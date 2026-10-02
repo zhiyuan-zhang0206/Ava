@@ -74,7 +74,7 @@ __description__ = "Shared memory pool: ava.memory SDK surface (PATH + search + w
 # child loads (task #3633). Its agent-runtime registrations (the two context-note
 # indexes, the memory-discipline prompt section, the passive-recall before_llm
 # hook) live in `agent_runtime.py`, imported only on the full path (see
-# `agent/extensions.py`).
+# `agent/extensions/__init__.py`).
 
 
 import ava as _ava

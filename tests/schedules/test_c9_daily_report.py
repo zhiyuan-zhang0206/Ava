@@ -78,24 +78,24 @@ class _FakeAccounting(SimpleNamespace):
 
 
 def _install_fake_accounting(monkeypatch: pytest.MonkeyPatch, accounting: Any) -> list[dict]:
-    sys.modules["ci_accounting"] = accounting  # type: ignore[assignment]
+    sys.modules["accounting"] = accounting  # type: ignore[assignment]
     emitted: list[dict] = []
 
     def record_emit(category: str, event_name: str, **kwargs: Any) -> None:
         emitted.append({"category": category, "event_name": event_name, **kwargs})
 
-    monkeypatch.setattr("shared.telemetry.emit", record_emit)
+    monkeypatch.setattr("base.telemetry.emit", record_emit)
     return emitted
 
 
 def test_repo_root_survives_runtime_materialization(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The script finds the source root from shared.__file__, not its own path.
+    """The script finds the source root from base.__file__, not its own path.
 
     The gateway materializes the script to ~/.ava/schedules/<id>/ before
     executing it; there, ``Path(__file__).parents[1]`` is ~/.ava/schedules,
-    not the repo root, and ``scripts/ci_accounting`` becomes unimportable
+    not the repo root, and ``scripts/accounting`` becomes unimportable
     (the 2026-09-08 05:00 first-fire failure). Loading a copy from a flat
     runtime-style directory must still resolve _REPO_ROOT to the deployed
     source root.
@@ -197,7 +197,7 @@ def test_fire_reconciles_the_claimed_slot_window_and_emits(
     monkeypatch.setattr(module, "init_gateway_process", fake_init_gateway)
     monkeypatch.setattr(module, "TZ", "Asia/Shanghai")
     accounting = _FakeAccounting(module)
-    sys.modules["ci_accounting"] = accounting  # type: ignore[assignment]
+    sys.modules["accounting"] = accounting  # type: ignore[assignment]
     emitted = _install_fake_accounting(monkeypatch, accounting)
     slot = datetime(2026, 9, 6, 21, 0, tzinfo=UTC)  # 05:00 cluster
     schedule_id = _insert_schedule(db_conn, created_at=datetime(2026, 9, 6, 20, 0, tzinfo=UTC))
@@ -206,7 +206,7 @@ def test_fire_reconciles_the_claimed_slot_window_and_emits(
     try:
         assert fire_slot_once(slot, None, fire=module._fire)
     finally:
-        sys.modules.pop("ci_accounting", None)
+        sys.modules.pop("accounting", None)
 
     assert accounting.windows == [("2026-09-05T21:00:00Z", "2026-09-06T21:00:00Z")]
     assert len(emitted) == 1
@@ -231,7 +231,7 @@ def test_catch_up_boot_with_two_missed_slots_reconciles_each_own_window(
 
     monkeypatch.setattr(module, "init_gateway_process", fake_init_gateway)
     accounting = _FakeAccounting(module)
-    sys.modules["ci_accounting"] = accounting  # type: ignore[assignment]
+    sys.modules["accounting"] = accounting  # type: ignore[assignment]
     emitted = _install_fake_accounting(monkeypatch, accounting)
     schedule_id = _insert_schedule(db_conn, created_at=datetime(2026, 9, 6, 0, 30, tzinfo=UTC))
     monkeypatch.setenv("AVA_SCHEDULE_ID", str(schedule_id))
@@ -244,7 +244,7 @@ def test_catch_up_boot_with_two_missed_slots_reconciles_each_own_window(
             now=datetime(2026, 9, 8, 10, 30, tzinfo=UTC),
         )
     finally:
-        sys.modules.pop("ci_accounting", None)
+        sys.modules.pop("accounting", None)
 
     # Missed 05:00 slots: 09-06, 09-07, 09-08 — catch-up keeps the two most
     # recent, and each must reconcile its OWN day.
@@ -272,7 +272,7 @@ def test_fire_reports_failure_without_raising(
         raise RuntimeError("gh api down")
 
     accounting.collect = broken_collect  # type: ignore[method-assign]
-    sys.modules["ci_accounting"] = accounting  # type: ignore[assignment]
+    sys.modules["accounting"] = accounting  # type: ignore[assignment]
     failures: list[str] = []
     monkeypatch.setattr(module, "_report_failure", failures.append)
     slot = datetime(2026, 9, 6, 21, 0, tzinfo=UTC)
@@ -282,7 +282,7 @@ def test_fire_reports_failure_without_raising(
     try:
         assert fire_slot_once(slot, None, fire=module._fire)
     finally:
-        sys.modules.pop("ci_accounting", None)
+        sys.modules.pop("accounting", None)
 
     assert len(failures) == 1
     assert "RuntimeError" in failures[0]
@@ -335,5 +335,16 @@ def test_report_failure_uses_exact_label_and_existing_message(
         17,
         "C9 daily reconciliation failed:\ncollector failed\n"
         "Check the schedule log; backfill the missed window manually with "
-        "`scripts/ci_accounting.py --since ... --until ... --append-ledger`.",
+        "`scripts/ci/accounting.py --since ... --until ... --append-ledger`.",
     )
+
+
+def test_load_accounting_resolves_under_scripts_ci() -> None:
+    """The loader must resolve accounting.py from its post-move home (scripts/ci/)."""
+    module = _load_schedule_module()
+    saved_path = list(sys.path)
+    try:
+        loaded = module._load_accounting()
+        assert Path(loaded.__file__).resolve() == REPO_ROOT / "scripts" / "ci" / "accounting.py"
+    finally:
+        sys.path[:] = saved_path

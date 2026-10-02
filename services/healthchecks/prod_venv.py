@@ -1,4 +1,4 @@
-"""Read-only watchdog detection of a damaged production virtualenv."""
+"""Read-only dependency and import diagnostics for an explicit checkout virtualenv."""
 
 from __future__ import annotations
 
@@ -7,10 +7,12 @@ import re
 import shutil
 import subprocess
 import tempfile
+from pathlib import Path
 
-from shared import cluster_drift, editable_install, proc, process_env
-from shared.log import init_gateway_process
-from shared.platform import IS_WINDOWS
+from base.deploy.git import cluster_drift
+from base.deploy.release import editable_install
+from base.host import proc
+from base.native_process import child_env
 
 _log = logging.getLogger("services.healthchecks.prod_venv")
 
@@ -23,9 +25,6 @@ for module in (ava, pydantic, psycopg, fastapi):
     if module.__file__ is None:
         raise ImportError(f"{module.__name__}: hollow package (namespace without __init__.py)")
 """
-
-# Reporting state only; a healthy round makes any recurrence loud again.
-_reported_violations: tuple[str, ...] = ()
 
 
 def _stderr_tail(stderr: str | bytes | None) -> str:
@@ -60,15 +59,16 @@ def _probe(label: str, argv: list[str], env: dict[str, str]) -> str | None:
     return None
 
 
-def _violations() -> tuple[str, ...]:
-    source_root = cluster_drift.prod_source_dir()
+def venv_violations(*, source_root: Path | None = None) -> tuple[str, ...]:
+    if source_root is None:
+        source_root = cluster_drift.prod_source_dir()
     if source_root is None:
         return ()
-    interpreter = editable_install._venv_python(source_root)
+    interpreter = editable_install.venv_python(source_root)
     if interpreter is None:
         return (f"{source_root}: venv python missing",)
 
-    env = process_env.inherited_process_env()
+    env = child_env.inherited_process_env()
     env.pop("VIRTUAL_ENV", None)
     env.pop("PYTHONPATH", None)
     violations: list[str] = []
@@ -85,19 +85,3 @@ def _violations() -> tuple[str, ...]:
     if failure is not None:
         violations.append(failure)
     return tuple(violations)
-
-
-def main() -> None:
-    global _reported_violations  # noqa: PLW0603 — reporting state spans watchdog rounds
-
-    init_gateway_process(name="prod_venv-healthcheck")
-    if IS_WINDOWS:
-        return
-    violations = _violations()
-    if violations and violations != _reported_violations:
-        _log.error("[prod-venv healthcheck] %s", "; ".join(violations))
-    _reported_violations = violations
-
-
-if __name__ == "__main__":
-    main()

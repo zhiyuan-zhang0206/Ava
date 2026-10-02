@@ -1,38 +1,29 @@
-"""Reference wiring: assemble the root's health + self-check from the roster.
+"""Bind actual root units to readiness, diagnostics, and tree self-check.
 
-This is the deployment-side assembly the daemon's `--wiring` hook drives
-(`--wiring services.ava_root_glue.glue:build_wiring`). It is deliberately
-thin: probes come from the roster specs — the old watchdog's
-`healthcheck_module` gate, with the shared identity probe `register_specs`
-requires on top (a spec missing that probe is skipped — the one deliberate
-rule delta), the two monitors run at their 60s defaults, and their snapshots
-attach to the supervisor's status surface through the W1.2b seams.
-
-The metric slots stay empty here: attribution coverage and reseeding latency
-are adapter/window inputs (W1.3 / G4), and an empty slot reads `unavailable`
-— never a fake number (W1.2b decision 4).
-
-Deployment freedom lives here, not in the root package: a spec-less unit is
-one `STATIC_PROBES` entry (`"module:attribute"`, resolved lazily), and a
-drill can assemble over its own probe source (see `drill.py`).
-
-The macOS permissions helper rides the same static path but is registered
-conditionally (`_helper_probe_enabled`): it exists only where the helper does.
-Its probe detects and classifies — repair stays with the helper's own
-lifecycle (task #3393).
+Service recovery belongs to HealthMonitor; host diagnostics have no launch
+verbs. One round coordinator publishes freshness after both parts complete.
+Native data-plane custody and the macOS parent helper remain explicit external
+boundaries; diagnostics never repair them from inside the service subtree.
 """
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
+from pathlib import Path
 
+from base.deploy.progress_timeout import (
+    CRITICAL_SERVICE_SESSIONS,
+    NON_CRITICAL_SERVICE_READY_TIMEOUT_S,
+    SERVICE_READY_TIMEOUT_S,
+)
 from ops.roster import build_services
+from services.ava_root.alerts import AlertRouter, AlertWebhookNotifier
 from services.ava_root.health import HealthConfig, HealthMonitor
-from services.ava_root.probes import ProbeRegistry
+from services.ava_root.probes import ProbeError, ProbeRegistry
 from services.ava_root.selfcheck import SelfCheckConfig, TreeSelfCheck
 from services.ava_root.wiring import WiringContext, WiringParticipant
-from shared.config import settings
-from shared.platform import IS_MACOS
+from services.ava_root_glue.diagnostic_probes import build_diagnostics
+from services.ava_root_glue.diagnostics import Diagnostic, DiagnosticMonitor, RootHealthRounds
 
 STATIC_PROBES: Mapping[str, str] = {}
 """Spec-less unit id -> `"module:attribute"` probe reference.
@@ -43,31 +34,38 @@ reference is validated eagerly and imported lazily (the `register_ref`
 contract).
 """
 
-HELPER_PROBE_UNIT_ID = "permissions-helper"
-"""The launchd-owned permissions helper's unit id in the health roster (the
-name the watchdog era also uses)."""
-
-HELPER_PROBE_REF = "services.healthchecks.permissions_helper:probe"
-"""The helper's total verdict probe (task #3393): reads the launchd job state,
-classifies an LWCR-stuck job, and never acts. Repair stays with the helper's
-own lifecycle (CLI converge / the era-1 loop) — this entry detects and the
-health monitor escalates; it is not a revival path."""
-
 
 def build_wiring(context: WiringContext) -> list[WiringParticipant]:
     """The reference participant set: health monitor + tree self-check."""
+    from base.deploy.release.runtime_interpreter import capture_loaded_runtime
+    from base.paths import ava_home
+
+    home = ava_home().resolve(strict=True)
+    identity = capture_loaded_runtime()
+    if Path.cwd().resolve() != Path(identity.cwd):
+        raise RuntimeError("root cwd differs from its loaded runtime")
+    context.supervisor.bind_runtime(identity, home=home)
     registry = ProbeRegistry()
-    registry.register_specs(build_services())
+    requested = {unit.id for unit in context.registry.units}
+    registry.register_specs(spec for spec in build_services() if spec.session in requested)
     for unit_id, ref in STATIC_PROBES.items():
         registry.register_ref(unit_id, ref)
-    if _helper_probe_enabled():
-        registry.register_ref(HELPER_PROBE_UNIT_ID, HELPER_PROBE_REF)
-    return assemble(context, registry)
-
-
-def _helper_probe_enabled() -> bool:
-    """A launchd helper job worth watching exists only where it was enabled."""
-    return IS_MACOS and settings.services.permissions_helper_enabled
+    missing = requested - set(registry.unit_ids())
+    if missing:
+        raise ProbeError(f"root units lack readiness probes: {', '.join(sorted(missing))}")
+    startup_graces = {
+        unit_id: SERVICE_READY_TIMEOUT_S
+        if unit_id in CRITICAL_SERVICE_SESSIONS
+        else NON_CRITICAL_SERVICE_READY_TIMEOUT_S
+        for unit_id in requested
+    }
+    return assemble(
+        context,
+        registry,
+        diagnostics=build_diagnostics(requested),
+        startup_graces=startup_graces,
+        alerts=AlertRouter(context.run_dir, notifier=AlertWebhookNotifier()),
+    )
 
 
 def assemble(
@@ -76,10 +74,33 @@ def assemble(
     *,
     health_config: HealthConfig | None = None,
     selfcheck_config: SelfCheckConfig | None = None,
+    diagnostics: Sequence[Diagnostic] | None = None,
+    startup_graces: Mapping[str, float] | None = None,
+    alerts: AlertRouter | None = None,
 ) -> list[WiringParticipant]:
-    """Build the two monitors over `registry` and attach their status surfaces."""
-    monitor = HealthMonitor(context.supervisor, registry, config=health_config)
+    """Build the two monitors over `registry` and attach their status surfaces.
+
+    `alerts` is the episode router the reference wiring supplies; the drill
+    assembly deliberately leaves it unset, so a dry run never posts its
+    throwaway units to the real alert store.
+    """
+    monitor = HealthMonitor(
+        context.supervisor,
+        registry,
+        config=health_config,
+        startup_graces=startup_graces,
+        alerts=alerts,
+    )
     check = TreeSelfCheck(context.supervisor, config=selfcheck_config)
+    if diagnostics is not None:
+        rounds = RootHealthRounds(
+            monitor,
+            DiagnosticMonitor(diagnostics),
+            interval_s=60 if health_config is None else health_config.interval_s,
+        )
+        context.supervisor.attach_health(rounds)
+        context.supervisor.attach_metrics(check)
+        return [rounds, check]
     context.supervisor.attach_health(monitor)
     context.supervisor.attach_metrics(check)
     return [monitor, check]

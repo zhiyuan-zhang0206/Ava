@@ -1,16 +1,10 @@
 {
+  "ambient_state": {
+    "cli/main.py::import-time-call:base.native_process.os_platform.ensure_line_buffered_stdio": 1,
+    "cli/python_install.py::import-time-call:sys.path.insert": 1
+  },
   "complexity": {
-    "cli/install_cluster.py::cmd_install_cluster": 21,
-    "cli/main.py::main": 29,
-    "cli/prepared_facts.py::_restricted_hop_material": 19,
-    "cli/prepared_facts.py::produce_facts": 15,
-    "cli/prepared_update.py::prepare_operator_input": 15,
-    "cli/python_install.py::install": 17
-  },
-  "owner_bypasses": {
-    "cli/prepared_facts.py::postgres-dial": 1
-  },
-  "private_imports": {
-    "cli/prepared_facts.py::shared.runtime_publication_input._receipt_expected": 1
+    "cli/main.py::main": 23,
+    "cli/python_install.py::install": 16
   }
 }

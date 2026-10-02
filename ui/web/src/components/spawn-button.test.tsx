@@ -83,7 +83,6 @@ function statusWith(
         serve_agent_runner: m.serveAgentRunner ?? m.name !== current,
         serve_observability_station: false,
         identity_mismatch: false,
-        settle_waited_on: false,
         is_staging: false,
         gateway_url: `http://${m.name}:8000`,
         up_since_at: "2026-05-19T00:00:00Z",

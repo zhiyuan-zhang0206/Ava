@@ -1,0 +1,10 @@
+{
+  "patch_targets": {
+    "tests/schedules/test_c9_daily_report.py::schedules._report_failure": 1,
+    "tests/schedules/test_debt_sweep_daily.py::schedules._report_agent": 1,
+    "tests/schedules/test_debt_sweep_daily.py::schedules._run_mechanical_scan": 2,
+    "tests/schedules/test_dev_ci_metrics.py::schedules._load_exporter": 2,
+    "tests/schedules/test_dev_ci_metrics.py::schedules._report_failure": 2,
+    "tests/schedules/test_dev_ci_metrics.py::schedules._snapshot": 1
+  }
+}

@@ -3,7 +3,7 @@
 Hard-won bug-class rules. Every pattern here is a class of defect that actually
 shipped, or nearly shipped, in this repo — not a general best-practices list.
 
-**Read before** writing lifecycle, release, or infrastructure-touching code,
+**Read before** designing a new subsystem, writing lifecycle, release, or infrastructure-touching code,
 before adding a protective test or lint, and before acting on a diagnosis.
 
 Each entry is a rule plus a pointer to the evidence. The narrative — what broke,
@@ -12,6 +12,23 @@ distillation, and it is the half people actually re-read. The pipeline runs one
 way: a postmortem produces guardrails, and the guardrails that generalize condense
 into an entry here. See [`doc-maintenance.md`](doc-maintenance.md) for how the two
 sit among the other axes.
+
+## Design and scope
+
+### Complexity must name the failure it prevents
+
+Before designing a subsystem, write down three things:
+
+- how far the problem must be solved at this system's real scale;
+- how established tools solve the same problem, by name;
+- the simplest sufficient design, and why it falls short.
+
+Every mechanism beyond that design must name the failure it prevents: one that has happened, or a credible one that cannot be handled by hand when it happens. A mechanism that cannot name one is cost.
+
+Make the simplest path run end to end on the real topology before adding breadth. A path exercised only through stubs has not been built.
+
+Review asks "can this be deleted, and what would handle the case on site?" as well as "is this correct?".
+Evidence: [`postmortems/0009`](../postmortems/0009-complexity-must-name-the-failure-it-prevents.md).
 
 ## Release and long-lived processes
 
@@ -27,9 +44,9 @@ Evidence: [`postmortems/0001`](../postmortems/0001-a-rollout-cannot-deliver-its-
 ### A running process does not adopt a tree checked out underneath it
 
 A daemon, watchdog, orchestrator, or agent keeps executing the code it imported.
-"The file on disk says otherwise" is not a rebuttal. This is why the orchestration
-executing any given rollout is always the old code, and why new orchestration
-behavior takes effect one rollout later than it lands.
+"The file on disk says otherwise" is not a rebuttal. Retain the executing image
+and run replacement from an independently owned executor. A checkout mutation
+cannot upgrade an already running orchestrator.
 Evidence: [`postmortems/0001`](../postmortems/0001-a-rollout-cannot-deliver-its-own-protection.md).
 
 ### A supervisor cannot replace itself from inside its own process tree
@@ -54,19 +71,32 @@ Evidence: [`postmortems/0005`](../postmortems/0005-a-supervisor-cannot-replace-i
 A parameter only arrives if the caller knows to pass it, and on the deciding
 rollout the caller predates the parameter. When a leg needs a new fact, design it
 to **read the fact itself** rather than be handed it — the same fact reached
-entirely inside the new code. Worked example:
-`cli/commands/start.py:_readiness_waiver`, which observes the update lease instead
-of waiting for a `--flag`.
+entirely inside the new code. Persist and verify the operation identity before
+effects; a newly introduced caller flag cannot authorize its own first deployment.
+Current start readiness always requires the complete selected roster to be ready.
 Evidence: [`postmortems/0001`](../postmortems/0001-a-rollout-cannot-deliver-its-own-protection.md).
+
+### A failed restart must not look like an operator stop
+
+"Expected down" comes from a recorded operator intent, never from residual
+state: a classifier that reads "not as desired" as "the operator meant it" turns
+a failed self-rescue into silence. A restart whose second half fails is a
+retryable, alertable state, and any unit that should be running but is held down
+raises an alert from state, not from a threshold. A lock taken by a failed
+restart needs a reconcile path other than `--force`, and a bounded retry needs an
+escalation outcome instead of ending in silence.
+Evidence: [`postmortems/0010`](../postmortems/0010-a-failed-restart-must-not-look-like-an-operator-stop.md).
 
 ### An editable install is a cross-checkout pointer
 
 An editable install writes its source path into the **active virtualenv**; the
 working directory does not constrain which environment a polluted
 `VIRTUAL_ENV` selects. Clear that variable for every worktree `uv` command,
-assert long-lived `.pth` targets and their `direct_url.json` records during
-lifecycle convergence, and inspect those targets before deleting a checkout. A read-only emergency guard also needs a
-bounded write window in the legitimate update path, with exact-mode restoration.
+verify `.pth` targets and their `direct_url.json` records when explicitly
+preparing that installation, and inspect those targets before deleting a
+checkout. Startup must not repair a different installation. Any explicit repair
+of protected editable files needs a bounded write window with exact-mode
+restoration.
 Evidence: [`postmortems/0006`](../postmortems/0006-an-editable-install-is-a-cross-checkout-pointer.md).
 
 ### Isolation that one command can undo is a convention, not a boundary
@@ -105,7 +135,7 @@ then add a member, then check. A fixture that builds the whole world first and
 applies the operation last covers every member by construction and can never fail,
 which is how a grant matrix asserted over a dozen tables while the class stayed
 open. Same family as *a guard only guards if the regression actually fails it*.
-Evidence: PR #208 — `shared/cluster/provision.py` granted the runner role
+Evidence: PR #208 — `base/cluster/provision.py` granted the runner role
 `SELECT ON ALL TABLES` once at install birth, so `extensions`, created by the
 first post-baseline migration to add a table, was unreadable on every pure
 agent-runner for the life of the cluster. It surfaced as a *materialization*
@@ -168,11 +198,11 @@ report is the thing under test, not the evidence.
 
 ### The blast radius is where the consumers' guards live
 
-Not where the diff's lines are. `shared/` sits at the bottom of the import
+Not where the diff's lines are. `base/` sits at the bottom of the import
 layering, so every layer above consumes it — and this repo deliberately places
 exhaustiveness assertions over enums and field sets in the **consumer's** test
 file, as review forcing functions. Edit-adjacency is structurally blind to them.
-A `shared/` change requires full-suite coverage in CI. Locally, select bounded
+A `base/` change requires full-suite coverage in CI. Locally, select bounded
 consumer tests by dependency; never launch the full backend suite locally
 (user ruling 2026-09-22; see the run-local-tests skill).
 Evidence: [`postmortems/0003`](../postmortems/0003-touched-areas-is-not-the-blast-radius.md).
@@ -180,7 +210,7 @@ Evidence: [`postmortems/0003`](../postmortems/0003-touched-areas-is-not-the-blas
 ### Prefer a mechanical guard where the boundary is nameable
 
 A rule someone has to remember loses to a hook that fails with a clear message.
-`scripts/lint_note_tags.py` turns one arm of the enum blast-radius class into a
+`scripts/lint/note_tags.py` turns one arm of the enum blast-radius class into a
 pre-commit failure; derived sets (`agent/state.py:_BASE_STATE_FIELDS`, from
 `model_fields`) need no guard at all because they cannot go stale. Reach for the
 written rule only where the boundary genuinely resists naming.
@@ -189,21 +219,21 @@ Evidence: [`postmortems/0003`](../postmortems/0003-touched-areas-is-not-the-blas
 ### A guard that looks redundant is the one that catches the fix
 
 Two producers of the same fact, pinned against each other, feel like a test of
-something nobody would get wrong. `tests/shared/test_cluster_env.py:test_health_port_env_matches_derive_env_for_the_same_base`
-pins `derive_env` (install-time) against `health_port_env` (enroll-time) for one
-base — and what it caught was not the original bug but the FIX for it: adding
-`agent_host` to the late-health-slot set made the two producers disagree, and
-the guard said so immediately.
+something nobody would get wrong. A test once pinned `derive_env` (first-start)
+against the runner-join helper that wrote the same health ports for one base
+(both producers are gone with the port block) — and what it caught was not the
+original bug but the FIX for it: adding `agent_host` to the late-health-slot set
+made the two producers disagree, and the guard said so immediately.
 
 Two lessons, and the second is the load-bearing one:
 
 - A table that is not derived needs a guard for its own internal invariants, not
-  just for agreement with its consumers. `LEGACY_AVA_PORTS` is not in offset
+  just for agreement with its consumers. `FIXED_PORTS` is not in any
   order (`ops` moved off 8106 to dodge a Windows service), so "next number after
   the last line" put `agent_host` on a port `ops` already held; the entire suite
   passed, because nothing asserted the table had no duplicates. That collision
   surfaced from reading a boot log, not from a test —
-  `test_legacy_ports_are_unique` exists now so the next one does not need a
+  `test_fixed_ports_are_unique` exists now so the next one does not need a
   careful reader.
 - The value of a cross-producer guard is highest exactly when you are changing
   the thing it guards. Deleting one because "both sides obviously agree" removes
@@ -234,8 +264,8 @@ to liveness — the daemon keepalive checks do, via identity-verified `/healthz`
 plus a `Liveness` beat that certifies the work loop is still ticking, not that
 the subsystem's work succeeds. The audit found one violation (`milvus`'s bare
 TCP connect, now a real `list_collections` RPC); the roster carries a
-"what it certifies" column per check (`services/healthchecks/check-roster/check-roster.ava.okf.md`)
-and `scripts/lint_doc_roster.py` pins roster, module directory, and ServiceSpec
+"what it certifies" column per check (`services/healthchecks/docs/check-roster/check-roster.ava.okf.md`)
+and `scripts/content_lint/lint_doc_roster.py` pins roster, module directory, and ServiceSpec
 registrations together so the drift the audit found cannot silently return.
 
 ### A guard that shares a mechanism with the failure cannot catch it

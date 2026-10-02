@@ -3,13 +3,14 @@
 Both rules measure `path::target -> [line, ...]` sites per module; the frozen
 counts live in the `private_imports` / `owner_bypasses` sections of
 scripts/structure/baseline/*.json shards, and the rules themselves are documented in the
-scripts/lint_code_structure.py header (Rules 4 and 5).
+scripts/lint/code_structure.py header (Rules 4 and 5).
 """
 
 from __future__ import annotations
 
 import ast
 import functools
+import json
 import re
 from collections import defaultdict
 from collections.abc import Callable
@@ -17,9 +18,18 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import cast
 
-from scripts.structure import baseline_shards, path_imports
+from scripts.structure import ambient_state, baseline_shards, path_imports
 
-SECTIONS = ("private_imports", "owner_bypasses")
+SECTIONS = ("private_imports", "owner_bypasses", "patch_targets", "tests_location")
+# section -> the lint that measures it. Frozen and guarded like the others, but measured over
+# the test files by its own script; the structure gate only parses and guards them.
+EXTERNAL_SECTIONS = {
+    "patch_targets": "scripts/lint/patch_targets.py",
+    "tests_location": "scripts/structure/tests_location.py",
+}
+# section -> the lint script whose absence at the base revision means the section is being
+# introduced by this change (no earlier baseline to shrink from).
+INTRODUCED_WITH = {**EXTERNAL_SECTIONS, ambient_state.SECTION: ambient_state.LINT}
 # White-box tests reach into privates by design; only test *directories* are
 # exempt, since a governed module may legitimately be named test_*.py.
 _TEST_DIR = re.compile(r"(^|/)tests?/")
@@ -288,13 +298,44 @@ class Decision:
 
 DECISIONS: dict[str, Decision] = {
     "postgres-dial": Decision(
-        owners=frozenset({"shared/db_connections.py"}),
+        owners=frozenset({"base/db/connections.py"}),
         find=_postgres_dials,
         fix=(
-            "dial through shared.db.connect() / shared.db.pool(), which own the transport "
-            "posture (prepare_threshold=None, keepalives, statement ceiling, sslmode, "
-            "pooled-session scrub)"
+            "dial through base.db.connect() / base.db.pool() (the cluster's own URL) "
+            "or base.db.connect_url() (an explicit target the caller names), which own "
+            "the transport posture (prepare_threshold=None, keepalives, statement ceiling "
+            "or unbounded, sslmode, pooled-session scrub)"
         ),
+        allowed={
+            "base/db/pg_admin.py": (
+                "the OS-user administrator's peer-socket authority (roles, grants, schema "
+                "DDL, owner sessions) behind its own postmaster custody check; the FC-10 "
+                "cutover scripts dial through it, so its transport stays as rehearsed until "
+                "the cutover lands"
+            ),
+            "base/cluster/authority/unit.py": (
+                "probes an installed unit capability's own runner login at the served "
+                "endpoint, the credential under test"
+            ),
+            "cli/commands/data_plane/cluster_instance.py": (
+                "proves the running postmaster demands a password by dialing a role "
+                "that cannot exist, with no credential"
+            ),
+            # base.db.connections resolves a home (base.host.env.dotenv_boot) and imports
+            # settings at load; the modules below run where neither may happen.
+            "base/cluster/dataplane/pg_tools.py": (
+                "provisions the throwaway Postgres it just started; run config-free by "
+                "scripts/ci/migration_smoke.py"
+            ),
+            "base/cluster/dataplane/pg_stall_watchdog.py": (
+                "probes the throwaway Postgres base/cluster/dataplane/pg_tools.py started, under the same "
+                "home-free constraint"
+            ),
+            "base/cluster/dataplane/pg_foreground.py": (
+                "readiness probe of the foreground throwaway postmaster base/cluster/dataplane/pg_tools.py "
+                "started, under the same home-free constraint"
+            ),
+        },
     ),
 }
 
@@ -314,7 +355,7 @@ def measure(
     tree: ast.Module, rel_path: str, roots: tuple[str, ...], repo_root: Path
 ) -> dict[str, Sites]:
     if _TEST_DIR.search(rel_path):
-        return {kind: {} for kind in SECTIONS}
+        return {kind: {} for kind in SECTIONS if kind not in EXTERNAL_SECTIONS}
     return {
         "private_imports": private_imports(tree, rel_path, roots, repo_root),
         "owner_bypasses": owner_bypasses(tree, rel_path, roots),
@@ -354,6 +395,8 @@ def _new_site_message(kind: str, target: str) -> str:
         )
     if kind == path_imports.SECTION:
         return f"imports by file path (`{target}`) — {path_imports.FIX}"
+    if kind == ambient_state.SECTION:
+        return ambient_state.site_message(target)
     return f"bypasses the single owner of `{target}` — {DECISIONS[target].fix}"
 
 
@@ -372,6 +415,8 @@ def site_errors(
     sources = {new: old for old, new in (renames or {}).items()}
     errors: list[str] = []
     for kind, sites in measured.items():
+        if kind in EXTERNAL_SECTIONS:
+            continue
         errors.extend(_growth_errors(kind, sites, baseline[kind], sources))
         errors.extend(_stale_errors(kind, sites, baseline[kind], scanned, repo_root))
     return errors
@@ -413,6 +458,35 @@ def _stale_errors(
     return errors
 
 
+def introduced(shards: dict[str, str] | None, repo_root: Path, base: str) -> dict[str, str] | None:
+    """The base revision's shards, with each section whose own lint is absent at `base`
+    carried over from the working tree.
+
+    A section is introduced by the change that adds its lint: there is no earlier baseline
+    to shrink from, so it is compared with itself. From the next revision on the lint
+    exists at the base and the section is shrink-only like the others.
+    """
+    if shards is None:
+        return None
+    new = {
+        kind
+        for kind, lint in INTRODUCED_WITH.items()
+        if not baseline_shards.exists_at(repo_root, base, lint)
+    }
+    carried = dict(shards)
+    for name, text in baseline_shards.read_worktree(repo_root).items():
+        added = {kind: entries for kind, entries in json.loads(text).items() if kind in new}
+        if added:
+            carried[name] = baseline_shards.render({**json.loads(carried.get(name, "{}")), **added})
+    return carried
+
+
+def _entry_scope(kind: str, scope: tuple[str, ...]) -> tuple[str, ...]:
+    """Top-level directories an entry's path may start with: an externally measured section
+    freezes test files, which sit in `tests/` or inside a package."""
+    return (*scope, "tests", "scripts") if kind in EXTERNAL_SECTIONS else scope
+
+
 def unpaired_additions(current: dict[str, int], previous: dict[str, int]) -> list[str]:
     """Added keys not explained by a same-file removal of the same private name.
 
@@ -441,6 +515,12 @@ def _pair_key(key: str) -> tuple[str, str]:
     return path, target.rsplit(".", 1)[-1]
 
 
+def _valid_target(kind: str, target: str) -> bool:
+    if kind == "owner_bypasses":
+        return target in DECISIONS
+    return ambient_state.is_target(target) if kind == ambient_state.SECTION else bool(target)
+
+
 def validate_entries(kind: str, entries: object, scope: tuple[str, ...]) -> None:
     if not isinstance(entries, dict):
         raise ValueError(f"'{kind}' must be an object")  # noqa: TRY004 — invalid JSON schema
@@ -452,10 +532,10 @@ def validate_entries(kind: str, entries: object, scope: tuple[str, ...]) -> None
             and not path.is_absolute()
             and path.as_posix() == path_text
             and ".." not in path.parts
-            and path.parts[0] in scope
+            and path.parts[0] in _entry_scope(kind, scope)
             and path.suffix == ".py"
         )
-        valid_target = target in DECISIONS if kind == "owner_bypasses" else bool(target)
+        valid_target = _valid_target(kind, target)
         if (
             not valid_path
             or not separator

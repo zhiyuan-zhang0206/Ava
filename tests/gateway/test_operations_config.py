@@ -14,11 +14,12 @@ from typing import Any
 
 import pytest
 
-from ops import ops_config as ops
-from ops.ops_config import config_audit_read_op, config_read_op, config_write_op
+from base.config import get_config_metadata
+from base.host import config_validators
+from base.host.env import runtime_config
+from ops import host_config as ops
+from ops.host_config import config_audit_read_op, config_read_op, config_write_op
 from ops.rpc_schemas import ConfigReadResult, ConfigWriteOpResult
-from shared import host_config_validators, runtime_config
-from shared.config import get_config_metadata
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -29,9 +30,9 @@ from shared.config import get_config_metadata
 def isolated_host_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     """Redirect runtime_config._ava_home to a fresh per-test tmp dir.
 
-    unit_home patches settings.general.ava_home but runtime_config._ava_home reads
-    os.environ["AVA_HOME"] directly, so tests that read/write this machine's .env
-    need this extra patch for proper isolation.
+    Tests that read/write this machine's .env pin `runtime_config._ava_home`
+    directly, so the `.env` they touch is this tmp dir's whatever else the test
+    does with `AVA_HOME`.
     """
     monkeypatch.setattr(runtime_config, "_ava_home", lambda: tmp_path)
     return tmp_path
@@ -64,7 +65,7 @@ def _inject_sensitive_host_field(monkeypatch: pytest.MonkeyPatch) -> str:
     real metadata list, so every downstream lookup (metas_by_name,
     host_fields) sees it.
     """
-    from shared.config import ConfigFieldMeta
+    from base.config import ConfigFieldMeta
 
     metas = get_config_metadata()
     field = ConfigFieldMeta(
@@ -138,10 +139,10 @@ def test_config_read_op_can_enable_for_browser_enabled(
     monkeypatch.setattr(ops, "machine_name", lambda: "test-machine")
     # Monkeypatch the validator so the test is deterministic on any host
     monkeypatch.setattr(
-        host_config_validators,
+        config_validators,
         "read_time_capability",
         lambda name: (  # pyright: ignore[reportUnknownArgumentType]
-            host_config_validators.ValidationResult(ok=True) if name == "browser_enabled" else None
+            config_validators.ValidationResult(ok=True) if name == "browser_enabled" else None
         ),
     )
     result = config_read_op()
@@ -157,10 +158,10 @@ def test_config_read_op_can_enable_false_carries_reason(
     """When read_time_capability returns ok=False the reason is propagated."""
     monkeypatch.setattr(ops, "machine_name", lambda: "test-machine")
     monkeypatch.setattr(
-        host_config_validators,
+        config_validators,
         "read_time_capability",
         lambda name: (  # pyright: ignore[reportUnknownArgumentType]
-            host_config_validators.ValidationResult(ok=False, reason="no display detected")
+            config_validators.ValidationResult(ok=False, reason="no display detected")
             if name == "browser_enabled"
             else None
         ),
@@ -266,9 +267,9 @@ def test_config_write_op_local_accepts_writable_host_field(
     on a local (self) write — `writable` means a human may edit it on its own host."""
     monkeypatch.setattr(ops, "machine_name", lambda: "test-machine")
     monkeypatch.setattr(
-        host_config_validators,
+        config_validators,
         "validate",
-        lambda _f, _v: host_config_validators.ValidationResult(ok=True),  # pyright: ignore[reportUnknownArgumentType]
+        lambda _f, _v: config_validators.ValidationResult(ok=True),  # pyright: ignore[reportUnknownArgumentType]
     )
     result = config_write_op({"cross_machine_transfer_backend": "none"}, local=True)
     assert result.applied is True
@@ -331,9 +332,9 @@ def test_config_write_op_all_good_writes_file(
     """A fully-valid body writes the local file and returns applied=True."""
     monkeypatch.setattr(ops, "machine_name", lambda: "test-machine")
     monkeypatch.setattr(
-        host_config_validators,
+        config_validators,
         "validate",
-        lambda _field, _val: host_config_validators.ValidationResult(ok=True),  # pyright: ignore[reportUnknownArgumentType]
+        lambda _field, _val: config_validators.ValidationResult(ok=True),  # pyright: ignore[reportUnknownArgumentType]
     )
     result = config_write_op({"ops_concurrency": 4, "machine_description": "test"})
     assert result.applied is True
@@ -347,9 +348,9 @@ def test_config_write_op_none_unsets_field(
     """Reducer semantics: a field mapped to None is unset (reverts to default)."""
     monkeypatch.setattr(ops, "machine_name", lambda: "test-machine")
     monkeypatch.setattr(
-        host_config_validators,
+        config_validators,
         "validate",
-        lambda _field, _val: host_config_validators.ValidationResult(ok=True),  # pyright: ignore[reportUnknownArgumentType]
+        lambda _field, _val: config_validators.ValidationResult(ok=True),  # pyright: ignore[reportUnknownArgumentType]
     )
     config_write_op({"ops_concurrency": 4, "machine_description": "hi"})
     assert runtime_config.env_set_field_names() == {"ops_concurrency", "machine_description"}
@@ -368,9 +369,9 @@ def test_config_write_op_absent_key_left_untouched(
     once wiped a cluster's secrets is gone."""
     monkeypatch.setattr(ops, "machine_name", lambda: "test-machine")
     monkeypatch.setattr(
-        host_config_validators,
+        config_validators,
         "validate",
-        lambda _field, _val: host_config_validators.ValidationResult(ok=True),  # pyright: ignore[reportUnknownArgumentType]
+        lambda _field, _val: config_validators.ValidationResult(ok=True),  # pyright: ignore[reportUnknownArgumentType]
     )
     config_write_op({"ops_concurrency": 4, "machine_description": "hi"})
     # A patch touching only ops_concurrency must NOT drop machine_description.
@@ -386,9 +387,9 @@ def test_config_write_op_empty_patch_is_noop(
     """An empty patch touches nothing — it does not unset previously-set fields."""
     monkeypatch.setattr(ops, "machine_name", lambda: "test-machine")
     monkeypatch.setattr(
-        host_config_validators,
+        config_validators,
         "validate",
-        lambda _field, _val: host_config_validators.ValidationResult(ok=True),  # pyright: ignore[reportUnknownArgumentType]
+        lambda _field, _val: config_validators.ValidationResult(ok=True),  # pyright: ignore[reportUnknownArgumentType]
     )
     config_write_op({"ops_concurrency": 4})
     result = config_write_op({})
@@ -400,13 +401,13 @@ def test_config_write_op_does_not_disturb_non_managed_env(
     isolated_host_home: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A write touches only the fields named in the patch — a connection value
-    install/enroll wrote into .env (e.g. AVA_DB_URL) is left alone even when a
+    the first start wrote into .env (e.g. AVA_DB_URL) is left alone even when a
     managed field is explicitly unset."""
     monkeypatch.setattr(ops, "machine_name", lambda: "test-machine")
     monkeypatch.setattr(
-        host_config_validators,
+        config_validators,
         "validate",
-        lambda _field, _val: host_config_validators.ValidationResult(ok=True),  # pyright: ignore[reportUnknownArgumentType]
+        lambda _field, _val: config_validators.ValidationResult(ok=True),  # pyright: ignore[reportUnknownArgumentType]
     )
     isolated_host_home.joinpath(".env").write_text("AVA_DB_URL=postgresql://x@127.0.0.1:1/x\n")
     config_write_op({"ops_concurrency": 4})
@@ -421,9 +422,9 @@ def test_config_write_op_restart_required_union(
     """restart_required is the sorted union over written fields' restart_required values."""
     monkeypatch.setattr(ops, "machine_name", lambda: "test-machine")
     monkeypatch.setattr(
-        host_config_validators,
+        config_validators,
         "validate",
-        lambda _field, _val: host_config_validators.ValidationResult(ok=True),  # pyright: ignore[reportUnknownArgumentType]
+        lambda _field, _val: config_validators.ValidationResult(ok=True),  # pyright: ignore[reportUnknownArgumentType]
     )
     result = config_write_op({"ops_concurrency": 4, "machine_description": "hi"})
     assert result.applied is True
@@ -451,40 +452,20 @@ def test_config_write_op_empty_overrides_applied_no_write(
     assert runtime_config.read_env_aliases() == {}
 
 
-def test_config_write_op_rejects_cross_field_invalid_candidate(
+def test_config_write_op_rejects_an_invalid_candidate_without_writing(
     isolated_host_home: Path,
 ) -> None:
-    """Removing the Baidu token cannot persist an enabled Baidu PITR candidate."""
-    backup_key = isolated_host_home / "backup.key"
-    backup_key.write_bytes(b"k" * 32)
-    backup_key.chmod(0o600)
-    baidu_credentials = isolated_host_home / "baidu-credentials.json"
-    baidu_credentials.write_text("{}")
-    baidu_credentials.chmod(0o600)
-    baidu_token = isolated_host_home / "baidu-token.json"
-    baidu_token.write_text("{}")
-    baidu_token.chmod(0o600)
-    runtime_config.write_fields(
-        {
-            "pitr_enabled": True,
-            "pitr_store_backend": "baidu",
-            "pitr_baidu_app_root": "/apps/test",
-            "pitr_baidu_credentials_file": baidu_credentials,
-            "pitr_baidu_token_file": baidu_token,
-            "pitr_backup_key_file": backup_key,
-            "pitr_backup_key_id": "test-key",
-        },
-        set(),
-    )
+    """A value the settings model would refuse at startup is never persisted."""
+    runtime_config.write_fields({"db_url": "postgresql://ava@127.0.0.1:5432/ava"}, set())
     env_path = isolated_host_home / ".env"
     before = env_path.read_bytes()
 
-    result = config_write_op({"pitr_baidu_token_file": None}, local=True)
+    result = config_write_op({"redis_bin_dir": "relative/bin"}, local=True)
 
     assert result.applied is False
-    assert result.results["pitr_baidu_token_file"].ok is False
-    assert result.results["pitr_baidu_token_file"].reason is not None
-    assert "candidate rejected" in result.results["pitr_baidu_token_file"].reason
+    assert result.results["redis_bin_dir"].ok is False
+    assert result.results["redis_bin_dir"].reason is not None
+    assert "candidate rejected" in result.results["redis_bin_dir"].reason
     assert env_path.read_bytes() == before
 
 
@@ -516,7 +497,7 @@ async def test_dispatch_config_read_calls_config_read_op(
         captured.append(True)
         return ConfigReadResult(machine="x", host_fields={}, raw_overrides={})
 
-    monkeypatch.setattr(daemon.ops_config, "config_read_op", _fake_config_read)
+    monkeypatch.setattr(daemon.host_config, "config_read_op", _fake_config_read)
     status, result = await daemon._dispatch("config_read", {})
     assert status == "completed"
     # _dispatch serializes the result model to a JSON dict for the wire.
@@ -548,7 +529,7 @@ async def test_dispatch_config_write_passes_overrides(
         captured["trace_id"] = trace_id
         return ConfigWriteOpResult(machine="x", results={}, applied=True, restart_required=[])
 
-    monkeypatch.setattr(daemon.ops_config, "config_write_op", _fake_config_write)
+    monkeypatch.setattr(daemon.host_config, "config_write_op", _fake_config_write)
     status, _result = await daemon._dispatch("config_write", {"overrides": {"ops_concurrency": 2}})
     assert status == "completed"
     assert captured["overrides"] == {"ops_concurrency": 2}
@@ -581,7 +562,7 @@ async def test_dispatch_config_write_missing_overrides_key_fails(
 def test_config_audit_read_op_returns_this_hosts_newest_records(
     isolated_host_home: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from shared.env_audit import record_env_write
+    from base.host.env.audit import record_env_write
 
     monkeypatch.setattr(ops, "machine_name", lambda: "test-machine")
     env_path = isolated_host_home / ".env"

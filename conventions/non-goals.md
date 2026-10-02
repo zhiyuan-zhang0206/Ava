@@ -24,7 +24,7 @@ first and ask "what changed that made it worth doing".
   (`ava/agents/presets.py`), and the `ava-guide/models` skill's standing policy put the model choice
   in the hands of whoever is deciding the sub-task, once, at spawn, not a framework router with none
   of that context. **This is not a rejection of multi-model support**: the registry
-  (`shared/lm/registry.py`) backs 9 providers side by side, each with its own per-model tuning
+  (`base/lm/registry.py`) backs 9 providers side by side, each with its own per-model tuning
   (`decisions/2026-07-25-per-model-config-registry.md`) — "single model" language elsewhere
   describes today's default *operating* configuration (one operator, one provider live per
   deployment), not a registry limit. What is rejected here is a dispatcher choosing FOR the agent
@@ -66,7 +66,7 @@ first and ask "what changed that made it worth doing".
   `execute_code` calls. Add one only if a use case appears where a single
   cluster must run agents against each other at different trust levels.
 - **Terminal UI (TUI)**: the product surface is the Next.js fleet console
-  ([`ui/web/web.ava.okf.md`](../ui/web/web.ava.okf.md)) plus chat
+  ([`ui/web/docs/web.ava.okf.md`](../ui/web/docs/web.ava.okf.md)) plus chat
   channels (e.g. X, wired through `ava mcp install`) for talking to
   individual agents — not a terminal. Ava is an always-on, multi-agent fleet:
   supervision means seeing which agents exist, their health, the spawn/fork/
@@ -142,9 +142,9 @@ first and ask "what changed that made it worth doing".
   cross-machine wire shape changes (e.g. the `/ops` result failure
   payload), do **not** keep a parallel parse branch for the old
   shape "just in case some agent-runner hasn't upgraded yet". Trigger:
-  fleet grows large enough that not every host can `ava cluster update`
+  fleet grows large enough that not every host can be updated
   together in the same hour. Reason: the fleet today is 1 gateway + 1-2
-  agent-runners, and `ava cluster update` fans out within minutes — every
+  agent-runners, and `cli.fleet_update` updates them within minutes — every
   rolling-upgrade compat branch shipped so far (#437) was deleted the
   same day (#444). Compat code at fleet size 1-2 is dead-on-arrival
   investment that confuses the next reviewer.
@@ -154,20 +154,20 @@ first and ask "what changed that made it worth doing".
   reading the agents' log files + `get_status()` alone can't keep up, or cross-machine monitoring is needed; then
   bring in a metrics pipeline. See
   self-rolling-release design record in git).
-  (Distributed *tracing* is no longer on this list: `shared/trace.py` records
+  (Distributed *tracing* is no longer on this list: `base/telemetry/tracing.py` records
   vendor-neutral OTLP/JSON spans to a local mirror — Traceloop/OpenLLMetry
   auto-instruments the LLM/tool path; `ava trace ship` replays the mirror to a
   self-hosted viewer out-of-band. That is span recording, not a metrics pipeline;
   the metrics/dashboard/anomaly rejection above still stands.)
 
-- **Grouping `shared/` / `scripts/` files into subpackages by folder shape alone**
+- **Grouping `base/` / `scripts/` files into subpackages by folder shape alone**
   (proposed groupings `cluster_*` / `machine_*` / `plugin_*`, or scripts by lint/devops/delete):
   not done on that basis. Trigger: a candidate group develops genuine internal cohesion that a
   package `__init__` could hide behind a narrow surface. Reasons: (a) a "deep module" (Ousterhout) is
   a narrow interface over a thick implementation — that's the interface/impl ratio of one module,
-  **orthogonal to directory depth**; the pre-2026-08 `shared/cluster.py` was already deep, and
-  moving it to `shared/cluster/core.py` would have changed only the import path, not its depth
-  (the actual 2026-08 split into `shared/cluster/{registry,ports,derive,provision}.py` was
+  **orthogonal to directory depth**; the pre-2026-08 `base/cluster.py` was already deep, and
+  moving it to `base/cluster/core.py` would have changed only the import path, not its depth
+  (the actual 2026-08 split into `base/cluster/{registry,ports,derive,provision}.py` was
   line-count + cohesion driven — the package `__init__` preserved the single import surface).
   A flat directory of many files can be many deep leaves. (b) Folder grouping only adds depth if
   the package hides internal files; a candidate group with zero internal cohesion and wide

@@ -5,16 +5,16 @@ from __future__ import annotations
 import asyncio
 import logging
 from contextlib import suppress
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from psycopg_pool import ConnectionPool
 
-from shared import telemetry
-from shared.config import settings
-from shared.db_transaction import write_transaction
-from shared.live_events import PageClosed
-from shared.redis_client import publish_best_effort
+from base import telemetry
+from base.config import settings
+from base.db.transaction import write_transaction
+from base.events.live.projection import PageClosed
+from base.events.live.redis_client import publish_best_effort
 
 _log = logging.getLogger("services.page_server.daemon")
 
@@ -31,7 +31,7 @@ class _PageRow:
     port: int
     host: str
     serve_dir: str
-    server_token: str | None = None
+    server_token: str | None = field(default=None, repr=False)
     session_name: str | None = None
 
 

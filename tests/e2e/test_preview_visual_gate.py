@@ -22,8 +22,8 @@ from typing import cast
 import pytest
 from playwright.sync_api import Browser
 
-from scripts.post_deploy_visual_check import _expected_capture_names
-from scripts.post_deploy_visual_matrix import load_ignore_registry, run_matrix
+from scripts.post_deploy_visual.check import _expected_capture_names
+from scripts.post_deploy_visual.matrix import load_ignore_registry, run_matrix
 from tests.e2e._ports import FRONTEND_URL
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -31,7 +31,9 @@ GOLDEN_ROOT = Path(__file__).parent / "__snapshots__" / "preview-gate"
 CAPTURES_DIR = GOLDEN_ROOT / "captures"
 META_PATH = GOLDEN_ROOT / "meta.json"
 REFRESH_ENV = "PREVIEW_GATE_REFRESH"
-REGISTRY_PATH = REPO_ROOT / "scripts" / "post_deploy_visual_known_ignores.json"
+REGISTRY_PATH = (
+    REPO_ROOT / "scripts" / "post_deploy_visual" / "post_deploy_visual_known_ignores.json"
+)
 
 MINT_HINT = (
     "mint them on an ubuntu runner via the visual-baselines workflow "

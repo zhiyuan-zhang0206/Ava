@@ -23,8 +23,8 @@ import time
 from collections.abc import Awaitable, Callable
 from typing import Any
 
+from base.config import settings
 from services.im_bridge import copy
-from shared.config import settings
 
 _log = logging.getLogger("services.im_bridge.core.push_watchdog")
 

@@ -19,10 +19,10 @@ import time
 from pathlib import Path
 from typing import NamedTuple
 
+from base.config import settings
+from base.host.net.predicates import is_loopback_host
+from base.host.net.url_secret import url_with_host
 from cli.commands.converge.spec import ConvergeCtx
-from shared.config import settings
-from shared.netutil import is_loopback_host
-from shared.url_secret import url_with_host
 
 logger = logging.getLogger("cli.converge.redis_bridge")
 
@@ -59,8 +59,8 @@ def _bridge_config(home: Path) -> RedisBridgeConfig | None:
     if not settings.data_plane.cluster_secret:
         return None
 
-    from shared.cluster import get_record, record_redis_port
-    from shared.machine import reachable_host
+    from base.cluster import get_record
+    from base.cluster.machine import reachable_host
 
     listen_host = reachable_host()
     if is_loopback_host(listen_host):
@@ -68,7 +68,7 @@ def _bridge_config(home: Path) -> RedisBridgeConfig | None:
     record = get_record(home)
     if record is None:
         raise _RedisBridgeUnconfiguredError(f"bridge unconfigured: no registry record for {home}")
-    return RedisBridgeConfig(listen_host=listen_host, port=record_redis_port(record))
+    return RedisBridgeConfig(listen_host=listen_host, port=record.ports["redis"])
 
 
 def _source_path(repo: Path) -> Path:
@@ -152,7 +152,7 @@ def _bootout_and_wait() -> bool:
 
 
 def _ensure_launchd(home: Path, repo: Path, config: RedisBridgeConfig) -> None:
-    from shared.os_cron import os_jobs_enabled, skip_os_job
+    from base.host.system.cron import os_jobs_enabled, skip_os_job
 
     if not os_jobs_enabled():
         skip_os_job("Redis bridge LaunchAgent")
@@ -229,7 +229,7 @@ def ensure_redis_bridge(ctx: ConvergeCtx) -> None:
 
 def probe_redis_bridge(home: Path | None = None) -> RedisBridgeStatus:
     """PING Redis through the relay and report its independent supervisor state."""
-    from shared.paths import ava_home
+    from base.paths import ava_home
 
     target = (home or ava_home()).expanduser()
     try:

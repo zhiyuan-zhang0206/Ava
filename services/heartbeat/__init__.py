@@ -17,7 +17,7 @@ gateway.
 Provides:
 - `daemon.py` — bounded dispatch loop; `AVA_HEARTBEAT_INTERVAL_SECONDS`
   (default 5 min) is each agent's durable minimum reminder cadence
-- `services/healthchecks/heartbeat.py` — watchdog keepalive (re-spawn on death)
+- the roster's `/healthz` identity probe (`ops/roster/healthz.py`) — root's health monitor revives it on death
 """
 
 # ── Dispatch semantics (single source of truth) ──
@@ -38,7 +38,7 @@ JITTER_SPAN_S = 300
 # Freshness window for the daemon's "no pending inbound" guard (seconds): a
 # pending inbound older than this no longer counts as "about to wake" — the
 # check-in goes out anyway. Deliberately NOT
-# shared.deploy_timing.NO_PROGRESS_TIMEOUT_S, which is a deployment-progress
+# base.deploy.progress_timeout.NO_PROGRESS_TIMEOUT_S, which is a deployment-progress
 # judgment (2026-08-08 audit, P3-5). The inspector's `heartbeat_pending`
 # mirrors the same window.
 STALE_PENDING_S = 900.0

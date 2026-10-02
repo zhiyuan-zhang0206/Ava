@@ -11,9 +11,9 @@ import pytest
 from langchain_core.messages import AIMessage
 from langgraph.checkpoint.postgres import PostgresSaver
 
-from shared.agents import AgentStatus
-from shared.agents.history.delta_read_compat import reconstruct_delta_messages
-from shared.config import settings
+from base.agents import AgentStatus
+from base.agents.history.delta_read_compat import reconstruct_delta_messages
+from base.config import settings
 from tests.e2e._ports import GATEWAY_URL
 
 

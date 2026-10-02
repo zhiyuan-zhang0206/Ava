@@ -15,16 +15,17 @@ import stat
 import subprocess
 import sys
 import time
-from collections.abc import Generator
+from collections.abc import Callable, Generator
 from contextlib import contextmanager
 from pathlib import Path
 from typing import cast
 
+import psutil
 import pytest
 
-from services.ava_root import daemon as daemon_module
-from services.ava_root.client import RootClient, RootClientError
-from services.ava_root.ipc import ResponsePayload
+from base.host.system.boot_unit import BootUnitContext
+from base.native_process.root_control.client import RootClient, RootClientError
+from base.native_process.root_control.ipc import ResponsePayload
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -154,6 +155,15 @@ def _kill_quietly(pid: int) -> None:
     _wait_dead(pid)
 
 
+def _wait_for(predicate: Callable[[], bool], message: str) -> None:
+    deadline = time.monotonic() + 5
+    while time.monotonic() < deadline:
+        if predicate():
+            return
+        time.sleep(0.02)
+    raise AssertionError(message)
+
+
 def test_daemon_end_to_end(short_tmp: Path) -> None:
     run_dir = short_tmp / "nested" / "run"  # the daemon creates its run dir
     manifests = _write_manifests(short_tmp, [{"id": "svc", "exec": _SLEEPER, "restart": "always"}])
@@ -211,9 +221,147 @@ def test_second_daemon_refuses_the_same_run_dir(short_tmp: Path) -> None:
         assert client.status()["ok"] is True
 
 
+def _stubborn(ready: Path) -> list[str]:
+    """A unit that ignores TERM once it has written `ready`."""
+    return [
+        sys.executable,
+        "-u",
+        "-c",
+        (
+            "import signal,time,pathlib; signal.signal(signal.SIGTERM, signal.SIG_IGN); "
+            f"pathlib.Path({str(ready)!r}).write_text('ready'); time.sleep(300)"
+        ),
+    ]
+
+
+def _assert_rest_of_tree_stopped(run_dir: Path, log: Path, peer: int) -> None:
+    """Both stubborn units' refusals are reported; the peer between them stopped."""
+    reported = _read_log(log)
+    assert "unit svc did not stop" in reported
+    assert "unit tail did not stop" in reported
+    _wait_dead(peer)
+    assert not (run_dir / "custody/peer.json").exists()
+
+
+def test_failed_shutdown_retains_owner_and_requires_explicit_closure(short_tmp: Path) -> None:
+    """A stubborn real child cannot turn ordinary root stop into orphaning or force.
+
+    Nor does it keep root from stopping the rest of its tree: the peer after it
+    in the stop order still stops, and each stubborn unit's refusal is reported.
+    """
+    ready, tail_ready = short_tmp / "child-ready", short_tmp / "tail-ready"
+    units: list[dict[str, object]] = [
+        {"id": "svc", "exec": _stubborn(ready), "restart": "never"},
+        {"id": "peer", "exec": _SLEEPER, "restart": "never"},
+        {"id": "tail", "exec": _stubborn(tail_ready), "restart": "never"},
+    ]
+    manifests = _write_manifests(short_tmp, units)
+    fixture = short_tmp / "fixtures"
+    fixture.mkdir()
+    (fixture / "short_deadline.py").write_text(
+        "from services.ava_root.supervisor import SupervisorConfig\n"
+        "def build(context):\n"
+        "    context.supervisor._config = SupervisorConfig(stop_timeout_s=0.15)\n"
+        "    return []\n"
+    )
+    run_dir = short_tmp / "run"
+    with _daemon(
+        run_dir,
+        manifests,
+        wiring="short_deadline:build",
+        env=_wiring_env(fixture, short_tmp / "markers"),
+    ) as (root, log):
+        client = _wait_ready(run_dir, root, log)
+        _wait_for(ready.exists, "child did not install its TERM handler")
+        _wait_for(tail_ready.exists, "tail did not install its TERM handler")
+        before, peer_unit, tail_unit = _units_of(client.status())
+        child, peer, tail = (
+            cast(int, before["pid"]),
+            cast(int, peer_unit["pid"]),
+            cast(int, tail_unit["pid"]),
+        )
+        try:
+            assert client.shutdown()["ok"]
+            _wait_for(
+                lambda: "retains custody after failed shutdown" in _read_log(log),
+                "root did not report retained custody after its shutdown deadline",
+            )
+            _assert_rest_of_tree_stopped(run_dir, log, peer)
+            assert root.poll() is None
+            _assert_alive(child)
+            assert (run_dir / "custody/svc.json").exists()
+            for _ in range(2):
+                observed = _units_of(client.status())[0]
+                assert (observed["pid"], observed["create_time"]) == (child, before["create_time"])
+            refusals = [
+                client.up("svc"),
+                client.restart("svc"),
+                client.resource("terminal.start", {}),
+            ]
+            assert all(not response["ok"] for response in refusals)
+            assert client.force_down("svc")["ok"]
+            assert client.force_down("tail")["ok"]
+            _wait_dead(child)
+            _wait_dead(tail)
+            assert not list((run_dir / "custody").iterdir())
+            assert client.shutdown()["ok"]
+            assert root.wait(timeout=5) == 0
+        finally:
+            _kill_quietly(child)
+            _kill_quietly(peer)
+            _kill_quietly(tail)
+
+
+# Wiring hook: asyncio's child watcher reaps each unit leader before root reads its birth.
+_REAPED_FIRST = (
+    "import asyncio\n"
+    "spawn = asyncio.create_subprocess_exec\n"
+    "async def reaped_first(*args, **kwargs):\n"
+    "    proc = await spawn(*args, **kwargs)\n"
+    "    await proc.wait()\n"
+    "    return proc\n"
+    "def build(context):\n"
+    "    asyncio.create_subprocess_exec = reaped_first\n"
+    "    return []\n"
+)
+
+
+@pytest.mark.parametrize("reaped_first", [False, True])
+def test_termination_after_unit_exit_releases_custody_and_exits(
+    short_tmp: Path, reaped_first: bool
+) -> None:
+    """A unit that exited before any stop does not hold root past SIGTERM.
+
+    systemd's root boot unit sets SendSIGKILL=no: TERM is the only stop, so a
+    root that kept the dead unit's custody would never exit. That holds too when
+    the leader was reaped before root read its birth.
+    """
+    command = [sys.executable, "-c", "pass"]
+    manifests = _write_manifests(short_tmp, [{"id": "svc", "exec": command, "restart": "never"}])
+    fixture = short_tmp / "fixtures"
+    fixture.mkdir()
+    (fixture / "reaped_first.py").write_text(_REAPED_FIRST)
+    run_dir = short_tmp / "run"
+    with _daemon(
+        run_dir,
+        manifests,
+        wiring="reaped_first:build" if reaped_first else None,
+        env=_wiring_env(fixture, short_tmp / "markers") if reaped_first else None,
+    ) as (root, log):
+        client = _wait_ready(run_dir, root, log)
+        _wait_for(
+            lambda: _units_of(client.status())[0]["pid"] is None, "unit did not exit on its own"
+        )
+        if reaped_first:
+            assert _units_of(client.status())[0]["create_time"] is None, "root read its birth"
+        assert (run_dir / "custody/svc.json").exists()
+        root.terminate()
+        assert root.wait(timeout=10) == 0, _read_log(log)
+    assert not list((run_dir / "custody").iterdir())
+
+
 def test_lock_dies_with_the_daemon_and_is_not_inherited_by_units(short_tmp: Path) -> None:
-    """The crash-recovery premise: a killed supervisor releases the lock even
-    while its units keep running, so a fresh supervisor can take the tree."""
+    """A released lock is not permission to duplicate orphaned application services."""
     run_dir = short_tmp / "run"
     manifests = _write_manifests(short_tmp, [{"id": "svc", "exec": _SLEEPER, "restart": "always"}])
     with _daemon(run_dir, manifests) as (proc_a, log_a):
@@ -226,14 +374,13 @@ def test_lock_dies_with_the_daemon_and_is_not_inherited_by_units(short_tmp: Path
             _assert_alive(unit_pid)  # the unit outlives its parent
             _wait_orphaned(unit_pid)  # reparented to init — the chain root is gone
 
-            # A fresh daemon takes the same run dir: the lock went with the dead
-            # process, and no unit inherited it.
+            # The free lock cannot prove the former unit lineage is gone.
+            # A replacement must hold without spawning a competing generation.
             with _daemon(run_dir, manifests) as (proc_b, log_b):
-                client_b = _wait_ready(run_dir, proc_b, log_b)
-                new_pid = cast(int, _units_of(client_b.status())[0]["pid"])
-                assert new_pid != unit_pid
-                # Cleanly stop the new tree; the old orphan is ours to reap.
-                client_b.down("svc")
+                assert proc_b.wait(timeout=10) != 0
+                assert "custody requires reconciliation" in _read_log(log_b)
+                _assert_alive(unit_pid)
+                assert (run_dir / "custody/svc.json").exists()
         finally:
             _kill_quietly(unit_pid)
 
@@ -354,98 +501,192 @@ def _root_uptime(result: dict[str, object]) -> float:
     return cast(float, cast("dict[str, object]", result["root"])["uptime_s"])
 
 
-def _wait_after_upgrade(client: RootClient, baseline_uptime: float) -> dict[str, object]:
-    """Poll until the successor generation answers: reset uptime, same socket.
+def _systemd_starter(
+    home: Path, receipt: Path, run_dir: Path, manifest: Path, failure: str
+) -> Path:
+    """A disposable readiness caller for the real generic root, not a deployed wrapper."""
+    starter = receipt.parent / "start.py"
+    starter.write_text(
+        "import json, os, subprocess, sys, time\n"
+        "from pathlib import Path\n"
+        f"sys.path.insert(0, {str(REPO_ROOT)!r})\n"
+        "import psutil\n"
+        "from base.native_process.root_control.client import RootClient, RootClientError, native_identity\n"
+        "from base.host.system.boot_unit import publish_root_ready, root_pid_path\n"
+        "from base.native_process.ownership import OwnedProcess\n"
+        "from dataclasses import asdict\n"
+        f"receipt = Path({str(receipt)!r})\n"
+        f"data = subprocess.Popen({_SLEEPER!r}, start_new_session=True)\n"
+        f"hint = root_pid_path(Path({str(home)!r}))\n"
+        "hint.parent.mkdir(parents=True, exist_ok=True)\n"
+        "hint.write_text(str(data.pid) + '\\n')\n"
+        "births = {'data': asdict(OwnedProcess.capture(psutil.Process(data.pid)))}\n"
+        "receipt.write_text(json.dumps(births))\n"
+        f"root = subprocess.Popen({_daemon_command(run_dir, manifest)!r}, start_new_session=True)\n"
+        "births['root'] = asdict(OwnedProcess.capture(psutil.Process(root.pid)))\n"
+        "receipt.write_text(json.dumps(births))\n"
+        f"client = RootClient(Path({str(run_dir / _SOCKET_NAME)!r}), timeout=1)\n"
+        "deadline = time.monotonic() + 20\n"
+        "while True:\n"
+        "    try:\n"
+        "        status = client.status()['result']\n"
+        "        if status['units'][0]['state'] == 'running': break\n"
+        "    except (RootClientError, KeyError): pass\n"
+        "    if root.poll() is not None or time.monotonic() > deadline: raise RuntimeError('root unready')\n"
+        "    time.sleep(.05)\n"
+        "births['app'] = asdict(native_identity(status['units'][0]))\n"
+        "receipt.write_text(json.dumps(births))\n"
+        + (
+            "receipt.with_suffix('.failure').write_text('before')\nraise RuntimeError('failed before publication')\n"
+            if failure == "before"
+            else ""
+        )
+        + f"publish_root_ready(Path({str(home)!r}), native_identity(status['root']))\n"
+        + (
+            "receipt.with_suffix('.failure').write_text('after')\nraise RuntimeError('failed after publication')\n"
+            if failure == "after"
+            else ""
+        )
+    )
+    return starter
 
-    Tolerates the rebind window (refused connections) and stale reads from the
-    outgoing generation.
+
+def _terminate_systemd_test_births(receipt: Path) -> None:
+    from base.native_process.ownership import OwnedProcess
+
+    if not receipt.exists():
+        return
+    births = json.loads(receipt.read_text())
+    # Let root close its application before cleaning any independent leftovers.
+    # Signalling both at once would invalidate root's stop capture artificially.
+    for name in ("root", "app", "data"):
+        if name not in births:
+            continue
+        owner = OwnedProcess(**births[name])
+        if owner.live():
+            process = psutil.Process(owner.pid)
+            if OwnedProcess.capture(process) == owner:
+                process.terminate()
+        deadline = time.monotonic() + 15
+        while owner.live() and time.monotonic() < deadline:
+            time.sleep(0.02)
+        assert not owner.live(), f"test-owned {name} did not close"
+
+
+def _systemd_test_context(home: Path) -> BootUnitContext:
+    import grp
+    import pwd
+
+    entry = pwd.getpwuid(os.getuid())
+    return BootUnitContext(
+        home,
+        REPO_ROOT,
+        entry.pw_name,
+        grp.getgrgid(entry.pw_gid).gr_name,
+        Path(entry.pw_dir),
+    )
+
+
+def _assert_failed_adoption(ctx: BootUnitContext, receipt: Path, failure: str) -> None:
+    from base.host.system import boot_unit
+
+    assert receipt.with_suffix(".failure").read_text() == failure
+    births = json.loads(receipt.read_text())
+    assert set(births) == {"data", "root", "app"}
+    assert boot_unit.manager_properties()["MainPID"] == "0"
+    # Before publication the deliberately stale hint names data; afterwards it
+    # names root. Neither becomes MainPID when the ordinary starter fails.
+    expected = births["data" if failure == "before" else "root"]["pid"]
+    hint = boot_unit.root_pid_path(ctx.home)
+    if hint.exists():  # Native manager may remove the failed unit's hint.
+        assert hint.read_text().strip() == str(expected)
+
+
+def _require_native_systemd() -> None:
+    from base.host.system import boot_unit
+
+    if sys.platform != "linux" or not boot_unit.systemd_running():
+        pytest.skip("native Linux systemd required")
+    allowed = subprocess.run(["sudo", "-n", "true"], check=False, timeout=10)
+    if allowed.returncode:
+        pytest.skip("native systemd test requires passwordless sudo")
+    # The host has one boot unit and the test must be that unit to be adopted, so it
+    # runs only where none exists: otherwise it would start, stop and reset the
+    # host's own.
+    known = subprocess.run(  # noqa: S603 — fixed systemctl verb, the module's own unit name
+        ["systemctl", "show", "--property=LoadState", "--value", boot_unit.UNIT_NAME],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=10,
+    )
+    if known.stdout.strip() != "not-found":
+        pytest.skip("this host has its own ava-boot unit; the test would act on it")
+
+
+@pytest.mark.parametrize("failure", ["", "before", "after"])
+def test_native_systemd_root_lifetime(tmp_path: Path, failure: str) -> None:
+    """Actual manager handoff, root TERM closure, and data sibling retention.
+
+    The retained sleeper represents a separately owned native data process;
+    this does not claim database protocol or durability verification. The
+    dedicated Ubuntu CI step asserts systemd and sudo before invoking this test.
     """
-    deadline = time.monotonic() + 15.0
-    threshold = baseline_uptime / 2.0
-    while time.monotonic() < deadline:
-        try:
-            response = client.status()
-        except RootClientError:
-            response = None
-        if response is not None and response["ok"]:
-            result = cast("dict[str, object]", response.get("result"))
-            if _root_uptime(result) < threshold:
-                return result
-        time.sleep(0.05)
-    raise AssertionError("the successor generation did not come up")
+    from base.host.system import boot_unit
 
+    _require_native_systemd()
+    ctx = _systemd_test_context(tmp_path / "home")
+    ctx.home.mkdir()
+    run_dir = ctx.home / "root"
+    manifest = _write_manifests(tmp_path, [{"id": "app", "exec": _SLEEPER, "restart": "always"}])
+    receipt = tmp_path / "births.json"
+    starter = _systemd_starter(ctx.home, receipt, run_dir, manifest, failure)
+    unit = boot_unit.UNIT_NAME
+    target = Path("/run/systemd/system") / unit
+    holder = tmp_path / unit
+    content = boot_unit.render_unit(ctx)
+    exec_line = next(row for row in content.splitlines() if row.startswith("ExecStart="))
+    replacement = f"ExecStart=:{boot_unit._quote(sys.executable, 'python')} {boot_unit._quote(str(starter), 'test starter')}"
+    holder.write_text(
+        content.replace(exec_line, replacement).replace("Restart=on-failure", "Restart=no")
+    )
 
-def test_upgrade_exec_replaces_in_place_and_adopts_the_tree(short_tmp: Path) -> None:
-    run_dir = short_tmp / "run"
-    manifests = _write_manifests(short_tmp, [{"id": "svc", "exec": _SLEEPER, "restart": "always"}])
-    with _daemon(run_dir, manifests) as (proc, log_path):
-        client = _wait_ready(run_dir, proc, log_path)
-        time.sleep(1.5)  # accrue a distinguishable uptime
-        status_before = client.status()
-        before = cast("dict[str, object]", status_before.get("result"))
-        uptime_before = _root_uptime(before)
-        assert _root_pid(before) == proc.pid
-        unit_pid = cast(int, _units_of(status_before)[0]["pid"])
+    def native(*args: str) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(  # noqa: S603 — fixed test-owned unit and explicit native verbs
+            ["sudo", "-n", *args], capture_output=True, text=True, check=False, timeout=45
+        )
 
-        response = client.upgrade()
-        assert response["ok"] is True
-        result = cast("dict[str, object]", response.get("result"))
-        assert result["accepted"] is True
-        assert result["root_pid"] == proc.pid
+    def require(*args: str) -> None:
+        result = native(*args)
+        assert result.returncode == 0, result.stdout + result.stderr
 
-        after = _wait_after_upgrade(client, uptime_before)
-        assert _root_pid(after) == proc.pid  # the exec kept the pid
-        (unit_after,) = cast("list[dict[str, object]]", after["units"])
-        assert unit_after["state"] == "running"
-        assert unit_after["pid"] == unit_pid  # adopted in place, not respawned
-        assert _root_uptime(after) < uptime_before  # uptime reset
-        assert not (run_dir / "handoff.json").exists()  # consumed and purged
+    try:
+        require("install", "-m", "0644", str(holder), str(target))
+        require("systemctl", "daemon-reload")
+        started = native("systemctl", "start", unit)
+        if failure:
+            assert started.returncode != 0
+            _assert_failed_adoption(ctx, receipt, failure)
+            return
+        assert started.returncode == 0, started.stdout + started.stderr
+        raw = json.loads(receipt.read_text())
+        # Receipt keys use OwnedProcess's dataclass spelling; status uses create_time.
+        from base.native_process.ownership import OwnedProcess
 
-        log_text = _read_log(log_path)
-        assert "upgrade accepted: handoff for 1 unit(s), 1 live" in log_text
-        assert f"unit svc: attached to the carried generation (pid {unit_pid})" in log_text
-        assert "upgrade: exec replacement now" in log_text
-
-        # The successor is itself upgradable: the protocol is not one-shot.
-        time.sleep(1.5)
-        uptime_two = _root_uptime(cast("dict[str, object]", client.status().get("result")))
-        assert client.upgrade()["ok"] is True
-        after_two = _wait_after_upgrade(client, uptime_two)
-        assert _root_pid(after_two) == proc.pid
-        (unit_two,) = cast("list[dict[str, object]]", after_two["units"])
-        assert unit_two["pid"] == unit_pid
-
-        proc.terminate()
-        assert proc.wait(timeout=10) == 0
-        assert not (run_dir / _SOCKET_NAME).exists()
-
-
-def test_takeover_marker_and_env_roundtrip(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("AVA_ROOT_HANDOFF", "1")
-    assert daemon_module._take_takeover_marker() is True
-    assert daemon_module._take_takeover_marker() is False  # one-shot
-    env = daemon_module._takeover_env()
-    assert env["AVA_ROOT_HANDOFF"] == "1"
-    assert env.get("PATH")  # the live environment is carried through
-
-
-def test_exec_failure_logs_and_exits_for_the_keepalive_path(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    def refuse(*_args: object, **_kwargs: object) -> None:
-        raise OSError("exec refused (test)")
-
-    exits: list[int] = []
-    shutdowns: list[int] = []
-
-    def fake_exit(code: int) -> None:
-        exits.append(code)
-        raise SystemExit(code)
-
-    monkeypatch.setattr(daemon_module.os, "execve", refuse)
-    monkeypatch.setattr(daemon_module.os, "_exit", fake_exit)
-    monkeypatch.setattr(daemon_module.logging, "shutdown", lambda: shutdowns.append(1))
-    with pytest.raises(SystemExit):
-        daemon_module._exec_upgrade(["--run-dir", "r", "--manifests", "m"])
-    assert exits == [1]
-    assert shutdowns == [1]
+        owners = {key: OwnedProcess(**value) for key, value in raw.items()}
+        root, app, data = owners["root"], owners["app"], owners["data"]
+        manager = boot_unit.manager_properties()
+        assert manager["MainPID"] == str(root.pid)
+        assert manager["ActiveState"] == "active"
+        assert psutil.Process(root.pid).ppid() == 1, "manager did not adopt root as its child"
+        assert all(owner.live() for owner in owners.values())
+        require("systemctl", "stop", unit)
+        assert not root.live() and not app.live()
+        assert data.live(), "application-root stop killed independent data-plane sibling"
+        assert not list((run_dir / "custody").glob("*.json"))
+    finally:
+        native("systemctl", "stop", unit)
+        _terminate_systemd_test_births(receipt)
+        native("rm", "-f", str(target))
+        native("systemctl", "daemon-reload")
+        native("systemctl", "reset-failed", unit)

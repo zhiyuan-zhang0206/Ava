@@ -25,8 +25,8 @@ from __future__ import annotations
 import importlib
 import inspect
 import logging
-from collections.abc import Awaitable, Sequence
-from dataclasses import dataclass
+from collections.abc import Awaitable, Callable, Sequence
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Protocol, cast, runtime_checkable
 
@@ -34,6 +34,7 @@ from services.ava_root.manifest import UnitRegistry
 from services.ava_root.supervisor import Supervisor
 
 _log = logging.getLogger("ava_root")
+ResourceHandler = Callable[[dict[str, object]], Awaitable[object]]
 
 
 class WiringError(ValueError):
@@ -61,6 +62,9 @@ class WiringContext:
     registry: UnitRegistry
     run_dir: Path
     log_dir: Path
+    resource_handlers: dict[str, ResourceHandler] = field(
+        default_factory=dict[str, ResourceHandler]
+    )
 
 
 def _split_ref(spec: str) -> tuple[str, str]:

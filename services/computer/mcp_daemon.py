@@ -43,7 +43,7 @@ Wire protocol (JSON line per request, mirrors `services/browser/protocol`):
             {"id": 2, "ok": false, "error": "message"}
 
 The per-agent bridge (`services/computer/mcp_wrapper.py`) and the MCP daemon's
-direct dial (`ava/_mcp_computer.py`) speak this protocol; `agent_id` is stamped
+direct dial (`ava/mcps/_computer.py`) speak this protocol; `agent_id` is stamped
 by the bridge from the calling agent's identity and rides into the audit
 stream, where it is likewise self-reported by the agent's own process.
 
@@ -70,6 +70,11 @@ from contextlib import suppress
 from pathlib import Path
 from typing import Any
 
+from base.config import settings
+from base.log import logger
+from base.paths import computer_mcp_socket
+from base.telemetry import audit_events
+
 # Re-export of the shared OCR module object (test compat: the suite patches
 # mcp_daemon.ocr_mod attributes, and every OCR caller sees the same object).
 from services.computer.execute import _TOOLS, _execute, _mcp_result, _priority
@@ -79,10 +84,6 @@ from services.computer.session import ScreenSession
 from services.computer.task_sessions import TaskSessionTracker
 from services.permissions_helper import client as helper
 from services.permissions_helper.client import PermissionsHelperError
-from shared import audit_events
-from shared.config import settings
-from shared.log import logger
-from shared.paths import computer_mcp_socket
 
 # A snapshot PNG can be multi-MB on one line; lift the stream buffer cap well
 # above StreamReader's 64KiB default (same limit as the browser daemon).
@@ -299,7 +300,7 @@ class ComputerMcpDaemon:
                 "task_id": args.get("task_id"),
             },
         )
-        from shared.agents.impersonation_manifest import emit_staged_central_event
+        from base.agents.impersonation_manifest import emit_staged_central_event
 
         emit_staged_central_event(
             event,
@@ -320,7 +321,7 @@ class ComputerMcpDaemon:
         task_id = payload["task_id"]
         if not isinstance(task_id, int) or isinstance(task_id, bool):
             raise TypeError("computer task-session audit requires an integer task id")
-        from shared.agents.impersonation_manifest import emit_staged_central_event
+        from base.agents.impersonation_manifest import emit_staged_central_event
 
         emit_staged_central_event(event, origin_kind=f"computer_{event_type}", origin_id=task_id)
 
@@ -370,7 +371,7 @@ async def run(sock: str | None = None) -> None:
     path = Path(daemon._sock)
     if await _socket_in_use(path):
         logger.error(
-            "[computer-mcp] socket %s is already served by a live daemon — "
+            "[computer-mcp] socket {} is already served by a live daemon — "
             "refusing to start a second instance",
             path,
         )
@@ -408,7 +409,7 @@ async def run(sock: str | None = None) -> None:
 
 
 def main() -> None:
-    from shared.log import init_gateway_process
+    from base.log import init_gateway_process
 
     init_gateway_process(name="computer-mcp")
     asyncio.run(run())

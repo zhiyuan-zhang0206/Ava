@@ -36,12 +36,10 @@ from fastapi import HTTPException
 from psycopg import Connection, Cursor
 from psycopg_pool import ConnectionPool
 
-from gateway import loki_events, loki_query_budget
-from gateway.schemas import MetricPoint, PluginMetricResult
-from shared.metrics.core import core_metrics
-from shared.metrics.metrics_logql import validate_logql
-from shared.plugin_context import PluginContext
-from shared.plugin_metrics import (
+from base.packages.plugins.context import PluginContext
+from base.telemetry.metrics.core import catalog
+from base.telemetry.metrics.logql import validate_logql
+from base.telemetry.metrics.plugin_metrics import (
     MetricSpec,
     PluginMetricError,
     drop_plugin_metrics,
@@ -50,6 +48,8 @@ from shared.plugin_metrics import (
     render_title,
     validate_metric_sql,
 )
+from gateway.inspect.schemas import MetricPoint, PluginMetricResult
+from gateway.lgtm import loki_events, loki_query_budget
 
 # The shipped-plugin metrics directory — every plugin dir with a metrics.py is
 # part of the in-process registry (the generator's import set, task #180 PR D).
@@ -117,7 +117,7 @@ def _load_plugin_metrics() -> list[MetricSpec]:
     partial registrations are dropped too (``drop_plugin_metrics`` — a module
     can raise mid-registration), so a fixed file is picked up cleanly on the
     next call."""
-    from shared import plugin_load_report
+    from base.packages.plugins import load_report
 
     for path in _plugin_metric_modules():
         name = path.parent.name
@@ -127,10 +127,10 @@ def _load_plugin_metrics() -> list[MetricSpec]:
         except (KeyboardInterrupt, SystemExit):
             raise
         except BaseException as exc:
-            plugin_load_report.report_plugin_load_failure(name, exc)
+            load_report.report_plugin_load_failure(name, exc)
             drop_plugin_metrics(name)
-    core_metrics.collect_core_metrics()
-    return registered_metrics() + core_metrics.registered_core_metrics()
+    catalog.collect_core_metrics()
+    return registered_metrics() + catalog.registered_core_metrics()
 
 
 def _render_metric_query(spec: MetricSpec, agent_id: int | None) -> str:

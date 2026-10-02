@@ -5,15 +5,15 @@ from datetime import UTC, datetime
 
 from psycopg.rows import dict_row
 
-from ava.impersonation_replay import consume_recorded_events, post_completion_integrity_breach
-from shared import maintenance
-from shared.agents.impersonation_manifest import monitor_manifest_health
-from shared.alerts import upsert_alert
-from shared.config import settings
-from shared.db_transaction import write_transaction
-from shared.log import logger
-from shared.loki_index_labels import retention_floor
-from shared.machine import machine_name
+from ava.impersonation.replay import consume_recorded_events, post_completion_integrity_breach
+from base.agents.impersonation_manifest import monitor_manifest_health
+from base.cluster.machine import machine_name
+from base.config import settings
+from base.db.transaction import write_transaction
+from base.deploy.maintenance import admission
+from base.log import logger
+from base.telemetry.alerts import upsert_alert
+from base.telemetry.loki_index_labels import retention_floor
 
 
 def reconcile_one() -> None:
@@ -85,7 +85,7 @@ def _record_integrity_alert(lease: dict[str, object]) -> None:
 async def reconcile_forever() -> None:
     """Replay at the runner's maintenance cadence without blocking ownership renewal."""
     while True:
-        if not maintenance.quiesced():
+        if not admission.quiesced():
             try:
                 await asyncio.to_thread(reconcile_one)
             except Exception:

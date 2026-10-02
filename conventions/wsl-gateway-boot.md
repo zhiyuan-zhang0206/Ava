@@ -1,10 +1,8 @@
 # Unattended boot for a WSL gateway
 
 A WSL gateway needs two boot owners: Windows starts and holds the intended
-distribution open; Linux starts the installed Ava home. Ava's native Windows
-runner still uses the interactive account described in
-[Windows setup](windows-setup.md). Do not change that runner's tasks to make the
-WSL gateway boot.
+distribution open; Linux starts the installed Ava home. The Windows task below
+anchors the WSL distribution and does not launch a native Ava runner.
 
 Windows `WSLService` being automatic does not establish a distribution boot
 trigger. A logon task needs a logged-on user, and
@@ -22,19 +20,15 @@ install, register, start, stop, or update anything.
    either a failed or a successful client exit. The task has no execution-time
    limit, battery restriction, or idle-only condition. It does not wake a sleeping
    Windows host.
-2. **Linux:** systemd starts the enabled cron daemon, and Ava's home-scoped
-   boot entry starts the installed home. On a host whose service manager is
-   systemd the preferred owner is the distro-level unit
-   `ava-boot.<home-slug>.service` (`ava cluster boot-unit install`,
-   `shared/os_boot_unit.py`): it runs the home's convergence script at boot and
-   systemd itself supplies the retry (`Restart=on-failure`, `RestartSec=60`, no
-   attempt cap, `RuntimeMaxSec=900` bounding one attempt). Without the unit —
-   hosts not running systemd as their service manager — the fallback stays the
-   `@reboot AVA_HOME=... /absolute/checkout/.venv/bin/ava boot` crontab entry,
-   whose retry loop is `ava boot`'s. Enabling the unit removes the crontab
-   entry in the same step, so exactly one owner converges at boot; after a
-   successful convergence the ordinary Ava watchdogs supervise services.
-   Preserve unrelated crontab entries.
+2. **Linux:** ordinary start convergence registers and enables the home-scoped
+   systemd unit `ava-boot.service` (`base/host/system/boot_unit.py`). It runs
+   ordinary start directly with the exact home, checkout and registry. Systemd
+   supplies retry (`Restart=on-failure`, `RestartSec=60`, no attempt cap), and
+   `TimeoutStartSec=900` bounds initial readiness. The successful start publishes
+   the birth-validated root PID; `Type=forking` adopts root after the starter
+   exits. Root owns application supervision. Automatic startup requires systemd;
+   interactive start can launch root directly. No cron boot route is registered.
+
 
 The anchor belongs to the distribution, not an Ava home: it may keep other Linux
 workloads alive too. It is deliberately outside `\Ava\<home-slug>\` and is not
@@ -68,7 +62,7 @@ $distribution = 'Ubuntu-24.04'
 $linuxUser = 'linux-owner'
 $windowsUser = [Security.Principal.WindowsIdentity]::GetCurrent().Name
 $wslExecutable = Join-Path $env:SystemRoot 'System32\wsl.exe'
-$xml = (python scripts/render_wsl_boot_task.py `
+$xml = (python scripts/host_ops/render_wsl_boot_task.py `
     --distribution $distribution --linux-user $linuxUser `
     --windows-user $windowsUser --wsl-executable $wslExecutable | Out-String)
 if ($LASTEXITCODE -ne 0) { throw 'WSL task rendering failed' }
@@ -91,7 +85,7 @@ not account rights or a successful cold boot.
 ## Install only during the coordinated host change
 
 First verify the Linux owner's installed home, `systemd=true`, enabled/active
-cron, and the exact checkout/home-scoped Ava boot entry. Confirm that the gateway
+systemd home unit, and its exact checkout/home binding. Confirm that the gateway
 home will be the sole active data-plane owner before any automatic bring-up.
 Use an elevated PowerShell **as the distribution owner** if registering the boot
 trigger requires administrator rights; do not run as a different account.
@@ -143,11 +137,10 @@ Start-ScheduledTask -TaskName $taskName
 
 Before calling unattended recovery ready, validate a Windows reboot **with no
 user login** in the approved maintenance window. Observe the task's correct user
-and running state, Linux boot ID and systemd/cron (with the boot unit installed:
-`systemctl status ava-boot.*` and `$AVA_HOME/logs/boot-converge.state`), Ava
-`boot.log`, authenticated gateway/data-plane readiness, Linux network access, and
+and running state, Linux boot ID and systemd (for the home unit:
+`systemctl status ava-boot.*` and its adopted root `MainPID`), the native
+journal, authenticated gateway/data-plane readiness, Linux network access, and
 runner/agent recovery.
-Record the Windows native runner's separate interactive-session dependency.
 Test that ending only the anchor makes the repeating trigger recover it, and
 that disabling it prevents resurrection during maintenance. Until these checks
 pass, describe the result as prepared boot wiring, not verified cold recovery.

@@ -6,7 +6,7 @@
 # fans out over pytest-split shards (LPT duration-balanced via the committed
 # .test_durations and least_duration — slow tests only, >=0.2s, 87% of total runtime; tests
 # absent from it are costed at this run's average. Refreshed nightly by
-# scripts/refresh_test_durations.py via .github/workflows/refresh-test-durations.yml).
+# scripts/ci/refresh_test_durations.py via .github/workflows/refresh-test-durations.yml).
 # There is no self-hosted fleet and no runner provisioner: a hosted runner
 # starts bare, so each job installs its own toolchain inline — uv, Node 22,
 # Postgres 17 + Redis server binaries on PATH (the suite self-provisions
@@ -14,8 +14,7 @@
 # for e2e (browser dir cached; system deps installed per run).
 #
 # CHANGE-CLASS GATING (the CI pyramid's top): the `classify` job maps the PR
-# diff through shared/deploy/git/repo_change.py — the same classifier `ava cluster update`
-# uses for selective restart — and suites skip when their side is untouched:
+# diff through base/deploy/git/repo_change.py, and suites skip when their side is untouched:
 # docs-only skips everything, frontend-only skips the backend suite,
 # backend-only skips the frontend suite. e2e runs whenever EITHER side changed
 # (it is the integration net). Draft PRs skip CI entirely until
@@ -92,7 +91,7 @@ concurrency:
 
 jobs:
   classify:
-    # Which sides does this diff touch? Imports shared/deploy/git/repo_change.py directly
+    # Which sides does this diff touch? Imports base/deploy/git/repo_change.py directly
     # (stdlib-only — no venv) over the PR's changed paths. push/dispatch
     # events always report both sides changed: main must always verify fully.
     name: classify change
@@ -126,7 +125,7 @@ jobs:
           from pathlib import Path
 
           sys.path.insert(0, ".")
-          from shared.deploy.git.repo_change import classify_change
+          from base.deploy.git.repo_change import classify_change
 
           paths = Path("/tmp/changed.txt").read_text().splitlines()
           frontend, backend = classify_change(paths)
@@ -178,7 +177,7 @@ jobs:
           # (if / continue-on-error) cannot read env, only needs, and an empty
           # mode degrades to the full-suite path.
           echo "mode=$TEST_SELECTION_MODE" >> "$GITHUB_OUTPUT"
-          python3 scripts/test_selector.py \
+          python3 scripts/ci/test_selector.py \
             --changed-files /tmp/changed.txt \
             --head-ref "$HEAD_REF" \
             --event "$EVENT" \
@@ -218,16 +217,16 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Scan for raw CJK (i18n locale files exempt)
-        run: python3 scripts/lint_no_cjk.py
+        run: python3 scripts/content_lint/lint_no_cjk.py
 
       - name: Scan for tailnet IP literals (CIDR range notation exempt)
-        run: python3 scripts/lint_no_tailnet.py
+        run: python3 scripts/content_lint/lint_no_tailnet.py
 
       - name: Scan the root supervisor for permission-domain symbols
-        run: python3 scripts/lint_ava_root_scope.py
+        run: python3 scripts/lint/ava_root_scope.py
 
       - name: Check canonical Python lock sources (stdlib only)
-        run: python3 scripts/lint_python_lock.py
+        run: python3 scripts/lint/python_lock.py
 
   core-content-manifests:
     # The content-channel gate (tasks #2915/#3267): core manifests' declared
@@ -257,7 +256,7 @@ jobs:
         uses: ./.github/actions/uv-sync
 
       - name: Lint core-content manifests
-        run: uv run python scripts/lint_core_content_manifests.py
+        run: uv run python scripts/content_lint/lint_core_content_manifests.py
 
   doc-lints:
     # The doc-lint family must fire on EVERY PR — including docs-only diffs,
@@ -341,7 +340,14 @@ jobs:
         uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
           version: 0.10.2
-          enable-cache: true
+          # No project cache here. setup-uv keys the cache on pyproject.toml +
+          # uv.lock only, every job shares that key, and an entry is immutable:
+          # the first job to finish writes it. This job installs nothing from the
+          # lockfile (only `uvx uv==0.11.16`) and finishes in ~20s, so it always
+          # won that race and left a ~46 MB entry without the project wheels,
+          # which every other job then restored as a "hit" and re-downloaded
+          # all 265 packages from PyPI anyway.
+          enable-cache: false
 
       - name: Audit locked Python dependencies
         # The canonical CI uv (0.10.2) predates `uv audit`; pin the
@@ -416,13 +422,23 @@ jobs:
       - name: Run ruff format check
         run: uv run ruff format --check
       - name: Lint migrations
-        run: uv run python scripts/lint_migrations.py
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          # On a pull request, a merged migration must be byte-identical in the
+          # base revision THIS event was built against and in the checked-out
+          # merge ref.
+          args=()
+          if [ "$EVENT" = "pull_request" ]; then
+            git fetch --depth=1 origin "$BASE_SHA"
+            args=(--base "$(git rev-parse FETCH_HEAD^{commit})")
+          fi
+          uv run python scripts/content_lint/lint_migrations.py "${args[@]}"
       - name: Lint clock lattice
-        run: uv run python scripts/lint_clock_lattice.py
+        run: uv run python scripts/lint/clock_lattice.py
       - name: Apply migrations to fresh DB + trigger smoke
-        run: uv run python scripts/migration_smoke.py
-      - name: Hardened venv survives production uv sync (write window)
-        run: bash scripts/test_uv_sync_write_window.sh
+        run: uv run python scripts/ci/migration_smoke.py
       - name: Run pyright
         run: uv run pyright
 
@@ -505,8 +521,8 @@ jobs:
                       "git", "diff", "--name-only", "--no-renames", "-z",
                       os.environ["LINT_STRUCTURE_BASELINE_BASE"], "HEAD",
                   ])
-                  # The hook regexes own the union (including shared/events/,
-                  # ui/web/openapi.json and shared/config/; not db/schema.sql).
+                  # The hook regexes own the union (including base/events/,
+                  # ui/web/openapi.json and base/config/; not db/schema.sql).
                   config = yaml.safe_load(Path(".pre-commit-config.yaml").read_text())
                   hooks = {hook["id"]: hook for repo in config["repos"] for hook in repo["hooks"]}
                   patterns = [re.compile(hooks[hook_id]["files"]) for hook_id in codegen_ids]
@@ -714,14 +730,18 @@ jobs:
         # from these runners) and re-arms per test, so a healthy slow run
         # cannot false-positive. A stall outside any test (controller, or a
         # worker between items) produces no dump — the cap stays its backstop.
+        #
+        # No positional path: pytest collects `testpaths` from pyproject.toml, the
+        # top-level tests/ plus every package's own <pkg>/**/tests/ (the flaky
+        # bucket and scripts/ci/refresh_test_durations.py do the same).
         run: |
           set +e
           set -o pipefail
           mkdir -p tmp
-          uv run pytest tests/ -q --ignore=tests/e2e -m "not flaky" -n 4 \
+          uv run pytest -q --ignore=tests/e2e -m "not flaky" -n 4 \
             --splits 16 --group ${{ matrix.group }} \
             --splitting-algorithm least_duration \
-            --cov=agent --cov=ava --cov=cli --cov=gateway --cov=shared --cov=ui \
+            --cov=agent --cov=ava --cov=cli --cov=gateway --cov=base --cov=ui \
             --cov=ops --cov=services --cov=ava_builtins \
             --junit-xml=tmp/junit-backend-shard-${{ matrix.group }}-a1.xml -o junit_family=xunit1 \
             -o faulthandler_timeout=300 \
@@ -738,16 +758,49 @@ jobs:
             # file (coverage.py appends by default) and flatten the combine;
             # drop it so the retry writes a clean per-shard file.
             rm -f "$COVERAGE_FILE"
-            uv run pytest tests/ -q --ignore=tests/e2e -m "not flaky" -n 4 \
+            uv run pytest -q --ignore=tests/e2e -m "not flaky" -n 4 \
               --splits 16 --group ${{ matrix.group }} \
               --splitting-algorithm least_duration \
-              --cov=agent --cov=ava --cov=cli --cov=gateway --cov=shared --cov=ui \
+              --cov=agent --cov=ava --cov=cli --cov=gateway --cov=base --cov=ui \
               --cov=ops --cov=services --cov=ava_builtins \
               --junit-xml=tmp/junit-backend-shard-${{ matrix.group }}-a2.xml -o junit_family=xunit1 \
               -o faulthandler_timeout=300
             status=$?
           fi
           exit "$status"
+
+      - name: Require the test gate
+        # Fail-closed: the Trunk gate below is the only thing that turns the pytest
+        # step's failures red (it is continue-on-error), so an empty secret must not
+        # skip it silently.
+        if: ${{ !cancelled() && env.TRUNK_ORG_URL_SLUG == '' }}
+        uses: ./.github/actions/require-test-gate
+        with:
+          pytest-outcome: ${{ steps.pytest-shard.outcome }}
+
+      - name: Report executed test counts
+        # What this shard actually ran, from the JUnit report pytest already wrote
+        # (the -q log has no test ids): the total and the count per tests/ directory,
+        # in this log and the job summary. The last attempt's report wins. It is also a
+        # gate: no JUnit report (pytest died before writing one, e.g. a plugin failed
+        # to import) or no executed test at all reds the shard, which the Trunk
+        # uploader alone would let pass.
+        if: ${{ !cancelled() }}
+        run: >
+          python3 scripts/ci/shard_counts.py shard --group ${{ matrix.group }}
+          --junit 'tmp/junit-backend-shard-${{ matrix.group }}-a*.xml'
+          --out tmp/shard-counts-${{ matrix.group }}.json
+          --summary "$GITHUB_STEP_SUMMARY" --min-tests 1
+
+      - name: Upload executed test counts
+        # Input of the `backend test counts` job; informational, never a gate.
+        if: ${{ !cancelled() }}
+        continue-on-error: true
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: shard-counts-${{ matrix.group }}
+          path: tmp/shard-counts-${{ matrix.group }}.json
+          if-no-files-found: ignore
 
       - name: Trunk quarantine gate (upload test results)
         id: trunk-gate
@@ -756,51 +809,17 @@ jobs:
         with:
           cli-version: 0.15.4
           junit-paths: tmp/junit-backend-shard-${{ matrix.group }}-*.xml
+          # The action's default is true: a missing report would upload nothing and pass.
+          allow-missing-junit-files: false
           org-slug: ${{ secrets.TRUNK_ORG_URL_SLUG }}
           token: ${{ secrets.TRUNK_API_TOKEN }}
       - name: Show unquarantined failure summary
-        # The test run above is continue-on-error, so this job's only
-        # hard-failing test step is the quarantine gate itself: this prints
-        # the failing tests from the uploaded JUnit when the gate rejects
-        # them, so a red step reads as "tests failed and were not
-        # quarantined" (a real gate block) instead of an uploader outage.
-        # failure() is load-bearing: without a status-check function GHA applies
-        # an implicit success(), so the bare outcome check silently skipped in
-        # exactly the failure case this step exists to explain.
+        # failure() prevents GitHub Actions from adding implicit success(),
+        # which would skip the summary when the gate fails.
         if: ${{ failure() && steps.trunk-gate.outcome == 'failure' }}
-        shell: bash
-        run: |
-          python3 - <<'EOF'
-          import glob
-          from xml.etree import ElementTree as ET
-
-          paths = set()
-          for pattern in ["tmp/junit-backend-shard-*.xml"]:
-              paths.update(glob.glob(pattern))
-          paths = sorted(paths)
-          if not paths:
-              print("No JUnit files found: the upload failed before test results were parsed (see the step log above).")
-              raise SystemExit(0)
-          failed = []
-          total = 0
-          for path in paths:
-              try:
-                  root = ET.parse(path).getroot()
-              except ET.ParseError:
-                  print("WARNING: could not parse " + path)
-                  continue
-              for tc in root.iter("testcase"):
-                  total += 1
-                  if tc.find("failure") is not None or tc.find("error") is not None:
-                      failed.append(tc.get("classname") + "::" + tc.get("name"))
-          print("Trunk quarantine gate: " + str(len(failed)) + " of " + str(total) + " test(s) failed and were NOT quarantined.")
-          for name in failed:
-              print("  FAILED " + name)
-          if failed:
-              print("Fix the test, or quarantine a known-flaky one in the Trunk Flaky Tests dashboard.")
-          else:
-              print("No failing tests in the JUnit: this red step is an uploader error, not a test failure.")
-          EOF
+        uses: ./.github/actions/junit-failure-summary
+        with:
+          junit-patterns: '["tmp/junit-backend-shard-*.xml"]'
 
       - name: Upload flake telemetry (attempt-1 failure)
         if: ${{ always() && (steps.pytest-shard.outputs.retried == 'true' || matrix.group == 8) }}
@@ -939,6 +958,14 @@ jobs:
             exit 1
           fi
 
+      - name: Require the test gate
+        # Fail-closed, enforce mode only (see backend-shard): an empty secret must
+        # not skip the Trunk gate silently.
+        if: ${{ !cancelled() && env.TRUNK_ORG_URL_SLUG == '' && needs.test-select.outputs.mode == 'enforce' }}
+        uses: ./.github/actions/require-test-gate
+        with:
+          pytest-outcome: ${{ steps.run-subset.outcome }}
+
       - name: Trunk quarantine gate (upload test results)
         id: trunk-gate
         # Enforce mode only: in shadow the subset never gates, so it uploads
@@ -948,51 +975,15 @@ jobs:
         with:
           cli-version: 0.15.4
           junit-paths: tmp/junit-backend-selected.xml
+          # The action's default is true: a missing report would upload nothing and pass.
+          allow-missing-junit-files: false
           org-slug: ${{ secrets.TRUNK_ORG_URL_SLUG }}
           token: ${{ secrets.TRUNK_API_TOKEN }}
       - name: Show unquarantined failure summary
-        # The test run above is continue-on-error, so this job's only
-        # hard-failing test step is the quarantine gate itself: this prints
-        # the failing tests from the uploaded JUnit when the gate rejects
-        # them, so a red step reads as "tests failed and were not
-        # quarantined" (a real gate block) instead of an uploader outage.
-        # failure() is load-bearing: without a status-check function GHA applies
-        # an implicit success(), so the bare outcome check silently skipped in
-        # exactly the failure case this step exists to explain.
         if: ${{ failure() && steps.trunk-gate.outcome == 'failure' }}
-        shell: bash
-        run: |
-          python3 - <<'EOF'
-          import glob
-          from xml.etree import ElementTree as ET
-
-          paths = set()
-          for pattern in ["tmp/junit-backend-selected.xml"]:
-              paths.update(glob.glob(pattern))
-          paths = sorted(paths)
-          if not paths:
-              print("No JUnit files found: the upload failed before test results were parsed (see the step log above).")
-              raise SystemExit(0)
-          failed = []
-          total = 0
-          for path in paths:
-              try:
-                  root = ET.parse(path).getroot()
-              except ET.ParseError:
-                  print("WARNING: could not parse " + path)
-                  continue
-              for tc in root.iter("testcase"):
-                  total += 1
-                  if tc.find("failure") is not None or tc.find("error") is not None:
-                      failed.append(tc.get("classname") + "::" + tc.get("name"))
-          print("Trunk quarantine gate: " + str(len(failed)) + " of " + str(total) + " test(s) failed and were NOT quarantined.")
-          for name in failed:
-              print("  FAILED " + name)
-          if failed:
-              print("Fix the test, or quarantine a known-flaky one in the Trunk Flaky Tests dashboard.")
-          else:
-              print("No failing tests in the JUnit: this red step is an uploader error, not a test failure.")
-          EOF
+        uses: ./.github/actions/junit-failure-summary
+        with:
+          junit-patterns: '["tmp/junit-backend-selected.xml"]'
 
       - name: Upload selected-subset log
         if: ${{ always() }}
@@ -1030,13 +1021,40 @@ jobs:
         uses: ./.github/actions/uv-sync
 
       - name: Run flaky pytest bucket serially
+        id: pytest-serial
         continue-on-error: true
         run: >
           mkdir -p tmp &&
-          uv run pytest tests/ -m flaky --ignore=tests/e2e -q
-          --cov=agent --cov=ava --cov=cli --cov=gateway --cov=shared --cov=ui
+          uv run pytest -m flaky --ignore=tests/e2e -q
+          --cov=agent --cov=ava --cov=cli --cov=gateway --cov=base --cov=ui
           --cov=ops --cov=services --cov=ava_builtins
           --junit-xml=tmp/junit-backend-serial.xml -o junit_family=xunit1
+
+      - name: Require the test gate
+        # Fail-closed (see backend-shard): an empty secret must not skip the Trunk gate.
+        if: ${{ !cancelled() && env.TRUNK_ORG_URL_SLUG == '' }}
+        uses: ./.github/actions/require-test-gate
+        with:
+          pytest-outcome: ${{ steps.pytest-serial.outcome }}
+
+      - name: Report executed test counts
+        # The flaky bucket's tests count with the shards' (see backend-shard). The bucket
+        # may legitimately be empty (pytest exits 5 and still writes a report), so only
+        # a missing JUnit report reds it.
+        if: ${{ !cancelled() }}
+        run: >
+          python3 scripts/ci/shard_counts.py shard --group serial
+          --junit tmp/junit-backend-serial.xml --out tmp/shard-counts-serial.json
+          --summary "$GITHUB_STEP_SUMMARY" --min-tests 0
+
+      - name: Upload executed test counts
+        if: ${{ !cancelled() }}
+        continue-on-error: true
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: shard-counts-serial
+          path: tmp/shard-counts-serial.json
+          if-no-files-found: ignore
 
       - name: Trunk quarantine gate (upload test results)
         id: trunk-gate
@@ -1045,51 +1063,15 @@ jobs:
         with:
           cli-version: 0.15.4
           junit-paths: tmp/junit-backend-serial.xml
+          # The action's default is true: a missing report would upload nothing and pass.
+          allow-missing-junit-files: false
           org-slug: ${{ secrets.TRUNK_ORG_URL_SLUG }}
           token: ${{ secrets.TRUNK_API_TOKEN }}
       - name: Show unquarantined failure summary
-        # The test run above is continue-on-error, so this job's only
-        # hard-failing test step is the quarantine gate itself: this prints
-        # the failing tests from the uploaded JUnit when the gate rejects
-        # them, so a red step reads as "tests failed and were not
-        # quarantined" (a real gate block) instead of an uploader outage.
-        # failure() is load-bearing: without a status-check function GHA applies
-        # an implicit success(), so the bare outcome check silently skipped in
-        # exactly the failure case this step exists to explain.
         if: ${{ failure() && steps.trunk-gate.outcome == 'failure' }}
-        shell: bash
-        run: |
-          python3 - <<'EOF'
-          import glob
-          from xml.etree import ElementTree as ET
-
-          paths = set()
-          for pattern in ["tmp/junit-backend-serial.xml"]:
-              paths.update(glob.glob(pattern))
-          paths = sorted(paths)
-          if not paths:
-              print("No JUnit files found: the upload failed before test results were parsed (see the step log above).")
-              raise SystemExit(0)
-          failed = []
-          total = 0
-          for path in paths:
-              try:
-                  root = ET.parse(path).getroot()
-              except ET.ParseError:
-                  print("WARNING: could not parse " + path)
-                  continue
-              for tc in root.iter("testcase"):
-                  total += 1
-                  if tc.find("failure") is not None or tc.find("error") is not None:
-                      failed.append(tc.get("classname") + "::" + tc.get("name"))
-          print("Trunk quarantine gate: " + str(len(failed)) + " of " + str(total) + " test(s) failed and were NOT quarantined.")
-          for name in failed:
-              print("  FAILED " + name)
-          if failed:
-              print("Fix the test, or quarantine a known-flaky one in the Trunk Flaky Tests dashboard.")
-          else:
-              print("No failing tests in the JUnit: this red step is an uploader error, not a test failure.")
-          EOF
+        uses: ./.github/actions/junit-failure-summary
+        with:
+          junit-patterns: '["tmp/junit-backend-serial.xml"]'
 
       - name: Upload coverage data
         id: coverage-upload
@@ -1164,7 +1146,7 @@ jobs:
         uses: ./.github/actions/uv-sync
 
       - name: Vendored PG + injected pgvector smoke (CREATE EXTENSION + query)
-        run: uv run python scripts/pgvector_runtime_smoke.py
+        run: uv run python scripts/ci/pgvector_runtime_smoke.py
 
   helper-signing-smoke:
     name: permissions helper signing smoke (macOS)
@@ -1213,6 +1195,7 @@ jobs:
           uv run python - <<'PY'
           import subprocess
 
+          from base.paths import permissions_helper_app_dir
           from services.permissions_helper import client, lifecycle
 
           # Import the signing identity into the isolated keychain.
@@ -1260,9 +1243,10 @@ jobs:
           )
 
           # Compile and assemble the real helper app bundle.
-          app = lifecycle._BUILD_DIR / "AvaPermissionsHelper.app"
-          lifecycle._BUILD_DIR.mkdir(parents=True, exist_ok=True)
-          binary = lifecycle._BUILD_DIR / "AvaPermissionsHelper"
+          build_dir = permissions_helper_app_dir()
+          app = build_dir / "AvaPermissionsHelper.app"
+          build_dir.mkdir(parents=True, exist_ok=True)
+          binary = build_dir / "AvaPermissionsHelper"
           lifecycle._run(["swiftc", "-O", str(lifecycle._SOURCE), "-o", str(binary)])
           lifecycle._remove_app(app)
           exe = lifecycle._app_executable(app)
@@ -1308,12 +1292,15 @@ jobs:
       - name: Two-section chain smoke (keeper semantics)
         run: |
           # The macOS adapter's behavioral gate (task #3209): launchd -> helper
-          # -> root -> unit parentage, the root-crash keepalive, and the
-          # helper-crash conflict / dispose / reseed path. The F11
-          # tccd-attribution phase is skipped here because hosted runners
-          # restrict `log show`; run the script without --skip-attribution on a
-          # dev host for that phase.
-          uv run python scripts/two_section_chain_smoke.py --skip-attribution
+          # -> root -> unit parentage, the helper-crash conflict path (the
+          # relaunched helper finds the orphan root, refuses to stop it, and
+          # the orphan closes its own tree so the helper can reseed a fresh
+          # root), and the root-crash restart path (units keep running; the
+          # replacement root refuses cold start while the killed generation's
+          # service custody is unresolved). The F11 tccd-attribution phase is
+          # skipped here because hosted runners restrict `log show`; run the
+          # script without --skip-attribution on a dev host for that phase.
+          uv run python scripts/ci/two_section_chain_smoke.py --skip-attribution
 
       - name: Tear down helper launchd job
         if: ${{ always() }}
@@ -1436,9 +1423,9 @@ jobs:
           # 100% — line coverage is not quality; this gate only sees shard data
           # that reached the combine step (including coverage-data-serial).
           #
-          # Two tiers, enforced by scripts/coverage_gates.py:
+          # Two tiers, enforced by scripts/ci/coverage_gates.py:
           # - the combined 85% gate over the core domains
-          #   agent/ava/cli/gateway/shared/ui (cli joined 2026-08-25, tech
+          #   agent/ava/cli/gateway/base/ui (cli joined 2026-08-25, tech
           #   audit P1 — measured 82% standalone);
           # - per-risk-domain minimum line floors for ops/services/ava_builtins
           #   (tech audit 2026-08-24 finding #10, Task #1570): the
@@ -1449,7 +1436,90 @@ jobs:
           #   threshold even though their tests run in every shard.
           uv run coverage combine coverage-data-*
           uv run coverage json -o coverage.json
-          uv run python scripts/coverage_gates.py coverage.json
+          uv run python scripts/ci/coverage_gates.py coverage.json
+
+  backend-test-counts:
+    # How many tests CI executed, and how that moved. Adds the shards' and the flaky
+    # bucket's counts up and compares them with the previous main run's total, so a test
+    # that moved, or fell out of the suite, shows as a change in one line instead of
+    # being proved by counting around every batch. Purely informational: the job cannot
+    # fail the run, and nothing needs it. Same fan-out condition as backend-shard.
+    name: backend test counts (all shards)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    continue-on-error: true
+    needs: [classify, test-select, backend-shard, backend-serial]
+    if: ${{ !cancelled() && needs.classify.outputs.backend == 'true' && (needs.test-select.outputs.mode != 'enforce' || needs.test-select.outputs.decision != 'SELECTED') }}
+    permissions:
+      contents: read
+      actions: read
+    env:
+      # Every count file the total expects: the backend-shard matrix groups and the
+      # serial bucket. tests/ci/test_shard_counts.py pins this against the matrix.
+      COUNT_GROUPS: "1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 serial"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Download executed test counts
+        continue-on-error: true
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: shard-counts-*
+          path: shard-counts
+          merge-multiple: true
+
+      - name: Fetch the previous main total
+        # The total of the main run this change is based on (a PR names its base commit);
+        # else the latest main run that left one. None yet is not an error.
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          mkdir -p baseline
+          runs() { gh run list --repo "$GITHUB_REPOSITORY" --workflow ci.yml --branch main --event push --status success --json databaseId --jq '.[].databaseId' "$@"; }
+          candidates=""
+          if [ -n "$BASE_SHA" ]; then
+            candidates="$(runs --commit "$BASE_SHA" --limit 1)"
+          fi
+          candidates="$candidates $(runs --limit 10)"
+          for run_id in $candidates; do
+            if gh run download "$run_id" --repo "$GITHUB_REPOSITORY" --name test-count-baseline --dir baseline; then
+              echo "baseline: main run $run_id"
+              break
+            fi
+          done
+
+      - name: Sum the executed test counts
+        continue-on-error: true
+        run: >
+          python3 scripts/ci/shard_counts.py total --dir shard-counts
+          --expected "$COUNT_GROUPS" --baseline baseline/test-count-baseline.json
+          --out test-count-baseline.json --summary "$GITHUB_STEP_SUMMARY"
+          --leak-report test-leak-report.json
+          --sha "$GITHUB_SHA" --run-id "$GITHUB_RUN_ID"
+
+      - name: Upload the leak report
+        # What the root leak guard (tests/fixtures/leak_guard.py) found across every shard: the
+        # full list behind the one `leak guard` annotation of the step above, so a leak is
+        # read from this job and its artifact, never from the shards' logs.
+        if: ${{ !cancelled() }}
+        continue-on-error: true
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: test-leak-report
+          path: test-leak-report.json
+          if-no-files-found: ignore
+
+      - name: Record the total as the next baseline
+        # Only main's own totals are baselines; a PR reads them and leaves none.
+        if: ${{ !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+        continue-on-error: true
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: test-count-baseline
+          path: test-count-baseline.json
+          if-no-files-found: ignore
 
   test-selection-shadow-report:
     # The shadow-mode measurement point. It only exists while the mode is
@@ -1634,48 +1704,10 @@ jobs:
           org-slug: ${{ secrets.TRUNK_ORG_URL_SLUG }}
           token: ${{ secrets.TRUNK_API_TOKEN }}
       - name: Show unquarantined failure summary
-        # The test run above is continue-on-error, so this job's only
-        # hard-failing test step is the quarantine gate itself: this prints
-        # the failing tests from the uploaded JUnit when the gate rejects
-        # them, so a red step reads as "tests failed and were not
-        # quarantined" (a real gate block) instead of an uploader outage.
-        # failure() is load-bearing: without a status-check function GHA applies
-        # an implicit success(), so the bare outcome check silently skipped in
-        # exactly the failure case this step exists to explain.
         if: ${{ failure() && steps.trunk-gate.outcome == 'failure' }}
-        shell: bash
-        run: |
-          python3 - <<'EOF'
-          import glob
-          from xml.etree import ElementTree as ET
-
-          paths = set()
-          for pattern in ["ui/web/junit.xml", "ui/web/junit-flaky.xml"]:
-              paths.update(glob.glob(pattern))
-          paths = sorted(paths)
-          if not paths:
-              print("No JUnit files found: the upload failed before test results were parsed (see the step log above).")
-              raise SystemExit(0)
-          failed = []
-          total = 0
-          for path in paths:
-              try:
-                  root = ET.parse(path).getroot()
-              except ET.ParseError:
-                  print("WARNING: could not parse " + path)
-                  continue
-              for tc in root.iter("testcase"):
-                  total += 1
-                  if tc.find("failure") is not None or tc.find("error") is not None:
-                      failed.append(tc.get("classname") + "::" + tc.get("name"))
-          print("Trunk quarantine gate: " + str(len(failed)) + " of " + str(total) + " test(s) failed and were NOT quarantined.")
-          for name in failed:
-              print("  FAILED " + name)
-          if failed:
-              print("Fix the test, or quarantine a known-flaky one in the Trunk Flaky Tests dashboard.")
-          else:
-              print("No failing tests in the JUnit: this red step is an uploader error, not a test failure.")
-          EOF
+        uses: ./.github/actions/junit-failure-summary
+        with:
+          junit-patterns: '["ui/web/junit.xml", "ui/web/junit-flaky.xml"]'
 
   e2e-shard:
     name: e2e shard (${{ matrix.group }}/4)
@@ -1758,48 +1790,10 @@ jobs:
           org-slug: ${{ secrets.TRUNK_ORG_URL_SLUG }}
           token: ${{ secrets.TRUNK_API_TOKEN }}
       - name: Show unquarantined failure summary
-        # The test run above is continue-on-error, so this job's only
-        # hard-failing test step is the quarantine gate itself: this prints
-        # the failing tests from the uploaded JUnit when the gate rejects
-        # them, so a red step reads as "tests failed and were not
-        # quarantined" (a real gate block) instead of an uploader outage.
-        # failure() is load-bearing: without a status-check function GHA applies
-        # an implicit success(), so the bare outcome check silently skipped in
-        # exactly the failure case this step exists to explain.
         if: ${{ failure() && steps.trunk-gate.outcome == 'failure' }}
-        shell: bash
-        run: |
-          python3 - <<'EOF'
-          import glob
-          from xml.etree import ElementTree as ET
-
-          paths = set()
-          for pattern in ["tmp/junit-e2e-shard-*.xml"]:
-              paths.update(glob.glob(pattern))
-          paths = sorted(paths)
-          if not paths:
-              print("No JUnit files found: the upload failed before test results were parsed (see the step log above).")
-              raise SystemExit(0)
-          failed = []
-          total = 0
-          for path in paths:
-              try:
-                  root = ET.parse(path).getroot()
-              except ET.ParseError:
-                  print("WARNING: could not parse " + path)
-                  continue
-              for tc in root.iter("testcase"):
-                  total += 1
-                  if tc.find("failure") is not None or tc.find("error") is not None:
-                      failed.append(tc.get("classname") + "::" + tc.get("name"))
-          print("Trunk quarantine gate: " + str(len(failed)) + " of " + str(total) + " test(s) failed and were NOT quarantined.")
-          for name in failed:
-              print("  FAILED " + name)
-          if failed:
-              print("Fix the test, or quarantine a known-flaky one in the Trunk Flaky Tests dashboard.")
-          else:
-              print("No failing tests in the JUnit: this red step is an uploader error, not a test failure.")
-          EOF
+        uses: ./.github/actions/junit-failure-summary
+        with:
+          junit-patterns: '["tmp/junit-e2e-shard-*.xml"]'
 
       - name: Upload e2e logs on failure
         if: failure()
@@ -1885,48 +1879,10 @@ jobs:
           org-slug: ${{ secrets.TRUNK_ORG_URL_SLUG }}
           token: ${{ secrets.TRUNK_API_TOKEN }}
       - name: Show unquarantined failure summary
-        # The test run above is continue-on-error, so this job's only
-        # hard-failing test step is the quarantine gate itself: this prints
-        # the failing tests from the uploaded JUnit when the gate rejects
-        # them, so a red step reads as "tests failed and were not
-        # quarantined" (a real gate block) instead of an uploader outage.
-        # failure() is load-bearing: without a status-check function GHA applies
-        # an implicit success(), so the bare outcome check silently skipped in
-        # exactly the failure case this step exists to explain.
         if: ${{ failure() && steps.trunk-gate.outcome == 'failure' }}
-        shell: bash
-        run: |
-          python3 - <<'EOF'
-          import glob
-          from xml.etree import ElementTree as ET
-
-          paths = set()
-          for pattern in ["tmp/junit-e2e-hosted.xml"]:
-              paths.update(glob.glob(pattern))
-          paths = sorted(paths)
-          if not paths:
-              print("No JUnit files found: the upload failed before test results were parsed (see the step log above).")
-              raise SystemExit(0)
-          failed = []
-          total = 0
-          for path in paths:
-              try:
-                  root = ET.parse(path).getroot()
-              except ET.ParseError:
-                  print("WARNING: could not parse " + path)
-                  continue
-              for tc in root.iter("testcase"):
-                  total += 1
-                  if tc.find("failure") is not None or tc.find("error") is not None:
-                      failed.append(tc.get("classname") + "::" + tc.get("name"))
-          print("Trunk quarantine gate: " + str(len(failed)) + " of " + str(total) + " test(s) failed and were NOT quarantined.")
-          for name in failed:
-              print("  FAILED " + name)
-          if failed:
-              print("Fix the test, or quarantine a known-flaky one in the Trunk Flaky Tests dashboard.")
-          else:
-              print("No failing tests in the JUnit: this red step is an uploader error, not a test failure.")
-          EOF
+        uses: ./.github/actions/junit-failure-summary
+        with:
+          junit-patterns: '["tmp/junit-e2e-hosted.xml"]'
 
       - name: Upload e2e logs on failure
         if: failure()
@@ -2019,48 +1975,10 @@ jobs:
           org-slug: ${{ secrets.TRUNK_ORG_URL_SLUG }}
           token: ${{ secrets.TRUNK_API_TOKEN }}
       - name: Show unquarantined failure summary
-        # The test run above is continue-on-error, so this job's only
-        # hard-failing test step is the quarantine gate itself: this prints
-        # the failing tests from the uploaded JUnit when the gate rejects
-        # them, so a red step reads as "tests failed and were not
-        # quarantined" (a real gate block) instead of an uploader outage.
-        # failure() is load-bearing: without a status-check function GHA applies
-        # an implicit success(), so the bare outcome check silently skipped in
-        # exactly the failure case this step exists to explain.
         if: ${{ failure() && steps.trunk-gate.outcome == 'failure' }}
-        shell: bash
-        run: |
-          python3 - <<'EOF'
-          import glob
-          from xml.etree import ElementTree as ET
-
-          paths = set()
-          for pattern in ["tmp/junit-e2e-env-guard.xml"]:
-              paths.update(glob.glob(pattern))
-          paths = sorted(paths)
-          if not paths:
-              print("No JUnit files found: the upload failed before test results were parsed (see the step log above).")
-              raise SystemExit(0)
-          failed = []
-          total = 0
-          for path in paths:
-              try:
-                  root = ET.parse(path).getroot()
-              except ET.ParseError:
-                  print("WARNING: could not parse " + path)
-                  continue
-              for tc in root.iter("testcase"):
-                  total += 1
-                  if tc.find("failure") is not None or tc.find("error") is not None:
-                      failed.append(tc.get("classname") + "::" + tc.get("name"))
-          print("Trunk quarantine gate: " + str(len(failed)) + " of " + str(total) + " test(s) failed and were NOT quarantined.")
-          for name in failed:
-              print("  FAILED " + name)
-          if failed:
-              print("Fix the test, or quarantine a known-flaky one in the Trunk Flaky Tests dashboard.")
-          else:
-              print("No failing tests in the JUnit: this red step is an uploader error, not a test failure.")
-          EOF
+        uses: ./.github/actions/junit-failure-summary
+        with:
+          junit-patterns: '["tmp/junit-e2e-env-guard.xml"]'
 
       - name: Upload e2e logs on failure
         if: failure()

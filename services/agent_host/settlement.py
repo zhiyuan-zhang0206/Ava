@@ -21,17 +21,17 @@ from __future__ import annotations
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from psycopg_pool import AsyncConnectionPool
 
-from agent.corpse_reap import reap_recrashed_corpse
-from agent.hosted_ownership import TurnSettlement, settle_and_stamp_turn
+from agent.ownership.corpse_reap import reap_recrashed_corpse
+from agent.ownership.hosted import TurnSettlement, settle_and_stamp_turn
 from agent.ownership.inbound import RuntimeOwnershipLostError
 from agent.startup import reconcile_claimed_inbounds_at_startup
+from base.config import settings
+from base.log import logger
+from base.native_process.runtime_incarnation import RuntimeIncarnation
+from base.native_process.turn_identity import bind_turn_identity, hosted_resources_settled
 from services.agent_host.crash_recovery import recover_reaped_corpses
 from services.agent_host.db_recovery import database_phase
 from services.agent_host.runtime import TurnOutcome
-from shared.config import settings
-from shared.log import logger
-from shared.runtime_incarnation import RuntimeIncarnation
-from shared.turn_identity import bind_turn_identity, hosted_resources_settled
 
 __all__ = [
     "close_hosted_turn",
@@ -61,9 +61,9 @@ async def close_hosted_turn(
     if outcome.aborted:
         await reconcile_inbounds_after_abort(pool, checkpointer, incarnation)
     elif not outcome.crashed and not outcome.truncated:
-        # A truncated turn (the update straggler reap, or an applied force
-        # terminate of its incarnation) skips the pass too: the successor
-        # boundary that settles the mark owns its claimed rows.
+        # A truncated turn (an applied force terminate of its incarnation)
+        # skips the pass too: the successor boundary that observes the force
+        # owns its claimed rows.
         await reconcile_inbounds_after_turn(pool, checkpointer, incarnation)
     if outcome.crashed:
         await prompt_reap_after_recrash(control_pool, incarnation, settlement)
@@ -78,7 +78,7 @@ async def prompt_reap_after_recrash(
 
     The mark's first stamp bought the grace window — the one chance to
     self-heal. A crash under an existing mark is the retry failing, so the
-    corpse reaper's termination (`agent.corpse_reap.reap_recrashed_corpse`,
+    corpse reaper's termination (`agent.ownership.corpse_reap.reap_recrashed_corpse`,
     same events) runs at once instead of letting a zombie spend the rest of
     the window claiming and re-dying (the #3602 window). A turn that died
     FIRST under its mark is not touched: the first grace stays whole.

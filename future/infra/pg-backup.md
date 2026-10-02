@@ -18,7 +18,8 @@
 > dump is encrypted before publication, and the restore drill validates a
 > decrypted artifact in an isolated Postgres instance. The measured full dump
 > is about 849 MiB and 6.3 minutes; `_DUMP_TIMEOUT_S` remains 60 minutes of
-> headroom. Checkpoint retention is owned separately by the checkpoint reaper.
+> headroom. The checkpoint reaper's trim opt-in was retired on 2026-09-30
+> under the never-delete ruling; its implementation remains unscheduled.
 >
 > **Update 2026-09-21:** the `events` table's frozen archive was dropped with
 > the archive cleanup (task #1281/#1823) — event history reads from Loki, and
@@ -35,11 +36,7 @@
 > history.
 >
 > **Update 2026-08-26 (#3347): pre-update snapshots get their own retention slot.**
-> **Update 2026-09-14:** enabled PITR now replaces the migration-bearing
-> update's full export with a drilled base plus a freshly verified WAL recovery
-> point. The logical snapshot slot below remains for PITR-disabled clusters;
-> daily logical backups and activation's initial recovery floor are unchanged.
-> Each `ava cluster update` that applies migrations writes a `<db>-<ts>.pre-update.dump.enc`
+> Each fleet update that applies migrations writes a `<db>-<ts>.pre-update.dump.enc`
 > snapshot into the same pool before stopping anything (pre-2026-08-27 artifacts
 > carry `.dump.gz.enc`; both stay managed). Prune keeps the newest
 > `BACKUP_KEEP = 7` **daily** dumps plus the newest one pre-update snapshot — an
@@ -61,63 +58,46 @@
 > scheduler's progress and any detached off-site publish; a stop refuses
 > (nothing stopped) while either is in flight (task #3661).
 
-> **Update 2026-08-30 (audit P0-2):** the off-site leg no longer uses the
-> Google Drive sync folder — it publishes through the shared BlobStore store
-> group (`services.pitr.store_factory`), so GCS and Baidu Netdisk are the
-> shared adapters and the Drive copy is gone. Remote objects are append-only
-> except policy-owned retention deletions (off by default; the publish
-> contract has no delete verb and the deletion role must be explicitly armed);
-> a shared remote-retention planner is the follow-up.
+> **Update 2026-10-01:** the daily logical backup no longer depends on the
+> physical PITR stack. The off-site leg is OSS-only
+> (`services/gateway_side/backup/offsite.py`; the destination is the
+> `AVA_BACKUP_OFFSITE_*` keys, and a home without them skips the leg with one
+> INFO line). The managed-name grammar
+> (`services/gateway_side/backup/names.py`) is `<db>-<UTC stamp>.dump.enc`: the
+> `.pre-update` and `.pitr-activation-*` kinds and the pre-cutover wall-clock
+> stamp have no writer and are no longer managed, so prune keeps the newest
+> `backup_keep` dumps. Operation custody moved to
+> `services/backup_scheduler/operation/` and `ava backup operations` is the
+> custody verb. The in-process pre-activation snapshot is gone.
+
+> **Update 2026-10-02:** the self-written physical PITR stack is deleted
+> ([decision](../../decisions/2026-10-02-delete-the-self-written-pitr-stack.md)).
+> The off-site destination is configured as `AVA_BACKUP_OFFSITE_ENDPOINT`,
+> `AVA_BACKUP_OFFSITE_BUCKET` and `AVA_BACKUP_OFFSITE_CREDENTIALS_FILE`
+> (`ava config set`); the PITR-era keys and the backend switch are gone.
 
 ## Future work
 
-### Physical PITR delivery
+### Physical backup
 
-The foundation is source-controlled in `services/pitr/`: per-`AVA_HOME` private
-layout, a stable stdlib-only archive shim, a disabled-by-default GCS uploader,
-and a health-state contract that never equates local archive with remote ACK.
-The uploader uses the official Google Cloud Storage SDK rather than a `gcloud`
-subprocess (host/tool coupling) or handwritten REST (duplicated auth, resumable
-upload, checksum, and conditional retry machinery). It performs immutable
-generation-zero creates, verifies CRC32C/generation/metadata, and fsyncs a local
-ACK before deleting local staging or spool data. It never deletes remote objects.
-Activation remains default-off and operator-owned: it journals the environment and
-`ALTER SYSTEM` changes, continues through the existing whole-cluster restart, proves
-an exact writer-smoke WAL through a durable ACK and independent viewer, then forces and
-restores one operation-scoped base chain. Existing verified pre-update `pg_dump`
-remains mandatory and is never pruned by physical-backup retention.
+There is none today. The daily logical dump is the only recovery point, so the
+recovery point objective is one backup window. The replacement under design is
+WAL archiving and base backups through WAL-G, not yet built; until it lands, no
+document may promise point-in-time recovery.
 
 1. **Off-site encrypted copy — delivered.** After encryption and before local
-   pruning, the gateway publishes the artifact through the shared backup store
-   contract (`services.pitr.store_factory` -> `RestartableStreamingObjectStore
-   .put_base_if_absent`, the same backend switch as the physical PITR plane) as
-   `ava-logical/<name>`; the store-verified ACK (pin_token, size, checksum) is
-   the identity. The publish is if-absent and immutable; a missing/unconfigured
-   store or a failed publish warns without discarding the local backup, which
-   stays the primary copy. Remote objects are append-only except policy-owned
-   retention deletions (off by default): the store contract deliberately has
-   no delete verb, and the retention planner is dry-run until an operator arms
-   the deletion role. The planner now covers this pool too: the `ava-logical/`
-   objects are decided under the retention window mirroring the local prune
-   (newest seven dailies + one pre-update + two activation snapshots + the
-   in-flight activation pin), with objects that carry no verifiable sidecar
-   binding labeled weak-evidence in the plan — see the storage-abstraction
-   effort's retention planner.
-2. **Restore drill — delivered.** `scripts/restore_drill.py` decrypts the
+   pruning, the gateway publishes the artifact to OSS
+   (`services/gateway_side/backup/offsite.py`) as `ava-logical/<name>`; the
+   store-verified ACK (pin_token, size, checksum) is the identity. The publish
+   is if-absent and immutable; a missing/unconfigured store is skipped with one
+   INFO line, and a failed publish warns without discarding the local backup,
+   which stays the primary copy. The publisher has no delete verb; remote
+   expiry belongs to the bucket's lifecycle policy.
+2. **Restore drill — delivered.** `scripts/data_plane_ops/restore_drill.py` decrypts the
    latest managed artifact (or a supplied path), restores it into scratch
    Postgres, and validates schema, agent rows, checkpoint rows, a checkpoint
    reader sample, and a service smoke.
 
 > **Update 2026-09-01:** the gateway-owned scheduler runs the isolated logical
 > restore drill once after the Sunday 03:00 cluster-time dump. A failure emits
-> a typed recovery-drill event and alert; success is recorded privately. The
-> physical-PITR monthly proof and the retention planner remain separately
-> gated, dry-run-safe work owned for deployment by 1818.
->
-> **Update 2026-09-16 (P2):** the retention planner's logical-surface half
-> landed: the `ava-logical/` pool is inventoried (per-backend, viewer
-> credentials), classified by the shared name grammar, and planned under the
-> same dry-run/arm discipline as the physical chains — sidecar-paired objects
-> carry the full-strength binding on OSS/Baidu, sidecar-less objects are
-> handled strict-naming-plus-stat and marked weak-evidence. Still dry-run
-> until the operator arms the deletion role.
+> a typed recovery-drill event and alert; success is recorded privately.

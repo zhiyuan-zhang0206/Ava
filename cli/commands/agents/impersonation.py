@@ -167,9 +167,9 @@ def _dsh_relay_stub() -> Path:
 async def _wait_inbox(
     lease_id: str, caller: dict[str, Any], limit: int, wait: float
 ) -> list[dict[str, Any]]:
-    from shared.agents import impersonation as control
-    from shared.config import settings
-    from shared.redis_listener import RedisInboundListener
+    from base.agents import impersonation as control
+    from base.config import settings
+    from base.events.live.redis_listener import RedisInboundListener
 
     if not math.isfinite(wait) or wait < 0:
         raise ValueError("--wait must be finite and nonnegative")
@@ -214,10 +214,10 @@ def _send(args: argparse.Namespace) -> int:
     ``agent:<the leased agent>`` — the borrowed identity the SDK attachment
     stamps for ``ava.agents.send_message`` (task #4102).
     """
+    from base.agents import impersonation as control
+    from base.agents.impersonation import sessions as sessions
+    from base.native_process.ownership import process_metadata
     from cli.commands.agents.control import send_agent_message
-    from shared.agents import impersonation as control
-    from shared.agents.impersonation import impersonation_sessions as sessions
-    from shared.proc_tree import process_metadata
 
     content = sys.stdin.read() if args.content == "-" else args.content
     caller = process_metadata()
@@ -231,9 +231,9 @@ def _send(args: argparse.Namespace) -> int:
 
 def _request(args: argparse.Namespace) -> int:
     """`impersonate request` — create the lease, then hand its relay the credential."""
+    from base.agents.impersonation import sessions as sessions
+    from base.native_process.ownership import process_metadata
     from cli.commands.agents.codex_app_server import require_control_endpoint
-    from shared.agents.impersonation import impersonation_sessions as sessions
-    from shared.proc_tree import process_metadata
 
     _reject_used_resident_relay()
     dsh_stub = _dsh_relay_stub() if args.relay_provider == "dsh" else None
@@ -286,10 +286,10 @@ def _request(args: argparse.Namespace) -> int:
 
 
 def _dispatch(args: argparse.Namespace) -> int:
-    from shared.agents import impersonation as control
-    from shared.agents.impersonation import impersonation_sessions as sessions
-    from shared.agents.impersonation.impersonation_history import public_session, say
-    from shared.proc_tree import process_metadata
+    from base.agents import impersonation as control
+    from base.agents.impersonation import sessions as sessions
+    from base.agents.impersonation.history import public_session, say
+    from base.native_process.ownership import process_metadata
 
     command = args.impersonation_cmd
     if command == "request":

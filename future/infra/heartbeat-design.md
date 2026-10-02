@@ -150,7 +150,7 @@ anything the fleet lead should know?"
 > durable pending-work scans and host health checks. Idle has no task or
 > per-agent process to probe. The escalation proposal below is historical
 > research, not the current heartbeat implementation; see
-> `services/gateway_side/heartbeat.ava.okf.md` for the implemented contract.
+> `services/docs/gateway_side/heartbeat.ava.okf.md` for the implemented contract.
 
 #### Trigger
 
@@ -456,7 +456,7 @@ cluster admin shouldn't need to configure it per agent.
 
 ### Phase A — Foundation (1 PR)
 
-- New inbound kind `heartbeat` in `shared/` schema + migration.
+- New inbound kind `heartbeat` in `base/` schema + migration.
 - Gateway watchdog async task (Tier 1): poll `agents_meta` every 5 min,
   log warnings on stale agents.
 - Agent system prompt section: heartbeat response convention

@@ -11,7 +11,7 @@ tags:
 
 One load directory: `~/.ava/skills/` (gated by the install registry's enabled
 flag). Converge (`cli/commands/extensions/skills_sync.py`, on `ava start` /
-`ava cluster update` / `ava converge`) syncs two source types into it:
+the fleet update / `ava converge`) syncs two source types into it:
 
 1. **Repo built-in** (origin=repo): `<repo>/ava_builtins/skills/` →
    `~/.ava/skills/<name>/`. Repo-native sources are bootstrap-only:
@@ -33,7 +33,7 @@ User-installed packages (origin=user): `ava skill install` drops directly into
 `ava skill register`.
 
 **The content channel adds two more pieces to this contract** (design §5.5 /
-§5.6; [[cli/commands/extensions/update-policy.ava.okf.md|update policy &
+§5.6; [[cli/commands/extensions/docs/update-policy.ava.okf.md|update policy &
 channels]]):
 
 - the **refresh pass** is the load directory's fourth bulk writer (after

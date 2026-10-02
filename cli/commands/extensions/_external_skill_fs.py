@@ -334,9 +334,6 @@ def _write_new(path: Path, data: bytes, mode: int) -> None:
 
 def _rename_no_replace(source: Path, destination: Path) -> None:
     """Atomically rename a directory only when the destination is absent."""
-    if os.name == "nt":
-        source.rename(destination)
-        return
     library = ctypes.CDLL(None, use_errno=True)
     source_bytes = os.fsencode(source)
     destination_bytes = os.fsencode(destination)

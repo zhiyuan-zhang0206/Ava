@@ -41,12 +41,12 @@ import threading
 from datetime import UTC, datetime
 from typing import Any
 
-from gateway import loki_events
-from gateway._edge_stream import EDGE_EVENT_NAMES, LINEAGE_EVENT_NAMES, LOKI_EDGE_LIMIT
-from shared import telemetry
-from shared.log import logger
-from shared.loki_index_labels import ARCHIVE_FLOOR_AT, ARCHIVE_FREEZE_AT
-from shared.redis_client import sync_redis
+from base import telemetry
+from base.events.live.redis_client import sync_redis
+from base.log import logger
+from base.telemetry.loki_index_labels import ARCHIVE_FLOOR_AT, ARCHIVE_FREEZE_AT
+from gateway.lgtm import loki_events
+from gateway.lgtm.edge_stream import EDGE_EVENT_NAMES, LINEAGE_EVENT_NAMES, LOKI_EDGE_LIMIT
 
 # Frozen-source cache (mirrors gateway/routers/fleet_graph.py): the archive
 # stream is immutable, so a 24h Redis entry turns its per-request scan into a
@@ -89,7 +89,7 @@ def _read_frozen_json(key: str, *, cache_name: str) -> Any | None:
             cached = redis.get(key)
         return json.loads(cached) if cached is not None else None
     except Exception as exc:
-        logger.debug("neighbors frozen %s cache read failed — querying source: %s", cache_name, exc)
+        logger.debug("neighbors frozen {} cache read failed — querying source: {}", cache_name, exc)
         return None
 
 
@@ -108,7 +108,7 @@ def _write_frozen_json(
         with sync_redis(decode_responses=True) as redis:
             redis.set(key, json.dumps(payload), ex=ttl)
     except Exception as exc:
-        logger.debug("neighbors frozen %s cache write failed: %s", cache_name, exc)
+        logger.debug("neighbors frozen {} cache write failed: {}", cache_name, exc)
 
 
 def _rows_from_cache_payload(raw: Any, *, cache_name: str) -> list[dict[str, Any]] | None:
@@ -127,7 +127,7 @@ def _rows_from_cache_payload(raw: Any, *, cache_name: str) -> list[dict[str, Any
             for row in raw["rows"]
         ]
     except Exception as exc:
-        logger.debug("neighbors frozen %s cache decode failed: %s", cache_name, exc)
+        logger.debug("neighbors frozen {} cache decode failed: {}", cache_name, exc)
         return None
 
 
@@ -149,7 +149,7 @@ def _read_cached_archive_rows() -> tuple[list[dict[str, Any]], bool] | None:
         return None
     if cached.get("has_more", len(rows) >= LOKI_EDGE_LIMIT):
         logger.warning(
-            "neighbors Loki archive stream exceeded the %d-row fetch cap — ties truncated",
+            "neighbors Loki archive stream exceeded the {}-row fetch cap — ties truncated",
             LOKI_EDGE_LIMIT,
         )
     return rows, bool(cached.get("degraded", False))
@@ -219,7 +219,7 @@ def _fetch_archive_rows() -> tuple[list[dict[str, Any]], bool]:
                 archive=True,
             )
         except Exception as exc:
-            logger.warning("neighbors Loki archive fetch failed — serving live-only ties: %s", exc)
+            logger.warning("neighbors Loki archive fetch failed — serving live-only ties: {}", exc)
             _write_frozen_json(
                 _ARCHIVE_CACHE_KEY,
                 {"rows": [], "has_more": False, "degraded": True},
@@ -230,7 +230,7 @@ def _fetch_archive_rows() -> tuple[list[dict[str, Any]], bool]:
             return [], True
         if has_more:
             logger.warning(
-                "neighbors Loki archive stream exceeded the %d-row fetch cap — ties truncated",
+                "neighbors Loki archive stream exceeded the {}-row fetch cap — ties truncated",
                 LOKI_EDGE_LIMIT,
             )
         _write_frozen_json(
@@ -272,7 +272,7 @@ def _fetch_loki_edges(*, now: datetime) -> list[dict[str, Any]]:
     )
     if has_more:
         logger.warning(
-            "neighbors Loki edge stream exceeded the %d-row fetch cap — ties truncated",
+            "neighbors Loki edge stream exceeded the {}-row fetch cap — ties truncated",
             LOKI_EDGE_LIMIT,
         )
     return rows

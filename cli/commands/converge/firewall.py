@@ -11,12 +11,12 @@ never existed — and retry through `sudo -n` on releases that still require
 elevation.
 
 A plain `sudo` would prompt for a password, and converge runs unattended from
-`ava start`, the watchdog, and `ava cluster update`. A prompt in that path does
+`ava start`, the watchdog, and the fleet update. A prompt in that path does
 not degrade to "unfixed"; it hangs the bring-up, which is strictly worse than the
 defect it was trying to repair, and on a headless host it hangs it invisibly.
 `sudo -n` either runs the fallback mutation or fails immediately, and a failure
 degrades to the historical behavior — print the exact manual commands for the
-operator. See `shared.macos_firewall` for the platform compatibility contract.
+operator. See `base.host.macos_firewall` for the platform compatibility contract.
 
 Because it reports rather than enforces, it warns and returns instead of raising:
 a missing firewall rule does not stop this host serving loopback, `ava start`
@@ -29,9 +29,9 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+from base.host import macos_firewall as fw
+from base.host.macos_firewall import FirewallAudit, FirewallVerdict, audit_allowlist
 from cli.commands.converge.spec import ConvergeCtx
-from shared import macos_firewall as fw
-from shared.macos_firewall import FirewallAudit, FirewallVerdict, audit_allowlist
 
 
 def serving_binaries(roles: frozenset[str]) -> tuple[Path, ...]:
@@ -55,8 +55,8 @@ def serving_binaries(roles: frozenset[str]) -> tuple[Path, ...]:
     wrong-but-harmless default contributes a phantom "missing rule" instead of a
     real one.
     """
-    from shared.paths import otel_collector_binary
-    from shared.pg_tools import pg_tool
+    from base.cluster.dataplane.pg_tools import pg_tool
+    from base.paths import otel_collector_binary
 
     candidates = [Path(sys.executable)]
     if "gateway" in roles:
@@ -71,13 +71,13 @@ def serving_binaries(roles: frozenset[str]) -> tuple[Path, ...]:
 
 
 def audit_this_host(roles: frozenset[str]) -> FirewallAudit:
-    """Audit this host's own serving binaries. The one entry point both callers share.
+    """Audit this host's own serving binaries. The one entry point every caller shares.
 
-    Converge calls it to report proactively; the rollout's `OFF_BOX_UNREACHABLE`
-    verdict calls it to explain a failure that already happened. Same detector, so
-    the two can never disagree about whether the firewall is the cause.
+    Converge calls it to report proactively; `ava firewall status` / `sync` call
+    it on demand. Same detector, so they can never disagree about whether the
+    firewall is the cause.
     """
-    from shared.machine import reachable_host
+    from base.cluster.machine import reachable_host
 
     required = serving_binaries(roles)
     if not required:
@@ -128,7 +128,7 @@ def ensure_firewall_allowlist(ctx: ConvergeCtx) -> None:
 
     # Prune before adding: a stale rule still holds its bundle identifier, and
     # macOS 15's ALF daemon silently ignores an --add whose identifier already
-    # has a rule (see shared.macos_firewall). Removing the stale rule first lets
+    # has a rule (see base.host.macos_firewall). Removing the stale rule first lets
     # the replacement version's rule persist in the same pass.
     pruned = fw.prune_stale_rules(rules)
     if pruned.removed:
@@ -155,8 +155,7 @@ def _report_missing(missing: tuple[Path, ...], total: int) -> None:
     """The historical fallback: name the binaries and print the exact commands.
 
     Reached when direct mutation and the older-macOS `sudo -n` fallback both
-    failed. Keeps naming the OFF_BOX_UNREACHABLE verdict so both halves of the
-    diagnosis still point at each other by name.
+    failed.
     """
     print(
         f"  ! firewall: {len(missing)} of {total} managed binaries have no ALF "
@@ -167,8 +166,8 @@ def _report_missing(missing: tuple[Path, ...], total: int) -> None:
     for path in missing:
         print(f"    - no allow rule: {path}", file=sys.stderr)
     print(
-        "    left unfixed, this presents as OFF_BOX_UNREACHABLE on the next "
-        "`ava cluster update` (the gateway serves loopback, no runner can reach it)",
+        "    left unfixed, off-box peers cannot reach these services (the gateway "
+        "serves loopback, no runner can reach it)",
         file=sys.stderr,
     )
     print(

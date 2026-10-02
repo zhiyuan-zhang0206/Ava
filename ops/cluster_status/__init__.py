@@ -1,0 +1,535 @@
+"""This host's snapshot in the multi-machine view.
+
+Assembles `ClusterStatus` from local probes — pidfiles for the daemons, the
+session backends' records for the services and the agents' persistent shells,
+the database's local agent identities — and
+answers the one endpoint that stays readable while the cluster is paused.
+
+  Observability: GET /api/cluster/status — bypasses 503 mode, always
+    returns this host's state directly.
+
+The `schema_mismatch` submodule supplies the snapshot's read-only migration
+diagnosis.
+"""
+
+from __future__ import annotations
+
+import logging
+import re
+from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime
+from pathlib import Path
+from typing import Any
+
+from pydantic import BaseModel
+
+import base.cluster
+import base.db
+import base.deploy.state.host_deploy_state
+from base.api_contracts.status import PausedReason, SchemaMismatchStatus
+from base.cluster.machine import (
+    is_agent_runner,
+    is_gateway,
+    is_observability_station,
+    machine_name,
+)
+from base.config import cluster_tz
+from base.host.proc import process_alive
+from base.host.resource_sample import ResourceSample
+from base.paths import pid_path
+from base.sessions.page_session import is_page_label
+from ops import cluster_pause
+from ops.cluster_status.schema_mismatch import status as schema_mismatch_status
+from ops.rpc_schemas import AgentSessionGroup, SessionInfo, ShellInfo
+
+_log = logging.getLogger(__name__)
+
+# `connection(timeout=...)` overrides the pool's long-lived default for this
+# probe. Status must degrade before the gateway's probe deadline when the
+# central DB is down instead of queueing behind the pool for its full timeout.
+#
+# The bound covers the pool QUEUE only: once a connection is handed out, a
+# query hung on a blackholed flow waits out the connection's own keepalive +
+# statement ceiling (~60s, PG_KEEPALIVE_KWARGS / statement_timeout) before
+# failing — same failure class as the pre-change fresh connects (connect
+# timeout 5s, then the same ~60s query ceiling), so a blackhole slows the
+# probe but never hangs it.
+_POOL_BORROW_TIMEOUT_S = 2.0
+
+
+class ClusterStatus(BaseModel):
+    """`GET /api/cluster/status` response body — this host's snapshot in the
+    multi-machine view.
+
+    `ava cluster status` CLI and the future monitoring page consume the
+    same payload.
+    """
+
+    machine_name: str
+    # Three orthogonal capability flags (any combination on a single host) —
+    # never a single categorical "role". See base/cluster/machine.py.
+    # serve_observability_station defaults False so a client on pre-station
+    # code still parses a station host's snapshot.
+    serve_gateway: bool
+    serve_agent_runner: bool
+    serve_observability_station: bool = False
+    # Status only: an unreadable deploy state, business pause, native admission
+    # hold, or startup not yet serving — the compound reads true whenever this
+    # host cannot claim readiness, whichever clause fired. Does not alter the
+    # business HTTP middleware's DB-posture policy.
+    paused: bool
+    # Which clause of the `paused` verdict fired — the first true one, in the
+    # verdict's own order: no_state / business_pause / maintenance / startup.
+    # None when not paused. Splitting it apart keeps a failed start's parked
+    # serving gate (`startup`) legible from a deliberate pause, instead of one
+    # opaque bool that a consumer can only guess at.
+    paused_reason: PausedReason | None = None
+    # This host's prod-source HEAD commit (`$AVA_HOME/source`), or None when it
+    # cannot be read (no prod source / git unavailable); threaded to the roster so
+    # the multi-machine view shows each node's checkout.
+    head_sha: str | None = None
+    # The commit the process answering this probe actually loaded, frozen at its
+    # own boot (`base.native_process.loaded_commit`), or None when it never froze one. Distinct
+    # from head_sha: head_sha is the checkout, running_sha is code the live
+    # process holds. They differ when the checkout advanced (`git pull`) but the
+    # process was not restarted — the roster marks that node's code as stale.
+    #
+    # This speaks only for the answering process (the ops daemon on an
+    # agent-runner, the gateway on a pure gateway). A sibling daemon respawned at
+    # a different commit is not covered here; its own commit is on its
+    # `/healthz`, and `probe_daemon` surfaces it per daemon.
+    running_sha: str | None = None
+    schema_mismatch: SchemaMismatchStatus | None = None
+    # This host's live agent shell-session count, surfaced per-machine in
+    # the status panel. 0 on a host with no agents (e.g. a pure gateway).
+    shell_count: int = 0
+    # Per-host daemon liveness (pidfile + signal). None = could not probe. Shown
+    # per-machine in the roster; central-only daemons (labeler/memory-indexer) are not
+    # here — they live in the gateway services panel.
+    agent_host_online: bool | None = None
+    supervisor_online: bool | None = None
+    # Agent-runner detail surfaced on the Status Page. `agent_count` is this
+    # host's non-terminated agent identities, including idle and paused agents.
+    # `session_count` counts live service and persistent terminal sessions.
+    agent_count: int = 0
+    session_count: int = 0
+    # The agents' shell/watcher sessions grouped by agent for hierarchical
+    # display (the agent process itself is not a session, so it is not a group entry).
+    agent_groups: list[dict[str, object]] = []
+    # This machine's live CPU / memory / disk reading — one sample, no history
+    # (Prometheus holds the series). None when psutil is unavailable.
+    resource: ResourceSample | None = None
+
+
+def _check_pidfile(pidfile_path: str) -> tuple[bool, int | None]:
+    """Read a pidfile + `process_alive(pid)` to test liveness. Returns (alive, pid).
+
+    Missing/empty/non-int file -> (False, None). Pidfile present but the process
+    is gone -> (False, pid)."""
+    pf = Path(pidfile_path)
+    try:
+        pid = int(pf.read_text().strip())
+    except (FileNotFoundError, ValueError):
+        return False, None
+    return process_alive(pid), pid
+
+
+def _count_agent_shells(sessions: list[SessionInfo]) -> int:
+    """Count agent shell + watcher sessions from the session list."""
+    return sum(1 for s in sessions if re.search(r"-agent-(\d+)-shell-", s.name))
+
+
+def _count_local_agents(conn: Any) -> int:
+    """Count this machine's retained agent identities through the snapshot connection."""
+    row = conn.execute(
+        "SELECT count(*) FROM agents_meta WHERE machine=%s AND status<>'terminated'",
+        (machine_name(),),
+    ).fetchone()
+    if row is None:
+        raise RuntimeError("local agent count returned no row")
+    return int(row[0])
+
+
+def _group_agent_sessions(
+    sessions: list[SessionInfo],
+) -> list[AgentSessionGroup]:
+    """Group cluster sessions by agent ID into a structured list for the frontend.
+
+    Each group is an AgentSessionGroup (agent_id, label, shells). Only the
+    agent's shell/watcher sessions appear — the agent process itself is not a
+    session — so a group forms for every agent that has at least one shell. The label is an empty string for now (resolved later via
+    agents_meta lookup if available).
+    """
+    groups: dict[int, AgentSessionGroup] = {}
+    for s in sessions:
+        m = _AGENT_SESSION_RE.search(s.name)
+        if m is None:
+            continue
+        agent_id = int(m.group(1))
+        if agent_id not in groups:
+            groups[agent_id] = AgentSessionGroup(agent_id=agent_id, label="", shells=[])
+        groups[agent_id].shells.append(s)
+    return list(groups.values())
+
+
+# Session name prefix — sessions are named `ava-<service>` (see
+# base/cluster.py:session_name; the per-home session-record namespace already
+# scopes them to this cluster). The prefix filter drops non-ava sessions.
+_CLUSTER_SESSION_PREFIX = f"{base.cluster.session_name('')}"  # "ava-"
+
+# A bare agent main-process session (`ava-agent-<id>`). Agent processes are
+# pid records, not sessions — `_collect_sessions` filters them out so the
+# session count / agent groups stay session-shaped (a P1 regression in #2330
+# put them back in and ghosted 26 of 38 agent_groups).
+_AGENT_PROCESS_RE = re.compile(
+    r"^ava-(?:[a-z0-9]+-)*(?:agent-\d+|boot-\d+-(?:\d+-\d+|[a-f0-9]{32}))$"
+)
+
+_AGENT_SESSION_RE = re.compile(r"-agent-(\d+)")
+# Parse one agent's persistent-shell session name: `…-agent-<id>-shell-<sid>[-<name>]`.
+# The agent's own process session (`…-agent-<id>`, no `-shell-`) does not match.
+AGENT_SHELL_RE = re.compile(r"-agent-(\d+)-shell-(\d+)(?:-(.+))?$")
+
+
+def agent_shell_sessions(agent_id: int) -> list[ShellInfo]:
+    """This host's live persistent-shell sessions for one agent, newest id last.
+
+    Reuses the same session enumeration as the cluster status snapshot
+    (`_collect_sessions`, already filtered to this cluster's prefix), keeping
+    only `…-agent-<agent_id>-shell-<sid>[-<name>]` sessions — the agent's
+    explicitly created shells and its watchers. The agent's own process session
+    has no `-shell-` segment and is excluded.
+
+    **Host scope: this machine's session backends only.** The gateway's inspector
+    and shell-monitor endpoints call this for agents that run on THIS host and
+    dispatch `shell_probe` / `shell_capture` ops to the agent's own machine
+    otherwise — a remote runner's shells never appear in a local probe.
+    """
+    sessions, *_ = _collect_sessions()
+    shells: list[ShellInfo] = []
+    for s in sessions:
+        m = AGENT_SHELL_RE.search(s.name)
+        if m is None or int(m.group(1)) != agent_id:
+            continue
+        shells.append(
+            ShellInfo(
+                id=int(m.group(2)),
+                name=m.group(3),
+                created_at=s.created_at,
+                uptime_seconds=s.uptime_seconds,
+            )
+        )
+    shells.sort(key=lambda sh: sh.id)
+    return shells
+
+
+class ShellNotFoundError(LookupError):
+    """No live shell with this session id exists on this host."""
+
+
+def capture_shell(
+    agent_id: int, session_id: int, lines: int = 200
+) -> tuple[str, list[str], datetime | None, int]:
+    """Capture the terminal tail of one of an agent's persistent shells.
+
+    Resolves `session_id` against this host's live shell sessions for the agent
+    (`agent_shell_sessions`), reconstructs the full session name (carrying the
+    optional `-<name>` suffix), and captures the last `lines` lines through the
+    shell session backend (per-session pty hosts on POSIX; the native supervisor on
+    Windows — the backend's exact-match capture pins it to that one session,
+    never a prefix neighbour `shell-3` vs `shell-30`, or its `-watcher`). Returns
+    (full_name, captured_lines, created_at, uptime_seconds) — lines newline-split
+    with the trailing newline stripped; created_at / uptime_seconds come from the
+    resolved session record (the launch epoch + probe-time uptime).
+
+    Host scope matches `agent_shell_sessions`: this host's session backend only.
+    The gateway's shell-monitor endpoint runs this locally for agents on this
+    host and dispatches the `shell_capture` op to the agent's own machine
+    otherwise.
+
+    Raises:
+        ShellNotFoundError: no live shell with `session_id` on this host.
+        RuntimeError: the capture failed (the session died between the
+            probe and the capture).
+    """
+    shell = next((s for s in agent_shell_sessions(agent_id) if s.id == session_id), None)
+    if shell is None:
+        raise ShellNotFoundError(f"agent {agent_id} has no live shell {session_id} on this host")
+
+    full_name = _shell_session_name(agent_id, shell)
+    from base.sessions.backend import get_shell_backend
+
+    try:
+        captured = get_shell_backend().capture_pane(full_name, lines)
+    except Exception as exc:
+        raise RuntimeError(f"session capture on {full_name!r} failed: {exc}") from exc
+    captured_lines = captured.splitlines()
+    # Trim blank padding from both ends of the tail. A cursor-addressed TUI
+    # (claude/codex-class CLIs) redraws via escape sequences, and each
+    # full-screen redraw scrolls cleared rows into the pyte scrollback — so a
+    # capture can open with dozens of blank rows the shell-monitor page
+    # renders as a huge blank region above the real output. Trailing blank
+    # screen rows below the last line of a short session do the mirror-image
+    # damage: the bottom-anchored pane scrolls the real output above the fold.
+    # Blank padding at the extremes of a capture is never meaningful output;
+    # interleaved blanks stay.
+    while captured_lines and not captured_lines[0].strip():
+        captured_lines.pop(0)
+    while captured_lines and not captured_lines[-1].strip():
+        captured_lines.pop()
+    return full_name, captured_lines, shell.created_at, shell.uptime_seconds
+
+
+def kill_shell(agent_id: int, session_id: int) -> tuple[str, bool, str | None]:
+    """Kill one host-local persistent shell, or report that it is already absent.
+
+    Returns ``(mode, interrupted, name)``: ``mode`` is ``"killed"`` or
+    ``"absent"``; ``interrupted`` is True when the killed session carried live
+    processes (a running foreground or background job) at kill time — the TTL
+    reaper uses it to decide whether the reclamation deserves a notice to the
+    owner (an empty shell's reaping is silent); ``name`` is the shell's
+    optional display name. The verdict comes from the same backend call that
+    kills (``kill_session_with_verdict``), so a job starting between a
+    separate idle probe and the kill cannot be missed; a backend without
+    verdict support reports interrupted=True (fail-open: a session that
+    cannot be proven idle may well be running work)."""
+    shell = next((s for s in agent_shell_sessions(agent_id) if s.id == session_id), None)
+    if shell is None:
+        return "absent", False, None
+    full_name = _shell_session_name(agent_id, shell)
+    from base.sessions.backend import get_shell_backend
+
+    backend = get_shell_backend()
+    try:
+        ok, _mode, interrupted = backend.kill_session_with_verdict(full_name)
+    except NotImplementedError:
+        interrupted = True  # cannot inspect — assume the worst
+        ok, _mode = backend.kill_session(full_name)
+    if not ok:
+        raise RuntimeError(f"failed to kill session {full_name!r}")
+    return "killed", interrupted, shell.name
+
+
+# Parallel kills bound one kill-all to roughly one PTY CLI round trip: the
+# synchronous terminate path answers inside the gateway's lifecycle deadline.
+_KILL_ALL_WORKERS = 8
+
+
+def kill_agent_shells(agent_id: int) -> list[int]:
+    """Kill every host-local persistent shell of one agent; return the killed ids.
+
+    The `kill_all_shell_sessions` primitive
+    (decisions/2026-09-27-terminate-has-no-closed-state.md). The enumeration is
+    `agent_shell_sessions` — the one `…-agent-<id>-shell-<sid>[-<name>]` rule —
+    so the agent's explicit shells and its watchers go, while another agent's
+    sessions and the agent's own process session are never touched. Page-server
+    sessions (`ava.ui.serve`, the `page-` label owned by
+    `base.sessions.page_session`) are spared: a page keeps its own lifecycle.
+    The backend's kill is idempotent, so a session that ended between the
+    listing and its kill still counts as killed — it is gone either way. No
+    notice is produced here (an owner-level kill is silent) and nothing is
+    written to the database: removing `agent_shell_ttls` rows is the gateway's
+    part. Every listed session is attempted; a kill the backend could not
+    confirm raises one RuntimeError naming those ids after the others ran.
+    """
+    shells = [shell for shell in agent_shell_sessions(agent_id) if not is_page_label(shell.name)]
+    if not shells:
+        return []
+    from base.sessions.backend import get_shell_backend
+
+    backend = get_shell_backend()
+
+    def _kill(shell: ShellInfo) -> bool:
+        ok, _mode = backend.kill_session(_shell_session_name(agent_id, shell), graceful=False)
+        return ok
+
+    with ThreadPoolExecutor(max_workers=min(len(shells), _KILL_ALL_WORKERS)) as pool:
+        confirmed = list(pool.map(_kill, shells))
+    failed = [shell.id for shell, ok in zip(shells, confirmed, strict=True) if not ok]
+    if failed:
+        raise RuntimeError(f"failed to kill shell session(s) {failed} of agent {agent_id}")
+    return [shell.id for shell in shells]
+
+
+def _shell_session_name(agent_id: int, shell: ShellInfo) -> str:
+    """The full backend session name of one listed shell (its `-<name>` kept)."""
+    return base.cluster.session_name(f"agent-{agent_id}-shell-{shell.id}") + (
+        f"-{shell.name}" if shell.name else ""
+    )
+
+
+def _collect_sessions() -> tuple[list[SessionInfo], int, int]:
+    """Enumerate this host's live sessions from the session backends, and return
+    (sessions, shell_count, total).
+
+    The service/daemon sessions come from `get_backend()` (native supervisor)
+    and the agents' persistent shells / watchers from
+    `get_shell_backend()` (per-session pty hosts) — the same two namespaces
+    `ava start` / the healthchecks write into. Only sessions matching the
+    current cluster prefix (`ava-*`) are kept — dev-worktree clusters and bare
+    non-ava sessions are excluded. Agent processes are not sessions (they are
+    pid records, tracked separately), so bare `ava-agent-<id>` sessions are
+    filtered out here — this covers the daemons + the agents' persistent
+    shells. A backend that is down degrades to empty data.
+    """
+    from base.sessions.backend import get_backend, get_shell_backend
+
+    rows: dict[str, SessionInfo] = {}
+    now = datetime.now().astimezone(cluster_tz())
+    for backend in (get_backend(), get_shell_backend()):
+        try:
+            names = backend.list_sessions(_CLUSTER_SESSION_PREFIX)
+        except Exception:
+            # A down backend means no sessions to show, and the
+            # status snapshot must stay readable while it is down.
+            _log.warning("session enumeration failed on %s", type(backend).__name__, exc_info=True)
+            continue
+        # Batch timestamp read: the PTY backend's per-session path costs one
+        # CLI process per session (~150 ms each) and a snapshot fans out over
+        # ALL of them serially — 28 sessions measured ~4.5 s, blowing past the
+        # roster's 3 s probe timeout (2026-08-12, misreported machine-1 offline).
+        epochs = backend.session_started_ats(names)
+        for name in names:
+            if _AGENT_PROCESS_RE.match(name):
+                continue  # agent processes are pid records, not sessions
+            created: datetime | None = None
+            epoch = epochs.get(name)
+            if epoch is not None:
+                try:
+                    created = datetime.fromtimestamp(epoch).astimezone(cluster_tz())
+                except (OSError, OverflowError, ValueError):
+                    created = None
+            uptime = int((now - created).total_seconds()) if created else 0
+            rows[name] = SessionInfo(name=name, created_at=created, uptime_seconds=uptime)
+    sessions = sorted(rows.values(), key=lambda s: s.name)
+    return sessions, _count_agent_shells(sessions), len(sessions)
+
+
+def _read_deploy_snapshot(
+    pool: Any | None,
+) -> tuple[
+    base.deploy.state.host_deploy_state.HostDeployState | None,
+    int,
+    SchemaMismatchStatus | None,
+]:
+    """Read deploy state, agents, and schema through one snapshot-local connection."""
+    try:
+        connection = (
+            base.db.connect(autocommit=True)
+            if pool is None
+            else pool.connection(timeout=_POOL_BORROW_TIMEOUT_S)
+        )
+        with connection as conn:
+            state = base.deploy.state.host_deploy_state.read(conn=conn)
+            agent_count = _count_local_agents(conn) if is_agent_runner() else 0
+            schema_status = schema_mismatch_status(conn=conn)
+        return state, agent_count, schema_status
+    except Exception as exc:  # status degrades when the central DB is unavailable
+        # Deploy state and agent count share one bounded connection. During a
+        # data-plane outage the snapshot remains readable with no deploy claim
+        # and the existing zero-count default.
+        _log.warning("deploy-state snapshot read failed; using degraded status", exc_info=True)
+        return (
+            None,
+            0,
+            SchemaMismatchStatus(
+                kind="unavailable",
+                machine=machine_name(),
+                detail=f"schema comparison unavailable: status database snapshot failed ({type(exc).__name__})",
+            ),
+        )
+
+
+def _read_resource_sample() -> ResourceSample | None:
+    """One live resource sample, degraded to None on any psutil failure."""
+    try:
+        from base.host.resource_sample import resource_sample
+
+        return resource_sample()
+    except Exception:  # psutil may not be installed; degrade gracefully
+        _log.warning("resource_sample failed (psutil missing?)", exc_info=True)
+        return None
+
+
+def _paused_reason(
+    state: base.deploy.state.host_deploy_state.HostDeployState | None,
+) -> PausedReason | None:
+    """The first true clause of the `paused` verdict, in its own clause order.
+
+    `no_state` (the deploy state was unreadable or absent), then a deliberate
+    `business_pause` posture, then a native `maintenance` admission hold, then
+    `startup` (the serving gate has not reached `serving` — a start is in
+    flight, or a failed start parked it and recovery stays gated). None when no
+    clause fired. `state` is the snapshot's already-read row, so this adds no
+    central-DB dial of its own.
+    """
+    from base.deploy.lifecycle import start_serving
+    from base.deploy.maintenance import admission
+
+    if state is None:
+        return "no_state"
+    if cluster_pause.is_paused(state):
+        return "business_pause"
+    if admission.held():
+        return "maintenance"
+    if not start_serving.is_serving():
+        return "startup"
+    return None
+
+
+def _supervisor_online() -> bool | None:
+    """An observed native root is online; unavailable inspection stays unknown."""
+    from base.native_process.root_control.client import RootClientError, root_process
+
+    try:
+        return root_process() is not None
+    except (RootClientError, RuntimeError):
+        return None
+
+
+def status_snapshot(pool: Any | None = None) -> ClusterStatus:
+    """Assemble this host's cluster state — used by `/api/cluster/status`.
+
+    When setup is missing, base/cluster/machine.py's machine_name /
+    machine_role raise specific exceptions; this function passes them
+    through and FastAPI surfaces as default 500 (admin endpoint, not
+    consumed by SDK).
+    """
+    from base.deploy.git.cluster_drift import prod_source_head_sha
+    from base.native_process import loaded_commit as _process_sha
+
+    agent_host_alive = _check_pidfile(str(pid_path("agent_host")))[0] if is_agent_runner() else None
+    supervisor_alive = _supervisor_online()
+    sessions, shell_count, session_total = _collect_sessions()
+    # The producer is typed (AgentSessionGroup); ClusterStatus.agent_groups stays
+    # an open dict list so the frontend-facing status schema (and its generated TS
+    # types) is unchanged — serialize the models to JSON dicts at the boundary.
+    agent_groups = [g.model_dump(mode="json") for g in _group_agent_sessions(sessions)]
+    # The live one-shot resource sample blocks for its CPU interval. Run it in
+    # parallel with the central-DB reads so snapshot latency pays the slower
+    # of those independent operations, not their sum.
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        resource_future = executor.submit(_read_resource_sample)
+        state, agent_count, schema_status = _read_deploy_snapshot(pool)
+        resource = resource_future.result()
+    # One source of truth for the pair: `paused` is exactly "a clause fired",
+    # so the bool can never drift from its reason.
+    paused_reason = _paused_reason(state)
+    return ClusterStatus(
+        machine_name=machine_name(),
+        serve_gateway=is_gateway(),
+        serve_agent_runner=is_agent_runner(),
+        serve_observability_station=is_observability_station(),
+        paused=paused_reason is not None,
+        paused_reason=paused_reason,
+        head_sha=prod_source_head_sha(),
+        running_sha=_process_sha.get(),
+        schema_mismatch=schema_status,
+        shell_count=shell_count,
+        agent_host_online=agent_host_alive,
+        supervisor_online=supervisor_alive,
+        agent_count=agent_count,
+        session_count=session_total,
+        agent_groups=agent_groups,
+        resource=resource,
+    )

@@ -57,7 +57,7 @@ into a takeover, stop — you are following the wrong section.
 it across many turns — everything below builds on this. Headless one-shot
 (`claude -p`, `codex exec`) exists but is rarely needed; avoid it unless the task
 is truly self-contained and needs no supervision. Per-tool launch detail lives in
-the [Claude Code](reference/claude_code.md) and [Codex](reference/codex.md)
+the [Claude Code](references/claude_code.md) and [Codex](references/codex.md)
 references.
 
 Don't supervise by reading the agent's screen. The screen is a redraw you have to
@@ -92,18 +92,18 @@ Use the spawn script — it creates the two files if absent, pre-trusts the
 workspace and presets Claude Code's first-run dialogs so an unattended spawn
 cannot park on them, launches the tool in a persistent shell session with a
 task-adapted TTL, and sends the contract message. Before launching Codex, read its
-[`canonical-owner reference`](reference/canonical_codex_owner.md). Run from the
+[`canonical-owner reference`](references/canonical_codex_owner.md). Run from the
 skill's directory:
 
 ```bash
 # Claude Code
-.venv/bin/python reference/spawn_claude.py <workspace-dir>
+.venv/bin/python scripts/spawn_claude.py <workspace-dir>
 
 # OpenAI Codex
-.venv/bin/python reference/spawn_codex.py <workspace-dir>
+.venv/bin/python scripts/spawn_codex.py <workspace-dir>
 
 # Relocate either file (absolute, or relative to the workspace)
-.venv/bin/python reference/spawn_claude.py <workspace-dir> --work-file notes/progress.md
+.venv/bin/python scripts/spawn_claude.py <workspace-dir> --work-file notes/progress.md
 ```
 
 On success it prints one `key=value` per line:
@@ -123,7 +123,7 @@ leaves the watcher polling a file nobody writes. Interact via
 
 For unusual manual setup, follow the scripts and the canonical-owner reference.
 
-The contract (`reference/collaboration_protocol.md`) is addressed to the coding
+The contract (`references/collaboration_protocol.md`) is addressed to the coding
 agent and self-contained: the two files, the `STATUS:` values, the log
 discipline, and the CHECKPOINT → handoff procedure. It refers to the two files
 by role, not by name — the spawn script's launch message supplies their real
@@ -156,13 +156,13 @@ beginning to plan or work.
 
 **Every persistent coding session must have supervision.** Codex gets it
 automatically from `spawn_codex.py`. For Claude, launch the reference watcher
-(`reference/watch_work.py`) that polls the work file's `STATUS:` line and only
+(`scripts/watch_work.py`) that polls the work file's `STATUS:` line and only
 wakes you when there is something to do. Delivery retries across a gateway /
 agent restart window, and if every attempt fails the watcher exits 2, so the
 loss surfaces in its exit notice.
 
 > **Use the reference watcher, don't write your own STATUS parser.** The
-> reference (`reference/watch_work.py`) uses a regex (`^STATUS:\s*(\w+)`) to
+> reference (`scripts/watch_work.py`) uses a regex (`^STATUS:\s*(\w+)`) to
 > correctly extract only the value part. A common bug is writing
 > `line.strip()` which gives the whole line `"STATUS: DONE"` instead of just
 > `"DONE"`, causing the watcher to never fire. If you must write an ad-hoc
@@ -200,7 +200,7 @@ A **nudge** is just `ava.shell.sessions.send(id, "read <task-file> and continue"
 (use the `tasks_file=` path the spawn script printed).
 Interrupt with `send_keys(id, "C-c")`. That is all `send` / `send_keys` are for
 now — not driving a menu. Long text (over roughly 1K characters) sent into a TUI
-has its own rule — bracketed paste or a short pointer: [Delivery safety](reference/delivery_safety.md).
+has its own rule — bracketed paste or a short pointer: [Delivery safety](references/delivery_safety.md).
 
 `capture` is for the rare stall check and for reading
 the context indicator (below), not for routine progress.
@@ -232,7 +232,7 @@ on-demand command, not the footer — the footer's context field is configurable
 and off by default in some builds:
 
 - `codex`: send `/status`; it prints `Context window: NN% left (X used / Y)`. Parse
-  the percentage (see `reference/context_probe.py`). A `/statusline`-configured
+  the percentage (see `scripts/context_probe.py`). A `/statusline`-configured
   footer may also show `NN% context left`, but don't count on it.
 - `claude`: `/context` prints a usage grid (no single number). A custom statusline
   may surface a `ctx:NN%` figure (percent *used*) you can scrape; otherwise lean
@@ -269,15 +269,15 @@ A takeover is **file-less and supervisor-less** — nothing from Mode A applies:
 Launch it from your own execution context, briefing inline:
 
 ```bash
-.venv/bin/python reference/spawn_codex.py <workspace-dir> --impersonate-self \
+.venv/bin/python scripts/spawn_codex.py <workspace-dir> --impersonate-self \
   --impersonation-name 'Fix login' --brief '<the full briefing text>'
 ```
 
 `--brief` is required; `--tasks-file`/`--work-file` are refused, and no file
 watcher runs for a takeover. The same command works with
-`spawn_claude.py` and `spawn_dsh.py` ([DeepSeek Harness](reference/deepseek_harness.md),
+`spawn_claude.py` and `spawn_dsh.py` ([DeepSeek Harness](references/deepseek_harness.md),
 takeover-only). The full procedure is [Let the coding agent take over your
-identity](reference/impersonate_self.md); the executor's own manual is the
+identity](references/impersonate_self.md); the executor's own manual is the
 `impersonator-guide` skill.
 
 ## After an interruption — resume
@@ -287,13 +287,13 @@ session runs in, but the tool keeps its conversation. Every launch prints the
 tool's session id (`claude_session=` / `codex_session=`), and
 `--resume <id>` on the same spawn command reopens it. Whether to resume or
 start fresh is your call from the task's context: [Resume after an
-interruption](reference/resume_after_interruption.md).
+interruption](references/resume_after_interruption.md).
 
 ## CLI reference
 
 Flags drift — confirm with `--help` on the actual machine. The per-tool
 references carry the launch variants, auth traps and headless notes:
 
-- [Claude Code (`claude`)](reference/claude_code.md)
-- [OpenAI Codex (`codex`)](reference/codex.md)
-- [DeepSeek Harness (`dsh`)](reference/deepseek_harness.md)
+- [Claude Code (`claude`)](references/claude_code.md)
+- [OpenAI Codex (`codex`)](references/codex.md)
+- [DeepSeek Harness (`dsh`)](references/deepseek_harness.md)

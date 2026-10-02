@@ -1,19 +1,22 @@
 {
-  "complexity": {
-    "tests/ava/test_external.py::test_failed_context_entry_restores_prior_binding_and_allows_next_attachment": 15,
-    "tests/ava/test_shell_background.py::test_run_background_e2e_notice_log_and_close": 16
+  "patch_targets": {
+    "tests/ava/sdk_surface/test_metering.py::ava.sdk_surface.metering._instrument_targets": 2,
+    "tests/ava/sdk_surface/test_validation.py::ava.self._publish_self_inbound_wake": 1,
+    "tests/ava/sdk_surface/test_validation.py::ava.ui._register_page": 2,
+    "tests/ava/sdk_surface/test_validation.py::ava.ui._reject_foreign_port_occupant": 1,
+    "tests/ava/sdk_surface/test_validation.py::ava.ui._wait_until_serving": 1,
+    "tests/ava/sdk_surface/test_validation.py::ava.understand._understand_one": 1,
+    "tests/ava/sdk_surface/test_validation.py::ava.watcher._spawn": 2,
+    "tests/ava/sdk_surface/test_validation.py::ava.web._fetch_one": 1,
+    "tests/ava/sdk_surface/test_validation.py::ava.web._search_one": 1,
+    "tests/ava/sdk_surface/test_validation.py::ava_builtins.plugins.ava_memory.sdk._entry_path": 2,
+    "tests/ava/sdk_surface/test_validation.py::ava_builtins.plugins.ava_memory.sdk._upsert_index": 1,
+    "tests/ava/sdk_surface/test_validation.py::ava_builtins.plugins.ava_memory.sdk._write_atomically": 1,
+    "tests/ava/test_external_integration.py::ava.gateway_client.transport._client": 2
   },
-  "directories": {
-    "tests/ava": 62
-  },
-  "files": {
-    "tests/ava/test__mcps_daemon.py": 2115,
-    "tests/ava/test_agents_sdk.py": 1163,
-    "tests/ava/test_mcps.py": 1367,
-    "tests/ava/test_self_evolution_collect.py": 930,
-    "tests/ava/test_skills.py": 1503,
-    "tests/ava/test_understand.py": 967,
-    "tests/ava/test_watcher.py": 2786,
-    "tests/ava/test_web.py": 1046
+  "tests_location": {
+    "tests/ava/sdk_surface/test_metering.py::top-level": 1,
+    "tests/ava/sdk_surface/test_validation.py::top-level": 1,
+    "tests/ava/test_external_integration.py::top-level": 1
   }
 }

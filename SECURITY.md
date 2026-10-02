@@ -27,7 +27,7 @@ not close off the possibility (see the module docstring in `ava/security.py`).
 Third-party **skills** are the one ingestion path with a gate of its own, for the
 same reason: a skill is text an agent is instructed to follow, so a malicious one
 needs no exploit. Every package installed from outside this repo is read by
-`shared/packages/skills/skill_scan.py` first, and a critical supply-chain pattern (a
+`base/packages/skills/scan.py` first, and a critical supply-chain pattern (a
 download-and-execute pipeline, an obfuscated payload, a credential store read
 paired with an outbound sink, instructions to work behind the user's back)
 **refuses the install**. It is pattern matching, so the same sentence applies:
@@ -45,7 +45,9 @@ can capture the screen and inject clicks/keys; the **managed Chrome** CDP
 port (`--remote-debugging-port`) is unauthenticated by design and the bridge
 injects a configurable, server-side gateway session cookie into it; the **mcp
 daemon** socket
-shares the machine with the cluster secret. Their real boundary is the OS
+shares the machine with the unit's machine credentials (its write generation's
+API token and database login; the gateway also holds the cluster secret). Their
+real boundary is the OS
 user: only processes running as the same user can reach them, and that user
 is the same trust domain `execute_code` runs in. Same-user isolation for
 these is a non-goal today; if a deployment needs it, isolate the OS user or

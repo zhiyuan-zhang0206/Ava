@@ -13,6 +13,8 @@ tags:
 
 > Design lead #2861 · design concept v3.3 (2026-08-07) · **design-phase node — the current system is NOT this; see the as-is nodes linked at the bottom.**
 
+> **As landed:** the cluster deploy lease and the per-host updater lease described below were retired with the in-place updater ([decision](../../../decisions/2026-09-30-remove-deployment-lease.md)). `host_deploy_state` is `machine`, the `idle`/`paused` posture and `updated_at`, and `deployment_state` is `id` plus the code-version gate's `min_code_version` ([decision](../../../decisions/2026-10-01-contract-the-retired-deploy-storage.md)). The `stable` / `updating` / `settling` phases, the settle note and `recover` do not exist; agent leases (`agents_meta.lease_expires_at`) landed as designed, and the agent state machine has three states (`restarting` was retired).
+
 ## Problem in one sentence
 
 "Now what is happening?" has no authority today: deployment status is the implicit conjunction of 6 signals (DB lock row, two flag files, session names, updater log mtime, orchestrator-local variables); agent liveness is a self-report chain that breaks; `agents_meta.status` transitions live in 8+ scattered SQL statements; the event stream doubles as a state register. Every consumer writes its own predicate subset — three heal controllers diverged into two settle semantics in one 48h window (#1020/#1074/#1116).
@@ -30,7 +32,7 @@ tags:
 
 **`host_deploy_state`** (host-level, one row per host) — replaces the `cluster_paused` file, `updating.flag`, session probing, updater-log-mtime liveness: `posture` (`idle`/`paused`/`converging`), `updater_lease_expires_at`, `updated_at`.
 
-**Cluster UI marker** (`$AVA_HOME/deploy-state.json`) — the generation-guarded active-maintenance fact used while gateway/app processes are replaced. The lock-winning rollout/restart child writes it before pausing; the parent observes that active marker and publishes its start hint before Phase A. The child CAS-clears the same generation only after the full Phase-B/finalization tail. Host posture/start/lease transitions never mutate it. Gate reads it offline and is the sole App/Updating/Not-Working projector; malformed state fails to Not Working rather than guessing. The lock-winning child that runs this code owns the marker with stable v2 generation/`started_at`; the v1 compatibility this paragraph once carried retired in batch b5 (2026-09-20) — a pre-v2 marker now projects invalid (fail-safe), and rollback to pre-v2 code is outside this marker contract.
+**Cluster UI marker** (`$AVA_HOME/deploy-state.json`) — retired with the in-place updater that wrote it. No lifecycle produces it and Gate does not read it: a stop takes Gate down with the rest of root. A leftover file is inert.
 
 ### Phases: three states, not five
 
@@ -42,7 +44,7 @@ The registry×lease frame for every managed object and the single `alive` predic
 
 ### Agent state machine: one matrix
 
-Four states (`running`/`idling`/`restarting`/`terminated`, matching [[shared/agents-contract.ava.okf.md]]) with one transition matrix: each transition is one row (from-set → to → allowed writer → side effects); all writers go through the single entry `agent_state.transition()`. Batch-adjudication edge conditions move from comments into the state graph + tests.
+Four states (`running`/`idling`/`restarting`/`terminated` as designed; `restarting` was retired, so three today, matching [[base/docs/agents-contract.ava.okf.md]]) with one transition matrix: each transition is one row (from-set → to → allowed writer → side effects); all writers go through the single entry `agent_state.transition()`. Batch-adjudication edge conditions move from comments into the state graph + tests.
 
 ### Migration application authority
 
@@ -67,4 +69,4 @@ Inspector statistics use cumulative or time-based windows over persisted observa
 
 ## Related as-is nodes
 
-[[../../../cli/cli.ava.okf.md]] · [[../../../agent/agent.ava.okf.md]] · [[../../../gateway/gateway.ava.okf.md]] · [[../../../shared/shared.ava.okf.md]]
+[[../../../cli/docs/cli.ava.okf.md]] · [[../../../agent/docs/agent.ava.okf.md]] · [[../../../gateway/docs/gateway.ava.okf.md]] · [[../../../base/docs/base.ava.okf.md]]

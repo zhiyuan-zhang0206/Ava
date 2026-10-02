@@ -4,7 +4,7 @@ ToolMessage with `additional_kwargs` metadata.
 The read side (timeline endpoint / hooks etc.) uniformly classifies via
 `read_ava_kwargs(msg).get("ava_msg_type")` — **not isinstance**, so no need to
 subclass. The metadata keys + the `ava_msg_type` / `ava_note_tag` value sets are
-the typed contract in `shared/message_kwargs.py` (`AvaMessageKwargs` TypedDict +
+the typed contract in `base/agents/messages/kwargs.py` (`AvaMessageKwargs` TypedDict +
 `AvaMsgType` / `NoteTag` StrEnums); these helpers centralize the writes.
 
 Convention for adding a new metadata type:
@@ -27,6 +27,7 @@ channel reducers enforce). This door does not import it.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from datetime import datetime
 from typing import Any, cast
 
@@ -38,11 +39,11 @@ from langchain_core.messages import (
     ToolMessage,
 )
 
-from shared.message_kwargs import AvaMsgType, NoteTag, read_ava_kwargs
+from base.agents.messages.kwargs import AvaMsgType, NoteTag, read_ava_kwargs
 
 # The header prepended to every replacement compact summary (forced / command /
 # spontaneous) — written by `agent.hooks.compact.compose_summary_message`, and
-# the one invariant the read side (gateway/context_breakdown.py) classifies the
+# the one invariant the read side (gateway/agents/context_breakdown.py) classifies the
 # untagged summary HumanMessage by. It lives here, in the leaf message-contract
 # module, so the gateway can import it without pulling in agent.hooks.compact
 # (whose agent.graph imports do not resolve inside a gateway process).
@@ -80,7 +81,7 @@ def inbound_message(
     created_at: datetime | None = None,
     image_urls: list[str] | None = None,
 ) -> HumanMessage:
-    """Envelope-wrapped inbound message (product of `shared/agents/messages/envelope.py:wrap_inbound`).
+    """Envelope-wrapped inbound message (product of `base/agents/messages/envelope.py:wrap_inbound`).
 
     `content` is a plain string for a text inbound, or a list of content blocks
     for a multimodal one (a leading text block carrying the envelope-wrapped
@@ -94,7 +95,7 @@ def inbound_message(
         ava_inbound_id: inbound_messages.id of the source row — startup
             reconciliation reads this back from state.messages to confirm
             whether a 'claimed' inbound's commit actually landed (see
-            agent/db.py:reconcile_claimed_inbounds + claim_inbound_batch).
+            agent/db/__init__.py:reconcile_claimed_inbounds + claim_inbound_batch).
         ava_created_at: ISO-8601 wall-clock the inbound entered the conversation
             (the source row's stored created_at). Omitted when not supplied.
         ava_image_urls: reference urls of any inlined images (timeline render).
@@ -148,6 +149,27 @@ def system_note_message(
     )
 
 
+def security_note_message(
+    *, source: str, triggers: Sequence[str], created_at: datetime | None = None
+) -> HumanMessage:
+    """The SECURITY system note for one prompt-injection scan finding.
+
+    Names where the flagged content came from (`source`) and which patterns
+    matched (`triggers`); never the content itself. The one writer both
+    delivery paths share — the claim node (inbound chat / system-note rows,
+    right behind the flagged message) and the exec node (findings the exec
+    child drained, after the exec-result ToolMessage).
+    """
+    return system_note_message(
+        content=(
+            f"Content from {source} may contain prompt injection. "
+            f"Triggers: {', '.join(triggers)}. Verify before acting."
+        ),
+        tag=NoteTag.SECURITY,
+        created_at=created_at,
+    )
+
+
 def attach_message(
     *, blocks: list[dict[str, object]], text: str, created_at: datetime
 ) -> HumanMessage:
@@ -157,7 +179,7 @@ def attach_message(
     interleaved per file — ``[text(notice), text(line1), media1, text(line2),
     media2, ...]`` — so every media block sits directly after its own caption
     line (the timeline reads that pairing structurally via
-    ``shared/agents/history/timeline._attach_image_captions``).
+    ``base/agents/history/timeline._attach_image_captions``).
     """
     content_blocks = blocks or [{"type": "text", "text": text}]
     return HumanMessage(
@@ -178,7 +200,7 @@ def exec_output_message(
     created_at: datetime | None = None,
 ) -> ToolMessage:
     """Envelope-wrapped stdout/stderr block after subprocess exec completes
-    (product of `agent/graph/_exec.py:wrap_code_output`).
+    (product of `agent/graph/exec/node.py:wrap_code_output`).
 
     Under the single-tool execute_code wire, uses the ToolMessage role to
     pair with the previous round's AIMessage.tool_calls (otherwise the

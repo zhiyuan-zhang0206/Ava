@@ -46,7 +46,7 @@ class EmbeddingProvider(Protocol):
       search deadline (`RETRIEVAL_QUERY` semantics); returns (dim,) float32.
     - `embed_query` — single sync query ("RETRIEVAL_QUERY" semantics) for
       ops tooling that embeds one query and compares several backends
-      (`scripts/memory_search_reconcile.py`).
+      (`scripts/data_repair/memory_search_reconcile.py`).
 
     A provider may distinguish document vs query task types internally
     (Gemini uses different projections for retrieval); the contract

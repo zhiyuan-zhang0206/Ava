@@ -12,19 +12,20 @@ import psycopg
 import pytest
 from psycopg_pool import AsyncConnectionPool, ConnectionPool
 
-from agent import turn_progress as progress
+from agent.turn import progress
+from base.agents.observation import db_wait
+from base.agents.observation.db_wait import database_wait_snapshot
+from base.cluster.machine import machine_name
+from base.config import settings
+from base.db import insert_inbound_message
+from base.deploy.maintenance import cohort, pause_owner
+from base.native_process.turn_identity import bind_turn_identity
 from services.agent_host import daemon, db_recovery
 from services.agent_host.dispatcher import InboundWakeDispatcher, PendingInboundWake, TurnScheduler
 from services.agent_host.host import AgentHost
+from services.agent_host.tests.test_hosted_db_recovery import _admit, _graph
 from services.delivery_watchdog import turn_liveness
-from shared import hosted_db_wait, maintenance_cohort, pause_owner
-from shared.config import settings
-from shared.db import insert_inbound_message
-from shared.hosted_db_wait import database_wait_snapshot
-from shared.machine import machine_name
-from shared.turn_identity import bind_turn_identity
-from tests.agent.test_hosted_db_recovery import _admit, _graph
-from tests.services.test_delivery_watchdog_turn_liveness import FakeRedis
+from services.delivery_watchdog.tests.test_delivery_watchdog_turn_liveness import FakeRedis
 
 
 @pytest.fixture(autouse=True)
@@ -56,7 +57,7 @@ async def test_real_db_wait_survives_both_stale_paths_and_clears_afterward(  # n
     if held:
         acquired = datetime.now(UTC)
         pause_owner.begin_maintenance("waiting", acquired)
-        maintenance_cohort.prepare(
+        cohort.prepare(
             db_conn,
             machine=machine_name(),
             host_owner=incarnation.owner,
@@ -122,7 +123,7 @@ async def test_real_db_wait_survives_both_stale_paths_and_clears_afterward(  # n
                 assert not cancelled.is_set(), (
                     "finite success handoff also protects the next DB stage"
                 )
-                hosted_db_wait._WAITING[agent].deadline = time.monotonic() - 1
+                db_wait._WAITING[agent].deadline = time.monotonic() - 1
                 assert database_wait_snapshot(agent) is None
                 await dispatcher.scan_once()
                 assert cancelled.is_set(), "normal stale handling must resume after DB recovery"
@@ -160,8 +161,8 @@ async def test_gateway_exemption_requires_current_db_identity_and_finite_fresh_p
     )
     db_conn.commit()
     now = 1000.0
-    ttl = hosted_db_wait.DB_WAIT_PROOF_TTL_SECONDS
-    monkeypatch.setattr(hosted_db_wait.time, "time", lambda: now)
+    ttl = db_wait.DB_WAIT_PROOF_TTL_SECONDS
+    monkeypatch.setattr(db_wait.time, "time", lambda: now)
     proof: dict[str, object] = {
         "generation": str(incarnation.generation),
         "owner": str(incarnation.owner),
@@ -213,9 +214,9 @@ async def test_heartbeat_preserves_progress_and_cannot_extend_wait_proof(
         async def set(self, _key: str, value: str, *, ex: int) -> None:
             writes.append(json.loads(value))
 
-    monkeypatch.setattr(daemon.shared.redis_client, "get_async_redis", CaptureRedis)
+    monkeypatch.setattr(daemon.base.events.live.redis_client, "get_async_redis", CaptureRedis)
     try:
-        with hosted_db_wait.database_wait(incarnation) as waiting:
+        with db_wait.database_wait(incarnation) as waiting:
             waiting.renew()
             await daemon._publish_turn_progress_heartbeat(machine_name(), {agent})
             await daemon._publish_turn_progress_heartbeat(machine_name(), {agent})
@@ -243,9 +244,9 @@ async def test_success_handoff_clears_on_actual_node_progress(
         async def set(self, _key: str, value: str, *, ex: int) -> None:
             writes.append(json.loads(value))
 
-    monkeypatch.setattr(daemon.shared.redis_client, "get_async_redis", CaptureRedis)
+    monkeypatch.setattr(daemon.base.events.live.redis_client, "get_async_redis", CaptureRedis)
     try:
-        with hosted_db_wait.database_wait(incarnation) as waiting:
+        with db_wait.database_wait(incarnation) as waiting:
             waiting.renew()
             waiting.complete()
         await daemon._publish_turn_progress_heartbeat(machine_name(), {agent})

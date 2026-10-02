@@ -10,10 +10,10 @@ from typing import Any
 
 import pytest
 
-from scripts import plugin_price_sync
+from scripts.model_registry import plugin_price_sync
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
-_SCRIPT = _REPO_ROOT / "scripts" / "update_model_pricing.py"
+_SCRIPT = _REPO_ROOT / "scripts" / "model_registry" / "update_model_pricing.py"
 
 
 def _load_script():
@@ -44,7 +44,7 @@ _DEEPSEEK_TABLE = """
 </main></html>
 """
 
-_PLUGIN_SOURCE = """from shared.lm.provider_api import PricePeriod, PriceRates, PriceTier, PriceWindow, register
+_PLUGIN_SOURCE = """from base.lm.provider_api import PricePeriod, PriceRates, PriceTier, PriceWindow, register
 
 register(
     None,
@@ -130,7 +130,7 @@ def _sync_fixture(
                 ],
             }
         )
-    archive_path = repo_root / "shared/lm/pricing_catalog_archive.json"
+    archive_path = repo_root / "base/lm/pricing_catalog_archive.json"
     archive_path.parent.mkdir(parents=True)
     archive_path.write_text(
         json.dumps(
@@ -264,7 +264,7 @@ def test_deepseek_parser_rejects_an_unknown_pricing_meter(band: str) -> None:
 
 
 def _reviewed_catalog() -> dict[str, Any]:
-    return json.loads((_REPO_ROOT / "shared/lm/pricing_catalog_archive.json").read_text())
+    return json.loads((_REPO_ROOT / "base/lm/pricing_catalog_archive.json").read_text())
 
 
 def _without_recorded_succession(catalog: dict[str, Any]) -> dict[str, Any]:
@@ -607,8 +607,13 @@ def test_workflow_runs_only_trusted_main_code_with_write_permissions() -> None:
     assert '[ -L "$ARCHIVE" ]' in workflow
     assert 'ARCHIVE_REAL="$(realpath "$ARCHIVE")"' in workflow
     assert '"$CANDIDATE_REAL"/*' in workflow
-    assert 'python scripts/update_model_pricing.py --catalog "$ARCHIVE" --write' in workflow
-    assert "python scripts/update_model_pricing.py --sync-plugins --write" in workflow
+    assert (
+        'python scripts/model_registry/update_model_pricing.py --catalog "$ARCHIVE" --write'
+        in workflow
+    )
+    assert (
+        "python scripts/model_registry/update_model_pricing.py --sync-plugins --write" in workflow
+    )
     assert "ava_builtins/plugins/lm_*/provider.py" in workflow
     assert "bot sync → human review of the PR" in workflow
     assert "model-pricing-future-windows.md" in workflow

@@ -11,8 +11,8 @@ if TYPE_CHECKING:
     from langchain_core.language_models.chat_models import BaseChatModel
 from loguru import logger
 
-from shared.lm.effort import clamp_effort
-from shared.lm.provider_api import (
+from base.lm.effort import clamp_effort
+from base.lm.provider_api import (
     BuildContext,
     PricePeriod,
     PriceRates,
@@ -21,8 +21,8 @@ from shared.lm.provider_api import (
     register,
     require_key,
 )
-from shared.lm.registry import ModelSpec, ModelTuning
-from shared.lm.stop import StopSpec
+from base.lm.registry import ModelSpec, ModelTuning
+from base.lm.stop import StopSpec
 
 _GEMINI_EFFORT_LEVELS = ("minimal", "low", "medium", "high")
 
@@ -259,7 +259,7 @@ register(
         # Removed 2026-09-23 (task #4508): gemini-2.5-pro and gemini-2.5-flash
         # were never selectable here (implicit spawnable=False) and have no
         # live references. Historical prices remain in
-        # shared/lm/pricing_catalog_archive.json.
+        # base/lm/pricing_catalog_archive.json.
     },
     pricing={
         "gemini-3.8-flash": PriceRates(

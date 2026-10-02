@@ -1,7 +1,7 @@
 """Throwaway Postgres + Redis for the test / eval suites — native processes, no Docker.
 
 Each pytest-session worker gets its OWN throwaway Postgres cluster and Redis
-server: the Postgres cluster comes from `shared.pg_tools.throwaway_postgres`
+server: the Postgres cluster comes from `base.cluster.dataplane.pg_tools.throwaway_postgres`
 (a fresh `initdb` on an ephemeral localhost port), and a `redis-server` runs on
 its own ephemeral port. The provisioning fixtures point `settings.data_plane.db_url` /
 `settings.data_plane.redis_url` at them. No external server and no `*_DB_URL` env var is
@@ -32,7 +32,7 @@ from pathlib import Path
 import psycopg
 import redis
 
-from shared.pg_tools import throwaway_postgres
+from base.cluster.dataplane.pg_tools import throwaway_postgres
 
 _SCHEMA_SQL = Path(__file__).resolve().parent.parent / "db" / "schema.sql"
 
@@ -44,7 +44,7 @@ _TMPFS_BASE = "/dev/shm" if Path("/dev/shm").is_dir() else None  # noqa: S108 �
 def _free_port() -> int:
     """Ask the OS for an unused localhost TCP port, closed immediately.
 
-    The release-to-bind window is the same TOCTOU class `shared/pg_tools` fixed
+    The release-to-bind window is the same TOCTOU class `base/pg_tools` fixed
     for throwaway Postgres (PR #1216): a parallel xdist worker can be handed the
     same port before the server binds it, and the collision surfaces as the
     spawned server dying (then `_wait_port` times out). Accepted here: the
@@ -80,14 +80,41 @@ def postgres() -> Generator[str]:
     migration, and its port never binds. Applying migrations at provisioning time
     keeps every future migration covered without special-casing any one of them.
     """
-    from shared.migrations import apply_pending_migrations
+    from base.deploy.schema.migrations import apply_pending_migrations
+    from base.native_process import code_version
 
+    # Every pooled dial of this process carries its code version
+    # (`base.db.code_version_gate`). Resolve it now, at provisioning, so the first
+    # dial cannot land inside a test that fakes `subprocess.run` and cache a
+    # git answer that is not this checkout's.
+    code_version.get()
     with throwaway_postgres(schema_sql=_SCHEMA_SQL.read_text()) as url:
         # Non-autocommit conn: apply_pending_migrations manages its own
         # per-migration transactions + advisory lock.
         with psycopg.connect(url) as conn:
             apply_pending_migrations(conn)
         yield url
+
+
+_RUNNER_LOGIN = "ava_g0_runner"
+_RUNNER_PASSWORD = "suite-runner-password"  # noqa: S105 — throwaway pg only
+
+
+def runner_projection(db_url: str | None = None) -> str:
+    """`db_url` (default: the suite's owner URL) as the runner-class login the
+    agent launcher injects into every agent-profile child.
+
+    Such a child holds no owner password (dotenv_boot drops it), so an owner
+    URL cannot configure it. The login is a write generation's runner login
+    shape (`grant_runner_login` on the suite database, dialled directly), then
+    carried onto `db_url`, which may be a pooler URL.
+    """
+    from base.config import settings
+    from base.host.net.url_secret import url_with_userinfo
+
+    admin = settings.data_plane.db_url
+    grant_runner_login(admin, owner="ava_citest", login=_RUNNER_LOGIN, password=_RUNNER_PASSWORD)
+    return url_with_userinfo(db_url or admin, _RUNNER_LOGIN, _RUNNER_PASSWORD)
 
 
 @contextmanager
@@ -120,7 +147,7 @@ def redis_server() -> Generator[str]:
             r.ping()
             # A subprocess (e2e gateway / ops daemon) loads Settings fresh, which
             # re-derives the redis_url username to the test suite's cluster ACL user
-            # `ava_citest` (the suite's URL-carried identity, tests/conftest.py). This throwaway
+            # `ava_citest` (the suite's URL-carried identity, tests/fixtures/env_bootstrap.py). This throwaway
             # redis has only the `default` user, so add `ava_citest` as a nopass
             # full-access user (the redis analog of the throwaway pg's peer-superuser
             # `ava_citest`) — otherwise that connection is rejected (WRONGPASS / no
@@ -149,8 +176,43 @@ def redis_server() -> Generator[str]:
         except subprocess.TimeoutExpired:
             # A wedged redis-server must not leak (and must not mask the
             # test's original exception): kill it, mirroring the milvus
-            # fixture's terminate→wait→kill pattern in tests/conftest.py
+            # fixture's terminate→wait→kill pattern in tests/fixtures/milvus.py
             # (audit round-2 cc-docs-tests P2).
             proc.kill()
             proc.wait(timeout=10)
         shutil.rmtree(tmp, ignore_errors=True)
+
+
+def grant_runner_login(url: str, *, owner: str, login: str, password: str) -> str:
+    """Give a throwaway database the runner capability and return a runner URL.
+
+    The production shape: `base.cluster.authority.ensure_groups` converges the
+    NOLOGIN `ava_gateway` / `ava_runner` groups on `url`'s database (default
+    privileges declared FOR `owner`, the role that creates later tables), and
+    `login` inherits `ava_runner` exactly as a write generation's runner login
+    does (INHERIT TRUE, SET FALSE, ADMIN FALSE). Idempotent. `url` must dial a
+    superuser session.
+    """
+    from urllib.parse import urlsplit
+
+    from psycopg import sql
+
+    from base.cluster.authority import GATEWAY_GROUP, RUNNER_GROUP, Groups, ensure_groups
+    from base.host.net.url_secret import url_with_userinfo
+
+    database = urlsplit(url).path.strip("/")
+    groups = Groups(gateway=GATEWAY_GROUP, runner=RUNNER_GROUP)
+    with psycopg.connect(url, autocommit=True) as conn:
+        ensure_groups(conn, owner=owner, database=database, groups=groups)
+        if conn.execute("SELECT 1 FROM pg_roles WHERE rolname = %s", (login,)).fetchone() is None:
+            conn.execute(
+                sql.SQL("CREATE ROLE {} LOGIN PASSWORD {}").format(
+                    sql.Identifier(login), sql.Literal(password)
+                )
+            )
+            conn.execute(
+                sql.SQL("GRANT {} TO {} WITH INHERIT TRUE, SET FALSE, ADMIN FALSE").format(
+                    sql.Identifier(RUNNER_GROUP), sql.Identifier(login)
+                )
+            )
+    return url_with_userinfo(url, login, password)

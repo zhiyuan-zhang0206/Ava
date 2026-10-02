@@ -19,30 +19,28 @@ from typing import cast
 
 import pytest
 
+from base.config import settings
+from base.host.env.dotenv_boot import resolve_ava_home
+from base.packages.extensions import install_registry as reg
 from cli.commands.extensions.packages_refresh import (
     effective_interval_seconds,
     is_due,
     parse_duration,
     run_refresh,
 )
-from shared import install_registry as reg
-from shared.config import settings
 
 
 @pytest.fixture(autouse=True)
 def _hermetic(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    """Isolated home, no cluster-update probe, OS-job gate off (suite default)."""
-    import cli.commands.status as status_mod
-
+    """Isolated home, OS-job gate off (suite default)."""
     home = tmp_path / ".ava"
     (home / "skills").mkdir(parents=True)
     (home / "logs").mkdir()
-    monkeypatch.setattr(settings.general, "ava_home", home)
-    monkeypatch.setattr(status_mod, "_update_in_flight", lambda: False)
+    monkeypatch.setenv("AVA_HOME", str(home))
 
 
 def _home() -> Path:
-    return Path(settings.general.ava_home)
+    return resolve_ava_home()
 
 
 def _git(cwd: Path, *args: str, check: bool = True) -> str:
@@ -408,23 +406,15 @@ def test_notify_mode_records_available_without_applying(core_repo: Path) -> None
     assert _row("foo").update.mode == "notify"  # explicit mode survives
 
 
-# ── gates: flock / in-flight / job switches / due cadence ───────────────────
+# ── gates: flock / job switches / due cadence ───────────────────
 
 
 def test_flock_skips_a_concurrent_pass(core_repo: Path) -> None:
-    from shared.platform import file_lock
+    from base.native_process.os_platform import file_lock
 
     with file_lock(_home() / "packages-refresh.lock", timeout_s=1):
         report = run_refresh(repo=core_repo)
     assert not report.ran and "holds the lock" in (report.skip_reason or "")
-
-
-def test_update_in_flight_skips(core_repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    import cli.commands.status as status_mod
-
-    monkeypatch.setattr(status_mod, "_update_in_flight", lambda: True)
-    report = run_refresh(repo=core_repo)
-    assert not report.ran and "update is in flight" in (report.skip_reason or "")
 
 
 def test_from_job_gates(core_repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -552,7 +542,10 @@ def _manifest_for(name: str, **extra: object) -> dict[str, object]:
 def test_loadable_names_respect_the_host_contract(
     core_repo: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from shared.install_registry import host_contract_reason, loadable_skill_names
+    from base.packages.extensions.install_registry import (
+        host_contract_reason,
+        loadable_skill_names,
+    )
 
     home = _home()
 
@@ -579,7 +572,7 @@ def test_loadable_names_respect_the_host_contract(
     skill("side", _manifest_for("side", requires_commit=side))
     skill("too_new", _manifest_for("too_new", engines={"ava": ">=2099"}))
 
-    import shared.paths as paths_mod
+    import base.paths as paths_mod
 
     monkeypatch.setattr(paths_mod, "repo_root", lambda: core_repo)
     loadable = loadable_skill_names()
@@ -591,7 +584,7 @@ def test_loadable_names_respect_the_host_contract(
 
 def test_scan_drops_host_blocked_packages(core_repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     import ava.skills as skills_mod
-    import shared.paths as paths_mod
+    import base.paths as paths_mod
 
     home = _home()
     for name in ("ok", "blocked"):
@@ -616,7 +609,7 @@ def test_scan_drops_host_blocked_packages(core_repo: Path, monkeypatch: pytest.M
 def test_refresh_cmd_json_shape(
     core_repo: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    import shared.paths as paths_mod
+    import base.paths as paths_mod
     from cli.commands.extensions.packages import cmd_packages_refresh
 
     monkeypatch.setattr(paths_mod, "repo_root", lambda: core_repo)

@@ -17,9 +17,18 @@ import time
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from datetime import time as clock_time
-from functools import partial
+from pathlib import Path
 
-from services.backup import _cluster_tz, is_due, run_backup
+from base import telemetry
+from base.config import settings
+from base.daemon.health import health_port, start_health_server, stop_health_server
+from base.daemon.health_schema import DEGRADED, OK, component
+from base.daemon.shutdown import cancel_and_drain, install_graceful_shutdown
+from base.daemon.shutdown import hard_exit as _hard_exit
+from base.log import init_gateway_process
+from base.paths import pid_path
+from services.backup import _cluster_tz, is_due
+from services.backup_scheduler.operation.custody import OperationBusyError
 from services.backup_scheduler.recovery_drill import (
     load_local_dump_restore_success,
     local_dump_restore_due,
@@ -27,20 +36,16 @@ from services.backup_scheduler.recovery_drill import (
 )
 from services.backup_scheduler.worker import run_job
 from services.pidfile import acquire_pidfile, pidfile_holds_daemon, remove_pidfile
-from shared import telemetry
-from shared.config import settings
-from shared.daemon_health import health_port, start_health_server, stop_health_server
-from shared.daemon_shutdown import cancel_and_drain, install_graceful_shutdown
-from shared.daemon_shutdown import hard_exit as _hard_exit
-from shared.health_schema import DEGRADED, OK, component
-from shared.log import init_gateway_process
 
 _log = logging.getLogger("services.backup_scheduler.daemon")
 
 BACKUP_RETRY_INTERVAL_S = 1800
 BACKUP_STALE_AFTER_S = 26 * 3600
 _SLEEP_CHUNK_S = 60
-_PIDFILE = settings.services.pg_backup_pidfile
+
+
+def _pidfile() -> Path:
+    return pid_path("pg_backup")
 
 
 @dataclass
@@ -68,18 +73,18 @@ class _BackupState:
 
 
 def _write_pidfile() -> None:
-    if not acquire_pidfile(_PIDFILE, "services.backup_scheduler.daemon"):
-        _log.info("[pg-backup] daemon already running (pidfile=%s), exiting", _PIDFILE)
+    if not acquire_pidfile(_pidfile(), "services.backup_scheduler.daemon"):
+        _log.info("[pg-backup] daemon already running (pidfile=%s), exiting", _pidfile())
         sys.exit(1)
 
 
 def _remove_pidfile() -> None:
-    remove_pidfile(_PIDFILE)
+    remove_pidfile(_pidfile())
 
 
 def _is_running() -> bool:
     """Whether this daemon already owns its pidfile."""
-    return pidfile_holds_daemon(_PIDFILE, "services.backup_scheduler.daemon")
+    return pidfile_holds_daemon(_pidfile(), "services.backup_scheduler.daemon")
 
 
 def _backup_components(state: _BackupState) -> list[dict[str, object]]:
@@ -146,20 +151,15 @@ async def _sleep_until_next_backup_hour(now: datetime) -> None:
     await _sleep((target.astimezone(UTC) - now).total_seconds())
 
 
-def run_local_dump_restore() -> None:
-    """Restore the newest local dump into an isolated Postgres instance."""
-    from scripts.restore_drill import run_drill
-
-    run_drill(foreground=True)
-
-
 async def _run_due_local_dump_restore(now: datetime) -> None:
     """Run one weekly local restore proof without re-running the daily dump."""
     try:
         if not local_dump_restore_due(now, last_success=load_local_dump_restore_success()):
             return
-        await run_job(run_local_dump_restore)
+        await run_job("restore")
         record_local_dump_restore_success(now)
+    except OperationBusyError as exc:
+        _log.info("[pg-backup] local restore drill deferred: %s", exc)
     except Exception as exc:
         telemetry.emit(
             "telemetry",
@@ -182,7 +182,7 @@ async def _backup_loop(state: _BackupState) -> None:
         state.record_attempt(now)
         state.running = True
         try:
-            await run_job(partial(run_backup, now))
+            await run_job("dump", now=now)
             state.record_success(now)
             await _run_due_local_dump_restore(now)
         except Exception as exc:
@@ -198,7 +198,7 @@ async def _backup_loop(state: _BackupState) -> None:
 async def run() -> None:
     """Own the pidfile and health server for the backup scheduler."""
     if _is_running():
-        _log.info("[pg-backup] daemon already running (pidfile=%s), exiting", _PIDFILE)
+        _log.info("[pg-backup] daemon already running (pidfile=%s), exiting", _pidfile())
         sys.exit(1)
 
     _write_pidfile()
@@ -218,11 +218,11 @@ async def run() -> None:
 
 def main() -> None:
     """Entry point for the gateway service session."""
-    from shared.migrations import assert_schema_current
+    from base.deploy.schema.migrations import assert_schema_current
 
     assert_schema_current(settings.data_plane.db_url)
-    init_gateway_process(name="pg-backup")
-    install_graceful_shutdown("pg-backup")
+    init_gateway_process(name="pg_backup")
+    install_graceful_shutdown("pg_backup")
     code = 0
     # `asyncio.Runner`, not `asyncio.run`: `run` closes in a `finally` that
     # awaits `shutdown_default_executor`, joining the default executor's

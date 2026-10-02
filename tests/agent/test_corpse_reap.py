@@ -1,4 +1,4 @@
-"""The hosted corpse reaper's recrash trigger against real rows — `agent/corpse_reap.py`.
+"""The hosted corpse reaper's recrash trigger against real rows — `agent/ownership/corpse_reap.py`.
 
 The beat reaper terminates marked idling corpses once the grace window
 elapses; the prompt reap (task #3616) terminates the row this incarnation just
@@ -9,7 +9,7 @@ touched, a row that moved on is refused, and the reap's CAS composes with the
 admission and resurrection transitions without tearing. Each termination
 also commits the death's recovery wake — one marked system chat (task
 #4039); the attempt that consumes it is locked in
-`tests/services/test_crash_recovery.py`.
+`services/agent_host/tests/test_crash_recovery.py`.
 """
 
 from __future__ import annotations
@@ -22,18 +22,18 @@ import psycopg
 import pytest
 from psycopg_pool import AsyncConnectionPool
 
-from agent.corpse_reap import (
+from agent.ownership.corpse_reap import (
     CRASH_RECOVERY_WAKE_TEXT,
     RECRASH_CONFIRMED_CRASHES,
     reap_crash_corpses,
     reap_recrashed_corpse,
 )
-from agent.hosted_ownership import admit_hosted_runtime, settle_hosted_runtime
-from ops import agent_wake
-from shared.config import settings
-from shared.db import create_agent
-from shared.lifecycle_acceptance import HOSTED_TURN_RECOVERY_MARKER
-from shared.runtime_incarnation import RuntimeIncarnation
+from agent.ownership.hosted import admit_hosted_runtime, settle_hosted_runtime
+from base.agents.incarnation.lifecycle_acceptance import HOSTED_TURN_RECOVERY_MARKER
+from base.config import settings
+from base.db import create_agent
+from base.native_process.runtime_incarnation import RuntimeIncarnation
+from ops.agents import wake
 
 
 def _agent(conn: psycopg.Connection[Any], machine: str = "host-test") -> int:
@@ -97,8 +97,8 @@ def reap_spies(monkeypatch: pytest.MonkeyPatch) -> tuple[list[dict[str, object]]
     async def _publish(agent_id: int) -> None:
         published.append(agent_id)
 
-    monkeypatch.setattr("agent.corpse_reap.insert_event_log_async", _event)
-    monkeypatch.setattr("agent.corpse_reap.publish_agent_updated", _publish)
+    monkeypatch.setattr("agent.ownership.corpse_reap.insert_event_log_async", _event)
+    monkeypatch.setattr("agent.ownership.corpse_reap.publish_agent_updated", _publish)
     return events, published
 
 
@@ -272,7 +272,7 @@ async def test_prompt_reap_then_resurrect_composes_without_tearing(
         del payload
         wakes.append(agent_id)
 
-    monkeypatch.setattr(agent_wake, "publish_inbound_wake", _wake)
+    monkeypatch.setattr(wake, "publish_inbound_wake", _wake)
 
     agent_id, incarnation = await _recrashed_row(db_conn, aops_pool)
     reaped = await reap_recrashed_corpse(aops_pool, incarnation)
@@ -280,7 +280,7 @@ async def test_prompt_reap_then_resurrect_composes_without_tearing(
 
     second_reap, resurrected = await asyncio.gather(
         reap_recrashed_corpse(aops_pool, incarnation),
-        asyncio.to_thread(agent_wake.resurrect_agent, agent_id, resurrected_by="user"),
+        asyncio.to_thread(wake.resurrect_agent, agent_id, resurrected_by="user"),
     )
 
     assert second_reap == []
@@ -306,7 +306,7 @@ async def test_grace_reap_commits_a_marked_wake_that_passes_the_notice_gate(
     """The grace path queues the same wake as the prompt reap; the marker
     keeps it out of the system-notice class, so the resurrection channels
     see real work (not a notification that never resurrects)."""
-    from ops.resurrect_gates import system_notice_source_of_trigger
+    from ops.lifecycle.resurrect_gates import system_notice_source_of_trigger
 
     agent_id, owner = _agent(db_conn), uuid4()
     incarnation = await admit_hosted_runtime(

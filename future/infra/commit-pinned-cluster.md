@@ -1,21 +1,28 @@
 # Cluster consistency: commit-level pinning (vs schema-level)
 
-> **Status: increments A and B are both built. What remains — hard fail-fast
-> enforcement — has been overtaken by a later decision and needs re-litigating
-> before it is built.**
+> **Status: superseded. Both increments and the drift response were retired by
+> the unified cluster lifecycle rework
+> ([`../infra/unified-cluster-lifecycle.md`](../infra/unified-cluster-lifecycle.md));
+> what remains open is re-litigated against that model, not this one.**
 >
-> - **Increment A (persist + visualize) — done.** `cluster_target_sha` is a standing
->   value in the `cluster_pin` table (`shared/cluster_pin.py`); the gateway writes it
->   after each rollout and `ava status` surfaces per-node drift from it.
-> - **Increment B (health-probe + rollback) — done.** `last_known_good_sha`,
->   `ava cluster health-probe`, `ava cluster rollback --to <tag|sha>`, and OS cron
->   registration all shipped; see
->   [`../../decisions/2026-06-29-self-evolution-rollback.md`](../../decisions/2026-06-29-self-evolution-rollback.md).
-> - **Drift response — done, but as reconcile, not refusal.** `ops/controllers/pin.py`
->   tightened the watchdog trigger from schema-drift to SHA-drift exactly as bullet 2
->   below proposed: an off-pin agent-runner force-updates to the pin (backoff-guarded,
->   declines while a cluster update holds the lock); a gateway drift only warns,
->   because it needs the full rollout path.
+> - **Increment A (persist + visualize) — superseded.** Nothing writes
+>   `cluster_target_sha` any more: the `cluster_pin` row
+>   holds the value the retired updater last wrote, and
+>   no operator surface shows it — a frozen value presented as current would be
+>   worse than none. There is no release record: a unit runs its source
+>   checkout at the commit `cli/fleet_update.py` switched it to, `ava status`
+>   prints that checkout, and `ava cluster status` shows each host's running
+>   commit.
+> - **Increment B (health-probe + rollback) — superseded.** There is no
+>   `ava cluster rollback --to <tag|sha>` verb. An update is
+>   `python -m cli.fleet_update`; a rollback is the same script given the
+>   previous SHA, not a health-probe-triggered auto-rollback — the independent
+>   health-probe rollback was removed (health checks and alerts remain), and
+>   `last_known_good_sha` has no writer.
+> - **Drift response — retired.** `ops/controllers/pin.py` (the SHA-drift
+>   watchdog this bullet used to describe) was deleted along with the rest of
+>   `ops/controllers/` in the old in-place updater's removal; nothing
+>   force-updates or flags a node against the pin any more.
 > - **Still not built:** the *hard* half — a drifted node **refusing work**. But
 >   [`2026-07-19-fail-fast-vs-reconcile-boundary.md`](../../decisions/2026-07-19-fail-fast-vs-reconcile-boundary.md)
 >   classifies pin drift as **world drift → reconcile toward spec** (no learner in
@@ -24,11 +31,10 @@
 >   longer "build the refusal" but "does anything remain once reconcile is loud and
 >   bounded?" — settle that against the later decision first.
 >
-> The down-migration foundation this rests on (`apply_down` / `rollback_to`) landed
-> in #687; the integer down-floor was superseded by the 2026-07-19 re-baseline (the
-> squashed `db/schema.sql` is the floor, every post-baseline timestamp migration
-> ships a `.down.sql` — see
-> [`../../decisions/2026-07-19-migration-timestamp-ids-and-rebaseline.md`](../../decisions/2026-07-19-migration-timestamp-ids-and-rebaseline.md)).
+> The down-migration foundation this rests on (`apply_down` / `rollback_to`, #687)
+> was removed: it had no production caller, and schema mistakes are fixed forward
+> — see
+> [`../../decisions/2026-10-02-no-down-migrations.md`](../../decisions/2026-10-02-no-down-migrations.md).
 > The rationale for pinning at all is the
 > [`philosophy.md`](../../conventions/philosophy.md) "strong invariant over managed
 > ambiguity" thread. Triggered by the 2026-06-01 self-upgrade incident.
@@ -36,7 +42,7 @@
 ## Today: schema-level consistency
 
 The cross-node contract is **DB schema version**, not git SHA. Every agent-runner
-talks to the central node's DB; `shared/migrations.py:check_schema_version`
+talks to the central node's DB; `base/deploy/schema/migrations.py:check_schema_version`
 asserts `applied == required` (strict, both directions) at every daemon start,
 and a `CodeBehindSchema` host self-heals via the watchdog. Nodes may run
 *different commits* as long as their schema requirement matches.
@@ -87,7 +93,7 @@ rollback-to-last-known-good-SHA on a failed upgrade. Ship that first.
 - A failed upgrade rolls the node back to the last-known-good SHA.
 
 > **Landed (2026-06-02): increment A — persist + visualize.** Bullet 1 is done: a
-> single source of truth (`cluster_pin` table + `shared/cluster_pin.py`,
+> single source of truth (`cluster_pin` table,
 > migration 0026). The gateway writes `cluster_target_sha` after its local
 > update reaches the target (`cli/commands/update.py:_persist_cluster_pin`), and
 > `ava status` shows each node's HEAD vs the pin (read-only drift surfacing —

@@ -8,8 +8,8 @@ import psycopg
 from psycopg_pool import AsyncConnectionPool, PoolTimeout
 
 from agent.db import has_pending_interrupt
-from shared.log import logger
-from shared.runtime_incarnation import RuntimeIncarnation
+from base.log import logger
+from base.native_process.runtime_incarnation import RuntimeIncarnation
 
 _POLL_INTERVAL_SECONDS = 2.0
 _QUERY_TIMEOUT_SECONDS = 5.0

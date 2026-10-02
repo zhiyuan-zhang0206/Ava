@@ -28,7 +28,7 @@ from .sdk_disable import _DisabledSDKModule
 # them down, avoiding reload-induced NamespaceConflictError.
 
 
-# ── Exception hierarchy (CLAUDE.md SDK docstring rule: parent + subclass) ─
+# ── Exception hierarchy (AGENTS.md SDK docstring rule: parent + subclass) ─
 # Plugin authors use RegisterNamespaceError for coarse catch, specific
 # subclass for fine catch.
 # `__all_for_ava__` and `_REGISTERED_NAMESPACES` are two-faced representations
@@ -119,7 +119,7 @@ def _current_plugin_name() -> str:
     has finished importing. Returns `<unknown>` when not called inside a
     PluginContext (e.g. test directly calling)."""
     try:
-        from shared.plugin_context import current_plugin_name as _cp
+        from base.packages.plugins.context import current_plugin_name as _cp
     except ImportError:
         return "<unknown>"
     return _cp() or "<unknown>"
@@ -135,10 +135,10 @@ def _record(
     `ava plugins inspect`. Lazily imported for the same reason
     `_current_plugin_name` is, and a no-op outside a plugin import."""
     try:
-        from shared import plugin_contributions
+        from base.packages.plugins import contributions
     except ImportError:
         return
-    plugin_contributions.record(surface, identifier, detail=detail)
+    contributions.record(surface, identifier, detail=detail)
 
 
 def _materialize_namespace(name: str, ns: SimpleNamespace) -> ModuleType:

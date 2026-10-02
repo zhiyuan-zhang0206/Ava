@@ -1,41 +1,41 @@
 ---
 type: doc
 title: Ava — Knowledge Graph
-description: Root node of the Ava project's OKF (Open Knowledge Format) knowledge graph. Each domain has an overview file that coexists with the source directory of the same name, covering all core subsystems of the project domain by domain.
+description: Root node of the Ava project's OKF (Open Knowledge Format) knowledge graph. Each domain has an overview node in the `docs/` layer of the source directory of the same name, covering all core subsystems of the project domain by domain.
 tags: []
 ---
 
 # Ava — Knowledge Graph
 
-Root node of the Ava project's OKF (Open Knowledge Format) knowledge graph. Each `.ava.okf.md` concept file lives alongside the source code it describes — the hierarchy comes from the file system: `<dir>/<dir>.ava.okf.md` is the overview node for directory `<dir>/`, the other files inside `<dir>/` are its child concepts, and this file is the root node of the entire graph.
+Root node of the Ava project's OKF (Open Knowledge Format) knowledge graph. Each package keeps its `.ava.okf.md` concept files in its own `docs/` directory, beside the source code they describe — the hierarchy comes from the file system, with the `docs/` layer transparent: `<dir>/<dir>.ava.okf.md` (logical path) is the overview node for directory `<dir>/`, the other files inside `<dir>/` are its child concepts, and this file is the root node of the entire graph.
 
-**Co-location is total (2026-08-12 ruling, completed 2026-08-13).** Every domain overview node lives **inside** the directory it describes — `agent/agent.ava.okf.md` inside `agent/`, `agent/graph/graph.ava.okf.md` inside `agent/graph/` (user ruling: "put it inside the folder", not beside it at the parent level). `shared/docs/okf_graph.py:compute_parent()` resolves the hierarchy from the filesystem: a file's parent is its directory's overview (`a/b/c.ava.okf.md` → `a/b/b.ava.okf.md`). The legacy sibling position (`a/b.ava.okf.md` beside `a/b/`) was retired with the last nested overviews moved inside — `compute_parent` no longer resolves it, and lint rule E009 reports any survivor. What remains in this `okf/` index layer is only what genuinely has no code directory to sit inside: this apex, and the cross-domain concept systems — plugins, skills, MCP integration, and the design-phase R1–R4 models. Nodes without a filesystem parent attach to this root; parents are only ever returned if they exist, so the tree has exactly one root and no dangling edges.
+**A package's nodes live in its `docs/` layer.** Every domain overview node belongs to the directory it describes — its logical path is `agent/agent.ava.okf.md` for `agent/`, `agent/graph/graph.ava.okf.md` for `agent/graph/` (user ruling: "put it inside the folder", not beside it at the parent level). The `docs/` layer is transparent to the hierarchy: `base/packages/docs/okf_graph.py:logical_path()` drops the last `docs` directory segment of a path, so `agent/graph/docs/graph.ava.okf.md` sits at `agent/graph/graph.ava.okf.md`. `compute_parent()` resolves the hierarchy on logical paths: a file's parent is its directory's overview (logically `a/b/c.ava.okf.md` → `a/b/b.ava.okf.md`; on disk `a/b/docs/c.ava.okf.md` → `a/b/docs/b.ava.okf.md`), returned as that node's physical path. Links are not logical — wikilinks and relative markdown links name the real path, `docs/` included. `compute_parent` does not resolve a sibling overview (`a/b.ava.okf.md` beside `a/b/`), and lint rule E009 reports one, layered or not. What remains in this `okf/` index layer is only what genuinely has no code directory to sit inside: this apex, and the cross-domain concept systems — plugins, skills, MCP integration, and the design-phase R1–R4 models. Nodes without a filesystem parent attach to this root; parents are only ever returned if they exist, so the tree has exactly one root and no dangling edges.
 
 ## Domains
 
 | Domain | Description |
 |---|---|
-| [[../agent/agent.ava.okf.md]] | Agent runtime — LangGraph execution graph, state channels, messages, process lifecycle, and infrastructure such as DB / cache / MCP daemon |
-| [[../ava/ava.ava.okf.md]] | SDK surface — `ava.*` single namespace: files / shell / agents / task / memory / skills / mcps / web / self / ui / watcher |
-| [[../gateway/gateway.ava.okf.md]] | Gateway — HTTP API, SSE push, authentication, `/api/agents` derived endpoints, bootstrap handshake |
-| [[../cli/cli.ava.okf.md]] | CLI — cluster lifecycle: start / stop / update / enroll / converge, multi-machine deployment orchestration |
-| [[../evals/evals.ava.okf.md]] | Eval-case contract — schema-v1 JSONL format, reference loader, versioning discipline |
-| [[../ui/web/web.ava.okf.md]] | Frontend Web UI — fleet monitoring, agent management, task tracking |
-| [[../ui/app/app.ava.okf.md]] | Tauri app shell — remote console window plus desktop and Android native behavior |
-| [[../shared/shared.ava.okf.md]] | Shared library — lm provider abstraction, agents-contract wire protocol, migrations, logging, configuration |
-| [[../services/services.ava.okf.md]] | Background services — long-running subsystems such as browser MCP wrapper |
+| [[../agent/docs/agent.ava.okf.md]] | Agent runtime — LangGraph execution graph, state channels, messages, process lifecycle, and infrastructure such as DB / cache / MCP daemon |
+| [[../ava/docs/ava.ava.okf.md]] | SDK surface — `ava.*` single namespace: files / shell / agents / task / memory / skills / mcps / web / self / ui / watcher |
+| [[../gateway/docs/gateway.ava.okf.md]] | Gateway — HTTP API, SSE push, authentication, `/api/agents` derived endpoints, bootstrap handshake |
+| [[../cli/docs/cli.ava.okf.md]] | CLI — cluster lifecycle: start / pause / stop / update / converge, multi-machine deployment orchestration |
+| [[../evals/docs/evals.ava.okf.md]] | Retired JSONL eval-case experiment; weekly adversarial evaluation remains in schedules |
+| [[../ui/web/docs/web.ava.okf.md]] | Frontend Web UI — fleet monitoring, agent management, task tracking |
+| [[../ui/app/docs/app.ava.okf.md]] | Tauri app shell — remote console window plus desktop and Android native behavior |
+| [[../base/docs/base.ava.okf.md]] | Base library — lm provider abstraction, agents-contract wire protocol, migrations, logging, configuration |
+| [[../services/docs/services.ava.okf.md]] | Background services — long-running subsystems such as browser MCP wrapper |
 | [[../.github/.github.ava.okf.md]] | GitHub Actions surface — backend/frontend/e2e and shell CI, cluster/app releases, issue + PR templates |
 | [[okf/plugins/plugins.ava.okf.md]] | Plugin system — extension mechanism that can carry skills / MCP servers |
 | [[okf/skills/skills.ava.okf.md]] | Skills — pure markdown instruction bundles, lazily loaded by agents on demand |
 | [[okf/mcps/mcps.ava.okf.md]] | MCP integration — built-in chrome + external servers installed via `ava mcp install` (e.g., x), invoked via daemon subprocesses |
-| [[../tests/tests.ava.okf.md]] | Test suite — pytest unit / integration / e2e tests covering all modules |
-| [[../scripts/scripts.ava.okf.md]] | Operations scripts — lint / build / install / provision / CI / release toolset |
+| [[../tests/docs/tests.ava.okf.md]] | Test suite — pytest unit / integration / e2e tests covering all modules |
+| [[../scripts/docs/scripts.ava.okf.md]] | Operations scripts — lint / build / install / provision / CI / release toolset |
 | [[okf/design/design.ava.okf.md]] | **Design-phase concept models** (R1–R4 planned final state from the 2026-08-07 audit, awaiting user review; R5 in design) — not yet implemented |
 
 ## Generation method
 
-Each concept file is written by an agent after reading the corresponding source code — not automatically generated by scripts. The graph is built **on demand by the gateway**: `GET /api/okf/graph` (`gateway/routers/okf_graph.py`) calls `shared/docs/okf_graph.py:build_graph_data()` per request and renders the D3 visualization from `scripts/okf-d3-template.html`. `scripts/build_okf_data.py` is a CLI wrapper over the same builder (for offline builds / viz serving); there is no checked-in `graph_data.json`.
+Each concept file is written by an agent after reading the corresponding source code — not automatically generated by scripts. The graph is built **on demand by the gateway**: `GET /api/okf/graph` (`gateway/routers/okf_graph.py`) calls `base/packages/docs/okf_graph.py:build_graph_data()` per request and renders the D3 visualization from `scripts/codegen/okf-d3-template.html`. `scripts/codegen/build_okf_data.py` is a CLI wrapper over the same builder (for offline builds / viz serving); there is no checked-in `graph_data.json`.
 
 ## Update method
 
-Ava code changes → agent reviews changes → updates affected concept files → `scripts/lint_ava_okf.py` validates (the gateway rebuilds the graph live, so no separate rebuild step) → `scripts/check_doc_references.py` for markdown-link drift.
+Ava code changes → agent reviews changes → updates affected concept files → `scripts/content_lint/lint_ava_okf.py` validates (the gateway rebuilds the graph live, so no separate rebuild step) → `scripts/content_lint/check_doc_references.py` for markdown-link drift.

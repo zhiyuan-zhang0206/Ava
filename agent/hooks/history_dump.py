@@ -41,10 +41,10 @@ from pathlib import Path
 from langchain_core.messages import AnyMessage, HumanMessage
 
 from agent.messages import NoteTag, system_note_message
-from shared.config.turn_view import turn_settings
-from shared.log import logger
-from shared.message_kwargs import read_ava_kwargs
-from shared.paths import workspace_dir
+from base.agents.messages.kwargs import read_ava_kwargs
+from base.config.turn_view import turn_settings
+from base.log import logger
+from base.paths import workspace_dir
 
 # Subdirectory of the agent workspace holding the dumps.
 _DUMP_DIRNAME = "message-history"

@@ -1,21 +1,5 @@
 {
   "complexity": {
-    "ops/agent_pause.py::_drain": 21,
-    "ops/agent_spawn.py::create_agent_row": 20,
-    "ops/cluster_deploy.py::spawn_update": 18,
-    "ops/ops_cluster.py::cluster_cancel_op": 16,
-    "ops/ops_cluster.py::cluster_recover_op": 20,
-    "ops/ops_config.py::config_write_op": 24,
-    "ops/spec.py::_gate_reason": 22
-  },
-  "directories": {
-    "ops": 59
-  },
-  "private_imports": {
-    "ops/cluster_pause.py::services.agent_ops.daemon._db_pool": 1,
-    "ops/ops_cluster.py::ava_builtins.plugins.ava_code._walk": 1,
-    "ops/publication_recovery.py::shared.managed_writer_publication._locked_publication": 1,
-    "ops/strand_hold.py::ops.controllers.stranded_pause._executing_owner": 1,
-    "ops/updater_reap.py::ops.controllers._heal_record": 2
+    "ops/host_config.py::config_write_op": 24
   }
 }

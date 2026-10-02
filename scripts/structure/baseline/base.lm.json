@@ -1,0 +1,36 @@
+{
+  "ambient_state": {
+    "base/lm/concurrency.py::global-rebind:_limiter": 2,
+    "base/lm/concurrency.py::hidden-singleton:_provider_keys": 1,
+    "base/lm/concurrency.py::import-time-call:base.lm.provider_api.REGISTRY.register_invalidator": 1,
+    "base/lm/effort.py::ambient-container:_PROVIDER_EFFORT_LEVELS": 1,
+    "base/lm/factory.py::ambient-container:_MODEL_KEY_MAP": 1,
+    "base/lm/factory.py::import-time-call:base.lm.provider_api.REGISTRY.reserve_core_prefixes": 1,
+    "base/lm/plugin_providers.py::ambient-instance:_STATE": 1,
+    "base/lm/plugin_providers.py::foreign-rebind:base.lm.provider_api._CURRENT_PLUGIN": 2,
+    "base/lm/pricing.py::ambient-container:_PLUGIN_PRICES": 1,
+    "base/lm/pricing.py::ambient-instance:_CATALOG": 1,
+    "base/lm/provider_api.py::ambient-instance:REGISTRY": 1,
+    "base/lm/registry.py::ambient-container:MODELS": 1,
+    "base/lm/registry.py::ambient-container:MODEL_CONTEXT_WINDOW": 1,
+    "base/lm/registry.py::ambient-container:MODEL_IDENTITY": 1,
+    "base/lm/registry.py::ambient-container:MODEL_KNOWLEDGE_CUTOFF": 1,
+    "base/lm/registry.py::ambient-container:SUPPORTED_MODELS": 1,
+    "base/lm/registry.py::import-time-call:base.lm.registry._rebuild_derived_views": 1,
+    "base/lm/registry.py::import-time-call:base.lm.registry._validate_registry": 1,
+    "base/lm/stop.py::ambient-container:_BY_PROVIDER": 1
+  },
+  "complexity": {
+    "base/lm/pricing.py::_parse_catalog": 17,
+    "base/lm/registry.py::_validate_registry": 18,
+    "base/lm/tests/test_provider_plugins.py::test_repo_xiaomi_provider_is_enabled_and_registers_complete_contract": 17
+  },
+  "files": {
+    "base/lm/tests/test_llm_factory.py": 1689,
+    "base/lm/tests/test_provider_plugins.py": 949
+  },
+  "patch_targets": {
+    "base/lm/tests/test_lm_billing.py::base.telemetry.tracing._state": 1,
+    "base/lm/tests/test_lm_call.py::base.telemetry.tracing._state": 1
+  }
+}

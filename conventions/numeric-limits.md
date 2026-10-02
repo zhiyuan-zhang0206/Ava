@@ -10,8 +10,8 @@ out of scope.
 
 ## The default: config, one declaration, reason in the description
 
-A user- or operator-tunable value is a field under `shared/config/` (declared
-once, per the registry doctrine in `shared/config_registry.py`), with:
+A user- or operator-tunable value is a field under `base/config/` (declared
+once, per the registry doctrine in `base/host/env/config_registry.py`), with:
 
 - `description` stating **why the default is that number** and what changing it
   does — the reason lives with the value, not in a doc beside it;
@@ -19,7 +19,7 @@ once, per the registry doctrine in `shared/config_registry.py`), with:
 - consumers that resolve the value **at call time**, and a parity invariant: an
   unconfigured cluster behaves exactly as before the field existed.
 
-The display domain (`shared/config/display.py`, task #3696) is the reference
+The display domain (`base/config/display.py`, task #3696) is the reference
 shape: user-facing windows and page defaults, each with its reasoning inline.
 
 ## The exception: a literal that stays
@@ -40,12 +40,12 @@ The permitted exception classes, with real sites:
 
 | Class | Why it stays | Examples |
 |---|---|---|
-| Protocol / format specs | the number is the format; changing it breaks the wire | msgpack ext-header bytes (`shared/agents/history/checkpoint.py`); short-SHA display width 7 (`shared/source_tree_guard.py`); page-registration name/host/path bounds (`gateway/schemas/pages.py`) |
-| External platform caps | the platform dictates it; any other value fails | Telegram caption 1024 (`ava_builtins/skills/telegram-send-file/scripts/send_file.py`); Baidu PCS SVIP single-file size (`services/pitr/baidu_pcs.py`) |
-| Self-imposed transport / payload guards | bounds one request or read so a single call cannot park unbounded bytes | message content ceiling (`gateway/routers/agents_state.py` — self-imposed, not an external protocol limit); attach ceilings (`shared/lm/attach_constants.py`); pty capture clamp (`shared/sessions/pty/_paths.py`); events `le=1000` / `offset` 10 000 (`gateway/routers/events.py`) |
-| Protective security / resource bounds | memory or abuse guard, not a tuning knob | login limiter's tracked-IP cap (`shared/rate_limit.py`); backup activation slots (`services/backup.py`); labeler poll batch (`services/labeler/daemon.py`); impersonation maintenance quantities (`shared/agents/impersonation/impersonation_maintenance.py`) |
+| Protocol / format specs | the number is the format; changing it breaks the wire | msgpack ext-header bytes (`base/agents/history/checkpoint.py`); short-SHA display width 7 (`base/deploy/git/source_tree_guard.py`); page-registration name/host/path bounds (`gateway/schemas/pages.py`) |
+| External platform caps | the platform dictates it; any other value fails | Telegram caption 1024 (`ava_builtins/skills/telegram-send-file/scripts/send_file.py`) |
+| Self-imposed transport / payload guards | bounds one request or read so a single call cannot park unbounded bytes | message content ceiling (`gateway/agents/state.py` — self-imposed, not an external protocol limit); attach ceilings (`base/lm/attach_constants.py`); pty capture clamp (`base/sessions/pty/_paths.py`); events `le=1000` / `offset` 10 000 (`gateway/events/router.py`) |
+| Protective security / resource bounds | memory or abuse guard, not a tuning knob | login limiter's tracked-IP cap (`base/cluster/rate_limit.py`); labeler poll batch (`services/labeler/daemon.py`); impersonation maintenance quantities (`base/agents/impersonation/maintenance.py`) |
 | UI micro-details | rendering density or truncation; a design decision per surface | run-timeline event rail (`ui/web/src/components/run-timeline/run-timeline-chart.tsx`); memory-graph label truncation (`ui/web/src/app/memory/graph/page.tsx`) |
-| Reference-script / tool defaults | these scripts run standalone; their knobs ARE their parameters — they never read cluster config | watcher wake-delivery retry contract — one template + five skill-reference copies (`.agents/skills/ship-a-change/reference/ci_watcher.py`, `ava_builtins/skills/ava-dynamic-workflow/reference/gather_files.py`, `ava_builtins/skills/ava-goal/reference/watch_idle.py`, `ava_builtins/skills/ava-watcher/reference/watch_idle.py`, `ava_builtins/skills/ava-use-other-agents/reference/watch_work.py`, `ava_builtins/plugins/ava_fleet/skills/ava-fleet/reference/watch_idle.py`); skill script defaults such as the gmail/sms query pages (`ava_builtins/skills/`) |
+| Reference-script / tool defaults | these scripts run standalone; their knobs ARE their parameters — they never read cluster config | watcher wake-delivery retry contract — one template + five skill-reference copies (`.agents/skills/ship-a-change/reference/ci_watcher.py`, `ava_builtins/skills/ava-dynamic-workflow/references/gather_files.py`, `ava_builtins/skills/ava-goal/scripts/watch_idle.py`, `ava_builtins/skills/ava-watcher/scripts/watch_idle.py`, `ava_builtins/skills/ava-use-other-agents/scripts/watch_work.py`, `ava_builtins/plugins/ava_fleet/skills/ava-fleet/reference/watch_idle.py`); skill script defaults such as the gmail/sms query pages (`ava_builtins/skills/`) |
 
 A reference-script default follows the same discipline one level down: it is a
 parameter or a documented constant with a comment stating why that number.

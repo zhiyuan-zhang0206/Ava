@@ -5,7 +5,7 @@ dynamic weight that sums per-event recency decay over a time window.
 
 Data sources (task #1197 LGTM cutover):
 - `agents_meta` + `agents` (Postgres): node identity, liveness, labels.
-- Prometheus (`gateway/prom_metrics.py`): the llm_usage token aggregates —
+- Prometheus (`gateway/lgtm/prom_metrics.py`): the llm_usage token aggregates —
   retained-window (7d) totals + selected-window scores — from the OTLP-mapped
   counters `ava_llm_usage_in_total` / `ava_llm_usage_out_total`. The retained
   total uses `increase()` so exporter restarts do not reset the reported value.
@@ -37,22 +37,21 @@ import httpx
 from fastapi import APIRouter, Query, Request
 from psycopg import errors as pg_errors
 
-from gateway import loki_events, loki_query_budget, prom_metrics, telemetry_staleness
-from gateway._edge_stream import EDGE_EVENT_NAMES, LOKI_EDGE_LIMIT
-from gateway.schemas import (
-    FleetGraphEdge,
-    FleetGraphNode,
-    FleetGraphResponse,
-    StatsWindowHours,
-    window_delta,
+from base import telemetry
+from base.config import settings
+from base.events.contract import FleetGraphStaleReason
+from base.events.live.redis_client import sync_redis
+from base.log import logger
+from base.telemetry.loki_index_labels import (
+    ARCHIVE_FLOOR_AT,
+    ARCHIVE_FREEZE_AT,
+    INDEX_LABEL_CUTOVER_AT,
 )
-from shared import telemetry
-from shared.config import settings
-from shared.events.contract import FleetGraphStaleReason
-from shared.log import logger
-from shared.loki_index_labels import ARCHIVE_FLOOR_AT, ARCHIVE_FREEZE_AT, INDEX_LABEL_CUTOVER_AT
-from shared.observability import cluster_label
-from shared.redis_client import sync_redis
+from base.telemetry.observability import cluster_label
+from gateway.lgtm import loki_events, loki_query_budget, prom_metrics, telemetry_staleness
+from gateway.lgtm.edge_stream import EDGE_EVENT_NAMES, LOKI_EDGE_LIMIT
+from gateway.schemas.fleet_graph import FleetGraphEdge, FleetGraphNode, FleetGraphResponse
+from gateway.schemas.stats import StatsWindowHours, window_delta
 
 router = APIRouter()
 
@@ -88,7 +87,7 @@ _ROUTE_TIMEOUT_S = 10.0
 # closed constant, never a request-derived path; reasons live in the contract.
 _STALE_ROUTE = "fleet_graph"
 
-# The OTLP-mapped llm_usage counters (shared/telemetry/otlp/telemetry_otlp._record_metrics:
+# The OTLP-mapped llm_usage counters (base/telemetry/otlp/telemetry_otlp._record_metrics:
 # int payload field -> Counter named ava_<event>_<field>, Prometheus appends
 # `_total`). The token totals are the sum of the two counters.
 _IN_METRIC = "ava_llm_usage_in_total"
@@ -345,7 +344,7 @@ def _fetch_archive_edges() -> tuple[list[dict[str, Any]], bool]:
     )
     if has_more:
         logger.warning(
-            "fleet_graph Loki archive edge stream exceeded the %d-row fetch cap — edges truncated",
+            "fleet_graph Loki archive edge stream exceeded the {}-row fetch cap — edges truncated",
             LOKI_EDGE_LIMIT,
         )
     return rows, has_more
@@ -595,7 +594,7 @@ def get_fleet_graph(  # noqa: PLR0915 — one linear fallback chain; each stale-
     agent — are excluded by default (user ruling 2026-08-09 #1104: terminated
     agents never appear in the graph, mirroring the sidebar's agent tree). The
     filter ORDER is liveness first: the node set is live-only (`status !=
-    'terminated'`, so restarting etc. stay), and edges only ever
+    'terminated'`), and edges only ever
     connect two live endpoints — a live node whose lineage partner has since
     terminated simply renders without that edge. Raw source rows are filtered
     during the merge; pass `?include_terminated=true` for the full graph.
@@ -681,7 +680,7 @@ def get_fleet_graph(  # noqa: PLR0915 — one linear fallback chain; each stale-
     # --- Token aggregates from Prometheus (the llm_usage counters) ---
     # total_tokens is the restart-proof retained-window sum; node_score is the
     # selected-window weighted score (node size). Both read the OTLP-mapped
-    # counters via gateway/prom_metrics; configured windows become PromQL
+    # counters via gateway/lgtm/prom_metrics; configured windows become PromQL
     # range selectors (increase over [Nh]) instead of SQL fragments.
     try:
         in_retained, out_retained, in_win, out_win = _fetch_prom_tokens(hours)

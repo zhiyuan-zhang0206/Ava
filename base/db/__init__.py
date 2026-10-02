@@ -1,0 +1,694 @@
+"""Postgres operations shared by UI and kernel.
+
+`base/` is the UI/kernel boundary layer — `ui/*.py` does not import
+`agent.*`; the two sides couple only via DB + Redis. This package
+centralizes helpers used by both ends (`config` / `db` / `events` /
+`exit_codes` / `schema.sql`).
+
+This module contains **pure SQL, no business semantics, used by both
+ends** helpers. Kernel-only (inbound claim, wait/mark/revert) is in
+`agent/db/__init__.py`. Connection policy and pool construction live in
+`base/db/connections.py` and remain re-exported here.
+"""
+
+import contextlib
+import json
+from collections.abc import Collection
+from datetime import UTC, datetime
+from typing import Any, NamedTuple
+
+import psycopg
+
+from base.agents import AgentStatus
+from base.agents.messages.inbound_provenance import (
+    InboundProvenance,
+    content_sha256,
+    source_assertion_match,
+)
+from base.db.connections import PG_KEEPALIVE_KWARGS as PG_KEEPALIVE_KWARGS
+from base.db.connections import (
+    PG_STATEMENT_TIMEOUT_SET_SQL as PG_STATEMENT_TIMEOUT_SET_SQL,
+)
+from base.db.connections import NoDatabaseAuthorityError as NoDatabaseAuthorityError
+from base.db.connections import PlaceholderDbUrlError as PlaceholderDbUrlError
+from base.db.connections import async_pool as async_pool
+from base.db.connections import connect as connect
+from base.db.connections import connect_url as connect_url
+from base.db.connections import direct_db_url as direct_db_url
+from base.db.connections import pool as pool
+from base.db.transaction import write_transaction
+from base.log import logger
+from base.telemetry import Event
+
+
+class InboundRow(NamedTuple):
+    """One row of inbound_messages (for timeline reads)."""
+
+    id: int
+    content: str
+    kind: str
+    source: str | None
+    status: str
+    created_at: datetime
+    claimed_at: datetime | None = None
+    # JSONB sidecar, None when the column is NULL. Only readers that need it
+    # select the column (list_pending_inbounds — the multimodal
+    # `{"content_blocks": [...]}` shape); the rest leave it defaulted.
+    payload: dict[str, Any] | None = None
+
+
+class ChatInboundFact(NamedTuple):
+    """One chat delivery fact for run-timeline arrows — no content read."""
+
+    id: int
+    source: str
+    created_at: datetime
+
+
+def list_chat_inbound_facts(
+    agent_id: int,
+    from_: datetime,
+    to: datetime,
+) -> list[ChatInboundFact]:
+    """Chat delivery facts in [from_, to], oldest first.
+
+    Windowed read on the (agent_id, created_at) index — the arrow source for
+    multi-agent compare views. Content is deliberately not selected: an arrow
+    needs identity, source and time only. Callers state the window (no default;
+    task #3696 posture).
+    """
+    db_pool = pool(autocommit=True)
+    try:
+        with db_pool.connection() as conn, conn.cursor() as cur:
+            cur.execute(
+                "SELECT id, source, created_at FROM inbound_messages"
+                " WHERE agent_id = %s AND kind = 'chat'"
+                " AND created_at BETWEEN %s AND %s"
+                " ORDER BY created_at",
+                (agent_id, from_, to),
+            )
+            return [
+                ChatInboundFact(id=int(row[0]), source=str(row[1]), created_at=row[2])
+                for row in cur.fetchall()
+            ]
+    finally:
+        db_pool.close()
+
+
+def fetch_one(cur: psycopg.Cursor, context: str) -> tuple[Any, ...]:
+    """After `fetchone()`, assert there was a row — for
+    `INSERT ... RETURNING` / aggregate queries where SQL contractually
+    guarantees "exactly one row". `python -O` swallows assert, so we
+    explicitly raise.
+
+    `context` is a short tag from the caller (e.g. `"insert agent-1"`)
+    — call sites are thin wrappers; the traceback pointing at the
+    helper alone cannot tell which query failed; reading `cur.query`
+    in the helper layer relies on unstable private API. In tests
+    `assert` is fine; `python -O` does not run tests."""
+    row = cur.fetchone()
+    if row is None:
+        raise RuntimeError(f"expected exactly one row: {context}")
+    return row
+
+
+def create_agent(db: psycopg.Connection) -> int:
+    """Create a new agent (agents + agents_meta row). label left NULL
+    ("not set" semantics) — frontend fallback `#N`.
+
+    The `agents` table name is constrained by LangGraph wire
+    (`config["configurable"]["thread_id"]`); the public API of this
+    function is "create agent". Also INSERTs the agents_meta row —
+    per-agent counters for shell/monitor/schedule depend on the
+    agents_meta row existing. The spawn path (gateway POST
+    /api/agents with prompt) uses a BackgroundTask to LLM-generate a
+    short name in the background and CAS-write; non-spawn paths
+    (this function, eval callers) do not auto-name; the caller is
+    expected to PATCH /api/agents/{id} manually as needed.
+    """
+    with db.cursor() as cur:
+        cur.execute("INSERT INTO agents DEFAULT VALUES RETURNING id")
+        new_id = fetch_one(cur, "insert new agent")[0]
+    db.commit()
+    return new_id
+
+
+def agent_exists(db: psycopg.Connection, agent_id: int) -> bool:
+    """Check whether an agent exists. Web endpoints use this as a 404 precondition."""
+    with db.cursor() as cur:
+        cur.execute("SELECT 1 FROM agents WHERE id = %s", (agent_id,))
+        return cur.fetchone() is not None
+
+
+def list_agents(db: psycopg.Connection) -> list[tuple[int, str | None]]:
+    """Return all agents: (id, label). label None means "not set" —
+    frontend fallback shows `#N` (see db/schema.sql `agents.label` comment)."""
+    with db.cursor() as cur:
+        cur.execute("SELECT id, label FROM agents ORDER BY id ASC")
+        return cur.fetchall()
+
+
+def publish_inbound_wake(agent_id: int, payload: str) -> bool:
+    """Best-effort Redis publish to wake an idle agent — the fast path paired
+    with the claim loop's SELECT recheck. Also SETEXes the agent's wake key
+    (`base.cluster.wake_key`) as a durable breadcrumb so a wake lost to a
+    disconnected listener is recovered on the listener's next (re)subscribe
+    instead of waiting out the full recheck budget.
+
+    Also runs the best-effort impersonation relay liveness alert before
+    publishing. Never raises: a wake lost here is recovered by `wait_for_inbound`'s
+    SELECT within `timeout_s`, so the caller's INSERT+commit is never held hostage to
+    Redis. Returns True when the wake reached Redis, False when the publish
+    was rejected or skipped — callers that meter delivery (the delivery
+    watchdog's dispatch counter) must read the return value, never assume
+    success. Ignoring the return value stays backward compatible.
+    But the failure is NOT swallowed blindly — a `NoPermissionError`
+    (a `ResponseError`) means the publisher's redis ACL user is not granted this
+    cluster's `<prefix>:inbound:*` channel (a channel-prefix or ACL misconfig),
+    which would silently disable instant wake fleet-wide, so it is logged at
+    WARNING. Transient failures (redis down) log at DEBUG. Channel is derived via
+    `inbound_channel` so publish and `RedisInboundListener` subscribe stay in
+    sync and stay inside the ACL grant."""
+    from redis.exceptions import ResponseError
+
+    # A wake for an impersonated agent whose relay heartbeat is stale must not
+    # be silent: the inbound can sit unread in the inbox forever. Best-effort,
+    # lazy-imported to keep this module importable without the lease layer.
+    from base.agents.impersonation import relay_liveness_alert
+    from base.cluster import WAKE_KEY_TTL_S, inbound_channel, wake_key
+    from base.events.live.redis_client import sync_redis
+
+    relay_liveness_alert(agent_id)
+    channel = inbound_channel(agent_id)
+    try:
+        r = sync_redis()
+        try:
+            # redis-py types publish()'s **kwargs as Unknown, so the bound
+            # method reads as partially-unknown; the call itself is fully typed.
+            r.publish(channel, payload)  # pyright: ignore[reportUnknownMemberType]
+            # Durable breadcrumb for the lost-wake window: pub/sub is
+            # fire-and-forget, so a publish that lands while the agent's
+            # listener is disconnected is otherwise unrecoverable until the
+            # claim loop's 30s SELECT recheck. The listener GETDELs this key
+            # on (re)subscribe and SELECTs immediately when it is present.
+            r.set(wake_key(agent_id), payload, ex=WAKE_KEY_TTL_S)
+            return True
+        finally:
+            r.close()
+    except ResponseError as exc:
+        logger.warning(
+            "inbound wake publish to {ch!r} rejected by redis ({exc!r}) — the "
+            "cluster redis ACL user lacks this channel; instant wake off, agents "
+            "fall back to their SELECT recheck. Check ensure_cluster_redis_acl.",
+            ch=channel,
+            exc=exc,
+        )
+        return False
+    except Exception as exc:
+        logger.debug(
+            "inbound wake publish to {ch!r} skipped ({exc!r}) — best-effort; the "
+            "agent's SELECT recheck delivers within timeout_s.",
+            ch=channel,
+            exc=exc,
+        )
+        return False
+
+
+def insert_inbound_message(
+    db: psycopg.Connection,
+    agent_id: int,
+    content: str,
+    source: str,
+    kind: str = "chat",
+    payload: dict[str, object] | None = None,
+    provenance: InboundProvenance | None = None,
+) -> int:
+    """UI / gateway call: INSERT one inbound; the agent's claim node
+    fetches and dispatches.
+
+    Args:
+        source: provenance tag — claim node reads it and goes
+            through `base/agents/messages/envelope.py:wrap_inbound` envelope prefix to tell
+            the agent who the message came from. The UI passes
+            `'user'`; a peer agent passes `'agent:N'`.
+        kind: default `'chat'` (user dialogue). Other valid values
+            see `db/schema.sql` CHECK constraint: `'compact_summary'`
+            / `'compact_request'` / `'cancel'` / `'terminate'` / `'restart'`
+            / `'restart_completed'` / `'resurrect'`. Non-'chat' usually
+            pairs with `content=''` (control signal without payload).
+        payload: optional JSONB sidecar. For a multimodal chat inbound this
+            carries `{"content_blocks": [...]}` (the OpenAI-shaped text/image
+            blocks); the claim node reads it to build a native multimodal
+            HumanMessage while `content` holds the text part for legacy /
+            envelope / timeline readers. None leaves the column NULL.
+
+    Returns:
+        The newly inserted inbound id — the caller can use it to
+        publish an `inbound_arrived` event for the web UI to show in
+        real time (spec §5).
+    """
+    if payload is not None and "lifecycle_result" in payload:
+        raise ValueError("lifecycle_result is reserved for verified command settlement")
+    if payload is not None and "launch_attempts" in payload:
+        raise ValueError("launch_attempts is reserved for controller authorization")
+    if payload is not None and "resurrection_retry" in payload:
+        raise ValueError("resurrection_retry is reserved for the pending resurrection owner")
+    if payload is not None and (
+        {"resurrection_launch", "resurrection_launch_attempts"} & payload.keys()
+    ):
+        raise ValueError("resurrection launch evidence is reserved for the lifecycle owner")
+    from base.agents.messages.caller_identity import caller_payload
+    from base.agents.messages.envelope import reject_unnegotiated_caller
+
+    reject_unnegotiated_caller(source)
+    payload = caller_payload(source, payload)
+    source_verified_by = provenance.source_verified_by if provenance is not None else None
+    source_transport = provenance.source_transport if provenance is not None else None
+    content_hash = content_sha256(content) if provenance is not None else None
+    assertion_match = source_assertion_match(source, provenance) if provenance is not None else None
+    # Map inbound kind → lifecycle event_type. Only chat messages between
+    # agents produce a 'send_message' event; user→agent chat is not an
+    # inter-agent event. Lifecycle kinds map 1:1 except compact_summary /
+    # compact_request which are handled elsewhere (agent self-insert /
+    # insert_compact_request_inbound).
+    _kind_to_event: dict[str, str | None] = {
+        "chat": "send_message",
+        "system_note": "send_message",
+        "terminate": "terminate",
+        "restart": "restart",
+        "cancel": "cancel",
+        "resurrect": "resurrect",
+        "restart_completed": "restart_completed",
+        "fork": "fork",
+    }
+    event_type = _kind_to_event.get(kind)
+    # Parse the lineage parent from source. For inter-agent chat it is the
+    # sender; for a kind='fork' lifecycle inbound the source is the fork
+    # identity marker "agent:{fork_source}" — and per the fork-lineage ruling
+    # (2026-08-28, task #1879) the fork event's target_agent_id must be the
+    # fork SOURCE (the lineage parent), never the executor.
+    target_agent_id: int | None = None
+    if event_type == "send_message" and source.startswith("agent:"):
+        with contextlib.suppress(ValueError):
+            target_agent_id = int(source.removeprefix("agent:"))
+    elif event_type == "send_message":
+        # user/UI → agent chat is not an inter-agent event; skip event write
+        event_type = None
+    elif event_type == "fork" and source.startswith("agent:"):
+        with contextlib.suppress(ValueError):
+            target_agent_id = int(source.removeprefix("agent:"))
+
+    prepared_event = None
+    with db.cursor() as cur:
+        cur.execute(
+            "INSERT INTO inbound_messages "
+            "(agent_id, content, kind, source, payload, source_verified_by, "
+            "source_transport, content_hash, source_assertion_match) "
+            "VALUES (%s, %s, %s, %s, %s::jsonb, %s, %s, %s, %s) RETURNING id",
+            (
+                agent_id,
+                content,
+                kind,
+                source,
+                json.dumps(payload) if payload else None,
+                source_verified_by,
+                source_transport,
+                content_hash,
+                assertion_match,
+            ),
+        )
+        new_id = fetch_one(cur, "insert inbound message")[0]
+        if event_type is not None:
+            from base.agents.impersonation_manifest import stage_central_expected_event
+            from base.telemetry.audit_events import prepare_event_log
+
+            prepared_event = prepare_event_log(
+                event_type=event_type,
+                agent_id=agent_id,
+                source=source,
+                target_agent_id=target_agent_id,
+                payload={"inbound_id": new_id, "content": content}
+                if content
+                else {"inbound_id": new_id},
+            )
+            prepared_event = stage_central_expected_event(
+                db,
+                prepared_event,
+                origin_kind="inbound_message",
+                origin_id=new_id,
+            )
+    db.commit()
+    _emit_prepared_event(prepared_event)
+    # Publish to Redis to wake the idle agent. Agents subscribe to
+    # `<prefix>:inbound:{agent_id}` (inbound_channel) via RedisInboundListener.
+    # Fire-and-forget: the agent's defensive SELECT recheck catches inbound
+    # within timeout_s regardless — but a NOPERM is logged, not swallowed.
+    publish_inbound_wake(agent_id, str(new_id))
+    return new_id
+
+
+def insert_spawn_prompt_in_transaction(
+    cur: psycopg.Cursor, agent_id: int, content: str, source: str
+) -> int:
+    """Persist a spawn's first chat in the caller's row-creation transaction.
+
+    This path deliberately does not commit or publish. The caller announces the
+    committed inbound after the transaction, while the pending scan covers a
+    lost announcement. Spawn prompts have no multimodal payload or transport
+    provenance; caller identity still follows the ordinary inbound rules.
+    """
+    from base.agents.messages.caller_identity import caller_payload
+    from base.agents.messages.envelope import reject_unnegotiated_caller, validate_writable_source
+
+    validate_writable_source(source)
+    reject_unnegotiated_caller(source)
+    payload = caller_payload(source, None)
+    cur.execute(
+        "INSERT INTO inbound_messages (agent_id, content, kind, source, payload) "
+        "VALUES (%s, %s, 'chat', %s, %s::jsonb) RETURNING id",
+        (agent_id, content, source, json.dumps(payload) if payload else None),
+    )
+    return fetch_one(cur, "insert spawn prompt")[0]
+
+
+def announce_spawn_prompt(agent_id: int, inbound_id: int, content: str, source: str) -> None:
+    """Emit the ordinary chat audit and wake hints after the prompt commits."""
+    try:
+        if source.startswith("agent:"):
+            from base.agents.impersonation_manifest import stage_central_expected_event
+            from base.telemetry.audit_events import prepare_event_log
+
+            prepared_event = prepare_event_log(
+                event_type="send_message",
+                agent_id=agent_id,
+                source=source,
+                target_agent_id=int(source.removeprefix("agent:")),
+                payload={"inbound_id": inbound_id, "content": content}
+                if content
+                else {"inbound_id": inbound_id},
+            )
+            with write_transaction() as conn:
+                prepared_event = stage_central_expected_event(
+                    conn,
+                    prepared_event,
+                    origin_kind="inbound_message",
+                    origin_id=inbound_id,
+                )
+            _emit_prepared_event(prepared_event)
+    finally:
+        publish_inbound_wake(agent_id, str(inbound_id))
+
+
+def _emit_prepared_event(event: Event | None) -> None:
+    """Enqueue a transactional audit event only after its commit succeeded."""
+    if event is not None:
+        from base import telemetry
+
+        telemetry.emit_prepared(event)
+
+
+def insert_restart_completed_inbound(
+    cur: psycopg.Cursor,
+    agent_id: int,
+    *,
+    post_commit_events: list[Event],
+) -> tuple[str, str, dict[str, object] | None] | None:
+    """Trace the newest restart inbound into a restart-completed marker.
+
+    The newest row matters: an older ``system:update`` restart must not shadow
+    a newer user or self restart, or the claim node renders the wrong marker
+    wording. The payload passes through unchanged so the lifecycle marker can
+    render this restart's config diff. After claiming the marker, the new
+    process writes its full effective-config snapshot; this row guarantees the
+    original restart envelope survives until then. The caller owns the outer
+    transaction and must emit every returned ``post_commit_events`` item only
+    after that transaction commits. ``None`` means no restart inbound exists;
+    the caller owns the appropriate integrity or best-effort response.
+    """
+    cur.execute(
+        "SELECT source, content, payload FROM inbound_messages "
+        "WHERE agent_id = %s AND kind = 'restart' "
+        "ORDER BY id DESC "
+        "LIMIT 1",
+        (agent_id,),
+    )
+    row = cur.fetchone()
+    if row is None:
+        return None
+    source: str = row[0]
+    content: str = row[1]
+    payload: dict[str, object] | None = row[2]
+    cur.execute("SELECT config_overlay FROM agents_meta WHERE id = %s", (agent_id,))
+    config_overlay_row = fetch_one(cur, "restart-completed: read per-agent config")
+    config_overlay: dict[str, object] | None = config_overlay_row[0]
+    cur.execute(
+        "INSERT INTO inbound_messages (agent_id, content, kind, source, payload) "
+        "VALUES (%s, %s, 'restart_completed', %s, %s::jsonb) RETURNING id",
+        (agent_id, content, source, json.dumps(payload) if payload else None),
+    )
+    restart_completed_row = cur.fetchone()
+    if restart_completed_row is None:
+        raise RuntimeError("restart-completed inbound INSERT returned no id")
+    from base.agents.impersonation_manifest import stage_central_expected_event
+    from base.telemetry.audit_events import prepare_event_log
+
+    prepared_event = prepare_event_log(
+        event_type="restart_completed",
+        agent_id=agent_id,
+        source=source,
+        payload={"config_overlay": config_overlay} if config_overlay else {},
+    )
+    prepared_event = stage_central_expected_event(
+        cur.connection,
+        prepared_event,
+        origin_kind="restart_completed",
+        origin_id=int(restart_completed_row[0]),
+    )
+    post_commit_events.append(prepared_event)
+    return source, content, payload
+
+
+# A "live" agent is one currently holding a process (status running/idling) —
+# the set a cluster-wide stop-the-world (quiesce before a schema migration) must
+# drain. The three helpers below all key off this same predicate; the statuses
+# live in ONE constant, passed as a parameter (`status = ANY(%s)`), so a "live"
+# semantics change touches one line, not three literal copies (audit
+# 05-gateway-lifecycle A3).
+# R1 (Task #1021): the single "alive" predicate — status in {running, idling}
+# AND lease unexpired. The lease (`agents_meta.lease_expires_at`, written at
+# claim by `agent._starting.claim_agent_row`, renewed by the agent's loop)
+# is the liveness authority: a process that died without writing 'terminated'
+# leaves its status behind and the lease expires; a process that cannot renew
+# (wedged, pre-lease code) is a zombie the reaper collects.
+#
+# The statuses live in ONE constant and the lease condition in ONE fragment
+# (`ALIVE_SQL`), so a "live" semantics change touches one line, not the literal
+# copies (audit 05-gateway-lifecycle A3 + r1-state-liveness).
+ALIVE_STATUSES: tuple[str, ...] = (
+    AgentStatus.RUNNING.value,
+    AgentStatus.IDLING.value,
+)
+
+# The SQL half of the predicate. Every reader interpolates `status = ANY(%s)
+# AND lease_expires_at > now()` (first parameter = list(ALIVE_STATUSES)) so
+# "alive" stays one definition across queries of every shape.
+ALIVE_SQL = "status = ANY(%s) AND lease_expires_at > now()"
+
+
+def agent_is_alive(status: str | None, lease_expires_at: datetime | None) -> bool:
+    """The Python half of the single alive predicate, for row-based checks.
+
+    A row is alive iff its status says a process should own it AND its lease is
+    unexpired. `None` lease (never granted — pre-lease code) reads as dead,
+    matching the SQL fragment: the reaper collects such rows so they land on
+    code that renews.
+    """
+    if status not in ALIVE_STATUSES:
+        return False
+    if lease_expires_at is None:
+        return False
+    return lease_expires_at > datetime.now(UTC)
+
+
+# FYI notice (require_response=false) lifetime in the open queue: after this many
+# days an unread FYI is auto-resolved ('read') — the open feed, the unread badge
+# and the IM bridge stop carrying it (audit 05-gateway-lifecycle C1: open FYIs
+# used to pile up forever). require_response notices NEVER expire — the user's
+# answer is the only close. The expiry is applied as a query-side rule
+# (created_at cutoff, `make_interval(days => ...)`) plus a lazy auto-resolve in
+# the gateway's open-feed query, so no background sweeper is needed. One knob:
+# change it here (and re-run the notice tests) to configure the TTL.
+NOTICE_FYI_TTL_DAYS = 30
+
+
+def signal_live_agents_restart(
+    source: str, *, exclude_agent_ids: Collection[int] = (), machine: str | None = None
+) -> list[int]:
+    """Bulk-INSERT one kind='restart' inbound per live agent, wake each over Redis; return ids.
+
+    The set-based form of the per-agent restart path (gateway
+    restart_agent_op -> insert_inbound_message(kind='restart')): same
+    inbound_messages contract, one INSERT ... SELECT over every live agent, and
+    the same per-agent Redis wake so an *idling* agent restarts now instead of
+    stalling to its SELECT recheck. That prompt drain matters here specifically:
+    this is the fleet update's quiesce step, whose convergence loop keeps signalling
+    until every live agent has drained — a 30s recheck lag per idle agent would
+    drag the whole quiesce out. `source` tags the signal's origin
+    (e.g. 'system:update').
+
+    `machine` scopes the signal to one host's agents — the per-host quiesce the
+    agent-runner self-update runs before it stops services (watchdog self-heal /
+    a direct fleet update on a runner); None means the whole cluster
+    (the rollout's stop-the-world).
+
+    Args:
+        source: tags the signal's origin (e.g. 'system:update').
+        exclude_agent_ids: agents to skip in the bulk insert. The quiesce
+            convergence loop passes its already-signalled set, so each pass
+            signals only agents that newly became live — an agent respawned
+            mid-quiesce, or one whose spawn completed mid-quiesce.
+        machine: restrict to agents running on this machine (None = all).
+    """
+    with write_transaction() as conn, conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO inbound_messages (agent_id, content, kind, source) "  # noqa: S608 — ALIVE_SQL is a module constant
+            "SELECT id, '', 'restart', %s FROM agents_meta "
+            f"WHERE {ALIVE_SQL} AND NOT (id = ANY(%s)) "
+            "AND (%s::text IS NULL OR machine = %s) "
+            "RETURNING agent_id",
+            (source, list(ALIVE_STATUSES), list(exclude_agent_ids), machine, machine),
+        )
+        ids = [row[0] for row in cur.fetchall()]
+        conn.commit()
+    # Publish a wake per signalled agent (see insert_inbound_message + the
+    # publish_inbound_wake docstring). Best-effort: a lost publish is recovered
+    # by the agent's SELECT recheck. restart carries no user-facing inbound id,
+    # so "0" (mirroring insert_compact_request_inbound).
+    for aid in ids:
+        publish_inbound_wake(aid, "0")
+    return ids
+
+
+def list_live_agent_ids(machine: str | None = None) -> list[int]:
+    """IDs of agents currently holding a process (status running/idling).
+
+    `machine` restricts to one host's agents (the per-host quiesce); None
+    returns the whole cluster (the rollout's stop-the-world).
+    """
+    with connect() as conn, conn.cursor() as cur:
+        cur.execute(
+            "SELECT id FROM agents_meta "  # noqa: S608 — ALIVE_SQL is a module constant
+            f"WHERE {ALIVE_SQL} AND (%s::text IS NULL OR machine = %s)",
+            (list(ALIVE_STATUSES), machine, machine),
+        )
+        return [row[0] for row in cur.fetchall()]
+
+
+def list_pending_inbounds(db: psycopg.Connection, agent_id: int) -> list[InboundRow]:
+    """List chat inbounds still queued for an agent, oldest first.
+
+    Only `status='pending'` (the claim node has not picked these up yet)
+    and `kind='chat'` (user-visible dialogue, not control signals). Once a
+    message is claimed it enters the agent's in-memory messages and shows
+    up in the timeline snapshot, so it is intentionally excluded here — the
+    web UI renders these as a compact "pending" strip above the composer,
+    distinct from the timeline.
+
+    Rows the active takeover pipeline has already absorbed are also
+    excluded: while an unexpired `active` lease exists, a pending chat that
+    the session trail has transcribed (an `agent_impersonation_entries`
+    row — what the timeline renders) or that the relay has read
+    (`agent_impersonation_messages`) is display-side delivered, and must
+    not appear in both the timeline and the strip (#3683). The row itself
+    stays `status='pending'` — this is a read-surface view, not a state
+    change; once the lease ends, unacknowledged rows are visible here
+    again (delivery evidence counts only while the lease is alive).
+
+    `payload` rides along (unlike the other InboundRow readers) because the
+    strip renders multimodal messages: the endpoint extracts their image
+    reference urls from the content blocks so the browser can show
+    thumbnails before the message is claimed.
+    """
+    with db.cursor() as cur:
+        cur.execute(
+            "SELECT ib.id, ib.content, ib.kind, ib.source, ib.status, ib.created_at, "
+            "       ib.claimed_at, ib.payload "
+            "FROM inbound_messages ib "
+            "WHERE ib.agent_id = %s AND ib.status = 'pending' AND ib.kind = 'chat' "
+            "AND NOT EXISTS ("
+            "  SELECT 1 FROM agent_impersonations lease "
+            "  WHERE lease.agent_id = ib.agent_id "
+            "    AND lease.status = 'active' "
+            "    AND lease.expires_at > clock_timestamp() "
+            "    AND (EXISTS ("
+            "      SELECT 1 FROM agent_impersonation_messages relay_read "
+            "      WHERE relay_read.lease_id = lease.id AND relay_read.inbound_id = ib.id"
+            "    ) OR EXISTS ("
+            "      SELECT 1 FROM agent_impersonation_entries transcribed "
+            "      WHERE transcribed.lease_id = lease.id "
+            "        AND transcribed.kind = 'message' "
+            "        AND transcribed.event_key = 'inbound:' || ib.id::text"
+            "    ))"
+            ") "
+            "ORDER BY ib.created_at ASC",
+            (agent_id,),
+        )
+        return [InboundRow(*row) for row in cur.fetchall()]
+
+
+def insert_compact_request_inbound(db: psycopg.Connection, agent_id: int) -> int:
+    """UI / admin call: insert one kind='compact_request' inbound —
+    the claim Node, on receiving, runs the backend Compaction LLM to
+    generate a summary that replaces messages.
+
+    The new design (Step 2 cleanup) merges the old
+    framework_compact / agent_compact kinds: the user view no longer
+    distinguishes modes; backend LLM summary generation is the unified
+    path. Agent-initiated compact still goes through
+    ava.self.compact() -> kind='compact_summary' (agent writes its
+    own summary)."""
+    with db.cursor() as cur:
+        cur.execute(
+            "INSERT INTO inbound_messages (agent_id, content, kind) VALUES (%s, %s, %s) "
+            "RETURNING id",
+            (agent_id, "", "compact_request"),
+        )
+        row = cur.fetchone()
+        if row is None:
+            raise RuntimeError("compact request inbound INSERT returned no id")
+        inbound_id = row[0]
+        from base.telemetry.audit_events import insert_event_log
+
+        insert_event_log(
+            event_type="compact",
+            agent_id=agent_id,
+            source="user",
+            payload={"compact_kind": "request"},
+        )
+    db.commit()
+    # Publish to Redis for agent wake-up (see insert_inbound_message + the
+    # publish_inbound_wake docstring).
+    publish_inbound_wake(agent_id, str(inbound_id))
+    return inbound_id
+
+
+def list_inbound_messages(
+    db: psycopg.Connection,
+    agent_id: int,
+    limit: int,
+) -> list[InboundRow]:
+    """Read inbound_messages rows for the given agent (including
+    done) in created_at ascending order.
+
+    Used by the /timeline endpoint — fetched when merging three
+    sources for external inbound records. Callers state their own
+    bound: there is no default (task #3696).
+    """
+    with db.cursor() as cur:
+        cur.execute(
+            "SELECT id, content, kind, source, status, created_at, claimed_at "
+            "FROM inbound_messages "
+            "WHERE agent_id = %s ORDER BY created_at ASC LIMIT %s",
+            (agent_id, limit),
+        )
+        return [InboundRow(*r) for r in cur.fetchall()]

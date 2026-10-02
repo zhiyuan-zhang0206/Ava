@@ -14,7 +14,7 @@ collision):
    `$AVA_HOME/plugins/<name>/.mcp.json`).
 3. installed — `$AVA_HOME/mcps/<name>/.mcp.json`, MCP packages added via
    `ava mcp install`, each a self-contained dir gated by the install registry
-   (`shared.install_registry`, `type="mcp"`). An installed server's command is
+   (`base.packages.extensions.install_registry`, `type="mcp"`). An installed server's command is
    a relative `.venv/bin/python …` resolved against that dir (see
    `installed_mcp_dir`), so its deps stay isolated from core.
 4. machine — `$AVA_HOME/mcp.json`, applied last, so a hand-added machine entry
@@ -32,10 +32,10 @@ import json
 from pathlib import Path
 from typing import Any, TypedDict
 
-from shared.paths import ava_home, mcps_dir, repo_root
-from shared.platform import IS_WINDOWS
-from shared.platform_probes import display_available, unix_sockets_available
-from shared.runtime_interpreter import external_plugin_read_root
+from base.deploy.release.runtime_interpreter import external_plugin_read_root
+from base.host.system.probes import display_available, unix_sockets_available
+from base.native_process.os_platform import IS_WINDOWS
+from base.paths import ava_home, mcps_dir, repo_root
 
 
 class MCPError(Exception):
@@ -120,7 +120,7 @@ def server_capability(spec: dict[str, Any]) -> tuple[bool, str | None]:
 # The relative interpreter path every `.mcp.json` we own is authored with. It is
 # a repo convention, not a platform fact — the file is committed once and read on
 # every platform, so the reader maps it onto this host's venv layout (the same
-# substitution `shared.session_backend` does for supervised session commands).
+# substitution `base.sessions.backend` does for supervised session commands).
 _POSIX_VENV_PYTHON = ".venv/bin/python"
 _WINDOWS_VENV_PYTHON = ".venv\\Scripts\\python.exe"
 
@@ -238,7 +238,7 @@ def _installed_mcp_paths() -> list[Path]:
     install` writes the dir and the registry row together; `ava mcp uninstall`
     removes both.
     """
-    from shared.install_registry import installed_mcp_names
+    from base.packages.extensions.install_registry import installed_mcp_names
 
     root = mcps_dir()
     if not root.is_dir():
@@ -263,7 +263,7 @@ def installed_mcp_dir(name: str) -> Path | None:
     by a same-named machine-config entry (the one layer above installed — that
     entry would be spawned from the daemon cwd instead).
     """
-    from shared.install_registry import installed_mcp_names
+    from base.packages.extensions.install_registry import installed_mcp_names
 
     if name not in installed_mcp_names():
         return None
@@ -354,7 +354,7 @@ def load_mcp_config(*, include_disabled: bool = False) -> dict[str, dict[str, An
     merged.update(read_servers(machine_config_path()))
     if include_disabled:
         return merged
-    from shared.mcp_enabled import McpEnabledConfigError, read_enabled
+    from base.packages.plugins.mcp_enabled import McpEnabledConfigError, read_enabled
 
     try:
         enabled = read_enabled()
@@ -380,9 +380,10 @@ def _session_death_codes() -> frozenset[int]:
 
 
 def is_transport_error(exc: BaseException) -> bool:
-    """True when `exc` means the MCP server process / transport died and a
-    reconnect + retry is appropriate — vs a tool-level error that must
-    propagate untouched (retrying would double-run side-effectful tools).
+    """True when `exc` means the MCP server process / transport died.
+
+    A caller may reconnect for its next request. It may retry this request
+    only if it was not a side-effectful tool call already in flight.
 
     Shared by the MCP daemon and the in-process SDK so both sides agree on
     the retry seam.

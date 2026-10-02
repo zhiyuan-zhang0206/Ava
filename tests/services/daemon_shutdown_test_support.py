@@ -80,7 +80,7 @@ def _noop_schema_gate(*_args: object, **_kwargs: object) -> None:
 
 def run_child() -> None:
     """Child entry: production ``main()`` with a wedge-shaped ``run()``."""
-    import shared.migrations
+    import base.deploy.schema.migrations
 
     mod = importlib.import_module(os.environ[_CHILD_MODULE_ENV])
     pre_ready = _load_pre_ready_probe()
@@ -88,7 +88,7 @@ def run_child() -> None:
     # Orthogonal to the exit shape under test and would otherwise dial the
     # cluster DB; the subprocess stays hermetic from here down everything is
     # production code.
-    shared.migrations.assert_schema_current = _noop_schema_gate
+    base.deploy.schema.migrations.assert_schema_current = _noop_schema_gate
 
     async def wedge_run() -> None:
         try:
@@ -208,8 +208,9 @@ def spawn_child(
     # dialing the operator's real collector.
     home = tmp_path / "ava-home"
     home.mkdir()
-    (home / ".env").write_text(f"{_ENDPOINT_ENV}={endpoint}\n", encoding="utf-8")
-    (home / "machine_name").write_text(f"{label}-shutdown-test\n", encoding="utf-8")
+    (home / ".env").write_text(
+        f"{_ENDPOINT_ENV}={endpoint}\nAVA_MACHINE_NAME={label}-shutdown-test\n", encoding="utf-8"
+    )
     env = os.environ.copy()
     env["AVA_HOME"] = str(home)
     env[_MARKERS_ENV] = str(markers_path)

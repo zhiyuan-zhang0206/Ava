@@ -15,7 +15,7 @@ when a feed item has no subtitles (most non-YouTube sources, music videos, newly
 ```python
 import os
 import sys
-sys.path.insert(0, os.path.join(os.environ["AVA_HOME"], "skills", "audio-transcribe"))
+sys.path.insert(0, os.path.join(os.environ["AVA_HOME"], "skills", "audio-transcribe", "scripts"))
 import transcribe
 
 # Local audio/video file → plain text
@@ -26,6 +26,10 @@ print(r["text"], r["chunks"], r["audio_seconds"])
 r = transcribe.transcribe("dRsjO-88nBs")
 r = transcribe.transcribe("https://example.com/podcast.mp3", language="en")
 ```
+
+A caller in another skill instead runs it as a subprocess CLI —
+`$AVA_HOME/source/.venv/bin/python $AVA_HOME/skills/audio-transcribe/scripts/transcribe.py <source> --json`
+— and reads the JSON from stdout (see `web-sources:youtube`'s whisper fallback).
 
 `transcribe(source, *, model="gpt-4o-transcribe", language=None, prompt=None,
 max_bytes=24MB)` returns `{text, model, chunks, audio_seconds, source}`. `language`
@@ -39,7 +43,7 @@ OpenAI single upload ≤25MB. Process: first use ffmpeg to convert to **mono 16k
 
 - `ffmpeg` (transcoding + segmentation) and `ffprobe` (duration measurement) on PATH.
 - `yt-dlp` (only when source is a URL/video id to extract audio).
-- `OPENAI_API_KEY` in `~/.ava/.env`, read via `shared.config.settings`.
+- `OPENAI_API_KEY` in `~/.ava/.env`, read via `base.config.settings`.
 
 ## What it does NOT do
 

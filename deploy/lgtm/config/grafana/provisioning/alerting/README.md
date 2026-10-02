@@ -5,10 +5,11 @@ the LGTM cutover (Task #1224) they evaluate against the **LGTM read side**:
 R1-R3, R5-R7, R13, R17, and R19 query **Loki** (every event is one OTLP log
 line under `{service_name="unknown_service"}`, body = the full event JSON, so
 `| json` flattens each line to labels), while R4, the gateway-metrics silence
-rule, and the watchdog-tick staleness rule query **Prometheus** (the
+rule, and the root-health round freshness rule query **Prometheus** (the
 `ava_llm_usage_latency_milliseconds` histogram,
 `ava_gateway_latency_count_total` heartbeat,
-`ava_watchdog_tick_last_tick_timestamp_seconds` gauge, and R18 turn-duration
+`ava_root_health_tick_last_tick_timestamp_seconds` and
+`ava_root_health_expected_expected_since_timestamp_seconds` gauges, and R18 turn-duration
 histogram); R24 queries Prometheus's own too-old-samples counter. The retired
 Postgres events read path (#1197) is gone — nothing
 queries the `ops` datasource from these rules.
@@ -19,7 +20,7 @@ dashboards).
 
 ### LogQL migration (task #1467, complete)
 
-- Since the 2026-08-23 index-label cutover (shared/loki_index_labels.py) the
+- Since the 2026-08-23 index-label cutover (base/telemetry/loki_index_labels.py) the
   collector promotes `event_name` / `agent_id` to stream labels; event-scoped
   rules match them INSIDE the stream selector
   (`{service_name="unknown_service", event_name=...}`) and keep `| json` only
@@ -44,13 +45,14 @@ The contact point posts to the gateway's alert ingest endpoint — loopback
 `127.0.0.1:8000` when the observatory is local, the gateway's reachable
 address when `AVA_OBSERVABILITY_URL` points at a remote station.
 
-## Rules (41)
+## Rules (43)
 
-The rules are split between `ava-ops` (31 rules, evaluated every minute:
-R1-R6, the watchdog-tick and gateway-metrics silence rules, the checkpoint
-guards, R8-R12, R14-R16, and R24) and
-`ava-ops-slow` (ten rules, evaluated every five minutes: R7, R13, R17's two
-fast-route tiers, R18, and R19's two slow-route tiers, plus the PITR-storage / Tempo-backend / LLM-rate-limit checks). Each rule retains its
+The rules are split between `ava-ops` (33 rules, evaluated every minute:
+R1-R6, the root-health-round and gateway-metrics silence rules, the checkpoint
+guards, R8-R12, R14-R16, R24, and the R25/R26 backup-operation custody
+rules) and
+`ava-ops-slow` (nine rules, evaluated every five minutes: R7, R13, R17's two
+fast-route tiers, R18, and R19's two slow-route tiers, plus the Tempo-backend / LLM-rate-limit checks). Each rule retains its
 own `for` window.
 
 Application layer — the Loki event stream plus the LLM latency histogram:
@@ -63,7 +65,7 @@ Application layer — the Loki event stream plus the LLM latency histogram:
 | `ava-ops-llm-latency-p95` | `ava-ops` | llm_usage latency p95 | histogram p95 in 10m > 60000 ms (Prometheus) | 10m | error |
 | `ava-ops-delivery-stalled-backlog` | `ava-ops` | delivery_stalled fresh backlog | fresh (age_s<600) count in 10m > 50 (Loki) | 5m | warning |
 | `ava-ops-events-freshness` | `ava-ops` | event stream stalled | no events in Loki for 5m (absent_over_time) | 5m | error |
-| `ava-ops-watchdog-tick-stale` | `ava-ops` | watchdog completed-tick timestamp | a recently seen machine+process timestamp is >3m old or absent for 3m (Prometheus) | 0m | error |
+| `ava-ops-root-health-stale` | `ava-ops` | root health round freshness | a machine+home+process expecting rounds within 24h has its last completed round >3m stale, or none since startup (Prometheus) | 0m | error |
 | `ava-ops-gateway-metrics-silent` | `ava-ops` | gateway_latency heartbeat | no samples in Prometheus for 5m (absent_over_time) | 5m | error |
 | `ava-ops-trace-disk-watermark` | `ava-ops-slow` | trace recording auto-degraded | recording_disabled_disk_watermark count in 24h > 0 (Loki) | 5m | error |
 | `ava-ops-llm-billing-quota` | `ava-ops-slow` | LLM key out of credit / quota | llm_provider_error with billing=true in 15m > 0 (Loki) | 0m | critical |
@@ -77,8 +79,9 @@ Application layer — the Loki event stream plus the LLM latency histogram:
 | `ava-ops-fleet-graph-stale` | `ava-ops` | fleet graph served stale | `fleet_graph_stale` episodes in 10m > 1 (Loki) | 0m | warning |
 | `ava-ops-telemetry-queue-loss` | `ava-ops` | telemetry queue lost events | a machine+process+queue's last drop < 300s old (Prometheus) | 0s | error |
 | `ava-ops-recovery-drill-failed` | `ava-ops` | scheduled recovery drill failed | `recovery_drill_failed` (level=error) by drill in 1h > 0 (Loki) | 0m | error |
+| `ava-ops-backup-operation-blocked` | `ava-ops` | backup operation kind blocked on unproven closure | `backup_operation_custody` custody=blocked (level=error) by operation in 1h > 0 (Loki) | 0m | error |
+| `ava-ops-backup-operation-quarantined` | `ava-ops` | backup operation failed or cancelled, quarantined | `backup_operation_custody` custody=quarantined (level=error) by operation in 1h > 0 (Loki) | 0m | warning |
 | `ava-ops-llm-rate-limit` | `ava-ops-slow` | LLM provider rate-limit burst | HTTP 429s by vendor in 5m > 5 (Loki) | 0m | warning |
-| `ava-ops-pitr-storage-growth` | `ava-ops-slow` | remote PITR storage growth | ratio vs 7d-ago footprint > 1.25 (Prometheus) | 1h | warning |
 | `ava-ops-llm-stall-pair` | `ava-ops` | LLM stream stall pair | `stream_stall_pair_terminated` in 15m > 0 (Loki) | 0m | warning |
 | `ava-ops-llm-stall-burst` | `ava-ops` | LLM provider stall burst | `stream_stalled_retry` per vendor in 15m > 4 (Loki) | 0m | warning |
 
@@ -152,8 +155,7 @@ collector logs alone miss the latter. The window rationale and acceptance
 runbook are in the [LGTM README](../../../../README.md#otlp-late-sample-window-out-of-order-intake).
 
 Storage and store growth — absolute-size gauges from the OTLP metric mirror
-(`ava_checkpoint_table_sizes` / `ava_memory_search_stats` /
-`ava_pitr_remote_inventory`), queried from Prometheus. The exporter's unit
+(`ava_checkpoint_table_sizes` / `ava_memory_search_stats`), queried from Prometheus. The exporter's unit
 translation renders the dimensionless gauges with a `_ratio` suffix — the
 series the rules read are e.g. `ava_checkpoint_table_sizes_blobs_bytes_ratio`:
 
@@ -165,7 +167,6 @@ series the rules read are e.g. `ava_checkpoint_table_sizes_blobs_bytes_ratio`:
 | `ava-ops-checkpoint-blobs-growth` | `ava-ops` | checkpoint_blobs growth rate | +1 GiB in the trailing 6h (Prometheus) | 1h | warning |
 | `ava-ops-memory-search-rows-warning` | `ava-ops` | memory-search store rows | > 30000 (Prometheus) | 2h | warning |
 | `ava-ops-memory-search-rows-critical` | `ava-ops` | memory-search store rows | > 100000 (Prometheus) | 2h | critical |
-| `ava-ops-pitr-storage-growth` | `ava-ops-slow` | remote PITR storage footprint | ratio vs 7d-ago footprint > 1.25 (Prometheus) | 1h | warning |
 
 The two checkpoint guards came out of the #4002 evaluation items (#4004/#4005).
 The freshness rule fires on the silent-NoData class itself — the absolute tiers
@@ -181,7 +182,7 @@ R17's fast-route thresholds are calibrated against seven days of route data,
 R19 gives slow-by-design routes separate 5s/10s thresholds calibrated against
 24 hours of route data, and R18 catches fleet-wide slowdown (p95 vs the 24h
 baseline ×2) rather than single long turns. The emitter's single
-route-classification source is `gateway/_latency.py`. All five carry
+route-classification source is `gateway/middleware/latency.py`. All five carry
 `notify_im: "false"` — the PM slow-request convention is warning-first and no
 IM fan-out (alert-fatigue ruling 2026-08-22); the gateway honors the label once
 the IM gating PR (#3219) lands, until then they reach IM like the rest.
@@ -197,7 +198,7 @@ R13 (llm-billing-quota) is the one rule with no threshold and no `for`
 window: an out-of-credit API key fails every turn in the fleet and only a
 human spending money clears it, so the first rejection is already the whole
 incident. Its discriminator is the `billing` field the emitter writes from
-`shared/lm/errors.py`'s cross-provider predicate (HTTP 402 plus a per-vendor
+`base/lm/errors.py`'s cross-provider predicate (HTTP 402 plus a per-vendor
 vocabulary matched against the response body's `error.type` AND `error.code`) —
 a new provider is covered by adding its string there, with no edit to
 `rules.yml`.
@@ -227,12 +228,10 @@ a new provider is covered by adding its string there, with no edit to
 
 ## Sync to the live Grafana
 
-There is no copy step: native Grafana reads this directory from the source
-checkout. Alert-rule provisioning does **not** hot-reload file changes
-(verified 2026-08-04), so restart it after editing `rules.yml` with
-`launchctl kickstart -k gui/$(id -u)/com.ava.grafana.<home-slug>` (first run
-`launchctl bootstrap gui/$(id -u) <plist>` if the job is not loaded).
-Datasource and contact-point provisioning do hot-reload.
+Converge renders the provisioning tree into this home's native configuration.
+Alert-rule changes require a new root generation. Use normal `ava stop -y` then
+`ava start`; readiness alone cannot prove that a running Grafana reloaded a file.
+There is no independent launchd or systemd Grafana restart path.
 
 ## How to add a rule
 

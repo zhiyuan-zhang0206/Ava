@@ -1,8 +1,9 @@
-"""Drain local native work before stopping its dependencies.
+"""Resume a drained unit and read or release its pause posture.
 
-The existing pause-owner journal closes admission and records checkpoint/exit
-receipts. Gateway middleware reads the separate DB posture, which changes only
-when the caller proceeds to service shutdown after the cluster-wide barrier.
+The drain itself is `ops.agent_pause`. The existing pause-owner journal closes
+admission and records checkpoint/exit receipts. It fences HTTP only after the
+cluster-wide drain barrier advances this home into its stop window. Database
+posture remains a status projection.
 """
 
 from __future__ import annotations
@@ -10,10 +11,13 @@ from __future__ import annotations
 import logging
 from typing import cast
 
-import shared.host_deploy_state
-from shared import http_dial
-from shared.daemon_health import health_port
-from shared.pause_owner import PauseOwnerSnapshot
+import psycopg
+from psycopg_pool import ConnectionPool
+
+import base.deploy.state.host_deploy_state
+from base.daemon.health import health_port
+from base.deploy.maintenance.pause_owner import PauseOwnerSnapshot
+from base.host.net import http_dial
 
 _log = logging.getLogger(__name__)
 _UNSET = object()
@@ -25,20 +29,19 @@ _POOL_RELEASE_TIMEOUT_S = 5.0
 
 
 def is_paused(
-    state: shared.host_deploy_state.HostDeployState | object | None = _UNSET,
+    state: base.deploy.state.host_deploy_state.HostDeployState | object | None = _UNSET,
 ) -> bool:
     """Whether this host is paused — the `host_deploy_state.posture` row written
     by the gateway's pause fan-out (R1, Task #1021).
 
-    Gateway middleware checks this on every request. The row is read from the
-    central DB, which the gateway owns; a read failure (DB unreachable) reads as
+    Status readers consume this database projection. HTTP admission instead reads
+    the local journal. A projection read failure (DB unreachable) reads as
     NOT paused — the same conservative direction the old file stat had (an
-    unreadable flag was an absent flag). The offline maintenance page is owned
-    separately by the cluster orchestrator's Gate marker.
+    unreadable flag was an absent flag).
     """
     if state is _UNSET:
         try:
-            resolved_state = shared.host_deploy_state.read()
+            resolved_state = base.deploy.state.host_deploy_state.read()
         except Exception:
             _log.warning(
                 "[cluster] is_paused: host_deploy_state read failed; reading as not paused",
@@ -46,42 +49,18 @@ def is_paused(
             )
             return False
     else:
-        resolved_state = cast(shared.host_deploy_state.HostDeployState | None, state)
+        resolved_state = cast(base.deploy.state.host_deploy_state.HostDeployState | None, state)
     return resolved_state is not None and resolved_state.posture == "paused"
 
 
-def pause_local_cluster() -> None:
-    """Drain native agents while keeping their in-flight SDK dependencies available.
-
-    The existing admission journal also keeps watchdogs and schedule admission
-    paused. Posture becomes 503 only when the caller actually stops services,
-    after all participating runners have completed their ordinary restarts.
-
-    This entry is update-family only (Phase A, `spawn_update`, the update CLI's
-    local leg), so the drain enables the straggler reap (task #4016): a member
-    still un-landed past `update_straggler_reap_seconds` is truncated and
-    released as `reaped` instead of aborting the wave.
-    """
-    from ops.agent_pause import pause_agents
-    from shared.config import settings
-
-    pause_agents(settings.gateway.update_quiesce_timeout_seconds, reap=True)
-
-
 def unpause_local_cluster() -> None:
-    """Restore posture, then release this unit's existing agent pause.
-
-    The resume/start boundary also settles any stranded straggler-reap marks
-    (task #4016): the compensating resume of an aborted wave runs while this
-    host stayed up, so the marker rows would otherwise outlive their drain.
-    """
+    """Restore posture, then release this unit's existing agent pause."""
+    from base.deploy.maintenance import admission
     from ops.agent_pause import resume_agents
-    from shared import maintenance
 
-    current = maintenance.snapshot()
+    current = admission.snapshot()
     if current is None:
         _unpause_local_cluster()
-        _settle_stranded_reaps()
         return
     assert current.holder is not None and current.acquired_at is not None  # noqa: S101
     if (refusal := _hold_refusal(current)) is not None:
@@ -92,57 +71,22 @@ def unpause_local_cluster() -> None:
             "cold admission re-drives their continuations: %s",
             sorted(current.maintenance.undelivered),
         )
-    with maintenance.authorized_start(current.holder, current.acquired_at):
+    with admission.authorized_start(current.holder, current.acquired_at):
         _unpause_local_cluster()
     resume_agents()
-    _settle_stranded_reaps()
-
-
-def _settle_stranded_reaps() -> None:
-    """Restore rows a wave's straggler reap left marked, then wake each one.
-
-    Best-effort by design: a settle failure leaves the mark in place (the row
-    stays unrunnable) and the next boot or resume retries it; it must not block
-    this unit's resume. The wake is what lets the settled agent's first
-    admission run the existing inbound reconcile and re-deliver the work the
-    reap truncated (task #4016).
-    """
-    from shared.db import connect
-    from shared.machine import machine_name
-    from shared.straggler_reap import (
-        announce_settled,
-        publish_settled_wakes,
-        settle_stranded_reaps,
-    )
-
-    try:
-        with connect() as conn, conn.transaction():
-            settled = settle_stranded_reaps(conn, machine_name())
-    except Exception:
-        _log.warning(
-            "[cluster] stranded straggler-reap settle failed; the mark stays for the "
-            "next boot/resume to retry",
-            exc_info=True,
-        )
-        return
-    if settled:
-        _log.info("[cluster] restored stranded straggler-reap row(s): %s", settled)
-        announce_settled(settled, site="resume")
-    publish_settled_wakes(settled)
 
 
 def _hold_refusal(current: PauseOwnerSnapshot) -> str | None:
     """The refusal `unpause_local_cluster` raises for a held unit, or None when its
-    resume may proceed. One source for both the pre-check a caller runs before
-    attempting and the text the attempt itself raises, so they cannot disagree."""
+    resume may proceed."""
     assert current.holder is not None and current.acquired_at is not None  # noqa: S101
-    if current.maintenance is not None and current.maintenance.unsettled_failures():
+    if current.maintenance is not None and current.maintenance.failures:
         return (
             "cannot resume failed continuation/flush receipts; fix the root cause, "
             f"then ava maintenance repair --operation {current.holder} "
             f"--acquired-at {current.acquired_at.isoformat()}"
         )
-    from shared import start_serving
+    from base.deploy.lifecycle import start_serving
 
     if (
         current.maintenance is not None
@@ -153,121 +97,25 @@ def _hold_refusal(current: PauseOwnerSnapshot) -> str | None:
     return None
 
 
-def local_resume_refusal() -> str | None:
-    """Why this unit's local unpause cannot succeed right now, or None when it may.
-
-    Read-only and local (pause-owner journal + start-serving marker), so it answers
-    with every service down — exactly the state a caller most needs it in. A refusal
-    is durable state no compensation attempt can clear; asking first turns the
-    compensating unpause's two doomed attempts (issue #2162: `rc=1`, then an
-    unreadable `RuntimeError`) into the one recovery command that fits.
-    """
-    from shared import maintenance
-
-    try:
-        current = maintenance.snapshot()
-    except RuntimeError as exc:
-        # An unreadable owner refuses new work; that refusal is the answer.
-        return str(exc)
-    if current is None:
-        return None
-    return _hold_refusal(current)
-
-
-def release_pre_stop_hold(*, reason: str) -> None:
-    """Abandon a pre-stop maintenance hold -- the auto twin of `resume --cancel`.
-
-    The bounded release behind task #3270: nothing is executing under the hold
-    and its shepherding process is gone, so the unit returns to serving exactly
-    as the operator's `ava maintenance resume --cancel` returns it. The
-    preconditions mirror that verb's cancel half -- a started stop cannot be
-    cancelled, failed receipts need repair first, and on an agent-runner the
-    live agent-host and a reachable data plane must still answer -- and the
-    release itself runs through the same authorized-start + unpause sequence.
-    A provably absent agent-host (no process; `host_running()` false) does not
-    block: with no process there is no continuation to protect, so the identity
-    probe is skipped and the downgrade is audited loudly. A live host that
-    cannot be identified still refuses (task #4168).
-    `reason` goes into the audit line so the ops log names the actor (watchdog
-    release vs updater self-release).
-
-    Callers serialize on the lifecycle lock (`recover_stranded_pause` is the
-    pattern); this function takes no lock of its own. Raises -- with the same
-    refusals the operator path raises -- leaving the hold preserved.
-    """
-    from shared import maintenance
-    from shared.db import connect
-    from shared.machine import machine_role
-
-    current = maintenance.snapshot()
-    if current is None:
-        raise RuntimeError("no maintenance hold stands on this unit")
-    assert current.holder is not None and current.acquired_at is not None  # noqa: S101
-    if current.maintenance is not None and current.maintenance.phase not in (
-        "preparing",
-        "draining",
-        "drained",
-    ):
-        raise RuntimeError(
-            "cancel cannot bypass a started stop; complete maintenance stop/start/resume"
-        )
-    if (refusal := _hold_refusal(current)) is not None:
-        raise RuntimeError(refusal)
-    if "agent-runner" in machine_role():
-        from ops.agent_pause_probe import host_identity_or_none
-
-        if host_identity_or_none() is None:
-            # No agent-host process exists, so no continuation can be in
-            # flight; the skipped probe and its process-level absence proof
-            # are audited loudly with the reason (task #4168).
-            _log.error(
-                "[cluster] pre-stop release downgrade: agent-host provably absent "
-                "(host_running()=false; no process => no continuations possible); "
-                "identity probe skipped (reason=%s, holder=%s, acquired_at=%s)",
-                reason,
-                current.holder,
-                current.acquired_at.isoformat(),
-            )
-    with connect() as conn:
-        conn.execute("SELECT 1")
-    with maintenance.authorized_start(current.holder, current.acquired_at):
-        unpause_local_cluster()
-    _log.error(
-        "[cluster] released a pre-stop maintenance hold (%s): holder=%s acquired_at=%s",
-        reason,
-        current.holder,
-        current.acquired_at.isoformat(),
-    )
-
-
 def _unpause_local_cluster() -> None:
     """Restore this unit's HTTP posture without launching any agent or service."""
-    from shared import maintenance
-    from shared.host_deploy_state import set_posture
+    from base.deploy.maintenance import admission
+    from base.deploy.state.host_deploy_state import set_posture
 
-    maintenance.require_start_allowed()
+    admission.require_start_allowed()
     set_posture("idle")
     _log.info("[cluster] unpaused: posture -> idle")
 
 
-def finalize_pause_owner_journal() -> None:
-    """Finalize only a legacy deploy journal after its caller restores service.
-
-    Current continuation holds are released by resume_agents; the legacy CAS
-    refuses every journal containing maintenance state.
-    """
-    from shared.pause_owner import finalize_natural_resume
-
-    if finalize_natural_resume():
-        _log.info("[cluster] legacy pause-owner journal: resumed")
-
-
-def release_local_db_pools() -> dict[str, object]:
+def release_local_db_pools(
+    ops_pool: ConnectionPool[psycopg.Connection] | None,
+) -> dict[str, object]:
     """Release this unit's idle DB-pool connections; never fail the stop.
 
     Two client pools survive the agent drain: the local host daemon's shared /
-    control pools (dialed over its loopback health port) and this ops daemon's
-    own dispatch pool. Left open, they hold PgBouncer server connections
+    control pools (dialed over its loopback health port) and the ops daemon's
+    own dispatch pool, which that daemon passes in as `ops_pool` (None before
+    its pool opens). Left open, they hold PgBouncer server connections
     through the data-plane window the stop is about to close. Both releases are
     best-effort — a failure leaves the stop correct but leaks idle client
     connections into the downtime — so it logs loudly and reports in the
@@ -287,13 +135,10 @@ def release_local_db_pools() -> dict[str, object]:
         released["host_error"] = str(exc)
 
     try:
-        from services.agent_ops import daemon as ops_daemon
+        if ops_pool is not None:
+            from base.db.pool_release import release_idle_sync
 
-        pool = ops_daemon._db_pool
-        if pool is not None:
-            from shared.pool_release import release_idle_sync
-
-            released["ops"] = release_idle_sync(pool)
+            released["ops"] = release_idle_sync(ops_pool)
     except Exception as exc:
         _log.warning("[cluster] ops pool release failed (continuing the stop): %s", exc)
         released["ops_error"] = str(exc)

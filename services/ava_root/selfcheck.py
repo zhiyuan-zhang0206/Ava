@@ -34,7 +34,7 @@ from contextlib import suppress
 from dataclasses import dataclass
 from typing import Protocol, cast
 
-from shared.proc import child_state
+from base.host.proc import child_state
 
 _log = logging.getLogger(__name__)
 
@@ -47,7 +47,7 @@ _SLOT_NAMES = (ATTRIBUTION_COVERAGE, RESEEDING_LATENCY_S)
 
 def _monotonic() -> float:
     """Wall-independent clock for the episode ages — a module seam so tests can
-    advance time (the same pattern as `shared.service_respawn`)."""
+    advance time (the same pattern as `base.service_respawn`)."""
     return time.monotonic()
 
 
@@ -243,7 +243,7 @@ class TreeSelfCheck:
 
     def _emit_chain_broken(self, broken: list[str], reasons: dict[str, str], root_pid: int) -> None:
         """The one alert per broken episode — a registered event (loguru `event=`)."""
-        from shared.log import logger
+        from base.log import logger
 
         logger.warning(
             "[selfcheck] tree chain broken — {units} no longer verified as live "

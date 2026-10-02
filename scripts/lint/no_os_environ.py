@@ -1,0 +1,374 @@
+"""Forbid bare os.environ / os.getenv — runtime config must go through base.config.Settings.
+
+Run: `.venv/bin/python scripts/lint/no_os_environ.py [path ...]` (defaults to scanning the whole repo;
+an explicit path that does not exist is an error (stderr + exit 1) rather than a
+silent no-op). Also run automatically via pre-commit hook before commit.
+
+## Why
+
+`base.config.settings` (the `Settings` aggregate in `base/config/`) is the single
+source of truth for runtime config. Scattered `os.environ.get("AVA_X")` causes:
+- defaults drift from Settings
+- types (bool/int/float) are unvalidated; ValueError surfaces only at use, not at startup
+- the frontend Control page does not see newly-added vars
+- review cannot trace "where does this variable come from"
+
+## Two rules
+
+### Rule 1: Non-test code
+
+Scan all non-test .py files under `agent/`, `base/`,
+`gateway/`, `services/`, `ava/`, `scripts/` (test_*.py / *_test.py /
+any `tests/` directory excluded). Any reference to `os.environ` or `os.getenv` is an error,
+unless the file is in _ALLOWED_FILES (Settings itself + .env loader +
+bootstrap that cannot depend on Settings).
+
+Adding a new _ALLOWED_FILES entry requires demonstrating "cannot go through
+Settings" — bootstrap ordering constraints; provider-key reads are centralized
+behind ``provider_api.require_key``, and other SDK-internal raw env is owned by
+Settings fields. No inline exemption mechanism — avoids scattered hard-to-audit
+`# noqa`-style escape hatches.
+
+### Rule 2: Test code
+
+Scan all `monkeypatch.setenv("X", ...)` / `monkeypatch.delenv("X")` /
+`os.environ["X"] = ...` calls in `tests/`, `test_*.py`, `*_test.py`; if
+X is in Settings's **model_fields alias set**, error — the `Settings`
+singleton is built once and its fields hold the environment as it stood then
+(the pytest conftest builds it eagerly at import, `AVA_CONFIG_BOOT=eager`; a
+production process builds it at the first config read beyond the boot-lite
+surface, see `base/config/__init__.py`), so later setenv/delenv cannot reach
+`settings.x`, and the test silently no-ops.
+Must switch to `monkeypatch.setattr(settings, "<field_name>", value)` —
+except provider API-key env vars declared in `_PROVIDER_KEY_ENV_VARS` and the
+live-read knobs in `_LIVE_READ_ENV_VARS` (see below): those are read from the
+environment live by design, so setenv is the real seam.
+
+The alias set is dynamically read from `the config field registry` — adding a
+new field to Settings auto-syncs the ban list; no manual maintenance.
+Historical bugs: PR #327 hit this pattern twice (test_loop_main's
+AVA_MCP_SOCKET, base/tests/test_health.py's AVA_SCHEDULER_HEALTH_PORT, plus the
+milvus_client fixture's AVA_MILVUS_URI).
+
+Error format `file:line: <line content>` + non-zero exit.
+"""
+
+from __future__ import annotations
+
+import re
+import sys
+from pathlib import Path
+
+# Project root (this script lives under scripts/)
+_REPO_ROOT = Path(__file__).resolve().parent.parent.parent
+sys.path.insert(0, str(_REPO_ROOT))
+from base.host.env.dotenv_boot import enter_scratch_home  # noqa: E402
+
+if __name__ == "__main__":
+    enter_scratch_home()
+
+
+from scripts.structure import lint_common  # noqa: E402 - standalone script
+
+# Scan directories — only OUR code, do not scan .venv / vendor / node_modules.
+_SCAN_DIRS = (
+    "agent",
+    "base",
+    "gateway",
+    "services",
+    "ava",
+    "scripts",
+)
+
+# Framework dirs Rule 1 does not scan. A test file under them (a package's own
+# `<pkg>/**/tests/`) is still read for Rule 2, so the default scan visits their
+# test files only.
+_TEST_ONLY_DIRS = tuple(d for d in lint_common.FRAMEWORK_DIRS if d not in _SCAN_DIRS)
+
+# Provider API-key env vars are read from os.environ at build time
+# (base/lm/provider_api.require_key) once the provider is a plugin — the
+# Settings field is retired from that provider's key path (task #2505). In
+# tests, monkeypatch.setenv on these is a REAL seam (require_key reads env
+# live), not a Settings-singleton no-op. Grow this set as each provider
+# migrates to plugin mode; each key must match a ProviderBinding.key_env.
+_PROVIDER_KEY_ENV_VARS = frozenset(
+    {
+        "ANTHROPIC_API_KEY",  # ava_builtins/plugins/lm_anthropic
+        "DEEPSEEK_API_KEY",  # ava_builtins/plugins/lm_deepseek
+        "GEMINI_API_KEY",  # ava_builtins/plugins/lm_google
+        "OPENAI_API_KEY",  # ava_builtins/plugins/lm_openai
+        "DASHSCOPE_API_KEY",  # ava_builtins/plugins/lm_alibaba
+        "GLM_API_KEY",  # ava_builtins/plugins/lm_zhipu
+        "MIMO_API_KEY",  # ava_builtins/plugins/lm_xiaomi
+        "MOONSHOT_API_KEY",  # ava_builtins/plugins/lm_moonshot
+    }
+)
+
+# Vars read from the live environment BY DESIGN (not via the Settings singleton,
+# which holds the environment as it stood when it was built). The exec-child
+# OTLP deferral knobs are read on the child arm path in
+# base/telemetry/otlp/telemetry_otlp_defer.py, where
+# constructing Settings would import the config chain the deferral exists to
+# avoid (task #3816 M4b) — so in tests, monkeypatch.setenv on them is a REAL
+# seam, the same class as the provider keys above. Every entry must have its
+# reader file in _ALLOWED_FILES.
+_LIVE_READ_ENV_VARS = frozenset(
+    {
+        "AVA_TELEMETRY_OTLP_CHILD_DEFER",  # base/telemetry/otlp/telemetry_otlp_defer.py
+        "AVA_TELEMETRY_OTLP_CHILD_DEFER_MAX_AGE_S",  # base/telemetry/otlp/telemetry_otlp_defer.py
+    }
+)
+
+# File-level exemption — must demonstrate "cannot go through Settings":
+# bootstrap ordering / dynamic env enumeration. When adding a new entry,
+# include a one-line inline comment explaining why.
+_ALLOWED_FILES = frozenset(
+    {
+        "cli/main.py",  # CLI bootstrap sets config/profile/log routing before importing Settings or command modules.
+        "cli/commands/cluster/home.py",  # Cross-home child environment projection removes caller credentials before the target's Settings loads.
+        "cli/start_intent.py",  # Identity bootstrap precedes Settings: read the birth inputs and pin the resolved home before config imports.
+        "cli/tests/test_start_identity.py",  # Exercises the settings-free birth boundary; environment is the actual input before Settings exists.
+        "tests/cli/test_start_repo_guard.py",  # Verifies checkout/home routing before Settings can be constructed.
+        "base/config/__init__.py",  # Settings aggregate; role-derives the gateway-config fetch before sub-models construct
+        "base/config/data_plane.py",  # _self_machine_host reads AVA_MACHINE_HOST at sub-model construction time — the settings singleton does not exist yet, sibling sub-models are unreachable, and base.cluster.machine imports settings (circular)
+        "base/host/env/dotenv_boot.py",  # load_dotenv ~/.ava/.env, must run before Settings import
+        "base/host/env/runtime_config.py",  # path bootstrap; cannot import Settings (circular dep)
+        "cli/commands/management/config.py",  # the settings-free repair path (ava config --local) reads AVA_GATEWAY_URL / AVA_CLUSTER_SECRET from the raw env/.env WITHOUT constructing Settings — a broken .env is exactly the scenario it repairs, and constructing Settings would fail first
+        "base/host/env/bootstrap.py",  # fetches config from the gateway and os.environ.update()s it BEFORE Settings is built; importing base.config here is the import cycle this module exists to break
+        "base/agents/messages/external_caller.py",  # per-invocation external child profile, consumed by SDK identity bootstrap before Settings; caller provenance is not cluster config and must not enter its persisted Settings projection
+        "services/page_server/daemon.py",  # spawns the page-server child with a per-launch PAGE_SERVER_TOKEN overlaid on the inherited env — the token is a fresh secrets.token_hex(16) per spawn, a dynamic child-env handoff Settings (boot-time static) cannot model, same class as base/sessions/env_forwarding
+        "base/cluster/auth.py",  # delivered_token reads the per-launch AVA_API_TOKEN the root launcher (or the boot pass) sets for this process — a write generation's machine credential handoff, never persisted config; it is read during the Settings import (bootstrap fetch), same class as PAGE_SERVER_TOKEN
+        "services/page_server/server.py",  # reads the per-launch PAGE_SERVER_TOKEN its daemon parent set in the child env — the token is minted per spawn by the daemon, Settings (boot-time static) cannot model it
+        "scripts/lint/no_os_environ.py",  # this script itself has "os.environ" in strings
+        "scripts/model_registry/check_model_updates.py",  # tracker selects provider API-key aliases dynamically and must prefer the live process env before its `.env` fallback
+        "scripts/structure/patch_points.py",  # recognizes a test's patch of "os.environ" by its AST text; it matches the string and never reads the environment
+        "scripts/lint/fixture_scope.py",  # same reason: it MATCHES the string "os.environ" against a test module's AST to find env mutation in a fixture body
+        "scripts/structure/ambient_state/scan.py",  # same reason: it MATCHES the strings "os.environ" / "os.getenv" against a module's AST to find an import-time read; it never reads the environment
+        "base/sessions/env_forwarding.py",  # forward_env_dict builds the child env from the LIVE env (incl. AVA_* vars Settings does not model); that is exactly what must be forwarded
+        "base/deploy/release/editable_install.py",  # editable_import_gate starts an isolated venv subprocess from the live inherited environment while removing VIRTUAL_ENV/PYTHONPATH; this process-boundary sanitation cannot use Settings' startup snapshot
+        "base/sessions/pty/host.py",  # the pty child (post-fork, pre-exec) builds its environment from the 0600 envfile dict overlaid on the host's inherited env — the same whole-environment child handoff as base.sessions.env_forwarding / base.host.env.registry; Settings cannot enumerate non-modeled keys and the overlay must reflect the parent's live env
+        "base/sessions/pty/launch.py",  # same child-env handoff as host.py: the pty fork + envfile overlay moved here when host.py was split at the 800-line ceiling (issue #2063)
+        "ava_builtins/skills/telegram-send-file/scripts/send_file.py",  # the telegram config domain is EXCLUDED from the agent process profile (Task #856 consumption matrix), so Settings cannot construct it in the skill's runtime context — the env aliases (the same values Settings itself reads from) are the only access path; same class as the child-env handoff entries
+        "base/host/env/registry.py",  # child_env builds the parent->child forwarding dict from the LIVE env (the registry's allowlist keys + passthrough rows); Settings cannot enumerate non-modeled keys and the dict must reflect the parent env, not its own snapshot — same child-env handoff as base.sessions.env_forwarding
+        "base/telemetry/tracing.py",  # sets TRACELOOP_TRACE_CONTENT=false for the traceloop-sdk instrumentors — the SDK's ONLY content-tracing switch (no Python API equivalent); Ava's own config surface is the AVA_TRACE_STRIP_CONTENT settings field, which drives this env translation
+        "base/deploy/git/gitenv.py",  # git_env copies the live env for a git subprocess (which needs PATH/HOME/SSH_AUTH_SOCK) and layers GIT_TERMINAL_PROMPT/GIT_SSH_COMMAND on top; git plumbing + a whole-environment child handoff, not Ava runtime config
+        "base/native_process/child_env.py",  # centralized process-protocol seam: copies the complete live env, consumes one-shot markers, and adopts a child's committed handoff; Settings cannot model dynamic per-process state
+        "scripts/ci/migration_smoke.py",  # builds a psql subprocess env (PGHOST/PGPORT/... from a throwaway native Postgres); PG* are libpq plumbing, not Ava runtime config
+        "scripts/lint/code_structure.py",  # LINT_STRUCTURE_BASELINE_BASE is a live per-invocation CI input; standalone lint must not load deployed Settings.
+        "scripts/ci/coverage_gates.py",  # BACKEND_COVERAGE_THRESHOLD is a ci.yml workflow knob for the pre-merge gate, not runtime config — Settings models the deployed runtime, and importing base.config would drag the settings singleton into a pure CI report parser
+        "scripts/ci_utils.py",  # CI_QUEUE and TRUNK_API_TOKEN are per-invocation CI-orchestration inputs; Settings models deployment config, and its singleton cannot preserve the required live environment read for this standalone merge watcher
+        "base/native_process/os_platform.py",  # launchd_job_label reads the per-process XPC_SERVICE_NAME scheduler identity
+        "base/host/system/probes.py",  # display_available reads DISPLAY/WAYLAND_DISPLAY to detect X11/Wayland; these are OS display-server vars, not ava runtime config; no Settings field models them. Single source of truth shared by the browser daemon / MCP loader / host-config validators
+        "ava/watcher.py",  # _spawn() bootstrap code uses os.environ.get in a string literal for the child process bootstrap
+        "ava/agent_identity.py",  # _try_establish_from_env() reads os.environ["AVA_AGENT_ID"] as a lazy fallback; the env key is the only channel for child processes (shell sessions, watchers) to discover their parent agent
+        "cli/commands/agents/impersonation.py",  # AVA_IMPERSONATION_RELAY_TOKEN is the relay's scoped credential handoff (stdin for codex, env for claude); it is neither persisted cluster config nor inherited native agent identity
+        "base/native_process/ownership.py",  # process_metadata records CODEX_HOME, the provider routing context the impersonation relay spec needs — a child-env handoff read, not persisted cluster config
+        "ava/attachment_transport.py",  # attach() reads the one-shot AVA_EXEC_REQUEST_FILE child-protocol marker at call time; it is not Settings config and only an exec child receives it
+        "base/telemetry/observability.py",  # endpoint_override_is_explicit must distinguish operator-set observability URLs from Settings' identical loopback defaults; Settings preserves the value but not whether it was explicit
+        "base/telemetry/otlp/telemetry_otlp_defer.py",  # the exec-child OTLP deferral knobs (AVA_TELEMETRY_OTLP_CHILD_DEFER[_MAX_AGE_S]) are read from the raw env on the child arm path — reading them through Settings would import the settings singleton + full config chain the deferral exists to keep out of the child's life (task #3816 M4b); same presence-style class as base/telemetry/observability.py
+        "base/native_process/turn_identity.py",  # effective_agent_id() reads the ambient AVA_AGENT_ID as the outermost identity fallback (the same per-process identity channel as ava/agent_identity.py / ava/mcps/_remote.py); the turn contextvar layers above it and Settings models neither  # _current_agent_id() reads the ambient AVA_AGENT_ID to stamp MCP daemon envelopes; the key is the process identity channel, not Settings-managed, and importing ava.self here is circular (moved from ava/mcps/__init__.py, 2026-08-13 #1229)
+        "services/computer/mcp_wrapper.py",  # _agent_id() reads the ambient AVA_AGENT_ID to stamp computer-mcp requests; same identity channel, not Settings-managed
+        "agent/process_boot.py",  # boot sets os.environ["AVA_AGENT_ID"] so child processes inherit the agent identity; the env forward must run before child spawn and cannot route through Settings (the same forward agent/loop.py previously owned)
+        "agent/loop.py",  # run() pops the per-agent config-overlay / birth-config env vars ($AVA_AGENT_CONFIG_OVERLAY / $AVA_AGENT_BIRTH_CONFIG) before spawning children; argv is world-readable via ps (issue #974) and the payloads are per-agent launch secrets, not Settings fields
+        "agent/exec_child.py",  # the exec child reads its per-launch protocol env (AVA_EXEC_REQUEST_FILE / AVA_EXEC_RESULT_FILE, one-shot spawn handoff) and pops the re-emitted per-agent overlay maps before child spawn — the same child-env handoff class as agent/loop.py's pop
+        "agent/exec_owner_child.py",  # the gated exec child validates the same one-shot AVA_EXEC_REQUEST_FILE / AVA_EXEC_RESULT_FILE handoff against its signed owner context before delegating to agent.exec_child; these dynamic per-launch paths are not Settings config
+        "agent/graph/exec/_subprocess.py",  # _build_child_env copies the LIVE parent env and layers the exec protocol vars on top — a whole-environment child handoff (same class as base/sessions/env_forwarding.py / ops/agent_launch.py); Settings cannot enumerate non-modeled keys and the dict must reflect the parent env
+        "base/lm/provider_api.py",  # plugin keys are not Settings fields; require_key reads the live process env for the bootstrap plugin-secrets channel on split runners, the same class as child-env handoff entries
+        "scripts/data_repair/migrate_skill_identity.py",  # standalone R2-B migration tool: must target an arbitrary AVA_HOME (--ava-home overrides) and build a psql subprocess env at call time; importing base.config would freeze the settings singleton to the process's own home at import and drag the whole config stack into a script that must run against foreign / fresh homes
+        "scripts/host_ops/guard_editable_venv.py",  # dependency-free pre-uv preflight must inspect inherited VIRTUAL_ENV before a project environment can be trusted or Settings can import
+        "base/config/_lite.py",  # the boot-lite resolution layer IS the Settings bootstrap: it reads raw env aliases and plants the placeholder data-plane URLs before any sub-model exists — the same "cannot depend on Settings by construction" class as base/config/__init__.py
+        "base/config/_full.py",  # the eager builder reads AVA_PROCESS_PROFILE at construction time, before the singleton exists — the same bootstrap-ordering class as base/config/data_plane.py
+        "scripts/codegen/gen_config_lite_table.py",  # regeneration must run in exactly the states that need it (broken .env, unreachable gateway): it forces AVA_CONFIG_FETCH=skip in the process env BEFORE importing the registry, which Settings cannot mediate by construction
+    }
+)
+
+# Transitional grandfathered list is empty — all originally grandfathered files have migrated to Settings.
+_GRANDFATHERED: frozenset[str] = frozenset()
+
+# Test files — pytest fixtures mocking env is a legitimate use
+_TEST_PATTERNS = (
+    re.compile(r"(^|/)tests?/"),
+    re.compile(r"(^|/)test_[^/]+\.py$"),
+    re.compile(r"_test\.py$"),
+)
+
+# Match os.environ. / os.environ[ / os.getenv(  (word boundary on both sides).
+_OS_ENV_PATTERN = re.compile(r"\bos\.(environ|getenv)\b")
+
+# Match only `monkeypatch.setenv("X"...)` / `monkeypatch.delenv("X"...)` —
+# pytest fixture calls, which always happen after Settings import (inside
+# the test function). Deliberately does **not** match `os.environ["X"] = ...`
+# — some env in conftest is bootstrap before Settings import, or used for
+# subprocesses (gateway / agent fork); neither is the settings-singleton bug.
+_TEST_SETENV_PATTERN = re.compile(
+    r"\bmonkeypatch\.(?:setenv|delenv)\s*\(\s*['\"]([A-Z_][A-Z0-9_]*)['\"]"
+)
+
+# Triple-quoted docstring literals like `monkeypatch.setenv("AVA_X"...)`
+# (e.g. a fixture's docstring describing the call) are not violations —
+# track triple-quote state line-by-line and skip inside docstring ranges.
+_TRIPLE_QUOTE_PATTERN = re.compile(r'"""|\'\'\'')
+
+
+def _settings_managed_aliases() -> frozenset[str]:
+    """Read every alias from the config field registry — auto-syncs when Settings adds a field.
+
+    Returns env var names (alias) that are owned by Settings, so any
+    monkeypatch.setenv on them is a NOOP at runtime (the Settings singleton is
+    built once; env reads happen when it is constructed, not on attribute access).
+    """
+    from base.config import FIELD_INFOS
+
+    aliases: set[str] = set()
+    for field in FIELD_INFOS.values():
+        if field.alias:
+            aliases.add(field.alias)
+    return frozenset(aliases)
+
+
+def _is_test_file(rel_path: str) -> bool:
+    return any(p.search(rel_path) for p in _TEST_PATTERNS)
+
+
+def _scan_file(
+    path: Path, rel_path: str, managed_envs: frozenset[str]
+) -> list[tuple[int, str, str]]:
+    """Return error list [(lineno, line_stripped, error_kind), ...].
+
+    error_kind = "naked-env" (Rule 1) | "setenv-managed" (Rule 2).
+    """
+    if rel_path in _ALLOWED_FILES or rel_path in _GRANDFATHERED:
+        return []
+    is_test = _is_test_file(rel_path)
+    try:
+        text = path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        return []  # unreadable entry (e.g. a dangling symlink) or binary content
+    violations: list[tuple[int, str, str]] = []
+    inside_triple = False
+    for lineno, line in enumerate(text.splitlines(), start=1):
+        # Triple-quote state machine: count occurrences of """ / ''' per
+        # line; odd count flips the inside state. We do not parse nested
+        # string semantics, but this suffices (docstrings not written on a
+        # single line `"""..."""` have all middle lines inside the triple range).
+        quote_count = len(_TRIPLE_QUOTE_PATTERN.findall(line))
+        line_starts_inside = inside_triple
+        if quote_count % 2:
+            inside_triple = not inside_triple
+        # Entire line in docstring range (both start and end inside) -> skip
+        if line_starts_inside and inside_triple:
+            continue
+        # `#` splits the line into code and comment; only check the code part.
+        code, _, _ = line.partition("#")
+        if is_test:
+            # Rule 2: monkeypatch.setenv/delenv in tests changing a Settings-managed env (silent no-op).
+            for m in _TEST_SETENV_PATTERN.finditer(code):
+                env_name = m.group(1)
+                if (
+                    env_name in managed_envs
+                    and env_name not in _PROVIDER_KEY_ENV_VARS
+                    and env_name not in _LIVE_READ_ENV_VARS
+                ):
+                    violations.append((lineno, line.strip(), f"setenv-managed:{env_name}"))
+        elif _OS_ENV_PATTERN.search(code):
+            # Rule 1: bare os.environ in non-test code.
+            violations.append((lineno, line.strip(), "naked-env"))
+    return violations
+
+
+def _iter_py_files(roots: list[Path]) -> list[Path]:
+    files: list[Path] = []
+    for root in roots:
+        if root.is_file() and root.suffix == ".py":
+            files.append(root)
+        elif root.is_dir():
+            files.extend(root.rglob("*.py"))
+    return files
+
+
+def _files_to_scan(argv: list[str], scope: frozenset[str] | None) -> list[Path]:
+    """Explicit paths as given; otherwise every file the default scan reads, narrowed to the
+    `--only` changed files when `scope` names them."""
+    if argv:
+        return _iter_py_files([Path(a).resolve() for a in argv])
+    targets = [_REPO_ROOT / d for d in _SCAN_DIRS] + [_REPO_ROOT / "tests"]
+    targets += [_REPO_ROOT / d for d in _TEST_ONLY_DIRS if (_REPO_ROOT / d).is_dir()]
+    default = [p for p in _iter_py_files(targets) if _in_default_scope(p)]
+    return lint_common.restrict(default, scope, _REPO_ROOT)
+
+
+def _rel_label(path: Path) -> str:
+    """Repo-relative posix path, or the absolute path of a file outside the repo."""
+    try:
+        return path.relative_to(_REPO_ROOT).as_posix()
+    except ValueError:
+        return path.as_posix()
+
+
+# The config registry decides which env names Rule 2 treats as Settings-managed, for every test.
+_RULE_INPUTS = ("base/config/", "base/host/env/")
+
+
+def _in_default_scope(path: Path) -> bool:
+    """Under a `_TEST_ONLY_DIRS` root only test files are scanned (Rule 2 only)."""
+    try:
+        rel = path.relative_to(_REPO_ROOT).as_posix()
+    except ValueError:
+        return True
+    if rel.split("/", 1)[0] in _TEST_ONLY_DIRS:
+        return _is_test_file(rel)
+    return True
+
+
+def main(argv: list[str] | None = None) -> int:
+    argv = argv if argv is not None else sys.argv[1:]
+    argv, only = lint_common.split_only(argv)
+    # argv non-empty = explicit paths; empty = default scan of all _SCAN_DIRS + tests/, or
+    # the `--only` changed files (the commit hook) under that same scope.
+    if argv:
+        missing = [arg for arg in argv if not Path(arg).exists()]
+        if missing:
+            print(f"error: target path(s) not found: {', '.join(missing)}", file=sys.stderr)
+            return 1
+    scope = lint_common.changed_scope(only, _REPO_ROOT, inputs=_RULE_INPUTS)
+    py_files = _files_to_scan(argv, scope)
+    # Only Rule 2 (tests) reads the config registry, and importing it is the slow part of a
+    # run that judges a few non-test files.
+    managed_envs: frozenset[str] = (
+        _settings_managed_aliases()
+        if any(_is_test_file(_rel_label(path)) for path in py_files)
+        else frozenset[str]()
+    )
+
+    total_violations = 0
+    for path in sorted(py_files):
+        rel = _rel_label(path)
+        violations = _scan_file(path, rel, managed_envs)
+        for lineno, content, kind in violations:
+            total_violations += 1
+            if kind.startswith("setenv-managed:"):
+                env = kind.split(":", 1)[1]
+                print(
+                    f"{rel}:{lineno}: monkeypatch.setenv/delenv on `{env}` — Settings is a singleton "
+                    f"built once; env changes do not reach the settings instance field. Use "
+                    f'`monkeypatch.setattr(settings, "<field_name>", value)` instead.'
+                )
+            else:
+                print(
+                    f"{rel}:{lineno}: bare os.environ/getenv usage -> route through base.config.settings"
+                )
+            print(f"    {content}")
+
+    if total_violations:
+        print(
+            f"\n{total_violations} violations total. See the docstring at the top of "
+            "scripts/lint/no_os_environ.py for the exemption procedure and the rationale "
+            "for using setattr in tests.",
+            file=sys.stderr,
+        )
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

@@ -14,8 +14,8 @@ from uuid import uuid4
 import psutil
 import pytest
 
-from agent.graph.exec_protocol import read_result, write_request
-from shared.exec_owner_protocol import (
+from agent.graph.exec.protocol import read_result, write_request
+from base.agents.incarnation.exec_owner_protocol import (
     OwnerClosed,
     OwnerContext,
     OwnerControl,
@@ -24,7 +24,7 @@ from shared.exec_owner_protocol import (
     read_owner_context,
     validate_native_ready,
 )
-from shared.incarnation_resources import ExecAllocation
+from base.agents.incarnation.resources import ExecAllocation, ResourceProcess
 
 
 def _context(tmp_path: Path, agent_id: int = 1) -> OwnerContext:
@@ -98,12 +98,12 @@ def test_eof_closes_exact_domain_before_user_code(tmp_path: Path) -> None:
         ready = _ready(tmp_path, proc)
         assert ready.allocation.owner_process is not None
         validate_native_ready(
-            ready, proc.pid, psutil.Process(proc.pid).create_time(), tmp_path / "owner.json"
+            ready, ResourceProcess.capture(psutil.Process(proc.pid)), tmp_path / "owner.json"
         )
         assert ready.allocation.root_process is not None
         root = psutil.Process(ready.allocation.root_process.pid)
         assert root.ppid() == ready.allocation.owner_process.pid
-        assert root.create_time() == ready.allocation.root_process.birth
+        assert ready.allocation.root_process.same_birth(ResourceProcess.capture(root))
         assert not context.result_path.exists()
         assert proc.stdin is not None
         proc.stdin.close()
@@ -119,33 +119,20 @@ def test_eof_closes_exact_domain_before_user_code(tmp_path: Path) -> None:
             proc.wait(timeout=5)
 
 
-def test_ready_receipt_tolerates_whole_second_birth_drift(tmp_path: Path) -> None:
-    """The receipt's births are written by another process than the verifier.
-
-    A re-read within the create_time tolerance is still the same process; a
-    reading beyond it refuses as before.
-    """
+def test_ready_receipt_refuses_a_different_native_launcher(tmp_path: Path) -> None:
+    """A valid owner receipt cannot authorize a different captured launcher."""
     context = _context(tmp_path)
     proc = _start(tmp_path, context)
     try:
         ready = _ready(tmp_path, proc)
-        owner, root = ready.allocation.owner_process, ready.allocation.root_process
-        assert owner is not None
-        assert root is not None
-        drifted = ready.model_copy(
-            update={
-                "allocation": ready.allocation.model_copy(
-                    update={
-                        "owner_process": owner.model_copy(update={"birth": owner.birth + 1.0}),
-                        "root_process": root.model_copy(update={"birth": root.birth + 1.0}),
-                    }
-                )
-            }
+        launcher = ResourceProcess.capture(psutil.Process(proc.pid))
+        different = launcher.model_copy(
+            update={"starttime": launcher.starttime + 1}
+            if launcher.starttime is not None
+            else {"birth": launcher.birth + 0.001}
         )
-        live = psutil.Process(proc.pid).create_time()
-        validate_native_ready(drifted, proc.pid, live + 1.0, tmp_path / "owner.json")
         with pytest.raises(ValueError, match="birth changed"):
-            validate_native_ready(drifted, proc.pid, live + 60.0, tmp_path / "owner.json")
+            validate_native_ready(ready, different, tmp_path / "owner.json")
     finally:
         if proc.poll() is None:
             proc.kill()
@@ -204,7 +191,7 @@ def test_completed_owner_exits_while_original_host_keeps_control_open(tmp_path: 
 @pytest.mark.parametrize("ending", ["record", "partial_eof", "oversize"])
 def test_control_pipe_is_bounded_and_owned_by_calling_loop(ending: str) -> None:
     from agent.exec_domain_owner import ControlPipe
-    from shared.exec_owner_protocol import MAX_OWNER_MESSAGE
+    from base.agents.incarnation.exec_owner_protocol import MAX_OWNER_MESSAGE
 
     source, destination = os.pipe()
     try:
@@ -260,7 +247,7 @@ def test_owner_death_is_not_a_terminal_receipt(tmp_path: Path) -> None:
         ready = _ready(tmp_path, proc)
         assert ready.allocation.owner_process is not None
         owner = psutil.Process(ready.allocation.owner_process.pid)
-        assert owner.create_time() == ready.allocation.owner_process.birth
+        assert ready.allocation.owner_process.same_birth(ResourceProcess.capture(owner))
         owner.kill()
         proc.wait(timeout=10)
         assert not (tmp_path / "owner.closed").exists()
@@ -295,7 +282,7 @@ def test_owner_import_does_not_boot_graph_sdk_or_settings(tmp_path: Path) -> Non
             "-c",
             "import sys; import agent.exec_domain_owner; "
             "assert 'agent.graph' not in sys.modules; assert 'ava' not in sys.modules; "
-            "assert 'shared.config' not in sys.modules",
+            "assert 'base.config' not in sys.modules",
         ],
         cwd=tmp_path,
         env=dict(os.environ, AVA_AGENT_ID="1", AVA_PROCESS_PROFILE="agent"),
@@ -310,7 +297,7 @@ def test_owner_import_does_not_boot_graph_sdk_or_settings(tmp_path: Path) -> Non
 _HOST = """
 import os, subprocess, sys, time
 from pathlib import Path
-from shared.exec_owner_protocol import OwnerControl, OwnerReady, read_owner_context
+from base.agents.incarnation.exec_owner_protocol import OwnerControl, OwnerReady, read_owner_context
 path = Path(sys.argv[1])
 context = read_owner_context(path)
 owner = subprocess.Popen(
@@ -377,7 +364,7 @@ def test_real_host_death_closes_active_managed_child(
         assert ready.allocation.owner_process is not None
         assert ready.allocation.root_process is not None
         owner = psutil.Process(ready.allocation.owner_process.pid)
-        assert owner.create_time() == ready.allocation.owner_process.birth
+        assert ready.allocation.owner_process.same_birth(ResourceProcess.capture(owner))
         record_property("owner_cold_start_ms", (time.monotonic() - started) * 1000)
         record_property("owner_rss_bytes", owner.memory_info().rss)
         user = psutil.Process(int(active.read_text()))

@@ -6,7 +6,7 @@ the output is line-oriented and greppable rather than pretty: every line starts
 with a stable token (`surface`, `plugin`, `entry`, `note`, a diff status), one
 fact per line, no boxes and no columns that shift with content width.
 
-The computation lives in `agent.plugin_catalog`; this module only formats it.
+The computation lives in `agent.extensions.catalog`; this module only formats it.
 """
 
 from __future__ import annotations
@@ -14,7 +14,7 @@ from __future__ import annotations
 import sys
 import textwrap
 
-from agent.plugin_catalog import (
+from agent.extensions.catalog import (
     DECLARATION_ONLY_KEYS,
     SURFACES,
     Catalog,

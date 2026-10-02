@@ -12,6 +12,7 @@ from __future__ import annotations
 import argparse
 import os
 import shlex
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -24,8 +25,8 @@ from typing import Protocol
 if not __package__:
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from base.deploy.release.python_lock import violations
 from cli._python_index import PYPI_INDEX, python_index
-from shared.python_lock import violations
 
 # These settings would redirect the target or change the lock's selected pins.
 # Transport/cache/TLS environment settings remain inherited; machine files are not replayed.
@@ -85,6 +86,65 @@ def _configured_env(environment: Mapping[str, str], mirror_env: Path | None) -> 
     return configured
 
 
+def _python_request(repo: Path, interpreter: str | None) -> str:
+    """The interpreter a created environment gets: the caller's, else the checkout pin.
+
+    ``--no-config`` also makes uv ignore ``.python-version`` and fall back to
+    ``requires-python``, which admits any newer minor a host happens to have.
+    """
+    return interpreter or (repo / ".python-version").read_text().strip()
+
+
+def _reported_version(python: Path, env: dict[str, str]) -> str:
+    """The version the interpreter itself reports; directory names and pyvenv.cfg can lie."""
+    return subprocess.run(  # noqa: S603 — the checkout's own virtualenv interpreter
+        [str(python), "-I", "-c", "import platform; print(platform.python_version())"],
+        env=env,
+        check=True,
+        capture_output=True,
+        text=True,
+        timeout=60,
+    ).stdout.strip()
+
+
+def _remove_checkout_venv(repo: Path) -> None:
+    """Delete only the checkout's own real `.venv` directory, never a link's target."""
+    venv = repo / ".venv"
+    if venv.is_symlink() or venv.resolve(strict=True).parent != repo.resolve(strict=True):
+        raise ValueError(f"Refusing to remove {venv}: it is not this checkout's own directory")
+    shutil.rmtree(venv)
+
+
+def _mirror_environment(
+    repo: Path,
+    target: Path,
+    interpreter: str | None,
+    request: str,
+    env: dict[str, str],
+    run: UvRunner,
+) -> int:
+    """Create the mirror target on the pin, recreating one off the declared pin.
+
+    Native sync recreates a drifted environment itself. An explicit interpreter
+    is the caller's choice; only the checkout's declared pin is enforced here.
+    """
+    create = ["uv", "venv", "--no-config", "--python", request, str(repo / ".venv")]
+    if not target.exists():
+        return run(create, repo, env)
+    if interpreter:
+        return 0
+    current = _reported_version(target, env)
+    if f"{current}.".startswith(f"{request}."):
+        return 0
+    print(
+        f"Recreating {repo / '.venv'}: Python {current} -> {request} (.python-version)",
+        file=sys.stderr,
+        flush=True,
+    )
+    _remove_checkout_venv(repo)
+    return run(create, repo, env)
+
+
 def install(
     repo: Path,
     *,
@@ -106,6 +166,12 @@ def install(
     env = {key: value for key, value in configured.items() if key not in _IGNORED_ENV}
     flags = (["--no-dev"] if no_dev else []) + (["--verbose"] if verbose else [])
     python_args = ["--python", interpreter] if interpreter else []
+    # `--compile-bytecode` is explicit on every install step: `--no-config` makes uv ignore
+    # `[tool.uv]`, and an uncompiled venv makes each service pay the compile on first import.
+    # Only steps that can create the environment carry the pin; the universal
+    # offline export must not need the pinned interpreter before uv can fetch it.
+    request = _python_request(repo, interpreter)
+    pinned = ["--python", request]
     # uv sync can recreate an interpreter-drifted venv before checking freshness.
     # Export validates the manifest without synchronizing the target environment.
     with tempfile.TemporaryDirectory(prefix="ava-python-lock-") as temporary:
@@ -141,24 +207,29 @@ def install(
                     "--locked",
                     "--inexact",
                     "--no-config",
+                    "--compile-bytecode",
                     *flags,
-                    *python_args,
+                    *pinned,
                     *reinstall,
                 ],
                 repo,
                 env,
             )
-        target = (
-            repo / ".venv" / ("Scripts/python.exe" if sys.platform == "win32" else "bin/python")
-        )
-        if not target.exists():
-            result = run(
-                ["uv", "venv", "--no-config", *python_args, str(repo / ".venv")], repo, env
-            )
-            if result:
-                return result
+        target = repo / ".venv" / "bin/python"
+        result = _mirror_environment(repo, target, interpreter, request, env, run)
+        if result:
+            return result
         env["UV_DEFAULT_INDEX"] = index
-        common = ["uv", "pip", "install", "--no-config", "--python", str(target), "--no-deps"]
+        common = [
+            "uv",
+            "pip",
+            "install",
+            "--no-config",
+            "--compile-bytecode",
+            "--python",
+            str(target),
+            "--no-deps",
+        ]
         if verbose:
             common.append("--verbose")
         reinstall = ["--reinstall-package", reinstall_package] if reinstall_package else []
@@ -173,7 +244,7 @@ def install(
 
 
 def main() -> int:
-    """Shared dependency-free entry point for install.sh and the bounded updater."""
+    """Dependency-free entry point for locked source-development dependencies."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--repo", type=Path, default=Path.cwd())
     parser.add_argument("--locked", action="store_true", help="Always enforced")
@@ -193,7 +264,7 @@ def main() -> int:
             reinstall_package=args.reinstall_package,
             mirror_env=args.mirror_env,
         )
-    except (ValueError, OSError) as exc:
+    except (ValueError, OSError, subprocess.SubprocessError) as exc:
         print(f"Python installation failed: {exc}", file=sys.stderr)
         return 1
 

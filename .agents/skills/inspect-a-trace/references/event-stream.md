@@ -16,7 +16,7 @@ The base stream selector, shared by every reader:
 ```
 
 Since the 2026-08-23 index-label cutover (`INDEX_LABEL_CUTOVER_AT` in
-`shared/loki_index_labels.py`, Task #1407 B2) the collector promotes
+`base/telemetry/loki_index_labels.py`, Task #1407 B2) the collector promotes
 `agent_id` and `event_name` to real Loki index labels, so a query over the
 indexed era narrows the stream itself instead of scanning the whole
 `unknown_service` family — the fast per-agent form is:
@@ -53,7 +53,7 @@ becomes `attributes_cost_usd`, and numbers parse as numbers, so
 
 `category` is `audit | telemetry | log`. `level` is
 `debug | info | warning | error | critical`, lowercase. The `event_name`
-vocabulary is the registry in `shared/events/contract.py` — read it there
+vocabulary is the registry in `base/events/contract.py` — read it there
 rather than guessing a name.
 
 **Multiple extractions in one `| json` stage is a parse error.** Each field
@@ -173,7 +173,7 @@ trace the event stream only summarizes.
 |---|---|
 | Loki | `http://127.0.0.1:3100` (`/loki/api/v1/query_range`, `/loki/api/v1/query`) |
 | Grafana | `http://localhost:3003` (anonymous viewer; datasource uid `loki`) |
-| Gateway | `http://localhost:8000/api/events` (bearer `AVA_CLUSTER_SECRET`) |
+| Gateway | `http://localhost:8000/api/events` (bearer `AVA_API_TOKEN` or the gateway's `AVA_CLUSTER_SECRET`) |
 
 `ava lgtm status` reports the marker, containers, and readiness probes; the
 whole stack only exists on the host holding the `$AVA_HOME/lgtm-host` marker.

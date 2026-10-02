@@ -13,8 +13,7 @@ skip() {
     exit 0
 }
 
-command -v flock >/dev/null || skip "flock is not installed"
-command -v python3 >/dev/null || skip "python3 is not installed (load probe unavailable)"
+command -v python3 >/dev/null || skip "python3 is not installed (load/lock probe unavailable)"
 case "$tool" in
     pyright)
         [[ -x .venv/bin/pyright ]] || skip "missing .venv/bin/pyright; run env -u VIRTUAL_ENV uv sync"
@@ -70,9 +69,57 @@ lock_file="$lock_dir/$tool.lock"
 [[ ! -L "$lock_file" ]] || skip "lock file is a symlink: $lock_file"
 (umask 000; set -o noclobber; : > "$lock_file") 2>/dev/null || [[ -f "$lock_file" ]] || skip "cannot create lock $lock_file"
 exec 9<"$lock_file" || skip "cannot open lock $lock_file"
-if ! flock -n 9; then
+
+# No `flock(1)` binary on this host's platform (notably stock macOS) --
+# fcntl.flock(2) on the fd bash just opened does the exact same job. The lock
+# is bound to the OPEN FILE DESCRIPTION fd 9 refers to, not to the python3
+# process that requests it: once acquired, it stays held for as long as ANY
+# descriptor referencing that same open file description remains open —
+# python3 exiting after a successful acquire does not release it, because fd
+# 9 is still open in this shell and inherited by the `exec "$@"` below.
+# LOCK_EX|LOCK_NB never blocks; a wait is polling LOCK_NB in a loop, since
+# fcntl has no built-in timed blocking wait like flock(1)'s -w.
+try_lock() {
+    local timeout="$1"
+    python3 - "$timeout" <<'PY'
+import fcntl
+import sys
+import time
+
+timeout = float(sys.argv[1])
+deadline = time.monotonic() + timeout
+poll_interval = 0.1
+while True:
+    try:
+        fcntl.flock(9, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        sys.exit(0)
+    except BlockingIOError:
+        if timeout <= 0 or time.monotonic() >= deadline:
+            sys.exit(1)
+        time.sleep(min(poll_interval, max(0.0, deadline - time.monotonic())))
+    except OSError as error:
+        print(f"lock probe failed: {error}", file=sys.stderr)
+        sys.exit(2)
+PY
+}
+
+# `cmd || status=$?` is the set -e-safe way to capture an exit code: the `||`
+# branch only runs on failure, and `$?` there is still try_lock's own status
+# (nothing else has run yet) -- unlike `if ! try_lock; then ... $?; fi`, where
+# `$?` inside the then-branch reflects the (already-negated) `if` test, not
+# try_lock's original code, so 1 (lock held) and 2 (probe error) could not be
+# told apart.
+status=0
+try_lock 0 || status=$?
+if [[ "$status" != 0 ]]; then
+    [[ "$status" == 2 ]] && skip "lock probe failed; check python3's fcntl support"
     echo "pre-push: waiting for $tool lock (up to ${wait_seconds}s)..." >&2
-    flock -w "$wait_seconds" 9 || skip "lock wait timed out after ${wait_seconds}s ($lock_file)"
+    status=0
+    try_lock "$wait_seconds" || status=$?
+    if [[ "$status" != 0 ]]; then
+        [[ "$status" == 2 ]] && skip "lock probe failed; check python3's fcntl support"
+        skip "lock wait timed out after ${wait_seconds}s ($lock_file)"
+    fi
 fi
 check_load
 echo "pre-push: running $tool"

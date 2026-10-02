@@ -5,15 +5,13 @@ skills match their sources (design `future/infra/core-package-update-channel.md`
 The engine behind `ava packages refresh`. One code path for manual runs and the
 per-machine OS job (`--from-job` adds the job-only gates). It NEVER writes the
 checkout — the core channel fetches objects only (`git fetch`, FETCH_HEAD +
-object store, never the working tree, the same contract as
-`shared.cluster_drift.prod_source_fetch`) — and content lands only under
+object store, never the working tree) — and content lands only under
 `$AVA_HOME/skills/` via the same staged-swap + preserved-subtree machinery the
 converge path uses. It never restarts anything (activation is the next skill
 scan) and never passes `--accept-risk`: the scan gate refuses, nothing else.
 
 Skip conditions (job runs only: `AVA_OS_JOBS_ENABLED`, `refresh_enabled`;
-always: another pass holds the per-home flock, a cluster update is in flight,
-the registry is unreadable).
+always: another pass holds the per-home flock, the registry is unreadable).
 
 Legacy rows carry no `applied_rev`. The design infers "the checkout's installed
 commit"; this pass instead reconciles by CONTENT: it stages the remote head and
@@ -39,15 +37,18 @@ from pathlib import Path
 
 from loguru import logger
 
+from base import paths
+from base.config import settings
+from base.deploy.git import host_version
+from base.deploy.git.gitenv import git_env
+from base.host.proc import run_bounded
+from base.host.system.cron import os_jobs_enabled
+from base.native_process.os_platform import LockTimeoutError, file_lock
+from base.packages.extensions import install_registry
+from base.packages.plugins import manifest as manifest_module
+from base.packages.skills import scan
+from base.packages.skills.names import match_key
 from cli.commands.extensions.skills_sync import _Source, iter_sources
-from shared import host_version, install_registry, paths, plugin_manifest
-from shared.config import settings
-from shared.deploy.git.gitenv import git_env
-from shared.os_cron import os_jobs_enabled
-from shared.packages.skills import skill_scan
-from shared.packages.skills.skill_names import match_key
-from shared.platform import LockTimeoutError, file_lock
-from shared.proc import run_bounded
 
 # Backoff: failures double the effective interval, capped after this many
 # doublings (so a repeatedly failing package still re-checks about weekly).
@@ -557,13 +558,13 @@ class _Pass:
             return "up_to_date", None
         if not any(staged.rglob("SKILL.md")):
             return "error: staged tree carries no SKILL.md", None
-        findings = skill_scan.scan_package(staged)
-        critical = skill_scan.criticals(findings)
+        findings = scan.scan_package(staged)
+        critical = scan.criticals(findings)
         if critical:
-            return f"refused_scan: {', '.join(skill_scan.rule_ids(critical))}", None
+            return f"refused_scan: {', '.join(scan.rule_ids(critical))}", None
         try:
-            manifest = plugin_manifest.load_manifest(staged)
-        except plugin_manifest.ManifestError as exc:
+            manifest = manifest_module.load_manifest(staged)
+        except manifest_module.ManifestError as exc:
             return f"error: manifest invalid: {exc}", None
         if manifest is not None:
             host_errors: list[str] = []
@@ -572,8 +573,8 @@ class _Pass:
             except host_version.HostVersionError as exc:
                 host_errors.append(str(exc))
             else:
-                host_errors += plugin_manifest.check_host_engine(manifest, host)
-            host_errors += plugin_manifest.check_host_commit(manifest, self.repo)
+                host_errors += manifest_module.check_host_engine(manifest, host)
+            host_errors += manifest_module.check_host_commit(manifest, self.repo)
             if host_errors:
                 return f"blocked_version: {'; '.join(host_errors)}", None
         recorded = pkg.installed_hash or pkg.content_hash
@@ -770,13 +771,9 @@ def run_refresh(
         return _skip("OS jobs disabled (AVA_OS_JOBS_ENABLED=false)")
     if from_job and not settings.packages.refresh_enabled:
         return _skip("refresh disabled (AVA_PACKAGES_REFRESH_ENABLED=false)")
-    from cli.commands.status import _update_in_flight
-
     lock_path = paths.ava_home() / "packages-refresh.lock"
     try:
         with file_lock(lock_path, timeout_s=_QUEUE_LOCK_TIMEOUT_S):
-            if _update_in_flight():
-                return _skip("a cluster update is in flight")
             pass_ = _Pass(
                 check_only=check_only,
                 only=only,

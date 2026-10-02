@@ -6,6 +6,7 @@ import os
 import subprocess
 import sys
 import threading
+import time
 import traceback
 from collections.abc import Iterator
 from pathlib import Path
@@ -19,17 +20,21 @@ import pytest
 from psycopg_pool import AsyncConnectionPool, ConnectionPool
 
 from agent.db import has_pending_interrupt
-from agent.graph._exec_stream import StreamingTextIO
-from agent.hosted_ownership import admit_hosted_runtime
-from ops.ops_exit import _force_terminate_transaction
+from agent.graph.exec._stream import StreamingTextIO
+from agent.ownership.hosted import admit_hosted_runtime
+from base.agents.incarnation import exec_request_evidence
+from base.agents.incarnation.exec_request_evidence import Verdict
+from base.agents.incarnation.hosted_force import (
+    original_host_force,
+    recover_orphaned_hosted_forces,
+)
+from base.config import settings
+from ops.agents.resurrection_retry import ResurrectSettlementDeferredError
+from ops.agents.wake import resurrect_agent
+from ops.lifecycle.termination import _force_terminate_transaction
 from services.agent_host.daemon import _cancel_turn_route
 from services.agent_host.dispatcher import TurnScheduler
 from services.agent_host.host import AgentHost
-from shared import exec_request_evidence
-from shared.config import settings
-from shared.exec_request_evidence import Verdict
-from shared.hosted_force import original_host_force, recover_orphaned_hosted_forces
-from shared.lifecycle_termination_observe import observe_applied_termination
 from tests.agent.test_inbound_ownership import _agent, _insert
 
 
@@ -81,16 +86,16 @@ def _observed_host(
 def _configure_late_reader(kind: str, patch: pytest.MonkeyPatch, release: threading.Event) -> None:
     if kind != "reader":
         return
-    from agent.graph import _exec_subprocess
+    from agent.graph.exec import _subprocess
 
-    original = _exec_subprocess._drain_output
+    original = _subprocess._drain_output
 
     def delayed(proc: subprocess.Popen[bytes], stream: StreamingTextIO) -> None:
         original(proc, stream)
         assert release.wait(20), "test must release real output reader"
 
-    patch.setattr(_exec_subprocess, "_drain_output", delayed)
-    patch.setattr("agent.graph._exec_process._READER_JOIN_TIMEOUT_S", 0.01)
+    patch.setattr(_subprocess, "_drain_output", delayed)
+    patch.setattr("agent.graph.exec._process._READER_JOIN_TIMEOUT_S", 0.01)
 
 
 async def _assert_pending_force(
@@ -101,9 +106,9 @@ async def _assert_pending_force(
         "SELECT status,applied_at IS NOT NULL,observed_at FROM inbound_messages WHERE id=%s",
         (command,),
     ).fetchone() == ("claimed", True, None)
-    conn.commit()  # The observer must not be a savepoint inside the earlier read transaction.
-    with conn.transaction():
-        assert not observe_applied_termination(conn, agent_id, "claim-test")
+    conn.commit()
+    with pytest.raises(ResurrectSettlementDeferredError):
+        await asyncio.to_thread(resurrect_agent, agent_id, resurrected_by="user")
     assert (
         await admit_hosted_runtime(
             pool, agent_id, "claim-test", uuid4(), expected_from="terminated"
@@ -172,7 +177,7 @@ async def test_force_waits_for_real_work_and_delayed_cancel_cannot_hit_successor
         elif work_kind == "thread":
             await asyncio.to_thread(_blocking_work, entered, release)
         else:
-            from agent.graph._exec_subprocess import _run_in_subprocess
+            from agent.graph.exec._subprocess import _run_in_subprocess
 
             await _run_in_subprocess(
                 "from pathlib import Path\nimport time\n"
@@ -280,7 +285,9 @@ async def test_exclusive_host_boot_recovers_resource_free_applied_force(
         _, _, _, command = await asyncio.to_thread(
             _force_terminate_transaction, agent_id, pool, source="user"
         )
-    monkeypatch.setattr("shared.exec_request_evidence.exec_run_dir", lambda: tmp_path)
+    monkeypatch.setattr(
+        "base.agents.incarnation.exec_request_evidence.exec_run_dir", lambda: tmp_path
+    )
 
     recovered, deferred = await recover_orphaned_hosted_forces(aops_pool, "claim-test")
 
@@ -310,7 +317,9 @@ async def test_exclusive_host_boot_recovers_torn_pointer_done_force(
         )
         is not None
     )
-    monkeypatch.setattr("shared.exec_request_evidence.exec_run_dir", lambda: tmp_path)
+    monkeypatch.setattr(
+        "base.agents.incarnation.exec_request_evidence.exec_run_dir", lambda: tmp_path
+    )
 
     # Build the torn shape directly: done + applied + unobserved with the pointer
     # still alive. INSERT is outside the commit-time guard's UPDATE window, so this
@@ -368,7 +377,9 @@ async def test_exclusive_host_boot_defers_force_with_persistent_exec_evidence(
             _force_terminate_transaction, agent_id, pool, source="user"
         )
     request = _aged_envelope(tmp_path, agent_id, owner=None)
-    monkeypatch.setattr("shared.exec_request_evidence.exec_run_dir", lambda: tmp_path)
+    monkeypatch.setattr(
+        "base.agents.incarnation.exec_request_evidence.exec_run_dir", lambda: tmp_path
+    )
 
     recovered, deferred = await recover_orphaned_hosted_forces(aops_pool, "claim-test")
 
@@ -429,9 +440,12 @@ async def test_exclusive_host_boot_quarantines_superseded_evidence_and_recovers(
         )
     request = _aged_envelope(tmp_path, agent_id, owner=uuid4())
     quarantine = tmp_path / "quarantined-exec-requests"
-    monkeypatch.setattr("shared.exec_request_evidence.exec_run_dir", lambda: tmp_path)
     monkeypatch.setattr(
-        "shared.exec_request_evidence.quarantined_exec_requests_dir", lambda: quarantine
+        "base.agents.incarnation.exec_request_evidence.exec_run_dir", lambda: tmp_path
+    )
+    monkeypatch.setattr(
+        "base.agents.incarnation.exec_request_evidence.quarantined_exec_requests_dir",
+        lambda: quarantine,
     )
 
     recovered, deferred = await recover_orphaned_hosted_forces(aops_pool, "claim-test")
@@ -468,7 +482,9 @@ def _no_process_iteration(*_args: Any, **_kwargs: Any) -> Iterator[Any]:
 
 def _hide_machine_processes(monkeypatch: pytest.MonkeyPatch) -> None:
     """This box runs other agents' exec children; isolate the test's own legs."""
-    monkeypatch.setattr("shared.exec_request_evidence.psutil.process_iter", _no_process_iteration)
+    monkeypatch.setattr(
+        "base.agents.incarnation.exec_request_evidence.psutil.process_iter", _no_process_iteration
+    )
 
 
 async def test_exclusive_host_boot_disposes_aged_unreadable_evidence_and_recovers(
@@ -494,9 +510,12 @@ async def test_exclusive_host_boot_disposes_aged_unreadable_evidence_and_recover
     bound = exec_request_evidence._unreadable_expiry_age_s()
     request = _unreadable_envelope(tmp_path, agent_id, age_s=bound + 60)
     quarantine = tmp_path / "quarantined-exec-requests"
-    monkeypatch.setattr("shared.exec_request_evidence.exec_run_dir", lambda: tmp_path)
     monkeypatch.setattr(
-        "shared.exec_request_evidence.quarantined_exec_requests_dir", lambda: quarantine
+        "base.agents.incarnation.exec_request_evidence.exec_run_dir", lambda: tmp_path
+    )
+    monkeypatch.setattr(
+        "base.agents.incarnation.exec_request_evidence.quarantined_exec_requests_dir",
+        lambda: quarantine,
     )
     _hide_machine_processes(monkeypatch)
 
@@ -538,7 +557,9 @@ async def test_exclusive_host_boot_still_defers_young_unreadable_evidence(
             _force_terminate_transaction, agent_id, pool, source="user"
         )
     request = _unreadable_envelope(tmp_path, agent_id, age_s=0.0)
-    monkeypatch.setattr("shared.exec_request_evidence.exec_run_dir", lambda: tmp_path)
+    monkeypatch.setattr(
+        "base.agents.incarnation.exec_request_evidence.exec_run_dir", lambda: tmp_path
+    )
     _hide_machine_processes(monkeypatch)
 
     recovered, deferred = await recover_orphaned_hosted_forces(aops_pool, "claim-test")
@@ -575,9 +596,12 @@ async def test_exclusive_host_boot_defers_while_a_live_child_references_the_requ
         )
     request = _aged_envelope(tmp_path, agent_id, owner=old_host._owner, age_s=0.0)
     quarantine = tmp_path / "quarantined-exec-requests"
-    monkeypatch.setattr("shared.exec_request_evidence.exec_run_dir", lambda: tmp_path)
     monkeypatch.setattr(
-        "shared.exec_request_evidence.quarantined_exec_requests_dir", lambda: quarantine
+        "base.agents.incarnation.exec_request_evidence.exec_run_dir", lambda: tmp_path
+    )
+    monkeypatch.setattr(
+        "base.agents.incarnation.exec_request_evidence.quarantined_exec_requests_dir",
+        lambda: quarantine,
     )
     child = subprocess.Popen(
         [sys.executable, "-c", "import time; time.sleep(30)"],
@@ -613,22 +637,22 @@ async def test_formatted_exec_cleanup_failure_retains_actual_resource_evidence(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    from agent.graph._exec_process import ExecProcessDomain
-    from agent.graph._exec_result import _ExecCrashed
-    from agent.graph._exec_subprocess import _run_in_subprocess
-    from agent.hosted_ownership import apply_hosted_lifecycle, settle_hosted_runtime
-    from shared.turn_identity import HostedTurnResources, bind_hosted_resources
+    from agent.graph.exec._process import ExecProcessDomain
+    from agent.graph.exec._result import _ExecCrashed
+    from agent.graph.exec._subprocess import _run_in_subprocess
+    from agent.ownership.hosted import apply_hosted_lifecycle, settle_hosted_runtime
+    from base.native_process.turn_identity import HostedTurnResources, bind_hosted_resources
     from tests.agent.test_inbound_ownership import _admit
 
     agent_id = _agent(db_conn)
     incarnation = await _admit(aops_pool, agent_id)
-    original_close = ExecProcessDomain.close
+    original_close = ExecProcessDomain.close_confirmed
 
-    def failed_close(domain: ExecProcessDomain) -> None:
-        original_close(domain)
+    def failed_close(domain: ExecProcessDomain, deadline: float) -> None:
+        original_close(domain, deadline)
         raise PermissionError("injected unverifiable domain closure")
 
-    monkeypatch.setattr(ExecProcessDomain, "close", failed_close)
+    monkeypatch.setattr(ExecProcessDomain, "close_confirmed", failed_close)
     scope = HostedTurnResources()
     with bind_hosted_resources(scope):
         outcome, _ = await _run_in_subprocess(
@@ -641,21 +665,23 @@ async def test_formatted_exec_cleanup_failure_retains_actual_resource_evidence(
         assert path.exists() and isinstance(domain, ExecProcessDomain)
         assert not scope.complete(path, object())
         assert scope.unresolved[path] is domain
-        assert domain.proc.poll() is not None
+        assert domain.proc.returncode is None  # unresolved closure must not reap
         # A formatted tool failure cannot become a positive lifecycle barrier.
         assert await apply_hosted_lifecycle(aops_pool, incarnation) is None
         assert not await settle_hosted_runtime(aops_pool, incarnation)
     assert len(scope.unresolved) == 1  # cache/context reset does not erase the evidence
+    original_close(domain, time.monotonic() + 5)
+    domain.proc.wait(timeout=5)
 
 
 async def test_real_missing_executable_is_not_an_unresolved_child(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    from agent.graph._exec_result import _ExecCrashed
-    from agent.graph._exec_subprocess import _run_in_subprocess
-    from shared.turn_identity import HostedTurnResources, bind_hosted_resources
+    from agent.graph.exec._result import _ExecCrashed
+    from agent.graph.exec._subprocess import _run_in_subprocess
+    from base.native_process.turn_identity import HostedTurnResources, bind_hosted_resources
 
-    monkeypatch.setattr("agent.graph._exec_subprocess.sys.executable", str(tmp_path / "absent"))
+    monkeypatch.setattr("agent.graph.exec._subprocess.sys.executable", str(tmp_path / "absent"))
     scope = HostedTurnResources()
     with bind_hosted_resources(scope):
         outcome, _ = await _run_in_subprocess(
@@ -674,7 +700,7 @@ async def test_real_missing_executable_is_not_an_unresolved_child(
 def test_unreadable_group_member_is_not_an_empty_domain(
     monkeypatch: pytest.MonkeyPatch, failure: type[Exception]
 ) -> None:
-    from shared.exec_process_domain import _process_group_has_live_member
+    from base.native_process.exec_domain import _process_group_has_live_member
 
     process = Mock(info={"pid": 123, "status": psutil.STATUS_RUNNING})
 
@@ -686,7 +712,7 @@ def test_unreadable_group_member_is_not_an_empty_domain(
     def unreadable(pid: int) -> int:
         raise failure()
 
-    monkeypatch.setattr("shared.exec_process_domain.os.getpgid", unreadable)
+    monkeypatch.setattr("base.native_process.exec_domain.os.getpgid", unreadable)
     with pytest.raises(failure):
         _process_group_has_live_member(123)
 

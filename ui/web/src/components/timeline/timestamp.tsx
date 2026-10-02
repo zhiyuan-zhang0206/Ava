@@ -13,7 +13,7 @@ import { formatAbsolute } from "@/lib/time";
 // deployments — accepted as the trade-off for not needing server-side
 // tz config in the frontend.
 //
-// The shape mirrors the agent-facing stamp (`shared.config.format_timestamp`)
+// The shape mirrors the agent-facing stamp (`base.config.format_timestamp`)
 // but keeps the trailing timezone, which the backend dropped: the agent is
 // told its cluster timezone once, in a standing context note, and every
 // timestamp it reads is in that one timezone. A viewer has no such

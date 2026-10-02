@@ -3,9 +3,13 @@ import re
 
 import yaml
 
-from ava_builtins.plugins.ava_memory.pool_ops import ava_home
+from ava_builtins.plugins.ava_memory.pool_ops import pool_dir
 
-mp = str(ava_home() / "memory")
+
+def _pool() -> str:
+    return str(pool_dir())
+
+
 RESERVED = {"MEMORY.md", "AGENTS.md", "index.md", "log.md"}
 
 # Directory-level index (2026-08-06 user ruling): MEMORY.md points at root
@@ -14,7 +18,7 @@ RESERVED = {"MEMORY.md", "AGENTS.md", "index.md", "log.md"}
 
 
 def frontmatter(rel):
-    with open(os.path.join(mp, rel), encoding="utf-8") as f:
+    with open(os.path.join(_pool(), rel), encoding="utf-8") as f:
         content = f.read()
     m = re.match(r"^---\n(.*?)\n---\n", content, re.S)
     if not m:
@@ -27,13 +31,13 @@ def frontmatter(rel):
 
 def collect():
     files = []
-    for dirpath, _dirnames, filenames in os.walk(mp):
+    for dirpath, _dirnames, filenames in os.walk(_pool()):
         if ".git" in dirpath or ".githooks" in dirpath:
             continue
         for fn in filenames:
             if not fn.endswith(".md") or fn in RESERVED:
                 continue
-            rel = os.path.relpath(os.path.join(dirpath, fn), mp)
+            rel = os.path.relpath(os.path.join(dirpath, fn), _pool())
             files.append(rel)
     return sorted(files)
 
@@ -85,10 +89,10 @@ for top in sorted(sub):
         detail = f"{n} notes: {', '.join(counts)}"
     lines.append(f"- [{top}/]({top}/index.md) \u2014 {detail}")
 
-with open(os.path.join(mp, "MEMORY.md"), encoding="utf-8") as f:
+with open(os.path.join(_pool(), "MEMORY.md"), encoding="utf-8") as f:
     content = f.read()
 head = content[: content.find("## Pointers")]
 new = head + "## Pointers\n\n\n" + "\n".join(lines) + "\n"
 print("root:", len(root_files), "dirs:", len(sub), "| chars:", len(new))
-with open(os.path.join(mp, "MEMORY.md"), "w", encoding="utf-8") as f:
+with open(os.path.join(_pool(), "MEMORY.md"), "w", encoding="utf-8") as f:
     f.write(new)

@@ -33,9 +33,9 @@ from typing import Any, NotRequired, Required, Union, get_args, get_origin, get_
 import pytest
 import yaml
 
-from shared.events.contract import EVENTS, payload_keys, telemetry_events
-from shared.telemetry.otlp.telemetry_otlp import _METRIC_DISPOSITION
-from shared.telemetry.otlp.telemetry_otlp_metrics import _strip_unit_suffix, _unit_for
+from base.events.contract import EVENTS, payload_keys, telemetry_events
+from base.telemetry.otlp.telemetry_otlp import _METRIC_DISPOSITION
+from base.telemetry.otlp.telemetry_otlp_metrics import _strip_unit_suffix, _unit_for
 
 _RULES = (
     Path(__file__).resolve().parent.parent.parent
@@ -57,7 +57,7 @@ _EXPECTED_UIDS = {
     "ava-ops-llm-stall-pair",
     "ava-ops-llm-stall-burst",
     "ava-ops-gateway-metrics-silent",
-    "ava-ops-watchdog-tick-stale",
+    "ava-ops-root-health-stale",
     "ava-ops-checkpoint-blobs-warning",
     "ava-ops-checkpoint-blobs-error",
     "ava-ops-checkpoint-blobs-freshness",
@@ -82,14 +82,15 @@ _EXPECTED_UIDS = {
     "ava-ops-otelcol-queue-pressure",
     "ava-ops-otelcol-enqueue-failures",
     "ava-ops-otelcol-host-silent",
-    # Prometheus OTLP receiver loss (task #4650; focused test in tests/cli/test_lgtm_native.py)
+    # Prometheus OTLP receiver loss (task #4650; focused test in cli/commands/tests/test_lgtm_native.py)
     "ava-ops-prom-too-old-samples",
     # memory-search growth layer (task #2088/#2090) — OTLP gauge mirror
     "ava-ops-memory-search-rows-warning",
     "ava-ops-memory-search-rows-critical",
-    # recovery posture — scheduled-proof failure and remote retention growth
+    # recovery posture — scheduled-proof failure and backup operation custody
     "ava-ops-recovery-drill-failed",
-    "ava-ops-pitr-storage-growth",
+    "ava-ops-backup-operation-blocked",
+    "ava-ops-backup-operation-quarantined",
     # alerting stack health — remote Tempo scrape target (task #3330)
     "ava-ops-tempo-backend-down",
 }
@@ -117,7 +118,7 @@ def _load_groups() -> list[dict[str, Any]]:
     assert [group["name"] for group in groups] == ["ava-ops", "ava-ops-slow"]
     assert [group["folder"] for group in groups] == ["Ava", "Ava"]
     assert [group["interval"] for group in groups] == ["1m", "5m"]
-    assert [len(group["rules"]) for group in groups] == [31, 10]
+    assert [len(group["rules"]) for group in groups] == [33, 9]
     return groups
 
 
@@ -365,22 +366,22 @@ def test_gateway_metrics_silence_rule_uses_heartbeat_counter() -> None:
     assert rule["execErrState"] == "OK"
 
 
-def test_watchdog_tick_staleness_tracks_each_recent_capability() -> None:
-    """A live process is insufficient when its watchdog round is wedged.
+def test_root_health_tick_staleness_tracks_each_recent_root_home() -> None:
+    """A live process is insufficient when its root round is wedged.
 
-    Keep the capability's ``machine`` / ``process`` dimensions through the
+    Keep the root home's ``machine`` / ``home_id`` / ``process`` dimensions through the
     historical/current set subtraction so one silent gateway or runner is
-    named, while a retired capability naturally leaves the 24-hour set.
+    named, while a retired root home naturally leaves the 24-hour set.
     """
     rules = {r["uid"]: r for r in _load_rules()}
-    rule = rules["ava-ops-watchdog-tick-stale"]
+    rule = rules["ava-ops-root-health-stale"]
     expr = _exprs(rule, "prometheus")[0]
-    assert "ava_watchdog_tick_last_tick_timestamp_seconds" in expr
+    assert "ava_root_health_tick_last_tick_timestamp_seconds" in expr
     assert "max_over_time" in expr
-    assert "[24h]" in expr
+    assert "ava_root_health_expected_expected_since_timestamp_seconds[24h]" in expr
     assert "[3m]" in expr
-    assert "unless on(machine, process)" in expr
-    assert "max by (machine, process)" in expr
+    assert "unless on(machine, home_id, process)" in expr
+    assert "max by (machine, home_id, process)" in expr
     assert _threshold_params(rule) == [[0]]
     assert rule["for"] == "0m"
     assert rule["noDataState"] == "OK"
@@ -724,7 +725,7 @@ def test_rate_limit_rule_groups_http_429s_by_provider() -> None:
 
 def test_billing_rule_keys_on_the_billing_flag_not_a_status_list() -> None:
     """The discriminator is the emitted `billing` verdict
-    (shared/lm/errors.py's cross-provider predicate), never a status list
+    (base/lm/errors.py's cross-provider predicate), never a status list
     re-spelled in LogQL: a provider added to that vocabulary must be covered
     here without touching this file."""
     rules = {r["uid"]: r for r in _load_rules()}
@@ -743,7 +744,7 @@ def test_billing_rule_names_vendor_and_model_in_the_notification() -> None:
     summary = rule["annotations"]["summary"]
     assert "{{ $labels.attributes_vendor }}" in summary
     assert "{{ $labels.attributes_model }}" in summary
-    # shared/alerts.py:notify_text truncates the summary at 200 chars; the
+    # base/telemetry/alerts.py:notify_text truncates the summary at 200 chars; the
     # template must still say what happened once the labels expand.
     assert len(summary) <= 200, f"summary is {len(summary)} chars, IM truncates at 200"
 
@@ -1084,29 +1085,6 @@ def test_recovery_drill_failure_rule_is_immediate_and_names_the_drill() -> None:
         "team": "ava-ops",
     }
     assert "attributes_drill" in rule["annotations"]["summary"]
-
-
-def test_pitr_storage_growth_rule_compares_remote_bytes_week_over_week() -> None:
-    rules = {r["uid"]: r for r in _load_rules()}
-    rule = rules["ava-ops-pitr-storage-growth"]
-
-    assert _exprs(rule, "prometheus") == [
-        "max by (machine, backend) (ava_pitr_remote_inventory_bytes_ratio) / "
-        "clamp_min(max by (machine, backend) "
-        "(ava_pitr_remote_inventory_bytes_ratio offset 7d), 1)"
-    ]
-    assert _exprs(rule, "loki") == []
-    assert rule["for"] == "1h"
-    assert rule["noDataState"] == "OK"
-    assert rule["execErrState"] == "OK"
-    assert _threshold_params(rule) == [[1.25]]
-    assert rule["labels"] == {
-        "severity": "warning",
-        "ruleUID": "ava-ops-pitr-storage-growth",
-        "metric": "pitr_remote_storage_growth",
-        "team": "ava-ops",
-        "notify_im": "false",
-    }
 
 
 def test_tempo_backend_down_rule_tracks_the_remote_scrape() -> None:

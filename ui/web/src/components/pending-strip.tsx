@@ -55,7 +55,7 @@ export function PendingStrip({
             <li key={it.id} className={cn("items-center gap-1.5 pl-4", FLEX, MIN_W_0)}>
               <span className="shrink-0 text-muted-foreground/70">· {sourceLabel(it.source)}</span>
               {/* An image-only message stores "[image]" as its text placeholder
-                  (gateway/routers/agents_state.py `_normalize_message_content`);
+                  (gateway/agents/state.py `_normalize_message_content`);
                   suppress that literal once real thumbnails render — the same
                   rule the timeline's EnvelopeContent uses. */}
               {it.images?.length && it.content === "[image]" ? null : (

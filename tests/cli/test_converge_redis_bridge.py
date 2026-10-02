@@ -139,7 +139,7 @@ def test_converge_installs_source_and_loads_changed_job(
     calls: list[tuple[str, ...]] = []
 
     monkeypatch.setattr(bridge, "_plist_path", lambda: plist)
-    monkeypatch.setattr("shared.os_cron.os_jobs_enabled", lambda: True)
+    monkeypatch.setattr("base.host.system.cron.os_jobs_enabled", lambda: True)
 
     def _launchctl(*args: str) -> object:
         calls.append(args)
@@ -173,7 +173,7 @@ def test_unchanged_loaded_job_is_not_restarted(
     calls: list[tuple[str, ...]] = []
 
     monkeypatch.setattr(bridge, "_plist_path", lambda: plist)
-    monkeypatch.setattr("shared.os_cron.os_jobs_enabled", lambda: True)
+    monkeypatch.setattr("base.host.system.cron.os_jobs_enabled", lambda: True)
 
     def _launchctl(*args: str) -> object:
         calls.append(args)
@@ -338,8 +338,8 @@ def test_probe_reports_unconfigured_when_registry_record_is_missing(
     def _missing_record(_home: Path) -> None:
         return None
 
-    monkeypatch.setattr("shared.machine.reachable_host", lambda: "10.64.0.7")
-    monkeypatch.setattr("shared.cluster.get_record", _missing_record)
+    monkeypatch.setattr("base.cluster.machine.reachable_host", lambda: "10.64.0.7")
+    monkeypatch.setattr("base.cluster.get_record", _missing_record)
     monkeypatch.setattr(bridge, "_job_loaded", lambda: False)
 
     status = bridge.probe_redis_bridge(tmp_path)

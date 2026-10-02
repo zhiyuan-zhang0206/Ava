@@ -3,11 +3,22 @@
     "tests/scripts/test_alert_rules.py::test_gateway_latency_rules_scope_to_route_class": 15,
     "tests/scripts/test_ci_secret_scanning.py::test_ci_secret_and_dependency_audits_are_wired_to_one_policy": 24
   },
-  "directories": {
-    "tests/scripts": 53
-  },
   "files": {
-    "tests/scripts/test_alert_rules.py": 1151,
-    "tests/scripts/test_check_model_updates.py": 899
+    "tests/scripts/test_alert_rules.py": 1150
+  },
+  "patch_targets": {
+    "tests/scripts/test_rotate_cluster_secret.py::services.backup._run_with_progress": 1
+  },
+  "tests_location": {
+    "tests/scripts/structure/test_lint_common.py::top-level": 1,
+    "tests/scripts/structure/test_path_imports.py::top-level": 1,
+    "tests/scripts/structure/test_placement.py::top-level": 1,
+    "tests/scripts/test_audit_branch_protection.py::top-level": 1,
+    "tests/scripts/test_refresh_test_durations.py::top-level": 1,
+    "tests/scripts/test_render_wsl_boot_task.py::top-level": 1,
+    "tests/scripts/test_rotate_cluster_secret.py::top-level": 1,
+    "tests/scripts/test_test_selector.py::top-level": 1,
+    "tests/scripts/test_update_model_pricing.py::top-level": 1,
+    "tests/scripts/test_worktree_sh_clean.py::top-level": 1
   }
 }

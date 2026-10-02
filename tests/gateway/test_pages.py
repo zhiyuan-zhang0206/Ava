@@ -26,8 +26,8 @@ import psycopg
 import pytest
 from fastapi.testclient import TestClient
 
+from base.db import create_agent
 from gateway.app import app
-from shared.db import create_agent
 
 _HOST = "127.0.0.1"  # loopback — the single-box posture the SDK registers (audit P1-4: only loopback / the agent's own machine are legal proxy targets)
 
@@ -106,7 +106,7 @@ def test_register_page_url_falls_back_to_request_base_without_gateway_url(
 ) -> None:
     """No Gateway URL configured (dev/tests) -> request base, so callers still
     get a usable absolute URL instead of a bare path."""
-    from shared.config import settings
+    from base.config import settings
 
     monkeypatch.setattr(settings.gateway, "gateway_url", "")
     aid = create_agent(db_conn)
@@ -186,7 +186,7 @@ def test_register_page_sets_explicit_expiry(db_conn: psycopg.Connection) -> None
 def test_register_page_applies_gateway_default_expiry(
     db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from shared.config import settings
+    from base.config import settings
 
     monkeypatch.setattr(settings.daemon, "page_default_ttl_seconds", 300.0)
     aid = create_agent(db_conn)

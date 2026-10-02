@@ -13,7 +13,7 @@ converge source: it reaches agents through the project-local mount instead
 (issue #146).
 
 Each synced top-level dir is tracked in the install registry
-(`shared/install_registry.py`); the scanner loads only enabled entries. An
+(`base/packages/extensions/install_registry.py`); the scanner loads only enabled entries. An
 installed plugin's skills gate on the plugin's own registry entry — no
 duplicate `type="skill"` row is created for it.
 
@@ -30,7 +30,7 @@ untouched copies are removed; touched ones are kept with a warning.
 User-origin entries (installed via `ava plugins install <git-url>` or
 `ava skill register`) are never touched.
 
-Runs as a converge step (`ava start` / `ava cluster update` / `ava converge`) and
+Runs as a converge step (`ava start` / the fleet update / `ava converge`) and
 directly after `ava plugins install`/`uninstall` so packages activate on the
 next skill scan without a restart.
 """
@@ -43,18 +43,19 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 
-from cli.commands.extensions.skill_package import contains_skill_md
-from shared import install_registry, paths
-from shared.cluster import is_default_home
-from shared.host.converge.converge_preserve_report import report_converge_preserve
-from shared.install_registry import (
+from base import paths
+from base.cluster import is_default_home
+from base.host.converge.preserve_report import report_converge_preserve
+from base.packages.extensions import install_registry
+from base.packages.extensions.install_registry import (
     IGNORED_NAMES,
     InstalledPackage,
     PackageOrigin,
     TrustTier,
     tree_hash,
 )
-from shared.packages.skills.skill_names import SkillIdentity, match_key
+from base.packages.skills.names import SkillIdentity, match_key
+from cli.commands.extensions.skill_package import contains_skill_md
 
 # A git worktree checkout's sources are branch work-in-progress. converge and
 # `ava skill update` take their sources from the checkout the CLI runs from
@@ -65,8 +66,8 @@ from shared.packages.skills.skill_names import SkillIdentity, match_key
 # `~/.ava/skills`, silently shadowing what main ships. Observed 2026-08-08: a
 # R5 worktree's copy of `ava-serious-research` was synced into prod by a
 # `skill update` run from that worktree (audit round 2, skills-plugins #3).
-# Dev worktree clusters resolve their own home (`~/.ava-<dir>`), which is not
-# the default home, so only the prod-home + worktree combination is refused.
+# Only the prod-home + worktree combination is refused: a home of any other
+# name (a test or scratch home) takes whatever checkout runs.
 _WORKTREE_MARKERS = (".claude/worktrees", "/.worktrees/")
 
 

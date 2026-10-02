@@ -8,8 +8,8 @@ from urllib.parse import urlparse
 import pytest
 from playwright.sync_api import Page, Request
 
+from tests.base.poll_until import poll_until
 from tests.e2e._env import E2EEnv
-from tests.shared.poll_until import poll_until
 
 _CHANNEL_PATHS = {
     "/api/system": "system",

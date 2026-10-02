@@ -17,7 +17,7 @@ def truncate_with_deadlock_retry(conn: psycopg.Connection[Any], statement: Liter
 
     Rollback between attempts; re-raise on the third so a persistent failure is
     never absorbed — the loop only rides out the transient lock-order race.
-    Mirrors the non-e2e suite's per-test truncate (tests/conftest.py
+    Mirrors the non-e2e suite's per-test truncate (tests/fixtures/provisioning.py
     `_clean_state` — keep the two in step).
     """
     for attempt in range(3):

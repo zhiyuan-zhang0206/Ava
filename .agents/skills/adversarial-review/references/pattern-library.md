@@ -72,7 +72,7 @@ otherwise. Each entry: symptom → how it reads in a diff → evidence anchor.
 
 - **D1 Hand-rolled retry loops.** A new retry loop with its own
   backoff/jitter/transient classification instead of converging on
-  `shared/resilience.py` (design invariant D1 — "the only retry loop").
+  `base/host/net/resilience.py` (design invariant D1 — "the only retry loop").
   The loops drift: one retries 429, another doesn't; one jitters, another
   sleeps negative.
 - **D2 Retry re-executes non-idempotent work.** A timeout-then-retry of a
@@ -93,9 +93,9 @@ otherwise. Each entry: symptom → how it reads in a diff → evidence anchor.
   the schema truth lags a merged migration; fresh databases only work
   because every migration is idempotent. Any future non-idempotent
   migration fails on fresh DBs.
-- **E2 Down migration destroys live data.** A `.down.sql` whose safety
-  precondition (a mirror still writing) was removed by later code —
-  rollback mechanically executes the down and drops live rows.
+- **E2 Merged migration rewritten.** A migration already on main is edited,
+  deleted or renamed — a DB that applied it never re-runs it, so fresh and
+  applied databases diverge; the fix is a new migration.
 - **E3 Event contract vs emitter drift.** EventSpec declares payload keys /
   retention that the emitter never writes or the daemon never reads;
   "derived views live here and nowhere else" is false.
@@ -149,7 +149,7 @@ otherwise. Each entry: symptom → how it reads in a diff → evidence anchor.
 - **G5 e2e without proof-of-work.** No junitxml/artifact assertion — a
   no-op e2e job stays green.
 - **G6 Tests that reach the real world.** Tests invoking code that can
-  POST to Telegram, register os_cron/launchd jobs, or apply migrations —
+  POST to Telegram, register cron/launchd jobs, or apply migrations —
   the shell leaks prod `.env` into test processes; non-pytest scripts bypass
   conftest guards entirely. (Two P0 incidents: real Telegram pushes from
   pytest; a worktree debug script rewriting the prod health-probe plist.)

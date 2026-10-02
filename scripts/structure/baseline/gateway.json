@@ -1,22 +1,10 @@
 {
-  "complexity": {
-    "gateway/_idempotency.py::idempotency_middleware": 15,
-    "gateway/_loki_aggregates.py::_numeric_attribute_slices": 15,
-    "gateway/_loki_aggregates.py::attribute_aggregate#3": 20,
-    "gateway/_loki_event_rows.py::count_events": 15,
-    "gateway/_loki_logql.py::_agg_pipeline": 18,
-    "gateway/_loki_logql.py::_build_logql": 21,
-    "gateway/app.py::_cluster_auth_middleware": 15,
-    "gateway/context_breakdown.py::bucket_messages": 16,
-    "gateway/prom_metrics.py::query_range": 16,
-    "gateway/schedule_manager.py::ScheduleManager._reconcile_locked": 16,
-    "gateway/sse.py::event_stream": 16,
-    "gateway/ttl_reaper.py::_reaper_loop": 19
-  },
-  "directories": {
-    "gateway": 43
-  },
-  "private_imports": {
-    "gateway/app.py::gateway.routers._machine_pause": 1
+  "ambient_state": {
+    "gateway/app.py::ambient-container:_session_last_touch": 1,
+    "gateway/app.py::asyncio-task:lifespan": 4,
+    "gateway/schedule_runner.py::import-time-read:_STALL_CHECK_INTERVAL_S": 1,
+    "gateway/schedule_runner.py::import-time-read:_STALL_TIMEOUT_S": 1,
+    "gateway/schedule_runner.py::thread:_stall_action": 1,
+    "gateway/schedule_runner.py::thread:_start_stall_guard": 1
   }
 }

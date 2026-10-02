@@ -1,18 +1,5 @@
-// AppConnectionBanner tests — the root-mounted resilience provider.
-//
-// Verifies:
-//   1. Auth-gated: nothing mounts (no cluster poll, no SSE subscription) until
-//      authenticated — pre-auth the login screen owns the viewport.
-//   2. The stranded-cluster recovery affordance renders from the store flag.
-//   3. SSE connection-health tracking writes to the store (connState) so the
-//      timeline's ConnectionNotice can read it. No visual banner for
-//      non-stranded states — those moved to ConnectionNotice in the timeline.
-//
-// useClusterHealth + useEventStream are mocked (their behavior is covered in
-// their own suites); the real Zustand store is used so the wiring is exercised.
-
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { act, cleanup, render, screen } from "@testing-library/react";
+import { act, cleanup, render } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { useStore } from "@/lib/store";
@@ -34,11 +21,6 @@ vi.mock("@/lib/use-cluster-health", () => ({
   CLUSTER_STATUS_QUERY_KEY: ["cluster-status"],
 }));
 
-const { reloadThroughGate } = vi.hoisted(() => ({ reloadThroughGate: vi.fn() }));
-vi.mock("@/lib/gate-maintenance", () => ({
-  reloadThroughGate,
-  UI_UPDATE_QUERY_KEY: ["ui-update-state"],
-}));
 
 // Capture the connection handler so a test can drive SSE state transitions.
 const { connRef, systemRef } = vi.hoisted(() => ({
@@ -52,9 +34,6 @@ vi.mock("@/lib/useEventStream", () => ({
   },
 }));
 
-vi.mock("@/lib/api", () => ({
-  api: { recoverCluster: vi.fn(() => Promise.resolve({ unlocked_holder: null })) },
-}));
 
 function renderBanner() {
   const qc = new QueryClient({
@@ -75,10 +54,8 @@ beforeEach(() => {
   connRef.current = null;
   systemRef.current = null;
   useClusterHealth.mockClear();
-  reloadThroughGate.mockClear();
   act(() => {
     useStore.setState({
-      clusterStranded: false,
       connState: "open",
     });
   });
@@ -94,20 +71,10 @@ describe("AppConnectionBanner", () => {
     expect(useClusterHealth).not.toHaveBeenCalled();
   });
 
-  it("authenticated + healthy: mounts the cluster-health poller, shows no banner", () => {
+  it("authenticated: mounts the cluster-health poller and renders nothing", () => {
     const { container } = renderBanner();
     expect(useClusterHealth).toHaveBeenCalled();
-    // Healthy state — no stranded recovery needed, no banner at root.
     expect(container.firstChild).toBeNull();
-  });
-
-  it("shows the stranded-cluster recovery prompt from the store flag", () => {
-    act(() => {
-      useStore.setState({ clusterStranded: true });
-    });
-    renderBanner();
-    expect(screen.getByRole("button", { name: /Resume cluster/i })).toBeTruthy();
-    expect(screen.getByText(/no update is running/i)).toBeTruthy();
   });
 
   it("tracks the global SSE connection health and writes to the store", () => {
@@ -139,19 +106,4 @@ describe("AppConnectionBanner", () => {
     expect(useStore.getState().connState).toBe("open");
   });
 
-  it("reloads through Gate when the durable-marker start event arrives", () => {
-    renderBanner();
-    expect(systemRef.current).not.toBeNull();
-
-    act(() => {
-      systemRef.current?.({
-        role: "cluster_update_started",
-        agent_id: 0,
-        kind: "rollout",
-        origin: "user",
-      });
-    });
-
-    expect(reloadThroughGate).toHaveBeenCalledTimes(1);
-  });
 });

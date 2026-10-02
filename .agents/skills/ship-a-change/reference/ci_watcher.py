@@ -56,8 +56,8 @@ import time
 from pydantic import ValidationError
 
 import ava
-from shared.config.data_plane import AgentProfileOwnerDbUrlRefusedError
-from shared.paths import workspace_dir
+from base.config.data_plane import AgentProfileOwnerDbUrlRefusedError
+from base.paths import workspace_dir
 
 # ── Configure before launching ───────────────────────────────────────────────
 REPO_ROOT = ""  # e.g. "/home/user/ava/.worktrees/ava-1234-task" — the worktree

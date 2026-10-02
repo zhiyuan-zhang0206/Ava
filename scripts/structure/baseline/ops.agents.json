@@ -1,0 +1,5 @@
+{
+  "complexity": {
+    "ops/agents/spawn.py::create_agent_row": 16
+  }
+}

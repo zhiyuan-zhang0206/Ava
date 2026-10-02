@@ -16,7 +16,7 @@ as a usage error — message on stderr, exit code 2. Three shapes:
   the parse-layer boundary — never deep in the command body.
 - **Value contract** (format, range, duration, JSON shape): a `type=` callable
   on the argument. It may lazily import the canonical validator from its owning
-  module (`shared.*`, `services.*`) and re-raise `ValueError` as
+  module (`base.*`, `services.*`) and re-raise `ValueError` as
   `argparse.ArgumentTypeError`; never duplicate the validator.
 
 No environment variable satisfies a CLI argument that was not passed — the
@@ -41,13 +41,8 @@ the cron payload, the display bound, the safe mode.
 
 ## Retained environment inputs
 
-Two operational inputs deliberately stay environment-only (audited
-2026-09-20; retained with these reasons):
+The worktree override deliberately stays environment-only:
 
-- The enrollment secret fallback in `cli/commands/data_plane/ensure_db_role.py` — an
-  enrolling host may carry the secret in its `.env` before enrollment
-  completes, and a secret on the command line is world-readable in process
-  listings.
 - The worktree override in `cli/commands/extensions/skills_sync.py` — the default is
   the protection (never sync a worktree checkout's sources into a production
   home); the environment switch is the deliberate escape hatch for a caller

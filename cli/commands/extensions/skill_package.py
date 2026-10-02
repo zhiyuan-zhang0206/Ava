@@ -24,7 +24,7 @@ scanner would skip-warn past forever.
 
 Every package installed through here is third-party content by construction
 (repo- and plugin-owned skills reach the load dir via converge, not this path),
-so it is put through `shared.packages.skills.skill_scan` before the first byte is copied. A
+so it is put through `base.packages.skills.scan` before the first byte is copied. A
 critical finding refuses the whole install; `accept_risk=True` is the human
 override, and it records what was accepted on the registry row.
 """
@@ -36,8 +36,8 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
-from shared.install_registry import IGNORED_NAMES, tree_hash
-from shared.packages.skills import skill_scan
+from base.packages.extensions.install_registry import IGNORED_NAMES, tree_hash
+from base.packages.skills import scan
 
 _COLLECTION_ROOTS = ("skills", ".claude/skills", ".agents/skills", ".ava/skills")
 
@@ -73,7 +73,7 @@ def contains_skill_md(d: Path) -> bool:
     Deliberately broader than `_package_at`'s root-SKILL.md rule, and the two
     are not interchangeable: the scanner mounts SKILL.md files at any depth
     (namespaced by folder path), so a plugin whose `skills/` root has only
-    nested skills (`ava_code/pr/SKILL.md`, no `skills/SKILL.md`) still syncs.
+    nested skills (`ava_fleet/ava-fleet/SKILL.md`, no `skills/SKILL.md`) still syncs.
     Install is the inverse — a *package* needs a root SKILL.md because its
     frontmatter name is the install identity.
     """
@@ -87,8 +87,8 @@ def _package_at(d: Path) -> SkillPackage | None:
         SkillPackageError: `d/SKILL.md` exists but does not parse / is missing a
             required field.
     """
-    from shared.packages.skills.skill_index import SkillFormatError
-    from shared.packages.skills.skill_index import parse_skill_frontmatter as _parse_frontmatter
+    from base.packages.skills.index import SkillFormatError
+    from base.packages.skills.index import parse_skill_frontmatter as _parse_frontmatter
 
     skill_md = d / "SKILL.md"
     if not skill_md.is_file():
@@ -165,7 +165,7 @@ def register_installed(
     on installed-plugin rows converge then re-owns `content_hash` for the
     load-dir skills copy.)
     """
-    from shared import install_registry
+    from base.packages.extensions import install_registry
 
     now = datetime.now(UTC).isoformat(timespec="seconds")
     update = install_registry.UpdateState()
@@ -200,12 +200,12 @@ def scan_report(root: Path, name: str, *, accept_risk: bool) -> tuple[str, list[
     Raises:
         SkillScanRefused: critical findings and `accept_risk` is False.
     """
-    findings = skill_scan.scan_package(root)
-    report = skill_scan.render(findings, package=name)
-    critical = skill_scan.criticals(findings)
+    findings = scan.scan_package(root)
+    report = scan.render(findings, package=name)
+    critical = scan.criticals(findings)
     if critical and not accept_risk:
         raise SkillScanRefused(report)
-    return report, skill_scan.rule_ids(critical)
+    return report, scan.rule_ids(critical)
 
 
 def _register_in_cluster(
@@ -233,8 +233,9 @@ def _register_in_cluster(
     a fact about how this machine fetched it, and the cluster row is keyed by
     name and addressed by content.
     """
-    from shared import db, extension_registry
-    from shared.machine import machine_name
+    from base import db
+    from base.cluster.machine import machine_name
+    from base.packages.extensions import registry
 
     from ._pkg_source import looks_like_local_path
 
@@ -249,7 +250,7 @@ def _register_in_cluster(
     # joins its own worker and prints "cannot join current thread" noise).
     with db.pool() as pool:
         for pkg in packages:
-            extension_registry.register_tree(
+            registry.register_tree(
                 pool,
                 root=pkg.root,
                 name=pkg.name,
@@ -281,7 +282,7 @@ def install(
         SkillScanRefused: a package carries critical findings and `accept_risk`
             is False.
     """
-    from shared import paths
+    from base import paths
 
     dest_root = paths.skills_dir()
     clashes = [pkg.name for pkg in packages if (dest_root / pkg.name).exists()]

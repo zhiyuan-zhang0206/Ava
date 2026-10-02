@@ -18,18 +18,18 @@ from types import ModuleType
 import pytest
 
 from ava.shell.coding_tools import _claude_checks, _common, claude, codex
-from shared import coding_session_owner
+from base.sessions import coding_session_owner
 
-_REFERENCE = (
-    Path(__file__).parents[3] / "ava_builtins" / "skills" / "ava-use-other-agents" / "reference"
-)
+_SKILL_DIR = Path(__file__).parents[3] / "ava_builtins" / "skills" / "ava-use-other-agents"
 _SESSION = "01a0e1ac-adc7-7d33-bd13-8ce2c6a686c5"
 _OTHER = "01a0e1eb-472f-7832-81f6-77c7d2e47d75"
 _STATUS_CARD = f"│  Directory:  /ws\n│  Session:                     {_SESSION}   │\n"
 
 
 def _load(name: str) -> ModuleType:
-    spec = importlib.util.spec_from_file_location(f"resume_{name}", _REFERENCE / f"{name}.py")
+    spec = importlib.util.spec_from_file_location(
+        f"resume_{name}", _SKILL_DIR / "scripts" / f"{name}.py"
+    )
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
@@ -114,7 +114,7 @@ def _request(workspace: Path, resume: str | None) -> codex._LaunchRequest:
         caller_instance=None,
         takeover_name=None,
         takeover_brief="",
-        reference_dir=_REFERENCE,
+        skill_dir=_SKILL_DIR,
         resume=resume,
     )
 
@@ -181,7 +181,7 @@ def test_claude_launch_names_its_session(
     monkeypatch.setattr(claude, "_run_supervised_launch", _supervised)
 
     claude.launch(
-        tmp_path, tmp_path / "t.md", tmp_path / "w.md", 60, reference_dir=_REFERENCE, resume=resume
+        tmp_path, tmp_path / "t.md", tmp_path / "w.md", 60, skill_dir=_SKILL_DIR, resume=resume
     )
 
     ((session, resumed),) = seen

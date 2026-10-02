@@ -6,22 +6,30 @@ coordination. Its design rationale is recorded in
 
 | Responsibility | Current implementation |
 |---|---|
-| Service specification | `ops/service_spec.py`, `ops/roster.py`, `ops/spec.py` |
-| Observation and status | `ops/observe.py`, `ops/cluster_status.py` |
-| Controller ordering | `ops/manager.py` and `ops/controllers/` |
-| Native agent drain | `ops/agent_pause.py` and `ops/agent_pause_probe.py` |
+| Service specification | `ops/spec.py` (capability selection and gates); `ops/roster/` (canonical roster, its `service_spec` contract; `healthz.py` builds the entry of a standard `/healthz` daemon from its session, module, capabilities and `requires_db`) |
+| Observation and status | `ops/roster/observe.py`; `ops/cluster_status/` (host snapshot, `schema_mismatch` diagnosis) |
+| Native agent drain | `ops/agent_pause/` (drain, `probe` of the running host) |
+| Agent lifecycle | `ops/agents/` (birth and wake); `ops/lifecycle/` (lifecycle RPC ops) |
+| RPC | `ops/rpc_schemas/` (wire vocabulary); `ops/cluster_rpc.py` (gateway client) |
+| Op clusters the ops server dispatches | `ops/lifecycle/`, `ops/cluster.py`, `ops/host_config.py`, `ops/inventory.py`, `ops/uploads.py` |
 | Pause, stop and restart | CLI maintenance orchestration over the shared drain |
-| Cluster rollout | `ava cluster update`, gateway barrier and runner self-updates |
+| Fleet update | `cli/fleet_update.py` (down and up scripts per unit, gated by the code version) |
 
-`build_services()` is the source for local startup and watchdog healthchecks.
+Each package door is the module it grew from; `ops.agents`,
+`ops.rpc_schemas`, `ops.cluster_status`, `ops.agent_pause` and `ops.roster`
+kept their import paths. Module names never repeat the package name, so the
+op clusters read `ops.lifecycle`, `ops.cluster`, `ops.host_config`,
+`ops.inventory` and `ops.uploads`. `python -m ops.private_files` stays top-level:
+it is an operator entry point beside its `private-files/` manifest.
+
+`build_services()` supplies the application root manifest and local status roster.
 Agent-runner units execute agents inside one agent host. There is no per-agent
 process launcher or restarter service. Native service sessions and persistent
 PTY hosts remain separate execution resources.
 
-The watchdog reconciles updater/rollout ownership, pause, schema and pinned
-code before attempting service recovery. A blocking result carries a scope;
-the watchdog maps it against each service's dependency flags. Controllers do
-not maintain their own service lists.
+The application root owns service supervision. There is no controller manager,
+background checkout/update trigger, scheduled updater reaper, or automatic
+stranded-hold restart path.
 
 Pause and update hold admission and wait for native restart, checkpoint flush,
 actual continuation completion and resource settlement. Ordinary stop shares
@@ -29,23 +37,25 @@ that drain and then closes the selected local services, PTYs and data plane.
 Timeout fails without implicit force. The complete operator contract is in
 [graceful maintenance](../conventions/graceful-maintenance.md).
 
-Gateway rollout drains all participating runners before schema migration.
-Readiness is necessary for resumption but cannot replace a missing drain or
-checkpoint receipt. The installed version's first update must respect its
-actual protocol capabilities; see the maintenance runbook.
+A fleet update is `python -m cli.fleet_update`. What the update path still lacks
+is recorded in the
+[unified lifecycle plan](../future/infra/unified-cluster-lifecycle.md). Retired
+updater RPCs cannot be used to fill those gaps.
 
-Service sessions use the platform's native supervisor (`shared/posixproc.py`
-or Windows winproc). Agent shells use independent PTY hosts. Healthchecks and
-CLI launch paths share the session backend; stop verifies captured process
-identity before signalling. No K8s runtime or image deployment is involved.
+The native OS unit supervises the application root, which owns its service
+subprocesses. Agent shells use independent PTY hosts. Stop verifies captured
+process identity before signalling.
 
-The import boundary is `shared < ops < {gateway, cli}`. Shared RPC contracts
-live in the ops schema modules (`ops/rpc_schemas.py` with the focused
-`ops/rpc_terminate.py` / `ops/rpc_content.py` / `ops/rpc_billing_recovery.py` / `ops/rpc_prepare_facts.py` /
-`ops/rpc_prepare_dispatch.py` siblings); gateway-only schemas stay in
-`gateway/schemas/`. Contracts that embed strict evidence models —
-`cluster_prepare_facts` and `cluster_prepare_dispatch` (task #4129) — validate
-their JSON wire copies in JSON mode.
+The import boundary is `base < ops < {gateway, cli}`. The supported RPC
+vocabulary lives in the `ops/rpc_schemas/` door; focused agent contracts live in
+its `terminate`, `content`, and `billing_recovery` submodules. Gateway-only
+schemas stay in `gateway/schemas/`.
+The client and daemon reject unknown kinds before machine lookup, maintenance
+admission, dedupe, or dispatch. Retired updater fetch, prepare, bootstrap, and
+continuation requests have no wire registration or handler. Their handlers, schemas, command producers and session/log status projections
+are absent. Callers import live pause, status and recovery definitions directly.
+The maintenance fences still enforce admission; removing an updater command
+does not remove them.
 Cluster identity remains the installed home path, resolved before runtime
 configuration construction.
 
@@ -55,6 +65,17 @@ business DB posture; `paused_reason` names the first true clause (`no_state` /
 `business_pause` / `maintenance` / `startup`), so a failed start that parked the
 serving gate reads apart from a deliberate pause. A missing DB snapshot cannot
 claim ready. This status
-projection does not change the business API's pause middleware. Rollout polling
-combines it with the responding ops process SHA and the source checkout SHA;
+projection does not change the business API's pause middleware. The responding
+ops process SHA and source checkout SHA remain read-only status metadata;
 these fields do not certify every sibling daemon's running code.
+
+`ops/cluster_status/schema_mismatch.py` compares the applied migration set
+with the running image's required set. Wheel runtimes use installed SQL metadata without Git.
+The status contract contains the diagnosis kind, machine and detail; it has no
+Git-pin category, watchdog counters, held-service projection, or stranded-hold
+record. Ordinary pause and maintenance status remain independent of this
+read-only schema diagnosis. Invalid database catalogs or image migration layouts
+report `invalid-migration-layout`; query and connection failures report
+`unavailable`. Only a successful comparison of equal sets returns no diagnosis.
+The batched host snapshot also reports an unavailable comparison when its shared
+database read fails, without retrying through another connection.

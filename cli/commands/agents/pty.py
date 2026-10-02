@@ -5,8 +5,8 @@ from __future__ import annotations
 import sys
 from typing import TextIO
 
-from shared.platform import LockTimeoutError
-from shared.sessions.pty import allocation_freeze
+from base.native_process.os_platform import LockTimeoutError
+from base.sessions.pty import allocation_freeze
 
 
 def _print_freeze(

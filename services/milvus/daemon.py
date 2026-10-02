@@ -20,8 +20,8 @@ from __future__ import annotations
 import os
 import sys
 
-from shared.config import settings
-from shared.paths import logs_dir
+from base.config import settings
+from base.paths import logs_dir
 
 DATA_DIR = settings.services.milvus_data_dir
 PORT = settings.services.milvus_port
@@ -44,7 +44,7 @@ def main() -> None:
     # session directly owns the milvus process.
     # The uv-installed entry point lives at .venv/bin/milvus-lite, in
     # PATH because the daemon session env activates the venv
-    # (`shared.session_env.forward_env_dict` prepends .venv/bin to PATH).
+    # (`base.sessions.env_forwarding.forward_env_dict` prepends .venv/bin to PATH).
     try:
         os.execvp(  # noqa: S606 — execvp is intentional, matching the PATH lookup for the milvus-lite binary
             "milvus-lite",

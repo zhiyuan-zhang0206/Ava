@@ -14,6 +14,8 @@ import psutil
 import psycopg
 import pytest
 
+from base.config import settings
+
 pytestmark = pytest.mark.skipif(sys.platform == "win32", reason="gateway runner is POSIX-only")
 
 
@@ -135,6 +137,10 @@ def _assert_cleanup(root: Path, owned: list[psutil.Process], *, complete: bool) 
 def test_runner_hard_exit_child_ownership(
     db_conn: psycopg.Connection, unit_home: Path, mode: str
 ) -> None:
+    # The runner is a separate process that boots its config from its home's `.env`
+    # (`AVA_HOME` is this test's `unit_home`, which starts bare): name the test
+    # database there, as a started cluster's `.env` does.
+    (unit_home / ".env").write_text(f"AVA_DB_URL={settings.data_plane.db_url}\n")
     root = unit_home / "cleanup"
     root.mkdir()
     script = _scripts(root, complete=mode == "complete")

@@ -12,7 +12,7 @@ Ava agents act by **writing code**, not by picking from a menu of tools. They
 form a **fleet** — a graph of peers that spawn, fork, and message one another —
 and they can **read and modify their own source**, shipping changes through
 PR → CI → merge and then rolling the new code across the running cluster with
-`ava cluster update`.
+the fleet update script (`python -m cli.fleet_update`).
 
 The core is deliberately small. From day one every layer is built asking *can
 this scaffolding be stripped once the model is strong enough to not need it?* —
@@ -32,10 +32,10 @@ screenshots, Windows notes, and FAQ: **[QUICKSTART.md](../QUICKSTART.md)**.
 
 ### 1. Self-Evolving — the cluster upgrades itself
 
-Ava's cluster upgrades itself. New code lands on `main`, and `ava cluster update`
-rolls the whole cluster onto it — without stopping the work in flight. An
+Ava's cluster upgrades itself. New code lands on `main`, and the fleet update script
+(`python -m cli.fleet_update`) rolls the whole cluster onto it — without stopping the work in flight. An
 agent's current code execution finishes at its turn boundary before the new
-version takes over; only wedged processes are force-reaped. The rollout is
+version takes over; only a wedged process needs an explicit forced stop. The rollout is
 self-supervised: a canary runs the new code under observation while a holdout
 on the old code watches, and rolls back on regression. No maintenance windows,
 no babysitting — the cluster works by day and updates itself by night.
@@ -207,9 +207,8 @@ it goes red"*, *"what is agent 42 doing?"*, *"tell it to skip the flaky test"*.
 | `terminate_agent` | end an agent (destructive: it stops working) |
 | `cluster_status` | is the cluster up, and is it paused for maintenance |
 
-Which cluster it drives is not a flag: the server dials the gateway of the
-checkout its `ava` belongs to, with that cluster's own secret. The `ava` on PATH
-means prod; a worktree's `.venv/bin/ava` means that worktree's cluster. Nothing
+Which cluster it drives is not a flag: the server dials the gateway of the home it
+resolves (`$AVA_HOME`, else `~/.ava`), with that cluster's own secret. Nothing
 new is exposed — every tool is the authenticated gateway route the web UI
 already calls.
 
@@ -220,19 +219,21 @@ already calls.
 
 ## CLI
 
-One entry point — `ava`. Every verb acts on the cluster the checkout anchors:
-the `ava` on PATH means prod (`~/.ava`); a worktree's `.venv/bin/ava` means that
-worktree's cluster. Run `ava --help` for the full surface.
+One entry point — `ava`. Every verb acts on the home `$AVA_HOME` names (`~/.ava`
+for prod when it is unset); a home with its own `source` checkout is operated only by
+that checkout's `ava`; any other checkout's `ava` refuses every command. Run `ava --help`
+for the full surface.
 
 | Verb | Does |
 |---|---|
-| `ava start` | bring up this host's stack (idempotent; machine-name / gateway-url only on the first run) |
+| `ava init` | record this host's identity once (machine name, capabilities, gateway URL); starts nothing |
+| `ava start` | bring up an initialized host's stack (idempotent); takes only the service selection |
 | `ava stop` / `ava restart` | tear down / bounce this host |
 | `ava status` | one-screen view: sessions, pg/redis/pgbouncer, healthchecks |
 | `ava logs` | list live service sessions or tail one |
-| `ava cluster update` | roll the latest merged code across the cluster — the only update path |
-| `ava cluster ls/status/down/destroy` | cluster registry + multi-machine roster |
-| `ava enroll --gateway <url>` | join a split-deployment agent-runner to a gateway |
+| `python -m cli.fleet_update` | roll the latest merged code across a networked cluster over SSH (`down`, then `up`) — the only update path |
+| `ava cluster status/destroy` | multi-machine roster + decommission of this host's cluster |
+| `.venv/bin/ava init --no-serve-gateway --serve-agent-runner --gateway-url <url> --db-capability <bundle>` | init of a split-deployment agent-runner joining a gateway, then `ava start` (its checkout's CLI — `ava` on PATH does not exist yet; with the bundle's `AVA_DB_CAPABILITY_KEY` exported) |
 | `ava agents` | observe + control agents (ls / cancel / restart / terminate) |
 | `ava schedules` | gateway-supervised schedules (cron jobs agents create and own) |
 | `ava skill install <src>` | install Agent Skills from a git URL or local path |
@@ -313,9 +314,9 @@ cluster; that has to come from outside Ava today. Full policy and reporting:
 | Package manager | uv |
 | Frontend | Next.js 16 + React 19 + Tailwind 4 + shadcn/ui |
 
-[Frontend stack →](../ui/web/web.ava.okf.md)
-[Connection budget →](../agent/db/db.ava.okf.md)
-[Model registry →](../shared/lm/registry.py)
+[Frontend stack →](../ui/web/docs/web.ava.okf.md)
+[Connection budget →](../agent/db/docs/db.ava.okf.md)
+[Model registry →](../base/lm/registry.py)
 
 ### Observability (OTel + LGTM)
 
@@ -347,8 +348,7 @@ full design.
 
 ## Agent instruction files
 
-`AGENTS.md` is this repo's entry point for all AI coding agents.
-`CLAUDE.md` is a symlink → `AGENTS.md`. `ui/web/CLAUDE.md` → `ui/web/AGENTS.md`.
+`AGENTS.md` is this repo's entry point for all AI coding agents; Claude Code reads it (and `ui/web/AGENTS.md`) directly, so there is no `CLAUDE.md`.
 
 ## Contributing
 

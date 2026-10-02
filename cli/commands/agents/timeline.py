@@ -10,8 +10,8 @@ def cmd_agents_timeline(agent_id: int, limit: int | None = None, before: str | N
 
     Without ``limit`` the request omits it and the gateway applies its
     configured default window (display.timeline_default_limit)."""
-    from shared.http_dial import get
-    from shared.machine import gateway_api_base, gateway_auth_headers
+    from base.cluster.machine import gateway_api_base, gateway_auth_headers
+    from base.host.net.http_dial import get
 
     params: dict[str, int | str] = {}
     if limit is not None:

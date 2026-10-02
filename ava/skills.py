@@ -8,15 +8,15 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, TypedDict
 
-from ava import skill_sources
-from shared.log import logger
-from shared.packages.skills.skill_names import SkillIdentity, display_name, match_key
-from shared.paths import ava_home
+from ava.sdk_surface import skill_sources
+from base.log import logger
+from base.packages.skills.names import SkillIdentity, display_name, match_key
+from base.paths import skills_dir
 
 if TYPE_CHECKING:
     # Annotation-only on the mount signatures; imported at the call site so the
     # stack stays off every exec child (task #3816; _TYPE_CHECKING_ALLOWED).
-    from shared.packages.skills.skill_index import SkillFile
+    from base.packages.skills.index import SkillFile
 
 _recorded_skill_invocations: set[tuple[int, str]] = set()
 # Per-agent-run dedup set: (agent_id, skill_identifier) tuples — one row per
@@ -47,7 +47,7 @@ _recorded_skill_invocations: set[tuple[int, str]] = set()
 # `~/.ava/skills/` is THE load dir: repo skills (`<repo>/ava_builtins/skills/*`) and plugin
 # skills (`<repo>/ava_builtins/plugins/<p>/skills/*`, `~/.ava/plugins/<p>/skills/*`) are
 # synced into it by the skills converge step (`cli/commands/extensions/skills_sync.py`,
-# run by `ava start` / `ava cluster update` / `ava converge`); they are not mounted from
+# run by `ava start` / the fleet update / `ava converge`); they are not mounted from
 # their source trees. A plugin's skills sync under its name
 # (`~/.ava/skills/<p>/…`), so the namespace layer survives as plain folder
 # structure. The agent never sees "plugins" — only a skill tree whose shape is
@@ -70,7 +70,7 @@ _recorded_skill_invocations: set[tuple[int, str]] = set()
 # label); if both exist the SKILL.md wins.
 #
 # Two renderings of a skill's location, and one fold between them
-# (`shared/packages/skills/skill_names.py` — dash is canonical outward, underscore is the Python
+# (`base/packages/skills/names.py` — dash is canonical outward, underscore is the Python
 # projection inward):
 #   - composer / display identifier — `.`-joined dash form:
 #     superpowers.brainstorming, coding.tdd, or bare `goal` (see `identifier`).
@@ -87,7 +87,7 @@ _recorded_skill_invocations: set[tuple[int, str]] = set()
 # this host (`engines.ava` / `requires_commit`) is dropped too, with the reason
 # visible in `ava packages status`. Keeps stray copies from silently loading.
 # Provider roots are scanned last (override). The scan is the shared,
-# mtime-cached SkillIndex (doorplate ⑤) — see shared/packages/skills/skill_index.py.
+# mtime-cached SkillIndex (doorplate ⑤) — see base/packages/skills/index.py.
 # Frontmatter requires name + description; other files in a skill dir are read
 # by the agent via ava.files.read.
 
@@ -136,13 +136,8 @@ def target(skill: Skill) -> str:
     return ".".join(match_key(seg) for seg in (*skill["namespace"], skill["name"]))
 
 
-def _skills_dir() -> Path:
-    """The skill load dir: `$AVA_HOME/skills/`. Separate function for test monkeypatch convenience."""
-    return ava_home() / "skills"
-
-
 # Plugin-contributed skill-root providers. The registry storage lives in
-# `ava.skill_sources` (framework-internal) so the kernel's plugin reload can
+# `ava.sdk_surface.skill_sources` (framework-internal) so the kernel's plugin reload can
 # clear it without importing this disable-able `ava.skills` module; the
 # functions here are the agent/plugin-facing client over it.
 
@@ -239,7 +234,7 @@ def _claim(claimed: dict[tuple[str, ...], str], attr_path: tuple[str, ...], src:
     if prev is not None and prev != src:
         raise SkillNameCollision(
             f"skill path {'.'.join(attr_path)!r} is claimed by both {prev} and {src} — "
-            "dash and underscore are the same name (shared/packages/skills/skill_names.py). "
+            "dash and underscore are the same name (base/packages/skills/names.py). "
             "Rename one; dash is canonical."
         )
     claimed[attr_path] = src
@@ -251,7 +246,7 @@ class SkillIndexBuilder:
     Owns the state the mount threads through — the tree, the per-root
     claimed-paths registry, and the cross-root seen-hashes dedup set — as
     instance state. The folder scan + frontmatter parse itself lives in
-    `shared.packages.skills.skill_index` (doorplate ⑤): one builder behind every skill read
+    `base.packages.skills.index` (doorplate ⑤): one builder behind every skill read
     path, so the loader and the lint cannot drift (they had: the INDEX.md gate
     compared raw names where the SKILL.md gate folded dash/underscore, and the
     lint's separate traversal once skipped a three-deep tree entirely).
@@ -291,13 +286,13 @@ class SkillIndexBuilder:
         # refused between two directories of the SAME mount root.
         self._claimed = {}
         gate_keys = None if gate is None else {match_key(g) for g in gate}
-        # The scan is `shared.packages.skills.skill_index` (doorplate ⑤), mtime-cached: this
+        # The scan is `base.packages.skills.index` (doorplate ⑤), mtime-cached: this
         # mount runs on every system-prompt rebuild, so the cache turns the
         # repeated scans into a stat walk. Entries arrive parent-before-child
         # (sorted folders) — the arrival order the tree converges under — and
         # include the mount point itself, so a SKILL.md at the root (empty
         # rel) still loads as a bare root skill.
-        from shared.packages.skills.skill_index import (
+        from base.packages.skills.index import (
             SkillIndex,  # heavy stack, deferred per-call (task #3816)
         )
 
@@ -438,10 +433,10 @@ def _scan_tree() -> dict:
     `.agents/skills/` and `.ava/skills/` in the same repo, where two of the
     three are usually links back to the third).
     """
-    from shared.install_registry import loadable_skill_names
+    from base.packages.extensions.install_registry import loadable_skill_names
 
     builder = SkillIndexBuilder()
-    builder.mount(_skills_dir(), loadable_skill_names())
+    builder.mount(skills_dir(), loadable_skill_names())
     for root in _provider_roots():
         builder.mount(root, None)
     return builder.tree
@@ -656,7 +651,7 @@ def read(name: str) -> str:
     spelling that folds to it (`"web_ai.deep_research"`, bare frontmatter name
     for a flat skill). Returns the same shape a proxy's `__doc__` carries.
     Unknown names raise ValueError."""
-    from ava.sdk_validation import coerce_str
+    from ava.sdk_surface.validation import coerce_str
 
     key = match_key(coerce_str(name, "name"))
     for skill in names():
@@ -688,13 +683,19 @@ def _record_skill_invoked(skill: Skill) -> None:
         _recorded_skill_invocations.add(key)
 
 
+def clear_recorded_skill_invocations() -> None:
+    """Forget which skills this agent run already recorded, so the next
+    consumption of each one records again (the dedup is per-run state)."""
+    _recorded_skill_invocations.clear()
+
+
 def _insert_skill_events(agent: int, skills: list[Skill]) -> bool:
     """Enqueue one `skill_invoked` audit event per skill; return whether the
     enqueue happened. Callers key their dedup on that return, so a swallowed
     failure is retried rather than remembered as done.
 
     The single write path, so the per-skill call and any future batch caller
-    cannot drift in what they record. The unified emitter (`shared.telemetry`)
+    cannot drift in what they record. The unified emitter (`base.telemetry`)
     owns persistence: the batch lands in the unified event stream, and the
     emitter's JSONL mirror is the durable fallback
     — the enqueue is a bounded-queue put, not a DB round-trip per skill.
@@ -710,7 +711,7 @@ def _insert_skill_events(agent: int, skills: list[Skill]) -> bool:
     if not skills:
         return True
     try:
-        from shared.audit_events import SkillInvokedPayload, insert_event_log_many
+        from base.telemetry.audit_events import SkillInvokedPayload, insert_event_log_many
 
         insert_event_log_many(
             event_type="skill_invoked",

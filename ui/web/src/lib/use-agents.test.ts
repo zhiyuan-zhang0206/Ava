@@ -261,7 +261,7 @@ describe("useAgents.fork", () => {
     vi.mocked(api.getAgent).mockRejectedValue(new Error("Agent not found"));
     // fail-fast: the button should never appear for a non-existent
     // agent; receiving a stale id is a UI bug. Silent fallback would
-    // mask it (the CLAUDE.md "missing-required-field → empty fallback" anti-pattern).
+    // mask it (the AGENTS.md "missing-required-field → empty fallback" anti-pattern).
     const showError = vi.fn();
     vi.mocked(api.spawnAgent).mockResolvedValue({ id: 100 });
     const { result } = renderHook(() => useAgents(showError), { wrapper });

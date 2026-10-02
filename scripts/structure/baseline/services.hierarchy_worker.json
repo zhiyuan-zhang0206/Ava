@@ -1,5 +1,11 @@
 {
+  "ambient_state": {
+    "services/hierarchy_worker/runner.py::global-rebind:_fallback_scanned_at": 1
+  },
   "complexity": {
     "services/hierarchy_worker/scan.py::_scan_tails": 16
+  },
+  "files": {
+    "services/hierarchy_worker/tests/test_hierarchy_worker.py": 897
   }
 }

@@ -1,0 +1,306 @@
+"""Explicit local maintenance; operators coordinate the same generation per host.
+
+Preparation leaves dependency APIs available while existing restart commands
+reach the ordinary claim boundary. Stop never escalates to force, never creates
+a backup, and proves only this home's declared services and owned descendants.
+"""
+
+import argparse
+import contextlib
+import getpass
+import json
+import os
+import sys
+from datetime import UTC, datetime
+
+from base.agents.exit_codes import SERVICES_NOT_READY_EXIT_CODE
+from base.cluster.machine import machine_name, machine_role
+from base.db import connect
+from base.deploy.lifecycle import start_serving
+from base.deploy.maintenance import admission, cohort, hold_driver, pause_owner
+from base.deploy.maintenance.state import MaintenanceHold
+from cli.commands.lifecycle._pause_resume import exclusive_resources
+from cli.commands.lifecycle.service_stop import (
+    deadline_after,
+    remaining,
+    require_no_terminals,
+    stop_data_plane,
+    stop_services,
+)
+from ops.agent_pause import drain, prepare
+from ops.agent_pause.probe import host_identity_or_none, ops_quiescent
+
+
+def _hold(holder: str, at: datetime) -> MaintenanceHold:
+    """This generation's hold, read through the maintenance journal's own door."""
+    current = admission.require_operation(holder, at)
+    assert current.maintenance is not None  # noqa: S101
+    return current.maintenance
+
+
+def _gateway_last(*, confirmed: bool) -> None:
+    if "gateway" in machine_role() and not confirmed:
+        raise RuntimeError(
+            "gateway stop requires --gateway-last after the operator verifies every remote unit; "
+            "this command does not verify remote hosts"
+        )
+
+
+@exclusive_resources
+def stop(
+    holder: str, at: datetime, timeout: float, *, gateway_last: bool, keep_terminals: bool = False
+) -> None:
+    deadline = deadline_after(timeout)
+    _gateway_last(confirmed=gateway_last)
+    hold = _hold(holder, at)
+    if hold.phase not in ("drained", "stopping", "stopped"):
+        raise RuntimeError("stop requires a completed drain for this operation")
+    with connect() as conn:
+        cohort.verify_drained(conn, hold)
+    if "agent-runner" in machine_role() and hold.phase == "drained":
+        identity = host_identity_or_none()
+        if identity is not None and identity.active:
+            raise RuntimeError("agent-host still has active continuations")
+    # Only now close ordinary API admission. In-flight native actions retained
+    # their dependency APIs throughout prepare/drain.
+    from base.deploy.state.host_deploy_state import set_posture
+
+    if hold.phase == "drained":
+        admission.set_phase(holder, at, "stopping")
+    set_posture("paused")
+    ops_quiescent(remaining(deadline))
+    stopped = stop_services(remaining(deadline), keep_terminals=keep_terminals)
+    remaining(deadline)
+    if hold.phase != "stopped":
+        admission.set_phase(holder, at, "stopped")
+    print(f"Stopped local recorded services: {stopped}; data plane remains available")
+
+
+def _start(holder: str, at: datetime) -> int:
+    from cli.commands.lifecycle.start import cmd_start
+
+    hold = _hold(holder, at)
+    if hold.phase not in ("stopped", "starting"):
+        raise RuntimeError("maintenance start requires a stopped unit")
+    if hold.phase == "stopped":
+        admission.set_phase(holder, at, "starting")
+    with admission.authorized_start(holder, at):
+        result = cmd_start(persist_services=False)
+    if result == 0:
+        if not start_serving.is_serving():
+            return SERVICES_NOT_READY_EXIT_CODE
+        admission.set_phase(holder, at, "ready")
+    return result
+
+
+def resume(holder: str, at: datetime, *, cancel: bool) -> None:
+    from ops.cluster_pause import unpause_local_cluster
+
+    hold = _hold(holder, at)
+    if cancel and hold.phase not in ("preparing", "draining", "drained"):
+        raise RuntimeError(
+            "cancel cannot bypass a started stop; complete maintenance stop/start/resume"
+        )
+    if not cancel and hold.phase != "ready":
+        raise RuntimeError("resume requires maintenance start; use --cancel to abandon a drain")
+    if "agent-runner" in machine_role() and host_identity_or_none() is None:
+        print(
+            "  ! agent-host is provably absent (host_running()=false; no process): "
+            "proceeding without its identity probe (a refused health dial alone "
+            "would not qualify)",
+            file=sys.stderr,
+        )
+    with connect() as conn:
+        conn.execute("SELECT 1")
+    # Preserve the hold if dependency/posture restoration fails. A crash after
+    # its release is recovered by existing durable restart-pointer scanning.
+    with admission.authorized_start(holder, at):
+        unpause_local_cluster()
+
+
+@exclusive_resources
+def _repair(holder: str, at: datetime, *, operator: str | None) -> None:
+    """Sanctioned release of latched blocking failure receipts.
+
+    The exact (holder, acquired_at) capability plus the operator-identity audit
+    record is the sanction; the journal tombstone keeps both sides of the CAS
+    (`failures` moved verbatim into `repaired`) visible via
+    `ava maintenance status`. Refuses while the agent-host still has active
+    continuations, so no live receipt can be cleared from under a running
+    turn. Only independently proven process absence skips the identity probe;
+    a refused health connection alone still refuses. A hold
+    that already drained is repairable: a post-drain failure has no other
+    sanctioned exit.
+    """
+    from ops.cluster_pause import unpause_local_cluster
+
+    hold = _hold(holder, at)
+    if not hold.failures:
+        raise RuntimeError(
+            "no failed receipts to repair; resume --cancel abandons a failure-free drain"
+        )
+    if hold.phase not in ("preparing", "draining", "drained"):
+        raise RuntimeError(
+            "repair cannot bypass a started stop; complete maintenance stop/start/resume"
+        )
+    if "agent-runner" in machine_role():
+        identity = host_identity_or_none()
+        if identity is not None and identity.active:
+            raise RuntimeError(
+                "agent-host still has active continuations; wait for quiescence "
+                "before repairing failed receipts"
+            )
+    with connect() as conn:
+        conn.execute("SELECT 1")
+    record = _repair_record(operator)
+    admission.repair(holder, at, record)
+    # Preserve the hold if dependency/posture restoration fails. The repaired
+    # journal stays; a partial release is completed by resume --cancel.
+    with admission.authorized_start(holder, at):
+        unpause_local_cluster()
+    print(
+        f"Repaired {len(hold.failures)} failed receipt(s) "
+        f"({sorted(hold.failures)}); hold released. "
+        f"Operator: {record['by']} at {record['at']}",
+        file=sys.stderr,
+    )
+
+
+def _repair_record(operator: str | None) -> dict[str, str]:
+    """Operator-identity facts for a sanctioned repair.
+
+    The `by` label is explicit when an agent names itself via --operator and
+    falls back to the OS login identity; the uid/pid/parent facts are captured
+    from the process itself, so a repair is always attributable to the process
+    chain that invoked it.
+    """
+    now = datetime.now(UTC).isoformat()
+    return {
+        "at": now,
+        "by": operator if operator else f"{getpass.getuser()} (local operator)",
+        "user": getpass.getuser(),
+        "uid": str(getattr(os, "getuid", lambda: 0)()),
+        "pid": str(os.getpid()),
+        "parent": _parent_process_identity(),
+        "machine": machine_name(),
+    }
+
+
+def _parent_process_identity() -> str:
+    """The immediate parent's pid + command line, truncated for the journal."""
+    import psutil
+
+    try:
+        parent = psutil.Process().parent()
+    except psutil.Error:
+        return "unknown"
+    if parent is None:
+        return "unknown (reparented)"
+    cmdline = " ".join(parent.cmdline() or [])
+    return f"pid={parent.pid} {cmdline[:180]}"
+
+
+def _driver_evidence(driver: hold_driver.HoldDriver | None) -> dict[str, object] | None:
+    """The recorded shepherd identity, for humans reading the journal (task #3276).
+
+    `root` is the process the stranded-hold verdict judges; `leader` (the session
+    leader at mint time) is display evidence only. Liveness is probed from local
+    process state (pid + birth), so `status` stays settings-lite. None when no
+    identity was recorded (a pre-#3270 journal or a daemon-driven pause).
+    """
+    if driver is None:
+        return None
+    return {
+        "liveness": hold_driver.liveness(driver),
+        "root": _driver_ref(driver.root),
+        "leader": _driver_ref(driver.leader),
+    }
+
+
+def _driver_ref(ref: hold_driver.ProcessRef | None) -> dict[str, object] | None:
+    """One recorded process reference as the journal reader needs it: pid + argv."""
+    if ref is None:
+        return None
+    return {"pid": ref.pid, "argv": ref.argv}
+
+
+@exclusive_resources
+def _stop_data(
+    holder: str, at: datetime, timeout: float, *, gateway_last: bool, keep_terminals: bool = False
+) -> None:
+    from cli.commands.lifecycle.root_driver import require_root_absent
+
+    _gateway_last(confirmed=gateway_last)
+    if "gateway" not in machine_role() or _hold(holder, at).phase != "stopped":
+        raise RuntimeError("data-plane stop requires this gateway's stopped maintenance hold")
+    require_root_absent()
+    if not keep_terminals:
+        require_no_terminals()
+    stopped = stop_data_plane(timeout)
+    print(f"Stopped local data plane: {stopped}; no backup was created")
+
+
+def _generation(args: argparse.Namespace) -> datetime:
+    """The exact hold generation the verb names."""
+    at = datetime.fromisoformat(args.acquired_at)
+    if at.tzinfo is None or not args.operation.strip():
+        raise ValueError("maintenance requires a nonempty operation and timezone-aware timestamp")
+    return at
+
+
+def run(args: argparse.Namespace) -> int:
+    verb: str = args.maintenance_cmd
+    if verb == "status":
+        current = pause_owner.read()
+        print(
+            json.dumps(
+                {
+                    "status": current.status,
+                    "operation": current.holder,
+                    "acquired_at": current.acquired_at.isoformat() if current.acquired_at else None,
+                    "maintenance": current.maintenance.encode() if current.maintenance else None,
+                    "driver": _driver_evidence(current.driver),
+                    "scope": "local unit; excludes independent OS-managed extras and remote hosts",
+                },
+                sort_keys=True,
+            )
+        )
+        return 0
+    at = _generation(args)
+    # Task #3270: this invocation is an operator-side ladder step, so stamp its
+    # shepherding identity on the standing hold before doing its work. A no-op
+    # when no matching hold stands yet (prepare's first run mints via prepare).
+    # Best-effort: a failed stamp must not block the verb itself -- the
+    # stranded-hold verdict reports missing evidence loudly instead.
+    driver = hold_driver.mint_driver()
+    with contextlib.suppress(Exception):
+        pause_owner.refresh_driver(args.operation, at, driver=driver)
+    if verb == "prepare":
+        prepare(args.operation, at, driver=driver)
+    elif verb == "drain":
+        drain(args.operation, at, args.timeout)
+    elif verb == "stop":
+        stop(
+            args.operation,
+            at,
+            args.timeout,
+            gateway_last=args.gateway_last,
+            keep_terminals=args.keep_terminals,
+        )
+    elif verb == "start":
+        return _start(args.operation, at)
+    elif verb == "resume":
+        resume(args.operation, at, cancel=args.cancel)
+    elif verb == "repair":
+        _repair(args.operation, at, operator=args.operator)
+    elif verb == "stop-data-plane":
+        _stop_data(
+            args.operation,
+            at,
+            args.timeout,
+            gateway_last=args.gateway_last,
+            keep_terminals=args.keep_terminals,
+        )
+    else:
+        raise ValueError(f"unknown maintenance action: {verb}")
+    return 0

@@ -21,7 +21,7 @@ system is now goes in the OKF node, the rule you extracted goes in
 conventions/defensive-patterns.md, the procedure goes in a skill. Link out to
 those; do not restate them here.
 
-Because the narrative is frozen, `scripts/check_doc_references.py` skips this
+Because the narrative is frozen, `scripts/content_lint/check_doc_references.py` skips this
 directory: naming the flag, file, or command that existed AT INCIDENT TIME is
 the record working as intended. That also means nothing checks your links, so
 mark anything a reader cannot open. Commits and PR numbers from before the

@@ -8,9 +8,9 @@ import struct
 from datetime import UTC, datetime
 from pathlib import Path
 
+from base.paths import logs_dir
 from services.computer.errors import ComputerUseError
 from services.permissions_helper import client as helper
-from shared.paths import logs_dir
 
 
 def _png_size(path: Path) -> tuple[int, int]:

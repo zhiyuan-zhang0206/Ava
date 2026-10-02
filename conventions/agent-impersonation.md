@@ -12,8 +12,9 @@ span if the external side dies.
 
 ## Start a named session
 
-Use the executable and interpreter belonging to the intended checkout; bare
-`ava` on PATH usually belongs to production.
+Run the commands with a bare `ava`: it acts on the cluster `AVA_HOME` names,
+else `~/.ava`. A checkout's own `.venv/bin/ava` acts on that checkout's
+cluster.
 
 ```bash
 ava impersonate request --agent 405 --name 'Fix login' --as 'Codex: login helper' \

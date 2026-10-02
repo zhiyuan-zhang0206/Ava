@@ -19,13 +19,13 @@ from psycopg_pool import AsyncConnectionPool
 
 from agent.db import claim_inbound_batch
 from agent.graph._chat_inbound import build_chat_inbound
-from agent.hosted_ownership import admit_hosted_runtime, settle_hosted_runtime
+from agent.ownership.hosted import admit_hosted_runtime, settle_hosted_runtime
+from base.config import settings
+from base.db import create_agent
+from base.native_process.runtime_incarnation import RuntimeIncarnation
+from base.native_process.turn_identity import bind_turn_identity
 from cli.commands.agents.control import cmd_agents_send
 from gateway.app import app
-from shared.config import settings
-from shared.db import create_agent
-from shared.runtime_incarnation import RuntimeIncarnation
-from shared.turn_identity import bind_turn_identity
 
 _SOURCE = "external_agent:codex:run-42"
 _CALLER = {"kind": "external_agent", "subject": "codex", "instance": "run-42"}
@@ -77,9 +77,11 @@ async def test_profile_through_auth_gate_and_real_hosted_claim(
     monkeypatch.setattr(settings.data_plane, "cluster_secret", secret)
     monkeypatch.setattr(settings.gateway, "auth_middleware_enabled", True)
     monkeypatch.setenv("AVA_AGENT_ID", "999")
-    monkeypatch.setattr("shared.machine.gateway_api_base", Mock(return_value="http://testserver"))
     monkeypatch.setattr(
-        "shared.machine.gateway_auth_headers",
+        "base.cluster.machine.gateway_api_base", Mock(return_value="http://testserver")
+    )
+    monkeypatch.setattr(
+        "base.cluster.machine.gateway_auth_headers",
         Mock(return_value={"Authorization": f"Bearer {secret}"}),
     )
     with TestClient(app) as client:
@@ -87,7 +89,7 @@ async def test_profile_through_auth_gate_and_real_hosted_claim(
         def post(url: str, **kwargs: Any) -> httpx2.Response:
             return client.post(url, **kwargs)
 
-        monkeypatch.setattr("shared.http_dial.post", post)
+        monkeypatch.setattr("base.host.net.http_dial.post", post)
         # Explicit provenance (user ruling 2026-09-20): the send path never consults
         # AVA_CALLER_IDENTITY; the profile value travels as the explicit source.
         assert cmd_agents_send(incarnation.agent_id, "caller path proof", _SOURCE) == 0
@@ -105,7 +107,7 @@ async def test_profile_through_auth_gate_and_real_hosted_claim(
         item = claimed[0]
         assert item.source == _SOURCE
         assert item.payload == {"caller_identity": _CALLER}
-        message = build_chat_inbound(item)
+        message, _ = build_chat_inbound(item)
     content = message.model_dump()["content"]
     assert isinstance(content, str)
     assert "External agent" in content and "codex" in content
@@ -126,7 +128,6 @@ _MUTATIONS: dict[str, LiteralString] = {
     "no_lease": "lease_expires_at = NULL",
     "expired": "lease_expires_at = clock_timestamp() - interval '1 second'",
     "terminated": "status = 'terminated'",
-    "restarting": "status = 'restarting'",
     "terminated_before_legacy": "status = 'terminated', runtime_protocol_version = 0",
     "owner_before_legacy": "runtime_owner = NULL, runtime_protocol_version = 0",
     "legacy_before_expired_lease": (
@@ -146,7 +147,6 @@ _EXPECTED_REFUSAL: dict[str, tuple[str, str]] = {
     "no_lease": ("lease_expires_at is NULL", "no lease"),
     "expired": ("lease_expires_at is", "expired; must be in the future"),
     "terminated": ("status is 'terminated'", "requires running or idling"),
-    "restarting": ("status is 'restarting'", "requires running or idling"),
     "terminated_before_legacy": ("status is 'terminated'", "requires running or idling"),
     "owner_before_legacy": ("runtime_owner is NULL", "records both"),
     "legacy_before_expired_lease": (
@@ -202,7 +202,10 @@ def test_unknown_target_refusal_names_the_missing_row(db_conn: psycopg.Connectio
     The HTTP route answers 404 before the gate for a missing agent, so this
     exercises the gate contract directly.
     """
-    from shared.caller_protocol import CallerProtocolUnavailableError, require_caller_protocol
+    from base.agents.messages.caller_protocol import (
+        CallerProtocolUnavailableError,
+        require_caller_protocol,
+    )
 
     row = db_conn.execute("SELECT COALESCE(max(id), 0) + 1000 FROM agents").fetchone()
     assert row is not None
@@ -217,7 +220,7 @@ def test_unknown_target_refusal_names_the_missing_row(db_conn: psycopg.Connectio
 async def test_gate_holds_owner_lock_until_transaction_ends(
     db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool
 ) -> None:
-    from shared.caller_protocol import require_caller_protocol
+    from base.agents.messages.caller_protocol import require_caller_protocol
 
     incarnation = await _admit(db_conn, aops_pool)
     _after_proven_old_writer_barrier(db_conn, incarnation)
@@ -239,7 +242,10 @@ async def test_gate_holds_owner_lock_until_transaction_ends(
 async def test_lease_expiring_while_waiting_for_unchanged_row_lock_is_rejected(
     db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool
 ) -> None:
-    from shared.caller_protocol import CallerProtocolUnavailableError, require_caller_protocol
+    from base.agents.messages.caller_protocol import (
+        CallerProtocolUnavailableError,
+        require_caller_protocol,
+    )
 
     incarnation = await _admit(db_conn, aops_pool)
     _after_proven_old_writer_barrier(db_conn, incarnation)

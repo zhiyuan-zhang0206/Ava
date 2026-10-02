@@ -9,7 +9,7 @@
 // connection-notice.test.
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render as rtlRender, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { api, MessageDeliveryUnknownError } from "@/lib/api";
@@ -17,9 +17,9 @@ import { clearMessageSent, markMessageSent } from "@/lib/interaction-timing";
 
 import { Composer } from "./composer";
 
-// The Composer mounts SlashAutocomplete, which fetches the command list on
-// mount. Default to an empty list so the existing button/Enter tests don't hit
-// the network; the command-integration block overrides commandList per-test.
+// The Composer fetches the command list on mount. Default to an empty list so
+// the existing button/Enter tests don't hit the network; the command-integration
+// block overrides commandList per-test.
 // getContextBreakdown backs the context-breakdown-panel block (mounted only
 // when that panel is expanded).
 let commandList: { name: string; description: string; instruction_hint: string }[] = [];
@@ -89,23 +89,19 @@ function storageWith(
   };
 }
 
-// Once contextTokens > 0, the meta row mounts ContextButton, which reads the
-// context-meter-width display setting via useUserSettings (react-query) —
-// needs a QueryClient in the tree even when the breakdown panel itself is
-// never opened.
-function renderComposer(ui: React.ReactElement) {
+// Every Composer now reads its command catalog through Query. Keep a fresh
+// cache per render so tests cannot share catalogs across cases.
+function render(ui: React.ReactElement) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  return render(<QueryClientProvider client={qc}>{ui}</QueryClientProvider>);
+  return rtlRender(ui, { wrapper: ({ children }) =>
+    <QueryClientProvider client={qc}>{children}</QueryClientProvider> });
 }
+
+const renderComposer = render;
 
 /** Render a Composer with the given agentId and return the textarea element. */
 function renderComposerAgent(agentId: number) {
-  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  render(
-    <QueryClientProvider client={qc}>
-      <Composer {...baseProps} mode="idle" agentId={agentId} />
-    </QueryClientProvider>,
-  );
+  render(<Composer {...baseProps} mode="idle" agentId={agentId} />);
   // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion -- RTL getByTestId returns HTMLElement; narrowing to access .value
   return screen.getByTestId("composer-input") as HTMLTextAreaElement;
 }
@@ -926,8 +922,11 @@ describe("Composer slash commands", () => {
       description: "compact context",
       instruction_hint: "a focus",
     };
+    let resolveCompact: (commands: typeof recap[]) => void = () => undefined;
     getCommandsMock.mockImplementation((selectedAgentId?: number | null) =>
-      Promise.resolve(selectedAgentId === 7 ? [recap] : [compact]),
+      selectedAgentId === 7
+        ? Promise.resolve([recap])
+        : new Promise((resolve) => { resolveCompact = resolve; }),
     );
     const { rerender } = render(<Composer {...baseProps} mode="idle" agentId={7} />);
 
@@ -936,6 +935,8 @@ describe("Composer slash commands", () => {
 
     rerender(<Composer {...baseProps} mode="idle" agentId={8} />);
     fireEvent.change(input(), { target: { value: "/" } });
+    expect(screen.queryByTestId("slash-option-recap")).toBeNull();
+    resolveCompact([compact]);
     expect(await screen.findByTestId("slash-option-compact")).toBeTruthy();
 
     rerender(<Composer {...baseProps} mode="idle" agentId={7} />);

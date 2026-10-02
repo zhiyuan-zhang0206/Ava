@@ -18,11 +18,10 @@ Each demo lives in its own category folder under `demos/<category>/`.
 | **Chrome MCP** | `chrome-mcp/` | Browser | 1 agent | Shared browser context between user and agents |
 | **Permission Hooks** | `permission-hooks/` | Hooks | 1 agent | Sensitive-operation gate examples |
 
-> Orchestrator reference scripts live at `ava_builtins/skills/ava-dynamic-workflow/reference/`.
+> Orchestrator reference scripts live at `ava_builtins/skills/ava-dynamic-workflow/references/`
+> (the two runnable lite demos are in its `scripts/` instead).
 >
-> **Note (2026-08-08)**: `dynamic-workflow-travel.md` is a stale duplicate of the
-> Deep Research prompt (the described Travel Booking demo was never written);
-> the checkpoint for Codebase Sweep is the same `gather_files` file-polling
+> The checkpoint for Codebase Sweep is the same `gather_files` file-polling
 > watcher as every other dynamic workflow — "agent lifecycle" below is a
 > description of what the polled file tracks, not a separate watcher type.
 
@@ -34,7 +33,6 @@ demos/
 ├── chrome-mcp/
 │   └── chrome-mcp-overview.md
 ├── dynamic-workflow/
-│   ├── dynamic-workflow-travel.md
 │   ├── codebase-sweep.md
 │   ├── landscape-research-case-study.md
 │   └── landscape-run-output.png

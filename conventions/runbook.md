@@ -3,15 +3,15 @@
 ## Clusters, units, prod, and dev clone paths
 
 A **cluster** = one logical deployment. Every cluster — including `main` — owns its
-OWN Postgres + Redis instance (under its `$AVA_HOME`, on a per-cluster pg/redis
-port), so co-located clusters share no data plane at all: isolation is
+OWN Postgres + Redis instance (under its `$AVA_HOME`, on the fixed pg/redis
+ports), so a cluster shares no data plane at all: isolation is
 home-directory isolation, not a database name / redis logical-DB index / channel
 prefix kept correct inside one shared instance. A cluster also owns one outward
-gateway and a contiguous host-port block. (The rationale — and the remaining slice 3,
+gateway on the fixed port table. (The rationale — and the remaining slice 3,
 bundling the pg/redis binaries — is in
 `future/infra/embedded-per-cluster-data-plane.md`.) A data plane is **swappable**:
 URLs naming a foreign host (another machine or a SaaS provider) make the cluster
-treat it as remote-managed — `ava start` / `ava stop` / `ava status` / the watchdog
+treat it as remote-managed — `ava start` / `ava stop` / `ava status` / the root health loop
 skip local instance management and degrade to reachability probes, and the
 connection-layer knobs (TLS, pool sizing) live in config
 (`docs/history/2026-08-28/connection-layer-swappable.md`).
@@ -22,14 +22,17 @@ listener when pooling is on (the default; 6433 on the default home), the direct
 Postgres port when off (5433). There is no separate pooler-port env key
 (`AVA_PGBOUNCER_PORT` is retired): the pooler port is a registry-record fact for
 the data-plane bring-up alone. The admin plane — migrations, `pg_dump`,
-provisioning — is the ONLY direct-Postgres consumer, deriving the direct URL
-from the registry record (`shared.db.direct_db_url`); everything else dials
-`AVA_DB_URL` as-is. Flipping `AVA_PGBOUNCER_ENABLED=false` is the kill-switch:
+provisioning — is the ONLY direct-Postgres consumer. On a locally owned
+plane it dials the home's owner-only socket as the OS user, acting as the
+schema owner for schema work and dumps (`base.db.pg_admin`), never
+the owner's own login or a write generation; a remote-managed plane uses its
+provider URL (`base.db.direct_db_url`). Everything else dials `AVA_DB_URL`
+as-is. Flipping `AVA_PGBOUNCER_ENABLED=false` is the kill-switch:
 converge rewrites the URL to the direct port on the next `ava start` and the
 pooler never starts.
 
 Fresh install creates LangGraph's checkpoint schema with
-`PostgresSaver.setup()` as the cluster owner. Start never calls setup: after
+`PostgresSaver.setup()` acting as the cluster owner. Start never calls setup: after
 applying Ava's tracked SQL files, every capability reads the complete
 `checkpoint_migrations` set and requires the explicitly approved version.
 Checkpoint readers and agent boot therefore need CRUD but no schema CREATE.
@@ -56,24 +59,24 @@ install setup already created both its schema effects and its
 name; the down SQL reverses the schema effect and deletes the upstream version
 row. Real-Postgres tests must cover both existing-N-1 update/down and fresh-N
 birth -> first-start registration/down. Until all of that ships together, the
-dependency-drift gate fails before any database mutation, preserving update
-recovery and automatic rollback.
+dependency-drift gate fails before any database mutation, preserving the
+ability to recover an interrupted update and to roll back a failed one.
 
 **Identity is the home path** — there is no cluster name; the display label is
 the home's basename. A cluster's database and the Postgres role that owns it
 share one identifier, carried by its `.env` connection URLs **as data**
-(`shared.cluster.identity_from_url`): a fresh birth writes the fixed `ava`;
+(`base.cluster.identity_from_url`): a fresh birth writes the fixed `ava`;
 prod stays on its historical `ava_main` until an ops rename edits the URLs.
-The role is `NOSUPERUSER` owning only its own database, provisioned by that
-instance's own `initdb` superuser over its private loopback-`trust` unix
-socket, never by the runtime role.
+The role is `NOLOGIN NOSUPERUSER` without a password, owning only its own
+database; that instance's own `initdb` superuser provisions it over the private
+owner-only unix socket (`peer`), acting as the owner for every schema object.
+No application process ever logs in as it.
 
 A **unit** is one install of Ava under its own `$AVA_HOME`, and `AVA_HOME`
 locates the unit's `.env`, logs, memory pool, milvus data, pidfiles, etc., all of
-which derive from it. The home is resolved **checkout-anchored** by
-`shared/dotenv_boot.py:resolve_ava_home` — see "How a unit finds its home"
-below — so a bare invocation (ad-hoc script, subagent) inside a dev worktree never
-silently falls back to the prod home:
+which derive from it. The home is `AVA_HOME` when set, else `~/.ava`
+(`base/host/env/dotenv_boot.py:resolve_ava_home` — see "How a unit finds its home"
+below), read whenever it is needed:
 
 A machine carries a **capability set** — `gateway`, `agent-runner`, or both:
 
@@ -84,82 +87,103 @@ A machine carries a **capability set** — `gateway`, `agent-runner`, or both:
   DB/Redis/Milvus URLs point at a gateway node when the host carries no
   `gateway` capability of its own.
 
-A **single-box** deployment is one machine, one `$AVA_HOME`, role
-`gateway,agent-runner` — it owns the data plane *and* runs agents, and `ava
-start` brings up the union of both capabilities' services. A gateway-only or
-runner-only node is the explicit split: `install.sh --role gateway` /
-`--role agent-runner` scaffolds a single-capability unit. When a gateway-only
-unit and a runner-only unit are co-located on one machine they live in separate
-homes (the gateway unit at `~/.ava_gateway`) so they do not share state; the
-runner unit's home is `~/.ava`.
+A **single-box** deployment carries gateway and runner capabilities in one
+home. A split deployment initializes a gateway with `ava init --serve-gateway
+--no-serve-agent-runner` and joins each runner through `ava init
+--serve-agent-runner --no-serve-gateway --gateway-url URL` with its machine
+identity and environment bearer. Separate units use separate homes.
 
-**Cluster identity** is born at install time (`scripts/install.sh` →
-`python -m cli.install_cluster`): the install allocates the home-keyed registry
-record + port block, brings up the cluster's own pg/redis, provisions the
-database, writes the cluster `.env` (secret follows the role: single-machine =
-NO-AUTH empty secret by default, gateway-only = minted,
-`AVA_INSTALL_CLUSTER_SECRET` states one explicitly; serve flags from `--role`), and — for `--worktree` —
-writes the checkout's `.ava_home` pointer.
-The home is resolved **checkout-anchored** (`resolve_ava_home`), *not* from the
-current directory and *not* from any flag — no name exists, so no env/cwd/flag
-can point an `ava` at the wrong cluster: the prod `ava` on PATH always acts on
-`~/.ava` no matter where it runs. `ava start` is a **pure bring-up** and fails
-fast on an uninstalled home, pointing at `install.sh` (gateway-capable),
-`install.sh --worktree` (unanchored dev worktree), or `ava enroll` (pure
-agent-runner). It fails the same way when the home IS registered but its `.env`
-names ports the record did not allocate (gateway / Postgres / Redis) — the state
-a home is left in when a destroy frees its block and a later birth takes it —
-since starting would bind ports the registry has promised to another cluster.
-The fix is re-running the install for that home, which re-derives `.env` from
-the record. The record is stored in a host-level JSON registry at
-`~/.ava/clusters.json` (`AVA_CLUSTER_REGISTRY`), keyed by home path. An
-agent-runner's cluster
-identity IS the gateway URL + secret it enrolled with (no name travels in the
-`/api/bootstrap` payload); its connection facts are NOT stored locally — since
-the 2026-08-01 config refactor every process on an enrolled runner fetches
-`GET /api/bootstrap` at startup (Settings build, `shared.bootstrap`), with
-fetched values authoritative over env/.env. A bare checkout with no role flags
-(CI, lint scripts), an unanchored checkout (rule 4 below) and a not-yet-enrolled
-runner construct Settings from local env/.env with no fetch — `ava start`'s
-preflight gate (AVA_GATEWAY_URL check) is what refuses the unenrolled runner. **Startup order: bring the gateway up first, then
-the runners** — a runner's `ava start` (and every daemon boot) fails fast until
-the gateway answers /api/bootstrap, and recovers on its own once it does (the
-boot policy retries `ava start`; the OS watchdog probe revives a daemon that
-died at boot).
+**Cluster identity is bound by `ava init`.** The settings-free entry validates
+home and capabilities, then durably records credentials and the port table and
+publishes configuration. It starts nothing and creates no resource; an interrupted
+init resumes with `ava init` and no flags, and an initialized home refuses a second
+one. The first `ava start` then converges host prerequisites, starts owned PG/Redis,
+prepares the database and checkpoints, applies migrations and runner grants, starts
+PgBouncer, then waits for every selected root service to become ready. A failure
+preserves the same initialization intent; a retry does not rotate credentials or
+select new ports. Between `ava init` and the first start the home's `.env` can be
+edited (provider keys, for one) without a restart.
 
-**Session names** are `ava-<service>` (composed via
-`shared/cluster/derive.py:session_name()`; neither machine nor cluster is encoded —
-session hosting is host-local AND per-home: native session records under `$AVA_HOME/run/sessions/`
-(services / orchestration / agent processes), pty session records + per-session
-sockets under `$AVA_HOME/run/pty/` (agent shells / watchers), so the home
-already scopes every session). Every cluster produces e.g.
-`ava-gateway`; two clusters are two homes, never one namespace.
+The home is `AVA_HOME`, else `~/.ava`, never the current directory. A bare
+repeated start keeps identity and desired service selection, and takes no identity
+flag. A home `ava init` has not initialized, unknown existing resources, missing
+reservations, and a terminal destroy intent refuse rather than reconstructing
+ownership.
+A home describes only itself: its record is its own start intent, and no host
+file lists clusters; the state a host shares (vendored runtime, initdb template,
+PTY freeze, coding-session owners) lives in the home too. See
+[[cli/docs/start_identity.ava.okf.md]].
+
+A runner fetches the gateway's authenticated bootstrap configuration before
+`ava init` records local identity. Bootstrap serves no database login: `AVA_DB_URL` is the
+credential-free endpoint. The runner's login arrives in a capability bundle the
+gateway operator issues for that one unit and the runner installs at `ava init` (and, for
+a later bundle, with `install-unit`):
+
+```bash
+# on the gateway (its checkout's CLI), for one unit:
+ava cluster db-authority issue-unit --machine <name> --home <unit $AVA_HOME> --out <bundle>
+# carry the 0600 bundle to the unit and the printed transport key separately; then, on the
+# unit (its checkout's `.venv/bin/ava` — the host's bare `ava` is linked by its first start):
+read -rs AVA_DB_CAPABILITY_KEY && export AVA_DB_CAPABILITY_KEY
+.venv/bin/ava init --db-capability <bundle>         # first join, plus the identity flags
+ava cluster db-authority install-unit <bundle>      # a later bundle: stop the unit first, start it after
+```
+
+The bundle is sealed (AES-256-GCM) under a transport key printed once; it names
+one unit (machine + home), the endpoint bootstrap serves, the active write
+generation and an expiry (`--ttl-hours`, default 24, at most 72). Start refuses
+an altered bundle, the wrong key, another unit's bundle, an expired one, an
+older generation than the installed one, and a login the cluster rejects (a
+revoked generation); it then writes `$AVA_HOME/db-authority/unit.json` (0600)
+and deletes the bundle. A runner without a capability refuses to start and names
+the issue command. Issue is refused on a remote-managed plane. A new generation
+reaches remote units only by a new bundle (join, emergency).
+
+**Guard a bundle like the generation it carries.** Nothing in it is the unit's
+own. The runner login and runner API token are the write generation's, shared by
+every runner unit, and the telemetry token is the cluster's until the human
+secret rotates. A bundle with its transport key therefore gives its holder every
+runner unit's database and API admission for that generation (bootstrap, with its
+Redis runtime URL and provider keys, and every unit's `/ops` included). Its
+machine binding only stops an install on the wrong unit by mistake: the
+installer asserts its own machine name, and the credentials work without
+installing. When a unit is compromised or a bundle and its key are lost, rotate
+the write generation and issue every unit a new bundle; rotate the human secret
+(telemetry token), the Redis runtime password and the provider keys as well, by
+hand, in the order of
+[manual rotation after a credential leak](#manual-rotation-after-a-credential-leak).
+Detail: [[base/cluster/authority/docs/unit-bundle.ava.okf.md]].
+
+Its DB/Redis connection facts are not cached locally: every runner process
+fetches them at Settings construction. Start the gateway first, then the
+runners. Gateway unavailability fails runner startup; the boot policy retries
+the same start entry.
+
+**Application services belong to one root per home.** On macOS, root descends
+from the signed permissions helper; on Linux, root runs directly or under
+systemd. Service identity and readiness are bound to that root's captured native
+generation. Persistent PTY shells and native PG/Redis have separate custody.
 
 **CI is a separate hosting surface.** The workflows provision isolated native
 test infrastructure; see [CI](#ci-continuous-integration). Neither tests nor
 build tooling may target a production cluster home. Container assets elsewhere
 in the repository do not establish a cluster runtime dependency.
 
-**Migration note (session rename)**: this naming dropped the machine segment and
-added the `ava-` prefix (old convention was `<cluster>-<machine>-<service>`). After
-the upgrade lands, the old-named sessions become orphans. The converge step
-`_reap_legacy_sessions` (`cli/commands/converge/host.py`, run on every `ava start` /
-`ava cluster update`) does a one-shot kill of any session matching the old
-`<cluster>-<machine>-*` prefix on this host. This boundary has **NOT been tested**
-in a live prod upgrade; manually killing the old-named session (its record lives
-under `$AVA_HOME/run/sessions/`) is the fallback if the reaper misses one.
-
-**Port blocks** per cluster come from a contiguous `port_base + offset` block,
-scanned and allocated by `ava start`. The default (`main`) cluster keeps its
-current ports (gateway 8000, frontend 3000, daemon healthz 8101-8106, milvus 19530)
-as the legacy seed. Watchdog probe URLs + daemon/milvus/frontend ports derive from settings.
+**Ports** come from one fixed table (`base/host/env/port_table.py`: gateway 8000,
+frontend 3000, pg 5433, redis 6380, pgbouncer 6433, daemon healthz ports in
+8103-8116, milvus 19530). A new home records the table in its start intent at birth, and
+every later read is `rec.ports[...]` off that record; a unit whose `.env` names no
+port binds the same numbers. Health probe URLs + daemon/milvus/frontend ports
+derive from settings. The table is closed: a record with more or fewer slots is
+refused at start. Tests never use these numbers (`base/cluster/tests/test_fixed_ports.py`).
 
 prod runtime and dev workspace are split at the filesystem level:
 
 | Path | Role | Notes |
 |---|---|---|
-| `$AVA_HOME/source/` (default `~/.ava/source/`) | **prod** — cwd of the long-running service sessions | git working tree; upgrades go through the CLI `ava cluster update` (`ava.self.update()` was removed 2026-08) |
-| `~/Ava/` | **dev clone** — root of worktree-driven development; dev worktrees live under `.worktrees/<task>/` (manual / agent-created) or `.claude/worktrees/<task>/` (Claude Code's native worktree tool) | freely checkout any branch, decoupled from prod |
+| `$AVA_HOME/source/` (default `~/.ava/source/`) | **prod** — cwd of the long-running service sessions | git working tree; upgrades go through `python -m cli.fleet_update` ([Updating a networked cluster in source mode](#updating-a-networked-cluster-in-source-mode); `ava.self.update()` was removed 2026-08) |
+| `~/Ava/` | **dev clone** — root of worktree-driven development; dev worktrees live under `.worktrees/<task>/` (made by `scripts/setup-worktree.sh <task>`) or `.claude/worktrees/<task>/` (Claude Code's native worktree tool; complete it with `scripts/setup-worktree.sh` inside it) | freely checkout any branch, decoupled from prod |
 
 ### Worktree uv iron rule (Tasks #1572, #5638)
 
@@ -172,7 +196,7 @@ inherited `VIRTUAL_ENV` first — for the preflight too, since the guard refuses
 leaked environment before it checks anything else:
 
 ```bash
-env -u VIRTUAL_ENV python scripts/guard_editable_venv.py .
+env -u VIRTUAL_ENV python scripts/host_ops/guard_editable_venv.py .
 env -u VIRTUAL_ENV uv sync
 env -u VIRTUAL_ENV uv pip install -e .
 ```
@@ -184,8 +208,8 @@ launcher while another service is using it (incident #4629).
 
 On PowerShell, apply the same rule with `Remove-Item Env:VIRTUAL_ENV
 -ErrorAction SilentlyContinue` before `uv`. Never rely on `cd` alone to select
-the worktree's `.venv`. `scripts/install.sh --worktree` and
-`scripts/setup-worktree.sh` invoke the same preflight before their own sync.
+the worktree's `.venv`. `scripts/setup-worktree.sh` invokes the same preflight
+before its dependency synchronization.
 
 Before deleting a worktree, inspect every long-lived Ava virtualenv on the host:
 
@@ -201,9 +225,13 @@ check applies to the editable URL uv records beside the pointer — in each venv
 checkout's `file://` URL. If either record is wrong, do **not** delete the
 worktree: use [manual editable-install recovery](#manual-editable-install-recovery)
 from the affected stable checkout and recheck. `ava converge` / `ava start`
-independently assert and auto-repair
-both prod records, then make site-packages, `ava-*.dist-info`, and `.venv/bin`
-directories read-only outside the narrow update/repair write window.
+independently assert and auto-repair both prod records. Converge no longer
+marks site-packages, `ava-*.dist-info`, or `.venv/bin` read-only itself; a
+directory still carrying an earlier converge's `0o555` opens automatically
+inside the repair's own write window
+(`base/deploy/release/editable_install.py:protected_editable_paths` /
+`editable_pth_write_window`), or by a one-time manual `chmod u+w` on that
+directory — after either, `uv sync` behaves normally again.
 Every `execute_code` spawn also checks
 the current interpreter's records: the first poisoned call repairs the install
 and returns a retryable structured error, preventing a flood of failed child
@@ -214,25 +242,8 @@ incident and escape analysis are in
 
 ### Manual editable-install recovery
 
-Production recovery normally goes through `ava cluster update`. For an
-operator-authorized manual reinstall, run the shared sync helper from the
-affected checkout so every protected directory opens and closes together:
-
-```bash
-env -u VIRTUAL_ENV PYTHONPATH=. .venv/bin/python - <<'PY'
-from pathlib import Path
-from cli.commands._update_uv_sync import run_uv_sync
-
-raise SystemExit(run_uv_sync(Path.cwd(), reinstall_package="ava").returncode)
-PY
-```
-
-The helper pins uv to this checkout's interpreter and restores prior permissions
-on success and failure. Any emergency `chmod u+w` recipe must cover
-`site-packages`, each `ava-*.dist-info`, **and `.venv/bin`**, plus any read-only
-editable records, then restore their exact original modes. Prefer the shared
-write window over a shell sequence that can leave directories writable on error.
-Fresh worktree installs have no production protection and need no manual chmod.
+Editable installation repair is a development-checkout operation; see
+[Editable Install Guard](../cli/commands/docs/editable-install-guard.ava.okf.md).
 
 A typical small deployment runs the **gateway as a single-box unit** on an
 always-on host (`gateway,agent-runner`, one home `~/.ava`, code `~/.ava/source`,
@@ -242,55 +253,52 @@ agent-runners stay single-home `~/.ava` and reach that gateway + DB/Redis over
 the private network. A larger deployment splits the gateway onto its own
 gateway-only host (the explicit `--role gateway` install).
 
-**How a unit finds its home** (`shared/dotenv_boot.py:resolve_ava_home`, run
-before `Settings` is constructed). Which checkout the code lives in is the
-prod/dev discriminator, so resolution is anchored to `__file__`, not cwd —
-identical no matter where a bare script is launched. Precedence:
+**How a unit finds its home** (`base/host/env/dotenv_boot.py:resolve_ava_home`, read
+every time the home is asked for, never captured at import): `AVA_HOME` when the
+variable is set, else `~/.ava`. That is the whole rule — no pointer file, no
+checkout claim, no in-process override — so a process and the children it spawns
+cannot disagree about their home. Production does not depend on the variable. A
+process tree that must not touch the host's cluster sets it once, at its top, and
+every descendant inherits it:
 
-1. `AVA_HOME` env var — explicit; what a gateway-launched subprocess and the prod
-   service sessions set.
-2. checkout == `~/.ava/source` (the prod source) → `~/.ava`.
-3. `<checkout>/.ava_home` pointer file → the home it names. `scripts/install.sh
-   --worktree` writes this into a dev cluster's worktree (gitignored), so every
-   later bare invocation from that worktree resolves to the cluster's own home.
-4. otherwise → **unanchored**: a checkout that claims no cluster (a dev worktree
-   that never ran `install.sh --worktree`, a fresh clone, CI) and carries no
-   explicit `AVA_HOME`. It never resolves to `~/.ava` — that home belongs to the
-   prod source alone. Its home is a private per-process scratch path under the
-   system temp dir, and it boots **bare**: no `.env` / `mirror.env` is read, the
-   config source decision never fetches from a gateway and the bootstrap
-   transport itself refuses to dial (`checkout_anchored()` gates
-   `fetch_bootstrap_config`, so no bootstrap snapshot is written) — but this is
-   scoped to the bootstrap fetch alone: an `AVA_CLUSTER_SECRET` / `AVA_GATEWAY_URL`
-   the process inherited from its parent shell still reaches an ordinary CLI
-   client (`ava agents ls`, ...) under the deliberate "explicit env wins" rule.
-   `load_ava_env` plants a sentinel `AVA_DB_URL`
-   (`UNANCHORED_DB_SENTINEL`, an unreachable loopback URL) so a DB
-   connection fails loud — `shared/db.connect`/`pool` raise `UnanchoredHomeError`.
-   Lint scripts, codegen hooks and ad-hoc `python -c` imports keep working from
-   any checkout; every verb that acts on "this checkout's cluster" (`start`,
-   `stop`, `restart`, `converge`, `config` writes, `enroll`, service launches)
-   refuses and points at `install.sh --worktree`. `pytest` is unaffected:
-   `tests/conftest.py` sets its own `AVA_HOME` before import.
+- the test session (`tests/fixtures/env_bootstrap.py`) sets a temporary home before
+  anything imports application code;
+- every script a git hook launches that reaches application code calls
+  `dotenv_boot.enter_scratch_home()` before its first import that does, behind
+  `if __name__ == "__main__":` (tests import these modules, and a pytest process
+  refuses the call): a fresh temporary `AVA_HOME` and `AVA_CONFIG_FETCH=skip`, whatever
+  the caller's environment carries. Hooks run on every commit and push by nobody's
+  choice, which is why this one is code
+  (`scripts/tests/test_hooks_scratch_home.py` derives the scripts from
+  `.pre-commit-config.yaml`);
+- every other script that imports application code is run on purpose, and follows the
+  convention in `conventions/dev-setup.md`: a temporary `AVA_HOME` in a development
+  checkout. `scripts/check_worktree_remove.py` is the one tool that must read the real
+  home: it reads this machine's live session records (`$AVA_HOME/run/pty`), so it only
+  skips the gateway config fetch, dials nothing and writes nothing; run it straight from
+  a checkout.
 
-Rule 1 only outranks rules 2-3 while they agree. When `AVA_HOME` names one home
-and the checkout claims another, resolution **refuses** with
-`AvaHomeContradictionError` naming both sides — a process holding one cluster's
-`.env` (database, secret, ports) and another's code (`migrations/`, skills,
-plugins) has no correct home to pick. That combination is how a fleet agent
-migrated prod on 2026-07-31: every agent shell inherits `AVA_HOME=~/.ava`, so a
-bare `ava start` in a freshly installed worktree resolved prod while running the
-worktree's migrations ([decision](../decisions/2026-07-31-ava-home-vs-checkout-contradiction.md)).
-Set `AVA_HOME_OVERRIDE=1` to authorize it where the mixing is the point:
-`install.sh --worktree` (it writes the pointer), `ava cluster down/destroy`
-(this checkout's `ava stop` against another home), and the test suite's scratch
-home. It is read from the real environment only — the check runs before any
-`.env` is loaded, so no cluster can grant itself the exemption on disk.
+**Which checkout may operate a home.** A home that carries its own `<home>/source`
+checkout (the production home `~/.ava`; every unit started from source) is operated
+only by that checkout's code (`dotenv_boot.home_checkout_error`). The CLI gate
+(`cli.preflight.require_own_checkout`, the first thing `cli.main` does,
+settings-free) refuses every command when the running CLI belongs to any other
+checkout, `status`, `ls` and `get` included; the only passes are bare `ava` and a
+lone `-h`/`--help`, which parse and run no verb. First start and the service
+launchers apply the same rule. A home with no `source` — a test or scratch home —
+accepts any checkout. The way out of the refusal is in its message: run
+`<home>/source/.venv/bin/ava` (the bare `ava` of a production host), or name a home
+of your own with `AVA_HOME`. `python -m cli.fleet_update` already drives every host
+through `$HOME/.ava/source/.venv/bin/ava`, so it is never refused.
 
-`.env` lives at `$AVA_HOME/.env`; each co-located unit carries its own. On a
-single-home machine prod (`~/.ava/source` → `~/.ava`) and dev worktrees resolve to
-*different* homes via the rules above, so they no longer share one `.env` by
-accident — a dev worktree only reaches a real database after its `ava start`.
+Without the variable a development checkout resolves to the host's own cluster: on a
+development machine that also runs production, that is production. Its CLI does not
+touch it, not even to read; read production with the host's bare `ava`.
+
+`.env` lives at `$AVA_HOME/.env`; each co-located unit carries its own. A dev
+worktree with `AVA_HOME` unset resolves to `~/.ava` like any other process: tests
+and tools therefore name a home of their own (above), and a real database is
+reached only through a home that was started.
 
 `.env` is the single config source of truth (precedence `env > Field default`; no
 override layer). To add/change a value — a cluster secret like an API key, or a host
@@ -302,7 +310,7 @@ themselves. `ava config get [KEY]` / `ava config unset KEY` round it out. Cluste
 values reach agent-runners + agents by bootstrap on their next restart; a rotated key
 needs only an agent restart, not a gateway restart. Which bucket a field falls
 in is declared on the field itself — every `Settings` field carries a `scope`
-(`cluster-pinned` / `cluster-default` / `host` / `agent`) in `shared/config/`,
+(`cluster-pinned` / `cluster-default` / `host` / `agent`) in `base/config/`,
 and `BOOTSTRAP_FIELDS` is derived from it.
 
 Every official `.env` write is audited in `$AVA_HOME/.env.audit.jsonl` (0600): site, actor
@@ -344,61 +352,62 @@ by the current home's declaration, or cleared when that home has none. Empty or
 No host PATH, package, preview, or Docker configuration changes are required.
 
 The setting does not replace a live Redis process. `ava start` retains an
-already-running instance, and `ava cluster update` normally keeps its data plane
-up. Change the running version only through an explicitly coordinated data-plane
-stop/start, after checking persistence and version compatibility. Keep the
-selected directory available across boot and updates; the config selects tools
-but neither downloads nor upgrades them.
+already-running instance. Change the running version only through an explicitly
+coordinated data-plane stop/start, after checking persistence and version
+compatibility. Keep the selected directory available across boot and updates;
+the config selects tools but neither downloads nor upgrades them.
 
 The data-plane posture is uniform — the default is multi-machine, a single box is just
-the case where the reachable address is loopback (no single-vs-multi branch). When the
-control-plane bearer is set, Postgres authenticates its owner role with the gateway-only
-`AVA_DB_ADMIN_PASSWORD`; Redis authenticates its `default` administrative user and
-`requirepass` with the gateway-only `AVA_REDIS_ADMIN_PASSWORD`; and the Redis ACL runtime
-identity uses `AVA_REDIS_PASSWORD` embedded in `AVA_REDIS_URL`. The runner database role
-has its separate `AVA_RUNNER_DB_PASSWORD`, embedded only in its projected URL. The bearer
-never authenticates the data plane. An EMPTY bearer — the single-box default — keeps all
-credentials empty and serves everything unauthenticated on loopback. Postgres loopback
-stays `trust`, so the owner password is consulted on TCP connections. Settings re-applies
-only the owner password to a main-identity DB URL; it leaves the Redis runtime URL
-verbatim. On the same load, a data-plane URL whose host is this machine's own reachable
-address (`AVA_MACHINE_HOST`) dials `127.0.0.1` instead (`shared/config/data_plane.py`):
-self-dial never leaves the box. The `.env` value, bootstrap payload, and registered
-address stay untouched, so remote runners keep dialing the gateway's real address.
+the case where the reachable address is loopback (no single-vs-multi branch). The internal
+data plane always authenticates, whatever the bearer
+([details](data-plane-secret-split.md)). Postgres `pg_hba` admits the OS user only by
+`peer` on the owner-only socket (the administrator, and through the `pg_ident` map the
+password-less monitoring role `ava_monitor` the collector scrapes as) and every other role
+by SCRAM; PgBouncer
+is always `auth_type = scram-sha-256` against a userlist holding exactly the active write
+generation's two SCRAM verifiers plus the admin-console entry `ava_pooler_admin`, and a
+changed userlist restarts the pooler (a reload keeps a removed user that already
+authenticated). Redis `requirepass` is the gateway-only `AVA_REDIS_ADMIN_PASSWORD`; the ACL
+runtime identity uses `AVA_REDIS_PASSWORD` embedded in `AVA_REDIS_URL`. The bearer decides
+only reach: an EMPTY bearer — the single-box default — serves the user-facing API
+unauthenticated and binds every data-plane listener to loopback. `.env` holds only the
+credential-free database endpoint; the root launcher delivers each DB-using service its
+class login (gateway or runner) from `$AVA_HOME/db-authority/`, and an admitted operator
+CLI receives the gateway login (see the secret-split page). A home born before this is
+refused by `ava start` before any native effect; no conversion exists
+([details](data-plane-secret-split.md#homes-born-before-this-model)). Settings never
+rewrites a database credential. On the same load, a data-plane URL whose host is this machine's own
+reachable address (`AVA_MACHINE_HOST`) dials `127.0.0.1` instead
+(`base/config/data_plane.py`): self-dial never leaves the box. The `.env` value,
+bootstrap payload, and registered address stay untouched, so remote runners keep dialing
+the gateway's real address.
 
-**Least-privilege runner role** (`ava_runner`, Task #1236): runner processes do
-not dial the main data-plane identity. Every bootstrap projection returns
-`AVA_DB_URL` projected onto the fixed `ava_runner` role (LOGIN
-NOSUPERUSER NOCREATEDB NOCREATEROLE), whose grants cover exactly the audited
-runner surface: SELECT on every table (plus sequence USAGE), SELECT/UPDATE on
-`agents_meta` (status/liveness), SELECT/UPDATE/INSERT on `inbound_messages`
-(claim AND the agent-side self-lifecycle inbounds — `ava.self.terminate` /
-`restart` / `compact` insert their own rows), SELECT/UPDATE on `agents`
-(`ava.self.set_label` writes the agent's own row), INSERT/UPDATE/SELECT on
-`machine_units` + INSERT/UPDATE on `machines` (register_self / mark_stopping
-— `ava start` / `ava stop`), INSERT/UPDATE on `host_deploy_state`
-(set_posture), INSERT/UPDATE/DELETE on `api_idempotency` (the runner's ops
-server dedupes /ops calls), INSERT/UPDATE on `agent_tasks` (`ava.tasks`),
-INSERT/UPDATE/DELETE on `agent_watchers` (unused since 2026-09-27 — a watcher
-is now a plain shell session with no registry row; the grant and the table
-itself are follow-up debt for a later contract-migration PR), UPDATE on
-`agent_pages` (page close at
-exit), INSERT on `agent_shell_ttls` (TTL deadline rows; the gateway
-reaper reads, re-aligns, and deletes them), and full CRUD on the LangGraph checkpoint
-tables. `agents` INSERT,
-`agents_meta` INSERT, notices writes, the cluster deploy-state tables and any
-DDL fail under it by construction — the 2026-08-12 pollution class (full write
-credential on the runner) is structurally impossible. That table-wide SELECT is
-granted per object rather than as a standing policy, so a migration that CREATES
-a table would otherwise leave the new table unreadable to every runner for the
-life of the cluster: `ava start` on a gateway host re-affirms the grants whenever
-it actually applied a migration, and an `ALTER DEFAULT PRIVILEGES` declared FOR
-the cluster's main identity (the role migrations run as) covers everything
-created after that first re-affirm. Its password (`AVA_RUNNER_DB_PASSWORD`) is minted
-at install (or by `ava cluster ensure-db-role` on pre-cutover clusters),
-kept in the gateway's `.env`, and travels only inside the projected URL —
-never as a standalone bootstrap field. The pooler's userlist carries the
-matching entry; the gateway's own processes keep dialing the main identity.
+**Direct `psql` access.** The administrator: `psql "host=/tmp/ava-pg-<home-slug>
+port=<pg port> dbname=<db>"` as the OS user (peer; add `options='-c role=<owner>'` to act
+as the schema owner). An application role reproduction uses the active generation's
+login from `$AVA_HOME/db-authority/generations/<n>.json` (0600; `<n>` is
+`ledger.json`'s `active.number`) — read it, never paste it into tickets or argv.
+
+**Capability groups and write generations** (Task #1236, `base/cluster/authority/`):
+application privileges live on two `NOLOGIN` groups, never on a login. `ava_gateway`
+holds DML on every table, `USAGE, SELECT, UPDATE` on sequences, `EXECUTE` on every
+routine and PostgreSQL 17 `MAINTAIN` on the checkpoint tables (the blob vacuum fails
+instead of silently skipping without it). `ava_runner` — the historical runner login,
+demoted in place — holds exactly the audited runner surface: SELECT on every table (plus
+sequence USAGE), SELECT/UPDATE on `agents_meta` (status/liveness), SELECT/UPDATE/INSERT on
+`inbound_messages` (claim AND the agent-side self-lifecycle inbounds), UPDATE on
+`agents` (`ava.self.set_label`), INSERT/UPDATE/SELECT on `machine_units` + INSERT/UPDATE
+on `machines` and `host_deploy_state`, INSERT/UPDATE/DELETE on `api_idempotency`,
+INSERT/UPDATE on `agent_tasks`, UPDATE on `agent_pages`, the shell
+TTL rows, and full CRUD on the LangGraph checkpoint tables.
+`agents` INSERT, `agents_meta` INSERT, notices writes, the cluster deploy-state tables and
+any DDL fail under it by construction. Each write generation is one `ava_g<n>_gateway` and
+one `ava_g<n>_runner` login inheriting its group (`INHERIT TRUE, SET FALSE, ADMIN
+FALSE`); generation 0 is minted at birth. The point-in-time `ALL`
+grants are re-run by every gateway `ava start` after migrations (`ensure_groups`), and
+standing `ALTER DEFAULT PRIVILEGES FOR ROLE <owner>` covers objects later migrations
+create; start then sweeps every non-active application login to `NOLOGIN` and holds on
+any catalog/ledger mismatch (`check_invariant`).
 
 The Redis ACL user comes from `AVA_REDIS_URL` independently of the Postgres
 db/role in `AVA_DB_URL` (for example, Redis `ava` and Postgres `ava_main`).
@@ -407,13 +416,10 @@ live at `ava start` (`ensure_cluster_redis_acl`), scoped to
 the cluster's pub/sub channels (`ava:*`); it is re-affirmed on every start (not persisted
 to redis.conf) and by the `redis-acl` gateway-watchdog healthcheck, so a redis restart
 that drops the in-memory ACL is repaired before agents reconnect. Provisioning uses that
-instance's own `default` user (the independent Redis admin password). A legacy `.env`
-whose redis_url carries no username (`redis://:<runtime-password>@host/0`, born before the
-names-as-data ACL model) dials as that `default` user. If the healthcheck encounters
-that URL, `redis_identity()` raises `ValueError` and the watchdog reports a failure.
-`ava start` converge backfills the username into the URL (from the db_url identity)
-so the cluster adopts the scoped ACL user. The same startup process adopts the repaired
-URL before provisioning Redis; no-auth homes receive a named `nopass` identity.
+instance's own `default` user (the independent Redis admin password). The ACL user always
+carries its runtime password; no identity is ever created `nopass`. A `.env` whose
+redis_url carries no username has no ACL identity: `redis_identity()` raises
+`ValueError`, so startup and the healthcheck fail instead of guessing one.
 **Postgres and PgBouncer bind loopback + this
 host's reachable address (`AVA_MACHINE_HOST`, default `localhost`), de-duplicated**
 (never all interfaces): a single box resolves to loopback alone, while a split node
@@ -433,10 +439,8 @@ loopback-only on both platforms. Each per-cluster pg is started with
 `max_connections = 500` (each agent process holds ~4 steady conns), passed on the
 `pg_ctl start` line; pg_hba is written into `$AVA_HOME/pg/pg_hba.conf` and —
 when the server is already running — reloaded (SIGHUP) so the rewritten hba takes
-effect immediately instead of at the next restart (install-time birth starts pg
-before the cluster's `.env` exists, so the first `ava start` rewrites it with the
-real posture; Task #1113). `ava start`
-is a *consumer*: it skips the bring-up when this cluster's pg/redis are already up
+effect immediately instead of at the next restart. First-start identity and
+configuration are durable before PG starts. Repeated `ava start` it skips the bring-up when this cluster's pg/redis are already up
 (`pg_isready` + a redis PING), and on a fresh start Postgres (and PgBouncer) first
 waits (bounded, ~60s) for the reachable bind address to appear on an interface — so
 a reboot that starts `ava` before the private-network interface exists retries rather
@@ -447,23 +451,21 @@ pgbouncer that answers on loopback but is missing its reachable-address listener
 (a silently degraded double bind, task #1288) is RESTARTED rather than reloaded,
 because a SIGHUP reload never
 retries a `listen_addr` that failed to bind at startup. `ava stop` tears this cluster's
-own instance down (data persists on disk); `ava cluster update` keeps it up (`--keep-infra`) for
-the migrate step.
+own instance down (data persists on disk).
 
 `repo` here is the checkout the running `ava` belongs to (resolved from where its `cli` source
 lives, `cli/commands/_repo.py:_repo_root`), **not** the current directory — so a given `ava` always
-targets the same cluster no matter where you run it. `install.sh` links `~/.local/bin/ava` to
-`scripts/ava-launcher.sh` (a .env-free bash step, so it works on a fresh host before secrets are
-filled); the converge phase re-ensures it, links each cluster's own `$AVA_HOME/ava` to its checkout's
-CLI, and applies the rest of the host wiring on every `ava start` / `ava cluster update`. That global
-`ava` runs `$AVA_HOME/ava` and refuses without `AVA_HOME`. For dev, run `.venv/bin/ava` inside the
-worktree, or export the dev cluster's `AVA_HOME`.
+targets the same cluster no matter where you run it. Invoke the checkout's
+`.venv/bin/ava` for first start: `ava` on PATH does not exist yet. On the production
+home its converge phase links `~/.local/bin/ava` to the checkout's `.venv/bin/ava` on every
+source `ava start` and applies the rest of the host wiring. That global `ava` is the
+production CLI, acting on `AVA_HOME`, else `~/.ava`. For dev, run `.venv/bin/ava` inside the
+worktree with `AVA_HOME` set to a temporary directory (a worktree's CLI is refused on the
+production home).
 
 The converge phase (`cli/commands/converge/host.py:converge_host`) is idempotent — run
-by `cmd_start`, so `ava cluster update` re-applies it on every upgrade. One gateway
-`ava cluster update` converges the whole fleet through the Phase B fan-out. Run it standalone
-with `ava converge`. It covers the `ava` symlink (re-ensuring install.sh's bootstrap),
-`~/.local/bin` on PATH, the `$AVA_HOME` dir skeleton, and one prod-host integration for
+by every source `cmd_start`. Run it standalone with `ava converge`. It covers the
+prod `ava` link, `~/.local/bin` on PATH, the `$AVA_HOME` dir skeleton, and one prod-host integration for
 external agents: when `~/.codex` and/or `~/.claude` already exists, it copies only
 `.agents/skills/operating-ava-cluster` into that client's global `skills/` root. Missing
 client homes are not created. A private per-client ledger under `$AVA_HOME/configs/`
@@ -489,25 +491,13 @@ the 2026-06-09 outage), plugin config images, and the pre-rename disabled-servic
 carry-over (below). Converge never runs plugin scaffolds or touches the memory pool;
 explicit `ava memory init` brings up the memory checkouts and seeds `MEMORY.md` plus the
 commit-cap hook. The unit-state plugin-image step needs a configured unit, so on a
-brand-new host it first runs at `ava start`, not during `install.sh`.
-On a gateway host it also registers the **fleet UI gate** (`cli/commands/converge/gate.py`)
-— a launchd KeepAlive job on macOS or user-systemd unit on Linux that owns the entry port (:3000) and proxies the Next.js app
-on :3001. That step **replaces the running job only when the desired supervisor definition actually
-changed** — checkout path, ports, or **the gate's own code and static assets**, which the
-definition carries as a content hash of `services/gate/` (`AVA_GATE_CONTENT_HASH`; no reader,
-its whole purpose is to move when the gate does). A rollout that touches none of the three
-leaves the gate process alone and the entry never blinks; one that rebuilds the login page
-or edits `daemon.py` replaces the job, which is the only way that change takes effect —
-the daemon reads its pages into memory once at boot, so a new page on disk behind a running
-gate is not deployed. Linux requires a running user manager, with lingering for
-unattended boot; it stops the old unit before replacing the definition and
-restarts crashes automatically. See [Linux gate supervision](linux-gate-supervision.md).
-On macOS, when it does have to swap, it waits for launchd
-to forget the old job before loading the new one — `bootout` returns before a draining job
-is gone, and bootstrapping into that window fails with `Bootstrap failed: 5: Input/output
-error`, which on 2026-08-01 left :3000 with no listener for the rest of the rollout. A load
-that still never lands now **raises**, so the start / rollout fails instead of reporting
-success over a dark entry port.
+brand-new host it first runs during `ava start`.
+On a gateway host, the selected root service roster includes **Gate**, the fleet
+UI entry. It owns the public `frontend` port slot and proxies the Next.js app on
+the separate `app` slot. Root starts and stops it with the application tree;
+planned downtime includes the entry listener. Its dedicated `/__ava/healthz`
+protocol plus captured root listener ownership provide readiness independently of
+gateway/app availability. See [Fleet UI Gate](../services/gate/docs/gate.ava.okf.md).
 **A rollout does not update built-in schedule scripts.** The `schedules` table is
 authoritative and boot-time provisioning only inserts rows that are missing, so a changed
 template in `schedules/` reaches a running cluster only through an explicit
@@ -516,12 +506,28 @@ schedule on the spot) — see [`schedules/README.md`](../schedules/README.md).
 Persistent `ava-schedule-<id>` terminals survive pause and update with their
 currently loaded runner code and script text. Adopt changed runner code through
 an explicit schedule restart at its work boundary, or a full stop/start.
+**A wave that moves code between packages (a package rename is the canonical
+case), changes schedule templates, moves or renames files that an in-store copy
+loads or calls at run time, or otherwise touches an import
+surface must also close the loop on in-store schedule copies.** A rollout
+never updates them (above), and a stale copy only surfaces at its next fire
+(crash-loop auto-pause once it cannot stay up, or a failure that folds
+into an unrelated exit code — 2026-10-01: a moved `scripts/` target read as
+"new candidates"). Before trusting `schedules`,
+verify and redeploy: run a full dry-import sweep over every in-store copy
+(py_compile + top-level imports only — never a real fire; it does not
+execute run-time paths, so after a file move check the copies' referenced
+paths directly) and redeploy drifted
+copies through the same `ava schedules update <name> --script-file <template>`
+path. Tooling lives on the host that runs the weekly sweep (`~/.ava/sched-dry-import/run_dry.sh`;
+the weekly `sched-dry-import-weekly` backstop schedule red-reports to its
+operator).
 On agent-runners it also runs capability preflights: a headed Chrome (when the browser
 is enabled, see below), a **probe of the configured cross-machine transfer backend**
 (`AVA_CROSS_MACHINE_TRANSFER_BACKEND`, `drive` by default), and **the ability to open
 and merge pull requests on the memory pool repo** (the nightly memory consolidation
 runs `gh` + `git push` on each machine; the gate `_ensure_github_pr` →
-`shared/deploy/git/github_pr.py:github_pr_blocker` fails loud unless `gh` is installed,
+`base/deploy/git/github_pr.py:github_pr_blocker` fails loud unless `gh` is installed,
 authenticated, and has write access to the pool repo). The transfer probe + GitHub-PR
 gate are **split-deployment-only**: both are auto-skipped when this unit also carries
 `gateway` (a single box has no peer to hand files to and consolidates memory locally);
@@ -532,7 +538,7 @@ that does not want the probe can set `AVA_CROSS_MACHINE_TRANSFER_BACKEND=none`
 host whose memory must stay on-box instead runs `AVA_MEMORY_KEEP_LOCAL=true`: the pool
 becomes a local-only git repo (no remote, no push / pull / PR), and the GitHub-PR gate
 is skipped regardless of role. The transfer probe
-(`_ensure_cross_machine_transfer` → `shared/host/converge/google_drive.py:find_writable_google_drive`)
+(`_ensure_cross_machine_transfer` → `base/host/converge/google_drive.py:find_writable_google_drive`)
 is how the fleet does cross-machine file transfer without a relay when Drive is present:
 every agent-runner mounts the same Google Drive account, so an agent hands a file to
 another machine by dropping it in its local Drive folder (the synced `My Drive` area —
@@ -546,181 +552,18 @@ Drive locations: macOS
 mount surfaced under `/mnt/<letter>/My Drive` (identified by the `My Drive` subfolder, so
 a plain `/mnt/c` never matches), and native Linux an rclone / `~/GoogleDrive` mount.
 
-The durable `--disable-service` set lives in `$AVA_HOME/disabled_services`.
-A bare operator `ava start` (no `--disable-service`) rewrites the marker to
-empty and re-enables the disabled services. Internal restarts (`ava cluster
-update` / recovery / `ava restart`) and the watchdog's 60 s round honor the
-persisted set without rewriting it.
+Service selection is durable. A bare `ava start` retains it; explicit
+`--only-service`, `--disable-service` or `--all-services` changes the selection.
+The root admits and probes the complete selected roster. There is no watchdog
+controller that pulls a checkout or chooses a release on the application's behalf.
 
-**The cluster pin is behind the DB schema.** `ava cluster status` names the
-`pin-behind-schema` machine, consecutive blocked rounds and DB-dependent
-services held back, even while its ops daemon is online. The first blocked
-round and bounded follow-ups emit `schema_mismatch_blocked` error events. A
-host-local watchdog heal does not spawn when HEAD equals the stale pin: the pin
-controller would undo its checkout. Preserve the target, applied migration
-set, lease/holder, and failure evidence. Run the pin-aware `ava cluster update`
-from the gateway after confirming no rollout is already executing; a
-pin-behind-schema mismatch forces the full fleet path even when the gateway
-already runs the newest commit. Verify each target's checkout, running SHA,
-unpaused state and the resulting pin/schema status. Do not reset the production
-checkout, call internal pin setters, or roll back applied migrations to make
-these facts appear aligned. If the installed CLI cannot converge the mismatch,
-stop and report the exact blocker.
-Only recover a stranded pause after proving no live orchestrator owns it.
-([decision](../decisions/2026-07-31-two-healers-must-not-own-the-same-checkout.md))
+A failed update half is recovered by fixing its cause and rerunning that half:
+each half of `python -m cli.fleet_update` is idempotent
+([Updating a networked cluster in source mode](#updating-a-networked-cluster-in-source-mode)).
 
-A paused posture with no owner — no *executing* update lease anywhere and no
-orchestration session on the host — now self-clears in ~2 min rather than 10
-(`STRANDED_PAUSE_TIMEOUT_S`, which is now sized for that case alone). One an
-orchestration or a local `ava-updater` still owns is declined however long it runs; a
-crashed holder stops being a live lease at its TTL, and a hung `ava-updater` is killed
-by the stalled-updater reaper, so both become unowned rather than waiting on a second
-timer.
-
-A **settle hold naming this host** is the one lease shape that is not ownership, and it
-is the shape a rollout leaves on an agent-runner whose updater died (a `POLL_STALLED`
-host is folded into the hold). Nothing executes under a settle hold, so treating it as
-an owner deadlocked the host: the pause gate blocks the whole round, so the pin and code
-controllers — which have their own settle-hold exception, and whose heals produce the
-convergence the hold is waiting for — never ran, and the hold could only lapse on
-`SETTLE_TTL_S` (900s) while the watchdog's ERROR escalation fired at ten rounds. The
-pause recovery now asks `DeployLease.awaits()` too, so such a host unpauses at the
-2 min bound and converges on the following round
-([decision](../decisions/2026-07-31-a-settle-hold-does-not-own-the-pause-it-waits-on.md),
-issue #1116). **Symptom to recognise:** a host reading `waited-on` in `ava cluster
-status` whose watchdog log repeats `round blocked by pause`. A hold naming a *different*
-host still owns this host's pause, as does a lease with no note (a rollout executing
-right now).
-
-A **deploy lease whose holder is provably gone is reclaimed automatically** (task
-#3250). The stranded-pause path above recovers the pause, but the lease row itself
-outlives a hard-killed orchestration by up to `LOCK_TTL_S` (30 min), refusing every
-new deploy with "another cluster update is in progress (held by ...)" on the strength
-of a process that is gone — the 2026-09-12 dev-worktree incident waited 9.5 minutes
-for a hand-run `ava cluster recover`. The watchdog's `stranded_lease` controller
-(registered ahead of the pause gate; never blocks) clears such a row in one round:
-the holder must name THIS machine and its pid be absent or provably recycled
-(`shared.cluster_lock.holder_process_gone` — the negation of the probe `ava cluster
-recover` uses, so the manual and automatic paths can never disagree); a live
-orchestration session or a live local updater lease declines; and the clear is a
-compare-and-set on the exact lease observed, so a racing new owner is never
-clobbered. Only a plain executing lease qualifies — a settle hold is never touched,
-and neither is the paused posture or any maintenance hold.
-
-Recovery recipe for a stranded deploy (deploys refused, or this host stuck paused):
-
-- **Automatic** — the `stranded_lease` controller reclaims a lease whose local
-  holder is provably dead within a round or two; a truly unowned pause self-clears
-  at the ~2 min bound. Watch one round of the watchdog log (`[ops.lease]` /
-  `[ops.pause]`) rather than reaching for the manual path.
-- **Manual** — `ava cluster recover` (in-process; needs only the data plane):
-  it prints the holder it is about to clear, refuses while the holder process is
-  alive, a spawned session or a local updater is live (that refusal is the command
-  working), then clears the lock and unpauses this host. A holder on ANOTHER
-  machine cannot be pid-probed here — run it there, or wait out the lease TTL.
-- **After** — `ava cluster status` should show the hold column empty and the host
-  unpaused; the next `ava cluster update` can start. A hold the controller must not
-  touch (a maintenance hold, a settle hold) follows its own hand-recovery recipe
-  ([graceful maintenance](graceful-maintenance.md)).
-
-A **rollout interrupted with a durable pending publication** is recovered by the
-checked protocol, never by hand (task #4082). An interrupted managed-writer
-rollout leaves `deployment_state.managed_writer_evidence.pending` behind, and
-every symptom points at it: `ava cluster update` refuses with "a durable pending
-publication from an interrupted rollout requires its checked recovery first",
-and new agent births defer cluster-wide. `ava cluster recover-pending` is the
-operator entrance to the recovery seat (`ops/publication_recovery.py`): it
-proves every live owner gone, then — once the trusted per-unit closure producer
-is connected — takes a new rollout lease, mints a new challenge and replaces the
-abandoned operation under a fresh complete writer closure. Until that producer
-is connected the verb refuses BEFORE touching the lease, and it is deliberately
-not a repair the generic `ava cluster recover` path performs. Clearing the
-evidence by hand, hand-writing a closure, or editing `runtime_protocol_version`
-is forbidden: the record exists to make recovery checkable.
-
-A **stranded update hold is completed once, bounded** (task #3142). The record
-above makes the silent hold loud; this completes the one shape whose owner is
-provably gone AND whose state is resumable: an update-armed hold (the pause
-window's updater run read FAILED) at a post-stop phase (`stopping` / `stopped` /
-`starting`). The pause controller reserves ONE attempt in the host's record
-(`host_deploy_state.stranded_hold_attempts`, a compare-and-set, 900s cooldown)
-and spawns the detached `ava-hold-recover` session, which re-verifies the hold's
-exact generation, then runs the same legs the manual recipe prescribes — a
-`stopping` hold re-runs the stop the update leg itself runs (`keep_infra`,
-terminals and browser retained, this home's declared services only), then
-`maintenance start`, then `maintenance resume`. Nothing else changed: an
-operator hold, a pre-stop phase, a live owner, and the gateway capability's
-watchdog round stay record-only (the gateway watchdog never initiates a
-completion; a unit that also serves `agent-runner` — macmini, WSL — completes
-its own hold in that capability's round). Turn the mechanism off with
-`AVA_STRANDED_HOLD_RECOVERY=false` (`settings.gateway.stranded_hold_recovery`,
-read by the watchdogs each tick) — the alarm and the manual steps in
-[graceful maintenance](graceful-maintenance.md) remain the recovery path — and
-read the attempt's outcome from the host's record
-(`stranded_hold_recovery_note`) and `$AVA_HOME/logs/hold-recover-<epoch>.log`.
-
-A **post-stop hold whose owner is gone is also completed once, out-of-band**
-(task #3887). #3142's completion above needs a live watchdog round and a
-reachable database; a FULL stop shape has neither — the 2026-09-17 S3 blackout
-left 110 minutes of downtime with only the OS scheduler alive (task #3719). So
-the OS schedule carries a second, independent job: `ava cluster hold-watchdog`
-(one per home, ~5 min cadence), which reads only host-local state — the hold
-journal, its shepherding identity, the updater handoff/updater lock,
-orchestration sessions, the held-stop marker, the lifecycle lock — and, when
-the hold is provably ownerless (recorded shepherd DEAD, nothing executing, no
-failed receipts, post-stop phase, past its age bound — 30 minutes,
-`AVA_HOLD_WATCHDOG_MIN_AGE_SECONDS`), completes it once through the same
-stop/start/resume legs, in its own process (no spawn channel: `ava start` is
-what brings the database back). One attempt per hold generation (local
-CAS `$AVA_HOME/state/hold-watchdog-attempt`, 900s cooldown); a hold released
-while an attempt is in flight is recorded as rescued, never as completed.
-Before spending the attempt the job asks the completion-environment question
-(task #4080): on a pure agent-runner the start leg builds its OTLP relay from
-the gateway's published `AVA_GATEWAY_OTLP_ENDPOINT`, so until that resolves
-and validates the attempt is deferred unspent; an outcome the settings-lite
-job cannot write to the fleet record is queued locally and backfilled by the
-first DB-capable run.
-Kill-switch: `AVA_STRANDED_HOLD_RECOVERY` (shared with #3142 — the field is
-settings-lite resolvable, so on a gateway host an `.env` edit applies at the
-next job run; on a pure agent-runner the job resolves the process environment
-or the ON default — to withhold it there, `ava cluster hold-watchdog-unregister`
-removes the job outright). Audit: `$AVA_HOME/logs/hold-watchdog.log` (job log)
-plus a per-attempt `hold-watchdog-<epoch>.log`.
-
-A **rollout that stops making progress** is reclaimed by the gateway watchdog
-(`ops/controllers/stalled_rollout.py`) rather than waiting for a human. Every layer
-above asks whether the lock holder is *alive*; this one asks whether it is getting
-anywhere, because on 2026-08-02 a rollout hung 67 minutes inside `converge` on a
-`codesign` child waiting for a GUI authorization no detached session can answer — the
-holder pid stayed alive throughout, so stranded-pause, the resurrected watchdog, the
-health probe and `ava cluster recover` all correctly stood down while the cluster sat
-stopped. A rollout whose `cluster_last_update` row reads `RUNNING` and which has
-written nothing to its `rollout-<epoch>.log` in `NO_PROGRESS_TIMEOUT_S` (900s, the
-family's one no-progress number) is **interrupted, not killed**: the reclaim sends
-`SIGINT` to the pid its own deploy-lease holder names (`<machine>:pid<N>`), so the
-`finally` in `cli/commands/update.py` runs the recovery that was always there —
-unpause this host, resume every paused agent-runner, record the terminal outcome,
-leave the pin where it is. Only if that changes nothing for a further full window is
-the session force-killed, and from there recovery falls back to the lease lapsing at
-`LOCK_TTL_S` and the stranded-pause path above. **Symptom to recognise:** the rollout
-log ends mid-phase and the next lines are the abort banner, with
-`[ops.rollout] rollout … interrupting pid N` in the gateway watchdog log. If instead
-you see `force-killed session ava-rollout`, the orchestration's own abort did **not**
-run and the cluster is stopped + paused until the lease lapses — `ava cluster recover`
-is the faster path. A healthy Phase B is not mistaken for this: the poll writes a
-`still polling Phase B (Nm)` heartbeat on the lease-renewal cadence, and the
-pre-update data snapshot writes `→ pre-update data snapshot: pg_dump <Ns>, <N MiB>
-written` progress lines while its dump runs (that stage alone is allowed 20 min),
-and one `→ pre-update data snapshot: waiting for the backup lock (<Ns> elapsed;
-another backup is writing)` line per minute of any wait for that lock
-(`_SNAPSHOT_HEARTBEAT_S`). During that dump the silence rule is deliberately
-superseded: the heartbeats are
-unconditional, so an alive-but-stuck dump is no longer reclaimed at 900 s of log
-silence — it rides to its own 20-minute bound (`_PRE_UPDATE_DUMP_TIMEOUT_S`), which the
-same loop that heartbeats enforces (`TimeoutExpired` aborts the rollout before anything
-is stopped). A snapshot that stops heartbeating (its loop wedged) is still reclaimed by
-the silence rule, and no other phase of a working rollout is silent for anything close
-to the bound.
+Ordinary maintenance holds retain their separate operator procedures in
+[graceful maintenance](graceful-maintenance.md). Generic recovery is not a way
+to forge process closure; do not resurrect a removed updater or bootstrap entry.
 
 Commands in the "long-running processes" / "E2E tests" sections below default to cwd = `$AVA_HOME/source/` (prod context). Dev work goes through `~/Ava/.worktrees/<task>/`.
 
@@ -729,16 +572,16 @@ Commands in the "long-running processes" / "E2E tests" sections below default to
 The `$AVA_HOME` directory tree, the `PluginsConfig` / `installed.json` schemas,
 the `ava plugins` / `ava skill` / `ava mcp` command surface, and the
 capability -> service model are structure, not procedure. They live in the OKF
-nodes co-located with their code:
+nodes of the packages that own the code:
 
 | What | Node |
 |---|---|
-| `$AVA_HOME` layout, what derives from the home | `shared/paths/paths.ava.okf.md` |
-| plugin enable config (`plugins_config.json`) | `shared/plugins_config.ava.okf.md` |
-| `installed.json` schema, installable shapes, the scanner gate | `shared/install_registry/install_registry.ava.okf.md` |
-| `ava plugins` / `skill` / `mcp` verbs, MCP merge layers, secret channel | `cli/commands/extensions/packages.ava.okf.md` |
-| machine name, capability set, `machines` table, spawn-target 400 invariant | `shared/machine.ava.okf.md` |
-| which services each capability contributes | `services/services.ava.okf.md` |
+| `$AVA_HOME` layout, what derives from the home | `base/paths/docs/paths.ava.okf.md` |
+| plugin enable config (`plugins_config.json`) | `base/packages/plugins/docs/enable_config.ava.okf.md` |
+| `installed.json` schema, installable shapes, the scanner gate | `base/packages/extensions/docs/install_registry.ava.okf.md` |
+| `ava plugins` / `skill` / `mcp` verbs, MCP merge layers, secret channel | `cli/commands/extensions/docs/packages.ava.okf.md` |
+| machine name, capability set, `machines` table, spawn-target 400 invariant | `base/cluster/docs/machine.ava.okf.md` |
+| which services each capability contributes | `services/docs/services.ava.okf.md` |
 
 Three operational consequences worth stating here:
 
@@ -754,10 +597,9 @@ Three operational consequences worth stating here:
 
 Ava's long-running **daemons** are each kept alive in their own named session — never crammed into one
 session with multiple windows. On POSIX they run as **detached native processes** (double-forked onto init by
-the process supervisor, `shared/posixproc.py`); orchestration sessions (updater /
-rollout / cluster-restart) are native sessions on the same backend. Agent
+the process supervisor, `base/sessions/posixproc.py`). Agent
 interactive shells / watchers each run in their own detached pty host
-(`shared/sessions/pty/` — one `pty.fork()` `bash -l -i` + pyte screen capture +
+(`base/sessions/pty/` — one `pty.fork()` `bash -l -i` + pyte screen capture +
 byte transcript under `$AVA_HOME/logs/` per host, session ops over the
 session's own socket at `$AVA_HOME/run/pty/<name>.sock`; hosts reparent to
 init at creation, so they are outside the service roster. Pause and update
@@ -769,37 +611,42 @@ progress and turn events for execution state. Verify actual process/session
 inventory as well as the desired roster when stopping an older release.
 
 Session names follow the pattern `ava-<service>` (composed by
-`shared/cluster/derive.py:session_name()`; neither machine nor cluster is encoded —
+`base/cluster/derive.py:session_name()`; neither machine nor cluster is encoded —
 per-home hosting scopes them: the `$AVA_HOME/run/sessions/` records for native ones, the PTY
 supervisor socket for agent shells / watchers).
+
+A standard `/healthz` daemon declares no healthcheck module. Its Healthcheck cell reads
+*roster identity probe*: the probe `ops/roster/healthz.py` derives from the service name,
+which asks `/healthz` on the daemon's health-port slot and accepts it only when the
+body's name, home and pid are this unit's own daemon.
 
 <!-- lint:roster-table -->
 | Service (suffix)         | Runs                                     | Healthcheck |
 |--------------------------|------------------------------------------|-------------|
+| `gate` (gateway only) | `.venv/bin/python -m services.gate.daemon` (root-owned public HTTP entry on `:3000`: auth-gates and proxies the Next.js `frontend`, and renders the login and Service unavailable pages) | `services.healthchecks.gate` (`GET /__ava/healthz` identity-verified) |
 | `gateway` ★ (gateway only) | `.venv/bin/python scripts/start_gateway.py` (FastAPI 0.0.0.0:8000) | `services.healthchecks.gateway` (HTTP `/api/agents` 200) |
-| `ops` (agent-runner only) | `.venv/bin/python -m services.agent_ops.daemon` (inbound server on 0.0.0.0:<ops_port>; the gateway POSTs each cluster op to `/ops`, dispatched in-process via the gateway ops_* modules) | `services.healthchecks.ops` (`/healthz`) |
-| `agent-host` (agent-runner only) | `.venv/bin/python -m services.agent_host.daemon`: one host schedules local turns with bounded concurrency, shared workload/control pools and per-agent context. Idle has no task. `/stats` reports active turns and cache use. Normal update drains claim, checkpoint, continuation and execution resources before stopping this service. Uncancellable tasks are reported; killing the whole host interrupts every active turn on that runner. | `services.healthchecks.agent_host` (`/healthz` :8114) |
-| `page-server` (agent-runner only) | `.venv/bin/python -m services.page_server.daemon` (supervisor of page servers: every open `agent_pages` row whose serve_dir is set — `ava.ui.serve()` pages — gets exactly one detached page server process on this host, spawned from the row's serve_dir on the row's port; rows that close get their server killed, while serve() pages stay open across an agent terminate. Truth source is the `agent_pages` table, not the session tree — a rollout's session rebuild does not kill page servers, an agent restart does not orphan them) | `services.healthchecks.page_server` (`/healthz` :8112) |
-| `labeler`                | `.venv/bin/python -m services.labeler.daemon` (auto label generation) | `services.healthchecks.labeler` (`/healthz` :8103) |
-| `im-bridge`              | `.venv/bin/python -m services.im_bridge.daemon` (IM frontends: Telegram; WeChat iLink / Feishu adapters shipped but **production-disabled since 2026-08-06** — `AVA_IM_DISABLED_ADAPTERS=weixin,feishu`) | `services.healthchecks.im_bridge` (`/healthz` :8111) |
-| `heartbeat` (gateway only) | `.venv/bin/python -m services.heartbeat.daemon` (every `AVA_HEARTBEAT_INTERVAL_SECONDS`, default 15 min, scans `idling` agents past `AVA_HEARTBEAT_IDLE_THRESHOLD_SECONDS` that have not called `ava.self.pause_heartbeat()` and INSERTs a `heartbeat` check-in inbound; cluster-wide — the inbound-insert trigger wakes the agent on any machine, so it runs once on the gateway, not per agent-runner) | `services.healthchecks.heartbeat` (`/healthz` :8107) |
-| `delivery-watchdog` (gateway only) | `.venv/bin/python -m services.delivery_watchdog.daemon` (six jobs on one fast tick, default 0.5s per `AVA_DELIVERY_WATCHDOG_INTERVAL_SECONDS`: **(1) wake dispatch** — re-publishes the Redis wake (with the wake-key breadcrumb) for every `pending` inbound of an `idling` owner older than `AVA_DELIVERY_WATCHDOG_DISPATCH_THRESHOLD_SECONDS` (default 1s), collapsing the lost-publish recovery from the claim loop's 30s recheck to ~1.5s; constant ~2 qps load, independent of fleet size; **(2) stall alerting** — WARNINGs chat inbounds still `pending` past `AVA_DELIVERY_WATCHDOG_THRESHOLD_SECONDS` (default 30s) whose owner is `idling`/`terminated`, once per row while stuck, with a `delivery_stalled` event emitted to the unified `events` stream; **(3) terminated-owner resurrect retry** — re-runs `resurrect_if_terminated` for each terminated owner holding a post-death `pending` chat younger than `AVA_DELIVERY_WATCHDOG_STALE_CLAIMED_THRESHOLD_SECONDS` (default 24h; Task #689 G4) — including the corpse reaper's committed crash-recovery wake (task #4039), with per-agent in-flight/cooldown maps and the escalating `resurrect_failed` wake-suppression ladder (30-minute exponential window capped at 24 h, after five consecutive failed attempts); **(4) stale-inbound dead-letter sweeps** — every 30s flips `claimed` then `pending` chat rows of terminated owners past the same stale threshold to `done` (Tasks #654/#2049), so the sweep and the G4 trigger share one age gate; **(5) stalled crash-marked recovery request** — escalates a chat still `pending` past the stall threshold whose owner is a crash-marked idling corpse over the internal `recover-crash-marked-v2` path (one request per owner, 60s cooldown, `delivery_recovery_decision` per decision, gated by `AVA_DELIVERY_STALLED_RECOVERY_ENABLED`; Task #3618); **(6) hosted-turn liveness recovery** — confirms any hosted `running` agent whose DB activity is older than the 2400 s wedged-agent budget (`wedged_agent_inbound_age_seconds`) against the agent-host's 15 s Redis progress heartbeat (missing heartbeats or stale per-turn marks = wedged), then force-terminates the incarnation and queues the marked `hosted_turn_recovery` chat so guarded resurrection survives restarts; one attempt per agent per 10-minute cooldown, `host_turn_stall_detected` evidence (Task #1712). `running` owners are never dispatched or alerted (mid-turn queues are normal). Gate cluster-level on/off with `AVA_DELIVERY_WATCHDOG_ENABLED`) | `services.healthchecks.delivery_watchdog` (`/healthz` :8110) |
-| `task-maintenance` (gateway only; **registered by the `ava_fleet` plugin**, not core — see `ava_builtins/plugins/ava_fleet/services.py`) | `.venv/bin/python -m ava_builtins.plugins.ava_fleet.task_maintenance.daemon` (every `AVA_TASK_MAINTENANCE_INTERVAL_SECONDS`, default 5 min, reminds owners of overdue in-progress tasks past their `remind_interval_seconds` window via a `chat` inbound; after `AVA_TASK_ESCALATE_N` (default 3) unanswered reminders, notifies the parent task's owner. Cluster-wide, runs once on the gateway. Discovered whenever the `ava_fleet` plugin code is present; gate its cluster-level on/off with `AVA_TASK_MAINTENANCE_ENABLED`) | `ava_builtins.plugins.ava_fleet.task_maintenance.healthcheck` (`/healthz` :8108) |
-| `events-maintenance` (gateway only) | `.venv/bin/python -m services.events_maintenance.daemon` (every `AVA_EVENTS_MAINTENANCE_INTERVAL_SECONDS`, default 1h. Each pass incrementally maintains the Since-Birth day-grain rollups — `agent_metrics_daily` / `agent_model_tokens_daily` (the durable token+cost ledger) — from **Loki** (the unified event stream's live store): one union-family count probe compares retained candidate days with `rollup_day_state`; missing, failed, count-changed, and the latest `AVA_EVENTS_ROLLUP_LATE_WRITE_LOOKBACK_DAYS` (default 1) get a full-day overwrite, while clean days avoid the fourteen aggregate queries. The scan clamps to Loki's 84h retention floor (an outage longer than retention loses those days' Loki aggregates — logged loudly; the filtered `events-YYYYMMDD.rollup.jsonl` mirror (90-day retention by default, tunable via `AVA_EVENTS_JSONL_ROLLUP_RETENTION_DAYS`) then automatically repairs older ledger-watermark gaps: zero-known-row files fail loudly and are not counted as replayed, missing files remain unrecoverable; pre-LGTM history was backfilled once by the llm-cost-rollup-columns migration from the frozen PG archive), uses its own capacity-one Loki budget, and stops between days at `AVA_EVENTS_ROLLUP_PASS_DEADLINE_S` (default 1200), leaving untouched/failed state for the next pass. Today is served live by the readers (whole-life cost = ledger + Loki tail from the watermark). Full-day overwrite upsert keyed on the PK ⇒ idempotent; a zero-row indexed slice preserves existing ledger rows and marks the day failed for retry. Cluster-wide, runs once on the gateway — it owns the data plane. The rollup, JSONL replay, blob vacuum and hourly checkpoint size sample are unconditional — the PG `events` archive slices (partition rolling, retention, index governance) were removed with the task #1281/#1823 cleanup. The current baseline omits that archive. The daemon also hosts the per-thread checkpoint pruner (every 60s, newest three regardless of liveness; parked by default since the never-delete ruling — `AVA_EVENTS_MAINTENANCE_CHECKPOINT_TRIM_ENABLED=true` is an explicit opt-in that deletes history) and the blob vacuum) | `services.healthchecks.events_maintenance` (`/healthz` :8109) |
+| `ops` (agent-runner only) | `.venv/bin/python -m services.agent_ops.daemon` (inbound server on 0.0.0.0:<ops_port>; the gateway POSTs each cluster op to `/ops`, dispatched in-process via the gateway ops_* modules) | roster identity probe (`/healthz` :8113) |
+| `agent-host` (agent-runner only) | `.venv/bin/python -m services.agent_host.daemon`: one host schedules local turns with bounded concurrency, shared workload/control pools and per-agent context. Idle has no task. `/stats` reports active turns and cache use. Normal update drains claim, checkpoint, continuation and execution resources before stopping this service. Uncancellable tasks are reported; killing the whole host interrupts every active turn on that runner. | roster identity probe (`/healthz` :8114) |
+| `page-server` (agent-runner only) | `.venv/bin/python -m services.page_server.daemon` (supervisor of page servers: every open `agent_pages` row whose serve_dir is set — `ava.ui.serve()` pages — gets exactly one detached page server process on this host, spawned from the row's serve_dir on the row's port; rows that close get their server killed, while serve() pages stay open across an agent terminate. Truth source is the `agent_pages` table, not the session tree — a rollout's session rebuild does not kill page servers, an agent restart does not orphan them) | roster identity probe (`/healthz` :8112) |
+| `labeler`                | `.venv/bin/python -m services.labeler.daemon` (auto label generation) | roster identity probe (`/healthz` :8103) |
+| `im-bridge`              | `.venv/bin/python -m services.im_bridge.daemon` (IM frontends: Telegram; WeChat iLink / Feishu adapters shipped but **production-disabled since 2026-08-06** — `AVA_IM_DISABLED_ADAPTERS=weixin,feishu`) | roster identity probe (`/healthz` :8111) |
+| `heartbeat` (gateway only) | `.venv/bin/python -m services.heartbeat.daemon` (every `AVA_HEARTBEAT_INTERVAL_SECONDS`, default 15 min, scans `idling` agents past `AVA_HEARTBEAT_IDLE_THRESHOLD_SECONDS` that have not called `ava.self.pause_heartbeat()` and INSERTs a `heartbeat` check-in inbound; cluster-wide — the inbound-insert trigger wakes the agent on any machine, so it runs once on the gateway, not per agent-runner) | roster identity probe (`/healthz` :8107) |
+| `delivery-watchdog` (gateway only) | `.venv/bin/python -m services.delivery_watchdog.daemon` (six jobs on one fast tick, default 0.5s per `AVA_DELIVERY_WATCHDOG_INTERVAL_SECONDS`: **(1) wake dispatch** — re-publishes the Redis wake (with the wake-key breadcrumb) for every `pending` inbound of an `idling` owner older than `AVA_DELIVERY_WATCHDOG_DISPATCH_THRESHOLD_SECONDS` (default 1s), collapsing the lost-publish recovery from the claim loop's 30s recheck to ~1.5s; constant ~2 qps load, independent of fleet size; **(2) stall alerting** — WARNINGs chat inbounds still `pending` past `AVA_DELIVERY_WATCHDOG_THRESHOLD_SECONDS` (default 30s) whose owner is `idling`/`terminated`, once per row while stuck, with a `delivery_stalled` event emitted to the unified `events` stream; **(3) terminated-owner resurrect retry** — re-runs `resurrect_if_terminated` for each terminated owner holding a post-death `pending` chat younger than `AVA_DELIVERY_WATCHDOG_STALE_CLAIMED_THRESHOLD_SECONDS` (default 24h; Task #689 G4) — including the corpse reaper's committed crash-recovery wake (task #4039), with per-agent in-flight/cooldown maps and the escalating `resurrect_failed` wake-suppression ladder (30-minute exponential window capped at 24 h, after five consecutive failed attempts); **(4) stale-inbound dead-letter sweeps** — every 30s flips `claimed` then `pending` chat rows of terminated owners past the same stale threshold to `done` (Tasks #654/#2049), so the sweep and the G4 trigger share one age gate; **(5) stalled crash-marked recovery request** — escalates a chat still `pending` past the stall threshold whose owner is a crash-marked idling corpse over the internal `recover-crash-marked-v2` path (one request per owner, 60s cooldown, `delivery_recovery_decision` per decision, gated by `AVA_DELIVERY_STALLED_RECOVERY_ENABLED`; Task #3618); **(6) hosted-turn liveness recovery** — confirms any hosted `running` agent whose DB activity is older than the 2400 s wedged-agent budget (`wedged_agent_inbound_age_seconds`) against the agent-host's 15 s Redis progress heartbeat (missing heartbeats or stale per-turn marks = wedged), then force-terminates the incarnation and queues the marked `hosted_turn_recovery` chat so guarded resurrection survives restarts; one attempt per agent per 10-minute cooldown, `host_turn_stall_detected` evidence (Task #1712). `running` owners are never dispatched or alerted (mid-turn queues are normal). Gate cluster-level on/off with `AVA_DELIVERY_WATCHDOG_ENABLED`) | roster identity probe (`/healthz` :8110) |
+| `task-maintenance` (gateway only; **registered by the `ava_fleet` plugin**, not core — see `ava_builtins/plugins/ava_fleet/services.py`) | `.venv/bin/python -m ava_builtins.plugins.ava_fleet.task_maintenance.daemon` (every `AVA_TASK_MAINTENANCE_INTERVAL_SECONDS`, default 5 min, reminds owners of overdue in-progress tasks past their `remind_interval_seconds` window via a `chat` inbound; after `AVA_TASK_ESCALATE_N` (default 3) unanswered reminders, notifies the parent task's owner. Cluster-wide, runs once on the gateway. Discovered whenever the `ava_fleet` plugin code is present; gate its cluster-level on/off with `AVA_TASK_MAINTENANCE_ENABLED`) | roster identity probe (`/healthz` :8108) |
+| `events-maintenance` (gateway only) | `.venv/bin/python -m services.events_maintenance.daemon` (every `AVA_EVENTS_MAINTENANCE_INTERVAL_SECONDS`, default 1h. Each pass incrementally maintains the Since-Birth day-grain rollups — `agent_metrics_daily` / `agent_model_tokens_daily` (the durable token+cost ledger) — from **Loki** (the unified event stream's live store): one union-family count probe compares retained candidate days with `rollup_day_state`; missing, failed, count-changed, and the latest `AVA_EVENTS_ROLLUP_LATE_WRITE_LOOKBACK_DAYS` (default 1) get a full-day overwrite, while clean days avoid the fourteen aggregate queries. The scan clamps to Loki's 84h retention floor (an outage longer than retention loses those days' Loki aggregates — logged loudly; the filtered `events-YYYYMMDD.rollup.jsonl` mirror (90-day retention by default, tunable via `AVA_EVENTS_JSONL_ROLLUP_RETENTION_DAYS`) then automatically repairs older ledger-watermark gaps: zero-known-row files fail loudly and are not counted as replayed, missing files remain unrecoverable; pre-LGTM history was backfilled once by the llm-cost-rollup-columns migration from the frozen PG archive), uses its own capacity-one Loki budget, and stops between days at `AVA_EVENTS_ROLLUP_PASS_DEADLINE_S` (default 1200), leaving untouched/failed state for the next pass. Today is served live by the readers (whole-life cost = ledger + Loki tail from the watermark). Full-day overwrite upsert keyed on the PK ⇒ idempotent; a zero-row indexed slice preserves existing ledger rows and marks the day failed for retry. Cluster-wide, runs once on the gateway — it owns the data plane. The rollup, JSONL replay, blob vacuum and hourly checkpoint size sample are unconditional — the PG `events` archive slices (partition rolling, retention, index governance) were removed with the task #1281/#1823 cleanup. The current baseline omits that archive. The checkpoint trim opt-in was retired on 2026-09-30 under the never-delete ruling; its reaper implementation remains unscheduled pending separate retirement) | roster identity probe (`/healthz` :8109) |
 | `milvus`                 | `.venv/bin/python -m services.milvus.daemon` (`milvus-lite server` gRPC :19530, data dir `~/.ava/milvus-data/`) | `services.healthchecks.milvus` (TCP probe :19530) |
-| `memory-indexer`         | `.venv/bin/python -m services.memory_indexer.daemon` (watchdog fs watch `~/.ava/memory/` + Gemini Embedding 2 → milvus collection) | `services.healthchecks.memory_indexer` (`/healthz` :8105) |
+| `memory-indexer`         | `.venv/bin/python -m services.memory_indexer.daemon` (watchdog fs watch `~/.ava/memory/` + Gemini Embedding 2 → milvus collection) | roster identity probe (`/healthz` :8105) |
 | `memory-search`          | `.venv/bin/python -m services.memory_search.daemon` (uvicorn on 127.0.0.1:19531 serving the exact-search store — in-memory matrix + npz persistence; the gateway and the indexer call it over HTTP when `AVA_MEMORY_SEARCH_BACKEND=numpy`) | `services.healthchecks.memory_search` (real POST /search probe :19531) |
 | `frontend`               | `cd ui/web && NEXT_PUBLIC_GATEWAY_PORT=<AVA_GATEWAY_PORT> npm run build && npm run start -- -p <app_port>` (Next.js prod build, **loopback-only bind** (`next start -H 127.0.0.1`); off-box browsers reach it only through the fleet UI gate on the entry port `:3000` — see Private-network deployment. The build-time port is injected from `AVA_GATEWAY_PORT` so the browser dials the gateway on the right port even when it is not the default 8000) | `services.healthchecks.frontend` (curl) |
-| `pg-backup` (gateway only) | `.venv/bin/python -m services.backup_scheduler.daemon` (cluster-clock daily dump schedule with bounded retry and owned, cancellable job processes; after the Sunday 03:00 successful dump, runs one isolated logical restore drill; `/healthz` reports last-success age) | `services.healthchecks.pg_backup` (identity-verified `/healthz` :8116) |
-| `pitr-uploader` (gateway only, `AVA_PITR_ENABLED`) | `.venv/bin/python -m services.pitr.uploader_daemon` (single-worker immutable GCS upload; WAL-only ciphertext staging is capped at 64 MiB and reported alongside spool bytes; disabled by default) | `services.healthchecks.pitr_uploader` (identity-verified `/healthz` :8117) |
-| `pitr-base-candidate` (gateway only, `AVA_PITR_BASE_BACKUP_ENABLED`) | `.venv/bin/python -m services.pitr.base_scheduler_daemon` (weekly unprotected base candidate; when the additional `AVA_PITR_RESTORE_PROOF_ENABLED` gate is true, runs one generation-pinned isolated proof in the first-day 06:00 cluster-time monthly window when a candidate is pending; both default off) | `services.healthchecks.pitr_base_backup` (identity-verified `/healthz` :8118; candidate and restore-proof states are separate non-readiness-gating components) |
-| `gateway-watchdog` ★ (gateway only) | `.venv/bin/python -m services.watchdog.daemon --role gateway` (asyncio imports + runs the gateway-capability healthchecks above — redis-acl first (re-affirms the cluster's redis ACL user (the identifier its redis_url carries), which a redis-server restart silently drops), then pgbouncer (restarts the per-cluster pooler when its listener stops answering OR its reachable-address listener is missing — a silently degraded double bind, task #1288; when the pooler is enabled it is every consumer's AVA_DB_URL, so it comes before any service that would be revived without a database), then gateway/im-bridge/labeler/heartbeat/delivery-watchdog/events-maintenance/milvus/frontend/pg-backup/otel-collector/task-maintenance/memory-indexer — every 60s). Its distinct `/healthz` reports the last completed tick and becomes stale after a 90s unfinished round. | the OS-scheduled **watchdog probe** (`ava cluster watchdog-probe --role gateway`, launchd / crontab / schtasks, every 60s) respawns it when its pidfile shows it dead |
-| `agent-runner-watchdog` ★ (agent-runner only) | `.venv/bin/python -m services.watchdog.daemon --role agent-runner` (asyncio imports + runs the agent-runner-capability healthchecks above — ops/agent-host (+browser, browser-mcp) — every 60s). Its distinct `/healthz` reports the last completed tick and becomes stale after a 90s unfinished round. | the OS-scheduled **watchdog probe** (`ava cluster watchdog-probe --role agent-runner`, launchd / crontab / schtasks, every 60s) respawns it when its pidfile shows it dead |
+| `pg-backup` (gateway only) | `.venv/bin/python -m services.backup_scheduler.daemon` (cluster-clock daily dump schedule with bounded retry and owned, cancellable job processes; after the Sunday 03:00 successful dump, runs one isolated logical restore drill; `/healthz` reports last-success age) | roster identity probe (`/healthz` :8116) |
 | `browser` (agent-runner only, auto-detect display; opt-out `AVA_BROWSER_ENABLED=false`) | `.venv/bin/python -m services.browser.daemon` (headed real Chrome, dedicated profile `~/.ava/chrome-profile/`, CDP :9222) | `services.healthchecks.browser` (HTTP probe `/json/version` :9222) |
 | `otel-collector` | `<otel-collector-dir>/otelcol-contrib --config <otel-collector-dir>/config.yaml` (native Go binary installed by converge on the `lgtm-host` gateway and pure runners; unmarked gateway homes skip it; the gateway fans out only its cluster's labeled resources, pure runners relay with bearer auth; traces mirror locally; trace/log queues are bounded and file-backed (1 GiB on-disk cap each) while metrics use bounded memory; every full queue rejects the newest batch without waiting, and every exporter gives up after a bounded 15-minute retry window) | `services.healthchecks.otel_collector` (valid empty OTLP POST must return 2xx on the local `AVA_TELEMETRY_OTLP_PORT`; both that port and `AVA_OTELCOL_METRICS_PORT` holders must resolve to this collector binary and its live session record, otherwise only a verified stale same-binary holder is reclaimed; failed listener inspection is reported as unavailable and never triggers respawn) |
+| `loki` (observability station) | Pinned native Loki under ava-root | `services.healthchecks.lgtm` (owned listener + `/ready` success) |
+| `prometheus` (observability station) | Pinned native Prometheus under ava-root | `services.healthchecks.lgtm` (owned listener + `/-/ready` success) |
+| `grafana` (observability station) | Pinned native Grafana under ava-root | `services.healthchecks.lgtm` (owned listener + `/api/health`, database ready) |
 | `browser-mcp` (agent-runner only, gated with `browser`) | `.venv/bin/python -m services.browser.mcp_daemon` (one shared `chrome-devtools-mcp` upstream attached to the headed Chrome, multiplexed over a Unix socket `~/.ava/chrome-mcp.<cdp_port>.sock` to every agent's chrome bridge — serial, with per-connection page affinity so one Chrome client is shared instead of one per browser-using agent) | `services.healthchecks.browser_mcp` (Unix-socket `list_tools` probe) |
 | `computer-mcp` (agent-runner only, platform-gated: signed permissions helper enabled + capable, AF_UNIX transport, non-Windows host — Windows is the phase-3 pilot) | `.venv/bin/python -m services.computer.mcp_daemon` (computer-use executor: every desktop action through the signed permissions helper — serialized machine-wide, screen-coordinated (lease + FIFO queue + `release_control`), Vision OCR on snapshots, audited as `computer_action` + `computer_session_start/end` events, served over `~/.ava/run/computer-mcp.sock`) | `services.healthchecks.computer_mcp` (Unix-socket lock-free `ping` probe) |
-| `mcp-daemon` (agent-runner only) | `.venv/bin/python -m ava._mcps_daemon` (ONE shared MCP daemon per machine, serving every agent over `~/.ava/run/mcp_daemon.sock` — sessions isolated per client connection, replacing the old one-daemon-per-agent children) | `services.healthchecks.mcp_daemon` (Unix-socket `ping` probe) |
+| `mcp-daemon` (agent-runner only) | `.venv/bin/python -m ava.mcps._daemon` (ONE shared MCP daemon per machine, serving every agent over `~/.ava/run/mcp_daemon.sock` — sessions isolated per client connection, replacing the old one-daemon-per-agent children) | `services.healthchecks.mcp_daemon` (Unix-socket `ping` probe) |
 
 The gate preserves the browser `Host` while proxying to the loopback frontend,
 so the frontend CSP derives the same host that its API client uses. A TLS or
@@ -836,31 +683,32 @@ loopback, never `forwarded-allow-ips=*`.
 
 Route `/api` and its descendants, `/pages` and its descendants, and `/grafana`
 and its descendants directly to the gateway; all remaining requests go to the
-existing gate, including `/__ava/deploy-state`. The gate buffers frontend
+existing gate. The gate buffers frontend
 responses and must not proxy SSE. Preserve route prefixes, query strings,
 cookies, redirects, and immediate `text/event-stream` delivery. Keep the entry
 supervised independently of rollout service teardown.
 
-For an existing Tailscale deployment, Serve can own the HTTPS listener,
-certificate renewal and persistence without a second proxy daemon. HTTPS
-certificates must be enabled for the tailnet; certificate issuance publishes
-the node's full DNS name in Certificate Transparency. Keep the service tailnet
-only (Serve, not Funnel). First save `tailscale serve status --json` and refuse
-to overwrite an occupied HTTPS port. For example, for gateway 20016 and gate
-20017 on an otherwise unused HTTPS port 443:
+If the host's private network already provides a managed HTTPS entry (listener,
+certificate renewal and persistence), it can take this role without a second
+proxy daemon. Keep that entry reachable only on the private network, never
+publicly exposed. If its certificates come from a public CA, issuance
+publishes the node's full DNS name in Certificate Transparency. Save the
+entry's current configuration first and refuse to overwrite an occupied HTTPS
+port. For example, for gateway 20016 and gate 20017 on an otherwise unused
+HTTPS port 443, add exactly four handlers:
 
-```bash
-tailscale serve --bg --https=443 --set-path=/api http://127.0.0.1:20016/api
-tailscale serve --bg --https=443 --set-path=/pages http://127.0.0.1:20016/pages
-tailscale serve --bg --https=443 --set-path=/grafana http://127.0.0.1:20016/grafana
-tailscale serve --bg --https=443 http://127.0.0.1:20017
-```
+| Path on `https://<entry-host>` | Upstream |
+|---|---|
+| `/api` | `http://127.0.0.1:20016/api` |
+| `/pages` | `http://127.0.0.1:20016/pages` |
+| `/grafana` | `http://127.0.0.1:20016/grafana` |
+| `/` (everything else) | `http://127.0.0.1:20017` |
 
-Serve strips the mount prefix, so the upstream URL deliberately restores it.
-`--bg` persists across Tailscale restarts. Preserve other Serve handlers and TCP
-relays; never use `tailscale serve reset` to roll back this entry. Remove only
-the four newly added handlers with the matching `--https` / `--set-path` and
-`off` arguments. The direct IP entry remains available throughout.
+An entry that strips the mount prefix needs the upstream URL to restore it, as
+above. Make the handlers persist across restarts of the entry. Preserve its
+other handlers and TCP relays; never reset the whole entry to roll this back.
+Remove only the four added handlers. The direct IP entry remains available
+throughout.
 
 Acceptance: verify ALPN negotiates `h2` from the user's machine with normal
 certificate verification; load several console windows and inspect the real
@@ -869,174 +717,46 @@ Grafana/pages and maintenance-state requests. API headers alone are not proof
 that the browser used HTTP/2. Full test suites run in CI; local verification
 uses the affected tests and the operator's authorized browser smoke.
 
-The base-candidate gate additionally requires `AVA_PITR_REPLICATION_DB_URL`, a
-local URL for a dedicated `LOGIN REPLICATION NOSUPERUSER` role. The role must be
-accepted by the cluster's private loopback `pg_hba.conf`; its password must not
-be embedded in commands or logs. This foundation does not create that identity
-or enable PostgreSQL archiving. Until the activation runbook provisions and
-verifies it, keep `AVA_PITR_BASE_BACKUP_ENABLED=false`. Candidate success never
-replaces or prunes daily logical dumps. A migration-bearing update can reuse a
-protected base plus freshly verified WAL as described in the update procedure.
+### Backup and recovery posture
 
-Physical PITR is disabled by default. Converge only prepares
-`$AVA_HOME/physical-backup/{spool,ack}` (0700) and atomically publishes the
-self-contained shim at `$AVA_HOME/runtime/pg-archive/archive-shim`; it does not
-set `archive_mode`, restart PostgreSQL, upload to GCS, or replace the daily and
-pre-update logical dumps. Do not set `AVA_PITR_ENABLED=true` until the GCS
-uploader and verified base-chain rollout have landed. Spool hard-bound failures
-make PostgreSQL retain WAL in `pg_wal`; monitor their combined disk usage and
-never delete unacknowledged segments to relieve pressure.
-The uploader's seekable staging contract is restricted to bounded WAL files;
-base backups must use the separate restartable streaming contract delivered by
-the base-chain rollout and must never materialize a full ciphertext sibling.
+The recovery points are the daily encrypted logical dumps (`pg-backup`, due at
+`AVA_BACKUP_HOUR` cluster time, the newest `AVA_BACKUP_KEEP` kept in
+`$AVA_HOME/backups/db/`, published off-site under `ava-logical/` when
+`AVA_BACKUP_OFFSITE_ENDPOINT`, `AVA_BACKUP_OFFSITE_BUCKET` and
+`AVA_BACKUP_OFFSITE_CREDENTIALS_FILE` are set through `ava config set`), proved
+by the weekly isolated logical restore drill. The self-written PITR stack was
+deleted (`decisions/2026-10-02-delete-the-self-written-pitr-stack.md`). Point-in-time
+recovery exists only while WAL-G is on (["WAL-G archiving"](#wal-g-archiving) below):
+`ava backup walg restore`, proved weekly by the recovery drill. Never state a
+recovery point newer than the last published dump unless the latest drill has passed.
 
-`AVA_PITR_STORE_BACKEND` selects the object-store backend for the whole PITR
-plane (default `gcs`); the other supported values are `baidu` (Baidu
-Netdisk) and `oss` (Aliyun OSS). An unrecognized value fails fast at store
-construction — a typo never silently falls back to GCS. Switching backends
-is one env var + a restart; the previously retained copy stays primary until
-the switchover runbook has been executed and observed. The full cut-over
-procedure (restore drills, migration script, rollback): see
-`conventions/pitr-backend-switchover.md`.
-An interrupted publish can leave an incomplete multipart upload (orphan
-shard) behind: the lifecycle rule stays the standing channel (fragments
-aborted after 7 days), and `ava pitr multipart list/abort` is the explicit
-single-upload surface for anything that cannot wait out that window.
-
-Activation is Ava-owned: use `ava cluster pitr status`, then
-`ava cluster pitr activate --origin operator:<name>`. The command validates the
-disabled shadow posture, creates the mandatory verified logical recovery floor,
-persists every side-effect intent, applies archive settings with `ALTER SYSTEM`,
-and dispatches the existing whole-cluster restart orchestration. Its typed,
-non-secret continuation automatically resumes the exact operation after restart
-readiness, executes `pg_switch_wal()`, and requires
-`pg_stat_archiver`, the fsynced local ACK, and viewer-only exact
-generation/size/CRC metadata to agree within the persisted five-minute deadline.
-It then forces one operation-scoped base candidate and exact isolated restore
-proof; only that chain may reach `protected`. That artifact is pinned while active;
-terminal runs use a bounded two-artifact retention window.
-Resume and status reverify that artifact. Preparation serializes with cluster
-update/maintenance, binds the live PGDATA/port/postmaster/system-id identity on
-both sides of the dump, and persists failures without resetting `started_at`.
-Its credential check proves distinct service-account emails, not merely distinct keys. The
-viewer proves object-list/read access without requiring bucket-metadata access; the
-objectCreator + objectViewer uploader is identity-checked without creating or deleting a probe. Never edit PostgreSQL or `.env` manually
-during this sequence. Resume a pending restart through the command; do not call
-`pg_ctl` or introduce another restart mechanism. `ava cluster pitr rollback`
-persists rollback intent, restores the frozen settings, and uses the same
-durable whole-cluster restart continuation. The four PITR gate keys are
-config-owned and are never reverted or stripped by a rollback; a fresh
-activation after a rollback needs them absent — unset them with `ava config unset
-pitr_enabled pitr_base_backup_enabled pitr_restore_proof_enabled
-pitr_retention_planner_enabled`, and the activation provisions them — or
-resume an already-prepared operation with the keys aligned to their desired
-values.
-Each of the four owned PostgreSQL settings has its own intent and applied
-journal entry: resume distinguishes pre-ALTER from post-ALTER/pre-journal
-failure without replaying a completed setting. Rollback restores only those
-owned fields, so unrelated concurrent `ALTER SYSTEM` keys survive; readiness
-verifies the owned semantic baseline after restart instead of requiring the
-whole `postgresql.auto.conf` file to equal its old bytes.
-It preserves logical dumps, local ACKs, remote objects, and protected manifests.
-
-Restore proof additionally requires
-`AVA_PITR_RESTORE_GCS_CREDENTIALS_FILE`, a distinct 0600 viewer-only service
-account file; configuration rejects the uploader and viewer paths when they
-resolve to the same inode. Before enabling the gate, prove the viewer cannot
-create, overwrite, list-latest, or delete objects. The drill performs one
-generation-pinned GCS download per object, then authenticates and extracts the
-base locally under `$AVA_HOME/physical-backup/restore/`. Insufficient space
-defers protection; do not reduce the WAL/spool, logical-backup, or emergency
-reserves to force a run. A candidate remains `protected=false` until the real
-isolated replay, promotion, fingerprints, live-Postgres identity check, and
-immutable proof publication all succeed. Keep daily logical dumps; this
-boundary has no retention or remote-delete operation. Enabled PITR replaces
-the migration-bearing update's logical export only after its separate fresh
-recovery-point verification succeeds.
-To re-prove a protected chain at an operator-chosen target LSN, run the
-isolated drill: `ava pitr drill` (procedure:
-`.agents/skills/operating-ava-cluster/references/physical-restore-drill.md`).
-
-When an activation fails, read the durable record first:
-`$AVA_HOME/physical-backup/activation/operation.json`
-(`error` / `error_code` / `error_detail`) and `ava cluster pitr status`. The
-CLI refusal line keeps only the TAIL of the restore worker's traceback, so the
-outermost exception there is the actionable cause — but a cleanup refusal can
-mask it. Zombie signature (2026-09-06, activation #12): the refusal names
-"refusing to remove a live restore PostgreSQL data directory" while a
-`.partial` restore directory is left behind. That message does NOT mean a
-postgres is running: the direct-exec sandbox postmaster is the restore
-worker's child and, once stopped, lingers as a zombie (it fails the pgid
-identity probe, so the stop path never reaps it, and psutil's create-time
-probe still matches it). Verify with
-`ps -o pid,stat,command -p <sandbox_pid>` — status `Z` means dead-but-unreaped
-(`sandbox_pid` sits in the matching `restore-owners/*.owner.json`). Since
-#1860 the run() cleanup reaps the Popen and every live-process probe treats a
-zombie as dead, so a current failure surfaces unmasked in the refusal tail.
-
-`AVA_PITR_RETENTION_PLANNER_ENABLED=true` adds only a local dry-run after the
-restore-proof gate is enabled. The private canonical plan lives at
-`$AVA_HOME/physical-backup/retention-plans/latest.dry-run.json`; inspect its
-digest, blockers, object counts and byte totals with:
+Backup operations (the daily dump and the weekly logical restore drill) each
+run as one owned worker group of their kind. A failed or cancelled operation
+whose group closure was proven -- including an `ava stop` during the nightly
+dump -- is quarantined under its kind's `$AVA_HOME/backups/quarantine/<kind>/`
+(request, logs, `failure.txt`, receipts; plaintext database material
+removed), raises the
+`ava-ops-backup-operation-quarantined` warning, and the next scheduled run
+proceeds. Unproven closure (or a controller killed mid-operation) blocks only
+that kind and raises `ava-ops-backup-operation-blocked`:
 
 ```bash
-ava pitr retention inspect
+ava backup operations status            # blocked kinds, reasons, newest quarantine entries
+ava backup operations retire            # preview: re-prove closure of each blocked operation
+ava backup operations retire --confirm  # quarantine every proven one; the kind proceeds
 ```
 
-A blocked plan exits 2 and always has zero eligible objects; with no plan on
-disk (before the first tick, or on a unit without a retention daemon) `retention
-inspect` prints a note and exits 1. The planner flag
-alone grants no delete credential and calls no remote delete API; deletion has
-its own gate -- the arm carriers and the explicit commands below. The gate does
-not alter Cloud Storage soft delete and leaves daily/pre-update `pg_dump`
-retention unchanged. Eligibility
-also remains zero while any candidate is unprotected, while the plan is stale,
-or while timeline history ancestry has not been authenticated. A WAL/history
-object is continuous only after its local ACK and viewer-only remote inventory
-entry match exactly on canonical archive/object path, generation, size, CRC32C,
-and immutable metadata; any missing, extra, duplicate, or conflicting entry
-blocks the complete plan.
-
-### Retention deletion gate (arm / run-once / disable)
-
-The deletion machinery ships armed-off, with exactly one sanctioned opener --
-the explicit command; the carriers in the unit `.env` are never hand-edited.
-
-```bash
-ava pitr retention status                            # carriers, plan, daemon state, journal tail
-ava pitr retention arm --digest <SHA256> --confirm   # approve the current plan digest
-ava pitr retention run-once --confirm                # operator-present first pass (same executor)
-ava pitr retention disable --confirm                 # clear the carriers; back to dry-run
-```
-
-`arm` fails closed unless the stored plan is unblocked and its digest equals
-`--digest`; every flipping command only previews without `--confirm`. The
-scheduler re-reads the carriers from the unit `.env` on every tick, so a flip
-takes effect on the next tick without a restart. Deletion still requires the
-approved digest to hold for consecutive ticks, and the first execution of a
-process recomputes the plan and re-compares the digest immediately before
-deleting; `run-once` runs exactly that recompute-then-execute sequence through
-the same bounded executor -- the operator-present form of the first real run.
-Every flip and every pass append to
-`$AVA_HOME/physical-backup/retention-journal/journal.jsonl` (actor, full
-command, plan digest, before/after carrier state); `retention status` shows the
-latest records.
-
-Retention depth rides one deploy-provisioned key, `AVA_PITR_RETAINED_WEEKLY_CHAINS`
-(default `2`, capped at `8`): that many newest protected chains are kept, each
-additional chain moving the deletable WAL floor roughly one week further back,
-so the key sets how far back point-in-time recovery reaches. It is read-only for
-`ava config` (`writable: false`) and is provisioned in the unit `.env` at deploy
-time, like `AVA_PITR_GCS_PREFIX`; align it before the shadow period starts so the
-observed digests describe the opening configuration instead of the default. The
-pre-open cost comparison (task #3292) measured about 30 GB of WAL per day on the
-live prefix and put each extra week near CNY 19/month; the opening parameter is
-`2` (the user's ruling on 2026-09-14: roughly a 14-day window, about CNY
-39/month). Deepening through the bucket's 90-day lifecycle ceiling stays
-deferred until after the shadow period.
-
-The full procedure and the pre-open cost comparison live with the retention
-design (task #2150).
+Closure covers the PostgreSQL children that `setsid` out of the worker group:
+retire also requires every recorded postgres birth dead and no process working
+inside a receipted data directory. Each refusal names its type and the PIDs
+involved (`worker-present`, `group-members`, `postgres-family-alive`,
+`birth-unrecorded`, `unverifiable`, `quarantine-failed`); wait for them (or stop
+them) and retry. A controller killed while launching can only be proven after
+a reboot. A closed operation whose quarantine keeps failing shows as blocked
+and `retire --confirm` retries it. An upload-interrupted dump keeps
+its complete encrypted artifact in quarantine: restore from it directly
+(`.agents/skills/operating-ava-cluster/references/db-restore.md`) or copy it
+into `backups/db/` (0600); the next scheduled run dumps again.
 
 All sessions have cwd set to the prod path `~/.ava/source/` (see "Prod and dev clone paths" above).
 Session commands run under `bash -lc` (#476) — the login-shell flag pulls in the user's
@@ -1120,7 +840,7 @@ The Codex launcher in `ava-use-other-agents` owns one canonical
 session per `(cluster, workspace, tool)`. Check it before starting work:
 
 ```bash
-python ava_builtins/skills/ava-use-other-agents/reference/spawn_codex.py \
+python ava_builtins/skills/ava-use-other-agents/scripts/spawn_codex.py \
   /absolute/workspace \
   --tasks-file /absolute/workspace/tasks.md \
   --work-file /absolute/workspace/work.md \
@@ -1152,7 +872,7 @@ the normal lifecycle boundary. Cancel only the generation printed by the
 launcher or `--status`:
 
 ```bash
-python ava_builtins/skills/ava-use-other-agents/reference/spawn_codex.py \
+python ava_builtins/skills/ava-use-other-agents/scripts/spawn_codex.py \
   /absolute/workspace \
   --tasks-file /absolute/workspace/tasks.md \
   --work-file /absolute/workspace/work.md \
@@ -1177,9 +897,9 @@ keeps per-connection page affinity (it re-selects each agent's own page before a
 page-scoped call, so concurrent agents never act on each other's tab through the
 single shared selected-page) and applies the cold-start `navigate_page` fix (a
 page-less navigate becomes `new_page`). The agent side is process-less since
-2026-08: the shared MCP daemon (`ava/_mcps_daemon.py`) dials the daemon's socket
+2026-08: the shared MCP daemon (`ava/mcps/_daemon.py`) dials the daemon's socket
 directly (`"shared": "browser"` in the chrome `.mcp.json`, in-daemon line client
-`ava/_mcp_browser.py`) — the former per-agent stdio bridge
+`ava/mcps/_browser.py`) — the former per-agent stdio bridge
 (`services/browser/mcp_wrapper.py`, ~63MB per agent) is no longer spawned. Both
 sides derive the CDP port + socket path from `settings.browser_cdp_port`
 (per-cluster).
@@ -1200,25 +920,24 @@ sides derive the CDP port + socket path from `settings.browser_cdp_port`
   **Guardrails**: any existing profile directory is never touched, including an
   empty or partial first copy (idempotent across restarts; prod's multi-GB logged-in
   profile survives every start); non-interactive
-  paths (watchdog respawn, boot autostart, `ava cluster update` rollout) never prompt and
+  paths (root revival, boot autostart, a `cli.fleet_update` start) never prompt and
   always take the fresh default; a host with no daily Chrome degrades silently to
   fresh.
 - **On by default with auto-detect**: `AVA_BROWSER_ENABLED` defaults to true.
   On a headless machine (no `$DISPLAY` / `$WAYLAND_DISPLAY` on Linux), the
   converge step prints a warning and skips the browser — `ava start`
   proceeds normally without it. On a headed machine (macOS / Linux with display),
-  the browser session and watchdog healthcheck engage automatically. Set
+  the browser session and its healthcheck engage automatically. Set
   `AVA_BROWSER_ENABLED=false` to explicitly opt out. The display verdict is
   computed consistently across processes: `$DISPLAY` / `$WAYLAND_DISPLAY` are
-  passed through both env builders (`shared/session_env.py`) —
-  forwarded into every daemon service session, and carried in the detached agent's
-  inherited env dict (`agent_spawn_env_dict`) — so the watchdog and the agent see
+  passed through both env builders (`base/sessions/env_forwarding.py`) —
+  forwarded into every daemon service session — so every service sees
   the same display the operator's shell does. Without this a headed Linux / WSLg
   host would strip the display and wrongly skip (and never revive) a browser it
   can actually run.
 - **Capability-gated at two layers, observably**: (1) `_services_for_roles`, the
   watchdog's `_checks_for_capability`, and `agent/warmup.py` all gate on
-  `browser_incapability()` (`shared/platform_probes.py`) — the single source of
+  `browser_incapability()` (`base/host/system/probes.py`) — the single source of
   the display + Chrome-binary + npx check, returning the reason a prong is missing
   (or None when capable). A host missing any of the three never starts the browser
   session or its healthcheck, and warmup never polls a CDP port that will not
@@ -1239,7 +958,7 @@ sides derive the CDP port + socket path from `settings.browser_cdp_port`
   revives the session. The daemon guards the collision: `main()` probes the CDP
   port first and refuses with a clear message rather than exec'ing a second
   Chrome into the lock. To (re)take service ownership, stop the squatter, then
-  `ava start` (or let the next watchdog round revive the session once the port is
+  `ava start` (or let the next root health round revive the session once the port is
   free) — and the refusal message now names that remedy itself. When the squatter
   is one of *ours* (a Chrome left outside the session by a `SingletonLock`
   handoff), `ava stop --force` sweeps it, so there is no pid hunt: it kills
@@ -1341,7 +1060,7 @@ while per-agent model/runtime caches remain bounded.
   cluster's Postgres so the connection count does not scale 1:1 with fleet
   size (hosted mode replaces per-agent pools with one bounded workload pool and
   one fixed four-connection control pool for the runner).
-  [`agent/db/db.ava.okf.md`](../agent/db/db.ava.okf.md).
+  [`agent/db/docs/db.ava.okf.md`](../agent/db/docs/db.ava.okf.md).
 
 None of this claims memory stops mattering — it is the honest current floor.
 The next walls once memory is handled: the heartbeat's
@@ -1352,7 +1071,7 @@ which is linear in fleet size regardless of any of the above.
 
 On the macmini runtime host, export `AVA_VISUAL_GATE_COOKIE_FILE` as a 0600
 Playwright storage-state JSON, Netscape cookie jar, or single `name=value` file,
-then run `scripts/post_deploy_visual_check.py --check --base-url <production-gate>
+then run `scripts/post_deploy_visual/check.py --check --base-url <production-gate>
 --health-url <gateway-origin>` (the gate serves the SPA wall for
 unauthenticated /api, so the health probe must target the gateway origin
 explicitly; the script appends `/api/health`).
@@ -1366,13 +1085,13 @@ agent sends a P0 result to #3242 and #405 with `send_message`, or queues P2 with
 exit 10 is P2, and exit 0 is green or expected drift.
 The daily 07:30 invocation and a same-process-start run are sentinels and do not
 advance the two-deployment-wave escalation counter. A concrete first-wave
-invocation: `scripts/post_deploy_visual_check.py --check --base-url
+invocation: `scripts/post_deploy_visual/check.py --check --base-url
 <gate-entry-url> --health-url <gateway-origin-url>` — the base URL is the
 gate (frontend entry), never the gateway API origin, and the script refuses a
 base URL that answers the gateway health JSON up front.
 
-No command updates a golden implicitly. After QA or #405 confirms a report,
-roll it forward with `scripts/post_deploy_visual_check.py --accept-wave <sha>
+No command updates a golden implicitly. After a reviewer or #405 confirms a report,
+roll it forward with `scripts/post_deploy_visual/check.py --accept-wave <sha>
 --accepted-by <reviewer>`; this appends the reviewer, UTC timestamp, SHA, and
 capture list to the 0600 `acceptance-audit.jsonl`. If the exported cookie leaks,
 revoke it immediately with `curl --fail-with-body -X POST --cookie
@@ -1383,223 +1102,121 @@ a Playwright storage-state JSON export must be revoked from the logged-in UI.
 
 ### Start / check / restart
 
-Day-to-day ops **only uses the `ava` CLI** — one line to bring up the full set / check status / stop everything:
+The CLI owns local lifecycle; `ava start` initializes a fresh home and resumes an
+existing one through the same path. First-start inputs persist before native
+effects. Repeated start checks the same identity and selected service roster.
 
 ```bash
-ava start [--machine-name X --serve-gateway --serve-agent-runner --memory-remote URL --gateway-url URL]
-             # Bring up an already installed/enrolled home; start does not birth it.
-             # Enabled services depend on capabilities and runner mode, not a fixed count.
-             # Pure bring-up: the home comes from the checkout-anchored boot (never the cwd, never a flag — identity is the path). An uninstalled home fails fast pointing at install.sh / install.sh --worktree / ava enroll by role. First run on a fresh install still takes --machine-name (+ --gateway-url if the install didn't write it); serve flags come from the install's --role via .env. idempotent
-ava memory init
-             # After a new install, explicitly create the memory checkout and seed its template. A split agent-runner bootstraps from its running gateway. Start, update, and rollback never initialize or validate the memory repository.
-ava status   # one screen of sessions / probes (http / tcp / pid); filtered by role (agent-runner skips the pg/redis probe). A gateway host also gets a `gate (fleet UI entry)` section: whether anything answers on the entry port (:3000) and whether this cluster's own supervisor still holds the gate (launchd label / Linux user-systemd unit). ANY HTTP status counts as answering — the gate serves 503 (updating) and 502 (app rebuilding) by design, so a 2xx test would call a correctly-working gate dead mid-rollout; it is liveness-only for the same reason the frontend row is (the entry port is the public bookmark and carries no identity payload), which is what the supervisor line covers. Both halves also ride in `ava cluster health-probe`'s check 5 — alert-only, never feeding auto-rollback, since a gate that failed to register is not a code regression and no rollback puts it back. On any installed host warns if the prod source `$AVA_HOME/source` has drifted off `main` (an agent that developed in the prod tree instead of a worktree) — it runs the live cluster, so a feature branch there means un-reviewed code live + force-discarded on the next rollout. Also shows the cluster pin (`cluster_target_sha`, the commit the last rollout pinned the cluster to) vs this host's HEAD, so a node that missed a rollout is visible (read-only; fail-fast-on-drift is future — see commit-pinned-cluster.md)
-ava pause    # normal native drain; retain infrastructure, browser and persistent PTYs
-ava stop -y  # same drain, then full local stop; --keep-infra / --keep-service preserve resources; --force explicitly escalates
-# Read AVA_CLUSTER_SECRET without echo and export it for this command first; unset it afterward.
-ava enroll --gateway URL --machine-name NAME --machine-host HOST   # join a split-deployment agent-runner to a gateway (presents AVA_CLUSTER_SECRET to the gateway's authenticated /api/bootstrap without putting it in argv); --machine-host is this runner's reachable address (written to the $AVA_HOME/machine_host file, so a re-enroll keeps it) — the gateway dials its ops server there; verifies the runner projection, which every runner process re-fetches at startup, then run `ava start`. Add --health-port-base N (a block base on the allocator's grid, 18000 + k*22, e.g. 18110; pick one no local cluster already owns — `ava cluster ls`) only when another Ava unit shares this machine's localhost namespace — daemon health ports are a per-UNIT fact the gateway does not serve, and two units otherwise take the same defaults 8102-8109. A WSL2 host auto-applies its own reserved base when the flag is omitted (issue #1152), since a co-located native Windows unit would otherwise default to that same shared block; a base already in `.env` — hand-set or auto — survives a bare re-enroll
-ava cluster update   # thin client on every host: POST /api/cluster/rollout to the gateway, which spawns the three-phase orchestration in a detached `ava-rollout` session running `ava cluster update --local` and returns 202. `--local` is the explicit in-process escape hatch used by detached orchestration sessions and for debugging. Every in-process leg (`--local`, including `--local --restart-only`; the agent-runner self-update; and `ava restart`) refuses to run from inside a hosted service session (an agent process or service daemon) or an agent exec domain (`execute_code`): its own stop leg kills that session's whole tree / the exec call's teardown SIGKILLs the domain's process group as the call returns, the orchestration with it (the 2026-08-12 and 2026-09-12 strandings; `shared.proc.hosting_supervised_session` and `shared.proc.hosting_exec_domain`). A persistent PTY shell session is NOT one of those — since the 2026-08-13 per-session PTY hosts it is outside every stop scope, so a foreground leg hosted there (e.g. via `ava.shell.run_background`) survives its own stop leg. The detached orchestration sessions are the narrow exemption. See "Multi-machine ava cluster update orchestration" below
-ava cluster rollback [--to SHA|TAG] [--keep-pin] [--set-known-good] [-y]  # default is a cluster rollback: stop-the-world (local + remote agent hosts drained, fleet quiesced) -> gateway schema/code rollback -> pin write-back -> remote runner self-update with mode=none (the drain already happened) -> poll. A runner still converging holds the deploy lease for the settle window and receives a best-effort resume; its watchdog then converges it to the rewritten pin. `--keep-pin` is the deliberate gateway-only escape hatch: it skips pin write-back and runner fan-out, then resumes the paused runners on their unchanged pin. `--set-known-good` explicitly makes the rollback target the anchor. Uncommitted changes in the checkout are preserved in a stash before the reset — a dev worktree's WIP would otherwise be discarded silently (2026-09-12); the output names the stash entry, and restores are `git stash list` → `git stash apply stash@{N}` on that entry (the stash list is shared across worktrees — never pop blind)
-ava cluster status   # full multi-machine roster (thin client: GET /api/cluster/roster; gateway resolves its own row + probes each agent-runner by dialing a status_probe op to its ops server). online = live probe answered; stopped = machines.stopped_at set by `ava stop` (cleared by `register_self()` — on `ava start`, and on the ops daemon's own boot); offline = neither (crash / unreachable); STALE-STOP = the probe answered AND the stop marker is set, i.e. the two sources of truth disagree — the marker is the wrong one (a latch, cleared only by a `register_self()`), and until it is cleared the `ava cluster update` fan-out, which filters on that same marker, would drop this host; the next rollout reconciles it (`_resolve_fanout_targets`). The `up since` column is that same `register_self()` stamp (`machines.up_since_at`) — a boot/announce time, never a heartbeat: nothing refreshes it while a host merely keeps running, which is why `online` is the live probe and not a freshness test on this column. The `pin` column shows each node's HEAD vs the cluster pin (`cluster_target_sha`): ✓ on-pin / ✗ off-pin (missed a rollout) / ? no pin yet or HEAD unknown — the gateway computes the verdict (`on_pin`) server-side so the roster stays a bare list. Same per-node pin view on the Control page; the `agent-runner-watchdog` tick also self-heals when this host is off-pin — `_check_pin_drift` force-updates it to the pin via a spawned update (`_spawn_update(target_sha=pin)`, cooldown-guarded, skips that tick's healthchecks; a paused host returns at the `_tick` gate first so it never fights a rollout). It also declines while ANY update is in flight on this host, not only while the cluster lease is held — being off-pin is a running update's own mid-flight state, and a watchdog-spawned `ava-updater` takes no lease, so the lease-only check let this force the checkout back underneath a live updater and flap prod between two commits for two hours ([decision](../decisions/2026-07-31-two-healers-must-not-own-the-same-checkout.md), issue #1074). If you see this dimension idle on a host that is off-pin, look for an `ava-updater` session before assuming the heal is broken. The `gateway-watchdog` only warns on an off-pin gateway (`_warn_gateway_off_pin`) — a gateway drift needs a rollout, not a single-host self-checkout. The `code` column is the separate question the pin cannot answer: it shows the commit the process that answered the probe froze at ITS OWN boot (`shared/process_sha.py`), so `⚠` there means the checkout moved but that process was never restarted — a node can read `pin ✓` and `code ⚠` at once. `ava start` will not clear it (it skips already-running sessions); `ava restart` will — and on an agent-runner the `agent-runner-watchdog`'s **code controller** (`ops/controllers/code.py`) now spawns exactly that restart on its own once HEAD is on the pin but the running commit is not. It is the second half of the pin dimension: `_check_pin_drift` heals *off*-pin hosts, so an on-pin host running old code (a Phase-B checkout whose restart declined — the 2026-07-28 wsl state) used to be off every controller's map and needed a human. Same guard set as the pin heal (agent-runner only, declines while the cluster update lock is held or a local orchestration session is alive, persistent per-commit backoff, shared process cooldown), and it never runs outside the prod source tree — with one exception, which is why a `pin ✗` or `code ⚠` host beside a `waited-on` cell now clears in a watchdog round instead of on the hold's TTL: a **settle hold naming this host** is not a deploy mutating the cluster, it is a stated waiting period whose content is "this host has not converged", and nothing executes under it, so deferring to it made the hold and the heal wait on each other (`DeployLease.awaits`, issue #1020). The pin heal takes the same exception for the same reason — `settle_hosts_converged` will not release until the named host reports BOTH `head_sha == pin` (pin's dimension) and `running_sha == pin` (code's). A lease with no settle fact — a rollout executing right now — still defers, as does a hold naming someone else. The stranded-pause recovery takes that same exception (issue #1116) rather than deferring to any live lease: unpausing is not itself convergence, but a paused host cannot reach the heals that are, because the pause gate blocks the whole round ahead of them — so a host that is both paused and waited-on was the one host forbidden to do the thing the hold was waiting for. Per-daemon granularity is on each daemon's own `/healthz` `sha`. The `hold` column is the third dimension, and the only one that is not a probe: it is transcribed from the live `cluster_update_lock` lease (`deploy_hold` = the lease sentence, stamped cluster-globally onto every row and printed once as a banner above the table; `waited-on` = this host is named in a settle hold's recorded waiting set). It answers "why was my deploy refused", which until now was legible only in the health-probe cron log or by reading the lock row by hand — but it answers ONLY that: `waited-on` is the hold's recorded set, not a live convergence verdict (`pin` / `code` are), a blank cell is "not named by the hold" and not "converged" (a host that never acked is never named), and a blank column is not proof no deploy is running, because a watchdog-spawned host-local `ava-updater` takes no lease at all. The roster deliberately reads the lease row rather than calling `deploy_in_flight()`, which would probe every machine and *release* a converged hold — neither belongs on a status GET. Above both banners sits the **last-update banner**: a rollout writes its own outcome to `cluster_last_update` (`shared/last_update.py`) — opened before Phase A and closed in the orchestration's `finally` — and the roster states it when it FAILED, because the `pin` and `code` columns alone are symptoms several unrelated states share (a node that missed a rollout, a checkout moved without a restart, a rollout that failed and rolled back all read the same there). **Pin semantics on failure:** a failed rollout does NOT roll the pin back. If the gateway reached its target before failing, the pin advanced and the hosts still off it converge via their own watchdog; if it failed earlier, the pin was never moved and nothing is converging toward the failed target — the banner says which. A rollout whose orchestration is killed never closes its row, and that is read as `orphaned` once its deploy lease lapses (the record is written ahead of the work precisely because the dying process cannot file it). A successful `ava cluster update` replaces the record, so nothing has to remember to clear a failure. A **held-host banner** (task #3132) sits above even this one for a different failure class: a host left in a maintenance hold whose owner is gone — the signature of a failed update leg — where nothing is executing to release it and only an explicit `ava start` on that host will — an update-armed hold at a post-stop phase is completed once automatically first (task #3142; the stranded-pause section above names the bounds and the kill-switch). It is read from the host's own record (`host_deploy_state.stranded_hold_since/reason`, declared by its pause controller once the state outlives ten minutes and the pause window's updater run reads FAILED; cleared once the state is decidably over — the hold released, an owner back, or a healthy updater window — while a round whose signals cannot be read leaves it standing), so it survives the held host's probe being down — the state this roster used to show only as "offline"/"paused". The same record is graded into the `update failed: host left held` alert by the gateway heartbeat (`services/heartbeat/stranded_holds.py`, source `deploy-probe`), and the web status page renders the same banner. The last-update banner also carries the **rollback anchor** (`cluster_pin.last_known_good_sha`, surfaced beside the pin on both the roster and the status page): it was recorded since the pin existed and shown nowhere, so a rollback used to present as the pin simply moving to an older commit. And when an external observer has acted on the failure — today `ava cluster rollback`, which the health probe's `--auto-rollback` shells into — it writes what it did onto the record (`observed_by`, e.g. `rolled back 8bdd366 -> 7e571b4`) without touching the verdict: the dying orchestration files nothing, but the process cleaning up after it witnessed the death, and that sentence is what makes the surfaced failure actionable rather than merely visible. A failure the cluster has already come back from reads `recovered` rather than `aborted`, which is a different call to action — nothing to repair, only something to know, so both surfaces mark it as a warning instead of a failure. It is reached from either side: the orchestration writes it when its own gateway leg rolled back to last-known-good (rc=1 on the pull path), and a reader derives it for any failed record carrying an `observed_by`, which is how a rollback that cleaned up after a dead orchestration closes the 2026-07-30 story. Finally, the record names the rollout's own log (`log_path`), threaded down as `ava cluster update --rollout-log` by the `spawn_rollout` that created the file — so the banner points at THE log rather than at the `$AVA_HOME/logs/rollout-<epoch>.log` glob. It is stamped once, by the intent write, and no later writer touches it; a foreground `ava cluster update --local` is not teed to a file and records nothing, since naming an older rollout's log would be worse than naming none
-ava cluster restart  # bounce the WHOLE cluster (this host + fan out to agent-runners, no git pull) via POST /api/cluster/restart. The gateway's detached `ava-cluster-restart` session runs `ava cluster update --local --restart-only`; plain `ava cluster update --restart-only` is also a thin POST, never the detached child's command. `ava restart` is the local single-host form
-ava cluster ls       # list all registered clusters in ~/.ava/clusters.json
-ava cluster down --path PATH   # stop the cluster at a home path (its gateway + its own pg/redis instance), keeping its registry slot + data dirs (the safe way to stop a dev worktree cluster from another checkout)
-ava cluster destroy --path PATH [--drop-db]   # stop a cluster + free its registry slot (port block) + deregister its OS-scheduled jobs (health probe, both watchdog probes, autostart, logs maintenance, packages refresh); --drop-db also removes its pg/redis data dirs; refused for the default home ~/.ava
+ava start
+ava status
+ava pause
+ava stop -y
+ava restart
+ava cluster status
+ava cluster destroy [--drop-db]
 ```
 
-`ava cluster update --target MACHINE [--target-sha SHA]` triggers ONE machine's
-per-host update through the gateway relay `POST /api/cluster/update` — the same
-per-host primitive a Phase-B fan-out and a watchdog off-pin self-heal use: the
-target's ops server spawns a detached, pause-first updater that takes no
-cluster-wide lease and does not move the cluster pin. Use it for
-bootstrap/convergence chases (see
-[bootstrap-update-runbook.md](bootstrap-update-runbook.md)) instead of a
-whole-cluster rollout; it is not combinable with `--restart-only`, `--local`,
-`--force`, `--dry-run` or `--mode`.
+`pause` retains infrastructure, browser and persistent PTYs. Full `stop` closes
+those resources; `--keep-infra` and repeated `--keep-service` preserve explicitly
+selected resources. `restart` is the ordinary local pause/start path. Destroy
+decommissions this host's cluster: it stops it, retires the host's native jobs
+(launchd, crontab, the Linux boot unit, the permissions helper) and marks the home
+detached, so `ava start` refuses it until `destroy-intent.json` is deleted by hand;
+`--drop-db` additionally removes the data directories (`pg/`, `redis/`). It acts on
+this process's home, `~/.ava` included, and asks you to type the home path at a
+terminal: with no terminal on stdin and stdout it refuses, and no flag skips the
+prompt (over ssh, use `ssh -t`). A home that is not the default home neither
+registers nor removes OS jobs, because their names carry no home.
 
-`ava cluster update --dry-run` resolves and validates the target, runs the
-non-disruptive runner fetch and prepare checks, and reports the predicted
-maintenance window. It creates no recovery snapshot, pause/stop state, pin,
-or checkout; it is the operator check before a real rollout. The gateway runs
-it in the detached `ava-rollout-dryrun` session, outside the orchestration-kind
-scan, so a live dry-run does not block or get interrupted by a real rollout; a
-dry-run still refuses while a real orchestration is live, and a second concurrent
-dry-run is rejected by the session backend's duplicate-name guard. Prepare-check
-failures return a failing verdict, while the maintenance estimate is informational
-and never permits or refuses a rollout. The estimate uses
-the p95 of the ten most recent stop-the-world, local-leg, and readiness stages.
-Phase B remains recorded and shown in the breakdown, but is excluded because it
-begins after readiness, while the gateway is serving, and measures remote-runner
-convergence rather than the maintenance window. Offsite publication of a real
-rollout's verified local snapshot runs detached only after recovery/finalization,
-so it is outside the maintenance window and cannot delay resumption. It
-also prints a read-only per-target cohort readiness report before dispatch: it
-classifies every agent-runner target's non-terminated cohort and flags the
-held-wake shape that stalls a pre-fix runner (`cli/commands/_update_cohort.py`).
-In a mixed-version fleet, split the wave instead of rolling the whole cluster —
-see [bootstrap-update-runbook.md](bootstrap-update-runbook.md).
+A runner joins through `ava init`. Supply the capability
+bundle's `AVA_DB_CAPABILITY_KEY` without echoing it, then use its checkout's
+`.venv/bin/ava init --serve-agent-runner --no-serve-gateway --gateway-url URL
+--machine-name NAME --machine-host HOST --db-capability BUNDLE` and `ava start`
+(`ava` on PATH does not exist until the first start; the bundle comes from `ava
+cluster db-authority issue-unit` on the gateway). Bootstrap publishes no database
+credential and not the human secret; the runner's login, API token and
+telemetry token arrive only in that unit's bundle (they are shared by every
+runner unit of the generation), and a runner never holds
+`AVA_CLUSTER_SECRET` (a home that still records it refuses to start). Memory checkout initialization remains
+explicit through `ava memory init`.
 
-Down-failure drill: see [down-failure-drill.md](down-failure-drill.md).
+**Health observations.** `ava cluster health-probe` retries
+gateway liveness three times, 30 seconds apart, before declaring it unhealthy.
+It checks data-volume usage before gateway liveness so a full disk that prevents
+gateway startup is reported as disk pressure. Both the crash-loop and schema
+checks are enabled by default; `--no-crash-loop-check` and `--no-schema-check`
+disable them individually.
+Gateway and population failures retain their code, environment, or local-maintenance
+classification. A disabled agent-host or native maintenance hold cannot hide a low
+global population: the probe still exits 1 and grades that outage. A live cluster
+deploy can pause explained alert grading while retaining the episode's true start;
+disk pressure remains independent.
 
-**Incremental pre-update recovery.** Before a migration-bearing update pauses
-any runner, an enabled PITR deployment reuses the newest protected scheduled
-base and creates a named PostgreSQL restore point. The updater verifies the
-live database/system/timeline identity, switches WAL, waits for every segment
-from the base to that point, and re-reads each required object's exact remote
-identity with at most eight concurrent viewer clients. It does not scan
-unrelated backup chains. It publishes an immutable recovery receipt
-offsite and fsyncs the local copy under
-`$AVA_HOME/physical-backup/update-recovery/`. The entire gate is bounded to
-600 seconds, below the rollout watchdog's 900-second silence threshold.
-Broken or incomplete enabled PITR fails before maintenance; it never silently
-starts another full export. With PITR disabled, updates retain the verified
-logical dump. Code-only updates need neither artifact.
+The OS job and CLI probe only observe and alert. They do not invoke rollback,
+maintain release-policy failure counters, or promote pending code to known-good.
+`--auto-rollback` and rollback `--threshold` options are rejected, including at
+health-probe registration. Registration replaces this home's scheduled payload with
+`ava cluster health-probe`; other homes' jobs stay untouched.
 
-The receipt identifies a physical, whole-instance recovery point, not a
-`pg_restore` input or a new restore-drill result. Recover into an isolated
-instance with its pinned base and WAL objects, setting PostgreSQL's
-`recovery_target_name` to the receipt's exact value. `archive_end_lsn` marks
-archival coverage only: do not use it as `recovery_target_lsn`, which can replay
-the following record. Verify the result before any production replacement.
-The base's completed drill is
-reused; each update verifies the later WAL's archival, not a fresh replay of
-the whole database. Recovery remains subject to the configured PITR chain
-retention window; a surviving receipt does not extend object retention.
-The point is captured before runner drain, so writes after it are outside
-that recovery point, as with the preceding logical snapshot. Daily logical
-backups and PITR activation's initial logical recovery floor remain separate.
-After successful publication, local audit copies retain the newest seven
-receipts. Offsite receipts are intentionally immutable audit metadata under
-the publisher's existing no-delete authority. Each carries the complete
-current-chain WAL identity list, so its size scales with that chain's length;
-offsite metadata accumulates with update attempts. Neither local cleanup nor
-keeping an offsite receipt extends the base/WAL retention window.
+A dev/QA cluster's birth seeds `AVA_HEALTH_PROBE_AGENT_MIN=0` when it has no resident
+agents by design; an explicit value stands as written. Crash-loop limits remain
+health observation parameters.
 
-**Rollback health guard and observation window.** `ava cluster health-probe` retries
-gateway liveness three times, 30 seconds apart, before declaring it unhealthy. A
-failed liveness or agent-population check is classified against the data plane:
-Postgres/Redis reachability failure is environment-class, alerts the owner, and never
-increments the auto-rollback counter; a healthy data plane with a failing gateway,
-population, crash-loop, or schema check is code-class and counts normally. One
-population-specific exception reads the existing local intent: `agent-host` in
-`disabled_services`, or an active native maintenance payload in the pause-owner
-journal. A low global count still exits 1 and remains visible in the probe output;
-local intent does not prove that remote runners are stopped or healthy. This
-maintenance classification preserves global alert grading and clears the code
-failure counter instead of rolling back code. The existing cluster-wide deploy
-lease can still pause grading. Missing, legacy-only, resumed or
-invalid journals do not certify maintenance. Re-enabling the host restores normal
-population failure counting. Other failing checks retain their existing policy.
-A dev/QA cluster's birth (any non-default home) seeds `AVA_HEALTH_PROBE_AGENT_MIN=0`
-in its `.env`: with no resident agents by design the population check would otherwise
-fail forever and --auto-rollback would cycle the checkout (2026-08-10 preview,
-2026-09-12 dev-worktree incidents); an explicit value stands as written.
-Any gating
-failure, including a deploy-suppressed or environment-class one, restarts the pending
-known-good observation streak. A backend rollout writes its target as
-`pending_known_good_sha` while preserving `last_known_good_sha`; two consecutive
-gating-pass probes after at least 10 minutes promote that target to the rollback anchor.
-Rollout completion is therefore not itself proof that the new commit is known good. If
-an `INCOMPLETE` Phase-B rollout self-heals onto that same target, this authoritative
-promotion finalizes its last-update record as `RECOVERED`, retaining the original
-failure detail while making clear that there is nothing left to repair.
-
-**`ava start`'s exit code means something.** Three outcomes, because "the start
-sequence ran" and "this host is serving" are different facts:
+**`ava start` reports the admitted roster's readiness.**
 
 | rc | Meaning | What to do |
 |---|---|---|
-| `0` | every step ran and every **critical** service passes its liveness probe (non-critical services get a 45 s window and then stop blocking the start — a straggler is reported and alerted, not a failure) | nothing, unless the printed verdict names non-critical services that missed their window — an alert was posted for those |
-| `4` | every step ran; a **critical** service never passed its probe inside `SERVICE_READY_TIMEOUT_S` (180 s) | read the snapshot printed just above — the failing rows are named, with the session list repeated after the snapshot. The host is **up but incomplete**: the watchdog keepalive is already retrying, `ava status` re-checks, and `ava start` is idempotent to run again |
-| `1` | a start *step* failed (converge, the data plane, migrations, the schema assertion, machine registration) | the host may have no services at all; the failing step printed why |
+| `0` | All selected services passed fresh ownership-bound protocol probes, and any Linux systemd handoff adopted the same native root | Inspect status for later health changes |
+| `4` | Launch failed or at least one selected service did not become ready within its deadline | Read the named failures; retrying the same start reuses the same generation |
+| `1` | A lifecycle step or native manager handoff failed | Read the step failure; unknown custody remains retained |
 
-The gated set is derived, not listed: it is `ops/spec.py`'s roster for this host's
-capabilities, minus anything `_gate_reason` skips (`browser` with no display,
-`browser-mcp` with no AF_UNIX, a disabled `heartbeat`), minus
-`--disable-service`, minus the frontend (whose ~30-60 s build would otherwise set
-the floor for every gateway start). **A service that is skipped is not a service
-that is unready** — it never reaches the gate and cannot fail a start. A service
-with no probe at all (`browser-mcp`, whose transport is a Unix socket only its
-healthcheck dials) likewise cannot: absence of evidence is not failure.
+The roster follows host capabilities and persisted service selection. Frontend
+is included. Missing probes and unobservable ownership cannot pass readiness.
+Critical services keep the full startup deadline; other selected services have a
+shorter deadline, but either failure keeps start incomplete. There is no readiness
+waiver for boot or rollout. Root owns application health recovery; retries do not
+create another service supervisor. Changing the immutable root's service inputs
+requires a normal stop before start.
 
-**The gate is tiered** (Task #2183, C2): the critical roster
-(`cli/commands/_probe.py:CRITICAL_SERVICE_SESSIONS` — gateway / frontend /
-agent-host / im-bridge / the two watchdogs; CTO ruling: critical =
-a failure cuts user-visible core function or the ops safety net) is the only
-one that can fail a start and the only one waited on for the full 180 s. Every
-other launched service gets a 45 s window
-(`shared/deploy_timing.py:NON_CRITICAL_SERVICE_READY_TIMEOUT_S`) and then stops
-blocking the start; one that missed the window is printed as a cross AND posted
-to the alerts store (the same channel the health probes use), so the downgrade
-is a verdict change, never a silence. The alert is one instance per service,
-reused while the failure stays open, resolved by the next start that finds the
-service up, and its IM push is suppressed under `--no-readiness-gate` (the
-boot job's uncapped retry must not spam the user's IM). This is the
-2026-08-30 rollout's lesson: its local start spent 182 of 197.5 s on a
-pitr-uploader healthz whose failure nothing downstream depended on.
+The Linux boot unit runs ordinary start directly. `Type=forking` and a
+private, birth-validated PIDFile let systemd adopt root after the ready starter exits;
+`TimeoutStartSec=900` bounds only startup. `KillMode=process` signals root alone,
+so the independent data plane survives while root closes its own application
+tree. Failed closure retains custody; systemd cannot prove orphan closure after
+abrupt root death. There is no convergence shell script or duplicate proxy probe.
 
-`ava start --no-readiness-gate` keeps the wait and the printed crosses but exits 0
-anyway. Two callers pass it and an operator normally should not:
-
-- **the boot job**, on every platform (`ava boot`'s child argv, the macOS
-  autostart plist's `ProgramArguments`, and the Linux boot unit's convergence
-  script `$AVA_HOME/bin/ava-boot-converge.sh`). Its retry has **no attempt cap** by
-  design, so a non-zero exit means retry forever — and a box whose headed Chrome
-  will never launch would re-run `ava start` every 60 s while otherwise serving
-  perfectly. launchd's `SuccessfulExit` is a boolean and cannot tell rc 1 from rc
-  4, so opting out on *all three* platforms is the only way they keep the single
-  retry behaviour `shared/boot_policy.py` requires. What the boot loop exists to
-  retry — a start that failed before launching anything, e.g. a runner whose VPN is
-  not up yet — still exits 1 and is still retried.
-- **the rollout's local gateway leg**, because `_gateway_ready` asks the same
-  question one step later and better (off-box, authenticated, through the probe
-  each runner's preflight uses). See the deploy-window section.
-
-**OS-scheduled jobs.** Five kinds go to the platform scheduler — the health
-probe (`shared/os_cron.py`), one watchdog probe per capability
-(`shared/os_watchdog_probe.py`; it skips revival while a maintenance stop holds
-this home, per the fresh `$AVA_HOME/state/held-stop` marker), the boot autostart
-(`shared/os_autostart.py`),
-daily rotate-then-retain log maintenance (`shared/os_logs_job.py`), and the
-per-machine content-refresh pass (`shared/os_packages.py`)
-— as launchd LaunchAgents on macOS, crontab lines on Linux, `\Ava\<home-slug>\`
-tasks on Windows (`shared/os_schtasks.py`). A Linux host whose service manager
-is systemd files the boot entry as a **system** unit instead of a crontab line
-(`ava-boot.<home-slug>.service`, `shared/os_boot_unit.py`): installed and
-enabled, the unit owns the boot path and the crontab entry is left out —
-crontab remains the fallback where systemd is not the service manager. Two
-properties are load-bearing:
+**OS-scheduled jobs.** The platform scheduler runs the health probe
+(`base/host/system/cron.py`), boot autostart (`base/host/system/autostart.py`),
+daily rotate-then-retain log maintenance (`base/host/system/logs_job.py`), and the
+per-machine content-refresh pass (`base/host/system/packages_job.py`)
+— as launchd LaunchAgents on macOS and systemd boot plus scheduled maintenance on
+Linux. Automatic startup requires systemd. Converge registers and enables the native
+home unit without starting a recursive caller; ordinary interactive start may
+launch root directly. The unit carries the exact home, checkout and registry.
+There is no cron boot route or second boot-install command. Two properties are
+load-bearing:
 
 - **A job spec is anchored to the checkout that wrote it.** `ava_binary_path()`
   resolves this checkout's `.venv` binary (PATH only as a fallback), and the
-  launchd plist / crontab line pin `AVA_HOME` explicitly, so a job registered by
-  cluster X can never run cluster Y's `ava` against cluster Y's home. A Windows
-  task action has no env slot and relies on the interpreter path alone.
-- **A health probe never reloads its own launchd label.** Auto-rollback runs
-  `ava start` below the health-probe LaunchAgent, and `launchctl bootout` would
-  terminate that whole recovery process tree. Registration defers on the
+  launchd plist / systemd unit / maintenance crontab line pin `AVA_HOME` explicitly, so a job registered by
+  cluster X can never run cluster Y's `ava` against cluster Y's home.
+- **A scheduled process never reloads its own launchd label.** `launchctl bootout`
+  would terminate the registering process tree. Registration defers on the
   direct child's label match (the env fast path) or on a proven live-process-
   tree match (`launchctl print` pid + `ps` ancestry walk) — the inherited
   `XPC_SERVICE_NAME` alone is not proof for descendants, which read "0"
   (`postmortems/0008`) — leaves the existing plist untouched, and lets the
   next external converge apply any pending spec change.
-- **Windows task settings are stated, not inherited.** Registration goes through a
-  task definition (`schtasks /Create /XML`, written to
-  `$AVA_HOME/run/schtasks/<kind>.xml`) rather than `/Create` flags, because Task
-  Scheduler's defaults stop every job when a laptop runner goes on battery and let
-  one wedged invocation block its successors for 72 hours. The definition sets the
-  power settings and a per-kind `ExecutionTimeLimit`; the boot job is the one that
-  is deliberately unbounded. Details + the AC caveat:
-  [`windows-setup.md`](windows-setup.md).
 - **`AVA_OS_JOBS_ENABLED=false` disables registration for a process.** The
   scheduler is one namespace per OS user, so a test-scoped `$AVA_HOME` cannot
-  isolate it — the pytest suite sets this and `tests/conftest.py` fails any run
+  isolate it — the pytest suite sets this and `tests/fixtures/provisioning.py` fails any run
   that leaves a job behind. Deregistration is never gated. Operators do not set
-  this: a prod cluster with it off silently loses its health probe, its watchdog
-  probes, daily log maintenance, and its ability to come back after a reboot.
+  this: a prod cluster with it off silently loses its health probe,
+  daily log maintenance, and its ability to come back after a reboot.
 
-`ava pause`, `ava stop`, restart and update use the same normal native drain.
-Pause/update retain infrastructure and persistent PTYs; default stop closes
-those local resources too. Both preserve durable agent identity and work.
+`ava pause`, `ava stop`, restart and update use the native maintenance primitives.
+Pause retains infrastructure and persistent PTYs; default stop closes those local
+resources. Durable agent identity and work remain on disk.
 A stop timeout is a failure; force escalation requires an explicit option.
 Normal `ava start` resumes only after readiness. See the
 [pause/stop procedure](graceful-maintenance.md) for partial stop, coordinated
@@ -1607,12 +1224,316 @@ multi-machine ordering, failure recovery and the first-deployment limitation.
 
 Stop-class drills and operations: see the executor-cancellation insurance and hold handover section of [graceful maintenance](graceful-maintenance.md).
 
-`ava cluster update` additionally owns checkout, dependency, schema, readiness
-and recovery stages. Use its installed implementation and dry-run; these are
-not a manual checkout recipe. A merged PR does not replace an already imported
-orchestrator. Update needs no stdin confirmation; `ava stop` asks unless `-y`
-is supplied.
+Merging a PR does not deploy it. `ava stop` asks for confirmation unless `-y` is supplied.
 
+
+### Updating a networked cluster in source mode
+
+A cluster whose units span machines, each running from `$HOME/.ava/source`, is
+updated by stopping every unit, switching every checkout and starting again
+([decision](../decisions/2026-09-30-networked-cluster-stays-on-source-updates.md)).
+`python -m cli.fleet_update` runs it from the operator's development checkout
+over key-based SSH, in two halves; any manual step the release needs goes in
+between. When the operator's Mac is itself a host, it must be able to `ssh` to
+itself (its own public key in its own `authorized_keys`):
+
+```bash
+.venv/bin/python -m cli.fleet_update down --new NEW_SHA \
+  --gateway GATEWAY --runner RUNNER [--runner ...] --log-dir DIR
+# manual release steps, if any
+.venv/bin/python -m cli.fleet_update up --gateway GATEWAY --runner RUNNER [--runner ...] --log-dir DIR
+```
+
+- `down` refuses (exit 2, nothing changed) when a checkout has a
+  `post-checkout` hook, uncommitted changes or `$HOME/.ava/updates/active`,
+  when a host holds maintenance other than a completed stop, when the hosts
+  disagree on HEAD, when `.python-version` changes without
+  `--allow-python-change`, or when it runs inside an Ava agent's shell. It
+  prints `git diff --stat OLD..NEW` over migrations, helper sources and locks,
+  fetches NEW on every host, runs `ava stop -y --timeout 600` on each runner and
+  then the gateway (each must leave phase `stopped` with no failures), then on
+  every host checks out NEW detached, repairs legacy read-only venv
+  directories, runs `uv sync --frozen` and requires a clean tree.
+- Runners fetch through the gateway's source clone (their checkout's `origin` is the gateway host's `~/.ava/source`): the target commit is fetched by SHA before it is reachable from any of the clone's refs, so the clone carries `uploadpack.allowAnySHA1InWant=true` (repo-local; set 2026-09-30). A reclone of the clone must re-apply it.
+- A failed stop prints the next step: on that host retry
+  `ava stop -y --timeout 600`, confirm `ava maintenance status` shows
+  paused/stopped, then rerun `down`. A tree that is not clean after the switch
+  prints its `git status --porcelain` (first 20 lines). Untracked files are not
+  caused by the update (a changed `.gitignore` can reveal them): check them and
+  move them away, never delete, then rerun `down`. Nothing is moved, deleted or
+  retried automatically.
+- `up` runs `ava start` on the gateway (its cold start applies migrations),
+  then on each runner; on macOS as a one-time LaunchAgent in `gui/<uid>`,
+  because signing the helper needs the login keychain (the user must be
+  logged in to the GUI). Each start must release its hold; every roster
+  machine must be online with checkout and running code on one commit (`online`
+  follows the heartbeat, so the roster is re-read every 5 seconds for up to
+  `--roster-timeout`, default 90, and a failure shows the last read); then
+  the gateway smoke-tests each agent-runner with a real agent, reading its own
+  address and bearer in place; last, each host runs `ava packages refresh`
+  (skills follow their channel; `ava skill update` is retired) and its summary
+  line (`applied N, conflict M`) is printed. Conflicts are only reported: the
+  script never passes `--force`, which is human-only.
+- The first failure stops a half and nothing rolls back: fix the cause and
+  rerun the whole half, which is idempotent. `--dry-run` runs only the
+  read-only checks and prints the effects. Output is redacted and tee'd to
+  `DIR`.
+- **A manual step that rewrites a state file comes before any command of the new
+  code.** When a release's manual steps change a file the code reads (a key dropped
+  from `start-intent.json`, a renamed file), finish them on every host already switched
+  to NEW before that host runs any NEW command, `ava stop` included. A rerun of `down`
+  is such a command: it runs `ava stop` again on a host already on NEW, and NEW refuses
+  the state file that is not yet converted. Rerun `down` only after the step is done on
+  the hosts it has switched.
+- A unit `down` could not reach (a laptop offline) keeps running its old
+  processes. The gateway's start in `up` raises the cluster's minimum code
+  version, and those processes exit when they next touch the database
+  ([code version gate](#code-version-gate)).
+
+### Release steps: retiring the PITR stack (one-time)
+
+The release that deletes the self-written PITR stack
+([decision](../decisions/2026-10-02-delete-the-self-written-pitr-stack.md)) needs
+three manual steps per gateway home, because the upgrade cannot do them itself.
+The last commit that still carries the stack is the tag `pitr-stack-final`. The
+daily dump, its off-site publish and the weekly restore drill import none of the
+deleted code.
+
+1. **Before `down`, with the old code running.**
+   - `SHOW archive_mode;` must read `off` and `SHOW archive_command;` must be
+     empty (`pg_stat_archiver.archived_count` zero). A home that reads `on`
+     first resets `archive_mode`, `archive_command`, `archive_timeout` and
+     `wal_compression` with `ALTER SYSTEM RESET` and restarts Postgres: the
+     uploader that drained the archive spool is gone, and a spool at its hard
+     bound makes `pg_wal` grow until the disk is full.
+   - Record the off-site destination: `AVA_PITR_OSS_ENDPOINT` and
+     `AVA_PITR_OSS_BUCKET` from `ava config get`, and the path in
+     `AVA_PITR_OSS_CREDENTIALS_FILE` (masked there; it is the 0600 file the old
+     configuration pointed at).
+   - Unset every writable retired key while the old code still knows it; after
+     the upgrade official config can no longer touch it:
+
+     ```bash
+     ava config unset AVA_PITR_ENABLED AVA_PITR_BASE_BACKUP_ENABLED \
+       AVA_PITR_RESTORE_PROOF_ENABLED AVA_PITR_RETENTION_PLANNER_ENABLED \
+       AVA_PITR_RETENTION_DELETE_ARMED AVA_PITR_RETENTION_DELETE_APPROVED_DIGEST \
+       AVA_PITR_STORE_BACKEND AVA_PITR_BAIDU_TOKEN_FILE AVA_PITR_OSS_ENDPOINT \
+       AVA_PITR_OSS_BUCKET AVA_PITR_OSS_CREDENTIALS_FILE \
+       AVA_PITR_OSS_VIEWER_CREDENTIALS_FILE AVA_PITR_OSS_DELETE_CREDENTIALS_FILE
+     ```
+
+     The off-site leg of the daily dump is idle from here until step 3; the
+     local dump is unaffected. The other `AVA_PITR_*` keys are deploy-provisioned
+     and read-only (`ava config` refuses them). They stay in the `.env`, inert:
+     every settings model ignores a key it does not declare. Do not edit the
+     `.env` by hand to remove them.
+2. **Between `down` and `up`, on every gateway home** (a runner-only home has no
+   reservation and needs nothing): delete the four retired port slots from the
+   start intent in this one step, the two PITR slots (`pitr_uploader`,
+   `pitr_base_backup`) and the two watchdog slots (`gateway_watchdog` 8119,
+   `agent_runner_watchdog` 8120; no daemon binds or reads them). New code
+   refuses a reservation whose slots differ from the fixed port table, so this
+   is a state-file rewrite that comes before any command of the new code (see
+   the rule above). The file is compact JSON with sorted keys, mode 0600:
+
+   ```bash
+   python3 - <<'EOF'
+   import json, os, pathlib
+   home = pathlib.Path(os.environ.get("AVA_HOME") or pathlib.Path.home() / ".ava")
+   path = home / "start-intent.json"
+   data = json.loads(path.read_text())
+   for slot in ("pitr_uploader", "pitr_base_backup", "gateway_watchdog", "agent_runner_watchdog"):
+       data["record"]["ports"].pop(slot, None)
+   staged = path.with_name(path.name + ".staged")
+   staged.write_text(json.dumps(data, sort_keys=True) + "\n")
+   staged.chmod(0o600)
+   staged.replace(path)
+   EOF
+   ```
+3. **After `up`.** Set the off-site destination under its new names, then apply
+   the restart hint `ava config set` prints so `pg-backup` reads them:
+
+   ```bash
+   ava config set AVA_BACKUP_OFFSITE_ENDPOINT=<endpoint> AVA_BACKUP_OFFSITE_BUCKET=<bucket> \
+     AVA_BACKUP_OFFSITE_CREDENTIALS_FILE=<credentials file>
+   ```
+
+   Judge the next dump by its destination, not by silence: `ava-logical/<that
+   dump's file name>` exists in the bucket with the size of the local
+   `.dump.enc`, and the log carries `[backup] off-site published`. Also check
+   `ava backup operations status` (all ready), `pg_backup` health, and that
+   `$AVA_HOME/run/ava-root/manifests.json` no longer lists `pitr-*` services.
+
+Everything else the stack left is inert and removed only with separate
+approval: `$AVA_HOME/physical-backup/` and `$AVA_HOME/runtime/pg-archive/`
+on disk, a `REPLICATION` role and the `replication` rows it needed in
+`pg_hba.conf` (rewritten on every start, so the rows disappear by themselves),
+and the remote objects and lifecycle rule of the retired physical chain.
+
+### WAL-G archiving
+
+WAL archiving ships every completed WAL segment, encrypted, to an OSS prefix
+through a pinned WAL-G
+([decision](../decisions/2026-10-02-walg-physical-backup.md),
+[node](../services/gateway_side/walg/docs/walg.ava.okf.md)). It is off until
+`AVA_WALG_CONFIG_FILE` is set; unset, nothing of it runs. It archives WAL and, once a
+day, takes a base backup, verifies the archived chain and applies retention; there is
+no restore yet, so it is not a recovery path.
+
+**Files the operator places** (0600, owned by the gateway's OS user):
+
+- The WAL-G configuration JSON, in WAL-G's own format; every key below is required:
+
+  ```json
+  {
+    "WALG_OSS_PREFIX": "oss://<bucket>/ava-walg/<home label>/pg17/gen1/",
+    "OSS_ACCESS_KEY_ID": "...",
+    "OSS_ACCESS_KEY_SECRET": "...",
+    "OSS_ENDPOINT": "https://oss-<region>.aliyuncs.com",
+    "OSS_REGION": "<region>",
+    "WALG_LIBSODIUM_KEY_PATH": "<path of the key file>",
+    "WALG_LIBSODIUM_KEY_TRANSFORM": "hex",
+    "WALG_PREVENT_WAL_OVERWRITE": "true"
+  }
+  ```
+
+  The prefix names a path (the PG major and a generation number belong in it) and
+  cannot sit under `ava-logical/` (the daily dump), `ava-pitr-scratch/` or
+  `ava-wsl-cutover-*`. Use a dedicated storage account whose policy is limited to that
+  prefix with Get, Put, List and Delete (plus AbortMultipartUpload and ListParts):
+  retention deletes, and the logical-dump upload credential must not be able to touch
+  the physical chain.
+- The libsodium key, 32 random bytes in hex: `umask 077; openssl rand -hex 32 > <key
+  file>`. **Losing it makes every archived segment unreadable.** Copy it to two places
+  off the gateway host and decrypt-verify a copy before enabling. There is no rotation:
+  a new key means a new prefix (a new `gen`).
+- A bucket lifecycle rule must not expire objects under the WAL-G prefix: two independent
+  deleters break the chain (the daily tick's retention is the only one). Keep any bucket-wide expiry scoped to the other prefixes. Cleaning up abandoned
+  multipart uploads can stay bucket-wide.
+
+**Switching it on.** `ava backup walg check` proves the binary, the configuration, the
+key and the storage permissions (it writes and deletes one small object under the
+prefix). Then:
+
+```bash
+ava config set AVA_WALG_CONFIG_FILE=<path of the JSON>
+ava stop && ava start          # archive_mode is read only when Postgres is launched
+ava backup walg status         # archive_mode=on, failing_now=False, health: ok
+ava backup walg run            # the first base backup, supervised (see "The daily tick")
+```
+
+Converge installs the pinned binary (`$AVA_HOME/runtime/walg/wal-g`; Linux x86_64 only,
+anything else fails here), validates the configuration and records the key fingerprint
+in `$AVA_HOME/backups/walg/key-id` before Postgres starts, so a bad configuration fails
+`ava start` instead of producing a Postgres whose archive command can never succeed. A
+plain update retains the running Postgres and does not activate or deactivate
+archiving: `ava start` prints a warning when the running Postgres differs, and the
+health probe reports it. After a start, `SELECT pg_switch_wal();` and an increase of
+`archived_count` in `pg_stat_archiver` show a segment arriving in the bucket.
+
+**The daily tick.** While the key is set, converge keeps one OS job registered
+(crontab line `# ava-walg` on Linux, LaunchAgent `com.ava.walg` on macOS; default home
+only) that runs `ava backup walg run` once a day, three hours after the daily dump
+becomes due (`AVA_BACKUP_HOUR`), writing to `$AVA_HOME/logs/walg.log`. The command is safe
+to run by hand at any time and to repeat: a second run while one is going stands down
+(exit 0), and a run during a deploy window or while Postgres does not accept
+connections is recorded as skipped (exit 0), not failed. A run is: preflight (binary,
+configuration, key pin, one `backup-list`), `backup-push` with `WALG_DELTA_MAX_STEPS=6`
+(WAL-G makes a full backup when the increment chain is six deep, so a daily run makes a
+full backup every seventh time, and a failed full backup is retried the next day), `wal-verify
+integrity timeline --json` (only the JSON status counts; WAL-G exits 0 while it reports a
+gap, and `WARNING` is archiving in flight, not a failure), then retention. The first
+failing step ends the run and is recorded; the next day starts over. Run the first full
+backup by hand and watch it: its duration and upload volume are not yet measured on this
+bucket.
+
+Retention is `delete retain FULL 3 --use-sentinel-time`, run first without `--confirm`.
+The objects WAL-G lists are written to the log, then three invariants must hold or the
+run fails at `retention` with nothing deleted: every key is under `basebackups_005/` or
+`wal_005/`; no key belongs to the newest backup or a backup it is an increment of; at
+least one full backup survives. Nothing is asked of WAL-G until more than three full
+backups exist. `wal-g delete garbage` is not used: the orphan files a failed full backup
+leaves cost only storage.
+
+`ava backup walg status` shows the last tick, run, backup, verification, retention and
+recovery drill from `$AVA_HOME/backups/walg/state.json` (0600; the tick writes it, the
+health probe reads it; remove it only to reset a state the tick reports as unreadable).
+
+**The weekly recovery drill.** A backup nobody has restored is not a recovery path, so the
+tick restores one every week, before that day's backup (it therefore restores yesterday's:
+the one a lost host would need). The drill is due one tick period before a week since the
+last success, and a failed drill is retried by the next tick. It fetches the newest backup
+into a scratch directory (`AVA_PG_THROWAWAY_BASE`, else the platform default, else the disk
+fallback; room is the backup's uncompressed size plus the WAL since it started plus
+`max_wal_size`, and a base that cannot hold that is refused), recovers it with a scratch
+postmaster to the start of the newest archived WAL segment, and reads a real conversation
+back through the checkpoint reader. Reaching that point proves every segment between the
+backup and it is in the bucket, decrypts and replays: a missing one ends recovery in
+Postgres' own FATAL, which the record carries (`ava backup walg status`, "last drill").
+The scratch copy and its process are removed in every outcome, and a failed drill never
+stops the backup that follows. `ava backup walg drill` runs it now (same lock as the tick);
+after switching WAL-G on, run it by hand once after the first `run` and check the result
+before trusting the schedule. Its download saturates the downlink for roughly the length of
+a base-backup fetch (an estimate, not measured on this bucket): schedule hand runs
+accordingly.
+
+**Restoring** (`ava backup walg restore --dir <empty directory> [--backup NAME]
+[--time 'YYYY-MM-DD HH:MM:SS+00' | --lsn X/X]`). It never touches this home's data
+directory (a `--dir` that is or contains `$AVA_HOME/pg` is refused) or its ports. Steps:
+
+1. Pick the backup. `LATEST` is the default; to recover to a time or LSN, name the newest
+   backup that *started* before it (`wal-g backup-list --detail` shows start times; an
+   increment resolves its whole chain by name). `LATEST` can name a backup newer than the
+   target, which cannot be recovered to it.
+2. Run the verb on a host with the same Postgres major (17), the same extensions
+   (pgvector), the configuration JSON and a copy of the encryption key. Without `--time`
+   or `--lsn` it recovers to the end of the archive. It fetches the backup, writes
+   `recovery.signal`, and starts a scratch postmaster on that directory (unix socket only,
+   its own temporary socket directory and port, `archive_mode=off`, the capacity settings
+   `pg_controldata` records, `restore_command` = `wal-g wal-fetch %f %p`) until it is
+   promoted, then shuts it down cleanly. The directory is left as a promoted database on a
+   new timeline; it is not started.
+3. A missing segment, a wrong key or an unreachable target ends in Postgres' FATAL, printed
+   with the end of its log; the directory is left for inspection, and must be emptied
+   before a retry.
+4. Before this database replaces the live one or backs a new primary: **use a new WAL-G
+   prefix (a new "generation", e.g. `.../gen2/`) and take a new full backup first.** The
+   recovered database is on a new timeline; archiving it into the old prefix would mix two
+   histories there.
+
+Scope: this recovers the **database** under the same home identity. A whole-host rebuild
+(the `$AVA_HOME/db-authority/` ledger, `.env`, `start-intent.json`) is not covered or
+exercised; see `conventions/disaster-recovery.md`.
+
+**Switching it off.** `ava config unset AVA_WALG_CONFIG_FILE`, then `ava stop && ava
+start`; converge removes the daily job. Nothing is left in the data directory (the archive
+settings are launch arguments). The objects stay in the bucket; deleting them is a manual storage action.
+There is no way to stop archiving without a restart: when archiving misbehaves, repair
+its cause (credentials, network, disk).
+
+**What the health probe reports** (alert-only, graded like disk usage; the texts carry
+no number so one outage is one episode): the running Postgres does not carry the
+configured archive settings (restart pending); the archiver is failing; complete WAL has
+waited in `archive_status/` for longer than the 300 s RPO objective (this is also how a
+hung archive command shows, since it neither succeeds nor fails); the key file is not the
+pinned key (restore the pinned key or start a new prefix; never replace the key under an
+existing prefix). From the daily tick's state file: the last executed run failed (one
+text per step: preflight, backup, verification, retention; read `ava backup walg status`
+and the end of `walg.log`); the last verification saw a broken chain (`FAILURE`; a missing
+segment cannot be repaired, so take a new full backup and treat the older recovery points
+as lost); no tick has started within 24 hours (the job is not registered or not running;
+a deliberate skip counts as started, and before the first tick the age of the key pin
+stands in); the latest recovery drill failed (read "last drill" in `ava backup walg
+status`: the detail is Postgres' own error or the content check that failed); no drill has
+succeeded within a week plus a tick (the same age stands in before the first drill). A
+failed run or drill stays reported until a later one succeeds; skipped ticks do not
+clear it. The probe reads the queue over the admin socket because the application login
+may not list `archive_status/`.
+
+**Before a planned stop**, look at `ava backup walg status`: Postgres' shutdown waits for
+the archiver to finish its queue, so a backlog (or a hung `wal-g`) delays `ava stop` and
+may end in "native shutdown did not complete; custody retained" while Postgres finishes
+on its own; run `ava stop` again.
 
 ### Agent recovery after a provider billing stoppage
 
@@ -1650,7 +1571,7 @@ alternatives: [billing batch resurrect decision](../decisions/2026-09-18-billing
 
 The gateway binds all interfaces on the **gateway host** (both address
 families); the Next.js app binds loopback only and is reachable **only through
-the fleet UI gate** — the always-up entry on `:3000`, which itself binds all
+the fleet UI gate** — the root-owned entry on `:3000`, which itself binds all
 interfaces and proxies the app (`services/gate`). Any private-network device
 (laptop, phone, other agent-runners) hits them directly at the gateway's
 private-network address — gateway on `:8000`, UI entry on `:3000`. The exact
@@ -1665,9 +1586,11 @@ agent-runners, and the user's own devices (laptop, phone) are **one trust
 group**. The gateway is reachable **only** over the private network — there is
 no public ingress, the gateway host has no public IP (and the earlier
 Cloudflare Tunnel was retired) — but reachability is not trust: every
-authenticated route requires the cluster secret (`AVA_CLUSTER_SECRET`, presented
-as a bearer token (agent-runner / `/api/bootstrap`
-/ `/ops`) or a signed session cookie (browser login). See
+authenticated route requires a bearer or a session cookie (browser login). A
+human or operator presents the cluster secret (`AVA_CLUSTER_SECRET`, gateway
+only); services, agents and remote units present their write generation's
+machine API token (`AVA_API_TOKEN`: the gateway admits the active
+generation's, a unit's `/ops` its own generation's). See
 [`decisions/2026-06-11-multihost-deployment.md`](../decisions/2026-06-11-multihost-deployment.md)
 (explicitly flags its own §4/§5/§9 "no auth" description as superseded history)
 and [`Credential rotation`](#credential-rotation) below for the bearer and
@@ -1683,15 +1606,17 @@ The frontend resolves the gateway as `${location.hostname}:8000` (frontend
 `:3000` and gateway `:8000` are co-located on the gateway host, different
 ports). Gateway CORS accepts exact origins only. An empty
 `AVA_GATEWAY_CORS_ALLOWED_ORIGINS` derives localhost, `127.0.0.1`, and the
-configured gateway host at the frontend entry port; set the variable to a
-comma-separated list to replace that derived allowlist. Cookie-authenticated
+configured gateway host at the frontend entry port, plus localhost and
+`127.0.0.1` at the cluster's reserved app port (`AVA_APP_PORT`, loopback-only
+like the Next.js bind); set the variable to a comma-separated list to replace
+that derived allowlist. Cookie-authenticated
 state changes also reject a present, non-allowlisted `Origin`. On a host where
 another service holds the gateway port, set
 `AVA_GATEWAY_PORT` plus the matching
 `AVA_GATEWAY_HEALTH_URL=http://localhost:<port>/api/health`
 (two-var contract; `ava status` probes the health URL). A pure agent-runner
 derives this health URL from the reachable `AVA_GATEWAY_URL` written by
-`ava enroll` unless the host sets an explicit health URL override.
+runner first start unless the host sets an explicit health URL override.
 
 ### Transport encryption
 
@@ -1714,22 +1639,30 @@ loopback.
 
 ## Credential rotation
 
-`AVA_CLUSTER_SECRET` is the control-plane bearer only: `/api/bootstrap`,
-`/ops`, gateway API requests, and machine registration. It is normally stable;
-run [`scripts/rotate_cluster_secret.py`](../scripts/rotate_cluster_secret.py)
-only after a bearer leak. Its dry-run preflights `GET /api/bootstrap` with the
-current bearer and a rejected invalid bearer. Execute stages only the new bearer
-in the gateway `.env`; restart that gateway, then push the bearer to every
-enrolled runner and restart them. It does not change Postgres, Redis, ACLs, or
-PgBouncer.
+`AVA_CLUSTER_SECRET` is the gateway's human bearer (API, frontend login); no
+remote unit holds it, and machine API tokens rotate with every write
+generation. Run
+[`scripts/data_plane_ops/rotate_cluster_secret.py`](../scripts/data_plane_ops/rotate_cluster_secret.py)
+(`--execute`) only after a bearer leak. Rotating the secret never touches the
+logical-backup passphrase `$AVA_HOME/backups/logical-backup.passphrase`: a gateway
+home's birth mints and pins it, independent of the secret; a home born earlier carries
+`sha256(secret)`, pinned once, so every earlier logical backup keeps decrypting (an
+empty-secret home carries a minted one instead). The script verifies the pin before it
+writes the new secret, and journals each step with fingerprints, never secrets.
+**The pinned file is backup-critical material**: nothing re-derives it, and losing it
+makes every logical backup of the home unreadable; escrow a copy with the gateway's
+backup keys ([decision](../decisions/2026-09-28-backup-passphrase-minted-at-birth.md),
+[passphrase](../services/gateway_side/backup/docs/passphrase.ava.okf.md)). Restart the
+gateway, then issue every remote unit a new capability bundle (its telemetry token
+derives from the secret). It does not change Postgres, Redis, ACLs, or PgBouncer.
 
 Routine data-plane rotation is independent and uses
-[`scripts/rotate_data_plane_secrets.py`](../scripts/rotate_data_plane_secrets.py):
+[`scripts/data_plane_ops/rotate_data_plane_secrets.py`](../scripts/data_plane_ops/rotate_data_plane_secrets.py):
 
 ```bash
-.venv/bin/python scripts/rotate_data_plane_secrets.py                 # dry-run, both scopes
-.venv/bin/python scripts/rotate_data_plane_secrets.py --scope admin --execute
-.venv/bin/python scripts/rotate_data_plane_secrets.py --scope runner --execute
+.venv/bin/python scripts/data_plane_ops/rotate_data_plane_secrets.py                 # dry-run, both scopes
+.venv/bin/python scripts/data_plane_ops/rotate_data_plane_secrets.py --scope admin --execute
+.venv/bin/python scripts/data_plane_ops/rotate_data_plane_secrets.py --scope runner --execute
 ```
 
 Run this script in a gateway context, not an agent shell: agent contexts see the
@@ -1765,13 +1698,162 @@ whether a restart is required — see
 Not automated: each is a manual console visit, and several (Telegram) have no
 programmatic rotation API at all.
 
+### Manual rotation after a credential leak
+
+No command rotates the database write generation, and none is planned: a leak
+is rare, single-operator and supervised, so it is a procedure run by hand.
+Every step names an existing tool. Cutting a leaked credential off
+means the previous write generation stops being able to log in: its logins lose
+`LOGIN`, their sessions are terminated, and their secret files are deleted.
+
+1. **Stop the whole cluster.** On every runner `ava stop -y`; on the gateway
+   `ava stop -y --keep-infra` (Postgres and Redis must stay up for the steps
+   below). No service may run while the generation changes: the `/ops` server
+   reads its accepted tokens once at boot, and the fence terminates whatever
+   still holds a session of the old logins.
+2. **Human bearer** (only if it leaked; on the gateway checkout, in a gateway
+   context): `rotate_cluster_secret.py --execute`. Do it before step 6: the
+   telemetry token in every unit bundle derives from this secret.
+3. **Redis** (gateway checkout): `rotate_data_plane_secrets.py --execute`
+   (`--scope admin` for `requirepass`, `--scope runner` for the ACL runtime
+   password; the default is both). Both scripts are described above.
+4. **Database write generation** (gateway checkout, home resolved from the
+   checkout, `unset AVA_PROCESS_PROFILE`, Postgres up). The fence and the next
+   admission of `base.cluster.authority` under one operation id. Keep the
+   printed id: a retry after a crash must pass the same one, and the ledger
+   holds instead of minting a second pair.
+
+```bash
+OP=$(uuidgen); echo "operation $OP"
+.venv/bin/python - "$OP" <<'PY'
+import sys
+from uuid import UUID
+
+from base.cluster import db_identity, get_record, ownership
+from base.cluster.authority import (
+    OperationAuthority,
+    activate,
+    mint_generation,
+    prune,
+    require_ledger,
+    verify_generation,
+)
+from base.cluster.authority.fence import close_revoked, revoke
+from base.host.net.url_secret import url_with_port
+from base.paths import ava_home
+from cli.commands.data_plane import pgbouncer as pooler
+from cli.commands.data_plane.bringup import admin_session, db_endpoint, prove_generation_logins
+
+authority = OperationAuthority(operation=UUID(sys.argv[1]), direction="candidate")
+home, database = ava_home().resolve(), db_identity()
+record = get_record(home)
+with admin_session(record, database) as conn:
+    revoke(conn, home, authority)  # ledger `revoking`, then the NOLOGIN sweep
+    pooler.stop_pgbouncer(force=True)  # nothing may still hold the old pair
+    ownership.require_listener(None, record.ports["pgbouncer"], required=False)
+    close_revoked(conn, home, authority)  # terminate and count sessions; ledger `closed`
+    prune(conn, home, authority)  # drop the closed logins
+    mint_generation(conn, home, authority)  # secret, ledger `pending`, the two logins
+    generation = require_ledger(home).unrevoked
+    direct = url_with_port(db_endpoint(), record.ports["postgres"])
+    prove_generation_logins(home, generation, direct)
+    print("active generation", activate(home, authority, verify_generation(conn, home)).number)
+PY
+```
+
+   The fence revokes the active generation (ledger `revoked`), removes `LOGIN`
+   and the password from its two logins, stops the pooler, terminates and counts
+   every session of them until none is left (ledger `closed`, secret deleted),
+   and drops the logins (one with a dependency stays as an inert `NOLOGIN`
+   tombstone). The admission mints `ava_g<n+1>_gateway` and `_runner`, proves
+   each logs in on the home's own Postgres, and marks the generation `active` in
+   `$AVA_HOME/db-authority/ledger.json`.
+5. **Start the gateway**: `ava start`. The ordinary start re-checks the group
+   grants, sweeps any stale login again, births a pooler serving exactly the new
+   pair, and launches every service with the new logins.
+6. **Every runner**: on the gateway `ava cluster db-authority issue-unit
+   --machine <name> --home <unit $AVA_HOME> --out <bundle>`, carry the bundle and
+   its printed transport key separately, then on the runner
+   `AVA_DB_CAPABILITY_KEY=<key> ava cluster db-authority install-unit <bundle>` with the unit
+   stopped, then `ava start` (the flow in
+   [Clusters, units, prod, and dev clone paths](#clusters-units-prod-and-dev-clone-paths)).
+   The runner's old login was revoked in step 4, so its previous bundle cannot
+   start it. A runner also fetches its Redis URL from the gateway at start, so
+   this step is what delivers the rotated Redis password.
+7. **Provider keys**: mint each in its console, then `ava config set KEY=VALUE`
+   (the table above); the command says whether a restart is needed.
+8. **Verify.** `ava status` on every unit; `active.number` in `ledger.json`
+   is the new number and every older one reads `closed`; and, as the
+   administrator (`psql`, above), `SELECT rolname, rolcanlogin FROM pg_roles
+   WHERE rolname LIKE 'ava\_g%'` shows only the two new logins able to log in.
+
+If step 4 fails, read its error: the ledger refuses rather than guess, and the
+cause is named (a session that would not close, a prepared transaction, a
+foreign pending generation). Fix that, then re-run the same block with the same
+operation id.
+
+## Code version gate
+
+Every pooled database session checks the code version of its own process against
+`deployment_state.min_code_version` and exits `78` when it is lower
+([decision](../decisions/2026-09-30-client-side-code-version-gate.md),
+[design](../base/db/docs/code-version-gate.ava.okf.md)). It keeps a unit that missed
+an update (a closed laptop) from writing with old code when it wakes. A process's
+**code version** is the first-parent commit count of the commit it loaded; the
+gateway raises the stored minimum to its own version on every start.
+
+**A routine update needs nothing.** The update script starts the gateway first,
+which raises the minimum, and then the runners. Every unit needs a **full** clone:
+a shallow one counts fewer commits than exist, so its processes look stale and
+exit `78` (`git rev-parse --is-shallow-repository` must print `false`).
+
+**A unit exits `78`.** Its log holds one `critical` line: `code version gate:
+process <name> runs code version <v>, below the cluster minimum <m>`. The checkout
+is behind the cluster: check out the commit the gateway runs, `uv sync --frozen`,
+`ava start`. `ava stop` and every other `ava` command keep working meanwhile, so
+a behind host can always be stopped and recovered; only service processes are
+gated. A supervisor that revives the stale service gets the same exit again until
+the checkout is updated.
+
+**Read the state.**
+
+```bash
+git rev-list --count --first-parent HEAD          # this checkout's code version
+psql "host=/tmp/ava-pg-<home-slug> port=<pg port> dbname=<db>" \
+  -c "SELECT min_code_version FROM deployment_state"   # administrator, as above
+```
+
+Running processes name themselves `ava:<process>:v<version>` in the pooler's
+client list: `PGPASSWORD=$(jq -r .password "$AVA_HOME/db-authority/pooler-admin.json")
+psql "host=127.0.0.1 port=<pooler port> user=ava_pooler_admin dbname=pgbouncer"
+-c 'SHOW CLIENTS'` (the pooler port is `AVA_DB_URL`'s port in the gateway `.env`;
+read the `application_name` column). The password stays in the environment, never
+argv.
+
+**Rolling back to an older commit** must lower the minimum by hand: it never falls
+by itself, and an older process would exit `78` at its first dial (the gateway
+included).
+
+1. Stop the whole cluster (`ava stop -y` on every unit; the gateway with
+   `--keep-infra`).
+2. Compute the target's version: `git rev-list --count --first-parent <sha>`.
+3. As the administrator, `psql "host=/tmp/ava-pg-<home-slug> port=<pg port>
+   dbname=<db>" -c "UPDATE deployment_state SET min_code_version = <target>
+   WHERE id = 1"`. `0` switches the gate off until the next gateway start.
+4. Check out `<sha>` on every unit, `uv sync --frozen`, start the gateway, then the
+   runners. The gateway's start sets the minimum to exactly the target's version.
+
+**Shipping the gate itself is unprotected.** Processes that run code from before
+the gate have no check, so the update that first carries it stops every unit by
+hand, as updates did before; the gate protects from the following update on.
+
 ## Code flow & Events
 
 Kernel-side LLM calls go through `llm.astream()`; a LangChain callback publishes
 chat / code / reasoning start + delta to the Redis `ava:events` channel on each
 chunk. The full role table (payload fields, publisher, when each fires) is in
-`shared/live_events.ava.okf.md`; interrupt semantics for cancel / terminate are in
-`agent/graph/graph.ava.okf.md`.
+`base/events/live/docs/live.ava.okf.md`; interrupt semantics for cancel / terminate are in
+`agent/graph/docs/graph.ava.okf.md`.
 
 **Lifecycle command residue:** never hand-clean a stuck lifecycle command (a row
 left pending/claimed, or a live `agents_meta.lifecycle_command_id` pointing at a
@@ -1788,7 +1870,7 @@ the failure invisible.
 The observability stack (user decision 2026-08-11, architecture task #1266):
 **OTel + Tempo + Loki + Prometheus + Grafana**. The one gateway home carrying
 `$AVA_HOME/lgtm-host` and every pure runner run an **OTel Collector sidecar**
-(`ava-otel-collector`, supervised by the watchdog and installed by converge
+(`ava-otel-collector`, supervised by the root and installed by converge
 from `deploy/otel-collector/`). Producers export OTLP/HTTP to their local
 sidecar (`AVA_TELEMETRY_OTLP_ENDPOINT`, default `http://127.0.0.1:4318`; the
 ingress port is the host setting `AVA_TELEMETRY_OTLP_PORT` — source for this
@@ -1800,12 +1882,13 @@ unmarked gateway skips the collector and the default producer export, keeping
 the JSONL event mirror only; an explicitly configured OTLP endpoint opts the
 producer into that external collector. Delivery is role-specific: the marked
 gateway collector writes traces to the Tempo selected by the host-scope
-`AVA_TELEMETRY_TEMPO_ENDPOINT` setting (prod's override selects the remote WSL
-Tempo) and logs/metrics to gateway-loopback Loki/Prometheus; a pure runner
+`AVA_TELEMETRY_TEMPO_ENDPOINT` setting and logs/metrics to gateway-loopback
+Loki/Prometheus; a pure runner
 collector keeps the same three exporter component IDs and relays each
 signal to `AVA_GATEWAY_OTLP_ENDPOINT`, a read-only bootstrap projection of
-the gateway's reachable host and OTLP port, with
-`Authorization: Bearer $AVA_CLUSTER_SECRET`. A runner's local port never
+the gateway's reachable host and OTLP port, with `Authorization: Bearer
+<telemetry token>` (from its capability; the gateway derives the same token
+from its secret). A runner's local port never
 selects the remote port: a Windows receiver on 4318 can relay to a WSL gateway
 on 54318 without colliding in mirrored networking. Update the gateway before
 runners; a missing or invalid endpoint fails converge rather than guessing a
@@ -1824,7 +1907,7 @@ resources. It fans out:
   Tempo) + local JSONL mirror
   (`$AVA_HOME/traces/spans.jsonl`, rotated `spans-<ISO>.jsonl`).
 - **logs** — every unified event (the emitter's write path) dual-writes to
-  OTLP logs (Loki) via `shared/telemetry/otlp/telemetry_otlp.py` → sidecar → Loki
+  OTLP logs (Loki) via `base/telemetry/otlp/telemetry_otlp.py` → sidecar → Loki
   (`AVA_TELEMETRY_LOKI_URL` base, `/otlp` appended). The emitter makes
   `event_name`, `cluster` and, when present, `agent_id` resource dimensions per
   record before the SDK serializes a batch: Loki indexes those resource
@@ -1845,15 +1928,17 @@ resources. It fans out:
   baked into that unit's config at converge. Dashboards and alerts group by
   `machine_name`. A pure agent-runner's DB/Redis URLs point at the gateway's
   data plane, so its config omits those two receivers entirely rather than
-  duplicating the gateway's series. A gateway whose Postgres URL has an empty
-  password omits the contrib Postgres receiver (which rejects an empty
-  password) but keeps its unauthenticated Redis receiver.
+  duplicating the gateway's series. A gateway's Postgres receiver dials its
+  own instance over the owner-only socket as the password-less monitoring role
+  `ava_monitor` (peer), so the config names no database credential and a
+  rollout leaves it scraping; a remote-managed plane omits it. The Redis
+  receiver always authenticates with the Redis-admin password.
 - **collector delivery metrics** — every sidecar scrapes its per-unit loopback
   self-metrics endpoint every 30s into `metrics/infra`
-  (`AVA_OTELCOL_METRICS_PORT`, default 8888). The local watchdog probes the same
+  (`AVA_OTELCOL_METRICS_PORT`, default 8888). The root probes the same
   endpoint. Grafana rules alert on current queue pressure, new enqueue failures
   over 5m (counter delta, never lifetime absolute value), and a recently-seen
-  machine whose collector stopped reporting for 5m. The watchdog logs current
+  machine whose collector stopped reporting for 5m. The root logs current
   full queues but does not restart a healthy receiver for remote backpressure.
 
 **Event-label canary.** After an OTLP-emitter rollout, query a post-rollout
@@ -1895,9 +1980,9 @@ newly emitted rows, since indexed-era data from before the rollout is immutable.
 
 **One time-series store.** Prometheus holds the host history; nothing else
 retains one. `ava status` and the status page carry a single LIVE psutil
-reading per machine (`shared/resource_sample.py`) — the degraded answer for a
+reading per machine (`base/host/resource_sample.py`) — the degraded answer for a
 deployment whose LGTM backend is down or was never deployed — and link to the
-Grafana host dashboard for the trend. The retired `shared/resource_monitor.py`
+Grafana host dashboard for the trend. The retired `base/resource_monitor.py`
 kept a 300-sample ring buffer per process; two samplers meant two answers to
 "what was the CPU on machine X" that drift apart, and its history evaporated
 on every restart anyway.
@@ -1929,13 +2014,11 @@ home/role producer gate additionally prevents an unmarked gateway from using
 the default loopback endpoint; explicitly setting `AVA_TELEMETRY_OTLP_ENDPOINT`
 bypasses that gate without creating a local collector.
 
-**LGTM backend lifecycle** — home-scoped native launchd jobs on Darwin arm64
-and user systemd units on Linux amd64 run Loki, Prometheus (GOMEMLIMIT
-2GiB / 1GiB), and Grafana. Unit names include the home slug; Linux ownership
-also checks the loaded unit file and exact executable. Explicit host listen
-ports permit isolated homes; defaults remain 3100/9090/3003 plus Loki gRPC
-9095. See [native lifecycle](../cli/commands/observability/lgtm.ava.okf.md). Tempo is configured per cluster; prod's host-scope
-override targets the remote WSL Tempo. No
+**LGTM backend lifecycle** — Loki, Prometheus (GOMEMLIMIT 2GiB / 1GiB), and
+Grafana run as native processes on Darwin arm64 and Linux amd64, owned by
+`ava-root` (below). Explicit host listen ports permit isolated homes; defaults
+remain 3100/9090/3003 plus Loki gRPC 9095. See [native lifecycle](../cli/commands/observability/docs/lgtm.ava.okf.md). Tempo is remote, selected by the host-scope
+`AVA_TELEMETRY_TEMPO_ENDPOINT` setting. No
 service lifecycle depends on a container backend. The backend is required while the gateway serves /ops
 and the inspect endpoints (consumers: the gateway Loki/Prometheus read paths,
 ops alerting via Grafana's embedded Alertmanager → the gateway webhook, the
@@ -1944,39 +2027,22 @@ singleton** owned by the lifecycle on exactly one home per host — the
 observability station. Provider identity is either the operator-created
 `$AVA_HOME/lgtm-host` marker file (in practice prod `~/.ava`;
 `touch ~/.ava/lgtm-host` once, or `ava lgtm on`) or the declarative
-`observability-station` unit capability (`ava start
---serve-observability-station` / `AVA_MACHINE_SERVE_OBSERVABILITY_STATION` /
-`$AVA_HOME/machine_serve_observability_station`). On the station home, converge
-installs pins from `deploy/lgtm/native/versions.yml`, renders native configs
-and native service definitions, and runs the idempotent lifecycle on every `ava start`
-/ `ava cluster update`. The observation data volume is a per-machine knob:
-`AVA_LGTM_STORAGE_DIR` (empty default = `$AVA_HOME/lgtm/native/data`) moves the
-Loki filesystem store and Prometheus TSDB to a configured path. The gateway watchdog re-runs it when Loki/Prometheus/Grafana readiness
-probes hit connection failures; its probe-first path skips only a reachable
-backend whose matching launchd job is still loaded. `ava status` shows native
-jobs and readiness probes.
-**Loki config hard gate** — any change to the native Loki config (the
-`deploy/lgtm/native/config/loki.yaml` template, which converge renders into
-`$AVA_HOME/lgtm/native/config/loki.yaml`) must pass
-`loki -config.file=<cfg> -verify-config` before the job is (re)started.
-The launcher (`deploy/lgtm/start.sh`) runs that verification against the
-rendered config on every invocation and **refuses to start Loki when it
-fails** — a bad field name otherwise crash-loops the launchd job (the
-2026-08-25 `ingester.wal_disk_full_threshold` incident, ~3min of Loki-backed
-read downtime). Legacy compose assets are not a supported production rollback
-procedure. Use the native lifecycle and its rendered configuration; do not
-introduce a container backend to recover this deployment. The Python-side
-pin (`shared/loki_index_labels.validate_loki_deploy_config`) still guards
-converge-time re-renders; the binary verify is the zero-cost last line
-before any restart, including the gateway watchdog's.
-Unmarked homes (dev worktree clusters) never touch these backends or install a
-gateway collector. Their gateway Loki readers reject the implicit loopback URL
-with HTTP 503; explicitly setting `AVA_TELEMETRY_LOKI_URL` opts reads into a
-caller-managed stack. Dashboard and fleet queries, as well as every Loki alert
-rule, also filter `cluster` so a shared backend cannot leak another home's
-telemetry into the result.
-Deliberate stop: remove the marker or `ava start --disable-service lgtm`, then
-`deploy/lgtm/stop.sh` — see `deploy/lgtm/README.md`.
+`observability-station` unit capability (`ava init
+--serve-observability-station`, recorded as `AVA_MACHINE_SERVE_OBSERVABILITY_STATION` in the
+home's `.env`). On the station home, converge
+prepares pins from `deploy/lgtm/native/versions.yml` and rendered configuration.
+Loki, Prometheus and Grafana belong to the normal root service roster, on both
+macOS and Linux. They have no separate OS jobs. `AVA_LGTM_STORAGE_DIR` selects
+retained Loki and Prometheus storage (default `$AVA_HOME/lgtm/native/data`).
+Readiness binds successful native protocols to root-owned listener generations.
+Loki write/read diagnostics report separately and never launch processes.
+
+The pinned Loki binary must accept `-verify-config` before startup. Configuration
+or roster changes require a normal stop before start. `ava lgtm on` and `off`
+change the three backend selections through the same start entry and preserve
+other service choices and stored data. See `deploy/lgtm/README.md`.
+Unmarked homes do not launch backends; explicitly configured remote query URLs
+remain independent from local backend ownership.
 
 **Recording is one collector hop from the producer** (sidecar architecture, task #1266). The
 previous inline-POST design raised `Exception while exporting Span.` whenever
@@ -1991,13 +2057,13 @@ and the collector's
 enqueue-failure counters make that loss visible. Every send attempt is bounded
 to five seconds and every exporter retries for at most 15 minutes before its
 counted failure path drops the batch. Cumulative metrics repair their totals on
-a later successful sample. `shared/telemetry/otlp/telemetry_otlp.py`
+a later successful sample. `base/telemetry/otlp/telemetry_otlp.py`
 also sheds (counted) instead of blocking, so an unreachable sidecar never
 touches the main write path. Exporter IDs stay `otlphttp/tempo`,
 `otlphttp/loki` and `otlphttp/prometheus`; in particular, renaming Tempo/Loki
 would orphan their file_storage backlog during an upgrade.
 
-**Record** — `shared/trace.py:initialize_tracing`, gated by `AVA_TRACE_ENABLED`
+**Record** — `base/telemetry/tracing.py:initialize_tracing`, gated by `AVA_TRACE_ENABLED`
 (default **on**). Instrumentation is OpenLLMetry (`traceloop-sdk`); the sole span
 exporter is `OtlpJsonHttpSpanExporter`, which POSTs each export batch as one
 standard protobuf `ExportTraceServiceRequest` to the configured collector's
@@ -2019,7 +2085,7 @@ the mirror and bypasses the LOCAL sidecar, because replaying through it would
 write the replayed lines back into the mirror (watermark loop). A gateway or
 single-box unit POSTs straight to loopback
 `{AVA_TELEMETRY_TEMPO_ENDPOINT}/v1/traces` without auth; a pure runner POSTs
-to the gateway collector's private port 4318 with the cluster bearer. The
+to the gateway collector's private port 4318 with its telemetry token. The
 remote trace pipeline writes Tempo only and never the gateway mirror, avoiding
 a second copy and replay ambiguity. Needed only for gaps the queue could not
 hold (backend down longer than the queue, offline machines, past windows).
@@ -2046,7 +2112,7 @@ containers record to their ephemeral-FS mirror, which dies with the container
 with `instruments={ANTHROPIC, OPENAI, LANGCHAIN, GOOGLE_GENERATIVEAI}` —
 LangGraph nests through the LANGCHAIN instrumentor (its callback handler), so
 there is no separate LANGGRAPH instrument. Around each per-turn
-`graph.ainvoke`, `agent/runloop.py` opens `turn_span(name="ava-agent-N",
+`graph.ainvoke`, `agent/turn/runloop.py` opens `turn_span(name="ava-agent-N",
 session_id=str(agent_id), turn=N)`, a native OTel root span stamped with the
 neutral `session.id` (the viewer groups one agent's turns into a session by
 it) and `ava.turn`. One trace = one turn: the root span closes and exports
@@ -2096,11 +2162,10 @@ Where to look when something went wrong on a host:
 |---|---|
 | what did daemon X do | `$AVA_HOME/logs/<name>.log` (JSONL, rotated 100MB / 7 days) |
 | what did the cluster do, without ssh | `GET /api/cluster/admin/events` over the private network |
-| what did a *detached* `ava cluster update` child do | same two — `ops/cluster_deploy.py:spawn_update` exports `AVA_CLI_LOG_NAME=updater` so the CLI wires the sinks |
 | why did a daemon vanish | its log file: every daemon wraps `asyncio.run(main())` and logs the traceback before re-raising |
 | what did milvus say | its log file only — it is a C++ binary with no PG sink |
-| an agent | `$AVA_HOME/logs/agent-{N}.log` (kernel + its exec subprocess, both appending) |
-| raw session stdout (gateway / shells / daemons / schedules) | Loki (the LGTM backend): shell logs → `filelog/sessions`; gateway/daemon/schedule logs → `filelog/services`; updater/rollout tees → `filelog/orchestration`. Banner-only agent main stdout is excluded. All filelog receivers derive Loki `service_name` from the filename and persist offsets. Loki retains 84 hours; scheduled local cleanup uses the family tiers below. See `deploy/lgtm/README.md`. |
+| an agent's exec subprocesses | `$AVA_HOME/logs/agent-{N}.log` (every exec subprocess of the agent appends) |
+| raw session stdout (gateway / shells / daemons / schedules) | Loki (the LGTM backend): shell logs → `filelog/sessions`; gateway/daemon/schedule logs → `filelog/services`. Banner-only agent main stdout is excluded. All filelog receivers derive Loki `service_name` from the filename and persist offsets. Loki retains 84 hours; scheduled local cleanup uses the family tiers below. See `deploy/lgtm/README.md`. |
 
 ### Local log rotation and retention
 
@@ -2160,9 +2225,7 @@ inspection or deletion failed.
 
 Converge registers one low-traffic daily job per machine. macOS launchd and
 Linux cron run rotation followed by retention at 04:40 local time; the second
-command runs only when rotation succeeds. Windows registers two windowless
-Task Scheduler jobs at 04:40 and 04:41 because one task action carries one Ava
-argv. Re-converge replaces the job definitions idempotently, and cluster destroy
+command runs only when rotation succeeds. Re-converge replaces the job definitions idempotently, and cluster destroy
 removes them.
 
 Raw session output is queried in Loki, not tailed from a file — Grafana Explore
@@ -2182,7 +2245,7 @@ Agent loguru JSONL (`agent-{N}.log`) is not scraped — it already reaches Loki
 structured via OTLP.
 
 The emitter wiring behind that stream, the unified `events` schema (and its
-legacy `agent_events` mirror), and the monthly partitioning are in `shared/log.ava.okf.md`.
+legacy `agent_events` mirror), and the monthly partitioning are in `base/log/docs/log.ava.okf.md`.
 
 ## Git hooks: pre-commit / pre-push
 
@@ -2206,8 +2269,8 @@ Never install from an ephemeral worktree: all worktrees of a clone share
 `git rev-parse --git-common-dir`'s `hooks/` directory, and pre-commit writes the
 installing interpreter's absolute path into `INSTALL_PYTHON`. Deleting that
 worktree leaves a dead pointer. `scripts/setup-worktree.sh` checks the shared
-installation without rewriting hooks or `core.hooksPath`. Converge re-asserts
-the same health on every `ava start` / `ava cluster update`
+installation (`check_git_hooks.py --strict`: a problem stops the bootstrap) without rewriting hooks or `core.hooksPath`. Converge re-asserts
+the same health on every source `ava start`
 (`ensure_local_git_hooks` runs `check_git_hooks.py --scan-machine` over the
 conventional local checkouts); drift warns, it never blocks. Before deleting a
 worktree, inspect both shared hooks' `INSTALL_PYTHON` values and reinstall from
@@ -2222,11 +2285,28 @@ installations pass. It prints the repair commands and passes: v1 is warn-only so
 hook rollout does not block commits; CI independently enforces the checks.
 Review any `core.hooksPath` override before removing it and installing.
 
-Commit hooks keep linting and code-generation checks. The full-repository
-strict pyright check, frontend typecheck (including Next.js route typegen),
-ESLint and the full Vitest suite run at **pre-push**. Other local hooks default
-to pre-commit; upstream hooks may also declare pre-push hygiene checks. File filters are
-unchanged. Run either stage explicitly with the worktree's own environment:
+A commit hook's cost follows the change, not the repository. The per-file
+Python and content lints take the changed files (`--only FILE...`; the contract,
+and what widens the run to a full scan, is the
+[changed-files mode](../scripts/lint/docs/changed-files-mode.ava.okf.md)). The
+code-generation freshness hooks, whose check needs the whole project, run only
+when one of the inputs in their `files:` filter changed. ESLint lints the changed
+frontend files (`scripts/precommit-eslint.sh`) and the whole project when the
+lint setup itself changed. A hook that scans the whole repository on every
+commit regardless of the diff is a design error, not a price of the check; CI's
+`pre-commit run --all-files` is the full scan of every hook and the merge gate.
+Frontend typecheck (including Next.js route typegen), the whole-project ESLint
+run (`frontend-eslint-full`: a type-aware rule can react to a type that changed
+in another file, which the per-file run cannot see) and the full Vitest suite run
+at **pre-push**, scoped by their own `files:` filter to frontend changes. Strict
+pyright also runs at pre-push, but scoped to the branch's own changed `.py`
+files (`scripts/prepush-pyright-files.sh`, `merge-base(origin/main,
+HEAD)..HEAD`, ACMR + still on disk) — never the whole repository locally
+(user ruling 2026-09-22: local runs check only the files touched; a
+full-repo strict pyright stays CI-only, `backend-static`'s `uv run pyright`).
+Other local hooks default to pre-commit; upstream hooks may also declare
+pre-push hygiene checks. Run either stage explicitly with the worktree's own
+environment:
 
 ```bash
 .venv/bin/pre-commit run --all-files
@@ -2239,26 +2319,78 @@ and run only the relevant vitest files, as described in the
 The [Vitest placement decision](../decisions/2026-09-24-vitest-prepush-selection.md)
 records the measurements, push-cost projection and affected-test-selection limits.
 
-`scripts/prepush-guard.sh` holds a separate `flock` for each of `pyright`,
-`tsc`, `eslint`, and `vitest` across all worktrees on the host. Locks live in
-`/tmp/ava-prepush-locks`, independent of clone, user, and `TMPDIR`; never delete
-live lock files. `AVA_PREPUSH_LOCK_DIR` may override this for tests or a host
-policy, but every checkout on that host must use the same local directory.
-Missing tools/dependencies, unavailable locks/load probes, excessive load, or
-a lock timeout print **WARNING: PRE-PUSH SKIPPED** with the tool and reason,
-then exit 0. Hook verbosity makes these successful skips visible. Install
-frontend dependencies with `(cd ui/web && npm ci)`; Python dependencies use
+Three more pre-push-only hooks close gaps: two that `git rebase` / `cherry-pick` /
+`merge` leave open (they never invoke the pre-commit hook for the commits they
+create), and one that a per-file verdict cannot see:
+
+- `lint-prepush-branch-diff` re-runs the whole pre-commit stage, filters and
+  all, over `git merge-base origin/main HEAD`..`HEAD` instead of whatever two
+  endpoints pre-commit's own push-time selection would use — so a
+  conflict-resolution or cherry-picked commit gets checked before it can
+  reach `git push` unchecked. The commit-stage hooks judge only the files they
+  are handed, so this costs about what one commit over the same files costs;
+  that is why it takes no load threshold and no lock (a load-dependent skip
+  would leave rebased commits unchecked at random). It skips loudly only when
+  it cannot know the range (`origin/main` is not locally resolvable — fetch
+  first) or has no `.venv/bin/pre-commit`.
+- `lint-prepush-artifact-freshness` (`scripts/provision/prepush_freshness.py`)
+  re-checks, over the whole repository, the generated-artifact hooks (types and
+  constants codegen, the events registry, the config-lite table, the Pyright
+  tests environments, OKF lint, doc references) whose inputs the branch
+  DELETED. A `files:`-filtered hook never sees a purely deleted path on any
+  range — pre-commit's own diff selection passes it only
+  Added/Copied/Modified/Renamed paths — so a change that only deletes the last
+  file behind an event or config field can otherwise reach `git push` with a
+  stale artifact and nothing local catching it. A whole-repository hook whose
+  inputs the branch also added or changed already ran in the branch-diff run,
+  which judges the deletion with it, so it is not repeated; a per-file hook
+  (`lint-ava-okf`) sees only the files it is handed and is re-checked whenever
+  a deleted path matches. A rename counts as deleting the old path; with no
+  known range every hook runs. `types-codegen-fresh` alone skips when
+  `ui/web/node_modules` is missing, same as the frontend pre-push hooks.
+- `lint-patch-targets-full` runs the patch-target lint over every test file
+  when the branch touches any `.py` path, deleted ones included
+  (`scripts/prepush-if-changed.sh`; a push with no Python cannot move a test's
+  home). A test's home follows what its subject's package imports, so a
+  production import change can move the home of a test the commit-time
+  `lint-patch-targets` never receives; CI's structure job scans everything too.
+- `lint-tests-location-full` runs the tests-location check over every tracked
+  top-level test at every push, unwrapped (paths only, under 0.1 s, so there is nothing
+  to skip). A deleted or renamed test is never passed to the commit-time
+  `lint-tests-location`, so its stale registry entry is found here; CI's structure job
+  checks everything too.
+
+`scripts/prepush-guard.sh` holds a separate lock for each of `pyright`,
+`tsc`, `eslint` (the whole-project run), and `vitest` across all worktrees on the host.
+The lock is `fcntl.flock(2)` on the fd bash opens via `exec 9<lock_file`, run
+from a fresh `python3 -c` subprocess per attempt — not the `flock(1)` binary,
+which stock macOS does not ship — bound to the *open file description* fd 9
+refers to, so it stays held after that python3 process exits, until the
+guarded command (exec'd in the same shell process, inheriting fd 9) itself
+finishes. A wait-with-timeout is `LOCK_NB` polled in a loop, since `fcntl` has
+no built-in timed blocking wait. Locks live in `/tmp/ava-prepush-locks`,
+independent of clone, user, and `TMPDIR`; never delete live lock files.
+`AVA_PREPUSH_LOCK_DIR` may override this for tests or a host policy, but every
+checkout on that host must use the same local directory. Missing
+tools/dependencies, unavailable load probes, excessive load, or a lock
+timeout print **WARNING: PRE-PUSH SKIPPED** with the tool and reason, then
+exit 0. Hook verbosity makes these successful skips visible. Install frontend
+dependencies with `(cd ui/web && npm ci)`; Python dependencies use
 `env -u VIRTUAL_ENV uv sync` after the worktree venv preflight above.
 
-`AVA_PREPUSH_LOCK_WAIT_SECONDS` defaults to `120`: enough for a normal pyright
-run to release its lock, while bounding a contended push. Waiting prints the
-tool name. `AVA_PREPUSH_MAX_LOAD_PER_CORE` defaults to `1.5` for the one-minute
-load average divided by logical CPUs: allow short bursts but avoid adding work
-to a sustained CPU queue. Load is checked before and after acquiring the lock.
-The tool's actual failure status propagates unchanged; a local skip is never
+`AVA_PREPUSH_LOCK_WAIT_SECONDS` bounds how long a contended push waits for a
+tool's lock before it skips; waiting prints the tool name.
+`AVA_PREPUSH_MAX_LOAD_PER_CORE` is the one-minute load average per logical CPU
+above which a heavy tool skips rather than add work to a sustained CPU queue;
+load is checked before and after acquiring the lock. Both exist for the heavy
+tools only: a hook light enough to run every time takes neither (the nested
+branch-diff run), because a skip that depends on host load makes a check present
+on some pushes and absent on others. The tool's actual failure status propagates
+unchanged; a local skip is never
 evidence that the check ran. CI bypasses the wrapper: `backend-static` runs
-`uv run pyright`; `frontend` runs `npx next typegen`, `npx tsc --noEmit`,
-`npm run lint` and `npx vitest run --coverage`. These independent runners retain
+`uv run pyright` (full repository — CI is where the complete strict pass
+lives); `frontend` runs `npx next typegen`, `npx tsc --noEmit`, `npm run lint`
+and `npx vitest run --coverage`. These independent runners retain
 enforcement; the structural CI job already skips the four duplicate hooks.
 
 ## CI (Continuous Integration)
@@ -2280,8 +2412,9 @@ keeps one job with two segments when the frontend/backend classifier selects it:
 - **Structure lint (A)** always runs `pre-commit run --all-files`, skipping the
   hooks owned by other CI jobs, the local installation warning, and the four
   codegen freshness hooks. The pyright, frontend-tsc, frontend-eslint and
-  frontend-vitest SKIP entries are redundant since those hooks run only at pre-push; CI still
-  runs their underlying checks directly in `backend-static` and `frontend`.
+  frontend-vitest SKIP entries name checks other jobs own (`frontend-eslint` is the
+  changed-files commit hook; the other three run only at pre-push); CI runs their
+  underlying whole-project checks directly in `backend-static` and `frontend`.
 - **Codegen freshness (B)** installs Node/frontend dependencies and explicitly
   runs `types-codegen-fresh`, `constants-codegen-fresh`, `events-registry-fresh`
   and `config-lite-table-fresh`. On a PR, the selector compares the fetched,
@@ -2303,66 +2436,44 @@ the selector on the combined tree before landing; required check names and
 failure reporting are unchanged. CI remains the merge gate, including when
 local pre-push checks visibly skip for load or missing tooling.
 
-## ava-root dev dry run (W1.2e / S2 / W1.2c)
+## Root-owned application lifecycle
 
-The root supervisor's wiring surfaces — the roster-to-manifest generator, the
-daemon's `--wiring` hook, the reference/drill assemblies, and the per-unit log
-layout — have a dev-side acceptance run of their own:
+`ava start` initializes or resumes the home and reconciles its selected services
+under one `ava-root`. Omitted service flags preserve the prior selection.
+`--only-service NAME` records an allowlist, while `--all-services` explicitly
+returns to the whole applicable roster. Repeating an unchanged start retains
+healthy process generations. A successful start requires the complete selected
+roster to pass identity-bound readiness, including frontend; there is no waiver.
 
-    cd <repo> && env -u VIRTUAL_ENV .venv/bin/python scripts/ava_root_dry_run.py --capabilities agent-runner
+The platform boundary is explicit:
 
-It writes a light four-unit manifest (`light-a` plus an attached child,
-`light-b`, and the heartbeat unit `light-beat`) and a production sample
-generated from the ops roster (without `--capabilities` the sample is
-skipped), starts the
-daemon with `--wiring services.ava_root_glue.drill:build_drill_wiring` under
-`/tmp/ava-root-dry-run`, and verifies over the live tree: the attach surfaces
-(`health` / `metrics` in `status`), a real probe round with `alive` verdicts,
-per-unit log directories (`<run-dir>/logs/<unit>/output.log`), the client
-verbs (`down` / `up` on a subtree, `restart` replacing a generation), and the
-probe-driven revive: the drill SIGSTOPs `light-beat` (pid stays alive, its
-beats stop), the root's own health path judges the stale heartbeat down and
-the supervisor replaces the generation — `down -> restarted, verified alive`
-in the daemon log, no watchdog/healthchecks/sessions process involved; then
-the in-place upgrade: the drill asks the root to exec-replace itself, and the
-successor attaches all four units — same root pid, every unit pid carried
-unchanged (no respawn), successor uptime reset, the handoff file consumed and
-purged. Seven phases must pass, each printed as `PASS(phase=...)`: generate /
-launch / status / ops / revive / upgrade / stop (SIGTERM, exit 0). The upgrade
-protocol itself lives in `services/ava_root/handoff.py` (handoff wire format +
-adoption) and `services/ava_root/daemon.py` (exec once the accepted response
-is flushed); `services/ava_root/survival.py` carries the update-survival
-roster hook (G6a(2)).
+- macOS: `launchd -> signed permissions helper -> ava-root -> application services`.
+- Linux: `systemd/direct launch -> ava-root -> application services`; no helper.
 
-Safety: the workdir defaults to `/tmp/ava-root-dry-run` and must stay outside
-a protected home — the one exception is the agent scratch tree
-(`<home>/workspaces/`), allowed so a drill's evidence can live in a worker
-workspace; the units are sleepers, and nothing production is started or
-probed. Evidence (manifests, status snapshots, the daemon log) is retained
-under `<workdir>/evidence`; pass `--cleanup` to remove the workdir. Flags:
-`--workdir DIR` (absolute, outside a protected home except the scratch tree),
-`--python PATH` (interpreter for the daemon and the units),
-`--capabilities gateway,agent-runner` (capability set for the
-production-generator sample; omit to skip the sample), and `--cleanup`. This is the root-side counterpart of
-`scripts/two_section_chain_smoke.py` (which drives the OS-edge chain); that
-smoke's operator notes live in the memory pool under `ava/runtime/`.
+The supervisor name does not imply UID 0. The macOS helper carries the stable
+signing identity used for permissions. Normal start observes an unchanged loaded
+helper; it never reloads a live ancestor or silently falls back to direct launch.
+A new helper artifact can be built at `AVA_PERMISSIONS_HELPER_ARTIFACT_DIR`.
+A loaded helper is never replaced. When the helper sources change, `ava stop`
+retires the exact-home job, and the next `ava start` rebuilds the stale
+`$AVA_HOME/helper` artifact in place under the same designated requirement
+(TCC grants carry over); it still refuses while the job is loaded, its plist
+remains, or a live process runs the old executable. Rebuilding needs the login
+keychain, so a host that cannot sign keeps the old artifact and fails the start.
 
-## ava-root-driven `ava start` / `ava stop` (W1.2e-2, dev)
+Root records native process birth and outstanding custody before spawning.
+Uncertain leftover ownership blocks a second generation. Service readiness checks
+protocol behavior and the captured native owner; an unrelated listener or missing
+inspection cannot certify the service. Application stop and persistent terminal
+stop are distinct operations, and native data-plane shutdown has its own verified
+boundary. A full destroy marks the home detached only after cleanup succeeds.
 
-With `AVA_ROOT_DRIVER_ENABLED=1` in the unit's environment (default off — the
-production path stays session-driven until the S3/S4 swap), `ava start` hands
-the roster to ava-root (`cli/commands/_root_driver.py`): the manifests are
-generated from the ops roster, the root is seeded through the permissions
-helper when it is committed (a direct spawn otherwise), and the readiness gate
-reads the root's own status surface. While the switch is on, converge retires
-the OS watchdog-probe jobs (the root health path absorbs the watchdogs, so a
-probe-revived legacy watchdog would race the tree) and re-registers them when
-the switch goes back off. `ava stop` stops the tree through the
-root with the same preserve semantics (`--keep-service`, pause's browser).
-Acceptance is `scripts/ava_root_e2_drill.py` — one worktree cluster driven
-through baseline (switch off) → start/stop → restart and idempotence → final
-stop, asserting tree == manifest, unit health verdicts, and the pid continuity
-rules (fresh start changes pids, idempotent start keeps them); evidence lands
-under `<workdir>/evidence`. The drill switches OS-job registration off
-wholesale (`AVA_OS_JOBS_ENABLED=false`) so the cluster's probe jobs never race
-the drill tree.
+Root framework tests under `tests/services/test_ava_root_*` exercise supervision,
+custody, IPC and readiness; an isolated native cluster is still required to verify
+platform ancestry and actual application execution. There is no local branch-preview
+controller: validate a branch with CI, the throwaway test clusters, and the Linux
+verification container (`python3 scripts/verify/container.py --ref <ref>`: a fresh
+container, the commit cloned to `~/.ava/source`, `ava init` and the first `ava start`, a scripted agent;
+[verification boundaries](../future/infra/verification-boundaries.md)); what only macOS can show
+(the signed helper chain, the desktop grants) runs in a throwaway Tart VM cloned from the golden
+image (`python3 scripts/verify/tart_run.py --ref <ref>`, same flow, plus the helper chain check).

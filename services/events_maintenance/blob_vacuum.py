@@ -1,12 +1,12 @@
 """Low-traffic-window VACUUM for the checkpoint tables (incremental reclamation).
 
-The checkpoint reaper deletes old rows every hour, but physical space only
-returns when a VACUUM reclaims the dead tuples — including the TOAST storage
+VACUUM reclaims dead tuples from checkpoint tables — including the TOAST storage
 that carries checkpoint blobs (a blob table can sit at hundreds of MB of
 physical size while holding a few thousand live rows: 2026-08-10 measured
 790 MB physical / 1.3 MB heap). Autovacuum eventually gets there, but on a
 small, append-heavy table its default thresholds fire late, so dead TOAST
-tuples accumulate between trims.
+tuples can accumulate. The checkpoint trim opt-in was retired on 2026-09-30;
+this physical reclamation does not delete live checkpoint history.
 
 This module runs a plain `VACUUM (ANALYZE)` (never FULL — FULL takes an
 ACCESS EXCLUSIVE lock and stalls agents, which the user explicitly ruled out)
@@ -31,10 +31,10 @@ from zoneinfo import ZoneInfo
 
 import psycopg
 
-import shared.db
-from shared import telemetry
-from shared.config import settings
-from shared.log import logger
+import base.db
+from base import telemetry
+from base.config import settings
+from base.log import logger
 
 _WINDOW_START_HOUR = 5
 _WINDOW_END_HOUR = 8  # exclusive
@@ -179,11 +179,18 @@ def vacuum_checkpoint_tables(conn: Any) -> VacuumResult:
     dead-tuple count before and after so the reclamation trend is visible in
     the daemon log (the convergence signal for Task #1130: 790MB -> steady
     state <=150MB).
+
+    The daemon dials as a gateway-class login, which maintains these tables
+    through PostgreSQL 17 `MAINTAIN`; a VACUUM the server skips with only a
+    WARNING (missing privilege) raises `VacuumSkippedError` instead of
+    reporting a reclamation that never ran.
     """
+    from base.cluster.authority import vacuum_or_fail
+
     with conn.cursor() as cur:
         before, _ = _checkpoint_state(cur)
         for table in _TABLES:
-            cur.execute(f"VACUUM (ANALYZE) {table}")  # table names are module constants
+            vacuum_or_fail(conn, table)
         after, dead = _checkpoint_state(cur)
     result = VacuumResult(ran=True, total_bytes=after.blobs_bytes, dead_tuples=dead)
     telemetry.emit("telemetry", "checkpoint_table_sizes", attributes=_sizes_attributes(after))
@@ -209,7 +216,7 @@ def run_blob_vacuum(*, force: bool = False) -> VacuumResult:
     if not force and not in_low_traffic_window():
         return VacuumResult(ran=False, total_bytes=0, dead_tuples=0)
     try:
-        with shared.db.connect(direct=True, autocommit=True) as conn:
+        with base.db.connect(direct=True, autocommit=True) as conn:
             return vacuum_checkpoint_tables(conn)
     except psycopg.errors.UndefinedTable:
         logger.info(

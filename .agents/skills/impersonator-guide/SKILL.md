@@ -58,10 +58,10 @@ Three values anchor every command in this skill:
   commands directly in the executor session's own shell: the caller's ancestor chain must
   contain the recorded executor anchor within 8 levels — deeper wrapping fails closed.
 - **The cluster executable** — run the commands as given, with a bare `ava`. It acts
-  on the cluster your `AVA_HOME` names: launched by an Ava agent, you inherited
-  that agent's `AVA_HOME`; in a terminal of your own, export the hosting
-  cluster's home first. Without `AVA_HOME`, or with an `ava` that belongs to
-  another cluster, the command refuses rather than guess.
+  on the home `AVA_HOME` names, else `~/.ava`: launched by an Ava agent, you
+  inherited that agent's `AVA_HOME`; in a terminal of your own on the hosting
+  machine, leave it unset. An `ava` from a checkout that is not the home's own
+  refuses every command rather than guess.
 
 Check state any time:
 

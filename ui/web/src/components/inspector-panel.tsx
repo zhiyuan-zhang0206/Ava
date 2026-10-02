@@ -206,8 +206,7 @@ export function InspectorPanel({ agentId }: { agentId: number }) {
     if (viewport) viewport.scrollTop = 0;
   }, [agentId]);
 
-  // Open pages: SSE-driven cache (page_opened/page_closed fold in live), not a
-  // poll — see useAgentPages.
+  // Open pages: page events prompt a coalesced list read; see useAgentPages.
   const pages = useAgentPages(agentId);
 
   // The global notices fold exclusively invalidates the live query. This
@@ -615,10 +614,10 @@ function ShellRow({
 }
 
 // Config keys whose values are skill-name lists. The agent runtime stores
-// these in the underscore Python projection (ava_code_worktree); the UI
-// renders the canonical dash spelling (ava-code-worktree) — the same rule the
+// these in the underscore Python projection (ava_qa_inspection); the UI
+// renders the canonical dash spelling (ava-qa-inspection) — the same rule the
 // `# Capabilities` index and the skills panel follow
-// (shared.packages.skills.skill_names.display_name).
+// (base.packages.skills.names.display_name).
 const SKILL_LIST_KEYS = new Set([
   "skills_to_inject_into_system_prompt",
   "skills_to_expand_at_start",
@@ -775,7 +774,6 @@ const STATUS_LABEL_KEY: Record<string, string> = {
   running: "statusRunning",
   idling: "statusIdling",
   impersonated: "statusImpersonated",
-  restarting: "statusRestarting",
   terminated: "statusTerminated",
 };
 
@@ -825,12 +823,10 @@ function LivenessSection({ inspect }: { inspect: AgentInspectLive }) {
 }
 
 // The "next heartbeat" cell — mirrors the backend's mutually-exclusive states:
-// an active pause renders a clock time; an idle-family agent (idling /
-// restarting — the statuses the fleet view projects to Idle)
+// an active pause renders a clock time; an idling agent
 // with a check-in already queued (the daemon won't send another while an
 // inbound is pending) renders "pending"; one with nothing queued renders its
-// projected next check-in, or "due" when the projection has passed (a
-// restarting agent's idle clock runs on while the daemon skips it — a past
+// projected next check-in, or "due" when the projection has passed (a past
 // "next" time must never render as "Xm ago"); a running or terminated agent
 // an em dash (never checked in on).
 function nextHeartbeatCell(

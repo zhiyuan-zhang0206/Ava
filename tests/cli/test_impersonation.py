@@ -14,11 +14,11 @@ from typing import Any
 import httpx
 import pytest
 
+from base.agents import impersonation as control
+from base.agents.impersonation import sessions as sessions
 from cli.commands.agents import impersonation as cli
 from cli.commands.agents.timeline import cmd_agents_timeline
 from cli.parsers import build_parser
-from shared.agents import impersonation as control
-from shared.agents.impersonation import impersonation_sessions as sessions
 
 
 def _private_id(agent_id: int, session_id: int) -> str:
@@ -64,10 +64,10 @@ def test_timeline_preserves_existing_payload(
         seen.update({"url": url, **kwargs})
         return httpx.Response(200, json=payload, request=httpx.Request("GET", url))
 
-    monkeypatch.setattr("shared.http_dial.get", get)
-    monkeypatch.setattr("shared.machine.gateway_api_base", lambda: "http://gateway")
+    monkeypatch.setattr("base.host.net.http_dial.get", get)
+    monkeypatch.setattr("base.cluster.machine.gateway_api_base", lambda: "http://gateway")
     monkeypatch.setattr(
-        "shared.machine.gateway_auth_headers", lambda: {"Authorization": "Bearer cluster"}
+        "base.cluster.machine.gateway_auth_headers", lambda: {"Authorization": "Bearer cluster"}
     )
     assert cmd_agents_timeline(405) == 0
     assert seen["url"] == "http://gateway/api/agents/405/timeline"
@@ -294,7 +294,7 @@ def test_ack_uses_explicit_processed_ids_only(
 def test_classified_attestation_refusal_fails_without_leaking_state(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    from shared.agents.impersonation import ImpersonationError
+    from base.agents.impersonation import ImpersonationError
 
     def deny(_lease: str, _caller: object) -> dict[str, Any]:
         raise ImpersonationError("Controller caller check failed (chain-mismatch): see docs")
@@ -320,9 +320,7 @@ def test_release_preserves_summary(monkeypatch: pytest.MonkeyPatch) -> None:
         _private_id,
     )
     monkeypatch.setattr(control, "release", release)
-    monkeypatch.setattr(
-        "shared.agents.impersonation.impersonation_history.public_session", _public_session
-    )
+    monkeypatch.setattr("base.agents.impersonation.history.public_session", _public_session)
     assert (
         cli.cmd_impersonate(
             _args("release", "0", "--agent", "405", "--summary", "Completed X.\nNext Y.")

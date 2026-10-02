@@ -8,7 +8,7 @@ tasks #2915 / #3267).
 ## The version
 
 - **Bare form:** `YYYY.M.D` from the commit date of the checkout's HEAD
-  (`shared/host_version.py:host_version`) — e.g. `2026.9.13`. This is the
+  (`base/deploy/git/host_version.py:host_version`) — e.g. `2026.9.13`. This is the
   string every gate compares, so it always exists on every checkout-mode
   machine, advances by itself, and needs no release process.
 - **Display form:** `YYYY.M.D+g<short-sha>` (`host_version_display`) — for
@@ -44,7 +44,7 @@ single source of truth for their bundled skills.
 
 | Point | Check | On violation |
 |---|---|---|
-| install / upgrade (skill / plugin / mcp) | `engines` range + `requires_commit` vs this checkout | refuse, report (`cli/commands/_manifest_gate.py`) |
+| install / upgrade (skill / plugin / mcp) | `engines` range + `requires_commit` vs this checkout | refuse, report (`cli/commands/extensions/_manifest_gate.py`) |
 | content-channel refresh landing | same, against the staged tree | keep the current content, record `blocked_version`, retry after the host moves |
 | runtime plugin load | `engines` vs the derived version | skip that plugin, loud report, process continues |
 | runtime skill scan | `engines` vs the derived version | excluded from the catalog with a visible reason |
@@ -55,12 +55,12 @@ There is deliberately **no** "bump a version on content-facing merges" rule —
 that was the rejected v2 proposal (a number nothing else maintains, enforced
 by CI bookkeeping). The derived date advances by itself, and a first-class
 human version exists only if the dormant dated-release pipeline
-(`scripts/release_cut.py`) is revived — a separate call, not a dependency of
+(`scripts/ci/release_cut.py`) is revived — a separate call, not a dependency of
 this policy.
 
 ## CI
 
-`scripts/lint_core_content_manifests.py` (CI job `core-content manifests`,
+`scripts/content_lint/lint_core_content_manifests.py` (CI job `core-content manifests`,
 pre-commit `lint-core-content-manifests`) keeps core content honest:
 
 - every manifest under `ava_builtins/` validates, its `engines` ranges admit

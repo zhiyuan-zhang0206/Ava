@@ -11,12 +11,13 @@ fallback).
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 
 import pytest
 import yaml
 
-from scripts import refresh_test_durations as refresh
+from scripts.ci import refresh_test_durations as refresh
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -187,7 +188,6 @@ def test_measure_backend_retries_and_reseeds_the_ci_durations(
         nonlocal attempts
         attempts += 1
         assert pytest_args == [
-            "tests/",
             "-q",
             "--ignore=tests/e2e",
             "-m",
@@ -353,3 +353,26 @@ def test_shard_counts_track_both_workflow_matrices() -> None:
 
     assert refresh._BACKEND_SHARDS == len(ci_backend) == len(nightly_backend)
     assert refresh._E2E_SHARDS == len(ci_e2e) == len(nightly_e2e)
+
+
+def test_coverage_args_track_the_ci_backend_shard() -> None:
+    """The measurement must trace the modules a CI shard traces.
+
+    Tracing is part of the shard environment, so durations measured without it run
+    systematically faster. ``--cov=shared`` outlived the shared -> base rename: pytest-cov
+    warned "Module shared was never imported" on every measured shard and ``base`` was not
+    traced at all. Both of the shard step's attempts must name the same modules as
+    ``_BACKEND_COVERAGE_ARGS``.
+    """
+    document = yaml.safe_load((_REPO_ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8"))
+    steps = document["jobs"]["backend-shard"]["steps"]
+    (command,) = (step["run"] for step in steps if step.get("name") == "Run pytest shard")
+    attempts = [
+        sorted(re.findall(r"--cov=(\w+)", attempt))
+        for attempt in command.split("uv run pytest")[1:]
+    ]
+    assert len(attempts) == 2
+    assert attempts[0] == attempts[1]
+    assert (
+        sorted(arg.removeprefix("--cov=") for arg in refresh._BACKEND_COVERAGE_ARGS) == attempts[0]
+    )

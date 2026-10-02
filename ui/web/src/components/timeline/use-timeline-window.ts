@@ -137,6 +137,7 @@ interface Options {
   identity: string | null;
   viewportRef: { current: HTMLElement | null };
   contentRef: { current: HTMLElement | null };
+  isFollowing: () => boolean;
   pendingAnchor: { id: string; rank: number } | null;
   restoreTop: number | null;
 }
@@ -149,11 +150,13 @@ export function useTimelineWindow({
   identity,
   viewportRef,
   contentRef,
+  isFollowing,
   pendingAnchor,
   restoreTop,
 }: Options) {
   const [heights, setHeights] = useState(() => new Map<string, number>());
   const [visiblePin, setVisiblePin] = useState<{ id: string; rank: number; identity: string | null } | null>(null);
+  if (isFollowing() && visiblePin !== null) setVisiblePin(null);
   const previousIdentityRef = useRef(identity);
   const [view, setView] = useState({ top: restoreTop ?? 0, height: 0, origin: 52 });
   const viewRef = useRef(view);
@@ -162,6 +165,13 @@ export function useTimelineWindow({
   const tracking = enabled || groups.reduce((count, group) =>
     count + (group.expandedRows?.length ?? 1), 0) >= measureRows;
   const rememberVisible = useCallback(() => {
+    // Bottom commands hand position ownership back to the sticky controller.
+    // A parked row must neither cancel its smooth scroll nor pin the old window.
+    if (isFollowing()) {
+      readingRef.current = null;
+      preserveRef.current = null;
+      return;
+    }
     const content = contentRef.current;
     const viewport = viewportRef.current;
     const node = content && viewport ? visibleRow(content, viewport.getBoundingClientRect()) : null;
@@ -171,12 +181,12 @@ export function useTimelineWindow({
     readingRef.current = { node, top: node.getBoundingClientRect().top, id, rank, identity };
     setVisiblePin((previous) => previous?.id === id && previous.rank === rank && previous.identity === identity
       ? previous : { id, rank, identity });
-  }, [contentRef, identity, viewportRef]);
+  }, [contentRef, identity, isFollowing, viewportRef]);
   useLayoutEffect(() => { viewRef.current = view; }, [view]);
   // Layout cleanup runs before React replaces rows. It covers window activation
   // and a Details-mode change even when neither fires a scroll event.
   useLayoutEffect(() => () => {
-    if (!tracking || preserveRef.current) return;
+    if (!tracking || isFollowing() || preserveRef.current) return;
     preserveRef.current = readingRef.current;
     if (!preserveRef.current) {
       rememberVisible();
@@ -297,7 +307,7 @@ export function useTimelineWindow({
     const preserved = preserveRef.current;
     preserveRef.current = null;
     const viewport = viewportRef.current;
-    if (preserved?.identity === identity && viewport) {
+    if (!isFollowing() && preserved?.identity === identity && viewport) {
       const node = preserved.node.isConnected ? preserved.node :
         contentRef.current?.querySelector<HTMLElement>(
           `.timeline-item[data-item-id="${CSS.escape(preserved.id)}"][data-display-rank="${preserved.rank}"], [data-turn-expanded="false"][data-item-id="${CSS.escape(preserved.id)}"][data-display-rank="${preserved.rank}"]`,

@@ -1,17 +1,17 @@
 #!/usr/bin/env bash
-# uv — the package manager every Ava unit and the eval image use. Installed
+# uv — the package manager every Ava unit and the verification image use. Installed
 # from a pinned GitHub release asset (fixed version + sha256, single source
-# with shared/brew_pin.py) instead of the astral installer's rolling latest,
+# with base/host/brew_pin.py) instead of the astral installer's rolling latest,
 # so a fresh box gets the same operator-approved version CI and brew-pinned
 # hosts run. Idempotent: skips the fetch when `uv` is already on PATH.
 #
 # This installs ONLY the uv binary. Interpreter provisioning + dependency sync
-# differ per consumer and stay with them: a unit runs `uv python install 3.12` +
-# `uv sync` in install.sh; the eval image bakes its venv in a dedicated Dockerfile
-# layer (it needs the pyproject/uv.lock COPY + the corp-CA build secret).
+# differ per consumer and stay with them: source development uses its locked
+# dependency installer; the verification image builds its venv at run time from the
+# commit under test's lockfile.
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_lib.sh"
 
-# Pinned uv release — must match shared/brew_pin.py UV_VERSION / UV_ASSET_SHA256
+# Pinned uv release — must match base/host/brew_pin.py UV_VERSION / UV_ASSET_SHA256
 # (contract test: tests/scripts/test_toolchain_uv_pin.py).
 UV_VERSION="0.10.2"
 # Overridable so a mirror user can point at a GitHub proxy they trust; the

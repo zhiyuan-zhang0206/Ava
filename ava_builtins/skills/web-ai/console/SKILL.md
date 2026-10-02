@@ -22,40 +22,40 @@ the question is easy, just answer it — don't convene the panel.
 
 ```bash
 # Ask all three (ChatGPT + Gemini + Claude):
-$AVA_HOME/source/.venv/bin/python $AVA_HOME/skills/web-ai/console/reference/ask.py --prompt "Prove that ..."
+$AVA_HOME/source/.venv/bin/python $AVA_HOME/skills/web-ai/console/scripts/ask.py --prompt "Prove that ..."
 
 # A subset:
-$AVA_HOME/source/.venv/bin/python $AVA_HOME/skills/web-ai/console/reference/ask.py --models chatgpt,gemini --prompt "..."
+$AVA_HOME/source/.venv/bin/python $AVA_HOME/skills/web-ai/console/scripts/ask.py --models chatgpt,gemini --prompt "..."
 
 # Perplexity — web-search-grounded, the best pick for current facts / cited
 # sources (opt-in: not in the default three, since it answers from a live
 # search rather than the model's own reasoning):
-$AVA_HOME/source/.venv/bin/python $AVA_HOME/skills/web-ai/console/reference/ask.py --models perplexity \
+$AVA_HOME/source/.venv/bin/python $AVA_HOME/skills/web-ai/console/scripts/ask.py --models perplexity \
     --prompt "What changed in the latest <X> release? Cite sources."
 
 # Long / multi-line question on stdin:
-cat question.txt | $AVA_HOME/source/.venv/bin/python $AVA_HOME/skills/web-ai/console/reference/ask.py
+cat question.txt | $AVA_HOME/source/.venv/bin/python $AVA_HOME/skills/web-ai/console/scripts/ask.py
 
 # Give a slow model more time (default 180s per model):
-$AVA_HOME/source/.venv/bin/python $AVA_HOME/skills/web-ai/console/reference/ask.py --timeout 300 --prompt "..."
+$AVA_HOME/source/.venv/bin/python $AVA_HOME/skills/web-ai/console/scripts/ask.py --timeout 300 --prompt "..."
 
 # Attach a local file (PDF / image / ...) — analyzed on the flat-rate seat,
 # no API credits. Sent to every model asked:
-$AVA_HOME/source/.venv/bin/python $AVA_HOME/skills/web-ai/console/reference/ask.py --models gemini \
+$AVA_HOME/source/.venv/bin/python $AVA_HOME/skills/web-ai/console/scripts/ask.py --models gemini \
     --file ~/Downloads/report.pdf --prompt "Summarize the attached report's key risks."
 
 # Follow up in an existing conversation by chat ID (the `chat_id` from a
 # previous result — preferred, it always points to the right conversation):
-$AVA_HOME/source/.venv/bin/python $AVA_HOME/skills/web-ai/console/reference/ask.py --models claude \
+$AVA_HOME/source/.venv/bin/python $AVA_HOME/skills/web-ai/console/scripts/ask.py --models claude \
     --chat-id "<chat_id>" --prompt "Now check the edge case where ..."
 
 # Follow up in an existing conversation (the `url` from a previous result).
 # Exactly one model — a conversation belongs to one site:
-$AVA_HOME/source/.venv/bin/python $AVA_HOME/skills/web-ai/console/reference/ask.py --models claude \
+$AVA_HOME/source/.venv/bin/python $AVA_HOME/skills/web-ai/console/scripts/ask.py --models claude \
     --continue-url "https://claude.ai/chat/<id>" --prompt "Now check the edge case where ..."
 
 # Keep each model's browser tab open afterward (default closes them):
-$AVA_HOME/source/.venv/bin/python $AVA_HOME/skills/web-ai/console/reference/ask.py --keep-tab --prompt "..."
+$AVA_HOME/source/.venv/bin/python $AVA_HOME/skills/web-ai/console/scripts/ask.py --keep-tab --prompt "..."
 ```
 
 Each model answers in its own browser tab, which is **closed once the answer is

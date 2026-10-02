@@ -72,7 +72,7 @@ from agent.messages.guard import guarded_add_messages, guarded_delta_reducer
 # module attribute lookup — so old checkpoints keep deserializing only while
 # these names stay importable from agent.state. New checkpoints carry
 # ("agent.state_channels", "<Name>") and are allowlisted in
-# shared/agents/history/checkpoint_serde.py alongside the legacy pairs.
+# base/agents/history/checkpoint_serde.py alongside the legacy pairs.
 from agent.state_channels import AttachEntry as _AttachEntry
 from agent.state_channels import (
     AttachState,
@@ -83,9 +83,9 @@ from agent.state_channels import (
     MemoryState,
     _memory_state_merge,
 )
-from shared import plugin_contributions
-from shared.agents.history.checkpoint_serde import STATIC_CHECKPOINT_MSGPACK_TYPES
-from shared.plugin_context import current_plugin_name
+from base.agents.history.checkpoint_serde import STATIC_CHECKPOINT_MSGPACK_TYPES
+from base.packages.plugins import contributions
+from base.packages.plugins.context import current_plugin_name
 
 AttachEntry = _AttachEntry
 
@@ -111,7 +111,7 @@ class BaseAgentState(BaseModel):
     # to `checkpoint_writes` (periodic `_DeltaSnapshot` blobs at
     # _MESSAGES_DELTA_SNAPSHOT_FREQUENCY); readers fold at read time, and the
     # read-compat layer keeps pre-switch threads readable through rollback
-    # (shared/agents/history/delta_read_compat.py). The reducer is the delta form of the
+    # (base/agents/history/delta_read_compat.py). The reducer is the delta form of the
     # append-only guard — guarded_delta_reducer replays stored writes through
     # guarded_add_messages, so the invariant (user ruling 2026-08-13, task
     # #1256 — only a full wipe, a tail append, or modifying the last message
@@ -191,7 +191,7 @@ _EXTRA_FIELDS: dict[str, _StateFieldSpec] = {}
 _PLUGIN_NAMESPACE_FIELDS: dict[str, set[str]] = {}
 
 # Core keys a plugin may declare/write: only `messages` (its add_messages
-# reducer defines the merge contract; _exec_notes.merge_exec_notes combines a
+# reducer defines the merge contract; exec._notes.merge_exec_notes combines a
 # plugin's messages delta with the exec ToolMessage — tool result first,
 # notes after, per the Anthropic-compat adjacency constraint). Every other
 # BaseAgentState field is framework-managed per turn (halted / turn_active /
@@ -229,7 +229,7 @@ _BASE_STATE_FIELDS: frozenset[str] = _BASE_FIELDS
 def _validate_plugin_state_keys(update: dict[str, Any], state_cls: type[Any]) -> dict[str, Any]:
     """fail-fast: plugin writing to ava.state_update with illegal keys must raise.
 
-    Two classes of abuse raise — CLAUDE.md "fail-fast / no silent fallback":
+    Two classes of abuse raise — AGENTS.md "fail-fast / no silent fallback":
     1. Base field written but the plugin did not explicitly declare it in
        BaseModel → missing prefix typo
     2. Key not in state schema → LangGraph reducer silently drops outside
@@ -600,7 +600,7 @@ def register_plugin_state[T: BaseModel](cls: type[T]) -> PluginStateHandle[T]:
             # treats this base channel as a legal write target (writing base
             # fields without declaration is still rejected as typo).
             _BASE_FIELD_DECLARED.add(name)
-            plugin_contributions.record(
+            contributions.record(
                 "state", name, detail=f"{cls.__name__}.{name}: base channel, co-written"
             )
             continue
@@ -615,7 +615,7 @@ def register_plugin_state[T: BaseModel](cls: type[T]) -> PluginStateHandle[T]:
                 )
         else:
             _EXTRA_FIELDS[prefixed] = (raw_annotation, model_field)
-            plugin_contributions.record(
+            contributions.record(
                 "state",
                 prefixed,
                 detail=f"{cls.__name__}.{name}: {_annotation_text(raw_annotation)}",
@@ -652,13 +652,13 @@ def clear_plugin_registrations() -> None:
     _BASE_FIELD_DECLARED.clear()
     # avoid circular import: lazy import inside the function for cross-module reset points
     import ava
+    import ava.sdk_surface.skill_sources
     import ava.sdk_surface.wraps
-    import ava.skill_sources
     from agent.graph.context_notes import clear_plugin_context_notes
     from agent.graph.system_prompt import clear_plugin_system_prompt_sections
     from agent.hooks import clear_hooks
-    from shared.plugin_config_registry import clear_plugin_configs
-    from shared.plugin_flags import clear_plugin_flags
+    from base.packages.plugins.config_registration import clear_plugin_configs
+    from base.packages.plugins.flags import clear_plugin_flags
 
     # Keep the framework-owned sections / context notes (registered once at
     # module import); drop only the plugin-contributed tails.
@@ -667,10 +667,10 @@ def clear_plugin_registrations() -> None:
     clear_hooks()
     clear_plugin_configs()
     clear_plugin_flags()
-    plugin_contributions.clear()
+    contributions.clear()
     ava.clear_registered_namespaces()
     ava.sdk_surface.wraps.clear_wraps()
-    ava.skill_sources.clear()
+    ava.sdk_surface.skill_sources.clear()
 
 
 def _plugin_namespace_view(state: BaseAgentState, plugin: str) -> SimpleNamespace:

@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Postgres 17 + Redis SERVER — the native data plane a gateway owns (and the CI /
 # bench hosts need so the test suite can spin throwaway clusters). One source for
-# install.sh / install-system.sh. Linux: PGDG pg17 + redis-server; macOS: brew;
-# Windows: Docker (see docker-compose.windows.yml).
+# install-system.sh and evaluation images. Linux: PGDG pg17 + redis-server;
+# macOS: brew. Gateway data-plane processes run on POSIX hosts.
 #
 # WSL without sudo: a Linux host that already carries the whole data plane
 # (pg17 binaries under /usr/lib/postgresql/17/bin, redis-server, pgbouncer)
@@ -16,9 +16,14 @@
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_lib.sh"
 
 # The operator-approved PgBouncer build (pgdg, Ubuntu 24.04). The CI install
-# action pins the same string; shared/brew_pin.py holds the canonical value and
+# action pins the same string; base/host/brew_pin.py holds the canonical value and
 # tests/ci/test_pgbouncer_pin.py asserts the copies match.
 PGBOUNCER_APT_VERSION="1.26.0-1.pgdg24.04+1"
+
+# The operator-approved Redis series (8.2, as macOS pins `redis@8.2`): the newest
+# patch release redis.io serves for it. base/host/brew_pin.py holds the canonical
+# value; tests/ci/test_redis_pin.py asserts the copies match.
+REDIS_APT_VERSION="6:8.2.*"
 
 OS="$(prov_os)"
 case "$OS" in
@@ -38,13 +43,15 @@ case "$OS" in
       prov_apt_install ca-certificates curl gnupg locales
 
       # Redis >= 6.2 for ACL resetchannels (Ubuntu 22.04 apt ships 6.0).
-      # Install from the official redis.io apt repo (matching prod's 8.2).
+      # Install from the official redis.io apt repo, held to the approved 8.2
+      # series: the repo's newest release is a different major line.
       prov_apt_install gpg
       curl -fsSL https://packages.redis.io/gpg | gpg --dearmor > /tmp/redis-archive-keyring.gpg
       prov_sudo mv /tmp/redis-archive-keyring.gpg /usr/share/keyrings/redis-archive-keyring.gpg
       echo "deb [signed-by=/usr/share/keyrings/redis-archive-keyring.gpg] https://packages.redis.io/deb $(source /etc/os-release && echo $VERSION_CODENAME) main"       | prov_sudo tee /etc/apt/sources.list.d/redis.list > /dev/null
       prov_sudo apt-get update
-      prov_apt_install redis
+      prov_apt_install "redis-server=${REDIS_APT_VERSION}" "redis-tools=${REDIS_APT_VERSION}"
+      prov_sudo apt-mark hold redis-server redis-tools
       prov_sudo locale-gen en_US.UTF-8
 
       # Postgres 17 server via the official PGDG repo (Ubuntu 24.04 ships 16).
@@ -75,11 +82,11 @@ case "$OS" in
     brew install postgresql@17 redis@8.2 pgbouncer pgvector
     ;;
   windows)
-    # PostgreSQL and Redis are provided via Docker Desktop (WSL2 backend).
-    # Native Windows PG/Redis installation is deferred to Phase 3.
-    # See docker-compose.windows.yml and conventions/windows-setup.md.
-    prov_log "Windows: PostgreSQL + Redis are expected via Docker Desktop (docker-compose.windows.yml)"
-    prov_log "If Docker is not running, start Docker Desktop and run: docker compose -f docker-compose.windows.yml up -d"
+    # A native Windows unit carries agent-runner only and owns no data plane; a
+    # gateway on Windows hardware runs inside WSL2, where the linux branch
+    # applies (conventions/windows-setup.md).
+    prov_log "Windows: no local data plane; run a gateway inside WSL2 through the Linux path"
+    exit 0
     ;;
 esac
 prov_log "postgres 17 + redis + pgbouncer installed"

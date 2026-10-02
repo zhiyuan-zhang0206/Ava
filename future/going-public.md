@@ -14,10 +14,9 @@ does not.
 
 Note that the rest of `scripts/provision/` is **not** self-hosted-runner
 machinery and stays: `_lib.sh` / `database.sh` / `node.sh` / `toolchain.sh` are
-sourced by `scripts/install.sh` (the installer a new user runs) and the
-`Dockerfile`, and `install-playwright.sh` is the eval image's playwright layer.
+package-acquisition helpers used by image/toolchain preparation.
 Deleting the directory wholesale, as an earlier version of this checklist said
-to, would break the installer.
+to, would remove those dependency-acquisition primitives.
 
 ## Gaps vs. the retired private lane
 
@@ -34,7 +33,7 @@ Status of the gaps left by the swap:
   PRs, and the backend/frontend jobs own the heavy checks directly. Only the
   warn-only hook-installation check is local-only; see the
   [CI runbook](../conventions/runbook.md#ci-continuous-integration).
-- **No `check_cross_branch_migrations`.** `scripts/check_cross_branch_migrations.py`
+- **No `check_cross_branch_migrations`.** `scripts/content_lint/check_cross_branch_migrations.py`
   exists and nothing calls it, so migration-set drift between concurrently open
   branches is unchecked.
 

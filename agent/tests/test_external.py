@@ -1,0 +1,690 @@
+"""Borrowed identities and plugin state honor consent, TTL and checkpoint ownership."""
+
+from __future__ import annotations
+
+import time
+from concurrent.futures import ThreadPoolExecutor
+from datetime import UTC, datetime
+from itertools import count
+from threading import Event, Thread, Timer
+from typing import Annotated, Any
+
+import pytest
+from langchain_core.messages import AnyMessage, HumanMessage, RemoveMessage
+from langgraph.graph.message import REMOVE_ALL_MESSAGES, add_messages
+from pydantic import BaseModel, Field
+
+import ava
+from agent import state as state_module
+from ava import agent_identity, external, gateway_client
+from ava.external import state
+from ava.external.state import apply_plugin_delta, decode_plugin_delta, encode_plugin_delta
+from base import telemetry
+from base.config.turn_view import bind_agent_config, current_agent_config_pins, turn_settings
+from base.packages.plugins.config_view import bind_agent_plugin_config, current_plugin_config_view
+from base.telemetry import Event as TelemetryEvent
+from base.telemetry.otlp import telemetry_otlp
+
+
+def _union(left: set[str], right: set[str]) -> set[str]:
+    return left | right
+
+
+class ExampleState(state_module.BaseAgentState):
+    sample__seen: Annotated[set[str], _union] = Field(default_factory=set)
+
+
+class ExamplePlugin(BaseModel):
+    seen: Annotated[set[str], _union] = Field(default_factory=set)
+
+
+class ExampleMessagesPlugin(BaseModel):
+    messages: Annotated[list[AnyMessage], add_messages] = Field(default_factory=list[AnyMessage])
+
+
+@pytest.fixture
+def attached_runtime(
+    monkeypatch: pytest.MonkeyPatch,
+) -> tuple[dict[str, Any], Any, list[dict[str, Any]]]:
+    lease: dict[str, Any] = {
+        "id": "lease",
+        "session_id": 0,
+        "agent_id": 405,
+        "machine": "local-runner",
+        "status": "active",
+        "delta_version": 0,
+        "applied_version": 0,
+        "plugin_delta": [],
+        "automatic": False,
+        "event_delivery_protocol_version": None,
+    }
+    staged: list[dict[str, Any]] = []
+    snapshot = ExampleState(sample__seen={"native"})
+    monkeypatch.setattr(agent_identity, "_external_identity", None)
+    monkeypatch.setattr(agent_identity, "_agent_id", None)
+    monkeypatch.setattr(agent_identity, "_owns_loop", True)
+    monkeypatch.setattr(ava, "state", None)
+    monkeypatch.setattr(ava, "state_update", None)
+
+    def loader_stub(**_kwargs: object) -> None:
+        """Accept the `surface` kwarg attach passes (ignored)."""
+
+    monkeypatch.setattr(ava, "ensure_plugins_loaded", loader_stub)
+    monkeypatch.setattr(state_module, "AgentState", ExampleState)
+    monkeypatch.setattr(state_module, "_BASE_FIELD_DECLARED", {"messages"})
+    monkeypatch.setattr(external, "machine_name", lambda: "local-runner")
+
+    def load(_agent_id: int) -> tuple[ExampleState, dict[str, Any], None]:
+        return snapshot.model_copy(deep=True), {"llm_model": "external-test"}, None
+
+    monkeypatch.setattr(external, "load_snapshot", load)
+
+    def require(lease_id: str, attesting: dict[str, Any]) -> dict[str, Any]:
+        assert lease_id == "lease"
+        assert attesting == {"pid": 777}
+        if lease["status"] != "active":
+            raise RuntimeError("lease expired")
+        return dict(lease)
+
+    def stage(
+        lease_id: str, attesting: dict[str, Any], delta: dict[str, Any], *, expected_version: int
+    ) -> None:
+        require(lease_id, attesting)
+        if expected_version != lease["delta_version"]:
+            raise RuntimeError("stale version")
+        staged.append(delta)
+        lease["plugin_delta"].append(delta)
+        lease["delta_version"] += 1
+
+    monkeypatch.setattr(external.control, "require_active", require)
+    monkeypatch.setattr(external.control, "merge_plugin_delta", stage)
+    monkeypatch.setattr(external, "process_metadata", lambda: {"pid": 777})
+
+    # This suite models the pre-manifest lease boundary with a symbolic lease
+    # id. The receipt seam is integration-tested against real UUID leases;
+    # keeping it outside this state-machine fixture avoids an accidental DB
+    # dial that the fixture cannot represent.
+    def no_local_participant(*_args: Any, **_kwargs: Any) -> bool:
+        return False
+
+    monkeypatch.setattr(
+        "base.agents.impersonation_manifest.open_local_participant", no_local_participant
+    )
+    return lease, snapshot, staged
+
+
+def test_attach_borrows_identity_even_with_explicit_external_profile(
+    attached_runtime: tuple[dict[str, Any], Any, list[dict[str, Any]]],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("AVA_CALLER_IDENTITY", '{"kind":"external_agent","subject":"codex"}')
+    with external.attach("lease"):
+        assert agent_identity._external_agent_id == 405
+        assert ava.self.AGENT_ID == 405
+        assert agent_identity.require_agent_id() == 405
+        assert agent_identity.require_actor() == "agent:405"
+        assert agent_identity.default_actor() == "agent:405"
+        assert turn_settings.lm.llm_model == "external-test"
+    assert agent_identity._external_identity is None
+    assert agent_identity._external_agent_id is None
+    assert agent_identity.require_actor() == "external_agent:codex"
+    assert ava.state is None
+
+
+def test_legacy_attachment_never_opens_a_manifest_receipt(
+    attached_runtime: tuple[dict[str, Any], Any, list[dict[str, Any]]],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A NULL-version legacy attachment has no manifest database side effect."""
+
+    def unexpected_open(_lease_id: str, *, agent_id: int, source_key: str) -> bool:
+        del agent_id, source_key
+        pytest.fail("legacy attachment opened a manifest receipt")
+
+    monkeypatch.setattr(
+        "base.agents.impersonation_manifest.open_local_participant",
+        unexpected_open,
+    )
+
+    with external.attach("lease"):
+        pass
+
+
+def test_expiry_blocks_identity_and_plugin_state_before_new_effects(
+    attached_runtime: tuple[dict[str, Any], Any, list[dict[str, Any]]],
+) -> None:
+    lease, _, staged = attached_runtime
+    attachment = external.attach("lease")
+    handle = state_module.PluginStateHandle(ExamplePlugin, "sample")
+    lease["status"] = "expired"
+    for read in (
+        lambda: ava.self.AGENT_ID,
+        agent_identity.require_actor,
+        handle.read,
+        lambda: handle.update({"seen": {"too-late"}}),
+    ):
+        with pytest.raises(RuntimeError, match="expired"):
+            read()
+    with pytest.raises(RuntimeError, match="expired"):
+        attachment.close()
+    assert agent_identity._external_identity is None
+    assert agent_identity._external_agent_id is None
+    assert not staged
+
+
+def test_attach_requests_native_plugin_load(
+    attached_runtime: tuple[dict[str, Any], Any, list[dict[str, Any]]],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The attach path asks for the faces-included plugin load (#2616 review).
+
+    ``load_snapshot`` rebuilds the checkpoint through ``build_agent_state()``,
+    so a surface-only load silently drops the plugin state fields the lease
+    carries. Locks the wiring; the loader's own surface/full split is
+    exercised in agent/tests/test_lazy_child_imports.py.
+    """
+    calls: list[dict[str, Any]] = []
+
+    def spy_loader(**kwargs: Any) -> None:
+        calls.append(kwargs)
+
+    monkeypatch.setattr(ava, "ensure_plugins_loaded", spy_loader)
+    with external.attach("lease"):
+        pass
+    assert calls == [{"surface": False}]
+
+
+def test_plugin_updates_journal_once_and_next_attachment_sees_them(
+    attached_runtime: tuple[dict[str, Any], Any, list[dict[str, Any]]],
+) -> None:
+    _, _, staged = attached_runtime
+    handle = state_module.PluginStateHandle(ExamplePlugin, "sample")
+    with external.attach("lease"):
+        handle.update({"seen": {"one"}})
+        handle.update({"seen": {"two"}})
+        assert handle.read().seen == {"native", "one", "two"}
+    assert len(staged) == 1
+    assert decode_plugin_delta(staged[0]) == {"sample__seen": {"one", "two"}}
+    with external.attach("lease"):
+        assert handle.read().seen == {"native", "one", "two"}
+    assert len(staged) == 1
+
+
+def test_stale_attachment_refuses_sdk_identity_and_removes_identity_on_close(
+    attached_runtime: tuple[dict[str, Any], Any, list[dict[str, Any]]],
+) -> None:
+    lease, _, _ = attached_runtime
+    attachment = external.attach("lease")
+    lease["delta_version"] += 1
+    with pytest.raises(RuntimeError, match="another attachment"):
+        agent_identity.require_actor()
+    with pytest.raises(RuntimeError, match="another attachment"):
+        attachment.close()
+    assert agent_identity._external_identity is None
+    assert agent_identity._external_agent_id is None
+
+
+@pytest.mark.parametrize("invalidated", ["expiry", "state_version"])
+def test_failed_context_entry_restores_prior_binding_and_allows_next_attachment(
+    attached_runtime: tuple[dict[str, Any], Any, list[dict[str, Any]]],
+    monkeypatch: pytest.MonkeyPatch,
+    invalidated: str,
+) -> None:
+    lease, _, staged = attached_runtime
+    prior_state = ExampleState(sample__seen={"prior"})
+    prior_update = {"sample__seen": {"pending-before-attachment"}}
+    monkeypatch.setattr(ava, "state", prior_state)
+    monkeypatch.setattr(ava, "state_update", prior_update)
+    with (
+        bind_agent_config({"llm_model": "prior-model"}),
+        bind_agent_plugin_config({"sample": {"setting": "prior"}}),
+    ):
+        prior_config = current_agent_config_pins()
+        prior_plugin_config = current_plugin_config_view()
+        attachment = external.attach("lease")
+        state_module.PluginStateHandle(ExamplePlugin, "sample").update({"seen": {"unflushed"}})
+        if invalidated == "expiry":
+            lease["status"] = "expired"
+            reason = "expired"
+        else:
+            lease["delta_version"] += 1
+            reason = "another attachment"
+        with pytest.raises(RuntimeError, match=reason), attachment:
+            pytest.fail("an invalid attachment entered its context")
+        assert agent_identity._external_identity is None
+        assert agent_identity._external_agent_id is None
+        assert ava.state is prior_state
+        assert ava.state_update is prior_update
+        assert current_agent_config_pins() is prior_config
+        assert current_plugin_config_view() is prior_plugin_config
+        assert not staged
+        attachment.close()  # Already detached; must not retry the failed lease or flush.
+
+        next_lease = {**lease, "id": "next", "status": "active", "delta_version": 0}
+
+        def require_next(lease_id: str, attesting: dict[str, Any]) -> dict[str, Any]:
+            assert lease_id == "next"
+            assert attesting == {"pid": 777}
+            return next_lease
+
+        monkeypatch.setattr(external.control, "require_active", require_next)
+        with external.attach("next"):
+            assert agent_identity._external_agent_id == 405
+            assert ava.self.AGENT_ID == 405
+        assert ava.state is prior_state
+        assert ava.state_update is prior_update
+        assert current_agent_config_pins() is prior_config
+        assert current_plugin_config_view() is prior_plugin_config
+
+
+def test_concurrent_constructor_fails_before_lease_lookup(
+    attached_runtime: tuple[dict[str, Any], Any, list[dict[str, Any]]],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    require = external.control.require_active
+    calls = count()
+    first_lookup = Event()
+    continue_lookup = Event()
+
+    def blocked_require(lease_id: str, attesting: dict[str, Any]) -> dict[str, Any]:
+        if next(calls) == 0:
+            first_lookup.set()
+            assert continue_lookup.wait(5), "test did not release the first lease lookup"
+        return require(lease_id, attesting)
+
+    def attach_in_worker() -> None:
+        with external.attach("lease"):
+            assert agent_identity._external_agent_id == 405
+            assert ava.self.AGENT_ID == 405
+
+    monkeypatch.setattr(external.control, "require_active", blocked_require)
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        first = executor.submit(attach_in_worker)
+        try:
+            assert first_lookup.wait(5), "first constructor did not reach the lease lookup"
+            with (
+                pytest.raises(RuntimeError, match="already has an external attachment"),
+                external.attach("lease"),
+            ):
+                pass
+        finally:
+            continue_lookup.set()
+            first.result(timeout=5)
+    assert agent_identity._external_identity is None
+    assert agent_identity._external_agent_id is None
+    with external.attach("lease"):
+        assert agent_identity._external_agent_id == 405
+        assert ava.self.AGENT_ID == 405
+
+
+@pytest.mark.parametrize("failure_at", ["lease", "snapshot"])
+def test_constructor_failure_restores_binding_and_allows_next_attachment(
+    attached_runtime: tuple[dict[str, Any], Any, list[dict[str, Any]]],
+    monkeypatch: pytest.MonkeyPatch,
+    failure_at: str,
+) -> None:
+    _, _, staged = attached_runtime
+    prior_state = ExampleState(sample__seen={"prior"})
+    prior_update = {"sample__seen": {"pending-before-attachment"}}
+    monkeypatch.setattr(ava, "state", prior_state)
+    monkeypatch.setattr(ava, "state_update", prior_update)
+
+    def fail(*_args: Any) -> Any:
+        raise RuntimeError("constructor interrupted")
+
+    with (
+        bind_agent_config({"llm_model": "prior-model"}),
+        bind_agent_plugin_config({"sample": {"setting": "prior"}}),
+    ):
+        prior_config = current_agent_config_pins()
+        prior_plugin_config = current_plugin_config_view()
+        with monkeypatch.context() as failure_patch:
+            if failure_at == "lease":
+                failure_patch.setattr(external.control, "require_active", fail)
+            else:
+                failure_patch.setattr(external, "load_snapshot", fail)
+            with pytest.raises(RuntimeError, match="constructor interrupted"):
+                external.attach("lease")
+        assert agent_identity._external_identity is None
+        assert agent_identity._external_agent_id is None
+        assert ava.state is prior_state
+        assert ava.state_update is prior_update
+        assert current_agent_config_pins() is prior_config
+        assert current_plugin_config_view() is prior_plugin_config
+        assert not staged
+        with external.attach("lease"):
+            assert agent_identity._external_agent_id == 405
+            assert ava.self.AGENT_ID == 405
+
+
+def test_repeated_close_cannot_release_another_attachment(
+    attached_runtime: tuple[dict[str, Any], Any, list[dict[str, Any]]],
+) -> None:
+    first = external.attach("lease")
+    first.close()
+    with external.attach("lease"):
+        first.close()
+        assert agent_identity._external_agent_id == 405
+        assert ava.self.AGENT_ID == 405
+        with pytest.raises(RuntimeError, match="already has an external attachment"):
+            external.attach("lease")
+
+
+def test_close_rejects_a_new_sdk_effect_before_it_reaches_the_gateway(
+    attached_runtime: tuple[dict[str, Any], Any, list[dict[str, Any]]],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Close fences a new SDK call before its gateway effect, not only at detach."""
+    from base.agents import impersonation_manifest as manifest
+
+    attachment = external.attach("lease")
+    participant = manifest.LocalParticipant("lease", attachment.agent_id, 0, "post-close-sdk")
+    manifest.bind_local_participant(participant)
+    attachment._manifest_participant = participant
+    delivered: list[tuple[int, str]] = []
+
+    def record_send(agent_id: int, *, content: str, source: str) -> None:
+        del source
+        delivered.append((agent_id, content))
+
+    def new_call_during_close() -> None:
+        with pytest.raises(RuntimeError, match="closing"):
+            ava.agents.send_message(99, "must not reach gateway")
+
+    monkeypatch.setattr(gateway_client, "send_message", record_send)
+    monkeypatch.setattr(attachment, "_seal_manifest_participant", lambda: None)
+    monkeypatch.setattr(attachment, "flush", new_call_during_close)
+    attachment.close()
+    assert delivered == []
+
+
+def test_close_does_not_revoke_an_sdk_call_admitted_before_the_fence(
+    attached_runtime: tuple[dict[str, Any], Any, list[dict[str, Any]]],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An SDK call already inside its metering admission finishes its gateway effect."""
+    from base.agents import impersonation_manifest as manifest
+
+    attachment = external.attach("lease")
+    participant = manifest.LocalParticipant("lease", attachment.agent_id, 0, "pre-close-sdk")
+    manifest.bind_local_participant(participant)
+    attachment._manifest_participant = participant
+    entered, release = Event(), Event()
+    delivered: list[tuple[int, str]] = []
+
+    def held_send(agent_id: int, *, content: str, source: str) -> None:
+        del source
+        entered.set()
+        assert release.wait(2), "close did not release the pre-close SDK call"
+        delivered.append((agent_id, content))
+
+    monkeypatch.setattr(gateway_client, "send_message", held_send)
+    monkeypatch.setattr(attachment, "_seal_manifest_participant", lambda: None)
+
+    def skip_seal(_participant: manifest.LocalParticipant) -> None:
+        return None
+
+    monkeypatch.setattr(manifest, "seal_local_participant", skip_seal)
+    worker = Thread(target=lambda: ava.agents.send_message(99, "already admitted"))
+    worker.start()
+    assert entered.wait(2), "SDK call did not reach its gateway boundary"
+    attachment.close()
+    release.set()
+    worker.join(2)
+    assert not worker.is_alive()
+    assert delivered == [(99, "already admitted")]
+
+
+def test_close_delivers_telemetry_when_plugin_flush_fails(
+    attached_runtime: tuple[dict[str, Any], Any, list[dict[str, Any]]],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The close finally path must run delivery as well as detachment."""
+    attachment = external.attach("lease")
+    delivered: list[bool] = []
+
+    def fail_flush() -> None:
+        raise RuntimeError("plugin journal unavailable")
+
+    monkeypatch.setattr(attachment, "flush", fail_flush)
+    monkeypatch.setattr(
+        external, "_deliver_telemetry_before_detach", lambda: delivered.append(True)
+    )
+
+    with pytest.raises(RuntimeError, match="plugin journal unavailable"):
+        attachment.close()
+
+    assert delivered == [True]
+    assert agent_identity._external_identity is None
+    assert agent_identity._external_agent_id is None
+
+
+def test_close_waits_for_a_dequeued_otlp_record_before_force_flush(
+    attached_runtime: tuple[dict[str, Any], Any, list[dict[str, Any]]],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A closing attachment waits for the OTLP worker's already-dequeued tail."""
+    from opentelemetry.sdk._logs import LoggerProvider
+    from opentelemetry.sdk._logs.export import InMemoryLogRecordExporter, SimpleLogRecordProcessor
+    from opentelemetry.sdk.metrics import MeterProvider
+    from opentelemetry.sdk.metrics.export import InMemoryMetricReader
+
+    exporter = InMemoryLogRecordExporter()
+    logger_provider = LoggerProvider()
+    logger_provider.add_log_record_processor(SimpleLogRecordProcessor(exporter))
+    backend = telemetry_otlp._OtlpBackend(
+        providers=(logger_provider, MeterProvider(metric_readers=[InMemoryMetricReader()]))
+    )
+    monkeypatch.setattr(backend, "_enabled", lambda: True)
+    monkeypatch.setattr(telemetry_otlp, "backend", backend)
+
+    def no_sync(*_args: object, **_kwargs: object) -> None:
+        pass
+
+    monkeypatch.setattr(telemetry, "sync", no_sync)
+    paused = Event()
+    release = Event()
+    original_emit = backend._emit_log
+
+    def pause_after_dequeue(event: TelemetryEvent) -> None:
+        paused.set()
+        assert release.wait(2), "close did not release the paused OTLP worker"
+        original_emit(event)
+
+    monkeypatch.setattr(backend, "_emit_log", pause_after_dequeue)
+    backend.export_batch(
+        [
+            TelemetryEvent(
+                ts=datetime.now(UTC),
+                trace_id=None,
+                span_id=None,
+                agent_id=405,
+                machine="test",
+                cluster="test",
+                process="external-test",
+                category="telemetry",
+                event_name="sdk_call",
+                level="info",
+                source="agent:405",
+                target_agent_id=None,
+                attributes={"fn": "files.read", "duration": 0.01},
+            )
+        ]
+    )
+    assert paused.wait(2), "OTLP worker did not dequeue the tail record"
+    attachment = external.attach("lease")
+    timer = Timer(0.1, release.set)
+    timer.daemon = True
+    timer.start()
+    try:
+        started = time.monotonic()
+        attachment.close()
+        assert time.monotonic() - started >= 0.08
+        assert len(exporter.get_finished_logs()) == 1
+    finally:
+        release.set()
+        timer.cancel()
+        backend.shutdown()
+
+
+def test_expired_lease_cannot_dispatch_through_local_mcp(
+    attached_runtime: tuple[dict[str, Any], Any, list[dict[str, Any]]],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from ava import mcps
+
+    lease, _, _ = attached_runtime
+    dispatched: list[bool] = []
+
+    def local_dispatch(coroutine: Any) -> dict[str, Any]:
+        coroutine.close()
+        dispatched.append(True)
+        return {}
+
+    monkeypatch.setattr(mcps, "_get_remote_client", lambda: None)
+    monkeypatch.setattr(mcps, "_run_async", local_dispatch)
+    attachment = external.attach("lease")
+    lease["status"] = "expired"
+    try:
+        with pytest.raises(RuntimeError, match="expired"):
+            mcps._call_raw("example", "side_effect")
+        assert not dispatched
+    finally:
+        with pytest.raises(RuntimeError, match="expired"):
+            attachment.close()
+
+
+def test_mcp_revalidates_lease_before_transport_fallback(
+    attached_runtime: tuple[dict[str, Any], Any, list[dict[str, Any]]],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from ava import mcps
+
+    lease, _, _ = attached_runtime
+
+    class FailedDaemon:
+        def call_tool(self, *_args: Any) -> dict[str, Any]:
+            lease["status"] = "expired"
+            raise mcps.MCPConnectError("daemon disconnected")
+
+    monkeypatch.setattr(mcps, "_get_remote_client", FailedDaemon)
+    attachment = external.attach("lease")
+    try:
+        with pytest.raises(RuntimeError, match="expired"):
+            mcps._call_raw("example", "side_effect")
+    finally:
+        with pytest.raises(RuntimeError, match="expired"):
+            attachment.close()
+
+
+def test_receipted_journal_entries_are_not_replayed(
+    attached_runtime: tuple[dict[str, Any], Any, list[dict[str, Any]]],
+) -> None:
+    lease, snapshot, _ = attached_runtime
+    snapshot.impersonation_applied = {"lease_id": "lease", "version": 1}
+    lease["delta_version"] = 1
+    lease["plugin_delta"] = [
+        encode_plugin_delta({"messages": [RemoveMessage(id="already-removed")]})
+    ]
+    with external.attach("lease"):
+        assert ava.state.messages == []
+
+
+def test_attach_rejects_other_machine_without_binding_identity(
+    attached_runtime: tuple[dict[str, Any], Any, list[dict[str, Any]]],
+) -> None:
+    lease, _, _ = attached_runtime
+    lease["machine"] = "another-runner"
+    with pytest.raises(RuntimeError, match="agent machine"):
+        external.attach("lease")
+    assert agent_identity._external_identity is None
+    assert agent_identity._external_agent_id is None
+
+
+def test_delta_codec_preserves_sets_and_message_objects(
+    attached_runtime: tuple[dict[str, Any], Any, list[dict[str, Any]]],
+) -> None:
+    delta = {
+        "sample__seen": {"a", "b"},
+        "messages": [HumanMessage(content="note", id="note"), RemoveMessage(id="old")],
+    }
+    decoded = decode_plugin_delta(encode_plugin_delta(delta))
+    assert decoded == delta
+    assert isinstance(decoded["sample__seen"], set)
+    assert isinstance(decoded["messages"][1], RemoveMessage)
+
+
+def test_delta_codec_rejects_framework_state_injection(
+    attached_runtime: tuple[dict[str, Any], Any, list[dict[str, Any]]],
+) -> None:
+    with pytest.raises(ValueError, match="framework core"):
+        encode_plugin_delta({"halted": False})
+
+
+@pytest.mark.parametrize("boundary", ["encode", "decode", "apply"])
+@pytest.mark.parametrize(
+    "messages",
+    [
+        RemoveMessage(id=REMOVE_ALL_MESSAGES),
+        [RemoveMessage(id=REMOVE_ALL_MESSAGES), HumanMessage(content="replacement")],
+        [{"type": "remove", "id": REMOVE_ALL_MESSAGES, "content": ""}],
+    ],
+    ids=["single-marker", "wipe-and-replace", "message-dict"],
+)
+def test_external_delta_rejects_full_history_reset_before_any_mutation(
+    attached_runtime: tuple[dict[str, Any], Any, list[dict[str, Any]]],
+    boundary: str,
+    messages: Any,
+) -> None:
+    _, snapshot, _ = attached_runtime
+    snapshot.messages = [HumanMessage(content="Native history", id="native")]
+    before = snapshot.model_copy(deep=True)
+    delta = {"sample__seen": {"must-not-apply"}, "messages": messages}
+    with pytest.raises(ValueError, match=r"REMOVE_ALL.*native compaction"):
+        if boundary == "encode":
+            encode_plugin_delta(delta)
+        elif boundary == "decode":
+            # A persisted envelope must pass the same check before native replay.
+            import base64
+
+            encoding, payload = state._serializer().dumps_typed(delta)
+            decode_plugin_delta(
+                {"encoding": encoding, "data": base64.b64encode(payload).decode("ascii")}
+            )
+        else:
+            apply_plugin_delta(snapshot, delta)
+    assert snapshot == before
+
+
+def test_external_attachment_appends_messages_without_replacing_native_history(
+    attached_runtime: tuple[dict[str, Any], Any, list[dict[str, Any]]],
+) -> None:
+    _, snapshot, staged = attached_runtime
+    native_message = HumanMessage(content="Native history", id="native")
+    appended_message = HumanMessage(content="External progress", id="external")
+    snapshot.messages = [native_message]
+    handle = state_module.PluginStateHandle(ExampleMessagesPlugin, "sample")
+    with external.attach("lease"):
+        handle.update({"messages": [appended_message]})
+        assert handle.read().messages == [native_message, appended_message]
+    assert len(staged) == 1
+    assert decode_plugin_delta(staged[0]) == {"messages": [appended_message]}
+    assert snapshot.messages == [native_message]
+    with external.attach("lease"):
+        assert handle.read().messages == [native_message, appended_message]
+    assert len(staged) == 1
+
+
+def test_external_attachment_refuses_to_journal_a_full_history_reset(
+    attached_runtime: tuple[dict[str, Any], Any, list[dict[str, Any]]],
+) -> None:
+    _, snapshot, staged = attached_runtime
+    snapshot.messages = [HumanMessage(content="Native history", id="native")]
+    attachment = external.attach("lease")
+    ava.state_update = {"messages": [RemoveMessage(id=REMOVE_ALL_MESSAGES)]}
+    with pytest.raises(ValueError, match=r"REMOVE_ALL.*native compaction"):
+        attachment.close()
+    assert not staged
+    assert agent_identity._external_identity is None
+    assert agent_identity._external_agent_id is None
+    assert snapshot.messages == [HumanMessage(content="Native history", id="native")]

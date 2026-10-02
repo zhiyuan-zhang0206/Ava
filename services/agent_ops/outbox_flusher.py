@@ -1,7 +1,7 @@
 """Resident retrier for the deferred-delivery outbox (task #3757).
 
 The recording half of the outbox runs in whatever process saw its send fail
-(`shared.agents.messages.delivery_outbox.record_failed_send`); this half is the dead hand: a
+(`base.agents.messages.delivery_outbox.record_failed_send`); this half is the dead hand: a
 daemon-lifetime task in the machine's ops server that keeps redelivering due
 records — through the canonical chat-inbound path — until they land or their
 budget is spent. It outlives every sender process by construction, which is
@@ -21,8 +21,8 @@ import logging
 
 from psycopg_pool import ConnectionPool
 
-from shared import maintenance
-from shared.agents.messages import delivery_outbox
+from base.agents.messages import delivery_outbox
+from base.deploy.maintenance import admission
 
 _log = logging.getLogger("services.agent_ops.outbox_flusher")
 
@@ -50,7 +50,7 @@ def stop() -> None:
 
 async def _run(pool: ConnectionPool, interval: float) -> None:
     while True:
-        if not maintenance.quiesced():
+        if not admission.quiesced():
             try:
                 report = await asyncio.to_thread(delivery_outbox.flush, pool)
             except Exception:
@@ -58,8 +58,8 @@ async def _run(pool: ConnectionPool, interval: float) -> None:
             else:
                 if report.touched or report.expired:
                     _log.info(
-                        "[delivery-outbox] flush pass: delivered={} buffered={} abandoned={} "
-                        "deferred={} unreadable={} expired={}",
+                        "[delivery-outbox] flush pass: delivered=%s buffered=%s abandoned=%s "
+                        "deferred=%s unreadable=%s expired=%s",
                         report.delivered,
                         report.buffered,
                         report.abandoned,
@@ -71,4 +71,4 @@ async def _run(pool: ConnectionPool, interval: float) -> None:
         try:
             interval = (await asyncio.to_thread(delivery_outbox.limits)).flush_interval_seconds
         except Exception:
-            _log.exception("[delivery-outbox] tick interval read failed; keeping {}s", interval)
+            _log.exception("[delivery-outbox] tick interval read failed; keeping %ss", interval)

@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import sys
 
+from base.host.brew_pin import unpinned_formulae
+from base.native_process.os_platform import IS_MACOS
 from cli.commands.converge.spec import ConvergeCtx
-from shared.brew_pin import unpinned_formulae
-from shared.platform import IS_MACOS
 
 
 def ensure_brew_pin(ctx: ConvergeCtx) -> None:  # noqa: ARG001

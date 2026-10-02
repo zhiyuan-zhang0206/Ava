@@ -1,4 +1,4 @@
-"""`scripts/lint_fixture_scope.py` — a fixture's scope versus the blast radius of
+"""`scripts/lint/fixture_scope.py` — a fixture's scope versus the blast radius of
 what it mutates.
 
 The two rules, both directions each, plus the three checks that make the whole thing
@@ -16,7 +16,7 @@ from pathlib import Path
 
 import pytest
 
-_lint = importlib.import_module("scripts.lint_fixture_scope")
+_lint = importlib.import_module("scripts.lint.fixture_scope")
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 _E2E_CONFTEST = _REPO_ROOT / "tests" / "e2e" / "conftest.py"
@@ -26,7 +26,7 @@ def _findings(src: str, rel: str = "tests/sub/conftest.py", *, init: bool = Fals
     return [msg for _, msg in _lint.findings_in_source(src, rel, has_package_init=init)]
 
 
-# ---- Rule 1: session scope + a process-global mutation, outside the root conftest ----
+# ---- Rule 1: session scope + a process-global mutation, outside the provisioning plugin ----
 
 
 def test_session_scoped_env_write_in_a_subdirectory_conftest_is_flagged() -> None:
@@ -48,7 +48,7 @@ def test_session_scoped_env_write_in_a_subdirectory_conftest_is_flagged() -> Non
 
 
 def test_session_scoped_settings_attribute_write_is_flagged() -> None:
-    # Not every process global is an env var — `shared.config.settings` is a
+    # Not every process global is an env var — `base.config.settings` is a
     # module-load singleton, and the real fixture reassigned a field on it too.
     src = (
         '@pytest.fixture(scope="session")\n'
@@ -164,7 +164,7 @@ def test_a_function_scoped_fixture_may_mutate_the_environment() -> None:
     assert _findings(src) == []
 
 
-# ---- the root-conftest exemption is by LOCATION, not by name ----
+# ---- the provisioning-plugin exemption is by LOCATION, not by name ----
 
 
 _PROVISIONED_DB = (
@@ -177,14 +177,18 @@ _PROVISIONED_DB = (
 )
 
 
-def test_the_root_conftests_session_provisioning_is_not_flagged() -> None:
-    # `tests/conftest.py:_provisioned_db` mutates two process globals at session scope
-    # and never restores them. That is correct: it is the ROOT conftest, so "the
-    # session" and "my directory" are the same blast radius, and it is establishing the
-    # session's baseline rather than claiming to clean up after itself. A lint that
-    # failed here would be wrong about the one legitimate case in the repo.
+def test_the_provisioning_plugins_session_fixtures_are_not_flagged() -> None:
+    # `tests/fixtures/provisioning.py:_provisioned_db` mutates two process globals at
+    # session scope and never restores them. That is correct: the repo-root conftest.py
+    # loads it once per process, so "the session" and "my directory" are the same blast
+    # radius, and it is establishing the session's baseline rather than claiming to
+    # clean up after itself. A lint that failed here would be wrong about the one
+    # legitimate case in the repo.
     assert (
-        _lint.findings_in_source(_PROVISIONED_DB, "tests/conftest.py", has_package_init=False) == []
+        _lint.findings_in_source(
+            _PROVISIONED_DB, "tests/fixtures/provisioning.py", has_package_init=False
+        )
+        == []
     )
 
 
@@ -339,7 +343,9 @@ def test_setup_env_keys_covers_pop_as_well_as_assignment() -> None:
 def test_setup_env_keys_matches_the_real_fixtures_body() -> None:
     # Ties the primitive to the file it guards: the twelve keys the real body
     # assigns (it was thirteen until the hibernation chain deletion dropped
-    # AVA_HIBERNATE_ENABLED — Task #1976 phase 2).
+    # AVA_HIBERNATE_ENABLED — Task #1976 phase 2 — twelve until the
+    # always-authenticated data plane retired AVA_RUNNER_DB_PASSWORD, and eleven
+    # until the direct-process stack started with an empty AVA_CLUSTER_SECRET).
     # The count is what keeps the `literal == declared` assertion below from passing
     # vacuously (both empty), so it tracks the fixture body — update it when the body
     # gains or drops an assignment, do not relax it.

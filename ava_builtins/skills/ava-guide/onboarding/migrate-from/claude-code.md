@@ -41,7 +41,7 @@ an MCP server, so Claude Code can keep driving the fleet
    Flatten `@path` imports.
 3. **Replace subagents with roles.** Each `.claude/agents/*.md` becomes a
    role-card skill (`be-a-<role>`; see the presets sub-skill's
-   reference/role-cards.md) plus a preset naming it in
+   references/role-cards.md) plus a preset naming it in
    `skills_to_expand_at_start`. The spawn prompt carries the mission; record
    the role's boundary as `type/role` memory.
 4. **Recreate hooks as rules and watchers.** Policy hooks become AGENTS.md /

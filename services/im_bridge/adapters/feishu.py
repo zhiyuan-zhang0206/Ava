@@ -25,9 +25,9 @@ import threading
 from collections import deque
 from typing import Any
 
+from base.log import logger
 from services.im_bridge.adapters.feishu_ws_proxy import allow_env_proxy_for_ws
 from services.im_bridge.types import IMAdapter, InboundMessage
-from shared.log import logger
 
 # Feishu caps a text message around 30KB of characters; segment conservatively.
 MAX_SEGMENT_CHARS = 8000
@@ -100,7 +100,7 @@ class FeishuAdapter(IMAdapter):
         ``env_names`` is accepted for call-site clarity but unused."""
         del env_names
         try:
-            from shared.config import settings
+            from base.config import settings
 
             domain = getattr(settings, "feishu", None)
             if domain is not None:
@@ -112,7 +112,7 @@ class FeishuAdapter(IMAdapter):
                         else str(value)
                     )
         except Exception:
-            # shared.config must never break the adapter (settings-lite verbs,
+            # base.config must never break the adapter (settings-lite verbs,
             # bare checkouts, a gateway fetch failure).
             logger.debug("FeishuAdapter: settings.feishu probe failed")
         return ""
@@ -215,7 +215,7 @@ class FeishuAdapter(IMAdapter):
         # Same fail-open guard as _credential: settings must never break the
         # adapter in a settings-lite context.
         try:
-            from shared.config import settings
+            from base.config import settings
 
             timeout = settings.feishu.feishu_rest_timeout_seconds
         except Exception:
@@ -357,7 +357,7 @@ class FeishuAdapter(IMAdapter):
         if self._poll_task is not None and not self._poll_task.done():
             return
         try:
-            from shared.config import settings
+            from base.config import settings
 
             interval = settings.feishu.feishu_poll_interval_seconds
             bootstrap = (settings.feishu.feishu_poll_chat_id or "").strip()

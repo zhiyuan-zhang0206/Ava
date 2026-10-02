@@ -42,7 +42,7 @@ jobs:
         shell: bash
         run: |
           set -o pipefail
-          uv run python scripts/audit_branch_protection.py --json 2>&1 | tee /tmp/audit.out
+          uv run python scripts/audit/branch_protection.py --json 2>&1 | tee /tmp/audit.out
 
       - name: Alert on verified drift
         if: steps.audit.outcome == 'failure'

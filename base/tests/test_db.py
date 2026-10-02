@@ -1,0 +1,412 @@
+"""`base/db/__init__.py` live-agent helpers — the SQL the fleet update's quiesce step drives.
+
+These are the relocated home of the agents_meta / inbound_messages queries the
+gateway CLI used to hand-write inline: signal_live_agents_restart (bulk
+restart), list_live_agent_ids. "Live" = status running/idling.
+Each helper opens its own connection, so it sees rows committed by the fixture.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import json
+import time
+from typing import Any, cast
+
+import psycopg
+import pytest
+from psycopg_pool import AsyncConnectionPool
+
+from base import db
+from base.config import settings
+from base.db import connections
+from base.events.live.redis_listener import RedisInboundListener
+from base.host.env.dotenv_boot import PLACEHOLDER_DB_URL
+from base.native_process import code_version
+from base.telemetry import Event, process_name
+
+
+def test_connect_refuses_placeholder_url(monkeypatch: pytest.MonkeyPatch) -> None:
+    """connect() raises PlaceholderDbUrlError when db_url is the placeholder URL,
+    rather than letting a bare process reach a real database."""
+    monkeypatch.setattr(settings.data_plane, "db_url", PLACEHOLDER_DB_URL)
+    with pytest.raises(db.PlaceholderDbUrlError):
+        db.connect()
+
+
+def test_pool_refuses_placeholder_url(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(settings.data_plane, "db_url", PLACEHOLDER_DB_URL)
+    with pytest.raises(db.PlaceholderDbUrlError):
+        db.pool()
+
+
+def test_async_pool_refuses_placeholder_url(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(settings.data_plane, "db_url", PLACEHOLDER_DB_URL)
+    with pytest.raises(db.PlaceholderDbUrlError):
+        db.async_pool(AsyncConnectionPool, min_size=0, max_size=1, timeout=1.0)
+
+
+def test_async_pool_fixes_the_transport_posture(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The async pool carries `pool()`'s posture: autocommit, no prepared
+    statements, keepalives, the configured sslmode when the URL is silent, and
+    the pooled-session scrub on every borrow, and the process/version name
+    PgBouncer shows. It comes back unopened (the caller's event loop opens it),
+    and the caller's subclass gets its own arguments."""
+    monkeypatch.setattr(settings.data_plane, "db_url", "postgresql://u@127.0.0.1:1/x")
+    monkeypatch.setattr(settings.data_plane, "db_sslmode", "require")
+    monkeypatch.setattr(code_version, "get", lambda: 7)
+    monkeypatch.setattr(code_version, "db_gate_applies", lambda: True)
+    captured: dict[str, object] = {}
+
+    class _FakePool:
+        def __init__(self, conninfo: str, **kw: object) -> None:
+            captured.update(kw, conninfo=conninfo)
+
+    db.async_pool(cast(Any, _FakePool), pool_name="probe", min_size=0, max_size=3, timeout=2.0)
+    assert captured == {
+        "conninfo": "postgresql://u@127.0.0.1:1/x",
+        "min_size": 0,
+        "max_size": 3,
+        "timeout": 2.0,
+        "open": False,
+        "kwargs": {
+            "autocommit": True,
+            "prepare_threshold": None,
+            "sslmode": "require",
+            "application_name": f"ava:{process_name()}:v7",
+            **db.PG_KEEPALIVE_KWARGS,
+        },
+        "check": connections._restore_pooled_session_async,
+        "pool_name": "probe",
+    }
+
+
+def _spy_dials(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, dict[str, Any]]]:
+    """Record each psycopg.connect (conninfo, kwargs) and refuse the pooled scrub:
+    the door must decide the posture without dialing anything real."""
+    dials: list[tuple[str, dict[str, Any]]] = []
+
+    def spy(conninfo: str = "", **kwargs: Any) -> object:
+        dials.append((conninfo, kwargs))
+        return object()
+
+    def no_scrub(_conn: object) -> None:
+        raise AssertionError("an explicit-target dial must not scrub a pooled session")
+
+    monkeypatch.setattr(psycopg, "connect", spy)
+    monkeypatch.setattr(connections, "_restore_pooled_session", no_scrub)
+    return dials
+
+
+def test_connect_url_owns_the_transport_posture(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The explicit-target door carries `connect()`'s posture — no prepared
+    statements, keepalives, the statement ceiling after the URL's own startup
+    options — and reads no settings: the configured sslmode is not injected and
+    the session is never scrubbed."""
+    monkeypatch.setattr(settings.data_plane, "db_sslmode", "require")
+    dials = _spy_dials(monkeypatch)
+    url = "postgresql://owner@/ava?host=/tmp/sock&options=-c%20role%3Dava"
+    db.connect_url(url, autocommit=True)
+    assert dials == [
+        (
+            url,
+            {
+                "autocommit": True,
+                "prepare_threshold": None,
+                **db.PG_KEEPALIVE_KWARGS,
+                "options": "-c role=ava -c statement_timeout=60000",
+            },
+        )
+    ]
+
+
+def test_connect_url_unbounded_keeps_the_keepalives(monkeypatch: pytest.MonkeyPatch) -> None:
+    """`unbounded=True` drops only the statement ceiling; a caller's shorter
+    connect timeout replaces the door's default."""
+    dials = _spy_dials(monkeypatch)
+    db.connect_url("postgresql://u@127.0.0.1:1/x", unbounded=True, connect_timeout=2)
+    assert dials == [
+        (
+            "postgresql://u@127.0.0.1:1/x",
+            {
+                "autocommit": False,
+                "prepare_threshold": None,
+                **db.PG_KEEPALIVE_KWARGS,
+                "connect_timeout": 2,
+            },
+        )
+    ]
+
+
+def test_connect_unbounded_keeps_the_keepalives(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The migration applier's unbounded direct dial drops only the ceiling: a
+    long DDL on a remote link is the flow a dead peer would otherwise pin."""
+    monkeypatch.setattr(settings.data_plane, "db_url", "postgresql://u:p@db.example:5432/x")
+    monkeypatch.setattr(settings.data_plane, "db_sslmode", "")
+    monkeypatch.setattr(connections, "direct_db_url", lambda: "postgresql://u:p@db:5432/x")
+    dials = _spy_dials(monkeypatch)
+    db.connect(direct=True, unbounded=True)
+    assert dials == [
+        (
+            "postgresql://u:p@db:5432/x",
+            {"autocommit": False, "prepare_threshold": None, **db.PG_KEEPALIVE_KWARGS},
+        )
+    ]
+
+
+def test_connect_url_refuses_placeholder_url() -> None:
+    with pytest.raises(db.PlaceholderDbUrlError):
+        db.connect_url(PLACEHOLDER_DB_URL)
+
+
+def _seed_agent(db_conn: psycopg.Connection, status: str, *, live_lease: bool = True) -> int:
+    """Create an agent + its agents_meta row in the given status, return id.
+
+    `live_lease` grants the R1 liveness lease (default True — a seeded live
+    agent renews like a real one); pass False to seed a lease-less (pre-lease /
+    zombie) row, which the alive predicate reads as dead."""
+    from datetime import UTC, datetime, timedelta
+
+    agent_id = db.create_agent(db_conn)
+    lease = datetime.now(UTC) + timedelta(seconds=600) if live_lease else None
+    with db_conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO agents_meta (id, spawner, status, lease_expires_at) "
+            "VALUES (%s, 'test', %s, %s) "
+            "ON CONFLICT (id) DO UPDATE SET status = EXCLUDED.status, "
+            "    lease_expires_at = EXCLUDED.lease_expires_at",
+            (agent_id, status, lease),
+        )
+    db_conn.commit()
+    return agent_id
+
+
+def _inbound_rows(db_conn: psycopg.Connection, agent_id: int) -> list[tuple[str, str, str]]:
+    with db_conn.cursor() as cur:
+        cur.execute(
+            "SELECT kind, source, content FROM inbound_messages WHERE agent_id = %s",
+            (agent_id,),
+        )
+        return cur.fetchall()
+
+
+def test_insert_restart_completed_inbound_traces_newest_restart(
+    db_conn: psycopg.Connection,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The completion marker retains the restart envelope the claim will render."""
+    agent_id = _seed_agent(db_conn, "idling")
+    payload = {"config_overlay": {"model": "gpt-5"}}
+    post_commit_events: list[Event] = []
+    emitted: list[Event] = []
+    monkeypatch.setattr(db, "_emit_prepared_event", emitted.append)
+    with db_conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO inbound_messages (agent_id, content, kind, source, payload) "
+            "VALUES (%s, %s, 'restart', 'self', %s::jsonb)",
+            (agent_id, "restart with a new model", json.dumps(payload)),
+        )
+        traced = db.insert_restart_completed_inbound(
+            cur, agent_id, post_commit_events=post_commit_events
+        )
+        assert emitted == []
+    db_conn.commit()
+    for event in post_commit_events:
+        db._emit_prepared_event(event)
+
+    assert traced == ("self", "restart with a new model", payload)
+    assert len(emitted) == 1
+    with db_conn.cursor() as cur:
+        cur.execute(
+            "SELECT kind, source, content, payload FROM inbound_messages "
+            "WHERE agent_id = %s ORDER BY id",
+            (agent_id,),
+        )
+        assert cur.fetchall() == [
+            ("restart", "self", "restart with a new model", payload),
+            ("restart_completed", "self", "restart with a new model", payload),
+        ]
+
+
+def test_insert_restart_completed_inbound_without_restart_returns_none(
+    db_conn: psycopg.Connection,
+) -> None:
+    """Callers decide how to handle a missing restart inbound; the helper does not insert."""
+    agent_id = _seed_agent(db_conn, "idling")
+    with db_conn.cursor() as cur:
+        assert db.insert_restart_completed_inbound(cur, agent_id, post_commit_events=[]) is None
+    db_conn.commit()
+
+    assert _inbound_rows(db_conn, agent_id) == []
+
+
+def test_signal_live_agents_restart_only_live(db_conn: psycopg.Connection) -> None:
+    """One restart inbound (content='', the given source) per running/idling agent;
+    terminated get none. Returns the ids signalled."""
+    running = _seed_agent(db_conn, "running")
+    idling = _seed_agent(db_conn, "idling")
+    terminated = _seed_agent(db_conn, "terminated")
+
+    ids = db.signal_live_agents_restart(source="system:update")
+
+    assert sorted(ids) == sorted([running, idling])
+    assert _inbound_rows(db_conn, running) == [("restart", "system:update", "")]
+    assert _inbound_rows(db_conn, idling) == [("restart", "system:update", "")]
+    assert _inbound_rows(db_conn, terminated) == []
+
+
+def test_signal_live_agents_restart_requires_an_unexpired_lease(
+    db_conn: psycopg.Connection,
+) -> None:
+    """R1 (Task #1021): a running/idling row WITHOUT a lease (pre-lease code) or
+    with an EXPIRED one (a process that stopped renewing) is not alive — the
+    lease is the liveness authority, and the quiesce must not signal a zombie."""
+    running_no_lease = _seed_agent(db_conn, "running", live_lease=False)
+    idling_no_lease = _seed_agent(db_conn, "idling", live_lease=False)
+    running_fresh = _seed_agent(db_conn, "running")
+
+    ids = db.signal_live_agents_restart(source="system:update")
+
+    assert ids == [running_fresh]
+    assert _inbound_rows(db_conn, running_no_lease) == []
+    assert _inbound_rows(db_conn, idling_no_lease) == []
+
+
+def test_agent_is_alive_predicate() -> None:
+    """The Python half of the single alive predicate — status AND unexpired
+    lease, one definition for row-based checks."""
+    from datetime import UTC, datetime, timedelta
+
+    now = datetime.now(UTC)
+    future = now + timedelta(seconds=600)
+    past = now - timedelta(seconds=1)
+
+    assert db.agent_is_alive("running", future) is True
+    assert db.agent_is_alive("idling", future) is True
+    assert db.agent_is_alive("running", None) is False  # pre-lease row
+    assert db.agent_is_alive("running", past) is False  # expired
+    assert db.agent_is_alive("terminated", future) is False
+
+
+def test_signal_live_agents_restart_none_live(db_conn: psycopg.Connection) -> None:
+    """No live agents → no inbound inserted, returns []."""
+    terminated = _seed_agent(db_conn, "terminated")
+    assert db.signal_live_agents_restart(source="system:update") == []
+    assert _inbound_rows(db_conn, terminated) == []
+
+
+def test_signal_live_agents_restart_exclude_ids(db_conn: psycopg.Connection) -> None:
+    """exclude_agent_ids agents are skipped even when live — the quiesce
+    convergence loop passes its already-signalled set so a pass only signals
+    newly-live agents."""
+    already = _seed_agent(db_conn, "running")
+    late = _seed_agent(db_conn, "running")
+
+    ids = db.signal_live_agents_restart(source="system:update", exclude_agent_ids={already})
+
+    assert ids == [late]
+    assert _inbound_rows(db_conn, already) == []
+    assert _inbound_rows(db_conn, late) == [("restart", "system:update", "")]
+
+
+def test_list_live_agent_ids(db_conn: psycopg.Connection) -> None:
+    """list_live_agent_ids lists agents with a LIVE process to act on (quiesce):
+    running/idling only."""
+    running = _seed_agent(db_conn, "running")
+    idling = _seed_agent(db_conn, "idling")
+    _seed_agent(db_conn, "terminated")
+    assert sorted(db.list_live_agent_ids()) == sorted([running, idling])
+
+
+async def test_signal_live_agents_restart_publishes_redis_wake(
+    db_conn: psycopg.Connection,
+) -> None:
+    """The bulk restart wakes each signalled agent over Redis — the same
+    per-agent publish as insert_inbound_message — so an idling agent restarts now
+    instead of stalling to its SELECT recheck (the quiesce step's convergence
+    depends on live agents draining promptly). Park a per-agent listener on the
+    agent's channel, fire the bulk signal, assert the parked wait wakes."""
+    tid = _seed_agent(db_conn, "idling")
+    listener = RedisInboundListener(settings.data_plane.redis_url, tid)
+    try:
+        wait_task = asyncio.create_task(listener.wait_one(timeout=10.0))
+        await asyncio.sleep(0.2)  # let the subscribe take effect before the publish
+        t0 = time.monotonic()
+        ids = await asyncio.to_thread(db.signal_live_agents_restart, source="system:update")
+        assert tid in ids
+        await asyncio.wait_for(wait_task, timeout=5.0)
+        assert time.monotonic() - t0 < 5.0, "bulk restart did not wake the parked listener"
+    finally:
+        await listener.close()
+
+
+def test_pool_check_connections_flag(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A POOLED pool arms the baseline-session restore on every checkout (and at
+    backend creation) — pgbouncer never resets backend session state between
+    clients, so a backend polluted by another client's session-level SET must be
+    scrubbed before each borrow (2026-09-02 P0). The restore doubles as the
+    Task #1027 dead-connection check (a dead connection raises and is replaced).
+    A DIRECT pool owns its backend exclusively — no scrub needed — and there the
+    `check_connections=True` flag keeps its original Task #1027 meaning."""
+    real_check = connections.ConnectionPool.check_connection
+    captured: dict[str, object] = {}
+
+    class _FakePool:
+        check_connection = real_check
+
+        def __init__(self, *_a: object, **_kw: object) -> None:
+            captured.update(_kw)
+
+    monkeypatch.setattr(connections, "ConnectionPool", _FakePool)
+    monkeypatch.setattr(connections, "direct_db_url", lambda: "postgresql://direct-test")
+    # Pooled (the default): the baseline restore is armed on configure + check.
+    db.pool()
+    assert captured.get("configure") is connections._restore_pooled_session
+    assert captured.get("check") is connections._restore_pooled_session
+    captured.clear()
+    # Direct: no scrub; the flag keeps arming the plain dead-connection check.
+    db.pool(direct=True, check_connections=True)
+    assert captured.get("configure") is None
+    assert captured.get("check") is real_check
+    captured.clear()
+    db.pool(direct=True)
+    assert captured.get("check") is None
+
+
+def test_list_chat_inbound_facts_windows_and_filters_kind(
+    db_conn: psycopg.Connection,
+) -> None:
+    """The arrow read: chat inbounds only, inside the closed [from_, to], oldest first."""
+    from datetime import UTC, datetime, timedelta
+
+    agent_id = _seed_agent(db_conn, "running")
+    base = datetime(2026, 9, 12, 4, tzinfo=UTC)
+    with db_conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO inbound_messages (agent_id, content, kind, source, created_at) VALUES "
+            "(%s, 'before', 'chat', 'agent:1', %s),"
+            "(%s, 'inside-a', 'chat', 'agent:2', %s),"
+            "(%s, 'inside-b', 'chat', 'user', %s),"
+            "(%s, 'note', 'system_note', 'system', %s),"
+            "(%s, 'after', 'chat', 'agent:1', %s)",
+            (
+                agent_id,
+                base - timedelta(minutes=1),
+                agent_id,
+                base + timedelta(minutes=1),
+                agent_id,
+                base + timedelta(minutes=2),
+                agent_id,
+                base + timedelta(minutes=3),
+                agent_id,
+                base + timedelta(minutes=10),
+            ),
+        )
+    db_conn.commit()
+
+    facts = db.list_chat_inbound_facts(agent_id, base, base + timedelta(minutes=5))
+
+    assert [(fact.source, fact.created_at) for fact in facts] == [
+        ("agent:2", base + timedelta(minutes=1)),
+        ("user", base + timedelta(minutes=2)),
+    ]

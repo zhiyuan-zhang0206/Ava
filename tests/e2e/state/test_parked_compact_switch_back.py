@@ -58,8 +58,9 @@ import psycopg
 import pytest
 from playwright.sync_api import Page, expect
 
-from shared.agents import AgentStatus
-from shared.config import settings
+from base.agents import AgentStatus
+from base.config import settings
+from tests.base.poll_until import poll_until
 from tests.e2e._db import wait_for_status
 from tests.e2e._env import E2EEnv
 from tests.e2e._settings import pin_compact_history_off, pin_expand_runs_all
@@ -69,7 +70,6 @@ from tests.e2e.fakes.scenarios.parked_compact import (
     REPLY_2,
     REPLY_3,
 )
-from tests.shared.poll_until import poll_until
 
 
 def _timeline(gateway_url: str, agent_id: int) -> list[dict[str, Any]]:

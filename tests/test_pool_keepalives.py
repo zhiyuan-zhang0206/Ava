@@ -1,4 +1,4 @@
-"""Every long-lived Postgres pool carries `shared.db.PG_KEEPALIVE_KWARGS`, so a
+"""Every long-lived Postgres pool carries `base.db.PG_KEEPALIVE_KWARGS`, so a
 connection that went dead while parked in the pool fails instead of stalling.
 
 ## The failure mode, and how it differs from PR #940's
@@ -46,11 +46,11 @@ from typing import Any
 from fastapi.testclient import TestClient
 from psycopg_pool import ConnectionPool
 
-import shared.log
+import base.log
+from base import db
+from base.config import settings
 from gateway.app import app
 from services.agent_ops import daemon
-from shared import db
-from shared.config import settings
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 
@@ -85,19 +85,19 @@ def _assert_pool_posture(pool: ConnectionPool, site: str) -> None:
     missing = {k: v for k, v in _EXPECTED_KWARGS.items() if kwargs.get(k) != v}
     assert not missing, (
         f"{site}'s pool is missing {missing} from its connection kwargs "
-        f"(got {kwargs!r}) — build it with `shared.db.pool()`"
+        f"(got {kwargs!r}) — build it with `base.db.pool()`"
     )
 
 
 # ─── the single definition ─────────────────────────────────────────────────────
 
 
-def test_shared_db_pool_is_the_single_definition() -> None:
-    """`shared.db.pool()` merges both halves, so a caller cannot take one without
+def test_base_db_pool_is_the_single_definition() -> None:
+    """`base.db.pool()` merges both halves, so a caller cannot take one without
     the other. Every site below inherits the posture by calling it."""
     pool = db.pool()
     try:
-        _assert_pool_posture(pool, "shared.db.pool()")
+        _assert_pool_posture(pool, "base.db.pool()")
     finally:
         pool.close()
 
@@ -163,39 +163,39 @@ def test_borrowed_connection_arms_the_kernel_keepalive() -> None:
 
 def test_log_sink_pipeline_drain_thread_stays_alive() -> None:
     """The event emitter's pipeline — the longest-lived resource in every ava
-    process (opened at `init_*` via `shared.log._add_postgres_sink` ->
-    `shared.telemetry`, never closed), drained by a background thread nobody
+    process (opened at `init_*` via `base.log.add_postgres_sink` ->
+    `base.telemetry`, never closed), drained by a background thread nobody
     watches. A stalled drain there is the least likely to be noticed — and
     since the LGTM cutover (task #1197 close-C) the pipeline no longer owns a
     Postgres pool, only the queue + drain thread + JSONL mirror.
 
-    Asserts the emitter pipeline `_add_postgres_sink` opens, matching
-    tests/gateway/test_log_sink.py; only the sink handler this call adds is
+    Asserts the emitter pipeline `add_postgres_sink` opens, matching
+    base/agents/tests/test_log_sink.py; only the sink handler this call adds is
     removed, the shared pipeline is left as the rest of the suite expects it.
     """
-    sink_id = shared.log._add_postgres_sink()
+    sink_id = base.log.add_postgres_sink()
     try:
-        from shared import telemetry
+        from base import telemetry
 
         assert telemetry._state["pipeline"] is not None
         pipe = telemetry._state["pipeline"]
         assert pipe._thread is not None and pipe._thread.is_alive()
     finally:
-        shared.log.logger.remove(sink_id)
+        base.log.logger.remove(sink_id)
 
 
-def test_log_sink_import_of_shared_db_stays_deferred() -> None:
-    """`shared/log.py` must import `shared.db` inside the function, not at module
-    scope — `shared/db.py` imports `shared.log` for `logger`, so a top-level
+def test_log_sink_import_of_base_db_stays_deferred() -> None:
+    """`base/log/__init__.py` must import `base.db` inside the function, not at module
+    scope — `base/db/__init__.py` imports `base.log` for `logger`, so a top-level
     import is a hard circular-import failure for any process that reaches
-    `shared.db` first, which is the common case.
+    `base.db` first, which is the common case.
 
     A fresh interpreter is the only way to see it: this process imported both
     modules long ago, so an in-process import would pass either way. The
-    subprocess imports `shared.db` first, the direction that breaks.
+    subprocess imports `base.db` first, the direction that breaks.
     """
     proc = subprocess.run(
-        [sys.executable, "-c", "import shared.db; import shared.log"],
+        [sys.executable, "-c", "import base.db; import base.log"],
         cwd=_REPO_ROOT,
         capture_output=True,
         text=True,
@@ -203,8 +203,8 @@ def test_log_sink_import_of_shared_db_stays_deferred() -> None:
         check=False,
     )
     assert proc.returncode == 0, (
-        "importing shared.db in a fresh interpreter failed — shared/log.py has "
-        f"probably acquired a module-level shared.db import:\n{proc.stderr}"
+        "importing base.db in a fresh interpreter failed — base/log/__init__.py has "
+        f"probably acquired a module-level base.db import:\n{proc.stderr}"
     )
 
 

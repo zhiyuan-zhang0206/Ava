@@ -37,15 +37,15 @@ knows best what tripped it up.
 collect dataset -> detect what changed -> mine bad runs + analyze -> (replay) -> report
 ```
 
-Helper scripts live in `reference/` (hyphenated dir, not importable — run as
+Helper scripts live in `scripts/` (hyphenated skill dir, not importable — run as
 scripts with bare `python`, PATH-resolved to this checkout's venv). Output
 lands under `$AVA_HOME/self_evolution/` (private per deployment), not in the repo.
 
 ### 1. Collect the dataset
 
 ```
-python $AVA_HOME/skills/ava-self-evolution/reference/collect.py --days 1  # Batch run (~100 accumulated runs)
-python $AVA_HOME/skills/ava-self-evolution/reference/collect.py --days 7  # Monday weekly summary
+python $AVA_HOME/skills/ava-self-evolution/scripts/collect.py --days 1  # Batch run (~100 accumulated runs)
+python $AVA_HOME/skills/ava-self-evolution/scripts/collect.py --days 7  # Monday weekly summary
 ```
 
 The batch command reads the past day; the Monday summary reads the past week.
@@ -53,7 +53,7 @@ Both write one JSON record per run to `$AVA_HOME/self_evolution/dataset/<this-mo
 Each record holds the task prompt, complete transcript (see Data source), tools called, objective
 signals (turns, exec failures, compactions, delivery breach, user re-prompts,
 user corrections, peer agent feedback), skills it touched, and a rule-based
-`label` of **ok / fumbled / failed** (see `ava_builtins/skill_support/self_evolution/label.py`). The script
+`label` of **ok / fumbled / failed** (see `ava_builtins/skills/ava-self-evolution/scripts/label.py`). The script
 prints the run counts.
 
 **Correction signals** (two new data sources since 2026-07):
@@ -86,8 +86,8 @@ where user modification concentrates. Sweep them too:
 ```python
 import json, subprocess
 from datetime import UTC, datetime, timedelta
-from shared.paths import ava_home, plugins_dir
-home = ava_home()  # checkout-anchored $AVA_HOME — never a guessed ~/.ava
+from base.paths import ava_home, plugins_dir
+home = ava_home()  # $AVA_HOME, else ~/.ava
 cutoff = (datetime.now(UTC) - timedelta(days=1)).isoformat()
 reg = json.loads((home / "installed.json").read_text())  # install registry
 print([p["name"] for p in reg["packages"] if (p.get("updated_at") or "") >= cutoff])
@@ -109,7 +109,7 @@ If nothing changed, write a short report noting the dataset grew and stop early.
 ### 3. Mine the bad runs and analyze
 
 ```
-python $AVA_HOME/skills/ava-self-evolution/reference/mine.py
+python $AVA_HOME/skills/ava-self-evolution/scripts/mine.py
 ```
 
 Clusters the active window's `failed`/`fumbled` runs and prints a markdown digest —
@@ -154,7 +154,7 @@ run.
 Only when a specific proposal is worth confirming empirically. The dataset's
 recorded outcome is the "old" baseline; re-running the same task under the
 current tree is the "new" side — via the Evaluation Loop's spawn path
-(`reference/evaluate.py`: `launch` -> `poll` -> `gather`). A clean A/B, not
+(`scripts/evaluate.py`: `launch` -> `poll` -> `gather`). A clean A/B, not
 a verbatim replay: a fresh agent gets only the task prompt — never the
 original transcript — verified against the original tool profile
 (`verify_replay`).
@@ -192,7 +192,7 @@ The report tells the user what regressed. The evaluation loop goes further: it
 
 ```
 dataset  = training data      (real tasks + traces)
-rubric   = loss function      (completion + efficiency, in ava_builtins/skill_support/self_evolution/rubric.py)
+rubric   = loss function      (completion + efficiency, in ava_builtins/skills/ava-self-evolution/scripts/rubric.py)
 skill    = the weights        (the SKILL.md text under test)
 iterate  = backpropagation    (measure -> propose edit -> re-measure -> keep the best)
 ```
@@ -220,11 +220,11 @@ For each skill that changed in the batch (or the full week on Monday), run this 
 
 A task run takes minutes, longer than one code block may run, so evaluation
 is two phases with a wait in between. Import it from your own code (add the
-reference dir to `sys.path`, then `import evaluate`; `launch` needs your live
+scripts dir to `sys.path`, then `import evaluate`; `launch` needs your live
 agent identity, so it is not a CLI):
 
 ```python
-import os, sys; sys.path.insert(0, os.path.join(os.environ["AVA_HOME"], "skills", "ava-self-evolution", "reference"))
+import os, sys; sys.path.insert(0, os.path.join(os.environ["AVA_HOME"], "skills", "ava-self-evolution", "scripts"))
 import evaluate
 state = evaluate.launch("ava-goal", tasks)   # spawns one fresh agent per safe task
 ```
@@ -254,7 +254,7 @@ is the Loki read path, and a 0-run dataset is an ALERT (exit 2), never
 "nothing to act on" — except a TEST- only window (QA review of PR #698), which exits 0.
 
 **Transcript completeness.** Each record's `transcript` is the checkpoint's
-complete read path (`load_checkpoint_messages_full`, `shared/agents/history/checkpoint.py`):
+complete read path (`load_checkpoint_messages_full`, `base/agents/history/checkpoint.py`):
 retained `compact_boundary` snapshots stitched with the latest segment,
 dropping only the repeated leading system prompt; summaries and session notes
 stay. "Complete" = full history since the compact-boundary retention rule
@@ -271,7 +271,7 @@ collects seven. Failed/fumbled runs, an unexplained empty window, a missing
 scan, or a hard failure also wake this agent so a broken data source cannot hide.
 
 **Read-failure fallback.** No-observability refusals (`observability_read_unavailable`) fall back to the local event
-mirror automatically: daily scan + weekly count. Dense-window `/api/events` 500s stay manual — `reference/mirror_backfill.py <days> [week]`; detail: `reference/no-observability-fallback.md`.
+mirror automatically: daily scan + weekly count. Dense-window `/api/events` 500s stay manual — `scripts/mirror_backfill.py <days> [week]`; detail: `references/no-observability-fallback.md`.
 
 ## Cron integration
 

@@ -1,7 +1,7 @@
 # UI App — remaining distribution work
 
 The cross-platform app itself lives in `ui/app/` and is current-state
-documented in [`app.ava.okf.md`](../ui/app/app.ava.okf.md). The old Electron
+documented in [`app.ava.okf.md`](../ui/app/docs/app.ava.okf.md). The old Electron
 package is gone. This file tracks work that cannot be completed by source code
 alone.
 

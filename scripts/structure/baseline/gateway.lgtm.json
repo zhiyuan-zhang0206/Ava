@@ -1,0 +1,27 @@
+{
+  "ambient_state": {
+    "gateway/lgtm/_loki_transport.py::global-rebind:_shared_client": 1,
+    "gateway/lgtm/loki_events_cache.py::ambient-container:_cache": 1,
+    "gateway/lgtm/loki_events_cache.py::ambient-container:_inflight": 1,
+    "gateway/lgtm/loki_query_budget.py::ambient-instance:query_budget": 1,
+    "gateway/lgtm/loki_query_budget.py::global-rebind:query_budget": 1,
+    "gateway/lgtm/prom_metrics.py::ambient-instance:prom_query_budget": 1,
+    "gateway/lgtm/prom_metrics.py::global-rebind:_consecutive_prom_failures": 2,
+    "gateway/lgtm/prom_metrics.py::global-rebind:_shared_client": 1,
+    "gateway/lgtm/prom_metrics.py::global-rebind:prom_query_budget": 1,
+    "gateway/lgtm/telemetry_staleness.py::ambient-container:_source_states": 1,
+    "gateway/lgtm/telemetry_staleness.py::ambient-instance:_check_state": 1
+  },
+  "complexity": {
+    "gateway/lgtm/_loki_aggregates.py::_numeric_attribute_slices": 15,
+    "gateway/lgtm/_loki_aggregates.py::attribute_aggregate#3": 20,
+    "gateway/lgtm/_loki_event_rows.py::count_events": 15,
+    "gateway/lgtm/_loki_logql.py::_agg_pipeline": 18,
+    "gateway/lgtm/_loki_logql.py::_build_logql": 21,
+    "gateway/lgtm/prom_metrics.py::query_range": 16,
+    "gateway/lgtm/tests/test_loki_events.py::TestGlobalQueryBudget.test_observes_every_transition_and_types_local_rejections": 18
+  },
+  "files": {
+    "gateway/lgtm/tests/test_loki_events.py": 2716
+  }
+}

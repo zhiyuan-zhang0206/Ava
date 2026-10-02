@@ -21,7 +21,7 @@
   transaction with a re-serve notice to the agent (deduped per 6h)
 
 The dead-page recovery writes and notifications live in the package-private
-`_page_reconcile.py`; the page restore contract is `page-restore.ava.okf.md`.
+`_page_reconcile.py`; the page restore contract is `docs/page-restore.ava.okf.md`.
 """
 
 from __future__ import annotations
@@ -58,7 +58,7 @@ from agent.startup._page_reconcile import (
 from agent.startup._page_reconcile import (
     _recent_page_recovery_notice as _recent_page_recovery_notice,
 )
-from shared.log import logger
+from base.log import logger
 
 
 def wrap_saver_writes_with_loud_failure(
@@ -386,7 +386,7 @@ async def reconcile_claimed_inbounds_at_startup(
     identity.
 
     The committed-id source strategy (task #4788) lives in
-    `shared/agents/history/inbound_sideload.py::committed_ids_for_reconcile`:
+    `base/agents/history/inbound_sideload.py::committed_ids_for_reconcile`:
     a guard read, then the claim-window side-load, with the full checkpoint
     read as the fallback.
 
@@ -396,7 +396,7 @@ async def reconcile_claimed_inbounds_at_startup(
     are reset to `'pending'`.
     """
     from agent.db import reconcile_claimed_inbounds
-    from shared.agents.history.inbound_sideload import committed_ids_for_reconcile
+    from base.agents.history.inbound_sideload import committed_ids_for_reconcile
 
     committed_inbound_ids = await committed_ids_for_reconcile(ops_pool, checkpointer, agent_id)
 
@@ -465,12 +465,12 @@ async def notify_desktop_permissions_at_startup() -> None:
 
     Must run after SDK init so ava.ui.notify is registered.
     """
-    from shared.host.converge.accessibility import AccessibilityStatus
-    from shared.host.converge.accessibility import (
+    from base.host.converge.accessibility import AccessibilityStatus
+    from base.host.converge.accessibility import (
         status_file_path as accessibility_status_file_path,
     )
-    from shared.host.converge.screen_capture import ScreenCaptureStatus
-    from shared.host.converge.screen_capture import (
+    from base.host.converge.screen_capture import ScreenCaptureStatus
+    from base.host.converge.screen_capture import (
         status_file_path as screen_capture_status_file_path,
     )
 
@@ -695,7 +695,7 @@ async def page_reconcile_loop(
     """
     import asyncio
 
-    from shared.config import settings
+    from base.config import settings
 
     if interval_s is None:
         interval_s = float(settings.daemon.heartbeat_interval_seconds)
@@ -738,8 +738,8 @@ async def reconcile_all_open_pages(
     the bind too. Best-effort like the per-agent pass: failures are logged
     per agent and never raise.
     """
-    from shared.machine import reachable_host
-    from shared.turn_identity import bind_turn_identity
+    from base.cluster.machine import reachable_host
+    from base.native_process.turn_identity import bind_turn_identity
 
     try:
         async with pool.connection() as conn, conn.cursor() as cur:

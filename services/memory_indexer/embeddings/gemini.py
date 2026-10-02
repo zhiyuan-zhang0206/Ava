@@ -6,7 +6,7 @@ class behind `embeddings.factory`). This is a thin wrapper over the
 Gemini Developer API `batchEmbedContents` endpoint, moved verbatim from
 the pre-abstraction `services/memory_indexer/embedder.py` — the wire
 contract (endpoint, payload, auth header, retry policies, dim, shape
-validation) is unchanged, pinned by `tests/services/test_embeddings.py`.
+validation) is unchanged, pinned by `services/memory_indexer/embeddings/tests/test_embeddings.py`.
 
 Deliberately does NOT use the `google-genai` SDK: importing it eagerly
 pulls an MCP + ASGI (starlette / uvicorn) + aiohttp stack into the
@@ -45,9 +45,8 @@ from typing import Any, override
 import httpx
 import numpy as np
 
-from services.memory_indexer.embeddings.base import EmbeddingAPIError
-from shared.config import settings
-from shared.resilience import (
+from base.config import settings
+from base.host.net.resilience import (
     MAX_RETRY_AFTER_RESPECT_S,
     ExponentialBackoff,
     Policy,
@@ -55,6 +54,7 @@ from shared.resilience import (
     http_classifier,
     retry,
 )
+from services.memory_indexer.embeddings.base import EmbeddingAPIError
 
 _MODEL_ID = "gemini-embedding-2"
 DIM = 3072
@@ -165,7 +165,7 @@ def _emit_billing(body: dict[str, Any]) -> None:
     failures are swallowed — they can never break the embed call.
     """
     try:
-        from shared.lm.usage import log_usage_fields
+        from base.lm.usage import log_usage_fields
 
         usage: dict[str, Any] = body.get("usageMetadata") or {}
         tok_in = int(usage.get("promptTokenCount") or 0)
@@ -249,8 +249,8 @@ def _embed(texts: list[str], task_type: str, *, policy: Policy = _EMBED_POLICY) 
     def _call() -> dict[str, Any]:
         try:
             asyncio.get_running_loop()
-        except RuntimeError:
-            pass  # fail-fast-ok: no running loop is the required sync calling context.
+        except RuntimeError:  # noqa: S110 - no running loop is the required sync calling context
+            pass
         else:
             raise RuntimeError(
                 "This is the sync embedding provider API; call it from a worker thread "
@@ -315,7 +315,7 @@ class GeminiEmbeddingProvider:
     Behavior-identical to the legacy `embedder` module it replaced: the
     same endpoint, payload, auth, per-site retry policies, dim, and shape
     validation — pinned by the contract tests in
-    `tests/services/test_embeddings.py`.
+    `services/memory_indexer/embeddings/tests/test_embeddings.py`.
     """
 
     name = "gemini"

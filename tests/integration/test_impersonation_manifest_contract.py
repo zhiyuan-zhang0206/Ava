@@ -15,11 +15,10 @@ import pytest
 from fastapi.testclient import TestClient
 from psycopg import sql
 
-from gateway.routers import alerts as alerts_router
-from shared.agents import impersonation as leases
-from shared.agents.impersonation import impersonation_history as history
-from shared.agents.impersonation.impersonation_events import _validate_event
-from shared.agents.impersonation_manifest import (
+from base.agents import impersonation as leases
+from base.agents.impersonation import history as history
+from base.agents.impersonation.events import _validate_event
+from base.agents.impersonation_manifest import (
     LocalParticipant,
     alert_if_participant_still_open,
     bind_local_participant,
@@ -33,15 +32,16 @@ from shared.agents.impersonation_manifest import (
     stage_central_expected_event,
     unbind_local_participant,
 )
-from shared.audit_events import prepare_event_log
-from shared.caller_identity import CallerIdentity
-from shared.config import settings
-from shared.db import create_agent
-from shared.machine import machine_name
-from shared.runtime_incarnation import RuntimeIncarnation
-from shared.telemetry import Event
+from base.agents.messages.caller_identity import CallerIdentity
+from base.cluster.machine import machine_name
+from base.config import settings
+from base.db import create_agent
+from base.native_process.runtime_incarnation import RuntimeIncarnation
+from base.telemetry import Event
+from base.telemetry.audit_events import prepare_event_log
+from gateway.alerts import router as alerts_router
+from tests.base import test_history as history_cases
 from tests.impersonation_support import attested_caller, recorded_tree
-from tests.shared import test_impersonation_history as history_cases
 
 _CERTIFICATION_SECRET = "test-manifest-certification-secret-000001"  # noqa: S105 -- test proof
 
@@ -238,7 +238,7 @@ def test_manual_is_pending_manual_while_nonempty_legacy_never_certifies(
         "source": f"agent:{owner.agent_id}",
         "attributes": {"fn": "ava.agents.send_message", "duration": 0.1},
     }
-    from shared.agents.impersonation.impersonation_events import consume_events
+    from base.agents.impersonation.events import consume_events
 
     assert consume_events(owner.agent_id, 1, [event]) == 1
     leases.release(str(legacy["id"]), attested_caller(legacy), "Legacy work completed")
@@ -438,7 +438,7 @@ def test_extra_before_final_read_refuses_and_late_extra_alerts_without_demoting(
     v1_lease: dict[str, Any],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from ava import impersonation_replay as reader
+    from ava.impersonation import replay as reader
     from services.agent_host.impersonation_events import _watch_completed_manifest_integrity
 
     leases.release(str(v1_lease["id"]), attested_caller(v1_lease), "No expected events")
@@ -462,7 +462,7 @@ def test_extra_before_final_read_refuses_and_late_extra_alerts_without_demoting(
             json={"items": rows, "meta": {"has_more": False}},
         )
 
-    monkeypatch.setattr(reader, "_get", get)
+    monkeypatch.setattr(reader, "get", get)
     assert not reader._indexed_manifest_matches(lease)
     assert history.resolve(owner.agent_id, 0)["events_completed_at"] is None
 
@@ -531,7 +531,7 @@ def test_runner_cannot_rewrite_ledgers_or_stamp_without_certification_procedure(
     owner: RuntimeIncarnation,
     v1_lease: dict[str, Any],
 ) -> None:
-    from shared.agents.impersonation_manifest_grants import grant_manifest_runner_access
+    from base.agents.impersonation_manifest_grants import grant_manifest_runner_access
 
     runner = "manifest_contract_runner"
     db_conn.execute(sql.SQL("CREATE ROLE {}").format(sql.Identifier(runner)))
@@ -596,6 +596,10 @@ def test_runner_cannot_rewrite_ledgers_or_stamp_without_certification_procedure(
         db_conn.execute(sql.SQL("DROP OWNED BY {}").format(sql.Identifier(runner)))
         db_conn.execute(sql.SQL("REVOKE {} FROM CURRENT_USER").format(sql.Identifier(runner)))
         db_conn.execute(sql.SQL("DROP ROLE {}").format(sql.Identifier(runner)))
+        # The body committed the role and its grants; an uncommitted drop rolls
+        # back when the fixture closes the connection, leaking both into every
+        # later test on this worker's database (a dump then names the role).
+        db_conn.commit()
 
 
 def test_cli_impersonate_send_outbox_retry_certifies_exactly_once(
@@ -611,10 +615,10 @@ def test_cli_impersonate_send_outbox_retry_certifies_exactly_once(
 
     import httpx
 
-    from ava import impersonation_replay as reader
+    from ava.impersonation import replay as reader
+    from base.agents.messages import delivery_outbox as outbox
     from cli.commands.agents.impersonation import _send
     from services.agent_host.impersonation_events import reconcile_one
-    from shared.agents.messages import delivery_outbox as outbox
 
     class SingleConnectionPool:
         def connection(self, *, timeout: float | None = None) -> Any:
@@ -636,15 +640,17 @@ def test_cli_impersonate_send_outbox_retry_certifies_exactly_once(
         flush_interval_seconds=1.0,
         max_entries=8,
     )
-    monkeypatch.setattr(settings.general, "ava_home", tmp_path)
+    monkeypatch.setenv("AVA_HOME", str(tmp_path))
     monkeypatch.setattr(outbox, "limits", lambda: snapshot)
     outbox._reset_caches_for_tests()
-    monkeypatch.setattr("shared.proc_tree.process_metadata", lambda: attested_caller(v1_lease))
+    monkeypatch.setattr(
+        "base.native_process.ownership.process_metadata", lambda: attested_caller(v1_lease)
+    )
 
     def gateway_down(*_args: Any, **_kwargs: Any) -> Any:
         raise httpx.ConnectError("gateway unavailable")
 
-    monkeypatch.setattr("shared.http_dial.post", gateway_down)
+    monkeypatch.setattr("base.host.net.http_dial.post", gateway_down)
     args = argparse.Namespace(
         agent_id=owner.agent_id,
         session_id=0,
@@ -709,6 +715,6 @@ def test_cli_impersonate_send_outbox_retry_certifies_exactly_once(
             json={"items": items, "meta": {"has_more": False}},
         )
 
-    monkeypatch.setattr(reader, "_get", get)
+    monkeypatch.setattr(reader, "get", get)
     reconcile_one()
     assert history.resolve(owner.agent_id, 0)["events_completed_at"] is not None

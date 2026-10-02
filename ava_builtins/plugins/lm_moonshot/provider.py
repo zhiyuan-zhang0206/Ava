@@ -16,8 +16,8 @@ if TYPE_CHECKING:
     from langchain_core.language_models.chat_models import BaseChatModel
 from loguru import logger
 
-from shared.lm.effort import clamp_effort
-from shared.lm.provider_api import (
+from base.lm.effort import clamp_effort
+from base.lm.provider_api import (
     BuildContext,
     PricePeriod,
     PriceRates,
@@ -26,8 +26,8 @@ from shared.lm.provider_api import (
     register,
     require_key,
 )
-from shared.lm.registry import ModelSpec, ModelTuning
-from shared.lm.stop import StopSpec
+from base.lm.registry import ModelSpec, ModelTuning
+from base.lm.stop import StopSpec
 
 _KIMI_EFFORT_LEVELS = ("low", "high", "max")
 
@@ -42,7 +42,7 @@ def build(ctx: BuildContext) -> BaseChatModel:
     # standard `Authorization: Bearer` auth. K2.7 thinking is on by default,
     # streamed in the delta's `reasoning_content` field. ChatMoonshot captures
     # reasoning in `additional_kwargs["reasoning_content"]`; the streaming
-    # fan-out (`RedisStreamHandler`) and timeline (`shared/agents/history/timeline.py`) both
+    # fan-out (`RedisStreamHandler`) and timeline (`base/agents/history/timeline.py`) both
     # read that key so reasoning renders through the same path as every other
     # provider.
     api_key = require_key("MOONSHOT_API_KEY")

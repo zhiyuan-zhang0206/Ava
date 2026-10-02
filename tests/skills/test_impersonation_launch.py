@@ -10,11 +10,11 @@ from typing import Any
 
 import pytest
 
-from ava.impersonation_launch import bootstrap_message
+from ava.impersonation.launch import bootstrap_message
 from ava.shell.coding_tools import codex
-from shared import coding_session_owner
+from base.sessions import coding_session_owner
 
-_REFERENCE = Path(__file__).parents[2] / "ava_builtins/skills/ava-use-other-agents/reference"
+_SKILL_DIR = Path(__file__).parents[2] / "ava_builtins/skills/ava-use-other-agents"
 _ENDPOINT = "unix:///home/u/.ava-lc/run/codex-app-server.0123456789ab-01234567.sock"
 
 
@@ -31,7 +31,7 @@ def _owner(state_dir: Path) -> coding_session_owner.CodingSessionOwner:
 def test_self_takeover_bootstrap_inlines_brief_and_links_real_guide(
     provider: str, tmp_path: Path
 ) -> None:
-    guide = _REFERENCE.parents[3] / ".agents/skills/impersonator-guide/SKILL.md"
+    guide = _SKILL_DIR.parents[2] / ".agents/skills/impersonator-guide/SKILL.md"
     assert guide.is_file()
     brief = "Goal: fix the login flow.\nDecision: keep the session table as-is."
     message = bootstrap_message(42, "Fix login", provider, brief, guide)
@@ -61,7 +61,7 @@ def test_self_takeover_bootstrap_inlines_brief_and_links_real_guide(
 )
 def test_bootstrap_names_the_executors_own_host_guide(provider: str, host_guide: str) -> None:
     """The general guide covers every host; relay startup and traps are per host."""
-    guide = _REFERENCE.parents[3] / ".agents/skills/impersonator-guide/SKILL.md"
+    guide = _SKILL_DIR.parents[2] / ".agents/skills/impersonator-guide/SKILL.md"
     path = guide.parent / "reference" / host_guide
     assert path.is_file()
     message = bootstrap_message(42, "Fix login", provider, "brief", guide)
@@ -71,7 +71,7 @@ def test_bootstrap_names_the_executors_own_host_guide(provider: str, host_guide:
 
 
 def test_codex_bootstrap_carries_the_shared_app_server_endpoint() -> None:
-    guide = _REFERENCE.parents[3] / ".agents/skills/impersonator-guide/SKILL.md"
+    guide = _SKILL_DIR.parents[2] / ".agents/skills/impersonator-guide/SKILL.md"
     message = bootstrap_message(42, "Fix login", "codex", "brief", guide, codex_remote=_ENDPOINT)
     assert f"--codex-remote {_ENDPOINT}" in message
     assert "delivers into that same server" in message
@@ -274,7 +274,7 @@ def test_launch_requires_native_identity_before_creating_workspace(
     provider: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     spec = importlib.util.spec_from_file_location(
-        f"takeover_spawn_{provider}", _REFERENCE / f"spawn_{provider}.py"
+        f"takeover_spawn_{provider}", _SKILL_DIR / "scripts" / f"spawn_{provider}.py"
     )
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
@@ -292,7 +292,7 @@ def test_launch_requires_native_identity_before_creating_workspace(
 
 
 def test_claude_bootstrap_resident_routing_names_the_plugin() -> None:
-    guide = _REFERENCE.parents[3] / ".agents/skills/impersonator-guide/SKILL.md"
+    guide = _SKILL_DIR.parents[2] / ".agents/skills/impersonator-guide/SKILL.md"
     message = bootstrap_message(42, "Fix login", "claude", "brief", guide, relay_resident=True)
     assert "Ava relay plugin" in message
     assert "do not arm a Monitor watch" in message
@@ -301,14 +301,14 @@ def test_claude_bootstrap_resident_routing_names_the_plugin() -> None:
 
 
 def test_codex_bootstrap_ignores_the_resident_flag() -> None:
-    guide = _REFERENCE.parents[3] / ".agents/skills/impersonator-guide/SKILL.md"
+    guide = _SKILL_DIR.parents[2] / ".agents/skills/impersonator-guide/SKILL.md"
     message = bootstrap_message(42, "Fix login", "codex", "brief", guide, relay_resident=True)
     assert "CODEX_THREAD_ID" in message and "CODEX_HOME" in message
     assert "Ava relay plugin" not in message
 
 
 def test_dsh_bootstrap_names_the_session_plugin_relay() -> None:
-    guide = _REFERENCE.parents[3] / ".agents/skills/impersonator-guide/SKILL.md"
+    guide = _SKILL_DIR.parents[2] / ".agents/skills/impersonator-guide/SKILL.md"
     message = bootstrap_message(42, "Fix login", "dsh", "brief", guide)
     assert "--provider dsh" in message and "--as 'DeepSeek Harness: Fix login'" in message
     assert "Ava relay plugin loaded into this DeepSeek Harness session" in message
@@ -316,11 +316,13 @@ def test_dsh_bootstrap_names_the_session_plugin_relay() -> None:
 
 
 def test_dsh_launcher_boots_headless_with_the_relay_plugin_as_its_runner(tmp_path: Path) -> None:
-    spec = importlib.util.spec_from_file_location("takeover_spawn_dsh", _REFERENCE / "spawn_dsh.py")
+    spec = importlib.util.spec_from_file_location(
+        "takeover_spawn_dsh", _SKILL_DIR / "scripts" / "spawn_dsh.py"
+    )
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
-    plugin = _REFERENCE / "ava-relay-dsh" / "ava-relay.mjs"
+    plugin = _SKILL_DIR / "scripts" / "ava-relay-dsh" / "ava-relay.mjs"
     assert plugin == module._PLUGIN and plugin.is_file()
     patch = module._patch(plugin, tmp_path / "launch.txt")
     assert "- id: headless-runner\n  disabled: true" in patch
@@ -396,7 +398,7 @@ def _run_plugin(tmp_path: Path, *args: str) -> dict[str, Any]:
     harness = tmp_path / "harness.mjs"
     harness.write_text(_PLUGIN_HARNESS, encoding="utf-8")
     out = tmp_path / "out.json"
-    plugin = _REFERENCE / "ava-relay-dsh" / "ava-relay.mjs"
+    plugin = _SKILL_DIR / "scripts" / "ava-relay-dsh" / "ava-relay.mjs"
     subprocess.run(  # noqa: S603 — fixed argv: node, the test harness and fixture paths
         ["node", str(harness), plugin.as_uri(), args[0], str(out), *args[1:]],
         check=True,

@@ -3,10 +3,9 @@
 When entering an interruptible section (the LLM stream or code execution), the
 node uses `async with subscribe_interrupt(...) as event:` to get an
 asyncio.Event; the context manager spawns a background task that watches for a
-durable interrupt inbound — kind 'cancel'/'terminate', or the update
-straggler-reap mark (a 'restarting' row carrying its un-applied maintenance
-restart command) — for this agent and sets the event the moment one is queued. The node races its work vs
-`event.wait()` and aborts when the event fires.
+durable interrupt inbound (kind 'cancel'/'terminate') for this agent and sets
+the event the moment one is queued. The node races its work vs `event.wait()`
+and aborts when the event fires.
 
 Durability is the whole point. The signal is a real `inbound_messages` row
 (INSERTed by /api/cancel for a pause, or the terminate path), detected via a
@@ -47,8 +46,8 @@ from psycopg_pool import AsyncConnectionPool
 
 from agent.db import pending_interrupt_reason
 from agent.graph.node_log import awaiter_chain_lines
-from shared.agents.messages.inbound import InterruptReason
-from shared.log import logger
+from base.agents.messages.inbound import InterruptReason
+from base.log import logger
 
 
 class InterruptEvent(asyncio.Event):

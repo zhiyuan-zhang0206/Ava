@@ -20,8 +20,18 @@ import time
 from pathlib import Path
 from typing import NamedTuple
 
+# Re-exported (redundant alias marks intentional re-export) so existing call
+# sites `from cli.commands._repo import session_name` keep working after the
+# composer moved to base.cluster.
+from base.cluster import session_name as session_name
+from base.cluster.machine import MachineRoles
+from base.config import settings
+from base.deploy.progress_timeout import GATEWAY_PREFLIGHT_BUDGET_S
+from base.host.system.backend import get_backend
+from base.sessions.env_forwarding import frontend_toolchain_env
+
 # The service roster + capability filtering live in the `ops` module family — the
-# single desired-state source (`shared < ops < {gateway, cli}`). Bound here under their
+# single desired-state source (`base < ops < {gateway, cli}`). Bound here under their
 # historical names (module-level assignments, so both ruff and pyright see them as
 # intentional exports) so existing `from cli.commands._repo import ...` call sites
 # (start / status / stop / update / converge / __init__) keep working; `_repo` stays
@@ -29,18 +39,8 @@ from typing import NamedTuple
 from cli.commands._setup import SetupValues
 from ops import spec as _spec
 from ops.roster import build_services as build_services
-from ops.service_spec import ServiceSpec as ServiceSpec
-from ops.service_spec import profile_marker as profile_marker
-
-# Re-exported (redundant alias marks intentional re-export) so existing call
-# sites `from cli.commands._repo import session_name` keep working after the
-# composer moved to shared.cluster.
-from shared.cluster import session_name as session_name
-from shared.config import settings
-from shared.deploy_timing import GATEWAY_PREFLIGHT_BUDGET_S
-from shared.machine import MachineRoles
-from shared.platform_backend import get_backend
-from shared.session_env import frontend_toolchain_env
+from ops.roster.service_spec import ServiceSpec as ServiceSpec
+from ops.roster.service_spec import profile_marker as profile_marker
 
 _services_for_roles = _spec.services_for_capabilities
 _services_for_roles_annotated = _spec.services_for_capabilities_annotated
@@ -51,7 +51,7 @@ def _roles_or_none() -> MachineRoles | None:
     explicit "this host's role is not resolvable yet" state, distinct from a
     (never-valid) empty capability set. stop/status/converge should not be
     blocked by unfinished setup, so they treat None conservatively."""
-    from shared.machine import MachineRoleInvalid, MachineRoleMissing, machine_role
+    from base.cluster.machine import MachineRoleInvalid, MachineRoleMissing, machine_role
 
     try:
         return machine_role()
@@ -107,7 +107,7 @@ def _ensure_frontend_deps(repo: Path) -> None:
     """Install frontend deps when node_modules is missing OR when
     package-lock.json changed since the last install — `npm run build` without
     the exact locked deps dies immediately and the session exits (hit by
-    first-time install, fresh clone, AND by `ava cluster update` pulling a lockfile that
+    first-time install, fresh clone, AND by the fleet update pulling a lockfile that
     adds a dependency: build fails, `npm run build && exec npm run start` short-
     circuits, port 3000 goes dark).
 
@@ -152,7 +152,7 @@ def _ensure_frontend_deps(repo: Path) -> None:
 def _assert_schema_current_or_die() -> int:
     """Verify the DB's applied migration set == the code's required set. Targeted
     hints for the two failure shapes (DB behind code / code behind DB)."""
-    from shared.migrations import (
+    from base.deploy.schema.migrations import (
         CodeBehindSchema,
         SchemaVersionMismatch,
         assert_schema_current,
@@ -172,8 +172,9 @@ def _assert_schema_current_or_die() -> int:
     except CodeBehindSchema as e:
         print(
             f"  ✗ {e}\n"
-            f"    The central DB is ahead of this checkout — typically the gateway ran `ava cluster update` while "
-            f"this host stayed on an older revision. Run `git pull && uv sync` on this host, then retry "
+            f"    The central DB is ahead of this code — typically the gateway moved to a newer "
+            f"revision while this host stayed on an older one. Bring this host to the gateway's "
+            f"revision (a source checkout: check out that commit and `uv sync`), then retry "
             f"`ava start`.",
             file=sys.stderr,
         )
@@ -184,7 +185,7 @@ def _assert_schema_current_or_die() -> int:
 
 # The one endpoint that answers "can a host use the gateway?". Authenticated, and
 # deliberately **exempt from the paused-host 503 middleware**
-# (`gateway/routers/cluster.py`), so a 200 here means the gateway is *serving* — not
+# (`gateway/cluster/router.py`), so a 200 here means the gateway is *serving* — not
 # that the cluster is unpaused. It is also served only after `gateway.app.main`'s
 # `assert_schema_current` has passed, so serving implies migrated: the two are not
 # separate instants a caller has to wait for in turn.
@@ -198,10 +199,8 @@ class GatewayProbe(NamedTuple):
     (connection refused / timeout — nothing is listening). `detail` is the exception
     text in that case, else the truncated response body.
 
-    Shared between the agent-runner's own preflight (`_probe_gateway_or_die`) and the
-    rollout's readiness gate (`cli.commands._gateway_ready`): that is what makes the
-    gate's success criterion *the same criterion* the preflight applies seconds later,
-    rather than a second definition of "reachable" that merely tends to agree with it.
+    The agent-runner preflight (`_probe_gateway_or_die`) uses this result to
+    distinguish an unavailable gateway from a rejected request.
     """
 
     status: int | None
@@ -217,8 +216,8 @@ def probe_gateway_once(gateway_url: str, *, timeout_s: float = 10.0) -> GatewayP
     """
     import httpx
 
-    from shared.http_dial import get as dial_get
-    from shared.machine import gateway_auth_headers
+    from base.cluster.machine import gateway_auth_headers
+    from base.host.net.http_dial import get as dial_get
 
     try:
         resp = dial_get(
@@ -248,22 +247,13 @@ def _probe_gateway_or_die(gateway_url: str, *, budget_s: float = GATEWAY_PREFLIG
 
     **Both transient shapes get the same bounded budget**: a 5xx (the gateway
     answered but is not ready) and no answer at all (nothing is listening on that
-    address *yet*). They used to be treated as opposites — the 5xx retried, a refused
-    connection failed on the first dial — on the reasoning that a rollout must not
-    paper over an ordering bug here, since making the gateway ready before any runner
-    is told to update is the orchestrator's job (`cli.commands._gateway_ready`). That
-    reasoning stands and the gate still owns the ordering; what it does not cover is a
-    gateway that was serving when the gate probed it and is briefly not by the time
-    this dial lands. Prod produced exactly that on 2026-08-01 (issue #1151): a ~9 s
-    restart hole, one ECONNREFUSED, an immediate decline, and two runners stranded
-    until the settle lease lapsed 15 minutes later. A single refused packet is not
-    evidence that the gateway is down, and treating it as such trades a 30 s wait for
-    a 15 minute one.
+    address *yet*). A brief gateway restart can refuse a connection before
+    serving returns; one refused packet is not evidence of a terminal failure.
 
     The budget buys nothing on the healthy path: a reachable gateway answers on the
     first dial and returns immediately. A gateway that is genuinely down still fails —
     `budget_s` is deliberately too short to outlast a real death, which needs the
-    watchdog's own round to fix (`shared.deploy_timing.GATEWAY_PREFLIGHT_BUDGET_S`).
+    watchdog's own round to fix (`base.deploy.progress_timeout.GATEWAY_PREFLIGHT_BUDGET_S`).
 
     A non-200 the gateway *chose* to send (401/403/404) is terminal on the first dial
     as before: a credential or route mismatch is not a timing problem.
@@ -313,7 +303,7 @@ def _probe_gateway_or_die(gateway_url: str, *, budget_s: float = GATEWAY_PREFLIG
 def _register_machine_or_die(resolved: SetupValues, roles: MachineRoles) -> int:
     """UPSERT this host into the machines table with typed error handling.
 
-    The dial URL comes from `shared.machines.unit_dial_url(roles)` — the one
+    The dial URL comes from `base.cluster.machines.unit_dial_url(roles)` — the one
     definition, shared with the ops daemon's boot registration so the two writers
     of this row cannot advertise different addresses for the same unit.
 
@@ -324,7 +314,7 @@ def _register_machine_or_die(resolved: SetupValues, roles: MachineRoles) -> int:
     """
     import psycopg
 
-    from shared.machines import LoopbackDialUrlRefused, register_self, unit_dial_url
+    from base.cluster.machines import LoopbackDialUrlRefused, register_self, unit_dial_url
 
     url = unit_dial_url(roles)
     try:
@@ -347,8 +337,9 @@ def _register_machine_or_die(resolved: SetupValues, roles: MachineRoles) -> int:
     except psycopg.errors.UndefinedTable as e:
         print(
             f"  ✗ register_self failed: `machines` table does not exist ({e}).\n"
-            f"    Gateway's DB schema is behind — run `ava cluster update` (or `ava start`, which "
-            f"applies pending migrations) on the gateway, then retry `ava start` here.",
+            f"    Gateway's DB schema is behind — run `ava stop` then `ava start` on the gateway "
+            f"(a source-run gateway applies pending migrations on a cold start), then retry "
+            f"`ava start` here.",
             file=sys.stderr,
         )
         return 1
@@ -359,7 +350,7 @@ def _register_machine_or_die(resolved: SetupValues, roles: MachineRoles) -> int:
 def _preflight_probes() -> int:
     """Run gateway and DB reachability checks BEFORE stopping services.
 
-    Designed for `ava restart` and `ava cluster update` (self-update leg): validate
+    Designed for `ava restart` and the fleet update (self-update leg): validate
     that the host can still reach the gateway *before* killing its own
     services, so a transient gateway outage or network blip does not leave
     the host in a "services dead, can't start" state.
@@ -371,21 +362,13 @@ def _preflight_probes() -> int:
 
     Returns 0 when both checks pass, non-zero otherwise.
     """
-    from cli.commands._setup import _collect_setup_values, _print_missing_setup_error
 
-    # Resolve setup from persisted env/files (all None args = read-only, no writes).
-    args: dict[str, str | bool | None] = {
-        "machine_name": None,
-        "machine_serve_gateway": None,
-        "machine_serve_agent_runner": None,
-        "machine_serve_observability_station": None,
-        "machine_description": None,
-        "memory_remote": None,
-        "gateway_url": None,
-    }
-    resolved, missing = _collect_setup_values(args)
+    from cli.commands._setup import _collect_setup_values, _missing_setup_message
+
+    # Resolve setup from the home's persisted env/files (read-only, no writes).
+    resolved, missing = _collect_setup_values()
     if missing:
-        _print_missing_setup_error(missing, resolved.get("machine_role"))
+        print(_missing_setup_message(missing), file=sys.stderr)
         return 1
 
     roles_raw = resolved.get("machine_role", "")

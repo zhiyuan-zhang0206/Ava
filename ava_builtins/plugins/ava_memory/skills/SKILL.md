@@ -53,11 +53,12 @@ trigger only costs a cheap commit**.
    merge the ready ones as they arrive (or batch them at the 03:00 consolidate).
 
 Every machine writes to its **own** authoring branch `machine-<name>`, where
-`<name>` is this machine's `AVA_MACHINE_NAME` (`shared/machine.py`: env >
-`$AVA_HOME/machine_name` file). Resolve it once, then use `$BRANCH` throughout:
+`<name>` is this machine's `AVA_MACHINE_NAME` (the process environment, else the
+home's `.env`; it fails when neither names the machine). Resolve it once, then
+use `$BRANCH` throughout:
 
 ```bash
-MACHINE="${AVA_MACHINE_NAME:-$(cat "${AVA_HOME:-$HOME/.ava}/machine_name")}"
+MACHINE="$(python -c 'from ava_builtins.plugins.ava_memory.pool_ops import machine_name; print(machine_name())')"
 BRANCH="machine-$MACHINE"
 ```
 

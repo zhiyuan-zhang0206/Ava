@@ -6,6 +6,7 @@ try:
     import fcntl
 except ImportError:  # Windows ships no fcntl module; the index lock degrades (see _locked_update)
     fcntl = None  # type: ignore[assignment]
+import functools
 import os
 import re
 import tempfile
@@ -17,12 +18,12 @@ from typing import cast
 import yaml
 
 import ava as _ava
-import shared.machine
-import shared.paths
+import base.cluster.machine
+import base.paths
 from ava import gateway_client as _client
-from ava.sdk_validation import coerce_str, coerce_typed
-from shared.agents import IndexerUnavailable as IndexerUnavailable
-from shared.paths import ava_home as _ava_home
+from ava.sdk_surface.validation import coerce_str, coerce_typed
+from base.agents import IndexerUnavailable as IndexerUnavailable
+from base.paths import ava_home as _ava_home
 
 __all_for_ava__ = ["PATH", "search", "write"]
 
@@ -41,7 +42,27 @@ Start each note with YAML frontmatter, then the attribution header:
 Use `write(slug, content, ..., store="shared")` as the canonical writer:
 an absolute pool path, immune to `ava.cwd` changes."""
 
-PATH = _ava.const(_ava_home() / "memory", doc=_PATH_DOC)
+
+@functools.cache
+def _documented_pool(home: Path) -> Path:
+    """The pool root for `home`, wrapped once so every read of one home is one object."""
+    return _ava.const(home / "memory", doc=_PATH_DOC)
+
+
+def __getattr__(name: str) -> Path:
+    """`PATH`, resolved when read so the module never captures the home at import.
+
+    An assignment (`memory.PATH = ...`, the isolated-evaluation boot in
+    `agent/process_boot.py`) creates a real attribute that shadows this hook.
+    """
+    if name == "PATH":
+        return _documented_pool(_ava_home())
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+
+def _pool_root() -> Path:
+    """The pool root as `PATH` reads: an assigned value wins, else the home's."""
+    return globals().get("PATH") or __getattr__("PATH")
 
 
 def _search(
@@ -63,7 +84,7 @@ def _search(
     k = coerce_typed(k, "k", int)
     timeout = coerce_typed(timeout, "timeout", (int, float), allow_none=True)
     results = _client.memory_search(query, k, timeout=timeout)
-    return [(PATH / r.path, r.description, list(r.tags)) for r in results]
+    return [(_pool_root() / r.path, r.description, list(r.tags)) for r in results]
 
 
 # Public binding — the plugin's wrap("memory.search", ...) replaces this name,
@@ -93,11 +114,11 @@ def _entry_path(slug: str, store: str, agent_id: int) -> tuple[Path, bool]:
     if store == "personal":
         if not _PERSONAL_SLUG_RE.fullmatch(slug):
             raise ValueError("personal memory slug must be one kebab-case name without slashes")
-        return shared.paths.workspace_dir(agent_id) / "memory" / f"{slug}.md", False
+        return base.paths.workspace_dir(agent_id) / "memory" / f"{slug}.md", False
     if store == "shared":
         if relative == Path("MEMORY"):
             raise ValueError("shared memory slug cannot replace MEMORY.md")
-        return shared.paths.memory_dir() / relative.with_suffix(".md"), True
+        return base.paths.memory_dir() / relative.with_suffix(".md"), True
     raise ValueError("memory store must be 'personal' or 'shared'")
 
 
@@ -613,7 +634,7 @@ def write(
 
     now = datetime.now(UTC).replace(microsecond=0)
     if is_shared:
-        machine = shared.machine.machine_name()
+        machine = base.cluster.machine.machine_name()
         generated = [
             ("type", "Memory"),
             ("ava_agent", str(agent_id)),
@@ -643,9 +664,7 @@ def write(
         # write entry point so callers cannot publish entries a sweep must repair.
         written += "\n"
     _write_atomically(entry, written)
-    root = (
-        shared.paths.memory_dir() if is_shared else shared.paths.workspace_dir(agent_id) / "memory"
-    )
+    root = base.paths.memory_dir() if is_shared else base.paths.workspace_dir(agent_id) / "memory"
     _upsert_index(
         root, entry.relative_to(root).as_posix(), note_title, note_description, shared=is_shared
     )

@@ -33,7 +33,7 @@
 
     // Statuses that mean the agent was doing something; the transition out of one
     // of these into `idling` is what "finished" means on the wire.
-    var BUSY = { running: true, starting: true, restarting: true };
+    var BUSY = { running: true, starting: true };
 
     // Per agent: the last status seen, and the awaiting-response notice ids
     // already announced. Both start empty, and the first frame for an agent only

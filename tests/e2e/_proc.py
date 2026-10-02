@@ -17,7 +17,7 @@ from pathlib import Path
 
 import psutil
 
-from shared.posixproc import _group_empty
+from base.sessions.posixproc import _group_empty
 
 
 def listener_evidence(port: int, phase: str) -> dict[str, object]:
@@ -113,7 +113,7 @@ def kill_group_or_prove_already_gone(
     outright — leaving a zombie that is the group's sole member. macOS answers
     `killpg` on such a zombie-only group with EPERM, not ESRCH (measured: 0/20
     in isolation, 3/3 under 8 CPU-saturating processes) — the same case
-    `shared.posixproc._group_empty` already carries a fallback for.
+    `base.sessions.posixproc._group_empty` already carries a fallback for.
 
     Both halves must hold before the refusal reads as "already gone": the
     leader itself has actually exited (bounded `wait`, not just believed to),
@@ -545,3 +545,33 @@ def sweep_stale_e2e_processes(*, include_own: bool = False) -> int:
             os.kill(pid, signal.SIGKILL)
     time.sleep(1.0)
     return len(groups) + len(singles)
+
+
+def fixture_entrypoint() -> None:
+    """Direct-process E2E serving injection, deliberately excluding root custody.
+
+    This test-only module is explicitly selected by conftest; no environment
+    flag or product entry point can bypass the real native birth gate.
+    """
+    import runpy
+
+    from base.deploy.lifecycle import start_serving
+
+    gate, module, *arguments = sys.argv[1:]
+    path = Path(gate)
+
+    def fixture_is_serving() -> bool:
+        return path.is_file()
+
+    @contextmanager
+    def fixture_recovery() -> Generator[bool]:
+        yield fixture_is_serving()
+
+    start_serving.is_serving = fixture_is_serving
+    start_serving.recovery_permitted = fixture_recovery
+    sys.argv = [module, *arguments]
+    runpy.run_module(module, run_name="__main__", alter_sys=True)
+
+
+if __name__ == "__main__":
+    fixture_entrypoint()

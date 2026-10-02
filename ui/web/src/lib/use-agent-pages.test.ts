@@ -1,8 +1,7 @@
 // useAgentPages hook tests — the inspector's open-pages list, SSE-driven over
-// a TanStack Query cache (mirrors the agents-cache pattern). Covers the initial
-// fetch, page_opened/page_closed folding, replace-by-name, the empty-cache
-// guard (no partial seed before the fetch lands), cross-agent filtering, and
-// reconnect reconciliation. Same mock strategy as flaky/use-timeline.test.ts.
+// a TanStack Query cache. Covers the initial fetch, page event invalidation,
+// authoritative rows, no partial seed, in-flight repair, per-agent scope, and
+// reconnect reconciliation.
 
 import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import React from "react";
@@ -152,69 +151,101 @@ describe("useAgentPages", () => {
     expect(api.listPages).toHaveBeenCalledWith(1);
   });
 
-  it("page_opened folds a new page into the cache (no refetch)", async () => {
-    vi.mocked(api.listPages).mockResolvedValue([]);
+  it("page_opened refetches the authoritative list", async () => {
+    vi.mocked(api.listPages)
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([pageRow({ name: "panel-a" })]);
     const { result } = renderHook(() => useAgentPages(1), { wrapper });
     await waitForFetch();
     await waitForEventSource();
 
     deliverSseMessage(pageOpened({ name: "panel-a" }));
     await waitFor(() => expect(result.current.map((p) => p.name)).toEqual(["panel-a"]));
-    expect(api.listPages).toHaveBeenCalledTimes(1); // SSE fold, not a refetch
+    expect(api.listPages).toHaveBeenCalledTimes(2);
   });
 
-  it("page_opened for an existing name replaces the row (port/url changed)", async () => {
-    vi.mocked(api.listPages).mockResolvedValue([pageRow({ name: "panel-a", port: 9000 })]);
+  it("page_opened reads the server's replacement row, including fields absent from SSE", async () => {
+    vi.mocked(api.listPages)
+      .mockResolvedValueOnce([pageRow({ name: "panel-a", port: 9000 })])
+      .mockResolvedValueOnce([pageRow({ name: "panel-a", port: 9999, url: "http://host/panel-a-new", serve_dir: "/srv/new" })]);
     const { result } = renderHook(() => useAgentPages(1), { wrapper });
     await waitFor(() => expect(result.current).toHaveLength(1));
     await waitForEventSource();
 
     deliverSseMessage(pageOpened({ name: "panel-a", port: 9999, url: "http://host/panel-a-new" }));
     await waitFor(() => expect(result.current[0].port).toBe(9999));
-    expect(result.current).toHaveLength(1); // replaced, not duplicated
+    expect(result.current).toHaveLength(1);
     expect(result.current[0].url).toBe("http://host/panel-a-new");
+    expect(result.current[0].serve_dir).toBe("/srv/new");
+    expect(api.listPages).toHaveBeenCalledTimes(2);
   });
 
-  it("page_closed removes the page by name", async () => {
-    vi.mocked(api.listPages).mockResolvedValue([
-      pageRow({ name: "panel-a" }),
-      pageRow({ name: "panel-b" }),
-    ]);
+  it("page_closed refetches the list without the closed page", async () => {
+    const panelB = pageRow({ name: "panel-b" });
+    vi.mocked(api.listPages)
+      .mockResolvedValueOnce([pageRow({ name: "panel-a" }), panelB])
+      .mockResolvedValueOnce([panelB]);
     const { result } = renderHook(() => useAgentPages(1), { wrapper });
     await waitFor(() => expect(result.current).toHaveLength(2));
     await waitForEventSource();
 
     deliverSseMessage({ role: "page_closed", agent_id: 1, name: "panel-a" });
     await waitFor(() => expect(result.current.map((p) => p.name)).toEqual(["panel-b"]));
+    expect(api.listPages).toHaveBeenCalledTimes(2);
   });
 
-  it("empty-cache guard: page_opened before the initial fetch lands is not seeded", async () => {
+  it("page_opened before the initial fetch does not seed partial event data", async () => {
     // Hang the fetch so the query has no data yet when the SSE arrives.
     let resolveFetch: (rows: PageRow[]) => void = () => undefined;
-    vi.mocked(api.listPages).mockImplementation(
-      () => new Promise((r) => { resolveFetch = r; }),
-    );
+    vi.mocked(api.listPages)
+      .mockImplementationOnce(() => new Promise((r) => { resolveFetch = r; }))
+      .mockResolvedValueOnce([pageRow({ name: "from-fetch" }), pageRow({ name: "early" })]);
     const { result } = renderHook(() => useAgentPages(1), { wrapper });
     await waitForEventSource();
 
     deliverSseMessage(pageOpened({ name: "early" }));
-    // Cache is still undefined (fetch pending) → the guard drops the partial.
+    // Cache stays undefined until the server responds.
     expect(queryClient.getQueryData(["agent-pages", 1])).toBeUndefined();
     expect(result.current).toEqual([]);
 
-    // The fetch is the source of truth for the initial list.
+    // The first response was captured before the event; repair reads again.
     act(() => resolveFetch([pageRow({ name: "from-fetch" })]));
-    await waitFor(() => expect(result.current.map((p) => p.name)).toEqual(["from-fetch"]));
+    await waitFor(() => expect(result.current.map((p) => p.name)).toEqual(["from-fetch", "early"]));
+    expect(api.listPages).toHaveBeenCalledTimes(2);
   });
 
-  it("first page opening into an already-fetched empty list ([]) still merges", async () => {
-    vi.mocked(api.listPages).mockResolvedValue([]);
+  it("repairs an old initial GET snapshot after a page opens mid-flight", async () => {
+    let resolveInitial!: (rows: PageRow[]) => void;
+    vi.mocked(api.listPages)
+      .mockImplementationOnce(() => new Promise((resolve) => { resolveInitial = resolve; }))
+      .mockResolvedValueOnce([pageRow({ name: "new" })]);
+    const { result } = renderHook(() => useAgentPages(1), { wrapper });
+    await waitFor(() => expect(api.listPages).toHaveBeenCalledTimes(1));
+    await waitForEventSource();
+
+    deliverSseMessage(pageOpened({ name: "new" }));
+    expect(queryClient.getQueryData(["agent-pages", 1])).toBeUndefined();
+    const invalidate = vi.spyOn(queryClient, "invalidateQueries");
+    await waitFor(() => expect(invalidate).toHaveBeenCalledWith(
+      { queryKey: ["agent-pages", 1] }, { cancelRefetch: false },
+    ));
+    act(() => resolveInitial([])); // The GET started before the event.
+
+    await waitFor(() => expect(api.listPages).toHaveBeenCalledTimes(2), { timeout: 2_000 });
+    await waitFor(() => expect(result.current.map((p) => p.name)).toEqual(["new"]));
+  });
+
+  it("first page opening into a fetched empty list triggers a read", async () => {
+    vi.mocked(api.listPages)
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([pageRow({ name: "first" })]);
     const { result } = renderHook(() => useAgentPages(1), { wrapper });
     await waitForFetch(); // fetched, empty ([])
     await waitForEventSource();
 
     deliverSseMessage(pageOpened({ name: "first" }));
     await waitFor(() => expect(result.current.map((p) => p.name)).toEqual(["first"]));
+    expect(api.listPages).toHaveBeenCalledTimes(2);
   });
 
   it("ignores events for other agents", async () => {
@@ -224,9 +255,11 @@ describe("useAgentPages", () => {
     await waitForEventSource();
 
     deliverSseMessage(pageOpened({ name: "other", agent_id: 2 }));
+    await new Promise((resolve) => setTimeout(resolve, 250));
     // agent 2's page must not appear in agent 1's list.
     expect(result.current).toEqual([]);
     expect(queryClient.getQueryData(["agent-pages", 1])).toEqual([]);
+    expect(api.listPages).toHaveBeenCalledTimes(1);
   });
 
   it("reconnect (open) refetches to reconcile events missed during the gap", async () => {

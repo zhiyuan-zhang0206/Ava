@@ -1,22 +1,26 @@
 """A stopped generation can prove readiness without reopening native work."""
 
-import asyncio
-import json
-from concurrent.futures import ThreadPoolExecutor
+import os
+from functools import partial
 from pathlib import Path
 from typing import Any
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
+from urllib.parse import urlsplit
 from uuid import uuid4
 
 import pytest
 from fastapi.testclient import TestClient
-from psycopg_pool import ConnectionPool, PoolTimeout
+from psycopg_pool import PoolTimeout
 
+from base import config
+from base.cluster.auth import bearer_header
+from base.config import settings
+from base.deploy.lifecycle import start_serving
+from base.deploy.maintenance import admission, pause_owner
+from base.deploy.maintenance.state import MaintenanceHold
+from base.deploy.state import host_deploy_state
+from base.host.env import runtime_config as rt
 from gateway.app import app
-from services.agent_ops import daemon
-from shared import host_deploy_state, maintenance, pause_owner, start_serving
-from shared.config import settings
-from shared.maintenance_state import MaintenanceHold
 from tests.agent.test_maintenance import WHEN
 from tests.agent.test_maintenance import isolate as isolate
 
@@ -38,7 +42,7 @@ def test_gateway_health_probes_database_during_hold_and_business_stays_closed() 
         assert health.json()["name"] == "gateway"
         assert health.json()["status"] == "ok"
         assert client.get("/api/agents").status_code == 503
-    assert maintenance.held()
+    assert admission.held()
     assert not start_serving.is_serving()
 
 
@@ -56,8 +60,48 @@ def test_held_gateway_health_still_reports_database_failure(
         assert response.status_code == 503
         assert response.json()["status"] == "degraded"
         assert "PoolTimeout" in response.text
-    assert maintenance.held()
+    assert admission.held()
     assert not start_serving.is_serving()
+
+
+def test_control_plane_bypasses_an_unreadable_admission_journal(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def unexpected_read(_request: object) -> bool:
+        raise AssertionError("control-plane request read the business admission journal")
+
+    monkeypatch.setattr("gateway.app._cluster_is_paused", unexpected_read)
+    with TestClient(app) as client:
+        assert client.get("/api/health").status_code == 200
+
+
+def test_fleet_drain_keeps_sdk_open_during_preparation_identity_probe(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from ops import agent_pause
+
+    class ProbeBoundaryError(Exception):
+        pass
+
+    monkeypatch.setattr(agent_pause, "machine_role", lambda: frozenset({"agent-runner"}))
+    monkeypatch.setattr(agent_pause, "host_running", lambda: True)
+    with TestClient(app) as client:
+
+        def inspect_before_drain() -> None:
+            response = client.get("/api/agents")
+            assert response.status_code == 200, response.text
+            current = admission.snapshot()
+            assert current is not None and current.maintenance is not None
+            assert current.maintenance.phase == "preparing"
+            raise ProbeBoundaryError
+
+        monkeypatch.setattr(agent_pause, "host_identity", inspect_before_drain)
+        # A continued release drain: its hold is published, still preparing.
+        pause_owner.begin_maintenance("fleet", WHEN)
+        with pytest.raises(ProbeBoundaryError):
+            agent_pause.prepare("fleet", WHEN)
+    # Only an explicit abort releases the hold, never the drain.
+    assert admission.held()
 
 
 @pytest.mark.usefixtures("held")
@@ -69,56 +113,91 @@ def test_held_health_exemption_preserves_authentication(monkeypatch: pytest.Monk
         # the authenticated status surface public too.
         assert client.get("/api/health").status_code == 200
         assert client.get("/api/cluster/status").status_code == 401
-    assert maintenance.held()
-
-
-@pytest.mark.real_cluster_spawn
-@pytest.mark.usefixtures("held")
-async def test_real_ops_status_and_exact_resume_keep_readiness_fence(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    # Real dispatch, executor, PostgreSQL posture and journal; no service is launched.
-    with (
-        ConnectionPool(settings.data_plane.db_url, min_size=1, max_size=2) as pool,
-        ThreadPoolExecutor(max_workers=2) as executor,
-    ):
-        monkeypatch.setattr(daemon, "_db_pool", pool)
-        monkeypatch.setattr(daemon, "_op_executor", executor)
-        monkeypatch.setattr(daemon, "_dispatch_sem", asyncio.Semaphore(2))
-
-        async def request(kind: str, payload: dict[str, Any]) -> dict[str, Any]:
-            status, raw, _ = await daemon._ops_route(
-                json.dumps({"kind": kind, "payload": payload}).encode()
-            )
-            assert status == 200
-            return json.loads(raw)
-
-        status = await request("status_probe", {})
-        assert status["status"] == "completed"
-        assert status["result"]["paused"] is True
-        transition = {"deploy_holder": "update", "deploy_acquired_at": WHEN.isoformat()}
-        early = await request("cluster_resume", transition)
-        assert early["status"] == "failed"
-        assert "readiness" in early["result"]["error"]
-        assert maintenance.held()
-        generation = start_serving.begin_start()
-        assert start_serving.mark_serving(generation)
-        wrong = await request("cluster_resume", {**transition, "deploy_holder": "other"})
-        assert wrong["status"] == "failed"
-        assert maintenance.held()
-        resumed = await request("cluster_resume", transition)
-        assert resumed["status"] == "completed"
-        assert not maintenance.held()
-        posture = host_deploy_state.read()
-        assert posture is not None and posture.posture == "idle"
+    assert admission.held()
 
 
 @pytest.mark.usefixtures("held")
 def test_maintenance_start_waiver_does_not_publish_ready(monkeypatch: pytest.MonkeyPatch) -> None:
-    from cli.commands import maintenance as cli_maintenance
+    from cli.commands.lifecycle import maintenance as cli_maintenance
 
-    monkeypatch.setattr("cli.commands.start.cmd_start", MagicMock(return_value=0))
+    monkeypatch.setattr("cli.commands.lifecycle.start.cmd_start", MagicMock(return_value=0))
     assert cli_maintenance._start("update", WHEN) != 0
-    current = maintenance.snapshot()
+    current = admission.snapshot()
     assert current is not None and current.maintenance is not None
     assert current.maintenance.phase == "starting"
+
+
+def _authenticated(monkeypatch: pytest.MonkeyPatch) -> str:
+    """The served home's ledger authenticates machine tokens; returns the human secret."""
+    secret = uuid4().hex
+    monkeypatch.setattr(settings.data_plane, "cluster_secret", secret)
+    monkeypatch.setattr(settings.gateway, "auth_middleware_enabled", True)
+    monkeypatch.setattr("base.paths.ava_home", rt._ava_home)
+    return secret
+
+
+@pytest.mark.usefixtures("held")
+def test_held_gateway_serves_bootstrap_only_to_an_authenticated_caller(
+    monkeypatch: pytest.MonkeyPatch, served_gateway_home: Any
+) -> None:
+    """Bootstrap is control-plane: a runner started under a hold and its processes'
+    config resolution read it before any hold is released. The exemption keeps
+    the authentication and serves no database login; business stays closed."""
+    _authenticated(monkeypatch)
+    runner = bearer_header(served_gateway_home.api.runner)
+    with TestClient(app) as client:
+        assert client.get("/api/bootstrap").status_code == 401
+        assert client.get("/api/bootstrap", headers=bearer_header("wrong")).status_code == 401
+        served = client.get("/api/bootstrap", headers=runner)
+        assert client.get("/api/agents", headers=runner).status_code == 503
+    assert served.status_code == 200, served.text
+    body: dict[str, str] = served.json()
+    assert urlsplit(body["AVA_DB_URL"]).password is None
+    assert not {"AVA_RUNNER_DB_PASSWORD", "AVA_REDIS_ADMIN_PASSWORD"} & set(body)
+    payload = "".join(body.values())
+    for role in (served_gateway_home.roles.runner, served_gateway_home.roles.gateway):
+        assert role.name not in payload and role.password not in payload
+    assert admission.business_paused()
+
+
+@pytest.mark.usefixtures("held")
+def test_a_runners_first_join_reaches_a_held_gateway(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, served_gateway_home: Any
+) -> None:
+    """A runner's init joins (`join_gateway`) with the bundle the gateway issued
+    while the gateway's own hold still stands, over the gateway's real
+    middleware stack."""
+    from base.cluster.authority import unit
+    from base.host.env import bootstrap
+    from cli import unit_join
+
+    secret = _authenticated(monkeypatch)
+    runner = (tmp_path / "runner").resolve()
+    runner.mkdir(mode=0o700)
+    issued = unit.issue_bundle(
+        rt._ava_home(),
+        unit=unit.UnitIdentity(machine="mini", home=str(runner)),
+        endpoint=config.bootstrap_config_values()["AVA_DB_URL"],
+        cluster_secret=secret,
+        ttl_s=600,
+    )
+    bundle = tmp_path / "mini.bundle"
+    bundle.write_bytes(issued.envelope)
+    # The seeded ledger's logins are no PostgreSQL roles: skip the install's login probe.
+    monkeypatch.setattr(
+        unit, "install_bundle", partial(unit.install_bundle, probe=lambda _dsn: None)
+    )
+    gateway = "http://127.0.0.1:1"
+    with TestClient(app) as client, patch.dict(os.environ):
+
+        def dial(url: str, **kwargs: Any) -> Any:
+            return client.get(url.removeprefix(gateway), **kwargs)
+
+        monkeypatch.setattr(bootstrap, "dial_get", dial)
+        os.environ[unit.CAPABILITY_KEY_ENV] = issued.transport_key
+        unit_join.join_gateway(
+            {"AVA_GATEWAY_URL": gateway, "AVA_MACHINE_NAME": "mini"}, runner, str(bundle)
+        )
+    installed = unit.require_unit_capability(runner)
+    assert installed.api is not None and not bundle.exists()
+    assert admission.business_paused()

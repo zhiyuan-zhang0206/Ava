@@ -11,7 +11,7 @@ hostile to interactive exploration (`SET`, prepared statements, advisory locks
 all misbehave). Derive the direct URL the way the admin plane does:
 
 ```bash
-psql "$(.venv/bin/python -c 'from shared.db import direct_db_url; print(direct_db_url())')"
+psql "$(.venv/bin/python -c 'from base.db import direct_db_url; print(direct_db_url())')"
 ```
 
 Pass that URL verbatim — it already carries whatever the cluster's auth needs
@@ -70,7 +70,7 @@ not, **except** for compaction boundaries.
 ## Reading history across compaction segments
 
 Every compaction stamps the thread's newest checkpoint
-`metadata->>'compact_boundary' = true` (`shared/agents/history/checkpoint_cleanup.py:mark_compact_boundary`),
+`metadata->>'compact_boundary' = true` (`base/agents/history/checkpoint_cleanup.py:mark_compact_boundary`),
 and the reaper's predicate excludes those rows from every trim:
 
 ```sql
@@ -94,7 +94,7 @@ involved — this is a query over what is already kept.
 ## Reading the messages
 
 ```python
-from shared.agents.history.checkpoint import load_checkpoint_messages, load_checkpoint_messages_by_trace
+from base.agents.history.checkpoint import load_checkpoint_messages, load_checkpoint_messages_by_trace
 
 msgs = load_checkpoint_messages(3048)                       # the agent's current state
 ckpt_id, msgs = load_checkpoint_messages_by_trace(3048, trace_id)   # by trace
@@ -114,7 +114,7 @@ saver.get_tuple({"configurable": {"thread_id": "3048", "checkpoint_id": "<uuid6>
 
 Always construct the serde with the allowlist
 (`JsonPlusSerializer(allowed_msgpack_modules=STATIC_CHECKPOINT_MSGPACK_TYPES)`,
-`shared/agents/history/checkpoint_serde.py`) or every load spews deserialization warnings.
+`base/agents/history/checkpoint_serde.py`) or every load spews deserialization warnings.
 
 ## Over HTTP instead
 
@@ -126,7 +126,8 @@ GET /api/agents/{agent_id}/traces/{trace_id}/messages
 GET /api/agents/{agent_id}/messages
 ```
 
-Bearer `AVA_CLUSTER_SECRET` when the cluster has one; gateway is on port 8000.
+Bearer `AVA_API_TOKEN` (or, on the gateway, `AVA_CLUSTER_SECRET`) when the
+cluster authenticates; gateway is on port 8000.
 `pruned: true` is the trimmed-checkpoint shape, not an error; 404 means the
 agent is gone. `scripts/read_trace.py --with-content` calls this for you.
 

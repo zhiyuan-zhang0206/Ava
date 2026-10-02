@@ -11,9 +11,9 @@ if TYPE_CHECKING:
     # `_TYPE_CHECKING_ALLOWED`).
     from langchain_core.language_models.chat_models import BaseChatModel
 
-from shared.config import settings
-from shared.lm.effort import clamp_effort
-from shared.lm.provider_api import (
+from base.config import settings
+from base.lm.effort import clamp_effort
+from base.lm.provider_api import (
     BuildContext,
     PricePeriod,
     PriceRates,
@@ -22,7 +22,7 @@ from shared.lm.provider_api import (
     register,
     require_key,
 )
-from shared.lm.registry import ModelSpec, ModelTuning
+from base.lm.registry import ModelSpec, ModelTuning
 
 _QWEN_EFFORT_LEVELS = ("none", "high")
 
@@ -56,7 +56,7 @@ def build(ctx: BuildContext) -> BaseChatModel:
     """qwen* branch: ReasoningContentChatModel (OpenAI-compatible).
     Thinking on/off rides top-level `enable_thinking` via extra_body; there is
     no graded effort field on this endpoint (`qwen_extra_body`)."""
-    from shared.lm.compat.openai_reasoning import ReasoningContentChatModel
+    from base.lm.compat.openai_reasoning import ReasoningContentChatModel
 
     # Alibaba Cloud Model Studio (DashScope) serves Qwen on an OpenAI-compatible
     # endpoint with standard `Authorization: Bearer` auth. The host is CONFIG,

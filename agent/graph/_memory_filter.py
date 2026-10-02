@@ -41,8 +41,8 @@ from dataclasses import dataclass
 
 from langchain_core.messages import HumanMessage
 
-from shared.config.turn_view import turn_settings
-from shared.log import logger
+from base.config.turn_view import turn_settings
+from base.log import logger
 
 _LABEL = "recall-filter"
 _PICKED_PATH_SAMPLE_LIMIT = 10
@@ -180,9 +180,9 @@ async def filter_candidates(query: str, candidates: list[Candidate]) -> list[str
 
     import asyncio
 
-    from shared.lm.effort import ReasoningEffort
-    from shared.lm.factory import build_chat_model
-    from shared.lm.usage import log_usage_from_message
+    from base.lm.effort import ReasoningEffort
+    from base.lm.factory import build_chat_model
+    from base.lm.usage import log_usage_from_message
 
     prompt = _INSTRUCTION.format(inject_k=inject_k, query=query, candidates=_render(candidates))
     # A judge that cannot answer must not fail the turn: LLM replies are
@@ -201,7 +201,7 @@ async def filter_candidates(query: str, candidates: list[Candidate]) -> list[str
             # reasoning pinned off — "none" maps onto deepseek's thinking
             # switch, and on any other provider the effort is a no-op the
             # registry default governs. Pinning is not optional: the registry
-            # defaults deepseek models to effort=max (shared/lm/registry.py),
+            # defaults deepseek models to effort=max (base/lm/registry.py),
             # which made a filter call take ~80s against the 20s bound here —
             # every call timed out and recall silently injected the unfiltered
             # top-3 the filter exists to reject.

@@ -11,7 +11,8 @@ the Gateway; can be deployed independently.
 Usage:
     .venv/bin/python -m services.labeler.daemon
 
-Kept alive by the gateway watchdog's 60s healthcheck (`services/healthchecks/labeler.py`).
+Kept alive by the root supervisor's health monitor through the roster's `/healthz`
+identity probe (`ops/roster/healthz.py`).
 """
 
 import asyncio
@@ -20,19 +21,21 @@ import os
 import signal
 import sys
 import time
+from pathlib import Path
 
 import psycopg
 from loguru import logger
 from psycopg_pool import ConnectionPool
 
-import shared.db
+import base.db
+from base.config import settings
+from base.daemon.health import Liveness, health_port, start_health_server, stop_health_server
+from base.daemon.shutdown import cancel_and_drain, install_graceful_shutdown
+from base.daemon.shutdown import hard_exit as _hard_exit
+from base.log import init_gateway_process
+from base.paths import pid_path
 from services.labeler.labeler import generate_label_async
 from services.pidfile import acquire_pidfile, pidfile_holds_daemon, remove_pidfile
-from shared.config import settings
-from shared.daemon_health import Liveness, health_port, start_health_server, stop_health_server
-from shared.daemon_shutdown import cancel_and_drain, install_graceful_shutdown
-from shared.daemon_shutdown import hard_exit as _hard_exit
-from shared.log import init_gateway_process
 
 _log = logging.getLogger("services.labeler.daemon")
 
@@ -41,7 +44,11 @@ _POLL_INTERVAL_S = 1.0
 # to 10 LLM label calls; beating per-item keeps a slow-but-legit call from
 # tripping it, while a genuine wedge still flips /healthz 503 -> respawn.
 _LIVENESS_TIMEOUT_S = 120.0
-_PIDFILE = settings.services.labeler_pidfile
+
+
+def _pidfile() -> Path:
+    return pid_path("labeler")
+
 
 # Per-agent failure backoff. A label that persistently fails (bad key, rate
 # limit, oversized prompt, model error) leaves `label` NULL, so the next poll
@@ -189,13 +196,13 @@ def _select_unlabeled(cur: psycopg.Cursor, cooling: list[int]) -> list[tuple[int
 
 
 def _write_pidfile() -> None:
-    if not acquire_pidfile(_PIDFILE, "services.labeler.daemon"):
-        _log.info("[labeler] daemon already running (pidfile=%s), exiting", _PIDFILE)
+    if not acquire_pidfile(_pidfile(), "services.labeler.daemon"):
+        _log.info("[labeler] daemon already running (pidfile=%s), exiting", _pidfile())
         sys.exit(1)
 
 
 def _remove_pidfile() -> None:
-    remove_pidfile(_PIDFILE)
+    remove_pidfile(_pidfile())
 
 
 def _is_running() -> bool:
@@ -203,7 +210,7 @@ def _is_running() -> bool:
 
     Pid-reuse-safe: a live pid whose argv does not name this daemon's module
     is a recycled pid, not a running instance (audit round 2, P1)."""
-    return pidfile_holds_daemon(_PIDFILE, "services.labeler.daemon")
+    return pidfile_holds_daemon(_pidfile(), "services.labeler.daemon")
 
 
 async def _dispatch_loop(pool: ConnectionPool, liveness: Liveness) -> None:
@@ -271,18 +278,18 @@ async def _dispatch_loop(pool: ConnectionPool, liveness: Liveness) -> None:
 async def run() -> None:
     """Start the daemon: healthz server -> write pidfile -> connect DB -> enter main loop."""
     if _is_running():
-        _log.info("[labeler] daemon already running (pidfile=%s), exiting", _PIDFILE)
+        _log.info("[labeler] daemon already running (pidfile=%s), exiting", _pidfile())
         sys.exit(1)
 
     # Publish the pidfile before binding healthz so identity-aware probes can verify it.
     _write_pidfile()
-    _log.info("[labeler] pidfile written: %s", _PIDFILE)
+    _log.info("[labeler] pidfile written: %s", _pidfile())
 
     liveness = Liveness(_LIVENESS_TIMEOUT_S)
     health = await start_health_server("labeler", liveness=liveness)
     _log.info("[labeler] healthz listening on :%s", health_port("labeler"))
 
-    pool = shared.db.pool()
+    pool = base.db.pool()
     try:
         await _dispatch_loop(pool, liveness)
     finally:
@@ -295,11 +302,11 @@ async def run() -> None:
 def main() -> None:
     """Entry point: init logger + run asyncio loop.
 
-    SIGTERM (the graceful stop `ava cluster update` sends) and Ctrl-C converge on
-    the same `KeyboardInterrupt` unwind — see `shared.daemon_shutdown`. `ava stop`
+    SIGTERM (the graceful stop the fleet update sends) and Ctrl-C converge on
+    the same `KeyboardInterrupt` unwind — see `base.daemon.shutdown`. `ava stop`
     default force-kill does not reach this.
     """
-    from shared.migrations import assert_schema_current
+    from base.deploy.schema.migrations import assert_schema_current
 
     # Pre-startup sanity: schema version must match code; raises SchemaVersionMismatch if not.
     assert_schema_current(settings.data_plane.db_url)

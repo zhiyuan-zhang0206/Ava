@@ -1,0 +1,6 @@
+# Trunk CLI's own convention: track only trunk.yaml (the merge-queue config)
+# and this file; everything else the CLI writes under .trunk/ (out/, logs/,
+# tools/, ...) is local run state.
+*
+!.gitignore
+!trunk.yaml

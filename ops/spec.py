@@ -7,72 +7,57 @@ capability selection and runtime gates to it.
 Every service declares its ``ServiceSpec.capabilities`` in one of three groups:
 gateway-only, agent-runner-only, or both. ``services_for_capabilities(roles)``
 selects services whose capabilities intersect the host's roles. A service also
-declares ``requires_db`` so the watchdog can hold back exactly the database's
-users during a DB-scoped round block (``ops.controllers.base.BlockScope``).
+declares ``requires_db`` so database-dependent readiness remains explicit.
 
 Plugins expose ``services() -> tuple[ServiceSpec, ...]`` from their services
-module. ``_plugin_services()`` discovers code-present plugins and appends them
+module. ``plugin_services()`` discovers code-present plugins and appends them
 to the roster: plugin declares, ops discovers. Each plugin service's
 own ``ServiceSpec.gate`` keeps cluster-level enablement out of ``_gate_reason``.
 The fleet task daemon follows this path; see
 ``decisions/2026-07-19-plugin-registered-services.md``.
 
-Layer: the ``ops`` module family imports ``shared``, plus lazy function-local
+Layer: the ``ops`` module family imports ``base``, plus lazy function-local
 reaches into the shared-tier browser identity probe and gate app-port source.
-Nothing reaches up into cli/gateway, so start, watchdog, and ``ava status``
+Nothing reaches up into cli/gateway, so start, root monitoring, and ``ava status``
 share one roster.
 
-**Deliberately outside the roster** (each documented at its own site): the
-``gate`` entry-port service (launchd KeepAlive / pidfile job, no session row —
-``cli/commands/converge/gate.py``, probed via ``probe_gate``, not the
-watchdog), the OS-level watchdog-probe jobs (``shared/os_watchdog_probe.py``),
-and the watchdog's hand-prepended ``redis-acl`` healthcheck
-(``services/watchdog/daemon.py``). These are not sessions, so
-``build_services()`` does not see them by design.
+Native Postgres, Redis, and PgBouncer have separate data-plane custody so they
+can remain available during an application-root transition. The macOS helper
+is root's platform parent, not an application service. Read-only extra checks
+live in the root diagnostic roster; they never acquire service ownership.
 ``cli.commands._repo`` re-exports ``ServiceSpec`` / ``build_services`` /
 ``services_for_capabilities`` under their historical names as a cli-facing façade
 (so existing `from cli.commands._repo import ...` call sites keep working), but the
-definitions live in ``service_spec.py``, ``roster.py``, and ``spec.py``.
+definitions live in ``ops.roster.service_spec``, ``ops.roster``, and ``ops.spec``.
 """
 
 from __future__ import annotations
 
 import importlib.util
-import shlex
 import sys
-from dataclasses import dataclass, replace
+from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
 
-from ops.service_spec import ServiceSpec as ServiceSpec  # re-export: generated plugin fixtures
-from shared.config import settings
-from shared.log import logger
-from shared.machine import MachineRoles
-from shared.observability import collector_allowed_for_home, gateway_observability_home
-from shared.platform import IS_WINDOWS
-from shared.platform_probes import (
+from base.cluster.machine import MachineRoles
+from base.config import settings
+from base.host.system.probes import (
     browser_incapability,
     browser_mcp_incapability,
     permissions_helper_incapability,
     unix_sockets_available,
 )
+from base.log import logger
+from base.telemetry.observability import collector_allowed_for_home, gateway_observability_home
+from ops.roster.service_spec import (
+    ServiceSpec as ServiceSpec,  # re-export: generated plugin fixtures
+)
 
 
-def _bind_runtime_command(spec: ServiceSpec) -> ServiceSpec:
-    """Bind Python services to the loaded runtime without changing their gates."""
-    from shared.runtime_interpreter import WHEEL_RUNTIME, runtime_python
-
-    prefix = ".venv/bin/python "
-    if not WHEEL_RUNTIME or not spec.cmd.startswith(prefix):
-        return spec
-    return replace(
-        spec, cmd=f"{shlex.quote(str(runtime_python()))} -I -B -X utf8 {spec.cmd[len(prefix) :]}"
-    )
-
-
-def _plugin_services() -> tuple[ServiceSpec, ...]:
+def plugin_services() -> tuple[ServiceSpec, ...]:
     """The services contributed by the plugins PRESENT on this machine.
 
-    Discovery, not import-of-known-plugins: `shared.plugins_config` enumerates the
+    Discovery, not import-of-known-plugins: `base.packages.plugins.enable_config` enumerates the
     plugins installed on THIS machine (builtin + external), and each that ships a
     ``services.py`` exposing ``services() -> tuple[ServiceSpec, ...]`` gets folded
     into the roster. This keeps the direction "plugin declares, ops discovers" — no
@@ -84,26 +69,26 @@ def _plugin_services() -> tuple[ServiceSpec, ...]:
     semantics. A plugin gates its own service (whether it starts) via an explicit
     settings field in ``ServiceSpec.gate`` — e.g. task-maintenance's
     ``AVA_TASK_MAINTENANCE_ENABLED`` — which is deterministic at daemon-start and
-    unaffected by any per-agent config overlay. start / watchdog / status all
+    unaffected by any per-agent config overlay. start / root / status all
     follow, since they derive from `build_services()`.
 
     The ``services.py`` module is loaded by FILE PATH (like
-    `shared.plugins_config.update_all_disk_images` loads `default_config.py`) so an
+    `base.packages.plugins.enable_config.update_all_disk_images` loads `default_config.py`) so an
     external plugin under ``~/.ava/plugins/`` — off the ``plugins.`` package path —
-    can register too; it must import only light deps (ops / shared), never its
+    can register too; it must import only light deps (ops / base), never its
     own `plugin.py`, so this load does not drag the agent kernel into the ops
     process.
 
     Fail-soft per plugin (user ruling 2026-09-11): a ``services.py`` that fails
     to load, a file without a ``services()`` function, or a ``services()`` call
     that raises is skipped with a loud report
-    (``shared.plugin_load_report``) — one broken plugin must not block
-    `ava start` / the watchdog roster for every other plugin. The session-name
+    (``base.packages.plugins.load_report``) — one broken plugin must not block
+    `ava start` / the root roster for every other plugin. The session-name
     collision guard stays fail-closed: no rule can pick a winner between two
     owners of one session name.
     """
-    from shared import plugin_load_report
-    from shared.plugins_config import installed_plugin_dirs
+    from base.packages.plugins import load_report
+    from base.packages.plugins.enable_config import installed_plugin_dirs
 
     specs: list[ServiceSpec] = []
     for name, plugin_dir in sorted(installed_plugin_dirs().items()):
@@ -115,11 +100,11 @@ def _plugin_services() -> tuple[ServiceSpec, ...]:
         except (KeyboardInterrupt, SystemExit):
             raise
         except BaseException as exc:
-            plugin_load_report.report_plugin_load_failure(name, exc)
+            load_report.report_plugin_load_failure(name, exc)
             continue
         declare = getattr(module, "services", None)
         if declare is None:
-            plugin_load_report.report_plugin_load_failure(
+            load_report.report_plugin_load_failure(
                 name,
                 PluginServiceError(
                     f"plugin {name!r} ships a services.py but it defines no `services()` function"
@@ -131,16 +116,16 @@ def _plugin_services() -> tuple[ServiceSpec, ...]:
         except (KeyboardInterrupt, SystemExit):
             raise
         except BaseException as exc:
-            plugin_load_report.report_plugin_load_failure(name, exc)
+            load_report.report_plugin_load_failure(name, exc)
     return tuple(specs)
 
 
 def _load_plugin_module(name: str, services_py: Path) -> object:
     """Load and register ``services.py`` so its own healthcheck is importable.
 
-    An external plugin can expose ``main`` here and declare
-    ``healthcheck_module=__name__``. The watchdog must resolve that module even
-    when no agent has bootstrapped the external plugin namespace. Registration
+    An external plugin can keep its protocol health probes here and declare
+    ``healthcheck_module=__name__``. Root health monitoring must resolve that
+    module even when no agent has bootstrapped the external plugin namespace. Registration
     before execution also gives dataclasses their normal import-time identity.
     Failed imports restore the prior module, never a half-executed replacement.
     """
@@ -163,7 +148,7 @@ def _load_plugin_module(name: str, services_py: Path) -> object:
 
 def _assert_unique_sessions(core: tuple[ServiceSpec, ...], plugin: tuple[ServiceSpec, ...]) -> None:
     """Fail fast if a plugin service's session name collides with a core service or
-    another plugin's — the roster is keyed on `session` (session, watchdog
+    another plugin's — the roster is keyed on `session` (session, root
     roster, status), so a duplicate would silently shadow one entry."""
     seen = {s.session for s in core}
     for s in plugin:
@@ -184,8 +169,7 @@ def _computer_mcp_gate_reason() -> str | None:
 
     Platform gates only: the daemon needs the permissions helper (the single
     TCC grant-holder it executes through), the AF_UNIX transport its socket
-    protocol uses, and a non-Windows host (Windows computer-use is the phase-3
-    pilot, task #1101). There is no governance gate — per-agent permission
+    protocol uses. There is no governance gate — per-agent permission
     division is a prompt-level peer convention, not code-enforced (user ruling
     2026-08-10).
     """
@@ -195,11 +179,6 @@ def _computer_mcp_gate_reason() -> str | None:
         return permissions_helper_incapability()
     if not unix_sockets_available():
         return "no AF_UNIX sockets (computer-mcp's transport is POSIX-only)"
-    if IS_WINDOWS:
-        # The Windows C# helper lacks screen_size/frontmost_app (the snapshot
-        # geometry needs them); Windows is the phase-3 pilot (task #1101) —
-        # enable it there with the helper methods added.
-        return "Windows computer-use is a phase-3 pilot (task #1101)"
     return None
 
 
@@ -211,7 +190,7 @@ def _otel_collector_gate_reason() -> str | None:
     ``services/healthchecks/otel_collector.py``. All three share
     ``collector_allowed_for_home`` (marker OR station capability OR explicit
     ``AVA_TELEMETRY_OTLP_ENDPOINT`` override) so the roster, ``ava start``,
-    ``ava status``, watchdog, rollout readiness, and cluster health probe agree
+    ``ava status``, the root, rollout readiness, and cluster health probe agree
     about which gateway owns the collector. Pure agent-runners retain their
     relay collector.
     """
@@ -225,6 +204,87 @@ def _otel_collector_gate_reason() -> str | None:
     return None
 
 
+# Uniform "session X is gated out when its single settings flag is off" rows —
+# each entry's predicate is checked in one small loop by `_flag_gate_reason`
+# instead of a repeated `if session == NAME and not settings...: return ...`
+# chain, which is what previously drove `_gate_reason`'s complexity above the
+# hard ceiling. Every row here has exactly this shape; a session whose gate
+# needs more than one flag or a non-boolean comparison (browser, mcp-daemon,
+# computer-mcp, the lgtm trio, otel-collector, milvus) stays a dedicated branch
+# in `_core_gate_reason` below.
+_FLAG_GATES: tuple[tuple[str, Callable[[], bool], str], ...] = (
+    (
+        "heartbeat",
+        lambda: settings.daemon.heartbeat_enabled,
+        "disabled (AVA_HEARTBEAT_ENABLED off)",
+    ),
+    (
+        "delivery-watchdog",
+        lambda: settings.daemon.delivery_watchdog_enabled,
+        "disabled (AVA_DELIVERY_WATCHDOG_ENABLED off)",
+    ),
+    (
+        "im-bridge",
+        lambda: settings.services.im_bridge_enabled,
+        "disabled (AVA_IM_BRIDGE_ENABLED off)",
+    ),
+)
+
+
+def _flag_gate_reason(session: str) -> str | None:
+    """The reason for a session in `_FLAG_GATES`, or None (enabled / not one of these)."""
+    for name, enabled, reason in _FLAG_GATES:
+        if session == name and not enabled():
+            return reason
+    return None
+
+
+def _browser_family_gate_reason(session: str) -> str | None:
+    if not settings.services.browser_enabled:
+        return "disabled (AVA_BROWSER_ENABLED off)"
+    # Two services, two capability probes: browser-mcp needs a strict SUPERSET
+    # of what the headed browser needs (the same display / Chrome / npx prongs
+    # plus an AF_UNIX transport), so a host can legitimately run `browser` and
+    # not `browser-mcp` — which is exactly a Windows agent-runner. Sharing one
+    # probe put browser-mcp in that host's start roster with no skip
+    # annotation, and it failed every launch.
+    if session == "browser-mcp":
+        return browser_mcp_incapability()
+    return browser_incapability()  # display / Chrome / npx, or None when capable
+
+
+def _core_gate_reason(session: str) -> str | None:
+    """The session-name-keyed half of `_gate_reason` — every core service
+    without its own plugin-registered ``gate``."""
+    if session in ("browser", "browser-mcp"):
+        return _browser_family_gate_reason(session)
+    if session == "mcp-daemon" and not unix_sockets_available():
+        # Same transport story as browser-mcp: the daemon binds a Unix socket
+        # (ava/mcps/_daemon.py) and its healthcheck dials it, so without AF_UNIX
+        # the service can never start and the root would judge it dead every
+        # round and log a restart failure — a Windows agent-runner, exactly.
+        return "no AF_UNIX sockets (mcp-daemon's transport is POSIX-only)"
+    if session == "computer-mcp":
+        return _computer_mcp_gate_reason()
+    if session in {"loki", "prometheus", "grafana"}:
+        from services.healthchecks.lgtm import is_lgtm_host
+
+        return None if is_lgtm_host() else "this home is not an observability station"
+    if session == "otel-collector":
+        return _otel_collector_gate_reason()
+    if session == "milvus" and settings.services.memory_search_backend != "milvus":
+        # The milvus-lite server only serves the memory indexer's milvus
+        # backend; numpy (default) and pgvector never dial it. Without the
+        # gate every `ava start` launched an idle ~1GB milvus-lite process the
+        # memory search never uses (2026-09-02 numpy-default ruling; daemon
+        # was disabled by hand 2026-09-03, this gate makes it durable).
+        return (
+            "memory-search backend is "
+            f"{settings.services.memory_search_backend!r} (AVA_MEMORY_SEARCH_BACKEND) — milvus not needed"
+        )
+    return _flag_gate_reason(session)
+
+
 def _gate_reason(spec: ServiceSpec) -> str | None:
     """Why a service is config/capability-gated OUT of the start roster, or None if
     it will run. The single place the gate's *reason* is computed, so the start
@@ -233,7 +293,7 @@ def _gate_reason(spec: ServiceSpec) -> str | None:
 
     A service that carries its own ``gate`` (plugin-registered services) is asked
     directly — its fleet/plugin-domain toggle lives with the plugin, not here.
-    Core services are gated by session name below.
+    Core services are gated by session name in `_core_gate_reason`.
     """
     if spec.gate is not None:
         try:
@@ -246,52 +306,9 @@ def _gate_reason(spec: ServiceSpec) -> str | None:
             # Fail OPEN — run the service — and log, so one plugin's gate bug
             # can never take the supervisor down; the capability filter above
             # already scoped the service to this host's role.
-            logger.warning("gate for %s raised (failing open): %s", spec.session, exc)
+            logger.warning("gate for {} raised (failing open): {}", spec.session, exc)
             return None
-    session = spec.session
-    if session in ("browser", "browser-mcp"):
-        if not settings.services.browser_enabled:
-            return "disabled (AVA_BROWSER_ENABLED off)"
-        # Two services, two capability probes: browser-mcp needs a strict
-        # SUPERSET of what the headed browser needs (the same display / Chrome /
-        # npx prongs plus an AF_UNIX transport), so a host can legitimately run
-        # `browser` and not `browser-mcp` — which is exactly a Windows
-        # agent-runner. Sharing one probe put browser-mcp in that host's start
-        # roster with no skip annotation, and it failed every launch.
-        if session == "browser-mcp":
-            return browser_mcp_incapability()
-        return browser_incapability()  # display / Chrome / npx, or None when capable
-    if session == "mcp-daemon" and not unix_sockets_available():
-        # Same transport story as browser-mcp: the daemon binds a Unix socket
-        # (ava/_mcps_daemon.py) and its healthcheck dials it, so without AF_UNIX
-        # the service can never start and the watchdog would judge it dead every
-        # 60s and log a restart failure — a Windows agent-runner, exactly.
-        return "no AF_UNIX sockets (mcp-daemon's transport is POSIX-only)"
-    if session == "computer-mcp":
-        return _computer_mcp_gate_reason()
-    if session == "otel-collector":
-        return _otel_collector_gate_reason()
-    if session == "heartbeat" and not settings.daemon.heartbeat_enabled:
-        return "disabled (AVA_HEARTBEAT_ENABLED off)"
-    if session == "delivery-watchdog" and not settings.daemon.delivery_watchdog_enabled:
-        return "disabled (AVA_DELIVERY_WATCHDOG_ENABLED off)"
-    if session == "pitr-uploader" and not settings.physical_backup.pitr_enabled:
-        return "disabled (AVA_PITR_ENABLED off)"
-    if session == "pitr-base-candidate" and not settings.physical_backup.pitr_base_backup_enabled:
-        return "disabled (AVA_PITR_BASE_BACKUP_ENABLED off)"
-    if session == "im-bridge" and not settings.services.im_bridge_enabled:
-        return "disabled (AVA_IM_BRIDGE_ENABLED off)"
-    if session == "milvus" and settings.services.memory_search_backend != "milvus":
-        # The milvus-lite server only serves the memory indexer's milvus
-        # backend; numpy (default) and pgvector never dial it. Without the
-        # gate every `ava start` launched an idle ~1GB milvus-lite process the
-        # memory search never uses (2026-09-02 numpy-default ruling; daemon
-        # was disabled by hand 2026-09-03, this gate makes it durable).
-        return (
-            "memory-search backend is "
-            f"{settings.services.memory_search_backend!r} (AVA_MEMORY_SEARCH_BACKEND) — milvus not needed"
-        )
-    return None
+    return _core_gate_reason(spec.session)
 
 
 def services_for_capabilities_annotated(
@@ -322,33 +339,12 @@ def services_for_capabilities(roles: MachineRoles) -> tuple[ServiceSpec, ...]:
     return tuple(s for s, reason in services_for_capabilities_annotated(roles) if reason is None)
 
 
-def gate_reason_for_session(session: str) -> str | None:
-    """The roster gate reason for ONE service session, or None when it will run.
-
-    The start loop applies ``_gate_reason`` to the whole capability-union roster
-    at once; a spawner that launches a single service OUTSIDE that loop (the
-    pause lifecycle's restarter respawn) must ask the same question per session
-    or it drifts from the roster — the hosted restarter relaunch after every
-    rollout (2026-09-02, Task #2342: ``ava start`` skipped it correctly while the
-    unpause finally respawned it). Capability membership is deliberately not
-    part of the answer: the caller already knows it owns the session; only the
-    config/capability gate can differ between an orchestration context and
-    ``ava start``.
-    """
-    for spec in build_services():
-        if spec.session == session:
-            return _gate_reason(spec)
-    return "not a roster service (no spec with this session in ops.spec)"
-
-
 @dataclass(frozen=True)
 class Spec:
-    """A host's desired state — the roster it should run, plus the code revision
-    and (as they converge here) the data plane it should run against.
+    """A host's desired state — the roster it should run and (as it converges
+    here) the data plane it should run against.
 
-    Slice 1 fills in the service roster; the cluster-pin accessor is a read-through
-    to ``shared.cluster_pin`` (the pin's writer stays the rollout path). The
-    data-plane desired state (per-cluster instance / ports / bind / redis-ACL
+    Slice 1 fills in the service roster. The data-plane desired state (per-cluster instance / ports / bind / redis-ACL
     users) lands after the data-plane retirement PR, whose model it will read from
     rather than re-derive. See ``future/infra/ops-module.md`` for the full
     Spec content and the batch sequence.
@@ -364,22 +360,11 @@ class Spec:
         """The diagnostic roster — every capability-matched service + its gate reason."""
         return services_for_capabilities_annotated(self.roles)
 
-    def cluster_pin(self) -> str | None:
-        """The SHA the cluster is pinned to (None = no rollout has pinned one yet).
-
-        A read-through to ``shared.cluster_pin`` — the pin is written by the rollout
-        path, not by Spec. The pin controller diffs a host's HEAD against this.
-        """
-        from shared.cluster_pin import get_cluster_target_sha
-
-        return get_cluster_target_sha()
-
 
 # Compatibility re-export: legacy importers (`from ops.spec import
-# build_services`, scripts/prepare_plugin_fixture.py's generated
-# `services.py` template, tests) take the canonical roster from this module.
+# build_services`, tests) take the canonical roster from this module.
 # Placed at the BOTTOM deliberately: roster's build_services calls back into
-# this module's helpers (_bind_runtime_command / _plugin_services /
+# this module's helpers (plugin_services /
 # _assert_unique_sessions) lazily, so this edge must not run while this module
 # is partially initialized (spec → roster at the top would be a load-time
 # edge in the opposite direction of the call-time edge — keep both lazy).

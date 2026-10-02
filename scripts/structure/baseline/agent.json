@@ -1,17 +1,25 @@
 {
+  "ambient_state": {
+    "agent/exec_child.py::foreign-rebind:ava.state": 2,
+    "agent/exec_child.py::foreign-rebind:ava.state_update": 1,
+    "agent/exec_child.py::global-rebind:agent_identity": 1,
+    "agent/exec_child.py::global-rebind:ava": 1,
+    "agent/exec_child.py::import-time-read:_CHILD_BOOT_STARTED_AT": 1,
+    "agent/exec_domain_owner.py::thread:run": 1,
+    "agent/exec_owner_child.py::thread:main": 1,
+    "agent/impersonation.py::ambient-container:_anchor_obscured": 1,
+    "agent/impersonation.py::ambient-container:_relay_children": 1,
+    "agent/impersonation.py::import-time-read:_PROCESS_STARTED_MONOTONIC": 1,
+    "agent/impersonation.py::import-time-read:_PROCESS_STARTED_WALL": 1,
+    "agent/state.py::ambient-container:_BASE_FIELD_DECLARED": 1,
+    "agent/state.py::ambient-container:_EXTRA_FIELDS": 1,
+    "agent/state.py::ambient-container:_PLUGIN_NAMESPACE_FIELDS": 1,
+    "agent/state.py::ambient-container:_PLUGIN_STATE_CLASSES": 1
+  },
   "complexity": {
-    "agent/db.py::claim_inbound_batch": 15,
     "agent/exec_domain_owner.py::run": 28,
-    "agent/hosted_ownership.py::admit_hosted_runtime": 20,
     "agent/impersonation.py::establish_relay": 16,
     "agent/impersonation.py::settle_checkpoint": 15,
-    "agent/impersonation.py::supervise_relay": 21,
-    "agent/runloop.py::_handle_fatal_llm_error": 26
-  },
-  "directories": {
-    "agent": 27
-  },
-  "private_imports": {
-    "agent/exec_child.py::shared.log._add_postgres_sink": 1
+    "agent/impersonation.py::supervise_relay": 21
   }
 }

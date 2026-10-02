@@ -204,17 +204,20 @@ class SourceGraph:
         return annotations
 
     def route_classes(self):
-        # `gateway/routers/` holds most FastAPI routers; `gateway/inspect/`
-        # is the Inspector's own functional package (router.py mounted the
-        # same way — see gateway/app.py) and carries its own route file too.
-        for routers_dir in ("gateway/routers", "gateway/inspect"):
-            for path in (self.root / routers_dir).rglob("*.py"):
-                module = ".".join(path.relative_to(self.root).with_suffix("").parts)
-                for func in self.nodes(module):
-                    if not isinstance(func, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                        continue
-                    for annotation in self.route_annotations(func):
-                        self.expression(module, annotation)
+        # Routes live in `gateway/routers/` (single-module surfaces) and in the
+        # gateway's feature packages (`gateway/agents/`, `gateway/cluster/`,
+        # `gateway/inspect/`, ...), all mounted by gateway/app.py — so every
+        # gateway module is scanned for route decorators.
+        for path in (self.root / "gateway").rglob("*.py"):
+            if "tests" in path.relative_to(self.root).parts:
+                continue  # a gateway test's throwaway routes are not the wire schema
+            parts = path.relative_to(self.root).with_suffix("").parts
+            module = ".".join(parts[:-1] if parts[-1] == "__init__" else parts)
+            for func in self.nodes(module):
+                if not isinstance(func, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                    continue
+                for annotation in self.route_annotations(func):
+                    self.expression(module, annotation)
         return self.classes
 
     def schema_sources(self, components, generated):

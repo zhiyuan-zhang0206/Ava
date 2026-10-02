@@ -1,51 +1,49 @@
 {
   "complexity": {
-    "tests/services/test_agent_host_recrash_reap.py::test_settle_boundary_prompt_reaps_the_second_crash_at_once": 15,
     "tests/services/test_ava_root_daemon.py::test_daemon_end_to_end": 15,
-    "tests/services/test_ava_root_daemon.py::test_upgrade_exec_replaces_in_place_and_adopts_the_tree": 18,
-    "tests/services/test_ava_root_selfcheck.py::test_missing_process_opens_one_event_per_episode": 15,
     "tests/services/test_backup.py::test_run_backup_keeps_checkpoints_and_hides_db_password_from_argv": 17,
-    "tests/services/test_computer_mcp_daemon.py::test_audit_emitted_on_success": 15,
-    "tests/services/test_delivery_watchdog.py::TestDispatchBackoffAndPoison.test_dispatch_cap_poisons_once_and_emits_event": 15,
-    "tests/services/test_embeddings.py::_embedding_server.<locals>.Handler.do_POST": 19,
-    "tests/services/test_healthcheck_browser.py::test_session_gone_rebuilds_via_the_gui_domain_when_the_chain_is_outside_it": 16,
-    "tests/services/test_healthcheck_permissions_helper.py::test_unhealthy_reports_once_and_escalates_with_backoff": 20,
-    "tests/services/test_host_pool_capacity.py::test_six_host_pools_settle_one_thousand_short_requests_through_pgbouncer": 15,
-    "tests/services/test_hosted_db_wait_liveness.py::test_real_db_wait_survives_both_stale_paths_and_clears_afterward": 16,
-    "tests/services/test_hosted_idle_recovery.py::test_quiet_idle_predecessor_is_recovered_without_a_model_call": 16,
-    "tests/services/test_im_bridge_core.py::test_spawn_menu_layers_render_with_summary_button": 22,
-    "tests/services/test_memory_indexer.py::test_reconcile_retry_drain_loop_converges_after_embed_failures": 15,
-    "tests/services/test_memory_indexer.py::test_reconcile_retry_schedule_backoff_and_reset": 21,
-    "tests/services/test_permissions_helper.py::_fake_tools.<locals>.run": 22,
-    "tests/services/test_pitr_cos_store.py::test_cos_ack_normalizes_into_candidate_and_protected_manifests": 19,
-    "tests/services/test_pitr_oss_roles.py::test_put_base_if_absent_streams_multipart_and_writes_sidecar": 15,
-    "tests/services/test_trace.py::test_turn_span_exports_root_at_start_not_at_end": 17
-  },
-  "directories": {
-    "tests/services": 163
+    "tests/services/test_hosted_db_wait_liveness.py::test_real_db_wait_survives_both_stale_paths_and_clears_afterward": 16
   },
   "files": {
-    "tests/services/agent_ops/test_daemon.py": 1734,
     "tests/services/test_agent_host.py": 1770,
-    "tests/services/test_backup.py": 1224,
-    "tests/services/test_browser_mcp_daemon.py": 1511,
-    "tests/services/test_computer_mcp_daemon.py": 1202,
-    "tests/services/test_delivery_watchdog.py": 2321,
-    "tests/services/test_embeddings.py": 922,
-    "tests/services/test_gate.py": 844,
-    "tests/services/test_healthcheck_browser.py": 891,
-    "tests/services/test_hierarchy_worker.py": 897,
-    "tests/services/test_im_bridge_core.py": 1423,
-    "tests/services/test_memory_indexer.py": 1515,
-    "tests/services/test_page_server_daemon.py": 855,
-    "tests/services/test_permissions_helper.py": 2106,
-    "tests/services/test_pitr_base_scheduler.py": 963,
-    "tests/services/test_pitr_restore_lifecycle.py": 824,
-    "tests/services/test_pitr_uploader.py": 872,
-    "tests/services/test_trace.py": 1726,
-    "tests/services/test_turn_dispatcher.py": 1429
+    "tests/services/test_backup.py": 902
   },
-  "nesting": {
-    "tests/services/test_host_pool_capacity.py::test_more_than_twenty_workload_leases_share_bounded_backends": 6
+  "patch_targets": {
+    "tests/services/test_ava_root_custody.py::services.permissions_helper.launchd_job._executable_pids": 2,
+    "tests/services/test_ava_root_custody.py::services.permissions_helper.launchd_job._retirement_command": 4,
+    "tests/services/test_ava_root_custody.py::services.permissions_helper.launchd_job._retirement_owner": 2,
+    "tests/services/test_ava_root_custody.py::services.permissions_helper.launchd_job._wait_retirement_owner": 2,
+    "tests/services/test_ava_root_custody.py::services.permissions_helper.lifecycle._expected_dr": 2,
+    "tests/services/test_ava_root_custody.py::services.permissions_helper.lifecycle._interactive_signing_reason": 3,
+    "tests/services/test_ava_root_custody.py::services.permissions_helper.lifecycle._is_valid_stable_app": 1,
+    "tests/services/test_ava_root_custody.py::services.permissions_helper.lifecycle._keychain_lock_reason": 3,
+    "tests/services/test_ava_root_custody.py::services.permissions_helper.lifecycle._run": 3,
+    "tests/services/test_ava_root_custody.py::services.permissions_helper.lifecycle._source_content_hash": 2,
+    "tests/services/test_ava_root_custody.py::services.permissions_helper.lifecycle._verify_dr": 2,
+    "tests/services/test_ava_root_ipc.py::base.deploy.lifecycle.start_serving._lock_path": 1,
+    "tests/services/test_backup_scheduler_shutdown.py::services.backup._db_size_breakdown": 1,
+    "tests/services/test_backup_scheduler_shutdown.py::services.backup._key_file": 1,
+    "tests/services/test_backup_scheduler_shutdown.py::services.backup._run_with_progress": 1,
+    "tests/services/test_backup_scheduler_shutdown.py::services.backup_scheduler.daemon._backup_loop": 1,
+    "tests/services/test_backup_scheduler_shutdown.py::services.backup_scheduler.daemon._is_running": 1,
+    "tests/services/test_backup_scheduler_shutdown.py::services.backup_scheduler.daemon._remove_pidfile": 1,
+    "tests/services/test_backup_scheduler_shutdown.py::services.backup_scheduler.daemon._write_pidfile": 1,
+    "tests/services/test_maintenance_readiness.py::gateway.app._cluster_is_paused": 1
+  },
+  "tests_location": {
+    "tests/services/test_agent_host.py::top-level": 1,
+    "tests/services/test_ava_root_custody.py::top-level": 1,
+    "tests/services/test_ava_root_daemon.py::top-level": 1,
+    "tests/services/test_ava_root_glue_manifests.py::top-level": 1,
+    "tests/services/test_ava_root_ipc.py::top-level": 1,
+    "tests/services/test_ava_root_manifest.py::top-level": 1,
+    "tests/services/test_ava_root_supervisor.py::top-level": 1,
+    "tests/services/test_backup.py::top-level": 1,
+    "tests/services/test_backup_recovery_contract.py::top-level": 1,
+    "tests/services/test_backup_scheduler_daemon.py::top-level": 1,
+    "tests/services/test_backup_scheduler_shutdown.py::top-level": 1,
+    "tests/services/test_gate_root.py::top-level": 1,
+    "tests/services/test_hosted_db_wait_liveness.py::top-level": 1,
+    "tests/services/test_maintenance_readiness.py::top-level": 1
   }
 }

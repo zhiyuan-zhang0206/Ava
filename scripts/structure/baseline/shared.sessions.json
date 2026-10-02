@@ -1,5 +1,0 @@
-{
-  "complexity": {
-    "shared/sessions/pty/cli.py::main": 17
-  }
-}

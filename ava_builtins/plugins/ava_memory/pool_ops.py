@@ -5,23 +5,10 @@ Imported by the consolidation scripts under `skills/scripts/` (`consolidate.py`,
 as `ava_builtins.plugins.ava_memory.pool_ops`, so a run needs the checkout's
 venv (`ava_builtins` importable) — `consolidation/SKILL.md` invokes them with
 a bare `python`, which an agent's shell resolves to that venv (the venv's
-`bin/` leads the PATH every agent process inherits). Still stdlib + subprocess only, no
-`shared` import: `ava_home()` does not use the checkout-anchored home
-resolution the rest of the repo uses (`shared.dotenv_boot`), for the reason
-below.
-
-`ava_home()` takes the opposite, simpler stance: require an explicit
-`AVA_HOME` instead of guessing one. Every legitimate caller already has it:
-these scripts run inside an agent's shell tool, a child of the agent process
-that pinned `AVA_HOME` into its own environment at boot
-(`shared.dotenv_boot.load_ava_env`), which subprocess inherits. A caller with
-no `AVA_HOME` — an ad-hoc run from an unrelated shell, e.g. a dev checkout
-with no cluster of its own — has no business guessing `~/.ava` either: that
-default is THIS MACHINE's real cluster home, and `pool_dir()` /
-`refresh_index()` are write paths (git commit + push to the pool, `ava
-memory refresh`), so a wrong guess here does not just misread — it can
-mutate production (the same "unanchored checkout reaches production" bug
-class as `shared/dotenv_boot.py`, 2026-09-27).
+`bin/` leads the PATH every agent process inherits). Stdlib + subprocess plus
+the leaf that resolves the home (`base.host.env.dotenv_boot.resolve_ava_home`:
+`$AVA_HOME`, else `~/.ava`), which builds no Settings, and `dotenv_values` to
+read the home's `.env`.
 """
 
 from __future__ import annotations
@@ -30,31 +17,32 @@ import os
 import subprocess
 from pathlib import Path
 
+from dotenv import dotenv_values
 
-def ava_home() -> Path:
-    """This process's Ava home. No fallback — see the module docstring."""
-    env = os.environ.get("AVA_HOME")
-    if not env:
-        raise SystemExit(
-            "AVA_HOME is not set. These scripts never guess a home (an agent's shell "
-            "inherits it from the agent process; a manual run must set it explicitly) "
-            "-- pass AVA_HOME=<path> instead of relying on ~/.ava."
-        )
-    return Path(env)
+from base.host.env.dotenv_boot import resolve_ava_home
 
 
 def pool_dir() -> Path:
-    return ava_home() / "memory"
+    return resolve_ava_home() / "memory"
 
 
 def machine_name() -> str:
-    env = os.environ.get("AVA_MACHINE_NAME")
+    """This host's machine name: `AVA_MACHINE_NAME` in the process environment, else
+    in the home's `.env`. Builds no Settings.
+
+    A host that declares neither is not a configured unit; the steward would push
+    under a made-up branch, so this refuses instead.
+    """
+    env = os.environ.get("AVA_MACHINE_NAME", "").strip()
     if env:
         return env
-    mf = ava_home() / "machine_name"
-    if mf.exists():
-        return mf.read_text().strip()
-    return "unknown"
+    declared = (dotenv_values(resolve_ava_home() / ".env").get("AVA_MACHINE_NAME") or "").strip()
+    if declared:
+        return declared
+    raise SystemExit(
+        "✗ AVA_MACHINE_NAME is set neither in the environment nor in "
+        f"{resolve_ava_home() / '.env'}; the memory branch is machine-<name>"
+    )
 
 
 def branch_name() -> str:

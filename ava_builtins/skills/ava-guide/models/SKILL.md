@@ -12,7 +12,7 @@ ava.agents.spawn(prompt="...", config_overlay={"llm_model": "deepseek-flash"})
 ```
 
 Omitting the overlay is a valid choice — the child inherits the cluster default.
-The registry (`shared/lm/registry.py`) is the authoritative list of available
+The registry (`base/lm/registry.py`) is the authoritative list of available
 models (`spawnable=True`) and their prices; this skill carries the judgment the
 registry cannot: **which model a given sub-task deserves, and which registered
 models sit on the Pareto frontier.**
@@ -30,17 +30,17 @@ copied from an old doc or an old spawn; list the current roster first:
   import httpx, os
   r = httpx.get(
       f"{os.environ['AVA_GATEWAY_URL']}/api/models",
-      headers={"Authorization": f"Bearer {os.environ['AVA_CLUSTER_SECRET']}"},
+      headers={"Authorization": f"Bearer {os.environ.get('AVA_API_TOKEN', '')}"},
       timeout=10,
   )
   models = r.json()["models"]  # id -> {provider, context_window, pricing,
                                #         reasoning_effort_options, ...}
   ```
 
-- **Source of truth (repo-side)** — `shared/lm/registry.py`'s `MODELS` dict and
+- **Source of truth (repo-side)** — `base/lm/registry.py`'s `MODELS` dict and
   the derived `SUPPORTED_MODELS` (provider → spawnable ids). A model is
   selectable iff `spawnable=True`. Chat prices live in the provider plugin's
-  `PriceRates` and are mirrored in `shared/lm/pricing_catalog_archive.json` —
+  `PriceRates` and are mirrored in `base/lm/pricing_catalog_archive.json` —
   the reviewed ledger the runtime reads (catalog-only services such as
   embeddings price from the archive alone). The frontend picker and
   `/api/models` both derive from this registry, so the registry is the only

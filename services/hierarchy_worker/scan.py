@@ -29,8 +29,8 @@ from datetime import UTC, datetime, timedelta
 
 from psycopg import Connection
 
-from shared.config import settings
-from shared.log import logger
+from base.config import settings
+from base.log import logger
 
 # The job kinds: 'compact' seals the batches a new compaction boundary
 # closed; 'tail' (task #3981 C) seals an idle agent's trailing stretch. P2c

@@ -10,6 +10,7 @@ class that has occurred here and the rule that prevents it.
 | Treat one red attempt as a regression | not lintable (operational) | Existing: attempt-history triage and rerun cap |
 | Read or mutate ambient host state | lintable now | Existing: fixture-scope and environment-write lints |
 | Depend on ordering | lintable with new rule | New: fixed-port heuristic; isolation guards |
+| Leave process-global state behind | not lintable (operational) | New: root leak guard names the leaker |
 | Quarantine timing races by default | not lintable (operational) | Existing: serial-group admission and exit policy |
 | Assume runner-load readiness | lintable with new rule | New: fake-timer-loop heuristic; bounded waits |
 | Pin wall-clock values or counts | lintable now | Existing: clock-lattice lint and topology tests |
@@ -25,15 +26,13 @@ not live, even while the process table still contains its PID.
 a dead process; CI reports `assert not True` and a rerun is green.
 
 **Evidence.** PR #306 changed three such assertions in
-`tests/agent/test_exec_subprocess.py`, including
+`agent/tests/test_exec_subprocess.py`, including
 `test_natural_exit_reaps_ordinary_descendant_holding_stdout`.
 `ExecProcessDomain.close()` promises `SIGKILL` delivery, not immediate
 process-table removal. A descendant can remain a zombie until an OS reaper
 asynchronously collects it, and `pid_exists` remains true meanwhile. PR #964
-applied the same discipline to the forced-shutdown PITR test in
-`tests/services/test_pitr_base_scheduler.py`; its root-cause fix was a daemon
-ownership-adoption `Event`, not a test relaxation. PR #1303 made
-`shared/posixproc.py` liveness zombie-aware
+applied the same discipline to a forced-shutdown daemon test; its root-cause fix was a daemon ownership-adoption `Event`, not a test relaxation. PR #1303 made
+`base/sessions/posixproc.py` liveness zombie-aware
 (`is_running()` and `status() != STATUS_ZOMBIE`) and exposed a separate
 regression: `_FakeProc` did not implement the new `status()` probe, so CI shard
 8 failed twice at the same `AttributeError`.
@@ -57,7 +56,7 @@ every test double that models that probe contract.
 
 **Lintability — lintable with new rule.** An AST heuristic can flag
 `pid_exists`-style assertions in tests, following the AST approach used by the
-[fixture-scope lint](../scripts/lint_fixture_scope.py); zombie semantics still
+[fixture-scope lint](../scripts/lint/fixture_scope.py); zombie semantics still
 need human review.
 
 ## 2. The same point twice is a regression
@@ -80,7 +79,7 @@ investigate it as a regression. Do not launch a third automatic rerun without a
 filed case; appendix A defines the release gate.
 
 **Lintability — not lintable (operational).** Attempt history is CI state, so
-the rule belongs in QA or merge-queue tooling rather than a repository lint.
+the rule belongs in merge-queue tooling rather than a repository lint.
 
 ## 3. Redirect resources; never inherit ambient host state
 
@@ -105,7 +104,8 @@ durable marker. In the 2026-08-07 P0 (pre-cutover), a non-pytest
 debug script inherited the real environment and rewrote the production launchd
 health-probe plist, restarting the cluster.
 
-**Correct form.** Let `tests/conftest.py` redirect `$AVA_HOME`, database,
+**Correct form.** Let the suite's root plugins (`tests/fixtures/env_bootstrap.py`,
+`tests/fixtures/provisioning.py`) redirect `$AVA_HOME`, database,
 Redis, registry, ports, and session home. Patch durable-marker reads in the
 fixture owning the test, rather than inheriting worker state. Do not use a
 non-root, session-scoped fixture to mutate process globals. The OS scheduler
@@ -113,9 +113,9 @@ cannot be redirected: keep `AVA_OS_JOBS_ENABLED=false`, and never run a
 non-pytest script that imports `gateway.app` from a worktree.
 
 **Lintability — lintable now.** The
-[fixture-scope lint](../scripts/lint_fixture_scope.py) rejects session-scoped
-process-global mutation outside root `tests/conftest.py`, and the existing
-`lint_no_os_environ.py` catches source-side environment writes. Hermetic
+[fixture-scope lint](../scripts/lint/fixture_scope.py) rejects session-scoped
+process-global mutation outside `tests/fixtures/provisioning.py`, and the existing
+`no_os_environ.py` catches source-side environment writes. Hermetic
 durable-marker reads remain a review heuristic and new-rule candidate; see
 [the testing guide](../tests/README.md#host-isolation-what-a-test-run-may-touch).
 
@@ -168,7 +168,7 @@ gate, bounded poll, or hermetic read. Admit a test only when its root cause is
 unknown and it has failed at least twice in one day; appendix C governs exit.
 
 **Lintability — not lintable (operational).** Marker admission and removal are
-QA decisions. CI can audit marker counts and justification, but no repository
+reviewer decisions. CI can audit marker counts and justification, but no repository
 lint can determine whether the root cause remains unknown.
 
 ## 6. Wait for the production read path, not an assumed runner speed
@@ -225,10 +225,9 @@ count.
 test uses real time or a lattice clock; a new timing constant defines a relation
 outside the lattice.
 
-**Evidence.** [`shared/timing.py`](../shared/timing.py) makes `CLOCKS` the
+**Evidence.** [`base/deploy/timing.py`](../base/deploy/timing.py) makes `CLOCKS` the
 single authority for ordered timing constants, including boot stall, launch
-confirmation, boot budget, and reap grace, as well as `NO_PROGRESS` and
-`LOCK_TTL`. In the 2026-07-30 spawn incident, launch confirmation was extended
+confirmation, boot budget, and reap grace, as well as `NO_PROGRESS`. In the 2026-07-30 spawn incident, launch confirmation was extended
 without extending its neighbouring reap grace; the required relation existed
 only in prose. The 2026-08-31 serial-bucket audit of the last 500 runs found
 that remaining noise was pinned-count sync gates or deterministic in-PR
@@ -240,9 +239,9 @@ time deterministically with fake timers; never assume a machine will reach a
 state by a fixed wall-clock instant.
 
 **Lintability — lintable now.** The
-[clock-lattice lint](../scripts/lint_clock_lattice.py) rejects
+[clock-lattice lint](../scripts/lint/clock_lattice.py) rejects
 lattice-vocabulary constants outside approved lattice modules, while
-`tests/shared/test_timing_topology.py` verifies the declared relations.
+`base/deploy/tests/test_timing_topology.py` verifies the declared relations.
 Pinned-count gates remain a review heuristic.
 
 ## 8. Generate and compare visual references in one environment
@@ -278,18 +277,48 @@ the runner image and browser stack. The workflow makes the environment a
 structural boundary; unit tests guard failure classification, complete
 candidate generation, and the PNG-only mutation rule.
 
-## Appendix: CI/QA ruling adopted 2026-09-01 21:01
+## 9. Leave process-global state as you found it
+
+**Rule.** A test returns the process to the state it started in: environment,
+module attributes, cwd and signal handlers. Undo a change through the tool that
+records it (`monkeypatch`, `patch.dict`, a `finally`). The agent identity is the
+exception: a root fixture (`identity_restore`) puts it back after every test, so
+`ava.agent_identity._agent_id = ...` needs no undo.
+
+**Signature.** A test fails only in some shard compositions and always in the
+worker of an earlier test; it reads a key or attribute it never set;
+moving test files makes the failure appear or vanish.
+
+**Evidence.** `monkeypatch.setattr(ava.self, "AGENT_ID", ...)` on a name the
+module `__getattr__` serves stored the dynamic value for good, and `tests/ava`
+tests failed in the shards where they ran after it (PR #3791).
+`monkeypatch.delenv(key, raising=False)` on an absent key records nothing, so
+five environment keys the code under test set outlived three test files (PR
+#3793). Both surfaced only when a batch of moved tests changed the order.
+
+**Correct form.** `setenv(name, "")` before `delenv`; `setitem(vars(module),
+name, value)` or `mock.patch.object` for a name served by `__getattr__`;
+`monkeypatch.chdir`; restore a handler in a `finally`. The root
+[leak guard](../tests/docs/test-leak-guard.ava.okf.md) compares these after
+every test; its default `fail` mode restores after each leaker and fails it at
+its own teardown, and the CI annotation of the counts job lists what it found.
+
+**Lintability — not lintable (operational).** Whether a test restores what it
+changed is a runtime property; a static lint only sees an assignment that
+bypasses `monkeypatch`.
+
+## Appendix: CI ruling adopted 2026-09-01 21:01
 
 **Provenance.** User ruling of 2026-09-01 21:01, adopted in full (items A-E).
 Items A-C appear verbatim below in faithful English translation; D is this
 document and E is summarized. The source ruling was in Chinese. It is binding
-on CI/QA practice.
+on CI practice.
 
 ### A. Rerun cap
 
 When the same test fails on two consecutive attempts, a third automatic rerun
 is forbidden and the queue auto-freezes. A case recording registration and
-attribution (regression or flake) must be filed before the QA line or P0 lead
+attribution (regression or flake) must be filed before the reviewer or P0 lead
 may release it.
 
 ### B. Mandatory deflake

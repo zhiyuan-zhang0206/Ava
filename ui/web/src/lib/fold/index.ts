@@ -5,18 +5,17 @@
 // and applies the returned outcome; hooks only read their keys.
 //
 // Lifecycle hints schedule authoritative roster/directory/detail reads.
-// Pages fold their explicit changes; notices, fleet graph and tasks invalidate.
+// Pages, notices, fleet graph and tasks invalidate from event hints.
 // The owner coalesces reads and guarantees trailing repair across event races.
 
 import { AGENTS_QUERY_KEY, AGENT_DIRECTORY_QUERY_KEY, AGENT_DETAIL_QUERY_KEY, foldAgents } from "./agents";
-import type { PageRow, SystemEvent } from "../types";
+import type { SystemEvent } from "../types";
 import { FLEET_GRAPH_KEY_PREFIX, foldFleetGraph } from "./graph";
 import {
   foldNotices,
   NOTICES_QUERY_KEY,
   NOTICES_RESOLVED_QUERY_KEY,
 } from "./notices";
-import { foldPages } from "./pages";
 import { foldTasks, TASKS_QUERY_KEY } from "./tasks";
 import type { FoldInvalidation, FoldOutcome, FoldWrite } from "./types";
 import { NO_FOLD } from "./types";
@@ -70,7 +69,7 @@ export function applyEvent(ctx: FoldContext, ev: SystemEvent): FoldOutcome {
 /** Fold an event against the live cache — the pure dispatch, exported for
  *  tests. Reducers run only for domains whose events can touch them. */
 export function foldAgainstCache(
-  ctx: FoldContext,
+  _ctx: FoldContext,
   ev: SystemEvent,
 ): FoldOutcome {
   const writes: FoldWrite[] = [];
@@ -78,17 +77,12 @@ export function foldAgainstCache(
 
   invalidations.push(...foldAgents(ev).invalidations);
 
-  // pages — the event's per-agent cache (only if it exists — the guard inside
-  // foldPages keeps an un-fetched key un-seeded) + the fleet-wide one.
+  // Page events are hints for both authoritative lists. The repair scheduler
+  // skips absent queries, coalesces bursts, and follows an in-flight GET with
+  // another read so its older snapshot cannot strand the cache.
   if (ev.role === "page_opened" || ev.role === "page_closed") {
-    const agentKey = ["agent-pages", ev.agent_id] as const;
-    const agentPrev = ctx.getQueryData(agentKey) as PageRow[] | undefined;
-    const agentNext = foldPages(agentPrev, ev, ev.agent_id);
-    if (agentNext !== undefined) writes.push({ key: agentKey, value: agentNext });
-
-    const allPrev = ctx.getQueryData(ALL_PAGES_QUERY_KEY) as PageRow[] | undefined;
-    const allNext = foldPages(allPrev, ev, null);
-    if (allNext !== undefined) writes.push({ key: ALL_PAGES_QUERY_KEY, value: allNext });
+    invalidations.push({ key: ["agent-pages", ev.agent_id] });
+    invalidations.push({ key: ALL_PAGES_QUERY_KEY });
   }
 
   // Notices / fleet graph / tasks share the owner's bounded coalescing policy.

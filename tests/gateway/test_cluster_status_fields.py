@@ -8,14 +8,10 @@ from pathlib import Path
 
 import pytest
 
-import gateway.routers._roster_probe as roster_probe
-import gateway.routers.status as status_mod
+import gateway.cluster.status as status_mod
+from gateway.cluster import roster_probe
 from ops import cluster_status
-from ops.cluster import (
-    _check_pidfile,
-    _count_agent_shells,
-    agent_shell_sessions,
-)
+from ops.cluster_status import _check_pidfile, _count_agent_shells, agent_shell_sessions
 from ops.rpc_schemas import SessionInfo
 
 
@@ -47,8 +43,8 @@ def test_collect_sessions_enumerates_both_backends(monkeypatch):
         ["ava-main-restarter", "ava-main-gateway", "ava-main-agent-9", "other-stray"]
     )
     shell = _FakeBackend(["ava-main-agent-7-shell-0", "ava-main-agent-7-shell-0-watcher"])
-    monkeypatch.setattr("shared.session_backend.get_backend", lambda: svc)  # pyright: ignore[reportUnknownMemberType]
-    monkeypatch.setattr("shared.session_backend.get_shell_backend", lambda: shell)  # pyright: ignore[reportUnknownMemberType]
+    monkeypatch.setattr("base.sessions.backend.get_backend", lambda: svc)  # pyright: ignore[reportUnknownMemberType]
+    monkeypatch.setattr("base.sessions.backend.get_shell_backend", lambda: shell)  # pyright: ignore[reportUnknownMemberType]
 
     sessions, shell_count, total = cluster_status._collect_sessions()
     names = {s.name for s in sessions}
@@ -74,7 +70,7 @@ def test_collect_sessions_records_uptime_when_started_at_known(monkeypatch):
             return {n: self.session_started_at(n) for n in names}
 
     backend = _FakeBackend()
-    monkeypatch.setattr("shared.session_backend.get_backend", lambda: backend)  # pyright: ignore[reportUnknownMemberType]
+    monkeypatch.setattr("base.sessions.backend.get_backend", lambda: backend)  # pyright: ignore[reportUnknownMemberType]
 
     empty = type(
         "_Empty",
@@ -84,7 +80,7 @@ def test_collect_sessions_records_uptime_when_started_at_known(monkeypatch):
             "session_started_ats": staticmethod(lambda _names: {}),  # pyright: ignore[reportUnknownArgumentType]
         },
     )
-    monkeypatch.setattr("shared.session_backend.get_shell_backend", lambda: empty)  # pyright: ignore[reportUnknownMemberType]
+    monkeypatch.setattr("base.sessions.backend.get_shell_backend", lambda: empty)  # pyright: ignore[reportUnknownMemberType]
     sessions, _, _ = cluster_status._collect_sessions()
     assert sessions[0].created_at is not None
     assert sessions[0].uptime_seconds > 0
@@ -162,7 +158,7 @@ def _stub_capture_backend(
                 raise error
             return output
 
-    monkeypatch.setattr("shared.session_backend.get_shell_backend", _FakeBackend)
+    monkeypatch.setattr("base.sessions.backend.get_shell_backend", _FakeBackend)
 
 
 def test_capture_shell_reconstructs_name_and_captures(monkeypatch: pytest.MonkeyPatch):
@@ -170,7 +166,7 @@ def test_capture_shell_reconstructs_name_and_captures(monkeypatch: pytest.Monkey
     full session name (with `-<name>` suffix), captures with the requested
     depth through the shell backend, and returns (name, lines) with the
     trailing newline stripped."""
-    from shared.cluster import session_name
+    from base.cluster import session_name
 
     stub = f"{session_name('agent-7')}-shell-3-watcher"
     _stub_sessions(monkeypatch, stub)
@@ -186,7 +182,7 @@ def test_capture_shell_reconstructs_name_and_captures(monkeypatch: pytest.Monkey
 
 def test_capture_shell_unnamed_session_no_suffix(monkeypatch: pytest.MonkeyPatch):
     """An unnamed shell (no `-<name>` segment) → full name without suffix."""
-    from shared.cluster import session_name
+    from base.cluster import session_name
 
     stub = f"{session_name('agent-7')}-shell-1"
     _stub_sessions(monkeypatch, stub)
@@ -209,8 +205,8 @@ def test_capture_shell_unknown_session_raises(monkeypatch: pytest.MonkeyPatch):
 
 
 def test_kill_shell_resolves_full_name(monkeypatch: pytest.MonkeyPatch) -> None:
+    from base.cluster import session_name
     from ops.rpc_schemas import ShellInfo
-    from shared.cluster import session_name
 
     killed: list[str] = []
 
@@ -225,7 +221,7 @@ def test_kill_shell_resolves_full_name(monkeypatch: pytest.MonkeyPatch) -> None:
         "agent_shell_sessions",
         lambda _agent_id: [ShellInfo(id=3, name="build", uptime_seconds=1)],  # pyright: ignore[reportUnknownArgumentType]
     )
-    monkeypatch.setattr("shared.session_backend.get_shell_backend", _Backend)
+    monkeypatch.setattr("base.sessions.backend.get_shell_backend", _Backend)
 
     # the verdict rides the kill itself (one call, no separate probe)
     assert cluster_status.kill_shell(7, 3) == ("killed", True, "build")
@@ -254,7 +250,7 @@ def test_kill_shell_uninspectable_backend_reports_interrupted(
         "agent_shell_sessions",
         lambda _agent_id: [ShellInfo(id=3, name=None, uptime_seconds=1)],  # pyright: ignore[reportUnknownArgumentType]
     )
-    monkeypatch.setattr("shared.session_backend.get_shell_backend", _Backend)
+    monkeypatch.setattr("base.sessions.backend.get_shell_backend", _Backend)
 
     assert cluster_status.kill_shell(7, 3) == ("killed", True, None)
 
@@ -276,7 +272,7 @@ def test_kill_shell_idle_session_reports_not_interrupted(
         "agent_shell_sessions",
         lambda _agent_id: [ShellInfo(id=3, name=None, uptime_seconds=1)],  # pyright: ignore[reportUnknownArgumentType]
     )
-    monkeypatch.setattr("shared.session_backend.get_shell_backend", _Backend)
+    monkeypatch.setattr("base.sessions.backend.get_shell_backend", _Backend)
 
     assert cluster_status.kill_shell(7, 3) == ("killed", False, None)
 
@@ -310,8 +306,8 @@ def test_kill_agent_shells_kills_only_the_owners_shell_sessions(
     watchers included; another agent's shells, non-shell sessions and the
     owner's `ava.ui.serve` page sessions (named by the page daemon's grammar)
     stay."""
-    from shared.cluster import session_name
-    from shared.sessions.page_session import page_session_name
+    from base.cluster import session_name
+    from base.sessions.page_session import page_session_name
 
     page = page_session_name(7, "dash_board", 3)
     _stub_sessions(
@@ -326,7 +322,7 @@ def test_kill_agent_shells_kills_only_the_owners_shell_sessions(
         "ava-restarter",
     )
     backend = _KillAllBackend()
-    monkeypatch.setattr("shared.session_backend.get_shell_backend", lambda: backend)
+    monkeypatch.setattr("base.sessions.backend.get_shell_backend", lambda: backend)
 
     assert cluster_status.kill_agent_shells(7) == [0, 2, 5]
     assert sorted(backend.killed) == sorted(
@@ -343,11 +339,11 @@ def test_kill_agent_shells_kills_only_the_owners_shell_sessions(
 def test_kill_agent_shells_raises_after_trying_every_session(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from shared.cluster import session_name
+    from base.cluster import session_name
 
     _stub_sessions(monkeypatch, "ava-agent-7-shell-0", "ava-agent-7-shell-1")
     backend = _KillAllBackend(survives=frozenset({session_name("agent-7-shell-0")}))
-    monkeypatch.setattr("shared.session_backend.get_shell_backend", lambda: backend)
+    monkeypatch.setattr("base.sessions.backend.get_shell_backend", lambda: backend)
 
     with pytest.raises(RuntimeError, match=r"shell session\(s\) \[0\] of agent 7"):
         cluster_status.kill_agent_shells(7)
@@ -420,7 +416,7 @@ def test_gather_cluster_status_local_agent_runner_probed(monkeypatch: pytest.Mon
             "running_sha": "def456",
             "shell_count": 4,
             "agent_host_online": True,
-            "watchdog_online": False,
+            "supervisor_online": False,
         }
 
     monkeypatch.setattr(status_mod._cluster_rpc, "dispatch_to_machine", _fake_dispatch)  # pyright: ignore[reportUnknownArgumentType]
@@ -446,7 +442,7 @@ def test_gather_cluster_status_local_agent_runner_probed(monkeypatch: pytest.Mon
     assert m.running_sha == "def456"
     assert m.shell_count == 4
     assert m.agent_host_online is True
-    assert m.watchdog_online is False
+    assert m.supervisor_online is False
 
 
 def test_probe_flags_identity_mismatch_when_responder_name_differs(monkeypatch: pytest.MonkeyPatch):
@@ -525,17 +521,17 @@ def test_identity_mismatch_logs_once_per_episode(
     rows: list[tuple[str, str | None, list[str], datetime, str | None, datetime | None, bool]] = [
         ("air", "http://localhost:8106", ["agent-runner"], datetime.now(UTC), None, None, False)
     ]
-    caplog.set_level(logging.DEBUG, logger="gateway.routers._roster_probe")
+    caplog.set_level(logging.DEBUG, logger="gateway.cluster.roster_probe")
 
     machines = asyncio.run(status_mod.gather_cluster_status(rows, "gateway-host"))
     assert machines[0].identity_mismatch is True
-    first = [r for r in caplog.records if r.name == "gateway.routers._roster_probe"]
+    first = [r for r in caplog.records if r.name == "gateway.cluster.roster_probe"]
     assert [r.levelno for r in first] == [logging.ERROR]
 
     # A second poll of the same mismatch is silent.
     caplog.clear()
     asyncio.run(status_mod.gather_cluster_status(rows, "gateway-host"))
-    assert [r for r in caplog.records if r.name == "gateway.routers._roster_probe"] == []
+    assert [r for r in caplog.records if r.name == "gateway.cluster.roster_probe"] == []
 
     # The identity echoes correctly -> the episode ends...
     caplog.clear()
@@ -549,7 +545,7 @@ def test_identity_mismatch_logs_once_per_episode(
     again = [
         r
         for r in caplog.records
-        if r.name == "gateway.routers._roster_probe" and r.levelno == logging.ERROR
+        if r.name == "gateway.cluster.roster_probe" and r.levelno == logging.ERROR
     ]
     assert len(again) == 1
 
@@ -586,13 +582,13 @@ def test_identity_mismatch_on_stopped_machine_is_info_once(
     rows: list[tuple[str, str | None, list[str], datetime, str | None, datetime | None, bool]] = [
         ("air", "http://localhost:8106", ["agent-runner"], stopped, None, stopped, False)
     ]
-    caplog.set_level(logging.DEBUG, logger="gateway.routers._roster_probe")
+    caplog.set_level(logging.DEBUG, logger="gateway.cluster.roster_probe")
 
     machines = asyncio.run(status_mod.gather_cluster_status(rows, "gateway-host"))
     asyncio.run(status_mod.gather_cluster_status(rows, "gateway-host"))
 
     assert machines[0].identity_mismatch is True
-    records = [r for r in caplog.records if r.name == "gateway.routers._roster_probe"]
+    records = [r for r in caplog.records if r.name == "gateway.cluster.roster_probe"]
     assert [r.levelno for r in records] == [logging.INFO]
     assert "stopped machine" in records[0].getMessage()
 
@@ -623,90 +619,27 @@ def test_gather_cluster_status_local_pure_gateway_lightweight(monkeypatch: pytes
     assert m.head_sha == "abc123"
     assert m.shell_count == 0
     assert m.agent_host_online is None
-    assert m.watchdog_online is None
+    assert m.supervisor_online is None
 
 
-# ─── deploy-hold stamping (the roster's `hold` column) ────────────────────────
+# ─── row order ────────────────────────────────────────────────────────────────
 
 
-def _hold_rows() -> list[
-    tuple[str, str | None, list[str], datetime, str | None, datetime | None, bool]
-]:
-    """Two pure-gateway-shaped rows so the fan-out takes the no-probe path (the hold
-    stamping is independent of what the probes return)."""
+def test_gather_returns_rows_sorted_by_name(monkeypatch: pytest.MonkeyPatch):
+    """The local pure-gateway row takes the lightweight local read and the
+    address-less row is reported offline without a dial; the roster comes back
+    ordered by machine name whatever order the table gave."""
+    monkeypatch.setattr(status_mod, "cluster_is_paused", lambda: False)
+    monkeypatch.setattr(status_mod, "prod_source_head_sha", lambda: "abc123")
     now = datetime.now(UTC)
-    return [
+    rows: list[tuple[str, str | None, list[str], datetime, str | None, datetime | None, bool]] = [
+        ("m2", None, ["agent-runner"], now, None, None, False),
         ("m1", "http://m1", ["gateway"], now, None, None, False),
-        ("m2", "http://m2", ["gateway"], now, None, None, False),
     ]
 
+    machines = asyncio.run(status_mod.gather_cluster_status(rows, "m1"))
 
-def test_gather_stamps_settle_hold_only_on_the_hosts_the_note_names(
-    monkeypatch: pytest.MonkeyPatch,
-):
-    """A settle hold's recorded set is the population: the hosts it names get
-    settle_waited_on=True, every other row False — and the lease sentence is stamped
-    on ALL rows, being cluster-global (same treatment as the pin verdict)."""
-    from shared.cluster_lock import DeployLease, settle_note
-
-    monkeypatch.setattr(status_mod, "cluster_is_paused", lambda: False)
-    monkeypatch.setattr(status_mod, "prod_source_head_sha", lambda: "abc123")
-    lease = DeployLease(
-        holder="gateway-host:pid42",
-        held_for_s=300.0,
-        expires_in_s=600.0,
-        settle_hosts=["m2"],
-        settle_note=settle_note(["m2"]),
-    )
-
-    machines = asyncio.run(status_mod.gather_cluster_status(_hold_rows(), "m1", deploy_lease=lease))
-
-    by_name = {m.name: m for m in machines}
-    assert by_name["m2"].settle_waited_on is True
-    assert by_name["m1"].settle_waited_on is False
-    assert all(
-        m.deploy_hold is not None and "gateway-host:pid42" in m.deploy_hold for m in machines
-    )
-
-
-def test_gather_stamps_hold_with_no_waited_on_hosts_for_an_executing_rollout(
-    monkeypatch: pytest.MonkeyPatch,
-):
-    """A lease with no settle fact is a rollout *executing*, not a settle hold: the sentence
-    is stamped so the roster can explain the refusal, but no row is marked waited-on —
-    there is no recorded waiting set to speak for."""
-    from shared.cluster_lock import DeployLease
-
-    monkeypatch.setattr(status_mod, "cluster_is_paused", lambda: False)
-    monkeypatch.setattr(status_mod, "prod_source_head_sha", lambda: "abc123")
-    lease = DeployLease(holder="gateway-host:pid42", held_for_s=60.0, expires_in_s=1740.0)
-
-    machines = asyncio.run(status_mod.gather_cluster_status(_hold_rows(), "m1", deploy_lease=lease))
-
-    assert all(m.deploy_hold is not None for m in machines)
-    assert not any(m.settle_waited_on for m in machines)
-
-
-def test_gather_leaves_hold_blank_when_no_lease(monkeypatch: pytest.MonkeyPatch):
-    """No live lease -> both hold fields at their defaults, on every row."""
-    monkeypatch.setattr(status_mod, "cluster_is_paused", lambda: False)
-    monkeypatch.setattr(status_mod, "prod_source_head_sha", lambda: "abc123")
-
-    machines = asyncio.run(status_mod.gather_cluster_status(_hold_rows(), "m1"))
-
-    assert all(m.deploy_hold is None and m.settle_waited_on is False for m in machines)
-
-
-def test_read_deploy_lease_degrades_on_operational_error(monkeypatch: pytest.MonkeyPatch):
-    """A connectivity blip while reading the lease blanks the hold column instead of
-    failing the roster — mid-rollout is exactly when the roster is asked for."""
-    import psycopg
-
-    def _boom() -> None:
-        raise psycopg.OperationalError("connection refused")
-
-    monkeypatch.setattr("shared.cluster_lock.read_update_lease", _boom)
-    assert status_mod._read_deploy_lease() is None
+    assert [m.name for m in machines] == ["m1", "m2"]
 
 
 def test_gather_cluster_status_carries_probe_paused_reason(monkeypatch: pytest.MonkeyPatch):
@@ -747,3 +680,12 @@ def test_gather_cluster_status_carries_probe_paused_reason(monkeypatch: pytest.M
     assert m.online is True
     assert m.paused is True
     assert m.paused_reason == "startup"
+
+
+def test_status_schemas_omit_retired_updater_projections() -> None:
+    from base.api_contracts.status import MachineStatus
+    from gateway.cluster.schemas import ClusterPanel
+
+    retired = {"current_orchestration", "last_updater_outcome", "last_update"}
+    for model in (cluster_status.ClusterStatus, ClusterPanel, MachineStatus):
+        assert retired.isdisjoint(model.model_fields)

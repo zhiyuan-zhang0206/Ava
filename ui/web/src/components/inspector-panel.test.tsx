@@ -77,7 +77,7 @@ vi.mock("@/lib/api", () => ({
 }));
 
 // useAgentPages subscribes to the global SSE stream; stub it to a no-op so the
-// panel renders without an <EventStreamProvider> (its page-fold behavior is
+// panel renders without an <EventStreamProvider> (its page invalidation behavior is
 // covered in use-agent-pages.test.ts).
 const streamHandlers = vi.hoisted(() => ({
   system: undefined as ((event: unknown) => void) | undefined,
@@ -861,8 +861,8 @@ describe("InspectorPanel", () => {
 
   it("renders skill-list config keys in canonical dash spelling (display_name)", async () => {
     // The runtime stores skill lists in the underscore Python projection
-    // (ava_code_worktree); the overlay must present the canonical dash form
-    // (ava-code-worktree) while non-skill values stay untouched.
+    // (ava_qa_inspection); the overlay must present the canonical dash form
+    // (ava-qa-inspection) while non-skill values stay untouched.
     getAgentInspectLive.mockResolvedValue(
       liveFixture({
         config_overlay: {
@@ -1108,8 +1108,8 @@ describe("InspectorPanel heartbeat cells (merged into Liveness, Task #1195)", ()
 
 
   it("shows 'due' when the projected check-in is in the past", async () => {
-    // A restarting agent's idle clock runs on while the daemon skips it, so a
-    // projected next_at can land in the past — the cell must render "due",
+    // The daemon dispatches at its next poll tick, so a projected next_at can
+    // land in the past — the cell must render "due",
     // never "4m ago" for a *next* heartbeat (the "one hour ago" bug family).
     const nextAt = new Date(Date.now() - 240_000).toISOString(); // 4m overdue
     getAgentInspectLive.mockResolvedValue(

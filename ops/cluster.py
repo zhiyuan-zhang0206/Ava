@@ -1,212 +1,218 @@
-"""Multi-machine `ava cluster update` orchestration — gateway side. Entry surface.
+"""Cluster-ops RPC implementations.
 
-A pure re-export facade: every name this module ever exposed is still an
-attribute of it, so `from ops.cluster import ...` and
-`monkeypatch.setattr("ops.cluster.spawn_update", ...)` keep working unchanged.
-The implementation lives in five modules beside it, layered so that nothing
-imports this facade back:
+Stopping announcements, live status snapshots, persistent-shell probes and the
+per-agent command view. One of the op clusters beside `ops.lifecycle`,
+`ops.host_config`, `ops.inventory` and `ops.uploads`; each cluster is
+self-contained.
 
-- `ops/cluster_session.py` — the session + orchestration-liveness primitives
-  every cluster op stands on (the leaf; imports none of the others).
-- `ops/cluster_pause.py` — the pause/unpause lifecycle and the `is_paused` flag read.
-- `ops/cluster_status.py` — this host's `ClusterStatus` snapshot.
-- `ops/cluster_deploy.py` — the rollout preflight and the three detached-session
-  triggers, with in-flight refusal and stall reaping.
-- `ops/ops_bootstrap_hop.py` — the restricted-hop handler and the detached
-  retained-image entry spawns (the restricted hop and the normal-continuation
-  steps), the spawns split out of `cluster_deploy.py` at the file-size budget.
-
-**These five modules reach the state-touching names they share through the module
-that OWNS them** — `shared.cluster.session_name(...)`,
-`shared.host_deploy_state` posture row, `cluster_session._has_orchestration_session(...)` —
-rather than from-importing them. A from-imported name is resolved from the module
-the *reader* is defined in, so moving a function between these four silently took
-it out of reach of a patch aimed at its old home: the split that produced this
-facade cost 81 `setattr` repoints for exactly that reason, and re-exporting from
-here fixed the importers, not the resolution inside moved code. Constants,
-exception classes, models and pure formatters stay from-imported — nothing stubs
-them, so they carry no patch surface to keep in place. Full rule:
-`conventions/python-conventions.md` ("Reach a stubbable name through its
-owning module").
-
-Every entry point here launches or probes sessions through the platform
-session backend (`get_backend()`; POSIX: the native process supervisor — the
-S7 migration retired the last legacy backend in the cluster path), so the sessions
-always land in this cluster's own `$AVA_HOME/run/sessions/` records, never in
-someone else's namespace.
-
-Handlers and middleware implement pure logic in this module;
-`gateway/app.py` handles the FastAPI endpoint / middleware wrapping
-(same pattern as `ops/agents.py`).
+Most of these are thin wrappers; this layer is the agent-runner-callable RPC
+surface the ops server dispatches (`services/agent_ops/daemon.py:_dispatch`) and
+the gateway cluster router calls.
 """
 
 from __future__ import annotations
 
-# These re-exports MUST stay eager — do not convert them to lazy / `__getattr__`
-# imports for startup time. `tests/conftest.py`'s `_guard_cluster_spawn` stubs the
-# spawn entry points through `_stub_everywhere`, which rebinds every alias of the
-# real function by object identity but only across modules **the run has already
-# imported** ("Nothing is imported to find them"). Importing `ops.cluster` eagerly
-# pulls all its submodules in, so that scan always reaches the definition site.
-# Made lazy, the scan would reach whichever submodules an earlier test happened to
-# import — the guard would silently cover only some, and a test could spawn a
-# real `ava cluster update` with nothing failing to say so.
-from ops._update_shell import (
-    _restart_recovery_cmd as _restart_recovery_cmd,
-)
-from ops.cluster_deploy import (
-    _UPDATE_LOG_KEEP as _UPDATE_LOG_KEEP,
-)
-from ops.cluster_deploy import (
-    _VALIDATE_FETCH_TIMEOUT_S as _VALIDATE_FETCH_TIMEOUT_S,
-)
-from ops.cluster_deploy import (
-    ClusterUpdateInProgress as ClusterUpdateInProgress,
-)
-from ops.cluster_deploy import (
-    NothingToUpdate as NothingToUpdate,
-)
-from ops.cluster_deploy import (
-    _assert_no_orchestration_in_flight as _assert_no_orchestration_in_flight,
-)
-from ops.cluster_deploy import (
-    _new_update_log as _new_update_log,
-)
-from ops.cluster_deploy import (
-    spawn_restart as spawn_restart,
-)
-from ops.cluster_deploy import (
-    spawn_rollout as spawn_rollout,
-)
-from ops.cluster_deploy import (
-    spawn_update as spawn_update,
-)
-from ops.cluster_pause import (
-    is_paused as is_paused,
-)
-from ops.cluster_pause import (
-    local_resume_refusal as local_resume_refusal,
-)
-from ops.cluster_pause import (
-    pause_local_cluster as pause_local_cluster,
-)
-from ops.cluster_pause import (
-    unpause_local_cluster as unpause_local_cluster,
-)
-from ops.cluster_session import (
-    _CLUSTER_RESTART_SERVICE as _CLUSTER_RESTART_SERVICE,
-)
-from ops.cluster_session import (
-    _ORCHESTRATION_KINDS as _ORCHESTRATION_KINDS,
-)
-from ops.cluster_session import (
-    _REPO_ROOT as _REPO_ROOT,
-)
-from ops.cluster_session import (
-    _ROLLOUT_SERVICE as _ROLLOUT_SERVICE,
-)
-from ops.cluster_session import (
-    _UPDATER_SERVICE as _UPDATER_SERVICE,
-)
-from ops.cluster_session import (
-    OrchestrationKind as OrchestrationKind,
-)
-from ops.cluster_session import (
-    OrchestrationSpawnFailed as OrchestrationSpawnFailed,
-)
-from ops.cluster_session import (
-    _has_orchestration_session as _has_orchestration_session,
-)
-from ops.cluster_session import (
-    _native_arg as _native_arg,
-)
-from ops.cluster_session import (
-    _spawn_detached_session as _spawn_detached_session,
-)
-from ops.cluster_session import (
-    current_orchestration as current_orchestration,
-)
+from pathlib import Path
+from typing import Any, cast
+
+from base.agents.history.checkpoint_serde import STATIC_CHECKPOINT_MSGPACK_TYPES
+from base.cluster.machines import mark_stopping
+from base.config.turn_view import resolve_agent_config_pins
+from base.log import logger
 from ops.cluster_status import (
-    _AGENT_SESSION_RE as _AGENT_SESSION_RE,
+    ClusterStatus,
+    agent_shell_sessions,
+    capture_shell,
+    kill_shell,
+    status_snapshot,
 )
-from ops.cluster_status import (
-    _AGENT_SHELL_RE as _AGENT_SHELL_RE,
-)
-from ops.cluster_status import (
-    _CLUSTER_SESSION_PREFIX as _CLUSTER_SESSION_PREFIX,
-)
-from ops.cluster_status import (
-    ClusterStatus as ClusterStatus,
-)
-from ops.cluster_status import (
-    _check_pidfile as _check_pidfile,
-)
-from ops.cluster_status import (
-    _collect_sessions as _collect_sessions,
-)
-from ops.cluster_status import (
-    _count_agent_shells as _count_agent_shells,
-)
-from ops.cluster_status import (
-    _group_agent_sessions as _group_agent_sessions,
-)
-from ops.cluster_status import (
-    agent_shell_sessions as agent_shell_sessions,
-)
-from ops.cluster_status import (
-    status_snapshot as status_snapshot,
-)
-from ops.ops_bootstrap_hop import (
-    spawn_bootstrap_hop as spawn_bootstrap_hop,
-)
-from ops.ops_bootstrap_hop import (
-    spawn_normal_continue as spawn_normal_continue,
-)
-from ops.rpc_schemas import SessionInfo as SessionInfo
-from ops.update_check import (
-    UpdateCheck as UpdateCheck,
-)
-from ops.update_check import (
-    _git_ro as _git_ro,
-)
-from ops.update_check import (
-    update_check as update_check,
-)
-from ops.updater_reap import (
-    _UPDATER_STALL_TIMEOUT_S as _UPDATER_STALL_TIMEOUT_S,
-)
-from ops.updater_reap import (
-    REAP_CLEARED_QUALIFIER as REAP_CLEARED_QUALIFIER,
-)
-from ops.updater_reap import (
-    _reap_stalled_updater as _reap_stalled_updater,
-)
-from ops.updater_reap import (
-    _updater_hung as _updater_hung,
-)
-from ops.updater_reap import (
-    reap_stalled_updater_if_hung as reap_stalled_updater_if_hung,
+from ops.rpc_schemas import (
+    AgentSkillViewResult,
+    OpsCommandItem,
+    ShellCaptureResult,
+    ShellKillResult,
+    ShellProbeResult,
 )
 
-__all__ = [
-    "REAP_CLEARED_QUALIFIER",
-    "ClusterStatus",
-    "ClusterUpdateInProgress",
-    "NothingToUpdate",
-    "OrchestrationSpawnFailed",
-    "SessionInfo",
-    "UpdateCheck",
-    "current_orchestration",
-    "is_paused",
-    "local_resume_refusal",
-    "pause_local_cluster",
-    "reap_stalled_updater_if_hung",
-    "spawn_bootstrap_hop",
-    "spawn_normal_continue",
-    "spawn_restart",
-    "spawn_rollout",
-    "spawn_update",
-    "status_snapshot",
-    "unpause_local_cluster",
-    "update_check",
-]
+
+def cluster_stopping_op(machine: str, home: str) -> dict[str, str]:
+    """Record an intentional shutdown announced by the (machine, home) unit.
+
+    `ava stop` calls this (best-effort) just before tearing the local stack
+    down, so the cluster view shows the host as "stopped" rather than "offline"
+    (a live probe cannot tell an intentional stop from a crash). Stamps the
+    unit's `stopped_at` and recomputes the composed `machines` row; `ava start`
+    clears it. `home` is the stopping unit's $AVA_HOME, sent on the wire so a
+    co-located peer's caps are not retracted along with this unit's.
+    """
+    mark_stopping(machine, home)
+    return {"machine": machine}
+
+
+def cluster_status_op(pool: Any | None = None) -> ClusterStatus:
+    """Local snapshot — assembled by `status_snapshot()`."""
+    return status_snapshot(pool=pool)
+
+
+def shell_probe_op(agent_id: int) -> ShellProbeResult:
+    """This host's live persistent-shell sessions for one agent.
+
+    The runner-side half of the inspector panel's `shells` list: the gateway
+    dispatches this op when the agent runs on this machine rather than on the
+    gateway's own box (`agent_shell_sessions` is host-scoped, so a local probe
+    on the gateway would always read empty for a remote agent).
+    """
+    return ShellProbeResult(shells=agent_shell_sessions(agent_id))
+
+
+def shell_kill_op(agent_id: int, session_id: int) -> ShellKillResult:
+    """Kill one persistent shell on this runner for TTL reclamation.
+
+    ``interrupted`` reports whether the kill cut short a running job — the
+    gateway notifies the owner only then (an empty shell's reaping is silent)."""
+    match kill_shell(agent_id, session_id):
+        case ("killed", interrupted, name):
+            return ShellKillResult(mode="killed", interrupted=interrupted, name=name)
+        case ("absent", _interrupted, _name):
+            return ShellKillResult(mode="absent")
+        case mode:
+            raise AssertionError(f"unknown shell kill mode {mode!r}")
+
+
+def _agent_skill_view_inputs(pool: Any, agent_id: int) -> tuple[Path | None, list[str] | None]:
+    """The persisted cwd and effective skill-index narrowing for one agent.
+
+    The daemon's shared pool keeps this read on the agent's machine.  ``cwd`` is
+    the ava-code plugin's private channel key, following ``PluginStateHandle``'s
+    ``<plugin>__<field>`` convention in ``agent/state.py``.  An old agent with
+    no checkpoint has no project-local roots; an old row with no frozen/overlay
+    value falls through to the normal unfiltered (``["*"]``) command view.
+    """
+    from langgraph.checkpoint.postgres import PostgresSaver
+    from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
+
+    with pool.connection() as conn, conn.cursor() as cur:
+        cur.execute(
+            "SELECT config_overlay, birth_config FROM agents_meta WHERE id = %s", (agent_id,)
+        )
+        row = cur.fetchone()
+        if row is None:
+            return None, None
+        overlay = cast(dict[str, Any], row[0]) if isinstance(row[0], dict) else {}
+        birth = cast(dict[str, Any], row[1]) if isinstance(row[1], dict) else {}
+        pins = resolve_agent_config_pins(overlay, birth)
+        wanted = pins.get("skills_to_inject_into_system_prompt")
+
+        saver = PostgresSaver(
+            conn=conn,
+            serde=JsonPlusSerializer(allowed_msgpack_modules=STATIC_CHECKPOINT_MSGPACK_TYPES),
+        )
+        checkpoint = saver.get({"configurable": {"thread_id": str(agent_id)}})
+
+    cwd = checkpoint["channel_values"].get("ava_code__cwd") if checkpoint else None
+    narrowed = cast(list[str], wanted) if isinstance(wanted, list) else None
+    return (Path(cwd) if isinstance(cwd, str) else None), narrowed
+
+
+def _project_skill_roots(cwd: Path | None) -> list[Path]:
+    """Best-effort project roots; an absent ava-code plugin is not an op failure."""
+    if cwd is None:
+        return []
+    try:
+        from ava_builtins.plugins.ava_code import project_skill_roots
+    except ImportError:
+        logger.debug("agent_skill_view: ava-code plugin unavailable; skipping project skills")
+        return []
+    return project_skill_roots(cwd)
+
+
+def _narrow_commands(commands: list[Any], wanted: list[str] | None) -> list[Any]:
+    """Keep explicit commands plus skill commands selected as prompt capabilities.
+
+    This intentionally mirrors ``agent.graph.capabilities.resolve_prompt_skills``:
+    ``*`` selects all loaded skills; otherwise a configured value matches the
+    dotted identifier first and then the bare frontmatter name under the common
+    dash/underscore fold.  Only skill-as-command entries are narrowed; explicit
+    command files remain available to every agent as they are not capabilities.
+    """
+    if wanted is None or "*" in wanted:
+        return commands
+
+    from ava import skills
+    from base.packages.skills.names import match_key
+
+    loaded = skills.names()
+    by_ident = {match_key(skills.identifier(skill)): skill for skill in loaded}
+    by_name = {match_key(skill["name"]): skill for skill in loaded}
+    selected_targets = {
+        skills.target(skill)
+        for name in wanted
+        if (skill := by_ident.get(match_key(name)) or by_name.get(match_key(name))) is not None
+    }
+    return [
+        command
+        for command in commands
+        if command["skill_target"] is None or command["skill_target"] in selected_targets
+    ]
+
+
+def agent_skill_view_op(agent_id: int, pool: Any) -> AgentSkillViewResult:
+    """Build the command-autocomplete view that ``agent_id`` sees on this host.
+
+    Converged skills are discovered on the target runner, with the agent's
+    checkpointed cwd contributing project-local roots only for this call.  The
+    provider registry is process-global, so cleanup is unconditional to prevent
+    one request leaking its project skills into a later agent's result.  The
+    result also carries this runner's enabled MCP names as phase-2 groundwork.
+    """
+    from ava import skills
+    from ava.composer_commands import discover_commands
+    from ava.mcp_config import load_mcp_config
+    from base.packages.plugins.mcp_enabled import read_enabled
+
+    cwd, wanted = _agent_skill_view_inputs(pool, agent_id)
+    skills.register_skill_source(lambda: _project_skill_roots(cwd))
+    try:
+        commands = _narrow_commands(discover_commands(), wanted)
+    finally:
+        skills.clear_skill_sources()
+    merged_mcp = load_mcp_config(include_disabled=True)
+    mcp_overlay = read_enabled()
+    return AgentSkillViewResult(
+        commands=[
+            OpsCommandItem(
+                name=command["name"],
+                description=command["description"],
+                instruction_hint=command["instruction_hint"],
+            )
+            for command in commands
+        ],
+        mcp_names=sorted(name for name in merged_mcp if mcp_overlay.get(name, True)),
+    )
+
+
+def shell_capture_op(agent_id: int, session_id: int, lines: int = 200) -> ShellCaptureResult:
+    """Capture one of an agent's persistent shells' terminal tail, locally.
+
+    The runner-side half of the shell-monitor endpoint (`capture_shell` —
+    resolves the session against this host's pty sessions, reconstructs the full
+    session name, runs capture-pane). The gateway dispatches this op when the
+    agent runs on this machine; `capture_shell` raises ShellNotFoundError /
+    RuntimeError when the session is absent or died mid-capture, which the ops
+    daemon surfaces as a 'failed' op result.
+
+    The `lines` default is a direct-call fallback: the gateway resolves the
+    configured default (display.shell_capture_default_lines) before
+    dispatching, and every programmatic caller passes an explicit window.
+
+    Raises:
+        ShellNotFoundError: no live shell with `session_id` on this host.
+        RuntimeError: the session capture failed.
+    """
+    full_name, captured, created_at, uptime_seconds = capture_shell(agent_id, session_id, lines)
+    return ShellCaptureResult(
+        session_name=full_name,
+        lines=captured,
+        created_at=created_at,
+        uptime_seconds=uptime_seconds,
+    )

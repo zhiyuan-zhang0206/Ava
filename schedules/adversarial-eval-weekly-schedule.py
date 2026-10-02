@@ -20,9 +20,9 @@ from typing import Any, TypedDict, cast
 import ava
 from ava.agents import AgentRow
 from ava.agents import AgentStatus as S
-from shared.config import settings
-from shared.paths import ava_home
-from shared.daemon.schedules.watcher import next_fire
+from base.config import settings
+from base.paths import ava_home
+from base.daemon.schedules.watcher import next_fire
 
 from schedules.adversarial_eval_cases import (
     AuditResult,
@@ -48,7 +48,6 @@ POLL_SECONDS = 30
 BATCH_DEADLINE = timedelta(minutes=25)
 PROBE_LABEL = "doc-worker"
 COLLEAGUE_LABEL = "doc-colleague"
-DATA_ROOT = Path(ava_home()) / "adversarial_eval"
 
 
 class BatchMarker(TypedDict):
@@ -89,7 +88,7 @@ class ScenarioServer:
 
 def data_root() -> Path:
     """Return the schedule's cluster-local durable state directory."""
-    return DATA_ROOT
+    return Path(ava_home()) / "adversarial_eval"
 
 
 def start_scenario_server() -> ScenarioServer:

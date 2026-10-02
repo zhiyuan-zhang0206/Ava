@@ -34,7 +34,7 @@ gateway collector ──▶ loopback Tempo + Loki + Prometheus ──▶ Grafana
   traces.
 - **Recovery replay** — `ava trace ship` bypasses the local collector so a
   replay cannot write itself back into the mirror. Gateway units dial loopback
-  Tempo; pure runners dial the gateway collector with the cluster bearer.
+  Tempo; pure runners dial the gateway collector with their telemetry token.
 - **Ingress port single source** — the OTLP/HTTP ingress port
   (`AVA_TELEMETRY_OTLP_PORT`, default the standard 4318) is one settings
   field: the sidecar receiver, the gateway's authenticated remote receiver,
@@ -97,4 +97,4 @@ shipping is not the live delivery mechanism.
 
 - Unified event model: `../../decisions/2026-08-04-event-system-design.md`
 - Tempo-only viewer (Jaeger dropped): `../../deploy/lgtm/README.md`
-- Trace v2 content stripping: `../../shared/trace.py` module docstring
+- Trace v2 content stripping: `../../base/telemetry/tracing.py` module docstring

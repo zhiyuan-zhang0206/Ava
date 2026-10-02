@@ -10,6 +10,13 @@ description: Designs systems, components, and significant features from user mod
 
 ## Core Principles
 
+- **Prior Art and the Simplest Sufficient Design First**: before designing a subsystem, write down how far the problem must be solved at the system's real scale, how established tools and practices already solve it, and the simplest design that would suffice; every mechanism beyond that design must name the failure it prevents. **Why**: the unified cluster lifecycle was sized to an idealized threat model. It re-derived release directories, orchestration, schema-version checks, and stale-writer protection from first principles, and took 274 commits and eight review rounds to land. Its release path then could not run on the only topology the project uses, and a stop, checkout, sync, and start script replaced it ([`postmortems/0009`](../../../../../postmortems/0009-complexity-must-name-the-failure-it-prevents.md)). **How**: open the design doc with three sections, in this order:
+  1. **Scope**: the failures to prevent and the scale assumptions.
+  2. **Prior art**: named tools or patterns, and what each does.
+  3. **Simplest sufficient design**: the design, and the specific failure it cannot handle.
+
+  Justify each added mechanism by a failure that has happened, or a credible one that cannot be handled by hand when it happens. Build the simplest path end to end on the real topology before any breadth.
+
 - **Design It Twice**: for every non-trivial design, conceive at least two substantially different alternatives before choosing one — **Why**: the brain's first instinct is usually the most familiar solution, not the best; comparing alternatives surfaces hidden trade-offs and prevents anchoring on a single path (Ousterhout, §4.4). — **How**: before writing implementation code, sketch two distinct approaches on a whiteboard or in a design doc; they must differ in at least one structural dimension (e.g. data model, module boundary, sync vs. async); if you cannot produce a second alternative, you do not understand the problem well enough.
 
 - **Explicit User Models — Better Wrong than Vague**: articulate who the users are, what they know, and what they need — as a written model, not an unspoken assumption — **Why**: every team member carries a different implicit user; an articulated guess, however imperfect, exposes disagreement and can be corrected; an unspoken assumption hides until the system is built (Brooks, §3.2). — **How**: write a short user model (1–2 paragraphs + a bullet list of capabilities/constraints) before designing the interface; name the user roles explicitly; review it with at least one stakeholder or real user.
@@ -25,6 +32,7 @@ description: Designs systems, components, and significant features from user mod
 
 ## Checklist
 
+- [ ] **MUST** Does the design state how far the problem must be solved at real scale, the prior art by name, and the simplest sufficient design? Does every further mechanism name the failure it prevents?
 - [ ] **SHOULD** Is there a written user model — who are the users, what do they know, what do they need?
 - [ ] **SHOULD** Were at least two substantially different design alternatives considered and compared?
 - [ ] **MUST** Are all constraints identified and classified (true / obsolete / imagined / deliberate)?
@@ -37,6 +45,7 @@ description: Designs systems, components, and significant features from user mod
 
 ## Anti-Patterns
 
+- **Reinventing the Commodity Layer**: re-deriving deployment, orchestration, versioning, or supervision from first principles, sized to an idealized end state, and exercised only through stubs. The alternative is to start from the established practice and the simplest sufficient design, run it on the real topology, and add a mechanism only for a named failure.
 - **First-Idea Commitment**: picking the first solution that comes to mind and running with it → alternative: always produce and compare at least two alternatives before committing.
 - **Unspoken User**: everyone assumes they know the user, nobody writes it down → alternative: write an explicit user model; a wrong model gets corrected; an absent model never does.
 - **Constraint Creep**: treating every historical accident as an unchangeable constraint → alternative: classify every constraint; imagined and obsolete constraints are fair game to challenge.
@@ -121,3 +130,4 @@ The retry policy, timeout strategy, idempotency key generation, and webhook deli
 - Thomas & Hunt, *The Pragmatic Programmer* — "find the box" constraint classification (Tip 81), tracer bullets as a design-validation tool (Tip 20)
 - 45ck/software-architecture-skills — ADR format and decision-log discipline
 - **Layer-1 behavioral eval (2026-08-06)** — t4: a general idempotency hook silently swallowed orders on external_id:null(`research/eval/ab/judge-verdict-t4.md`)
+- **Unified cluster lifecycle (2026-09-24 to 2026-09-30)** — a release system sized to an idealized end state; its networked path could not run on the real topology, and a scripted stop/checkout/sync/start replaced it (`postmortems/0009-complexity-must-name-the-failure-it-prevents.md`)

@@ -12,11 +12,11 @@ import psycopg
 import pytest
 from psycopg import sql
 
-import ava.impersonation_replay as reader
-import shared.agents.impersonation_manifest as manifest
-from shared.agents import impersonation as leases
-from shared.agents.impersonation import impersonation_history as history
-from shared.agents.impersonation_manifest import (
+import ava.impersonation.replay as reader
+import base.agents.impersonation_manifest as manifest
+from base.agents import impersonation as leases
+from base.agents.impersonation import history as history
+from base.agents.impersonation_manifest import (
     LocalParticipant,
     bind_local_participant,
     capture_local_event,
@@ -24,18 +24,20 @@ from shared.agents.impersonation_manifest import (
     seal_local_participant,
     unbind_local_participant,
 )
-from shared.agents.impersonation_manifest_grants import grant_manifest_runner_access
-from shared.cluster import ensure_runner_role
-from shared.config import settings
-from shared.db import create_agent
-from shared.machine import machine_name
-from shared.runtime_incarnation import RuntimeIncarnation
-from shared.telemetry import Event
-from shared.url_secret import url_with_userinfo
+from base.agents.impersonation_manifest_grants import grant_manifest_runner_access
+from base.cluster.machine import machine_name
+from base.config import settings
+from base.db import create_agent
+from base.native_process.runtime_incarnation import RuntimeIncarnation
+from base.telemetry import Event
+from tests._containers import grant_runner_login
+from tests.base import test_history as history_cases
 from tests.impersonation_support import attested_caller
-from tests.shared import test_impersonation_history as history_cases
 
+# The capability group the receipt grants target, and the generation-shaped
+# login that inherits it (the only identity that logs in).
 _RECEIPT_RUNNER = "ava_runner"
+_RECEIPT_LOGIN = "ava_g0_runner"
 _CERTIFICATION_SECRET = "test-manifest-certification-secret-000001"  # noqa: S105 -- test proof
 
 
@@ -83,7 +85,7 @@ def _eligible_sdk_event(agent_id: int) -> Event:
 
 
 def _central_send_event(agent_id: int) -> Event:
-    from shared.audit_events import prepare_event_log
+    from base.telemetry.audit_events import prepare_event_log
 
     return prepare_event_log(
         event_type="send_message",
@@ -106,10 +108,11 @@ def restricted_receipt(
         participant.lease_id, agent_id=owner.agent_id, source_key=participant.source_key
     )
     owner_url = settings.data_plane.db_url
-    ensure_runner_role(
-        "ava_citest",
-        base_admin_url=owner_url.rsplit("/", 1)[0] + "/postgres",
-        runner_password="test-runner-password",  # noqa: S106 -- throwaway role credential
+    runner_url = grant_runner_login(
+        owner_url,
+        owner="ava_citest",
+        login=_RECEIPT_LOGIN,
+        password="test-runner-password",  # noqa: S106 -- throwaway role credential
     )
     db_conn.execute(
         sql.SQL(
@@ -118,9 +121,8 @@ def restricted_receipt(
         ).format(sql.Identifier(_RECEIPT_RUNNER))
     )
     db_conn.commit()
-    runner_url = url_with_userinfo(owner_url, _RECEIPT_RUNNER, "test-runner-password")
     with psycopg.connect(runner_url) as conn:
-        assert conn.execute("SELECT current_user").fetchone() == (_RECEIPT_RUNNER,)
+        assert conn.execute("SELECT current_user").fetchone() == (_RECEIPT_LOGIN,)
         assert conn.execute(
             "SELECT has_table_privilege(current_user, "
             "'agent_impersonation_event_participants', 'UPDATE')"
@@ -296,7 +298,7 @@ def test_runner_expiry_replay_freezes_and_certifies_after_seal(
             json={"items": items, "meta": {"has_more": False}},
         )
 
-    monkeypatch.setattr(reader, "_get", get)
+    monkeypatch.setattr(reader, "get", get)
     if seal_before_expiry:
         seal_local_participant(participant)
     # A sealed receipt on an active lease must not freeze admission early.
@@ -369,7 +371,7 @@ def test_runner_replay_after_abort_or_termination_certifies(
             json={"items": [], "meta": {"has_more": False}},
         )
 
-    monkeypatch.setattr(reader, "_get", get)
+    monkeypatch.setattr(reader, "get", get)
     if ending == "abort":
         assert leases.abort_lease(participant.lease_id, owner, "the executor process is gone")
     else:

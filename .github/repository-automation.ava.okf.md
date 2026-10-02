@@ -30,19 +30,13 @@ residual — a deliberately cancelled run is re-run at most once, since GitHub
 exposes no cancel reason to distinguish it. A still-red run returns to normal
 maintainer triage.
 
-The trigger whitelist is per-workflow. `Inactive runtime preparation` is covered
-too, narrowed to its known flake family: exactly one failing job —
-`cold-offline (ubuntu-24.04)` — whose only failed step is `Real offline prepare,
-retained interpreter and failure isolation` (the offline-prepare watchdog; five
-of the six runs catalogued in task #3281 match it in their original-attempt
-view, and the sixth failed both matrix legs). Wider shapes — a second failing
-job or leg, a consequence step after the watchdog step — are left to manual
-triage, as is every other workflow (task #3285).
+The trigger whitelist is per-workflow: only `CI` is retried; every other workflow is
+left to manual triage.
 
 ## `workflows/update-model-pricing.yml`
 
 A daily schedule (plus manual dispatch) runs the strict provider adapters in
-`scripts/update_model_pricing.py`. No change is a no-op. A verified source change
+`scripts/model_registry/update_model_pricing.py`. No change is a no-op. A verified source change
 appends an effective-dated period and synchronizes each provider plugin's flat
 runtime rate to the period covering the run. The fixed
 `ava-bot/model-pricing` branch opens or updates a review-only PR, then explicitly
@@ -57,7 +51,7 @@ executed. Future effective windows are copied into the PR body for review.
 ## `workflows/audit-branch-protection.yml`
 
 A weekly schedule (plus manual dispatch) runs
-`scripts/audit_branch_protection.py` with read access to GitHub's live branch
+`scripts/audit/branch_protection.py` with read access to GitHub's live branch
 protection and workflow registry. The script derives the expected checks from
 `.trunk/trunk.yaml`, then verifies exact required contexts, non-strict update
 policy, admin enforcement, and active `ci.yml` / `ci-rerun.yml` workflows.
@@ -70,4 +64,4 @@ closes every open marker issue, making the alert loop self-healing.
 ## Key dependencies
 
 - [[.github.ava.okf.md]] — parent overview and the protected CI check names.
-- [[../scripts/scripts.ava.okf.md]] — audit and model-pricing implementations.
+- [[../scripts/docs/scripts.ava.okf.md]] — audit and model-pricing implementations.

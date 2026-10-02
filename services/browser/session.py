@@ -13,7 +13,7 @@ is host-only for the configured gateway URL (no Domain attribute, matching the
 login cookie), so it is never sent to any other host.
 
 Runs inside the browser-mcp daemon process, which shares the machine with
-Chrome and the cluster secret.
+Chrome and holds its launch-delivered runner API token (the login credential).
 """
 
 from __future__ import annotations
@@ -29,7 +29,7 @@ from typing import Any
 import httpx
 import websockets
 
-from shared.cluster_auth import MANAGED_BROWSER_USER_AGENT, cookie_name
+from base.cluster.auth import MANAGED_BROWSER_USER_AGENT, cookie_name
 
 # CDP endpoint timeouts: Chrome is local, so these only bound a wedged browser.
 _HTTP_TIMEOUT_S = 5.0

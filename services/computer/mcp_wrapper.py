@@ -9,7 +9,7 @@ audit stream carries the acting agent.
 
 Wired in ava_builtins/mcps/computer_use/.mcp.json as the local-fallback command
 (the MCP daemon's primary path dials the service directly — see
-ava/_mcp_computer.py). Takes no arguments (the socket path is derived from
+ava/mcps/_computer.py). Takes no arguments (the socket path is derived from
 settings, matching the daemon). The MCP daemon spawns it with cwd pinned to the
 repo root (`ava/mcp_config.py:server_cwd`), so the relative interpreter path
 resolves there:
@@ -26,12 +26,12 @@ from mcp import types
 from mcp.server.lowlevel import Server
 from mcp.server.stdio import stdio_server
 
+from base.paths import computer_mcp_socket
 from services.browser.mcp_socket_bridge import (
     ReconnectingLink,
     SocketLink,
     dial_unix_socket,
 )
-from shared.paths import computer_mcp_socket
 
 
 def _agent_id() -> int | None:

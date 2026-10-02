@@ -1,0 +1,188 @@
+"""Contract tests for the standalone encrypted-backup restore drill."""
+
+from __future__ import annotations
+
+import importlib.util
+import subprocess
+import sys
+import types
+from datetime import UTC, datetime
+from pathlib import Path
+from typing import Any
+
+import psycopg
+import pytest
+from langchain_core.messages import HumanMessage
+from langgraph.checkpoint.base import empty_checkpoint
+from langgraph.checkpoint.postgres import PostgresSaver
+
+from base.config import settings
+from base.paths import ava_home
+from services.gateway_side.backup import offsite, passphrase
+
+_SCRIPT = Path(__file__).parents[3] / "scripts" / "data_plane_ops" / "restore_drill.py"
+_SPEC = importlib.util.spec_from_file_location("restore_drill", _SCRIPT)
+assert _SPEC is not None and _SPEC.loader is not None
+restore_drill = importlib.util.module_from_spec(_SPEC)
+sys.modules[_SPEC.name] = restore_drill
+_SPEC.loader.exec_module(restore_drill)
+
+
+def _write_checkpoint(agent_id: int) -> None:
+    checkpoint = empty_checkpoint()
+    checkpoint["ts"] = datetime.now(UTC).isoformat()  # real conversations carry a ts
+    checkpoint["channel_values"] = {"messages": [HumanMessage(content="restored conversation")]}
+    checkpoint["channel_versions"] = {"messages": "1", "__start__": "1"}
+    with PostgresSaver.from_conn_string(settings.data_plane.db_url) as saver:
+        saver.put(
+            config={"configurable": {"thread_id": str(agent_id), "checkpoint_ns": ""}},
+            checkpoint=checkpoint,
+            metadata={"source": "input", "step": 1, "parents": {}},
+            new_versions={"messages": "1"},
+        )
+
+
+def test_verification_reports_schema_counts_and_readable_conversation(
+    db_conn: psycopg.Connection,
+) -> None:
+    """The drill's verification is stronger than a successful pg_restore: it
+    reads every checkpoint table and loads one restored conversation through
+    the production checkpoint reader."""
+    with db_conn.cursor() as cur:
+        cur.execute("INSERT INTO agents DEFAULT VALUES RETURNING id")
+        row = cur.fetchone()
+    assert row is not None
+    agent_id = row[0]
+    db_conn.commit()
+    _write_checkpoint(agent_id)
+
+    report = restore_drill.verify_restored_database(settings.data_plane.db_url)
+
+    assert report.agents == 1
+    assert report.checkpoints >= 1
+    assert report.checkpoint_blobs >= 0
+    assert report.checkpoint_writes >= 0
+    assert report.sample_agent_id == agent_id
+    assert report.sample_message_count == 1
+
+
+def _grant_prod_roles(db_conn: psycopg.Connection) -> None:
+    """Reproduce the prod role set in the test DB so the dump carries the
+    GRANT/OWNER statements that broke production drills (the throwaway cluster
+    only has `ava`, so pg_restore hit `role does not exist`): the 2026-08-27
+    missing roles, plus the 2026-09-21 admin-owned-object variant — a
+    `zzy`-owned ad-hoc table, as the sweep backup convention leaves behind."""
+    from psycopg import sql as pgsql
+
+    with db_conn.cursor() as cur:
+        for role in restore_drill._RESTORE_ROLES:
+            cur.execute("SELECT 1 FROM pg_roles WHERE rolname = %s", (role,))
+            if cur.fetchone() is None:
+                cur.execute(pgsql.SQL("CREATE ROLE {} LOGIN").format(pgsql.Identifier(role)))
+        cur.execute("GRANT SELECT ON agents TO ava_runner")
+        cur.execute("GRANT SELECT ON agents TO grafana_ro")
+        cur.execute(
+            pgsql.SQL("ALTER TABLE agents OWNER TO {}").format(pgsql.Identifier("ava_main"))
+        )
+        # The 2026-09-21 variant: an ad-hoc table owned by the admin role
+        # (the model_sweep_backup_* convention leaves one in the app database).
+        cur.execute("CREATE TABLE IF NOT EXISTS adhoc_admin_owned (id int)")
+        cur.execute(
+            pgsql.SQL("ALTER TABLE adhoc_admin_owned OWNER TO {}").format(pgsql.Identifier("zzy"))
+        )
+    db_conn.commit()
+
+
+@pytest.mark.skipif(not restore_drill.pg_tool("pg_dump").exists(), reason="needs native pg_dump")
+def test_run_drill_restores_an_encrypted_artifact_into_throwaway_postgres(
+    db_conn: psycopg.Connection, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The command path decrypts, restores, and proves a checkpoint
+    reader can consume the restored conversation without touching the source DB.
+
+    The test DB carries the prod role set (ava_main / ava_runner / grafana_ro /
+    zzy with grants, plus a zzy-owned ad-hoc table) so the dump exercises the
+    same restore path that failed in production on 2026-08-27 and 2026-09-21."""
+    _grant_prod_roles(db_conn)
+    with db_conn.cursor() as cur:
+        cur.execute("INSERT INTO agents DEFAULT VALUES RETURNING id")
+        row = cur.fetchone()
+    assert row is not None
+    agent_id = row[0]
+    db_conn.commit()
+    _write_checkpoint(agent_id)
+
+    monkeypatch.setattr(restore_drill.backup, "backup_dir", lambda: tmp_path)
+
+    def _no_publish(_artifact: object) -> None:
+        return None
+
+    monkeypatch.setattr(offsite, "publish", _no_publish)
+    # The session database is not a born home: dump it through an explicit dial,
+    # under the passphrase a gateway birth pins.
+    passphrase.ensure_minted(ava_home())
+    artifact = restore_drill.backup.run_backup(db_url=settings.data_plane.db_url)
+    report, elapsed = restore_drill.run_drill(artifact)
+
+    assert report.agents == 1
+    assert report.sample_agent_id == agent_id
+    assert report.sample_message_count == 1
+    assert report.agents_owner == "ava_main"
+    assert elapsed > 0
+
+
+def test_scratch_space_requirement_scales_with_the_dump_size(tmp_path: Path) -> None:
+    """The base is picked against a multiple of the decrypted dump's size: measured
+    restores ran ~1.7x (10.16 GiB artifact, 2026-09-14) and >=2.7x (3.0 GiB
+    artifact, 2026-09-19), so the drill reserves 3x as the floor for choosing a
+    base."""
+    dump = tmp_path / "backup.dump"
+    dump.write_bytes(b"x" * 1000)
+    assert restore_drill._scratch_space_requirement(dump) == 3000
+
+
+def test_restore_failure_message_names_the_base_and_the_capacity_knob(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A server killed mid-COPY must not surface as a bare exit code (the
+    2026-09-14 WSL failure: `pg_restore exited 1` plus a host-side dmesg signal).
+    The message carries the base, its free space, the stderr tail, and the
+    override knob that moves the base."""
+    base = tmp_path / "fallback"
+    base.mkdir()
+    monkeypatch.setattr(
+        restore_drill.shutil,
+        "disk_usage",
+        lambda _path: types.SimpleNamespace(free=512 * 2**20),  # pyright: ignore[reportUnknownArgumentType]
+    )
+    proc = subprocess.CompletedProcess(
+        args=["pg_restore"],
+        returncode=1,
+        stderr=b"pg_restore: error: PQputCopyData: server closed the connection unexpectedly\n",
+    )
+    message = restore_drill._restore_failure_message(proc, base)
+    assert "pg_restore exited 1" in message
+    assert str(base) in message
+    assert "512 MiB free" in message
+    assert "AVA_PG_THROWAWAY_BASE" in message
+    assert "PQputCopyData: server closed the connection" in message
+
+
+def test_the_legacy_empty_secret_key_is_only_ever_an_explicit_choice(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The drill decrypts under the pinned passphrase unless the operator names
+    the legacy empty-secret key; the flag reaches decryption and nothing else."""
+    calls: list[tuple[Path | None, bool]] = []
+
+    def drill(artifact: Path | None, *, legacy_empty_secret: bool) -> tuple[Any, float]:
+        calls.append((artifact, legacy_empty_secret))
+        report = restore_drill.RestoreReport(0, 0, 0, 0, 0, 0, "owner")
+        return report, 0.0
+
+    monkeypatch.setattr(restore_drill, "run_drill", drill)
+    artifact = tmp_path / "ava-20260901T030000Z.dump.enc"
+    restore_drill.main([str(artifact)])
+    restore_drill.main([str(artifact), "--legacy-empty-secret-passphrase"])
+    assert calls == [(artifact, False), (artifact, True)]
+    assert capsys.readouterr().out.count("restore drill passed") == 2

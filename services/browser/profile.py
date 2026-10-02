@@ -15,7 +15,7 @@ logged-in profile that must survive every `ava start`).
 
 `ensure_browser_profile` is called from the converge `_ensure_browser` step,
 which runs at `ava start` before the browser session launches. Non-interactive
-paths (watchdog respawn, boot autostart, `ava cluster update` rollout) pass
+paths (watchdog respawn, boot autostart, the fleet update rollout) pass
 `interactive=False` and take the fresh-profile default without prompting.
 """
 
@@ -26,9 +26,9 @@ import shutil
 import time
 from pathlib import Path
 
-from shared.config import settings
-from shared.platform_probes import default_chrome_user_data_dir
-from shared.proc import process_alive
+from base.host.proc import process_alive
+from base.host.system.probes import default_chrome_user_data_dir
+from base.paths import ava_home
 
 # Names never worth copying out of a Chrome user-data dir. `Singleton*` are the
 # live lock/socket/cookie files Chrome holds while running — copying them would
@@ -56,7 +56,7 @@ def profile_dir() -> Path:
 
     Single source of truth shared by the daemon (which launches Chrome against
     it) and this module (which may seed it)."""
-    return Path(settings.general.ava_home).expanduser() / "chrome-profile"
+    return ava_home() / "chrome-profile"
 
 
 def profile_is_populated(path: Path) -> bool:

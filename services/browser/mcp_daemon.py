@@ -33,7 +33,7 @@ out of scope by construction, and expiry surfaces as the page simply being
 gone (next page-scoped call takes the existing no-page path) -- never as an
 invented "page expired" error. See `services.browser.page_lifecycle`.
 
-Wire protocol (JSON line per request, mirrors `ava._mcps_daemon`):
+Wire protocol (JSON line per request, mirrors `ava.mcps._daemon`):
   Request:  {"id": 1, "method": "list_tools"}
             {"id": 2, "method": "call_tool", "tool": "click", "args": {...}}
             {"id": 3, "method": "release_agent_page", "agent_id": 7}
@@ -61,6 +61,9 @@ from mcp import ClientSession, types
 from mcp.shared.exceptions import MCPError
 from mcp.types import CONNECTION_CLOSED, REQUEST_TIMEOUT
 
+from base.config import settings
+from base.log import logger
+from base.paths import chrome_mcp_socket
 from services.browser import page_lifecycle
 from services.browser.gateway_session import (
     _navigates_to_gateway,
@@ -87,9 +90,6 @@ from services.browser.page_lifecycle import (
     touch_agent_page,
 )
 from services.browser.protocol import Request, Response
-from shared.config import settings
-from shared.log import logger
-from shared.paths import chrome_mcp_socket
 
 # A single tool result (screenshot / DOM snapshot) can be multi-MB on one line;
 # lift the stream buffer cap well above StreamReader's 64KiB default.
@@ -533,7 +533,7 @@ async def run() -> None:  # noqa: PLR0915 — upstream watchdog lifecycle keeps 
     # serving; refuse to start instead of stealing.
     if await _socket_in_use(sock):
         logger.error(
-            "[browser-mcp] socket %s is already served by a live daemon — "
+            "[browser-mcp] socket {} is already served by a live daemon — "
             "refusing to start a second instance",
             sock,
         )
@@ -636,6 +636,9 @@ async def run() -> None:  # noqa: PLR0915 — upstream watchdog lifecycle keeps 
         # blocked `cluster update` for the whole 300s stop budget).
         with suppress(BaseException):
             await session_task
+        # Two bounded steps, so the daemon may keep closing for up to
+        # `shutdown_budget.SHUTDOWN_CEILING_S`; ava-root's window for this unit
+        # is derived from that total.
         await _bounded_stack_close(current_stack, "upstream stack close during shutdown")
         server.close()
         await _bounded(server.wait_closed(), "server close")
@@ -648,7 +651,7 @@ def main() -> None:
     # per-daemon log file plus the event pipeline, so this daemon's expiry /
     # renewal events land attributed to `browser-mcp` and an uncaught
     # traceback is postmortem-able. Idempotent.
-    from shared.log import init_gateway_process
+    from base.log import init_gateway_process
 
     init_gateway_process(name="browser-mcp")
     asyncio.run(run())

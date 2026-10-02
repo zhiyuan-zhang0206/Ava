@@ -1,6 +1,6 @@
 """`ava` host-level lifecycle verbs — argparse builders + their `_h_*` handlers.
 
-`start` / `pause` / `stop` / `restart` / `status` / `converge` / `firewall` / `trace` /
+`init` / `start` / `pause` / `stop` / `restart` / `status` / `converge` / `firewall` / `trace` /
 `lgtm` act
 on THIS host (or the unit this checkout owns), as opposed to the cluster-wide
 verbs in ``cli.parsers.cluster``. Handlers stay thin: each lazy-imports its
@@ -12,29 +12,20 @@ from __future__ import annotations
 import argparse
 
 
-def _h_start(args: argparse.Namespace) -> int:
-    # The installed-home gate already ran in main() (cli.preflight, settings-free,
-    # BEFORE this handler's cli.commands import can trip a generic Settings
-    # validation error on an uninstalled home).
-    from cli.commands.start import cmd_start
+def _h_init(args: argparse.Namespace) -> int:
+    from cli.init_intent import run_init
 
-    return cmd_start(
-        machine_name=args.machine_name,
-        serve_gateway=args.serve_gateway,
-        serve_agent_runner=args.serve_agent_runner,
-        serve_observability_station=args.serve_observability_station,
-        machine_description=args.machine_description,
-        memory_remote=args.memory_remote,
-        gateway_url=args.gateway_url,
-        disabled_services=tuple(args.disable_service),
-        persist_services=args.persist_services,
-        readiness_gate=not args.no_readiness_gate,
-        updater_telemetry=args.updater_telemetry,
-    )
+    return run_init(args)
+
+
+def _h_start(args: argparse.Namespace) -> int:
+    from cli.start_intent import run_start
+
+    return run_start(args)
 
 
 def _h_stop(args: argparse.Namespace) -> int:
-    from cli.commands.stop import cmd_stop
+    from cli.commands.lifecycle.stop import cmd_stop
 
     return cmd_stop(
         keep_infra=args.keep_infra,
@@ -47,7 +38,7 @@ def _h_stop(args: argparse.Namespace) -> int:
 
 
 def _h_pause(args: argparse.Namespace) -> int:
-    from cli.commands.stop import cmd_pause
+    from cli.commands.lifecycle.stop import cmd_pause
 
     return cmd_pause(
         preserve_sessions=frozenset(args.keep_service), force=args.force, timeout=args.timeout
@@ -55,17 +46,16 @@ def _h_pause(args: argparse.Namespace) -> int:
 
 
 def _h_restart(args: argparse.Namespace) -> int:
-    from cli.commands.stop import cmd_restart
+    from cli.commands.lifecycle.stop import cmd_restart
 
     return cmd_restart(
-        quiesce=args.quiesce,
         mode=args.mode,
         force_reap=args.force_reap,
     )
 
 
 def _h_status(_args: argparse.Namespace) -> int:
-    from cli.commands.status import cmd_status
+    from cli.commands.lifecycle.status import cmd_status
 
     return cmd_status()
 
@@ -94,71 +84,98 @@ def _h_trace_ship(args: argparse.Namespace) -> int:
     return cmd_trace_ship(since=args.since, until=args.until, dry_run=args.dry_run)
 
 
-def _add_start_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
-    # `ava start` — multi-machine setup args; pass once on first run, CLI persists
-    # to file and subsequent calls do not need them. NO TTY prompt — agent-first
-    # design, agent has no TTY, missing values fail loud.
-    start_p = sub.add_parser(
-        "start",
-        help="[host] bring up this unit's full stack (idempotent). Cluster identity "
-        "is checkout-anchored — never a flag. Machine identity is first-run only: "
-        "pass --machine-name / --serve-gateway / --serve-agent-runner / "
-        "--gateway-url on the FIRST start (or set the env vars / $AVA_HOME files); "
-        "the values are persisted and later runs need none of them.",
+def _add_init_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
+    # `ava init` — the home's identity, recorded once. NO TTY prompt — agent-first
+    # design, agent has no TTY, missing values fail loud. Settings-free: it starts
+    # nothing; the first `ava start` provisions the data plane and launches.
+    init_p = sub.add_parser(
+        "init",
+        help="[host] record this home's identity once (machine name, capabilities, "
+        "credentials, ports) before its first `ava start`; starts nothing. The home is "
+        "$AVA_HOME, else ~/.ava — never a flag. A home that is already initialized is "
+        "refused; `ava start` brings it up.",
     )
-    start_p.add_argument(
+    init_p.add_argument(
         "--machine-name",
         default=None,
-        help="usually first-run only: stable identifier for this host (e.g. host-a / host-b). "
-        "Persisted to $AVA_HOME/machine_name; env AVA_MACHINE_NAME wins over the file",
+        help="stable identifier for this host (e.g. host-a / host-b); required",
     )
-    start_p.add_argument(
+    init_p.add_argument(
         "--serve-gateway",
         action=argparse.BooleanOptionalAction,
         default=None,
-        help="usually first-run only: serve the gateway capability (central pg/redis + all daemons). Single box "
-        "passes both --serve-gateway --serve-agent-runner; unset falls back to the "
-        "$AVA_HOME/machine_serve_gateway file. env: AVA_MACHINE_SERVE_GATEWAY",
+        help="serve the gateway capability (central pg/redis + all daemons). A single box "
+        "passes both --serve-gateway --serve-agent-runner",
     )
-    start_p.add_argument(
+    init_p.add_argument(
         "--serve-agent-runner",
         action=argparse.BooleanOptionalAction,
         default=None,
-        help="usually first-run only: serve the agent-runner capability (agent-host/ops/watchdog); unset falls back to the $AVA_HOME/machine_serve_agent_runner file. "
-        "env: AVA_MACHINE_SERVE_AGENT_RUNNER",
+        help="serve the agent-runner capability (agent-host/ops/watchdog)",
     )
-    start_p.add_argument(
+    init_p.add_argument(
         "--serve-observability-station",
         action=argparse.BooleanOptionalAction,
         default=None,
-        help="usually first-run only: serve the observability-station capability (own the native LGTM "
-        "observability backends — the declarative form of the $AVA_HOME/lgtm-host marker); unset falls "
-        "back to the $AVA_HOME/machine_serve_observability_station file. env: "
-        "AVA_MACHINE_SERVE_OBSERVABILITY_STATION",
+        help="serve the observability-station capability (own the native LGTM "
+        "observability backends — the declarative form of the $AVA_HOME/lgtm-host marker)",
     )
-    start_p.add_argument(
+    init_p.add_argument(
         "--machine-description",
         default=None,
-        help='Free-text note of what this host is for (e.g. "voice IO + browser"); persisted to $AVA_HOME/machine_description and the machines table.',
+        help='free-text note of what this host is for (e.g. "voice IO + browser")',
     )
-    start_p.add_argument(
+    init_p.add_argument(
         "--memory-remote",
         default=None,
-        help="usually first-run only: central git remote URL for memory pool (e.g. git@github.com:you/AvaMemory.git). env: AVA_MEMORY_REMOTE",
+        help="central git remote URL for memory pool (e.g. git@github.com:you/AvaMemory.git)",
     )
-    start_p.add_argument(
+    init_p.add_argument(
         "--gateway-url",
         default=None,
-        help="usually first-run only: public URL of the gateway. On the gateway this host's own URL; on an agent-runner, the gateway it reaches. env: AVA_GATEWAY_URL",
+        help="public URL of the gateway. On the gateway this host's own URL; on an "
+        "agent-runner, the gateway it reaches (required there)",
     )
-    start_p.add_argument(
+    init_p.add_argument(
+        "--config-file",
+        type=str,
+        default=None,
+        help="explicit dotenv configuration, outside the home",
+    )
+    init_p.add_argument(
+        "--machine-host", default=None, help="this host's reachable private-network address"
+    )
+    init_p.add_argument("--ssl-cert-file", default=None, help="CA bundle for gateway verification")
+    init_p.add_argument(
+        "--db-capability",
+        default=None,
+        metavar="BUNDLE",
+        help="agent-runner only: install the database capability bundle the gateway operator "
+        "issued (`ava cluster db-authority issue-unit`); its transport key comes from "
+        "AVA_DB_CAPABILITY_KEY. The bundle file is deleted once installed. A later bundle "
+        "goes to `ava cluster db-authority install-unit`.",
+    )
+    init_p.set_defaults(func=_h_init)
+
+
+def _add_start_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
+    # `ava start` — brings up a home `ava init` initialized; the service selection
+    # is its only input.
+    start_p = sub.add_parser(
+        "start",
+        help="[host] bring up this unit's full stack (idempotent). The home is "
+        "$AVA_HOME, else ~/.ava — never a flag. It must be initialized first: "
+        "`ava init` takes the machine identity (name, capabilities, gateway).",
+    )
+    selection = start_p.add_mutually_exclusive_group()
+    selection.add_argument(
         "--disable-service",
         action="append",
         default=[],
         metavar="SERVICE",
         help="durably disable this service session (repeatable; e.g. --disable-service labeler "
-        "--disable-service frontend). Pass the bare service name. The disable is recorded so the "
-        "watchdog leaves it down; re-enable by running `ava start` again without the flag.",
+        "--disable-service frontend). Pass the bare service name. Bare `ava start` preserves "
+        "this selection; use `--all-services` to reset it or `--only-service` to replace it.",
     )
     start_p.add_argument(
         # Internal: an update / recovery / restart forwards its transient disabled set
@@ -169,24 +186,15 @@ def _add_start_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) 
         default=True,
         help=argparse.SUPPRESS,
     )
-    start_p.add_argument(
-        # Internal: a detached updater asks the fresh `ava start` process to emit
-        # migration/readiness timing without changing normal start behavior.
-        "--updater-telemetry",
-        action="store_true",
-        default=False,
-        help=argparse.SUPPRESS,
+    selection.add_argument(
+        "--all-services", action="store_true", help="explicitly select the entire roster"
     )
-    start_p.add_argument(
-        "--no-readiness-gate",
-        action="store_true",
-        default=False,
-        help="exit 0 even when a launched service never passes its liveness probe "
-        "(default: exit 4 and name it, after the status snapshot). For callers that "
-        "retry without a cap — the OS boot job passes this, because an unbounded "
-        "retry on a permanently-unready service is a host that never finishes "
-        "booting — or that answer readiness themselves, like the rollout's off-box "
-        "gateway gate. The wait and the printed crosses are unaffected.",
+    selection.add_argument(
+        "--only-service",
+        action="append",
+        default=[],
+        metavar="SERVICE",
+        help="run only these services (repeatable; persisted for restart)",
     )
     start_p.set_defaults(func=_h_start)
 
@@ -200,10 +208,9 @@ def _add_stop_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -
         "--keep-infra",
         action="store_true",
         help="do not stop THIS cluster's own Postgres/Redis instance (every "
-        "cluster owns one, under its $AVA_HOME). Used by the `ava cluster update` "
-        "orchestrator: the migrate step that follows still needs the database, so "
-        "tearing the data plane down first would give it connect-refused. A plain "
-        "`ava stop` means 'fully stop' and leaves this off.",
+        "cluster owns one, under its $AVA_HOME). Used by `ava restart`, whose start "
+        "leg still needs the database. A plain `ava stop` means 'fully stop' and "
+        "leaves this off.",
     )
     stop_p.add_argument(
         "-y",
@@ -257,11 +264,6 @@ def _add_restart_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]
     restart_p = sub.add_parser(
         "restart",
         help="[host] normal pause then start, retaining persistent terminals",
-    )
-    restart_p.add_argument(
-        "--quiesce",
-        action="store_true",
-        help="compatibility flag; restart always uses the native drain boundary",
     )
     # task #4092 cli-default inventory: "smooth" is the safe default — force
     # must be asked for explicitly.

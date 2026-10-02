@@ -155,6 +155,6 @@ def test_count_mirror_events_filters_the_window_by_ts(
     (logs / f"events-{now:%Y%m%d}.jsonl").write_text(
         json.dumps(row(in_window)) + "\n" + json.dumps(row(after_window)) + "\n"
     )
-    monkeypatch.setattr("shared.paths.logs_dir", lambda: logs)
+    monkeypatch.setattr("base.paths.logs_dir", lambda: logs)
 
     assert weekly_mod._count_mirror_events(since) == 2  # in_window twice; edges dropped

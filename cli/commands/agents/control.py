@@ -21,7 +21,7 @@ of them can wake it again.
 `ava.shell.run_background` and watcher exit notices are generated command lines
 ending in `ava agents send ... --source shell:N|watcher:N`, and a host operator
 can message any agent directly. A `send` that cannot reach the gateway is not
-lost: the deferred-delivery outbox (`shared.agents.messages.delivery_outbox`) records it on this
+lost: the deferred-delivery outbox (`base.agents.messages.delivery_outbox`) records it on this
 machine and the ops daemon redelivers it once the gateway returns — the same
 coverage the SDK send path has. Richer capabilities (spawn an agent, inspect its
 events) stay in the `ava.*` SDK and the web UI.
@@ -54,7 +54,7 @@ class ProvenanceError(ValueError):
 
 def _validated_source_arg(source: str) -> str:
     """Validate one explicit source value (the CLI parse layer runs first)."""
-    from shared.agents.messages.envelope import validate_source
+    from base.agents.messages.envelope import validate_source
 
     try:
         validate_source(source)
@@ -88,8 +88,8 @@ def cmd_agents_ls(
     *, scope: str = "live", query: str = "", before_id: int | None = None, limit: int = 100
 ) -> int:
     """Render one agent directory page and its continuation cursor."""
-    from shared.http_dial import get as dial_get
-    from shared.machine import gateway_api_base, gateway_auth_headers
+    from base.cluster.machine import gateway_api_base, gateway_auth_headers
+    from base.host.net.http_dial import get as dial_get
 
     url = f"{gateway_api_base()}/api/agents"
     params: dict[str, str | int] = {"scope": scope, "query": query, "limit": limit}
@@ -162,7 +162,7 @@ def cmd_agents_send(
     explicit parameters only). Machine callers pass `shell:N` / `watcher:N`; a
     human operator — or an agent acting as one — passes `user`. A source that
     still reaches the gateway is re-validated there (`AgentMessageIn.source` ->
-    `shared.agents.messages.envelope.validate_source`) and rejected 422 with the legal set
+    `base.agents.messages.envelope.validate_source`) and rejected 422 with the legal set
     printed. A programmatic caller with no source gets this option list as a
     ProvenanceError, which the CLI handlers report without a traceback.
 
@@ -173,7 +173,7 @@ def cmd_agents_send(
     (gateway behavior, same as the SDK path).
 
     A failed send is not lost: the deferred-delivery outbox
-    (`shared.agents.messages.delivery_outbox`) records a transport failure or a transient HTTP
+    (`base.agents.messages.delivery_outbox`) records a transport failure or a transient HTTP
     response (429/5xx) on this machine under the message's idempotency key, and
     the machine's ops daemon redelivers it once the gateway returns. 4xx stay
     loud and unrecorded — the wire reason is application semantics, replay
@@ -211,7 +211,7 @@ def send_agent_message(
     not need a follow-up read.
 
     A failed send is not lost: the deferred-delivery outbox
-    (`shared.agents.messages.delivery_outbox`) records a transport failure or a transient HTTP
+    (`base.agents.messages.delivery_outbox`) records a transport failure or a transient HTTP
     response (429/5xx) on this machine under the message's idempotency key, and
     the machine's ops daemon redelivers it once the gateway returns. 4xx stay
     loud and unrecorded — the wire reason is application semantics, replay
@@ -223,9 +223,9 @@ def send_agent_message(
 
     import httpx
 
-    from shared.agents.messages import delivery_outbox
-    from shared.http_dial import post as dial_post
-    from shared.machine import gateway_api_base, gateway_auth_headers
+    from base.agents.messages import delivery_outbox
+    from base.cluster.machine import gateway_api_base, gateway_auth_headers
+    from base.host.net.http_dial import post as dial_post
 
     if tail_file is not None:
         # Delivering the notice is the primary contract; the tail is a rider.
@@ -319,8 +319,8 @@ def cmd_agents_cancel(agent_id: int) -> int:
     A running step interrupts immediately; if the agent is between steps the next
     claim halts it to idle. Either way it stops but stays alive and resumes on the
     next message — the soft stop, vs terminate / kill which end the agent."""
-    from shared.http_dial import post as dial_post
-    from shared.machine import gateway_api_base, gateway_auth_headers
+    from base.cluster.machine import gateway_api_base, gateway_auth_headers
+    from base.host.net.http_dial import post as dial_post
 
     url = f"{gateway_api_base()}/api/cancel"
     resp = dial_post(
@@ -346,8 +346,8 @@ def cmd_agents_restart(
     import json
     import sys
 
-    from shared.http_dial import post as dial_post
-    from shared.machine import gateway_api_base, gateway_auth_headers
+    from base.cluster.machine import gateway_api_base, gateway_auth_headers
+    from base.host.net.http_dial import post as dial_post
 
     url = f"{gateway_api_base()}/api/agents/{agent_id}/restart"
     caller = _explicit_caller(source)
@@ -384,8 +384,8 @@ def cmd_agents_resurrect(agent_id: int, *, source: str | None = None) -> int:
     Brings a terminated agent back: a fresh process is respawned attached to the
     same agent_id (history preserved). An already-running agent returns
     `already_alive`."""
-    from shared.http_dial import post as dial_post
-    from shared.machine import gateway_api_base, gateway_auth_headers
+    from base.cluster.machine import gateway_api_base, gateway_auth_headers
+    from base.host.net.http_dial import post as dial_post
 
     url = f"{gateway_api_base()}/api/agents/{agent_id}/resurrect"
     caller = _explicit_caller(source, field="resurrected_by")
@@ -410,8 +410,8 @@ def cmd_agents_resurrect_billing(*, execute: bool) -> int:
     `resurrect-billing-v1` on each home machine) and prints the per-agent
     outcome. Refused runs exit 1; previews and runs exit 0.
     """
-    from shared.http_dial import post as dial_post
-    from shared.machine import gateway_api_base, gateway_auth_headers
+    from base.cluster.machine import gateway_api_base, gateway_auth_headers
+    from base.host.net.http_dial import post as dial_post
 
     url = f"{gateway_api_base()}/api/agents/resurrect-billing"
     resp = dial_post(
@@ -459,8 +459,8 @@ def _terminate(
     leaves the server default in place.
     `kill_all_shell_sessions` is sent only when set; the output reports what
     the kill did, so it is verifiable from the output alone."""
-    from shared.http_dial import post as dial_post
-    from shared.machine import gateway_api_base, gateway_auth_headers
+    from base.cluster.machine import gateway_api_base, gateway_auth_headers
+    from base.host.net.http_dial import post as dial_post
 
     verb = "kill" if force else "terminate"
     url = f"{gateway_api_base()}/api/agents/{agent_id}/terminate"
@@ -531,8 +531,8 @@ def cmd_agents_compact(agent_id: int) -> int:
     A terminated target is auto-resurrected first; a
     wedged target consumes it once recovered (turn-liveness restart, or an
     operator kill + resurrect) — the request is durable and waits."""
-    from shared.http_dial import post as dial_post
-    from shared.machine import gateway_api_base, gateway_auth_headers
+    from base.cluster.machine import gateway_api_base, gateway_auth_headers
+    from base.host.net.http_dial import post as dial_post
 
     url = f"{gateway_api_base()}/api/agents/{agent_id}/compact"
     resp = dial_post(url, timeout=_TIMEOUT_S, headers=gateway_auth_headers())

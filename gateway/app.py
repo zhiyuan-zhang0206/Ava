@@ -35,18 +35,19 @@ Redis (`ava:events` channel); they do not share Python process state or
 semantic payload.
 
 Concurrency:
-- DB uses one `shared.db.pool()` per process; each request borrows a connection
+- DB uses one `base.db.pool()` per process; each request borrows a connection
 - Publish callsites reuse one process-wide `aredis.Redis` via
-  `shared.redis_client.get_async_redis()`; SSE / pubsub subscribers still
+  `base.events.live.redis_client.get_async_redis()`; SSE / pubsub subscribers still
   open their own connection per request (subscriber lifecycle ≠ publisher).
 
 Frontend: Next.js app under `ui/web/`, served on :3000; the browser calls
 this service directly at `<hostname>:8000` (no rewrites proxy — see
 ui/web/next.config.ts).
 
-Endpoint implementations live under `gateway/routers/<domain>.py` and are
-mounted at the bottom of this file. Lifespan and middleware registration remain
-in this module; exception-to-envelope adapters live in `gateway/error_handlers.py`.
+Endpoint implementations live in the gateway's feature packages
+(`gateway/<feature>/`) and single-module `gateway/routers/<domain>.py`, and are
+mounted at the bottom of this file in a fixed order. Lifespan and middleware registration remain
+in this module; exception-to-envelope adapters live in `gateway/middleware/error_handlers.py`.
 
 Start: `.venv/bin/python scripts/start_gateway.py` (or `python -m gateway`)
 -> uvicorn :8000 on all interfaces, both IPv4 and IPv6 (reachable on the
@@ -65,82 +66,68 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
-import shared.db
-from gateway import (
-    _idempotency,
-    _latency,
-    _pause_policy,
-    _runtime_metrics,
-    alert_reconciliation,
-    loki_events,
-    loki_query_budget,
-    prom_metrics,
-    ttl_reaper,
-)
-from gateway import mcp_endpoint as _mcp_endpoint
-from gateway import periodic_flushers as _periodic_flushers
-from gateway._auth401_log import _log_auth401_rejection
-from gateway._cors import cors_allowed_origins
+import base.db
+from base.agents import AvaAgentError
+from base.agents.context import AvaContext
+from base.cluster.auth import cookie_name
+from base.config import settings
+from base.host.system.cron import register_os_cron
+from base.lm.plugin_providers import ensure_provider_plugins_loaded
+from gateway import ttl_reaper
 from gateway._server import main as _run_gateway
-from gateway.error_envelope import error_response, request_trace_middleware
-from gateway.error_handlers import (
-    _ava_agent_error_handler,
-    _http_exception_handler,
-    _loki_query_budget_error_handler,
-    _observability_read_unavailable_handler,
-    _prom_query_budget_error_handler,
-    _request_validation_error_handler,
-    _unhandled_exception_handler,
-)
-from gateway.error_handlers import (
-    _cors_headers as _cors_headers,
-)
+from gateway.agents import completion_notice_flusher, max_id_gauge
+from gateway.agents import conversation as conversation_router
+from gateway.agents import lifecycle as agents_lifecycle_router
+from gateway.agents import notices as notices_router
+from gateway.agents import router as agents_router
+from gateway.agents import state as agents_state_router
+from gateway.agents import timeline as timeline_router
+from gateway.alerts import reconciliation
+from gateway.alerts import router as alerts_router
+from gateway.auth import rejection_log
+from gateway.auth import router as auth_router
+from gateway.auth.cors import cors_allowed_origins
+from gateway.auth.rejection_log import log_auth401_rejection
+from gateway.auth.session_store import touch_session
+from gateway.cluster import bootstrap as bootstrap_router
+from gateway.cluster import machine_pause as machine_pause_router
+from gateway.cluster import ops_monitor as ops_monitor_router
+from gateway.cluster import router as cluster_router
+from gateway.cluster import status as status_router
+from gateway.events import agent_events as agent_events_router
+from gateway.events import computer_traces as computer_traces_router
+from gateway.events import metrics as metrics_router
+from gateway.events import resolutions as event_resolutions_router
+from gateway.events import router as events_router
+from gateway.events import system as system_router
+from gateway.extensions import inventory as inventory_router
+from gateway.extensions import packages as packages_router
+from gateway.extensions import plugin_ui as plugin_ui_router
+from gateway.extensions import skills as skills_router
+from gateway.extensions import ui_contributions as ui_contributions_router
 from gateway.inspect import router as inspect_router
-from gateway.routers import (
-    _machine_pause as machine_pause_router,
-)
-from gateway.routers import (
-    agent_events as agent_events_router,
-)
-from gateway.routers import (
-    agents as agents_router,
-)
-from gateway.routers import (
-    agents_lifecycle as agents_lifecycle_router,
-)
-from gateway.routers import (
-    agents_state as agents_state_router,
-)
-from gateway.routers import (
-    alerts as alerts_router,
-)
-from gateway.routers import (
-    auth as auth_router,
-)
-from gateway.routers import (
-    bootstrap as bootstrap_router,
-)
-from gateway.routers import (
-    cluster as cluster_router,
+from gateway.lgtm import loki_events, loki_query_budget, prom_metrics
+from gateway.mcp_server import endpoint as mcp_server_endpoint
+from gateway.mcp_server import router as mcp_server_router
+from gateway.middleware import idempotency, latency, pause_policy, runtime_metrics
+from gateway.middleware.error_envelope import error_response, request_trace_middleware
+from gateway.middleware.error_handlers import (
+    ava_agent_error_handler,
+    http_exception_handler,
+    loki_query_budget_error_handler,
+    observability_read_unavailable_handler,
+    prom_query_budget_error_handler,
+    request_validation_error_handler,
+    unhandled_exception_handler,
 )
 from gateway.routers import (
     commands as commands_router,
 )
 from gateway.routers import (
-    computer_traces as computer_traces_router,
-)
-from gateway.routers import (
     config as config_router,
 )
-from gateway.routers import conversation as conversation_router
 from gateway.routers import (
     default_model as default_model_router,
-)
-from gateway.routers import (
-    event_resolutions as event_resolutions_router,
-)
-from gateway.routers import (
-    events as events_router,
 )
 from gateway.routers import (
     fleet_graph as fleet_graph_router,
@@ -155,43 +142,16 @@ from gateway.routers import (
     guide as guide_router,
 )
 from gateway.routers import (
-    inventory as inventory_router,
-)
-from gateway.routers import (
-    mcp_clients as mcp_clients_router,
-)
-from gateway.routers import (
     memory as memory_router,
-)
-from gateway.routers import (
-    metrics as metrics_router,
-)
-from gateway.routers import (
-    notices as notices_router,
 )
 from gateway.routers import (
     okf_graph as okf_graph_router,
 )
 from gateway.routers import (
-    ops_monitor as ops_monitor_router,
-)
-from gateway.routers import (
-    packages as packages_router,
-)
-from gateway.routers import (
     pages as pages_router,
 )
 from gateway.routers import (
-    plugin_ui as plugin_ui_router,
-)
-from gateway.routers import (
     presets as presets_router,
-)
-from gateway.routers import (
-    run_timeline as run_timeline_router,
-)
-from gateway.routers import (
-    schedules as schedules_router,
 )
 from gateway.routers import (
     settings as settings_router,
@@ -200,22 +160,7 @@ from gateway.routers import (
     shell as shell_router,
 )
 from gateway.routers import (
-    skills as skills_router,
-)
-from gateway.routers import (
-    status as status_router,
-)
-from gateway.routers import (
-    system as system_router,
-)
-from gateway.routers import (
     tasks as tasks_router,
-)
-from gateway.routers import (
-    timeline as timeline_router,
-)
-from gateway.routers import (
-    ui_contributions as ui_contributions_router,
 )
 from gateway.routers import (
     uploads as uploads_router,
@@ -223,18 +168,9 @@ from gateway.routers import (
 from gateway.routers import (
     work_failed as work_failed_router,
 )
-from gateway.schedule_manager import ScheduleManager
-from gateway.session_store import session_is_valid, touch_session
-from shared.agents import AvaAgentError
-from shared.cluster_auth import (
-    cookie_name,
-    verify_bearer,
-)
-from shared.config import settings
-from shared.context import AvaContext
-from shared.lm.plugin_providers import ensure_provider_plugins_loaded
-from shared.machine import machine_name
-from shared.os_cron import register_os_cron
+from gateway.run_timeline import router as run_timeline_router
+from gateway.schedules import router as schedules_router
+from gateway.schedules.manager import ScheduleManager
 
 _log = logging.getLogger(__name__)
 
@@ -264,7 +200,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     # app.state.ctx; raw db_pool / get_async_redis() keep working for
     # call sites that aren't migrated yet.
     app.state.ctx = AvaContext()
-    # Runtime consumer -> `shared.db.pool()` dials the pooled URL (PgBouncer when
+    # Runtime consumer -> `base.db.pool()` dials the pooled URL (PgBouncer when
     # enabled, else direct) and decides the connection kwargs in one place:
     # prepare_threshold=None keeps every borrowed connection transaction-pooling-safe,
     # and PG_KEEPALIVE_KWARGS bounds a borrow on a half-dead socket. The second
@@ -272,18 +208,18 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     # gateway process and serves every request, so a connection idle across a host
     # sleep or a network change comes back on a dead TCP flow and, unbounded, parks
     # the request handler on the OS TCP-retransmit timeout.
-    app.state.db_pool = shared.db.pool(max_size=8)
+    app.state.db_pool = base.db.pool(max_size=8)
     # The control plane must never queue behind the saturated data-plane pool.
     # Audit P0-2 follows the 2026-08-23 watchdog misjudgment chain: health and
     # recovery reads need their own short, small reservation.
-    app.state.control_db_pool = shared.db.pool(min_size=1, max_size=2, timeout=2.0)
+    app.state.control_db_pool = base.db.pool(min_size=1, max_size=2, timeout=2.0)
 
     # Shared upstream client for the Grafana reverse proxy — one connection
     # pool across proxied requests instead of an AsyncClient per request.
     # Cheap when the proxy is disabled: no connection exists until the first
     # proxied request.
     app.state.grafana_client = grafana_router.build_proxy_client()
-    app.state.alert_reconciler = alert_reconciliation.start_grafana_alert_reconciler(
+    app.state.alert_reconciler = reconciliation.start_grafana_alert_reconciler(
         app.state.db_pool,
         app.state.grafana_client,
         alerts_router.publish_alert_rows,
@@ -296,8 +232,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
 
     # Register the OS-level health-probe cron (launchd plist on macOS, crontab
     # on Linux). This is the primary registration path — every gateway start
-    # refreshes the plist, so an `ava cluster update` that changes the probe command
-    # (e.g. adds --auto-rollback) takes effect on the next gateway restart
+    # refreshes the health probe command on the next gateway restart
     # without relying on the converge phase. Idempotent.
     try:
         await asyncio.to_thread(register_os_cron)
@@ -310,29 +245,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     app.state.schedule_manager = ScheduleManager(app.state.db_pool)
     await app.state.schedule_manager.start()
 
-    # Built-in schedules (schedules/manifest.json) — provisioned on boot
-    # so a fresh install comes up with its product schedules (self-evolution,
-    # memory) enabled and its cluster-operator schedules (trace-ship-tempo)
-    # present but disabled, per the pre-open-source policy ruling (2026-08-11).
-    # Idempotent create-if-missing: existing rows are never touched, so an
-    # operator's edits survive every boot and a deliberately deleted built-in
-    # comes back with its manifest default. Best-effort — a missing or corrupt
-    # manifest must not take the gateway down; the reconcile loop launches any
-    # newly created enabled schedule within a poll tick.
-    try:
-        from shared.daemon.schedules.builtin_schedules import provision_builtin_schedules
-
-        def _provision() -> list[str]:
-            # Connection acquisition included: `pool.connection()` blocks and
-            # must not run on the event loop.
-            with app.state.db_pool.connection() as conn:
-                return provision_builtin_schedules(conn)
-
-        created = await asyncio.to_thread(_provision)
-        if created:
-            _log.info("provisioned built-in schedules: %s", ", ".join(created))
-    except Exception:
-        _log.warning("built-in schedule provisioning failed", exc_info=True)
+    # Automatic seeding is explicit configuration; unseeded previews still use
+    # the normal manager and schedule APIs without launching background workloads.
+    await app.state.schedule_manager.provision_builtins()
 
     # Config migrations (the retired override layers -> .env) run in the converge
     # phase before the gateway process starts, so by the time this Settings is
@@ -340,9 +255,17 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
 
     # Periodic telemetry emitters (latency / auth-401 / agent max-id / runtime): each
     # drains its accumulator or DB sample once per 60s and emits ONE bounded
-    # event; the lifespan owns and stops every task or scheduled callback.
-    _periodic_flushers.start(app)
-    app.state.runtime_metrics = _runtime_metrics.start_runtime_monitor()
+    # event; the lifespan owns and stops every task or scheduled callback. The
+    # completion-notice digest flusher rides the same lifespan-owned task set.
+    app.state.latency_flusher = asyncio.create_task(latency.latency_flusher())
+    app.state.auth401_flusher = asyncio.create_task(rejection_log.auth401_flusher())
+    app.state.agent_max_id_flusher = asyncio.create_task(
+        max_id_gauge.max_agent_id_flusher(app.state.db_pool)
+    )
+    app.state.completion_notice_flusher = asyncio.create_task(
+        completion_notice_flusher.completion_notice_flusher(app.state.db_pool)
+    )
+    app.state.runtime_metrics = runtime_metrics.start_runtime_monitor()
 
     # /mcp endpoint (design task #1212 step 1): flag-gated, built fresh per
     # lifespan — StreamableHTTPSessionManager.run() can only be entered once
@@ -350,7 +273,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     # /mcp answers 404 through the mcp_gateway wrapper and nothing changes.
     mcp_manager = None
     if settings.gateway.mcp_endpoint_enabled:
-        mcp_manager = _mcp_endpoint.build_manager(app.state.db_pool)
+        mcp_manager = mcp_server_endpoint.build_manager(app.state.db_pool)
         app.state.mcp_manager = mcp_manager
 
     try:
@@ -363,7 +286,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
         app.state.mcp_manager = None
         app.state.runtime_metrics.stop()
         await ttl_reaper.stop_ttl_reaper(app.state.ttl_reaper)
-        await alert_reconciliation.stop_grafana_alert_reconciler(app.state.alert_reconciler)
+        await reconciliation.stop_grafana_alert_reconciler(app.state.alert_reconciler)
         await app.state.grafana_client.aclose()
         for flusher in (
             app.state.latency_flusher,
@@ -389,85 +312,18 @@ app = FastAPI(
 )
 
 # Pause exemptions are a route-declared attribute: the middleware consumes
-# only the tested decision function `gateway._pause_policy.should_bypass_pause`,
-# which reads the CONTROL_PLANE doorplates from `shared/api_contracts/contracts.py`. The
+# only the tested decision function `gateway.middleware.pause_policy.should_bypass_pause`,
+# which reads the CONTROL_PLANE doorplates from `base/api_contracts/contracts.py`. The
 # exempt surface (control plane + agent self-reports) is enumerable and
 # audited by tests/gateway/test_route_contracts.py — a new exemption is a
 # deliberate declaration, not an incident patch.
 
 
-_PAUSE_READ_TTL_S = 1.0
-"""How long a pause-posture read is cached. A 1s-stale judgment is fine for
-the 503 gate (the pause fan-out itself is a multi-second rollout step, and
-R1's lease semantics tolerate sub-second staleness); the cache is what keeps
-the middleware off the DB for the steady state — one pool borrow + SELECT per
-second per gateway process instead of one per request."""
+async def _cluster_is_paused(_request: Request) -> bool:
+    """Read this home's durable admission state without a stale posture cache."""
+    from base.deploy.maintenance.admission import business_paused
 
-_pause_cache: list[tuple[float, bool] | None] = [None]
-"""``(expires_at_monotonic, paused)`` — the last posture read and when it
-expires. A one-element list so the async reader can update it without a
-`global` statement (ruff PLW0603); the middleware is the only writer."""
-
-_pause_inflight: list[asyncio.Future[bool] | None] = [None]
-"""One shared expired-cache posture read; followers await this Future."""
-
-
-async def _cluster_is_paused(request: Request) -> bool:
-    """Whether this host's posture is `paused`, read off the event loop.
-
-    The posture row lives in the central DB and is read by the gateway's 503
-    middleware on every request (audit P1-1: the old path opened a fresh
-    non-pooled connection and ran a synchronous SELECT directly on the event
-    loop — a slow DB froze the whole gateway exactly when pause matters
-    most). This version borrows the reserved control-plane pool, runs the
-    read in the threadpool, caches it for `_PAUSE_READ_TTL_S`, and shares one
-    in-flight read when the cache expires.
-
-    A read failure reads as NOT paused — the same conservative direction the
-    old flag-file stat had (an unreadable flag was an absent flag). Offline
-    maintenance projection comes from the cluster orchestrator's durable Gate
-    marker, not this host posture read.
-    """
-    now = time.monotonic()
-    cached = _pause_cache[0]
-    if cached is not None and now < cached[0]:
-        return cached[1]
-    inflight = _pause_inflight[0]
-    if inflight is not None:
-        return await asyncio.shield(inflight)
-
-    def _read_posture() -> bool:
-        try:
-            with request.app.state.control_db_pool.connection() as conn, conn.cursor() as cur:
-                cur.execute(
-                    "SELECT posture FROM host_deploy_state WHERE machine = %s",
-                    (machine_name(),),
-                )
-                row = cur.fetchone()
-            return row is not None and row[0] == "paused"
-        except Exception:
-            _log.warning(
-                "[cluster] pause posture read failed; reading as not paused",
-                exc_info=True,
-            )
-            return False
-
-    async def _read_and_cache() -> bool:
-        paused = await asyncio.to_thread(_read_posture)
-        _pause_cache[0] = (now + _PAUSE_READ_TTL_S, paused)
-        return paused
-
-    # A canceled request stops awaiting this one worker read but does not
-    # cancel it for concurrent middleware followers.
-    task = asyncio.create_task(_read_and_cache())
-    _pause_inflight[0] = task
-
-    def _clear_inflight(done: asyncio.Future[bool]) -> None:
-        if _pause_inflight[0] is done:
-            _pause_inflight[0] = None
-
-    task.add_done_callback(_clear_inflight)
-    return await asyncio.shield(task)
+    return await asyncio.to_thread(business_paused)
 
 
 # AtLeastOnceWithKey dedup (doorplate ①): generic keyed routes store/replay a
@@ -479,7 +335,7 @@ async def _cluster_is_paused(request: Request) -> bool:
 # pause-window requests claim a placeholder and then 503, an INSERT+DELETE
 # per request that also bricked the key if the process died inside the
 # window).
-app.middleware("http")(_idempotency.idempotency_middleware)
+app.middleware("http")(idempotency.idempotency_middleware)
 
 
 @app.middleware("http")
@@ -487,18 +343,19 @@ async def _cluster_pause_middleware(
     request: Request,
     call_next: Callable[[Request], Awaitable[Response]],
 ) -> Response:
-    """While this host's posture is `paused`, short-circuit SDK / UI /
-    data-plane requests to 503 so the caller sees "cluster updating, retry
-    shortly" and the request does not punch through to business logic that
-    might step on a migrating schema.
+    """During this home's journal-owned stop window, refuse business requests.
+
+    Drain keeps SDK dependencies available; stop/start phases fence them until
+    the same durable admission hold is released. Control-plane routes bypass
+    the journal read, including when the record needs explicit repair.
 
     Exempt: every route whose doorplate declares CONTROL_PLANE (the
-    /api/cluster/* control plane and the Grafana alerting webhook).
-    Everything else 503.
+    /api/cluster/* control plane, health, the ingest webhooks and the
+    bootstrap config read). Everything else 503.
     """
-    if await _cluster_is_paused(request) and not _pause_policy.should_bypass_pause(
+    if not pause_policy.should_bypass_pause(
         request.method, request.url.path
-    ):
+    ) and await _cluster_is_paused(request):
         return error_response(
             request,
             code="cluster_updating",
@@ -514,8 +371,9 @@ async def _cluster_pause_middleware(
 # reachable without auth. Health is probed by each host on the private
 # network; login is how the browser obtains a session cookie.
 # Every other API route requires either a valid session cookie or a
-# Bearer token carrying the cluster secret — unless the cluster has no secret
-# at all (no-auth posture) or the middleware is disabled for e2e.
+# Bearer token carrying the cluster secret or a machine API token of the active
+# write generation — unless the cluster has no secret at all (no-auth posture)
+# or the middleware is disabled for e2e.
 _AUTH_BYPASS_PATHS: frozenset[str] = frozenset(
     {
         "/api/health",
@@ -561,6 +419,25 @@ def _prune_session_last_touch(now: float) -> None:
             _session_last_touch.pop(session_id, None)
 
 
+async def _cookie_session(request: Request, secret: str) -> tuple[str, str] | None:
+    """The request's session cookie and its credential fact, when it authenticates.
+
+    Valid only while the credential that minted the session is current (a
+    revoked generation's or a rotated secret's sessions end). Only a request
+    carrying a cookie consults the session store: bearer and anonymous
+    requests never pay its thread hop.
+    """
+    from gateway.auth.request_principal import current_session_fact
+
+    cookie_token = request.cookies.get(cookie_name())
+    if not cookie_token:
+        return None
+    fact = await asyncio.to_thread(
+        current_session_fact, request.app.state.db_pool, cookie_token, secret
+    )
+    return None if fact is None else (cookie_token, fact)
+
+
 @app.middleware("http")
 async def _cluster_auth_middleware(
     request: Request,
@@ -569,8 +446,11 @@ async def _cluster_auth_middleware(
     """Require a valid session cookie OR Bearer token on every API route.
 
     Two auth methods, checked in order:
-    1. Session cookie (``ava_session``) — for browser users who logged in.
-    2. ``Authorization: Bearer <secret>`` — for SDK / agent / script callers.
+    1. Session cookie (``ava_session``) — for browser users who logged in; it
+       authenticates only while the credential that minted it is current.
+    2. ``Authorization: Bearer <token>`` — the human cluster secret (operator
+       SDK / scripts), or the active write generation's machine API token that
+       the launcher delivers to every service and agent (``AVA_API_TOKEN``).
 
     Two states serve the API unauthenticated, both first-class:
     - ``cluster_secret`` empty — a no-secret cluster is fully unauthenticated by
@@ -580,7 +460,7 @@ async def _cluster_auth_middleware(
       middleware while keeping the cluster secret for internal
       service-to-service auth (ops / agent-host).
     """
-    from gateway.request_principal import AuthPrincipal
+    from gateway.auth.request_principal import AuthPrincipal, cluster_credential
 
     # This is set only by credential verification, never by caller/source JSON.
     request.state.auth_principal = None
@@ -606,15 +486,12 @@ async def _cluster_auth_middleware(
     ):
         return await call_next(request)
 
-    # 1. Check session cookie
-    cookie_token = request.cookies.get(cookie_name())
-    if cookie_token and await asyncio.to_thread(
-        session_is_valid,
-        request.app.state.db_pool,
-        cookie_token,
-    ):
+    # 1. Check session cookie.
+    session = await _cookie_session(request, secret)
+    if session is not None:
+        cookie_token, session_fact = session
         request.state.auth_principal = AuthPrincipal("cluster", "administrator")
-        request.state.source_verified_by = "user_session"
+        request.state.source_verified_by = session_fact
         origin = request.headers.get("Origin")
         # Origin is checked only after valid cookie auth; without it, the request
         # reaches 401 unless another explicit credential authenticates it.
@@ -645,14 +522,15 @@ async def _cluster_auth_middleware(
             )
         return await call_next(request)
 
-    # 2. Check Bearer token
-    authorization = request.headers.get("Authorization")
-    if verify_bearer(authorization, secret):
+    # 2. Check Bearer token: the human secret, or the active write generation's
+    # machine API token (a revoked generation's never authenticates).
+    verified_by = cluster_credential(request.headers.get("Authorization"), secret)
+    if verified_by is not None:
         request.state.auth_principal = AuthPrincipal("cluster", "administrator")
-        request.state.source_verified_by = "cluster_bearer"
+        request.state.source_verified_by = verified_by
         return await call_next(request)
 
-    _log_auth401_rejection(request)
+    log_auth401_rejection(request)
     return error_response(
         request,
         code="authentication_required",
@@ -667,7 +545,7 @@ async def _cluster_auth_middleware(
 # and the measurement covers the full pipeline: pause gate, idempotency
 # dedup, and auth. `await call_next` returns at response headers, so SSE /
 # long-poll connections count time-to-first-byte, not lifetime.
-app.middleware("http")(_latency.latency_middleware)
+app.middleware("http")(latency.latency_middleware)
 
 
 # CORSMiddleware is registered AFTER latency — the OUTERMOST middleware — so
@@ -692,22 +570,22 @@ app.add_middleware(
 app.middleware("http")(request_trace_middleware)
 
 
-app.add_exception_handler(AvaAgentError, _ava_agent_error_handler)  # type: ignore[arg-type]
+app.add_exception_handler(AvaAgentError, ava_agent_error_handler)  # type: ignore[arg-type]
 app.add_exception_handler(
     loki_query_budget.LokiQueryBudgetError,
-    _loki_query_budget_error_handler,  # type: ignore[arg-type]
+    loki_query_budget_error_handler,  # type: ignore[arg-type]
 )
 app.add_exception_handler(
     loki_events.ObservabilityReadUnavailable,
-    _observability_read_unavailable_handler,  # type: ignore[arg-type]
+    observability_read_unavailable_handler,  # type: ignore[arg-type]
 )
 app.add_exception_handler(
     prom_metrics.PromQueryBudgetError,
-    _prom_query_budget_error_handler,  # type: ignore[arg-type]
+    prom_query_budget_error_handler,  # type: ignore[arg-type]
 )
-app.add_exception_handler(RequestValidationError, _request_validation_error_handler)  # type: ignore[arg-type]
-app.add_exception_handler(StarletteHTTPException, _http_exception_handler)  # type: ignore[arg-type]
-app.add_exception_handler(Exception, _unhandled_exception_handler)
+app.add_exception_handler(RequestValidationError, request_validation_error_handler)  # type: ignore[arg-type]
+app.add_exception_handler(StarletteHTTPException, http_exception_handler)  # type: ignore[arg-type]
+app.add_exception_handler(Exception, unhandled_exception_handler)
 
 
 # `_publish_inbound_arrived` was inlined into the spawn/lifecycle handlers;
@@ -716,7 +594,7 @@ app.add_exception_handler(Exception, _unhandled_exception_handler)
 # ava-ops in-process dispatch.
 
 
-# --- Router registration (endpoints live in gateway/routers/<domain>.py) ---
+# --- Router registration (feature packages + gateway/routers/<domain>.py) ---
 app.include_router(auth_router.router)
 app.include_router(bootstrap_router.router)
 app.include_router(agents_router.router)
@@ -751,7 +629,7 @@ app.include_router(ops_monitor_router.router)
 app.include_router(alerts_router.router)
 app.include_router(status_router.router)
 app.include_router(memory_router.router)
-app.include_router(mcp_clients_router.router)
+app.include_router(mcp_server_router.router)
 app.include_router(fleet_graph_router.router)
 app.include_router(frontend_telemetry_router.router)
 app.include_router(grafana_router.router)
@@ -767,12 +645,12 @@ app.include_router(work_failed_router.router)
 # the route surface is stable and the flag is a pure on/off switch. Auth is
 # the mounted wrapper requires its own revocable client token, including on
 # no-secret clusters; cluster cookies and Bearer secrets are not MCP identities.
-app.mount("/mcp", _mcp_endpoint.mcp_gateway(app))
+app.mount("/mcp", mcp_server_endpoint.mcp_gateway(app))
 
 
 def main() -> None:
     """Run the gateway process through the stable `gateway.app` entry point."""
-    from shared.config import ensure_eager
+    from base.config import ensure_eager
 
     # Task #3621: the gateway is on the full-validation whitelist — build the
     # eager config chain at the entry, before serving.

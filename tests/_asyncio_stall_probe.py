@@ -26,7 +26,7 @@ and faulthandler's own dump writes to the same one.
 
 No new dependency, no change to the deadline, and inert without one: with
 ``faulthandler_timeout`` unset (the local default) nothing is patched and
-nothing is armed. Loaded as a plugin: ``tests/conftest.py`` names it in
+nothing is armed. Loaded as a plugin: the repo-root ``conftest.py`` names it in
 ``pytest_plugins``.
 """
 

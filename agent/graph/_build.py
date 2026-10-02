@@ -47,13 +47,13 @@ from agent.nodes import (
     NodeName,
 )
 from agent.state import BaseAgentState, build_agent_state
-from shared.config import settings
-from shared.config.turn_view import turn_settings
-from shared.context import AvaContext
+from base.agents.context import AvaContext
+from base.config import settings
+from base.config.turn_view import turn_settings
 
-from ._exec import exec_node
 from ._init_context import init_context_node
 from .claim.node import claim_node
+from .exec.node import exec_node
 from .llm.node import llm_node
 
 # LLM node retry policy — covers network jitter + DeepSeek server-side intermittent drift.
@@ -108,17 +108,28 @@ _retry_budget_state = threading.local()
 
 
 def _retry_thread_id() -> str:
-    """The per-thread stall-pair streak key (bound turn identity, else `?`).
+    """The per-thread stall-pair streak key: the bound turn identity.
 
     `agent.graph.llm_errors` keys its streaks by the llm node's
     ``str(agent_id_from_config(config))``; the retry machinery runs in the same
-    turn, so the bound identity resolves to the same string. `?` keeps tests
-    and non-agent entry points from crashing on an unbound identity.
+    turn, so the bound identity resolves to the same string. The one host
+    process serves many agents, so an unbound identity must not fall into a
+    shared bucket that every agent's streak would then count against: the only
+    caller is the stall-pair retry inside a hosted turn (the host binds the
+    identity around the whole turn), and anything else is a bug that raises.
+
+    Raises:
+        RuntimeError: no turn identity is bound.
     """
-    from shared.turn_identity import effective_agent_id
+    from base.native_process.turn_identity import effective_agent_id
 
     ident = effective_agent_id()
-    return str(ident) if ident is not None else "?"
+    if ident is None:
+        raise RuntimeError(
+            "the stall-pair retry needs the turn identity bound (the agent host binds it "
+            "around every turn); with none, every agent would share one streak bucket"
+        )
+    return str(ident)
 
 
 def _delayed_stall_sleep(streak: int) -> float:
@@ -136,7 +147,7 @@ def _delayed_stall_sleep(streak: int) -> float:
         settings.lm.llm_stall_retry_initial_interval_seconds * (2 ** (streak - 1)),
         settings.lm.llm_stall_retry_max_interval_seconds,
     )
-    from shared.resilience import jittered
+    from base.host.net.resilience import jittered
 
     return jittered(base, span=base * settings.lm.llm_stall_retry_jitter_fraction, mode="random")
 
@@ -180,7 +191,7 @@ def _retry_phase_jitter() -> float:
     offset is deterministic so an agent keeps its own phase across restarts.
     Absent an identity (tests, non-agent entry points) → 0 (no offset).
     """
-    from shared.turn_identity import effective_agent_id
+    from base.native_process.turn_identity import effective_agent_id
 
     ident = effective_agent_id()
     if ident is None:
@@ -222,7 +233,7 @@ class _TurnScopedRetryPolicy(RetryPolicy):
     never iterated field-wise.
 
     That is a dependency's internal read timing, so it is pinned by
-    `tests/agent/test_turn_scoped_retry.py`, which drives LangGraph's real retry
+    `agent/graph/tests/test_turn_scoped_retry.py`, which drives LangGraph's real retry
     loop rather than asserting on this class alone. If a future version snapshots
     the policy instead, that test fails loudly — and the constructor below still
     fills the underlying tuple slots with the build-time values, so even an
@@ -243,7 +254,7 @@ class _TurnScopedRetryPolicy(RetryPolicy):
 
     @property
     def max_attempts(self) -> int:  # pyright: ignore[reportIncompatibleVariableOverride]
-        from shared.lm.registry import resolve_setting
+        from base.lm.registry import resolve_setting
 
         base = resolve_setting("llm_retry_max_attempts", model=turn_settings.lm.llm_model)
         if _delayed_stall_sleep_pending():
@@ -381,7 +392,7 @@ def _build_llm_retry() -> RetryPolicy:
         _retry_budget_state.stall_pair_sleep = None
         return True
 
-    from shared.lm.registry import resolve_setting
+    from base.lm.registry import resolve_setting
 
     return _TurnScopedRetryPolicy(
         # These two are shadowed by the properties above for every attribute

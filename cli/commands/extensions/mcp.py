@@ -168,8 +168,8 @@ def cmd_mcp_list() -> int:
     """`ava mcp list` — print the merged server set, flagging each server's
     origin (machine / installed / plugin-built-in) and which are disabled."""
     from ava.mcp_config import MCPError, load_mcp_config
-    from shared.install_registry import installed_mcp_names
-    from shared.mcp_enabled import McpEnabledConfigError, read_enabled
+    from base.packages.extensions.install_registry import installed_mcp_names
+    from base.packages.plugins.mcp_enabled import McpEnabledConfigError, read_enabled
 
     try:
         merged = load_mcp_config(include_disabled=True)
@@ -219,7 +219,7 @@ def _source_is_dead_local_path(name: str) -> bool:
     cannot be re-fetched: `ava mcp upgrade` would fail."""
     from pathlib import Path
 
-    from shared import install_registry
+    from base.packages.extensions import install_registry
 
     pkg = install_registry.get(name)
     if pkg is None or pkg.source is None or "://" in pkg.source or pkg.source.startswith("git@"):
@@ -239,7 +239,7 @@ def cmd_mcp_disable(name: str) -> int:
 
 def _set_mcp_enabled(name: str, *, enabled: bool) -> int:
     from ava.mcp_config import load_mcp_config
-    from shared.mcp_enabled import local_config_path, set_mcp_enabled
+    from base.packages.plugins.mcp_enabled import local_config_path, set_mcp_enabled
 
     set_mcp_enabled(name, enabled=enabled)
     verb = "enabled" if enabled else "disabled"
@@ -392,7 +392,7 @@ def _register_mcp(
     """
     from datetime import UTC, datetime
 
-    from shared import install_registry
+    from base.packages.extensions import install_registry
 
     now = datetime.now(UTC).isoformat(timespec="seconds")
     install_registry.register(
@@ -573,7 +573,8 @@ def cmd_mcp_install(
     `--env` injects machine-local values (a bot token, an API key) into the
     landed copy's `env`; the package's own `.mcp.json` ships no secrets.
     """
-    from shared import install_registry, paths
+    from base import paths
+    from base.packages.extensions import install_registry
 
     from ._pkg_source import cleanup_temp
 
@@ -622,7 +623,7 @@ def cmd_mcp_install(
             )
             return 1
 
-        from cli.commands._manifest_gate import gate_refuses
+        from cli.commands.extensions._manifest_gate import gate_refuses
 
         if gate_refuses(pkg_dir, command="mcp install", mirror_pyproject=True):
             return 1
@@ -650,7 +651,8 @@ def cmd_mcp_install(
 
 def cmd_mcp_uninstall(name: str) -> int:
     """`ava mcp uninstall <name>` — remove an installed MCP package + its entry."""
-    from shared import install_registry, paths
+    from base import paths
+    from base.packages.extensions import install_registry
 
     pkg = install_registry.get(name)
     if pkg is None or pkg.type != "mcp":
@@ -676,7 +678,8 @@ def cmd_mcp_upgrade(name: str, *, force: bool = False) -> int:
     wrote) aborts with a conflict unless `--force` is given — the R5 conflict
     contract, mirroring `git pull` (force = reset --hard).
     """
-    from shared import install_registry, paths
+    from base import paths
+    from base.packages.extensions import install_registry
 
     from ._pkg_source import cleanup_temp
 
@@ -724,7 +727,7 @@ def cmd_mcp_upgrade(name: str, *, force: bool = False) -> int:
             )
             return 1
 
-        from cli.commands._manifest_gate import gate_refuses
+        from cli.commands.extensions._manifest_gate import gate_refuses
 
         if gate_refuses(pkg_dir, command="mcp upgrade", mirror_pyproject=True):
             return 1

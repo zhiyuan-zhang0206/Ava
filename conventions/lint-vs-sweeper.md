@@ -72,15 +72,15 @@ now graduated to a lint as well.
 |---|---|---|---|---|
 | 1 | `deps` | ✗ networked (`uv pip list --outdated`, `npm outdated`) | varies | **Sweeper** (detection gate) |
 | 2 | `docs-aging` | ✗ `git log` + `gh pr view` per file + judgement | cross-doc reorg | **Sweeper** (judgement) |
-| 3 | `fail-fast` | grep cheap BUT irreducible FP (`get() or {}`, `case _:` legit in non-enum match) | varies | **SPLIT**: `except…: pass` → Lint; rest → Sweeper |
+| 3 | `fail-fast` | grep cheap BUT irreducible FP (`get() or {}`, `case _:` legit in non-enum match) | varies | **SPLIT**: `except…: pass` → Ruff S110; rest → Sweeper |
 | 4 | `inline-marker` (TODO/FIXME) | ✓ | varies | **Sweeper** (no hard core — cannot block all TODOs; low yield) |
 | 5 | `dead-code` (vulture) | ✗ slow + 70 FP without the exclude list | local delete | **Sweeper** (detection gate) |
 | 6 | `boundary` (type/responsibility) | ✗ cross-file reasoning | type + all consumers, multi-file | **Sweeper** (its raison d'être) |
 | 7 | `skill-desc` | ✓ | single file | **Already split** (80→lint / 50–80→sweeper) = the precedent |
 | 8 | `import-lint` | ✓ but **already the `lint-imports` hook** | local | **DELETE from sweeper** (pure redundancy) |
 | NEW | `doc-roster` | ✓ parse runbook table vs `build_services()` | <3 files | **Lint (new, flagship)** |
-| NEW | `doc-symbols` (docs ↔ deleted SDK symbol) | ✓ once restricted to code spans + non-symbol guards | 1–2 files | **Lint (new)** — `scripts/lint_doc_symbols.py` |
-| NEW | `doc-anchors` (docs ↔ renamed code symbol) | ✓ same code-span restriction, resolved against the AST | 1–2 files | **Lint (new)** — `scripts/lint_doc_anchors.py` |
+| NEW | `doc-symbols` (docs ↔ deleted SDK symbol) | ✓ once restricted to code spans + non-symbol guards | 1–2 files | **Lint (new)** — `scripts/content_lint/lint_doc_symbols.py` |
+| NEW | `doc-anchors` (docs ↔ renamed code symbol) | ✓ same code-span restriction, resolved against the AST | 1–2 files | **Lint (new)** — `scripts/content_lint/lint_doc_anchors.py` |
 | NEW | `docstring-budget` (agent-visible docstring verbosity) | ✓ scan cheap BUT keep/trim is judgement (a long Args block can be all format contracts) | 1–2 files | **SPLIT** (2026-06-10): zero-FP core (CJK / impl keywords / module-doc child restating / SDK↔skill coupling) → the `lint-docstrings` hook; Raises-section + soft-length residue → Sweeper class 8, reusing the lint's scope helpers |
 
 Net: **8 → 7 → 8 sweeper classes** (`deps`, `docs-aging`, `fail-fast`
@@ -94,7 +94,7 @@ inside inline-code spans / fenced blocks (prose is never flagged), hostnames
 (`ava.host.com`) and the metasyntactic `ava.X` placeholder are excluded, and
 the valid set is built live from `ava.__all_for_ava__` + real submodules + module attrs
 + plugin-registered namespaces (reusing the same plugin scan
-`lint_agent_docstrings.py` uses, so the two stay coupled).
+`agent_docstrings.py` uses, so the two stay coupled).
 
 ## Worked example: `skill-desc`
 
@@ -104,7 +104,7 @@ A skill's `description` is the index line the agent reads to decide whether to
 reach for the skill, and for resident (injected) skills it sits in *every*
 system prompt — so its length is a real cost. The check has two tiers:
 
-- **Hard ceiling — 80 units — is a lint.** `scripts/lint_skill_descriptions.py`
+- **Hard ceiling — 80 units — is a lint.** `scripts/content_lint/lint_skill_descriptions.py`
   enforces it in pre-commit and fails the commit. Detection is a deterministic
   unit count over the frontmatter `description:` field (zero false positives),
   and the fix is local: one file, trim the description. Both halves of the
@@ -119,7 +119,7 @@ The anti-drift coupling is concrete here: the sweeper class does not re-implemen
 the scan. It imports the lint's own helpers —
 
 ```python
-from scripts.lint_skill_descriptions import length_units, _skill_md_files, _description
+from scripts.content_lint.lint_skill_descriptions import length_units, _skill_md_files, _description
 ```
 
 — so the soft-zone sweep and the hard-ceiling lint scan exactly the same files
@@ -138,14 +138,14 @@ habit of reaching for the blunt instrument, and the blunt instrument takes out
 the gates that were working. `SKIP=` is the narrow tool that lets you get past
 the broken one without disarming the rest.
 
-The same rule decides where a check belongs. `scripts/migration_smoke.py` is not
+The same rule decides where a check belongs. `scripts/ci/migration_smoke.py` is not
 a hook because it shells out to `psql`, which is in the CI image but not on every
 dev machine — as a commit gate it would fail for reasons unrelated to the commit,
 manufacturing exactly this pressure. It stays in CI, where the toolchain is
 guaranteed.
 
 Its corollary: **a gate that cannot fail is also worse than an absent one**,
-because it reads as coverage. `scripts/check_cross_branch_migrations.py` was a
+because it reads as coverage. `scripts/content_lint/check_cross_branch_migrations.py` was a
 pass-through returning 0 unconditionally; it now asserts its own single-branch
 premise and fails if a long-lived second branch appears. Before adding a check,
 ask what makes it go red — if nothing can, it is decoration.

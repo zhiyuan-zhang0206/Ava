@@ -46,14 +46,14 @@ surface merged-but-still-listed-as-pending mismatches.
 ### 3. fail-fast anti-patterns (whole-repo)
 
 `rg` across the tracked source roots — the canonical list is `SCAN_DIRS` in
-`run.sh` (`ava/ ava_builtins/ agent/ gateway/ cli/ ops/ schedules/ services/ shared/`;
+`run.sh` (`ava/ ava_builtins/ agent/ gateway/ cli/ ops/ schedules/ services/ base/`;
 the stale `plugins/` path was corrected 2026-09-23 — no such tracked dir exists) — for:
 `get() or {}`, `case _:` defaults, `(rare|shouldn't happen|almost never)`
 comments. False positives in config-defaults and external boundaries are
 expected — flag candidates, the human decides.
 
-`except ...: pass` silent swallows are now enforced mechanically by
-`scripts/lint_fail_fast.py` in pre-commit — do not re-flag them here.
+`except ...: pass` silent swallows are enforced by Ruff S110 in pre-commit —
+do not re-flag them here.
 
 ### 4. inline-marker (whole-repo)
 
@@ -73,7 +73,7 @@ scan produces 70+ false positives reflecting framework conventions):
 - Pydantic schemas referenced only by wire-format-freezing tests
 - Watchdog event handler methods (`on_created` / `on_modified` etc.)
 - Transport `Protocol` / interface signatures (parameter names with `...`
-  bodies — e.g. the `services/pitr` protocols, `SpanExporter.force_flush`)
+  bodies — e.g. `SpanExporter.force_flush`)
 
 The exclude list is itself an artifact — when it drifts (starts hiding real dead
 code, or a new convention appears), say so in the PR body. Two observed drift
@@ -81,7 +81,7 @@ cases (2026-09-23): transport `Protocol` signatures read as unused parameters
 (interface, not dead code; bullet added above), and a file that fails vulture's
 `type_comments=True` parse — a `# type:`-prefixed comment does it — is skipped
 whole, so scan the run output for parse-error lines before trusting coverage
-(one instance: `shared/agents/history/timeline.py`, fixed in the same pass).
+(one instance: `base/agents/history/timeline.py`, fixed in the same pass).
 
 ### 6. boundary (anchored on recent PRs — the reasoned class)
 
@@ -103,7 +103,7 @@ universal rather than scoped to a chosen few. One skill's slack is paid by every
 agent on the cluster, on every turn. Length is measured in *units* (one CJK char
 = 1, one non-CJK word = 1; a flat char count is unfair across languages). The
 hard ceiling (80 units) is enforced mechanically by
-`scripts/lint_skill_descriptions.py` in pre-commit; this class covers the
+`scripts/content_lint/lint_skill_descriptions.py` in pre-commit; this class covers the
 **soft zone (50-80 units)**: descriptions that pass the gate but should be
 tightened. Reuse the lint's own scope + helpers (so this audit never drifts from
 what the gate scans — `ava_builtins/skills/`, `ava_builtins/plugins/*/skills/`,
@@ -111,7 +111,7 @@ and `.agents/skills/`):
 
 ```
 python - <<'PY'
-from scripts.lint_skill_descriptions import length_units, _skill_entries
+from scripts.content_lint.lint_skill_descriptions import length_units, _skill_entries
 for entry in _skill_entries():
     d = entry.description
     if d and 50 < length_units(d) <= 80:
@@ -153,7 +153,7 @@ targets in `ava_builtins/plugins/*/plugin.py`):
 python - <<'PY'
 import ast
 from pathlib import Path
-from scripts.lint_agent_docstrings import (
+from scripts.lint.agent_docstrings import (
     _discover_agent_surface_modules, _discover_plugin_namespace_modules, _is_in_scope,
     _agent_visible_names, _wrap_targets, _is_visible,
 )

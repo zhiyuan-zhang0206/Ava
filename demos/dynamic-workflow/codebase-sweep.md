@@ -8,10 +8,10 @@
 ```
 Load dynamic workflow skill: ava.help(ava.skills.ava_dynamic_workflow)
 
-Use reference/codebase_sweep_orchestrator.py to scan Ava repo's legacy code.
+Use references/codebase_sweep_orchestrator.py to scan Ava repo's legacy code.
 
 Directly execute with script:
-- Wave 1: 4 scout agents scan agent/ ava/ shared/ plugins/
+- Wave 1: 4 scout agents scan agent/ ava/ base/ plugins/
 - Wave 2: 8 verify agents cross-verify (2 per issue type)
 - Wave 3: 1 writer composes initial report
 - Wave 4: 3 adversarial agents try to overturn findings
@@ -42,7 +42,7 @@ write JSON file → `ava.self.terminate()`. Silent — no `send_message`.
 
 Orchestrator: one checkpoint per wave. The checkpoint is the same `gather_files`
 file-polling watcher as every other dynamic workflow (see
-`ava_builtins/skills/ava-dynamic-workflow/reference/`) — here it watches the
+`ava_builtins/skills/ava-dynamic-workflow/references/`) — here it watches the
 wave's status file: all agents reported terminated = wave complete → read the
 result files for the data.
 

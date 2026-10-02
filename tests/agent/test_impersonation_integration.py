@@ -17,21 +17,21 @@ from pydantic import BaseModel
 
 from agent import impersonation
 from agent import state as states
-from agent.graph._exec import exec_node
 from agent.graph.claim.node import claim_node
-from agent.hosted_ownership import admit_hosted_runtime
+from agent.graph.exec.node import exec_node
 from agent.impersonation import flush_checkpoint, protect_native_hooks, settle_checkpoint
+from agent.ownership.hosted import admit_hosted_runtime
 from agent.startup import wrap_saver_writes_with_nstep_interval
-from ava.external_state import encode_plugin_delta
-from shared.agents import impersonation as leases
-from shared.agents.history.delta_read_compat import wrap_saver_reads_with_delta_reconstruction
-from shared.caller_identity import CallerIdentity
-from shared.context import AvaContext
-from shared.db import create_agent, insert_inbound_message
-from shared.machine import machine_name
-from shared.plugin_context import PluginContext
-from shared.runtime_incarnation import RuntimeIncarnation
-from shared.turn_identity import bind_turn_identity
+from ava.external.state import encode_plugin_delta
+from base.agents import impersonation as leases
+from base.agents.context import AvaContext
+from base.agents.history.delta_read_compat import wrap_saver_reads_with_delta_reconstruction
+from base.agents.messages.caller_identity import CallerIdentity
+from base.cluster.machine import machine_name
+from base.db import create_agent, insert_inbound_message
+from base.native_process.runtime_incarnation import RuntimeIncarnation
+from base.native_process.turn_identity import bind_turn_identity
+from base.packages.plugins.context import PluginContext
 from tests.impersonation_support import attested_caller, recorded_tree
 
 
@@ -103,6 +103,11 @@ async def _prepare_graph(
         if len(model_calls) == 1 and not automatic:
             code = (
                 "import ava\n"
+                "import os, psycopg\n"
+                "from base.host.env.registry import ADMIN_DATA_PLANE_ALIASES\n"
+                "assert not ADMIN_DATA_PLANE_ALIASES.intersection(os.environ)\n"
+                "with psycopg.connect(ava.DB_URL) as conn:\n"
+                "    assert conn.execute('SELECT current_user').fetchone() == ('ava_g0_runner',)\n"
                 f"ava.impersonation.accept({requested['id']!r}, "
                 "'Hand the task to the external session.')"
             )
@@ -156,6 +161,7 @@ async def _prepare_graph(
 
 
 @pytest.mark.parametrize("finish", ["release", "expire"])
+@pytest.mark.usefixtures("runner_exec_env")
 async def test_consent_exec_inbox_release_and_resume(
     db_conn: psycopg.Connection[Any],
     aops_pool: AsyncConnectionPool[Any],
@@ -285,7 +291,7 @@ async def test_replacement_host_adopts_held_agent_without_model(
     monkeypatch.setattr(impersonation, "_provider_anchor_states", Mock(return_value=["alive"]))
     monkeypatch.setattr(impersonation, "_PROCESS_STARTED_MONOTONIC", impersonation.time.monotonic())
     monkeypatch.setattr(
-        "shared.config.settings.agent.impersonation_reprovision_window_seconds", 120.0
+        "base.config.settings.agent.impersonation_reprovision_window_seconds", 120.0
     )
     impersonation._relay_children.clear()
     graph = MagicMock()
@@ -358,7 +364,7 @@ async def test_automatic_takeover_handoff_precedes_queued_input(
     import json
     from pathlib import Path
 
-    from shared.agents.impersonation import impersonation_history as history
+    from base.agents.impersonation import history as history
 
     graph, saver, ctx, config, reset, owner, requested, model_calls = await _prepare_graph(
         db_conn,
@@ -453,7 +459,7 @@ async def test_handoff_checkpoint_failure_keeps_gate_and_retry_flushes_receipt(
     tmp_path: Path,
 ) -> None:
     from agent.impersonation_handoff import deliver_handoff
-    from shared.agents.impersonation import impersonation_history as history
+    from base.agents.impersonation import history as history
 
     graph, saver, ctx, config, reset, owner, requested, calls = await _prepare_graph(
         db_conn,
@@ -511,10 +517,10 @@ async def test_handoff_leaves_replay_pending_until_runner_reconcile_completes(
     import httpx
 
     from agent.impersonation_handoff import deliver_handoff
-    from ava import impersonation_replay as recorded
+    from ava.impersonation import replay as recorded
+    from base.agents.impersonation import history as history
+    from base.config import settings
     from services.agent_host.impersonation_events import reconcile_one
-    from shared.agents.impersonation import impersonation_history as history
-    from shared.config import settings
 
     monkeypatch.setattr(settings.general, "impersonation_event_manifest_enabled", True)
     monkeypatch.setattr(
@@ -561,7 +567,7 @@ async def test_handoff_leaves_replay_pending_until_runner_reconcile_completes(
             json={"items": [], "meta": {"has_more": False}},
         )
 
-    monkeypatch.setattr(recorded, "_get", get)
+    monkeypatch.setattr(recorded, "get", get)
     reconcile_one()
     after = history.resolve(owner.agent_id, 0)
     assert after["events_completed_at"] is not None
@@ -595,7 +601,7 @@ async def test_end_note_resumes_an_empty_queue(
     idled out with the note unprocessed. The note is the resumed input: the claim
     runs before_llm with an empty queue, and delivery publishes a wake.
     """
-    from shared.agents.impersonation import impersonation_history as history
+    from base.agents.impersonation import history as history
 
     graph, saver, ctx, config, reset, owner, requested, model_calls = await _prepare_graph(
         db_conn, aops_pool, monkeypatch, automatic=True
@@ -647,7 +653,7 @@ async def test_aborted_takeover_resumes_the_native_with_the_death_cause(
     """Task #3998 end to end: the supervisor stops an automatic takeover whose
     relay handle vanished outside the fresh-start window, and the resume chain
     delivers the end note naming the death cause; the note's first turn runs."""
-    from shared.agents.impersonation import impersonation_history as history
+    from base.agents.impersonation import history as history
 
     graph, saver, ctx, config, reset, owner, requested, model_calls = await _prepare_graph(
         db_conn, aops_pool, monkeypatch, automatic=True

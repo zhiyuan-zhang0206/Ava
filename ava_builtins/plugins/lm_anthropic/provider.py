@@ -12,8 +12,8 @@ if TYPE_CHECKING:
     from langchain_core.language_models.chat_models import BaseChatModel
 from loguru import logger
 
-from shared.lm.effort import clamp_effort
-from shared.lm.provider_api import (
+from base.lm.effort import clamp_effort
+from base.lm.provider_api import (
     AttachPolicy,
     BuildContext,
     PricePeriod,
@@ -23,8 +23,8 @@ from shared.lm.provider_api import (
     register,
     require_key,
 )
-from shared.lm.registry import MODELS, ModelSpec, ModelTuning, resolve_setting
-from shared.lm.stop import StopSpec
+from base.lm.registry import MODELS, ModelSpec, ModelTuning, resolve_setting
+from base.lm.stop import StopSpec
 
 # Budget used when AVA_REASONING_EFFORT clamps an extended-thinking-only claude
 # model to its "on" tier and no explicit AVA_CLAUDE_THINKING_BUDGET_TOKENS is
@@ -87,7 +87,7 @@ def build(ctx: BuildContext) -> BaseChatModel:
     wire returns thinking text the timeline can render. Reasoning effort
     rides the `effort` field, gated per model.
     """
-    from shared.lm.compat.anthropic_thinking import ThinkingTokensChatAnthropic
+    from base.lm.compat.anthropic_thinking import ThinkingTokensChatAnthropic
 
     # Fail fast on missing key — the same posture as every other provider
     # branch. Without it, ChatAnthropic reads ANTHROPIC_API_KEY from env
@@ -102,7 +102,7 @@ def build(ctx: BuildContext) -> BaseChatModel:
     if spec is None or spec.max_output_tokens is None:
         raise ValueError(
             f"Unknown claude model {ctx.model!r} — register it (with "
-            f"max_output_tokens) in `shared/lm/registry.py:MODELS`"
+            f"max_output_tokens) in `base/lm/registry.py:MODELS`"
         )
 
     thinking = _effective_thinking(ctx, spec)
@@ -198,6 +198,8 @@ register(
         "claude-sonnet-5": ModelSpec(
             provider="claude",
             spawnable=True,
+            # Display-only supersession: existing agent configs remain valid.
+            superseded_by="claude-sonnet-5-5",
             context_window=1_000_000,
             max_output_tokens=128_000,
             knowledge_cutoff="2026-01",
@@ -210,6 +212,21 @@ register(
                 # the parameter, whose default is high). NOT the ladder floor.
                 reasoning_effort="high",
                 # User decision (2026-09-03): Claude family defaults this section off.
+                prompt_user_tone_enabled=False,
+            ),
+            media_types=frozenset({"image", "pdf"}),
+        ),
+        "claude-sonnet-5-5": ModelSpec(
+            provider="claude",
+            spawnable=True,
+            context_window=1_000_000,
+            max_output_tokens=128_000,
+            knowledge_cutoff="2026-06",
+            effort_levels=_CLAUDE_ADAPTIVE_EFFORT,
+            # Live-checked 2026-09-30: thinking.type.disabled 400s.
+            thinking_always_on=True,
+            tuning=ModelTuning(
+                reasoning_effort="high",
                 prompt_user_tone_enabled=False,
             ),
             media_types=frozenset({"image", "pdf"}),
@@ -330,7 +347,7 @@ register(
         # claude-opus-4-6, claude-sonnet-4-6, and claude-haiku-4-5
         # were never selectable here (implicit spawnable=False) and have no
         # live references. Historical prices remain in
-        # shared/lm/pricing_catalog_archive.json.
+        # base/lm/pricing_catalog_archive.json.
     },
     pricing={
         "claude-sonnet-5": PriceRates(
@@ -340,6 +357,30 @@ register(
             source_url="https://www.anthropic.com/pricing",
             source_checked_at="2026-06-27",
             vendor="anthropic",
+            periods=(
+                PricePeriod(
+                    effective_from=None,
+                    effective_until=None,
+                    tiers=(
+                        PriceTier(
+                            input_tokens_min=0,
+                            input_tokens_max=None,
+                            cache_miss="2.0",
+                            cache_hit="0.20",
+                            output="10.0",
+                        ),
+                    ),
+                ),
+            ),
+        ),
+        "claude-sonnet-5-5": PriceRates(
+            cache_miss=2.0,
+            cache_hit=0.20,
+            output=10.0,
+            source_url="https://platform.claude.com/docs/en/models/sonnet-5-5/overview",
+            source_checked_at="2026-09-30",
+            vendor="anthropic",
+            # Cache writes cost $2.50/M for 5m or $4/M for 1h; no cache-write field.
             periods=(
                 PricePeriod(
                     effective_from=None,

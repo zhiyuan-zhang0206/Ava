@@ -101,7 +101,7 @@ async def _repair_once(llm: Any, messages: list[Any]) -> str | None:
             err=f"{type(exc).__name__}: {exc}",
         )
         return None
-    from shared.lm.billing import emit_billing_from_message
+    from base.lm.billing import emit_billing_from_message
 
     emit_billing_from_message(
         resp,
@@ -124,7 +124,7 @@ async def _llm_repair_syntax(code: str, rendered_error: str) -> str | None:
     degrades to surfacing the error to the agent. A non-None return is
     guaranteed to compile.
     """
-    from shared.lm.factory import build_chat_model
+    from base.lm.factory import build_chat_model
 
     try:
         llm = build_chat_model(_REPAIR_MODEL)

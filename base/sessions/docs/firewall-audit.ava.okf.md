@@ -1,0 +1,40 @@
+---
+type: doc
+title: macOS Firewall Manifest
+description: base/host/macos_firewall.py — the declarative per-binary Application Firewall allow-list manifest, renderer, and rootless-first reconciliation behind converge and `ava firewall`.
+tags:
+- base
+- macos
+- firewall
+---
+
+# macOS Firewall Manifest
+
+## Manifest and reconciliation
+
+`base/host/macos_firewall.py` owns the declarative macOS Application Firewall
+allow-list manifest. Each entry carries stable identity, purpose, machine scope,
+and globbed paths so versioned Python, Postgres, Homebrew, browser, and
+observability binaries are resolved after upgrades. Redis is absent by design:
+it is loopback-only and its off-box relay uses Apple's system Python.
+
+The audit reads membership from `--listapps`, never `--getappblocked`: the latter
+reports "permitted" for a path with no rule and cannot detect a missing entry.
+The status renderer joins the manifest to that audit and reports every pattern,
+resolved path, and Allow/Block/Missing state.
+
+Reconciliation prunes stale rules, then adds and unblocks managed rules.
+Mutations exit 0 without elevation on the macmini running macOS 15.3.1, but the
+daemon silently persists nothing for an add whose bundle identifier already has
+a rule (every uv interpreter shares identifier `-`), so every add is verified
+by re-reading `--listapps` and only confirmed rules are reported; failed
+mutations are retried with bounded, non-interactive `sudo -n`; if that also
+fails, converge reports the exact manual command (or points at the popup, for
+identifier-colliding families) and continues rather than blocking unattended
+startup.
+`cli/commands/converge/firewall.py` uses the reconciler proactively, and
+`ava firewall status` / `sync` run the same audit on demand — see
+[[cli/commands/docs/commands.ava.okf.md]].
+
+
+Parent: [[base/sessions/docs/session-backend.ava.okf.md|session backend]].

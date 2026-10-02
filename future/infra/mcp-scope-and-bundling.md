@@ -49,7 +49,7 @@ lived in that subprocess, every turn would cold-start every server (≈250ms eac
 + the server's own warm-up — a heavy server startup is far worse). So each agent process
 spawns **one long-lived daemon subprocess** that holds the connections; the
 per-turn exec subprocesses talk to it over a Unix socket
-(`agent/mcp_daemon.py`, `ava/_mcps_daemon.py`) instead of starting servers
+(`agent/mcp_daemon.py`, `ava/mcps/_daemon.py`) instead of starting servers
 themselves. The daemon is connection-persistence infrastructure, not optional.
 
 The **per-machine** scope needs the same idea one level up: a daemon **not** keyed
@@ -105,8 +105,8 @@ An MCP declaration carries `{source, scope}` — not just a config dict:
 - **source** — where the config comes from. **Landed:** the machine `mcp.json`
   and plugin-bundled `.mcp.json` (declared like CC's, at the plugin root) are
   merged by `ava/mcp_config.py:load_mcp_config` — machine overrides a plugin's
-  same-named default — which both `ava/mcps.py:_load_config` (in-process) and
-  `ava/_mcps_daemon.py:_load_config` (the daemon) now delegate to. **Also
+  same-named default — which both `ava/mcps/__init__.py:_load_config` (in-process) and
+  `ava/mcps/_daemon.py:_load_config` (the daemon) now delegate to. **Also
   landed:** `ava plugins install` can now *deliver* a plugin-bundled `.mcp.json`
   into `~/.ava/plugins/<name>/` (`cli/commands/extensions/_claude_code_plugin.py`, alongside any
   bundled agents) — feeding the existing plugin source, no new loader path.
@@ -114,7 +114,7 @@ An MCP declaration carries `{source, scope}` — not just a config dict:
   as a third source. `ava mcp install <git-url|local-dir>` lands a self-contained
   package (own `.mcp.json` + `pyproject.toml`) under `$AVA_HOME/mcps/<name>/`,
   runs `uv sync` to build its isolated `.venv`, and registers it in
-  `shared/install_registry.py`. `load_mcp_config` scans it as the installed layer
+  `base/packages/extensions/install_registry.py`. `load_mcp_config` scans it as the installed layer
   (`_installed_mcp_paths`, registry-gated), between plugin and machine. The
   package's command is a relative `.venv/bin/python -m <module>` spawned with
   cwd = the package dir (`installed_mcp_dir`), so its deps stay out of core — no
@@ -177,12 +177,12 @@ above relies on.
     reference implementation rather than a special case.
 
     **Update (2026-08-03):** the generic machine-scope daemon now exists — the
-    shared MCP daemon (`ava/_mcps_daemon.py`, ops roster session "mcp-daemon",
+    shared MCP daemon (`ava/mcps/_daemon.py`, ops roster session "mcp-daemon",
     per-connection session isolation) plus a `"shared"` server spec. Chrome's
     per-agent bridge process is gone (the wrapper module itself still exists at
     `services/browser/mcp_wrapper.py` and remains the command chrome's `.mcp.json`
     declares): the daemon dials
-    the browser-mcp service's line protocol in-process (`ava/_mcp_browser.py`),
+    the browser-mcp service's line protocol in-process (`ava/mcps/_browser.py`),
     keeping per-connection page affinity because each connection owns its socket.
     Stateless servers (x) declare `"shared": true` for one daemon-wide
     stdio child serialized per server.

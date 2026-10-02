@@ -9,8 +9,9 @@ starts with the session via the skill's bundled ava-relay plugin (resident
 mode) unless the executor-armed Monitor flow is requested.
 
 The ``ava-use-other-agents`` skill's ``spawn_claude.py`` is the command-line
-entry; it passes its own reference directory, which holds the collaboration
-contract and the relay plugin, and locates the impersonator guide.
+entry; it passes its own skill directory, whose ``references/`` holds the
+collaboration contract (and locates the impersonator guide) and whose
+``scripts/`` holds the bundled relay plugin.
 """
 
 from __future__ import annotations
@@ -23,7 +24,7 @@ import uuid
 from pathlib import Path
 
 import ava
-from shared import coding_session_owner
+from base.sessions import coding_session_owner
 
 from ._claude_checks import (
     _bootstrap_count,
@@ -62,7 +63,7 @@ def _claude_command(
     launch can print it; with ``resume`` the same id reopens that recorded
     session (``--resume``) instead.
     """
-    from shared.external_caller import launch_caller_assignment
+    from base.agents.messages.external_caller import launch_caller_assignment
 
     resident = ""
     plugin_flag = ""
@@ -113,7 +114,7 @@ def _takeover_bootstrap_message(
     agent_id: int, name: str, brief: str, guide: Path, *, relay_resident: bool
 ) -> str:
     """Inline the briefing; a takeover reads no task or work file."""
-    from ava.impersonation_launch import bootstrap_message
+    from ava.impersonation.launch import bootstrap_message
 
     return bootstrap_message(agent_id, name, "claude", brief, guide, relay_resident=relay_resident)
 
@@ -222,7 +223,7 @@ def _run_takeover_launch(
     takeover_brief: str,
     ttl_seconds: float,
     caller_instance: str | None,
-    reference_dir: Path,
+    skill_dir: Path,
     claude_session: str,
     *,
     resume: bool = False,
@@ -231,7 +232,7 @@ def _run_takeover_launch(
 ) -> int:
     plugin_dir: Path | None = None
     if relay_resident:
-        candidate = relay_plugin_dir or reference_dir / "ava-relay"
+        candidate = relay_plugin_dir or skill_dir / "scripts" / "ava-relay"
         if not candidate.is_dir():
             raise RuntimeError(
                 f"the relay plugin directory is missing: {candidate}; "
@@ -272,7 +273,7 @@ def _run_takeover_launch(
                 ),
             )
             _wait_for_ready(sid, failure_marker=marker, resumed=resume)
-        guide = impersonator_guide(reference_dir)
+        guide = impersonator_guide(skill_dir)
         message = _takeover_bootstrap_message(
             owner_agent_id,
             takeover_name,
@@ -323,20 +324,21 @@ def launch(
     impersonation_name: str | None = None,
     brief: str | None = None,
     *,
-    reference_dir: Path,
+    skill_dir: Path,
     resume: str | None = None,
     relay_resident: bool = True,
     relay_plugin_dir: Path | None = None,
 ) -> int:
     """Launch a supervised worker, or a takeover when ``impersonation_name`` is set.
 
-    ``reference_dir`` is the calling skill's reference directory: it holds the
-    collaboration contract and the resident relay plugin, and locates the
-    impersonator guide. The Claude session id is chosen here and printed as
-    ``claude_session``; ``resume`` reopens that recorded session instead of
-    starting a new one. Prints one ``key=value`` per line and returns the exit code.
+    ``skill_dir`` is the calling skill's own directory: its ``references/``
+    holds the collaboration contract and locates the impersonator guide, and
+    its ``scripts/`` holds the resident relay plugin. The Claude session id is
+    chosen here and printed as ``claude_session``; ``resume`` reopens that
+    recorded session instead of starting a new one. Prints one ``key=value``
+    per line and returns the exit code.
     """
-    from shared.external_caller import launch_caller_assignment
+    from base.agents.messages.external_caller import launch_caller_assignment
 
     takeover_name: str | None = impersonation_name
     takeover_brief = ""
@@ -361,7 +363,7 @@ def launch(
             work_file,
             ttl_seconds,
             caller_instance,
-            reference_dir / "collaboration_protocol.md",
+            skill_dir / "references" / "collaboration_protocol.md",
             claude_session,
             resume=resume is not None,
         )
@@ -371,7 +373,7 @@ def launch(
         takeover_brief,
         ttl_seconds,
         caller_instance,
-        reference_dir,
+        skill_dir,
         claude_session,
         resume=resume is not None,
         relay_resident=relay_resident,

@@ -19,11 +19,12 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.types import Command, interrupt
 from psycopg_pool import AsyncConnectionPool
 
-from agent.hosted_ownership import admit_hosted_runtime, settle_hosted_runtime
+from agent.ownership.hosted import admit_hosted_runtime, settle_hosted_runtime
+from base.agents.incarnation import exec_request_evidence
+from base.cluster.machine import machine_name
+from base.db import insert_inbound_message
+from base.deploy.maintenance import cohort, pause_owner
 from ops.agent_pause import resume_agents
-from shared import exec_request_evidence, maintenance_cohort, pause_owner
-from shared.db import insert_inbound_message
-from shared.machine import machine_name
 from tests.agent.test_maintenance import WHEN, _agent
 from tests.agent.test_maintenance import isolate as isolate
 
@@ -35,12 +36,10 @@ class _State(TypedDict):
     history: list[str]
 
 
-def _persist_end(
-    conn: psycopg.Connection[Any], agent: int, *, restart: bool, pending: str | None = None
-) -> None:
+def _persist_end(conn: psycopg.Connection[Any], agent: int, *, pending: str | None = None) -> None:
     def claim(_state: _State) -> Command[Any]:
         return Command(
-            update={"halted": True, "exit_requested": restart, "restart_requested": False},
+            update={"halted": True, "exit_requested": False, "restart_requested": False},
             goto=END if pending is None else "work",
         )
 
@@ -73,39 +72,25 @@ def _persist_end(
         assert snapshot.next == ("work",) and snapshot.tasks
         if pending == "interrupt":
             assert snapshot.tasks[0].interrupts
-    assert snapshot.values["exit_requested"] is restart
     conn.commit()
 
 
-def _retired(conn: psycopg.Connection[Any], *, restart: bool) -> int:
+def _retired(conn: psycopg.Connection[Any]) -> int:
     agent = _agent(conn)
     conn.execute(
-        "UPDATE agents_meta SET status=%s,runtime_kind='hosted',runtime_owner=%s,"
+        "UPDATE agents_meta SET status='idling',runtime_kind='hosted',runtime_owner=%s,"
         "runtime_generation=%s,lease_expires_at=%s WHERE id=%s",
-        (
-            "restarting" if restart else "idling",
-            uuid4(),
-            uuid4(),
-            datetime.now(UTC) - timedelta(minutes=5),
-            agent,
-        ),
+        (uuid4(), uuid4(), datetime.now(UTC) - timedelta(minutes=5), agent),
     )
-    if restart:
-        command = insert_inbound_message(conn, agent, "", "system:update", kind="restart")
-        conn.execute(
-            "UPDATE inbound_messages SET status='done',claimed_at=clock_timestamp() WHERE id=%s",
-            (command,),
-        )
     conn.commit()
-    _persist_end(conn, agent, restart=restart)
+    _persist_end(conn, agent)
     return agent
 
 
-@pytest.mark.parametrize("restart", [False, True])
 def test_completed_retired_consumer_parks_without_inventing_receipts(
-    db_conn: psycopg.Connection[Any], restart: bool
+    db_conn: psycopg.Connection[Any],
 ) -> None:
-    agent = _retired(db_conn, restart=restart)
+    agent = _retired(db_conn)
     before = db_conn.execute(
         "SELECT runtime_kind,runtime_owner,runtime_generation,lease_expires_at,"
         "lifecycle_command_id,incarnation_resources FROM agents_meta WHERE id=%s",
@@ -119,7 +104,7 @@ def test_completed_retired_consumer_parks_without_inventing_receipts(
     ).fetchall()
     db_conn.commit()
     pause_owner.begin_maintenance("cold", WHEN)
-    hold = maintenance_cohort.prepare(
+    hold = cohort.prepare(
         db_conn,
         machine=machine_name(),
         host_owner=None,
@@ -129,7 +114,7 @@ def test_completed_retired_consumer_parks_without_inventing_receipts(
     )
     assert hold.parked == (agent,)  # time-bomb-ok: WHEN is hold identity; this compares agent IDs.
     assert not hold.commands and not hold.drained
-    maintenance_cohort.verify_drained(db_conn, hold)
+    cohort.verify_drained(db_conn, hold)
     assert db_conn.execute("SELECT status FROM agents_meta WHERE id=%s", (agent,)).fetchone() == (
         "idling",
     )
@@ -157,7 +142,7 @@ def test_completed_retired_consumer_parks_without_inventing_receipts(
 
 def _prepare(conn: psycopg.Connection[Any]) -> None:
     pause_owner.begin_maintenance("cold", WHEN)
-    maintenance_cohort.prepare(
+    cohort.prepare(
         conn,
         machine=machine_name(),
         host_owner=None,
@@ -168,21 +153,16 @@ def _prepare(conn: psycopg.Connection[Any]) -> None:
 
 
 @pytest.mark.parametrize(
-    "defect", ["fresh_lease", "old_end", "unknown_version", "branch", "interrupt", "no_end"]
+    "defect", ["fresh_lease", "unknown_version", "branch", "interrupt", "no_end"]
 )
-def test_incomplete_or_live_restart_is_not_normalized(
+def test_incomplete_or_live_end_is_not_parked(
     db_conn: psycopg.Connection[Any], defect: str
 ) -> None:
-    agent = _retired(db_conn, restart=True)
+    agent = _retired(db_conn)
     if defect == "fresh_lease":
         db_conn.execute(
             "UPDATE agents_meta SET lease_expires_at=clock_timestamp()+interval '1 hour' "
             "WHERE id=%s",
-            (agent,),
-        )
-    elif defect == "old_end":
-        db_conn.execute(
-            "UPDATE inbound_messages SET claimed_at=clock_timestamp() WHERE agent_id=%s",
             (agent,),
         )
     elif defect == "unknown_version":
@@ -191,9 +171,9 @@ def test_incomplete_or_live_restart_is_not_normalized(
             (str(agent),),
         )
     elif defect == "no_end":
-        _persist_end(db_conn, agent, restart=False)
+        db_conn.execute("DELETE FROM checkpoints WHERE thread_id=%s", (str(agent),))
     else:
-        _persist_end(db_conn, agent, restart=True, pending=defect)
+        _persist_end(db_conn, agent, pending=defect)
     db_conn.commit()
     before = db_conn.execute("SELECT * FROM agents_meta WHERE id=%s", (agent,)).fetchone()
     db_conn.commit()
@@ -202,12 +182,11 @@ def test_incomplete_or_live_restart_is_not_normalized(
     assert db_conn.execute("SELECT * FROM agents_meta WHERE id=%s", (agent,)).fetchone() == before
 
 
-@pytest.mark.parametrize("restart", [False, True])
 @pytest.mark.parametrize("kind", ["restart", "terminate"])
 def test_pending_lifecycle_keeps_the_original_cold_intent(
-    db_conn: psycopg.Connection[Any], restart: bool, kind: str
+    db_conn: psycopg.Connection[Any], kind: str
 ) -> None:
-    agent = _retired(db_conn, restart=restart)
+    agent = _retired(db_conn)
     insert_inbound_message(db_conn, agent, "", "user", kind=kind)
     before = db_conn.execute("SELECT * FROM agents_meta WHERE id=%s", (agent,)).fetchone()
     db_conn.commit()
@@ -219,7 +198,7 @@ def test_pending_lifecycle_keeps_the_original_cold_intent(
 def test_real_unrecorded_legacy_consumer_blocks_cold_prepare(
     db_conn: psycopg.Connection[Any], tmp_path: Path
 ) -> None:
-    agent = _retired(db_conn, restart=True)
+    agent = _retired(db_conn)
     package = tmp_path / "agent"
     package.mkdir()
     (package / "__init__.py").write_text("")
@@ -247,7 +226,7 @@ def test_real_unrecorded_legacy_consumer_blocks_cold_prepare(
             process.kill()
             process.wait(timeout=5)
     assert db_conn.execute("SELECT status FROM agents_meta WHERE id=%s", (agent,)).fetchone() == (
-        "restarting",
+        "idling",
     )
 
 
@@ -279,15 +258,20 @@ def _no_process_iteration(*_args: Any, **_kwargs: Any) -> Iterator[Any]:
 
 def _hide_machine_processes(monkeypatch: pytest.MonkeyPatch) -> None:
     """This box runs other agents' exec children; isolate the test's own legs."""
-    monkeypatch.setattr("shared.exec_request_evidence.psutil.process_iter", _no_process_iteration)
+    monkeypatch.setattr(
+        "base.agents.incarnation.exec_request_evidence.psutil.process_iter", _no_process_iteration
+    )
 
 
 def _exec_request_dirs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Path, Path]:
     exec_dir = tmp_path / "exec"
     quarantine = tmp_path / "quarantined-exec-requests"
-    monkeypatch.setattr("shared.exec_request_evidence.exec_run_dir", lambda: exec_dir)
     monkeypatch.setattr(
-        "shared.exec_request_evidence.quarantined_exec_requests_dir", lambda: quarantine
+        "base.agents.incarnation.exec_request_evidence.exec_run_dir", lambda: exec_dir
+    )
+    monkeypatch.setattr(
+        "base.agents.incarnation.exec_request_evidence.quarantined_exec_requests_dir",
+        lambda: quarantine,
     )
     return exec_dir, quarantine
 
@@ -296,7 +280,7 @@ def test_superseded_exec_envelope_is_quarantined_and_cold_prepare_parks(
     db_conn: psycopg.Connection[Any], monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     """A superseded incarnation's envelope no longer fences cold preparation."""
-    agent = _retired(db_conn, restart=True)
+    agent = _retired(db_conn)
     exec_dir, quarantine = _exec_request_dirs(tmp_path, monkeypatch)
     request = _aged_request(exec_dir, agent, owner=uuid4())
     before = request.read_text()
@@ -318,7 +302,7 @@ def test_unattributable_exec_envelope_refuses_cold_prepare_with_disposition(
     db_conn: psycopg.Connection[Any], monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     """No incarnation attribution: refuse, name the file, keep the evidence."""
-    agent = _retired(db_conn, restart=True)
+    agent = _retired(db_conn)
     exec_dir, quarantine = _exec_request_dirs(tmp_path, monkeypatch)
     request = _aged_request(exec_dir, agent, owner=None)
 
@@ -327,10 +311,12 @@ def test_unattributable_exec_envelope_refuses_cold_prepare_with_disposition(
 
     message = str(excinfo.value)
     assert request.name in message
-    assert f"--agent {agent}" in message and "shared.exec_request_evidence" in message
+    assert (
+        f"--agent {agent}" in message and "base.agents.incarnation.exec_request_evidence" in message
+    )
     assert request.exists() and not quarantine.exists()
     assert db_conn.execute("SELECT status FROM agents_meta WHERE id=%s", (agent,)).fetchone() == (
-        "restarting",
+        "idling",
     )
 
 
@@ -338,7 +324,7 @@ def test_unreadable_exec_envelope_past_the_bound_parks_cold_prepare(
     db_conn: psycopg.Connection[Any], monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     """A zero-byte remnant older than the bound no longer fences cold prepare."""
-    agent = _retired(db_conn, restart=True)
+    agent = _retired(db_conn)
     exec_dir, quarantine = _exec_request_dirs(tmp_path, monkeypatch)
     bound = exec_request_evidence._unreadable_expiry_age_s()
     request = exec_dir / str(agent) / f"req-{uuid4().hex}.json"
@@ -364,7 +350,7 @@ def test_young_unreadable_exec_envelope_still_refuses_cold_prepare(
     db_conn: psycopg.Connection[Any], monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     """Young remnants still refuse: the bound waits out the request's full life."""
-    agent = _retired(db_conn, restart=True)
+    agent = _retired(db_conn)
     exec_dir, quarantine = _exec_request_dirs(tmp_path, monkeypatch)
     request = exec_dir / str(agent) / f"req-{uuid4().hex}.json"
     request.parent.mkdir(parents=True, exist_ok=True)
@@ -376,12 +362,12 @@ def test_young_unreadable_exec_envelope_still_refuses_cold_prepare(
 
     assert request.exists() and not quarantine.exists()
     assert db_conn.execute("SELECT status FROM agents_meta WHERE id=%s", (agent,)).fetchone() == (
-        "restarting",
+        "idling",
     )
 
 
 def test_failed_current_lifecycle_cannot_be_parked(db_conn: psycopg.Connection[Any]) -> None:
-    agent = _retired(db_conn, restart=False)
+    agent = _retired(db_conn)
     db_conn.execute(
         "INSERT INTO inbound_messages(agent_id,kind,status,source,content,target_generation,"
         "target_owner,claimed_at,payload) SELECT id,'restart','done','system:update','',"
@@ -394,34 +380,32 @@ def test_failed_current_lifecycle_cannot_be_parked(db_conn: psycopg.Connection[A
         _prepare(db_conn)
 
 
-@pytest.mark.parametrize("restart", [False, True])
-def test_checkpoint_replaced_by_real_second_connection_refuses_normalization(
-    db_conn: psycopg.Connection[Any], monkeypatch: pytest.MonkeyPatch, restart: bool
+def test_checkpoint_replaced_by_real_second_connection_refuses_parking(
+    db_conn: psycopg.Connection[Any], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from shared import maintenance_cold
+    from base.deploy.maintenance import cold
 
-    agent = _retired(db_conn, restart=restart)
-    original = maintenance_cold.require_persisted_end
+    agent = _retired(db_conn)
+    original = cold.require_persisted_end
 
-    def replace(conn: psycopg.Connection[Any], agent_id: int, *, restarting: bool) -> str:
-        checkpoint = original(conn, agent_id, restarting=restarting)
+    def replace(conn: psycopg.Connection[Any], agent_id: int) -> str:
+        checkpoint = original(conn, agent_id)
         with psycopg.connect(db_conn.info.dsn, autocommit=True) as writer:
-            _persist_end(writer, agent_id, restart=restart)
+            _persist_end(writer, agent_id)
         return checkpoint
 
-    monkeypatch.setattr(maintenance_cold, "require_persisted_end", replace)
+    monkeypatch.setattr(cold, "require_persisted_end", replace)
     with pytest.raises(RuntimeError, match="checkpoint changed"):
         _prepare(db_conn)
     assert db_conn.execute("SELECT status FROM agents_meta WHERE id=%s", (agent,)).fetchone() == (
-        "restarting" if restart else "idling",
+        "idling",
     )
 
 
-@pytest.mark.parametrize("restart", [False, True])
 async def test_resume_admits_a_successor_without_rewriting_legacy_history(
-    db_conn: psycopg.Connection[Any], aops_pool: AsyncConnectionPool[Any], restart: bool
+    db_conn: psycopg.Connection[Any], aops_pool: AsyncConnectionPool[Any]
 ) -> None:
-    agent = _retired(db_conn, restart=restart)
+    agent = _retired(db_conn)
     history = db_conn.execute(
         "SELECT * FROM inbound_messages WHERE agent_id=%s ORDER BY id", (agent,)
     ).fetchall()
@@ -430,7 +414,7 @@ async def test_resume_admits_a_successor_without_rewriting_legacy_history(
     _prepare(db_conn)
     current = pause_owner.read()
     assert current.maintenance is not None
-    maintenance_cohort.verify_drained(db_conn, current.maintenance)
+    cohort.verify_drained(db_conn, current.maintenance)
     db_conn.commit()
     owner = uuid4()
     assert (

@@ -12,25 +12,26 @@ from typing import Any, cast
 import psycopg
 import pytest
 from psycopg.types.json import Jsonb
-from psycopg_pool import ConnectionPool
+from psycopg_pool import AsyncConnectionPool, ConnectionPool
 
-import shared.db
-from ops.agent_wake import ResurrectTriggerStaleError
-from ops.agents import (
-    create_agent_row,
-    resurrect_agent,
-)
-from ops.ops_lifecycle import _force_mark_terminated
-from shared.agent_snapshot import select_one
-from shared.agents import (
+import base.db
+from base.agents import (
     AgentNotFound,
     ForkCheckpointNotFound,
     ResurrectAlreadyAlive,
     ResurrectError,
 )
-from shared.agents.messages.envelope import wrap_inbound
-from shared.config import settings
-from shared.machine import machine_name
+from base.agents.messages.envelope import wrap_inbound
+from base.agents.observation.snapshot import select_one
+from base.cluster.machine import machine_name
+from base.config import settings
+from ops.agents import (
+    create_agent_row,
+    resurrect_agent,
+    wake,
+)
+from ops.agents.wake import ResurrectTriggerStaleError
+from ops.lifecycle import _force_mark_terminated
 
 
 def _test_pool() -> ConnectionPool:
@@ -54,17 +55,6 @@ def _agents_row(db: psycopg.Connection, agent_id: int) -> tuple[int, str, str, i
         return cur.fetchone()
 
 
-def _agents_pid_started_at(db: psycopg.Connection, agent_id: int) -> tuple[int | None, object]:
-    with db.cursor() as cur:
-        cur.execute(
-            "SELECT pid, started_at FROM agents_meta WHERE id = %s",
-            (agent_id,),
-        )
-        row = cur.fetchone()
-    assert row is not None
-    return row[0], row[1]
-
-
 def _inbound_count(db: psycopg.Connection, agent_id: int) -> int:
     with db.cursor() as cur:
         cur.execute("SELECT COUNT(*) FROM inbound_messages WHERE agent_id = %s", (agent_id,))
@@ -81,8 +71,8 @@ def test_machine_pause_resolves_old_and_new_fingerprint_alerts(
 
     from psycopg.types.json import Jsonb
 
-    from gateway.routers._machine_pause import _resolve_machine_alerts_blocking
-    from shared.alerts import fingerprint
+    from base.telemetry.alerts import fingerprint
+    from gateway.cluster.machine_pause import _resolve_machine_alerts_blocking
 
     identity_labels = {"alertname": "machine offline", "machine": "away"}
     old_labels = {**identity_labels, "severity": "warning"}
@@ -132,7 +122,7 @@ def _spawn_agent(
     (create row + launch) as the two-phase split: `create_agent_row`
     (gateway-side, the main data-plane identity) then `_launch_agent_process`
     (runner-side), with the launch stubbed by the autouse guard. The launch op's
-    prompt-delivery half is covered in tests/gateway/test_operations.py."""
+    prompt-delivery half is covered in ops/tests/test_operations.py."""
     agent_id, _birth_config, _prompt_id, _attempt_id = create_agent_row(
         spawner=spawner,
         fork_from=fork_from,
@@ -143,7 +133,7 @@ def _spawn_agent(
         prompt=prompt,
         prompt_source=prompt_source,
     )
-    shared.db.publish_inbound_wake(agent_id, "0")
+    base.db.publish_inbound_wake(agent_id, "0")
     return agent_id
 
 
@@ -209,7 +199,7 @@ class TestSpawnAgent:
         passes config_overlay= to _launch_agent_process. Both sides must work for
         the per-agent model override to actually take effect at boot.
         """
-        from shared.config import settings
+        from base.config import settings
 
         new_id = _spawn_agent(spawner="user", config={"llm_model": "gpt-5.6-sol"})
 
@@ -227,8 +217,8 @@ class TestSpawnAgent:
     ) -> None:
         from dataclasses import replace
 
-        from shared.lm.plugin_providers import ensure_provider_plugins_loaded
-        from shared.lm.registry import MODELS
+        from base.lm.plugin_providers import ensure_provider_plugins_loaded
+        from base.lm.registry import MODELS
 
         ensure_provider_plugins_loaded()
         model = "deepseek-vision-fixture"
@@ -259,14 +249,41 @@ class TestSpawnAgent:
         assert withdrawn_snapshot.supports_vision is False
 
 
+def _hosted_agent(db: psycopg.Connection) -> int:
+    """Seed the retained authority of a hosted incarnation for guard tests."""
+    agent_id = _spawn_agent()
+    db.execute(
+        "UPDATE agents_meta SET runtime_kind='hosted', runtime_generation=gen_random_uuid(), "
+        "runtime_owner=gen_random_uuid() WHERE id=%s",
+        (agent_id,),
+    )
+    db.commit()
+    return agent_id
+
+
+async def _settle_hosted_force(
+    db: psycopg.Connection, pool: AsyncConnectionPool, agent_id: int
+) -> None:
+    """Complete this inactive fixture through its retained hosted owner."""
+    from base.agents.incarnation.hosted_force import original_host_force
+
+    row = db.execute("SELECT runtime_owner FROM agents_meta WHERE id=%s", (agent_id,)).fetchone()
+    assert row is not None
+    db.commit()
+    assert await original_host_force(pool, agent_id, row[0], machine_name(), quiescent=True)
+
+
 class TestResurrectAgent:
-    def test_repeat_force_fence_preserves_page_reopen_epoch(
-        self, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+    async def test_repeat_force_fence_preserves_page_reopen_epoch(
+        self,
+        db_conn: psycopg.Connection,
+        monkeypatch: pytest.MonkeyPatch,
+        aops_pool: AsyncConnectionPool,
     ) -> None:
         """A repeated force creates a newer intent fence without changing the
         real status-transition epoch used to reopen pages on manual resurrect."""
-        agent_id = _spawn_agent()
-        monkeypatch.setattr("ops.ops_exit.publish_inbound_wake", _noop)
+        agent_id = _hosted_agent(db_conn)
+        monkeypatch.setattr("ops.lifecycle.termination.publish_inbound_wake", _noop)
         with db_conn.cursor() as cur:
             cur.execute(
                 "INSERT INTO agent_pages (agent_id, name, port) VALUES (%s, 'work', 8765)",
@@ -310,6 +327,8 @@ class TestResurrectAgent:
         assert repeated_agent_row[1] > first_agent_row[1]
         assert repeated_page_row[0] == first_page_row[0]
 
+        await _settle_hosted_force(db_conn, aops_pool, agent_id)
+
         resurrect_agent(agent_id, resurrected_by="user")
 
         with db_conn.cursor() as cur:
@@ -320,21 +339,26 @@ class TestResurrectAgent:
             reopened_page_row = cur.fetchone()
         assert reopened_page_row == (None,)
 
-    def test_guarded_resurrect_rejects_chat_below_latest_force_fence(
-        self, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+    async def test_guarded_resurrect_rejects_chat_below_latest_force_fence(
+        self,
+        db_conn: psycopg.Connection,
+        monkeypatch: pytest.MonkeyPatch,
+        aops_pool: AsyncConnectionPool,
     ) -> None:
         """Even without a real status transition, a repeated explicit force
         fences every chat inbound that existed before that latest intent."""
-        agent_id = _spawn_agent()
-        monkeypatch.setattr("ops.ops_exit.publish_inbound_wake", _noop)
+        agent_id = _hosted_agent(db_conn)
+        monkeypatch.setattr("ops.lifecycle.termination.publish_inbound_wake", _noop)
         with db_conn.cursor() as cur:
             cur.execute("UPDATE agents_meta SET status = 'terminated' WHERE id = %s", (agent_id,))
         db_conn.commit()
-        trigger_id = shared.db.insert_inbound_message(
+        trigger_id = base.db.insert_inbound_message(
             db_conn, agent_id, "work before repeated force", source="user"
         )
         with _test_pool() as pool:
             _force_mark_terminated(agent_id, pool)
+
+        await _settle_hosted_force(db_conn, aops_pool, agent_id)
 
         with pytest.raises(ResurrectTriggerStaleError, match="trigger work no longer qualifies"):
             resurrect_agent(
@@ -352,11 +376,11 @@ class TestResurrectAgent:
     ) -> None:
         """A watchdog task selected for one death must not revive a later
         explicit kill while its RPC was in flight."""
-        agent_id = _spawn_agent()
+        agent_id = _hosted_agent(db_conn)
         with db_conn.cursor() as cur:
             cur.execute("UPDATE agents_meta SET status = 'terminated' WHERE id = %s", (agent_id,))
         db_conn.commit()
-        trigger_id = shared.db.insert_inbound_message(
+        trigger_id = base.db.insert_inbound_message(
             db_conn, agent_id, "wake after first death", source="user"
         )
 
@@ -393,11 +417,11 @@ class TestResurrectAgent:
     ) -> None:
         """A trigger claimed while the RPC is in flight no longer justifies
         launching the terminated owner."""
-        agent_id = _spawn_agent()
+        agent_id = _hosted_agent(db_conn)
         with db_conn.cursor() as cur:
             cur.execute("UPDATE agents_meta SET status = 'terminated' WHERE id = %s", (agent_id,))
         db_conn.commit()
-        trigger_id = shared.db.insert_inbound_message(
+        trigger_id = base.db.insert_inbound_message(
             db_conn, agent_id, "already handled", source="user"
         )
         with db_conn.cursor() as cur:
@@ -424,11 +448,11 @@ class TestResurrectAgent:
     ) -> None:
         """A pending chat created after the current death still auto-wakes the
         agent, preserving the post-termination delivery contract."""
-        agent_id = _spawn_agent()
+        agent_id = _hosted_agent(db_conn)
         with db_conn.cursor() as cur:
             cur.execute("UPDATE agents_meta SET status = 'terminated' WHERE id = %s", (agent_id,))
         db_conn.commit()
-        trigger_id = shared.db.insert_inbound_message(
+        trigger_id = base.db.insert_inbound_message(
             db_conn, agent_id, "new work after death", source="user"
         )
         returned = resurrect_agent(
@@ -451,11 +475,11 @@ class TestResurrectAgent:
     ) -> None:
         """UI compact is guarded work too: its exact durable id and expected
         kind qualify only while pending after the current death."""
-        agent_id = _spawn_agent()
+        agent_id = _hosted_agent(db_conn)
         with db_conn.cursor() as cur:
             cur.execute("UPDATE agents_meta SET status = 'terminated' WHERE id = %s", (agent_id,))
         db_conn.commit()
-        compact_id = shared.db.insert_inbound_message(
+        compact_id = base.db.insert_inbound_message(
             db_conn,
             agent_id,
             "",
@@ -476,51 +500,16 @@ class TestResurrectAgent:
             ("", "resurrect", "system"),
         ]
 
-    def test_guarded_resurrect_wakes_a_row_with_a_legacy_closure_stamp(
-        self, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """Terminate has no closed state: an `agents_meta.closed_at` left by the
-        retired closed-agent concept neither gates the automatic wake nor is
-        cleared by it (decisions/2026-09-27-terminate-has-no-closed-state.md)."""
-        agent_id = _spawn_agent()
-        with db_conn.cursor() as cur:
-            cur.execute(
-                "UPDATE agents_meta SET status = 'terminated', closed_at = now() WHERE id = %s",
-                (agent_id,),
-            )
-        db_conn.commit()
-        trigger_id = shared.db.insert_inbound_message(
-            db_conn, agent_id, "wake the terminated agent", source="user"
-        )
-
-        returned = resurrect_agent(
-            agent_id,
-            resurrected_by="system",
-            trigger_inbound_id=trigger_id,
-            trigger_inbound_kind="chat",
-        )
-
-        assert returned == agent_id
-        row = _agents_row(db_conn, agent_id)
-        assert row is not None and row[2] == "idling"
-        assert db_conn.execute(
-            "SELECT closed_at IS NOT NULL FROM agents_meta WHERE id = %s", (agent_id,)
-        ).fetchone() == (True,)
-        assert _inbound_rows(db_conn, agent_id) == [
-            ("wake the terminated agent", "chat", "user"),
-            ("", "resurrect", "system"),
-        ]
-
     def test_guarded_compact_rejects_kind_mismatch_and_claimed_trigger(
         self, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """The caller's expected kind is part of the CAS, and a compact that
         has already been claimed no longer licenses a new process."""
-        agent_id = _spawn_agent()
+        agent_id = _hosted_agent(db_conn)
         with db_conn.cursor() as cur:
             cur.execute("UPDATE agents_meta SET status = 'terminated' WHERE id = %s", (agent_id,))
         db_conn.commit()
-        compact_id = shared.db.insert_inbound_message(
+        compact_id = base.db.insert_inbound_message(
             db_conn,
             agent_id,
             "",
@@ -551,17 +540,20 @@ class TestResurrectAgent:
 
         assert _agents_row(db_conn, agent_id)[2] == "terminated"  # type: ignore[index]
 
-    def test_guarded_compact_below_force_fence_is_stale(
-        self, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+    async def test_guarded_compact_below_force_fence_is_stale(
+        self,
+        db_conn: psycopg.Connection,
+        monkeypatch: pytest.MonkeyPatch,
+        aops_pool: AsyncConnectionPool,
     ) -> None:
         """A force after compact enqueue fences that older work exactly like
         chat, even though no second status transition occurs."""
-        agent_id = _spawn_agent()
-        monkeypatch.setattr("ops.ops_exit.publish_inbound_wake", _noop)
+        agent_id = _hosted_agent(db_conn)
+        monkeypatch.setattr("ops.lifecycle.termination.publish_inbound_wake", _noop)
         with db_conn.cursor() as cur:
             cur.execute("UPDATE agents_meta SET status = 'terminated' WHERE id = %s", (agent_id,))
         db_conn.commit()
-        compact_id = shared.db.insert_inbound_message(
+        compact_id = base.db.insert_inbound_message(
             db_conn,
             agent_id,
             "",
@@ -570,6 +562,8 @@ class TestResurrectAgent:
         )
         with _test_pool() as pool:
             _force_mark_terminated(agent_id, pool)
+
+        await _settle_hosted_force(db_conn, aops_pool, agent_id)
 
         with pytest.raises(ResurrectTriggerStaleError):
             resurrect_agent(
@@ -583,11 +577,9 @@ class TestResurrectAgent:
     def test_resurrects_terminated_agent_and_inserts_resurrect_inbound(
         self, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """terminated → unclaimed idling + start process + auto INSERT a kind='resurrect'
-        source=resurrected_by inbound; when the new process starts, claim dispatches it as a lifecycle
-        marker appended to messages."""
-        agent_id = _spawn_agent()
-        # simulate terminate path: UPDATE 'idling' → 'terminated' (semantics from loop.py)
+        """Terminated -> unclaimed idling with durable resurrection and optional chat."""
+        agent_id = _hosted_agent(db_conn)
+        # simulate terminate path: UPDATE 'idling' → 'terminated' (retaining the hosted incarnation)
         with db_conn.cursor() as cur:
             cur.execute("UPDATE agents_meta SET status = 'terminated' WHERE id = %s", (agent_id,))
         db_conn.commit()
@@ -597,9 +589,7 @@ class TestResurrectAgent:
         assert returned == agent_id
         row = _agents_row(db_conn, agent_id)
         assert row is not None
-        assert (
-            row[2] == "idling"
-        )  # unclaimed, waiting for the process to claim and UPDATE 'running'
+        assert row[2] == "idling"  # unclaimed, waiting for the host to admit and UPDATE 'running'
         # resurrect inserts lifecycle inbound — content empty, trigger written to source field;
         # prompt as chat inbound follows in the same transaction
         rows = _inbound_rows(db_conn, agent_id)
@@ -611,7 +601,7 @@ class TestResurrectAgent:
         """The UI resurrect button is a pure lifecycle event — no prompt. Only
         the kind='resurrect' marker inbound is written; no chat inbound. The
         agent still wakes (the marker is the "ok I'm awake" signal)."""
-        agent_id = _spawn_agent()
+        agent_id = _hosted_agent(db_conn)
         with db_conn.cursor() as cur:
             cur.execute("UPDATE agents_meta SET status = 'terminated' WHERE id = %s", (agent_id,))
         db_conn.commit()
@@ -626,7 +616,7 @@ class TestResurrectAgent:
     ) -> None:
         """resurrected_by is written as-is into the inbound source field (not into content), so that claim
         can compose it into the lifecycle marker during dispatch. SDK paths pass 'agent:N', gateway passes 'user'."""
-        agent_id = _spawn_agent()
+        agent_id = _hosted_agent(db_conn)
         with db_conn.cursor() as cur:
             cur.execute("UPDATE agents_meta SET status = 'terminated' WHERE id = %s", (agent_id,))
         db_conn.commit()
@@ -644,8 +634,8 @@ class TestResurrectAgent:
     ) -> None:
         """A resurrect with a prompt writes two inbounds (lifecycle + chat); the chat inbound reuses
         resurrected_by as its source — that value must survive envelope wrap, otherwise
-        the new process dies with a ValueError on its first claim (agent-240 incident)."""
-        agent_id = _spawn_agent()
+        the successor turn fails with a ValueError on its first claim (agent-240 incident)."""
+        agent_id = _hosted_agent(db_conn)
         with db_conn.cursor() as cur:
             cur.execute("UPDATE agents_meta SET status = 'terminated' WHERE id = %s", (agent_id,))
         db_conn.commit()
@@ -676,7 +666,7 @@ class TestResurrectAgent:
 
     @pytest.mark.parametrize(
         "alive_status",
-        ["running", "idling", "restarting"],
+        ["running", "idling"],
     )
     def test_resurrect_alive_agent_raises_already_alive(
         self,
@@ -687,13 +677,13 @@ class TestResurrectAgent:
         """Any status other than 'terminated' cannot be resurrected — only 'terminated' is a valid source state.
 
         Full parametrization locks the contract that "resurrect refuses all states that are still alive or not fully dead".
-        Historically only running/idling/restarting were tested. The complete current
+        Historically only running/idling were tested. The complete current
         non-terminal set is covered explicitly — a regression that changed the guard
         to `if current in [...]` and missed a value would silently let resurrect
         send a revival notification to an agent that is "still running / still init'ing",
-        with the production consequence of a dual-process race on the same agent_id.
+        with the production consequence of a dual-incarnation race on the same agent_id.
         """
-        agent_id = _spawn_agent()
+        agent_id = _hosted_agent(db_conn)
         # the helper leaves 'idling'; other statuses are explicitly set via UPDATE for the test
         if alive_status != "idling":
             with db_conn.cursor() as cur:
@@ -717,7 +707,7 @@ class TestResurrectAgent:
         Simulate: make the first fetchone falsely report 'terminated' while the underlying row is actually 'idling'
         — equivalent to "status was rewritten after SELECT". The code must raise when UPDATE rowcount=0.
         """
-        agent_id = _spawn_agent()  # real status='idling'
+        agent_id = _hosted_agent(db_conn)  # real status='idling'
 
         original_execute = cast(Callable[..., Any], psycopg.Cursor.execute)
         original_fetchone = psycopg.Cursor.fetchone
@@ -725,10 +715,7 @@ class TestResurrectAgent:
 
         def tracking_execute(self: Any, query: Any, *args: Any, **kwargs: Any) -> Any:
             result = original_execute(self, query, *args, **kwargs)
-            if query == (
-                "SELECT status,machine,permanent_reject_streak,"
-                "last_permanent_reject_reason FROM agents_meta WHERE id = %s FOR UPDATE"
-            ):
+            if query == wake._RESURRECTION_ROW:
                 status_select_cursors.add(id(self))
             return result
 
@@ -736,7 +723,9 @@ class TestResurrectAgent:
             if id(self) in status_select_cursors:
                 status_select_cursors.remove(id(self))
                 # enter UPDATE while preserving placement
-                return ("terminated", machine_name(), 0, None)
+                row = original_fetchone(self)
+                assert row is not None
+                return ("terminated", *row[1:])
             return original_fetchone(self)
 
         monkeypatch.setattr(psycopg.Cursor, "execute", tracking_execute)
@@ -760,36 +749,6 @@ class TestResurrectAgent:
         """Both subclasses belong to ResurrectError — a coarse catch with ResurrectError can catch them."""
         with pytest.raises(ResurrectError):
             resurrect_agent(9999, resurrected_by="user", prompt="test")
-
-    def test_resurrect_clears_stale_pid_and_started_at(
-        self, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """The UPDATE that changes 'terminated' → 'idling' must **also clear** pid /
-        started_at — otherwise the fields left from the previous running round become ghost data;
-        operations like `ps -p <stale_pid>` / `kill <stale_pid>` would misjudge (agent 44 incident).
-
-        invariant: pid and started_at are only filled during 'running'; any transition back to 'idling'
-        must reset them to NULL, aligning with the new row default from spawn.
-        """
-        agent_id = _spawn_agent()
-        # simulate "fields left from the previous running round" — directly UPDATE to fill pid + started_at,
-        # then switch to terminated (terminate finalize mark_agent_exited_op does not touch pid/started_at)
-        with db_conn.cursor() as cur:
-            cur.execute(
-                "UPDATE agents_meta SET status = 'terminated', pid = 99999, started_at = now() "
-                "WHERE id = %s",
-                (agent_id,),
-            )
-        db_conn.commit()
-        # pre-check: confirm stale fields are indeed set
-        pid, started_at = _agents_pid_started_at(db_conn, agent_id)
-        assert pid == 99999 and started_at is not None
-
-        resurrect_agent(agent_id, resurrected_by="user", prompt="test")
-
-        pid, started_at = _agents_pid_started_at(db_conn, agent_id)
-        assert pid is None, f"resurrect did not clear stale pid: {pid}"
-        assert started_at is None, f"resurrect did not clear stale started_at: {started_at}"
 
 
 def _insert_checkpoint(
@@ -954,7 +913,7 @@ class TestSpawnFork:
         """The fork checkpoint never terminates its own walk. Forking exactly at a boundary
         continues down to the next boundary below it — with no boundary below, the window is
         the full chain (the old cut-at-the-boundary window read back empty; the read-back
-        assertions live in tests/shared/test_delta_read_compat.py)."""
+        assertions live in tests/base/test_delta_read_compat.py)."""
         source = _spawn_agent()
         _insert_checkpoint(db_conn, source, "a", parent_id=None)
         _insert_checkpoint(db_conn, source, "b", parent_id="a", compact_boundary=True)
@@ -1090,7 +1049,7 @@ class TestSpawnFork:
         seen: list[list[tuple]] = []
 
         def _spy_wake(agent_id: int, _payload: str) -> None:
-            with shared.db.connect() as conn, conn.cursor() as cur:
+            with base.db.connect() as conn, conn.cursor() as cur:
                 cur.execute(
                     "SELECT content, kind, source FROM inbound_messages "
                     "WHERE agent_id = %s ORDER BY id ASC",
@@ -1098,7 +1057,7 @@ class TestSpawnFork:
                 )
                 seen.append(cur.fetchall())  # pyright: ignore[reportUnknownMemberType]
 
-        monkeypatch.setattr(shared.db, "publish_inbound_wake", _spy_wake)
+        monkeypatch.setattr(base.db, "publish_inbound_wake", _spy_wake)
         _spawn_agent(fork_from=source, fork_checkpoint="ck", prompt="go do X", prompt_source="user")
 
         assert seen and all(
@@ -1126,8 +1085,8 @@ class TestSpawnFork:
         import json
         from datetime import UTC, datetime
 
-        from shared import telemetry
-        from shared.paths import logs_dir
+        from base import telemetry
+        from base.paths import logs_dir
 
         source = _spawn_agent()
         executor = _spawn_agent()
@@ -1168,8 +1127,8 @@ class TestSpawnFork:
         import json
         from datetime import UTC, datetime
 
-        from shared import telemetry
-        from shared.paths import logs_dir
+        from base import telemetry
+        from base.paths import logs_dir
 
         parent = _spawn_agent()
         new_id = _spawn_agent(spawner=f"agent:{parent}")
@@ -1208,12 +1167,12 @@ class TestSpawnFork:
         import json
         from datetime import UTC, datetime
 
-        from shared import telemetry
-        from shared.paths import logs_dir
+        from base import telemetry
+        from base.paths import logs_dir
 
         source = _spawn_agent()
         new_id = _spawn_agent()
-        shared.db.insert_inbound_message(db_conn, new_id, "", source=f"agent:{source}", kind="fork")
+        base.db.insert_inbound_message(db_conn, new_id, "", source=f"agent:{source}", kind="fork")
 
         telemetry.sync()
         day = datetime.now(UTC).strftime("%Y%m%d")

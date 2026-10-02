@@ -33,10 +33,10 @@ from typing import Any
 from langchain_core.messages import HumanMessage
 
 from agent.messages import NoteTag, system_note_message
-from shared.config import settings
-from shared.config.turn_view import turn_settings
-from shared.log import logger
-from shared.paths import workspace_dir_readonly
+from base.config import settings
+from base.config.turn_view import turn_settings
+from base.log import logger
+from base.paths import workspace_dir_readonly
 
 from .sdk import _frontmatter_parts
 
@@ -141,7 +141,7 @@ def _ancestor_chain(agent_id: int) -> list[dict[str, Any]] | None:
     import httpx  # deferred: stays off the boot path
 
     from ava import gateway_client
-    from shared.agents import GatewayUnavailable
+    from base.agents import GatewayUnavailable
 
     try:
         chain = gateway_client.get_born_chain(agent_id)
@@ -166,8 +166,8 @@ def _collect_blocks(
     is skipped silently, like an empty entry.
 
     Returns (blocks, remote_ancestors)."""
-    from shared import machine as host_machine
-    from shared.machine import MachineNameMissing
+    from base.cluster import machine as host_machine
+    from base.cluster.machine import MachineNameMissing
 
     chain = _ancestor_chain(agent_id)
     if chain is None:

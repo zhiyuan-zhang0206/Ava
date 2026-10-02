@@ -37,7 +37,7 @@ import { FLEX } from "@/lib/layout";
 // One re-parse per SSE event window (~25 FPS) reads as live while removing the
 // per-chunk parse storm that pegs the mobile main thread. The window is the
 // same constant the agent-side publisher coalesces into (generated from
-// shared/live_events.py EVENT_COALESCE_MS). See use-throttled-streaming.ts.
+// base/events/live/projection.py EVENT_COALESCE_MS). See use-throttled-streaming.ts.
 //
 // A FIXED window is not enough: the parse is O(payload length), so as a code
 // block streams, each flush re-highlights the whole accumulated text — total
@@ -61,7 +61,7 @@ export function streamingParseIntervalMs(payloadLength: number): number {
 }
 
 // envelope wrap is always "<header>:\n\n<body>" (envelope.py wrap_inbound /
-// _exec.py wrap_code_output both follow this). Split out the header as a metadata
+// exec/output.py wrap_code_output both follow this). Split out the header as a metadata
 // label and the body as the main content — preserve raw text, only layer
 // visually. Empty header then entire payload is body.
 function splitEnvelope(payload: string): { header: string; body: string } {

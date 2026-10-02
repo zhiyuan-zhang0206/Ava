@@ -1,15 +1,12 @@
 {
-  "complexity": {
-    "services/healthchecks/browser.py::main": 17
+  "ambient_state": {
+    "services/healthchecks/browser_reach.py::ambient-instance:_CDP_IDS": 1,
+    "services/healthchecks/frontend.py::ambient-instance:_FRONTEND_URL": 1,
+    "services/healthchecks/gateway.py::import-time-read:_HEALTH_URL": 1,
+    "services/healthchecks/lgtm.py::ambient-instance:_local_http": 1,
+    "services/healthchecks/permissions_helper.py::global-rebind:_reported_unhealthy": 1
   },
-  "directories": {
-    "services/healthchecks": 31
-  },
-  "private_imports": {
-    "services/healthchecks/im_bridge.py::shared.daemon_health._MAX_BODY_BYTES": 2,
-    "services/healthchecks/im_bridge.py::shared.daemon_health._PROBE_TIMEOUT_S": 1,
-    "services/healthchecks/permissions_helper.py::services.permissions_helper.client._connect": 1,
-    "services/healthchecks/permissions_helper.py::services.permissions_helper.client._parse_reply": 1,
-    "services/healthchecks/prod_venv.py::shared.editable_install._venv_python": 1
+  "patch_targets": {
+    "services/healthchecks/tests/test_healthcheck_gateway.py::base.daemon.health._probe_home": 2
   }
 }

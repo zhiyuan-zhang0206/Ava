@@ -36,14 +36,14 @@ from pathlib import Path
 import psycopg
 from psycopg import Connection
 
+from base import telemetry
+from base.config import settings
+from base.db import connect
+from base.db.transaction import write_transaction
+from base.log import init_gateway_process, logger
 from services.hierarchy_worker.scan import KIND_COMPACT, SILENT_BASELINE_MARKER, first_build, scan
-from shared import telemetry
-from shared.config import settings
-from shared.db import connect
-from shared.db_transaction import write_transaction
-from shared.log import init_gateway_process, logger
 
-# The deployed source root: shared/ sits at the repo root in prod and in a
+# The deployed source root: base/ sits at the repo root in prod and in a
 # worktree alike (the c9-daily-report precedent), and the child must import
 # from the same checkout this runner executes.
 _REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -73,7 +73,7 @@ def prepare() -> None:
     (backoff + breaker + last_error) exposes it instead of every tick failing
     on its own.
     """
-    from shared.migrations import assert_schema_current
+    from base.deploy.schema.migrations import assert_schema_current
 
     init_gateway_process(name="schedule-hierarchy-worker")
     assert_schema_current(settings.data_plane.db_url)

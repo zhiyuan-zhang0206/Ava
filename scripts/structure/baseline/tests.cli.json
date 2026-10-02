@@ -1,39 +1,53 @@
 {
   "complexity": {
-    "tests/cli/test_converge_lgtm.py::test_native_grafana_renders_from_the_repo_and_host_setting": 28,
-    "tests/cli/test_data_plane_admin_secrets.py::test_missing_values_are_minted_activated_and_persisted": 15,
-    "tests/cli/test_lgtm_native.py::test_ensure_renders_configs_with_native_paths_and_loopback": 24,
-    "tests/cli/test_maintenance_stop.py::test_bash_node_layered_chain_converges": 16,
-    "tests/cli/test_maintenance_stop_report.py::test_layered_shell_node_chain_reports_the_surviving_node_process": 19,
-    "tests/cli/test_maintenance_stop_report.py::test_refusing_service_failure_names_its_full_identity": 16,
-    "tests/cli/test_managed_writer_dispatch.py::test_assemble_phase_inputs_binds_each_projection_to_its_content_name": 26,
-    "tests/cli/test_managed_writer_dispatch.py::test_begin_chain_reads_the_context_opens_the_journal_and_dispatches": 32,
+    "tests/cli/test_converge_lgtm.py::test_native_grafana_renders_from_the_repo_and_host_setting": 25,
     "tests/cli/test_packages_refresh.py::test_refresh_applies_only_the_changed_package": 17,
-    "tests/cli/test_pgbouncer_config.py::test_render_ini_is_transaction_scram_and_socket_server": 17,
-    "tests/cli/test_update_pitr.py::test_fresh_point_is_complete_and_published_before_returning": 16
-  },
-  "directories": {
-    "tests/cli": 194
+    "tests/cli/test_pgbouncer_config.py::test_render_ini_is_transaction_scram_and_socket_server": 17
   },
   "files": {
-    "tests/cli/test_cluster_health.py": 2315,
-    "tests/cli/test_cluster_lifecycle.py": 868,
-    "tests/cli/test_config_cmd.py": 804,
-    "tests/cli/test_converge.py": 1908,
-    "tests/cli/test_converge_lgtm.py": 1175,
-    "tests/cli/test_converge_otel_collector.py": 1268,
-    "tests/cli/test_enroll.py": 1093,
-    "tests/cli/test_impersonation_bridge.py": 965,
-    "tests/cli/test_maintenance_stop.py": 1145,
-    "tests/cli/test_managed_writer_collector.py": 1098,
-    "tests/cli/test_managed_writer_dispatch.py": 985,
-    "tests/cli/test_managed_writer_mode.py": 1017,
-    "tests/cli/test_pitr_activation.py": 1833,
-    "tests/cli/test_release_normal.py": 1702,
-    "tests/cli/test_start_readiness_gate.py": 1469,
-    "tests/cli/test_update_publication.py": 890
+    "tests/cli/test_impersonation_bridge.py": 965
   },
-  "nesting": {
-    "tests/cli/test_update_uv_sync.py::test_prod_source_never_imports_dev_only_modules": 6
+  "patch_targets": {
+    "tests/cli/test_converge_redis_bridge.py::services.redis_bridge.relay._sleep": 2,
+    "tests/cli/test_grafana_render_cmd.py::cli.commands.observability.grafana_render._provisioning_dashboard": 2,
+    "tests/cli/test_impersonation_bridge.py::cli.commands.agents.impersonation_relay._MIN_EMIT_INTERVAL_SECONDS": 2,
+    "tests/cli/test_impersonation_bridge.py::cli.commands.agents.impersonation_relay._heartbeat_loop": 2,
+    "tests/cli/test_impersonation_bridge.py::cli.commands.agents.impersonation_relay._loop_time": 1,
+    "tests/cli/test_impersonation_bridge.py::cli.commands.agents.impersonation_relay._read_inbox": 2,
+    "tests/cli/test_impersonation_bridge.py::cli.commands.agents.impersonation_relay._write_heartbeat": 2,
+    "tests/cli/test_main_dispatch.py::base.native_process.code_version._db_gate_exempt": 1,
+    "tests/cli/test_main_dispatch.py::cli.parsers.host._h_start": 1,
+    "tests/cli/test_main_dispatch.py::cli.parsers.host._h_status": 2,
+    "tests/cli/test_maintenance.py::ops.agent_pause._wake": 1,
+    "tests/cli/test_packages_refresh.py::ava.skills._provider_roots": 1,
+    "tests/cli/test_pgbouncer_wire.py::base.db.code_version_gate._last_read_at": 1,
+    "tests/cli/test_pgbouncer_wire.py::base.native_process.code_version._db_gate_exempt": 1,
+    "tests/cli/test_pgbouncer_wire.py::base.native_process.code_version._version": 1,
+    "tests/cli/test_plugin_scaffold.py::cli.commands.extensions._plugin_scaffold": 2,
+    "tests/cli/test_schedules_cmd.py::cli.commands.management.schedules._alert_verify": 2,
+    "tests/cli/test_schedules_cmd.py::cli.commands.management.schedules._check_script": 1,
+    "tests/cli/test_schedules_cmd.py::cli.commands.management.schedules._open_verify_starts_at": 4,
+    "tests/cli/test_schedules_cmd.py::cli.commands.management.schedules._read_schedule_rows": 2,
+    "tests/cli/test_storage_ownership.py::base.cluster.postgres._read": 1,
+    "tests/cli/test_storage_ownership.py::base.cluster.postgres._require_closed": 2,
+    "tests/cli/test_storage_ownership.py::base.cluster.postgres._spawn": 2
+  },
+  "tests_location": {
+    "tests/cli/test_commands_cluster_status.py::top-level": 1,
+    "tests/cli/test_converge_lgtm.py::top-level": 1,
+    "tests/cli/test_converge_redis_bridge.py::top-level": 1,
+    "tests/cli/test_grafana_render_cmd.py::top-level": 1,
+    "tests/cli/test_impersonation.py::top-level": 1,
+    "tests/cli/test_impersonation_bridge.py::top-level": 1,
+    "tests/cli/test_main_dispatch.py::top-level": 1,
+    "tests/cli/test_maintenance.py::top-level": 1,
+    "tests/cli/test_mcp.py::top-level": 1,
+    "tests/cli/test_otel_bootstrap_relay.py::top-level": 1,
+    "tests/cli/test_packages_refresh.py::top-level": 1,
+    "tests/cli/test_pgbouncer_config.py::top-level": 1,
+    "tests/cli/test_pgbouncer_wire.py::top-level": 1,
+    "tests/cli/test_plugin_scaffold.py::top-level": 1,
+    "tests/cli/test_schedules_cmd.py::top-level": 1,
+    "tests/cli/test_storage_ownership.py::top-level": 1
   }
 }

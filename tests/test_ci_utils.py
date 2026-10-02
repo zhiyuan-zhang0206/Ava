@@ -87,15 +87,10 @@ def _urlopen_sequence(
     return urlopen
 
 
-def _labels_runner(labels: list[str], calls: list[list[str]]):
+def _gh_runner(calls: list[list[str]]):
     def run(command: list[str], **_: object) -> subprocess.CompletedProcess[str]:
         calls.append(command)
-        return subprocess.CompletedProcess(
-            command,
-            0,
-            stdout=json.dumps({"labels": [{"name": label} for label in labels]}),
-            stderr="",
-        )
+        return subprocess.CompletedProcess(command, 0, stdout="{}", stderr="")
 
     return run
 
@@ -137,7 +132,7 @@ def gh(monkeypatch: pytest.MonkeyPatch):
                 # main-workflow runs for this head.
                 stdout = "1" if main_completed else "0"
             elif "actions/runs?" in url and "--jq" not in cmd:
-                # ci_job_rerun reads the raw REST runs payload (issue #1945);
+                # job_rerun reads the raw REST runs payload (issue #1945);
                 # keep its view empty so diagnose tests stay deterministic.
                 stdout = json.dumps({"total_count": 0, "workflow_runs": []})
             elif "/jobs?" in url:
@@ -485,8 +480,8 @@ def test_early_green_window_without_the_main_run_is_not_green(gh: Any, has_workf
     out until the main run is visible rather than calling that narrow window green."""
     checks = [
         _APP_CHECK,
-        _check("prove-observation", "SKIPPED", workflow="Agent observation proof"),
-        _check("prove-retry-guard", "SKIPPED", workflow="CI retry safety proof"),
+        _check("prove-example-a", "SKIPPED", workflow="Example proof A"),
+        _check("prove-example-b", "SKIPPED", workflow="Example proof B"),
     ]
     has_workflows(True)
     gh(checks, scheduled=[], main_completed=False)
@@ -674,7 +669,7 @@ _QA_APPROVED_GATE_FAILURE = _check("qa-approved-gate", "FAILURE", workflow="QA a
     ],
 )
 def test_qa_failure_is_excluded_from_ci_verdict(gh: Any, has_workflows: Any, gate: dict) -> None:
-    """The queue enforces both QA checks outside the CI verdict."""
+    """Both retired QA checks stay outside the CI verdict on older heads."""
     gh([_check("backend (pytest + pyright)", "SUCCESS"), gate])
     has_workflows(True)
     r = ci_utils.check_ci("57")
@@ -833,11 +828,11 @@ def test_wait_timeout_while_pending_exits_one(monkeypatch, poll, capsys) -> None
 
 def test_wait_merge_trunk_submits_and_lands_when_green(no_sleep, poll, monkeypatch, capsys) -> None:
     poll(CIStatus.ALL_PASSED)
-    label_calls: list[list[str]] = []
+    gh_calls: list[list[str]] = []
     requests: list[urllib.request.Request] = []
     monkeypatch.setattr(ci_utils, "_queue_cooldown_seconds", lambda *_a, **_k: 0)
     monkeypatch.setenv("TRUNK_API_TOKEN", "test-token")
-    monkeypatch.setattr(ci_utils.subprocess, "run", _labels_runner(["qa-approved"], label_calls))
+    monkeypatch.setattr(ci_utils.subprocess, "run", _gh_runner(gh_calls))
     monkeypatch.setattr(
         ci_utils.urllib.request,
         "urlopen",
@@ -851,7 +846,7 @@ def test_wait_merge_trunk_submits_and_lands_when_green(no_sleep, poll, monkeypat
         ),
     )
     # --merge implies --wait: with the Trunk default queue, submit the PR
-    # (qa-approved label verified first), then wait for the queue to land it.
+    # then wait for the queue to land it.
     assert ci_utils.main(["1243", "--merge"]) == 0
     assert requests[0].full_url == "https://api.trunk.io/v1/submitPullRequest"
     assert requests[0].get_header("X-api-token") == "test-token"
@@ -865,7 +860,7 @@ def test_wait_merge_trunk_submits_and_lands_when_green(no_sleep, poll, monkeypat
     }
     assert requests[1].full_url == "https://api.trunk.io/v1/getSubmittedPullRequest"
     assert "PR #1243 merged by the Trunk merge queue" in capsys.readouterr().out
-    assert label_calls[0][:4] == ["gh", "pr", "view", "1243"]
+    assert gh_calls[0][:4] == ["gh", "pr", "view", "1243"]
 
 
 def test_wait_merge_trunk_failed_state_prints_full_payload(
@@ -878,7 +873,7 @@ def test_wait_merge_trunk_failed_state_prints_full_payload(
     poll(CIStatus.ALL_PASSED)
     monkeypatch.setattr(ci_utils, "_queue_cooldown_seconds", lambda *_a, **_k: 0)
     monkeypatch.setenv("TRUNK_API_TOKEN", "test-token")
-    monkeypatch.setattr(ci_utils.subprocess, "run", _labels_runner(["qa-approved"], []))
+    monkeypatch.setattr(ci_utils.subprocess, "run", _gh_runner([]))
     monkeypatch.setattr(
         ci_utils.urllib.request,
         "urlopen",
@@ -902,7 +897,7 @@ def test_wait_merge_trunk_submit_failure_exits_four(no_sleep, poll, monkeypatch,
     poll(CIStatus.ALL_PASSED)
     monkeypatch.setattr(ci_utils, "_queue_cooldown_seconds", lambda *_a, **_k: 0)
     monkeypatch.setenv("TRUNK_API_TOKEN", "test-token")
-    monkeypatch.setattr(ci_utils.subprocess, "run", _labels_runner(["qa-approved"], []))
+    monkeypatch.setattr(ci_utils.subprocess, "run", _gh_runner([]))
     monkeypatch.setattr(
         ci_utils.urllib.request,
         "urlopen",
@@ -1339,7 +1334,6 @@ def _diag_pr_view(mergeable: str = "MERGEABLE", checks: list[dict] | None = None
     return json.dumps(
         {
             "mergeable": mergeable,
-            "labels": [{"name": "qa-approved"}],
             "headRefOid": "aaaa1111aaaa1111aaaa1111aaaa1111aaaa1111",
             "state": "OPEN",
             "statusCheckRollup": checks or [],
@@ -1359,7 +1353,7 @@ def _diag_job(name: str, job_id: int = 9, conclusion: str = "FAILURE") -> dict:
 def _diag_runs(run_id: int = 10) -> str:
     """Real-shaped REST runs payload with one CI run (issue #1945).
 
-    The run carries `status: completed`, which `ci_job_rerun` reads to decide whether a re-run is
+    The run carries `status: completed`, which `job_rerun` reads to decide whether a re-run is
     admissible (task #3764)."""
     return json.dumps(
         {
@@ -1752,14 +1746,14 @@ def test_limbo_runs_flags_aged_queued_zero_job_run(monkeypatch) -> None:
     calls: list[list[str]] = []
     _install_probe(
         monkeypatch,
-        [{"id": 91, "name": "Native launcher observation proof", "created_at": _aged(910)}],
+        [{"id": 91, "name": "Native root lifetime proof", "created_at": _aged(910)}],
         {91: 0},
         calls=calls,
     )
     got = ci_utils._limbo_runs("abc1234", "o/r")
     assert got is not None
     assert [r["id"] for r in got] == [91]
-    assert got[0]["name"] == "Native launcher observation proof"
+    assert got[0]["name"] == "Native root lifetime proof"
     assert got[0]["age_s"] >= 900
     # the runs probe filters queued-only server-side; the jobs probe confirms zero.
     assert 'select(.status == "queued")' in calls[0][-1]
@@ -1815,14 +1809,14 @@ def test_limbo_runs_skips_unparseable_created_at_and_non_int_id(monkeypatch) -> 
 def test_check_ci_attaches_limbo_to_pending(gh: Any, has_workflows: Any, monkeypatch) -> None:
     gh(
         [_check("backend (pytest + pyright)", "SUCCESS")],
-        scheduled=["Caller protocol integration proof"],
+        scheduled=["Example proof A"],
     )
     has_workflows(True)
-    stuck = [{"id": 91, "name": "Caller protocol integration proof", "age_s": 1500}]
+    stuck = [{"id": 91, "name": "Example proof A", "age_s": 1500}]
     monkeypatch.setattr(ci_utils, "_limbo_runs", lambda *_a, **_k: stuck)
     r = ci_utils.check_ci("1")
     assert r.verdict is CIStatus.PENDING
-    assert r.pending == ["Caller protocol integration proof"]
+    assert r.pending == ["Example proof A"]
     assert r.limbo == stuck
     assert "GitHub limbo" in r.summary()
 

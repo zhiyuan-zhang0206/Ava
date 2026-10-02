@@ -69,8 +69,8 @@ from langgraph.runtime import Runtime
 from agent import state as _state
 from agent.hooks._registry import Hook
 from agent.messages import exec_output_message
-from shared.context import AvaContext, agent_id_from_config
-from shared.log import logger
+from base.agents.context import AvaContext, agent_id_from_config
+from base.log import logger
 
 _INTERRUPTED_TOOL_RESULT = (
     "[interrupted: the agent process was cancelled before this tool produced a result]"

@@ -1,0 +1,9 @@
+{
+  "ambient_state": {
+    "gateway/auth/rejection_log.py::ambient-container:_auth401_last_warn": 1,
+    "gateway/auth/rejection_log.py::ambient-container:_auth401_suppressed": 1,
+    "gateway/auth/rejection_log.py::global-rebind:_auth401_total": 2,
+    "gateway/auth/request_principal.py::ambient-container:_session_key_cache": 1,
+    "gateway/auth/session_store.py::ambient-container:_session_cache": 1
+  }
+}

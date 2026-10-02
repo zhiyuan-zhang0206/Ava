@@ -9,9 +9,9 @@ import httpx
 import psycopg
 import pytest
 
-from shared.config import settings
+from base.config import settings
+from tests.base.poll_until import poll_until
 from tests.e2e._env import E2EEnv
-from tests.shared.poll_until import poll_until
 
 
 def _evidence(agent_id: int) -> tuple[tuple[Any, ...] | None, list[tuple[Any, ...]]]:

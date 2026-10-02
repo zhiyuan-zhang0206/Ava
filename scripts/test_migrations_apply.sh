@@ -44,6 +44,34 @@ echo "-> apply baseline db/schema.sql"
 psql -d "$TEST_DB" -v ON_ERROR_STOP=1 -q -f db/schema.sql
 echo "  ok"
 
+echo "-> retired deploy storage is absent and the version-gate row survives"
+psql -d "$TEST_DB" -v ON_ERROR_STOP=1 <<'SQL'
+DO $$
+BEGIN
+    IF to_regclass('public.cluster_pin') IS NOT NULL
+       OR to_regclass('public.cluster_last_update') IS NOT NULL
+       OR to_regclass('public.agent_watchers') IS NOT NULL
+       OR to_regprocedure('public.lock_runtime_publication_admission()') IS NOT NULL THEN
+        RAISE EXCEPTION 'retired deploy or watcher storage is back in the baseline';
+    END IF;
+    IF EXISTS (SELECT 1 FROM information_schema.columns
+               WHERE table_schema = 'public' AND table_name = 'agents_meta'
+                 AND column_name = 'closed_at') THEN
+        RAISE EXCEPTION 'agents_meta.closed_at is back in the baseline';
+    END IF;
+    IF (SELECT array_agg(column_name::text ORDER BY column_name)
+        FROM information_schema.columns
+        WHERE table_schema = 'public' AND table_name = 'deployment_state')
+       IS DISTINCT FROM ARRAY['id', 'min_code_version'] THEN
+        RAISE EXCEPTION 'deployment_state must hold only id and min_code_version';
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM deployment_state WHERE id = 1) THEN
+        RAISE EXCEPTION 'the deployment_state singleton row is missing (version gate)';
+    END IF;
+END $$;
+SQL
+echo "  ok"
+
 echo "-> trigger smoke: exercise agents_meta termination triggers"
 psql -d "$TEST_DB" -v ON_ERROR_STOP=1 <<'SQL'
 INSERT INTO agents (label) VALUES ('smoke-agent');
@@ -311,9 +339,6 @@ echo "-> convergence: db/schema.sql alone vs baseline-pending migrations (pg_dum
 psql -d "$ADMIN_DB" -v ON_ERROR_STOP=1 -c "CREATE DATABASE $FULL_DB"
 psql -d "$FULL_DB" -v ON_ERROR_STOP=1 -q -f db/schema.sql
 for f in migrations/*.sql; do
-    case "$f" in
-        *.down.sql) continue ;;
-    esac
     migration_name="${f##*/}"
     migration_name="${migration_name%.sql}"
     # A current baseline can fold a non-idempotent migration and stamp its name

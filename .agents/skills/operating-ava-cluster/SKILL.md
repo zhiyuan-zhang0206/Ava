@@ -8,8 +8,8 @@ description: Triages Ava production alerts and diagnoses disk, memory, connectiv
 This skill is the cluster operator's day-to-day companion: how to review the
 alert stream, how to diagnose the recurring failure classes, and how to
 respond. It is **methodology** (how to find and judge), not a fix index —
-for symptom → fix recovery of a broken cluster use the `ava cluster recover`
-CLI verb (see `conventions/runbook.md`); for the CLI verbs see
+for symptom → fix recovery of a broken cluster see `conventions/runbook.md`
+(a stranded maintenance hold: `conventions/graceful-maintenance.md`); for the CLI verbs see
 `ava-guide/ops`; for rolling out changes see `ship-a-change`.
 
 ## Role
@@ -30,9 +30,9 @@ CLI verb (see `conventions/runbook.md`); for the CLI verbs see
 
 Start with `ava agents ls`: its ID, status, machine, and label columns map the
 sibling agent to its execution context. For an agent owned by this host, its
-workspace is `<cluster-home>/workspaces/<id>`. Resolve the cluster home through
-`ava cluster ls` and the checkout-anchored `ava` CLI; the default production
-home is `~/.ava`. A remote agent's workspace lives on its owning machine — never
+workspace is `<cluster-home>/workspaces/<id>`. The cluster home is the
+`AVA_HOME` your own environment carries (the host keeps no list of clusters);
+the default production home is `~/.ava`. A remote agent's workspace lives on its owning machine — never
 infer it by joining the ID to the gateway's home.
 
 Inside a workspace, read `memory/MEMORY.md` first and follow only the entries it
@@ -77,15 +77,15 @@ from real incidents; the concrete sizes and dates are illustrative.
   thread_id); blob table size; orphan worktrees / stale cluster homes.
 - Causes: LangGraph's PostgresSaver is append-only — terminated agents'
   checkpoint threads grow without bound (a real incident: 21GB in ~12h). Orphaned
-  dev-cluster homes (a deleted worktree whose `ava cluster down --path` was
-  forgotten).
+  dev-cluster homes an older version left behind (a deleted worktree whose
+  cluster was never stopped; a worktree no longer owns one).
 - Response: the checkpoint reaper (events-maintenance daemon) owns retention
   automatically: Rule B hourly trims stale threads (terminated, or inactive
   >24h) to keep=1; Rule A on the fast loop trims overgrown active threads
   (>20 ckpts) to keep=5. Compaction-boundary checkpoints are always kept
   (each past compaction segment stays recoverable). Physical space still
   needs VACUUM FULL after large trims (a 42GB→27GB trim was recovered this
-  way). Remove orphan worktrees with `ava cluster down --path`
+  way). Stop a leftover cluster at an orphan home with `AVA_HOME=<home> ava stop -y`
   *then* delete the directory; delete verified-obsolete backups only with
   user approval.
 
@@ -137,7 +137,7 @@ from real incidents; the concrete sizes and dates are illustrative.
   (same agent-id-derived ports) — tear down the whole unit, not just the dir.
 - Response: match the backend to the session type (PTY → `get_shell_backend`),
   kill stale sessions by exact name (`=name`, prefix matching kills siblings),
-  remove the whole stale unit (`ava cluster down --path` + bootout probes +
+  remove the whole stale unit (`AVA_HOME=<home> ava stop -y` + bootout probes +
   delete plist).
 
 ### Schedules not running / breaker tripped
@@ -187,8 +187,11 @@ code version. After every rollout, verify:
    the rollout window is running stale code (three real cases: the mcp
    daemon, the wsl watchdog, and the win browser daemon were all found this
    way).
-2. **mcp-daemon**: exactly ONE `_mcps_daemon` per unit
-   (`pgrep -fc "python -m ava._mcps_daemon"`; wsl co-located units → 2 total).
+2. **mcp-daemon**: exactly ONE `ava.mcps._daemon` per unit
+   (`pgrep -fc "python -m ava(\.mcps\._daemon|\._mcps_daemon)"`; wsl co-located
+   units → 2 total). The second alternative is the pre-rename module name a
+   host on an older release still runs; it goes away with
+   `_LEGACY_DAEMON_MODULE` in `ava/mcps/_daemon.py`.
    Ghosts accumulate when a respawn storm relaunches while the old detached
    process survives; a ghost's exit can steal the live socket.
    Healthcheck probe: `.venv/bin/python -m services.healthchecks.mcp_daemon`

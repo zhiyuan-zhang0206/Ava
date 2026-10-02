@@ -7,7 +7,9 @@ Branch, tag and activity-type filters do not exempt an event. Other triggers
 predicate, which is deliberately limited to the two named events.
 """
 
+import re
 import shutil
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -16,7 +18,6 @@ import yaml
 WORKFLOWS = Path(__file__).resolve().parents[2] / ".github/workflows"
 EXEMPTIONS = {
     ("ci.yml", "pull_request"): "Required checks report on every PR; jobs classify paths.",
-    ("qa-approved-gate.yml", "pull_request"): "Required QA gate follows every PR head and label.",
     ("release-app.yml", "push"): "Version-tag releases; GitHub ignores paths for tags.",
     ("release.yml", "push"): "Version-tag releases; GitHub ignores paths for tags.",
 }
@@ -134,3 +135,99 @@ def test_removed_exemption_is_reported(tmp_path: Path) -> None:
     (workflows / "release.yml").unlink()
     with pytest.raises(AssertionError, match=r"stale workflow exemptions.*release.yml"):
         assert_workflow_paths(workflows)
+
+
+# ── a filter entry must name something that exists ──────────────────────────
+#
+# GitHub does not validate `paths:` entries: a filter naming a moved or renamed
+# file never fails, the proof workflow just stops triggering. Test files move into
+# their packages' `tests/` directories, so every positive entry must still match a
+# tracked file.
+
+
+def glob_regex(pattern: str) -> re.Pattern[str]:
+    """GitHub's filter glob as a regex: `*` stays inside a path segment, `**` crosses them."""
+    out = ""
+    index = 0
+    while index < len(pattern):
+        char = pattern[index]
+        if pattern.startswith("**/", index):
+            out += "(?:.*/)?"
+            index += 3
+        elif pattern.startswith("**", index):
+            out += ".*"
+            index += 2
+        elif char == "*":
+            out += "[^/]*"
+            index += 1
+        elif char == "?":
+            out += "[^/]"
+            index += 1
+        else:
+            out += re.escape(char)
+            index += 1
+    return re.compile(out + "$")
+
+
+def filter_entries(workflow: Path) -> list[str]:
+    """The positive `paths:` entries of a workflow's push and pull_request events."""
+    document = yaml.safe_load(workflow.read_text())
+    triggers = document["on" if "on" in document else True]
+    if not isinstance(triggers, dict):
+        return []
+    entries: list[str] = []
+    for event in ("push", "pull_request"):
+        options = triggers.get(event)
+        if isinstance(options, dict):
+            entries.extend(entry for entry in options.get("paths", []) if not entry.startswith("!"))
+    return entries
+
+
+def tracked_files() -> list[str]:
+    result = subprocess.run(  # noqa: S603 - fixed git query in this repository
+        ["git", "-C", str(WORKFLOWS.parents[1]), "ls-files", "-z"],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    return [path for path in result.stdout.split("\0") if path]
+
+
+@pytest.mark.parametrize(
+    ("pattern", "path", "matches"),
+    [
+        ("tests/ui/**", "tests/ui/a/b.py", True),
+        ("tests/ui/**", "tests/uix/b.py", False),
+        ("tests/agent/test_resources*.py", "tests/agent/test_resources_x.py", True),
+        ("tests/agent/test_resources*.py", "tests/agent/sub/test_resources.py", False),
+        ("**/tests/**", "base/packages/tests/test_x.py", True),
+        ("tests/_*.py", "tests/_containers.py", True),
+        ("tests/_*.py", "tests/x/_containers.py", False),
+        ("base/paths/__init__.py", "base/paths/__init__.py", True),
+    ],
+)
+def test_glob_regex_follows_the_filter_syntax(pattern: str, path: str, matches: bool) -> None:
+    assert (glob_regex(pattern).match(path) is not None) is matches
+
+
+def test_every_paths_filter_entry_matches_a_tracked_file() -> None:
+    tracked = tracked_files()
+    dead = {
+        f"{workflow.name}: {entry}"
+        for workflow in sorted([*WORKFLOWS.glob("*.yml"), *WORKFLOWS.glob("*.yaml")])
+        for entry in filter_entries(workflow)
+        if not any(glob_regex(entry).match(path) for path in tracked)
+    }
+    assert not dead, (
+        "workflow `paths:` entries that match no tracked file (the workflow would stop "
+        f"triggering on them; a moved test needs its entry updated): {sorted(dead)}"
+    )
+
+
+def test_a_dead_filter_entry_is_detected(tmp_path: Path) -> None:
+    workflow = tmp_path / "proof.yml"
+    workflow.write_text(
+        "on:\n  push:\n    paths:\n      - 'tests/base/test_gone.py'\n      - '!docs/**'\n"
+    )
+    assert filter_entries(workflow) == ["tests/base/test_gone.py"]
+    assert not any(glob_regex("tests/base/test_gone.py").match(path) for path in tracked_files())

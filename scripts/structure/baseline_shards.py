@@ -8,6 +8,14 @@ section names to their entries and omits empty sections. One file per area
 keeps concurrent PRs off each other's lines; an entry filed under the wrong
 shard is an error, so every entry has exactly one home.
 
+`rules.json` is not a shard: it names the rule version each section was frozen under
+(`{"patch_targets": 2}`; a section it does not list is at version 1). A change to how a
+section's sites are measured makes today's keys disappear and new ones appear, so the guard
+cannot hold a per-key shrink-only line across it: when a section's version differs from the
+base revision's, the guard holds only its total (see `rule_change_errors`), and against an
+equal version it is per-key again. Raise the version in the same change as the rule change,
+re-freeze the section under the new rule, and leave it alone afterwards.
+
 The directory also carries `README.md`, committed even when every shard is
 empty (all debt paid off): git does not track empty directories, so without it
 a fully clean baseline would vanish from the tree and become indistinguishable
@@ -20,8 +28,10 @@ import json
 import subprocess
 from collections.abc import Iterable
 from pathlib import Path, PurePosixPath
+from typing import cast
 
 SHARD_DIR = "scripts/structure/baseline"
+RULES_FILE = "rules.json"
 _SHARD_DEPTH = 2
 
 
@@ -96,7 +106,9 @@ def read_worktree(repo_root: Path) -> dict[str, str]:
             f"baseline directory missing: {SHARD_DIR} (its README.md keeps it tracked)"
         )
     return {
-        path.stem: path.read_text(encoding="utf-8") for path in sorted(directory.glob("*.json"))
+        path.stem: path.read_text(encoding="utf-8")
+        for path in sorted(directory.glob("*.json"))
+        if path.name != RULES_FILE
     }
 
 
@@ -119,12 +131,95 @@ def read_at(repo_root: Path, rev: str) -> dict[str, str] | None:
     listing = git("ls-tree", "--name-only", f"{rev}:{SHARD_DIR}")
     if listing.returncode:
         return None
+    filenames = [
+        name for name in listing.stdout.split() if name.endswith(".json") and name != RULES_FILE
+    ]
+    if not filenames:
+        return {}
+    # One `cat-file --batch` for every shard: a process per shard costs ~30ms each, and the
+    # baseline has dozens of them.
+    batch = subprocess.run(  # noqa: S603 — local git query, no shell
+        ["git", "-C", str(repo_root), "cat-file", "--batch"],
+        input="".join(f"{rev}:{SHARD_DIR}/{name}\n" for name in filenames).encode(),
+        capture_output=True,
+        check=False,
+    )
+    if batch.returncode:
+        return None
     texts: dict[str, str] = {}
-    for filename in listing.stdout.split():
-        if not filename.endswith(".json"):
-            continue
-        shown = git("show", f"{rev}:{SHARD_DIR}/{filename}")
-        if shown.returncode:
+    cursor = 0
+    for filename in filenames:
+        header_end = batch.stdout.index(b"\n", cursor)
+        header = batch.stdout[cursor:header_end].split()
+        if len(header) != 3:  # `<object> missing`
             return None
-        texts[filename.removesuffix(".json")] = shown.stdout
+        size = int(header[2])
+        body_start = header_end + 1
+        texts[filename.removesuffix(".json")] = batch.stdout[
+            body_start : body_start + size
+        ].decode()
+        cursor = body_start + size + 1  # the newline that follows each object
     return texts
+
+
+def exists_at(repo_root: Path, rev: str, path: str) -> bool:
+    """Whether `path` exists in the tree of revision `rev`."""
+    result = subprocess.run(  # noqa: S603 — local git query, no shell
+        ["git", "-C", str(repo_root), "cat-file", "-e", f"{rev}:{path}"],
+        capture_output=True,
+        check=False,
+    )
+    return result.returncode == 0
+
+
+def parse_rules(text: str) -> dict[str, int]:
+    """The rule versions of a `rules.json` text: section -> integer version >= 1."""
+    rules = cast("object", json.loads(text))
+    if not isinstance(rules, dict) or any(
+        type(version) is not int or version < 1
+        for version in cast("dict[str, object]", rules).values()
+    ):
+        raise ValueError(f"{RULES_FILE} must map a section to an integer rule version >= 1")
+    return cast("dict[str, int]", rules)
+
+
+def read_rules_worktree(repo_root: Path) -> dict[str, int]:
+    """The rule versions in the working tree (none: every section is at version 1)."""
+    path = repo_root / SHARD_DIR / RULES_FILE
+    return parse_rules(path.read_text(encoding="utf-8")) if path.is_file() else {}
+
+
+def read_rules_at(repo_root: Path, rev: str) -> dict[str, int]:
+    """The rule versions at a revision (none: every section was at version 1)."""
+    shown = subprocess.run(  # noqa: S603 — local git query, no shell
+        ["git", "-C", str(repo_root), "show", f"{rev}:{SHARD_DIR}/{RULES_FILE}"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    return {} if shown.returncode else parse_rules(shown.stdout)
+
+
+def read_rules(repo_root: Path, rev: str) -> tuple[dict[str, int], dict[str, int]]:
+    """(the rule versions at `rev`, the rule versions in the working tree)."""
+    return read_rules_at(repo_root, rev), read_rules_worktree(repo_root)
+
+
+def rule_change_errors(
+    section: str, current: dict[str, int], previous: dict[str, int], was: int, now: int
+) -> list[str]:
+    """What a section's baseline may do when its rule version changes from `was` to `now`.
+
+    The keys are not comparable across a rule change, so only the total is held: the new
+    rule may not freeze more sites than the old one did. The version itself only goes up.
+    """
+    if now < was:
+        return [f"{SHARD_DIR}/{RULES_FILE}: {section} rule version went back from {was} to {now}"]
+    before, after = sum(previous.values()), sum(current.values())
+    if after > before:
+        return [
+            f"{SHARD_DIR}/{RULES_FILE}: {section} rule version rose from {was} to {now}, but the "
+            f"frozen total rose from {before} to {after} — a rule change may only keep or lower "
+            "the frozen sites"
+        ]
+    return []

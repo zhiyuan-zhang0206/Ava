@@ -30,7 +30,7 @@ from langchain_core.messages import AIMessage, BaseMessage
 from langchain_core.outputs import ChatGenerationChunk
 
 import ava
-from shared.config import settings
+from base.config import settings
 from tests.e2e.fakes._chat_model import ScriptedFakeChatModel
 
 _USAGE = {"input_tokens": 10, "output_tokens": 5, "total_tokens": 15}

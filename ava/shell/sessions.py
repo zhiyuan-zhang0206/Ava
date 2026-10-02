@@ -12,14 +12,14 @@ from typing import Any
 
 import ava
 import ava.agent_identity
-from ava.sdk_validation import coerce_str, coerce_typed
+from ava.sdk_surface.validation import coerce_str, coerce_typed
 from ava.security import scan_content
-from shared.cluster import session_name
-from shared.config import settings
-from shared.paths import repo_root, workspace_dir
-from shared.session_backend import get_shell_backend
-from shared.session_env import cwd_is_inside_checkout, forward_env_dict
-from shared.sessions.page_session import is_page_label
+from base.cluster import session_name
+from base.config import settings
+from base.paths import repo_root, workspace_dir
+from base.sessions.backend import get_shell_backend
+from base.sessions.env_forwarding import cwd_is_inside_checkout, forward_env_dict
+from base.sessions.page_session import is_page_label
 
 
 def _agent_prefix() -> str:
@@ -42,7 +42,7 @@ def _next_session_index_from_db() -> int:
     # number (shared by shells and watchers). Uses `UPDATE ... RETURNING` for
     # concurrency safety. No fallback — raise directly if DB is unavailable or
     # the agent isn't in agents_meta.
-    from shared.db import connect
+    from base.db import connect
 
     agent_id = ava.agent_identity.agent_id()
     if agent_id is None:
@@ -53,7 +53,7 @@ def _next_session_index_from_db() -> int:
             "ava.agent_identity.establish). Running a standalone script that imports ava "
             "does not set an agent identity."
         )
-    # shared.db.connect(): this runs inside the agent's exec sandbox, so its
+    # base.db.connect(): this runs inside the agent's exec sandbox, so its
     # connect cap keeps a black-holing database from hanging `ava.shell.new()`
     # on the OS TCP-retransmit timeout instead of raising.
     with connect() as conn, conn.cursor() as cur:
@@ -137,7 +137,7 @@ def _record_ttl(session_id: int, ttl: float) -> None:
     the caller must abort the creation it just made. `SET TRANSACTION READ
     WRITE` leads the transaction — a pooled backend handed over with
     session-level read-only poison would otherwise reject the write."""
-    from shared.db import connect
+    from base.db import connect
 
     try:
         with connect() as conn, conn.cursor() as cur:
@@ -181,7 +181,7 @@ def create_session(
         )
     if is_page_label(name):
         # The `page-` label names ava.ui.serve page sessions exactly
-        # (shared/sessions/page_session.py), which a terminate's shell kill spares.
+        # (base/sessions/page_session.py), which a terminate's shell kill spares.
         raise ValueError(f"session name {name!r} invalid — 'page-' names are reserved for pages")
     # Validate here, not at call sites, so every caller is capped at the
     # write point (ruling 2026-09-01: sessions live at most 24h) — except
@@ -371,7 +371,7 @@ def _record_renewal(agent_id: int, session_id: int, ttl: float) -> datetime:
             f"session {session_id} has no TTL row — a pre-mandate session cannot be renewed"
         )
     new_expires = _apply_renewal(agent_id, session_id, ttl, prev_expires)
-    from shared import telemetry
+    from base import telemetry
 
     telemetry.emit(
         "telemetry",
@@ -393,7 +393,7 @@ def _read_expiry_row(agent_id: int, session_id: int) -> datetime | None:
     """The session's current deadline; None when the row is absent."""
     import psycopg
 
-    from shared.db import connect
+    from base.db import connect
 
     try:
         with connect() as conn, conn.cursor() as cur:
@@ -439,7 +439,7 @@ def _apply_renewal(agent_id: int, session_id: int, ttl: float, prev_expires: dat
     """
     import psycopg
 
-    from shared.db import connect
+    from base.db import connect
 
     new_expires: datetime | None = None
     try:

@@ -22,8 +22,7 @@ Six jobs on one fast tick (user-confirmed design, 2026-08-02 — see
    re-reporting every still-stalled inbound (the 5,184-event burst, 2026-08-06 audit).
 
 `running` owners are never dispatched or alerted: a chat queued behind a long
-in-flight turn is normal — the claim's turn-end SELECT picks it up. Boot states
-(restarting) is left to its own reaper.
+in-flight turn is normal — the claim's turn-end SELECT picks it up.
 
 3. **Terminated-owner resurrect retry** — every tick, for each DISTINCT
    terminated agent that still holds a `pending` chat created after its latest
@@ -44,23 +43,24 @@ in-flight turn is normal — the claim's turn-end SELECT picks it up. Boot state
    `AVA_DELIVERY_WATCHDOG_STALE_CLAIMED_IDLING_THRESHOLD_SECONDS` (default 2h),
    to `done` (age from `claimed_at`, falling back to `created_at`). Hosted
    idling agents may never boot again to reconcile their completed claims;
-   running/restarting owners remain untouched. The same cadence completes the
+   running owners remain untouched. The same cadence completes the
    stale pending `terminate` / `system_note` / `restart_completed` rows of
    terminated owners (no consumer), and the reconcile-side cutoff
-   (`agent/db.py::reconcile_claimed_inbounds`) still closes the resurrect race at boot.
+   (`agent/db/__init__.py::reconcile_claimed_inbounds`) still closes the resurrect race at boot.
 5. **Hosted-turn liveness recovery** — on the same watchdog tick, select hosted
    running rows whose DB activity is older than the 2400s wedged-agent budget,
    then confirm them against the agent-host's 15s Redis progress heartbeat
    (60s TTL). Missing host heartbeats or stale per-turn marks trigger a
-   terminate-then-resurrect recovery with a 10-minute per-agent cooldown.
+   terminate-then-resurrect recovery with a 10-minute per-agent cooldown; the
+   recovery wake commits in the same transaction as the force terminate.
 
 6. **Stalled crash-marked harvest request** — escalate a chat still `pending`
    past the stall threshold whose owner is a crash-marked idling corpse over
    the internal `recover-crash-marked-v2` path (one request per owner, 60s
    cooldown, gated by `AVA_DELIVERY_STALLED_RECOVERY_ENABLED`; Task #3618).
 
-Runs on the gateway, one per cluster. Kept alive via
-`services/healthchecks/delivery_watchdog.py` (the gateway watchdog).
+Runs on the gateway, one per cluster. Kept alive by the root supervisor's health
+monitor through the roster's `/healthz` identity probe (`ops/roster/healthz.py`).
 
 Usage:
     .venv/bin/python -m services.delivery_watchdog.daemon
@@ -72,12 +72,23 @@ import os
 import signal
 import sys
 import time
+from pathlib import Path
 
 import psycopg
 from psycopg import sql
 from psycopg_pool import ConnectionPool
 
-import shared.db
+import base.db
+from base import telemetry
+from base.agents import AgentStatus
+from base.config import settings
+from base.config.service_read import current_field_values
+from base.daemon.health import Liveness, health_port, start_health_server, stop_health_server
+from base.daemon.shutdown import cancel_and_drain, install_graceful_shutdown
+from base.daemon.shutdown import hard_exit as _hard_exit
+from base.db.transaction import write_transaction
+from base.log import init_gateway_process
+from base.paths import pid_path
 from services.delivery_watchdog import (
     dispatch_guard,
     resurrect_guard,
@@ -97,19 +108,14 @@ from services.delivery_watchdog.dead_letter import (
     dead_letter_stale_pending_terminated as dead_letter_stale_pending_terminated,
 )
 from services.pidfile import acquire_pidfile, pidfile_holds_daemon, remove_pidfile
-from shared import telemetry
-from shared.agents import AgentStatus
-from shared.config import settings
-from shared.config.service_read import current_field_values
-from shared.daemon_health import Liveness, health_port, start_health_server, stop_health_server
-from shared.daemon_shutdown import cancel_and_drain, install_graceful_shutdown
-from shared.daemon_shutdown import hard_exit as _hard_exit
-from shared.db_transaction import write_transaction
-from shared.log import init_gateway_process
 
 _log = logging.getLogger("services.delivery_watchdog.daemon")
 
-_PIDFILE = settings.services.delivery_watchdog_pidfile
+
+def _pidfile() -> Path:
+    return pid_path("delivery_watchdog")
+
+
 # Liveness staleness ceiling. The loop sleeps a short inter-poll interval
 # (default 30s), so `_sleep_with_liveness` beats every _LIVENESS_BEAT_STEP_S
 # during that wait; the ceiling only has to exceed that step, not the whole
@@ -140,10 +146,9 @@ def select_stale_pending(
 
     An owner mid-turn (status='running') queues inbound legitimately — the
     claim's turn-end SELECT picks them up, so they are NOT stalls (a long LLM
-    turn with a queued user message is normal). 'restarting' has its own reaper
-    (boot_reap_grace_seconds); alerting at the 30s threshold would fire
-    during a mass rollout. Only waiting/terminal owners signal a real stall:
-    'idling' (lost wake), 'terminated' (delivery auto-resurrect failed).
+    turn with a queued user message is normal). Only waiting/terminal owners signal
+    a real stall: 'idling' (lost wake), 'terminated' (delivery auto-resurrect
+    failed).
     """
     with pool.connection() as conn, conn.cursor() as cur:
         cur.execute(
@@ -196,12 +201,12 @@ def select_terminated_owners_with_pending(
     `dead_letter_stale_pending_chats` closes — and with it the trigger, so no
     unbounded retry can resurrect-suicide the agent forever.
     """
-    from shared.lifecycle_acceptance import (
+    from base.agents.incarnation.lifecycle_acceptance import (
         FAILED_RESTART_FOR_CURRENT_TARGET,
         SYSTEM_NOTICE_SOURCE,
         SYSTEM_REAPED_CRASH_ROW,
     )
-    from shared.recovery_breaker import RECOVERY_BREAKER_CLEAR
+    from base.agents.recovery_breaker import RECOVERY_BREAKER_CLEAR
 
     with pool.connection() as conn, conn.cursor() as cur:
         cur.execute(
@@ -360,13 +365,13 @@ def _alert_stalled(
 
 
 def _write_pidfile() -> None:
-    if not acquire_pidfile(_PIDFILE, "services.delivery_watchdog.daemon"):
-        _log.info("[delivery_watchdog] daemon already running (pidfile=%s), exiting", _PIDFILE)
+    if not acquire_pidfile(_pidfile(), "services.delivery_watchdog.daemon"):
+        _log.info("[delivery_watchdog] daemon already running (pidfile=%s), exiting", _pidfile())
         sys.exit(1)
 
 
 def _remove_pidfile() -> None:
-    remove_pidfile(_PIDFILE)
+    remove_pidfile(_pidfile())
 
 
 def _is_running() -> bool:
@@ -374,7 +379,7 @@ def _is_running() -> bool:
 
     Pid-reuse-safe: a live pid whose argv does not name this daemon's module
     is a recycled pid, not a running instance (audit round 2, P1)."""
-    return pidfile_holds_daemon(_PIDFILE, "services.delivery_watchdog.daemon")
+    return pidfile_holds_daemon(_pidfile(), "services.delivery_watchdog.daemon")
 
 
 async def _sleep_with_liveness(liveness: Liveness, total_s: float) -> None:
@@ -400,7 +405,7 @@ async def _resurrect_one(pool: ConnectionPool, agent_id: int, trigger_inbound_id
     """Run `resurrect_if_terminated` for one agent, bounded by the concurrency
     semaphore; classify the returned status and escalate consecutive failures
     into a durable wake-suppression window."""
-    from ops.ops_lifecycle import resurrect_if_terminated
+    from ops.lifecycle import resurrect_if_terminated
 
     async with _resurrect_semaphore:
         try:
@@ -496,7 +501,7 @@ _DEDUP_GC_EVERY_TICKS = 120
 # tick-gated) so its real period is independent of the tick interval. 30s is
 # plenty — the hazard is a resurrect re-delivering ancient rows, and a
 # resurrect takes seconds to boot, so the sweep is virtually always ahead of
-# it; the reconcile-side cutoff (agent/db.py) closes the residual race.
+# it; the reconcile-side cutoff (agent/db/__init__.py) closes the residual race.
 _CLAIMED_SWEEP_INTERVAL_S = 30.0
 
 
@@ -665,17 +670,17 @@ async def _scan_loop(pool: ConnectionPool, liveness: Liveness) -> None:
 async def run() -> None:
     """Start the daemon: pidfile -> healthz server -> connect DB -> main loop."""
     if _is_running():
-        _log.info("[delivery] daemon already running (pidfile=%s), exiting", _PIDFILE)
+        _log.info("[delivery] daemon already running (pidfile=%s), exiting", _pidfile())
         sys.exit(1)
 
     _write_pidfile()
-    _log.info("[delivery] pidfile written: %s", _PIDFILE)
+    _log.info("[delivery] pidfile written: %s", _pidfile())
 
     liveness = Liveness(_LIVENESS_TIMEOUT_S)
     health = await start_health_server("delivery_watchdog", liveness=liveness)
     _log.info("[delivery] healthz listening on :%s", health_port("delivery_watchdog"))
 
-    pool = shared.db.pool()
+    pool = base.db.pool()
     try:
         await _scan_loop(pool, liveness)
     finally:
@@ -687,7 +692,7 @@ async def run() -> None:
 
 def main() -> None:
     """Entry point: init logger + run asyncio loop."""
-    from shared.migrations import assert_schema_current
+    from base.deploy.schema.migrations import assert_schema_current
 
     # Pre-startup sanity: schema version must match code; raises SchemaVersionMismatch if not.
     assert_schema_current(settings.data_plane.db_url)

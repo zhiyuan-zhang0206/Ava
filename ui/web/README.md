@@ -16,8 +16,8 @@ the memory graph.
 - No Next rewrites proxy for `/api` — the frontend connects to the gateway
   directly (`API_BASE` resolution in `src/lib/api.ts`); same-origin reverse
   proxy in prod.
-- State rules live in `src/frontend-state/frontend-state.ava.okf.md` and
-  `src/frontend-data-flow/frontend-data-flow.ava.okf.md`; the R4 concept model is in
+- State rules live in `src/docs/frontend-state/frontend-state.ava.okf.md` and
+  `src/docs/frontend-data-flow/frontend-data-flow.ava.okf.md`; the R4 concept model is in
   `okf/design/r4-frontend-projection.ava.okf.md` (repo root).
 
 ## Development
@@ -39,3 +39,8 @@ npm run lint      # errors and warnings absent from scripts/eslint-warning-basel
 npx tsc --noEmit  # type check
 npm run build:analyze  # optional local Webpack bundle report
 ```
+
+Locally, run eslint and vitest on the paths you changed (`npx eslint <files>`,
+`npx vitest related --run <files>`) and `tsc --noEmit` once after your last edit;
+the project-wide `vitest run` and `npm run lint` belong to CI (see
+[the local-test skill](../../.agents/skills/run-local-tests/SKILL.md)).

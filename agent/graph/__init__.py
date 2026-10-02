@@ -3,9 +3,10 @@
 Submodules split by node (one file per node); leading underscore marks
 package-private, no underscore marks a module promoted to a real public door
 (other packages import it directly — plugin registration points, the exec
-child's protocol, etc.). Two node families are subpackages, one package per
-node (`claim/`, `llm/`) — each package door (`__init__.py`) is docstring-only,
-so `claim_node` / `llm_node` are re-exported from their `node.py`:
+child's protocol, etc.). Three node families are subpackages, one package per
+node (`claim/`, `llm/`, `exec/`) — each package door (`__init__.py`) is
+docstring-only, so `claim_node` / `llm_node` / `exec_node` are re-exported from
+their `node.py`:
 
   - `claim/node.py`      — claim node: pipeline orchestrator (long await + dispatch by inbound kind)
   - `claim/_batch.py`    — claim batch acquisition: idle wait loop, trim, chat deferral
@@ -19,16 +20,17 @@ so `claim_node` / `llm_node` are re-exported from their `node.py`:
   - `llm/_chunk.py`      — llm chunk assembly + final-message validation
   - `llm_errors.py`      — llm stream error taxonomy + consecutive-error tracking
   - `_base_prompt.py`   — immutable base system prompt + lazily captured `ava` SDK overview
-  - `_exec.py`         — exec node (one disposable subprocess per execute_code call)
-  - `exec_output.py`   — code execution output envelope: format / truncate / overflow-to-file
-  - `_exec_alerts.py`  — best-effort operator alert for boot-phase exec child crashes
+  - `exec/node.py`      — exec node (one disposable subprocess per execute_code call)
+  - `exec/output.py`    — code execution output envelope: format / truncate / overflow-to-file
+  - `exec/protocol.py`  — exec child request/result envelopes (shared with `agent/exec_child.py`)
+  - `exec/_*.py`        — exec subprocess machinery: spawn, process domain, stream, result, alerts
   - `_build.py`        — build_graph: assemble 8-Node self-cycling topology
   - `node_log.py`      — node enter/exit lifecycle log + publish timeline snapshot
   - `system_prompt.py` — system prompt dynamic assembly (base + plugin contributions)
 
 Public API is lazily re-exported via this __init__.py (PEP 562) — external
 `from agent.graph import X` callers don't need to know the submodule layout,
-and importing a light submodule (`exec_protocol`, `agent_traceback`) no
+and importing a light submodule (`exec.protocol`, `agent_traceback`) no
 longer drags the node set into the importer — the exec child imports those
 before user code runs (startup-path laziness, task #3585).
 """
@@ -43,9 +45,9 @@ if TYPE_CHECKING:
     # stays lazy — the node set is a heavy import on paths (the exec child) that
     # never use these names (agent/graph/__init__.py in `_TYPE_CHECKING_ALLOWED`).
     from ._build import build_graph as build_graph
-    from ._exec import exec_node as exec_node
     from .claim.node import claim_node as claim_node
-    from .exec_output import EXEC_CANCEL_NOTE as EXEC_CANCEL_NOTE
+    from .exec.node import exec_node as exec_node
+    from .exec.output import EXEC_CANCEL_NOTE as EXEC_CANCEL_NOTE
     from .llm.node import llm_node as llm_node
 
 # Eager `from ._build import build_graph` used to run on every `agent.graph`
@@ -54,8 +56,8 @@ if TYPE_CHECKING:
 _LAZY_EXPORTS = {
     "build_graph": "._build",
     "claim_node": ".claim.node",
-    "exec_node": "._exec",
-    "EXEC_CANCEL_NOTE": ".exec_output",
+    "exec_node": ".exec.node",
+    "EXEC_CANCEL_NOTE": ".exec.output",
     "llm_node": ".llm.node",
 }
 

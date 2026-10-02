@@ -1,0 +1,56 @@
+---
+type: doc
+title: "Telemetry cluster isolation"
+description: "The home-derived cluster identity and lgtm-host gates that keep co-located Ava homes from sharing observability by accident."
+tags:
+- base
+- telemetry
+- otlp
+- observability
+- isolation
+---
+
+# Telemetry cluster isolation
+
+## Identity
+
+Every event, metric, and trace Resource carries `cluster`, resolved without the
+data plane from `cluster.home_label(ava_home())`, then the home slug, then
+`.unknown`. Event JSON and log attributes carry the same value. The designated
+LGTM collector drops a record only when its non-null cluster differs from its
+own home label; null Resources remain valid for legacy events and the
+collector's filelog/infra pipelines.
+
+## Lifecycle and producer gates
+
+The implicit loopback event exporter requires a registered machine identity and
+the production cluster label `.ava`. Tests, ad-hoc processes with hostname
+fallback, and non-production homes do not export by default; their unified
+events continue into the local JSONL mirror. An explicit
+`AVA_TELEMETRY_OTLP_ENDPOINT` is the operator escape hatch and opts any process
+into a caller-managed collector before the production-identity check.
+
+`$AVA_HOME/lgtm-host` names the production gateway home that owns the host's
+LGTM stack and local collector. A production gateway without the marker neither
+installs that collector nor exports logs, metrics, or traces to the implicit
+loopback endpoint. The cached producer verdict warns once per process when this
+marker gate declines export and applies at restart.
+
+Production-identity pure agent-runner homes retain their authenticated relay
+collector regardless of the marker: they are transport participants, not
+competing backend owners. Non-production runners require an explicit endpoint.
+The collector's Postgres receiver reads the home's own instance over its
+owner-only socket as the password-less monitoring role (peer), so it carries no
+database credential; a remote-managed plane omits it.
+
+## Read boundary
+
+Gateway Loki reads follow the same ownership rule. An unmarked gateway cannot
+use the implicit loopback Loki URL and receives a clean HTTP 503 before any
+network request; an explicit `AVA_TELEMETRY_LOKI_URL` is the operator escape
+hatch. Dashboard and fleet callers pass their current cluster label, and the
+production alert rules filter `cluster=".ava"` after JSON parsing.
+That strict filter excludes legacy no-cluster rows for up to Loki retention;
+lower aggregate counts are deliberate in exchange for excluding preview pollution.
+
+Parent node: [[telemetry-otlp.ava.okf.md|OTLP export backend & trace ship to Tempo]].

@@ -17,7 +17,7 @@
 // it has declared that it means to pin both, and the picker says so.
 //
 // The tokens come back off the wire already validated as color literals
-// against a closed vocabulary (`shared/plugin_ui_contributions.py`), so there
+// against a closed vocabulary (`base/packages/plugins/ui_contributions.py`), so there
 // is nothing to sanitize here — an unknown token or a `var(...)` value could
 // not have reached a manifest that loads.
 

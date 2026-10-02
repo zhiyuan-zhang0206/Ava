@@ -37,9 +37,9 @@ export type WireAgentDirectoryPage = Schemas["AgentDirectoryPage"];
 export type OpenImpersonationStatus = NonNullable<WireAgentCard["open_impersonation_status"]>;
 
 /** The console's complete, user-facing agent status model. Liveness remains a
- *  separate `AgentRow.liveness_state` axis, so an internally restarting agent
- *  whose runner is unreachable still renders as `idling` + `offline`, rather
- *  than leaking a control-plane transition or hiding the outage.
+ *  separate `AgentRow.liveness_state` axis, so an idling agent whose runner
+ *  is unreachable still renders as `idling` + `offline`, rather than hiding
+ *  the outage.
  *  `impersonated` is a card-level projection (see `projectAgentStatus`), not
  *  a wire lifecycle state — the backend `AgentStatus` enum never changes. */
 export type PublicAgentStatus =
@@ -68,7 +68,6 @@ export function projectAgentStatusValue(status: WireAgentStatus): Extract<WireAg
     case "terminated":
       return "terminated";
     case "idling":
-    case "restarting":
       return "idling";
     default: {
       const unknownStatus: never = status;
@@ -94,7 +93,7 @@ export function projectAgentStatus(row: WireAgentCard | WireAgentRow): AgentRow 
     status === row.status &&
     "awaiting_response_count" in row
   ) {
-    return row as AgentRow;
+    return row;
   }
   // Hand-rebuilt allowlist: an omitted optional field vanishes silently (availability, task #4723).
   return {
@@ -144,7 +143,7 @@ export type PluginStat = Schemas["PluginStat"];
 // but `metrics` is `Record<string, unknown>` there by design: the backend
 // types it as a free-form dict so adding a `@metric` unit is one function with
 // no schema churn. The per-unit data shapes below mirror the `data` dicts the
-// units in shared/metrics/report.py emit; consumers narrow `report.metrics[key]` to
+// units in base/telemetry/metrics/report.py emit; consumers narrow `report.metrics[key]` to
 // the matching interface. Adding a unit that reuses these shapes needs no TS
 // change beyond a new key access.
 export type AlertsWindow = "1h" | "6h" | "24h" | "7d";
@@ -451,7 +450,7 @@ export interface TimelineSnapshotEvent extends BaseEvent {
 }
 
 // AgentSnapshot is structurally identical to WireAgentRow (the HTTP schema)
-// — see shared/agent_snapshot.py for the canonical Python definition.
+// — see base/agents/observation/snapshot.py for the canonical Python definition.
 // Only selected detail reads use it; lifecycle SSE events carry ID hints.
 export type AgentSnapshot = WireAgentRow;
 
@@ -480,11 +479,6 @@ export interface TaskCreatedEvent extends BaseEvent {
 export interface TaskUpdatedEvent extends BaseEvent {
   readonly role: "task_updated";
   readonly task_id: number;
-}
-export interface ClusterUpdateStartedEvent extends BaseEvent {
-  readonly role: "cluster_update_started";
-  readonly kind: "rollout" | "restart";
-  readonly origin: string;
 }
 
 export type SystemEvent =
@@ -517,8 +511,7 @@ export type SystemEvent =
   | NoticePostedEvent
   | NoticeResolvedEvent
   | TaskCreatedEvent
-  | TaskUpdatedEvent
-  | ClusterUpdateStartedEvent;
+  | TaskUpdatedEvent;
 
 
 
@@ -620,7 +613,6 @@ export type MachineStatus = Schemas["MachineStatus"];
 export type ResourceSample = Schemas["ResourceSample"];
 export type ClusterPanel = Schemas["ClusterPanel"];
 export type ClusterStatus = Schemas["ClusterStatus"];
-export type ClusterUpdateCheck = Schemas["UpdateCheck"];
 export type SystemStatus = Schemas["SystemStatus"];
 
 // --- Plugin console contributions (GET /api/ui/contributions) ---
@@ -713,7 +705,7 @@ export type FleetGraph = Omit<WireFleetGraph, "nodes" | "edges"> & {
 // The task registry — persistent, process-decoupled work items that outlive
 // the agent doing them. Backs the Task Graph (a free D3-force view).
 
-// The task lifecycle status set — the backend's shared/tasks/task_status.py enum,
+// The task lifecycle status set — the backend's base/agents/tasks/status.py enum,
 // surfaced through the generated wire schema (a pytest locks db/schema.sql and
 // openapi.json to it; 'ongoing' was removed by user ruling 2026-09-15). The
 // system root is not a status: it is pinned in_progress and immutable.

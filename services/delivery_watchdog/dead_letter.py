@@ -10,7 +10,7 @@ and this sweep share that gate, in lockstep).
 
 from psycopg_pool import ConnectionPool
 
-from shared.db_transaction import write_transaction
+from base.db.transaction import write_transaction
 
 
 def dead_letter_stale_pending_chats(pool: ConnectionPool, threshold_s: float) -> int:

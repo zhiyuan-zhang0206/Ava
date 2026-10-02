@@ -29,7 +29,7 @@ from-scratch sandbox.
    primitive is the work.
 2. **The promote-on-pass path** — a self-code-change (or any candidate) that
    passes its eval *inside the container* is what gets promoted to the real
-   cluster via the normal PR -> CI -> merge -> `ava cluster update` loop. The
+   cluster via the normal PR -> CI -> merge -> fleet update loop. The
    container is where it is *tried*; the existing rollout is how it *ships*.
 
 ## Scope nuance (kept honest)

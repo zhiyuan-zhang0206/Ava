@@ -31,7 +31,21 @@ from fastapi.responses import RedirectResponse, StreamingResponse
 from psycopg_pool import ConnectionPool
 from starlette.background import BackgroundTask
 
-from gateway.schemas import PageRegisterRequest
+from base.agents import AgentStatus
+from base.config import settings
+from base.db import agent_exists
+from base.events.live.projection import PageClosed, PageOpened
+from base.events.live.redis_client import publish_best_effort
+from base.log import logger
+from base.packages.docs.pages_copy import (
+    PAGE_EXPIRED_BODY,
+    PAGE_EXPIRED_TITLE,
+    PAGE_LANGUAGE_DEFAULT,
+    PAGE_SERVER_DOWN_BODY,
+    PAGE_SERVER_TIMEOUT_BODY,
+)
+from base.telemetry.alerts import display_language
+from gateway.schemas.pages import PageRegisterRequest
 from ops.pages import (
     PagePortConflictError,
     assert_port_free,
@@ -43,20 +57,6 @@ from ops.pages import (
     register_page,
 )
 from ops.rpc_schemas import PageRow
-from shared.agents import AgentStatus
-from shared.alerts import display_language
-from shared.config import settings
-from shared.db import agent_exists
-from shared.docs.pages_copy import (
-    PAGE_EXPIRED_BODY,
-    PAGE_EXPIRED_TITLE,
-    PAGE_LANGUAGE_DEFAULT,
-    PAGE_SERVER_DOWN_BODY,
-    PAGE_SERVER_TIMEOUT_BODY,
-)
-from shared.live_events import PageClosed, PageOpened
-from shared.log import logger
-from shared.redis_client import publish_best_effort
 
 router = APIRouter()
 
@@ -75,7 +75,7 @@ def _page_language(pool: ConnectionPool) -> str:
     """The page copy language — ``user_settings`` display.language (zh | en).
 
     Same single-language-source mechanism as the IM alert copy
-    (``shared.alerts.display_language``); a missing row or unknown value
+    (``base.telemetry.alerts.display_language``); a missing row or unknown value
     falls back to ``PAGE_LANGUAGE_DEFAULT``. A DB failure also falls back —
     an error page must not turn a proxy 502/504 into a 500 (QA nit A).
     """
@@ -93,7 +93,7 @@ def _page_language(pool: ConnectionPool) -> str:
 def _EXPIRED_PAGE_HTML(agent_id: int, name: str, lang: str) -> str:  # noqa: N802 — fixed contract name
     """Small self-contained response for links whose page TTL elapsed.
 
-    Copy follows the user's display language (``shared/docs/pages_copy.py``, the
+    Copy follows the user's display language (``base/packages/docs/pages_copy.py``, the
     locale module); the page name and agent id pass through untranslated.
     """
     escaped_name = _html.escape(name)
@@ -128,10 +128,9 @@ _FORWARDED_RESPONSE_HEADERS = frozenset(
 def _absolute_url(request: Request, path: str) -> str:
     """Render a gateway-relative path as the absolute URL the browser dials.
 
-    The base is the configured Gateway URL (`AVA_GATEWAY_URL` /
-    `$AVA_HOME/gateway_url`), NOT the request's own Host: the SDK dials the
-    gateway at its local loopback URL on a single box, so absolutizing
-    against the request would hand every SDK caller a `localhost` link that
+    The base is the configured Gateway URL (`AVA_GATEWAY_URL`), NOT the request's own
+    Host: the SDK dials the gateway at its local loopback URL on a single box, so
+    absolutizing against the request would hand every SDK caller a `localhost` link that
     is unreachable from the user's other devices. The Gateway URL variable is
     the single source of truth for how the gateway is reached from outside —
     whatever the caller's dial address is (localhost / VPN overlay / LAN), the

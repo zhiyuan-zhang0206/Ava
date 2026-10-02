@@ -2,15 +2,18 @@
 
 import os
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 import yaml
 from fastapi.testclient import TestClient
 
+from base import config
+from base.cluster.authority.api import telemetry_token
+from base.config.observability import ObservabilitySettings
+from base.host.env import runtime_config
 from cli.commands.observability import otel_collector as collector
 from gateway.app import app
-from shared import config, runtime_config
-from shared.config.observability import ObservabilitySettings
 
 
 @pytest.mark.parametrize(("gateway_port", "local_port"), [(4318, 4319), (54318, 4318)])
@@ -47,7 +50,17 @@ def test_bootstrap_routes_to_gateway_with_distinct_local_listener(
         }
     )
     monkeypatch.setattr(config.settings, "observability", settings)
-    monkeypatch.setattr("shared.machine.machine_name", lambda: "relay-test-runner")
+    monkeypatch.setattr("base.cluster.machine.machine_name", lambda: "relay-test-runner")
+    # The runner renders its relay from its capability's telemetry token (the
+    # gateway derived it from its secret); the runner holds no human secret.
+    telemetry = telemetry_token("relay-test-token")
+    capability = SimpleNamespace(api=SimpleNamespace(telemetry=telemetry))
+
+    def installed(_home: Path) -> SimpleNamespace:
+        return capability
+
+    monkeypatch.setattr("base.cluster.authority.unit.load_unit_capability", installed)
+    monkeypatch.setattr(config.settings.data_plane, "cluster_secret", "")
     rendered = yaml.safe_load(
         collector.generate_config(
             Path(__file__).resolve().parents[2], tmp_path, roles=frozenset({"agent-runner"})
@@ -60,9 +73,7 @@ def test_bootstrap_routes_to_gateway_with_distinct_local_listener(
     assert "otlp/remote" not in rendered["receivers"]
     for name in ("otlphttp/tempo", "otlphttp/loki", "otlphttp/prometheus"):
         assert rendered["exporters"][name]["endpoint"] == remote
-        assert rendered["exporters"][name]["headers"] == {
-            "Authorization": "Bearer relay-test-token"
-        }
+        assert rendered["exporters"][name]["headers"] == {"Authorization": f"Bearer {telemetry}"}
     assert rendered["exporters"]["otlphttp/tempo"]["sending_queue"]["storage"] == "file_storage"
 
 

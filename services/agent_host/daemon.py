@@ -48,6 +48,7 @@ import os
 import signal
 import sys
 from collections.abc import Collection
+from pathlib import Path
 from typing import cast
 
 import psycopg
@@ -55,9 +56,30 @@ from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from psycopg.rows import DictRow
 from psycopg_pool import AsyncConnectionPool
 
-import shared.redis_client
-from agent.hosted_ownership import settle_stale_running_rows
-from agent.turn_progress import turn_progress_age_s, turn_progress_snapshot
+import base.events.live.redis_client
+from agent.ownership.hosted import settle_stale_running_rows
+from agent.turn.progress import turn_progress_age_s, turn_progress_snapshot
+from base import paths
+from base.agents.incarnation.exec_request_evidence import disposition_hint
+from base.agents.incarnation.hosted_force import recover_orphaned_hosted_forces
+from base.cluster.machine import machine_name
+from base.config import settings
+from base.daemon.health import (
+    Liveness,
+    RouteHandler,
+    health_port,
+    start_health_server,
+    stop_health_server,
+)
+from base.daemon.shutdown import cancel_and_drain, install_graceful_shutdown
+from base.daemon.shutdown import hard_exit as _hard_exit
+from base.db import pool_release
+from base.deploy.maintenance import admission
+from base.deploy.progress_timeout import AGENT_LEASE_RENEW_INTERVAL_S
+from base.deploy.timing import assert_clock_lattice
+from base.log import init_gateway_process, logger
+from base.paths import pid_path
+from base.sessions.helper_chain_guard import parent_chain_intact
 from services.agent_host import boot_defer
 from services.agent_host.dispatcher import InboundWakeDispatcher, TurnScheduler
 from services.agent_host.host import AgentHost, kill_terminating_agent_shells
@@ -65,33 +87,20 @@ from services.agent_host.pooled_checkpoint import PooledPostgresSaver
 from services.agent_host.pools import build_control_pool, build_shared_pool
 from services.agent_host.stdout_log import _rotate_stdout_log_forever
 from services.pidfile import acquire_pidfile, pidfile_holds_daemon, remove_pidfile
-from shared import maintenance, paths, pool_release
-from shared.config import settings
-from shared.daemon_health import (
-    Liveness,
-    RouteHandler,
-    health_port,
-    start_health_server,
-    stop_health_server,
-)
-from shared.daemon_shutdown import cancel_and_drain, install_graceful_shutdown
-from shared.daemon_shutdown import hard_exit as _hard_exit
-from shared.exec_request_evidence import disposition_hint
-from shared.helper_chain_guard import parent_chain_intact
-from shared.hosted_force import recover_orphaned_hosted_forces
-from shared.log import init_gateway_process, logger
-from shared.machine import machine_name
-from shared.straggler_reap import settle_stranded_reaps_async
-from shared.timing import assert_clock_lattice
 
 _log = logging.getLogger("services.agent_host.daemon")
 
 _MODULE = "services.agent_host.daemon"
-_PIDFILE = settings.services.agent_host_pidfile
 
-# A fixed timer proves liveness even when no agent has work.
+
+def _pidfile() -> Path:
+    return pid_path("agent_host")
+
+
+# A fixed timer proves liveness even when no agent has work. The same beat
+# renews hosted agent leases, so its step IS the lattice's renewal interval.
 _LIVENESS_TIMEOUT_S = 60.0
-_LIVENESS_BEAT_STEP_S = 15.0
+_LIVENESS_BEAT_STEP_S = AGENT_LEASE_RENEW_INTERVAL_S
 _OWNERSHIP_RENEW_TIMEOUT_S = 10.0
 # Gateway key presence proves the 15s host loop runs; four missed beats expire it.
 _TURN_PROGRESS_HEARTBEAT_TTL_S = 60
@@ -117,7 +126,7 @@ def _plugins_fingerprint() -> str:
     any other file under the dir does not. The directory itself missing is a
     valid state (no plugins) — the fingerprint is then empty, not an error.
     """
-    from shared.runtime_interpreter import external_plugin_read_root
+    from base.deploy.release.runtime_interpreter import external_plugin_read_root
 
     root = external_plugin_read_root()
     if not root.exists():
@@ -142,11 +151,11 @@ async def _watch_plugins_for_restart() -> None:
     turns into the KeyboardInterrupt every daemon already unwinds through —
     the drains run, then the supervisor restarts the host fresh.
     """
-    base = _plugins_fingerprint()
+    baseline = _plugins_fingerprint()
     while True:
         await asyncio.sleep(_PLUGINS_POLL_INTERVAL_S)
         now = _plugins_fingerprint()
-        if now == base:
+        if now == baseline:
             continue
         _log.info(
             "[agent-host] external plugins changed under $AVA_HOME/plugins — "
@@ -161,7 +170,7 @@ async def _publish_turn_progress_heartbeat(
     active_agents: Collection[int],
 ) -> None:
     """Best-effort Redis snapshot for the gateway's out-of-process breaker."""
-    from shared.hosted_db_wait import database_wait_snapshot
+    from base.agents.observation.db_wait import database_wait_snapshot
 
     snapshots = {}
     for agent_id in sorted(active_agents):
@@ -174,7 +183,7 @@ async def _publish_turn_progress_heartbeat(
             }
     try:
         async with asyncio.timeout(_TURN_PROGRESS_PUBLISH_TIMEOUT_S):
-            await shared.redis_client.get_async_redis().set(
+            await base.events.live.redis_client.get_async_redis().set(
                 f"host_turn_progress:{machine}",
                 json.dumps(snapshots, separators=(",", ":")),
                 ex=_TURN_PROGRESS_HEARTBEAT_TTL_S,
@@ -228,7 +237,7 @@ async def _beat_forever(
         # leases alive across the whole window and add DB work the window
         # exists to stop. The leases lapse with their TTL; the first beat after
         # resume refreshes every row this host still owns.
-        if not maintenance.quiesced():
+        if not admission.quiesced():
             try:
                 await asyncio.wait_for(host.renew_ownership(), timeout=_OWNERSHIP_RENEW_TIMEOUT_S)
             except TimeoutError:
@@ -286,8 +295,8 @@ class _PageEventPublisher:
         self._tasks: set[asyncio.Task[object]] = set()
 
     def emit(self, payload: str) -> None:
-        from shared.config import settings
-        from shared.redis_client import publish_best_effort
+        from base.config import settings
+        from base.events.live.redis_client import publish_best_effort
 
         # Fire-and-forget: publish_best_effort never raises; the task set
         # keeps a strong ref so the publish cannot be GC'd mid-flight.
@@ -309,14 +318,14 @@ async def _page_reconcile_forever(pool: AsyncConnectionPool) -> None:
     pass logs and retries on the next interval without blocking other turns.
     """
     from agent.startup import reconcile_all_open_pages
-    from shared.config import settings
+    from base.config import settings
 
     interval_s = float(settings.daemon.heartbeat_interval_seconds)
     publisher = _PageEventPublisher()
     while True:
         # A quiesced unit (stop window) skips its pass, silently, until
         # resume: page probing would borrow the pools the stop released.
-        if not maintenance.quiesced():
+        if not admission.quiesced():
             try:
                 await reconcile_all_open_pages(
                     pool, interval_s=interval_s, event_publisher=publisher
@@ -364,8 +373,8 @@ async def _build_checkpointer(
         wrap_saver_writes_with_nstep_interval,
     )
     from agent.state import build_checkpoint_serde
-    from shared.agents.history.delta_read_compat import wrap_saver_reads_with_delta_reconstruction
-    from shared.config.turn_view import turn_settings
+    from base.agents.history.delta_read_compat import wrap_saver_reads_with_delta_reconstruction
+    from base.config.turn_view import turn_settings
 
     saver_pool = cast(AsyncConnectionPool[psycopg.AsyncConnection[DictRow]], pool)
     checkpointer = PooledPostgresSaver(conn=saver_pool, serde=build_checkpoint_serde())
@@ -439,7 +448,7 @@ async def _close_host_pools(
 def _is_running() -> bool:
     """Whether a host is already running. Pid-reuse-safe: a live pid whose argv
     does not name this module is a recycled pid, not an instance."""
-    return pidfile_holds_daemon(_PIDFILE, _MODULE)
+    return pidfile_holds_daemon(_pidfile(), _MODULE)
 
 
 async def run() -> None:
@@ -447,10 +456,10 @@ async def run() -> None:
     for why the order is what it is."""
     assert_clock_lattice()
     if _is_running():
-        _log.info("[agent-host] daemon already running (pidfile=%s), exiting", _PIDFILE)
+        _log.info("[agent-host] daemon already running (pidfile=%s), exiting", _pidfile())
         sys.exit(1)
-    if not acquire_pidfile(_PIDFILE, _MODULE):
-        _log.info("[agent-host] could not acquire pidfile %s, exiting", _PIDFILE)
+    if not acquire_pidfile(_pidfile(), _MODULE):
+        _log.info("[agent-host] could not acquire pidfile %s, exiting", _pidfile())
         sys.exit(1)
 
     # langgraph types its checkpointer parameter with an unparameterized generic,
@@ -491,10 +500,6 @@ async def run() -> None:
         # a stuck agent has really been silent.
         scheduler = TurnScheduler(host.run_turn, activity_clock=host.last_active_at)
         beat = asyncio.create_task(_beat_forever(liveness, host, scheduler, local_machine))
-        # Straggler-reap marks settle before anything else may look at the row
-        # (task #4016): a predecessor boot reaped mid-wave left rows unrunnable;
-        # their first-admission wakes are injected after the scheduler exists.
-        settled_reaps = await settle_stranded_reaps_async(control_pool, local_machine)
         settled = await settle_stale_running_rows(control_pool, local_machine)
         logger.info("hosted boot settle: settled {n} stale running row(s)", n=len(settled))
 
@@ -521,10 +526,6 @@ async def run() -> None:
         # no per-agent page_reconcile_loop (loop.py:main() is process-only).
         background = _spawn_background_tasks(workload_pool)
         try:
-            # Settled reap rows need one admission each: the cold build's
-            # reconcile re-delivers the claimed ordinary work the reap cut
-            # short, and the dangling-tool repair closes the truncated turn.
-            host.arm_settled_reaps(settled_reaps)
             await InboundWakeDispatcher(
                 settings.data_plane.redis_url,
                 scheduler,
@@ -545,7 +546,7 @@ async def run() -> None:
         if health is not None:
             await stop_health_server(health)
         await _close_host_pools(workload_pool, control_pool)
-        remove_pidfile(_PIDFILE)
+        remove_pidfile(_pidfile())
         _log.info("[agent-host] daemon stopped")
 
 
@@ -628,7 +629,7 @@ def _release_pools_route(
     return handler
 
 
-def _stats_route(host: AgentHost, scheduler: TurnScheduler):  # noqa: ANN202 — RouteHandler, declared in shared.daemon_health
+def _stats_route(host: AgentHost, scheduler: TurnScheduler):  # noqa: ANN202 — RouteHandler, declared in base.daemon.health
     """Expose cache/activity counters and this running boot's maintenance identity."""
     import json
 
@@ -660,8 +661,8 @@ def _stats_route(host: AgentHost, scheduler: TurnScheduler):  # noqa: ANN202 —
 
 def main() -> None:
     """Entry point: schema gate, logging, graceful shutdown, then the loop."""
-    from shared.config import ensure_eager
-    from shared.migrations import assert_schema_current
+    from base.config import ensure_eager
+    from base.deploy.schema.migrations import assert_schema_current
 
     # Task #3621: the agent host is on the full-validation whitelist — build
     # the eager config chain before anything else reads config.

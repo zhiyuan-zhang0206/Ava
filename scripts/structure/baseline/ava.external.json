@@ -1,0 +1,8 @@
+{
+  "ambient_state": {
+    "ava/external/__init__.py::foreign-rebind:ava.agent_identity._external_agent_id": 2,
+    "ava/external/__init__.py::foreign-rebind:ava.agent_identity._external_identity": 2,
+    "ava/external/__init__.py::foreign-rebind:ava.state_update": 1,
+    "ava/external/__init__.py::global-rebind:_active_attachment": 2
+  }
+}

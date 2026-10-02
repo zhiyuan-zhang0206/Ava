@@ -27,10 +27,10 @@ from agent.hooks import Hook, register_before_llm
 from agent.hooks.compact import auto_compact_will_fire
 from agent.messages import tail_has_recallable_inbound
 from agent.state import AgentState, MemoryState
-from shared.config import settings
-from shared.config.turn_view import turn_settings
-from shared.context import AvaContext
-from shared.log import logger
+from base.agents.context import AvaContext
+from base.config import settings
+from base.config.turn_view import turn_settings
+from base.log import logger
 
 from .inherit import inherited_memory_note
 from .notes import memory_index_note, per_agent_memory_note
@@ -173,7 +173,7 @@ def memory_discipline_section() -> str:
     the agent does not have. The mechanics of reading/writing/searching live in
     the ava.memory SDK docstrings and the two index notes, so this section
     deliberately does not repeat them."""
-    from shared.lm.registry import resolve_setting
+    from base.lm.registry import resolve_setting
 
     if not resolve_setting("prompt_memory_behavior_enabled", model=turn_settings.lm.llm_model):
         return ""

@@ -26,13 +26,13 @@ from mcp import types
 from mcp.server.lowlevel import Server
 from mcp.server.stdio import stdio_server
 
+from base.paths import chrome_mcp_socket
 from services.browser.mcp_socket_bridge import (
     ReconnectingLink,
     SocketLink,
     dial_unix_socket,
     is_transport_error,
 )
-from shared.paths import chrome_mcp_socket
 
 # The daemon explicitly rejected the request before forwarding it upstream.
 _UPSTREAM_DOWN_MSG = "chrome upstream session is down; browser-mcp will restart"

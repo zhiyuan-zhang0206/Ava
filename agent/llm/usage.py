@@ -4,7 +4,7 @@ from datetime import datetime
 
 from langchain_core.messages import AIMessage
 
-from shared.lm.usage import log_usage_from_message
+from base.lm.usage import log_usage_from_message
 
 
 def log_llm_usage(
@@ -22,7 +22,7 @@ def log_llm_usage(
     """Log LangChain-standardized usage for one completed agent LLM call.
 
     `cache_mechanism` / `cache_scope` label how much of the provider's
-    cache_read field covers (shared/lm/usage.py constants): the llm node
+    cache_read field covers (base/lm/usage.py constants): the llm node
     passes mixed/explicit_block when the Gemini explicit cache carried the
     request, because the API then reports only the explicit block.
     """

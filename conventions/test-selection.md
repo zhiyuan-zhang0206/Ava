@@ -9,7 +9,7 @@ is in enforce mode (the default), a direct-import-selected subset in its place.
 The merge queue therefore continues to verify the combined tree with its full
 regression net; test selection does not change broken-main risk.
 
-The selector is [scripts/test_selector.py](../scripts/test_selector.py). It is
+The selector is [scripts/ci/test_selector.py](../scripts/ci/test_selector.py). It is
 stdlib-only and builds a direct static import reverse map for the checked-out
 tree. It does not execute tests, import application code, modify the checkout,
 or infer dynamic imports.
@@ -28,7 +28,7 @@ SELECTED replaces the backend pytest fan-out, and only in enforce mode.
 | --- | --- | --- |
 | 1 | Not a pull_request, or head ref begins trunk-merge/ or trunk-temp/ | FULL (queue-or-non-pr) |
 | 2 | Every path is a documentation path | SKIP |
-| 3 | A path is under shared/, ava/, agent/, ava_builtins/, db/, migrations/, or evals/ | FULL (the report names the forced root) |
+| 3 | A path is under base/, ava/, agent/, ava_builtins/, db/, migrations/, or evals/ and is not inside a `tests/` directory | FULL (the report names the forced root) |
 | 4 | A path is pyproject.toml, .test_durations, or any conftest.py | FULL |
 | 5 | A path is under tests/e2e/ | FULL |
 | 6 | A path is neither a current collectable backend test, a direct-map source key, nor documentation | FULL (unmapped) |
@@ -39,7 +39,7 @@ SELECTED replaces the backend pytest fan-out, and only in enforce mode.
 
 Tree-scan tests join the candidate subset before rules 8-10 run: every
 `test_lint_*.py` under `tests/` (any depth, non-e2e) and the repo-level
-CI/governance checks pinned in `scripts/test_selector.py`
+CI/governance checks pinned in `scripts/ci/test_selector.py`
 (`_TREE_SCAN_TESTS`). The direct-import map cannot reach a repo-wide scan
 test from a changed source file, and a green subset must not miss a
 tree-wide gate (task #4183: PR #3020's subset passed while the full
@@ -47,24 +47,36 @@ population was red on tests/test_lint_event_kinds.py). Name a new scan test
 `test_lint_*.py` to join automatically, or extend `_TREE_SCAN_TESTS`;
 tests/scripts/test_test_selector.py guards completeness and staleness.
 
-The documentation predicate reuses shared.deploy.git.repo_change.is_doc_path. Files under
-scripts/, schedules/, and tests/ are deliberately not treated as documentation
-by the selector even when their name ends in Markdown: operational schedule and
-test changes must remain conservative.
+The documentation predicate reuses base.deploy.git.repo_change.is_doc_path. Files under
+scripts/, schedules/, and any `tests/` directory (the top-level one or a package's own
+`<pkg>/**/tests/`) are deliberately not treated as documentation by the selector even
+when their name ends in Markdown: operational schedule and test changes must remain
+conservative.
+
+Tests live in the top-level `tests/` or beside the code they prove in
+`<pkg>/**/tests/` (hosts: agent, ava, ava_builtins, base, cli, gateway, ops, scripts,
+services). A unit test sits in the `tests/` directory of the package it tests; an
+integration test across packages sits in the lowest package that may legally import
+everything it uses; end-to-end tests and contract tests that read repository artifacts
+stay in the top-level `tests/` ([testing guide](../tests/README.md#where-to-put-tests)).
+The selector treats both alike: a test-only edit under `base/x/tests/` is a
+test change resolved through the reverse map (rule 3 does not force FULL for it), and
+a module that merely carries a `test_` prefix outside a `tests/` directory
+(`scripts/ci/test_selector.py`) is not a test.
 
 ## Static map and blind files
 
-The map AST-parses every Python file under tests/, except files named
+The map AST-parses every Python file under any `tests/` directory, except files named
 conftest.py, and walks imports in every scope. It includes both module imports
 and absolute from-import targets; for example, from agent import exec_child
-reaches agent/exec_child.py, and from shared import lm reaches
-shared/lm/__init__.py when those paths exist. Relative imports and unresolved
+reaches agent/exec_child.py, and from base import lm reaches
+base/lm/__init__.py when those paths exist. Relative imports and unresolved
 modules are omitted.
 
 Only importer files named test_*.py or *_test.py outside tests/e2e/ are
 collectable. Test helpers are still inspected but do not add selected tests.
 Resolution considers these source roots: agent, ava, cli, gateway, ops,
-services, shared, ava_builtins, evals, ui, scripts, and schedules.
+services, base, ava_builtins, evals, ui, scripts, and schedules.
 
 This is intentionally a direct static map, not a coverage claim. About 280 of
 roughly 970 source files have no static test reachability, including
@@ -145,7 +157,7 @@ report is a no-op. Decisions: FULL 680 (forced roots and unmapped paths
 dominated), SELECTED 31 runs / 25 PRs, empty 267 (262 push runs plus a handful
 of concurrency-cancelled runs). One run recorded FALSE GREEN (PR #1842,
 2026-09-06): triage attributed it to a time-dependent assertion in
-tests/services/test_pitr_base_scheduler.py — unrelated to that PR's diff, and
+a daemon test in `tests/services/` — unrelated to that PR's diff, and
 fixed the same morning by #1840 (merged five minutes after this run's decision
 was recorded). Its decision payload had no changed blind file, so no static-map
 gap was involved. No other false green was observed, and no informational

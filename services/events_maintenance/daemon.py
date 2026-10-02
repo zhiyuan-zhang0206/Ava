@@ -1,6 +1,6 @@
 """Events-maintenance daemon — gateway-owned unified event-stream + checkpoint maintenance.
 
-Always-on gateway daemon (cluster-wide; the gateway owns the data plane). Three
+Always-on gateway daemon (cluster-wide; the gateway owns the data plane). Two
 loops:
 
 - Hourly loop (`AVA_EVENTS_MAINTENANCE_INTERVAL_SECONDS`, default 1h): recompute
@@ -12,12 +12,11 @@ loops:
   (partitions / retention / table retention / index governance) were removed
   with the task #1281/#1823 cleanup — the table was dropped and its data lives
   in the Loki archive stream.
-- Fast loop (60s): prune every checkpoint thread above three rows to its newest
-  three (`services.events_maintenance.checkpoint_reaper.prune_threads`), unless
-  `AVA_EVENTS_MAINTENANCE_CHECKPOINT_TRIM_ENABLED` is false — the loop then
-  parks as a no-op.
 - Resolution loop (`AVA_EVENTS_RESOLUTION_INTERVAL_SECONDS`, default 5m):
   refresh immutable-event class-resolution state and gauges from Loki.
+
+The checkpoint trim opt-in was retired on 2026-09-30 under the never-delete
+ruling. Its implementation remains in `checkpoint_reaper.py` but is not scheduled.
 
 Each loop reports independent progress, success, and errors in `/healthz`.
 Only completed bounded work or sleeps beat; exceeding a hard deadline fails
@@ -25,13 +24,8 @@ healthz until the watchdog replaces the process and its orphaned worker thread.
 The same trackers are projected as unified envelope components, so the legacy
 per-loop snapshots and the component degradation reasons describe one state.
 
-The PG `events` archive slices (partitions / retention / table retention /
-index governance) were removed with the task #1281/#1823 cleanup — the frozen
-archive was dropped and its rows live in the Loki archive stream. The
-checkpoint slices are NOT gated: checkpoint_blobs growth is independent of the
-events pipeline, and the daemon must keep reaping (the 2026-08-12 design
-regression: gating the whole daemon off stopped the reaper and checkpoint_blobs
-grew ~150MB/h unbounded).
+The checkpoint size sample and blob vacuum remain active independently of the
+events pipeline; neither deletes live checkpoint history.
 
 The rollup only covers whole days up to yesterday (UTC); today is served live by
 the readers. The upsert is a full-day overwrite recompute keyed on the PK, so
@@ -42,13 +36,13 @@ treated as an empty day, leaving that day's existing ledger rows intact.
 Usage:
     .venv/bin/python -m services.events_maintenance.daemon
 
-Kept alive by the gateway watchdog's 60s healthcheck
-(`services.healthchecks.events_maintenance`), so the schema-drift exit in
+Kept alive by the root supervisor's health monitor through the roster's
+`/healthz` identity probe, so the schema-drift exit in
 `_dispatch_loop` is revived on the next round instead of staying dead.
 
-Health reports progress independently for the rollup, checkpoint-trim, and
-resolution loops. The endpoint takes the worst state: only a completed bounded
-unit refreshes a loop's success timestamp, and a worker running beyond its hard
+Health reports progress independently for the rollup and resolution loops.
+The endpoint takes the worst state: only a completed bounded unit refreshes
+a loop's success timestamp, and a worker running beyond its hard
 deadline makes `/healthz` return 503 for watchdog recovery.
 """
 
@@ -60,43 +54,44 @@ import sys
 import time
 from collections.abc import Callable
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import cast
 
 import psycopg
 from psycopg_pool import ConnectionPool
 
-import shared.db
-from services.events_maintenance.blob_vacuum import (
-    emit_checkpoint_table_sizes,
-    run_blob_vacuum,
-)
-from services.events_maintenance.checkpoint_reaper import prune_threads
-from services.events_maintenance.jsonl_replay import replay_gap_days
-from services.events_maintenance.observed_metrics import recover_observations
-from services.events_maintenance.resolution import run_resolution_slice
-from services.events_maintenance.rollup import compute_rollup
-from services.pidfile import acquire_pidfile, pidfile_holds_daemon, remove_pidfile
-from shared.config import settings
-from shared.daemon_health import (
+import base.db
+from base.config import settings
+from base.daemon.health import (
     LivenessGroup,
     LoopProgress,
     health_port,
     start_health_server,
     stop_health_server,
 )
-from shared.daemon_shutdown import cancel_and_drain, install_graceful_shutdown
-from shared.daemon_shutdown import hard_exit as _hard_exit
-from shared.health_schema import DEGRADED, OK, component
-from shared.log import init_gateway_process
+from base.daemon.health_schema import DEGRADED, OK, component
+from base.daemon.shutdown import cancel_and_drain, install_graceful_shutdown
+from base.daemon.shutdown import hard_exit as _hard_exit
+from base.log import init_gateway_process
+from base.paths import pid_path
+from services.events_maintenance.blob_vacuum import (
+    emit_checkpoint_table_sizes,
+    run_blob_vacuum,
+)
+from services.events_maintenance.jsonl_replay import replay_gap_days
+from services.events_maintenance.observed_metrics import recover_observations
+from services.events_maintenance.resolution import run_resolution_slice
+from services.events_maintenance.rollup import compute_rollup
+from services.pidfile import acquire_pidfile, pidfile_holds_daemon, remove_pidfile
 
 _log = logging.getLogger("services.events_maintenance.daemon")
 
-_PIDFILE = settings.services.events_maintenance_pidfile
-_LIVENESS_BEAT_STEP_S = 30.0
 
-# The fixed per-thread checkpoint budget is enforced within one minute of a
-# thread crossing it, independent of agent liveness or the hourly event work.
-_CHECKPOINT_TRIM_INTERVAL_S = 60.0
+def _pidfile() -> Path:
+    return pid_path("events_maintenance")
+
+
+_LIVENESS_BEAT_STEP_S = 30.0
 
 
 class WedgedPassError(RuntimeError):
@@ -158,30 +153,6 @@ def _run_maintenance(pool: ConnectionPool, progress: LoopProgress) -> None:
     progress.mark_success()
 
 
-def _run_checkpoint_trim(pool: ConnectionPool, progress: LoopProgress) -> None:
-    """Prune every checkpoint thread to newest-three on the fast loop.
-
-    Disabled via `AVA_EVENTS_MAINTENANCE_CHECKPOINT_TRIM_ENABLED=false`: the
-    pass deletes nothing, but still stamps success so the loop — and the
-    daemon's health envelope — stay green.
-    """
-    if not settings.daemon.events_maintenance_checkpoint_trim_enabled:
-        progress.mark_success()
-        return
-    pruned = prune_threads(pool)
-    if pruned.agents:
-        _log.info(
-            "[events-maintenance] checkpoint prune: %d thread(s), "
-            "%d checkpoints / %d writes / %d blobs",
-            pruned.agents,
-            pruned.checkpoints,
-            pruned.writes,
-            pruned.blobs,
-        )
-    progress.beat()
-    progress.mark_success()
-
-
 def _run_resolution(pool: ConnectionPool, progress: LoopProgress) -> None:
     """Run the resolution slice while discarding its test-facing summary."""
 
@@ -191,13 +162,13 @@ def _run_resolution(pool: ConnectionPool, progress: LoopProgress) -> None:
 
 
 def _write_pidfile() -> None:
-    if not acquire_pidfile(_PIDFILE, "services.events_maintenance.daemon"):
-        _log.info("[events_maintenance] daemon already running (pidfile=%s), exiting", _PIDFILE)
+    if not acquire_pidfile(_pidfile(), "services.events_maintenance.daemon"):
+        _log.info("[events_maintenance] daemon already running (pidfile=%s), exiting", _pidfile())
         sys.exit(1)
 
 
 def _remove_pidfile() -> None:
-    remove_pidfile(_PIDFILE)
+    remove_pidfile(_pidfile())
 
 
 def _is_running() -> bool:
@@ -205,7 +176,7 @@ def _is_running() -> bool:
 
     Pid-reuse-safe: a live pid whose argv does not name this daemon's module
     is a recycled pid, not a running instance (audit round 2, P1)."""
-    return pidfile_holds_daemon(_PIDFILE, "services.events_maintenance.daemon")
+    return pidfile_holds_daemon(_pidfile(), "services.events_maintenance.daemon")
 
 
 def _loop_components(liveness: LivenessGroup) -> list[dict[str, object]]:
@@ -319,55 +290,12 @@ async def _dispatch_loop(pool: ConnectionPool, progress: LoopProgress) -> None:
         await _sleep_with_liveness(progress, interval)
 
 
-async def _checkpoint_trim_loop(pool: ConnectionPool, progress: LoopProgress) -> None:
-    """Prune all over-budget checkpoint threads every fast-loop interval.
-
-    The loop is unconditional and independent of agent liveness. It has the
-    same failure posture as `_dispatch_loop`: a transient error waits a full
-    interval (the prune is idempotent and self-catching-up), while a schema or
-    syntax error exits so the watchdog revives the daemon after the fix.
-    """
-    _log.info(
-        "[events-maintenance] checkpoint trim loop started, pid=%s, interval=%.0fs, enabled=%s",
-        os.getpid(),
-        _CHECKPOINT_TRIM_INTERVAL_S,
-        settings.daemon.events_maintenance_checkpoint_trim_enabled,
-    )
-    while True:
-        try:
-            await _maintenance_with_liveness(
-                pool,
-                progress,
-                run=lambda target_pool: _run_checkpoint_trim(target_pool, progress),
-            )
-        except asyncio.CancelledError:
-            raise
-        except WedgedPassError:
-            _log.critical(
-                "[events-maintenance] checkpoint trim pass wedged — parking for watchdog respawn",
-                exc_info=True,
-            )
-            break
-        except psycopg.ProgrammingError:
-            _log.critical(
-                "[events-maintenance] checkpoint trim schema / syntax error — "
-                "code<->DB drift; retry will not self-heal, daemon exiting, "
-                "restart after fix",
-                exc_info=True,
-            )
-            raise
-        except Exception as exc:
-            progress.mark_error(str(exc))
-            _log.exception("[events-maintenance] checkpoint trim iteration failed")
-        await _sleep_with_liveness(progress, _CHECKPOINT_TRIM_INTERVAL_S)
-
-
 async def _resolution_loop(pool: ConnectionPool, progress: LoopProgress) -> None:
     """Refresh immutable-event class-resolution gauges on their own cadence.
 
     The six-hour Loki read and safety-valve write are unrelated to the frozen
     archive's hourly rollup and must run while archive maintenance is disabled.
-    As with the checkpoint loops, a transient backend outage waits one full
+    As with the rollup loop, a transient backend outage waits one full
     configured interval; schema drift exits for watchdog recovery.
     """
 
@@ -410,19 +338,18 @@ async def run() -> None:
     if _is_running():
         _log.info(
             "[events-maintenance] daemon already running (pidfile=%s), exiting",
-            _PIDFILE,
+            _pidfile(),
         )
         sys.exit(1)
 
     # Publish the pidfile before binding healthz so identity-aware probes can verify it.
     _write_pidfile()
-    _log.info("[events-maintenance] pidfile written: %s", _PIDFILE)
+    _log.info("[events-maintenance] pidfile written: %s", _pidfile())
 
     liveness = LivenessGroup()
     dispatch_progress = liveness.register(
         "dispatch", settings.daemon.events_maintenance_pass_deadline_s
     )
-    trim_progress = liveness.register("trim", settings.daemon.events_maintenance_trim_deadline_s)
     resolution_progress = liveness.register(
         "resolution", settings.daemon.events_maintenance_resolution_deadline_s
     )
@@ -433,11 +360,10 @@ async def run() -> None:
     )
     _log.info("[events-maintenance] healthz listening on :%s", health_port("events_maintenance"))
 
-    pool = shared.db.pool()
+    pool = base.db.pool()
     try:
         await asyncio.gather(
             _dispatch_loop(pool, dispatch_progress),
-            _checkpoint_trim_loop(pool, trim_progress),
             _resolution_loop(pool, resolution_progress),
         )
     finally:
@@ -450,11 +376,11 @@ async def run() -> None:
 def main() -> None:
     """Entry point: init logger + run asyncio loop.
 
-    SIGTERM (the graceful stop `ava cluster update` sends) and Ctrl-C converge on
-    the same `KeyboardInterrupt` unwind — see `shared.daemon_shutdown`. `ava stop`
+    SIGTERM (the graceful stop the fleet update sends) and Ctrl-C converge on
+    the same `KeyboardInterrupt` unwind — see `base.daemon.shutdown`. `ava stop`
     default force-kill does not reach this.
     """
-    from shared.migrations import assert_schema_current
+    from base.deploy.schema.migrations import assert_schema_current
 
     # Pre-startup sanity: schema version must match code; raises SchemaVersionMismatch if not.
     assert_schema_current(settings.data_plane.db_url)

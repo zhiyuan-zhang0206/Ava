@@ -170,6 +170,12 @@ def _h_schedules_provision(args: argparse.Namespace) -> int:
     return h_schedules_provision(args)
 
 
+def _h_schedules_verify(args: argparse.Namespace) -> int:
+    from cli.commands.management.schedules import h_schedules_verify
+
+    return h_schedules_verify(args)
+
+
 def _add_config_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
     # `ava config` — read / set / unset cluster + host config via the gateway. The
     # handlers defer the cli.commands.management.config import (which loads Settings) so
@@ -269,7 +275,8 @@ def _add_schedules_parser(sub: argparse._SubParsersAction[argparse.ArgumentParse
     schedules_p = sub.add_parser(
         "schedules",
         help="manage gateway-supervised schedules "
-        "(ls / get / create / update / delete / provision / start / stop / restart / logs / runs)",
+        "(ls / get / create / update / delete / provision / verify / start / stop / restart / "
+        "logs / runs)",
     )
     schedules_sub = schedules_p.add_subparsers(dest="schedules_cmd", required=True)
 
@@ -288,6 +295,24 @@ def _add_schedules_parser(sub: argparse._SubParsersAction[argparse.ArgumentParse
         "schedules/manifest.json; product enabled, operator disabled)",
     )
     schedules_provision_p.set_defaults(func=_h_schedules_provision)
+
+    schedules_verify_p = schedules_sub.add_parser(
+        "verify",
+        help="dry-import every in-store schedule script, read-only "
+        "(rc 0 clean / 1 red / 2 tool error)",
+    )
+    schedules_verify_p.add_argument(
+        "--check-file",
+        default=None,
+        metavar="PATH",
+        help="check one script file off-DB instead of the table (falsification hook; no alert)",
+    )
+    schedules_verify_p.add_argument(
+        "--no-notify",
+        action="store_true",
+        help="suppress the red-path alert for this run (self-tests)",
+    )
+    schedules_verify_p.set_defaults(func=_h_schedules_verify)
 
     schedules_create_p = schedules_sub.add_parser("create", help="create a schedule")
     schedules_create_p.add_argument("--name", required=True, help="unique schedule name")

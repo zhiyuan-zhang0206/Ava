@@ -6,8 +6,8 @@ import psycopg
 from psycopg_pool import AsyncConnectionPool
 
 from agent.db import LoggingConnectionPool
-from shared.config import settings
-from shared.db import async_pool
+from base.config import settings
+from base.db import async_pool
 
 
 def build_shared_pool() -> AsyncConnectionPool[psycopg.AsyncConnection]:
@@ -17,7 +17,7 @@ def build_shared_pool() -> AsyncConnectionPool[psycopg.AsyncConnection]:
     budget covers short database borrows and is shared by all active agents.
     The transport posture (autocommit for the saver, no prepared statements
     across PgBouncer backends, the per-borrow session scrub) is
-    `shared.db.async_pool`'s. `min_size=0` keeps no warm idle connection: the
+    `base.db.async_pool`'s. `min_size=0` keeps no warm idle connection: the
     pool opens connections on demand, so the pre-stop release
     (`/release-db-pools`) drains it to zero and the first borrow after resume
     reconnects lazily.

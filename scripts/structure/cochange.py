@@ -12,7 +12,7 @@ detection needs a rolling window of history and the fix needs judgement, so
 neither half of the lint test holds. It always exits 0 on a successful scan
 (an index, not a wall) and reuses `scripts.structure.locality._package_of`
 for Python package resolution, so "package" here means exactly what Rule 4
-(package doors, `scripts/lint_code_structure.py`) means by it.
+(package doors, `scripts/lint/code_structure.py`) means by it.
 
 Metric A (spread): per commit, the number of distinct packages among its
 tracked source files, reported as p50/p90 by conventional-commit type
@@ -67,7 +67,6 @@ _GENERATED_EXCLUDE = (
     "uv.lock",
     "package-lock.json",
     "db/schema.sql",
-    "*.api.txt",
 )
 # Declared cross-process contract boundaries: a pair of path prefixes whose
 # co-change is carried by codegen, not a leaked decision. See the module
@@ -81,11 +80,10 @@ _CONTRACT_BOUNDARIES: tuple[tuple[str, str], ...] = (
     # functional package, not gateway/schemas/), but they feed the same
     # OpenAPI-codegen contract with the frontend.
     ("gateway/inspect/schemas.py", "ui/web/"),
-    # The exec child's request/result wire: `exec_protocol` owns it; the child
-    # process (`exec_child`) and the parent's exec node family
-    # (`agent/graph/_exec*`) are its two ends.
-    ("agent/exec_child.py", "agent/graph/exec_protocol.py"),
-    ("agent/exec_child.py", "agent/graph/_exec"),
+    # The exec child's request/result wire: `exec/protocol.py` owns it; the
+    # child process (`exec_child`) and the parent's exec node package
+    # (`agent/graph/exec/`) are its two ends.
+    ("agent/exec_child.py", "agent/graph/exec/"),
 )
 _COMMIT_TYPES = ("fix", "feat", "refactor")
 _TAG_PREFIX_RE = re.compile(r"^\[[^\]]*\]\s*")

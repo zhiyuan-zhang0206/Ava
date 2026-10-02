@@ -7,7 +7,7 @@
 // ephemeral markers (compact_done / cancelled / compact_request / error) and the
 // unrecognized-marker red alarm render bare (no card) through EphemeralSystemMarker.
 //
-// LifecycleTag mirrors the backend shared/message_kwargs.py NoteTag lifecycle_* members.
+// LifecycleTag mirrors the backend base/agents/messages/kwargs.py NoteTag lifecycle_* members.
 // When the backend adds a new lifecycle tag without updating here, classifyMarker
 // routes it to the ephemeral path and it surfaces as the red UnknownMarkerChip —
 // fail-loud instead of a silent fallback.
@@ -33,7 +33,7 @@ export function isLifecycleTag(s: string): s is LifecycleTag {
 
 // Card-rendered marker families. Exported so the marker-contract test can
 // iterate the exact dispatch sets the renderer uses — the backend NoteTag
-// enum (shared/message_kwargs.py) is asserted to be a subset of
+// enum (base/agents/messages/kwargs.py) is asserted to be a subset of
 // LIFECYCLE_TAGS ∪ MEMORY_SOURCES ∪ NOTE_SOURCES by tests/test_lint_marker_contract.py.
 export const MEMORY_SOURCES = new Set(["memory", "agent_memory", "inherited_memory"]);
 

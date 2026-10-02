@@ -15,10 +15,10 @@ import os
 from pathlib import Path
 
 from ava import agent_identity
-from ava.sdk_validation import coerce_str, coerce_typed
+from ava.sdk_surface.validation import coerce_str, coerce_typed
 from ava.security import is_flagged, scan_content
-from shared.log import logger
-from shared.paths import ava_home, workspace_dir
+from base.log import logger
+from base.paths import ava_home, workspace_dir
 
 # Module-load invariant assert: if `Path.home()` is unavailable
 # (container / sandbox without $HOME returns Path("") or a nonexistent

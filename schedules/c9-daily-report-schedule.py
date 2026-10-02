@@ -2,7 +2,7 @@
 
 Fires once per day at 05:00 cluster time (after the 4AM memory consolidation),
 collects the trailing 24h of CI runs, appends them to the attribution ledger
-idempotently (keyed by run id — `scripts/ci_accounting.py`), and emits one
+idempotently (keyed by run id — `scripts/ci/accounting.py`), and emits one
 `ci_usage_daily` telemetry event carrying the day's totals. The per-agent
 breakdown stays in the ledger; `ci_utils.py --ci-usage` reads it on demand.
 
@@ -15,7 +15,7 @@ is run-id-keyed, so a re-run of the same window is a no-op for
 already-recorded runs. A failed reconciliation does NOT
 retry automatically (the claim stays committed — the documented
 at-most-once trade-off); the failure message tells the P0 lead to backfill
-manually with `scripts/ci_accounting.py --since ... --until ... --append-ledger`.
+manually with `scripts/ci/accounting.py --since ... --until ... --append-ledger`.
 """
 
 from __future__ import annotations
@@ -27,13 +27,13 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 import ava
-import shared
+import base
 from ava.agents import AgentStatus as S
 from schedules.agent_status_guard import ensure_agent_status_members
 from schedules.catchup import claimed_slot
 from schedules.daily_host import report_agent, run_daily_loop
-from shared.config import settings
-from shared.log import init_gateway_process
+from base.config import settings
+from base.log import init_gateway_process
 
 ensure_agent_status_members(
     S,
@@ -50,12 +50,12 @@ _REPORT_LABEL = "Ava \u8d1f\u8d23\u4eba"
 # The gateway materializes this script to ~/.ava/schedules/<id>/ before
 # executing it, so a __file__-relative root resolves to ~/.ava/schedules at
 # runtime (the repo layout only matches inside the checkout). Derive the
-# source root from shared.__file__ instead: shared/ lives at the deployed
-# source root in both places, so scripts/ci_accounting.py is always found.
-_REPO_ROOT = Path(shared.__file__).resolve().parents[1]
+# source root from base.__file__ instead: base/ lives at the deployed
+# source root in both places, so scripts/ci/accounting.py is always found.
+_REPO_ROOT = Path(base.__file__).resolve().parents[1]
 _PROCESS_NAME = "schedule-c9-daily"
 
-# GitHub-hosted overage rates (private-repo equivalent; scripts/ci_accounting.py).
+# GitHub-hosted overage rates (private-repo equivalent; scripts/ci/accounting.py).
 _LINUX_MINUTE_USD = 0.006
 _MACOS_MINUTE_USD = 0.062
 
@@ -68,7 +68,7 @@ def _report_failure(detail: str) -> None:
     message = (
         f"C9 daily reconciliation failed:\n{detail[-1000:]}\n"
         "Check the schedule log; backfill the missed window manually with "
-        "`scripts/ci_accounting.py --since ... --until ... --append-ledger`."
+        "`scripts/ci/accounting.py --since ... --until ... --append-ledger`."
     )
     try:
         ava.agents.send_message(_report_agent(), message)
@@ -94,11 +94,11 @@ def window_bounds(slot_end: datetime) -> tuple[str, str, str]:
 
 
 def _load_accounting() -> Any:
-    """Import `scripts/ci_accounting.py` (scripts/ is not a package)."""
-    scripts_dir = _REPO_ROOT / "scripts"
+    """Import `scripts/ci/accounting.py` (scripts/ is not a package)."""
+    scripts_dir = _REPO_ROOT / "scripts" / "ci"
     if str(scripts_dir) not in sys.path:
         sys.path.insert(0, str(scripts_dir))
-    return __import__("ci_accounting")
+    return __import__("accounting")
 
 
 def summarize(
@@ -148,7 +148,7 @@ def _fire(_payload: None) -> None:
         entries = accounting.collect(accounting.DEFAULT_REPO, since, until)
         appended = accounting.append_ledger(accounting.DEFAULT_LEDGER, entries)
         init_gateway_process(name=_PROCESS_NAME)
-        from shared import telemetry
+        from base import telemetry
 
         telemetry.emit(
             "telemetry",

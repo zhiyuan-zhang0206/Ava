@@ -18,8 +18,9 @@ from datetime import timedelta
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import get_default_environment, stdio_client
 
-from shared.config import settings
-from shared.log import logger
+from base.config import settings
+from base.log import logger
+from services.browser.shutdown_budget import SHUTDOWN_STEP_TIMEOUT_S
 
 # Pinned exact version — do NOT go back to @latest. npx re-resolves @latest on
 # every daemon (re)start, so an upstream release can silently break the browser
@@ -39,12 +40,12 @@ _LEAN_FLAGS = ["--usageStatistics=false"]
 # navigation never trips it -- only a true hang does.
 _READ_TIMEOUT = timedelta(seconds=180)
 
-# Every teardown await is bounded by this budget: after SIGTERM the daemon must
-# exit even when a cleanup step wedges (a stuck upstream stack close, a
-# session loop mid-request). A step that overruns is logged and shutdown
-# continues — the process exits anyway, so no live resource is ever reported
-# as stopped (2026-09-09 #2043).
-_SHUTDOWN_STEP_TIMEOUT_S = 10.0
+# Every teardown await is bounded by `SHUTDOWN_STEP_TIMEOUT_S` (see
+# `services.browser.shutdown_budget` for the total ava-root must allow): after
+# SIGTERM the daemon must exit even when a cleanup step wedges (a stuck upstream
+# stack close, a session loop mid-request). A step that overruns is logged and
+# shutdown continues — the process exits anyway, so no live resource is ever
+# reported as stopped (2026-09-09 #2043).
 
 
 class _StoppingError(Exception):
@@ -52,7 +53,7 @@ class _StoppingError(Exception):
 
 
 async def _bounded(awaitable: Awaitable[object], what: str) -> None:
-    """Await a cleanup step within ``_SHUTDOWN_STEP_TIMEOUT_S``.
+    """Await a cleanup step within ``SHUTDOWN_STEP_TIMEOUT_S``.
 
     A cleanup step that wedges (a stack close waiting on a stuck child, a
     server close racing a half-dead loop) must not hold the daemon past the
@@ -60,12 +61,12 @@ async def _bounded(awaitable: Awaitable[object], what: str) -> None:
     close is logged as such, and shutdown continues.
     """
     try:
-        await asyncio.wait_for(awaitable, timeout=_SHUTDOWN_STEP_TIMEOUT_S)
+        await asyncio.wait_for(awaitable, timeout=SHUTDOWN_STEP_TIMEOUT_S)
     except TimeoutError:
         logger.warning(
-            "[browser-mcp] %s did not finish within %.0fs; continuing shutdown",
+            "[browser-mcp] {} did not finish within {:.0f}s; continuing shutdown",
             what,
-            _SHUTDOWN_STEP_TIMEOUT_S,
+            SHUTDOWN_STEP_TIMEOUT_S,
         )
 
 

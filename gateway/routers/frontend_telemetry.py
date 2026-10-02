@@ -4,7 +4,7 @@ The web frontend's user-modeling telemetry (`ui/web/src/lib/telemetry.ts`)
 batches tracked interactions — key-control clicks, page views, user_settings
 changes — and posts them here; this router validates the batch and emits one
 `frontend_interaction` event (category=telemetry, source=user) per accepted
-interaction into the unified event stream (shared/telemetry/emitter.py). Loki is
+interaction into the unified event stream (base/telemetry/emitter.py). Loki is
 the store; the Grafana core-metrics panels aggregate it.
 
 Two volume guards sit between the browser and the event stream:
@@ -33,9 +33,9 @@ from typing import Any
 
 from fastapi import APIRouter, Request, Response
 
-from gateway.error_envelope import error_response
+from base import telemetry
+from gateway.middleware.error_envelope import error_response
 from gateway.schemas.frontend_telemetry import FrontendInteractionIn, FrontendTelemetryBatch
-from shared import telemetry
 
 router = APIRouter()
 

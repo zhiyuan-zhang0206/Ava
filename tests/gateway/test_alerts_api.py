@@ -25,9 +25,9 @@ from fastapi.testclient import TestClient
 from psycopg.types.json import Jsonb
 from pydantic import SecretStr
 
+from base.config import settings
+from gateway.alerts import router as alerts_router
 from gateway.app import app
-from gateway.routers import alerts as alerts_router
-from shared.config import settings
 
 
 def _alert(
@@ -531,7 +531,7 @@ def test_ingest_computes_fingerprint_when_absent(db_conn: psycopg.Connection) ->
         assert row is not None
         fp, n = row
     assert n == 1
-    from shared.alerts import fingerprint as compute_fp
+    from base.telemetry.alerts import fingerprint as compute_fp
 
     assert fp == compute_fp({"alertname": "test-rule", "team": "ava-ops", "severity": "error"})
 
@@ -948,10 +948,10 @@ def test_start_readiness_alert_lifecycle_on_real_db(
     firing inserts one unresolved row per service, a re-firing start UPDATES it
     (no duplicate, no re-notify), the resolved edge flips it with ends_at, and a
     failure AFTER resolution is a fresh instance with a fresh IM."""
-    import shared.alerts as _alerts
+    import base.telemetry.alerts as _alerts
     from cli.commands import _probe as _probe_mod
     from cli.commands._repo import ServiceSpec
-    from ops.service_spec import _GATEWAY
+    from ops.roster.service_spec import _GATEWAY
 
     def _spec(service: str) -> ServiceSpec:
         return ServiceSpec(
@@ -979,7 +979,7 @@ def test_start_readiness_alert_lifecycle_on_real_db(
         )
     db_conn.commit()
 
-    specs = (_spec("pitr-uploader"),)
+    specs = (_spec("labeler"),)
     _probe_mod._notify_non_critical_unready_services(specs, im_enabled=True)
     _probe_mod._notify_non_critical_unready_services(specs, im_enabled=True)
 

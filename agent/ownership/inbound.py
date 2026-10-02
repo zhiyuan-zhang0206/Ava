@@ -2,7 +2,7 @@
 
 import psycopg
 
-from shared.runtime_incarnation import current_incarnation
+from base.native_process.runtime_incarnation import current_incarnation
 
 
 class RuntimeOwnershipLostError(RuntimeError):

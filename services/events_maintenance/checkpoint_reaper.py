@@ -1,13 +1,11 @@
 """Bound every checkpoint thread to its newest three versions.
 
 LangGraph's PostgresSaver appends one checkpoint per super-step under Ava's
-default durability. The gateway-owned events-maintenance daemon can scan the
-checkpoint table every minute and prune every thread above the fixed
-keep-three budget, independent of agent status or liveness. The trim is
-parked by default since the never-delete ruling (2026-09-12, task #3180):
-`AVA_EVENTS_MAINTENANCE_CHECKPOINT_TRIM_ENABLED=true` is an explicit opt-in
-that deletes history. While enabled, the scan and retained storage are
-O(thread count).
+default durability. This retained implementation can scan the checkpoint table
+and prune every thread above the fixed keep-three budget, independent of agent
+status or liveness. The daemon's trim opt-in was retired on 2026-09-30 under
+the never-delete ruling; no daemon schedules this reaper. Full retirement of
+this implementation requires a separate decision. A pass is O(thread count).
 
 Compaction-boundary checkpoints are exempt from the budget: a row stamped
 `compact_boundary: true` is never trimmed, so each past compaction segment
@@ -25,8 +23,8 @@ from dataclasses import dataclass
 import psycopg
 from psycopg_pool import ConnectionPool
 
-from shared.agents.history.checkpoint_cleanup import trim_checkpoints_sync
-from shared.log import logger
+from base.agents.history.checkpoint_cleanup import trim_checkpoints_sync
+from base.log import logger
 
 _KEEP = 3
 _MAX_THREADS_PER_PASS = 64

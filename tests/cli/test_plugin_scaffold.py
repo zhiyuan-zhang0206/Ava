@@ -9,13 +9,14 @@ from pathlib import Path
 
 import pytest
 
+from base import paths
+from base.cluster.machine import set_identity
+from base.deploy.git import memory_repo
+from base.host import proc
+from base.packages.plugins.enable_config import write_local
 from cli.commands.converge import host as converge_host
 from cli.commands.extensions import memory
 from cli.commands.extensions._plugin_scaffold import ScaffoldResult, run_plugin_scaffolds
-from shared import memory_repo, paths, proc
-from shared.config import settings
-from shared.machine import set_identity
-from shared.plugins_config import write_local
 
 
 @pytest.fixture(autouse=True)
@@ -27,8 +28,23 @@ def _isolate(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(paths, "repo_plugins_dir", lambda: repo)
     monkeypatch.setattr(paths, "plugins_dir", lambda: user)
     monkeypatch.setattr(paths, "plugins_config_path", lambda: tmp_path / "plugins.json")
-    monkeypatch.setattr(settings.general, "ava_home", str(tmp_path / "ava"))
-    monkeypatch.setattr(paths, "ava_home", lambda: tmp_path)
+    # One home, read through the one seam every consumer shares. `paths.ava_home()` is
+    # `AVA_HOME` plus a mkdir, and modules that did `from base.paths import
+    # ava_home` (the service roster `converge_host` consults) hold their own reference that a
+    # patch of `paths.ava_home` never reaches — so the home lives in the variable, not in a patch,
+    # and a second, real `ava_home()` cannot create a sibling directory next to it.
+    home = tmp_path / "ava"
+    home.mkdir()
+    monkeypatch.setenv("AVA_HOME", str(home))
+
+
+def test_the_isolated_home_is_the_one_every_consumer_resolves(tmp_path: Path) -> None:
+    """`ops.roster` binds `ava_home` by name at import, out of reach of any patch of
+    `paths.ava_home`; `converge_host` reaches it through `_desired_service_names`. A home that
+    only a patch pointed at made that real call create a second, unrelated directory."""
+    from ops import roster
+
+    assert roster.ava_home() == paths.ava_home() == tmp_path / "ava"
 
 
 def test_scaffold_runs_despite_dangling_config() -> None:
@@ -111,7 +127,6 @@ def test_converge_steps_do_not_scaffold_plugins() -> None:
 
 _HOST_INTEGRATION_STEP_NAMES = frozenset(
     {
-        "port conflict preflight",
         "health preflight",
         "otel collector sidecar",
         "lgtm native backends",
@@ -171,6 +186,10 @@ def _install_memory_plugin() -> Path:
 
 def _make_dirty_memory_repo(pool: Path, branch: str) -> None:
     subprocess.run(["git", "init", "-q", "-b", branch, str(pool)], check=True)  # noqa: S603
+    # `git commit` would otherwise spawn a detached `git maintenance run --auto` that holds
+    # `.git/objects/maintenance.lock` while the test walks the tree.
+    for key, value in (("maintenance.auto", "false"), ("gc.auto", "0")):
+        subprocess.run(["git", "-C", str(pool), "config", key, value], check=True)  # noqa: S603
     subprocess.run(  # noqa: S603
         ["git", "-C", str(pool), "config", "user.email", "ava@test.invalid"], check=True
     )
@@ -222,7 +241,7 @@ def test_converge_ignores_a_dirty_wrong_branch_memory_pool(
         converge_host.converge_host(
             tmp_path / "repo",
             frozenset({"agent-runner"}),
-            ava_home=tmp_path,
+            ava_home=paths.ava_home(),
             steps=converge_host.CONVERGE_STEPS,
         )
 

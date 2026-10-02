@@ -14,7 +14,7 @@ trap "rm -rf $TMPDIR" EXIT
 
 cd "$(dirname "$0")/.."  # repo root
 
-.venv/bin/python scripts/dump_openapi.py "$TMPDIR/openapi.json" >/dev/null
+.venv/bin/python scripts/codegen/dump_openapi.py "$TMPDIR/openapi.json" >/dev/null
 (cd ui/web && npx --no-install openapi-typescript "$TMPDIR/openapi.json" -o "$TMPDIR/types-generated.ts" >/dev/null)
 
 if ! diff -q ui/web/openapi.json "$TMPDIR/openapi.json" >/dev/null; then

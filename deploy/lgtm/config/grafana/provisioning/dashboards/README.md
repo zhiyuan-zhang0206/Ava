@@ -106,7 +106,7 @@ summaries cover the same information.
 ## Files
 
 - `ava-ops-main.json` — the only dashboard, rendered from the metric
-  registries since task #3697: `shared/metrics/grafana_dashboard.py` renders the
+  registries since task #3697: `base/telemetry/metrics/grafana_dashboard.py` renders the
   registries into this file's shape (every panel registry-covered, slice
   S2), `ava lgtm render` previews (diff) or force-writes the host
   provisioning copy, and converge generates its provisioning copy from the
@@ -141,18 +141,18 @@ resolution gauges, not raw event lines.
 
 ## Core metrics (registered, not hand-written)
 
-Core metric definitions live in `shared/metrics/core/core_metrics_panels.py` (the core
+Core metric definitions live in `base/telemetry/metrics/core/panels.py` (the core
 dashboard panels, including the Statistics-coverage tiles),
-`shared/metrics/core/core_metrics_observability.py` (the former `ava_observability`
+`base/telemetry/metrics/core/observability.py` (the former `ava_observability`
 plugin pack, promoted to core the same day — the repo's own observability
-is not a plugin, per user ruling), `shared/metrics/core/core_metrics_events.py` (the
+is not a plugin, per user ruling), `base/telemetry/metrics/core/events.py` (the
 event-stream panels: the Events trio and the gateway sample count) and
-`shared/metrics/core/core_metrics_host.py` (the `Host & data plane` section), plus the
-smaller registration modules beside them (`core_metrics_cost` and
-`core_metrics_frontend` — the line budget splits of the first two, task
-#3697 — and `core_metrics_dismissed`, `core_metrics_fleet`,
-`core_metrics_pr_flow`). All register through `register_core_metric()` in
-`shared/metrics/core/core_metrics.py`, which runs the **same
+`base/telemetry/metrics/core/host.py` (the `Host & data plane` section), plus the
+smaller registration modules beside them (`cost` and
+`frontend` — the line budget splits of the first two, task
+#3697 — and `dismissed`, `fleet`,
+`pr_flow`). All register through `register_core_metric()` in
+`base/telemetry/metrics/core/catalog.py`, which runs the **same
 SQL-template safety validation as plugin metrics** (`validate_spec_sql`) and
 fills `plugin = "core"`.
 
@@ -162,7 +162,7 @@ dashboard is provisioning-managed — titles are edited here, as code).
 
 ### MetricSpec — the registration contract
 
-`shared/plugin_metrics.py` defines `MetricSpec`, shared by core and plugin
+`base/telemetry/metrics/plugin_metrics.py` defines `MetricSpec`, shared by core and plugin
 registrations: `name` / `title` / `description` / `event_name` / `category` /
 `unit` / `panel` (`timeseries` / `stat` / `barchart` / `table`) / `query`
 (Grafana query template — LogQL over the Loki event stream,
@@ -223,7 +223,7 @@ of mass-editing targets.
    #1467) the `event_name`/`agent_id` matchers go INSIDE the stream selector
    (`{service_name="unknown_service", event_name=...}`) and `| json` stays
    for the level/category/attributes filters (those fields are not stream
-   labels); the template contract is validated by `shared/metrics/metrics_logql.py`.
+   labels); the template contract is validated by `base/telemetry/metrics/logql.py`.
    Use the fixed window
    that matches the panel's information density; stats and tables remain
    instant over `[$__range]`; every count wraps in `sum(...)`.

@@ -23,11 +23,9 @@ import shutil
 import subprocess
 from pathlib import Path
 
-from shared.paths import logs_dir
+from base.paths import logs_dir
 
 _SOURCE = Path(__file__).with_name("ocr.swift")
-_BIN_DIR = logs_dir() / "computer" / "ocr-bin"
-_BIN = _BIN_DIR / "ocr"
 # A 4K full-screen run takes ~0.5-2s; 30s is generous but bounded.
 _OCR_TIMEOUT_S = 30.0
 
@@ -36,15 +34,21 @@ class OcrError(Exception):
     """OCR could not run or produced no parseable output."""
 
 
+def _bin_path() -> Path:
+    """Where the compiled OCR binary lives, under this home's logs dir."""
+    return logs_dir() / "computer" / "ocr-bin" / "ocr"
+
+
 def _binary() -> Path:
     """The compiled OCR binary, built on demand (source-newer check)."""
-    if not _BIN.exists() or _SOURCE.stat().st_mtime > _BIN.stat().st_mtime:
-        _BIN_DIR.mkdir(parents=True, exist_ok=True)
+    binary = _bin_path()
+    if not binary.exists() or _SOURCE.stat().st_mtime > binary.stat().st_mtime:
+        binary.parent.mkdir(parents=True, exist_ok=True)
         swiftc = shutil.which("swiftc")
         if swiftc is None:
             raise OcrError("swiftc not found on PATH — cannot build the OCR helper")
         built = subprocess.run(  # noqa: S603 — swiftc from PATH, argv is our own source
-            [swiftc, "-o", str(_BIN), str(_SOURCE)],
+            [swiftc, "-o", str(binary), str(_SOURCE)],
             capture_output=True,
             text=True,
             timeout=120,
@@ -52,7 +56,7 @@ def _binary() -> Path:
         )
         if built.returncode != 0:
             raise OcrError(f"swiftc failed: {built.stderr.strip()[:300]}")
-    return _BIN
+    return binary
 
 
 def ocr_image(path: str | Path) -> list[dict[str, float | str]]:

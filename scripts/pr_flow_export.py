@@ -9,13 +9,13 @@ the unified telemetry pipeline:
   re-emitted on every run so the whole window stays visible inside
   Prometheus's retention. Fields: ``merged_count`` plus (when the day has
   samples) ``ready_to_merge_median_seconds`` / ``ready_to_merge_p90_seconds``,
-  ``qa_rounds_mean`` / ``qa_rereview_share``, ``flake_new_quarantines``.
+  ``flake_new_quarantines``.
 - ``pr_flow_run`` — one event per run carrying the point-in-time
   ``queue_depth`` sample of the Trunk merge queue (absent when the queue is
   unreachable; the event itself stays as the daily breadcrumb).
 
 Every numeric payload field is dispositioned as an ObservableGauge in
-``shared/telemetry/otlp/telemetry_otlp.py`` — the values are per-day absolute state, never
+``base/telemetry/otlp/telemetry_otlp.py`` — the values are per-day absolute state, never
 sums, and re-emission must replace them rather than accrue them.
 
 Metric definitions (cluster-tz days; the fleet timezone is Asia/Shanghai):
@@ -29,12 +29,6 @@ Metric definitions (cluster-tz days; the fleet timezone is Asia/Shanghai):
 - **queue depth**: length of Trunk ``getQueue``'s ``enqueuedPullRequests``
   at run time. One sample per run — a point-in-time reading, not a per-day
   aggregate.
-- **QA rounds**: per merged PR, the number of ``ava-qa`` receipt comments
-  (``scripts/qa_receipt.py`` format, shared GitHub account); ``qa_rounds_mean``
-  is the day's mean. A **delta re-review** is a receipt followed by a
-  different head commit before the next receipt or merge — the brief's
-  "post-receipt head-SHA change" — and ``qa_rereview_share`` is the share of the
-  day's PRs with at least one.
 - **flakes**: Trunk's flaky database — tests whose ``quarantined_at`` falls
   on day D, counted over the currently quarantined list.
 
@@ -72,11 +66,10 @@ from __future__ import annotations
 import argparse
 import contextlib
 import json
-import re
 import subprocess
 import sys
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 from datetime import time as dtime
 from pathlib import Path
@@ -84,8 +77,8 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 # Script-mode path guards (PYTHONSAFEPATH=1 removed the implicit script-dir
-# entry): this checkout's root first so `shared` resolves against this tree,
-# then the scripts dir for the sibling scripts (ci_utils / qa_receipt).
+# entry): this checkout's root first so `base` resolves against this tree,
+# then the scripts dir for the sibling script (ci_utils).
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
@@ -97,9 +90,6 @@ DEFAULT_REPO = "zhiyuan-zhang0206/Ava"
 DEFAULT_WINDOW_DAYS = 30
 PROCESS_NAME = "pr-flow"
 TRUNK_TOKEN_PATH = Path.home() / ".trunk" / "api-token"
-
-# The shared GitHub account that posts QA receipts (scripts/qa_receipt.py).
-QA_ACCOUNT_ID = 87293881
 
 _GH_TIMEOUT_S = 60.0
 _TRUNK_REQUEST_TIMEOUT_S = 30.0
@@ -128,8 +118,6 @@ class PrRecord:
     created_at: str
     merged_at: str
     ready_at: str
-    receipts: list[dict[str, str]] = field(default_factory=list)
-    head_deltas: int = 0
     partial: bool = False  # True when the timeline could not be read
 
     def to_cache(self) -> dict[str, Any]:
@@ -138,8 +126,6 @@ class PrRecord:
             "created_at": self.created_at,
             "merged_at": self.merged_at,
             "ready_at": self.ready_at,
-            "receipts": self.receipts,
-            "head_deltas": self.head_deltas,
             "partial": self.partial,
         }
 
@@ -151,8 +137,6 @@ class PrRecord:
             created_at=str(data.get("created_at") or ""),
             merged_at=str(data.get("merged_at") or ""),
             ready_at=str(data.get("ready_at") or ""),
-            receipts=list(data.get("receipts") or []),
-            head_deltas=int(data.get("head_deltas") or 0),
             partial=bool(data.get("partial")),
         )
 
@@ -181,7 +165,7 @@ class RunStats:
 
 def cluster_tz() -> ZoneInfo:
     """The cluster's wall clock — the day boundary every aggregate uses."""
-    from shared.config import settings
+    from base.config import settings
 
     return ZoneInfo(settings.general.timezone)
 
@@ -259,11 +243,7 @@ def fetch_timeline(repo: str, number: int, stats: RunStats) -> list[dict[str, An
     Bounded at ``_MAX_TIMELINE_PAGES`` pages; a busier timeline is truncated
     (logged via stats) rather than unbounded.
     """
-    jq = (
-        "[.[] | {event, created_at, label: (.label.name // null), sha: (.sha // null), "
-        "commit_date: (.committer.date // .author.date // null), uid: (.user.id // null), "
-        "body: (.body // null)}] | @json"
-    )
+    jq = "[.[] | {event, created_at}] | @json"
     events: list[dict[str, Any]] = []
     for page in range(1, _MAX_TIMELINE_PAGES + 1):
         out = _run_gh(
@@ -289,70 +269,6 @@ def fetch_timeline(repo: str, number: int, stats: RunStats) -> list[dict[str, An
     return events
 
 
-def parse_receipts(events: list[dict[str, Any]]) -> list[dict[str, str]]:
-    """QA receipts from a timeline: (at, head_sha, verdict) per receipt comment.
-
-    The format is `scripts/qa_receipt.py`'s: a fenced ```ava-qa JSON block
-    posted by the shared account. Malformed or foreign comments are skipped —
-    the receipt count must never be inflated by a lookalike.
-    """
-    import qa_receipt
-
-    receipts: list[dict[str, str]] = []
-    for event in events:
-        if event.get("event") != "commented" or event.get("uid") != QA_ACCOUNT_ID:
-            continue
-        body = event.get("body") or ""
-        match = qa_receipt._RECEIPT.fullmatch(body)
-        if match is None:
-            continue
-        try:
-            value = json.loads(match[1])
-        except json.JSONDecodeError:
-            continue
-        if not isinstance(value, dict):
-            continue
-        head_sha = value.get("head_sha")
-        if not isinstance(head_sha, str) or not re.fullmatch(r"[0-9a-f]{40}", head_sha):
-            continue
-        receipts.append(
-            {
-                "at": str(event.get("created_at") or ""),
-                "head_sha": head_sha,
-                "verdict": str(value.get("verdict") or ""),
-            }
-        )
-    return receipts
-
-
-def count_head_deltas(
-    receipts: list[dict[str, str]],
-    events: list[dict[str, Any]],
-    merged_at: str,
-) -> int:
-    """Receipts followed by a different head before the next receipt / merge.
-
-    The brief's delta re-review count: walk each receipt's window (its
-    timestamp to the next receipt's, or to the merge) over the timeline's
-    ``committed`` events; a commit whose sha differs from the receipt's head
-    means the head moved and the review went stale.
-    """
-    committed = sorted(
-        (str(event.get("commit_date") or ""), str(event.get("sha") or ""))
-        for event in events
-        if event.get("event") == "committed" and event.get("commit_date")
-    )
-    deltas = 0
-    for index, receipt in enumerate(receipts):
-        end = receipts[index + 1]["at"] if index + 1 < len(receipts) else merged_at
-        moved = any(
-            receipt["at"] < at < end and sha and sha != receipt["head_sha"] for at, sha in committed
-        )
-        if moved:
-            deltas += 1
-    return deltas
-
-
 def build_record(meta: dict[str, Any], events: list[dict[str, Any]]) -> PrRecord:
     """The compact per-PR record from one PR's list row + timeline."""
     number = int(meta["number"])
@@ -363,15 +279,12 @@ def build_record(meta: dict[str, Any], events: list[dict[str, Any]]) -> PrRecord
             ready_at = str(event["created_at"])
             break
     merged_at = str(meta.get("merged_at") or "")
-    receipts = parse_receipts(events)
     return PrRecord(
         number=number,
         updated_at=str(meta.get("updated_at") or ""),
         created_at=created_at,
         merged_at=merged_at,
         ready_at=ready_at,
-        receipts=receipts,
-        head_deltas=count_head_deltas(receipts, events, merged_at),
     )
 
 
@@ -441,12 +354,6 @@ def compute_days(
         if durations:
             entry["ready_to_merge_median_seconds"] = round(_percentile(durations, 0.5), 1)
             entry["ready_to_merge_p90_seconds"] = round(_percentile(durations, 0.9), 1)
-        rounds = [len(record.receipts) for record in group]
-        if rounds:
-            entry["qa_rounds_mean"] = round(sum(rounds) / len(rounds), 3)
-            entry["qa_rereview_share"] = round(
-                sum(1 for record in group if record.head_deltas > 0) / len(group), 3
-            )
         if flake_counts is not None:
             entry["flake_new_quarantines"] = flake_counts.get(day, 0)
         payload[day.isoformat()] = entry
@@ -681,8 +588,8 @@ def emit_snapshot(snapshot: dict[str, Any], *, dry_run: bool) -> None:
 
 def _emit_events(snapshot: dict[str, Any]) -> None:
     """The pipeline write (separate seam so tests can assert dry-run silence)."""
-    from shared import telemetry
-    from shared.telemetry.otlp import telemetry_otlp
+    from base import telemetry
+    from base.telemetry.otlp import telemetry_otlp
 
     telemetry.init_telemetry(process=PROCESS_NAME)
     telemetry_otlp.warmup()
@@ -735,7 +642,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.state_dir is not None:
         state_dir = args.state_dir
     else:
-        from shared.paths import ava_home
+        from base.paths import ava_home
 
         state_dir = ava_home() / _STATE_DIR_RELATIVE
     cache = load_cache(state_dir / "cache.json")

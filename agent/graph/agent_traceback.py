@@ -1,7 +1,7 @@
 """Render exec tracebacks for two audiences with two different cuts.
 
 Agent-written code runs under the pseudo-filename ``<agent_code>`` (the name
-``compile()`` stamps in `_exec.py`). When that code raises, the raw traceback
+``compile()`` stamps in `exec/node.py`). When that code raises, the raw traceback
 threads through the exec harness above it and the SDK / plugin / standard-library
 frames below it. Those frames are useless to the agent (it did not write them and
 cannot fix them) and they leak framework internals into the model's context.
@@ -61,8 +61,10 @@ def register_agent_source(code: str) -> None:
 
     Stores the source under the ``<agent_code>`` key with a None mtime, which
     `linecache.checkcache` leaves untouched (no real file to validate against).
-    Overwritten each turn with the current code; one agent per process means the
-    shared key never races across agents.
+    The key is process-global, so call this only from the exec child
+    (`agent/exec_child.py`): a fresh process per execute_code call, whose
+    linecache holds exactly that execution's code. The agent host's one process
+    serves many agents and must never call it.
     """
     linecache.cache[AGENT_CODE_FILENAME] = (
         len(code),

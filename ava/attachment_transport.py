@@ -12,13 +12,13 @@ from pathlib import Path
 from typing import Any
 
 from ava.files import resolve
-from ava.sdk_validation import coerce_str
-from shared.lm.attach_constants import (
+from ava.sdk_surface.validation import coerce_str
+from base.lm.attach_constants import (
     ATTACH_MAX_FILE_BYTES,
     ATTACH_MAX_LABEL_CHARS,
     ATTACH_MEDIA_MIME,
 )
-from shared.log import logger
+from base.log import logger
 
 _ATTACHMENTS: list[dict[str, Any]] = []
 
@@ -29,7 +29,7 @@ def attach_available() -> bool:
     The single gate behind the text-only ruling (2026-08-28): `attach()`
     raises for a model with no attachable modality, and the system-prompt /
     help surfaces hide the member entirely. See
-    `shared.lm.registry.attach_modalities_for_model` for the resolution."""
+    `base.lm.registry.attach_modalities_for_model` for the resolution."""
     return _attach_unavailable_reason() is None
 
 
@@ -48,8 +48,8 @@ def _current_model() -> str:
 
     Capability gates judge the model that will actually run, so a withdrawn id
     is gated as its fallback (task #3212)."""
-    from shared.config.turn_view import turn_settings
-    from shared.lm.registry import resolve_available_model
+    from base.config.turn_view import turn_settings
+    from base.lm.registry import resolve_available_model
 
     return resolve_available_model(turn_settings.lm.llm_model)
 
@@ -61,7 +61,7 @@ def _attach_unavailable_reason() -> str | None:
     ``attach_modalities`` declaration) cannot receive any attached media, so
     registering files for its next turn is a contradiction — the SDK docs drop
     the member and the call fails with this reason (user ruling 2026-08-28)."""
-    from shared.lm.registry import attach_modalities_for_model
+    from base.lm.registry import attach_modalities_for_model
 
     model = _current_model()
     if attach_modalities_for_model(model):
@@ -73,7 +73,7 @@ def _validate_modality(suffix: str) -> None:
     """Reject a file whose modality the current model's attach set does not
     include — a clear error at registration, never a silent pack-time skip
     (user ruling 2026-08-28)."""
-    from shared.lm.registry import attach_modalities_for_model
+    from base.lm.registry import attach_modalities_for_model
 
     model = _current_model()
     mime = ATTACH_MEDIA_MIME[suffix]

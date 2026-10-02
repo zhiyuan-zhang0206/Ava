@@ -1,16 +1,9 @@
 {
-  "complexity": {
-    "tests/ops/test_publication_recovery.py::test_pre_stop_abort_clears_a_never_effective_window": 15,
-    "tests/ops/test_publication_recovery.py::test_run_replaces_the_abandoned_operation_under_a_fresh_closure": 28
+  "patch_targets": {
+    "tests/ops/test_schema_mismatch.py::gateway.cluster.roster_probe._probe_failures": 1
   },
-  "directories": {
-    "tests/ops": 47
-  },
-  "files": {
-    "tests/ops/test_cluster_spawn_backend.py": 988,
-    "tests/ops/test_controllers_stranded_pause.py": 1237,
-    "tests/ops/test_publication_recovery.py": 880,
-    "tests/ops/test_updater_outcome.py": 993,
-    "tests/ops/test_updater_stall_reap.py": 832
+  "tests_location": {
+    "tests/ops/test_agent_wake_hosted.py::top-level": 1,
+    "tests/ops/test_schema_mismatch.py::top-level": 1
   }
 }

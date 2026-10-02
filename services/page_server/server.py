@@ -71,10 +71,9 @@ class _PageHandler(http.server.SimpleHTTPRequestHandler):
         return io.BytesIO(body)
 
     def handle_one_request(self) -> None:
-        try:
+        # Client hung up mid-request; nothing to do.
+        with suppress(TimeoutError, ConnectionResetError, BrokenPipeError):
             return super().handle_one_request()
-        except (TimeoutError, ConnectionResetError, BrokenPipeError):
-            pass  # fail-fast-ok: client hung up mid-request; nothing to do
 
 
 _EXTENSIONS = {

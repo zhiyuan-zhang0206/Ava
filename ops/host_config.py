@@ -1,0 +1,189 @@
+"""Host-scope config read / write RPC ops.
+
+Read this machine's host-scope config fields (sensitive values masked) and apply
+a validated all-or-nothing override write. One of the op clusters beside
+`ops.lifecycle`, `ops.cluster`, `ops.inventory` and `ops.uploads`; each cluster
+is self-contained.
+
+Dispatched by the agent-runner ops server (`services/agent_ops/daemon.py`) and
+called by the gateway config router. `SENSITIVE_MASK` is re-imported by the
+router to render masked fields consistently.
+"""
+
+from __future__ import annotations
+
+from typing import Any
+
+from base.cluster.machine import machine_name
+from base.config import env_override_values, field_domain, get_config_metadata
+from base.config.candidate import validate_env_patch_for_write
+from base.config.editing import field_editable, split_reducer_patch
+from base.host import config_validators
+from base.host.env import runtime_config
+from ops.rpc_schemas import (
+    ConfigAuditReadResult,
+    ConfigReadResult,
+    ConfigWriteOpResult,
+    FieldWriteResult,
+    HostConfigField,
+)
+
+SENSITIVE_MASK = "••••••••"
+
+
+def config_read_op() -> ConfigReadResult:
+    """Read this machine's host-scope config fields and return them with metadata.
+
+    Returns a ConfigReadResult with:
+      - machine: this machine's name
+      - host_fields: one entry per host-scope field with effective value (sensitive
+        fields masked), set-in-.env flag, remote_writable flag, and optional
+        read-time capability hint
+      - raw_overrides: the host's editable override set ({field: value} for the
+        remotely-writable host fields set in this machine's .env), sensitive keys
+        omitted (the frontend deltas against this to build a write payload)
+    """
+    metas = get_config_metadata()
+    metas_by_name = {m.name: m for m in metas}
+    set_fields = runtime_config.env_set_field_names()
+    overrides = env_override_values()
+    host_fields: dict[str, HostConfigField] = {}
+    for meta in metas:
+        if meta.scope != "host":
+            continue
+        value = meta.current_value
+        if meta.sensitive and value:
+            value = SENSITIVE_MASK
+        cap = config_validators.read_time_capability(meta.name)
+        host_fields[meta.name] = HostConfigField(
+            value=value,
+            overridden=meta.name in set_fields,
+            remote_writable=meta.remote_writable,
+            can_enable=cap.ok if cap is not None else None,
+            reason=cap.reason if cap is not None else None,
+        )
+
+    raw_overrides = {
+        name: value
+        for name, value in overrides.items()
+        if metas_by_name[name].scope == "host" and not metas_by_name[name].sensitive
+    }
+
+    return ConfigReadResult(
+        machine=machine_name(),
+        host_fields=host_fields,
+        raw_overrides=raw_overrides,
+    )
+
+
+def config_audit_read_op(last: int) -> ConfigAuditReadResult:
+    """Read this machine's most recent `.env`-write audit records (newest first)."""
+    from base.host.env.audit import read_env_write_records
+
+    return ConfigAuditReadResult(machine=machine_name(), records=read_env_write_records(last))
+
+
+def config_write_op(
+    overrides: dict[str, Any],
+    *,
+    local: bool = False,
+    actor: str | None = None,
+    trace_id: str | None = None,
+) -> ConfigWriteOpResult:
+    """Validate and merge this machine's host overrides into its .env (reducer semantics).
+
+    `overrides` is a JSON-merge-patch over the host `.env`: a key with a value is
+    set/replaced, a key mapped to `None` is unset (reverted to its default), and a
+    key that is ABSENT is left untouched. Deletion is always explicit (a null
+    value) — never inferred from absence — so a partial payload can never silently
+    drop a field it did not mention (a full-replace once wiped a cluster's secrets
+    that way). Validates every field against host-scope + editability checks, then
+    the host-side capability validator (skipped for an unset — there is no value to
+    validate). Only writes if every field passes (atomic). Returns per-field
+    results, applied flag, and the union of restart_required values from the
+    changed fields.
+
+    `local` distinguishes a self-target edit (the gateway editing its OWN host
+    fields) from a remote one. A host field is editable iff `writable` when local,
+    else `remote_writable` — `writable` means "a human may edit it on its own host",
+    `remote_writable` is the narrower allowlist for editing a *remote* host's field.
+    The gate is `base.config.editing.field_editable` — the same definition the
+    gateway's PUT /api/config gate uses, so the two write paths cannot drift.
+    """
+    metas = {m.name: m for m in get_config_metadata()}
+
+    results: dict[str, FieldWriteResult] = {}
+    for field, value in overrides.items():
+        if field not in metas:
+            results[field] = FieldWriteResult(ok=False, reason="unknown field")
+            continue
+        meta = metas[field]
+        if meta.scope != "host":
+            results[field] = FieldWriteResult(ok=False, reason="not a host-scope field")
+            continue
+        if not field_editable(meta, local=local):
+            results[field] = FieldWriteResult(
+                ok=False, reason="not editable" if local else "not remotely editable"
+            )
+            continue
+        if value is None:
+            # Explicit unset — no value to validate.
+            results[field] = FieldWriteResult(ok=True, reason=None)
+            continue
+        vr = config_validators.validate(field, value)
+        results[field] = FieldWriteResult(ok=vr.ok, reason=vr.reason)
+
+    # all() over an empty dict is True, so an empty payload is trivially applied.
+    applied = all(r.ok for r in results.values())
+
+    restart_required: list[str] = []
+    if applied:
+        writes, removals = split_reducer_patch(overrides, metas)
+        candidate = validate_env_patch_for_write(writes, removals)
+        errors_by_domain = candidate.errors_by_domain
+        if errors_by_domain:
+            applied = False
+            patched_fields = set(writes) | removals
+            rejected_fields = {
+                field for field in patched_fields if field_domain(field) in errors_by_domain
+            }
+            if not rejected_fields:
+                rejected_fields = {next(iter(sorted(patched_fields)))}
+            for field in rejected_fields:
+                errors = errors_by_domain.get(field_domain(field))
+                reason = "candidate rejected: " + "; ".join(errors or [])
+                results[field] = FieldWriteResult(ok=False, reason=reason)
+        else:
+            if writes or removals:
+                try:
+                    runtime_config.write_fields(
+                        writes,
+                        removals,
+                        expected_digest=candidate.expected_digest,
+                        audit_site="ops_config_write",
+                        actor=actor,
+                        trace_id=trace_id,
+                    )
+                except RuntimeError as exc:
+                    if str(exc) != ".env changed before owned runtime-config write":
+                        raise
+                    applied = False
+                    for field in set(writes) | removals:
+                        results[field] = FieldWriteResult(
+                            ok=False,
+                            reason="config changed concurrently; retry the request",
+                        )
+            restart_required = sorted(
+                {
+                    metas[f].restart_required
+                    for f in set(writes) | removals
+                    if applied and metas[f].restart_required
+                }
+            )
+
+    return ConfigWriteOpResult(
+        machine=machine_name(),
+        results=results,
+        applied=applied,
+        restart_required=restart_required,
+    )

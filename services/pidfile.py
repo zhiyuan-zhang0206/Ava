@@ -25,7 +25,7 @@ import os
 from contextlib import suppress
 from pathlib import Path
 
-from shared.proc import process_alive, process_cmdline
+from base.host.proc import process_alive, process_cmdline
 
 
 def pidfile_holds_daemon(path: Path, module: str) -> bool:

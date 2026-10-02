@@ -16,6 +16,7 @@ import uuid
 from functools import partial
 from typing import Any, Literal
 
+from base.config import settings
 from services.im_bridge import copy, notice_bridge, push_watchdog
 from services.im_bridge.gateway_client import GatewayClient
 from services.im_bridge.spawn_menu import SpawnMenuMixin
@@ -34,7 +35,6 @@ from services.im_bridge.types import (
     Reply,
     SpawnDraft,
 )
-from shared.config import settings
 
 _log = logging.getLogger("services.im_bridge.core")
 

@@ -23,11 +23,11 @@ from uuid import UUID
 
 from pydantic import BaseModel
 
-import shared.redis_listener
+import base.events.live.redis_listener
+from base.agents.impersonation import RELAY_HEARTBEAT_SECONDS
+from base.agents.impersonation.delivery import reserve_delivery
+from base.config import settings
 from cli.commands.agents.codex_app_server import live_submit, require_control_endpoint
-from shared.agents.impersonation import RELAY_HEARTBEAT_SECONDS
-from shared.agents.impersonation.impersonation_delivery import reserve_delivery
-from shared.config import settings
 
 _CATCHUP_SECONDS = 30.0
 _MIN_EMIT_INTERVAL_SECONDS = 2.0
@@ -101,8 +101,8 @@ class WakeListener(Protocol):
 
 
 def ack_command(lease_id: int | UUID, ids: Sequence[int], agent_id: int | None = None) -> str:
-    """The exact ACK command for one pushed batch, as a bare `ava`: the executor
-    inherits AVA_HOME, and the host launcher runs that cluster's own CLI."""
+    """The exact ACK command for one pushed batch, as a bare `ava`: the host's
+    `~/.local/bin/ava`, linked to the production CLI."""
     return shlex.join(
         [
             "ava",
@@ -249,7 +249,7 @@ def host_emitter(
 
 
 def _read_inbox(agent_id: int, lease_id: UUID, token: str) -> InboxSnapshot:
-    from shared.agents import impersonation
+    from base.agents import impersonation
 
     lease = _Lease.model_validate(impersonation.relay_get(str(lease_id), token))
     if lease.agent_id != agent_id or lease.id != lease_id:
@@ -465,7 +465,7 @@ async def relay_inbox(  # noqa: PLR0915 — one consent/window/reservation deliv
 def _write_heartbeat(lease_id: UUID, token: str) -> bool:
     """One durable liveness beat; False means the lease ended or the relay
     credential was revoked — the heartbeat loop stops silently."""
-    from shared.agents import impersonation
+    from base.agents import impersonation
 
     try:
         impersonation.relay_heartbeat(str(lease_id), token)
@@ -493,8 +493,8 @@ def cmd_relay(args: argparse.Namespace) -> int:
     from cli.commands.agents import impersonation
 
     try:
-        from shared.agents.impersonation import relay_get
-        from shared.agents.impersonation.impersonation_history import resolve
+        from base.agents.impersonation import relay_get
+        from base.agents.impersonation.history import resolve
 
         if args.lease_id is None:
             lease_id = UUID(str(resolve(args.agent_id, args.session_id)["id"]))
@@ -522,7 +522,7 @@ def cmd_relay(args: argparse.Namespace) -> int:
                 return
             heartbeat = asyncio.create_task(_heartbeat_loop(lease_id, token))
             try:
-                listener = shared.redis_listener.RedisInboundListener(
+                listener = base.events.live.redis_listener.RedisInboundListener(
                     settings.data_plane.redis_url, args.agent_id
                 )
                 await relay_inbox(

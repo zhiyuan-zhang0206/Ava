@@ -13,13 +13,13 @@ that would `NameError` on a TYPE_CHECKING-only import.
 
 Genuine exceptions (circular imports, `import torch`-class heavy deps) go in
 `_TYPE_CHECKING_ALLOWED` with a reason. This rule is lint-enforced by
-`scripts/lint_code_structure.py`.
+`scripts/lint/code_structure.py`.
 
 ## Per-file line budget: 800 lines
 
 A `.py` file may contain at most 800 lines (`len(text.splitlines())`). Split
 larger files into focused modules. The budget covers the eight governed
-packages (`agent`, `ava`, `ava_builtins`, `gateway`, `shared`, `services`, `ops`,
+packages (`agent`, `ava`, `ava_builtins`, `gateway`, `base`, `services`, `ops`,
 `cli`) plus `tests/` and `scripts/`. The TYPE_CHECKING ban and machine_role()
 allowlist still apply only to the eight packages.
 
@@ -38,7 +38,7 @@ the gate. New violations and growth above a frozen value fail the gate. The base
 shrink-only: a guard compares it with the base revision described below and
 rejects added file entries or raised values. After splitting a file, lower
 its baseline value by hand to its current line count, or remove its entry
-once it is within budget. Enforced by `scripts/lint_code_structure.py`.
+once it is within budget. Enforced by `scripts/lint/code_structure.py`.
 
 ## Directory budget: ≤20 direct entries
 
@@ -46,10 +46,14 @@ Each directory in the same scope may have at most 20 direct entries:
 `.py` and `.pyi` files plus direct subdirectories. A subdirectory counts as
 one regardless of its contents — unless it holds nothing but `__pycache__` /
 dot-prefixed entries (or nothing), the leftover a local package rename or
-removal leaves and a fresh checkout never has. Each level is checked
-independently. `__pycache__`, dot-prefixed entries, and symlinks do not count
-and are not traversed. `migrations` subtrees are entirely exempt. `docs/` and `ui/` are
-outside the scope.
+removal leaves and a fresh checkout never has, or it is a `docs/` or `tests/`
+layer without `__init__.py` (such a package with `__init__.py` counts). A `tests/`
+layer has no entry cap of its own either: a test is a file under any `tests/`
+directory, the top-level one or a package's own `<pkg>/**/tests/`, and
+`lint_common.is_test_path` is the one predicate every lint uses for it. Each
+level is checked independently. `__pycache__`, dot-prefixed entries, and symlinks do not count
+and are not traversed. `migrations` subtrees are entirely exempt. The repo-root `docs/` and
+`ui/` are outside the scope.
 
 Existing over-limit directories are frozen in the `directories` sections of
 the baseline shards, with the same containment and shrink-only
@@ -64,8 +68,9 @@ baseline guard runs in both modes.
 Two AST rules keep a change, or a reader tracing one, inside one package plus
 its neighbors' public doors. The authoritative rule text — what counts as
 private, what a bypass is, today's single-owner decision — lives in the
-`scripts/lint_code_structure.py` module docstring (Rules 4 and 5); this
-section covers fixing a violation and maintaining its baseline.
+`scripts/lint/code_structure.py` module docstring (Rules 4 and 5); this
+section covers fixing a violation and maintaining its baseline. Rule 8 has
+its own script (`scripts/lint/patch_targets.py`).
 
 - **Rule 4 — package doors.** Reaching a `_`-prefixed module or name from
   outside the package that owns it fails, whether by import or by attribute
@@ -80,18 +85,35 @@ section covers fixing a violation and maintaining its baseline.
   ([SDK surface](sdk-docstring-discipline.md)), not the underscore, so an
   `ava/_*.py` module another package needs is promoted to a public module name
   without becoming agent-visible. Files under a `tests/` directory are
-  exempt.
+  exempt from the import and attribute check, but not from Rule 8.
+- **Rule 8 — tests may not patch another package's private names.**
+  `scripts/lint/patch_targets.py` rejects a patch (`monkeypatch.setattr`,
+  `patch`, `patch.object`, `mocker.patch`, string or object target) of a
+  `_private` name whose owning package does not contain the test's home. The
+  home is the deepest package that holds or directly depends on everything the
+  test imports (its own imports plus what the package imports), not its
+  directory, so moving a test into `<pkg>/tests/` changes no verdict; the ambient environment
+  (`base.config`, `base.paths`, machine identity, `AVA_*`) is exempt. Fix it
+  by patching a public name, giving the owner an injection seam (a parameter,
+  a settings field, a public setter), or moving the test into the owner.
 - **Rule 6 — no path imports under `ava_builtins/`.** A skill or plugin
   module may not edit `sys.path`, call `site.addsitedir`, or load a module
   by file path (`spec_from_file_location`, `SourceFileLoader`,
   `runpy.run_path`); `scripts/structure/path_imports.py` finds them. Shared
   code moves into a governed package the script imports normally, and a
-  script that needs it runs on the checkout's venv python. The
+  script that needs it runs on the checkout's venv python. One narrow
+  exception: a script under `ava_builtins/skills/<skill>/` may run a
+  one-line `sys.path.insert(0, ...)` / `.append(...)` guard whose argument
+  is derived from `__file__` and resolves inside that same `<skill>/` tree
+  (its own `scripts/`, or a sibling sub-skill's) — recognized by AST, so it
+  is not counted as a site at all. A guard reaching outside the skill (another
+  skill, `ava_builtins/skills/` itself, or `ava_builtins/plugins/`), or any
+  file-loader call regardless of its argument, is still a violation. The
   `path_imports` baseline section is empty; unlike Rules 4 and 5 it has no
   pairing, so any new key is refused.
 - **Rule 5 — single decision owners.** `scripts/structure/locality.py:DECISIONS`
   names design decisions with exactly one owning module — today,
-  `postgres-dial` (`shared/db_connections.py`). Any other module making that
+  `postgres-dial` (`base/db/connections.py`). Any other module making that
   decision is a bypass; fix it by routing through the owner. A site that
   genuinely cannot goes in that decision's `allowed` map with a one-line
   reason — an allowed module that stops bypassing (or disappears) fails as
@@ -99,16 +121,24 @@ section covers fixing a violation and maintaining its baseline.
   decision only once its owner exists: an entry in `DECISIONS` with its owning
   module(s), a `find(tree, roots)` AST scanner, and a `fix` message.
 
-Both rules freeze today's sites in the `private_imports` / `owner_bypasses`
-sections of the baseline shards as exact `path::target -> site
-count` maps. Unlike the line/directory budgets, the count must match reality
-exactly in both directions: a new or grown site fails, and a shrunk or removed
-site fails too until its baseline entry is lowered or deleted — so a fixed
-reach-in cannot silently return uncounted. Against the base revision both
-sections are shrink-only: a new key is accepted only against a same-file
+Rules 4, 5 and 8 freeze today's sites in the `private_imports` /
+`owner_bypasses` / `patch_targets` sections of the baseline shards as exact
+`path::target -> site count` maps. Unlike the line/directory budgets, the
+count must match reality exactly in both directions: a new or grown site
+fails, and a shrunk or removed site fails too until its baseline entry is
+lowered or deleted — so a fixed reach-in cannot silently return uncounted.
+Against the base revision all three sections are shrink-only: a new key is accepted only against a same-file
 removal of the same private name with equal or greater value (the private
 owner module moved), and a git `-M` rename carries keys once they are migrated
-to the new path by hand.
+to the new path by hand. Changing how a section's sites are measured raises
+its version in `scripts/structure/baseline/rules.json` and re-freezes it; for
+that one change the guard holds the section's total instead of its keys.
+
+The `tests_location` section is the same kind of frozen map for a different rule: a test in the
+top-level `tests/` must stay by design, be listed in `scripts/structure/tests_location_allowed.py`
+with a reason, or be frozen there as `path::top-level -> 1` (the tests still to move into their
+package). It is shrink-only against the base revision, and a moved test's key fails as stale
+until it is deleted (`scripts/structure/tests_location.py`).
 
 What this means for common edits:
 
@@ -122,26 +152,24 @@ What this means for common edits:
   function defined in that same module) — `cli.main` is not a handler
   registry; its tests patch the parser module before `build_parser()` runs.
 
-### Contract snapshots: a door's public surface, committed
+## Ambient state: inject what is read to decide
 
-Rule 4 says nothing outside a package may import its `_`-private modules or
-names — so a door's contract IS its public surface. `scripts/structure/contracts.py`
-renders that surface (module-by-module, function/class/variable/re-export, sorted
-and deterministic) into a snapshot file next to the code: `shared/db.api.txt`,
-`shared/agents/api.txt`, `shared/events/api.txt`. Regenerate with
-`.venv/bin/python scripts/structure/contracts.py --write`; the
-`lint-contract-snapshots` pre-commit hook runs `--check` and fails on drift.
-
-**A snapshot diff is a contract change, and the PR must declare it** (see the
-"Contract change" section in
-[`write-a-pr-description`](../.agents/skills/write-a-pr-description/SKILL.md)).
-The tool is pure AST — it never imports a door's own code — so a body-only
-change (an implementation fix with no signature change) leaves the snapshot
-byte-identical; only a real surface change (a new/removed public name, a
-changed signature, a widened re-export) moves it. A `fix` PR whose diff has to
-touch a contract snapshot is a sign the "fix" actually changed the door's
-contract — that goes back through [align](../ava_builtins/skills/ava-workflow/align/SKILL.md)
-instead of landing as an internal-only change.
+Inject what is read to decide; write-only facades (a logger, a meter, a tracer) may
+stay global, so for anything a module holds at import — an instance, a container,
+a `global` slot, a `ContextVar`, a platform constant, an import-time call or read —
+ask whether anything reads it to decide what to do, and if so build it in a
+composition root and hand it to the component that uses it. Background work must be
+durable or re-derivable from durable state and run as its own service loop; use a
+per-iteration `async with asyncio.TaskGroup()` for bounded parallelism, never a
+free-floating `create_task` or thread. Rule 9 of `scripts/lint/code_structure.py`
+(`scripts/structure/ambient_state/`) enforces both: new sites fail, today's are
+frozen in the `ambient_state` baseline section as `path::rule:name -> site count`
+(exact, shrink-only), and the only things let through are the closed, reasoned lists
+in `scripts/structure/ambient_state/allowlist.py` — write-only facades, framework wiring
+(`FastAPI()`, routers, argparse/Typer, `StateGraph`, locks), pure constants
+(`re.compile`, `TypeVar`, `timedelta`, `Path`) and memoized pure functions. There is
+no inline exemption; `schedules/` is in scope, tests, `__main__.py` and skill scripts
+are not.
 
 ## Function quality budgets: complexity and nesting
 
@@ -213,7 +241,7 @@ in-between shrink as a phantom raise (task #4597). The guard runs for full
 and explicit-target scans alike, while quality checks only inspect the
 selected scope.
 
-Run `.venv/bin/python scripts/lint_code_structure.py` for the full gate.
+Run `.venv/bin/python scripts/lint/code_structure.py` for the full gate.
 Complexity warnings go to stderr as a total function/file count and up to
 30 per-file counts, sorted by count descending then path ascending; remaining
 files and functions are summarized in a `rest:` line. Add
@@ -223,28 +251,32 @@ no warning output. Warnings alone never fail the gate.
 
 ## No `print()` in framework code
 
-Framework code logs via `shared.log.logger`. `print()` is banned in framework
+Framework code logs via `base.log.logger`. `print()` is banned in framework
 code by ruff `T20`. Exempt: `cli/` (terminal output), `ava/` + `plugins/`
 (agent-facing dump), `scripts/` (tooling).
 One-off legitimate cases use inline `# noqa: T201` with a reason.
 
+`base.log.logger` is loguru: a message takes `{}` fields
+(`logger.warning("gate for {} raised: {}", name, exc)`), never printf `%s`,
+which loguru leaves in the text while dropping the arguments. A stdlib
+`logging.getLogger(...)` logger is the opposite: it keeps `%s`
+(`_log.warning("gate for %s raised: %s", name, exc)`), and a `{}` field with
+positional arguments raises `TypeError` at emit, losing the line. Both
+directions are enforced by `scripts/lint/loguru_format.py` (hook
+`lint-loguru-format`).
+
 ## No decorative emoji in core Python
 
 Agent + backend code stays glyph-free. Enforced by
-`scripts/lint_no_emoji.py` (hook `lint-no-emoji`). Exempt: `cli/` and `ui/`
+`scripts/lint/no_emoji.py` (hook `lint-no-emoji`). Exempt: `cli/` and `ui/`
 (deliberate-UX surfaces), prose/content (`skills/`, the doc axes, `ui/web/`).
 Plain text marks (✓ ✗) are allowed. A line that genuinely needs the character
 uses inline `# emoji-ok: <reason>`.
 
 ## Import layering
 
-`shared < ava < agent < gateway < cli` — a lower layer importing a
-higher one fails; higher→lower is fine. `services` must not import the `agent`
-kernel but is otherwise unlayered (it straddles). `plugins` is ungoverned
-(agent ↔ plugins is cyclic by design).
-
-Enforced by import-linter (config in `pyproject.toml [tool.importlinter]`,
-hook `lint-imports`).
+Which package may import which, and how it is enforced:
+[`import-layering.md`](import-layering.md).
 
 ## contextvars are allowlisted, not free
 
@@ -255,23 +287,25 @@ contextvars (pregel `copy_context`, `get_runtime`), and the SDK / log /
 telemetry / retry-policy readers sit outside node signatures, so a blanket
 ban is not possible — but every use is a mechanism-layer decision. A new use
 point needs a written justification in the PR description before joining the
-allowlist.
+allowlist. Each `ContextVar` is also a frozen `contextvar` site of the
+[ambient-state rule](#ambient-state-inject-what-is-read-to-decide); the target is
+the LangGraph runtime context (`AvaContext`), not a module global.
 
 ## Model new cross-process / cross-layer wire shapes
 
 A payload crossing a process boundary (gateway↔agent-runner RPC, SSE events,
 `additional_kwargs` metadata bags) gets a `BaseModel` / `TypedDict` / `StrEnum`
 at the boundary, not a `dict[str, Any]` unpacked by hand at each call site.
-`shared/live_events.py`'s discriminated union (`role: Literal[...]` discriminator +
+`base/events/live/projection.py`'s discriminated union (`role: Literal[...]` discriminator +
 a `TypeAdapter`) is the template. Not lint-enforced — see
 the git log (typed-boundaries design record)
 for why pyright's `reportUnknown*` family can't substitute for this.
 
-## A subprocess timeout means `shared.proc.run_bounded`
+## A subprocess timeout means `base.host.proc.run_bounded`
 
 `subprocess.run(..., timeout=T)` bounds the process Python spawned, not the work
 it started: on expiry Python kills that one process and every descendant keeps
-running. Use `shared.proc.run_bounded(argv, timeout=...)` instead — same shape,
+running. Use `base.host.proc.run_bounded(argv, timeout=...)` instead — same shape,
 but it kills the whole tree (descendants enumerated *before* the parent dies)
 and still raises `TimeoutExpired`, so caller control flow is unchanged.
 
@@ -281,62 +315,62 @@ git: the fleet's Windows agent-runner accumulated 66 orphaned `git.exe` + 66
 `ssh.exe` + 63 `sh.exe`, all below a killed stub. Anything with a shell in the
 middle (`shell=True`, a `-lc` wrapper) has the same shape on every platform.
 
-Git specifically: pass `env=shared.deploy.git.gitenv.git_env()` so a credential prompt
+Git specifically: pass `env=base.deploy.git.gitenv.git_env()` so a credential prompt
 errors instead of blocking on a terminal that does not exist, and ssh neither
 asks nor dials unbounded. Note that `ConnectTimeout` is not the bound — an
 `ssh.exe` on that box reached a state where its own timeout never fired, so the
 caller's bound is the only real one.
 
 Not lint-enforced repo-wide yet; the modules that drive git are guarded by
-`tests/shared/test_proc.py::test_git_driving_modules_do_not_bound_with_subprocess_run`.
+`tests/base/test_proc.py::test_git_driving_modules_do_not_bound_with_subprocess_run`.
 
 ## Reach a stubbable name through its owning module
 
-`from shared.cluster import session_name` binds the function object into the
+`from base.cluster import session_name` binds the function object into the
 *reader's* module dict at import time, and that binding is what the reader
 resolves. So the reader — not the owner — becomes the patch surface, and moving a
 function to another module silently takes it out of reach of a patch aimed at its
-old home. Splitting `ops/cluster.py` cost **81 `setattr` repoints across 6 test
+old home. Splitting one `ops` module cost **81 `setattr` repoints across 6 test
 files over 12 names** for exactly this reason; a re-export facade did not help,
 because it fixes importers, not global resolution inside moved code.
 
 So a name that a test would stub is **reached through the module that owns it**:
 
 ```python
-import shared.cluster
-from ops import cluster_session
+import base.cluster
+from ops import cluster_pause
 
-shared.cluster.session_name(_UPDATER_SERVICE)      # not: session_name(...)
-cluster_session._has_orchestration_session(updater_sess)    # not: _has_orchestration_session(...)
+base.cluster.session_name(service)      # not: session_name(...)
+cluster_pause.unpause_local_cluster()     # not: unpause_local_cluster()
 ```
 
 Which names: the state-touching ones — path resolvers, session liveness probes,
 spawners, pause/unpause, anything that reads the filesystem, a subprocess or the
 network. **Not** constants, exception classes, Pydantic models, type aliases, pure
 formatters, or the `settings` singleton: nothing stubs them, so they carry no patch
-surface, and `except cluster_session.OrchestrationSpawnFailed` only adds noise. A
+surface, and `except cluster_rpc.ClusterOpUnreachable` only adds noise. A
 function-local `from x import y` is already fine — it re-resolves per call, so it
 reads the owner's current binding and survives its enclosing function moving.
 
 **Before converting anything in a function, check that function for a
-`import shared.X` statement.** It binds `shared` as a *local* for the entire function
-body — the binding is decided statically, so a module-level `import shared.paths`
-does **not** rescue you — and every `shared.…` above that line then raises
+`import base.X` statement.** It binds `base` as a *local* for the entire function
+body — the binding is decided statically, so a module-level `import base.paths`
+does **not** rescue you — and every `base.…` above that line then raises
 `UnboundLocalError`:
 
 ```python
-import shared.paths          # module scope — irrelevant to the function below
+import base.paths          # module scope — irrelevant to the function below
 
-def pause_local_cluster():
-    state = shared.host_deploy_state.read()     # UnboundLocalError
-    import shared.db                            # <- makes `shared` local for the whole body
+def is_paused():
+    state = base.deploy.state.host_deploy_state.read()     # UnboundLocalError
+    import base.db                            # <- makes `base` local for the whole body
 ```
 
 Runtime only, on that branch only, and neither ruff nor pyright reports it.
 `ops/cluster_pause.py` was exactly this shape, so its conversion had to hoist
-`import shared.db` to module level first. Hit blind, it reads as the whole approach
+`import base.db` to module level first. Hit blind, it reads as the whole approach
 being unworkable rather than as one import in the wrong place. A function-local
-`from shared.x import y` is safe — it binds `y`, not `shared`.
+`from base.x import y` is safe — it binds `y`, not `base`.
 
 The trade is deliberate: source-patching has a **wider blast radius** than
 patch-where-used. Measure it before arguing about it — a source patch only reaches
@@ -346,17 +380,14 @@ process (there is one `$AVA_HOME`, one posture row, one session-naming
 scheme — a second reader seeing the unpatched value is a bug, not precision).
 
 Keep the from-import where the test's assertion is about *one call site's mechanism*
-rather than about the value. `shared.proc.run_bounded` stays from-imported into
-`ops/cluster_deploy.py` on that ground: the test claims the validate-before-kill
-fetch uses `run_bounded` rather than a plausible-looking `subprocess.run(timeout=)`,
-so the stub has to name the site to mean anything. The widening there is also latent
-rather than absent — `run_bounded` is the repo's universal subprocess primitive, so
-the moment a second module reaches it through `shared.proc`, one test's source patch
-starts faking that module's bounded work too.
+rather than about the value. A subprocess-boundary test must name the actual
+call site when it proves that site's timeout, native custody or refusal behavior.
+Patching the shared utility itself can also intercept unrelated consumers and
+turn their work into an accidental fake.
 
 Pre-existing aliases that cannot be converted away — a facade's own re-exports, and
 consumers that from-import from it at module top level — are what
-`tests/conftest.py`'s `_stub_everywhere` is for. The two mechanisms do not overlap:
+`tests/fixtures/guards.py`'s `_stub_everywhere` is for. The two mechanisms do not overlap:
 this rule prevents new frozen aliases, that helper reaches the ones already frozen.
 
 ## Role-scope check for per-machine surfaces

@@ -1,6 +1,6 @@
 """ava_fleet Grafana + inspector metrics — registered at import time.
 
-``shared/metrics/grafana_dashboard_supply`` imports this module (inside a
+``base/telemetry/metrics/grafana_dashboard_supply`` imports this module (inside a
 PluginContext) to collect the registrations for the rendered Ava Ops
 dashboard (``ava lgtm render``, task #3697). Two metrics:
 
@@ -31,9 +31,9 @@ category='audit' (~1.1k rows/30d). ``audit`` never had a ``log`` phase, so
 the category predicate is exact (no ``|log`` alternative).
 """
 
-from shared.events.contract import TASK_UPDATE_KEYS
-from shared.metrics.metrics_logql import event_count
-from shared.plugin_metrics import MetricSpec, register_metric
+from base.events.contract import TASK_UPDATE_KEYS
+from base.telemetry.metrics.logql import event_count
+from base.telemetry.metrics.plugin_metrics import MetricSpec, register_metric
 
 # Attribute labels are derived from the payload-key contract (a renamed
 # payload key fails loudly here instead of silently NULLing out) — the same

@@ -10,14 +10,11 @@ The lock fd is opened O_CLOEXEC, and units are spawned with `close_fds=True`
 elsewhere in this package, so a unit process can never inherit — and keep
 alive — the tree's lock.
 
-The POSIX mechanism (`fcntl.flock`) is what ships first; a platform-native
-equivalent (a named mutex) plugs in behind `acquire_instance_lock` when the
-platform adapter work lands.
+The lock uses `fcntl.flock`.
 """
 
 from __future__ import annotations
 
-import fcntl
 import logging
 import os
 from pathlib import Path
@@ -40,6 +37,8 @@ def acquire_instance_lock(run_dir: Path) -> int:
     """
     run_dir.mkdir(parents=True, exist_ok=True)
     lock_path = run_dir / _LOCK_NAME
+    import fcntl
+
     fd = os.open(lock_path, os.O_CREAT | os.O_RDWR | os.O_CLOEXEC, 0o600)
     try:
         fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -57,6 +56,8 @@ def acquire_instance_lock(run_dir: Path) -> int:
 
 def release_instance_lock(fd: int) -> None:
     """Release the instance lock and close its fd (idempotent at process exit)."""
+    import fcntl
+
     try:
         fcntl.flock(fd, fcntl.LOCK_UN)
     except OSError as exc:

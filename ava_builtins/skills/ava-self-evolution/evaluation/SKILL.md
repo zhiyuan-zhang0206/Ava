@@ -9,7 +9,7 @@ This is the discipline section of the
 [`ava-self-evolution`](../SKILL.md) skill. Evaluating a skill is not a
 test-suite problem — it is a measurement problem over a real, uncontrolled
 distribution. This document states why, and the standard the parent skill's
-Evaluation Loop runs against (`reference/evaluate.py`, spawning fresh
+Evaluation Loop runs against (`scripts/evaluate.py`, spawning fresh
 agents).
 
 ## Real distribution, naturally scarce representativeness
@@ -18,7 +18,7 @@ Eval cases are built from the user's real run traces — the dataset. Real
 usage is exactly what makes them valuable, and exactly what makes them hard:
 
 - **Real data, no ground truth.** A real trace carries no answer key. The
-  labeler (`ava_builtins/skill_support/self_evolution/label.py`) only detects visible breakage (breach,
+  labeler (`ava_builtins/skills/ava-self-evolution/scripts/label.py`) only detects visible breakage (breach,
   corrections, re-prompts, exec failures) and the rubric scores proxy
   signals (completion, efficiency), not correctness. Nothing in a trace says
   "this was the right output".

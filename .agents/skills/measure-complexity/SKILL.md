@@ -40,7 +40,7 @@ Hidden directories (`.git`, `.venv`, `.claude`, …) are auto-ignored, so
 running from the repo root is safe. To scope to the Python source tree only
 (mirrors the sweeper's scope, skips `tests/` noise):
 ```
-.venv/bin/radon cc -a -s ava/ agent/ gateway/ cli/ services/ shared/ plugins/
+.venv/bin/radon cc -a -s ava/ agent/ gateway/ cli/ services/ base/ plugins/
 ```
 
 - `-s` shows the numeric complexity next to the A–F rank.
@@ -130,5 +130,5 @@ deciding:
    before/after cc for the touched functions in the PR description.
 
 Use this report to choose refactoring work. Run the enforced structure gate
-with `.venv/bin/python scripts/lint_code_structure.py` to verify the resulting
+with `.venv/bin/python scripts/lint/code_structure.py` to verify the resulting
 CC, nesting, file and directory budgets against the frozen baseline.

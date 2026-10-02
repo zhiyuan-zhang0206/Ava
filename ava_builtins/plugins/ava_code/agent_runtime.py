@@ -33,9 +33,9 @@ from agent.graph.system_prompt import register_system_prompt_section
 from agent.hooks import Hook, register_after_exec, register_after_init
 from agent.messages import NoteTag, system_note_message
 from agent.state import AgentState, register_plugin_state
-from shared.config.turn_view import turn_settings
-from shared.log import logger
-from shared.paths import workspace_dir
+from base.config.turn_view import turn_settings
+from base.log import logger
+from base.paths import workspace_dir
 
 from . import plugin as _surface
 
@@ -96,7 +96,7 @@ class AvaCodeState(BaseModel):
     # channel during the exec turn. The annotation must match BaseAgentState
     # exactly (incl. the add_messages reducer) — register_plugin_state
     # enforces it — and the exec node merges the plugin's messages delta with
-    # its own ToolMessage delta (agent/graph/_exec.py), so the notes ride in
+    # its own ToolMessage delta (agent/graph/exec/node.py), so the notes ride in
     # the same in-memory state update instead of a side-channel file.
     messages: Annotated[list[AnyMessage], add_messages] = Field(default_factory=list)
     injected_paths: set[str] = Field(default_factory=set)
@@ -157,11 +157,10 @@ def _coding_tools_section() -> str:
         "- Read `AGENTS.md` first (via the file tools) before reading other "
         "code — it sets the project rules you must follow.\n"
         "- Search with `rg` (ripgrep), not `grep -r`/`find` — recursive grep scans "
-        "every `.worktrees/` checkout and often hits the 30s shell timeout "
-        "(benchmarks in `ava-code:conventions`).\n"
+        "every `.worktrees/` checkout and often hits the 30s shell timeout.\n"
         "- For any change to a repo, work in an isolated `git worktree` — never edit, "
         "switch the branch of, or push the shared checkout directly; every change goes "
-        "through a PR. Read the `worktree` skill for naming and how to create one.\n"
+        "through a PR.\n"
         "- Every commit appends a `Co-authored-by: Ava #<your agent id>` trailer; PR "
         "titles start with `[Ava-<your agent id>]`.\n"
         "- Before calling a change done, run the narrowest check that proves it (the "
@@ -271,7 +270,7 @@ class _InjectCwdNotesAfterExecHook(Hook):
                     result["ava_code__project_skills_seen_compact"] = compact_v
 
         if notes:
-            logger.info("[ava_code] injecting %d finding(s) as system notes", len(notes))
+            logger.info("[ava_code] injecting {} finding(s) as system notes", len(notes))
             result["messages"] = notes
             return result
         return None

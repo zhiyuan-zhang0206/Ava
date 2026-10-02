@@ -95,7 +95,7 @@ server lives on GUI machines because you only **install** it there.
   never had, and cluster-identity fields cannot meaningfully be per-machine. What
   generalized out of that argument and survives is the **ownership taxonomy**: every
   Settings field declares a `scope` (`cluster-pinned` / `cluster-default` / `host` /
-  `agent`), and `BOOTSTRAP_FIELDS` is derived from it (`shared/config/`). The
+  `agent`), and `BOOTSTRAP_FIELDS` is derived from it (`base/config/`). The
   override *store* was then retired on 2026-06-08 — cluster fields live in the
   gateway's `.env`, host fields in the machine's own, precedence collapsed to
   `env(.env) > default`, and `ava config set` is the edit path.

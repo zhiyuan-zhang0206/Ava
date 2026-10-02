@@ -104,12 +104,7 @@ interface ClusterSlice {
   connState: ConnectionState;
   setConnState: (s: ConnectionState) => void;
 
-  /** True when this host is paused but no orchestration is running — a rollout
-   * was hard-killed and left the pause/lock behind. Drives AppConnectionBanner's
-   * recovery state (offers a manual force-recover), the only banner still
-   * rendered at the app root — it needs operator action. */
-  clusterStranded: boolean;
-  setClusterStranded: (b: boolean) => void;
+
 }
 
 // =============================================================
@@ -159,8 +154,6 @@ export const useStore = create<Store>()((set) => ({
   reconnectNonce: 0,
   bumpReconnect: () => set((s) => ({ reconnectNonce: s.reconnectNonce + 1 })),
 
-  clusterStranded: false,
-  setClusterStranded: (b) => set({ clusterStranded: b }),
 
   connState: "open",
   setConnState: (s) => set({ connState: s }),

@@ -60,7 +60,7 @@ description: Makes repository assumptions, constraints, boundaries, and agent co
   - **Enforced by**: `scripts/lint_raw_sql.sh` (blocked in CI)
   - **Exception process**: Add table+column to `.allowed-raw-sql.json` with justification
 - All migrations must be reversible.
-  - **Enforced by**: `scripts/lint_migrations.py --check-reversible` (blocked in CI)
+  - **Enforced by**: `scripts/content_lint/lint_migrations.py --check-reversible` (blocked in CI)
 ```
 
 ### 2. Module boundary without vs. with structural enforcement

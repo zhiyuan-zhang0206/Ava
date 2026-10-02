@@ -23,7 +23,7 @@ from typing import Any, cast
 
 from pydantic_core import PydanticUndefined
 
-from shared.api_contracts.config import (
+from base.api_contracts.config import (
     ConfigAuditView,
     ConfigFieldView,
     ConfigView,
@@ -36,23 +36,12 @@ _HTTP_TIMEOUT_S = 15.0
 _GATEWAY_URL_KEYS = ("AVA_GATEWAY_URL",)
 
 
-def _anchored_gateway_base() -> str | None:
-    """This checkout's own home gateway identity: its persisted ``gateway_url``
-    file first (machine identity, written at first start / enroll), then the
-    home `.env` aliases. None when the home carries no identity yet (fresh
-    install before first start) or when the checkout is unanchored — an
-    unanchored checkout has NO home of its own; its rule-4 scratch home carries
-    no identity to read."""
-    from shared import runtime_config
-    from shared.dotenv_boot import AVA_ENV_PATH, checkout_anchored
+def _home_gateway_base() -> str | None:
+    """This process's home gateway identity: the home `.env` aliases
+    (`AVA_GATEWAY_URL`, recorded by `ava init`). None when the home carries no
+    identity yet (before `ava init`)."""
+    from base.host.env import runtime_config
 
-    if not checkout_anchored():
-        return None
-    gateway_url_path = AVA_ENV_PATH.parent / "gateway_url"
-    if gateway_url_path.exists():
-        gateway_url = gateway_url_path.read_text().strip()
-        if gateway_url:
-            return gateway_url.rstrip("/")
     aliases = runtime_config.read_env_aliases()
     for key in _GATEWAY_URL_KEYS:
         gateway_url = aliases.get(key, "").strip()
@@ -65,65 +54,70 @@ def _gateway_base() -> str:
     """Resolve the configured gateway without constructing ``Settings``.
 
     Explicit env wins (deliberate cross-cluster intent). Otherwise the
-    checkout-anchored home's own gateway identity wins — host aliases are only
-    its fallback, never the first choice: a bare worktree (no `.ava_home`
-    pointer) resolving to the default home used to pick up prod's gateway URL
-    from the alias file and route `ava config set` into prod's `.env`
-    (2026-09-07 incident). An unanchored checkout therefore gets a refusal
-    with guidance instead of a silent fallback."""
+    home's own gateway identity wins. A home with no identity yet gets a
+    refusal with guidance instead of a silent fallback."""
     for key in _GATEWAY_URL_KEYS:
         gateway_url = os.environ.get(key, "").strip()
         if gateway_url:
             return gateway_url.rstrip("/")
-    anchored = _anchored_gateway_base()
-    if anchored is not None:
-        return anchored
+    home_base = _home_gateway_base()
+    if home_base is not None:
+        return home_base
     raise _ConfigError(
-        "gateway_url unset — this checkout is not anchored to a cluster home: "
-        "run `scripts/install.sh --worktree` to give it its own cluster, or "
-        "`export AVA_GATEWAY_URL=<gateway url>` to target one explicitly. "
-        "(An unanchored checkout never falls back to the default home's gateway.)"
+        "gateway_url unset — this home carries no gateway identity yet: "
+        "run `ava init` for it, or "
+        "`export AVA_GATEWAY_URL=<gateway url>` to target one explicitly."
     )
 
 
 def _guard_gateway_write(target: str) -> None:
-    """Refuse gateway config writes whose target is not this checkout's home.
+    """Refuse gateway config writes whose target is not this process's home.
 
     The 2026-09-01 ruling: config changes go through the official path AND are
     verified against the complete candidate before writing. The target half of
-    that verification lives here: an unanchored checkout may not write any
-    gateway config, and an explicit env override that contradicts the
-    anchored home's own gateway identity is refused — a foreign-home write
-    must never be one innocuous command away (2026-09-07 incident)."""
-    anchored = _anchored_gateway_base()
-    if anchored is None:
+    that verification lives here: a home with no gateway identity may not write
+    any gateway config, and an explicit env override that contradicts the home's
+    own gateway identity is refused — a foreign-home write must never be one
+    innocuous command away (2026-09-07 incident)."""
+    home_base = _home_gateway_base()
+    if home_base is None:
         raise _ConfigError(
-            "refusing to write gateway config: this checkout is not anchored "
-            "to a cluster home (no `.ava_home` pointer). Run "
-            "`scripts/install.sh --worktree` for a dev cluster, or run this "
-            "command from the target home's own checkout."
+            "refusing to write gateway config: this home carries no gateway "
+            "identity yet. Run `ava start` for it first."
         )
-    if target != anchored:
+    if target != home_base:
         raise _ConfigError(
             f"refusing to write gateway config: resolved target {target!r} "
-            f"does not match this home's gateway {anchored!r} — a config write "
-            "must target this checkout's own cluster home."
+            f"does not match this home's gateway {home_base!r} — a config write "
+            "must target this process's own home."
         )
 
 
 def _auth_headers() -> dict[str, str]:
-    """Read this unit's bearer secret without constructing Settings."""
-    from shared import runtime_config
-    from shared.cluster_auth import bearer_header
+    """This unit's bearer, read without constructing Settings.
 
-    secret = os.environ.get("AVA_CLUSTER_SECRET")
-    if secret is None:
-        secret = runtime_config.read_env_aliases().get("AVA_CLUSTER_SECRET", "")
-    return bearer_header(secret) if secret else {}
+    A delivered machine API token first (the boot pass gives an admitted
+    operator process on the gateway home its token); else the gateway's human
+    secret (environment, then `.env`); else, on a remote unit, its installed
+    capability's API token, only while this process runs the admitted runtime.
+    """
+    from base.cluster.auth import bearer_header, delivered_token
+    from base.host.env import runtime_config
+
+    bearer = delivered_token() or os.environ.get("AVA_CLUSTER_SECRET")
+    if bearer is None:
+        bearer = runtime_config.read_env_aliases().get("AVA_CLUSTER_SECRET", "")
+    home = runtime_config.env_file_path().parent
+    if not bearer and (home / "db-authority" / "unit.json").exists():
+        from base.cluster.authority.unit import consume_unit
+
+        api = consume_unit(home.resolve()).api
+        bearer = "" if api is None else api.token
+    return bearer_header(bearer) if bearer else {}
 
 
 def _get_config(machine: str | None) -> ConfigView:
-    from shared.http_dial import get as dial_get
+    from base.host.net.http_dial import get as dial_get
 
     params = {"machine": machine} if machine else None
     resp = dial_get(
@@ -137,7 +131,7 @@ def _get_config(machine: str | None) -> ConfigView:
 
 
 def _get_config_audit(machine: str | None, last: int) -> ConfigAuditView:
-    from shared.http_dial import get as dial_get
+    from base.host.net.http_dial import get as dial_get
 
     params: dict[str, str] = {"last": str(last)}
     if machine:
@@ -153,7 +147,7 @@ def _get_config_audit(machine: str | None, last: int) -> ConfigAuditView:
 
 
 def _put_config(body: dict[str, Any], machine: str | None) -> ConfigWriteResult:
-    from shared.http_dial import put as dial_put
+    from base.host.net.http_dial import put as dial_put
 
     _guard_gateway_write(_gateway_base())
     params = {"machine": machine} if machine else None
@@ -197,7 +191,7 @@ def _field_extra(field_info: Any) -> dict[str, Any]:
 
 def _local_fields() -> dict[str, _LocalConfigField]:
     """Build local-edit metadata from the registry, never from Settings values."""
-    from shared.config_registry import FIELD_INFOS, field_alias, field_editor_type
+    from base.host.env.config_registry import FIELD_INFOS, field_alias, field_editor_type
 
     fields: dict[str, _LocalConfigField] = {}
     for name, info in FIELD_INFOS.items():
@@ -242,7 +236,7 @@ def _resolve_local_field(key: str, index: dict[str, _LocalConfigField]) -> _Loca
 
 
 def _config_source_is_local() -> bool:
-    from shared.bootstrap import config_source_is_local
+    from base.host.env.bootstrap import config_source_is_local
 
     return config_source_is_local()
 
@@ -277,7 +271,7 @@ def _reject_local_machine(machine: str | None, verb: str) -> int | None:
 
 
 def _local_get(key: str | None) -> int:
-    from shared import runtime_config
+    from base.host.env import runtime_config
 
     aliases = runtime_config.read_env_aliases()
     fields = _local_fields()
@@ -318,7 +312,7 @@ def _resolve_field(key: str, index: dict[str, ConfigFieldView]) -> ConfigFieldVi
 
 
 def _field_editable(field: ConfigFieldView, *, remote: bool) -> bool:
-    # Mirrors shared.config.editing.field_editable. The CLI has the wire view,
+    # Mirrors base.config.editing.field_editable. The CLI has the wire view,
     # not ConfigFieldMeta, so these two definitions must stay in lockstep.
     return field.remote_writable if remote and field.scope == "host" else field.writable
 
@@ -415,8 +409,8 @@ def cmd_config_audit(last: int, key: str | None, machine: str | None) -> int:
     if not 1 <= last <= 200:
         print("[ava config audit] --last must be between 1 and 200", file=sys.stderr)
         return 1
-    from shared.env_audit import read_env_write_records
-    from shared.machine import machine_name
+    from base.cluster.machine import machine_name
+    from base.host.env.audit import read_env_write_records
 
     if machine is None:
         records = [{**record, "machine": machine_name()} for record in read_env_write_records(last)]
@@ -517,7 +511,7 @@ def _build_local_patch(
     pairs: dict[str, str] | None, unset_keys: list[str] | None
 ) -> tuple[dict[str, object], set[str], list[_LocalConfigField]]:
     """Resolve, gate, and coerce one direct `.env` patch before validation."""
-    from shared.config.editing import coerce_config_scalar
+    from base.config.editing import coerce_config_scalar
 
     index = _index_local_fields(_local_fields())
     writes: dict[str, object] = {}
@@ -543,19 +537,8 @@ def _edit_local_config(
     pairs: dict[str, str] | None, unset_keys: list[str] | None, verb: str
 ) -> int:
     """Validate and persist one local `.env` patch without booting Settings."""
-    from shared import runtime_config
-    from shared.config.candidate import validate_env_patch_for_write
-    from shared.dotenv_boot import checkout_anchored
-
-    if not checkout_anchored():
-        print(
-            "[ava config] refusing to write local config: this checkout is not "
-            "anchored to a cluster home (no `.ava_home` pointer) — it boots on a "
-            "throwaway scratch home, so a write would configure nothing. Run "
-            "`scripts/install.sh --worktree` for a dev cluster.",
-            file=sys.stderr,
-        )
-        return 1
+    from base.config.candidate import validate_env_patch_for_write
+    from base.host.env import runtime_config
 
     try:
         writes, removals, changed = _build_local_patch(pairs, unset_keys)

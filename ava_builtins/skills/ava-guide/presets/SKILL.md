@@ -19,7 +19,7 @@ Use this when:
 
 When the "new agent type" is a **role** — a product manager, a growth lead, an
 editor — the preset is the small half of the job. Read
-[reference/role-cards.md](reference/role-cards.md) first: the role itself is
+[references/role-cards.md](references/role-cards.md) first: the role itself is
 authored as a skill, and the preset only names it.
 
 ## Concept Review
@@ -41,7 +41,7 @@ is ADDING skills to `skills_to_inject_into_system_prompt` /
 
 **What does Config store?** The preset's `config` is a JSON object whose
 fields are per-agent config field name → value. Available per-agent fields are
-returned by `shared/config`'s `per_agent_field_names()`, and common ones
+returned by `base/config`'s `per_agent_field_names()`, and common ones
 include:
 
 | Field | Description | Type |
@@ -58,7 +58,7 @@ include:
 
 > **Model ids come from the registry, not from memory.** `llm_model` values must
 > be ids on the current roster — list them with `GET /api/models` or read
-> `shared/lm/registry.py` (`MODELS` / `SUPPORTED_MODELS`); a name copied from an
+> `base/lm/registry.py` (`MODELS` / `SUPPORTED_MODELS`); a name copied from an
 > old doc or spawn may be stale or unregistered (see the
 > [models sub-skill](../models/SKILL.md)).
 
@@ -81,7 +81,7 @@ config = {
     # Full SKILL.md text loaded before the first turn — the field that actually
     # differentiates a role. Keep it to short disciplinary skills; a large
     # reference skill is already one ava.help() away via the index.
-    "skills_to_expand_at_start": ["ava-code.conventions"],
+    "skills_to_expand_at_start": ["ava-ultra-speed"],
     "llm_model": "deepseek-flash",
 }
 ```
@@ -109,7 +109,7 @@ body = {
 }
 r = httpx.post(
     f"{base}/api/presets", json=body,
-    headers={"Authorization": f"Bearer {os.environ['AVA_CLUSTER_SECRET']}"}
+    headers={"Authorization": f"Bearer {os.environ.get('AVA_API_TOKEN', '')}"}
 )
 print(r.status_code, r.text)  # 201 on success; 409 = name taken
 ```

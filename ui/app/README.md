@@ -115,7 +115,7 @@ cargo test
 cargo check --target aarch64-linux-android
 cd ../../..
 .venv/bin/pytest tests/ui/test_android_overlay.py \
-  tests/scripts/test_build_app_update_manifest.py -q
+  scripts/codegen/tests/test_build_app_update_manifest.py -q
 ```
 
 Tags matching `app-v<major>.<minor>.<patch>` drive

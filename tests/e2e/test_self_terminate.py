@@ -17,8 +17,8 @@ from __future__ import annotations
 import psycopg
 import pytest
 
-from shared.agents import AgentStatus
-from shared.config import settings
+from base.agents import AgentStatus
+from base.config import settings
 from tests.e2e._db import wait_for_status
 from tests.e2e._env import E2EEnv
 

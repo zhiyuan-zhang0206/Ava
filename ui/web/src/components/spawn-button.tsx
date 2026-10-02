@@ -4,7 +4,7 @@
 //
 // Pulls /api/status to inspect cluster.machines. Agent processes only run on
 // agent-runner machines (the gateway refuses local spawn with HTTP 400 —
-// see `gateway/routers/agents.py:post_agents`), so the spawn target list requires
+// see `gateway/agents/router.py:post_agents`), so the spawn target list requires
 // online, unpaused agent-runner rows with an observed live agent host.
 //
 // - 0 spawnable → button disabled with a tooltip explaining

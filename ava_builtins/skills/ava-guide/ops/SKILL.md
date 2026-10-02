@@ -35,8 +35,7 @@ Each cluster owns its **own** Postgres + Redis instance under its `$AVA_HOME`
 shared brew/systemd services, and not one instance partitioned by database name.
 `ava start` ensures this cluster's pair is up (skip-if-running); `ava stop` tears
 it down. Because `ava stop` (gateway role) takes this cluster's data plane down,
-stop a dev worktree cluster with `ava cluster down --path <home>`, not a bare
-`ava stop`.
+it stops the whole host's cluster; a worktree owns no cluster of its own.
 
 Redis auth has two users, and confusing them is what turns an auth error into a
 self-inflicted outage:
@@ -61,10 +60,9 @@ instead of experimenting on the data plane.
 ## Start / Stop / Status
 
 ```bash
-ava start     # pure bring-up (idempotent). Ensures this cluster's own pg/redis
-              # instance, then brings up the union of this host's services. The
-              # cluster is born at install time (scripts/install.sh), not here;
-              # the home resolves from the checkout, never a flag.
+ava init ...  # once per home: record its identity (see `ava init --help`); starts nothing
+ava start     # provision owned storage on the first start, and wait for the selected
+              # root services to become ready.
 ava pause     # normal agent drain; keep infrastructure, browser and persistent PTYs
 ava stop      # normal drain, then full local stop; durable data and agent IDs survive
               # --keep-infra / --keep-service retain resources; --force is explicit
@@ -84,127 +82,93 @@ gateway is up has nowhere to land.
 ### Cluster sub-commands
 
 ```bash
-ava cluster ls                        # list all registered clusters (label = home basename)
 ava cluster status                    # full multi-machine roster
-ava cluster down --path <home>        # stop the cluster at a home path, keep its slot + data
-ava cluster destroy --path <home>     # stop + free registry slot + deregister its OS-scheduled
-                                      # jobs (refused for ~/.ava, the prod home)
+ava cluster destroy                   # decommission this host's cluster: stop + deregister its
+                                      # OS-scheduled jobs + mark the home detached. Needs a
+                                      # terminal; you type the home path (no flag skips it)
                                       # add --drop-db to also remove its pg/redis data dirs
 ```
 
-### Split deployments (`ava enroll`)
+### Split deployments
 
 A pure agent-runner on another box **enrolls** into an existing cluster instead
 of birthing one of its own — it inherits the cluster's identity (db / redis /
 channels) from the gateway:
 
 ```bash
-printf 'Cluster secret: ' >&2
-IFS= read -rs AVA_CLUSTER_SECRET
+# on the gateway: seal the unit's database capability (prints its key once)
+ava cluster db-authority issue-unit --machine <NAME> --home <runner $AVA_HOME> --out <NAME>.bundle
+# on the runner, with the bundle carried over:
+printf 'Capability transport key: ' >&2
+IFS= read -rs AVA_DB_CAPABILITY_KEY
 printf '\n' >&2
-export AVA_CLUSTER_SECRET
-ava enroll --gateway <URL> --machine-name <NAME> --machine-host <HOST>
-unset AVA_CLUSTER_SECRET
-# then: ava start
+export AVA_DB_CAPABILITY_KEY
+ava init --serve-agent-runner --no-serve-gateway --gateway-url <URL> \
+  --machine-name <NAME> --machine-host <HOST> --db-capability <NAME>.bundle
+unset AVA_DB_CAPABILITY_KEY
+ava start
 ```
 
-Enrollment presents the cluster secret (`AVA_CLUSTER_SECRET`) to the gateway's
-authenticated `/api/bootstrap`, which returns the cluster's connection bundle
-(db / redis URLs, channels). The runner's database URL carries a separately
-minted least-privilege `ava_runner` password and its Redis URL carries the
-runtime ACL password. The cluster secret remains the HTTP bearer only; the
-gateway keeps independent Postgres-owner and Redis-admin credentials.
-`--machine-host` is the runner's own reachable address (how the gateway dials
-back to its ops server) and is **required**. The runner starts no gateway
-process of its own; it needs both network reachability to the gateway *and* the
-cluster secret.
+The sealed bundle carries the active write generation's runner login (it
+inherits the least-privilege `ava_runner` group) and machine API token, bound
+to this machine and home and installed into the runner's private
+`$AVA_HOME/db-authority/`. `ava init` presents that API token to the gateway's
+authenticated `/api/bootstrap`, which returns the cluster's configuration (the
+credential-free database endpoint, the Redis URL with its runtime ACL password,
+channels). The runner never holds the gateway's human cluster secret; the
+gateway's schema owner never logs in, and its Redis-admin credential stays
+gateway-local. `--machine-host` is the runner's own reachable address (how the
+gateway dials back to its ops server) and is **required**. The runner starts no
+gateway process of its own; it needs network reachability to the gateway and
+its capability bundle. A later bundle (after a write-generation rotation) is
+installed on the stopped runner with `ava cluster db-authority install-unit
+<NAME>.bundle` before `ava start`.
 
-## Update & Converge
+## Update and recover
 
-`ava cluster update` is the capability-dispatched upgrade command:
+A production cluster runs every unit from its own source checkout and is updated
+by stopping every unit, switching every checkout and starting again:
+`python -m cli.fleet_update down` and `up`, attended and idempotent per half (the
+runbook's "Updating a networked cluster in source mode"). A result from anywhere
+else does not replace CI, review or operator authorization for production.
 
-- On a gateway-capable host (incl. single box): orchestrates the whole cluster —
-  pause agent-runners → local pull/`uv sync`/migrate/restart → trigger
-  agent-runner self-updates.
-- On a pure agent-runner: self-updates (git pull + `uv sync` + restart).
+Related local commands:
 
-Related commands:
+- `ava restart` restarts this home's application through its ordinary lifecycle.
+- `ava converge` applies development host wiring.
+- `ava status` and `ava cluster status` provide observations, not permission to
+  update the cluster.
 
-- `ava restart` — restart all services on **current** code (no pull/sync/migrate).
-- `ava cluster restart` — restart the whole cluster, same code.
-- `ava converge` — re-apply idempotent host wiring (`ava` symlink, PATH,
-  home directory, plugin images, memory pool). Runs automatically on every
-  `ava start` / `ava cluster update`; run standalone if wiring looks off.
+## Update safety discipline
 
-## Channel (update track)
-
-A cluster tracks a GitHub branch as its update source — its **channel**,
-controlled by `AVA_TRACK_BRANCH` (default `main`).
-
-| Channel | Value | Who should use it |
-|---------|-------|-------------------|
-| Production | `main` (default) | All clusters |
-
-```bash
-ava config get AVA_TRACK_BRANCH      # view current channel
-ava config set AVA_TRACK_BRANCH=<b>  # switch channel (then `ava cluster update`)
-```
-
-Switching channel only declares intent — run `ava cluster update` to actually pull.
-
-Branch model:
-
-```
-feature/*  ──→ main  ──→ tag  ──→ ava cluster update   # the ONLY update entry point
-```
-
-## Update — operator CLI only
-
-Use the installed `ava cluster update --help` contract, not historical drain
-timeouts or restarter assumptions. Record the actual phase, elapsed time,
-desired service state and hosted/process ownership. Forceful interruption
-requires scoped authorization; a short configured drain is not a promise
-about total downtime or successful convergence.
-
-## Update Safety Discipline
-
-- **Merge is not runtime health.** CI and exact-head review establish repository
-  evidence, not successful deployment. Require explicit operator authorization,
-  a fixed target, compatible schema/plugins/protocols and verified recovery
-  evidence. Verify actual running services and representative agent progress
-  after rollout; skipped checks or a filtered roster are not sufficient.
-- **The prod checkout stays on `track_branch`.** It is the tree the live
-  processes run from. Sitting on a feature branch means the cluster is running
-  unreviewed code, and the next `ava cluster update` force-checkouts `track_branch`,
-  **discarding any unmerged commits on it**. Develop in a worktree; never switch
-  the prod checkout's branch by hand. `ava status` warns when the prod checkout
-  has drifted off `track_branch`.
-- **Recovery uses official lifecycle surfaces.** Preserve logs and inspect the
-  installed `ava cluster recover --help` / `ava cluster rollback --help` contract.
-  Check live holder semantics and schema compatibility. Never reset production
-  source, reinstall its venv, send raw signals, or blindly retry a rollout.
-  Escalate if no supported safe recovery path exists.
-- **Old code drives the first rollout.** A newly merged safeguard does not
-  protect the update that introduces it. Read the old orchestrator and record
-  the bootstrap plan before activation; see `conventions/defensive-patterns.md`.
-- **One operator.** Contributors and reviewers do not launch concurrent
-  rollouts. Respect explicit CI-only/no-local-cluster requirements. Preparation
-  and backup uploads should remain outside maintenance where supported, without
-  dropping backup or rollback gates to meet a downtime target.
+- **Merge is not runtime health.** Require repository review and CI, a fixed
+  target, verified recovery evidence and operator authorization for production.
+  Verify the selected service roster and representative agent progress after
+  activation. Skipped checks are not successful checks.
+- **Retain executing code.** Never change the checkout, interpreter or libraries
+  underneath a serving process: `down` stops every unit before it switches a
+  checkout.
+- **Recover by rerunning the half.** After a failure, fix the cause and rerun
+  the whole half; both are idempotent. Unknown custody or a hold that is not a
+  completed stop needs diagnosis, not raw signals or hand-edited state.
+- **Treat first adoption as a separate cutover.** A new mechanism cannot
+  protect the legacy deployment that introduces it. Inspect the currently
+  running implementation and follow the approved explicit cutover procedure.
+  Respect any explicit CI-only or no-local-cluster constraint.
 
 ## Release Cut
 
-Release cut tags `main` at milestone points. Tool: `scripts/release_cut.py`.
+Release cut tags `main` at milestone points. Tool: `scripts/ci/release_cut.py`.
 
 ```bash
-.venv/bin/python scripts/release_cut.py daily     # daily patch bump
-.venv/bin/python scripts/release_cut.py weekly    # weekly minor bump
-.venv/bin/python scripts/release_cut.py catchup   # backfill missed days
+.venv/bin/python scripts/ci/release_cut.py daily     # daily patch bump
+.venv/bin/python scripts/ci/release_cut.py weekly    # weekly minor bump
+.venv/bin/python scripts/ci/release_cut.py catchup   # backfill missed days
 # add --push to push tags
 ```
 
 The full release strategy (versioning scheme, cadence, digest handling) is the
-module docstring of `scripts/release_cut.py`.
+module docstring of `scripts/ci/release_cut.py`.
 
 ## Resource Oversight (the SRE loop)
 
@@ -246,7 +210,7 @@ When disk pressure comes from dead agents' workspaces, the disposal playbook is 
 
 Ava's long-running processes (gateway, agent-runners, services, agent shells)
 run as named sessions on the platform session backend — the native process
-supervisor on POSIX (`shared.posixproc`), `shared.winproc` on Windows, and
+supervisor (`base.sessions.posixproc`) and
 per-session detached pty hosts for agents' interactive shells. Key facts:
 
 ### Session naming
@@ -255,19 +219,17 @@ per-session detached pty hosts for agents' interactive shells. Key facts:
 - `ava-agent-<id>` — an agent main process session
 - `ava-agent-<id>-shell-<n>[-<name>]` — an agent's shell sub-sessions (and
   `...-watcher` for background watchers)
-- `ava-updater` / `ava-rollout` / `ava-cluster-restart` — orchestration sessions
 
 ### Per-cluster session records
 
 Each session's record (pid, start time) lives at `<ava_home>/run/sessions/
 <session-name>.json` (agent shells: `<ava_home>/run/pty/`); its combined stdout+stderr goes to
-`<ava_home>/logs/<session-name>.out.log` (orchestration sessions additionally
-tee to `<ava_home>/logs/{updater,rollout,cluster-restart}-<epoch>.log` on
-POSIX). `ava cluster status` enumerates the same sessions. Raw session
+`<ava_home>/logs/<session-name>.out.log`. `ava cluster status` enumerates the
+same sessions. Raw session
 output is queried in Loki, not tailed by a CLI: the collector's
 `filelog/sessions` receiver admits only agent shell transcripts, while
 `filelog/services` admits gateway/daemon/schedule stdout and excludes all
-agent main logs; updater/rollout tees use `filelog/orchestration`. Loki's
+agent main logs. Loki's
 `service_name` label is the filename-derived session name. Query via Grafana
 Explore (LogQL), `logcli --addr http://127.0.0.1:3100`, or the Loki HTTP API;
 local managed logs are pruned only when `ava logs retention` runs. No age flag
@@ -279,13 +241,11 @@ symlinks, and skips open handles. Register it daily; see `deploy/lgtm/README.md`
 
 ### Environment forwarding
 
-The session backend hands the child a built env dict (`shared.session_env.
+The session backend hands the child a built env dict (`base.sessions.env_forwarding.
 forward_env_dict`) — host-scope env only (machine identity, paths, health
 ports, the gateway URL) for daemon/service sessions; the cluster-scope values
 are NOT forwarded — the child re-sources them at its own boot (fetch on a
-pure runner, own .env on a gateway host). Detached agent processes get
-`ops.agent_launch.agent_spawn_env_dict` — bootstrap guide keys only, cluster
-secrets dropped. Nothing secret ever rides an argv (issue #974).
+pure runner, own .env on a gateway host). Nothing secret ever rides an argv (issue #974).
 
 ### Shell sub-sessions outlive agent processes AND cluster updates
 
@@ -297,4 +257,4 @@ or watchdog respawn can kill it; only its own `kill`, its shell exiting, or a
 machine reboot ends it. Orphan sessions are reclaimed as a periodic
 management task.
 
-Full detail: `shared/session_env.py`, `shared/session_backend.py`, `cli/commands/observability/logs.py`.
+Full detail: `base/sessions/env_forwarding.py`, `base/sessions/backend.py`, `cli/commands/observability/logs.py`.

@@ -15,7 +15,7 @@ no host state.
 The guard, not a wall clock, is the timeout. A turn that keeps making progress
 may legitimately run for days (the hosted design explicitly allows long
 autonomous loops), so an absolute turn budget would be wrong; only silence
-counts. The clock (agent/turn_progress.py) is marked by every LangGraph node
+counts. The clock (agent/turn/progress.py) is marked by every LangGraph node
 enter, completed LLM step and streamed LLM chunk, so a long exec or a long
 model stream keeps the turn alive while a graph-level hang — or a provider
 hanging without ever completing a step — does not.
@@ -29,17 +29,17 @@ import contextlib
 from langchain_core.runnables import RunnableConfig
 from langgraph.graph.state import CompiledStateGraph
 
-from agent.runloop import emit_error_event
 from agent.state import BaseAgentState
-from agent.turn_progress import reset_turn_progress, turn_progress_age_s
+from agent.turn.progress import reset_turn_progress, turn_progress_age_s
+from agent.turn.runloop import emit_error_event
+from base.agents.context import AvaContext
+from base.config import settings
+from base.deploy.stop_timing import CANCEL_UNWIND_TIMEOUT_S
+from base.log import logger
 from services.agent_host.dispatcher import (
     HostRestartRequiredError,
     TurnStallTimeoutError,
 )
-from shared.config import settings
-from shared.context import AvaContext
-from shared.log import logger
-from shared.stop_timing import CANCEL_UNWIND_TIMEOUT_S
 
 _Graph = CompiledStateGraph[BaseAgentState, AvaContext, BaseAgentState, BaseAgentState]
 

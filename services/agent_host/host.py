@@ -47,17 +47,9 @@ from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from langgraph.graph.state import CompiledStateGraph
 from psycopg_pool import AsyncConnectionPool, PoolTimeout
 
-from agent.corpse_reap import reap_crash_corpses
 from agent.graph.llm_errors import FatalLLMStreamError, FatalProviderError
 from agent.graph.node_log import flush_node_exit_aggregate
 from agent.hooks.compact import CompactionFailedError
-from agent.hosted_ownership import (
-    admit_hosted_runtime,
-    apply_hosted_lifecycle,
-    release_hosted_owner,
-    renew_hosted_owner,
-    settle_hosted_runtime,
-)
 from agent.impersonation import (
     active_lease,
     drop_relay_supervision,
@@ -66,15 +58,42 @@ from agent.impersonation import (
     settle_checkpoint,
     supervise_relay,
 )
+from agent.ownership.corpse_reap import reap_crash_corpses
+from agent.ownership.hosted import (
+    admit_hosted_runtime,
+    apply_hosted_lifecycle,
+    release_hosted_owner,
+    renew_hosted_owner,
+    settle_hosted_runtime,
+)
 from agent.process_boot import boot_agent_scope
-from agent.runloop import PendingTurnFailure, emit_error_event, graph_config, settle_turn_failure
 from agent.startup import (
     reconcile_claimed_inbounds_at_startup,
     repair_dangling_tool_use_at_startup,
 )
 from agent.state import BaseAgentState
-from agent.trace_checkpoint import attach_trace_checkpoint_ref
-from agent.turn_progress import reset_turn_progress
+from agent.turn.progress import reset_turn_progress
+from agent.turn.runloop import (
+    PendingTurnFailure,
+    emit_error_event,
+    graph_config,
+    settle_turn_failure,
+)
+from agent.turn.trace_checkpoint import attach_trace_checkpoint_ref
+from base.agents.context import AvaContext
+from base.agents.history.delta_read_compat import recovery_reconstruction_scope
+from base.cluster.machine import machine_name
+from base.config import settings
+from base.config.turn_view import bind_agent_config, resolve_agent_config_pins
+from base.deploy.maintenance import admission
+from base.events.live.announce import publish_agent_updated
+from base.events.live.publisher import AgentEventPublisher
+from base.events.live.redis_client import get_async_redis
+from base.log import logger
+from base.native_process.runtime_incarnation import RuntimeIncarnation, current_incarnation
+from base.native_process.turn_identity import bind_turn_identity
+from base.packages.plugins.config_view import bind_agent_plugin_config, resolve_agent_plugin_pins
+from base.telemetry.tracing import turn_span
 from services.agent_host import maintenance as maintenance_receipts
 from services.agent_host.admission import TurnAdmission
 from services.agent_host.crash_recovery import recover_reaped_corpses
@@ -93,30 +112,14 @@ from services.agent_host.runtime import (
 )
 from services.agent_host.settlement import close_hosted_turn
 from services.agent_host.stall_guard import run_invocation_with_stall_guard
-from services.agent_host.truncation import reap_truncation_outcome, reap_truncation_stop
-from shared import maintenance
-from shared.agents.history.delta_read_compat import recovery_reconstruction_scope
-from shared.config import settings
-from shared.config.turn_view import bind_agent_config, resolve_agent_config_pins
-from shared.context import AvaContext
-from shared.event_publisher import AgentEventPublisher
-from shared.live_announce import publish_agent_updated
-from shared.log import logger
-from shared.machine import machine_name
-from shared.plugin_config_view import bind_agent_plugin_config, resolve_agent_plugin_pins
-from shared.redis_client import get_async_redis
-from shared.runtime_incarnation import RuntimeIncarnation, current_incarnation
-from shared.trace import turn_span
-from shared.turn_identity import bind_turn_identity
 
 _HostGraph = CompiledStateGraph[BaseAgentState, AvaContext, BaseAgentState, BaseAgentState]
 
-# Statuses whose owner must not be handed a turn. `terminated` is the real one:
-# a wake for a dead agent is the delivery watchdog's resurrect business, and
-# running a turn would revive it behind the gateway's back. Unclaimed `idling` and
-# `restarting` belong to the boot / respawn path, which owns the row until it
-# reaches a running state.
-_UNRUNNABLE_STATUSES = frozenset({"terminated", "restarting"})
+# The host's whole stop must fit ava-root's TERM window (`stop_timeout_s`, 10 s,
+# `services/ava_root/supervisor.py`) or root retains custody of it. With Postgres
+# unreachable the release would otherwise wait out the control pool's acquire
+# timeout (30 s). A release that cannot land leaves the leases to expire by TTL.
+_RELEASE_OWNER_TIMEOUT_S = 3.0
 
 
 def kill_terminating_agent_shells(agent_id: int) -> None:
@@ -124,7 +127,7 @@ def kill_terminating_agent_shells(agent_id: int) -> None:
 
     The at-exit half of `kill_all_shell_sessions`, bound into
     `apply_hosted_lifecycle` (right before a graceful termination commits) and
-    into the force settlements (`shared.hosted_force`: the sweep once a force
+    into the force settlements (`base.agents.incarnation.hosted_force`: the sweep once a force
     is observed quiescent, live or at boot). Never raises: a failed kill must
     not turn a termination into a crashed turn, so it is logged at ERROR and
     the termination still applies.
@@ -133,7 +136,7 @@ def kill_terminating_agent_shells(agent_id: int) -> None:
 
     try:
         killed = kill_agent_shells(agent_id)
-    except Exception:  # fail-fast-ok: logged at ERROR; the termination must still apply
+    except Exception:  # logged at ERROR; the termination must still apply
         logger.opt(exception=True).error(
             "terminate could not kill every shell session of agent {agent_id}",
             agent_id=agent_id,
@@ -177,7 +180,6 @@ class AgentHost:
         # — it would just throw the work away and make that agent's NEXT turn
         # pay a cold build, which is the opposite of what a cache is for.
         self._in_flight: set[int] = set()
-        self._settled_reap_pending: set[int] = set()
         self._maintenance_failed: dict[int, tuple[str | None, datetime | None]] = {}
         self.admission = TurnAdmission(settings.daemon.host_max_concurrent_turns)
         self.stats = HostStats()
@@ -190,11 +192,8 @@ class AgentHost:
         Durable interrupts still stop cooperative LLM/exec work. Repeated outer
         cancellation must not release this agent to a concurrent successor.
         """
-        from shared.turn_identity import HostedTurnResources, bind_hosted_resources
+        from base.native_process.turn_identity import HostedTurnResources, bind_hosted_resources
 
-        # A settled reap asks for one admission attempt, even if the row then
-        # proves unrunnable or another wake reached it first.
-        self._settled_reap_pending.discard(agent_id)
         resources = HostedTurnResources()
         with bind_hosted_resources(resources):
             # Keep the child's Context so its config fingerprint can be copied
@@ -215,7 +214,7 @@ class AgentHost:
             raise
         finally:
             _active_turn_config_fingerprint.set(turn_context.get(_active_turn_config_fingerprint))
-            from shared.hosted_force import original_host_force
+            from base.agents.incarnation.hosted_force import original_host_force
 
             if resources.unresolved:
                 # Keep the actual domains and scheduler registration alive.
@@ -260,7 +259,7 @@ class AgentHost:
 
     async def accepts_force(self, agent_id: int, command_id: int) -> bool:
         """Authenticate cancellation against this live host's actual boot owner."""
-        from shared.hosted_force import original_host_force
+        from base.agents.incarnation.hosted_force import original_host_force
 
         return await original_host_force(
             self._control_pool, agent_id, self._owner, self._machine, command_id=command_id
@@ -337,7 +336,7 @@ class AgentHost:
                     status=stored.status,
                 )
                 return
-            if maintenance.held():
+            if admission.held():
                 # Admission may have waited for prepare's real row lock.
                 # Its only permitted continuation now is the owned control;
                 # do not build a new runtime or run initialization hooks.
@@ -390,9 +389,7 @@ class AgentHost:
         )
         if incarnation is None:
             return
-        reap_stop = reap_truncation_stop(self._control_pool, incarnation)
-        force_stop = force_termination_stop(self._control_pool, incarnation)
-        async with reap_stop, force_stop:
+        async with force_termination_stop(self._control_pool, incarnation):
             await self._apply_held_controls(agent_id, incarnation)
 
     async def _apply_held_controls(self, agent_id: int, incarnation: RuntimeIncarnation) -> None:
@@ -443,7 +440,7 @@ class AgentHost:
                 owner=stored.machine,
             )
             return False
-        if stored.status in _UNRUNNABLE_STATUSES:
+        if stored.status == "terminated":
             logger.info(
                 "hosted wake for agent {agent_id} ignored — status {status} is not runnable",
                 agent_id=agent_id,
@@ -553,7 +550,7 @@ class AgentHost:
         Handed to `TurnScheduler` so an uncancellable-turn report can say how
         long the agent has actually been silent. Deliberately THIS column and not
         the `/api/agents` field of the same name: that one is
-        `MAX(inbound_messages.created_at)` (`shared/agent_snapshot.py`) and goes
+        `MAX(inbound_messages.created_at)` (`base/agents/observation/snapshot.py`) and goes
         stale during exactly the long turns where "is it wedged?" is a real
         question — issue #183. This column is written on every completed LLM step
         (`agent/graph/llm/node.py:_persist_last_active`).
@@ -568,10 +565,6 @@ class AgentHost:
                 )
             ).fetchone()
         return None if row is None else row[0]
-
-    def arm_settled_reaps(self, agents: list[int]) -> None:
-        """Deliver each boot-settled reap once through the paced scan."""
-        self._settled_reap_pending.update(agents)
 
     async def pending_inbound_wakes(self, stale_after_s: float) -> list[PendingInboundWake]:
         """Find queued work and expired predecessors missed by Redis wakes.
@@ -591,13 +584,7 @@ class AgentHost:
             # cohort: its pace belongs to the drain windows (task #4652).
             return held_wakes
         rows = await scan_rows(self._control_pool, self._owner, self._machine, stale_after_s)
-        wakes = [PendingInboundWake(agent_id=row[0], stale=row[1], recovery=row[2]) for row in rows]
-        pending = {wake.agent_id for wake in wakes}
-        wakes.extend(
-            PendingInboundWake(agent_id=agent_id, stale=False, recovery=True)
-            for agent_id in self._settled_reap_pending - pending
-        )
-        return wakes
+        return [PendingInboundWake(agent_id=row[0], stale=row[1], recovery=row[2]) for row in rows]
 
     def drop_agent(self, agent_id: int) -> None:
         """Forget an agent's cached runtime — the hosted equivalent of the
@@ -730,9 +717,7 @@ class AgentHost:
                     incarnation=incarnation,
                 )
             except Exception as exc:
-                ended = await reap_truncation_outcome(exc, self._control_pool, agent_id)
-                if ended is None:
-                    ended = await force_termination_outcome(exc, self._control_pool, agent_id)
+                ended = await force_termination_outcome(exc, self._control_pool, agent_id)
                 if ended is not None:
                     self.drop_agent(agent_id)
                     return ended
@@ -747,7 +732,16 @@ class AgentHost:
         """Drop every cached runtime. The pool, checkpointer and graph belong to
         the daemon that built them and are closed there."""
         self._runtimes.clear()
-        await release_hosted_owner(self._control_pool, self._machine, self._owner, self._in_flight)
+        try:
+            async with asyncio.timeout(_RELEASE_OWNER_TIMEOUT_S):
+                await release_hosted_owner(
+                    self._control_pool, self._machine, self._owner, self._in_flight
+                )
+        except TimeoutError as exc:
+            raise TimeoutError(
+                f"hosted ownership release did not land within {_RELEASE_OWNER_TIMEOUT_S:g}s; "
+                "its leases expire by TTL"
+            ) from exc
 
     async def renew_ownership(self) -> None:
         """Existing daemon health beat also proves idle runtime responsibility.

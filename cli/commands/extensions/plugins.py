@@ -1,9 +1,9 @@
 """`ava plugins` subcommands.
 
 - `update`              — auto-merge plugin config disk image schema diff
-                          (logic in `shared.plugins_config.update_all_disk_images`).
+                          (logic in `base.packages.plugins.enable_config.update_all_disk_images`).
 - `install <url>`       — install an external package from a git source and
-                          record it in the install registry (`shared.install_registry`).
+                          record it in the install registry (`base.packages.extensions.install_registry`).
                           A bare **skill** (SKILL.md at the package root) lands in
                           the `~/.ava/skills/` load dir — `ava skill install` is the
                           fuller skill entry point (local paths + skill collections);
@@ -34,7 +34,7 @@ import sys
 from collections.abc import Callable
 from pathlib import Path
 
-from cli.commands._manifest_gate import gate_refuses
+from cli.commands.extensions._manifest_gate import gate_refuses
 
 from ._pkg_source import cleanup_temp, clone_git
 
@@ -42,10 +42,10 @@ from ._pkg_source import cleanup_temp, clone_git
 def cmd_plugins_update() -> int:
     """`ava plugins update` — scan all plugins, auto-merge disk image schema diff.
 
-    Actual scan + merge logic lives in `shared.plugins_config.update_all_disk_images`;
+    Actual scan + merge logic lives in `base.packages.plugins.enable_config.update_all_disk_images`;
     this function only formats the structured result for printing.
     """
-    from shared.plugins_config import update_all_disk_images
+    from base.packages.plugins.enable_config import update_all_disk_images
 
     result = update_all_disk_images()
     if not result.entries:
@@ -83,7 +83,7 @@ def cmd_plugins_disable(name: str) -> int:
 
 
 def _set_enabled(name: str, *, enabled: bool) -> int:
-    from shared.plugins_config import DanglingPlugin, set_local_enabled
+    from base.packages.plugins.enable_config import DanglingPlugin, set_local_enabled
 
     verb = "enable" if enabled else "disable"
     try:
@@ -103,7 +103,7 @@ def _skill_name_at(pkg_dir: Path) -> str | None:
     Raises:
         SkillFormatError: SKILL.md is present but unparseable.
     """
-    from shared.packages.skills.skill_index import parse_skill_frontmatter as _parse_frontmatter
+    from base.packages.skills.index import parse_skill_frontmatter as _parse_frontmatter
 
     skill_md = pkg_dir / "SKILL.md"
     if not skill_md.is_file():
@@ -116,11 +116,11 @@ def _sync_skills_load_dir() -> None:
     """Run the skills converge pass so a just-(un)installed plugin's skills
     land in / leave `~/.ava/skills/` now, keeping the "active on the next
     skill scan, no restart" promise. Idempotent."""
+    from base.paths import ava_home
     from cli.commands._repo import _repo_root
     from cli.commands.extensions.skills_sync import converge_skills
-    from shared.config import settings
 
-    result = converge_skills(_repo_root(), Path(settings.general.ava_home).expanduser())
+    result = converge_skills(_repo_root(), ava_home())
     for warning in result.warnings:
         print(f"  ! skills: {warning}", file=sys.stderr)
 
@@ -181,7 +181,7 @@ def _register_plugin_install(
     registry write fails, the landed dir is removed again, so a retry does
     not hit "already installed" against an untracked copy.
     """
-    from shared.install_registry import tree_hash
+    from base.packages.extensions.install_registry import tree_hash
 
     from . import skill_package
 
@@ -238,7 +238,7 @@ def cmd_plugins_install(
     run code rather than being read — so the same scan gates it, over the whole
     bundle rather than just the skills it ships.
     """
-    from shared import paths
+    from base import paths
 
     from . import _claude_code_plugin, skill_package
 
@@ -257,7 +257,7 @@ def cmd_plugins_install(
         if gate_refuses(pkg_dir, command="plugins install"):
             return 1
 
-        from shared.packages.skills.skill_index import SkillFormatError
+        from base.packages.skills.index import SkillFormatError
 
         try:
             name = _skill_name_at(pkg_dir)
@@ -338,14 +338,15 @@ def cmd_plugins_install(
 
 def _install_dest(pkg_type: str, name: str) -> Path:
     """On-disk install location for a package, by type."""
-    from shared import paths
+    from base import paths
 
     return (paths.plugins_dir() if pkg_type == "plugin" else paths.skills_dir()) / name
 
 
 def cmd_plugins_uninstall(name: str) -> int:
     """`ava plugins uninstall <name>` — remove an installed package + registry entry."""
-    from shared import install_registry, paths
+    from base import paths
+    from base.packages.extensions import install_registry
 
     pkg = install_registry.get(name)
     if pkg is None:
@@ -374,7 +375,7 @@ def cmd_plugins_uninstall(name: str) -> int:
 
 def cmd_plugins_installed() -> int:
     """`ava plugins installed` — list install-registry entries."""
-    from shared import install_registry
+    from base.packages.extensions import install_registry
 
     pkgs = install_registry.load().packages
     if not pkgs:
@@ -395,7 +396,8 @@ def cmd_plugins_upgrade(name: str, *, force: bool = False) -> int:
     wrote) aborts with a conflict unless `--force` is given — the R5 conflict
     contract, mirroring `git pull` (force = reset --hard).
     """
-    from shared import install_registry, paths
+    from base import paths
+    from base.packages.extensions import install_registry
 
     from . import _claude_code_plugin
 
@@ -406,7 +408,7 @@ def cmd_plugins_upgrade(name: str, *, force: bool = False) -> int:
     if pkg.source is None:
         print(
             f"[ava plugins upgrade] '{name}' has no recorded git source "
-            f"(converge-managed, origin={pkg.origin}); it updates via `ava cluster update`.",
+            f"(converge-managed, origin={pkg.origin}); it updates via the fleet update.",
             file=sys.stderr,
         )
         return 1

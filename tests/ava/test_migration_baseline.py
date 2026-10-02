@@ -10,8 +10,9 @@ import psycopg
 import pytest
 from psycopg import sql
 
-from shared.config import settings
-from shared.migrations import (
+from base.config import settings
+from base.deploy.schema.migrations import (
+    MigrationFailed,
     apply_pending_migrations,
     required_migration_set,
 )
@@ -155,3 +156,105 @@ def test_schema_sql_seeds_presets_without_a_skill_index() -> None:
     seed_block = _SCHEMA_SQL.read_text().split("INSERT INTO agent_presets")[1]
     seed_block = seed_block.split("ON CONFLICT")[0]
     assert "skills_to_inject_into_system_prompt" not in seed_block
+
+
+# ── Contraction of the retired deploy and watcher storage ──
+#
+# `20261001T055030_drop-retired-deploy-and-watcher-storage` drops the objects whose
+# readers and writers are gone, and `20261001T055130_retire-restarting-and-publication-deferred`
+# tightens two `agents_meta` CHECKs; the retirement refuses a stuck row.
+
+_DROP = "20261001T055030_drop-retired-deploy-and-watcher-storage"
+_RETIRE = "20261001T055130_retire-restarting-and-publication-deferred"
+
+
+def _widen_retired_checks(conn: psycopg.Connection) -> None:
+    """The two `agents_meta` CHECKs as they stood before the retirement migration."""
+    conn.execute("ALTER TABLE agents_meta DROP CONSTRAINT agents_meta_status_check")
+    conn.execute(
+        "ALTER TABLE agents_meta ADD CONSTRAINT agents_meta_status_check "
+        "CHECK (status IN ('running', 'idling', 'restarting', 'terminated'))"
+    )
+
+
+def test_the_version_gate_and_posture_paths_survive_the_contraction() -> None:
+    """Everything a live process still does against the two surviving tables."""
+    with _throwaway_database("retire_paths") as url, psycopg.connect(url) as conn:
+        conn.execute(cast(LiteralString, _SCHEMA_SQL.read_text()))
+        conn.commit()
+        apply_pending_migrations(conn)
+        conn.execute(
+            "UPDATE deployment_state SET min_code_version = GREATEST(min_code_version, %s) "
+            "WHERE id = 1",
+            (2700,),
+        )
+        assert conn.execute(
+            "SELECT COALESCE((SELECT min_code_version FROM public.deployment_state WHERE id = 1), 0)"
+        ).fetchone() == (2700,)
+        for posture in ("paused", "idle"):
+            conn.execute(
+                "INSERT INTO host_deploy_state (machine, posture, updated_at) "
+                "VALUES ('m1', %s, now()) ON CONFLICT (machine) DO UPDATE "
+                "SET posture = EXCLUDED.posture, updated_at = EXCLUDED.updated_at",
+                (posture,),
+            )
+        assert conn.execute("SELECT posture FROM host_deploy_state").fetchone() == ("idle",)
+        with pytest.raises(psycopg.errors.CheckViolation):
+            conn.execute("UPDATE host_deploy_state SET posture = 'converging'")
+        conn.rollback()
+        conn.execute("INSERT INTO agents (id, label) VALUES (1, 'a')")
+        with pytest.raises(psycopg.errors.CheckViolation):
+            conn.execute(
+                "INSERT INTO agents_meta (id, status, machine) VALUES (1, 'restarting', 'm')"
+            )
+        conn.rollback()
+        conn.execute("INSERT INTO agents (id, label) VALUES (2, 'b')")
+        with pytest.raises(psycopg.errors.CheckViolation):
+            conn.execute(
+                "INSERT INTO agents_meta (id, status, machine, last_admission_outcome, "
+                "last_admission_at) VALUES (2, 'idling', 'm', 'publication_deferred', now())"
+            )
+
+
+def test_restarting_row_refuses_the_retirement_and_leaves_the_schema_alone() -> None:
+    with _throwaway_database("retire_guard") as url:
+        with psycopg.connect(url, autocommit=True) as conn:
+            conn.execute(cast(LiteralString, _SCHEMA_SQL.read_text()))
+            _widen_retired_checks(conn)
+            conn.execute("INSERT INTO agents (id, label) VALUES (7, 'stuck'), (8, 'ok')")
+            conn.execute(
+                "INSERT INTO agents_meta (id, status, machine) VALUES "
+                "(7, 'restarting', 'm'), (8, 'idling', 'm')"
+            )
+
+        with psycopg.connect(url) as conn, pytest.raises(MigrationFailed) as refusal:
+            apply_pending_migrations(conn)
+        assert isinstance(refusal.value.__cause__, psycopg.errors.RaiseException)
+        assert "rows 7 are still in it" in str(refusal.value.__cause__)
+
+        with psycopg.connect(url, autocommit=True) as conn:
+            names = {
+                row[0] for row in conn.execute("SELECT name FROM schema_migrations").fetchall()
+            }
+            assert _RETIRE not in names
+            assert conn.execute("SELECT status FROM agents_meta WHERE id = 7").fetchone() == (
+                "restarting",
+            )
+            # The drop migration ran first and committed on its own; only the
+            # retirement refused, so the status CHECK still admits the value.
+            assert _DROP in names
+            definition = conn.execute(
+                "SELECT pg_get_constraintdef(oid) FROM pg_constraint "
+                "WHERE conname = 'agents_meta_status_check'"
+            ).fetchone()
+            assert definition is not None and "restarting" in definition[0]
+
+        with psycopg.connect(url, autocommit=True) as conn:
+            conn.execute("UPDATE agents_meta SET status = 'idling' WHERE id = 7")
+        with psycopg.connect(url) as conn:
+            assert apply_pending_migrations(conn) == [_RETIRE]
+        with (
+            psycopg.connect(url, autocommit=True) as conn,
+            pytest.raises(psycopg.errors.CheckViolation),
+        ):
+            conn.execute("UPDATE agents_meta SET status = 'restarting' WHERE id = 8")

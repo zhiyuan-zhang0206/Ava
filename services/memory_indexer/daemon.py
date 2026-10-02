@@ -57,6 +57,13 @@ import numpy as np
 from watchdog.events import FileSystemEvent, FileSystemEventHandler
 from watchdog.observers import Observer
 
+from base.config import settings
+from base.daemon.health import Liveness, health_port, start_health_server, stop_health_server
+from base.daemon.shutdown import cancel_and_drain, install_graceful_shutdown
+from base.daemon.shutdown import hard_exit as _hard_exit
+from base.log import init_gateway_process
+from base.native_process.os_platform import CREATE_NO_WINDOW
+from base.paths import gateway_memory_dir, pid_path
 from services.memory_indexer.backends.base import MemorySearchBackend, content_hash
 from services.memory_indexer.backends.factory import get_backend
 from services.memory_indexer.backends.probe import probe_backend
@@ -77,18 +84,19 @@ from services.memory_indexer.embeddings import factory
 from services.memory_indexer.embeddings.base import EmbeddingAPIError, EmbeddingProvider
 from services.memory_indexer.embeddings.factory import get_provider
 from services.pidfile import acquire_pidfile, pidfile_holds_daemon, remove_pidfile
-from shared.config import settings
-from shared.daemon_health import Liveness, health_port, start_health_server, stop_health_server
-from shared.daemon_shutdown import cancel_and_drain, install_graceful_shutdown
-from shared.daemon_shutdown import hard_exit as _hard_exit
-from shared.log import init_gateway_process
-from shared.paths import gateway_memory_dir
-from shared.platform import CREATE_NO_WINDOW
 
 _log = logging.getLogger("services.memory_indexer.daemon")
 
-_MEMORY_ROOT = gateway_memory_dir()
-_PIDFILE = settings.services.memory_indexer_pidfile
+
+def _memory_root() -> Path:
+    """The consolidated memory checkout this daemon indexes, resolved on use."""
+    return gateway_memory_dir()
+
+
+def _pidfile() -> Path:
+    return pid_path("memory_indexer")
+
+
 _LOOP_INTERVAL_S = 1.0
 # Derive the ceiling from one provider batch's full retry budget: a single
 # legitimate call can exceed 180s, and several shorter calls can compound.
@@ -158,13 +166,13 @@ class _MarkdownEventHandler(FileSystemEventHandler):
 
 
 def _write_pidfile() -> None:
-    if not acquire_pidfile(_PIDFILE, "services.memory_indexer.daemon"):
-        _log.info("[memory_indexer] daemon already running (pidfile=%s), exiting", _PIDFILE)
+    if not acquire_pidfile(_pidfile(), "services.memory_indexer.daemon"):
+        _log.info("[memory_indexer] daemon already running (pidfile=%s), exiting", _pidfile())
         sys.exit(1)
 
 
 def _remove_pidfile() -> None:
-    remove_pidfile(_PIDFILE)
+    remove_pidfile(_pidfile())
 
 
 def _is_running() -> bool:
@@ -172,7 +180,7 @@ def _is_running() -> bool:
 
     Pid-reuse-safe: a live pid whose argv does not name this daemon's module
     is a recycled pid, not a running instance (audit round 2, P1)."""
-    return pidfile_holds_daemon(_PIDFILE, "services.memory_indexer.daemon")
+    return pidfile_holds_daemon(_pidfile(), "services.memory_indexer.daemon")
 
 
 def _scan_disk(root: Path) -> dict[Path, float]:
@@ -225,7 +233,7 @@ def _process_paths(
     Backends must be cross-thread safe (the milvus gRPC client is).
     """
     liveness.beat()
-    root = _MEMORY_ROOT.resolve()
+    root = _memory_root().resolve()
     to_delete: list[Path] = []
     to_embed: list[tuple[Path, float, str, str]] = []  # (path, mtime, hash, content)
     existing_meta = backend.all_meta()
@@ -418,11 +426,11 @@ def _reconcile(
     never split a file; its rows commit as one unit (issue #1946). An
     `EmbeddingAPIError` is logged and the remaining chunks are skipped.
     """
-    disk = _scan_disk(_MEMORY_ROOT)
+    disk = _scan_disk(_memory_root())
     indexed = backend.all_meta()
     indexed_paths = {Path(p) for p in indexed}
     disk_paths = set(disk.keys())
-    root = _MEMORY_ROOT.resolve()
+    root = _memory_root().resolve()
 
     dirty: set[Path] = set()
     # Changes / additions — mark dirty when mtime differs;
@@ -472,7 +480,7 @@ def _refresh_gateway_checkout() -> None:
     logged at ERROR and retried next cycle — a stale index can no longer
     rot silently. Keep-local mode: `pull_main` is a no-op.
     """
-    from shared.memory_repo import gateway_memory_dir, pull_main
+    from base.deploy.git.memory_repo import gateway_memory_dir, pull_main
 
     cwd = gateway_memory_dir()
     try:
@@ -611,11 +619,11 @@ async def run() -> None:
     Publish the pidfile before binding healthz so identity-aware probes can verify it.
     """
     if _is_running():
-        _log.info("[indexer] daemon already running (pidfile=%s), exiting", _PIDFILE)
+        _log.info("[indexer] daemon already running (pidfile=%s), exiting", _pidfile())
         sys.exit(1)
 
     _write_pidfile()
-    _log.info("[indexer] pidfile written: %s", _PIDFILE)
+    _log.info("[indexer] pidfile written: %s", _pidfile())
 
     # Fail fast before deriving liveness or binding healthz: an unknown
     # AVA_EMBEDDING_BACKEND must produce the clean configuration FATAL.
@@ -636,7 +644,8 @@ async def run() -> None:
     )
     _log.info("[indexer] healthz listening on :%s", health_port("memory_indexer"))
 
-    _MEMORY_ROOT.mkdir(parents=True, exist_ok=True)
+    root = _memory_root()
+    root.mkdir(parents=True, exist_ok=True)
     # Preflight the selected backend BEFORE the retry loop: a backend that can
     # never work (fatal) fails fast with the actionable fix instead of a 30s
     # retry storm; a merely-unreachable one rides into the retry loop with its
@@ -661,9 +670,9 @@ async def run() -> None:
     dirty_queue: queue.Queue[Path] = queue.Queue()
     handler = _MarkdownEventHandler(dirty_queue)
     observer = Observer()
-    observer.schedule(handler, str(_MEMORY_ROOT), recursive=True)
+    observer.schedule(handler, str(root), recursive=True)
     observer.start()
-    _log.info("[indexer] watching %s", _MEMORY_ROOT)
+    _log.info("[indexer] watching %s", root)
 
     try:
         if not await asyncio.to_thread(_reconcile, backend, provider, liveness):
@@ -688,7 +697,7 @@ def main() -> None:
     schema-drift surface.
     """
     init_gateway_process(name="memory_indexer")
-    install_graceful_shutdown("indexer")
+    install_graceful_shutdown("memory_indexer")
     code = 0
     # `asyncio.Runner`, not `asyncio.run`: `run` closes in a `finally` that
     # awaits `shutdown_default_executor`, joining the default executor's

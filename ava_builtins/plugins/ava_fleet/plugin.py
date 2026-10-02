@@ -45,8 +45,8 @@ from typing import Any, TypedDict
 import ava
 import ava.agent_identity
 import ava.agents
-from ava.sdk_validation import coerce_str, coerce_typed
-from shared.tasks.priority import validate_priority
+from ava.sdk_surface.validation import coerce_str, coerce_typed
+from base.agents.tasks.priority import validate_priority
 
 from . import task_registry
 
@@ -59,7 +59,7 @@ def set_label(text: str) -> None:
             "UPDATE agents SET label=%s, label_user_set=TRUE WHERE id=%s",
             (text or None, agent_id),
         )
-        from shared.audit_events import insert_event_log
+        from base.telemetry.audit_events import insert_event_log
 
         insert_event_log(
             event_type="label_change",
@@ -68,7 +68,7 @@ def set_label(text: str) -> None:
             payload={"new_label": text or None},
         )
     # Per-call import: plugin autoload stays off the redis/live-events stack (task #3816).
-    from shared.live_announce import publish_agent_updated_sync
+    from base.events.live.announce import publish_agent_updated_sync
 
     publish_agent_updated_sync(agent_id)
 
@@ -193,7 +193,7 @@ def notify(
 
     expire_at_iso: str | None = None
     if expire_at is not None:
-        from shared.daemon.schedules.watcher import normalize_when
+        from base.daemon.schedules.watcher import normalize_when
 
         due_at = normalize_when(expire_at)
         if due_at < datetime.now(UTC):

@@ -1,9 +1,10 @@
 """End-to-end: a real PgBouncer in transaction pooling in front of a throwaway
 Postgres. Proves the load-bearing wire behaviour the unit tests cannot:
 
-- scram-sha-256 client auth against a plaintext userlist entry (the chosen auth
-  scheme), with a credential-less server hop (here TCP loopback trust, mirroring
-  the prod unix-socket trust),
+- scram-sha-256 client auth against a userlist entry, with a credential-less
+  server hop (here TCP loopback trust — the pooling behavior under test is
+  independent of the hop's auth; the production verifier userlist and SCRAM
+  pass-through socket hop are proven in cli/commands/tests/test_single_box.py),
 - transaction pooling with `prepare_threshold=None` (never prepare) — the same
   query run across many autocommit transactions never hits "prepared statement
   does not exist" as different backends are handed out,
@@ -30,9 +31,10 @@ from pathlib import Path
 import psycopg
 import pytest
 from psycopg import sql
-from psycopg.conninfo import conninfo_to_dict
+from psycopg.conninfo import conninfo_to_dict, make_conninfo
 from psycopg_pool import AsyncConnectionPool, ConnectionPool
 
+from base.cluster.authority import POOLER_ADMIN
 from cli.commands.data_plane.pgbouncer import pgbouncer_bin
 from tests._containers import _free_port, _wait_port, postgres
 
@@ -58,9 +60,9 @@ def _pgbouncer_in_front(
     read_only_default: bool = False,
 ) -> Generator[str]:
     """Start a transaction-pooling PgBouncer in front of the throwaway Postgres at
-    `pg_url`; yield the pooled connection URL. Config mirrors cli/commands/pgbouncer,
-    but the server hop is TCP loopback (the throwaway's trust posture) rather than the
-    prod unix socket — behaviourally the same credential-less trust hop.
+    `pg_url`; yield the pooled connection URL. Pooling config mirrors
+    cli/commands/pgbouncer; the server hop is TCP loopback under the throwaway's
+    trust posture rather than the production SCRAM pass-through socket hop.
 
     `listen_addr` lets a test bind the listener on a specific loopback address —
     e.g. 127.0.0.2 to prove the degraded-bind probe dials exactly the bound
@@ -94,12 +96,13 @@ def _pgbouncer_in_front(
                 )
             )
 
-    from shared.db import PG_STATEMENT_TIMEOUT_SET_SQL
+    from base.db import PG_STATEMENT_TIMEOUT_SET_SQL
 
     tmp = Path(tempfile.mkdtemp(prefix="ava-pgbouncer-test-"))
     listen_port = _free_port()
     userlist = tmp / "userlist.txt"
-    userlist.write_text(f'"{role}" "{_SECRET}"\n')
+    # Mirrors _render_ini: the admin console belongs to the pooler admin alone.
+    userlist.write_text(f'"{role}" "{_SECRET}"\n"{POOLER_ADMIN}" "{_SECRET}"\n')
     ini = tmp / "pgbouncer.ini"
     ini.write_text(
         "\n".join(
@@ -124,14 +127,14 @@ def _pgbouncer_in_front(
                 # the SV_ACTIVE window, so clean releases/disconnects keep the
                 # backend's session (birth connect_query ceiling and a client's
                 # own SETs survive — measured 2026-09-03); between-transaction
-                # pollution is defended client-side by shared/db.py's baseline
+                # pollution is defended client-side by base/db/__init__.py's baseline
                 # restore on every pooled dial and borrow.
                 "server_reset_query = DISCARD ALL",
                 "server_reset_query_always = 0",
                 "max_client_conn = 100",
                 f"default_pool_size = {pool_size}",  # tiny, so transactions genuinely reuse backends
                 "ignore_startup_parameters = extra_float_digits,options",
-                f"admin_users = {role}",
+                f"admin_users = {POOLER_ADMIN}",
                 f"logfile = {tmp / 'pgbouncer.log'}",
                 f"pidfile = {tmp / 'pgbouncer.pid'}",
                 "",
@@ -161,6 +164,12 @@ def _pgbouncer_in_front(
             pid = int((tmp / "pgbouncer.pid").read_text().strip())
             os.kill(pid, signal.SIGTERM)
         shutil.rmtree(tmp, ignore_errors=True)
+
+
+def _admin_console_url(pooled: str) -> str:
+    """The admin console of a `_pgbouncer_in_front` pooler, dialed as the
+    pooler admin — its only `admin_users` entry (the pooled role is refused)."""
+    return make_conninfo(pooled, user=POOLER_ADMIN, password=_SECRET, dbname="pgbouncer")
 
 
 def test_scram_client_auth_and_pooled_select() -> None:
@@ -217,38 +226,6 @@ def _read_only_default_pooler(pg_url: str, pool_size: int = 2) -> Generator[str]
         yield pooled
 
 
-def test_finalize_writes_override_a_read_only_default(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Finalizer posture and lock writes must override a read-only session default.
-
-    The tail's two compensating writes must start explicit read-write
-    transactions before DML, so a read-only default (the rollout-finalizer
-    failure's posture) cannot fail them.
-    """
-    from shared import config, host_deploy_state
-    from shared.cluster_lock import release_update_lock
-
-    with postgres() as pg_url, _read_only_default_pooler(pg_url, pool_size=1) as pooled:
-        monkeypatch.setattr(config.settings.data_plane, "db_url", pooled)
-        host_deploy_state.set_posture("idle")
-        release_update_lock("pgbouncer-finalizer-test")
-
-
-def test_recovery_claim_overrides_a_read_only_default(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Recovery can lock a lease in a session that defaults to read-only."""
-    from shared import config
-    from shared.cluster_lock import claim_recovery_lock
-
-    with postgres() as pg_url, _read_only_default_pooler(pg_url) as pooled:
-        monkeypatch.setattr(config.settings.data_plane, "db_url", pooled)
-        claim = claim_recovery_lock("pgbouncer-recovery-test", observed=None)
-
-    assert claim.acquired is True
-
-
 def _direct_writer(pg_url: str) -> psycopg.Connection:
     """A direct setup/verify connection that writes despite a read-only default."""
     return psycopg.connect(pg_url, options="-c default_transaction_read_only=off")
@@ -265,23 +242,26 @@ def _insert_agent(pg_url: str) -> int:
 def test_write_transaction_overrides_a_read_only_default_on_connect(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Rule A writes (`shared.cluster_lock`'s update-lock acquire/release)
-    land in sessions that default to read-only."""
-    from shared import config
-    from shared.cluster_lock import acquire_update_lock, release_update_lock
+    """Rule A writes (`set_posture`'s upsert, opened by `write_transaction()` on its
+    own dial) land in sessions that default to read-only."""
+    from base import config
+    from base.deploy.state import host_deploy_state
 
-    with postgres() as pg_url, _read_only_default_pooler(pg_url) as pooled:
+    with postgres() as pg_url, _read_only_default_pooler(pg_url, pool_size=1) as pooled:
         monkeypatch.setattr(config.settings.data_plane, "db_url", pooled)
-        assert acquire_update_lock("pgbouncer-wire-test") is True
-        release_update_lock("pgbouncer-wire-test")
+        host_deploy_state.set_posture("paused")
+
+        with psycopg.connect(pg_url) as verify:
+            row = verify.execute("SELECT posture FROM host_deploy_state").fetchone()
+        assert row is not None and row[0] == "paused"
 
 
 def test_schedule_provision_overrides_a_read_only_default(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """R3 Rule A schedule provisioning declares direct writes read-write."""
+    from base import config
     from cli.commands.management.schedules import cmd_schedules_provision
-    from shared import config
 
     with postgres() as pg_url, _read_only_default_pooler(pg_url) as pooled:
         monkeypatch.setattr(config.settings.data_plane, "db_url", pooled)
@@ -296,9 +276,9 @@ def test_write_transaction_overrides_a_read_only_default_on_pool_borrow(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Rule B's pool-borrow DELETE declares its transaction writable first."""
+    from base import config
+    from base.db import pool
     from gateway.ttl_reaper import _delete_shell_row_blocking
-    from shared import config
-    from shared.db import pool
 
     with postgres() as pg_url, _read_only_default_pooler(pg_url) as pooled:
         monkeypatch.setattr(config.settings.data_plane, "db_url", pooled)
@@ -325,7 +305,7 @@ def test_write_transaction_overrides_a_read_only_default_on_pool_borrow(
 
 def test_session_touch_overrides_a_read_only_default() -> None:
     """R3 Rule B session writes declare a raw pool borrow read-write first."""
-    from gateway.session_store import touch_session
+    from gateway.auth.session_store import touch_session
 
     with postgres() as pg_url, _read_only_default_pooler(pg_url) as pooled:
         with _direct_writer(pg_url) as setup:
@@ -355,7 +335,7 @@ def test_session_touch_overrides_a_read_only_default() -> None:
 
 def test_async_write_transaction_overrides_a_read_only_default() -> None:
     """Rule C opens an explicit read-write transaction on an autocommit pool."""
-    from shared.db_transaction import async_write_transaction
+    from base.db.transaction import async_write_transaction
 
     async def write_once(pooled: str) -> None:
         db_pool = AsyncConnectionPool(
@@ -368,7 +348,9 @@ def test_async_write_transaction_overrides_a_read_only_default() -> None:
         await db_pool.open()
         try:
             async with async_write_transaction(db_pool) as conn:
-                await conn.execute("UPDATE deployment_state SET phase = phase WHERE id = 1")
+                await conn.execute(
+                    "UPDATE deployment_state SET min_code_version = min_code_version WHERE id = 1"
+                )
         finally:
             await db_pool.close()
 
@@ -380,13 +362,15 @@ def test_plain_autocommit_write_still_fails_under_a_read_only_default(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The read-only-default tests have teeth: an unpostured pooled write is rejected."""
-    from shared import config
-    from shared.db import connect
+    from base import config
+    from base.db import connect
 
     with postgres() as pg_url, _read_only_default_pooler(pg_url, pool_size=1) as pooled:
         monkeypatch.setattr(config.settings.data_plane, "db_url", pooled)
         with connect(autocommit=True) as conn, pytest.raises(psycopg.errors.ReadOnlySqlTransaction):
-            conn.execute("UPDATE deployment_state SET phase = phase WHERE id = 1")
+            conn.execute(
+                "UPDATE deployment_state SET min_code_version = min_code_version WHERE id = 1"
+            )
 
 
 def test_pooler_isolates_one_clients_read_only_posture_from_another() -> None:
@@ -406,7 +390,9 @@ def test_pooler_isolates_one_clients_read_only_posture_from_another() -> None:
         poisoner.execute("SET default_transaction_read_only = on")
         row = other.execute("SHOW default_transaction_read_only").fetchone()
         assert row is not None and str(row[0]) == "off"
-        other.execute("UPDATE deployment_state SET phase = phase WHERE id = 1")
+        other.execute(
+            "UPDATE deployment_state SET min_code_version = min_code_version WHERE id = 1"
+        )
         row = poisoner.execute("SHOW default_transaction_read_only").fetchone()
         assert row is not None and str(row[0]) == "on"
 
@@ -432,13 +418,13 @@ def test_connect_query_bounds_pooled_backends_at_birth() -> None:
         assert _statement_timeout(conn) == "1min"
 
 
-def test_shared_connect_applies_statement_timeout_on_pooled_dial(
+def test_base_connect_applies_statement_timeout_on_pooled_dial(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """shared.db.connect() delivers the statement ceiling through the pooler: the
+    """base.db.connect() delivers the statement ceiling through the pooler: the
     `options` startup parameter is dropped by PgBouncer, so the pooled dial runs
     the explicit SET (the client-side half of the delivery)."""
-    from shared import config
+    from base import config
 
     with postgres() as pg_url, _pgbouncer_in_front(pg_url) as pooled:
         dp = config.settings.data_plane
@@ -450,26 +436,26 @@ def test_shared_connect_applies_statement_timeout_on_pooled_dial(
         # password and is not in the userlist.
         monkeypatch.setattr(dp, "db_url", pooled)
 
-        import shared.db
+        import base.db
 
-        with shared.db.connect() as conn:
+        with base.db.connect() as conn:
             assert _statement_timeout(conn) == "1min"
 
 
-def test_shared_pool_applies_statement_timeout_on_pooled_dial(
+def test_base_pool_applies_statement_timeout_on_pooled_dial(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """shared.db.pool() applies the SET on every new backend via the pool's
+    """base.db.pool() applies the SET on every new backend via the pool's
     configure hook — a borrowed connection through PgBouncer is bounded."""
-    from shared import config
+    from base import config
 
     with postgres() as pg_url, _pgbouncer_in_front(pg_url) as pooled:
         dp = config.settings.data_plane
         monkeypatch.setattr(dp, "db_url", pooled)
 
-        import shared.db
+        import base.db
 
-        pool = shared.db.pool(min_size=1, max_size=2)
+        pool = base.db.pool(min_size=1, max_size=2)
         try:
             with pool.connection() as conn:
                 assert _statement_timeout(conn) == "1min"
@@ -501,16 +487,16 @@ def test_langgraph_saver_setup_and_roundtrip_through_pgbouncer() -> None:
 
 
 def test_admin_probe_reaches_the_bound_address_only() -> None:
-    """P4: the load-bearing premise of the degraded-bind probe — a psycopg dial
-    to an address pgbouncer failed to bind actually FAILS, while the bound one
-    answers. `_admin_reachable(host=...)` is what `pgbouncer_public_listener_
-    reachable` trusts to tell a silently degraded pooler from a healthy one.
+    """P4: the admin-console probe authenticates as the pooler admin and dials
+    exactly the address it names — an address pgbouncer did not bind FAILS,
+    while the bound one answers. (Public-bind verification itself reads the
+    socket table, `pgbouncer_public_listener_reachable`, never a self-dial.)
 
     127.0.0.2 is local on Linux (CI runs this); macOS needs an lo0 alias, so
     skip there."""
     import sys
 
-    from cli.commands.data_plane.pgbouncer import _admin_reachable
+    from base.cluster.dataplane.pooler import admin_reachable
 
     if sys.platform == "darwin":
         pytest.skip("127.0.0.2 needs an lo0 alias on macOS")
@@ -519,8 +505,8 @@ def test_admin_probe_reaches_the_bound_address_only() -> None:
         _pgbouncer_in_front(pg_url, listen_addr="127.0.0.2") as pooled,
     ):
         listen_port = int(str(conninfo_to_dict(pooled)["port"]))
-        assert _admin_reachable(listen_port, "ava_citest", _SECRET, host="127.0.0.2") is True
-        assert _admin_reachable(listen_port, "ava_citest", _SECRET, host="127.0.0.1") is False
+        assert admin_reachable(listen_port, _SECRET, host="127.0.0.2") is True
+        assert admin_reachable(listen_port, _SECRET, host="127.0.0.1") is False
 
 
 # ── Pooled session-GUC pollution (2026-09-02 P0) ────────────────────────────
@@ -566,12 +552,12 @@ def test_pooled_borrow_scrubs_a_poisoned_backend(
     session-level SET. The pool's `check` hook (every borrow) restores the
     baseline session, so the borrowed session resolves names and carries the
     statement ceiling again, and an unqualified write succeeds."""
-    import shared.db as shared_db
-    from shared import config
+    import base.db as base_db
+    from base import config
 
     with postgres() as pg_url, _pgbouncer_in_front(pg_url, pool_size=1) as pooled:
         monkeypatch.setattr(config.settings.data_plane, "db_url", pooled)
-        pool = shared_db.pool(min_size=1, max_size=1)
+        pool = base_db.pool(min_size=1, max_size=1)
         try:
             # Force the pool's physical backend into existence (creation runs the
             # configure hook) BEFORE poisoning, so the borrow-time check hook —
@@ -583,7 +569,9 @@ def test_pooled_borrow_scrubs_a_poisoned_backend(
                 row = conn.execute("SHOW search_path").fetchone()
                 assert row is not None and str(row[0]) != "nowhere"
                 assert _statement_timeout(conn) == "1min"
-                conn.execute("UPDATE deployment_state SET phase = phase WHERE id = 1")
+                conn.execute(
+                    "UPDATE deployment_state SET min_code_version = min_code_version WHERE id = 1"
+                )
         finally:
             pool.close()
 
@@ -596,10 +584,10 @@ def test_message_insert_and_schedule_stop_survive_a_poisoned_backend(
     their transaction a backend another client left polluted. Runs the real
     write helpers through the sanctioned pool path against a poisoned
     single-backend pooler."""
-    import shared.db as shared_db
-    from gateway.routers.schedules import _update_blocking
-    from shared import config
-    from shared.agents.messages.chat_delivery import insert_chat_inbound_once
+    import base.db as base_db
+    from base import config
+    from base.agents.messages.chat_delivery import insert_chat_inbound_once
+    from gateway.schedules.router import _update_blocking
 
     with postgres() as pg_url, _pgbouncer_in_front(pg_url, pool_size=1) as pooled:
         monkeypatch.setattr(config.settings.data_plane, "db_url", pooled)
@@ -609,7 +597,7 @@ def test_message_insert_and_schedule_stop_survive_a_poisoned_backend(
         def _no_wake(*_args: object, **_kwargs: object) -> None:
             return None
 
-        monkeypatch.setattr("shared.agents.messages.chat_delivery.publish_inbound_wake", _no_wake)
+        monkeypatch.setattr("base.agents.messages.chat_delivery.publish_inbound_wake", _no_wake)
         with psycopg.connect(pg_url, autocommit=True) as admin:
             row = admin.execute(
                 "INSERT INTO agents (label) VALUES ('poison-probe-agent') RETURNING id"
@@ -623,7 +611,7 @@ def test_message_insert_and_schedule_stop_survive_a_poisoned_backend(
             ).fetchone()
             assert row is not None
             schedule_id: int = row[0]
-        pool = shared_db.pool(min_size=1, max_size=1)
+        pool = base_db.pool(min_size=1, max_size=1)
         try:
             with pool.connection() as conn:
                 conn.execute("SELECT 1")
@@ -645,3 +633,33 @@ def test_message_insert_and_schedule_stop_survive_a_poisoned_backend(
             assert row[4] is False
         finally:
             pool.close()
+
+
+def test_pooled_dial_names_its_process_and_code_version_and_keeps_the_ceiling(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A pooled `base.db.connect()` whose borrow also reads the cluster's minimum
+    code version (the restore's combined statement) still bounds the backend, and
+    the pooler's own client list names the connection `ava:<process>:v<version>`:
+    the observability half of the code-version gate."""
+    from base import config
+    from base.db import code_version_gate as gate
+    from base.native_process import code_version
+    from base.telemetry import process_name
+
+    with postgres() as pg_url, _pgbouncer_in_front(pg_url) as pooled:
+        monkeypatch.setattr(config.settings.data_plane, "db_url", pooled)
+        monkeypatch.setattr(code_version, "_version", 4321)
+        monkeypatch.setattr(code_version, "_db_gate_exempt", False)
+        monkeypatch.setattr(gate, "_last_read_at", None)  # the minimum is read on this dial
+
+        import base.db
+
+        with base.db.connect() as conn:
+            assert gate.min_read_due() is False  # the dial did read it
+            assert _statement_timeout(conn) == "1min"
+            with psycopg.connect(_admin_console_url(pooled), autocommit=True) as console:
+                cursor = console.execute("SHOW CLIENTS")
+                columns = [column.name for column in cursor.description or ()]
+                names = {row[columns.index("application_name")] for row in cursor.fetchall()}
+    assert f"ava:{process_name()}:v4321" in names

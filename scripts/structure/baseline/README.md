@@ -4,10 +4,13 @@ This directory holds the structure lint's frozen baseline, split into one
 shard file per directory area — `<shard>.json`, named after the first two
 components of an entry's directory (`agent/graph/x.py` files under
 `agent.graph.json`; a `directories` entry's key is itself the directory, so
-`shared` lives in `shared.json`). See `scripts/structure/baseline_shards.py`
-for the exact rule (`shard_of`) and `scripts/lint_code_structure.py` for how
+`base` lives in `base.json`). See `scripts/structure/baseline_shards.py`
+for the exact rule (`shard_of`) and `scripts/lint/code_structure.py` for how
 the shards are merged, validated and compared against the base revision. An
 entry filed under the wrong shard fails the gate.
+
+`rules.json` is not a shard: it records the rule version a section was frozen under
+(`baseline_shards.py` explains how the guard uses it when a rule changes).
 
 This README is committed even when every shard is empty (all structural debt
 paid off): git does not track empty directories, so without it a fully clean

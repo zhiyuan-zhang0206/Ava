@@ -17,9 +17,9 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
+from base.config import settings
 from services.memory_indexer.embeddings import gemini
 from services.memory_indexer.embeddings.base import EmbeddingProvider
-from shared.config import settings
 
 _ProviderEntry = tuple[Callable[[], EmbeddingProvider], Callable[[], float]]
 _PROVIDERS: dict[str, _ProviderEntry] = {

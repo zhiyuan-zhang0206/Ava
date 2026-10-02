@@ -15,11 +15,11 @@ from fastapi.testclient import TestClient
 from langchain_core.messages import AIMessage
 
 import services.labeler.labeler as labels_module
+from base.agents.labels import publish_label_updated
+from base.config import settings
+from base.db import create_agent
 from gateway.app import app
 from services.labeler.labeler import _normalize, generate_label_async
-from shared.config import settings
-from shared.db import create_agent
-from shared.labels import publish_label_updated
 
 
 def _label_of(conn: psycopg.Connection, agent_id: int) -> str | None:
@@ -139,7 +139,7 @@ async def test_labeler_emits_batch_billing_after_a_successful_llm_call(
         "build_chat_model",
         lambda _model, **_kwargs: _ResponseLLM(),  # pyright: ignore[reportUnknownArgumentType]
     )
-    monkeypatch.setattr("shared.lm.usage.log_usage_from_message", _emit)
+    monkeypatch.setattr("base.lm.usage.log_usage_from_message", _emit)
 
     assert await generate_label_async(1, "prompt", "deepseek-v4-pro") is False
     assert emitted == [

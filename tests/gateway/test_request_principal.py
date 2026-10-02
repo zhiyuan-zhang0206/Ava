@@ -3,7 +3,12 @@
 import pytest
 from starlette.requests import Request
 
-from gateway.request_principal import AuthPrincipal, PrincipalScopeError, principal_key, request_key
+from gateway.auth.request_principal import (
+    AuthPrincipal,
+    PrincipalScopeError,
+    principal_key,
+    request_key,
+)
 
 
 def _request(scope: str | None = "principal-v1", principal: AuthPrincipal | None = None) -> Request:
@@ -68,7 +73,7 @@ def test_unknown_scope_fails_loudly(scope: str) -> None:
 
 
 def test_reconciliation_uses_original_message_operation_namespace() -> None:
-    from gateway.routers.agents_state import _scoped_message_key
+    from gateway.agents.state import _scoped_message_key
 
     request = _request(principal=AuthPrincipal("mcp_client", "1"))
     assert _scoped_message_key(request, 42, "k") == principal_key(

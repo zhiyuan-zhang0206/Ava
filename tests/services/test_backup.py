@@ -8,13 +8,12 @@ to the host's timezone would pass or fail by which machine ran it.
 
 from __future__ import annotations
 
-import hashlib
 import os
 import subprocess
 import sys
 import textwrap
 import time
-from collections.abc import Callable, Mapping
+from collections.abc import Callable
 from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
@@ -26,12 +25,11 @@ import pytest
 from psycopg import sql
 from psycopg.conninfo import conninfo_to_dict
 
+from base.config import settings
+from base.native_process.os_platform import LockTimeoutError
 from services import backup
-from services.pitr import logical_dump_names, store_factory
-from services.pitr.checksums import MD5, ObjectChecksum
-from services.pitr.object_store import RemoteObjectAck
-from shared.config import settings
-from shared.platform import LockTimeoutError
+from services.gateway_side.backup import names, offsite
+from services.gateway_side.backup.passphrase import logical_backup_passphrase
 
 _CLUSTER_TZ = "America/Los_Angeles"
 _REPO = Path(__file__).resolve().parents[2]
@@ -56,14 +54,12 @@ def _touch(directory: Path, name: str) -> Path:
 
 
 def _disable_offsite(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Make the off-site leg degrade ("store unavailable") in tests that only
-    exercise the local pipeline — the same failure mode a cluster without a
-    configured backup store hits."""
+    """Skip the off-site leg in tests that only exercise the local pipeline."""
 
-    def _no_store_group() -> Any:
-        raise RuntimeError("no backup store configured")
+    def _skip(_artifact: Path, **_kwargs: object) -> None:
+        return None
 
-    monkeypatch.setattr(store_factory, "get_store_group", _no_store_group)
+    monkeypatch.setattr(offsite, "publish", _skip)
 
 
 def _spawn_backup_lock_holder(
@@ -77,9 +73,7 @@ def _spawn_backup_lock_holder(
 
         sys.path.insert(0, {str(_REPO)!r})
         from services.backup import backup_lock
-        from shared.config import settings
 
-        settings.general.ava_home = Path({str(ava_home)!r})
         with backup_lock(timeout_s=60):
             Path({str(ready)!r}).write_text("1", encoding="utf-8")
             time.sleep({hold_s})
@@ -112,18 +106,18 @@ def test_due_at_hour_with_no_dumps(bdir: Path) -> None:
 
 
 def test_not_due_again_after_todays_dump(bdir: Path) -> None:
-    _touch(bdir, "ava-20260610-030001.dump")
+    _touch(bdir, "ava-20260610T100001Z.dump")
     assert not backup.is_due(_dt(2026, 6, 10, 9, 0))
 
 
 def test_due_again_the_next_day(bdir: Path) -> None:
-    _touch(bdir, "ava-20260609-030001.dump")
+    _touch(bdir, "ava-20260609T100001Z.dump")
     assert backup.is_due(_dt(2026, 6, 10, settings.services.backup_hour, 0))
 
 
 def test_catchup_after_downtime(bdir: Path) -> None:
     """Host down at 03:00 -> the first tick later that day is still due."""
-    _touch(bdir, "ava-20260609-030001.dump")
+    _touch(bdir, "ava-20260609T100001Z.dump")
     assert backup.is_due(_dt(2026, 6, 10, 14, 30))
 
 
@@ -201,10 +195,8 @@ def test_dump_name_is_utc_stamped(bdir: Path, monkeypatch: pytest.MonkeyPatch) -
     assert path.name == "ava-20260609T190000Z.dump.enc"
 
 
-def test_pre_update_backup_can_defer_offsite_publish(
-    bdir: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """A prepare-phase snapshot retains a verified local artifact without a network publish."""
+def test_run_backup_can_defer_offsite_publish(bdir: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """`publish=False` retains the local artifact without a network publish."""
     published: list[Path] = []
 
     class _Ok:
@@ -219,11 +211,9 @@ def test_pre_update_backup_can_defer_offsite_publish(
         return _Ok()
 
     monkeypatch.setattr(backup.subprocess, "run", _fake_run)
-    monkeypatch.setattr(backup, "_publish_offsite", published.append)
+    monkeypatch.setattr(offsite, "publish", published.append)
 
-    artifact = backup.run_backup(
-        _dt(2026, 6, 10, 3, 0), db_url="dbname=ava", pre_update=True, publish=False
-    )
+    artifact = backup.run_backup(_dt(2026, 6, 10, 3, 0), db_url="dbname=ava", publish=False)
 
     assert artifact.exists()
     assert published == []
@@ -233,121 +223,33 @@ def test_publish_offsite_module_entry_publishes_the_named_artifact(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The detached uploader entry delegates one existing artifact to idempotent publishing."""
-    artifact = tmp_path / "ava-pre-update.dump.enc"
+    artifact = tmp_path / "ava-20260916T030000Z.dump.enc"
     artifact.write_bytes(b"encrypted")
-    published: list[Path] = []
-    monkeypatch.setattr(backup, "_publish_offsite", published.append)
+    published: list[tuple[Path, str]] = []
+
+    def _record(path: Path, *, root: str) -> None:
+        published.append((path, root))
+
+    monkeypatch.setattr(offsite, "publish", _record)
 
     assert backup._main(["--publish-offsite", str(artifact)]) == 0
+    assert backup._main(["--publish-offsite", str(artifact), "--offsite-root", "scratch/x"]) == 0
 
-    assert published == [artifact]
-
-
-def test_publish_offsite_standalone_success_is_visible(tmp_path: Path) -> None:
-    """A standalone success reaches stderr: the entry point configures logging,
-    so the store-verified publish ACK is visible — a fully silent success was
-    once read as a dead upload (misdiagnosed 2026-09-16). A fresh interpreter is
-    deliberate: pytest's own root handler would mask the standalone behavior."""
-    artifact = tmp_path / "ava-20260916T030000Z.dump.enc"
-    artifact.write_bytes(b"encrypted artifact")
-    code = textwrap.dedent(f"""
-        import sys
-        from pathlib import Path
-
-        sys.path.insert(0, {str(_REPO)!r})
-        from services.backup import _main
-        from services.pitr import store_factory
-        from services.pitr.checksums import MD5, ObjectChecksum
-        from services.pitr.object_store import RemoteObjectAck
-
-        class _Store:
-            def put_base_if_absent(self, *, source, object_name, metadata, cancelled=None):
-                return RemoteObjectAck(
-                    object_name=object_name,
-                    pin_token="gen-7",
-                    size=Path({str(artifact)!r}).stat().st_size,
-                    checksum=ObjectChecksum(MD5, "0" * 32),
-                    metadata=dict(metadata),
-                    created=True,
-                )
-
-        class _Group:
-            def restartable_streaming_object_store(self):
-                return _Store()
-
-        store_factory.get_store_group = _Group
-        raise SystemExit(_main(["--publish-offsite", {str(artifact)!r}]))
-    """)
-    proc = subprocess.run(  # noqa: S603
-        [sys.executable, "-c", code], capture_output=True, text=True, check=False
-    )
-
-    assert proc.returncode == 0, proc.stderr
-    assert "[backup] off-site published" in proc.stderr
-    assert f"{logical_dump_names.REMOTE_ROOT}/{artifact.name}" in proc.stderr
+    assert published == [(artifact, names.REMOTE_ROOT), (artifact, "scratch/x")]
 
 
-def test_publish_offsite_standalone_failure_behavior_unchanged(tmp_path: Path) -> None:
-    """The standalone failure path is unchanged: an unconfigured store still
-    reports on stderr, still exits 0 (best-effort), still retains the local
-    artifact."""
-    artifact = tmp_path / "ava-20260916T030000Z.dump.enc"
-    artifact.write_bytes(b"encrypted artifact")
-    code = textwrap.dedent(f"""
-        import sys
-
-        sys.path.insert(0, {str(_REPO)!r})
-        from services.backup import _main
-        from services.pitr import store_factory
-
-        def _no_store_group():
-            raise RuntimeError("no backup store configured")
-
-        store_factory.get_store_group = _no_store_group
-        raise SystemExit(_main(["--publish-offsite", {str(artifact)!r}]))
-    """)
-    proc = subprocess.run(  # noqa: S603
-        [sys.executable, "-c", code], capture_output=True, text=True, check=False
-    )
-
-    assert proc.returncode == 0, proc.stderr
-    assert "[backup] off-site store unavailable; local artifact retained" in proc.stderr
-    assert artifact.read_bytes() == b"encrypted artifact"
-
-
-def test_publish_offsite_standalone_publish_failure_keeps_exit_and_artifact(
-    tmp_path: Path,
+@pytest.mark.parametrize("root", ["", "/abs", "trailing/"])
+def test_publish_offsite_entry_rejects_a_malformed_root(
+    root: str, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """A standalone publish failing inside the store reports the object it died
-    on, still exits 0 (best-effort), and still retains the local artifact."""
     artifact = tmp_path / "ava-20260916T030000Z.dump.enc"
-    artifact.write_bytes(b"encrypted artifact")
-    code = textwrap.dedent(f"""
-        import sys
+    artifact.write_bytes(b"encrypted")
 
-        sys.path.insert(0, {str(_REPO)!r})
-        from services.backup import _main
-        from services.pitr import store_factory
+    with pytest.raises(SystemExit) as raised:
+        backup._main(["--publish-offsite", str(artifact), "--offsite-root", root])
 
-        class _Store:
-            def put_base_if_absent(self, *, source, object_name, metadata, cancelled=None):
-                raise RuntimeError("store write failed")
-
-        class _Group:
-            def restartable_streaming_object_store(self):
-                return _Store()
-
-        store_factory.get_store_group = _Group
-        raise SystemExit(_main(["--publish-offsite", {str(artifact)!r}]))
-    """)
-    proc = subprocess.run(  # noqa: S603
-        [sys.executable, "-c", code], capture_output=True, text=True, check=False
-    )
-
-    assert proc.returncode == 0, proc.stderr
-    msg = f"[backup] off-site publish of {logical_dump_names.REMOTE_ROOT}/{artifact.name} failed"
-    assert msg in proc.stderr
-    assert artifact.read_bytes() == b"encrypted artifact"
+    assert raised.value.code == 2
+    assert "--offsite-root" in capsys.readouterr().err
 
 
 def test_db_size_breakdown_real_db(db_conn: Any) -> None:
@@ -457,27 +359,21 @@ def test_prune_order_survives_the_dst_fold(bdir: Path) -> None:
     assert pst.exists()
 
 
-def test_legacy_named_dumps_stay_managed(bdir: Path) -> None:
-    """Pre-cutover names (host wall clock, no offset) still count for due-ness
-    and still prune, so a cutover does not strand a week of dumps as
-    permanently-ignored foreign files. They sort against UTC-stamped names by
-    reading their stamp in cluster time."""
-    legacy = _touch(bdir, "ava-20261101-013000.dump")  # 01:30 cluster time
-    modern = _touch(bdir, "ava-20261101T220000Z.dump")  # 14:00 cluster time, same day
-    assert [p for _ts, p in backup._managed_dumps(bdir)] == [legacy, modern]
-    assert not backup.is_due(_dt(2026, 11, 1, 23, 0))
-
-    for i in range(2, settings.services.backup_keep + 1):
-        _touch(bdir, f"ava-202611{i:02d}-030000.dump")
-    assert backup._prune(bdir) == [legacy]
-
-
 def test_foreign_files_ignored(bdir: Path) -> None:
-    """Hand-made dumps / stray files are neither counted for due-ness nor pruned."""
+    """Hand-made dumps / stray files are neither counted for due-ness nor pruned.
+
+    That includes names no writer produces any more: the wall-clock stamp of the
+    pre-cutover naming and the `pre-update` / `pitr-activation` kind segments."""
     foreign = [
         _touch(bdir, "manual.dump"),
         _touch(bdir, "ava-before-migration.dump"),
         _touch(bdir, "notes.txt"),
+        _touch(bdir, "ava-20260610-030001.dump"),
+        _touch(bdir, "ava-20260610T100001Z.pre-update.dump.enc"),
+        _touch(
+            bdir,
+            "ava-20260610T100001Z.pitr-activation-11111111-1111-1111-1111-111111111111.dump.enc",
+        ),
     ]
     assert backup.is_due(_dt(2026, 6, 10, 9, 0))
     assert backup._prune(bdir) == []
@@ -485,7 +381,7 @@ def test_foreign_files_ignored(bdir: Path) -> None:
 
 
 def test_prune_keeps_newest(bdir: Path) -> None:
-    names = [f"ava-202606{i:02d}-030000.dump" for i in range(1, 11)]  # 10 days, oldest first
+    names = [f"ava-202606{i:02d}T100000Z.dump" for i in range(1, 11)]  # 10 days, oldest first
     for name in names:
         _touch(bdir, name)
     removed = backup._prune(bdir)
@@ -494,164 +390,51 @@ def test_prune_keeps_newest(bdir: Path) -> None:
     assert sorted(p.name for p in bdir.glob("*.dump")) == names[len(names) - keep :]
 
 
-def test_prune_keeps_newest_daily_plus_newest_pre_update_snapshot(
-    bdir: Path,
-) -> None:
-    """Update-kind snapshots get their own slot: 7 dailies survive alongside the
-    newest `.pre-update` snapshot instead of consuming a daily-dump slot."""
-    dailies = [f"ava-202606{i:02d}-030000.dump" for i in range(1, 9)]  # 8 dailies
-    snaps = [
-        "ava-20260605T100000Z.pre-update.dump.gz.enc",
-        "ava-20260607T100000Z.pre-update.dump.gz.enc",
-    ]
-    for name in dailies + snaps:
-        _touch(bdir, name)
-    removed = backup._prune(bdir)
-    # the oldest daily (beyond the 7-window) and the older snapshot (only the
-    # newest one is kept) are pruned; 7 dailies + the newest snapshot survive
-    assert removed == [
-        Path(bdir / "ava-20260601-030000.dump"),
-        Path(bdir / "ava-20260605T100000Z.pre-update.dump.gz.enc"),
-    ]
-    assert (bdir / "ava-20260607T100000Z.pre-update.dump.gz.enc").exists()
-    assert len(list(bdir.glob("*.dump"))) == settings.services.backup_keep  # dailies only
-
-
-def test_prune_with_snapshot_alone_keeps_newest_snapshot(bdir: Path) -> None:
-    """No dailies yet (fresh cluster, first update) keeps the one snapshot."""
-    snaps = [
-        "ava-20260605T100000Z.pre-update.dump.gz.enc",
-        "ava-20260607T100000Z.pre-update.dump.gz.enc",
-    ]
-    for name in snaps:
-        _touch(bdir, name)
-    removed = backup._prune(bdir)
-    assert removed == [bdir / "ava-20260605T100000Z.pre-update.dump.gz.enc"]
-    assert (bdir / "ava-20260607T100000Z.pre-update.dump.gz.enc").exists()
-
-
 def test_prune_keep_follows_config(bdir: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """The daily retention window resolves from ``services.backup_keep``."""
     monkeypatch.setattr(settings.services, "backup_keep", 3)
     for day in range(1, 6):
-        _touch(bdir, f"ava-2026060{day}-030000.dump")
+        _touch(bdir, f"ava-2026060{day}T100000Z.dump")
     removed = backup._prune(bdir)
     assert len(removed) == 2
     assert len(backup._managed_dumps(bdir)) == 3
 
 
-def test_prune_bounds_terminal_pitr_activation_snapshots(bdir: Path) -> None:
-    activations = [
-        _touch(
-            bdir,
-            f"ava-2026060{day}T100000Z.pitr-activation-"
-            f"00000000-0000-0000-0000-00000000000{day}.dump.enc",
-        )
-        for day in range(1, backup.ACTIVATION_KEEP + 2)
-    ]
-    backup._prune(bdir)
-    assert not activations[0].exists()
-    assert all(path.exists() for path in activations[-backup.ACTIVATION_KEEP :])
-
-
-def test_run_backup_pre_update_names_artifact(bdir: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """A pre-update snapshot carries the kind segment so prune can classify it."""
-    monkeypatch.setattr(settings.general, "timezone", "Asia/Shanghai")
-
-    class _Ok:
-        returncode = 0
-        stderr = ""
-
-    def _fake_run(cmd: list[str], **_kw: object) -> _Ok:
-        if cmd[0].endswith("pg_dump"):
-            Path(cmd[cmd.index("--file") + 1]).write_bytes(b"x")
-        else:
-            Path(cmd[cmd.index("-out") + 1]).write_bytes(b"encrypted dump")
-        return _Ok()
-
-    monkeypatch.setattr(backup.subprocess, "run", _fake_run)
-    path = backup.run_backup(
-        datetime(2026, 6, 10, 3, 0, tzinfo=ZoneInfo("Asia/Shanghai")),
-        db_url="dbname=ava",
-        pre_update=True,
-    )
-    assert path.name == "ava-20260609T190000Z.pre-update.dump.enc"
-    assert backup._is_pre_update(path)
-    assert backup._is_pre_update(_touch(bdir, "ava-20260609T190000Z.dump.gz.enc")) is False
-
-
-def test_run_backup_pitr_activation_has_independent_kind(
+def test_run_backup_failure_leaves_no_plaintext(
     bdir: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr(settings.general, "timezone", "Asia/Shanghai")
+    """A failed dump removes its reaped writer's plaintext partial, and the next
+    run sweeps a dead run's partial that no process holds open."""
+    (bdir / "other-20260801T101500Z.dump.partial").write_bytes(b"stale")
 
-    class _Ok:
-        returncode = 0
-        stderr = ""
+    def fail(cmd: list[str], **_kw: object) -> Any:
+        Path(cmd[cmd.index("--file") + 1]).write_bytes(b"PLAINTEXT")
+        return cast(Any, type("Failed", (), {"returncode": 1, "stderr": "refused"}))
 
-    def _fake_run(cmd: list[str], **_kw: object) -> _Ok:
-        output_flag = "--file" if cmd[0].endswith("pg_dump") else "-out"
-        Path(cmd[cmd.index(output_flag) + 1]).write_bytes(b"backup")
-        return _Ok()
-
-    monkeypatch.setattr(backup.subprocess, "run", _fake_run)
-    path = backup.run_backup(
-        datetime(2026, 6, 10, 3, 0, tzinfo=ZoneInfo("Asia/Shanghai")),
-        db_url="dbname=ava",
-        pitr_activation="11111111-1111-1111-1111-111111111111",
-    )
-    assert path.name == (
-        "ava-20260609T190000Z.pitr-activation-11111111-1111-1111-1111-111111111111.dump.enc"
-    )
-    assert backup._is_activation(path)
-
-
-def test_run_backup_failure_leaves_no_files(bdir: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    class _Failed:
-        returncode = 1
-        stderr = "connection refused"
-
-    monkeypatch.setattr(backup.subprocess, "run", lambda *_a, **_kw: _Failed())  # pyright: ignore[reportUnknownArgumentType]
-    with pytest.raises(RuntimeError, match="pg_dump exited 1"):
-        backup.run_backup(_dt(2026, 6, 10, 3, 0), db_url="dbname=whatever")
-    assert list(bdir.iterdir()) == []  # no .dump, no .partial
-
-
-def test_run_backup_sweeps_stale_partials(bdir: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """A `.partial` left by an interrupted run (e.g. the process tree killed
-    mid-rollout) is swept before the new dump is written, so it cannot pile up
-    unnoticed: the name never matches the managed grammar, so due/prune logic ignores it."""
-    (bdir / "whatever-20260801-030000.dump.partial").write_bytes(b"stale")
-    (bdir / "other-20260801-031500.dump.partial").write_bytes(b"stale")
-
-    class _Failed:
-        returncode = 1
-        stderr = "connection refused"
-
-    monkeypatch.setattr(backup.subprocess, "run", lambda *_a, **_kw: _Failed())  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(backup.subprocess, "run", fail)
     with pytest.raises(RuntimeError, match="pg_dump exited 1"):
         backup.run_backup(_dt(2026, 8, 2, 3, 0), db_url="dbname=whatever")
-    assert not list(bdir.glob("*.partial"))  # both stale partials swept
-    assert list(bdir.iterdir()) == []
+    assert not list(bdir.glob("*.partial")) and not list(bdir.glob(".backup-key-*"))
+    assert not list(bdir.glob("*.dump.enc"))
 
 
 @pytest.mark.skipif(not backup.pg_tool("pg_dump").exists(), reason="needs a native pg_dump binary")
 def test_run_backup_real_dump_and_prune(bdir: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Real pg_dump against the session's provisioned Postgres: dump lands under
-    the managed name, the .partial intermediate is gone, and old dumps prune."""
+    """Real pg_dump of the session's Postgres (an explicit dial: not a born home): dump
+    lands under the managed name, the .partial is gone, and old dumps prune."""
     for i in range(1, settings.services.backup_keep + 1):
-        _touch(bdir, f"test-2026060{i}-030000.dump")
+        _touch(bdir, f"test-2026060{i}T100000Z.dump")
 
     _disable_offsite(monkeypatch)
-    path = backup.run_backup(_dt(2026, 6, 10, 3, 0))
+    path = backup.run_backup(_dt(2026, 6, 10, 3, 0), db_url=settings.data_plane.db_url)
 
     assert path.parent == bdir
-    assert logical_dump_names.DUMP_NAME_RE.match(path.name)
+    assert names.DUMP_NAME_RE.match(path.name)
     assert path.stat().st_size > 0
     assert not list(bdir.glob("*.partial"))
     # backup_keep pre-seeded + 1 new -> the oldest pre-seed pruned, KEEP remain.
     assert len(backup._managed_dumps(bdir)) == settings.services.backup_keep
-    assert not (bdir / "test-20260601-030000.dump").exists()
+    assert not (bdir / "test-20260601T100000Z.dump").exists()
     # The fresh dump is restorable input: decrypt, then list its TOC directly
     # (current artifacts are raw custom dumps — no gzip layer).
     import subprocess
@@ -795,9 +578,8 @@ def test_encrypted_artifact_decrypts_to_original_dump(
 
     assert artifact.name.endswith(".dump.enc")
     key_file = bdir / "decrypt.key"
-    key_file.write_text(
-        hashlib.sha256(settings.data_plane.cluster_secret.encode()).hexdigest(), encoding="utf-8"
-    )
+    # The pinned passphrase, as an operator restoring by hand reads it.
+    key_file.write_text(logical_backup_passphrase(), encoding="utf-8")
     key_file.chmod(0o600)
     custom_dump = bdir / "restored.dump"
     decrypted = real_run(
@@ -841,121 +623,6 @@ def test_gunzip_if_needed_decompresses_legacy_artifact_layer(
     plain.write_bytes(raw)
     backup.gunzip_if_needed(plain)
     assert plain.read_bytes() == raw
-
-
-def test_offsite_publish_goes_through_the_store_contract(
-    bdir: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """The off-site leg publishes through the shared BlobStore contract: an
-    if-absent object under the logical root, store-verified ACK, and the store
-    source reads exactly the encrypted artifact bytes."""
-    artifact = _touch(bdir, "ava-20260608T100000Z.dump.enc")
-    artifact.write_bytes(b"encrypted artifact")
-    calls: list[dict[str, object]] = []
-
-    class _Store:
-        def put_base_if_absent(
-            self,
-            *,
-            source: object,
-            object_name: str,
-            metadata: Mapping[str, str],
-            cancelled: object = None,
-        ) -> RemoteObjectAck:
-            calls.append({"source": source, "object_name": object_name, "metadata": dict(metadata)})
-            return RemoteObjectAck(
-                object_name=object_name,
-                pin_token="gen-7",  # noqa: S106 — fake store identity, not a secret
-                size=artifact.stat().st_size,
-                checksum=ObjectChecksum(MD5, "0" * 32),
-                metadata=dict(metadata),
-                created=True,
-            )
-
-    class _Group:
-        def restartable_streaming_object_store(self) -> _Store:
-            return _Store()
-
-    monkeypatch.setattr(store_factory, "get_store_group", _Group)
-
-    published = backup._publish_offsite(artifact)
-
-    assert published == f"{logical_dump_names.REMOTE_ROOT}/{artifact.name}"
-    assert calls[0]["object_name"] == published
-    assert calls[0]["metadata"] == {"ava-artifact-kind": "logical-backup"}
-    source = cast(Any, calls[0]["source"])
-    assert source.ciphertext_size == len(b"encrypted artifact")
-    assert b"".join(source.iter_chunks()) == b"encrypted artifact"
-    # The local artifact is still the primary copy after a successful publish.
-    assert artifact.read_bytes() == b"encrypted artifact"
-
-
-def test_offsite_store_unavailable_keeps_local_artifact(
-    bdir: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """The off-site leg is optional: an unconstructable store cannot turn a
-    successful local backup into a failed backup or remove its only local
-    artifact."""
-    artifact = _touch(bdir, "ava-20260608T100000Z.dump.enc")
-    artifact.write_bytes(b"encrypted artifact")
-
-    def _no_store_group() -> Any:
-        raise RuntimeError("no backup store configured")
-
-    monkeypatch.setattr(store_factory, "get_store_group", _no_store_group)
-
-    assert backup._publish_offsite(artifact) is None
-    assert artifact.read_bytes() == b"encrypted artifact"
-
-
-def test_run_backup_publishes_offsite_via_store_contract(
-    bdir: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """The pipeline publishes the encrypted artifact through the store after
-    encryption; the published name mirrors the local managed name."""
-    published: list[str] = []
-
-    class _Ok:
-        returncode = 0
-        stderr = ""
-
-    def _fake_run(cmd: list[str], **kwargs: object) -> _Ok:
-        if cmd[0].endswith("pg_dump"):
-            Path(cmd[cmd.index("--file") + 1]).write_bytes(b"plaintext dump")
-        else:
-            Path(cmd[cmd.index("-out") + 1]).write_bytes(b"encrypted dump")
-        return _Ok()
-
-    class _Store:
-        def put_base_if_absent(
-            self,
-            *,
-            source: object,
-            object_name: str,
-            metadata: Mapping[str, str],
-            cancelled: object = None,
-        ) -> RemoteObjectAck:
-            published.append(object_name)
-            return RemoteObjectAck(
-                object_name=object_name,
-                pin_token="p",  # noqa: S106 — fake store identity, not a secret
-                size=13,
-                checksum=ObjectChecksum(MD5, "0" * 32),
-                metadata=dict(metadata),
-                created=True,
-            )
-
-    class _Group:
-        def restartable_streaming_object_store(self) -> _Store:
-            return _Store()
-
-    monkeypatch.setattr(backup.subprocess, "run", _fake_run)
-    monkeypatch.setattr(store_factory, "get_store_group", _Group)
-
-    artifact = backup.run_backup(_dt(2026, 8, 8, 3, 0), db_url="dbname=whatever")
-
-    assert published == [f"{logical_dump_names.REMOTE_ROOT}/{artifact.name}"]
-    assert artifact.read_bytes() == b"encrypted dump"
 
 
 def test_run_backup_forwards_requested_timeout(bdir: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1007,7 +674,7 @@ def test_run_with_progress_heartbeats_while_a_slow_child_runs(
 ) -> None:
     """A stage allowed to run for minutes narrates itself: one start line, then a
     line per interval carrying the bytes written. This is what keeps a slow
-    pre-update dump from reading as a stalled rollout (2026-09-14 incident)."""
+    dump from reading as a stalled rollout (2026-09-14 incident)."""
     monkeypatch.setattr(backup, "_PROGRESS_INTERVAL_S", 0.2)
     out = tmp_path / "slow.dump.partial"
     out.write_bytes(b"")
@@ -1122,7 +789,7 @@ def test_run_backup_narrates_both_silent_stages_through_progress(
 def test_backup_lock_reentrant_same_thread(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """A snapshot may take the lock before `run_backup` takes it again."""
     ava_home = tmp_path / "ava-home"
-    monkeypatch.setattr(settings.general, "ava_home", ava_home)
+    monkeypatch.setenv("AVA_HOME", str(ava_home))
 
     with backup.backup_lock(), backup.backup_lock(timeout_s=0.5):
         pass
@@ -1136,7 +803,7 @@ def test_backup_lock_cross_process_excludes(
 ) -> None:
     """A scheduler dump waits for a rollout snapshot already holding the lock."""
     ava_home = tmp_path / "ava-home"
-    monkeypatch.setattr(settings.general, "ava_home", ava_home)
+    monkeypatch.setenv("AVA_HOME", str(ava_home))
     ready = tmp_path / "ready"
     holder = _spawn_backup_lock_holder(ava_home, ready, hold_s=2.0)
     try:
@@ -1157,7 +824,7 @@ def test_backup_lock_cross_process_excludes(
 def test_backup_lock_timeout_expires(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """A wedged snapshot produces a bounded failure rather than an unbounded wait."""
     ava_home = tmp_path / "ava-home"
-    monkeypatch.setattr(settings.general, "ava_home", ava_home)
+    monkeypatch.setenv("AVA_HOME", str(ava_home))
     ready = tmp_path / "ready"
     holder = _spawn_backup_lock_holder(ava_home, ready, hold_s=30.0)
     try:
@@ -1189,13 +856,24 @@ def test_run_backup_serializes_dump_creation(bdir: Path, monkeypatch: pytest.Mon
 
     def _run_backup(_now: datetime | None = None, **_kwargs: object) -> Path:
         events.append("backup-body")
+        artifact.write_bytes(b"encrypted")
         return artifact
 
     monkeypatch.setattr(backup, "backup_lock", _backup_lock)
     monkeypatch.setattr(backup, "_run_backup", _run_backup)
 
+    def _record(name: str, result: object = None) -> Callable[[Path], object]:
+        def record(_path: Path) -> object:
+            events.append(name)
+            return result
+
+        return record
+
+    monkeypatch.setattr(offsite, "publish", _record("publish"))
+    monkeypatch.setattr(backup, "_prune", _record("prune", []))
+
     assert backup.run_backup(_dt(2026, 8, 8, 3, 0), db_url="dbname=whatever") == artifact
-    assert events == ["lock-enter", "backup-body", "lock-exit"]
+    assert events == ["lock-enter", "backup-body", "publish", "prune", "lock-exit"]
 
 
 def test_run_backup_avoids_overwriting_a_same_second_dump(

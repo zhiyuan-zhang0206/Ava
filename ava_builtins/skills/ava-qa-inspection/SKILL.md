@@ -50,12 +50,12 @@ the page the bridge owns for this agent:
 
 ## What to inspect
 
-Work from `reference/checklist.md` — one row per defect class, each with how to
+Work from `references/checklist.md` — one row per defect class, each with how to
 detect it, its severity, and the evidence a finding must carry. The list is the
 contract; extend it (see "Graduating a finding") rather than improvising new
 classes ad hoc.
 
-Judge with `reference/judgment-standards.md` as well — severity floors, the
+Judge with `references/judgment-standards.md` as well — severity floors, the
 diff-only rule, and the negative-sample discipline; attach it to any sweep or
 review brief.
 
@@ -69,7 +69,7 @@ reaches the user.
 
 1. **Navigate** to the route with `ava.mcps.chrome` (the shared logged-in
    Chrome). Set the viewport for the state you're testing.
-2. **Run the deterministic pass first.** Inject `reference/probes.js` via the
+2. **Run the deterministic pass first.** Inject `scripts/probes.js` via the
    evaluate tool. It returns structured signals — horizontal overflow, zero-box
    blocks, sibling-edge misalignment, duplicate accessible-names, off-canvas
    elements — each with a selector and the measured numbers. These are your

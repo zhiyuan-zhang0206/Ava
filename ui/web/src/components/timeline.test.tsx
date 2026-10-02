@@ -1463,6 +1463,101 @@ describe("load-older spinner (pinned top overlay)", () => {
 
 // ---------------------------------------------------------------------------
 describe("deep history DOM window", () => {
+  afterEach(() => { vi.restoreAllMocks(); });
+
+  function trackedHistory(count: number) {
+    const items = Array.from({ length: count }, (_, index) => makeItem({
+      item_id: `${index + 1}.0`, kind: "agent_chat", payload: `Reply ${index + 1}`,
+    }));
+    // Measure a parked reader before crossing the virtualization threshold, as history loading does.
+    const loadOlder = vi.fn();
+    const view = (rows: BackendTimelineItem[]) => (
+      <TimelineView items={rows} threadKey="tracked-bottom" hasMoreOlder onLoadOlder={loadOlder} />
+    );
+    const { rerender } = render(view(items.slice(0, 90)));
+    const viewport = screen.getByTestId("scroll-viewport");
+    let height = 52 + Math.min(count, 90) * 92;
+    let top = height - 600;
+    let smoothTarget: number | null = null;
+    const writes: number[] = [];
+    Object.defineProperties(viewport, {
+      clientHeight: { value: 600, configurable: true },
+      scrollHeight: { configurable: true, get: () => height },
+      scrollTop: {
+        configurable: true,
+        get: () => top,
+        set: (value: number) => {
+          // Browsers cancel a smooth scroll even when a write leaves its position unchanged.
+          smoothTarget = null;
+          writes.push(value);
+          top = Math.max(0, Math.min(value, height - 600));
+        },
+      },
+    });
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+      if (this === viewport) return { top: 0, bottom: 600, height: 600 } as DOMRect;
+      const group = this.matches("[data-virtual-group]") ? this : this.closest<HTMLElement>("[data-virtual-group]");
+      const id = group?.querySelector<HTMLElement>(".timeline-item")?.dataset.itemId;
+      const rowTop = id ? 52 + (Number.parseInt(id) - 1) * 92 - top : 0;
+      return { top: rowTop, bottom: rowTop + 80, height: 80 } as DOMRect;
+    });
+    act(() => { fireEvent.scroll(viewport); });
+    act(() => { top = 3000; fireEvent.scroll(viewport); });
+    height = 52 + count * 92;
+    rerender(view(items));
+    expect(viewport.scrollTop).toBe(3000);
+    expect(screen.getByLabelText("Scroll to bottom").className).toContain("opacity-100");
+    if (count > 100) expect(viewport.querySelector("[data-timeline-spacer]")).not.toBeNull();
+    const scrollTo = vi.spyOn(viewport, "scrollTo").mockImplementation((options?: ScrollToOptions | number) => {
+      if (typeof options === "object") smoothTarget = options.top ?? null;
+    });
+    writes.length = 0;
+    return {
+      viewport, height, writes, scrollTo,
+      smoothTarget: () => smoothTarget,
+      finishSmoothScroll: () => {
+        // Motion can precede the browser's next scroll event and React commit.
+        top = height - 600;
+        rerender(view(items));
+      },
+      requestOlder: () => {
+        // Move through the mounted buffer before reaching the paging trigger.
+        for (let next = top - 300; next > 0; next -= 300) {
+          act(() => { top = next; fireEvent.scroll(viewport); });
+        }
+        act(() => { top = 0; fireEvent.scroll(viewport); });
+        expect(loadOlder).toHaveBeenCalledTimes(1);
+      },
+    };
+  }
+
+  it.each([90, 300])("lets the bottom button finish its smooth scroll with %i tracked rows", (count) => {
+    const history = trackedHistory(count);
+    fireEvent.click(screen.getByLabelText("Scroll to bottom"));
+    expect(history.scrollTo).toHaveBeenCalledWith({ top: history.height, behavior: "smooth" });
+    expect(history.writes).toEqual([]);
+    expect(history.smoothTarget()).toBe(history.height);
+    history.finishSmoothScroll();
+    expect(history.viewport.scrollTop).toBe(history.height - 600);
+    expect(history.viewport.querySelector(`.timeline-item[data-item-id="${count}.0"]`)).not.toBeNull();
+  });
+
+  it.each([90, 300])("keeps a send force pin at the bottom with %i tracked rows", (count) => {
+    const history = trackedHistory(count);
+    act(() => { useTimelineStore.getState().requestScrollToBottom(); });
+    expect(history.viewport.scrollTop).toBe(history.height - 600);
+    expect(history.viewport.querySelector(`.timeline-item[data-item-id="${count}.0"]`)).not.toBeNull();
+  });
+
+  it("releases a pending older-page anchor when the bottom button is clicked", () => {
+    const history = trackedHistory(200);
+    history.requestOlder();
+    fireEvent.click(screen.getByLabelText("Scroll to bottom"));
+    history.finishSmoothScroll();
+    expect(history.viewport.scrollTop).toBe(history.height - 600);
+    expect(history.viewport.querySelector('.timeline-item[data-item-id="200.0"]')).not.toBeNull();
+  });
+
   it("uses configured activation and child-window row thresholds", () => {
     displayLimits.set("AVA_TIMELINE_WINDOW_ACTIVATION_ROWS", 20);
     const chats = Array.from({ length: 60 }, (_, index) => makeItem({
@@ -1607,6 +1702,7 @@ describe("deep history DOM window", () => {
       x: 0, y: top, toJSON: () => ({}),
     });
     Object.defineProperty(viewport, "clientHeight", { value: 600, configurable: true });
+    Object.defineProperty(viewport, "scrollHeight", { value: 18_000, configurable: true });
     vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
       if (this === viewport) return box(0, 600);
       const group = this.matches("[data-virtual-group]") ? this : this.closest<HTMLElement>("[data-virtual-group]");
@@ -1618,6 +1714,10 @@ describe("deep history DOM window", () => {
         if (sibling.hasAttribute("data-timeline-spacer")) top += Number.parseFloat((sibling as HTMLElement).style.height) + 12;
       }
       return box(top - viewport.scrollTop, 160);
+    });
+    act(() => {
+      viewport.scrollTop = viewport.scrollHeight - viewport.clientHeight;
+      fireEvent.scroll(viewport);
     });
     act(() => {
       viewport.scrollTop = 52 + 50 * 172 - 100;
@@ -1656,6 +1756,7 @@ describe("deep history DOM window", () => {
       x: 0, y: top, toJSON: () => ({}),
     });
     Object.defineProperty(viewport, "clientHeight", { value: 600, configurable: true });
+    Object.defineProperty(viewport, "scrollHeight", { value: 120_000, configurable: true });
     vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
       if (this === viewport) return box(0, 600);
       const group = this.matches("[data-virtual-group]") ? this : this.closest<HTMLElement>("[data-virtual-group]");
@@ -1668,6 +1769,10 @@ describe("deep history DOM window", () => {
         if (sibling.hasAttribute("data-timeline-spacer")) top += Number.parseFloat((sibling as HTMLElement).style.height) + 12;
       }
       return box(top - viewport.scrollTop, heightOf(group));
+    });
+    act(() => {
+      viewport.scrollTop = viewport.scrollHeight - viewport.clientHeight;
+      fireEvent.scroll(viewport);
     });
     act(() => {
       viewport.scrollTop = 52 + 53 * 92 - 100;
@@ -4309,7 +4414,7 @@ describe("detail-block duration display (Last mode)", () => {
 });
 
 describe("Marker contract: every dispatch-set source renders without the red alarm", () => {
-  // The backend NoteTag enum (shared/message_kwargs.py) is asserted to be a
+  // The backend NoteTag enum (base/agents/messages/kwargs.py) is asserted to be a
   // subset of these dispatch sets by tests/test_lint_marker_contract.py (CI
   // backend job). This test closes the loop on the frontend side: every
   // member of each exported set actually renders as its intended chip and

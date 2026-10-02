@@ -19,8 +19,8 @@ from collections.abc import Collection
 from pathlib import Path
 from typing import cast
 
-from shared import paths
-from shared.log import logger
+from base import paths
+from base.log import logger
 
 # Consecutive boots a hosted-force recovery may stay deferred before the
 # per-boot warning escalates to the hosted_boot_recovery_stalled anomaly event.

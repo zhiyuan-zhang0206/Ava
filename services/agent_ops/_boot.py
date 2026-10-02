@@ -7,7 +7,7 @@ namespace, so `daemon._register_boot` and friends stay the names the daemon's ow
 callers (and its tests) address.
 
 - `_register_boot` — the boot-time `machine_units` re-announce.
-- `_ops_bind_host` / `_ops_auth_token` — where this daemon listens, and what it
+- `_ops_bind_host` / `_ops_acceptance` — where this daemon listens, and what it
   requires on the way in.
 - `_open_db_pool` — the shared pool every in-process op borrows a connection from.
 """
@@ -20,8 +20,8 @@ import psycopg
 from psycopg.rows import TupleRow
 from psycopg_pool import ConnectionPool
 
-import shared.db
-from shared.config import settings
+import base.db
+from base.config import settings
 
 _log = logging.getLogger("services.agent_ops.daemon")
 
@@ -49,8 +49,8 @@ def _register_boot() -> None:
     outage this function exists to prevent. The failure is logged at error so a
     permanently unregistered runner is visible rather than quietly absent.
     """
-    from shared.machine import machine_role
-    from shared.machines import register_self, unit_dial_url
+    from base.cluster.machine import machine_role
+    from base.cluster.machines import register_self, unit_dial_url
 
     try:
         url = unit_dial_url(machine_role())
@@ -64,33 +64,53 @@ def _register_boot() -> None:
     _log.info("registered this unit as up at %s", url)
 
 
-def _ops_bind_host() -> str:
-    """The ops server's bind address — 0.0.0.0 with a cluster secret, loopback
-    without one.
+def _ops_bind_host(acceptance: frozenset[str] | None) -> str:
+    """The ops server's bind address — 0.0.0.0 when /ops is authenticated
+    (`acceptance` is not None), loopback when it is not.
 
-    With a secret, the gateway dials /ops over the network and the surface is
-    always authenticated (every /ops POST carries the cluster secret as a bearer
-    token — reachability is not trust; a single box's gateway self-dials its own
-    /ops the same authenticated way over loopback). A no-secret cluster has no
-    credential to present and nothing remote to serve (its data plane and gateway
-    are loopback-only too), so /ops binds 127.0.0.1 then — an unauthenticated
-    control surface must never be LAN-reachable. /healthz (watchdog) is served on
-    the same port and stays reachable via localhost (unauthenticated — it leaks
-    no secret).
+    Authenticated, the gateway dials /ops over the network and every POST must
+    carry a machine API token (reachability is not trust; a single box's
+    gateway self-dials its own /ops the same authenticated way over loopback).
+    An open cluster has no credential to present and nothing remote to serve
+    (its data plane and gateway are loopback-only too), so /ops binds 127.0.0.1
+    then — an unauthenticated control surface must never be LAN-reachable.
+    /healthz (watchdog) is served on the same port and stays reachable via
+    localhost (unauthenticated — it leaks no secret).
     """
-    if settings.data_plane.cluster_secret:
+    if acceptance is not None:
         return "0.0.0.0"  # noqa: S104 — inbound ops port; authenticated, the gateway is the trust boundary
     return "127.0.0.1"
 
 
-def _ops_auth_token() -> str | None:
-    """The bearer token /ops requires — the cluster secret, or None on a no-secret
-    cluster (then /ops serves unauthenticated, bound to loopback — see
-    `_ops_bind_host`). The gateway presents the token on every dial when the
-    cluster has one (`ops.cluster_rpc` sends the header only when the secret is
-    set); a no-secret cluster's dials carry nothing.
+def _ops_acceptance() -> frozenset[str] | None:
+    """SHA-256 digests of the bearers /ops accepts, or None for the open posture.
+
+    The gateway dials /ops with its gateway-class machine API token
+    (`ops.cluster_rpc`), and a runner-class process of the unit (the
+    agent-host's crash recovery) dials it with its runner token, so /ops
+    accepts exactly its write generation's two tokens. A remote unit takes the
+    gateway token digest its installed capability carries plus its own runner
+    token's (none when its cluster's API is open): it never holds the gateway
+    token or the human secret. The gateway home takes the active generation's
+    two tokens while the cluster secret is set (none while no generation is
+    active: fail closed). A remote-managed plane keeps no write generations and
+    accepts the human secret its gateway presents instead.
     """
-    return settings.data_plane.cluster_secret or None
+    from base.cluster.authority.api import acceptance, token_digest
+    from base.cluster.authority.unit import load_unit_capability
+    from base.paths import ava_home
+
+    home = ava_home().resolve()
+    capability = load_unit_capability(home)
+    if capability is not None:
+        api = capability.api
+        return None if api is None else frozenset({api.gateway, token_digest(api.token)})
+    secret = settings.data_plane.cluster_secret
+    if not secret:
+        return None
+    if settings.data_plane.is_remote:
+        return frozenset({token_digest(secret)})
+    return frozenset(acceptance(home).values())
 
 
 def _open_db_pool() -> ConnectionPool[psycopg.Connection[TupleRow]]:
@@ -100,7 +120,7 @@ def _open_db_pool() -> ConnectionPool[psycopg.Connection[TupleRow]]:
     connection only briefly, so the cap bounds concurrent dispatch rather than
     request rate.
 
-    Built by `shared.db.pool()` so the borrows carry `prepare_threshold=None` and
+    Built by `base.db.pool()` so the borrows carry `prepare_threshold=None` and
     `PG_KEEPALIVE_KWARGS` from the one place that defines them. The keepalives are
     not incidental for this daemon in particular: it is the longest-lived ava
     process on an agent-runner, which is typically a laptop-grade box that sleeps
@@ -118,7 +138,7 @@ def _open_db_pool() -> ConnectionPool[psycopg.Connection[TupleRow]]:
     # the first dispatch of the day dies with psycopg.OperationalError
     # 'the connection is closed' (Task #1027). The check discards the dead conn
     # and hands out a fresh one.
-    return shared.db.pool(
+    return base.db.pool(
         min_size=0,  # an idle daemon holds no client connection; borrows open lazily
         max_size=max(2, settings.services.ops_concurrency + 2),
         check_connections=True,

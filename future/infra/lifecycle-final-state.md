@@ -1,5 +1,10 @@
 # Process / service lifecycle final state — design record (task #3195)
 
+> Superseded implementation plan: follow
+> [Unified cluster lifecycle](unified-cluster-lifecycle.md) for the September 25
+> revision. This earlier proposal is retained for its link to the frozen decision
+> and measured permission-ancestry evidence, not as a parallel runtime design.
+
 > Status: **decided (2026-09-12)** — user rulings G1–G6 + the fallback are in, the design
 > surface is closed, and the implementation phase has started (task #3195, slices P1–P7).
 > Migration is a one-shot cutover; the window is booked with the user directly, and the
@@ -72,8 +77,8 @@
 ## A · OS-coupling as-is inventory (condensed; the full table with file:line evidence lives in the source material)
 
 ### A0 · The current three-layer structure
-1. **Session/process execution layer**: `shared/session_backend.py` unified protocol + three implementations (posixproc / winproc / helperproc) + the `shared/_reparent` double-fork primitive.
-2. **OS job/host layer**: four job writers (`os_cron` health probe / `os_autostart` autostart / `os_logs_job` logs / `os_watchdog_probe` probe) + the platform-capability ABC (`platform_backend.py`) + the low-level fact source (`platform.py`).
+1. **Session/process execution layer**: `base/sessions/backend.py` unified protocol + three implementations (posixproc / winproc / helperproc) + the `base/_reparent` double-fork primitive.
+2. **OS job/host layer**: four job writers (`host.system.cron` health probe / `host.system.autostart` autostart / `host.system.logs_job` logs / `os_watchdog_probe` probe) + the platform-capability ABC (`base/host/system/backend.py`) + the low-level fact source (`platform.py`).
 3. **Permission adaptation layer**: `services/permissions_helper/` (macOS Swift + Windows C#) + the status channels (`accessibility` / `screen_capture`) + firewall (`macos_firewall`).
 
 ### A1 · Ten key classes (condensed)
@@ -252,7 +257,7 @@ Each (machine × cluster) has one complete **process tree**: a general root supe
 - The helperproc session path (currently the canary branch) → the final-state main path.
 
 **Retired** (concepts/mechanisms that no longer exist in the final state):
-- The `AVA_PERMISSIONS_HELPER_SPAWN` switch + the `permissions_helper_enabled` double switch gate (`shared/session_backend.py:627-644`).
+- The `AVA_PERMISSIONS_HELPER_SPAWN` switch + the `permissions_helper_enabled` double switch gate (`base/sessions/backend.py:627-644`).
 - "Pick a backend once per process" (the `get_backend` singleton) — root is the sole spawn executor; there is no backend-selection concept.
 - The "dual track / spare" semantics of posixproc/helperproc/winproc — restated as **root's platform execution implementations** (one contract, three implementations), not a runtime either-or.
 - `_reparent`'s double fork (forbidden by I2; zombie prevention moves to root's reaper — E2(b)).
@@ -289,7 +294,7 @@ Ran the level-by-level probe chain: helper→L1→L2→L3→L4 (4 fork+exec hops
 
 ### F2 result (measured 2026-09-12, macmini)
 
-Full enumeration across 16 scenarios x 3 requests: parent exit / launchd adoption (ppid=1) / setsid / double-fork (hand-written and the real shared._reparent primitive) / SIGHUP single and process-group / PTY close / bash exec — **no trigger changes the attribution resolution**. The helper lineage held responsible=com.ava.permissions-helper 30/30; the non-helper control lineage self-anchored 18/18. Conclusion: the anchor is decided **statically at spawn** by the lineage's spawn-root class, robust to every later topology change; the 2026-09-04 "reparent resets" observation is refuted (it was the non-helper lineage's own anchoring, not an effect of reparent). XPC could not be minimally reproduced within constraints (deferred to F5/F12); the helper-death path remains the only open reset candidate (F12). Zero prompts across the suite. Evidence record: workspaces/6127/F2-findings.md.
+Full enumeration across 16 scenarios x 3 requests: parent exit / launchd adoption (ppid=1) / setsid / double-fork (hand-written and the real base._reparent primitive) / SIGHUP single and process-group / PTY close / bash exec — **no trigger changes the attribution resolution**. The helper lineage held responsible=com.ava.permissions-helper 30/30; the non-helper control lineage self-anchored 18/18. Conclusion: the anchor is decided **statically at spawn** by the lineage's spawn-root class, robust to every later topology change; the 2026-09-04 "reparent resets" observation is refuted (it was the non-helper lineage's own anchoring, not an effect of reparent). XPC could not be minimally reproduced within constraints (deferred to F5/F12); the helper-death path remains the only open reset candidate (F12). Zero prompts across the suite. Evidence record: workspaces/6127/F2-findings.md.
 
 ## G0 · User touchpoint list (the "you'll need to act" summary along the final-state path)
 
@@ -308,7 +313,7 @@ Full enumeration across 16 scenarios x 3 requests: parent exit / launchd adoptio
 - Landing details (draft-3 / the implementation phase): (1) designing the "zero permission content in root" lint rule (B2a) (2) refining the helper→root keepalive chain and the single-instance flow (E1/B5) (3) aligning the B7 metrics with the F list (4) decomposing the migration steps (D) (5) per-machine audit of the actual helper authorization state on all four Macs — using the zero-prompt preflight query probe (no side effects); never trigger a TCC prompt on a user or company device — added 2026-09-12, after the F1 event (task #3202).
 
 ## Open / to verify (tracked)
-- [ ] Stale docstrings such as `ops/agents.py:16-17` (already listed as a candidate small task)
+- [ ] Stale docstrings such as `ops/agents/__init__.py:16-17` (already listed as a candidate small task)
 - [ ] A line-by-line read of the `machine=` spawn-routing entry (C to verify)
 - [ ] The otel-collector supervisor shape (A to verify 3)
 - [ ] Refining the G6 counter-case (LGTM staying independent)

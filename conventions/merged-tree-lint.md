@@ -12,12 +12,12 @@ head. It is an early warning only: a finding does not block the workflow today.
 Issue #1584 exposed a merge-emergent violation. A file was 738 lines on main,
 then a PR added 75 lines, producing an 813-line file only in the Trunk combined
 tree. `lint-code-structure` enforces an 800-line hard ceiling
-(`scripts/lint_code_structure.py` sets `_HARD_CEILING = 800`), and the
+(`scripts/lint/code_structure.py` sets `_HARD_CEILING = 800`), and the
 `lint-code-structure` pre-commit hook runs that check.
 
 The PR head passed its own checks because it was tested against a stale main.
 The red result appeared only after queue admission, which wasted a combined-tree
-round, bisection, and QA re-review. This job makes that kind of violation visible
+round, bisection, and re-review. This job makes that kind of violation visible
 while the PR is still being reviewed.
 
 ## How it works

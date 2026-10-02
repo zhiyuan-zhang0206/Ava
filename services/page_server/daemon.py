@@ -24,26 +24,27 @@ import sys
 import time
 import urllib.request
 from contextlib import suppress
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 import psutil
 import psycopg
 from psycopg_pool import ConnectionPool
 
-import shared.db
-import shared.sessions.pty.cli
+import base.db
+import base.sessions.pty.cli
+from base.cluster.machine import machine_name, reachable_host
+from base.config import settings
+from base.daemon.health import Liveness, start_health_server, stop_health_server
+from base.daemon.shutdown import cancel_and_drain, install_graceful_shutdown
+from base.daemon.shutdown import hard_exit as _hard_exit
+from base.db.transaction import write_transaction
+from base.log import init_gateway_process
+from base.paths import ava_home, pid_path
+from base.sessions.backend import PtySessionBackend, SessionBackend, get_shell_backend
+from base.sessions.page_session import page_session_name
+from base.sessions.record import SessionRecord
 from services.pidfile import acquire_pidfile, pidfile_holds_daemon, remove_pidfile
-from shared.config import settings
-from shared.daemon_health import Liveness, start_health_server, stop_health_server
-from shared.daemon_shutdown import cancel_and_drain, install_graceful_shutdown
-from shared.daemon_shutdown import hard_exit as _hard_exit
-from shared.db_transaction import write_transaction
-from shared.log import init_gateway_process
-from shared.machine import machine_name, reachable_host
-from shared.session_backend import PtySessionBackend, SessionBackend, get_shell_backend
-from shared.session_record import SessionRecord
-from shared.sessions.page_session import page_session_name
 
 from .degradation import (
     _DegradedServeDir,
@@ -56,7 +57,11 @@ _log = logging.getLogger("services.page_server.daemon")
 
 _POLL_INTERVAL_S = settings.daemon.page_server_poll_interval_seconds
 _LIVENESS_TIMEOUT_S = 60.0
-_PIDFILE = settings.services.page_server_pidfile
+
+
+def _pidfile() -> Path:
+    return pid_path("page_server")
+
 
 # A new PTY host needs a short window to finish its interactive-shell startup
 # and receive its initial command before a health probe can make a decision.
@@ -74,24 +79,24 @@ class _ServerHandle:
     name: str
     port: int
     serve_dir: str
-    token: str
+    token: str = field(repr=False)
     session_name: str
     last_launch_monotonic: float
 
 
 def _write_pidfile() -> None:
-    if not acquire_pidfile(_PIDFILE, "services.page_server.daemon"):
-        _log.info("[page-server] daemon already running (pidfile=%s), exiting", _PIDFILE)
+    if not acquire_pidfile(_pidfile(), "services.page_server.daemon"):
+        _log.info("[page-server] daemon already running (pidfile=%s), exiting", _pidfile())
         sys.exit(1)
 
 
 def _remove_pidfile() -> None:
-    remove_pidfile(_PIDFILE)
+    remove_pidfile(_pidfile())
 
 
 def _is_running() -> bool:
     """Whether a daemon is already running (via its pidfile)."""
-    return pidfile_holds_daemon(_PIDFILE, "services.page_server.daemon")
+    return pidfile_holds_daemon(_pidfile(), "services.page_server.daemon")
 
 
 def _open_rows(pool: ConnectionPool, host: str) -> list[_PageRow]:
@@ -294,7 +299,7 @@ def _live_session_records(backend: SessionBackend) -> dict[str, SessionRecord] |
     """
     if not isinstance(backend, PtySessionBackend):
         return None
-    return shared.sessions.pty.cli.live_sessions()
+    return base.sessions.pty.cli.live_sessions()
 
 
 def _session_is_live(
@@ -362,7 +367,7 @@ def _reclaim_occupants(
 ) -> None:
     """Kill detached legacy/orphan servers while preserving live page shells."""
     wanted_ports = {row.port for row in rows}
-    own_home = str(settings.general.ava_home)
+    own_home = str(ava_home())
     for port, (pid, home) in occupants.items():
         if _page_session_owner(pid, shell_pids) is not None:
             continue
@@ -642,12 +647,12 @@ async def _reconcile_loop(pool: ConnectionPool, liveness: Liveness) -> None:
 async def run() -> None:
     """Start the daemon and keep its health endpoint alive while it reconciles."""
     if _is_running():
-        _log.info("[page-server] daemon already running (pidfile=%s), exiting", _PIDFILE)
+        _log.info("[page-server] daemon already running (pidfile=%s), exiting", _pidfile())
         sys.exit(1)
     _write_pidfile()
     liveness = Liveness(_LIVENESS_TIMEOUT_S)
     health = await start_health_server("page_server", liveness=liveness)
-    pool = shared.db.pool()
+    pool = base.db.pool()
     try:
         await _reconcile_loop(pool, liveness)
     finally:
@@ -658,7 +663,7 @@ async def run() -> None:
 
 def main() -> None:
     """Initialize the daemon after verifying the database schema version."""
-    from shared.migrations import assert_schema_current
+    from base.deploy.schema.migrations import assert_schema_current
 
     assert_schema_current(settings.data_plane.db_url)
     init_gateway_process(name="page_server")

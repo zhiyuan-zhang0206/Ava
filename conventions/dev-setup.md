@@ -2,7 +2,7 @@
 
 Generic dev procedures that sit on top of [`runbook.md`](runbook.md): the
 platform-specific traps (WSL2's private-network identity), the first-time
-agent-runner enrollment flow, and the per-worktree cluster dev loop. The
+agent-runner enrollment flow, and development in a worktree. The
 runbook stays role-agnostic; this doc covers the per-developer setup steps.
 
 A specific deployment's concrete machine roster, SSH access pattern, cloud-host
@@ -11,6 +11,13 @@ operator-specific and not generic — they belong in your own private deployment
 notes, not here. The placeholders to fill in: a gateway is reached at
 `http://<gateway-host>:8000`, secrets live in per-machine `~/.ava/.env` +
 `~/.ava/secrets/*.env`, and SSH keys are per dev machine.
+
+## Tool caches
+
+Every tool's cache lives under `.cache/<tool>/` (`.cache/pytest`,
+`.cache/ruff`, `.cache/import-linter`, ...), ignored by the single root
+`/.cache/` line in `.gitignore`. Configure a newly added tool the same way
+instead of letting it drop a cache dir at the repo root.
 
 ## WSL2 needs its own private-network identity
 
@@ -24,156 +31,109 @@ join your private-network client inside the distro itself, following that
 client's own setup docs.
 
 After that the distro gets its own identity and IP on the private network.
-If you've already brought the agent-runner up with a wrong
-`AVA_GATEWAY_URL`, edit `~/.ava/.env` and re-run `ava start` so the
-`machines` table UPSERT overwrites the stale row.
+Choose the gateway URL and this host's reachable address before first start.
+Repeated start does not change the recorded identity; conflicting inputs refuse.
 
-## First time bringing up a new dev / agent-runner
+## Joining a runner
 
-0. On the **gateway**: a split deployment always has a cluster secret (a
-   gateway-only birth mints one; `AVA_INSTALL_CLUSTER_SECRET` states it explicitly), and
-   `/api/bootstrap` + each runner's `/ops` authenticate against it as a bearer
-   token. A single-box cluster with an empty secret is fully unauthenticated on
-   loopback — nothing here is conditional on
-   the cluster being multi-host. The agent-facing machine surface (`spawn(machine=)`,
-   `list_machines`, the roster) is always present too; a single box just sees one
-   machine.
-1. Join this host to the deployment's private network (VPN overlay, LAN, or
-   whatever the deployment uses). (WSL2: install and join inside the
-   distro — see above.)
-2. Clone the repo to `~/Ava` for dev work, or `~/.ava/source` for
-   agent-runner duty: `git clone https://github.com/zhiyuan-zhang0206/Ava.git ~/.ava/source` (the path matters
-   — see runbook §"Prod and dev clone paths").
-3. `uv sync` in the clone.
-4. Make sure the new host is joined to the private network (the gateway is
-   reachable only over it). Read the cluster secret without echo and export it as
-   `AVA_CLUSTER_SECRET` for the enrollment command, then unset it afterward.
-5. On the new host: `ava enroll --gateway http://<gateway-host>:8000
-   --machine-name <new-name> --machine-host <this-host-addr>`. Add `--ssl-cert-file
-   <ca-bundle>` if you're behind a TLS-MITM proxy. The `/api/bootstrap` response
-   carries the cluster connection facts (db/redis URLs etc. — no name travels).
-6. `ava start`. Every process on the host re-fetches its config from
-   `/api/bootstrap` at Settings build (no `.env` cache since the 2026-08-01
-   refactor; so a data-plane re-key reaches an already-enrolled runner on its
-   next restart; fails fast if the gateway is unreachable), then start brings
-   up the ops / agent-host / watchdog sessions (`ava-ops` etc.).
-
-## Per-worktree cluster dev flow
-
-**Mental model — a dev copy is a full, isolated, prod-like deployment addressed
-by location.** Prod and every worktree are the *same shape*: a complete unit with
-its own database, redis namespace, ports, home, and running processes. They differ
-only in whether the code was copied to a canonical dir (prod: `install.sh` ->
-`~/.ava/source`) or referenced in place (dev: the worktree). This is `pip install
-.` vs `pip install -e .`, or a system `ffmpeg` vs a dev build run as `./ffmpeg` —
-the dev build is reached by *location*, never by a global name competing with the
-installed one. The more a dev copy resembles a real deployment, the fewer prod/dev
-surprises.
-
-The location-addressed entrypoint is **`.venv/bin/ava`, run from inside the
-worktree** (the `./ffmpeg` analog — a literal path into this checkout, no resident
-`uv run` wrapper). `uv sync` does the editable package install and creates that
-console script, so `.venv/bin/ava` runs the worktree's code live; the host-global
-`ava` on PATH runs whichever cluster `$AVA_HOME` names (a dev cluster's converge
-links its own `$AVA_HOME/ava` but skips the host-global launcher/PATH wiring). There is deliberately **no
-`./ava` / global `ava-<name>` dev shim** — addressing is by location: the `.venv`
-physically lives in this worktree (a literal `./ava` is also blocked: the repo root
-already has an `ava/` package dir).
-
-Before every manual worktree `uv sync`, run `env -u VIRTUAL_ENV python
-scripts/guard_editable_venv.py .` and then `env -u VIRTUAL_ENV uv sync`. The
-worktree `.venv` must be a real directory under that checkout, never a symlink;
-`scripts/install.sh --worktree` and `scripts/setup-worktree.sh` run the same
-preflight automatically.
-
-The first `ava start` from a worktree is the "editable install + deploy" step: it
-brings the in-place tree up as its own cluster (name defaults to the worktree dir
-`<name>`), giving it:
-
-- its own Postgres + Redis instance under the cluster's `$AVA_HOME`, holding
-  database `ava_<name>` owned by the per-cluster `ava_<name>` role
-- fixed redis channels (`ava:events` / `ava:inbound:<id>`) — same names in every
-  cluster, but each cluster has its own redis instance so they never collide
-- Port block (gateway, frontend, daemons, milvus, and its own pg/redis at
-  base+11 / base+12 — non-overlapping with prod)
-- service sessions `ava-<name>-gateway`, `ava-<name>-ops`, etc. (POSIX: detached native processes; agent interactive shells run in per-session pty hosts)
-- a `.ava_home` pointer written into the worktree (gitignored) — the
-  editable-install anchor (cf. pip's `.pth`/`.egg-link`), so **bare invocations
-  from this tree resolve to this cluster's home**. This is the DB-layer analog of
-  static-by-default linking: a process running this tree structurally cannot reach
-  the prod data plane (see runbook §"How a unit finds its home").
+Acquire the checkout's dependencies using the
+[deployment procedure](../.agents/skills/deploy-ava-cluster/SKILL.md). A split
+gateway must already be serving and have a cluster bearer. On the new host,
+join the private network, then run (the runner never needs the gateway's
+bearer: its capability bundle authenticates it):
 
 ```bash
-cd ~/Ava/.worktrees/<name>
-scripts/install.sh --worktree                # births cluster <name>: locked Python install + own DB/redis/ports/home
-                                             # (~/.ava-<name>), NO cluster secret by default (single-machine
-                                             # no-auth; AVA_INSTALL_CLUSTER_SECRET to turn auth on), seeded LLM/web
-                                             # keys from ~/.ava/.env, and the .ava_home pointer. --path P
-                                             # overrides the home; --no-seed skips the key copy. No host-global
-                                             # steps. Idempotent — re-run freely.
-.venv/bin/ava start                          # brings up its gateway + agent-runner (ops/agent-host/watchdog).
-                                             # Pure bring-up: a home install.sh never birthed has no
-                                             # registry record, and start fails fast pointing back at install.sh
-.venv/bin/ava status                         # sessions/probes for this cluster
-.venv/bin/ava cluster down --path ~/.ava-<name>  # stop the cluster's sessions (its own Postgres/Redis + registry slot stay up)
+.venv/bin/ava init --serve-agent-runner --no-serve-gateway \
+  --gateway-url http://<gateway-host>:8000 \
+  --machine-name <new-name> --machine-host <this-host-addr> \
+  --db-capability <bundle>
+.venv/bin/ava start
 ```
 
-`ava cluster down` stops only this cluster's sessions; its own native
-Postgres/Redis instance and its registry slot stay up.
-`ava cluster destroy --path ~/.ava-<name>` additionally frees the slot (its port
-block) and deregisters that cluster's OS-scheduled jobs (health probe, both
-watchdog probes, autostart, logs maintenance), and `--drop-db` drops its database. (A bare `ava stop` here tears down
-only this worktree cluster's own private pg/redis instance — it can no longer
-touch the prod data plane, since every cluster owns a separate instance; still,
-don't run prod-affecting commands from a worktree.)
+The bundle comes from `ava cluster db-authority issue-unit --machine <new-name>
+--home <this unit's $AVA_HOME> --out <bundle>` on the gateway; export its
+printed transport key as `AVA_DB_CAPABILITY_KEY` without echoing it, and unset
+it afterward. `--ssl-cert-file PATH` supplies a trusted CA
+bundle when required. `ava init` installs the capability (and deletes the
+bundle) and durably records local identity; the first `ava start` registers this
+host and starts its selected root services.
+Every runner process fetches current connection facts at Settings construction.
+Use bare start thereafter; `ava init` refuses an initialized home. A later bundle
+(after a write-generation rotation) goes to `ava cluster db-authority install-unit
+<bundle>` with the unit stopped.
 
-A worktree cluster is a single-machine birth, so it carries NO cluster secret
-by default — the whole cluster (gateway API, /ops, pg/redis) serves
-unauthenticated on loopback (user decision: off is fully off). Read a token without
-echo and export it as the one-shot `AVA_INSTALL_CLUSTER_SECRET` before `install.sh --worktree` if you
-want auth on a dev cluster, then unset it. The secret is never inherited from prod; this is only a manual step for a
-worktree that skipped the install.
+## Development in a worktree
 
-**A worktree cluster runs pinned; rebase soberly.** A rollout (or a self-heal)
-moves the cluster pin — the commit the cluster installed — and rebasing the
-worktree under a running cluster leaves its HEAD off that pin. If the cluster then
-rolls back to its pin (the health probe's `--auto-rollback` did exactly that on
-2026-09-12), `git reset --hard` lands the worktree on the pin. Two guardrails
-soften that now: `ava cluster rollback` stashes uncommitted work first (restore
-with `git stash pop`), and a dev cluster's birth seeds `AVA_HEALTH_PROBE_AGENT_MIN=0`
-so a fresh cluster with no resident agents no longer trips the probe (the "pinned
-cluster, casual rebase" strand). Prefer committing/pushing WIP before rebasing
-under a live cluster; if a worktree cluster does strand a lease or a pause, its
-own `ava cluster recover` clears it (see the runbook's stranded-deploy recipe).
+A worktree is a checkout, not a deployment: it owns no cluster. Use its own real
+`.venv`, never a symlink to another checkout's environment. Development invokes
+`.venv/bin/ava` directly; the host's bare `ava` runs the cluster `$AVA_HOME` names.
+Package acquisition and Git hooks are separate from starting a cluster.
 
-**What needs a cluster, what doesn't** (pick the lightest loop that covers the
-change):
+`scripts/setup-worktree.sh <task>` is the one command that makes a worktree. It
+fetches `origin/main`, adds `.worktrees/<task>` on branch `ava-<task>` (`--branch`
+and `--base` override), builds the worktree's own real `.venv`, runs the locked
+install and `npm ci`, and verifies the shared git hooks and the editable-install
+guard (an inherited `VIRTUAL_ENV` is cleared) — without creating a cluster.
+Re-running it only re-bootstraps; after a failure, run it again with no argument
+inside the worktree. A worktree made by another tool (Claude Code's
+`.claude/worktrees/<name>/`) is completed the same way; the main clone is refused.
 
-- **Tests** (`.venv/bin/pytest ...`) need **no** cluster. `tests/conftest.py` starts
-  throwaway native Postgres/Redis (per worker, no Docker) and overrides the db/redis
-  URLs, so the suite never touches a real cluster or prod. Fastest inner loop — reach for it
-  first. Pick the dir by change type (see CLAUDE.md "Workflow": DB -> `tests/ava` +
-  `tests/gateway`, wire -> `tests/agent` + `tests/gateway`, agent core ->
-  `tests/agent`, frontend -> `cd ui/web && npm test`).
-- **A bare DB poke / SDK script** (`.venv/bin/python -c "...shared.db.connect()..."`)
-  needs the worktree to have its own cluster (`scripts/install.sh --worktree`,
-  then `ava start`). Before the install the worktree is *unanchored*: it boots bare
-  on a private scratch home — it never reads `~/.ava/.env`, never fetches from a
-  gateway and never writes under `~/.ava` — and `AVA_DB_URL` is the unanchored
-  sentinel, so a connection fails fast with `UnanchoredHomeError` instead of
-  reaching any real database. Imports, lint scripts and codegen hooks work there
-  as they do in CI.
-- **The full running stack** (gateway + agents + frontend, exercising spawn /
-  inbound / SSE end to end) needs `ava start` (single-box gateway,agent-runner).
-  This is the "full deployment" tier.
+```bash
+bash scripts/setup-worktree.sh <task>   # last line: worktree ready: <path> (branch <branch>)
+cd ~/Ava/.worktrees/<task>              # a script cannot change your directory
+.venv/bin/pytest <selected test files>
+```
 
-For PR / dev workflow conventions (worktree + PR for code changes, doc-axis
-direct edits in main), see [`CLAUDE.md`](../CLAUDE.md) "Workflow".
+For a manual dependency operation in an existing worktree, clear inherited
+`VIRTUAL_ENV` and run `scripts/host_ops/guard_editable_venv.py` first.
+
+**Which home a worktree reads.** With `AVA_HOME` unset the home is `~/.ava`; on a
+development machine that also runs production, that is the production cluster. A
+home that carries its own `<home>/source` checkout is operated only by that
+checkout's CLI: a worktree's CLI refuses every command against it, `status`
+included (bare `ava` and a lone `-h`/`--help` excepted), and names the CLI to run;
+read production with the host's bare `ava`.
+
+**The convention: a development tool that imports application code runs in a home of
+its own.** Any script, test run or subagent that imports application code, run in a
+development checkout, sets a temporary `AVA_HOME` first, once, at the top of the process
+tree (or runs inside the Docker or Tart verification boundary). Left unset, the home is
+`~/.ava`, and on a host that runs production that is production:
+
+```bash
+export AVA_HOME="$(mktemp -d)" AVA_CONFIG_FETCH=skip   # a throwaway home: no .env, no gateway fetch
+```
+
+Code enforces this in one place only, where the convention is sure to be broken by
+nobody's choice: the git hooks. pre-commit and pre-push launch scripts on every commit,
+so each hook script that reaches application code calls `dotenv_boot.enter_scratch_home()`
+itself (only when run as a program; `scripts/tests/test_hooks_scratch_home.py` derives the
+hook scripts from `.pre-commit-config.yaml`). The test harness sets a temporary home
+before any import. Every other script is run by a person or an agent on purpose, and the
+convention is its only guard.
+
+Do not rebase or rewrite a checkout while a cluster runs from it: its root manifest
+and loaded source must remain coherent. Source checkout editing is development work;
+it is not a production update mechanism.
+
+**Choose the check that proves the change:**
+
+- Targeted tests need no running cluster. The test harness uses private native
+  Postgres/Redis and isolated configuration. Never use a real cluster home for
+  test imports or a production endpoint as a test fixture.
+- A DB/SDK script needs a home that has been started and explicitly named with
+  `AVA_HOME`. A throwaway home carries no `.env`: its `AVA_DB_URL` is the
+  placeholder URL, so a connection fails fast with `PlaceholderDbUrlError`.
+  Imports, lint scripts and codegen hooks work there as they do in CI.
+- End-to-end agent/frontend behavior runs in CI's e2e job (a real gateway, agent
+  subprocess and browser against throwaway Postgres and Redis).
+
+See [AGENTS.md](../AGENTS.md) for the worktree and PR workflow.
 
 ## Machine Python indexes
 
-Installation and updates share `cli.python_install`: the installer launches its
-absolute script path; the updater retains its imported functions before switching
+Dependency acquisition and updates share `cli.python_install`: operators invoke
+its standalone script; the updater retains its imported functions before switching
 source and passes the target repo explicitly. Historical canonical targets need
 not contain the new helper. All updater uv steps share one process-tree deadline.
 The committed `uv.lock` stays on canonical PyPI origins. A host mirror changes
@@ -187,10 +147,10 @@ the editable build. A failed install is not a transactional rollback of every
 package. The updater retains its existing editable-record recovery and bound.
 
 Index precedence is explicit `UV_DEFAULT_INDEX` / `UV_INDEX_URL`, then uv
-configuration, then `PIP_INDEX_URL`, then pip configuration, then PyPI. The
-installer's explicit `--mirror cn` selects and persists its profile as before;
-without that flag, the helper reads the unit's existing `mirror.env` without
-replacing real environment values. Native command boot preserves this precedence
+configuration, then `PIP_INDEX_URL`, then pip configuration, then PyPI. A
+profile exported into the shell (`scripts/mirrors/cn.env`) is real environment;
+the helper also reads the unit's existing `mirror.env` without replacing real
+environment values. Native command boot preserves this precedence
 across both uv single-index aliases while loading `.env` and `mirror.env`, before
 an update enters the helper. Additional index settings are not merged into them.
 The pip bridge reads only index settings, with global, user, target-venv and

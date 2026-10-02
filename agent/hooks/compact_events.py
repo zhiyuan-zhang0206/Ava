@@ -4,7 +4,7 @@ Extracted from `agent/hooks/compact.py` (file line budget; task #3323). Emits
 the pair consumed by the frontend's ticking "Compacting" block: `compact_started`
 when a forced/auto compaction begins, and exactly one `compact_finished`
 (success / failure / replaced) when it ends. The wire contract lives in
-`shared/live_events.py`.
+`base/events/live/projection.py`.
 """
 
 from __future__ import annotations
@@ -13,8 +13,8 @@ from datetime import UTC, datetime
 from typing import Literal
 from uuid import uuid4
 
-from shared.event_publisher import AgentEventPublisher
-from shared.live_events import CompactFinished, CompactStarted
+from base.events.live.projection import CompactFinished, CompactStarted
+from base.events.live.publisher import AgentEventPublisher
 
 
 def emit_compact_started(

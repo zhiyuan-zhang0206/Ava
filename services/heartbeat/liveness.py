@@ -1,12 +1,9 @@
 """Agent liveness pass — gateway-owned derivation of `agents_meta.liveness_state`.
 
 The heartbeat daemon (gateway, one per cluster) runs this pass on a slow cadence.
-It closes the gap behind Task #1174: every corpse detector that reads the
-process lease (`ops.controllers.respawn` reaper, wedged, revive) is
-machine-scoped — it runs on the agent's own host, so when that host drops
-offline (network partition / power-off) nobody reads the lease, and
-`agents_meta.status` sits at 'idling'/'running' while the frontend shows a dead
-agent as online.
+It combines machine reachability with the process lease so a host that drops
+offline cannot leave an agent displayed as online solely because its durable
+`agents_meta.status` still reads 'idling' or 'running'.
 
 Two signals, merged per agent:
 
@@ -22,8 +19,7 @@ Two signals, merged per agent:
   agent process renews it every 60s while alive, so expiry with the machine up
   means a dead/wedged process. An unclaimed `idling` row has no process yet, so
   it stays
-  `unknown` until its atomic claim writes `started_at`; `restarting` judges on
-  machine reachability alone.
+  `unknown` until its atomic claim writes `started_at`.
 
 Per-agent merge (`liveness_state`):
 
@@ -43,9 +39,8 @@ and the next pass re-marks the identities online.
 Machine alerting uses a separate episode clock: `machine_probe.transition_since`
 is set on the first failed probe and cleared on success. The shared transition
 policy stays silent through normal recovery, then fires WARNING and escalates
-the same alert instance to ERROR. A live cluster deploy or this host's updater
-lease explains the bounded window without resetting the clock; unreadable
-deploy context explains nothing.
+the same alert instance to ERROR. This pass reads no deploy context, so a
+runner offline across an update grades from its true start like any other outage.
 
 The probe path is injectable (`probe` argument) so tests can run the full
 DB merge without dialing real ops servers.
@@ -59,21 +54,23 @@ from typing import Any, cast
 
 from psycopg_pool import ConnectionPool
 
+from base.agents.observation.evidence import (
+    LIVENESS_PASS_INTERVAL_S,
+    MACHINE_OFFLINE_AFTER_FAILURES,
+)
+from base.cluster.machines import list_agent_runners
+from base.config import settings
+from base.db.transaction import write_transaction
+from base.deploy.transition import transition_severity
+from base.events.live.announce import publish_agent_updated_sync
 from ops import cluster_rpc
 from ops.cluster_status import ClusterStatus
-from shared import cluster_lock, host_deploy_state
-from shared.agent_observation import LIVENESS_PASS_INTERVAL_S, MACHINE_OFFLINE_AFTER_FAILURES
-from shared.config import settings
-from shared.db_transaction import write_transaction
-from shared.live_announce import publish_agent_updated_sync
-from shared.machines import list_agent_runners
-from shared.transition import transition_severity
 
 _log = logging.getLogger("services.heartbeat.liveness")
 
 # Per-machine status_probe timeout — `settings.gateway.status_probe_timeout_seconds`
 # (default 8s), the SAME setting the roster's probe reads
-# (gateway/routers/status.py), so the two probes stay aligned by construction
+# (gateway/cluster/status.py), so the two probes stay aligned by construction
 # (task #1200: a 3.0s hardcode here and in the roster flipped a slow-but-healthy
 # WSL runner offline — its status_snapshot measured 3.07-3.27s — while a
 # genuinely offline host still refuses fast, so the wider budget costs only the
@@ -127,7 +124,6 @@ def _machine_alert_edges(
     new_cf: int,
     transition_since: datetime | None,
     now: datetime,
-    deploy_explains: bool,
 ) -> None:
     """Grade one machine transition and persist its firing/recovery edges.
 
@@ -142,7 +138,7 @@ def _machine_alert_edges(
     (DB errors propagate to the caller's per-pass catch, IM errors are
     swallowed by ``notify_im``).
     """
-    from shared.alerts import (
+    from base.telemetry.alerts import (
         display_language,
         fingerprint,
         notify_im,
@@ -159,7 +155,6 @@ def _machine_alert_edges(
         severity = transition_severity(
             transition_since,
             now,
-            deploy_explains=deploy_explains,
             warning_after_s=settings.alerts.transition_warning_seconds,
             error_after_s=settings.alerts.transition_error_seconds,
         )
@@ -227,7 +222,7 @@ def _machine_alert_edges(
 
 
 async def _record_probe(
-    pool: ConnectionPool, name: str, *, ok: bool, host_online: bool | None, deploy_explains: bool
+    pool: ConnectionPool, name: str, *, ok: bool, host_online: bool | None
 ) -> None:
     """UPSERT one probe outcome into machine_probe, bumping the consecutive
     failure count on failure and resetting it on success — and record the
@@ -267,21 +262,7 @@ async def _record_probe(
             new_cf=new_cf,
             transition_since=transition_since,
             now=now,
-            deploy_explains=deploy_explains,
         )
-
-
-def _deploy_explanations(names: list[str]) -> dict[str, bool]:
-    """Read the pass's deploy context once; unreadable context explains nothing."""
-    try:
-        cluster_deploy_live = cluster_lock.read_update_lease() is not None
-        host_states = host_deploy_state.read_all()
-    except Exception:
-        return dict.fromkeys(names, False)
-    return {
-        name: cluster_deploy_live or (name in host_states and host_states[name].updater_live)
-        for name in names
-    }
 
 
 def _merge_liveness(pool: ConnectionPool) -> list[int]:
@@ -350,12 +331,9 @@ async def run_liveness_pass(
     runners = list_agent_runners()
     if not runners:
         return
-    deploy_explanations = _deploy_explanations([name for name, _url in runners])
     results = await asyncio.gather(*(_probe_machine(name, probe=probe) for name, _url in runners))
     for (name, _url), (ok, host_online) in zip(runners, results, strict=True):
-        await _record_probe(
-            pool, name, ok=ok, host_online=host_online, deploy_explains=deploy_explanations[name]
-        )
+        await _record_probe(pool, name, ok=ok, host_online=host_online)
     changed_agent_ids = _merge_liveness(pool)
     # `_merge_liveness` committed before these best-effort invalidation hints.
     for agent_id in changed_agent_ids:

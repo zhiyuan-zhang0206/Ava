@@ -1,10 +1,12 @@
 """Warn about missing Git hooks or ephemeral interpreter pointers; never install.
 
 Default mode inspects the repository at the current directory and stays
-warn-only (exit 0) during hook rollout. ``--scan-machine`` sweeps every
-conventional local checkout on this machine — both dev clones and each home's
-``source`` tree — and exits 1 when any of them reports a problem; that is the
-form the converge warning step runs.
+warn-only (exit 0) during hook rollout; ``--strict`` makes the same inspection
+exit 1 on any problem (the worktree bootstrap uses it: a worktree without
+working hooks is not ready). ``--scan-machine`` sweeps every conventional local
+checkout on this machine — both dev clones and each home's ``source`` tree —
+and exits 1 when any of them reports a problem; that is the form the converge
+warning step runs.
 """
 
 # `language: system` runs this under whatever `python3` the committer's PATH
@@ -168,6 +170,11 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="check every conventional checkout under $HOME instead of the current repository",
     )
+    parser.add_argument(
+        "--strict",
+        action="store_true",
+        help="exit 1 when the current repository reports a problem (default: warn only)",
+    )
     args = parser.parse_args(argv)
     if args.scan_machine:
         return scan_machine()
@@ -185,6 +192,8 @@ def main(argv: list[str] | None = None) -> int:
             "env -u VIRTUAL_ENV uv tool install pre-commit; then from the main clone run "
             "~/.local/bin/pre-commit install --hook-type pre-commit --hook-type pre-push"
         )
+        if args.strict:
+            return 1
         print("Warn-only during hook rollout; independent CI checks remain the merge gate.")
     return 0
 

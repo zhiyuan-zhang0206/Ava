@@ -21,7 +21,6 @@ These four plans co-locate with the code they plan for, per the 2026-08-12 doc r
 | File | What's left |
 |------|------|
 | [Ava / Ava Code prompt architecture](../agent/prompt-architecture.md) | Living doc; the core-vs-`ava_code` responsibility split + the mechanics-vs-behavior axis. Open: malicious-code refusal stance (pending a threat-model call), a minor whitespace nudge. The `ava_code` memory layer was **rejected**, not deferred |
-| [Default bundled skills](../ava_builtins/default-skills.md) | Which external capability packs ship as repo defaults. Direction settled (**vendor-and-adapt**); open: per-overlap reconciliation, vendor location |
 | [Compaction redesign](../agent/compaction-redesign.md) | Forced / command / spontaneous compact mechanics |
 | [Import an existing agent's history](../agent/import-existing-agent-history.md) | Onboarding demo script — distil a new user's Claude Code / Codex history into the memory pool. Gated on going public |
 
@@ -30,11 +29,11 @@ These four plans co-locate with the code they plan for, per the 2026-08-12 doc r
 | File | What's left |
 |------|------|
 | [Agent-runner as server](infra/agent-runner-as-server.md) | Implemented as the sole runtime; remaining question is host fault isolation |
-| [Vendored data-plane binaries](infra/vendored-data-plane-binaries.md) | **Redis leg only** — Postgres vendoring landed (`shared/runtime_binaries.py`), redis still comes from brew/apt. Also the single home for slice 3 of the doc below |
+| [Vendored data-plane binaries](infra/vendored-data-plane-binaries.md) | **Redis leg only** — Postgres vendoring landed (`base/cluster/dataplane/runtime_binaries.py`), redis still comes from brew/apt. Also the single home for slice 3 of the doc below |
 | [Embedded per-cluster data plane](infra/embedded-per-cluster-data-plane.md) | Design record; slices 1+2 done. Only the redis half of slice 3 remains, tracked in the row above |
 | [Auth / TLS design](infra/auth-tls-design.md) | **Phase 3 (TLS) only** — Phase 1 (fail-closed gateway auth) and Phase 2 (cookie session auth) are deployed |
-| [Cluster consistency: commit-level pinning](infra/commit-pinned-cluster.md) | Increments A + B built and drift now self-heals via `ops/controllers/pin.py`. The remaining hard fail-fast enforcement is **overtaken** by the fail-fast-vs-reconcile decision and needs re-litigating before it is built |
-| [Ops module](../ops/ops-module.md) | Spec / Status / controllers / manager built. Left: `ops/identity.py` and the shared **Drain** primitive (still `cli/commands/update.py`); pg-backup is a supervised scheduler service |
+| [Cluster consistency: commit-level pinning](infra/commit-pinned-cluster.md) | **Superseded.** Increments A + B were retired with the in-place updater: the pin has no writer and is not shown; the retained release journal is the release record. The remaining hard fail-fast enforcement is **overtaken** by the fail-fast-vs-reconcile decision and the [unified cluster lifecycle](infra/unified-cluster-lifecycle.md), and needs re-litigating before it is built |
+| [Ops module](../ops/ops-module.md) | Spec / Status built. Native maintenance drain and the source-mode fleet update own lifecycle; pg-backup is a supervised scheduler service |
 | [Extension ownership](infra/extension-ownership.md) | **S2's sync event, then S3–S5** (design for issue #39): S1 done (decision + spec revision); S2 mostly built (cluster rows + blobs, converge/boot materialization, adoption sweep); S3 onward untouched |
 | [Decentralized install + local config](infra/decentralized-install-and-config.md) | **Hooks-only plugin bundles only** — everything else (install registry, CC plugin materialization, `type="mcp"` packages, the cross-machine inventory UI) landed. The per-machine enable-state direction is proposed to be reversed by [extension-ownership](infra/extension-ownership.md) |
 | [Core package update channel](infra/core-package-update-channel.md) | **P2 core-plugin materialization** (P0+P1 landed — PRs #2355/#2368): collision rule, module-identity verification, isolation gates; then P3 alignment with [extension-ownership](infra/extension-ownership.md) |
@@ -44,12 +43,13 @@ These four plans co-locate with the code they plan for, per the 2026-08-12 doc r
 | [PG backup — off-site leg](infra/pg-backup.md) | Off-site leg (GCS / R2) for the disk-loss scenario; the local daily `pg_dump` landed |
 | [Release-directory atomic code swap](infra/release-dir-atomic-code-swap.md) | Deferred, not started — document the immutable-artifact swap mechanism |
 | [Release cadence: self-scheduling by Ava](infra/release-self-scheduling.md) | Once bootstrapping is done, Ava schedules its own releases |
-| [Locality](infra/locality.md) | Package-door and single-owner rules landed with frozen baselines. Left: Postgres door burn-down (29 modules), reach-in burn-down (140 keys), a co-change sweeper index, core contract snapshots, a PR-description locality note |
+| [Locality](infra/locality.md) | Package-door and single-owner rules landed with frozen baselines. Left: Postgres door burn-down (19 modules), reach-in burn-down (114 keys), a co-change sweeper index, a PR-description locality note |
+| [Dependency injection](infra/dependency-injection.md) | **All of it** — target shape and migration order; nothing built. Left: the structure lint and its baseline, the import-time config reads (44), composition roots per process, the field-ownership slices (survey pending), turn context in `AvaContext`, background duties as services with sequential loops (audit pending). Open: the non-graph ContextVars, the cross-agent contamination audit, the per-service memory and onboarding cost (memory audit pending), plugins outside the repo |
 | [Living tech-debt ledger](tech-debt/ledger.md) | Single "what debt is open now" register maintained by the sweeper engine |
 | [Checkpoint storage rebuild](infra/checkpoint-storage-rebuild.md) | **Observation-window calibrations (Section 7)** — delta-channel storage, keep-everything retention (R1–R4), read-time fold, and the reader-first write switch are all landed and deployed (write switch 2026-09-14, task #3180) |
 | [Heartbeat design](infra/heartbeat-design.md) | Research record; Tier 2 shipped as a simpler opt-out design. Kept for the rejected two-tier proposal |
 | [Process / service lifecycle final state](infra/lifecycle-final-state.md) | Implementation slices **P1–P7** (task #3195) — F1, the multi-level attribution measurement, runs first; the one-shot migration window is booked with the user |
-| [Model providers as plugins](../shared/lm/model-providers-as-plugins.md) | **Mechanics + Grok pilot landed** — registry, dispatch, vocabularies, key channel, and lazy load are built. Left: plugin dependency installation and deciding which remaining core providers should extract |
+| [Model providers as plugins](../base/lm/model-providers-as-plugins.md) | **Mechanics + Grok pilot landed** — registry, dispatch, vocabularies, key channel, and lazy load are built. Left: plugin dependency installation and deciding which remaining core providers should extract |
 
 ## Top level
 

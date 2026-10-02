@@ -17,7 +17,11 @@ export interface paths {
          * Login
          * @description Authenticate with the cluster secret and receive a session cookie.
          *
-         *     Request body: ``{"password": "<cluster-secret>"}``
+         *     Request body: ``{"password": "<cluster-secret>"}``. An agent-runner's
+         *     managed browser presents the active generation's runner API token instead.
+         *     The session is bound to the credential that minted it (`login_mint`): it
+         *     stops authenticating when that generation is revoked or the human secret
+         *     rotates, whatever its remaining lifetime.
          *
          *     On success, returns ``{"ok": true}`` and sets an HTTP-only session
          *     cookie whose lifetime is controlled by ``session_ttl_seconds``.
@@ -31,7 +35,7 @@ export interface paths {
          *
          *     Brute-force guard: an IP that fails ``gateway.login_max_failures`` times in
          *     a row is locked for ``gateway.login_lockout_seconds`` (policy + rationale on
-         *     those config fields; enforcement in shared/rate_limit.py).
+         *     those config fields; enforcement in base/cluster/rate_limit.py).
          *     While locked, the endpoint returns 429 + ``Retry-After`` instead of 401 —
          *     401 would read as "wrong password" and invite exactly the retry loop the
          *     lockout exists to stop. A successful login resets the IP's counter.
@@ -95,13 +99,16 @@ export interface paths {
         };
         /**
          * Sessions
-         * @description List active browser sessions, marking the request's current cookie.
+         * @description List browser sessions that still authenticate, marking the current cookie.
          *
-         *     Only the request's current session keeps its full id; every other row's id
-         *     is masked to its final 8 characters — enough to tell rows apart and to
-         *     revoke (the revoke endpoint accepts the suffix), without exposing the full
-         *     credential of sessions the caller does not hold. Managed-browser sessions
-         *     are labeled with ``managed`` so they are not mistaken for the caller's own.
+         *     A session is listed only while the credential that minted it is current,
+         *     the same test the session check applies, so a security screen never shows
+         *     a dead session as active. Only the request's current session keeps its full
+         *     id; every other row's id is masked to its final 8 characters — enough to
+         *     tell rows apart and to revoke (the revoke endpoint accepts the suffix),
+         *     without exposing the full credential of sessions the caller does not hold.
+         *     Managed-browser sessions are labeled with ``managed`` so they are not
+         *     mistaken for the caller's own.
          */
         get: operations["sessions_api_auth_sessions_get"];
         put?: never;
@@ -151,16 +158,16 @@ export interface paths {
          * @description Return cluster-common config ({ENV_ALIAS: value}, unmasked) for an
          *     agent-runner to load into its environment.
          *
-         *     `role=None` and `role="runner"` both serve the least-privilege
-         *     `ava_runner` AVA_DB_URL (the role's own password, carried inside the URL —
-         *     never a standalone key). The main identity and all admin credentials remain
-         *     gateway-local (see shared.config.bootstrap_config_values).
+         *     `AVA_DB_URL` is the credential-free endpoint; no database credential is
+         *     served. The admin credentials remain gateway-local (see
+         *     base.config.bootstrap_config_values).
          *
          *     Raises:
-         *         HTTPException: 401 when the request does not carry
-         *             `Authorization: Bearer <cluster secret>` (a no-secret cluster serves
-         *             without auth — there is no credential to require); 400 for an
-         *             unknown role value, and when the runner credential is not provisioned.
+         *         HTTPException: 401 when the request carries neither the active write
+         *             generation's machine API token nor the cluster secret as its bearer
+         *             (a no-secret cluster serves without auth — there is no credential
+         *             to require); 400 when the gateway configuration has no database
+         *             endpoint.
          */
         get: operations["get_bootstrap_api_bootstrap_get"];
         put?: never;
@@ -508,7 +515,7 @@ export interface paths {
          *
          *     404: agent_id does not exist (AgentNotFound -> handler returns 404 + reason).
          *     `already_alive`: agent is still alive
-         *         (running/idling/restarting); resurrect does not
+         *         (running/idling); resurrect does not
          *         apply — idempotent.
          */
         post: operations["post_agent_resurrect_api_agents__agent_id__resurrect_post"];
@@ -882,7 +889,7 @@ export interface paths {
          *     Buckets the checkpoint messages by kind + splits the system prompt into its
          *     top-level sections, each a chars/4 estimate proportionally normalized to the
          *     last LLM call's real `input_tokens` (so the categories sum to the truth). Pure
-         *     gateway-side view logic (`gateway/context_breakdown.py`) — one checkpoint read,
+         *     gateway-side view logic (`gateway/agents/context_breakdown.py`) — one checkpoint read,
          *     no kernel/agent involvement. A checkpoint read failure / no checkpoint yields
          *     an empty breakdown with zeroed totals (same tolerance as token-usage: the
          *     panel re-opens fine later).
@@ -1101,7 +1108,7 @@ export interface paths {
         /**
          * Get Agent Plugin Metrics
          * @description The agent's plugin metrics for the inspector panel — the W13b inspector
-         *     surface of the plugin metric system (see `shared/plugin_metrics.py`).
+         *     surface of the plugin metric system (see `base/telemetry/metrics/plugin_metrics.py`).
          *
          *     Builds the metric registry in process (task #180 PR D — shipped
          *     plugin `metrics.py` modules + core definitions), keeps the metrics whose
@@ -1141,7 +1148,7 @@ export interface paths {
         /**
          * Get Agent Inspect Widgets
          * @description The agent's plugin widgets for the inspector panel — the extension
-         *     surface where enabled plugins embed widgets (see `shared/plugin_inspector.py`;
+         *     surface where enabled plugins embed widgets (see `base/packages/plugins/inspector.py`;
          *     registration mirrors the plugin-metric system).
          *
          *     Builds the widget registry in process (shipped builtin plugins'
@@ -1218,7 +1225,7 @@ export interface paths {
          *
          *     One checkpoint segment is built at a time; windowing trims the payload +
          *     the frontend render. A checkpoint read failure renders an empty view + 200
-         *     (cold-load tolerance, see `shared.agents.history.checkpoint`).
+         *     (cold-load tolerance, see `base.agents.history.checkpoint`).
          */
         get: operations["get_timeline_api_agents__agent_id__timeline_get"];
         put?: never;
@@ -1699,81 +1706,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/cluster/stop": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Post Cluster Stop
-         * @description Phase A handler: drain native agent controls while SDK dependencies
-         *     remain available, then stop local services through cluster_stop.
-         */
-        post: operations["post_cluster_stop_api_cluster_stop_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/cluster/resume": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Post Cluster Resume
-         * @description Compensating unpause: restore posture and release native admission holds,
-         *     executed by this host's ops server via a cluster_resume op.
-         *
-         *     Symmetric inverse of `/api/cluster/stop`. The orchestration's failure path
-         *     fans this out (by dialing each host's ops server) to every host it had paused.
-         *     Operators recover a stranded host through `/api/cluster/recover`; this route
-         *     requires the opaque exact capability of the deploy that created the pause.
-         */
-        post: operations["post_cluster_resume_api_cluster_resume_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/cluster/recover": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Post Cluster Recover
-         * @description Operator stranded-cluster recovery — force-clear a pause + update lock left
-         *     behind by a hard-killed rollout, so the UI/SDK unblock and the next rollout can
-         *     run without waiting out the lock TTL.
-         *
-         *     Bypasses the cluster-paused 503 middleware (`/api/cluster/*`), so it is callable
-         *     exactly when the cluster is wedged paused. Refuses (409) if an orchestration is
-         *     actually in flight on this host — recovery is only for the no-session strand.
-         *
-         *     Returns {"unlocked_holder": <prior lock holder or None>}.
-         */
-        post: operations["post_cluster_recover_api_cluster_recover_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/cluster/stopping": {
         parameters: {
             query?: never;
@@ -1799,149 +1731,6 @@ export interface paths {
          *     probes online=True.
          */
         post: operations["post_cluster_stopping_api_cluster_stopping_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/cluster/update": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Post Cluster Update
-         * @description Trigger an update.
-         *
-         *     `target` selects which machine to update (omitted means this host). Either
-         *     way the op POSTs to the target's ops server, which calls cluster_update_op
-         *     in-process there — spawning a detached updater and returning quickly. This
-         *     host is no special case: its own ops server is dialed at its registered
-         *     localhost URL.
-         *
-         *     `target_sha` pins the force-checkout commit (the watchdog off-pin self-heal
-         *     passes the cluster pin so the host converges to exactly it, not the moving
-         *     origin/main tip); threaded into the op payload.
-         *
-         *     Returns the orchestration session name + tee'd log path.
-         *
-         *     503 when the target's ops server is unreachable; 502 when the op ran but
-         *     reported failure (e.g. an updater session already in flight there — the
-         *     caller waits for paused=false then retries).
-         */
-        post: operations["post_cluster_update_api_cluster_update_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/cluster/rollout": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Post Cluster Rollout
-         * @description Launch the whole-cluster `ava cluster update` rollout, detached.
-         *
-         *     Gateway only. Spawns a detached session running the full
-         *     orchestration — Phase A pauses every agent-runner, the gateway stops /
-         *     pulls / syncs / migrates, Phase B fans out the agent-runner self-updates,
-         *     then polls each host back to healthy. Returns 202 immediately; clients
-         *     poll `GET /api/cluster/status` per host to observe progress.
-         *
-         *     Body is fully optional; `origin` (default "user") names the trigger and
-         *     heads the rollout log + the cluster pin's `updated_by`.
-         *
-         *     Returns the orchestration session name + tee'd log path, plus
-         *     `backend_changed` (whether this rollout restarts agent processes) and
-         *     `needs_replay` (whether the installed commit is ahead of the running
-         *     bookmark). The frontend uses the first to describe agent restarts; the CLI
-         *     uses the second to identify a half-deployed state. The SDK initiator that
-         *     once waited on the restart signal, `ava.self.update()`, was removed 2026-08.
-         *
-         *     Errors:
-         *     - 400 if called on an agent-runner (rollout is a gateway operation).
-         *     - 409 if a rollout / update is already in flight.
-         *     - 422 if the cluster is already up to date (behind==0 and no replay is
-         *       needed) — nothing to roll out, so the fleet is not bounced. Use
-         *       /api/cluster/restart to bounce on the current code.
-         *     - 503 if the session backend could not start the orchestration session.
-         */
-        post: operations["post_cluster_rollout_api_cluster_rollout_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/cluster/restart": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Post Cluster Restart
-         * @description Launch a whole-cluster restart (no pull), detached.
-         *
-         *     Gateway only. Same three-phase orchestration as rollout — pause every
-         *     agent-runner, gracefully quiesce agents, bounce this host, fan out the
-         *     agent-runner bounces — but skips git pull / uv sync / migration. Use it to
-         *     apply config changes (or unwedge a service) without changing the checked-out
-         *     code. Returns 202 immediately; clients poll `GET /api/cluster/status`.
-         *
-         *     Body is fully optional; `origin` (default "user") names the trigger and
-         *     heads the restart log.
-         *
-         *     Returns the orchestration session name + tee'd log path.
-         *
-         *     Errors:
-         *     - 400 if called on an agent-runner (restart is a gateway operation).
-         *     - 409 if a restart / rollout / update is already in flight.
-         *     - 503 if the session backend could not start the orchestration session.
-         */
-        post: operations["post_cluster_restart_api_cluster_restart_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/cluster/update-check": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Get Cluster Update Check
-         * @description Read-only preflight for the Update button — how far behind origin/main and
-         *     what a rollout would restart, or whether an interrupted rollout needs replay.
-         *
-         *     Gateway only (it inspects the gateway checkout). Does a
-         *     `git fetch` but never pulls or mutates the tree, so the UI can poll it.
-         *     A clean `behind == 0` → the UI shows "no updates" and does not launch a
-         *     rollout. An installed commit ahead of the running bookmark is instead
-         *     returned as `needs_replay`.
-         */
-        get: operations["get_cluster_update_check_api_cluster_update_check_get"];
-        put?: never;
-        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -2084,9 +1873,9 @@ export interface paths {
          * @description Set or clear a machine's operator staging flag (`is_staging`).
          *
          *     The staging latch is what keeps a registered staging host out of the
-         *     rollout target set — `ava start` on it clears its `stopped_at` like any
-         *     host, and this flag is the exclusion (`shared.machines.list_agent_runners`
-         *     skips is_staging rows). Backed by `shared.machines.set_staging`; the CLI
+         *     agent-runner target set — `ava start` on it clears its `stopped_at` like any
+         *     host, and this flag is the exclusion (`base.cluster.machines.list_agent_runners`
+         *     skips is_staging rows). Backed by `base.cluster.machines.set_staging`; the CLI
          *     verbs `ava cluster mark-staging` / `unmark-staging` call this endpoint.
          */
         post: operations["set_machine_staging_api_cluster_machines__name__staging_post"];
@@ -2168,7 +1957,7 @@ export interface paths {
          *        anyway.
          *     From the latch onward the machine vanishes from the roster / cluster panel /
          *     agents' list_machines, `list_agent_runners()` drops it (no probe, no offline
-         *     alert, rollout skips it) and ordinary spawns targeting it are refused (409).
+         *     alert, cluster fan-outs skip it) and ordinary spawns targeting it are refused (409).
          *     The separate transaction race between the pause latch and creation of a
          *     brand-new agent row is outside this resurrection boundary.
          *
@@ -2207,7 +1996,7 @@ export interface paths {
          *     `register_self()` refreshes its dial URL (its reachable address may have
          *     changed) and clears its `stopped_at` latch. If the machine's reachable
          *     address changed, the gateway's pg_hba must cover the new IP — see the ops checklist in the
-         *     CLI output (`AVA_TRUSTED_CIDRS` + `ava cluster update --restart-only`).
+         *     CLI output (`AVA_TRUSTED_CIDRS`, then `ava restart` on the gateway host).
          *
          *     404 when the row does not exist; idempotent (resumed=False) when the
          *     machine was not paused.
@@ -2322,7 +2111,7 @@ export interface paths {
          *     Omitted `last` returns the configured default count
          *     (``display.config_audit_default_last`` - 20 out of the box); an explicit
          *     `last` stays capped at 200. Records are the raw
-         *     audit-JSONL entries (`shared/env_audit.py`), each tagged with its `machine`;
+         *     audit-JSONL entries (`base/host/env/audit.py`), each tagged with its `machine`;
          *     values were redacted at write time (non-sensitive fields only), and records
          *     from before record v2 lack `actor` / `trace_id` / `changed`.
          */
@@ -2348,7 +2137,7 @@ export interface paths {
          *
          *     Answers "what will an agent on this model actually run with, and which layer
          *     decided that": shared default < per-model default (both code, in
-         *     `shared/lm/registry.py`) < explicit `.env` value. `explain_setting` does the
+         *     `base/lm/registry.py`) < explicit `.env` value. `explain_setting` does the
          *     layering — the same function the runtime resolves through, so this view
          *     cannot drift from the value an agent gets.
          *
@@ -2412,7 +2201,7 @@ export interface paths {
          * Put Default Model
          * @description Set the cluster's default model.
          *
-         *     400 when the id is not a spawnable model in `shared/lm/registry.py:MODELS`.
+         *     400 when the id is not a spawnable model in `base/lm/registry.py:MODELS`.
          *     Takes effect for agents born after the write; every existing agent keeps the
          *     model stamped on its own row.
          */
@@ -3178,7 +2967,7 @@ export interface paths {
          *
          *     `name` is a constant naming the service this route belongs to — the point being
          *     that an impostor answering here reports its own name, or none. No probe reads it
-         *     yet; `shared.daemon_health._probe_home` gains the `name` arm only once every
+         *     yet; `base.daemon.health._probe_home` gains the `name` arm only once every
          *     deployed gateway emits the field, and that ordering is load-bearing (#1038).
          */
         get: operations["get_health_api_health_get"];
@@ -3202,7 +2991,7 @@ export interface paths {
          * @description Pull all data for the sidebar-top stats card in one shot.
          *
          *     Data sources:
-         *     - `live_count`: agents_meta table — all non-terminated agents (running/idling/restarting)
+         *     - `live_count`: agents_meta table — all non-terminated agents (running/idling)
          *     - `tokens` / `cost_usd`: full UTC days from the fleet ledger plus a Loki tail
          *     - average turn duration: Loki's unified event stream in 12-hour shards
          *     - warning/error counts: per-class counts via the resolution daemon's
@@ -3394,7 +3183,7 @@ export interface paths {
          *     `git bundle` of HEAD (full real ancestry, so a bootstrapped machine branch
          *     is a true descendant of `main` and converges cleanly when a memory remote
          *     is configured later). A fresh agent-runner whose memory remote is not
-         *     configured (headless enroll, no GitHub credentials) fetches this over its
+         *     configured (a headless remote runner, no GitHub credentials) fetches this over its
          *     gateway URL and clones it as its initial pool, so the shared index and
          *     notes reach its agents without GitHub. Untracked machine-local paths
          *     (`.cache`, `.githooks`, …) never ride a bundle — git only carries the
@@ -3474,7 +3263,7 @@ export interface paths {
          *     agent — are excluded by default (user ruling 2026-08-09 #1104: terminated
          *     agents never appear in the graph, mirroring the sidebar's agent tree). The
          *     filter ORDER is liveness first: the node set is live-only (`status !=
-         *     'terminated'`, so restarting etc. stay), and edges only ever
+         *     'terminated'`), and edges only ever
          *     connect two live endpoints — a live node whose lineage partner has since
          *     terminated simply renders without that edge. Raw source rows are filtered
          *     during the merge; pass `?include_terminated=true` for the full graph.
@@ -3850,7 +3639,7 @@ export interface components {
          * AdmissionOutcome
          * @enum {string}
          */
-        AdmissionOutcome: "admitted" | "maintenance_hold" | "publication_deferred" | "resource_fence" | "admission_guard_refused";
+        AdmissionOutcome: "admitted" | "maintenance_hold" | "resource_fence" | "admission_guard_refused";
         /**
          * AgentActivity
          * @description Active-rate: the share of an agent's alive wall-clock it spent actively
@@ -4167,7 +3956,7 @@ export interface components {
          *     `source` is required — the SDK passes f"agent:{my_id}", the generated
          *     notices pass shell:N / watcher:N; there is no default to prevent callers
          *     from forgetting and having inbounds silently tagged as "user", muddying
-         *     envelope labels. The valid set is in `shared/agents/messages/envelope.py:validate_source`
+         *     envelope labels. The valid set is in `base/agents/messages/envelope.py:validate_source`
          *     (system / agent:N / user / ui:page:<name> / watcher:N / shell:N /
          *     schedule:N); an illegal source is intercepted by 422 at the HTTP layer —
          *     otherwise it would land in inbound_messages and the agent claim node
@@ -4212,7 +4001,7 @@ export interface components {
          * @description One agent's row in the fleet metrics breakdown — headline counters
          *     aggregated over its events within the report window. `label` is the
          *     agent's display name (None = unset; frontend falls back to "#id").
-         *     `cost_usd` prices each call via `shared.lm.pricing.cost_usd`; calls on an
+         *     `cost_usd` prices each call via `base.lm.pricing.cost_usd`; calls on an
          *     unpriced model contribute 0. `cache_hit_pct` = cached / in * 100 (in=0
          *     degrades to 0). `exec_failed` is every exec outcome other than plain
          *     `exec` — same exec-ok/exec-failed split as the metrics report.
@@ -4304,7 +4093,7 @@ export interface components {
          * AgentRow
          * @description GET /api/agents/{id} detail, including response-required notice bodies.
          *
-         *     The directory and live roster use bounded cards from shared.agent_roster.
+         *     The directory and live roster use bounded cards from base.agents.observation.roster.
          *     last_active_at is the real-activity clock; last_inbound_at is the latest
          *     inbound message clock.
          */
@@ -4392,7 +4181,7 @@ export interface components {
          * AgentStatus
          * @enum {string}
          */
-        AgentStatus: "running" | "idling" | "restarting" | "terminated";
+        AgentStatus: "running" | "idling" | "terminated";
         /**
          * AgentTps
          * @description Token-per-second metrics for one agent — two views of throughput.
@@ -4741,39 +4530,6 @@ export interface components {
             status: "enqueued" | "already_terminated";
         };
         /**
-         * ClusterOpRequest
-         * @description POST /api/cluster/rollout | /api/cluster/restart request body — fully
-         *     optional; a body-less POST uses defaults.
-         *
-         *     `origin` names the trigger, same convention as `resurrected_by`:
-         *     default "user" (the frontend buttons), SDK passes f"agent:{my_id}".
-         *     It heads the rollout/restart log and (rollout only) lands in the
-         *     cluster pin's `updated_by`, so "who moved the cluster" is answerable
-         *     from the log file or the pin row alone.
-         */
-        ClusterOpRequest: {
-            /**
-             * Origin
-             * @default user
-             */
-            origin: string;
-            /**
-             * Mode
-             * @default smooth
-             */
-            mode: string;
-            /**
-             * Force
-             * @default false
-             */
-            force: boolean;
-            /**
-             * Dry Run
-             * @default false
-             */
-            dry_run: boolean;
-        };
-        /**
          * ClusterPanel
          * @description GET /api/status cluster sub-section — multi-machine view.
          *
@@ -4795,15 +4551,8 @@ export interface components {
             current_serve_observability_station: boolean;
             /** Current Paused */
             current_paused: boolean;
-            /** Current Orchestration */
-            current_orchestration?: ("rollout" | "restart" | "update") | null;
             /** Machines */
             machines: components["schemas"]["MachineStatus"][];
-            /** Cluster Target Sha */
-            cluster_target_sha?: string | null;
-            last_update?: components["schemas"]["LastUpdate"] | null;
-            /** Cluster Last Known Good Sha */
-            cluster_last_known_good_sha?: string | null;
         };
         /**
          * ClusterStatus
@@ -4829,9 +4578,6 @@ export interface components {
             paused: boolean;
             /** Paused Reason */
             paused_reason?: ("no_state" | "business_pause" | "maintenance" | "startup") | null;
-            /** Current Orchestration */
-            current_orchestration?: ("rollout" | "restart" | "update") | null;
-            last_updater_outcome?: components["schemas"]["UpdaterOutcome"] | null;
             /** Head Sha */
             head_sha?: string | null;
             /** Running Sha */
@@ -4844,8 +4590,8 @@ export interface components {
             shell_count: number;
             /** Agent Host Online */
             agent_host_online?: boolean | null;
-            /** Watchdog Online */
-            watchdog_online?: boolean | null;
+            /** Supervisor Online */
+            supervisor_online?: boolean | null;
             /**
              * Agent Count
              * @default 0
@@ -4864,22 +4610,6 @@ export interface components {
                 [key: string]: unknown;
             }[];
             resource?: components["schemas"]["ResourceSample"] | null;
-        };
-        /**
-         * ClusterTransitionPayload
-         * @description Exact deploy-lease capability for one stop/resume generation.
-         *
-         *     Both fields are required. A delayed request from generation A must not be
-         *     authorized by whichever generation happens to own the lease when it lands.
-         */
-        ClusterTransitionPayload: {
-            /** Deploy Holder */
-            deploy_holder: string;
-            /**
-             * Deploy Acquired At
-             * Format: date-time
-             */
-            deploy_acquired_at: string;
         };
         /**
          * CommandItem
@@ -4941,7 +4671,7 @@ export interface components {
          * ConfigAuditView
          * @description GET /api/config/audit response — merged `.env`-write audit records, newest first.
          *
-         *     Each record is the raw audit-JSONL entry (`shared/env_audit.py`, record v2:
+         *     Each record is the raw audit-JSONL entry (`base/host/env/audit.py`, record v2:
          *     ts / site / pid / process / cmdline / actor / trace_id / keys_written /
          *     keys_removed / digest_after / changed), tagged with its `machine`. Values were
          *     redacted when the record was written (non-sensitive fields only); records from
@@ -5330,7 +5060,7 @@ export interface components {
          *
          *     Every signal shares this shape (event-system design doc §1): audit
          *     (legacy `event_log`), telemetry and log (formerly `agent_events`) all land
-         *     in it, written through the unified emitter (`shared/telemetry/emitter.py`).
+         *     in it, written through the unified emitter (`base/telemetry/emitter.py`).
          *     `trace_id` is the correlation key — one turn = one trace id, every event
          *     inside it carries the same value. `agent_id` is None for service-level
          *     events (gateway / daemons); `machine` is the host dimension. `level` is
@@ -5531,9 +5261,9 @@ export interface components {
          * @description Idle check-in heartbeat state for one agent — mutually-exclusive display
          *     states the panel renders:
          *
-         *     - idle-family (idling / restarting — the statuses the fleet view
-         *       projects to "Idle") & not paused & no fresh wake queued: `next_at` is
-         *       set — the daemon's projected check-in due time: the later of
+         *     - idling (the status the fleet view projects to "Idle") & not paused & no
+         *       fresh wake queued: `next_at` is set — the daemon's projected check-in due
+         *       time: the later of
          *       `last_active_at + idle_threshold + (id mod JITTER_SPAN_S)` and
          *       `last_heartbeat_at + interval_s` when a prior check-in exists. The daemon
          *       dispatches the actual check-in at its first poll tick at/after that (at
@@ -5541,7 +5271,7 @@ export interface components {
          *       check-in, and never later than what the daemon does. An overdue
          *       projection renders as "due" in the frontend, never as a past time;
          *       everything else off.
-         *     - idle-family & not paused & a *fresh* wake already queued (created within
+         *     - idling & not paused & a *fresh* wake already queued (created within
          *       the daemon's 900s `STALE_PENDING_S` freshness window): `heartbeat_pending`
          *       is True — the daemon suppresses check-ins while a fresh inbound is pending
          *       (its `NOT EXISTS` guard, windowed by `STALE_PENDING_S`), so no future
@@ -5708,7 +5438,7 @@ export interface components {
          *     GET /api/agents/{id}/inspect/widgets.
          *
          *     The resolved twin of a registered `InspectWidgetSpec`
-         *     (`shared/plugin_inspector.py`): `plugin` + `id` name the registration,
+         *     (`base/packages/plugins/inspector.py`): `plugin` + `id` name the registration,
          *     `kind` selects the console renderer (a closed set; an unknown kind is
          *     skipped by the console), and the payload field the kind reads (`tasks`)
          *     carries the kernel-resolved rows. A widget with an empty payload is
@@ -5848,7 +5578,7 @@ export interface components {
          * InventoryWriteRequest
          * @description PUT /api/inventory body. Each half is genuinely optional (the frontend may
          *     toggle only a plugin or only an MCP server), so a missing half defaults to
-         *     empty — not the contract-required-field fallback CLAUDE.md forbids. FastAPI
+         *     empty — not the contract-required-field fallback AGENTS.md forbids. FastAPI
          *     422s a present-but-non-object half before the handler runs.
          */
         InventoryWriteRequest: {
@@ -5902,40 +5632,6 @@ export interface components {
         LastMessageResponse: {
             /** Text */
             text: string | null;
-        };
-        /**
-         * LastUpdate
-         * @description The last cluster update, as served to `ava cluster status` and the frontend.
-         *
-         *     `failed` is computed here rather than in each surface: two consumers deciding
-         *     independently what counts as a failure is how they end up disagreeing, and this
-         *     is the value a banner is switched on.
-         */
-        LastUpdate: {
-            outcome: components["schemas"]["UpdateOutcome"];
-            /** Failed */
-            failed: boolean;
-            /** Target Sha */
-            target_sha?: string | null;
-            /** Origin */
-            origin?: string | null;
-            /** Holder */
-            holder?: string | null;
-            /** Started At */
-            started_at?: string | null;
-            /** Ended At */
-            ended_at?: string | null;
-            /** Failing Step */
-            failing_step?: string | null;
-            /** Observed By */
-            observed_by?: string | null;
-            /**
-             * Pin Advanced
-             * @default false
-             */
-            pin_advanced: boolean;
-            /** Log Path */
-            log_path?: string | null;
         };
         /**
          * LlmBucket
@@ -5995,9 +5691,11 @@ export interface components {
         };
         /**
          * LoginRequest
-         * @description POST /api/auth/login body. `password` is the cluster secret; a missing or
-         *     empty one falls through to the 401 below rather than a 422. `username` is
-         *     accepted for Chrome password-manager compatibility but never validated.
+         * @description POST /api/auth/login body. `password` is the cluster secret (or, for the
+         *     managed browser of an agent-runner, the active generation's runner API
+         *     token); a missing or empty one falls through to the 401 below rather than a
+         *     422. `username` is accepted for Chrome password-manager compatibility but
+         *     never validated.
          */
         LoginRequest: {
             /**
@@ -6128,25 +5826,9 @@ export interface components {
             is_staging: boolean;
             /** Head Sha */
             head_sha?: string | null;
-            /** On Pin */
-            on_pin?: boolean | null;
             /** Running Sha */
             running_sha?: string | null;
             schema_mismatch?: components["schemas"]["SchemaMismatchStatus"] | null;
-            /** Deploy Hold */
-            deploy_hold?: string | null;
-            last_update?: components["schemas"]["LastUpdate"] | null;
-            /** Cluster Last Known Good Sha */
-            cluster_last_known_good_sha?: string | null;
-            /** Stranded Hold Since */
-            stranded_hold_since?: string | null;
-            /** Stranded Hold Reason */
-            stranded_hold_reason?: string | null;
-            /**
-             * Settle Waited On
-             * @default false
-             */
-            settle_waited_on: boolean;
             /**
              * Identity Mismatch
              * @default false
@@ -6159,8 +5841,8 @@ export interface components {
             shell_count: number;
             /** Agent Host Online */
             agent_host_online?: boolean | null;
-            /** Watchdog Online */
-            watchdog_online?: boolean | null;
+            /** Supervisor Online */
+            supervisor_online?: boolean | null;
             /**
              * Agent Count
              * @default 0
@@ -6297,7 +5979,7 @@ export interface components {
          * @description GET /api/memory/note response — one parsed memory note.
          *
          *     Mirrors MemoryGraphNode plus the parsed markdown body. The body is the
-         *     markdown with the YAML frontmatter removed (shared.parse_note's body), so
+         *     markdown with the YAML frontmatter removed (base.parse_note's body), so
          *     the frontend renders the note itself rather than re-parsing frontmatter
          *     (frontmatter values arrive as structured fields: title / description /
          *     tags / timestamp / ava_agent / ava_machine).
@@ -6896,7 +6578,7 @@ export interface components {
          * @description One plugin metric rendered for the inspector surface — an element of
          *     GET /api/agents/{id}/inspect/metrics.
          *
-         *     Mirrors the registered MetricSpec (see `shared/plugin_metrics.py`):
+         *     Mirrors the registered MetricSpec (see `base/telemetry/metrics/plugin_metrics.py`):
          *     `panel` selects the payload — `timeseries` / `barchart` / `table` metrics
          *     carry `series` (a bounded recent window, 24h in 1h buckets by default, so
          *     at most a couple of dozen points), `stat` metrics carry `value` (the
@@ -7073,7 +6755,7 @@ export interface components {
          * ResolvedFieldView
          * @description One per-model-defaultable setting resolved for a specific model.
          *
-         *     The read-only mirror of `shared/lm/registry.py:explain_setting`: the value an
+         *     The read-only mirror of `base/lm/registry.py:explain_setting`: the value an
          *     agent on this model boots with, plus every candidate layer and the name of
          *     the one that won. There is no write path here — an explicit value is edited
          *     as the normal config field of the same `name`, so the panel links back to
@@ -7228,7 +6910,7 @@ export interface components {
          *     composes it into the marker `[system ts] You have been resurrected
          *     by {resurrected_by}` so the agent knows who resurrected it.
          *
-         *     The value must pass `shared.agents.messages.envelope.validate_source` (same check as
+         *     The value must pass `base.agents.messages.envelope.validate_source` (same check as
          *     `AgentMessageIn.source`): the same value becomes the prompt chat
          *     inbound's source, and the claim node's envelope wrap raises on
          *     anything outside the whitelist — killing the freshly resurrected
@@ -7264,7 +6946,7 @@ export interface components {
          *         (LangGraph state preserved; agent wakes up from where it left
          *         off).
          *     `already_alive`: agent is still alive
-         *         (running/idling/restarting); resurrect does
+         *         (running/idling); resurrect does
          *         not apply.
          */
         ResurrectAgentResponse: {
@@ -7732,20 +7414,16 @@ export interface components {
         };
         /**
          * SchemaMismatchStatus
-         * @description One machine's code/schema/pin mismatch and watchdog hold-back.
+         * @description A current schema mismatch, invalid layout, or unavailable comparison.
          */
         SchemaMismatchStatus: {
             /**
              * Kind
              * @enum {string}
              */
-            kind: "pin-behind-schema" | "schema-ahead-of-code" | "schema-behind-code" | "divergent";
+            kind: "schema-ahead-of-code" | "schema-behind-code" | "divergent" | "invalid-migration-layout" | "unavailable";
             /** Machine */
             machine: string;
-            /** Consecutive Blocked Rounds */
-            consecutive_blocked_rounds: number;
-            /** Held Back Services */
-            held_back_services: string[];
             /** Detail */
             detail: string;
         };
@@ -7971,7 +7649,7 @@ export interface components {
          *     The schema does not give prompt_source a default — to avoid the
          *     "caller forgot to pass it and got silently tagged user,
          *     contaminating envelope source" anti-pattern (one of the
-         *     `or default` forms CLAUDE.md prohibits); both kinds of callers must
+         *     `or default` forms AGENTS.md prohibits); both kinds of callers must
          *     explicitly identify themselves.
          */
         SpawnAgentRequest: {
@@ -8689,107 +8367,6 @@ export interface components {
             } | null;
         };
         /**
-         * UpdateCheck
-         * @description `GET /api/cluster/update-check` response — how far the gateway's
-         *     checkout is behind its track target, and which side a pull would restart.
-         *
-         *     `behind` is the commit count from the last fully installed commit to the
-         *     track target. `needs_replay` covers an interrupted installed-versus-running
-         *     transition and a cluster pin that lacks migrations already applied in the
-         *     DB. Either case needs a full rollout even with zero new commits. A running
-         *     commit ahead of installation alone is the normal fast-path state.
-         *
-         *     `frontend_changed` / `backend_changed` mirror `ava cluster update`'s own
-         *     classification so the UI can tell the user what a rollout would actually
-         *     restart (docs-only diffs count as neither — a pull with nothing to restart).
-         */
-        UpdateCheck: {
-            /** Behind */
-            behind: number;
-            /** Frontend Changed */
-            frontend_changed: boolean;
-            /** Backend Changed */
-            backend_changed: boolean;
-            /** Needs Replay */
-            needs_replay: boolean;
-        };
-        /**
-         * UpdateOutcome
-         * @description How the last update ended, as the surfaces need to say it.
-         *
-         *     `CLEAN` / `INCOMPLETE` / `ABORTED` mirror
-         *     `cli.commands._update_recover.RolloutOutcome` — the orchestration's own
-         *     three-way verdict, persisted rather than re-derived, so the banner cannot
-         *     disagree with the rollout log.
-         *
-         *     `RECOVERED` is the fourth terminal state, and it is a distinct one rather than a
-         *     shade of `ABORTED` because it answers a different operator question: the attempt
-         *     failed AND the cluster is already back on a commit that works, so there is
-         *     nothing to repair — only something to know. It is reached three ways, and all
-         *     are real recoveries: the orchestration's own gateway leg rolling back to
-         *     last-known-good (written by `finish_update`), a *later* `ava cluster rollback`
-         *     cleaning up after an orchestration that died (derived by `read_last_update` from
-         *     the observation that rollback left behind), and an incomplete rollout whose
-         *     target becomes last-known-good after the cluster self-heals. Collapsing it into
-         *     `ABORTED` was what made the 2026-07-30 recovery read as an open incident.
-         *
-         *     `RUNNING` and `ORPHANED` are the two readings of a row with no recorded end, and
-         *     they are told apart by the deploy lease rather than by a timeout: a rollout runs
-         *     for as long as it runs (the lease is renewed while it does), so elapsed time
-         *     proves nothing, while the holder having stopped renewing does.
-         * @enum {string}
-         */
-        UpdateOutcome: "clean" | "recovered" | "incomplete" | "aborted" | "running" | "orphaned";
-        /**
-         * UpdaterOutcome
-         * @description How this host's last updater session ended, as far as its log can say.
-         *
-         *     `kind` is the operator-facing distinction:
-         *
-         *     - `declined` — the restart's validate-before-kill preflight refused. **Nothing
-         *       was stopped**: the host is serving its old code, intact, and the next action
-         *       is to fix what the preflight named (usually gateway reachability) and re-run.
-         *     - `exited` — the session ran to its end and reported `rc`. Non-zero means the
-         *       self-update failed after the stop; the host may be half-transitioned.
-         *     - `unknown` — the log is this update's, and carries neither marker. The
-         *       session died mid-flight: every terminal branch on both platforms writes one
-         *       (`native_exit_line`), so reaching an end and saying nothing is no longer a
-         *       thing a healthy run does.
-         *
-         *     `rc` is None whenever no exit line was found. It is a fact about the run, not
-         *     about the platform: a Windows run that got as far as any branch of its ladder
-         *     reports one.
-         */
-        UpdaterOutcome: {
-            /**
-             * Kind
-             * @default unknown
-             */
-            kind: string;
-            /** Rc */
-            rc?: number | null;
-            /**
-             * Detail
-             * @default
-             */
-            detail: string;
-            /**
-             * Log
-             * @default
-             */
-            log: string;
-            /** Stages */
-            stages?: {
-                [key: string]: number;
-            };
-            /** Total S */
-            total_s?: number | null;
-            /** Current Stage */
-            current_stage?: string | null;
-            /** Current Stage S */
-            current_stage_s?: number | null;
-        };
-        /**
          * UploadedBatch
          * @description Result of one upload request — the files saved in a single batch.
          */
@@ -9036,9 +8613,7 @@ export interface operations {
     };
     get_bootstrap_api_bootstrap_get: {
         parameters: {
-            query?: {
-                role?: string | null;
-            };
+            query?: never;
             header?: {
                 authorization?: string | null;
             };
@@ -10784,98 +10359,6 @@ export interface operations {
             };
         };
     };
-    post_cluster_stop_api_cluster_stop_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["ClusterTransitionPayload"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        [key: string]: boolean;
-                    };
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    post_cluster_resume_api_cluster_resume_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["ClusterTransitionPayload"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        [key: string]: boolean;
-                    };
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    post_cluster_recover_api_cluster_recover_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-        };
-    };
     post_cluster_stopping_api_cluster_stopping_post: {
         parameters: {
             query: {
@@ -10906,130 +10389,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    post_cluster_update_api_cluster_update_post: {
-        parameters: {
-            query?: {
-                target?: string | null;
-                target_sha?: string | null;
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            202: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        [key: string]: string;
-                    };
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    post_cluster_rollout_api_cluster_rollout_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: {
-            content: {
-                "application/json": components["schemas"]["ClusterOpRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            202: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        [key: string]: string | boolean;
-                    };
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    post_cluster_restart_api_cluster_restart_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: {
-            content: {
-                "application/json": components["schemas"]["ClusterOpRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            202: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        [key: string]: string;
-                    };
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    get_cluster_update_check_api_cluster_update_check_get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["UpdateCheck"];
                 };
             };
         };

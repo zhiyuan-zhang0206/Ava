@@ -100,7 +100,7 @@ class MemoryNoteResponse(BaseModel):
     """GET /api/memory/note response — one parsed memory note.
 
     Mirrors MemoryGraphNode plus the parsed markdown body. The body is the
-    markdown with the YAML frontmatter removed (shared.parse_note's body), so
+    markdown with the YAML frontmatter removed (base.parse_note's body), so
     the frontend renders the note itself rather than re-parsing frontmatter
     (frontmatter values arrive as structured fields: title / description /
     tags / timestamp / ava_agent / ava_machine).

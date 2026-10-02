@@ -9,10 +9,10 @@ from pathlib import Path
 from typing import NamedTuple
 
 from ava import agent_identity
-from ava.sdk_validation import coerce_str, coerce_typed
+from ava.sdk_surface.validation import coerce_str, coerce_typed
 from ava.security import scan_content
-from shared.paths import workspace_dir
-from shared.platform import CREATE_NO_WINDOW
+from base.native_process.os_platform import CREATE_NO_WINDOW
+from base.paths import workspace_dir
 
 from . import background
 from . import sessions as sessions

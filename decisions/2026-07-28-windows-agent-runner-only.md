@@ -111,3 +111,5 @@ on EVERY platform — not only on the POSIX-only pooler path this cited it for. 
 2026-08-12 that raised `[WinError 87]` out of the middle of win's `ava restart` and
 killed its self-update. Routed through `shared.proc` in the same PR as
 `cli/commands/_installed_sha.py`. -->
+
+Superseded in part by: [decisions/2026-09-28-retire-windows-docker-compose.md](2026-09-28-retire-windows-docker-compose.md) — the compose file kept here for a WSL2 gateway is deleted; that gateway runs the native Linux data plane.

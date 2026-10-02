@@ -15,15 +15,18 @@ from langchain_core.messages import HumanMessage
 from agent.db import ClaimedInbound
 from agent.messages import inbound_message
 from ava.composer_commands import expand_command
-from ava.security import scan_inbound_content
-from shared.agents.messages.envelope import wrap_inbound
-from shared.config import settings
-from shared.log import logger
-from shared.uploads import fetch_upload_b64, parse_upload_url
+from ava.security import SecurityFindingEntry, scan_inbound_content
+from base.agents.messages.envelope import wrap_inbound
+from base.agents.uploads import fetch_upload_b64, parse_upload_url
+from base.log import logger
 
 
-def build_chat_inbound(item: ClaimedInbound) -> HumanMessage:
-    """Build the HumanMessage for a kind='chat' inbound row.
+def build_chat_inbound(item: ClaimedInbound) -> tuple[HumanMessage, SecurityFindingEntry | None]:
+    """Build the HumanMessage for a kind='chat' inbound row, plus its scan finding.
+
+    The second element is the injection-scan finding for the row's text, or None
+    when it is clean (or scanning is disabled). The caller owns delivering it —
+    the claim node appends a SECURITY note right behind the message.
 
     Plain text (no content_blocks payload): a `/<name> ...` composer message is
     expanded here — every command in it, in the order typed — into each
@@ -48,21 +51,20 @@ def build_chat_inbound(item: ClaimedInbound) -> HumanMessage:
     raw_blocks = item.payload.get("content_blocks") if item.payload else None
     if not isinstance(raw_blocks, list):
         raw = expand_command(item.content)
-        if settings.agent.security_scan_enabled:
-            raw = scan_inbound_content(raw, source=scan_src)
+        finding = scan_inbound_content(raw, source=scan_src)
         wrapped = wrap_inbound(raw, item.source, created_at=item.created_at)
-        return inbound_message(
+        message = inbound_message(
             content=wrapped,
             source=item.source,
             inbound_id=item.id,
             created_at=item.created_at,
         )
+        return message, finding
     blocks = cast("list[dict[str, Any]]", raw_blocks)
 
     text = "\n".join(b["text"] for b in blocks if b.get("type") == "text")
     raw_text = expand_command(text)
-    if settings.agent.security_scan_enabled:
-        raw_text = scan_inbound_content(raw_text, source=scan_src)
+    finding = scan_inbound_content(raw_text, source=scan_src)
     wrapped_text = wrap_inbound(raw_text, item.source, created_at=item.created_at)
     content: list[dict[str, Any]] = [{"type": "text", "text": wrapped_text}]
     image_urls: list[str] = []
@@ -91,10 +93,11 @@ def build_chat_inbound(item: ClaimedInbound) -> HumanMessage:
         data_uri = f"data:{mime};base64,{b64}"
         content.append({"type": "image_url", "image_url": {"url": data_uri}})
         image_urls.append(url)
-    return inbound_message(
+    message = inbound_message(
         content=content,
         source=item.source,
         inbound_id=item.id,
         created_at=item.created_at,
         image_urls=image_urls,
     )
+    return message, finding

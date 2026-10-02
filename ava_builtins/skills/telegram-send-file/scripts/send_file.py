@@ -33,7 +33,7 @@ from typing import Any
 
 import httpx
 
-from shared.config import settings
+from base.config import settings
 
 # Telegram's hard cap for documents sent through the Bot API.
 MAX_DOCUMENT_BYTES = 50 * 1024 * 1024

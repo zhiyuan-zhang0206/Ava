@@ -13,7 +13,7 @@ architecture overview (much of it is maintainer ops you can skip).
 hacking on the code:
 
 ```bash
-env -u VIRTUAL_ENV python3 scripts/guard_editable_venv.py .
+env -u VIRTUAL_ENV python3 scripts/host_ops/guard_editable_venv.py .
 env -u VIRTUAL_ENV uv sync    # Python deps + the `ava` CLI into this checkout's .venv
 .venv/bin/pre-commit install --hook-type pre-commit --hook-type pre-push
 ```
@@ -32,7 +32,7 @@ Standard fork-and-PR — use whatever local git setup you like:
 
 1. Fork, branch from `main`, one focused change per PR.
 2. Make the change; run the tests for the area you touched
-   (`.venv/bin/pytest tests/<area>`) and `.venv/bin/pre-commit run --all-files`.
+   (`.venv/bin/pytest tests/<area>`, or the package's own `<pkg>/**/tests/`) and `.venv/bin/pre-commit run --all-files`.
    Heavy checks run at pre-push; see the
    [hook runbook](conventions/runbook.md#git-hooks-pre-commit--pre-push) for
    manual stage invocation and targeted frontend verification.
@@ -41,28 +41,6 @@ Standard fork-and-PR — use whatever local git setup you like:
    be green; the PR then merges through the Trunk queue as a rebase merge
    (linear history, every commit kept — no merge commits, no squash), so
    make each commit stand on its own.
-
-### Merge gate: `qa-approved` label
-
-Every merge through the Trunk queue requires the `qa-approved` label in
-addition to green CI — a PR without it is never merged, even with green CI
-and an enqueued position. The label is applied by the maintainers' QA
-review only:
-
-- **When the label is applied:** QA sets `qa-approved` on a final **PASS** or
-  **PASS with nits** conclusion (nits are tracked on the PR and addressed by
-  the author). **BLOCK** or **CONDITIONAL** conclusions never carry the
-  label, and a later BLOCK removes it immediately.
-- **Who applies it:** QA / maintainers only — authors never self-apply the
-  label.
-- **Stale-PASS discipline:** any new commit after a PASS still requires a
-  delta re-review before the label is (re)applied.
-- **What it does:** the merge condition is green CI **plus**
-  `label=qa-approved`; automated PRs (e.g. Dependabot) are delayed until QA
-  labels them, never broken.
-
-External contributors need do nothing extra: after your PR passes review, a
-maintainer applies the label and the queue merges it.
 
 For a larger change, a description that shows the reviewer *where the critical
 path is* — the file-tree-diff style in

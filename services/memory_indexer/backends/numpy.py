@@ -21,8 +21,8 @@ from collections.abc import Sequence
 import httpx
 import numpy as np
 
+from base.config import settings
 from services.memory_indexer.backends.base import KIND_BODY
-from shared.config import settings
 
 
 class NumPyBackend:

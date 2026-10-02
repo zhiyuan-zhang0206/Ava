@@ -52,7 +52,7 @@ a takeover from an Ava agent goes through the spawn scripts' `--impersonate-self
 
 | If you need to… | Read |
 |---|---|
-| Start/stop/update the cluster, understand cluster/unit/machine model, manage channels, cut releases | [ops](ops/SKILL.md) |
+| Start/stop/update the cluster, understand cluster/unit/machine model, prepare and cut releases | [ops](ops/SKILL.md) |
 | Dispose of dead agents' workspaces — cold-data disposal, tombstone, ledger | [workspace-cleanup](workspace-cleanup/SKILL.md) |
 | Add, list, remove, enable/disable MCP servers | [mcp](mcp/SKILL.md) |
 | Install, upgrade, remove skills & plugins; understand the difference | [packages](packages/SKILL.md) |
@@ -63,8 +63,8 @@ a takeover from an Ava agent goes through the spawn scripts' `--impersonate-self
 
 Cluster + host config cuts across all of these: `ava config get/set/unset`
 reads and writes the cluster's `.env` — the single source of truth for settings
-like the update channel (`AVA_TRACK_BRANCH`). See [ops](ops/SKILL.md) for the
-config-driven surfaces (channels, release cut).
+like the memory pool's tracked branch (`AVA_TRACK_BRANCH`). See [ops](ops/SKILL.md) for the
+config-driven surfaces (fleet update, release cut).
 
 ## Division of Operations and Development
 
@@ -78,7 +78,7 @@ When you face a task related to Ava itself, first determine which category it fa
 Simply put: **Ava Guide = operating system**, **the modification layers = development system**.
 
 Things not handled by this skill:
-- Modifying a line of SDK code and then making the cluster take effect → this is the full process of ava-self-development (PR → CI → merge → `ava cluster update`)
+- Modifying a line of SDK code and then making the cluster take effect → this is the full process of ava-self-development (PR → CI → merge → the operator's `python -m cli.fleet_update`)
 - Directly modifying files in the production checkout and then reloading → **never do this** (there is no "in-process shortcut")
 - Manually using `git checkout` to switch branches in the production checkout → will break the startup of all new agents
 
@@ -93,7 +93,7 @@ Things not handled by this skill:
   Telegram push are *skills / CLI*, not permanent SDK functions: a capability
   earns a short SDK name only by being used often enough to pay for itself.
 - **Changing your own code is not a CLI op.** You never edit the running source
-  and reload it. Code changes go through PR -> CI -> merge -> `ava cluster update`.
+  and reload it. Code changes go through PR -> CI -> merge -> the operator's `python -m cli.fleet_update`.
   That whole flow is its own skill: **ava-self-development**. This guide stops
   at *operating* the deployment; self-modification lives there.
 - **Use the existing primitive.** When you want a deployment to do something,

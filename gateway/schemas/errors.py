@@ -2,7 +2,7 @@
 
 from pydantic import BaseModel
 
-from shared.agents import ErrorReason
+from base.agents import ErrorReason
 
 
 class ErrorEnvelope(BaseModel):

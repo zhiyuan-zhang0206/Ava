@@ -26,10 +26,10 @@ from psycopg_pool import AsyncConnectionPool
 
 from agent import state as _state
 from agent.nodes import BEFORE_LLM, END, NodeName
-from shared.agents.messages.envelope import wrap_inbound
-from shared.context import AvaContext, agent_id_from_config
-from shared.runtime_incarnation import RuntimeIncarnation, current_incarnation
-from shared.turn_identity import hosted_resources_settled
+from base.agents.context import AvaContext, agent_id_from_config
+from base.agents.messages.envelope import wrap_inbound
+from base.native_process.runtime_incarnation import RuntimeIncarnation, current_incarnation
+from base.native_process.turn_identity import hosted_resources_settled
 
 
 async def native_status(agent_id: int) -> dict[str, Any] | None:
@@ -37,7 +37,7 @@ async def native_status(agent_id: int) -> dict[str, Any] | None:
     incarnation = current_incarnation(agent_id)
     if incarnation is None:
         return None
-    from shared.agents.impersonation import native_status as read_status
+    from base.agents.impersonation import native_status as read_status
 
     return await asyncio.to_thread(read_status, agent_id, incarnation)
 
@@ -76,7 +76,7 @@ async def claim_gate(
         return None
     if session["status"] == "requested" and session["automatic"]:
         from agent.impersonation_handoff import start_marker
-        from shared.agents.impersonation import accept
+        from base.agents.impersonation import accept
 
         incarnation = current_incarnation(agent_id)
         assert incarnation is not None  # noqa: S101 — native_status requires it
@@ -165,7 +165,7 @@ async def settle_checkpoint(
         return False
     incarnation = current_incarnation(agent_id)
     assert incarnation is not None  # noqa: S101 — native_status requires it
-    from shared.agents.impersonation import activate, mark_plugin_applied
+    from base.agents.impersonation import activate, mark_plugin_applied
 
     if session["status"] == "accepted":
         if not activate_accepted:
@@ -187,7 +187,7 @@ async def settle_checkpoint(
         session = await asyncio.to_thread(activate, session["id"], incarnation)
     if session["status"] == "active":
         return True
-    from ava.external_state import decode_plugin_delta
+    from ava.external.state import decode_plugin_delta
 
     config: RunnableConfig = {"configurable": {"thread_id": str(agent_id)}}
     snapshot = await graph.aget_state(config)
@@ -205,7 +205,7 @@ async def settle_checkpoint(
         await asyncio.to_thread(mark_plugin_applied, session["id"], version, incarnation)
     if session["automatic"] and session["handoff_applied_at"] is None:
         from agent.impersonation_handoff import deliver_handoff
-        from shared.agents.impersonation import aborted_detail
+        from base.agents.impersonation import aborted_detail
 
         # A supervisor-aborted lease (task #3998) carries its death cause as
         # "aborted: <detail>" in rejection_reason; the end note names it.
@@ -282,7 +282,7 @@ def _spawn_codex_relay(
     discarded because delivery uses the app-server Steer path; stderr flows
     into this process's log.
     """
-    from shared.session_env import forward_env_dict
+    from base.sessions.env_forwarding import forward_env_dict
 
     relay_env = forward_env_dict()
     if codex_home is not None:
@@ -311,12 +311,10 @@ def _spawn_codex_relay(
         start_new_session=True,
         env=relay_env,
     )
-    try:
+    with contextlib.suppress(BrokenPipeError, OSError):  # child already gone; poll reports it
         assert process.stdin is not None  # noqa: S101 — PIPE requested above
         with process.stdin:
             process.stdin.write(relay_token.encode() + b"\n")
-    except (BrokenPipeError, OSError):  # fail-fast-ok: child already gone; poll reports it
-        pass
     return process
 
 
@@ -333,7 +331,7 @@ def _terminate_relay(child: _RelayChild) -> None:
 
 
 def _heartbeat_fresh(heartbeat: datetime | None, *, now: datetime | None = None) -> bool:
-    from shared.agents.impersonation import RELAY_HEARTBEAT_STALE_SECONDS
+    from base.agents.impersonation import RELAY_HEARTBEAT_STALE_SECONDS
 
     current = now or datetime.now(UTC)
     if heartbeat is None:
@@ -353,7 +351,7 @@ def establish_relay(session: dict[str, Any], incarnation: RuntimeIncarnation) ->
     control resumes. A lease that is no longer 'accepted' returns False without
     a transition — someone else already ended it.
     """
-    from shared.agents.impersonation import (
+    from base.agents.impersonation import (
         SESSION_RELAY_PROVIDERS,
         ImpersonationError,
         fail_acceptance,
@@ -364,7 +362,7 @@ def establish_relay(session: dict[str, Any], incarnation: RuntimeIncarnation) ->
     provider = session["relay_provider"]
     if provider in SESSION_RELAY_PROVIDERS:
         if session["automatic"]:
-            from shared.agents.impersonation import native_status as read_status
+            from base.agents.impersonation import native_status as read_status
 
             deadline = time.monotonic() + _RELAY_READY_TIMEOUT_S
             while (
@@ -446,7 +444,7 @@ def _roll_back_relay_failure(
     fail_acceptance: Callable[[str, RuntimeIncarnation, str], dict[str, Any]],
     reason: str,
 ) -> bool:
-    from shared.agents.impersonation import ImpersonationError
+    from base.agents.impersonation import ImpersonationError
 
     with contextlib.suppress(ImpersonationError):
         fail_acceptance(session["id"], incarnation, reason)  # already ended: no-op
@@ -455,14 +453,14 @@ def _roll_back_relay_failure(
 
 def _provider_anchor_states(process_metadata: object) -> list[str]:
     """The lease's recorded provider anchors classified against the live table."""
-    from shared.agents.impersonation import provider_anchor_states
+    from base.agents.impersonation import provider_anchor_states
 
     return provider_anchor_states(process_metadata)
 
 
 def _reprovision_window_active() -> bool:
     """Whether the fresh-start window for the codex re-provision carve-out is open."""
-    from shared.config import settings
+    from base.config import settings
 
     window = float(settings.agent.impersonation_reprovision_window_seconds)
     return window > 0 and (time.monotonic() - _PROCESS_STARTED_MONOTONIC) <= window
@@ -485,7 +483,7 @@ async def _abort_for_death(
     session: dict[str, Any], agent_id: int, component: str, detail: str
 ) -> bool:
     """Stop the lease after a core-component death; emits impersonation_aborted."""
-    from shared.agents.impersonation import ImpersonationError, abort_lease
+    from base.agents.impersonation import ImpersonationError, abort_lease
 
     incarnation = current_incarnation(agent_id)
     if incarnation is None:
@@ -496,7 +494,7 @@ async def _abort_for_death(
         return False
     if ended is None:
         return False
-    from shared.log import logger
+    from base.log import logger
 
     logger.warning(
         "impersonation stopped after a core-component death: {detail}",
@@ -537,7 +535,7 @@ async def supervise_relay(session: dict[str, Any] | None, agent_id: int) -> None
     Only a stale heartbeat escalates: at most one provision write, one relay
     spawn, and the rate-limited failure stamp.
     """
-    from shared.agents.impersonation import (
+    from base.agents.impersonation import (
         ImpersonationError,
         provision_relay,
         record_relay_failure,
@@ -635,7 +633,7 @@ async def supervise_relay(session: dict[str, Any] | None, agent_id: int) -> None
         token,
         spawned_at,
     )
-    from shared.log import logger
+    from base.log import logger
 
     logger.warning(
         "re-provisioning impersonation relay inside the fresh-start window",
@@ -649,8 +647,8 @@ def _stamp_relay_failure(
     agent_id: int,
     record_relay_failure: Callable[[str, RuntimeIncarnation], bool],
 ) -> None:
-    from shared.agents.impersonation import ImpersonationError
-    from shared.log import logger
+    from base.agents.impersonation import ImpersonationError
+    from base.log import logger
 
     incarnation = current_incarnation(agent_id)
     if incarnation is None:

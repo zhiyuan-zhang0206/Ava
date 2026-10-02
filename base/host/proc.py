@@ -1,0 +1,409 @@
+"""Local OS process primitives: the liveness probe, the force-kill, and the
+timeout that actually bounds the work (`run_bounded`).
+
+`process_alive` and `process_cmdline` inspect local processes. A PID from
+another machine is not ours to probe, and PID liveness alone is not identity:
+callers that act on an execution owner must also verify its OS birth evidence.
+
+`run_bounded` is the module's other half and exists because
+`subprocess.run(..., timeout=T)` does not do what its name implies: on expiry
+Python kills the **one** process it spawned and leaves every descendant running.
+Measured consequence on the fleet's Windows agent-runner: 66 orphaned `git.exe`
++ 66 `ssh.exe` + 63 `sh.exe`, because `C:\\Program Files\\Git\\cmd\\git.exe` is a
+thin launcher for the real git — the timeout killed the launcher and the
+three-process tail below it survived. Every Ava-initiated subprocess with a
+timeout should go through `run_bounded` instead, so the bound applies to the
+work rather than to whichever wrapper happened to be on top.
+"""
+
+from __future__ import annotations
+
+import contextlib
+import os
+import signal
+import subprocess
+import time
+from collections.abc import Sequence
+from typing import Any, Literal
+
+import psutil
+
+from base.native_process.os_platform import CREATE_NO_WINDOW, SIGKILL
+from base.native_process.ownership import OwnedProcess, capture_tree
+
+# psutil exceptions that mean "the process is already gone / not ours to touch" —
+# expected during a teardown, not an error: between enumerating a tree and
+# signalling it, any member may exit on its own.
+_GONE = (psutil.NoSuchProcess, psutil.AccessDenied, OSError)
+
+# How long the tree gets between the terminate and the kill. This is NOT
+# politeness — the caller's `timeout` already was all the patience the work
+# gets. It buys exactly one thing: git installs signal handlers that unlink its
+# lockfiles (`.git/index.lock`), so a SIGTERM'd `git pull` leaves a usable repo
+# where a SIGKILL'd one can leave a lock that breaks the next git call. Seconds,
+# not tens of seconds, because the thing we are killing has already proven it
+# does not finish.
+_TERMINATE_GRACE_S = 3.0
+
+# Ceiling on the post-kill reap. A process that survives SIGKILL is in
+# uninterruptible sleep (wedged NFS / a stuck driver) and no amount of waiting
+# will collect it; we log nothing and return rather than hang the caller.
+_REAP_TIMEOUT_S = 5.0
+
+# Ceiling on draining the pipes after the tree is dead. The descendants
+# inherited the write ends, so an un-killable holder would make an unbounded
+# drain the new hang — the whole defect one layer down.
+_DRAIN_TIMEOUT_S = 5.0
+
+# A recorded pid counts as the recorded session only while the live process's
+# start time matches the record — the supervisors' own pid-recycling rule
+# (`posixproc` / the pty backend use this same 2 s tolerance).
+_SESSION_CREATE_TIME_TOLERANCE_S = 2.0
+
+
+def hosting_supervised_session() -> str | None:
+    """The supervised session this process is running INSIDE — the name of a live
+    `$AVA_HOME/run/sessions/<name>.json` record whose pid is this process or one
+    of its ancestors — or None when the lineage is clear.
+
+    The question a host-transition verb must ask before running in-process: the
+    stop leg of a stop/restart kills every service session's whole tree, and
+    agents + their shells are quiesced/reaped with it, so a transition launched
+    from inside one of those trees is killed by its own stop mid-flight
+    (2026-08-12: a host transition run in an agent's pty-hosted background shell
+    died when stopping ava-pty-supervisor force-killed the supervisor's whole
+    tree, stranding the cluster paused with every service down).
+
+    A record whose process is gone, or whose pid the OS recycled onto a
+    different process (start-time mismatch), does not count.
+    """
+    # Function-local: `base.paths` pulls in `base.config` settings and
+    # its session stack, which this leaf module keeps out of its import-time
+    # closure; each call also reads the owners' current bindings.
+    from base.native_process.ownership import stable_create_time
+    from base.paths import run_dir
+    from base.sessions.record import SessionRecord
+
+    try:
+        me = psutil.Process()
+        lineage = {me.pid} | {p.pid for p in me.parents()}
+    except psutil.Error:  # racing our own ancestry going away — no lineage evidence
+        return None
+    for record_path in (run_dir() / "sessions").glob("*.json"):
+        name = record_path.stem
+        record = SessionRecord.read(record_path)
+        if record is None or record.pid not in lineage:
+            continue
+        try:
+            proc = psutil.Process(record.pid)
+            if record.starttime is not None:
+                is_record_process = record.identifies(record.pid) is True
+            else:
+                is_record_process = (
+                    abs(stable_create_time(proc) - record.create_time)
+                    <= _SESSION_CREATE_TIME_TOLERANCE_S
+                )
+            if is_record_process:
+                return name
+        except psutil.Error:
+            continue
+    return None
+
+
+# The entry modules an agent exec-domain session leader runs. Both exec spawn
+# shapes make their root the session leader (`start_new_session`): the
+# protocol-zero spawn runs `agent.exec_child` directly
+# (`agent/graph/exec/_subprocess.py::_spawn`), and the owned protocol spawns
+# `agent.exec_owner_child` as the root (`agent/exec_domain_owner.py`), which
+# runs the same payload via `runpy` in-process. Compared as whole argv
+# elements: the token is one exact argument, never a substring.
+_EXEC_DOMAIN_SESSION_ENTRIES = frozenset({"agent.exec_child", "agent.exec_owner_child"})
+
+
+def hosting_exec_domain() -> str | None:
+    """The agent exec domain this process runs inside — the entry module of this
+    process's session leader (`agent.exec_child` / `agent.exec_owner_child`), or
+    None when this process is not in an exec-domain session.
+
+    Membership, not ancestry: the exec root calls setsid (its spawn passes
+    `start_new_session`), and `ExecProcessDomain.close()` SIGKILLs its process
+    group as the tool call returns, while `sh -c "nohup ava … &"` reparents the
+    child out of any covered lineage WITHOUT leaving the session — the
+    2026-09-12 stranding: a restart that passed the ancestry guard was
+    group-killed mid-drain and left the host paused. The session id is the
+    widest cheap probe: every member still shares it after reparenting, and a
+    member that re-arranged its process group (interactive job control) is
+    refused too — deliberately, because the leg is still tied to an ephemeral
+    call, not only to the kill that call performs. The env marker is not usable
+    for this: `cli.main` clears `AVA_PROCESS_PROFILE` before any dispatch
+    (`docs/history/2026-08-24/cli-full-settings-profile.md`) and session shells
+    carry the exec request/result files and agent id as well, so only the
+    session's identity discriminates (see `hosting_supervised_session` for the
+    hosted-service half of the same refusal).
+
+    A session whose leader already exited reads as None — the argv evidence is
+    gone with it, and the domain's own teardown is already in flight by then.
+    """
+    cmdline = process_cmdline(os.getsid(0))
+    if cmdline is None:
+        return None
+    for argument in cmdline:
+        if argument in _EXEC_DOMAIN_SESSION_ENTRIES:
+            return argument
+    return None
+
+
+def process_alive(pid: int) -> bool:
+    """Liveness probe.
+
+    True if `pid` names a live process; False only on an unambiguous
+    "no such pid". A PermissionError — the pid was recycled and is now owned
+    by another user — counts as alive: we must not declare a row an orphan
+    when its pid maps to *some* running process.
+
+    Uses `os.kill(pid, 0)` (signal 0 — existence test, no signal sent).
+    """
+    try:
+        os.kill(pid, 0)
+        return True
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+
+
+def process_cmdline(pid: int) -> list[str] | None:
+    """The OS-level argv `pid` was exec'd with, or None if it cannot be read.
+
+    None means "no answer", never "no arguments". A pid that is gone, one whose
+    argv this user may not read (a recycled pid now owned by someone else), and a
+    zombie (whose argv the kernel has already released, surfaced as an empty
+    list) all collapse to None, because none of them is evidence about *whose*
+    process the pid is. A caller that must tell "gone" from "alive but opaque"
+    pairs this with `process_alive` — the pair is what `ops.agent_identity` turns
+    into a verdict.
+
+    psutil reads the process table directly and delivers nothing to the target.
+    """
+    try:
+        cmdline = psutil.Process(pid).cmdline()
+    except (psutil.Error, OSError):
+        return None
+    return cmdline or None
+
+
+ChildState = Literal["attached", "detached", "missing", "unverifiable"]
+
+
+def child_state(pid: int, parent_pid: int) -> ChildState:
+    """How live process `pid` reads relative to its expected chain parent.
+
+    The root supervisor's self-check probes each managed child with this:
+    ``attached`` — a genuinely live (zombie ≠ live, the reaper's own rule)
+    direct child of `parent_pid`; ``detached`` — live but parented elsewhere
+    (reparented out of the chain, or the pid was recycled); ``missing`` — no
+    such process, or a corpse awaiting its reaper (neither can serve);
+    ``unverifiable`` — the read itself failed; the answer is never guessed.
+    """
+    try:
+        proc = psutil.Process(pid)
+        status = proc.status()
+        ppid = proc.ppid()
+    except psutil.NoSuchProcess:
+        return "missing"
+    except (psutil.Error, OSError):
+        return "unverifiable"
+    if status == psutil.STATUS_ZOMBIE:
+        return "missing"
+    return "attached" if ppid == parent_pid else "detached"
+
+
+def force_kill(pid: int) -> None:
+    """Force-terminate `pid` (the SIGKILL intent), tolerant of an absent pid.
+
+    A dead/absent pid is a silent no-op —
+    callers force-kill exactly to make a row reach 'terminated', so racing the
+    process's own exit must not raise.
+
+    A pid this user may not signal is a no-op too, and for the same reason as
+    `process_alive` reading it as alive: "could not deliver" is not "did not need
+    to". The caller re-probes and reports the process as a survivor if delivery
+    failed, so an unhandled exception must not interrupt that verification.
+    """
+    try:
+        os.kill(pid, SIGKILL)
+    except (ProcessLookupError, PermissionError):
+        return
+
+
+def request_stop(pid: int) -> None:
+    """Ask `pid` to stop (the SIGTERM intent), tolerant of an absent pid.
+
+    Complements `process_alive` and `force_kill` for callers that first request
+    a graceful stop before escalating to SIGKILL.
+
+    A pid this user may not signal returns quietly, like `force_kill` and for the
+    same reason (see there). The realistic shape is not exotic: a stray from a
+    `sudo`-run instance of this very checkout passes the caller's cmdline ownership
+    check, `process_alive` correctly reads it as alive, and the signal is refused.
+    """
+    try:
+        os.kill(pid, signal.SIGTERM)
+    except (ProcessLookupError, PermissionError):
+        return
+
+
+def _wait_owned(members: list[OwnedProcess], timeout: float) -> list[OwnedProcess]:
+    """Bounded native exit observation; a permission gap remains a survivor."""
+    deadline = time.monotonic() + timeout
+    while True:
+        alive: list[OwnedProcess] = []
+        for identity in members:
+            try:
+                if identity.live():
+                    alive.append(identity)
+            except (psutil.AccessDenied, OSError):
+                alive.append(identity)
+        remaining = deadline - time.monotonic()
+        if not alive or remaining <= 0:
+            return alive
+        members = alive
+        time.sleep(min(0.02, remaining))
+
+
+def kill_process_tree(
+    pid: int, *, grace_s: float = _TERMINATE_GRACE_S, include_root: bool = True
+) -> None:
+    """Take down `pid` **and every descendant**: terminate the tree, wait up to
+    `grace_s`, then hard-kill whatever is still standing. A pid that is already
+    gone is a no-op.
+
+    With ``include_root=False``, capture and terminate only descendants. This
+    lets a hard-exiting owner clean up its children without signalling itself
+    or its process group (which may also contain its PTY shell).
+
+    Escalation (terminate → wait → kill) rather than a straight kill for one
+    reason only, spelled out at `_TERMINATE_GRACE_S`: git unlinks its lockfiles
+    from a signal handler. Nothing here waits on the tree's cooperation — the
+    kill is attempted after `grace_s` for surviving identities.
+
+    The descendant set is enumerated **once, up front, while the parent is still
+    alive**. Walking down from a dead parent is not possible: psutil resolves
+    children by ppid, so the link is lost after reparenting. Only the root is
+    signalled last when included.
+
+    Limitation worth knowing: a descendant that has already double-forked away
+    (reparented to init) is not in the ppid walk and is not reached. git and ssh
+    do not do that, so the measured leak shape is covered; a process supervisor
+    is not something to bound with a timeout in the first place. We also
+    conservatively skip members whose identity or ancestry no longer matches
+    before the first signal pass. Birth identity is rechecked before KILL;
+    reparenting caused by our own TERM pass does not exempt survivors.
+    """
+    try:
+        parent = OwnedProcess.capture(psutil.Process(pid))
+        members = list(capture_tree(parent) - {parent})
+        if include_root:
+            members.append(parent)
+    except psutil.NoSuchProcess:
+        return
+
+    for identity in members:
+        # A member that exited between enumeration and this line is the normal
+        # case, not a failure — that race is the whole reason the set is
+        # snapshotted rather than re-walked.
+        with contextlib.suppress(*_GONE):
+            identity.send_signal(signal.SIGTERM)
+    alive = _wait_owned(members, grace_s)
+    if not alive:
+        return
+    for identity in alive:
+        with contextlib.suppress(*_GONE):
+            identity.send_signal(SIGKILL)
+    _wait_owned(alive, _REAP_TIMEOUT_S)
+
+
+def run_bounded(
+    argv: Sequence[str],
+    *,
+    timeout: float,
+    capture_output: bool = False,
+    input: bytes | str | None = None,  # mirrors subprocess.run's own parameter name
+    **popen_kwargs: object,
+) -> subprocess.CompletedProcess[Any]:  # str or bytes, decided by the caller's `text=`
+    """`subprocess.run` whose timeout bounds the **work**, not just the process
+    Python spawned: on expiry the whole tree dies (`kill_process_tree`) before
+    `TimeoutExpired` propagates.
+
+    Drop-in for the `subprocess.run(argv, timeout=..., check=False)` shape:
+    `capture_output` and `input` are honoured, everything else is passed
+    through to `Popen` (`cwd`, `text`, `env`, …). There is deliberately no
+    `check=` — this returns the `CompletedProcess` and the caller reads
+    `returncode`, so a non-zero exit can never be confused with the timeout
+    path.
+
+    `TimeoutExpired` is raised exactly as `subprocess.run` raises it, carrying
+    whatever output was captured before the bound tripped: a caller that treats a
+    timeout as a failed fetch keeps working unchanged. This fixes the leak, not
+    the control flow.
+
+    Raises:
+        subprocess.TimeoutExpired: the tree did not finish within `timeout`. It
+            is dead by the time this is raised.
+    """
+    if capture_output:
+        if "stdout" in popen_kwargs or "stderr" in popen_kwargs:
+            raise ValueError("capture_output=True is exclusive with stdout / stderr")
+        popen_kwargs["stdout"] = subprocess.PIPE
+        popen_kwargs["stderr"] = subprocess.PIPE
+
+    if input is not None:
+        if popen_kwargs.get("stdin") is not None:
+            raise ValueError("stdin and input arguments may not both be used")
+        popen_kwargs["stdin"] = subprocess.PIPE
+
+    if "creationflags" not in popen_kwargs:
+        popen_kwargs["creationflags"] = CREATE_NO_WINDOW
+
+    proc = subprocess.Popen(argv, **popen_kwargs)  # type: ignore[call-overload]  # noqa: S603 — argv is list-form, callers pass fixed argv
+    try:
+        # Keep the no-input call shape exactly `communicate(timeout=timeout)`
+        # for callers that never asked to feed stdin.
+        stdout, stderr = (
+            proc.communicate(timeout=timeout)
+            if input is None
+            else proc.communicate(input, timeout=timeout)
+        )
+    except subprocess.TimeoutExpired as exc:
+        kill_process_tree(proc.pid)
+        # The pipes' write ends were inherited by the descendants, so this drain
+        # only terminates because they are dead — bounded anyway, because an
+        # un-killable holder would otherwise make the drain the new unbounded
+        # wait (the same defect, one layer down). `exc` already carries whatever
+        # was buffered before the bound tripped, so a drain that times out keeps
+        # that partial output.
+        with contextlib.suppress(subprocess.TimeoutExpired):
+            exc.stdout, exc.stderr = proc.communicate(timeout=_DRAIN_TIMEOUT_S)
+        raise
+    except BaseException:  # KeyboardInterrupt / cancellation must not leak a tree either
+        kill_process_tree(proc.pid)
+        proc.poll()  # Native liveness observes exit; Popen still owns reaping.
+        raise
+    return subprocess.CompletedProcess(argv, proc.returncode, stdout, stderr)
+
+
+def timeout_stderr_tail(exc: subprocess.TimeoutExpired, *, lines: int = 3) -> str:
+    """The last `lines` non-empty stderr lines a timed-out child wrote, as text.
+
+    A `run_bounded` timeout's `TimeoutExpired` carries whatever the child wrote
+    before the bound tripped (the pipes are drained after the tree kill) — the
+    "where was it when it died" evidence a bare timeout message drops. Bytes or
+    None are normalized so callers can log/return the tail without type games:
+    a fetch killed before ssh/git printed anything yields an empty string, which
+    is itself the evidence that it died in the local/connect phase rather than
+    mid-transfer (2026-08-27 win/wsl fetch forensics).
+    """
+    raw: str | bytes | None = exc.stderr
+    if isinstance(raw, bytes):
+        raw = raw.decode("utf-8", errors="replace")
+    return " | ".join((raw or "").strip().splitlines()[-lines:])

@@ -94,7 +94,7 @@ startup, plus alerts when the probe itself fails):
   first (or read the remote ref) — a stale copy reads exactly like "no
   change".
 - **Protect the wake delivery across a restart window.** A gateway / agent
-  restart window (an update wave, `ava cluster update`) refuses connections
+  restart window (an update wave, the fleet update) refuses connections
   for minutes; a bare `send_message` exhausts the SDK's own 3 quick retries
   and the raised exception kills the watcher — the wake is lost silently.
   When the wake must not be lost, retry delivery with growing gaps and fail
@@ -187,7 +187,7 @@ terminating.
 
 ## See also
 
-This skill's own `reference/watch_idle.py` is a ready-made watcher that wakes
+This skill's own `scripts/watch_idle.py` is a ready-made watcher that wakes
 you when a target agent goes idle. Delivery retries across a gateway / agent
 restart window, and if every attempt fails the watcher exits 2, so the loss
 surfaces in its exit notice.
@@ -198,5 +198,5 @@ supervise a worker toward a goal across many turns.
 The `ava-dynamic-workflow` skill builds on it the other way: its workers finish
 silently (write a result file, terminate), and a watcher — one **checkpoint**
 per place the orchestrator wants to wake, not one per worker — reports the
-whole batch in a single message. Its `reference/gather_files.py` is a ready-made
+whole batch in a single message. Its `references/gather_files.py` is a ready-made
 watcher for that: wake when the named files have landed, or at K of N.

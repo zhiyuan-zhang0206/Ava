@@ -7,20 +7,60 @@ import faulthandler
 import logging
 import os
 import signal
+import socket
+import sys
 from contextlib import suppress
 from typing import Any
 
 import uvicorn
+from uvicorn.config import STARTUP_FAILURE
 
-from shared.config import settings
-from shared.log import init_gateway_process
-from shared.machine import is_gateway
-from shared.migrations import assert_schema_current
-from shared.platform import raise_fd_limit
-from shared.transport_encryption import verify_transport_encryption
+from base.cluster.machine import is_gateway
+from base.cluster.transport_encryption import verify_transport_encryption
+from base.config import settings
+from base.db.code_version_gate import raise_min_code_version
+from base.deploy.schema.migrations import assert_schema_current
+from base.log import init_gateway_process
+from base.native_process.os_platform import raise_fd_limit
+from gateway.middleware import stopping
 
 _log = logging.getLogger(__name__)
 _GATEWAY_UVICORN_WORKERS = 1
+
+
+class GatewayServer(uvicorn.Server):
+    """uvicorn's server, marking its shutdown for long-lived streams as it begins.
+
+    uvicorn cancels an unfinished response only when `timeout_graceful_shutdown`
+    runs out, so an SSE stream that never ends by itself holds every stop for that
+    whole budget (and ava-root's window for this unit is derived from it). Marking
+    the shutdown first lets the streams end within one poll tick; the budget stays
+    the bound for whatever does not end.
+    """
+
+    async def shutdown(self, sockets: list[socket.socket] | None = None) -> None:
+        stopping.mark_stopping()
+        await super().shutdown(sockets)
+
+
+def serve(kwargs: dict[str, Any]) -> None:
+    """`uvicorn.run` with the gateway's own server class.
+
+    `uvicorn.run` always builds the stock `Server`, so this is its single-worker
+    path with `GatewayServer`, including the startup-failure exit code root's
+    restart policy reads. Hot reload (dev only) keeps `uvicorn.run`: its reloader
+    builds its own server in a child process.
+    """
+    if kwargs["reload"]:
+        uvicorn.run(**kwargs)
+        return
+    config = uvicorn.Config(**kwargs)
+    config.load_app()
+    server = GatewayServer(config)
+    with suppress(KeyboardInterrupt):
+        server.run()
+    if not server.started:
+        sys.exit(STARTUP_FAILURE)
 
 
 def main() -> None:
@@ -49,6 +89,13 @@ def main() -> None:
 
     init_gateway_process()
 
+    # Raise the cluster's minimum code version to this gateway's own: a process
+    # left running older code (a runner offline during the update) then refuses
+    # to write. After the schema assertion and the logger init, so a refusal or
+    # a failure is logged; a runner's local gateway holds no write on the row.
+    if is_gateway():
+        raise_min_code_version()
+
     # Thread dump on SIGUSR1: the watchdog's gateway healthcheck sends this
     # before respawning a frozen gateway, so a stall lands a stack trace in
     # the pane log instead of a silent black box (2026-08-03: 13 freezes in
@@ -66,7 +113,7 @@ def main() -> None:
     #   clients (healthchecks, SDK) outright — verified on macOS.
     #   A no-secret gateway binds 127.0.0.1 instead: its API is unauthenticated,
     #   and the no-secret posture is single-box (the data plane is loopback-only
-    #   too — `_bind_addrs`), so an all-interfaces bind would expose the
+    #   too — `port_preflight.bind_addrs`), so an all-interfaces bind would expose the
     #   unauthenticated API to the LAN.
     # - **agent-runner**: 127.0.0.1. The gateway does not reach an
     #   agent-runner's gateway directly — gateway→agent-runner RPC goes
@@ -79,7 +126,7 @@ def main() -> None:
     # multiprocessing.spawn, and the worker's `PPID=1` is fully detached
     # from the session: when the session closes the worker does
     # not die, leaving a zombie holding :8000; the next graceful kill on
-    # ava cluster update cannot catch it, and the new gateway boot gets
+    # a fleet update cannot catch it, and the new gateway boot gets
     # [Errno 48] Address already in use. For dev hot-reload, set
     # AVA_GATEWAY_RELOAD=1 (usually in a dev clone's .env or shell). Reload
     # mode binds through uvicorn's own bind_socket, which maps "" to a
@@ -87,21 +134,21 @@ def main() -> None:
     # IPv6 dial instantly.
     host = "" if is_gateway() and settings.data_plane.cluster_secret else "127.0.0.1"
     if host != "127.0.0.1":
-        verify_transport_encryption(settings.data_plane.cluster_secret, host)
+        verify_transport_encryption(host, authenticated=bool(settings.data_plane.cluster_secret))
     if _GATEWAY_UVICORN_WORKERS != 1:
         raise RuntimeError(
             "gateway must run one uvicorn worker because rate limiters are process-local"
         )
     _log.warning("gateway starts with one uvicorn worker because rate limiters are process-local")
-    uvicorn.run(**serve_kwargs(host=host))
+    serve(serve_kwargs(host=host))
 
 
 def serve_kwargs(*, host: str, app: str = "gateway.app:app") -> dict[str, Any]:
     """Assemble the uvicorn launch parameters for the gateway ASGI server.
 
     The single assembly point of the launch contract: ``main()`` hands the dict
-    straight to ``uvicorn.run``, and the shutdown regression
-    (``tests/gateway/test_server_shutdown.py``) starts a real child-process
+    straight to ``serve``, and the shutdown regression
+    (``gateway/tests/test_server_shutdown.py``) starts a real child-process
     server from the same dict — only the bind address, the app path and the
     port are swapped — so a field dropped here (in particular
     ``timeout_graceful_shutdown``) fails a real server, not just a mock.
@@ -120,7 +167,7 @@ def serve_kwargs(*, host: str, app: str = "gateway.app:app") -> dict[str, Any]:
         "host": host,
         "port": settings.gateway.gateway_port,
         "reload": reload,
-        "reload_dirs": ["gateway", "shared", "ava", "agent"] if reload else None,
+        "reload_dirs": ["gateway", "base", "ava", "agent"] if reload else None,
         # log_config=None: uvicorn's default LOGGING_CONFIG dictConfig would
         # clobber the root-handler install (`_StdlibInterceptHandler`) that
         # init_gateway_process set up above, sending uvicorn's own records

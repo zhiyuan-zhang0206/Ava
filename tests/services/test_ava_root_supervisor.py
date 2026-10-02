@@ -1,794 +1,778 @@
-"""services.ava_root.supervisor: the supervise loop over real subprocesses.
-
-Every test drives real child processes through the supervisor: bring-up,
-subtree verbs, restart policies with backoff, the start-new-before-stop-old
-replacement, the reap path, and the chain assertions (a unit's parent must
-stay this process — no double-fork, no detaching).
-"""
+"""Root ownership against real disposable processes; no service/helper jobs."""
 
 from __future__ import annotations
 
 import asyncio
-import json
+import contextlib
 import os
-import signal
 import subprocess
 import sys
-import time
-from collections.abc import AsyncIterator, Awaitable, Callable
-from contextlib import suppress
+from functools import partial
 from pathlib import Path
 from typing import Any, cast
 
+import psutil
 import pytest
 
-from services.ava_root.handoff import HandoffFile, HandoffUnit
-from services.ava_root.manifest import (
-    DesiredState,
-    RestartPolicy,
-    UnitManifest,
-    UnitRegistry,
-    UnknownUnitError,
-)
+from base.native_process.ownership import OwnedProcess
+from services.ava_root.inputs import InputSeal
+from services.ava_root.manifest import RestartPolicy, UnitManifest, UnitRegistry
 from services.ava_root.supervisor import Supervisor, SupervisorConfig
 
 
-def _python(code: str) -> list[str]:
-    return [sys.executable, "-u", "-c", code]
+def root(tmp_path: Path, code: str, *, env: tuple[tuple[str, str], ...] = ()) -> Supervisor:
+    unit = UnitManifest(
+        "worker", (sys.executable, "-u", "-c", code), RestartPolicy.ALWAYS, "root", env
+    )
+    return Supervisor(
+        UnitRegistry([unit]), run_dir=tmp_path, config=SupervisorConfig(stop_timeout_s=0.2)
+    )
 
 
-_SLEEP_FOREVER = _python("import time; time.sleep(60)")
+async def row(owner: Supervisor) -> dict[str, Any]:
+    return cast("list[dict[str, Any]]", (await owner.status())["units"])[0]
 
 
-def _exit_now(code: int) -> list[str]:
-    return _python(f"import sys; sys.exit({code})")
-
-
-def _unit(
-    unit_id: str,
-    cmd: list[str],
-    *,
-    attach: str = "root",
-    restart: str = "always",
-) -> UnitManifest:
-    return UnitManifest(id=unit_id, exec=tuple(cmd), restart=RestartPolicy(restart), attach=attach)
-
-
-def _make(units: list[UnitManifest], run_dir: Path, **cfg: float) -> Supervisor:
-    return Supervisor(UnitRegistry(units), run_dir=run_dir, config=SupervisorConfig(**cfg))
-
-
-StartFactory = Callable[..., Awaitable[Supervisor]]
-
-
-@pytest.fixture
-async def started(short_tmp: Path) -> AsyncIterator[StartFactory]:
-    """Factory: start a supervisor; every tree it made is torn down at test end."""
-    created: list[Supervisor] = []
-
-    async def factory(units: list[UnitManifest], **cfg: float) -> Supervisor:
-        supervisor = _make(units, short_tmp, **cfg)
-        created.append(supervisor)
-        await supervisor.start()
-        return supervisor
-
-    yield factory
-    for supervisor in created:
-        await supervisor.shutdown()
-
-
-async def _unit_status(supervisor: Supervisor, unit_id: str) -> dict[str, object]:
-    status = await supervisor.status()
-    units = cast("list[dict[str, object]]", status["units"])
-    for entry in units:
-        if entry["id"] == unit_id:
-            return entry
-    raise AssertionError(f"unit {unit_id!r} missing from status")
-
-
-async def _wait_until(predicate: Callable[[], Awaitable[bool]], *, timeout: float = 3.0) -> None:
-    deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
-        if await predicate():
+async def wait_file(path: Path) -> None:
+    for _ in range(100):
+        if path.exists():
             return
         await asyncio.sleep(0.02)
-    raise AssertionError("condition not met before the deadline")
+    raise AssertionError(f"child did not write {path}")
 
 
-async def _assert_dead(pid: int, *, timeout: float = 3.0) -> None:
-    """The pid is gone from the process table (killed and reaped)."""
-
-    async def gone() -> bool:
-        try:
-            os.kill(pid, 0)
-        except ProcessLookupError:
-            return True
-        return False
-
-    await _wait_until(gone, timeout=timeout)
-
-
-def _ppid(pid: int) -> int:
-    out = subprocess.run(  # noqa: S603 — fixed system tool, literal argv, no shell
-        ["ps", "-o", "ppid=", "-p", str(pid)],
-        capture_output=True,
-        text=True,
-        check=True,
+async def test_parent_birth_and_private_environment_are_retained(tmp_path: Path) -> None:
+    output = tmp_path / "environment"
+    owner = root(
+        tmp_path,
+        f"import os,pathlib,time; pathlib.Path({str(output)!r}).write_text(os.environ['ROOT_TEST']); time.sleep(60)",
+        env=(("ROOT_TEST", "projected"),),
     )
-    return int(out.stdout.strip())
+    await owner.start()
+    try:
+        await wait_file(output)
+        unit = await row(owner)
+        assert psutil.Process(unit["pid"]).ppid() == os.getpid()
+        assert isinstance(unit["create_time"], float)
+        assert output.read_text() == "projected"
+        assert "projected" not in str(await owner.status())
+        assert (tmp_path / "custody/worker.json").exists()
+    finally:
+        await owner.shutdown()
+    assert not list((tmp_path / "custody").iterdir())
 
 
-async def test_start_brings_up_tree_with_intact_parent_chain(
-    started: StartFactory,
+async def test_up_is_idempotent_and_restart_stops_previous_generation(tmp_path: Path) -> None:
+    owner = root(tmp_path, "import time; time.sleep(60)")
+    await owner.start()
+    try:
+        original = (await row(owner))["pid"]
+        await owner.up("worker")
+        assert (await row(owner))["pid"] == original
+        await owner.restart("worker")
+        assert (await row(owner))["pid"] != original
+        assert not psutil.pid_exists(original)
+    finally:
+        await owner.shutdown()
+
+
+@pytest.mark.parametrize("change", ["bytes", "added-file", "removed-file"])
+async def test_restart_refuses_changed_inputs_before_native_birth(
+    tmp_path: Path, change: str
 ) -> None:
-    supervisor = await started(
-        [
-            _unit("parent", _SLEEP_FOREVER),
-            _unit("child", _SLEEP_FOREVER, attach="parent"),
-        ]
+    config = tmp_path / "config"
+    config.mkdir()
+    value = config / "value"
+    value.write_text("admitted")
+    output = tmp_path / "read-config"
+    unit = UnitManifest(
+        "worker",
+        (
+            sys.executable,
+            "-c",
+            # Rename into place: the waiter polls for existence, not content.
+            f"import pathlib,time; t=pathlib.Path({str(output)!r} + '.tmp'); t.write_text(pathlib.Path({str(value)!r}).read_text()); t.replace({str(output)!r}); time.sleep(60)",
+        ),
+        RestartPolicy.ALWAYS,
+        "root",
+        inputs=(InputSeal.capture(config),),
     )
-    parent = await _unit_status(supervisor, "parent")
-    child = await _unit_status(supervisor, "child")
-    assert parent["state"] == "running"
-    assert child["state"] == "running"
-    parent_pid = cast(int, parent["pid"])
-    child_pid = cast(int, child["pid"])
-    # I2: both generations are plain children of this process — no double-fork,
-    # no new session; the chain is not truncated anywhere below the root.
-    assert _ppid(parent_pid) == os.getpid()
-    assert _ppid(child_pid) == os.getpid()
-    # setsid would leave the ppid intact but detach the unit from this
-    # process's session — also forbidden by I2, so pin it explicitly.
-    assert os.getsid(parent_pid) == os.getsid(0)
-    assert os.getsid(child_pid) == os.getsid(0)
-    # Unit output is captured under the run directory.
-    assert (Path(supervisor._log_dir) / "parent" / "output.log").exists()
+    owner = Supervisor(UnitRegistry([unit]), run_dir=tmp_path / "root")
+    await owner.start()
+    try:
+        await wait_file(output)
+        assert output.read_text() == "admitted"
+        original = (await row(owner))["pid"]
+        if change == "bytes":
+            value.write_text("unapproved")
+        elif change == "added-file":
+            (config / "new-rule").write_text("unapproved")
+        else:
+            value.unlink()
+        output.unlink()
+        await owner.restart("worker")
+        current = await row(owner)
+        assert current["state"] == "stopped"
+        assert "service input changed" in current["last_error"]
+        assert not psutil.pid_exists(original)
+        assert not output.exists()
+        assert not list((tmp_path / "root/custody").glob("*.json"))
+        value.write_text("admitted")
+        (config / "new-rule").unlink(missing_ok=True)
+        await owner.up("worker")
+        await wait_file(output)
+        assert output.read_text() == "admitted"
+    finally:
+        await owner.shutdown()
 
 
-async def test_up_is_idempotent(started: StartFactory) -> None:
-    supervisor = await started([_unit("svc", _SLEEP_FOREVER)])
-    before = await _unit_status(supervisor, "svc")
-    response = await supervisor.up("svc")
-    units = cast("list[dict[str, object]]", response["units"])
-    assert [u["action"] for u in units] == ["already-running"]
-    after = await _unit_status(supervisor, "svc")
-    assert after["pid"] == before["pid"]
-
-
-async def test_down_stops_subtree_children_first(started: StartFactory) -> None:
-    supervisor = await started(
-        [
-            _unit("parent", _SLEEP_FOREVER),
-            _unit("child", _SLEEP_FOREVER, attach="parent"),
-        ]
+async def test_graceful_timeout_retains_scope_until_explicit_force(tmp_path: Path) -> None:
+    ready = tmp_path / "ready"
+    owner = root(
+        tmp_path,
+        f"import signal,pathlib,time; signal.signal(signal.SIGTERM,signal.SIG_IGN); pathlib.Path({str(ready)!r}).touch(); time.sleep(60)",
     )
-    child_pid = cast(int, (await _unit_status(supervisor, "child"))["pid"])
-    response = await supervisor.down("parent")
-    units = cast("list[dict[str, object]]", response["units"])
-    # Children before parents — the reverse of the startup order.
-    assert [u["id"] for u in units] == ["child", "parent"]
-    assert [u["action"] for u in units] == ["stopped", "stopped"]
-    for entry in units:
-        assert entry["state"] == "stopped"
-        assert entry["pid"] is None
-    await _assert_dead(child_pid)
-    assert (await _unit_status(supervisor, "parent"))["state"] == "stopped"
+    await owner.start()
+    await wait_file(ready)
+    pid = (await row(owner))["pid"]
+    try:
+        with pytest.raises(RuntimeError, match="ownership retained"):
+            await owner.down("worker")
+        assert psutil.pid_exists(pid)
+        assert (tmp_path / "custody/worker.json").exists()
+    finally:
+        await owner.down("worker", force=True)
+        await owner.shutdown()
+    assert not psutil.pid_exists(pid)
+    assert not list((tmp_path / "custody").iterdir())
 
 
-async def test_down_keeps_units_stopped_until_up(started: StartFactory) -> None:
-    """An explicit down holds even for restart=always — no resurrection."""
-    supervisor = await started([_unit("svc", _SLEEP_FOREVER)], backoff_base_s=0.05)
-    await supervisor.down("svc")
-    await asyncio.sleep(0.3)
-    assert (await _unit_status(supervisor, "svc"))["state"] == "stopped"
-    response = await supervisor.up("svc")
-    units = cast("list[dict[str, object]]", response["units"])
-    assert [u["action"] for u in units] == ["started"]
+async def test_stop_closes_captured_descendant_after_leader_exits(tmp_path: Path) -> None:
+    child_file = tmp_path / "child"
+    code = f"import subprocess,sys,pathlib,time; child=subprocess.Popen([sys.executable,'-c','import time; time.sleep(60)']); pathlib.Path({str(child_file)!r}).write_text(str(child.pid)); time.sleep(60)"
+    owner = root(tmp_path, code)
+    await owner.start()
+    await wait_file(child_file)
+    child = psutil.Process(int(child_file.read_text()))
+    await owner.down("worker")
+    assert not child.is_running() or child.status() == psutil.STATUS_ZOMBIE
+    assert not list((tmp_path / "custody").iterdir())
+    await owner.shutdown()
 
 
-async def test_restart_always_restarts_after_crash(started: StartFactory) -> None:
-    supervisor = await started([_unit("svc", _exit_now(1), restart="always")], backoff_base_s=0.02)
-    first = cast(int, (await _unit_status(supervisor, "svc"))["pid"] or 0)
+def exits_on(trigger: Path, before: str = "pass") -> str:
+    """Unit code that runs `before`, then exits once the test creates `trigger`.
 
-    async def restarted() -> bool:
-        entry = await _unit_status(supervisor, "svc")
-        return cast(int, entry["restart_count"]) >= 1
-
-    await _wait_until(restarted)
-    entry = await _unit_status(supervisor, "svc")
-    assert entry["state"] == "running"
-    assert entry["pid"] != first
-
-
-async def test_restart_never_holds_stopped(started: StartFactory) -> None:
-    supervisor = await started([_unit("svc", _exit_now(3), restart="never")], backoff_base_s=0.02)
-
-    async def stopped() -> bool:
-        return (await _unit_status(supervisor, "svc"))["state"] == "stopped"
-
-    await _wait_until(stopped)
-    await asyncio.sleep(0.15)
-    entry = await _unit_status(supervisor, "svc")
-    assert entry["restart_count"] == 0
-    assert entry["last_exit"] == "exit 3"
-
-
-async def test_restart_on_failure_clean_exit_holds(started: StartFactory) -> None:
-    supervisor = await started(
-        [_unit("svc", _exit_now(0), restart="on-failure")], backoff_base_s=0.02
+    A unit that exits at once can be reaped before root reads its birth; these
+    tests inspect or rewrite that birth, so each creates `trigger` only after
+    `start()` has returned.
+    """
+    return (
+        f"import pathlib,sys,time\n{before}\n"
+        "deadline=time.monotonic()+30\n"
+        f"while not pathlib.Path({str(trigger)!r}).exists():\n"
+        "    if time.monotonic()>deadline: sys.exit(1)\n"
+        "    time.sleep(0.01)\n"
     )
 
-    async def stopped() -> bool:
-        return (await _unit_status(supervisor, "svc"))["state"] == "stopped"
 
-    await _wait_until(stopped)
-    await asyncio.sleep(0.15)
-    assert (await _unit_status(supervisor, "svc"))["restart_count"] == 0
-
-
-async def test_restart_on_failure_nonzero_restarts(started: StartFactory) -> None:
-    supervisor = await started(
-        [_unit("svc", _exit_now(2), restart="on-failure")], backoff_base_s=0.02
-    )
-
-    async def restarted() -> bool:
-        entry = await _unit_status(supervisor, "svc")
-        return cast(int, entry["restart_count"]) >= 1
-
-    await _wait_until(restarted)
-
-
-async def test_backoff_schedule_grows_and_caps(started: StartFactory) -> None:
-    supervisor = await started(
-        [_unit("svc", _SLEEP_FOREVER)], backoff_base_s=0.05, backoff_max_s=0.2
-    )
-    runtime = supervisor._units["svc"]
-    delays: list[float] = []
-    for _ in range(4):
-        before = time.monotonic()
-        supervisor._schedule_restart(runtime)
-        backoff_until = runtime.backoff_until
-        assert backoff_until is not None
-        delays.append(backoff_until - before)
-        task = runtime.restart_task
-        assert task is not None
-        task.cancel()
-    assert delays == pytest.approx([0.05, 0.1, 0.2, 0.2], abs=0.03)
-
-
-async def test_backoff_schedule_clamps_a_huge_failure_streak(started: StartFactory) -> None:
-    """Regression (the wiring gate): an unclamped `2**streak` overflows the
-    int-to-float conversion from streak=1024 on, raising before the `min()`
-    cap could apply."""
-    supervisor = await started(
-        [_unit("svc", _SLEEP_FOREVER)], backoff_base_s=0.05, backoff_max_s=0.2
-    )
-    runtime = supervisor._units["svc"]
-    runtime.failure_streak = 10_000
-    before = time.monotonic()
-    supervisor._schedule_restart(runtime)
-    backoff_until = runtime.backoff_until
-    assert backoff_until is not None
-    assert backoff_until - before == pytest.approx(0.2, abs=0.03)
-    task = runtime.restart_task
-    assert task is not None
-    task.cancel()
-
-
-async def test_watch_survives_a_huge_streak_and_the_unit_restarts(
-    started: StartFactory,
-) -> None:
-    """Regression: the overflow used to kill the watch task before
-    `generation.exited` was set, so the unit silently stopped restarting while
-    its status kept claiming running."""
-    exits_soon = _python("import sys, time; time.sleep(0.3); sys.exit(1)")
-    supervisor = await started(
-        [_unit("svc", exits_soon, restart="always")],
-        backoff_base_s=0.05,
-        backoff_max_s=0.1,
-    )
-    runtime = supervisor._units["svc"]
-    watch_task = runtime.watch_task
-    runtime.failure_streak = 5000
-
-    async def restarted() -> bool:
-        entry = await _unit_status(supervisor, "svc")
-        return cast(int, entry["restart_count"]) >= 1
-
-    await _wait_until(restarted)
-    assert watch_task is not None
-    assert watch_task.done()
-    assert watch_task.exception() is None
-
-
-async def test_manual_restart_replaces_generation(started: StartFactory) -> None:
-    supervisor = await started([_unit("svc", _SLEEP_FOREVER)])
-    old_pid = cast(int, (await _unit_status(supervisor, "svc"))["pid"])
-    response = await supervisor.restart("svc")
-    units = cast("list[dict[str, object]]", response["units"])
-    assert [u["action"] for u in units] == ["replaced"]
-    entry = await _unit_status(supervisor, "svc")
-    assert entry["state"] == "running"
-    assert entry["restart_count"] == 1
-    new_pid = cast(int, entry["pid"])
-    assert new_pid != old_pid
-    await _assert_dead(old_pid)
-
-
-async def test_restart_starts_a_stopped_unit(started: StartFactory) -> None:
-    supervisor = await started([_unit("svc", _SLEEP_FOREVER)])
-    await supervisor.down("svc")
-    response = await supervisor.restart("svc")
-    units = cast("list[dict[str, object]]", response["units"])
-    assert [u["action"] for u in units] == ["started"]
-    entry = await _unit_status(supervisor, "svc")
-    assert entry["state"] == "running"
-    assert entry["restart_count"] == 0
-
-
-async def test_restart_rolls_the_whole_subtree(started: StartFactory) -> None:
-    supervisor = await started(
-        [
-            _unit("parent", _SLEEP_FOREVER),
-            _unit("child", _SLEEP_FOREVER, attach="parent"),
-        ]
-    )
-    before = {
-        "parent": cast(int, (await _unit_status(supervisor, "parent"))["pid"]),
-        "child": cast(int, (await _unit_status(supervisor, "child"))["pid"]),
-    }
-    await supervisor.restart("parent")
-    for member, old_pid in before.items():
-        entry = await _unit_status(supervisor, member)
-        assert entry["state"] == "running"
-        assert entry["pid"] != old_pid
-        await _assert_dead(old_pid)
-
-
-async def test_failed_spawn_keeps_old_generation(started: StartFactory, short_tmp: Path) -> None:
-    """start-new-before-stop-old: a failed new start must not take the old
-    instance down."""
-    script = short_tmp / "unit.sh"
-    script.write_text("#!/bin/sh\nexec sleep 60\n", encoding="utf-8")
-    script.chmod(0o755)
-    supervisor = await started([_unit("svc", [str(script)], restart="never")])
-    old_pid = cast(int, (await _unit_status(supervisor, "svc"))["pid"])
-    # Drop the execute bit rather than unlinking: removing the file races the
-    # shell's read of its own script (a shell that loses that race exits, and
-    # then the old generation is legitimately gone). chmod cannot disturb the
-    # running process, and the next execve gets EACCES.
-    script.chmod(0o644)
-
-    response = await supervisor.restart("svc")
-    units = cast("list[dict[str, object]]", response["units"])
-    assert [u["action"] for u in units] == ["failed"]
-    assert "spawn failed" in str(units[0]["error"])
-    entry = await _unit_status(supervisor, "svc")
-    assert entry["state"] == "running"
-    assert entry["pid"] == old_pid  # the old generation keeps serving
-    os.kill(old_pid, 0)  # still alive
-
-
-async def test_failed_initial_spawn_records_error_and_retries(started: StartFactory) -> None:
-    supervisor = await started(
-        [_unit("svc", ["/nonexistent-ava-root-test-binary"], restart="always")],
-        backoff_base_s=0.05,
-        backoff_max_s=0.1,
-    )
-
-    async def retried() -> bool:
-        entry = await _unit_status(supervisor, "svc")
-        return cast(int, entry["failure_streak"]) >= 2
-
-    await _wait_until(retried)
-    entry = await _unit_status(supervisor, "svc")
-    assert entry["state"] == "backoff"
-    assert "spawn failed" in str(entry["last_error"])
-    # A down stops the retry loop.
-    await supervisor.down("svc")
-    assert (await _unit_status(supervisor, "svc"))["state"] == "stopped"
-
-
-async def test_stop_escalates_to_kill_after_timeout(started: StartFactory, short_tmp: Path) -> None:
-    ready = short_tmp / "term-ignored.ready"
-    cmd = _python(
-        "import pathlib, signal, time; "
-        "signal.signal(signal.SIGTERM, signal.SIG_IGN); "
-        f"pathlib.Path({str(ready)!r}).write_text('ready'); "
-        "time.sleep(60)"
-    )
-    supervisor = await started([_unit("svc", cmd)], stop_timeout_s=0.3)
-    pid = cast(int, (await _unit_status(supervisor, "svc"))["pid"])
-
-    async def ready_written() -> bool:
-        return ready.exists()
-
-    # Only stop once the child has actually installed its handler; TERM racing
-    # interpreter startup would kill it before the ignore even exists.
-    await _wait_until(ready_written)
-
-    started_at = time.monotonic()
-    await supervisor.down("svc")
-    elapsed = time.monotonic() - started_at
-    # The polite stop was given its grace period before the forceful kill.
-    assert 0.25 <= elapsed < 5.0
-    await _assert_dead(pid)
-
-
-async def test_shutdown_stops_everything(started: StartFactory) -> None:
-    supervisor = await started([_unit("alpha", _SLEEP_FOREVER), _unit("beta", _SLEEP_FOREVER)])
-    pids = [cast(int, (await _unit_status(supervisor, name))["pid"]) for name in ("alpha", "beta")]
-    await supervisor.shutdown()
-    for pid in pids:
-        await _assert_dead(pid)
-    status = await supervisor.status()
-    root = cast("dict[str, object]", status["root"])
-    assert root["running"] is False
-
-
-async def test_exited_process_is_reaped_not_zombie(started: StartFactory) -> None:
-    supervisor = await started([_unit("svc", _exit_now(0), restart="never")], backoff_base_s=0.02)
-    pid = cast(int, (await _unit_status(supervisor, "svc"))["pid"])
-
-    async def stopped() -> bool:
-        return (await _unit_status(supervisor, "svc"))["state"] == "stopped"
-
-    await _wait_until(stopped)
-    # A zombie would still answer signal 0; ProcessLookupError proves the child
-    # was waited on (reaped) rather than left dangling.
-    await _assert_dead(pid)
-
-
-async def test_concurrent_commands_settle_consistently(started: StartFactory) -> None:
-    supervisor = await started([_unit("alpha", _SLEEP_FOREVER)])
-    results = await asyncio.gather(
-        supervisor.up("alpha"),
-        supervisor.up("alpha"),
-        supervisor.status(),
-        supervisor.down("alpha"),
-        supervisor.up("alpha"),
-        supervisor.status(),
-        return_exceptions=True,
-    )
-    assert not any(isinstance(r, BaseException) for r in results)
-    entry = await _unit_status(supervisor, "alpha")
-    assert entry["state"] in {"running", "stopped"}
-    if entry["state"] == "running":
-        assert entry["pid"] is not None
-
-
-async def test_dispatch_translates_business_errors(started: StartFactory) -> None:
-    supervisor = await started([_unit("svc", _SLEEP_FOREVER)])
-    response = await supervisor.dispatch({"verb": "up", "name": "ghost"})
-    assert response["ok"] is False
-    assert response.get("code") == "unknown_unit"
-    assert "ghost" in str(response.get("error"))
-
-    response = await supervisor.dispatch({"verb": "status"})
-    assert response["ok"] is True
-    result = cast("dict[str, object]", response.get("result"))
-    root = cast("dict[str, object]", result["root"])
-    assert root["pid"] == os.getpid()
-
-
-# -- revival_deferral: the seam that keeps a second reviver from fighting ------
-
-
-async def test_revival_deferral_none_for_a_healthy_unit(started: StartFactory) -> None:
-    supervisor = await started([_unit("svc", _SLEEP_FOREVER)])
-    assert supervisor.revival_deferral("svc") is None
-
-
-async def test_revival_deferral_held_down_after_operator_stop(started: StartFactory) -> None:
-    supervisor = await started([_unit("svc", _SLEEP_FOREVER)])
-    await supervisor.down("svc")
-    assert supervisor.revival_deferral("svc") == "held down"
-
-
-async def test_revival_deferral_already_scheduled_during_retry(started: StartFactory) -> None:
-    supervisor = await started(
-        [_unit("svc", _SLEEP_FOREVER)], backoff_base_s=60.0, backoff_max_s=120.0
-    )
-    pid = cast(int, (await _unit_status(supervisor, "svc"))["pid"])
-    os.kill(pid, signal.SIGKILL)
-
-    async def scheduled() -> bool:
-        return supervisor.revival_deferral("svc") == "already scheduled"
-
-    await _wait_until(scheduled)
-
-
-async def test_revival_deferral_policy_never(started: StartFactory) -> None:
-    supervisor = await started([_unit("svc", _SLEEP_FOREVER, restart="never")])
-    assert supervisor.revival_deferral("svc") == "policy never"
-
-
-async def test_revival_deferral_held_down_wins_over_never(started: StartFactory) -> None:
-    supervisor = await started([_unit("svc", _SLEEP_FOREVER, restart="never")])
-    await supervisor.down("svc")
-    assert supervisor.revival_deferral("svc") == "held down"
-
-
-async def test_revival_deferral_unknown_unit(started: StartFactory) -> None:
-    supervisor = await started([_unit("svc", _SLEEP_FOREVER)])
-    with pytest.raises(UnknownUnitError):
-        supervisor.revival_deferral("ghost")
-
-
-# -- status attach seams + tree_view (W1.2b) -----------------------------------
-
-
-async def test_status_embeds_attached_surfaces_only(started: StartFactory) -> None:
-    supervisor = await started([_unit("svc", _SLEEP_FOREVER)])
-    status = await supervisor.status()
-    assert "health" not in status
-    assert "metrics" not in status
-
-    class _Health:
-        def health_snapshot(self) -> dict[str, object]:
-            return {"svc": {"breaker_open": False}}
-
-    class _Metrics:
-        def metrics_snapshot(self) -> dict[str, object]:
-            return {"chain": {"broken": False}}
-
-    supervisor.attach_health(_Health())
-    supervisor.attach_metrics(_Metrics())
-    status = await supervisor.status()
-    assert status["health"] == {"svc": {"breaker_open": False}}
-    assert status["metrics"] == {"chain": {"broken": False}}
-    assert "units" in status and "root" in status and "restarts_total" in status
-
-
-async def test_tree_view_reports_the_raw_recorded_pid(started: StartFactory) -> None:
-    supervisor = await started([_unit("svc", _SLEEP_FOREVER)])
-    view = supervisor.tree_view()
-    assert view["root_pid"] == os.getpid()
-    units = cast("list[dict[str, object]]", view["units"])
-    assert units[0]["id"] == "svc" and units[0]["state"] == "running"
-    pid = cast(int, units[0]["pid"])
-
-    # Disarm the watch and kill: status() masks the dead generation's pid to
-    # None, but tree_view keeps carrying the recorded pid the self-check judges.
-    runtime = supervisor._units["svc"]
-    assert runtime.watch_task is not None
-    runtime.watch_task.cancel()
-    os.kill(pid, signal.SIGKILL)
-    await asyncio.sleep(0.15)
-    assert (await _unit_status(supervisor, "svc"))["pid"] is None
-    units = cast("list[dict[str, object]]", supervisor.tree_view()["units"])
-    assert units[0]["pid"] == pid
-
-    await supervisor.up("svc")  # leave a healthy generation for teardown
-
-
-# -- the upgrade handoff: snapshot, fail-fast write, steady-state warnings -------
-
-
-def _kill_quietly(pid: int) -> None:
-    with suppress(ProcessLookupError):
-        os.kill(pid, signal.SIGKILL)
-
-
-def _wait_zombie(pid: int, *, timeout: float = 5.0) -> None:
-    """Wait until a killed child is an unreaped zombie (its exit is pending)."""
-    deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
-        out = subprocess.run(  # noqa: S603 — fixed system tool, literal argv, no shell
-            ["ps", "-o", "state=", "-p", str(pid)],
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        if out.stdout.strip().startswith("Z"):
+async def exited(owner: Supervisor) -> None:
+    """Wait until root's watch task has processed the unit's own exit."""
+    for _ in range(100):
+        if (await row(owner))["state"] == "stopped":
             return
-        time.sleep(0.05)
-    raise AssertionError(f"pid {pid} did not become an unreaped zombie")
+        await asyncio.sleep(0.02)
+    raise AssertionError("unit did not exit on its own")
 
 
-async def test_upgrade_snapshots_the_tree_and_answers_accepted(
-    started: StartFactory, short_tmp: Path
-) -> None:
-    supervisor = await started([_unit("svc", _SLEEP_FOREVER)])
-    unit_pid = cast(int, (await _unit_status(supervisor, "svc"))["pid"])
-
-    response = await supervisor.dispatch({"verb": "upgrade"})
-    assert response["ok"] is True
-    result = cast("dict[str, object]", response.get("result"))
-    assert result["accepted"] is True
-    assert result["root_pid"] == os.getpid()
-    assert result["units_total"] == 1 and result["units_running"] == 1
-
-    raw = cast("dict[str, object]", json.loads((short_tmp / "handoff.json").read_text("utf-8")))
-    assert raw["writer_pid"] == os.getpid()
-    (carried,) = cast("list[dict[str, object]]", raw["units"])
-    assert carried["id"] == "svc" and carried["pid"] == unit_pid
-    assert carried["desired"] == "running"
-    assert cast(float, carried["started_at"]) > 0.0
-    assert not (short_tmp / "handoff.json.tmp").exists()
-
-    assert supervisor.take_pending_upgrade() is True
-    assert supervisor.take_pending_upgrade() is False
-
-
-async def test_upgrade_write_failure_is_an_error_and_leaves_the_tree(
-    started: StartFactory, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    supervisor = await started([_unit("svc", _SLEEP_FOREVER)])
-
-    def fail_write(*_args: object, **_kwargs: object) -> None:
-        raise OSError("disk full (test)")
-
-    monkeypatch.setattr("services.ava_root.supervisor.write_handoff", fail_write)
-    response = await supervisor.dispatch({"verb": "upgrade"})
-    assert response["ok"] is False
-    assert response.get("code") == "internal"
-    assert supervisor.take_pending_upgrade() is False
-    assert (await _unit_status(supervisor, "svc"))["state"] == "running"
-
-
-async def test_upgrade_warns_when_a_unit_is_not_in_steady_state(
-    started: StartFactory, caplog: pytest.LogCaptureFixture
-) -> None:
-    supervisor = await started([_unit("svc", _exit_now(1))], backoff_base_s=100.0)
-
-    async def in_backoff() -> bool:
-        return (await _unit_status(supervisor, "svc"))["state"] == "backoff"
-
-    await _wait_until(in_backoff)
-    with caplog.at_level("WARNING", logger="services.ava_root.supervisor"):
-        response = await supervisor.dispatch({"verb": "upgrade"})
-    assert response["ok"] is True
-    assert any("not in steady state" in record.getMessage() for record in caplog.records)
-
-
-# -- taking over an inherited tree: attach instead of respawn --------------------
-
-
-async def test_start_from_handoff_attaches_live_children_without_spawning(
-    short_tmp: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    first = subprocess.Popen(_SLEEP_FOREVER, cwd=short_tmp)  # noqa: S603 — test's own child
-    second = subprocess.Popen(_SLEEP_FOREVER, cwd=short_tmp)  # noqa: S603 — test's own child
-    handoff = HandoffFile.stamp(
-        os.getpid(),
-        (
-            HandoffUnit(
-                "svc-a",
-                DesiredState.RUNNING,
-                pid=first.pid,
-                pgid=os.getpgid(first.pid),
-                started_at=time.monotonic(),
-            ),
-            HandoffUnit(
-                "svc-b",
-                DesiredState.RUNNING,
-                pid=second.pid,
-                pgid=os.getpgid(second.pid),
-                started_at=time.monotonic(),
-            ),
-        ),
-    )
-    spawns: list[str] = []
-    original_spawn = Supervisor._spawn
-
-    async def spy(self: Supervisor, runtime: Any) -> None:
-        spawns.append(runtime.manifest.id)
-        await original_spawn(self, runtime)
-
-    monkeypatch.setattr(Supervisor, "_spawn", spy)
-    supervisor = _make([_unit("svc-a", _SLEEP_FOREVER), _unit("svc-b", _SLEEP_FOREVER)], short_tmp)
+async def test_stop_after_unexpected_exit_closes_surviving_descendants(tmp_path: Path) -> None:
+    child_file, trigger = tmp_path / "child", tmp_path / "go"
+    spawn = f"import subprocess; child=subprocess.Popen([sys.executable,'-c','import time; time.sleep(60)']); pathlib.Path({str(child_file)!r}).write_text(str(child.pid))"
+    owner = root(tmp_path, exits_on(trigger, spawn))
+    await owner.start()
+    child = psutil.Process(await pid_in(child_file))
     try:
-        await supervisor.start(handoff=handoff)
-        assert spawns == []  # both attached in place
-        assert (await _unit_status(supervisor, "svc-a"))["pid"] == first.pid
-        assert (await _unit_status(supervisor, "svc-b"))["pid"] == second.pid
-
-        # The reaper is re-attached: a child's exit still drives the policy.
-        os.kill(first.pid, signal.SIGKILL)
-
-        async def svc_a_replaced() -> bool:
-            entry = await _unit_status(supervisor, "svc-a")
-            return entry["pid"] is not None and entry["pid"] != first.pid
-
-        await _wait_until(svc_a_replaced)
-        assert spawns == ["svc-a"]
+        trigger.touch()
+        await exited(owner)
+        assert child.is_running()
+        await owner.down("worker")
+        assert not child.is_running() or child.status() == psutil.STATUS_ZOMBIE
+        assert not list((tmp_path / "custody").iterdir())
     finally:
-        await supervisor.shutdown()
-        _kill_quietly(first.pid)
-        _kill_quietly(second.pid)
+        if child.is_running():
+            child.kill()
+    await owner.shutdown()
 
 
-async def test_start_from_handoff_starts_a_unit_whose_child_already_exited(
-    short_tmp: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    dead = subprocess.Popen(_SLEEP_FOREVER, cwd=short_tmp)  # noqa: S603 — test's own child
-    dead.kill()
-    _wait_zombie(dead.pid)  # keep it unreaped: the handoff probe must reap it
-    handoff = HandoffFile.stamp(
-        os.getpid(),
-        (
-            HandoffUnit(
-                "svc",
-                DesiredState.RUNNING,
-                pid=dead.pid,
-                pgid=None,
-                started_at=time.monotonic(),
-            ),
-        ),
+def signal_recorder(signals: Path, ready: Path) -> str:
+    """A stranger's code: log every catchable stop signal instead of exiting."""
+    return (
+        "import pathlib,signal,time\n"
+        f"log=pathlib.Path({str(signals)!r})\n"
+        "def record(number, _frame):\n"
+        "    with log.open('a') as out: out.write(f'{number}\\n')\n"
+        "for number in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP, signal.SIGUSR1):\n"
+        "    signal.signal(number, record)\n"
+        f"pathlib.Path({str(ready)!r}).touch()\n"
+        "time.sleep(60)\n"
     )
-    spawns: list[str] = []
-    original_spawn = Supervisor._spawn
 
-    async def spy(self: Supervisor, runtime: Any) -> None:
-        spawns.append(runtime.manifest.id)
-        await original_spawn(self, runtime)
 
-    monkeypatch.setattr(Supervisor, "_spawn", spy)
-    supervisor = _make([_unit("svc", _SLEEP_FOREVER)], short_tmp)
+async def pid_in(path: Path) -> int:
+    """The PID a child writes to `path`, once the write is complete."""
+    for _ in range(250):
+        with contextlib.suppress(FileNotFoundError, ValueError):
+            return int(path.read_text())
+        await asyncio.sleep(0.02)
+    raise AssertionError(f"no PID written to {path}")
+
+
+def ended(process: psutil.Process) -> bool:
+    """Whether `process` exited; a zombie counts, since its reaper is not this test."""
     try:
-        await supervisor.start(handoff=handoff)
-        assert spawns == ["svc"]  # gone at takeover: the start path
-        entry = await _unit_status(supervisor, "svc")
-        assert entry["state"] == "running"
-        assert entry["pid"] != dead.pid
-        assert entry["last_exit"] == "signal 9"
+        return not process.is_running() or process.status() == psutil.STATUS_ZOMBIE
+    except psutil.NoSuchProcess:
+        return True
+
+
+def kill_all(spawned: list[psutil.Process]) -> None:
+    """Kill each test child and everything it forked, so a failed assertion leaks none.
+
+    psutil refuses to signal a PID that now names another birth.
+    """
+    processes = list(spawned)
+    for process in spawned:
+        with contextlib.suppress(psutil.NoSuchProcess):
+            processes.extend(process.children(recursive=True))
+    for process in processes:
+        with contextlib.suppress(psutil.NoSuchProcess):
+            process.kill()
+
+
+async def gone(process: psutil.Process, *, reaped: bool = False) -> None:
+    """Wait for `process` to end; `reaped` waits until it left the process table (a zombie fills its group)."""
+    for _ in range(250):
+        if not process.is_running() if reaped else ended(process):
+            return
+        await asyncio.sleep(0.02)
+    raise AssertionError(f"pid {process.pid} did not exit")
+
+
+async def test_exited_birth_at_a_reused_pid_never_signals_the_stranger(tmp_path: Path) -> None:
+    """The recorded PID now belongs to another birth leading its own group.
+
+    The recorded birth is positively dead, so its custody is released; the
+    stranger is never signalled, captured, or adopted.
+    """
+    trigger = tmp_path / "go"
+    owner = root(tmp_path, exits_on(trigger))
+    await owner.start()
+    trigger.touch()
+    await exited(owner)
+    signals, ready = tmp_path / "stranger-signals", tmp_path / "stranger-ready"
+    code = signal_recorder(signals, ready)
+    stranger = subprocess.Popen([sys.executable, "-c", code], process_group=0)  # noqa: S603 — disposable test child
+    try:
+        await wait_file(ready)
+        generation = owner._units["worker"].generation
+        assert generation is not None and generation.identity is not None
+        assert generation.custody is not None
+        dead = generation.identity
+        # The kernel handed the recorded PID to the stranger; the record keeps
+        # the dead birth. Survivors at reap would otherwise send the stop to
+        # the group that now carries that number.
+        generation.identity = OwnedProcess(stranger.pid, dead.birth, dead.starttime)
+        generation.tracked = {generation.identity}
+        generation.custody.retain(generation.tracked, generation.proc.pid)
+        generation.scope_closed_at_exit = False
+        await owner.down("worker")
+        assert stranger.poll() is None
+        assert not signals.exists(), "the stranger received a signal"
+        assert not list((tmp_path / "custody").iterdir())
     finally:
-        await supervisor.shutdown()
-        _kill_quietly(dead.pid)
+        stranger.kill()
+        stranger.wait(timeout=5)
+    await owner.shutdown()
 
 
-async def test_start_from_handoff_keeps_a_stopped_unit_stopped(
-    short_tmp: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    alive = subprocess.Popen(_SLEEP_FOREVER, cwd=short_tmp)  # noqa: S603 — test's own child
-    handoff = HandoffFile.stamp(
-        os.getpid(),
-        (
-            HandoffUnit("held", DesiredState.STOPPED),
-            HandoffUnit(
-                "svc",
-                DesiredState.RUNNING,
-                pid=alive.pid,
-                pgid=os.getpgid(alive.pid),
-                started_at=time.monotonic(),
-            ),
-        ),
+async def reaped_with_survivor(tmp_path: Path, reaped: str) -> tuple[Supervisor, psutil.Process]:
+    """A unit whose leader root reaped while a TERM-ignoring survivor lived on.
+
+    The leader exits on its own, or during a stop that the survivor makes refuse.
+    """
+    survivor_file = tmp_path / "survivor"
+    survivor = (
+        "import os,pathlib,signal,time; signal.signal(signal.SIGTERM, signal.SIG_IGN); "
+        f"pathlib.Path({str(survivor_file)!r}).write_text(str(os.getpid())); time.sleep(60)"
     )
-    spawns: list[str] = []
-    original_spawn = Supervisor._spawn
-
-    async def spy(self: Supervisor, runtime: Any) -> None:
-        spawns.append(runtime.manifest.id)
-        await original_spawn(self, runtime)
-
-    monkeypatch.setattr(Supervisor, "_spawn", spy)
-    supervisor = _make([_unit("held", _SLEEP_FOREVER), _unit("svc", _SLEEP_FOREVER)], short_tmp)
+    trigger = tmp_path / "leader-go"
+    spawn = f"import subprocess; subprocess.Popen([sys.executable,'-c',{survivor!r}])"
+    stays = f"import sys,time; {spawn}; time.sleep(60)"
+    owner = root(tmp_path, exits_on(trigger, spawn) if reaped == "unexpected-exit" else stays)
+    await owner.start()
+    survivor_process = psutil.Process(await pid_in(survivor_file))
     try:
-        await supervisor.start(handoff=handoff)
-        assert spawns == []  # operator intent survives: stopped stays stopped
-        assert (await _unit_status(supervisor, "held"))["state"] == "stopped"
-        assert (await _unit_status(supervisor, "svc"))["pid"] == alive.pid
-    finally:
-        await supervisor.shutdown()
-        _kill_quietly(alive.pid)
+        trigger.touch()
+        if reaped == "refused-stop":
+            with pytest.raises(RuntimeError, match="ownership retained"):
+                await owner.down("worker")
+        await exited(owner)
+    except BaseException:
+        kill_all([survivor_process])
+        raise
+    return owner, survivor_process
 
 
-async def test_start_from_handoff_warns_about_unknown_carried_units(
-    short_tmp: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
-) -> None:
-    handoff = HandoffFile.stamp(
-        os.getpid(),
-        (
-            HandoffUnit("svc", DesiredState.RUNNING),
-            HandoffUnit("ghost", DesiredState.RUNNING),
-        ),
+async def stranger_group(
+    tmp_path: Path, *, own_session: bool = False
+) -> tuple[int, psutil.Process, Path]:
+    """Another program's group whose leader exited like a classic daemon.
+
+    The group forms in this process's session, which is root's in these tests;
+    with `own_session` its leader calls setsid() first (fork, setsid, fork).
+    Returns its number (no process holds it as a PID), its live member, and the
+    file where that member logs any stop signal it receives.
+    """
+    signals, ready, member_file = (tmp_path / name for name in ("signals", "ready", "member"))
+    daemon = (
+        "import pathlib,subprocess,sys; "
+        f"m=subprocess.Popen([sys.executable,'-c',{signal_recorder(signals, ready)!r}]); "
+        f"pathlib.Path({str(member_file)!r}).write_text(str(m.pid))"
     )
-    supervisor = _make([_unit("svc", _SLEEP_FOREVER)], short_tmp)
+    stranger = subprocess.Popen(  # noqa: S603 — disposable test child
+        [sys.executable, "-c", daemon],
+        start_new_session=own_session,
+        process_group=None if own_session else 0,
+    )
+    assert stranger.wait(timeout=10) == 0, "the stranger's leader must exit and be reaped"
+    member = psutil.Process(await pid_in(member_file))
     try:
-        with caplog.at_level("WARNING", logger="services.ava_root.supervisor"):
-            await supervisor.start(handoff=handoff)
-        assert (await _unit_status(supervisor, "svc"))["state"] == "running"
-        assert any("not in this registry" in record.getMessage() for record in caplog.records)
+        await wait_file(ready)
+        assert os.getpgid(member.pid) == stranger.pid
+        assert (os.getsid(member.pid) != os.getsid(0)) is own_session
+    except BaseException:
+        kill_all([member])
+        raise
+    return stranger.pid, member, signals
+
+
+async def stranger_at_number(
+    tmp_path: Path, reaped: str, *, own_session: bool
+) -> tuple[Supervisor, int, psutil.Process, Path]:
+    """A unit reaped with a survivor that has since exited; a stranger's group carries its number.
+
+    The kernel may hand the unit's group number to another program once its
+    survivors exit; the recorded leader is pointed at the stranger's number as
+    if it had. Returns root, that number, the stranger's member and its signal log.
+    """
+    owner, survivor = await reaped_with_survivor(tmp_path, reaped)
+    try:
+        generation = owner._units["worker"].generation
+        assert generation is not None and generation.identity is not None
+        assert generation.scope_closed_at_exit is False
+        survivor.kill()
+        await gone(survivor, reaped=True)
+        pgid, member, signals = await stranger_group(tmp_path, own_session=own_session)
+    except BaseException:
+        kill_all([survivor])
+        raise
+    dead = generation.identity
+    generation.identity = OwnedProcess(pgid, dead.birth, dead.starttime)
+    return owner, pgid, member, signals
+
+
+@pytest.mark.parametrize("reaped", ["unexpected-exit", "refused-stop"])
+async def test_exited_leader_never_signals_a_stranger_group_at_its_number(
+    tmp_path: Path, reaped: str
+) -> None:
+    """The unit's group ended after its leader's reap; its number now names another program's group.
+
+    That group lies in root's own session, so root cannot tell it from the
+    unit's. Whether the unit's leader exited on its own or during a refused
+    stop, no later stop signals by that number: nothing is signalled, even with
+    force, and custody stays with a refusal that names the group and the record.
+    """
+    owner, pgid, member, signals = await stranger_at_number(tmp_path, reaped, own_session=False)
+    record = tmp_path / "custody/worker.json"
+    try:
+        for force in (False, True):
+            with pytest.raises(RuntimeError) as refused:
+                await owner.down("worker", force=force)
+            assert not signals.exists(), "the stranger's member received a signal"
+            message = str(refused.value)
+            for named in (f"process group {pgid}", str(member.pid), str(record), "retry the stop"):
+                assert named in message
+        assert not ended(member)
+        assert record.exists()
     finally:
-        await supervisor.shutdown()
+        kill_all([member])
+    await gone(member, reaped=True)
+    # Once that group has ended, the stop proves the unit's group over.
+    await owner.down("worker")
+    assert not list((tmp_path / "custody").iterdir())
+    await owner.shutdown()
+
+
+@pytest.mark.parametrize("reaped", ["unexpected-exit", "refused-stop"])
+async def test_a_group_in_another_session_at_the_number_is_released_without_a_signal(
+    tmp_path: Path, reaped: str
+) -> None:
+    """A classic daemon (fork, setsid, fork) holds the unit's group number.
+
+    Its group lies in another session, so it holds no process of the unit:
+    the stop releases custody without signalling it, and root's own shutdown,
+    which stops the tree the same way, completes.
+    """
+    owner, _pgid, member, signals = await stranger_at_number(tmp_path, reaped, own_session=True)
+    try:
+        await owner.down("worker")
+        assert owner._units["worker"].generation is None
+        assert (await row(owner))["last_error"] is None
+        assert not list((tmp_path / "custody").iterdir())
+        await owner.shutdown()
+        assert not signals.exists(), "the stranger's member received a signal"
+        assert not ended(member)
+    finally:
+        kill_all([member])
+
+
+async def test_a_group_whose_session_root_cannot_read_keeps_custody(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Root cannot read the session of the group at the unit's number, so it refuses.
+
+    The stranger receives nothing; once its session reads again, the stop releases.
+    """
+    owner, pgid, member, signals = await stranger_at_number(
+        tmp_path, "unexpected-exit", own_session=True
+    )
+    getsid = os.getsid
+
+    def denied(pid: int) -> int:
+        if pid == member.pid:
+            raise PermissionError(f"session of {pid} not readable")
+        return getsid(pid)
+
+    try:
+        monkeypatch.setattr(os, "getsid", denied)
+        with pytest.raises(RuntimeError, match=f"process group {pgid}"):
+            await owner.down("worker")
+        assert (tmp_path / "custody/worker.json").exists()
+        monkeypatch.undo()
+        await owner.down("worker")
+        assert not list((tmp_path / "custody").iterdir())
+        assert not signals.exists(), "the stranger's member received a signal"
+        assert not ended(member)
+    finally:
+        kill_all([member])
+    await owner.shutdown()
+
+
+@pytest.mark.parametrize(
+    ("read", "own_session"),
+    [("outside-the-group", False), ("setsid-between-reads", False), ("birth-changed", True)],
+)
+async def test_only_one_birth_read_inside_the_group_proves_another_session(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, read: str, own_session: bool
+) -> None:
+    """Reads that do not place one birth inside the group prove nothing.
+
+    The member's reads are faked: its PID now names a process of another
+    session outside the group; it calls setsid() between root's reads of its
+    session and its group; or its PID names another birth once both are read.
+    Each time the stop refuses and signals nothing.
+    """
+    owner, pgid, member, signals = await stranger_at_number(
+        tmp_path, "unexpected-exit", own_session=own_session
+    )
+    getsid, getpgid, live = os.getsid, os.getpgid, OwnedProcess.live
+    reads: list[str] = []
+
+    def placement(kind: str, pid: int) -> int:
+        real = getsid(pid) if kind == "session" else getpgid(pid)
+        if pid != member.pid:
+            return real
+        reads.append(kind)
+        if read == "outside-the-group":
+            return 1
+        if read == "setsid-between-reads" and len(reads) > 1:
+            return member.pid  # it now leads a session and a group of its own
+        return real
+
+    def reborn(identity: OwnedProcess) -> bool:
+        return identity.pid != member.pid and live(identity)
+
+    try:
+        monkeypatch.setattr(os, "getsid", partial(placement, "session"))
+        monkeypatch.setattr(os, "getpgid", partial(placement, "group"))
+        if read == "birth-changed":
+            monkeypatch.setattr(OwnedProcess, "live", reborn)
+        with pytest.raises(RuntimeError, match=f"process group {pgid}"):
+            await owner.down("worker")
+        monkeypatch.undo()
+        assert reads, "root never read the member"
+        assert not signals.exists(), "the stranger's member received a signal"
+        assert not ended(member)
+    finally:
+        kill_all([member])
+    await gone(member, reaped=True)
+    await owner.down("worker")
+    await owner.shutdown()
+
+
+async def test_moving_the_record_aside_settles_an_unproven_group_without_a_signal(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """The refusal's escape works on the running root, which keeps its generation in memory.
+
+    A stranger's group in root's session holds the unit's number, so the stop
+    refuses. Once the operator moves the record aside with no recorded birth
+    alive, the retried stop drops the generation, the stranger receives
+    nothing, and root's own shutdown completes.
+    """
+    owner, pgid, member, signals = await stranger_at_number(
+        tmp_path, "unexpected-exit", own_session=False
+    )
+    try:
+        with pytest.raises(RuntimeError, match=f"process group {pgid}"):
+            await owner.down("worker")
+        (tmp_path / "custody/worker.json").rename(tmp_path / "worker.json.aside")
+        await owner.down("worker")
+        assert owner._units["worker"].generation is None
+        released = await row(owner)
+        assert released["state"] == "stopped" and released["last_error"] is None
+        assert "operator moved the custody record aside" in caplog.text
+        await owner.shutdown()
+        assert not signals.exists(), "the stranger's member received a signal"
+        assert not ended(member)
+    finally:
+        kill_all([member])
+
+
+async def test_a_moved_aside_record_never_drops_a_live_recorded_birth(tmp_path: Path) -> None:
+    """Without its record, root cannot record custody before a signal, so it refuses.
+
+    Even with force, the recorded survivor keeps running and the generation
+    stays; restoring the record lets the explicit force stop close it.
+    """
+    owner, survivor = await reaped_with_survivor(tmp_path, "unexpected-exit")
+    record, aside = tmp_path / "custody/worker.json", tmp_path / "worker.json.aside"
+    try:
+        record.rename(aside)
+        for force in (False, True):
+            with pytest.raises(RuntimeError, match="moved aside") as refused:
+                await owner.down("worker", force=force)
+            assert str(survivor.pid) in str(refused.value)
+        assert not ended(survivor)
+        assert owner._units["worker"].generation is not None
+        aside.rename(record)
+        await owner.down("worker", force=True)
+        await gone(survivor)
+        assert not list((tmp_path / "custody").iterdir())
+    finally:
+        kill_all([survivor])
+    await owner.shutdown()
+
+
+async def test_unobserved_reap_refuses_until_the_record_is_moved_aside(tmp_path: Path) -> None:
+    trigger = tmp_path / "go"
+    owner = root(tmp_path, exits_on(trigger))
+    await owner.start()
+    trigger.touch()
+    await exited(owner)
+    generation = owner._units["worker"].generation
+    assert generation is not None
+    generation.exited.clear()  # as if root never observed its leader's reap
+    record = tmp_path / "custody/worker.json"
+    with pytest.raises(RuntimeError, match="never observed its reap") as refused:
+        await owner.down("worker")
+    assert str(record) in str(refused.value)
+    record.rename(tmp_path / "worker.json.aside")
+    await owner.down("worker")
+    assert owner._units["worker"].generation is None
+    await owner.shutdown()
+
+
+async def test_a_leader_reaped_before_its_birth_read_is_stopped_by_what_its_reap_recorded(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The child watcher reaps the leader before root reads its birth.
+
+    The stop closes the child recorded at the reap; the other, unreadable then,
+    is never signalled, and the stop refuses until the record is moved aside."""
+    spawn, capture = asyncio.create_subprocess_exec, OwnedProcess.capture
+
+    async def reaped_first(*args: Any, **kwargs: Any) -> asyncio.subprocess.Process:
+        proc = await spawn(*args, **kwargs)
+        await proc.wait()
+        return proc
+
+    def unreadable(_cls: type[OwnedProcess], process: psutil.Process) -> OwnedProcess:
+        if process.pid == int((tmp_path / "other").read_text()):
+            raise psutil.AccessDenied(process.pid)
+        return capture(process)
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", reaped_first)
+    monkeypatch.setattr(OwnedProcess, "capture", classmethod(unreadable))
+    code = f"import pathlib,subprocess,sys\nfor n in ('kept', 'other'): c=subprocess.Popen([sys.executable,'-c','import time; time.sleep(60)']); pathlib.Path({str(tmp_path)!r}, n).write_text(str(c.pid))"
+    owner = root(tmp_path, code)
+    await owner.start()
+    spawned = [psutil.Process(await pid_in(tmp_path / name)) for name in ("kept", "other")]
+    try:
+        kept, other = spawned
+        await exited(owner)
+        generation = owner._units["worker"].generation
+        assert generation is not None and generation.identity is None
+        assert {item.pid for item in generation.tracked} == {kept.pid}
+        refusal = rf"process group {generation.proc.pid} still holds pids \[{other.pid}\]"
+        with pytest.raises(RuntimeError, match=refusal):
+            await owner.down("worker")
+        assert ended(kept) and not ended(other)
+        (tmp_path / "custody/worker.json").rename(tmp_path / "worker.json.aside")
+        await owner.down("worker")
+        await owner.shutdown()
+        assert not ended(other), "the unrecorded child received a signal"
+    finally:
+        kill_all(spawned)
+
+
+@pytest.mark.parametrize("moves_group", [False, True])
+async def test_exited_leader_stop_closes_recorded_survivors_and_their_later_children(
+    tmp_path: Path, moves_group: bool
+) -> None:
+    """A survivor recorded at the reap is closed with a child it forked after that reap.
+
+    The stop reaches both through the survivor's recorded birth, not through
+    the group number, so it still closes them after the survivor moved to a
+    group of its own; then custody is released and no error remains.
+    """
+    survivor_file, trigger, late_file, leader_go = (
+        tmp_path / name for name in ("survivor", "go", "late", "leader-go")
+    )
+    survivor = (
+        "import os,pathlib,subprocess,sys,time\n"
+        f"pathlib.Path({str(survivor_file)!r}).write_text(str(os.getpid()))\n"
+        "deadline=time.monotonic()+30\n"
+        f"while not pathlib.Path({str(trigger)!r}).exists():\n"
+        "    if time.monotonic()>deadline: sys.exit(1)\n"
+        "    time.sleep(0.01)\n"
+        + ("os.setpgid(0, 0)\n" if moves_group else "")
+        + "late=subprocess.Popen([sys.executable,'-c','import time; time.sleep(60)'])\n"
+        f"pathlib.Path({str(late_file)!r}).write_text(str(late.pid))\n"
+        "time.sleep(60)\n"
+    )
+    spawn = f"import subprocess; subprocess.Popen([sys.executable,'-c',{survivor!r}])"
+    owner = root(tmp_path, exits_on(leader_go, spawn))
+    await owner.start()
+    spawned: list[psutil.Process] = []
+    try:
+        survivor_process = psutil.Process(await pid_in(survivor_file))
+        spawned.append(survivor_process)
+        leader_go.touch()
+        await exited(owner)
+        generation = owner._units["worker"].generation
+        assert generation is not None and generation.scope_closed_at_exit is False
+        assert survivor_process.pid in {item.pid for item in generation.tracked}
+        trigger.touch()
+        late = psutil.Process(await pid_in(late_file))
+        spawned.append(late)
+        await owner.down("worker")
+        assert ended(survivor_process) and ended(late)
+        assert not list((tmp_path / "custody").iterdir())
+        assert (await row(owner))["last_error"] is None
+    finally:
+        kill_all(spawned)
+    await owner.shutdown()
+
+
+@pytest.mark.parametrize("unreadable", ["access-denied", "no-start-ticks"])
+async def test_an_unreadable_survivor_leaves_its_siblings_recorded_and_closed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, unreadable: str
+) -> None:
+    """One member's birth cannot be read at the reap; its sibling is still recorded.
+
+    The stop closes the recorded sibling. The unreadable member is never
+    signalled: it keeps the group occupied, so the stop refuses, naming it alone.
+    """
+    kept_file, denied_file, trigger = (tmp_path / name for name in ("kept", "denied", "go"))
+    child = "import time; time.sleep(60)"
+    owner = root(
+        tmp_path,
+        "import pathlib,subprocess,sys,time\n"
+        f"kept=subprocess.Popen([sys.executable,'-c',{child!r}])\n"
+        f"denied=subprocess.Popen([sys.executable,'-c',{child!r}])\n"
+        f"pathlib.Path({str(kept_file)!r}).write_text(str(kept.pid))\n"
+        f"pathlib.Path({str(denied_file)!r}).write_text(str(denied.pid))\n"
+        "deadline=time.monotonic()+30\n"
+        f"while not pathlib.Path({str(trigger)!r}).exists() and time.monotonic()<deadline:\n"
+        "    time.sleep(0.01)\n",
+    )
+    await owner.start()
+    spawned: list[psutil.Process] = []
+    try:
+        kept = psutil.Process(await pid_in(kept_file))
+        denied = psutil.Process(await pid_in(denied_file))
+        spawned += [kept, denied]
+        capture = OwnedProcess.capture
+
+        def deny_one(_cls: type[OwnedProcess], process: psutil.Process) -> OwnedProcess:
+            if process.pid != denied.pid:
+                return capture(process)
+            if unreadable == "access-denied":
+                raise psutil.AccessDenied(process.pid)
+            raise RuntimeError(f"cannot capture Linux start ticks for PID {process.pid}")
+
+        monkeypatch.setattr(OwnedProcess, "capture", classmethod(deny_one))
+        trigger.touch()
+        await exited(owner)
+        monkeypatch.undo()
+        generation = owner._units["worker"].generation
+        assert generation is not None and generation.scope_closed_at_exit is False
+        recorded = {item.pid for item in generation.tracked}
+        assert kept.pid in recorded and denied.pid not in recorded
+        with pytest.raises(RuntimeError, match="process group") as refused:
+            await owner.down("worker")
+        assert ended(kept) and not ended(denied)
+        assert f"pids [{denied.pid}]" in str(refused.value)
+        denied.kill()
+        await gone(denied, reaped=True)
+        await owner.down("worker")
+        assert not list((tmp_path / "custody").iterdir())
+    finally:
+        kill_all(spawned)
+    await owner.shutdown()
+
+
+async def test_unconfirmable_exited_birth_retains_custody(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    trigger = tmp_path / "go"
+    owner = root(tmp_path, exits_on(trigger))
+    await owner.start()
+    trigger.touch()
+    await exited(owner)
+
+    def unverifiable(self: OwnedProcess) -> bool:
+        raise RuntimeError(f"cannot verify process identity for PID {self.pid}")
+
+    monkeypatch.setattr(OwnedProcess, "live", unverifiable)
+    record = tmp_path / "custody/worker.json"
+    with pytest.raises(RuntimeError) as refused:
+        await owner.down("worker")
+    message = str(refused.value)
+    assert "cannot verify process identity" in message
+    assert str(record) in message and "retry" in message
+    assert record.exists()
+    monkeypatch.undo()
+    await owner.shutdown()
+
+
+async def test_unacknowledged_intent_blocks_launch_without_signals(tmp_path: Path) -> None:
+    directory = tmp_path / "custody"
+    directory.mkdir()
+    intent = directory / "worker.json"
+    intent.write_text('{"stage":"spawning"}')
+    owner = root(tmp_path, "raise AssertionError('must not spawn')")
+    with pytest.raises(RuntimeError, match="requires reconciliation"):
+        await owner.start()
+    assert intent.read_text() == '{"stage":"spawning"}'

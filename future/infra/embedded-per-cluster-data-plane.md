@@ -5,7 +5,7 @@ every cluster (including the prod default home) runs its own Postgres+Redis inst
 under its `$AVA_HOME`; the shared-instance + logical-isolation model and
 `cli/commands/_compose.py` are gone. Slice 3 (bundling the binaries so there is no
 brew/apt dependency) is **half done**: Postgres is vendored
-(`shared/runtime_binaries.py`), redis is not. That remaining leg lives entirely in
+(`base/cluster/dataplane/runtime_binaries.py`), redis is not. That remaining leg lives entirely in
 [`vendored-data-plane-binaries.md`](vendored-data-plane-binaries.md) — this doc does
 not re-describe it.
 
@@ -57,7 +57,7 @@ across the machines on hand is simpler than engineering shared-instance isolatio
 
 The shared instance is gone, so every discriminator that existed to tell two
 clusters apart *inside one instance* is unnecessary. The bulk is in
-`cli/commands/_compose.py` and `shared/cluster/`:
+`cli/commands/_compose.py` and `base/cluster/`:
 
 - **Redis logical-DB index allocation + channel prefix** (`redis_db_index`,
   `redis_prefix`, `allocate_redis_index`, `redis_channel_prefix`,
@@ -70,8 +70,9 @@ clusters apart *inside one instance* is unnecessary. The bulk is in
 - **Per-cluster role inside a shared instance** (the bootstrap-superuser-
   provisions-every-cluster's-role model; the legacy-role reassignment this model
   carried was retired 2026-09-20). Each instance
-  `initdb`s its own superuser; a slim role + db owned by it uses the independent
-  gateway-local DB-owner password for the scram TCP connection.
+  `initdb`s its own superuser; a NOLOGIN owner role owns the db, and processes
+  dial write-generation logins over SCRAM
+  ([authority](../../base/cluster/authority/docs/authority.ava.okf.md)).
 - **Shared-instance foreign/neighbour probes** — `_shared_infra_running`,
   `_foreign_redis_error`, `_redis_listening`. A per-cluster instance on its own
   port with its own data dir under `$AVA_HOME` is unambiguously this cluster's;
@@ -87,8 +88,9 @@ stay `host:port` — an asymmetry not worth its weight).
 
 `AVA_CLUSTER_SECRET` stays as the control-plane bearer. A per-cluster TCP port
 on loopback is reachable by *any* local process — including a co-located
-cluster — so each authenticated instance keeps independent data-plane locks:
-the Postgres owner password, Redis `default`/`requirepass` password, runner DB
+cluster — so every instance keeps independent data-plane locks, whatever the
+bearer: the write generation's SCRAM logins (the owner never logs in; the OS
+user administers over the owner-only socket), Redis `default`/`requirepass`
 password, and Redis runtime ACL password. Isolation comes from *each cluster
 having its own instance* (which kills cross-talk); authority is separated so a
 runner cannot use its bearer to become an owner or Redis administrator.
@@ -118,10 +120,9 @@ from-scratch supervision lift.
 - **Data dir moves under `$AVA_HOME`.** `_pg_data()` / `_redis_conf_*()` resolve
   to `$AVA_HOME/pg/` and `$AVA_HOME/redis/` instead of the brew/apt shared
   locations. Each cluster's postmaster and redis own that directory.
-- **Postgres + Redis join the per-cluster `PORT_OFFSETS` block.** Every cluster's
-  pg/redis gets an allocated port in its block (postgres = base+11, redis = base+12);
-  the prod default home carries fixed pg 5433 / redis 6380, exactly as it keeps fixed
-  gateway/health ports. Nothing binds the default 5432/6379.
+- **Postgres + Redis have their own slots in the fixed port table**
+  (`base/host/env/port_table.py`): pg 5433 / redis 6380, exactly as the gateway and
+  health daemons keep fixed ports. Nothing binds the default 5432/6379.
 - **`db_url` / `redis_url` point at the per-cluster TCP port** (loopback +
   reachable address, unchanged posture). The `DERIVED_ENV_KEYS` written at cluster
   birth carry the per-cluster port.

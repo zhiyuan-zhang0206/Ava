@@ -17,12 +17,12 @@ from typing import Any
 import pytest
 
 import ava
-from shared.live_events import EVENT_ADAPTER
+from base.events.live.projection import EVENT_ADAPTER
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 _SNIPPET_PATHS = (
-    "ava_builtins/skills/ava-goal/reference/watch_idle.py",
-    "ava_builtins/skills/ava-watcher/reference/watch_idle.py",
+    "ava_builtins/skills/ava-goal/scripts/watch_idle.py",
+    "ava_builtins/skills/ava-watcher/scripts/watch_idle.py",
     "ava_builtins/plugins/ava_fleet/skills/ava-fleet/reference/watch_idle.py",
 )
 _FIXTURE_PATH = _REPO_ROOT / "tests" / "fixtures" / "events" / "agent_updated.json"
@@ -59,7 +59,7 @@ def _agent_updated_event(agent_id: int) -> dict[str, Any]:
     return json.loads(event.model_dump_json())
 
 
-@pytest.mark.parametrize("status", ["idling", "running", "restarting", "terminated"])
+@pytest.mark.parametrize("status", ["idling", "running", "terminated"])
 def test_target_hint_reads_current_status(
     monkeypatch: pytest.MonkeyPatch,
     status: str,

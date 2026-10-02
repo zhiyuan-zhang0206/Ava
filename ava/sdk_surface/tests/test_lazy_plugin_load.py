@@ -1,0 +1,314 @@
+"""ava.__getattr__ env-gated lazy plugin-namespace load + ava.ensure_plugins_loaded.
+
+A process an agent launched (AVA_AGENT_ID forwarded, no bootstrap to hook — a
+bare `python x.py` in a persistent shell session) self-loads plugin namespaces
+on the first unknown `ava.X`; gateway / cli / the agent process itself keep the
+fail-fast AttributeError.
+
+These lock the gating matrix + the once-latch so a future edit can't silently
+(a) start loading plugins in the gateway / cli, (b) re-run load_extensions in
+the agent process (which would clear the built-in repair/compact hooks that
+build_graph — not load_extensions — re-registers), or (c) turn a dunder probe
+into a plugin load.
+"""
+
+from __future__ import annotations
+
+from collections.abc import Iterator
+from types import SimpleNamespace
+from typing import Any
+
+import pytest
+
+import ava
+from ava import agent_identity
+from ava.sdk_surface import plugins
+
+
+@pytest.fixture(autouse=True)
+def _reset(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
+    # Each test drives _plugins_loaded + agent identity explicitly; snapshot-restore
+    # so nothing leaks between tests. Save existing plugin namespace objects before
+    # clearing so they can be re-registered — never permanently wipe namespaces
+    # registered by other plugins during import ava (ava.memory, ava.tasks, ava.cwd).
+    monkeypatch.setattr(ava, "_plugins_loaded", False)
+    monkeypatch.setattr(agent_identity, "_agent_id", agent_identity._agent_id)
+    monkeypatch.setattr(agent_identity, "_owns_loop", agent_identity._owns_loop)
+    # Save existing namespace objects before clearing
+    _saved_ns: dict[str, Any] = {}
+    for _name in list(plugins._REGISTERED_NAMESPACES):
+        _obj = getattr(ava, _name, None)
+        if _obj is not None:
+            _saved_ns[_name] = _obj
+    ava.clear_registered_namespaces()
+    yield
+    ava.clear_registered_namespaces()
+    # Restore saved plugin namespaces (setattr directly, bypass register_namespace
+    # conflict checks since we know these were originally here)
+    for _name, _obj in _saved_ns.items():
+        setattr(ava, _name, _obj)
+        if _name not in plugins._REGISTERED_NAMESPACES:
+            plugins._REGISTERED_NAMESPACES[_name] = "<restored>"
+        if _name not in ava.__all_for_ava__:
+            ava.__all_for_ava__.append(_name)
+
+
+def _spy_loader(monkeypatch: pytest.MonkeyPatch, *, register: str | None) -> list[int]:
+    """Replace agent.extensions.load_extensions (reached by ensure_plugins_loaded
+    via importlib) with a spy that records calls and optionally registers a namespace.
+    Avoids the heavy, DB-touching real load in a unit test."""
+    from agent import extensions
+
+    calls: list[int] = []
+
+    def fake(*, surface: bool = False) -> None:
+        calls.append(1)
+        if register is not None:
+            ava.register_namespace(register, SimpleNamespace(ping=lambda: "pong", __doc__="t"))
+
+    monkeypatch.setattr(extensions, "load_extensions", fake)
+    return calls
+
+
+def _as_launched_child(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(agent_identity, "_agent_id", None)
+    monkeypatch.setattr(agent_identity, "_owns_loop", True)
+    monkeypatch.setenv("AVA_AGENT_ID", "42")
+
+
+def test_lazy_load_fires_in_launched_child(monkeypatch: pytest.MonkeyPatch) -> None:
+    _as_launched_child(monkeypatch)
+    calls = _spy_loader(monkeypatch, register="lazytasks")
+
+    assert (
+        ava.lazytasks.ping() == "pong"
+    )  # first access triggers the load  # type: ignore[attr-defined]
+    assert calls == [1]
+    assert ava._plugins_loaded is True
+
+
+def test_lazy_load_latches_once(monkeypatch: pytest.MonkeyPatch) -> None:
+    _as_launched_child(monkeypatch)
+    calls = _spy_loader(monkeypatch, register="lazytasks")
+
+    _ = ava.lazytasks  # loads  # type: ignore[attr-defined]
+    # A later unknown miss must NOT reload (latched) — it fails fast instead.
+    with pytest.raises(AttributeError):
+        _ = ava.still_unknown  # type: ignore[attr-defined]
+    assert calls == [1]
+
+
+def test_no_lazy_load_without_agent_id(monkeypatch: pytest.MonkeyPatch) -> None:
+    # gateway / cli: no AVA_AGENT_ID -> behavior byte-identical to before the fix
+    # (same AttributeError message, loader never touched).
+    monkeypatch.setattr(agent_identity, "_agent_id", None)
+    monkeypatch.setattr(agent_identity, "_owns_loop", True)
+    monkeypatch.delenv("AVA_AGENT_ID", raising=False)
+    calls = _spy_loader(monkeypatch, register=None)
+
+    with pytest.raises(AttributeError, match=r"module 'ava' has no attribute 'nope_xyz'"):
+        _ = ava.nope_xyz  # type: ignore[attr-defined]
+    assert calls == []
+
+
+def test_no_lazy_load_in_agent_process(monkeypatch: pytest.MonkeyPatch) -> None:
+    # owns_loop=True + established id = the agent process. A typo must fail fast,
+    # not re-run load_extensions — which clears all hooks and would drop the
+    # built-in ones build_graph registers after it.
+    monkeypatch.setenv("AVA_AGENT_ID", "7")
+    agent_identity.establish(7, owns_loop=True)
+    calls = _spy_loader(monkeypatch, register=None)
+
+    with pytest.raises(AttributeError):
+        _ = ava.nope_xyz  # type: ignore[attr-defined]
+    assert calls == []
+
+
+def test_underscore_names_never_lazy_load(monkeypatch: pytest.MonkeyPatch) -> None:
+    # A dunder / private probe (copy, pickle, hasattr on `_x`) must not trigger a
+    # plugin load even in a launched child — plugin namespaces are never
+    # underscore-prefixed.
+    _as_launched_child(monkeypatch)
+    calls = _spy_loader(monkeypatch, register=None)
+
+    with pytest.raises(AttributeError):
+        _ = ava._some_private  # type: ignore[attr-defined]
+    assert calls == []
+
+
+def test_db_url_forward_wins_over_lazy_load(monkeypatch: pytest.MonkeyPatch) -> None:
+    # DB_URL/REDIS_URL/GATEWAY_URL forward to _settings and must return before the
+    # lazy branch — even in a launched child, accessing ava.DB_URL never loads.
+    _as_launched_child(monkeypatch)
+    calls = _spy_loader(monkeypatch, register=None)
+
+    assert isinstance(ava.DB_URL, str)
+    assert calls == []
+
+
+def test_ensure_plugins_loaded_idempotent(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls = _spy_loader(monkeypatch, register=None)
+
+    ava.ensure_plugins_loaded()
+    ava.ensure_plugins_loaded()
+
+    assert calls == [1]  # latched: loads at most once per process
+    assert ava._plugins_loaded is True
+
+
+def test_ensure_plugins_loaded_contains_a_failing_load_chain(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    loguru_records: list[dict],
+) -> None:
+    """A failure escaping the load chain — duplicate plugin name, malformed
+    config, schema drift — must not kill an agent-launched child at `import
+    ava` (the 2026-08-28 ava_ledger crash shape: every new process died). It
+    is contained, reported loudly, and the process continues without plugin
+    namespaces; the stderr line is the always-visible channel because a
+    launched child usually has no loguru sink configured."""
+    from agent import extensions
+    from base.packages.plugins.enable_config import DuplicatePlugin
+
+    def boom(*, surface: bool = False) -> None:
+        raise DuplicatePlugin("plugin 'x' exists in both builtin and external roots")
+
+    monkeypatch.setattr(extensions, "load_extensions", boom)
+
+    ava.ensure_plugins_loaded()  # must not raise
+
+    assert ava._plugins_loaded is True
+    assert any("failed in this launched child" in r["message"] for r in loguru_records)
+    stderr = capsys.readouterr().err
+    assert "plugin load failed in this launched child" in stderr
+    assert "DuplicatePlugin" in stderr
+
+
+def test_ensure_plugins_loaded_defers_while_the_loader_module_still_initializes(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    loguru_records: list[dict],
+) -> None:
+    """A re-entrant import is not a failure (task #3234).
+
+    A process that imports an `agent.*` module before `ava` reaches the eager
+    load hits the loader while `agent.extensions` is still its own partial
+    `sys.modules` entry: the attribute does not exist YET. That call must defer
+    (no latch, no loud report) — and once the module is complete, the next call
+    loads normally instead of being blocked by a latch for a load that never
+    ran.
+    """
+    from agent import extensions
+
+    calls: list[int] = []
+
+    def fake(*, surface: bool = False) -> None:
+        calls.append(1)
+
+    # Mid-import: the loader attribute is not defined yet and CPython marks
+    # the partial-module state (the shape the real circular import hits).
+    monkeypatch.delattr(extensions, "load_extensions")
+    monkeypatch.setattr(extensions.__spec__, "_initializing", True, raising=False)
+
+    ava.ensure_plugins_loaded()  # must not raise
+
+    assert ava._plugins_loaded is False  # deferred, not latched
+    assert calls == []
+    assert "plugin load failed" not in capsys.readouterr().err
+    assert not any("failed in this launched child" in r["message"] for r in loguru_records)
+
+    # The module finishes initializing; the next call retries and loads.
+    monkeypatch.setattr(extensions, "load_extensions", fake, raising=False)
+    monkeypatch.setattr(extensions.__spec__, "_initializing", False)
+
+    ava.ensure_plugins_loaded()
+
+    assert calls == [1]
+    assert ava._plugins_loaded is True
+
+
+def test_lazy_miss_fails_fast_while_deferred_and_succeeds_after(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """The deferred path must not re-enter `__getattr__` recursively.
+
+    With the latch left off, a lazy miss whose load defers stops at the
+    fail-fast AttributeError (no reload loop), and the first miss after the
+    loader module is complete loads the plugin surface.
+    """
+    _as_launched_child(monkeypatch)
+    from agent import extensions
+
+    calls: list[int] = []
+
+    def fake(*, surface: bool = False) -> None:
+        calls.append(1)
+        ava.register_namespace("deferrednsp", SimpleNamespace(ping=lambda: "pong", __doc__="t"))
+
+    monkeypatch.delattr(extensions, "load_extensions")
+    monkeypatch.setattr(extensions.__spec__, "_initializing", True, raising=False)
+
+    with pytest.raises(AttributeError):
+        _ = ava.deferrednsp  # type: ignore[attr-defined]
+    assert calls == []
+    assert ava._plugins_loaded is False
+    assert "plugin load failed" not in capsys.readouterr().err
+
+    monkeypatch.setattr(extensions, "load_extensions", fake, raising=False)
+    monkeypatch.setattr(extensions.__spec__, "_initializing", False)
+
+    assert ava.deferrednsp.ping() == "pong"  # type: ignore[attr-defined]
+    assert calls == [1]
+    assert ava._plugins_loaded is True
+
+
+def _spy_member_loader(
+    monkeypatch: pytest.MonkeyPatch, *, namespace: str, member: str
+) -> list[int]:
+    """Loader spy that registers a plugin MEMBER on an existing framework
+    namespace (ava.self / ava.ui) — the shape ava_fleet uses for log/notify."""
+    from agent import extensions
+
+    calls: list[int] = []
+
+    def fake(*, surface: bool = False) -> None:
+        calls.append(1)
+        ava.register_namespace_member(namespace, member, lambda: "pong")
+
+    monkeypatch.setattr(extensions, "load_extensions", fake)
+    return calls
+
+
+def test_member_lazy_load_on_ava_self(monkeypatch: pytest.MonkeyPatch) -> None:
+    # ava.self exists as a module, so ava.__getattr__ never fires for
+    # ava.self.<missing member> — ava/self.py's own __getattr__ must trigger
+    # the shared lazy load in a launched child.
+    _as_launched_child(monkeypatch)
+    calls = _spy_member_loader(monkeypatch, namespace="self", member="lazylog")
+
+    assert ava.self.lazylog() == "pong"  # type: ignore[attr-defined]
+    assert calls == [1]
+
+
+def test_member_lazy_load_on_ava_ui(monkeypatch: pytest.MonkeyPatch) -> None:
+    _as_launched_child(monkeypatch)
+    calls = _spy_member_loader(monkeypatch, namespace="ui", member="lazynotify")
+
+    assert ava.ui.lazynotify() == "pong"  # type: ignore[attr-defined]
+    assert calls == [1]
+
+
+def test_member_fail_fast_outside_child(monkeypatch: pytest.MonkeyPatch) -> None:
+    # No AVA_AGENT_ID: gateway/cli semantics — missing members on ava.self /
+    # ava.ui stay a fail-fast AttributeError and the loader never runs.
+    monkeypatch.setattr(agent_identity, "_agent_id", None)
+    monkeypatch.setattr(agent_identity, "_owns_loop", True)
+    monkeypatch.delenv("AVA_AGENT_ID", raising=False)
+    calls = _spy_member_loader(monkeypatch, namespace="self", member="lazylog")
+
+    with pytest.raises(AttributeError):
+        _ = ava.self.lazylog  # type: ignore[attr-defined]
+    with pytest.raises(AttributeError):
+        _ = ava.ui.lazynotify  # type: ignore[attr-defined]
+    assert calls == []

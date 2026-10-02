@@ -20,15 +20,15 @@ from contextlib import suppress
 from typing import Any
 from urllib.parse import urlsplit
 
+from base.cluster.machine import GatewayApiTokenMissing, gateway_api_base, gateway_bearer
+from base.config import settings
+from base.log import logger
 from services.browser.mcp_upstream import _await_stop_or_timeout
 from services.browser.session import (
     gateway_session_is_valid,
     inject_session_cookie,
     last_injected_cookie,
 )
-from shared.config import settings
-from shared.log import logger
-from shared.machine import gateway_api_base
 
 # Gateway session cookie refresh: the default server-side lifetime is 24h;
 # refreshing every 6h leaves a comfortable margin and self-heals a lost,
@@ -40,19 +40,30 @@ _SESSION_REFRESH_INTERVAL_S = 6 * 3600
 
 
 def _gateway_session_params() -> tuple[str, str] | None:
-    """(gateway_url, cluster_secret) when a gateway session can be minted, else
+    """(gateway_url, login credential) when a gateway session can be minted, else
     None (with a logged reason) — the daemon keeps serving either way, the
-    browser just cannot open auth-gated gateway URLs without the cookie."""
+    browser just cannot open auth-gated gateway URLs without the cookie.
+
+    The credential is this daemon's delivered runner API token (the login
+    accepts the active generation's runner token). The human secret never
+    stands in for a missing token: a daemon launched without one is logged as
+    a launch defect and left without the cookie (best effort, like every
+    other path here), except on a remote-managed data plane, which delivers no
+    token and whose gateway home presents the human secret."""
     try:
         gateway_url = gateway_api_base()
     except Exception as e:  # gateway URL unset on this unit
         logger.warning(f"[browser-mcp] gateway session injection disabled: {e}")
         return None
-    secret = settings.data_plane.cluster_secret
-    if not secret:
-        logger.warning("[browser-mcp] gateway session injection disabled: empty cluster secret")
+    try:
+        credential = gateway_bearer()
+    except GatewayApiTokenMissing as e:
+        logger.error(f"[browser-mcp] gateway session injection disabled: {e}")
         return None
-    return gateway_url, secret
+    if not credential:
+        logger.warning("[browser-mcp] gateway session injection disabled: the cluster API is open")
+        return None
+    return gateway_url, credential
 
 
 async def _inject_gateway_session_once() -> None:

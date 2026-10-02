@@ -16,9 +16,9 @@ from typing import Any
 
 import ava
 from ava.sdk_surface import plugin_loader, sdk_disable
-from shared.config.turn_view import turn_settings
-from shared.log import logger
-from shared.paths import workspace_dir
+from base.config.turn_view import turn_settings
+from base.log import logger
+from base.paths import workspace_dir
 
 
 def _apply_per_agent_sdk_disable() -> None:
@@ -80,15 +80,15 @@ def init_process_scope() -> None:
     path stays sub-second. OpenLLMetry must still be installed before the
     first turn (the LangChain callback-manager wrap and the SDK instrumentors
     are call-time, and the turn root span needs the provider set) — that
-    ordering is enforced by `shared.trace.ensure_init_resolved` inside
+    ordering is enforced by `base.telemetry.tracing.ensure_init_resolved` inside
     `turn_span`, which is what the first graph invocation waits on.
 
     Process scope, not agent scope: `initialize_tracing` installs the global
     tracer provider, and the span attribution that distinguishes agents is the
-    per-turn root span (`shared.trace.turn_span`), not the provider. The hosted
+    per-turn root span (`base.telemetry.tracing.turn_span`), not the provider. The hosted
     runner calls this once at daemon boot.
     """
-    from shared.trace import initialize_tracing
+    from base.telemetry.tracing import initialize_tracing
 
     initialize_tracing()
 
@@ -98,7 +98,7 @@ def land_cluster_extensions() -> None:
 
     The boot-side sibling of `cli/commands/extensions/materialize.py`
     (`materialize_cluster_extensions`), over the same
-    `shared.extension_materialize.materialize_skills`. Converge covers the
+    `base.packages.extensions.materialize.materialize_skills`. Converge covers the
     operator path — `ava start`, `ava converge`; this covers the one that needs
     no operator at all, which is what closes the offline window: a machine that
     was down when someone ran `ava skill install` elsewhere catches up the moment
@@ -127,11 +127,12 @@ def land_cluster_extensions() -> None:
     On a cluster with no installed extensions this is one indexed query
     returning no rows.
     """
-    from shared import db, extension_materialize, paths
+    from base import db, paths
+    from base.packages.extensions import materialize
 
     try:
         with db.connect() as conn:
-            result = extension_materialize.materialize_skills(conn, dest_root=paths.skills_dir())
+            result = materialize.materialize_skills(conn, dest_root=paths.skills_dir())
     except Exception as exc:
         logger.warning(
             "[extensions] could not read the cluster registry at boot ({}); this "
@@ -170,10 +171,10 @@ def load_process_extensions() -> None:
     made the module object stable, which removes a different obstacle, not this
     one). Newly installed plugins take effect on the next runner restart.
     """
-    from shared import plugins_config
+    from base.packages.plugins import enable_config
 
-    known = set(plugins_config.installed_plugin_dirs())
-    config = plugins_config.load_for_runtime(known)
+    known = set(enable_config.installed_plugin_dirs())
+    config = enable_config.load_for_runtime(known)
     enabled = {name for name, entry in config.plugins.items() if entry.enabled}
     plugin_loader.scan_and_load(enabled=enabled)
     # Each loaded surface's agent-runtime face (state fields / hooks / prompt
@@ -202,7 +203,7 @@ async def boot_agent_scope(agent_id: int) -> Any:
 
     The chat model is built from `turn_settings.lm.llm_model`, so callers must
     bind this agent's framework-scope config first through
-    `shared.config.turn_view.bind_agent_config`.
+    `base.config.turn_view.bind_agent_config`.
 
     Building it eagerly is safe even though the trace init is still in flight:
     traceloop's LangChain wrap injects its callback handler into every
@@ -221,6 +222,6 @@ async def boot_agent_scope(agent_id: int) -> Any:
     from .startup import notify_desktop_permissions_at_startup
 
     await notify_desktop_permissions_at_startup()
-    from shared.lm.factory import build_chat_model
+    from base.lm.factory import build_chat_model
 
     return build_chat_model(turn_settings.lm.llm_model)

@@ -8,8 +8,8 @@ from typing import Any
 
 from psycopg_pool import AsyncConnectionPool
 
-from shared.db_transaction import async_write_transaction
-from shared.log import logger
+from base.db.transaction import async_write_transaction
+from base.log import logger
 
 # The re-serve notice prefix — also the dedupe key for the min-interval check.
 _PAGE_RECOVERY_NOTICE_PREFIX = "Page recovery:"
@@ -93,7 +93,7 @@ async def _close_dead_show_pages(
         return
 
     if event_publisher is not None:
-        from shared.live_events import PageClosed
+        from base.events.live.projection import PageClosed
 
         for name in names:
             event_publisher.emit(PageClosed(agent_id=agent_id, name=name).model_dump_json())
@@ -110,7 +110,7 @@ async def _close_dead_show_pages(
         # SELECT recheck delivers it within timeout_s regardless). At boot the
         # listener is not subscribed yet — the wake's SETEX breadcrumb makes
         # the listener SELECT immediately on subscribe.
-        from shared.db import publish_inbound_wake
+        from base.db import publish_inbound_wake
 
         await asyncio.to_thread(publish_inbound_wake, agent_id, "0")
         logger.bind(event="page_restore_notified", agent_id=agent_id).info(

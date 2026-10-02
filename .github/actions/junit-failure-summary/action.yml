@@ -1,0 +1,42 @@
+name: Show unquarantined failure summary
+description: Print failing tests when the Trunk quarantine gate rejects uploaded JUnit.
+inputs:
+  junit-patterns:
+    description: Python list of JUnit glob patterns to inspect.
+    required: true
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      run: |
+        python3 - <<'EOF'
+        import glob
+        from xml.etree import ElementTree as ET
+
+        paths = set()
+        for pattern in ${{ inputs['junit-patterns'] }}:
+            paths.update(glob.glob(pattern))
+        paths = sorted(paths)
+        if not paths:
+            print("No JUnit files found: the upload failed before test results were parsed (see the step log above).")
+            raise SystemExit(0)
+        failed = []
+        total = 0
+        for path in paths:
+            try:
+                root = ET.parse(path).getroot()
+            except ET.ParseError:
+                print("WARNING: could not parse " + path)
+                continue
+            for tc in root.iter("testcase"):
+                total += 1
+                if tc.find("failure") is not None or tc.find("error") is not None:
+                    failed.append(tc.get("classname") + "::" + tc.get("name"))
+        print("Trunk quarantine gate: " + str(len(failed)) + " of " + str(total) + " test(s) failed and were NOT quarantined.")
+        for name in failed:
+            print("  FAILED " + name)
+        if failed:
+            print("Fix the test, or quarantine a known-flaky one in the Trunk Flaky Tests dashboard.")
+        else:
+            print("No failing tests in the JUnit: this red step is an uploader error, not a test failure.")
+        EOF

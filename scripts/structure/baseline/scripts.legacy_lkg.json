@@ -1,9 +1,0 @@
-{
-  "complexity": {
-    "scripts/legacy_lkg/cold_boot.py::main": 25,
-    "scripts/legacy_lkg/prepare.py::main": 24
-  },
-  "nesting": {
-    "scripts/legacy_lkg/cold_boot.py::main": 6
-  }
-}

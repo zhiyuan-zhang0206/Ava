@@ -99,7 +99,7 @@ message brings it back with full context) only when a follow-up is needed.
 
 ```python
 import ava
-from shared.paths import workspace_dir
+from base.paths import workspace_dir
 
 handoff = workspace_dir(ava.self.AGENT_ID) / "task_handoff"
 handoff.mkdir(parents=True, exist_ok=True)
@@ -140,11 +140,11 @@ workflow has and what each one waits for:
 | **K checkpoints** | one per wave, where wave N+1 needs wave N's output | multi-wave workflow (2-3 checkpoints is typical) |
 | **Designated reporters** | name only the results that gate the next step | wide fan-out — 10 workers, 2 of them gate, the other 8 just end |
 
-`reference/gather_files.py` is that watcher.  Configure it by string-patching
+`references/gather_files.py` is that watcher.  Configure it by string-patching
 its placeholders, and launch it BEFORE the workers start so no result is missed.
 
 ```python
-watcher_code = ava.files.read(f"{ava.skills.ava_dynamic_workflow.path}/reference/gather_files.py")
+watcher_code = ava.files.read(f"{ava.skills.ava_dynamic_workflow.path}/references/gather_files.py")
 watcher_code = watcher_code.replace('HANDOFF_DIR = ""', f'HANDOFF_DIR = "{handoff}"')
 watcher_code = watcher_code.replace("EXPECTED_FILES: list[str] = []",
     'EXPECTED_FILES = ["flights.json", "hotels.json", "activities.json"]')
@@ -213,14 +213,14 @@ for wid in worker_ids.values():
 
 | Script | Purpose |
 |---|---|
-| `reference/gather_files.py` | Checkpoint watcher: wakes the orchestrator when the results it names have landed (all, K-of-N, or by glob) |
-| `reference/orchestrator_template.py` | Orchestrator skeleton — explore, fork, one checkpoint, reduce |
-| `reference/deep_research_orchestrator.py` | Full orchestrator: AI coding agent competitive landscape research — 7 waves, ~40 agents |
-| `reference/codebase_sweep_orchestrator.py` | Full orchestrator: legacy code & stale patterns sweep — 7 waves, ~28 agents |
-| `reference/deep_research_lite.py` | Scaled-down demo: 5 waves, ~11 agents — runs in persistent shell |
-| `reference/codebase_sweep_lite.py` | Scaled-down demo: 5 waves, ~11 agents — scans real codebase |
+| `references/gather_files.py` | Checkpoint watcher: wakes the orchestrator when the results it names have landed (all, K-of-N, or by glob) |
+| `references/orchestrator_template.py` | Orchestrator skeleton — explore, fork, one checkpoint, reduce |
+| `references/deep_research_orchestrator.py` | Full orchestrator: AI coding agent competitive landscape research — 7 waves, ~40 agents |
+| `references/codebase_sweep_orchestrator.py` | Full orchestrator: legacy code & stale patterns sweep — 7 waves, ~28 agents |
+| `scripts/deep_research_lite.py` | Scaled-down demo: 5 waves, ~11 agents — runs in persistent shell |
+| `scripts/codebase_sweep_lite.py` | Scaled-down demo: 5 waves, ~11 agents — scans real codebase |
 
-Read a reference with `ava.files.read(f"{ava.skills.ava_dynamic_workflow.path}/reference/<name>.py")`.
+Read a reference with `ava.files.read(f"{ava.skills.ava_dynamic_workflow.path}/references/<name>.py")` (the two lite demos, runnable directly, live in `scripts/` instead — see below).
 
 **Running the lite demos**: Each lite script is a state machine — run it once
 per wave.  After spawning workers it arms that wave's checkpoint and goes idle;
@@ -229,10 +229,10 @@ the next wave.  Progress is tracked in `orchestrator_state.json`.
 
 ```python
 # In a persistent shell session, run:
-#   python reference/deep_research_lite.py
+#   python scripts/deep_research_lite.py
 # (bare `python` — the session's PATH already resolves it to this checkout's
 # own venv interpreter on prod home, a dev worktree cluster, or Windows alike;
-# see shared/session_env.py::forward_env_dict)
+# see base/sessions/env_forwarding.py::forward_env_dict)
 # Each invocation executes one wave, then idles. Repeat until "ALL DONE".
 ```
 

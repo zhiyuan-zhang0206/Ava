@@ -1,0 +1,11 @@
+{
+  "complexity": {
+    "scripts/model_registry/check_model_updates.py::_load_state": 18,
+    "scripts/model_registry/check_model_updates.py::_markdown_report": 19,
+    "scripts/model_registry/plugin_price_sync.py::_archive_periods": 31,
+    "scripts/model_registry/update_model_pricing.py::parse_deepseek_pricing": 37
+  },
+  "files": {
+    "scripts/model_registry/tests/test_check_model_updates.py": 899
+  }
+}

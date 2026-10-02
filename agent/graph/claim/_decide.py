@@ -6,7 +6,7 @@ the ``halted`` formula appears exactly once. Chain: cancel path → veto
 re-entry → idle-restart gate → compact path → normal fallthrough (with the
 END snapshot flag).
 
-State typing follows the agent/graph/_exec.py module-docstring pattern
+State typing follows the agent/graph/exec/node.py module-docstring pattern
 (``_state.AgentState`` + deferred annotations) — see node.py docstring.
 """
 
@@ -16,7 +16,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import cast
 
-from langchain_core.messages import AnyMessage, RemoveMessage
+from langchain_core.messages import AnyMessage, BaseMessage, RemoveMessage
 from langgraph.types import Command
 
 from agent import state as _state
@@ -36,11 +36,11 @@ from agent.hooks.compact_events import emit_compact_finished, emit_compact_start
 from agent.hooks.history_dump import dump_history, history_dump_note
 from agent.nodes import BEFORE_LLM, CLAIM, END, INIT_CONTEXT
 from agent.state_channels import CIRCUIT_REASON_CONTEXT_OVERFLOW
-from shared.agents.messages.inbound import InboundKind
-from shared.context import AvaContext
-from shared.live_events import CompactDone
-from shared.log import logger
-from shared.message_kwargs import AvaMsgType
+from base.agents.context import AvaContext
+from base.agents.messages.inbound import InboundKind
+from base.agents.messages.kwargs import AvaMsgType, NoteTag, read_ava_kwargs
+from base.events.live.projection import CompactDone
+from base.log import logger
 
 
 @dataclass(frozen=True)
@@ -55,6 +55,27 @@ class _Outcome:
 
     command: Command[ClaimGoto]
     publish_end_snapshot: bool = False
+
+
+def _markers_only(messages: list[BaseMessage]) -> list[BaseMessage]:
+    """The framework markers of a batch whose chats are deferred: system notes
+    survive, chat messages do not.
+
+    A SECURITY note rides right behind the message it flags, so one behind a
+    dropped chat goes with it — the deferred chat is claimed and scanned again
+    in the fresh context, which raises its note then.
+    """
+    kept: list[BaseMessage] = []
+    subject_kept = False
+    for message in messages:
+        kwargs = read_ava_kwargs(message)
+        keep = kwargs.get("ava_msg_type") == AvaMsgType.SYSTEM_NOTE.value
+        if keep and kwargs.get("ava_note_tag") == NoteTag.SECURITY.value:
+            keep = subject_kept
+        if keep:
+            kept.append(message)
+        subject_kept = keep
+    return kept
 
 
 async def decide(
@@ -177,11 +198,7 @@ async def decide(
         # markers (resurrect / fork) ride the tail — never raw conversation.
         if st.committed_chat_ids:
             await _defer_chats_to_pending(ctx.ops_pool, agent_id, st.committed_chat_ids)
-            st.new_msgs = [
-                m
-                for m in st.new_msgs
-                if m.additional_kwargs.get("ava_msg_type") == AvaMsgType.SYSTEM_NOTE.value  # pyright: ignore[reportUnknownMemberType]
-            ]
+            st.new_msgs = _markers_only(st.new_msgs)
             st.committed_chat_ids = []
         # Finalize every remaining claimed inbound before the wipe: their
         # HumanMessages live in state.messages (about to be REMOVE_ALL'd) and

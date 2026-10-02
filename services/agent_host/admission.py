@@ -10,10 +10,10 @@ flight, no starvation across agents.
 
 The queue primitive stays ``asyncio.Semaphore``, whose waiters wake in FIFO
 order (CPython 3.12 wakes the oldest live waiter; locked by the wake-order test
-in tests/services/test_turn_admission.py). This class adds what the bare
+in services/agent_host/tests/test_turn_admission.py). This class adds what the bare
 semaphore cannot express:
 
-- **The waiting state.** A waiter is registered in ``agent/turn_progress.py``
+- **The waiting state.** A waiter is registered in ``agent/turn/progress.py``
   BEFORE the acquire await, so there is no window in which a parked turn is
   invisible to the dispatcher's fake-alive scan. Cancelling a waiter would only
   re-queue it at the tail (its successor is a new ticket), so the wait is
@@ -35,7 +35,7 @@ import time
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
-from agent.turn_progress import begin_admission_wait, end_admission_wait
+from agent.turn.progress import begin_admission_wait, end_admission_wait
 
 
 class TurnAdmission:

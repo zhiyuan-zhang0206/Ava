@@ -14,7 +14,7 @@ import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
-from shared.install_registry import looks_like_local_path
+from base.packages.extensions.install_registry import looks_like_local_path
 
 _TEMP_PREFIX = "ava-install-"
 

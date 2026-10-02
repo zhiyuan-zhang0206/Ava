@@ -13,8 +13,8 @@ from pathlib import Path
 
 import psutil
 
-from shared.config import settings
-from shared.paths import logs_dir
+from base.config import settings
+from base.paths import logs_dir
 
 _MANAGED_LOG_NAME = re.compile(
     r"(?:"

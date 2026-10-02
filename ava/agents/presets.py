@@ -5,10 +5,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
+from typing import Any
 
-from ava import gateway_client as _client
-from ava.gateway_client import PresetNotFoundError as PresetNotFoundError
-from ava.sdk_validation import coerce_str
+from ava import gateway_client
+from ava.sdk_surface.validation import coerce_str
 
 
 @dataclass
@@ -22,35 +22,36 @@ class Preset:
     updated_at: datetime
 
 
-def list() -> list[Preset]:  # pyright: ignore[reportGeneralTypeIssues] — `list` shadows builtin; safe at runtime via `from __future__ import annotations`
-    """Return every preset, ordered by name."""
-    rows = _client.list_presets()
-    return [
-        Preset(
-            id=r["id"],
-            name=r["name"],
-            label=r["label"],
-            description=r.get("description"),
-            config=r["config"],
-            created_at=r["created_at"],
-            updated_at=r["updated_at"],
-        )
-        for r in rows
-    ]
+class PresetNotFoundError(Exception):
+    """No preset with that name exists."""
 
 
-def get(name: str) -> Preset:
-    """Return the preset whose name matches exactly."""
-    row = _client.get_preset(coerce_str(name, "name"))
+def _from_row(row: dict[str, Any]) -> Preset:
     return Preset(
         id=row["id"],
         name=row["name"],
         label=row["label"],
-        description=row.get("description"),
+        description=row["description"],
         config=row["config"],
-        created_at=row["created_at"],
-        updated_at=row["updated_at"],
+        created_at=datetime.fromisoformat(row["created_at"]),
+        updated_at=datetime.fromisoformat(row["updated_at"]),
     )
+
+
+def list() -> list[Preset]:  # pyright: ignore[reportGeneralTypeIssues] — `list` shadows builtin; safe at runtime via `from __future__ import annotations`
+    """Return every preset, ordered by name."""
+    return [_from_row(row) for row in gateway_client.list_presets()]
+
+
+def get(name: str) -> Preset:
+    """Return the preset whose name matches exactly."""
+    name = coerce_str(name, "name")
+    # The full list is small (a handful of presets), so filter it here rather
+    # than keep a get-by-name gateway endpoint.
+    for row in gateway_client.list_presets():
+        if row["name"] == name:
+            return _from_row(row)
+    raise PresetNotFoundError(f"preset {name!r} not found")
 
 
 __all_for_ava__ = ["Preset", "PresetNotFoundError", "get", "list"]

@@ -1,0 +1,287 @@
+"""Unified event stream query — `GET /api/events`.
+
+The programmatic query surface over the unified event stream (audit /
+telemetry / log — the LGTM read side, task #1197: the PG `events` read was
+replaced by Loki). One schema and one correlation key (`trace_id`), served
+from `gateway/lgtm/loki_events.py`; wire shape and filter semantics are unchanged
+from the PG version.
+
+Filters compose (AND): `category` / `event_name` / `tier` / `agent_id` /
+`trace_id` / `machine` / `level`, plus a
+time window given either as `from`/`to`
+(ISO-8601, inclusive) or as `hours` (the last N hours — shorthand for
+`from = now - hours`; the two forms are mutually exclusive). `level` is an
+exact match (case-insensitive), the same reading as the per-agent events
+query. Pagination is `limit` + `offset`; `meta.has_more` (from the list
+fetch's +1 lookahead) tells the client whether another page exists, and
+`meta.total` — the exact filtered row count before paging — is opt-in via
+`with_total=1` (it costs a full-window count aggregation, which a page flip
+does not need).
+
+Two hard contract rules keep every query bounded and unambiguous:
+  - a lower bound is always in effect — absent both `from` and `hours`,
+    `from = now - 24h` is assumed (the old PG scan needed the partition
+    prune; on Loki it keeps the count/list fetch cheap — the API never
+    runs an unbounded window);
+  - `from` / `to` must carry a timezone offset — a naive timestamp would be
+    interpreted in the server's local timezone, silently shifting the
+    window; such input is rejected with 422 instead.
+"""
+
+from __future__ import annotations
+
+import re
+from datetime import UTC, datetime, timedelta
+from typing import Annotated
+
+import httpx
+from fastapi import APIRouter, Depends, HTTPException, Query
+
+from base.config import settings
+from base.events.contract import EventTier, tier_for
+from gateway.agents.eval_guard import deny_isolated_result_read
+from gateway.events.schemas import EventRow, EventsMeta, EventsResponse
+from gateway.lgtm import loki_events, loki_query_budget
+from gateway.lgtm.backend_failure import raise_backend_unavailable
+
+router = APIRouter()
+
+# These are stored lowercase (design doc §1); unknown values are
+# rejected with 422 rather than silently matching nothing (fail fast).
+_CATEGORIES = frozenset({"audit", "telemetry", "log"})
+_LEVELS = frozenset({"debug", "info", "warning", "error", "critical"})
+_TIERS = ("business", "anomaly", "observation", "noise")
+_IMPERSONATION_SESSION = re.compile(r"^[0-9]+:[0-9]+$")
+
+# Longest retention (audit = 365d); anything longer is a no-op window anyway.
+# Protective constant, evaluated at import for the `hours` Query bound — not
+# configuration (task #3696 exception inventory: KEEP).
+_MAX_HOURS = 24 * 365
+
+# Default window when the request names no lower bound (`from`/`hours`) —
+# same contract as the old PG API (which pruned to the current month
+# partitions); on Loki it bounds the count/list fetch.
+_DEFAULT_WINDOW_HOURS = 24
+
+
+def _validate(
+    *,
+    category: str | None,
+    level: str | None,
+    from_: datetime | None,
+    to: datetime | None,
+    hours: float | None,
+) -> str | None:
+    """Validate enum-ish filters; return the normalized `level` (lowercase)
+    or raise 422. `from` + `hours` together is a contradiction — reject it
+    instead of silently picking one. Naive timestamps are rejected too: a
+    tz-less `from`/`to` would be interpreted in the server's local timezone,
+    silently shifting the window — fail fast instead of guessing."""
+    if category is not None and category not in _CATEGORIES:
+        raise HTTPException(
+            status_code=422,
+            detail=f"category must be one of {sorted(_CATEGORIES)}, got {category!r}",
+        )
+    if level is not None:
+        level = level.lower()
+        if level not in _LEVELS:
+            raise HTTPException(
+                status_code=422,
+                detail=f"level must be one of {sorted(_LEVELS)}, got {level!r}",
+            )
+    for name, value in (("from", from_), ("to", to)):
+        if value is not None and value.tzinfo is None:
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    f"{name} must include a timezone offset "
+                    f"(e.g. 2026-08-04T00:00:00Z) — naive timestamps are "
+                    f"interpreted in the server's local timezone"
+                ),
+            )
+    if from_ is not None and hours is not None:
+        raise HTTPException(
+            status_code=422,
+            detail="from and hours are mutually exclusive — pass one time window",
+        )
+    return level
+
+
+def _parse_tiers(tier: str | None) -> list[EventTier] | None:
+    """Normalize a comma-separated tier filter or fail fast with 422."""
+    if tier is None:
+        return None
+    tiers: list[EventTier] = []
+    for raw in tier.split(","):
+        value = raw.strip().lower()
+        if value not in _TIERS:
+            raise HTTPException(
+                status_code=422,
+                detail=f"tier must be a comma-separated list of {_TIERS}, got {tier!r}",
+            )
+        if value not in tiers:
+            tiers.append(value)
+    return tiers
+
+
+def _impersonation_filters(session: str | None) -> dict[str, str] | None:
+    """Validate the private replay correlation value and build its Loki filter."""
+    if session is None:
+        return None
+    if not _IMPERSONATION_SESSION.fullmatch(session):
+        raise HTTPException(
+            status_code=422,
+            detail="impersonation_session must be an agent_id:session_id pair",
+        )
+    return {"impersonation_session": session}
+
+
+@router.get("/api/events", dependencies=[Depends(deny_isolated_result_read)])
+def get_events(
+    category: Annotated[str | None, Query()] = None,
+    event_name: Annotated[str | None, Query()] = None,
+    agent_id: Annotated[int | None, Query()] = None,
+    trace_id: Annotated[str | None, Query()] = None,
+    impersonation_session: Annotated[str | None, Query()] = None,
+    machine: Annotated[str | None, Query()] = None,
+    level: Annotated[str | None, Query()] = None,
+    tier: Annotated[str | None, Query()] = None,
+    from_: Annotated[datetime | None, Query(alias="from")] = None,
+    to: Annotated[datetime | None, Query()] = None,
+    hours: Annotated[float | None, Query(gt=0, le=_MAX_HOURS)] = None,
+    # `limit`'s range and `offset`'s ceiling stay protective constants (import-
+    # time Query bounds); the default *window* is display.events_default_limit.
+    limit: Annotated[int | None, Query(ge=1, le=1000)] = None,
+    offset: Annotated[int, Query(ge=0, le=10_000)] = 0,
+    with_total: Annotated[bool, Query()] = False,  # noqa: FBT002 — FastAPI query param
+) -> EventsResponse:
+    """Slice of the unified event stream — every event (audit / telemetry /
+    log) through one query surface, the programmatic read side of the
+    unified emitter. Newest-first (`ts DESC`, `id DESC` tiebreak).
+
+    Filters compose (AND):
+      - `category=<audit|telemetry|log>`: retention/alerting class (unknown
+        value 422s).
+      - `event_name=<name>`: exact event name, e.g. `llm_usage` /
+        `turn_end` / `spawn` / `send_message`.
+      - `agent_id=<n>`: events belonging to that agent; service-level events
+        (NULL) are excluded when set.
+      - `trace_id=<hex>`: one turn's whole call chain — every event that
+        shares the id.
+      - `machine=<name>`: the host dimension.
+      - `level=<debug|info|warning|error|critical>`: exact match,
+        case-insensitive (unknown value 422s).
+      - `tier=<business|anomaly|observation|noise>[,...]`: comma-separated
+        display tiers, ORed within the list and ANDed with every other filter.
+        The Loki predicate is derived before pagination so `meta.total` and
+        page boundaries stay exact.
+      - `from=<ISO-8601>` / `to=<ISO-8601>`: inclusive time window
+        (`ts >= from AND ts <= to`); either side may be omitted. Values
+        MUST carry a timezone offset (`Z` or `+hh:mm`) — a naive timestamp
+        is interpreted in the server's local timezone, so it 422s instead
+        of silently shifting the window.
+      - `hours=<n>`: alternative window — the last N hours
+        (`from = now - hours`). Mutually exclusive with `from`.
+      - Default window: when neither `from` nor `hours` is given, the last
+        24 hours are assumed (`from = now - 24h`) — an unbounded query
+        would scan the whole retention history (6M+ rows across every
+        month partition), so the API never runs one. `meta.window_from`
+        always echoes the effective lower bound.
+      - `limit` (configured default window — ``display.events_default_limit``,
+        100 out of the box — cap 1000) / `offset` (cap 10,000): offset
+        paging with stable ordering across same-`ts` rows. The cap bounds the
+        in-memory Loki JSON parse (`limit + offset + 1` rows).
+      - `with_total=1`: also compute the exact filtered row count
+        (`meta.total`) via the Loki count path — one extra full-window
+        aggregation, so it is opt-in; without it `meta.total` is null.
+
+    Response: `meta` (opt-in exact filtered `total`, effective
+    `window_from`/`window_to`, `limit`/`offset`, `has_more` from the list
+    fetch's +1 lookahead) + `items` (the unified `EventRow` shape).
+    `window_from` is always set — the default 24h lower bound when the
+    request named none. An empty window returns `items: []`.
+    """
+    level = _validate(category=category, level=level, from_=from_, to=to, hours=hours)
+    attribute_filters = _impersonation_filters(impersonation_session)
+    tiers = _parse_tiers(tier)
+    effective_limit = limit if limit is not None else settings.display.events_default_limit
+
+    now = datetime.now(UTC)
+    window_from = from_
+    if hours is not None:
+        window_from = now - timedelta(hours=hours)
+    if window_from is None:
+        # No explicit lower bound — default to the last 24h (the same
+        # lower-bound contract as the old PG API; A31).
+        window_from = now - timedelta(hours=_DEFAULT_WINDOW_HOURS)
+
+    name = event_name
+
+    try:
+        total: int | None = None
+        if with_total:
+            total = loki_events.count_events(
+                agent_id=agent_id,
+                categories=[category] if category is not None else None,
+                event_names=[name] if name is not None else None,
+                tiers=tiers,
+                trace_id=trace_id.lower() if trace_id is not None else None,
+                machine=machine,
+                level=level,
+                attribute_filters=attribute_filters,
+                from_=window_from,
+                to=to,
+            )
+        rows, has_more = loki_events.query_events(
+            agent_id=agent_id,
+            categories=[category] if category is not None else None,
+            event_names=[name] if name is not None else None,
+            tiers=tiers,
+            trace_id=trace_id.lower() if trace_id is not None else None,
+            machine=machine,
+            level=level,
+            attribute_filters=attribute_filters,
+            from_=window_from,
+            to=to,
+            limit=effective_limit,
+            offset=offset,
+        )
+    except loki_query_budget.LokiQueryBudgetError:
+        # Local admission saturation has its own typed 503 contract and
+        # transition metrics; the global handler preserves that reason.
+        raise
+    except httpx.HTTPError as exc:
+        # The failing query shape is recorded by loki_events before the
+        # exception reaches this wire-level retriable response.
+        raise_backend_unavailable(exc)
+
+    items = [
+        EventRow(
+            id=row["id"],
+            line_sha256=row["line_sha256"],
+            ts=row["ts"],
+            trace_id=row["trace_id"],
+            span_id=row["span_id"],
+            agent_id=row["agent_id"],
+            machine=row["machine"],
+            process=row["process"],
+            category=row["category"],
+            event_name=row["event_name"],
+            tier=tier_for(row["event_name"], row["category"], row["level"]),
+            level=row["level"],
+            source=row["source"],
+            target_agent_id=row["target_agent_id"],
+            attributes=row["attributes"],
+        )
+        for row in rows
+    ]
+    meta = EventsMeta(
+        total=total,
+        window_from=window_from,
+        window_to=to,
+        limit=effective_limit,
+        offset=offset,
+        has_more=has_more,
+        generated_at=now.isoformat(),
+    )
+    return EventsResponse(meta=meta, items=items)

@@ -15,20 +15,23 @@ from psycopg_pool import AsyncConnectionPool
 
 from agent.db import claim_inbound_batch
 from agent.graph.claim.node import claim_node
-from agent.hosted_ownership import admit_hosted_runtime, apply_hosted_lifecycle
+from agent.ownership.hosted import admit_hosted_runtime, apply_hosted_lifecycle
 from agent.state import BaseAgentState
+from base.agents import impersonation as leases
+from base.agents.context import AvaContext
+from base.agents.impersonation.maintenance import remind_expiring_impersonations
+from base.agents.incarnation.hosted_force import original_host_force
+from base.agents.messages.caller_identity import CallerIdentity
+from base.cluster.machine import machine_name
+from base.db import create_agent, pool
+from base.native_process.runtime_incarnation import RuntimeIncarnation
+from base.native_process.turn_identity import bind_turn_identity
 from cli.commands.agents import impersonation_relay as relay
-from ops.agent_wake import resurrect_agent
-from ops.ops_exit import _enqueue_termination_inbounds, _force_terminate_transaction
-from shared.agents import impersonation as leases
-from shared.agents.impersonation.impersonation_maintenance import remind_expiring_impersonations
-from shared.caller_identity import CallerIdentity
-from shared.context import AvaContext
-from shared.db import create_agent, pool
-from shared.hosted_force import original_host_force
-from shared.machine import machine_name
-from shared.runtime_incarnation import RuntimeIncarnation
-from shared.turn_identity import bind_turn_identity
+from ops.agents.wake import resurrect_agent
+from ops.lifecycle.termination import (
+    _enqueue_termination_inbounds,
+    _force_terminate_transaction,
+)
 from tests.impersonation_support import recorded_tree
 
 
@@ -281,7 +284,7 @@ async def test_restart_and_termination_without_a_lease_add_no_notices(
     db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool
 ) -> None:
     owner, session = await _termination_session(db_conn, aops_pool)
-    db_conn.execute("UPDATE agents_meta SET status='restarting' WHERE id=%s", (owner.agent_id,))
+    db_conn.execute("UPDATE agents_meta SET status='idling' WHERE id=%s", (owner.agent_id,))
     db_conn.commit()
     assert _native_notices(db_conn, owner.agent_id) == []
     assert db_conn.execute(
@@ -410,7 +413,7 @@ async def test_resurrection_timestamp_follows_notes_even_in_an_older_transaction
     aops_pool: AsyncConnectionPool,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from ops import agent_wake
+    from ops.agents import wake
 
     owner, _session = await _termination_session(db_conn, aops_pool)
     started = db_conn.execute("SELECT transaction_timestamp()").fetchone()
@@ -424,7 +427,7 @@ async def test_resurrection_timestamp_follows_notes_even_in_an_older_transaction
     def earlier_transaction():
         yield db_conn
 
-    monkeypatch.setattr(agent_wake, "write_transaction", earlier_transaction)
+    monkeypatch.setattr(wake, "write_transaction", earlier_transaction)
     resurrect_agent(owner.agent_id, resurrected_by="user", prompt="Continue")
     ordered = db_conn.execute(
         "SELECT kind,payload->>'note_tag' FROM inbound_messages "

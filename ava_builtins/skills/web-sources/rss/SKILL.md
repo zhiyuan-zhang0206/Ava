@@ -9,7 +9,7 @@ The **RSS/Atom adapter** of the `web-sources` family (shared S1 item schema: [`.
 Many sources (media official websites, AI lab official blogs, major newspapers, YouTube channels, personal blogs) expose standard RSS/Atom feeds, which is the cleanest integration method: **one feed URL is one collection**, with no need to enumerate followed accounts.
 Which specific feeds to subscribe to are **user preferences** and are not written into this skill — the agent reads from its own memory (followed source list) and syncs one by one.
 
-**A self-contained CLI script** (`reference/feed.py`): agent starts bash, calls with command-line arguments, reads stdout JSON.
+**A self-contained CLI script** (`scripts/feed.py`): agent starts bash, calls with command-line arguments, reads stdout JSON.
 Parsing uses `feedparser` (handles all RSS 0.9x/1.0/2.0 + Atom dialects + date normalization + `content:encoded`);
 feed bytes are fetched with `curl` + browser UA (can bypass host 403 for bare clients). When using `--full` to fetch full text, it imports `extract_article` from the same repo's `generic`.
 
@@ -17,13 +17,13 @@ feed bytes are fetched with `curl` + browser UA (can bypass host 403 for bare cl
 
 ```bash
 # List current feed entries (newest-first, without landing in mirror):
-$AVA_HOME/source/.venv/bin/python $AVA_HOME/skills/web-sources/rss/reference/feed.py enum --url <feed-url>
+$AVA_HOME/source/.venv/bin/python $AVA_HOME/skills/web-sources/rss/scripts/feed.py enum --url <feed-url>
 
 # One-stop: parse + land each entry in mirror + project S1:
-$AVA_HOME/source/.venv/bin/python $AVA_HOME/skills/web-sources/rss/reference/feed.py sync --url <feed-url> --since 14d
+$AVA_HOME/source/.venv/bin/python $AVA_HOME/skills/web-sources/rss/scripts/feed.py sync --url <feed-url> --since 14d
 
 # --full: additionally fetch full article text for each link (most feeds only carry summary):
-$AVA_HOME/source/.venv/bin/python $AVA_HOME/skills/web-sources/rss/reference/feed.py sync --url <feed-url> --full
+$AVA_HOME/source/.venv/bin/python $AVA_HOME/skills/web-sources/rss/scripts/feed.py sync --url <feed-url> --full
 ```
 
 `--since` accepts `30d`/`12h`/`2026-05-07` (by publication date window; **entries without dates are kept** — no date does not mean old).

@@ -18,7 +18,7 @@ from typing import Literal
 
 import psutil
 
-from shared.exec_owner_protocol import (
+from base.agents.incarnation.exec_owner_protocol import (
     MAX_OWNER_MESSAGE,
     OwnerClosed,
     OwnerControl,
@@ -27,12 +27,8 @@ from shared.exec_owner_protocol import (
     read_owner_bytes,
     read_owner_context,
 )
-from shared.exec_process_domain import KILL_GRACE_S, ExecProcessDomain
-from shared.incarnation_resources import ResourceProcess
-from shared.platform import CREATE_NO_WINDOW, IS_WINDOWS
-from shared.proc_tree import stable_create_time
-from shared.winjob import WindowsJob
-from shared.winjob_pipes import PipedJobChild, start_piped_job_process
+from base.agents.incarnation.resources import ResourceProcess
+from base.native_process.exec_domain import KILL_GRACE_S, ExecProcessDomain
 
 
 def _ended(identity: psutil.Process) -> bool:
@@ -45,7 +41,7 @@ def _ended(identity: psutil.Process) -> bool:
 class ControlPipe:
     """The owner loop alone reads control; no buffered daemon survives shutdown.
 
-    Python 3.12 supports nonblocking pipes on POSIX and Windows. Partial records
+    Python 3.12 supports nonblocking pipes. Partial records
     retain their fixed bound, and EOF never upgrades a truncated record to permit.
     """
 
@@ -74,7 +70,7 @@ class ControlPipe:
         return line + separator
 
 
-def _relay(root: subprocess.Popen[bytes] | PipedJobChild, failures: list[BaseException]) -> None:
+def _relay(root: subprocess.Popen[bytes], failures: list[BaseException]) -> None:
     if root.stdout is None:
         failures.append(RuntimeError("owner root has no output pipe"))
         return
@@ -109,7 +105,6 @@ def run(context_path: Path) -> None:  # noqa: PLR0915 -- one native owner retain
     ):
         raise RuntimeError("exec owner request digest differs from reservation")
     control = ControlPipe(sys.stdin.fileno())
-    job = WindowsJob.create() if IS_WINDOWS else None
     argv = [
         sys.executable,
         "-I",
@@ -121,26 +116,15 @@ def run(context_path: Path) -> None:  # noqa: PLR0915 -- one native owner retain
         "--context",
         str(context_path),
     ]
-    try:
-        root = (
-            start_piped_job_process(argv, job)
-            if job is not None
-            else subprocess.Popen(  # noqa: S603 -- fixed isolated entry; no caller-selected executable.
-                argv,
-                stdin=subprocess.PIPE,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                close_fds=True,
-                creationflags=CREATE_NO_WINDOW,
-                start_new_session=not IS_WINDOWS,
-                bufsize=0,
-            )
-        )
-    except BaseException:
-        if job is not None:
-            job.close()
-        raise
-    domain = ExecProcessDomain(root, job)
+    root, domain = ExecProcessDomain.launch_posix(
+        argv,
+        new_session=True,
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        close_fds=True,
+        bufsize=0,
+    )
     reader_failures: list[BaseException] = []
     reader = threading.Thread(target=_relay, args=(root, reader_failures), daemon=True)
     reason: Literal["completed", "host_eof", "cancel", "timeout"] = "completed"
@@ -152,20 +136,15 @@ def run(context_path: Path) -> None:  # noqa: PLR0915 -- one native owner retain
         owner_identity = psutil.Process()
         allocation = allocation.model_copy(
             update={
-                "owner_process": ResourceProcess(
-                    pid=owner_identity.pid, birth=stable_create_time(owner_identity)
-                ),
-                "root_process": ResourceProcess(
-                    pid=root.pid, birth=stable_create_time(root_identity)
-                ),
+                "owner_process": ResourceProcess.capture(owner_identity),
+                "root_process": ResourceProcess.capture(root_identity),
             }
         )
         reader.start()
         publish_owner_message(context_path.with_suffix(".ready"), OwnerReady(allocation=allocation))
         permitted = False
-        # POSIX must keep the root unreaped to pin its process group. Windows
-        # instead retains the Job handle and uses the actual root process handle.
-        while not (root.poll() is not None if IS_WINDOWS else _ended(root_identity)):
+        # Keep the root unreaped to pin its process group.
+        while not _ended(root_identity):
             if time.monotonic() >= deadline:
                 reason = "timeout"
                 break
@@ -210,17 +189,15 @@ def run(context_path: Path) -> None:  # noqa: PLR0915 -- one native owner retain
             if attached and not close_attempted:
                 close_attempted = True
                 domain.close_confirmed(close_deadline)
+                root.wait(timeout=max(0.001, close_deadline - time.monotonic()))
             elif not attached:
                 root.kill()
-            root.wait(timeout=max(0.001, close_deadline - time.monotonic()))
+                root.wait(timeout=max(0.001, close_deadline - time.monotonic()))
         except BaseException as cleanup:
             original.add_note(f"owner cleanup unresolved: {type(cleanup).__name__}: {cleanup}")
         raise
     finally:
-        # Never turn failed cleanup into a terminal receipt. Closing the native
-        # handle on error is best effort containment, not positive evidence.
-        if job is not None and not job.closed:
-            job.close()
+        # Never turn failed cleanup into a terminal receipt.
         if not attached:
             root.kill()
         if root.stdin is not None and not root.stdin.closed:

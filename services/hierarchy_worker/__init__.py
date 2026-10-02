@@ -22,11 +22,11 @@ Modules:
   scan-cursor advance for a `compact` job, the tail-seal delta column for a
   `tail` job) and the build itself. Generation runs agent-shaped (task #4674):
   the child resolves the target agent's own model
-  (`shared.agent_snapshot.agent_effective_model`) and passes the agent's tool
+  (`base.agents.observation.snapshot.agent_effective_model`) and passes the agent's tool
   schema, so each request rides the agent's conversation prefix and serves
   from the provider's prefix cache.
 
-The build is `shared.agents.history.hierarchy.pipeline.build_agent_tree` plus the storage
+The build is `base.agents.history.hierarchy.pipeline.build_agent_tree` plus the storage
 layer's `write_tree`; generation is hash-idempotent, so any interrupted run
 resumes with zero redone nodes (the review-pinned invariant), and a job
 budget under the hard deadline lets an oversized history be sliced with the
@@ -38,5 +38,5 @@ on the gateway host). It is imported by
 runner, a profile-less process that constructs every config domain) and by
 the job child — never by the gateway process itself, whose import closure
 must stay clear of the generation stack (see
-`tests/shared/test_gateway_consumer_guard.py`).
+`cli/commands/lifecycle/tests/test_gateway_consumer_guard.py`).
 """

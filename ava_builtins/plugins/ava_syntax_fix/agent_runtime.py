@@ -24,8 +24,8 @@ from agent.graph.tool_calls import (
 from agent.hooks import Hook, register_before_exec
 from agent.messages import exec_output_message
 from agent.state import AgentState
-from shared.config.turn_view import turn_settings
-from shared.context import AvaContext
+from base.agents.context import AvaContext
+from base.config.turn_view import turn_settings
 
 from ._deterministic_fixes import apply_all_deterministic_fixes
 from ._escapes import _fix_invalid_escapes

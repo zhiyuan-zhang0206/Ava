@@ -4,7 +4,7 @@ Spans give you what the event stream cannot — the tree, the durations, the
 langgraph node path, and the shape of each LLM call. Come here once you already
 have a `trace_id`.
 
-**Check the trace's scope first.** The root span (`shared/trace.py:turn_span`)
+**Check the trace's scope first.** The root span (`base/telemetry/tracing.py:turn_span`)
 wraps one graph invocation in `services/agent_host/host.py`. The host admits
 work before invoking the graph, so an idle agent has no parked graph invocation.
 The claim node returns at idle; waiting for a Redis wake happens in the host
@@ -24,7 +24,7 @@ Three sources, in the order you should reach for them:
 | **Grafana** | `http://localhost:3003`, datasource uid `tempo` | letting a human browse |
 
 Spans are **metadata-only**. Prompts, completions, tool arguments and results
-are stripped at record time (`shared/trace.py`) — nothing you do to Tempo will
+are stripped at record time (`base/telemetry/tracing.py`) — nothing you do to Tempo will
 produce them. Content comes from the checkpoint
 ([find-the-run](find-the-run.md)).
 
@@ -116,8 +116,9 @@ on pre-#1964 traces; on newer traces the root no longer carries it — pass
   for an old run whose checkpoint was trimmed, not an error.
 - `--with-events` fetches the correlated event rows via
   `GET /api/events?trace_id=<hex>&from=<ISO>`.
-- Gateway auth: bearer `AVA_CLUSTER_SECRET`, read from `$AVA_HOME/.env` or the
-  environment. The gateway is port **8000** (8100 is an unrelated service).
+- Gateway auth: bearer `AVA_API_TOKEN` (a launched process's machine token),
+  else `AVA_CLUSTER_SECRET` from the environment or the gateway's
+  `$AVA_HOME/.env`. The gateway is port **8000** (8100 is an unrelated service).
 
 ## Render
 

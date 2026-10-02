@@ -30,8 +30,8 @@ from langgraph.runtime import Runtime
 from agent.hooks import Hook, register_before_exec
 from agent.messages import NoteTag, system_note_message
 from agent.state import AgentState
-from shared.context import AvaContext, agent_id_from_config
-from shared.log import logger
+from base.agents.context import AvaContext, agent_id_from_config
+from base.log import logger
 
 # ── Policy tier ────────────────────────────────────────────────────────────
 

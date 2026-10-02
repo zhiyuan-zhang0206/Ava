@@ -6,7 +6,7 @@
 // console maps it onto a component it imports itself. That is the whole reason
 // the vocabulary is a closed set: an unknown name has to be a manifest
 // validation error rather than a blank nav row, so the two halves of the set
-// (`shared/plugin_ui_contributions.py:NAV_ICONS` and this map) must stay
+// (`base/packages/plugins/ui_contributions.py:NAV_ICONS` and this map) must stay
 // identical. `plugin-nav-icon.test.ts` reads the Python tuple and asserts it.
 //
 // Adding an icon is a deliberate two-file change: the tuple and this map.

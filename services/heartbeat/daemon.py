@@ -17,7 +17,8 @@ wake-rate ceiling. See the "Wakeup-storm flattening" note below.
 Usage:
     .venv/bin/python -m services.heartbeat.daemon
 
-Kept alive via `services/healthchecks/heartbeat.py` (the gateway watchdog).
+Kept alive by the root supervisor's health monitor through the roster's `/healthz`
+identity probe (`ops/roster/healthz.py`).
 """
 
 import asyncio
@@ -28,26 +29,31 @@ import os
 import signal
 import sys
 import time
+from pathlib import Path
 
 import psycopg
 from psycopg_pool import ConnectionPool
 
-import shared.db
+import base.db
+from base import telemetry
+from base.config import settings
+from base.daemon.health import Liveness, health_port, start_health_server, stop_health_server
+from base.daemon.shutdown import cancel_and_drain, install_graceful_shutdown
+from base.daemon.shutdown import hard_exit as _hard_exit
+from base.db.transaction import write_transaction
+from base.log import init_gateway_process
+from base.paths import pid_path
 from services.heartbeat import JITTER_SPAN_S, STALE_PENDING_S
 from services.heartbeat.liveness import _PASS_INTERVAL_S, run_liveness_pass
-from services.heartbeat.stranded_holds import grade_stranded_holds
 from services.pidfile import acquire_pidfile, pidfile_holds_daemon, remove_pidfile
-from shared import telemetry
-from shared.config import settings
-from shared.daemon_health import Liveness, health_port, start_health_server, stop_health_server
-from shared.daemon_shutdown import cancel_and_drain, install_graceful_shutdown
-from shared.daemon_shutdown import hard_exit as _hard_exit
-from shared.db_transaction import write_transaction
-from shared.log import init_gateway_process
 
 _log = logging.getLogger("services.heartbeat.daemon")
 
-_PIDFILE = settings.services.heartbeat_pidfile
+
+def _pidfile() -> Path:
+    return pid_path("heartbeat")
+
+
 # Liveness staleness ceiling. The loop sleeps a long inter-poll interval (default
 # 300s), so `_sleep_with_liveness` beats every _LIVENESS_BEAT_STEP_S during that
 # wait; the ceiling only has to exceed that step, not the whole interval. A
@@ -139,7 +145,7 @@ def _select_idle_agents_needing_heartbeat(
     The idle clock is `last_active_at` — the timestamp of the agent's last
     completed LLM turn (real work), NOT `status_changed_at`. status_changed_at is
     bumped by every status flip including ops lifecycle churn (rollout quiesce /
-    respawn / update cycles an agent idling -> restarting -> ... -> idling),
+    respawn / update cycles an agent through idling and back),
     so keying idle time off it let an ops restart reset the whole fleet's idle
     timers. last_active_at is written only by a real turn and is untouched by that
     cycle (an idle agent runs no LLM turn through it), so an ops event never resets
@@ -211,9 +217,9 @@ def _select_idle_agents_needing_heartbeat(
     with pool.connection() as conn, conn.cursor() as cur:
         cur.execute(sql, params)
         rows = cur.fetchall()
-    # Consecutive-failure backoff: skip agents whose backoff deadline (monotonic
-    # wall clock) has not arrived — a wedged agent must not be poked on the
-    # normal cadence. The deadline dict is empty in the common case, so the
+    # Consecutive-failure backoff: skip agents whose absolute backoff deadline
+    # has not arrived — a wedged agent must not be poked on the normal cadence.
+    # The deadline dict is empty in the common case, so the
     # filter is a fast no-op. The limit is applied AFTER the backoff filter so
     # backed-off agents never consume the per-step wake-rate slots.
     if backoff_until:
@@ -243,7 +249,7 @@ def _send_heartbeat_checkin(pool: ConnectionPool, agent_id: int, idle_minutes: f
         cur.execute("UPDATE agents_meta SET last_heartbeat_at = now() WHERE id = %s", (agent_id,))
         # The event name 'heartbeat_nudged' is stored row data — renaming it
         # would strand the existing history. Emit through the unified pipeline
-        # (`shared/telemetry/emitter.py`).
+        # (`base/telemetry/emitter.py`).
         #
         # ts time-source note: the emitter stamps datetime.now(UTC) at ENQUEUE
         # time (process clock, one time source for the whole stream) — the old
@@ -261,9 +267,9 @@ def _send_heartbeat_checkin(pool: ConnectionPool, agent_id: int, idle_minutes: f
     # The inbound is committed on `with` exit (the emit above is enqueued and
     # lands on the emitter's next batch — best-effort, JSONL-mirrored). The wake
     # is published after the inbound row is durable. Best-effort wake (see
-    # shared.db.publish_inbound_wake); heartbeat carries no user-facing inbound
+    # base.db.publish_inbound_wake); heartbeat carries no user-facing inbound
     # id, so "0".
-    shared.db.publish_inbound_wake(agent_id, "0")
+    base.db.publish_inbound_wake(agent_id, "0")
 
 
 def _reconcile_checkin_outcomes(
@@ -349,8 +355,8 @@ def _reconcile_checkin_outcomes(
                 failure_streak.pop(agent_id, None)
             elif sent_at is not None:
                 failure_streak[agent_id] = failure_streak.get(agent_id, 0) + 1
-            # Not pending and not recovered: keep the existing streak — the
-            # backoff deadline just extends by another window.
+            # Not pending and not recovered: keep the existing streak and
+            # its previously assigned backoff deadline.
 
             # B7 no-op nudge streak — independent of the failure streak above.
             if paused or real_inbound:
@@ -426,27 +432,40 @@ def _sweep_backoff_resets(pool: ConnectionPool) -> None:
             )
 
 
-def _backoff_deadlines(failure_streak: dict[int, int], idle_threshold_s: float) -> dict[int, float]:
-    """Monotonic-wall-clock deadline (seconds) before which each streaking agent
-    must not be checked in on: `now + min(2^streak, _BACKOFF_MAX_WINDOWS) *
+def _backoff_deadlines(
+    failure_streak: dict[int, int],
+    idle_threshold_s: float,
+    deadline_state: dict[int, tuple[int, float]] | None = None,
+) -> dict[int, float]:
+    """Keep each absolute deadline until its agent's failure streak changes.
+
+    A new streak gets `now + min(2^streak, _BACKOFF_MAX_WINDOWS) *
     idle_threshold`. A streak of 1 doubles the normal interval; the cap bounds
     the longest silence (~5.3h at a 5min threshold) so the daemon still probes
-    a wedged agent occasionally."""
+    a wedged agent occasionally. The state is in-process only.
+    """
+    deadline_state = {} if deadline_state is None else deadline_state
+    for agent_id in deadline_state.keys() - failure_streak.keys():
+        del deadline_state[agent_id]
     now = time.time()
-    return {
-        agent_id: now + min(2**streak, _BACKOFF_MAX_WINDOWS) * idle_threshold_s
-        for agent_id, streak in failure_streak.items()
-    }
+    for agent_id, streak in failure_streak.items():
+        previous = deadline_state.get(agent_id)
+        if previous is None or previous[0] != streak:
+            deadline_state[agent_id] = (
+                streak,
+                now + min(2**streak, _BACKOFF_MAX_WINDOWS) * idle_threshold_s,
+            )
+    return {agent_id: deadline for agent_id, (_, deadline) in deadline_state.items()}
 
 
 def _write_pidfile() -> None:
-    if not acquire_pidfile(_PIDFILE, "services.heartbeat.daemon"):
-        _log.info("[heartbeat] daemon already running (pidfile=%s), exiting", _PIDFILE)
+    if not acquire_pidfile(_pidfile(), "services.heartbeat.daemon"):
+        _log.info("[heartbeat] daemon already running (pidfile=%s), exiting", _pidfile())
         sys.exit(1)
 
 
 def _remove_pidfile() -> None:
-    remove_pidfile(_PIDFILE)
+    remove_pidfile(_pidfile())
 
 
 def _is_running() -> bool:
@@ -454,7 +473,7 @@ def _is_running() -> bool:
 
     Pid-reuse-safe: a live pid whose argv does not name this daemon's module
     is a recycled pid, not a running instance (audit round 2, P1)."""
-    return pidfile_holds_daemon(_PIDFILE, "services.heartbeat.daemon")
+    return pidfile_holds_daemon(_pidfile(), "services.heartbeat.daemon")
 
 
 async def _sleep_with_liveness(liveness: Liveness, total_s: float) -> None:
@@ -501,6 +520,7 @@ async def _dispatch_loop(pool: ConnectionPool, liveness: Liveness) -> None:
     # daemon restart re-probes everyone at the normal cadence.
     pending_checkin: dict[int, float] = {}
     failure_streak: dict[int, int] = {}
+    deadline_state: dict[int, tuple[int, float]] = {}
     # B7 no-op-nudge counter: in-process only; the raised level itself persists
     # in agents_meta.heartbeat_backoff_level.
     noop_streak: dict[int, int] = {}
@@ -522,7 +542,7 @@ async def _dispatch_loop(pool: ConnectionPool, liveness: Liveness) -> None:
                 heartbeat_interval_s=heartbeat_interval,
                 jitter_span_s=JITTER_SPAN_S,
                 limit=_MAX_CHECKINS_PER_STEP,
-                backoff_until=_backoff_deadlines(failure_streak, idle_threshold),
+                backoff_until=_backoff_deadlines(failure_streak, idle_threshold, deadline_state),
             )
             for agent_id, idle_minutes in rows:
                 try:
@@ -548,17 +568,11 @@ async def _dispatch_loop(pool: ConnectionPool, liveness: Liveness) -> None:
 
 
 async def _liveness_loop(pool: ConnectionPool, liveness: Liveness) -> None:
-    """Slow loop running the agent-liveness pass (Task #1174) and the
-    stranded-hold grading pass (task #3132) — see `services.heartbeat.liveness`
-    and `services.heartbeat.stranded_holds`. Catches per-pass failures so one bad
-    pass (e.g. a DB blip) never takes down the daemon; the next pass retries."""
+    """Run agent-liveness checks; a failed pass is retried on the next interval."""
     while True:
         try:
             await _sleep_with_liveness(liveness, _PASS_INTERVAL_S)
             await run_liveness_pass(pool)
-            # The stranded-hold pass is a DB read plus an alerts upsert; off the
-            # event loop because its IM fan-out can block on HTTP.
-            await asyncio.to_thread(grade_stranded_holds, pool)
         except asyncio.CancelledError:
             raise
         except Exception:
@@ -568,18 +582,18 @@ async def _liveness_loop(pool: ConnectionPool, liveness: Liveness) -> None:
 async def run() -> None:
     """Start the daemon: healthz server -> write pidfile -> connect DB -> enter main loop."""
     if _is_running():
-        _log.info("[heartbeat] daemon already running (pidfile=%s), exiting", _PIDFILE)
+        _log.info("[heartbeat] daemon already running (pidfile=%s), exiting", _pidfile())
         sys.exit(1)
 
     # Publish the pidfile before binding healthz so identity-aware probes can verify it.
     _write_pidfile()
-    _log.info("[heartbeat] pidfile written: %s", _PIDFILE)
+    _log.info("[heartbeat] pidfile written: %s", _pidfile())
 
     liveness = Liveness(_LIVENESS_TIMEOUT_S)
     health = await start_health_server("heartbeat", liveness=liveness)
     _log.info("[heartbeat] healthz listening on :%s", health_port("heartbeat"))
 
-    pool = shared.db.pool()
+    pool = base.db.pool()
     # Liveness pass (Task #1174): a slow independent task alongside the check-in
     # loop, so a stalled probe fan-out (bounded by _PROBE_TIMEOUT_S) can never
     # delay a check-in. One pass per _PASS_INTERVAL_S, first pass after one full
@@ -601,11 +615,11 @@ async def run() -> None:
 def main() -> None:
     """Entry point: init logger + run asyncio loop.
 
-    SIGTERM (the graceful stop `ava cluster update` sends) and Ctrl-C converge on
-    the same `KeyboardInterrupt` unwind — see `shared.daemon_shutdown`. `ava stop`
+    SIGTERM (the graceful stop the fleet update sends) and Ctrl-C converge on
+    the same `KeyboardInterrupt` unwind — see `base.daemon.shutdown`. `ava stop`
     default force-kill does not reach this.
     """
-    from shared.migrations import assert_schema_current
+    from base.deploy.schema.migrations import assert_schema_current
 
     # Pre-startup sanity: schema version must match code; raises SchemaVersionMismatch if not.
     assert_schema_current(settings.data_plane.db_url)

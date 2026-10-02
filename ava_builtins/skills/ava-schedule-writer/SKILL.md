@@ -55,8 +55,8 @@ period like `*/5 * * * *`.
 
 ```python
 from datetime import UTC, datetime
-from shared.config import settings
-from shared.daemon.schedules.watcher import next_fire
+from base.config import settings
+from base.daemon.schedules.watcher import next_fire
 nxt = next_fire("0 3 * * *", after=datetime.now(UTC), timezone=settings.general.timezone)
 ```
 
@@ -69,7 +69,7 @@ archive are gone — do not query Postgres for events:
 - tokens: `llm_usage` events — sum `in_total + out_total`.
 - agents spawned: count of `spawn` events (`category='audit'`).
 - memory growth: `ava.shell.run("cd ~/.ava/memory && git diff --numstat | awk '{s+=$1+$2} END{print s+0}'")`.
-- Read events via the gateway's `/api/events` endpoint or `gateway.loki_events`
+- Read events via the gateway's `/api/events` endpoint or `gateway.lgtm.loki_events`
   helpers — works from a schedule, no agent identity needed.
 
 **Compound** is just `if a or b:`. **Skip** is `if should_skip(): continue`.
@@ -118,8 +118,8 @@ import time
 from datetime import UTC, datetime
 import ava
 from ava.agents import AgentStatus as S
-from shared.config import settings
-from shared.daemon.schedules.watcher import next_fire
+from base.config import settings
+from base.daemon.schedules.watcher import next_fire
 
 def ensure_agent(label: str, prompt: str) -> int:
     before_id = None
@@ -181,7 +181,7 @@ body = {
     "command": "python schedule.py",      # default; how the runner runs the script
 }
 r = httpx.post(f"{base}/api/schedules", json=body,
-               headers={"Authorization": f"Bearer {os.environ['AVA_CLUSTER_SECRET']}"})
+               headers={"Authorization": f"Bearer {os.environ.get('AVA_API_TOKEN', '')}"})
 print(r.status_code, r.text)             # 201 on success; 400 = script syntax error; 409 = name taken
 ```
 

@@ -15,11 +15,9 @@ Two questions frame every managed object: **registry** answers "should it exist?
 
 | Object | Registry | Lease | Renewed by | Observers |
 |---|---|---|---|---|
-| Cluster orchestration | `deployment_state` row | `lease_expires_at` | orchestrator (existing) | controllers, status, recover |
 | Agent process | `agents_meta` row (exists) | `agents_meta.lease_expires_at` (new column) | the agent itself (light timer — idle renews too) | quiesce, reaper, frontend, heartbeat guard |
-| Updater process | `host_deploy_state` row | `host_deploy_state.updater_lease_expires_at` | the updater | stalled judgment, Phase B polling |
 
-Today's gaps fall out of the frame: agents have a registry but no lease; updaters have neither. A watcher (`ava.watcher.at/cron/launch`) deliberately sits OUTSIDE this frame: it is a plain `ava.shell.sessions` session with a shell TTL and nothing else — no registry row, no "should it exist?" record, no rebuild
+The frame's cluster-orchestration and updater rows are retired with the in-place updater: no cluster deploy lease or updater lease exists ([decision](../../../decisions/2026-09-30-remove-deployment-lease.md)). A watcher (`ava.watcher.at/cron/launch`) deliberately sits OUTSIDE this frame: it is a plain `ava.shell.sessions` session with a shell TTL and nothing else — no registry row, no "should it exist?" record, no rebuild
 (decisions/2026-09-27-watchers-are-never-restarted.md). Its TTL reaper reclaim
 is the same interruption notice any other reclaimed shell gets.
 

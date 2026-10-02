@@ -53,15 +53,15 @@ from datetime import time as datetime_time
 import psycopg
 from psycopg import sql
 
-from shared.log import logger
-from shared.loki_index_labels import (
+from base.log import logger
+from base.telemetry.loki_index_labels import (
     EVENT_STREAM_RETENTION,
     LokiReadEra,
     escape_logql_label,
     event_stream_selector,
     split_index_label_window,
 )
-from shared.loki_query_budget import FairQueryBudget
+from base.telemetry.loki_query_budget import FairQueryBudget
 
 _HTTP_TIMEOUT_S = 60.0
 # Serialized by design (capacity 1): the maintenance sweep must not crowd out
@@ -134,15 +134,13 @@ def _event_pipeline(
     era: LokiReadEra,
     event_names: list[str],
     telemetry_only: bool,
-    indexed_labeled: bool = False,
 ) -> str:
-    """One rollup event family, selective only after resource-label cutover."""
+    """One rollup event family using body-truth filters."""
 
     selector = event_stream_selector(
         era=era,
         agent_id=None,
         event_names=event_names,
-        indexed_labeled=indexed_labeled,
     )
     parts = [
         selector,
@@ -161,7 +159,6 @@ def _tokens_queries(
     *,
     era: LokiReadEra = LokiReadEra.LEGACY,
     duration_s: int = _DAY_S,
-    indexed_labeled: bool = False,
 ) -> dict[str, str]:
     """The per-(agent, model) instant queries for one day's tokens/cost row.
 
@@ -172,7 +169,6 @@ def _tokens_queries(
         era=era,
         event_names=["llm_usage"],
         telemetry_only=True,
-        indexed_labeled=indexed_labeled,
     )
     model = ' | json model="attributes.model"'
     out = {
@@ -201,26 +197,22 @@ def _metrics_queries(
     *,
     era: LokiReadEra = LokiReadEra.LEGACY,
     duration_s: int = _DAY_S,
-    indexed_labeled: bool = False,
 ) -> dict[str, str]:
     """The per-agent instant queries for one day's turn/exec metrics row."""
     turn = _event_pipeline(
         era=era,
         event_names=["turn_end"],
         telemetry_only=True,
-        indexed_labeled=indexed_labeled,
     )
     exec_ok = _event_pipeline(
         era=era,
         event_names=["exec"],
         telemetry_only=False,
-        indexed_labeled=indexed_labeled,
     )
     exec_failed = _event_pipeline(
         era=era,
         event_names=["exec_.+", "exec\\(.*"],
         telemetry_only=False,
-        indexed_labeled=indexed_labeled,
     )
     dur = ' | json duration_seconds="attributes.duration_seconds" | __error__="" | unwrap duration_seconds'
     hist = (
@@ -252,7 +244,7 @@ def _query_instant(logql: str, at: datetime) -> list[tuple[dict[str, str], float
     or HTTP failure — the daemon pass reports and retries next round (a
     silently-zero day would be worse than a loud skip). The process-local
     capacity-one budget also governs resolution.py, which imports this seam."""
-    from shared.config import settings
+    from base.config import settings
 
     base = settings.observability.telemetry_loki_url.rstrip("/")
     params = urllib.parse.urlencode({"query": logql, "time": at.timestamp()})
@@ -281,7 +273,6 @@ def _day_source_count(day: date) -> int | None:
                 era=slice_.era,
                 event_names=_ROLLUP_EVENT_NAMES,
                 telemetry_only=False,
-                indexed_labeled=len(slices) == 2 and slice_.era is LokiReadEra.INDEXED,
             )
             logql = f"sum(count_over_time(({pipeline})[{duration_s}s]))"
             source_count += int(sum(value for _labels, value in _query_instant(logql, slice_.end)))
@@ -306,11 +297,9 @@ def _day_aggregates(day: date) -> tuple[list[TokensRow], list[MetricsRow]] | Non
     for slice_ in slices:
         slice_row_count = 0
         duration_s = max(1, int((slice_.end - slice_.start).total_seconds()))
-        indexed_labeled = len(slices) == 2 and slice_.era is LokiReadEra.INDEXED
         for name, logql in _tokens_queries(
             era=slice_.era,
             duration_s=duration_s,
-            indexed_labeled=indexed_labeled,
         ).items():
             result_rows = _query_instant(logql, slice_.end)
             slice_row_count += len(result_rows)
@@ -321,7 +310,6 @@ def _day_aggregates(day: date) -> tuple[list[TokensRow], list[MetricsRow]] | Non
         for name, logql in _metrics_queries(
             era=slice_.era,
             duration_s=duration_s,
-            indexed_labeled=indexed_labeled,
         ).items():
             result_rows = _query_instant(logql, slice_.end)
             slice_row_count += len(result_rows)
@@ -343,7 +331,7 @@ def _day_aggregates(day: date) -> tuple[list[TokensRow], list[MetricsRow]] | Non
                     values[name] = max(values.get(name, value), value)
                 else:
                     values[name] = values.get(name, 0.0) + value
-        if slice_.era is LokiReadEra.INDEXED and slice_row_count == 0:
+        if slice_row_count == 0:
             return None
     tokens_rows = [
         TokensRow(
@@ -612,7 +600,7 @@ def compute_rollup(
     did not land. A retention gap is still unrecoverable without the JSONL
     mirror and is reported before the retained candidate scan begins.
     """
-    from shared.config import settings
+    from base.config import settings
 
     pass_started = time.monotonic()
     if lookback_days is None:

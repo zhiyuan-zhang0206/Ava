@@ -15,7 +15,7 @@ registered and a disabled one stays on disk but out of every agent's tree.
 - `trust <name>`     — record that a human read this package (tier "reviewed").
 
 Everything arriving through `install` / `register` is third-party content, so
-it goes through `shared.packages.skills.skill_scan` first: a critical finding refuses the
+it goes through `base.packages.skills.scan` first: a critical finding refuses the
 install outright and `--accept-risk` is the recorded override. Nothing here
 promotes a package's trust tier on its own — a clean scan means "no rule
 matched", which is why `trust` is a separate verb a person runs.
@@ -33,9 +33,9 @@ import sys
 from datetime import UTC, datetime
 from pathlib import Path
 
+from base.packages.extensions import install_registry as reg
+from base.paths import ava_home
 from cli.commands.extensions.skills_sync import _Source
-from shared import install_registry as reg
-from shared.config import settings
 
 _REFUSAL_ADVICE = (
     "  Refusing to install. Read the package yourself — these patterns are how a\n"
@@ -63,7 +63,7 @@ def cmd_skill_install(
     unmodified. A local path is read in place (never moved), so a skill tree
     that lives in a checkout can be installed straight from it.
 
-    Every package is scanned first (`shared.packages.skills.skill_scan`). A critical finding
+    Every package is scanned first (`base.packages.skills.scan`). A critical finding
     aborts the whole install with the report; `--accept-risk` overrides it and
     records which rules were waived.
     """
@@ -87,7 +87,7 @@ def cmd_skill_install(
         if not root.is_dir():
             print(f"[ava skill install] path '{path}' not found in source.", file=sys.stderr)
             return 1
-        from cli.commands._manifest_gate import gate_refuses
+        from cli.commands.extensions._manifest_gate import gate_refuses
 
         if gate_refuses(root, command="skill install"):
             return 1
@@ -129,8 +129,9 @@ def cmd_skill_scan(target: str) -> int:
     to re-scan an installed package after the rule table grows. Exit code 2 on
     critical findings, so a caller can gate on it; 0 when only notices remain.
     """
-    from shared import install_registry, paths
-    from shared.packages.skills import skill_scan
+    from base import paths
+    from base.packages.extensions import install_registry
+    from base.packages.skills import scan
 
     root = Path(target).expanduser()
     if not root.is_dir():
@@ -141,14 +142,14 @@ def cmd_skill_scan(target: str) -> int:
             file=sys.stderr,
         )
         return 1
-    findings = skill_scan.scan_package(root)
+    findings = scan.scan_package(root)
     entry = install_registry.get(root.name)
     tier = entry.trust if entry is not None else "untracked"
     print(f"[ava skill scan] {root} (trust={tier})")
-    print(skill_scan.render(findings, package=root.name))
+    print(scan.render(findings, package=root.name))
     if entry is not None and entry.accepted_findings:
         print(f"  previously accepted: {', '.join(entry.accepted_findings)}")
-    return 2 if skill_scan.criticals(findings) else 0
+    return 2 if scan.criticals(findings) else 0
 
 
 def cmd_skill_trust(name: str, *, revoke: bool = False) -> int:
@@ -160,7 +161,7 @@ def cmd_skill_trust(name: str, *, revoke: bool = False) -> int:
     before pulling a skill's text into an agent's context unprompted. Read the
     package (`ava skill scan <name>` shows what the scanner saw) first.
     """
-    from shared import install_registry
+    from base.packages.extensions import install_registry
 
     entry = install_registry.get(name)
     if entry is None:
@@ -193,8 +194,8 @@ def cmd_skill_disable(name: str) -> int:
 
 
 def _set_enabled(name: str, *, enabled: bool) -> int:
-    from shared import install_registry
-    from shared.packages.skills.skill_names import find
+    from base.packages.extensions import install_registry
+    from base.packages.skills.names import find
 
     verb = "enable" if enabled else "disable"
     with install_registry.mutate() as registry:
@@ -227,10 +228,11 @@ def cmd_skill_register(name: str, *, accept_risk: bool = False) -> int:
     so it is scanned here — otherwise `cp -r && ava skill register` would be the
     way around every check `ava skill install` makes.
     """
-    from shared import install_registry, paths
-    from shared.packages.skills.skill_index import SkillFormatError
-    from shared.packages.skills.skill_index import parse_skill_frontmatter as _parse_frontmatter
-    from shared.packages.skills.skill_names import find
+    from base import paths
+    from base.packages.extensions import install_registry
+    from base.packages.skills.index import SkillFormatError
+    from base.packages.skills.index import parse_skill_frontmatter as _parse_frontmatter
+    from base.packages.skills.names import find
 
     from .skill_package import SkillScanRefused, scan_report
 
@@ -318,8 +320,8 @@ def _land_repo_copy(
     """Land / overwrite `skills_root/<name>` from the source and (re)track it
     as repo-native. Returns the package name (the caller files it under the
     outcome it already knows)."""
+    from base.packages.extensions.install_registry import InstalledPackage, tree_hash
     from cli.commands.extensions.skills_sync import _copy_tree
-    from shared.install_registry import InstalledPackage, tree_hash
 
     dest = skills_root / s.name
     if not dest.exists() or overwrite:
@@ -356,7 +358,7 @@ def _update_one(
 ) -> None:
     """Bring one repo-native skill in line with its source (the per-package
     update/conflict/force decision table of `cmd_skill_update`)."""
-    from shared.install_registry import tree_hash
+    from base.packages.extensions.install_registry import tree_hash
 
     dest = skills_root / s.name
     src_hash = tree_hash(s.src)
@@ -474,14 +476,14 @@ def cmd_skill_update(
     """
     from datetime import UTC, datetime
 
+    from base import paths
+    from base.packages.extensions import install_registry as reg
     from cli.commands._repo import _repo_root
     from cli.commands.extensions.skills_sync import assert_repo_source_bound
-    from shared import install_registry as reg
-    from shared import paths
 
     repo = repo or _repo_root()
     try:
-        assert_repo_source_bound(repo, Path(settings.general.ava_home).expanduser())
+        assert_repo_source_bound(repo, ava_home())
     except RuntimeError as e:
         print(f"[ava skill update] {e}", file=sys.stderr)
         return 1
@@ -555,7 +557,8 @@ def cmd_skill_upgrade(name: str, *, force: bool = False) -> int:
     import shutil
     import subprocess
 
-    from shared import install_registry, paths
+    from base import paths
+    from base.packages.extensions import install_registry
 
     from ._pkg_source import SourcePathNotFoundError, acquire_source, cleanup_temp
 

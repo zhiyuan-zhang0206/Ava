@@ -6,12 +6,11 @@
 
 import { describe, expect, it, vi } from "vitest";
 
-import type { AgentRow, PageRow, SystemEvent } from "../types";
+import type { AgentRow, SystemEvent } from "../types";
 import { AGENTS_QUERY_KEY, foldAgents, AGENT_DIRECTORY_QUERY_KEY, AGENT_DETAIL_QUERY_KEY } from "./agents";
 import { foldFleetGraph } from "./graph";
 import { foldAgainstCache, applyEvent, ALL_PAGES_QUERY_KEY } from "./index";
 import { foldNotices, NOTICES_QUERY_KEY, NOTICES_RESOLVED_QUERY_KEY } from "./notices";
-import { foldPages } from "./pages";
 import { foldTasks, TASKS_QUERY_KEY } from "./tasks";
 import { FLEET_GRAPH_KEY_PREFIX } from "./graph";
 
@@ -77,55 +76,6 @@ describe("foldAgents", () => {
   });
 });
 
-describe("foldPages", () => {
-  const row: PageRow = {
-    id: 1,
-    agent_id: 1,
-    name: "report",
-    port: 9000,
-    title: "report",
-    serve_dir: null,
-    url: "http://host/report",
-    created_at: "2026-01-01T00:00:00Z",
-    closed_at: null,
-  };
-
-  it("page_opened appends to a fetched-empty list", () => {
-    const next = foldPages([], pageOpened({ name: "x" }), 1);
-    expect(next?.map((p) => p.name)).toEqual(["x"]);
-  });
-
-  it("re-open replaces the row and preserves the original created_at", () => {
-    const ev = pageOpened({ name: "report", port: 9999 });
-    const next = foldPages([row], ev, 1);
-    expect(next?.length).toBe(1);
-    expect(next?.[0]?.port).toBe(9999);
-    expect(next?.[0]?.created_at).toBe("2026-01-01T00:00:00Z");
-  });
-
-  it("page_closed removes by name (per-agent scope)", () => {
-    const next = foldPages([row], pageClosed("report"), 1);
-    expect(next).toEqual([]);
-  });
-
-  it("ignores events for other agents (per-agent scope)", () => {
-    expect(foldPages([row], pageOpened({ name: "other", agent_id: 2 }), 1)).toBeUndefined();
-    expect(foldPages([row], pageClosed("report", 2), 1)).toBeUndefined();
-  });
-
-  it("empty-cache guard: no partial seed before the fetch", () => {
-    expect(foldPages(undefined, pageOpened({ name: "x" }), 1)).toBeUndefined();
-  });
-
-  it("all-pages scope keys rows by (agent_id, name)", () => {
-    const a = foldPages([], pageOpened({ name: "x", agent_id: 1 }), null);
-    const b = foldPages(a, pageOpened({ name: "x", agent_id: 2 }), null);
-    expect(b?.length).toBe(2); // same name, different agent = distinct rows
-    const removed = foldPages(b, pageClosed("x", 1), null);
-    expect(removed?.map((p) => p.agent_id)).toEqual([2]);
-  });
-});
-
 describe("invalidation policies", () => {
   it("notice_posted invalidates only the open queue", () => {
     const o = foldNotices({ role: "notice_posted", notice_id: 1, priority: "P2", title: "t", task_id: null } as unknown as SystemEvent);
@@ -157,29 +107,20 @@ describe("foldAgainstCache — the dispatch", () => {
     };
   }
 
-  it("writes agents + pages folds into their keys", () => {
+  it.each([pageOpened({ name: "p1" }), pageClosed("p1")])("invalidates both page keys for %s", (event) => {
     const cache = new Map<string, unknown>();
-    cache.set(JSON.stringify(AGENTS_QUERY_KEY), [baseAgent]);
-    cache.set(JSON.stringify(["all-pages"]), []);
-    cache.set(JSON.stringify(["agent-pages", 1]), []);
-
-    const outcome = foldAgainstCache(ctxWith(cache), pageOpened({ name: "p1" }));
-
-    const writes = new Map(outcome.writes.map((w) => [JSON.stringify(w.key), w.value]));
-    expect(writes.has(JSON.stringify(["agent-pages", 1]))).toBe(true);
-    expect(writes.has(JSON.stringify(ALL_PAGES_QUERY_KEY))).toBe(true);
-    expect((writes.get(JSON.stringify(["agent-pages", 1])) as PageRow[])[0]?.name).toBe("p1");
+    const outcome = foldAgainstCache(ctxWith(cache), event);
+    expect(outcome.writes).toEqual([]);
+    expect(outcome.invalidations.map((item) => item.key)).toEqual([
+      ["agent-pages", 1], ALL_PAGES_QUERY_KEY,
+    ]);
   });
 
-  it("never writes an un-fetched per-agent pages key (empty-cache guard)", () => {
+  it("never writes an un-fetched page key", () => {
     const cache = new Map<string, unknown>();
-    cache.set(JSON.stringify(AGENTS_QUERY_KEY), [baseAgent]);
-    cache.set(JSON.stringify(ALL_PAGES_QUERY_KEY), []);
-
     const outcome = foldAgainstCache(ctxWith(cache), pageOpened({ name: "p1" }));
-    const keys = outcome.writes.map((w) => JSON.stringify(w.key));
-    expect(keys).not.toContain(JSON.stringify(["agent-pages", 1]));
-    expect(keys).toContain(JSON.stringify(ALL_PAGES_QUERY_KEY));
+    expect(outcome.writes).toEqual([]);
+    expect(cache.size).toBe(0);
   });
 
   it("emits notices invalidations from a notice event", () => {

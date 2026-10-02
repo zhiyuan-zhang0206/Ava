@@ -20,8 +20,8 @@ from agent.graph.llm_errors import (
     LLMStreamTruncatedError,
     LLMStreamUnexpectedStopReasonError,
 )
-from shared.lm.content import content_blocks
-from shared.log import logger
+from base.lm.content import content_blocks
+from base.log import logger
 
 
 def _sanitize_thinking_blocks(final_msg: AIMessage) -> None:
@@ -33,7 +33,7 @@ def _sanitize_thinking_blocks(final_msg: AIMessage) -> None:
     block round-trips the endpoint (probed 2026-07-25: 200; the key-missing shape
     400s with "missing field `thinking`"), and every downstream consumer — the
     streaming fan-out (`agent/graph/_callbacks.py`), the timeline renderer
-    (`shared/agents/history/timeline.py`) — already skips empty-thinking blocks.
+    (`base/agents/history/timeline.py`) — already skips empty-thinking blocks.
 
     Repair-in-place replaces the old fail-fast guard (raise → non-stream
     fallback): the drift is a permanent protocol quirk (~2% of deepseek turns),
@@ -82,7 +82,7 @@ def _validate_stop_reason(final_msg: AIMessage) -> None:
     fail-fast contract: a missing terminal reason cannot be silently treated as
     idle (would let `if not final_msg.tool_calls` misjudge a lost final frame).
     """
-    from shared.lm.stop import StopCategory, classify_stop
+    from base.lm.stop import StopCategory, classify_stop
 
     category, raw = classify_stop(final_msg)
     output_tokens = (final_msg.usage_metadata or {}).get("output_tokens", 0)  # pyright: ignore[reportUnknownMemberType]

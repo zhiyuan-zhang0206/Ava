@@ -4,12 +4,12 @@
 > and why it is shaped this way, is
 > [`decisions/2026-07-29-skill-trust-tiers-and-install-scan.md`](../../decisions/2026-07-29-skill-trust-tiers-and-install-scan.md);
 > the current-state description lives in
-> [`shared/install_registry.ava.okf.md`](../../shared/install_registry/install_registry.ava.okf.md)
-> and [`cli/commands/extensions/packages.ava.okf.md`](../../cli/commands/extensions/packages.ava.okf.md).
+> [`base/packages/extensions/docs/install_registry.ava.okf.md`](../../base/packages/extensions/docs/install_registry.ava.okf.md)
+> and [`cli/commands/extensions/docs/packages.ava.okf.md`](../../cli/commands/extensions/docs/packages.ava.okf.md).
 > This doc holds only the open work.
 
 In one line: every package entering `$AVA_HOME/skills/` from outside the
-checkout is scanned by `shared/packages/skills/skill_scan.py` and refused on a critical finding
+checkout is scanned by `base/packages/skills/scan.py` and refused on a critical finding
 (`--accept-risk` overrides, loudly and on the record), and it lands at trust tier
 `unreviewed` until a human runs `ava skill trust`.
 
@@ -24,7 +24,7 @@ arriving through a side door.
 The rule to implement: recall may **name** an `unreviewed` skill (so the agent
 can choose to open it, a decision that is at least in the transcript) but must
 not **inject its body**. `builtin` and `reviewed` inject normally. The accessor
-is `shared.install_registry.trust_by_name()`; a skill whose name the registry
+is `base.packages.extensions.install_registry.trust_by_name()`; a skill whose name the registry
 does not track — a plugin's runtime provider root, which never passes through
 the registry — counts as `unreviewed`.
 

@@ -30,7 +30,6 @@ import type { NoticesFeed,
   ResolveNoticeIn,
   CancelRequested,
   ClusterStatus,
-  ClusterUpdateCheck,
   CommandItem,
   ContentBlock,
   CompactEnqueued,
@@ -523,8 +522,8 @@ export const api = {
 
   // --- ava.ui.show pages ---
   //
-  // page-load fetches open pages; SSE page_opened / page_closed cover
-  // increments. PageRow.url is a gateway reverse-proxy URL
+  // page-load fetches open pages; SSE page_opened / page_closed prompt
+  // coalesced list refetches. PageRow.url is a gateway reverse-proxy URL
   // (shape: /pages/<agent_id>-<name>/); the frontend opens it in a new
   // tab.
 
@@ -534,7 +533,7 @@ export const api = {
 
   // Every agent's currently-open pages in one fetch — the fleet-wide twin of
   // listPages, so a many-agent view (the inbox) can surface each agent's live
-  // page without a per-agent request. SSE page_opened / page_closed cover deltas.
+  // page without a per-agent request. SSE page events prompt list refetches.
   listAllPages: (): Promise<PageRow[]> => {
     return f(`/api/pages`).then(ok<PageRow[]>);
   },
@@ -713,39 +712,9 @@ export const api = {
 
   // This host's cluster snapshot. Unlike /api/status, this path bypasses the
   // cluster-paused 503 middleware, so it is the one status source readable while
-  // the cluster is paused — used to tell a live rollout (paused + orchestration
-  // set) from a stranded pause (paused + orchestration null) for recovery.
+  // the cluster is paused.
   getClusterStatus: (): Promise<ClusterStatus> => {
     return f("/api/cluster/status").then(ok<ClusterStatus>);
-  },
-
-  // Operator stranded-cluster recovery: force-clear a pause + update lock left by
-  // a hard-killed rollout. 409 if an orchestration is actually in flight. Returns
-  // {unlocked_holder}. Bypasses the 503 middleware, so callable while wedged.
-  recoverCluster: (): Promise<{ unlocked_holder: string | null }> => {
-    return f("/api/cluster/recover", POST).then(ok<{ unlocked_holder: string | null }>);
-  },
-
-  // Trigger the whole-cluster rolling upgrade. Gateway only: pauses every
-  // agent-runner, updates all hosts in sequence, then resumes agents on new code.
-  // Returns 202 with {session, log}. 409 means a rollout or update is already
-  // in flight — caller should wait and retry.
-  triggerClusterRollout: (): Promise<{ session: string; log: string }> => {
-    return f("/api/cluster/rollout", POST).then(ok<{ session: string; log: string }>);
-  },
-
-  // Read-only preflight for the Update button: how far the gateway is
-  // behind origin/main and which side a rollout would restart. A clean
-  // behind===0 means "no updates"; needs_replay keeps a half-deployed state actionable.
-  checkClusterUpdate: (): Promise<ClusterUpdateCheck> => {
-    return f("/api/cluster/update-check").then(ok<ClusterUpdateCheck>);
-  },
-
-  // Graceful whole-cluster restart with NO git pull — bounce every service on
-  // the current code to apply config changes. Gateway only. Returns 202
-  // with {session, log}; 409 means a restart/rollout/update is already in flight.
-  triggerClusterRestart: (): Promise<{ session: string; log: string }> => {
-    return f("/api/cluster/restart", POST).then(ok<{ session: string; log: string }>);
   },
 
   // Full-replace of the override layer. `machine` targets a host's overrides

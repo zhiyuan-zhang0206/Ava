@@ -23,13 +23,13 @@ import time
 from pathlib import Path
 from typing import Protocol, cast
 
+from base.daemon.health import DaemonProbe
+from base.host.proc import process_alive
 from services.ava_root.health import HealthConfig
 from services.ava_root.probes import Probe, ProbeRegistry
 from services.ava_root.selfcheck import SelfCheckConfig
 from services.ava_root.wiring import WiringContext, WiringParticipant
 from services.ava_root_glue.glue import assemble
-from shared.daemon_health import DaemonProbe
-from shared.proc import process_alive
 
 _DRILL_INTERVAL_S = 10.0
 _HEARTBEAT_TIMEOUT_S = 3.0

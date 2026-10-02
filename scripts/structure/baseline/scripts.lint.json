@@ -1,0 +1,24 @@
+{
+  "complexity": {
+    "scripts/lint/agent_docstrings.py::_check_file": 17,
+    "scripts/lint/agent_docstrings.py::_discover_plugin_namespace_modules": 15,
+    "scripts/lint/agent_docstrings.py::_docstring_violations": 16,
+    "scripts/lint/agent_docstrings.py::_module_doc_child_reference_violations": 16,
+    "scripts/lint/agent_docstrings.py::_wrap_targets": 19,
+    "scripts/lint/clock_lattice.py::_scan_file": 15,
+    "scripts/lint/code_structure.py::_budget_targets": 15,
+    "scripts/lint/fixture_scope.py::_bound_names": 15,
+    "scripts/lint/fixture_scope.py::setup_env_keys": 18,
+    "scripts/lint/no_plugin_wrap.py::_scan_file": 17,
+    "scripts/lint/no_script_sibling_imports.py::_scan_file.<locals>.walk": 21,
+    "scripts/lint/time_bomb.py::_Index._inside_fallback": 15,
+    "scripts/lint/time_bomb.py::_Index.summary": 20,
+    "scripts/lint/time_bomb.py::_lint_fixture_dates": 17,
+    "scripts/lint/time_bomb.py::_lint_source_file": 15,
+    "scripts/lint/time_bomb.py::_lint_test_file": 16,
+    "scripts/lint/time_bomb.py::_tainted": 19,
+    "scripts/lint/time_bomb.py::main": 19,
+    "scripts/lint/turn_scoped_config.py::main": 24,
+    "scripts/lint/zombie_pyright_ignores.py::strip_file": 18
+  }
+}

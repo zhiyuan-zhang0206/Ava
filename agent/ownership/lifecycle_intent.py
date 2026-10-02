@@ -3,6 +3,9 @@
 Process and hosted dispatch share this acceptance boundary. All old consumers
 must still be upgraded before activation: unconditional legacy claims are not
 fenced by adding nullable columns. Acceptance never asserts that a process exited.
+
+The pointer's whole life lives here: acceptance, superseded settlement, and the
+admitted successor's restart observation, which clears it.
 """
 
 from typing import Literal, TypedDict
@@ -12,8 +15,24 @@ from psycopg.pq import TransactionStatus
 from psycopg.types.json import Jsonb
 
 from agent.ownership.inbound import lock_inbound_owner
-from shared.lifecycle_acceptance import LifecycleIntent, accept_lifecycle_command_async
-from shared.runtime_incarnation import current_incarnation
+from base.agents.incarnation.lifecycle_acceptance import (
+    LifecycleIntent,
+    accept_lifecycle_command_async,
+)
+from base.native_process.runtime_incarnation import RuntimeIncarnation, current_incarnation
+
+_OBSERVE_RESTART = (
+    "UPDATE inbound_messages i SET observed_at=clock_timestamp(),status='done', "
+    "payload=i.payload-'lifecycle_result' "
+    "FROM agents_meta m WHERE m.id=%s AND m.runtime_generation=%s AND m.runtime_owner=%s "
+    "AND m.lifecycle_command_id=i.id AND i.agent_id=m.id AND i.kind='restart' "
+    "AND i.status='claimed' AND i.applied_at IS NOT NULL AND i.observed_at IS NULL "
+    "AND (i.target_generation<>m.runtime_generation OR i.target_owner<>m.runtime_owner) "
+    "RETURNING i.id"
+)
+_CLEAR_POINTER = (
+    "UPDATE agents_meta SET lifecycle_command_id=NULL WHERE id=%s AND lifecycle_command_id=%s"
+)
 
 
 class LifecycleNoopResult(TypedDict):
@@ -76,8 +95,20 @@ async def settle_superseded_intent(conn: psycopg.AsyncConnection, command: Lifec
     )
     if await cursor.fetchone() is None:
         return False
-    await conn.execute(
-        "UPDATE agents_meta SET lifecycle_command_id=NULL WHERE id=%s AND lifecycle_command_id=%s",
-        (command.agent_id, command.id),
-    )
+    await conn.execute(_CLEAR_POINTER, (command.agent_id, command.id))
     return True
+
+
+async def observe_hosted_admission(
+    conn: psycopg.AsyncConnection, incarnation: RuntimeIncarnation
+) -> None:
+    """The admitted successor may observe restart before claiming new work.
+
+    Successor admission acknowledges the restart in its own transaction.
+    """
+    cursor = await conn.execute(
+        _OBSERVE_RESTART, (incarnation.agent_id, incarnation.generation, incarnation.owner)
+    )
+    observed = await cursor.fetchone()
+    if observed is not None:
+        await conn.execute(_CLEAR_POINTER, (incarnation.agent_id, observed[0]))

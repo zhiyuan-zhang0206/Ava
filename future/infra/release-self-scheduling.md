@@ -1,6 +1,6 @@
 # Release cadence: self-scheduling by Ava
 
-The dated release cadence — `scripts/release_cut.py daily|weekly` — is
+The dated release cadence — `scripts/ci/release_cut.py daily|weekly` — is
 currently cut **manually** (or not at all on idle days). It is deliberately
 **not** wired to OS cron or a static `ava.watcher.cron` registration yet.
 
@@ -9,7 +9,7 @@ currently cut **manually** (or not at all on idle days). It is deliberately
 A static cron entry would be scaffolding to strip later. Cutting a release is
 itself an agent action — read the window's PRs, summarize them, tag, push — which
 is a natural fit for a self-hosting agent, not an external timer. Ava already
-owns its own upgrades (`ava cluster update` — the CLI, `ava.self.update()`
+owns its own upgrades (the fleet update — the CLI, `ava.self.update()`
 was removed 2026-08); owning its own release cadence is the same shape.
 
 ## The third mechanism, which postdates this note

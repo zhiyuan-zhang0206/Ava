@@ -1,0 +1,7 @@
+{
+  "complexity": {
+    "scripts/codegen/gen_config_lite_table.py::_collect": 16,
+    "scripts/codegen/gen_config_lite_table.py::_default": 17,
+    "scripts/codegen/gen_event_registry.py::render": 16
+  }
+}

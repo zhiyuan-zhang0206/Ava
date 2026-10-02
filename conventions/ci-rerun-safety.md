@@ -5,10 +5,8 @@ repository identities match the completed run. Push retries require the current
 branch tip. Missing identity or API errors do not authorize a retry. Only the
 first failed attempt is retried; a cap-cancelled run (`cancelled`) follows the
 same single-attempt policy as a failure, never a second rerun (task #3239). The
-trigger whitelist is per-workflow: besides CI, only `Inactive runtime
-preparation` is retried, and only when its failure shape is the known
-cold-offline family (task #3285); every other workflow or shape is left to
-manual triage.
+trigger whitelist is per-workflow: only CI is retried; every other workflow is
+left to manual triage.
 
 Re-runs are admissible only once the run reads `completed`: while any job is
 still going, the job-level endpoint answers 403 "The workflow run containing

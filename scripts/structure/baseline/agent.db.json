@@ -1,0 +1,9 @@
+{
+  "ambient_state": {
+    "agent/db/__init__.py::ambient-container:_borrow_spans": 1,
+    "agent/db/__init__.py::import-time-read:_CLAIM_DB_ACQUIRE_TIMEOUT_S": 1
+  },
+  "complexity": {
+    "agent/db/__init__.py::claim_inbound_batch": 15
+  }
+}

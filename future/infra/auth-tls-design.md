@@ -40,8 +40,8 @@ cluster secret existed but was only used for data-plane auth (pg/redis passwords
 ## Phase 1 — gateway auth middleware (landed)
 
 `Authorization: Bearer <secret>` on every `/api/*` route, constant-time compared
-(`shared/cluster_auth.py`: `bearer_header()` / `verify_bearer()`, pure stdlib). The
-SDK transport (`ava/_gateway_transport.py`) and `scripts/start_agent.py` inject the header
+(`base/cluster/auth.py`: `bearer_header()` / `verify_bearer()`, pure stdlib). The
+SDK transport (`ava/gateway_client/transport.py`) and `scripts/start_agent.py` inject the header
 automatically.
 
 Two things changed versus the original Phase-1 draft:
@@ -73,7 +73,7 @@ forcing function is what produced Phase 2.
 ### Decision: cookie-based session auth
 
 `POST /api/auth/login` verifies the password (the cluster secret) and sets an
-HttpOnly `ava_session` cookie (`gateway/routers/auth.py`); the browser then carries
+HttpOnly `ava_session` cookie (`gateway/auth/router.py`); the browser then carries
 it automatically on both `fetch()` and `EventSource`. CORS allows exact configured
 origins (or derives the local and gateway-host frontend origins), since the frontend
 (`:3000`) and gateway (`:8000`) are co-located but cross-origin. Cookie-authenticated
@@ -131,8 +131,8 @@ TLS is "add a cert + switch the scheme", not a re-architecture.
 1. **Should loopback be exempt from auth?** Leaning no — keep auth uniform; an
    exemption would reintroduce a "same box" special case.
 2. **Should the gateway stop binding `0.0.0.0`?** It should bind `127.0.0.1` AND
-   `AVA_MACHINE_HOST`, matching the Postgres/PgBouncer posture; Redis remains
-   loopback-only with off-box ingress carried by the relay bridge. The ops server
-   deliberately still binds `0.0.0.0` (the gateway dials it across the private
+   `AVA_MACHINE_HOST`, matching the Postgres/PgBouncer/Linux-Redis posture; macOS
+   Redis remains loopback-only with off-box ingress carried by the relay bridge.
+   The ops server deliberately still binds `0.0.0.0` (the gateway dials it across the private
    network and it authenticates), so this is specifically about the gateway's
    own listener.

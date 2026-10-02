@@ -1,0 +1,58 @@
+---
+type: doc
+title: Pre-Stop Start-Readiness Preflight
+description: The read-only local checks of `ava start`, run before the stop by `ava restart` — refusing as RESTART_DECLINED while the host still serves.
+tags:
+- cli
+- update
+---
+
+# Pre-Stop Start-Readiness Preflight
+
+`cli/commands/lifecycle/_start_readiness_preflight.py` is the local-state half of
+"validate before kill" for `ava restart` (`cli/commands/lifecycle/stop.py`).
+`ava start` is the only step that brings a stopped host back, so a start check
+that fails AFTER the stop fails on a host whose services are already down
+(macmini 2026-09-12: a stray workspace socket aborted converge after the stop
+had already landed). This gate runs the read-only parts of those checks in
+front of the stop: a failure refuses the stop while the host still serves.
+
+Checked, all read-only:
+
+- **private-tree roots and marker** — a `logs` / `workspaces` / `memory` root
+  that converge would abort on (a symlink, or not a directory), and the
+  `logs/.metadata_never_index` marker being non-regular. Non-regular nodes
+  INSIDE the trees (sockets, FIFOs, devices) are reported as observations only:
+  converge skips them (see `base/host/private_storage.py`).
+- **daemon health ports** — the blocking pre-bind gate (issue #977), on the
+  roster the coming start will launch. Only terminal verdicts count, so an
+  idempotent restart passes.
+- **migration readability** — tracked migrations the applier cannot open; their
+  names are already vetted at the target ref by `validate_migrations_at_ref`.
+- **prod-checkout anchor and the venv entry points** — `ava start`'s first
+  refusal (`prod_service_checkout_error`), the interpreter every service
+  session launches through (`.venv/bin/python`, checked before restart), and
+  — only when the caller's start execs it (`check_launcher`, a caller executing the launcher) —
+  the `.venv/bin/ava` launcher step 5 runs (its presence is step 3.5's report;
+  this adds the exec bit).
+
+Contract: read-only, and findings are data — the gate never raises for one. A
+refusal is `RESTART_DECLINED_EXIT_CODE` ("nothing was stopped, host still
+serving"), and it deliberately does NOT revert the checkout: the target tree is
+not at fault (contrast the migrations-layout gate, which reverts). Every
+category it refuses on also fails the refusing caller's own start leg — the
+repairs it names are the path, so a refusal never blocks a viable restart (on
+an already-down host it protects nothing, but a bounce could not have made it
+past the same condition either). The mirror checks inside start stay where they
+are — this gate narrows the window, it does not replace them.
+
+Tests: `cli/commands/lifecycle/tests/test_start_readiness_preflight.py` pins each check family's
+disposition and the `check_launcher` toggle; the caller-level refusal contracts
+live in
+`cli/commands/lifecycle/tests/test_commands_restart_stop.py::test_cmd_restart_aborts_when_start_readiness_fails`.
+
+## Key Dependencies
+
+- [[start-readiness.ava.okf.md]] — what `ava start` itself asks before and after
+  launching a service
+- [[commands.ava.okf.md]] — the command-module overview

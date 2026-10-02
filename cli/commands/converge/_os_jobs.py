@@ -3,46 +3,42 @@
 Six jobs, one concept — everything Ava asks the platform scheduler (launchd /
 crontab) to run on its behalf:
 
-- **health probe** — periodic cluster health check with auto-rollback (gateway).
-- **watchdog probe** — revives a dead per-capability watchdog (any serving role); retired instead on a root-driven host (the root supervisor absorbs the watchdogs).
+- **health probe** — periodic cluster health check reporting observations and
+  graded alerts (gateway); it takes no repair action.
 - **boot autostart** — brings the whole cluster back after a reboot (prod only).
 - **logs maintenance** — daily copytruncate rotation followed by tiered retention.
 - **packages refresh** — the content channel's recurring pass (skills fast lane).
 - **PR flow** — the daily merge-pipeline sampler, credential-gated to the
   production home that can reach GitHub and Trunk (task #2139).
+- **WAL-G tick** — the daily physical backup, present exactly while
+  `AVA_WALG_CONFIG_FILE` is set.
 
 They share a shape worth keeping together: each is idempotent, each delegates the
-platform branching to a ``shared.os_*`` module, and each fails the converge loudly
-rather than leaving the cluster silently unsupervised — EXCEPT on Windows, where
-a registration failure degrades to a loud warning instead (see
-``WindowsPlatformBackend``): the failure class is transient (task #1196), and a
-cluster that is down is worse than one that is up and loudly unsupervised.
+platform branching to a ``base.os_*`` module, and each fails the converge loudly
+rather than leaving the cluster silently unsupervised.
 """
 
 from __future__ import annotations
 
-from cli.commands.converge.spec import CAPABILITY_ORDER, ConvergeCtx
+from cli.commands.converge.spec import ConvergeCtx
 
 
 def ensure_health_probe_cron(_ctx: ConvergeCtx) -> None:
     """Register the OS cron job for the cluster health probe.
 
-    Only runs on gateway hosts (roles gated). Delegates to `shared.os_cron`.
+    Only runs on gateway hosts (roles gated). Delegates to `base.host.system.cron`.
     The primary registration path is now in the gateway lifespan
     (`gateway/app.py`); this converge step is a belt-and-suspenders fallback
     that runs before the gateway process starts. Idempotent."""
-    from shared.os_cron import register_os_cron
+    from base.host.system.cron import register_os_cron
 
     register_os_cron()
-    # On failure the exception propagates so converge fails fast on POSIX (the
-    # cluster starts without a health probe, which is a degraded state). On
-    # Windows the backend degrades to a warning instead — see
-    # WindowsPlatformBackend.register_cron.
+    # On failure the exception propagates so converge fails fast.
 
 
 def ensure_logs_maintenance(_ctx: ConvergeCtx) -> None:
     """Register daily rotation followed by retention."""
-    from shared.os_logs_job import register_logs_job
+    from base.host.system.logs_job import register_logs_job
 
     register_logs_job()
 
@@ -51,118 +47,55 @@ def ensure_packages_refresh_job(_ctx: ConvergeCtx) -> None:
     """Register the recurring content-refresh pass (design §5.6; task #3267).
 
     Every serving unit runs it: skills are per-machine state, so each home owns
-    its own pass. Delegates to `shared.os_packages`, which no-ops when
+    its own pass. Delegates to `base.host.system.packages_job`, which no-ops when
     `AVA_OS_JOBS_ENABLED` is off and skips registration when the refresh channel
     itself is disabled (`AVA_PACKAGES_REFRESH_ENABLED`); the registered command
     re-checks both at run time. Idempotent."""
-    from shared.os_packages import register_packages_job
+    from base.host.system.packages_job import register_packages_job
 
     register_packages_job()
-    # POSIX: a registration failure propagates so converge fails fast (without
-    # the job, content updates would silently stall until a manual refresh).
-    # Windows degrades to a warning — see WindowsPlatformBackend.register_packages_job.
+    # A registration failure propagates so converge fails fast.
 
 
 def ensure_pr_flow_job(_ctx: ConvergeCtx) -> None:
     """Register the daily PR-flow sampler job (task #2139).
 
-    The gate lives in `shared.os_pr_flow.register_pr_flow_job`: the job is
+    The gate lives in `base.host.system.pr_flow_job.register_pr_flow_job`: the job is
     registered only on a production home whose machine holds the sampler's
     credentials (`gh` on PATH + a Trunk API token) — in the fleet, macmini.
     Every other unit skips with the reason logged, so converge output explains
     the absence. Idempotent."""
-    from shared.os_pr_flow import register_pr_flow_job
+    from base.host.system.pr_flow_job import register_pr_flow_job
 
     register_pr_flow_job()
 
 
-def ensure_watchdog_probe(ctx: ConvergeCtx) -> None:
-    """Keep the OS-scheduled watchdog probe in step with this host's service driver.
+def ensure_walg_job(_ctx: ConvergeCtx) -> None:
+    """Keep the daily WAL-G tick registered exactly while WAL-G is switched on.
 
-    Session mode (the default): register ONE job per capability this unit
-    carries, not one per host — the watchdog daemons are per-capability (a
-    single box runs both `ava-gateway-watchdog` and `ava-agent-runner-watchdog`),
-    so a single probe would leave the other capability's watchdog unsupervised —
-    the same collision that motivated splitting the watchdog itself.
+    Key set: register (idempotent). Key unset: remove a job a previous
+    configuration left behind, so turning WAL-G off leaves no schedule that runs
+    a command which now does nothing. Both directions only act in the default
+    home (`owns_os_jobs`), and registration is a no-op where
+    `AVA_OS_JOBS_ENABLED` is off. Delegates to `base.host.system.walg_job`."""
+    from base.host.system.walg_job import register_walg_job, unregister_walg_job
+    from services.gateway_side.walg.config import enabled
 
-    Root mode (`services.root_driver_enabled` on for this host — the same rule
-    `ava start`/`ava stop` fork on): RETIRE the probe instead. The root
-    supervisor's own HealthMonitor absorbs the watchdogs (the unit manifests
-    drop `ABSORBED_WATCHDOGS`), so a probe-revived legacy watchdog would run a
-    second supervision path beside the root tree. Retirement is idempotent, and
-    the next converge with the switch back off falls through to the register
-    branch — the gray-rollout revert restores legacy supervision by itself.
-    Deliberately NOT gated on `os_jobs_enabled()`: cleanup has to work wherever
-    registration is forbidden too, the same rule `shared.os_cron` states for
-    deregistration.
-
-    `ctx.roles` is the unit's capability SET and is `frozenset[str]` off the DB,
-    so it is filtered through the known capabilities rather than trusted: a
-    gateway-only host carries one job, an agent-runner-only host one, a single
-    box two, and an unknown token none. Delegates to `shared.os_watchdog_probe`;
-    idempotent either way."""
-    from cli.commands import _root_driver
-
-    carried = ctx.roles or frozenset()
-    if _root_driver._root_driven_enabled():
-        from shared.os_watchdog_probe import unregister_watchdog_probe
-
-        for role in CAPABILITY_ORDER:
-            if role in carried:
-                unregister_watchdog_probe(role)
-        return
-    from shared.os_watchdog_probe import register_watchdog_probe
-
-    for role in CAPABILITY_ORDER:
-        if role in carried:
-            # POSIX: failure propagates so converge fails fast (a dead watchdog
-            # would not be revived). Windows degrades to a warning — see
-            # WindowsPlatformBackend.register_watchdog_probe.
-            register_watchdog_probe(role)
-
-
-def ensure_hold_watchdog(_ctx: ConvergeCtx) -> None:
-    """Keep the OS-scheduled hold watchdog in step with this host's service driver.
-
-    Session mode (the default): register ONE job for this home — the
-    maintenance hold is host-level, so unlike the per-capability watchdog
-    probe a box carrying both capabilities needs exactly one job.
-
-    Root mode: RETIRE it, the same rule the watchdog probe follows. The root
-    supervisor owns local transitions; a second OS-side actor driving the
-    same lifecycle locks is the double-master shape the retirement exists to
-    avoid. The next converge with the switch back off falls through to the
-    register branch — the gray-rollout revert restores the job by itself.
-    Deliberately NOT gated on `os_jobs_enabled()`: cleanup has to work
-    wherever registration is forbidden too.
-
-    Delegates to `shared.os_hold_watchdog`; idempotent either way."""
-    from cli.commands import _root_driver
-
-    if _root_driver._root_driven_enabled():
-        from shared.os_hold_watchdog import unregister_hold_watchdog
-
-        unregister_hold_watchdog()
-        return
-    from shared.os_hold_watchdog import register_hold_watchdog
-
-    register_hold_watchdog()
-    # POSIX: failure propagates so converge fails fast (an orphaned hold would
-    # otherwise never be completed). Windows degrades to a warning — see
-    # WindowsPlatformBackend.register_hold_watchdog.
+    if enabled():
+        register_walg_job()
+    else:
+        unregister_walg_job()
 
 
 def ensure_cluster_autostart(_ctx: ConvergeCtx) -> None:
     """Register the boot-time autostart job so a machine reboot brings this
     cluster's gateway / agents / daemons back up without a manual `ava start`
-    (macOS launchd RunAtLoad / Linux @reboot crontab).
+    (macOS launchd RunAtLoad / Linux systemd).
 
     host_global-gated to the prod install, so a dev worktree cluster never
     registers autostart (its plist would dangle once the worktree is removed).
-    Delegates to `shared.os_autostart`. Idempotent."""
-    from shared.os_autostart import register_autostart
+    Delegates to `base.host.system.autostart`. Idempotent."""
+    from base.host.system.autostart import register_autostart
 
     register_autostart()
-    # On failure the exception propagates so converge fails fast on POSIX (the
-    # cluster would silently not come back after a reboot otherwise). Windows
-    # degrades to a warning — see WindowsPlatformBackend.register_autostart.
+    # On failure the exception propagates so converge fails fast.

@@ -30,5 +30,5 @@ does not auto-merge that PR.
 ## Key dependencies
 
 - [[.github.ava.okf.md]] — parent overview and the CI shard definitions.
-- [[../scripts/scripts.ava.okf.md]] — the measurement and merge command.
-- [[../tests/tests.ava.okf.md]] — pytest-split duration consumers.
+- [[../scripts/docs/scripts.ava.okf.md]] — the measurement and merge command.
+- [[../tests/docs/tests.ava.okf.md]] — pytest-split duration consumers.

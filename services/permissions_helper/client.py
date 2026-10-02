@@ -1,8 +1,7 @@
-"""Client for the permissions helper daemon (macOS + Windows).
+"""Client for the macOS permissions helper daemon.
 
 Connects to this cluster's helper and exchanges one line-delimited JSON
-request/response per call: a Unix socket on macOS/Linux, a named pipe
-(``\\\\.\\pipe\\ava-permissions-helper``) on Windows. Same wire contract both. Skills that drive the macOS
+request/response per call over a Unix socket. Skills that drive the macOS
 desktop (screen capture, clicks, keystrokes, window geometry) call these
 functions instead of shelling out to screencapture / posting CGEvents
 themselves -- so the privileged, permission-granted work happens in the one
@@ -20,21 +19,15 @@ import base64
 import binascii
 import itertools
 import json
-import os
 import socket
 import time
 from pathlib import Path
 from typing import Any, NotRequired, TypedDict
 
-from shared.host.converge.accessibility import AccessibilityState, AccessibilityStatus
-from shared.host.converge.screen_capture import ScreenCaptureState, ScreenCaptureStatus
-from shared.paths import permissions_helper_socket
-from shared.resilience import Policy, retry
-
-# Transport selection: named pipe on Windows, Unix socket elsewhere. A module
-# constant (not a live os.name check) so tests can flip the transport without
-# changing the process-wide platform (pathlib keys off os.name).
-_IS_WINDOWS = os.name == "nt"
+from base.host.converge.accessibility import AccessibilityState, AccessibilityStatus
+from base.host.converge.screen_capture import ScreenCaptureState, ScreenCaptureStatus
+from base.host.net.resilience import Policy, retry
+from base.paths import permissions_helper_socket
 
 _LINE_LIMIT = (
     64 * 1024 * 1024
@@ -56,7 +49,8 @@ class PermissionsHelperError(RuntimeError):
     """A permissions helper call failed, or the daemon was unreachable."""
 
 
-def _connect(path: str) -> socket.socket:
+def connect(path: str) -> socket.socket:
+    """Open the helper's Unix socket, retrying briefly while it is absent or refusing."""
     phase = ["socket"]
     policy = Policy(
         max_attempts=_CONNECT_ATTEMPTS,
@@ -78,7 +72,13 @@ def _connect(path: str) -> socket.socket:
         try:
             s.connect(path)
             return s
-        except (FileNotFoundError, ConnectionRefusedError):
+        except PermissionError:
+            # Not an unreachability signal — the socket exists and answers, but
+            # this caller's ACLs are wrong. Surface it raw instead of closing
+            # the socket and relabeling it "not reachable": that message would
+            # send an operator chasing a dead helper instead of a permissions fix.
+            raise
+        except OSError:
             phase[0] = "close"
             s.close()
             phase[0] = "connect"
@@ -87,7 +87,9 @@ def _connect(path: str) -> socket.socket:
     last: OSError | None = None
     try:
         return retry(policy)(once)
-    except (FileNotFoundError, ConnectionRefusedError) as exc:
+    except PermissionError:
+        raise
+    except OSError as exc:
         if phase[0] != "connect":
             raise
         last = exc
@@ -98,21 +100,16 @@ def _call(
     method: str,
     *,
     sock_path: str | Path | None = None,
-    _disconnect_is_success: bool = False,
     **args: object,
 ) -> Any:
-    """One JSON-line request/response over the platform transport.
-
-    POSIX dials this cluster's Unix socket; Windows dials the machine-wide
-    named pipe (``ava-permissions-helper``) the user-session helper listens
-    on. Both speak the same wire contract; a helper that never answers gets
-    the same unreachable/truncated errors either way.
-    """
+    """One JSON-line request/response over this cluster's Unix socket."""
     req = {"id": next(_ids), "method": method, **args}
-    if _IS_WINDOWS:
-        return _call_pipe(req, disconnect_is_success=_disconnect_is_success)
     path = str(sock_path or permissions_helper_socket())
-    s = _connect(path)
+    return _exchange(connect(path), method, req)
+
+
+def _exchange(s: socket.socket, method: str, req: dict[str, object]) -> Any:
+    """Send one request line on a connected socket, read one reply, close it."""
     s.settimeout(_CALL_TIMEOUT_S)
     try:
         s.sendall((json.dumps(req) + "\n").encode())
@@ -130,57 +127,11 @@ def _call(
         ) from e
     finally:
         s.close()
-    if _disconnect_is_success and not buf:
-        return True
-    return _parse_reply(bytes(buf), method)
+    return parse_reply(bytes(buf), method)
 
 
-def _call_pipe(req: dict[str, object], *, disconnect_is_success: bool = False) -> Any:
-    """Windows transport: named-pipe file I/O (see services.permissions_helper._win_pipe)."""
-    from services.permissions_helper import _win_pipe
-
-    policy = Policy(
-        max_attempts=_CONNECT_ATTEMPTS,
-        backoff=lambda attempt: _CONNECT_DELAY_S,  # noqa: ARG005 — Backoff keyword name
-        jitter="none",
-        jitter_span=1.0,
-        classify=lambda exc: isinstance(exc, (ConnectionError, OSError)),
-        idempotent=True,
-        respect_retry_after=False,
-        on_final_failure=None,
-    )
-    pair: tuple[Any, Any] | None = None
-    failure: OSError | None = None
-    try:
-        pair = retry(policy)(_win_pipe.connect)
-    except (ConnectionError, OSError) as exc:
-        failure = exc
-    if failure is not None or pair is None or pair[0] is None:
-        raise PermissionsHelperError(
-            f"permissions helper not reachable at pipe {_win_pipe.PIPE_NAME!r}"
-        )
-    conn, handle = pair
-    try:
-        conn.write((json.dumps(req) + "\n").encode())
-        conn.flush()
-        deadline = time.monotonic() + _CALL_TIMEOUT_S
-        buf = bytearray()
-        while not buf.endswith(b"\n"):
-            chunk = _win_pipe.read_available(handle, deadline)
-            if not chunk:
-                break
-            buf += chunk
-            if len(buf) > _LINE_LIMIT:
-                raise PermissionsHelperError("permissions helper response exceeded line limit")
-    finally:
-        conn.close()
-    if disconnect_is_success and not buf:
-        return True
-    return _parse_reply(bytes(buf), str(req["method"]))
-
-
-def _parse_reply(buf: bytes, method: str) -> Any:
-    """The wire reply contract, shared by the socket and pipe transports."""
+def parse_reply(buf: bytes, method: str) -> Any:
+    """The helper's JSON-line reply contract."""
     if not buf:
         raise PermissionsHelperError(f"permissions helper closed without a response to {method!r}")
     if not buf.endswith(b"\n"):
@@ -200,8 +151,12 @@ def _parse_reply(buf: bytes, method: str) -> Any:
 
 class PingResult(TypedDict):
     pong: bool
+    pid: NotRequired[int]
+    root_stop_intent_v1: NotRequired[bool]
+    helper_shutdown_v1: NotRequired[bool]
+    root_seed_report_v1: NotRequired[bool]  # `root_status.seed` is reported
     preflight_screen: bool  # Screen Recording grant held
-    ax_trusted: NotRequired[bool]  # Accessibility grant held (macOS only)
+    ax_trusted: bool  # Accessibility grant held
 
 
 class ScreencaptureResult(TypedDict):
@@ -290,6 +245,16 @@ class RootSeedConfig(TypedDict):
     env: NotRequired[dict[str, str]]
 
 
+class RootSeedReport(TypedDict):
+    """The seed the keeper holds for its next spawn; its environment is withheld."""
+
+    argv: list[str]
+    cwd: str
+    run_dir: str
+    stdout: str
+    stderr: str
+
+
 class RootExitInfo(TypedDict):
     """How the root process last ended (a `last_exit` on `RootStatus`)."""
 
@@ -314,6 +279,8 @@ class RootStatus(TypedDict):
     seeded: bool
     restarts: int
     stop_requested: bool
+    run_dir: NotRequired[str]
+    seed: NotRequired[RootSeedReport]  # present while seeded (`root_seed_report_v1`)
     pid: NotRequired[int]  # the keeper's live root child
     last_exit: NotRequired[RootExitInfo]
     next_restart_in_s: NotRequired[float]
@@ -321,12 +288,18 @@ class RootStatus(TypedDict):
     seed_error: NotRequired[str]  # startup seed file was rejected
 
 
+class HelperShutdownResult(TypedDict):
+    stopping: bool
+    pid: int
+    run_dir: str
+
+
 class ScreenSize(TypedDict):
     x: float
     y: float
     w: float
     h: float
-    scale: float  # backing scale factor; 1 when physical == logical (Windows)
+    scale: float  # backing scale factor
 
 
 class FrontmostApp(TypedDict):
@@ -397,7 +370,7 @@ def type_text(text: str, *, sock_path: str | Path | None = None) -> TypeResult:
 
 
 def key(code: int, *, cmd: bool = False, sock_path: str | Path | None = None) -> KeyResult:
-    """Press the key with virtual keycode `code` (Windows VK code; cmd = Ctrl)."""
+    """Press the key with virtual keycode `code`."""
     return _call("key", code=code, cmd=cmd, sock_path=sock_path)
 
 
@@ -491,35 +464,22 @@ def root_status(*, sock_path: str | Path | None = None) -> RootStatus:
     return result
 
 
-def stop_root(*, force: bool = False, sock_path: str | Path | None = None) -> RootStatus:
-    """Stop the seeded root; `force` disposes a live root the helper did not seed.
-
-    Without `force`, a foreign root (the conflict case) is refused — stopping
-    it would tear down a serving tree. A stop the keeper requested is not
-    followed by a restart.
-    """
-    result: RootStatus = _call("root_stop", force=force, sock_path=sock_path)
+def stop_root(*, sock_path: str | Path | None = None) -> RootStatus:
+    """Durably stop the owned root; foreign or unknown custody always refuses."""
+    result: RootStatus = _call("root_stop", sock_path=sock_path)
     return result
 
 
-def request_self_upgrade(exe_path: str, *, sock_path: str | Path | None = None) -> bool:
-    """Ask the helper to exec a replacement; a clean disconnect means it succeeded."""
-    return bool(
-        _call(
-            "self_upgrade",
-            exe_path=exe_path,
-            sock_path=sock_path,
-            _disconnect_is_success=True,
-        )
-    )
+def shutdown_helper(run_dir: Path, *, sock_path: str | Path) -> HelperShutdownResult:
+    """Close this home's native admission, retain intent, and request exit zero."""
+    return _call("helper_shutdown", run_dir=str(run_dir), sock_path=sock_path)
 
 
 def screen_size(*, sock_path: str | Path | None = None) -> ScreenSize:
     """Report the main display's geometry in logical points + backing scale.
 
     Computer-use callers use this to map screenshot pixels (physical) to
-    click coordinates (logical): divide by `scale` (macOS Retina only;
-    Windows reports scale 1)."""
+    click coordinates (logical): divide by `scale`."""
     return _call("screen_size", sock_path=sock_path)
 
 
@@ -620,9 +580,7 @@ def check_accessibility(
                     "$AVA_HOME/logs/permissions-helper.log."
                 ),
             )
-        # The Windows helper has no Accessibility concept: SendInput is not
-        # TCC-gated, so its older ping shape correctly means this axis is granted.
-        if "ax_trusted" not in result or result["ax_trusted"] is True:
+        if result["ax_trusted"] is True:
             return AccessibilityStatus(state=AccessibilityState.GRANTED)
         return AccessibilityStatus(
             state=AccessibilityState.NOT_GRANTED, diagnostic=_NO_AX_GRANT_DIAGNOSTIC

@@ -1,0 +1,8 @@
+{
+  "ambient_state": {
+    "gateway/events/sse.py::import-time-read:_DISCONNECT_POLL_SECONDS": 1
+  },
+  "complexity": {
+    "gateway/events/sse.py::event_stream": 16
+  }
+}

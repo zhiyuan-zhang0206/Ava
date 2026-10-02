@@ -17,7 +17,7 @@ from pathlib import Path
 import pytest
 from pydantic import BaseModel, ConfigDict, Field
 
-from shared.plugin_config_registry import (
+from base.packages.plugins.config_registration import (
     _PLUGIN_CONFIG_CLASSES,
     _PLUGIN_CONFIGS,
     DuplicateRegistration,
@@ -37,7 +37,7 @@ from shared.plugin_config_registry import (
     validate_config_overlay,
     write_default_disk_image,
 )
-from shared.plugin_context import PluginContext
+from base.packages.plugins.context import PluginContext
 
 
 class _FixtureConfig(BaseModel):
@@ -235,7 +235,7 @@ def test_is_per_agent_field_metadata(isolated_registry):
 def _setup_overlayable_plugin():
     """Register a frozen Config with per_agent=True fields, run bind_from_disk.
 
-    Requires the `unit_home` fixture active in the calling test (settings.general.ava_home
+    Requires the `unit_home` fixture active in the calling test (AVA_HOME
     pointing at a per-test tmp dir) so bind_from_disk writes the disk image there,
     not into the shared session home — callers must declare `unit_home`.
     """
@@ -274,10 +274,10 @@ def test_validate_config_overlay_uses_declaring_model_in_gateway_profile(
     monkeypatch: pytest.MonkeyPatch, isolated_registry, unit_home
 ) -> None:
     """Framework validation must not read a domain absent from the gateway profile."""
-    import shared.config as shared_config
-    from shared.config import Settings
+    import base.config as base_config
+    from base.config import Settings
 
-    monkeypatch.setattr(shared_config, "settings", Settings(profile="gateway"))
+    monkeypatch.setattr(base_config, "settings", Settings(profile="gateway"))
 
     validate_config_overlay({"completion_notice_policy": "hourly"})
     with pytest.raises(InvalidConfigOverlay, match="completion_notice_policy"):
@@ -288,10 +288,10 @@ def test_validate_config_overlay_runs_declaring_model_validators_in_gateway_prof
     monkeypatch: pytest.MonkeyPatch, isolated_registry, unit_home
 ) -> None:
     """Declaring-model validation preserves before and field validators."""
-    import shared.config as shared_config
-    from shared.config import Settings
+    import base.config as base_config
+    from base.config import Settings
 
-    monkeypatch.setattr(shared_config, "settings", Settings(profile="gateway"))
+    monkeypatch.setattr(base_config, "settings", Settings(profile="gateway"))
 
     validate_config_overlay({"skills_to_expand_at_start": "a,b"})
     with pytest.raises(InvalidConfigOverlay, match="only accepts"):
@@ -317,8 +317,8 @@ def test_validate_overlay_is_self_sufficient_in_a_fresh_process() -> None:
     tests here depend on it), so the scenario runs in a fresh interpreter."""
     code = textwrap.dedent(
         """
-        from shared.lm.registry import MODELS
-        from shared.plugin_config_registry import validate_config_overlay
+        from base.lm.registry import MODELS
+        from base.packages.plugins.config_registration import validate_config_overlay
 
         assert not MODELS, "fresh process must start with an empty registry"
         validate_config_overlay({"llm_model": "deepseek-flash"})
@@ -465,7 +465,7 @@ def test_apply_config_overlay_framework_scope_only_mutates_settings(
     isolated_registry, unit_home, monkeypatch: pytest.MonkeyPatch
 ):
     """scope='framework' applies only framework Settings half; plugin half untouched."""
-    from shared.config import settings
+    from base.config import settings
 
     _setup_overlayable_plugin()
     monkeypatch.setattr(settings.lm, "llm_model", settings.lm.llm_model)  # snapshot for teardown
@@ -481,7 +481,7 @@ def test_apply_config_overlay_plugin_scope_only_mutates_plugin_configs(
     isolated_registry, unit_home, monkeypatch: pytest.MonkeyPatch
 ):
     """scope='plugin' applies only plugin half; framework Settings untouched."""
-    from shared.config import settings
+    from base.config import settings
 
     _setup_overlayable_plugin()
     original_model = settings.lm.llm_model
@@ -494,7 +494,7 @@ def test_apply_config_overlay_plugin_scope_only_mutates_plugin_configs(
 
 def test_llm_model_is_per_agent() -> None:
     """llm_model must be marked per_agent=True for the spawn-time overlay path."""
-    from shared.config import FIELD_INFOS
+    from base.config import FIELD_INFOS
 
     info = FIELD_INFOS["llm_model"]
     extra = info.json_schema_extra
@@ -505,7 +505,7 @@ def test_llm_model_is_per_agent() -> None:
 def test_skills_to_inject_is_per_agent_overlayable(isolated_registry, unit_home) -> None:
     """A spawner overlays a per-worker skill index, so the field must be
     per_agent and resolve to the framework half (not raise like a pinned field)."""
-    from shared.config import FIELD_INFOS
+    from base.config import FIELD_INFOS
 
     info = FIELD_INFOS["skills_to_inject_into_system_prompt"]
     extra = info.json_schema_extra
@@ -588,7 +588,7 @@ def test_syntax_fix_ruff_format_overlay_is_accepted() -> None:
     """Per-agent A/B of the ruff format gate (task #1858 follow-up, user chose
     a paired experiment): the field must accept a spawn config_overlay, like
     prompt_codeact_enabled after #719."""
-    from shared.plugin_config_registry import validate_config_overlay
+    from base.packages.plugins.config_registration import validate_config_overlay
 
     validate_config_overlay({"syntax_fix_ruff_format": True})  # must not raise
     validate_config_overlay({"syntax_fix_ruff_format": False})

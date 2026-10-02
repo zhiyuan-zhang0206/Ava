@@ -3,7 +3,7 @@
 The entry point the worker's parent process spawns (runner.run_child). The
 build logic lives in `services.hierarchy_worker.execute.execute_job`; this
 module is only argv plumbing, so tests and the runner can call the logic
-directly — plus the child's process boot: `shared/log.py` drops loguru's
+directly — plus the child's process boot: `base/log/__init__.py` drops loguru's
 default handler at import, so without the `init_gateway_process` seam every
 record this process produces — including the `llm_usage` rows that are the
 worker's authoritative per-call metering ledger — is silently discarded
@@ -15,7 +15,7 @@ from __future__ import annotations
 import argparse
 import sys
 
-from shared.log import init_gateway_process
+from base.log import init_gateway_process
 
 
 def main(argv: list[str] | None = None) -> int:

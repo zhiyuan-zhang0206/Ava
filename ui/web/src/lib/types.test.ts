@@ -7,7 +7,7 @@
 // The impersonated-status cases below lock the rule that only an `active`
 // lease means the agent is actually taken over — a `requested`/`accepted`
 // lease still runs the native agent until activation reaches its next safe
-// boundary (see shared/agent_roster.py's open_impersonation LATERAL join).
+// boundary (see base/agents/observation/roster.py's open_impersonation LATERAL join).
 
 import { expect, it } from "vitest";
 
@@ -48,11 +48,11 @@ it("keeps availability through the detail-row rebuild", () => {
 });
 
 it("keeps availability through a rebuild a remapped card status triggers", () => {
-  const restartingCard = {
+  const impersonatedCard = {
     agent_id: 8,
     spawner: "user",
     fork_source_agent_id: null,
-    status: "restarting",
+    status: "idling",
     pid: 100,
     spawned_at: "2026-09-01T00:00:00Z",
     started_at: "2026-09-01T00:00:00Z",
@@ -68,9 +68,11 @@ it("keeps availability through a rebuild a remapped card status triggers", () =>
     highest_notice_priority: null,
     unread_notice_count: 0,
     heartbeat_paused_until: null,
-    open_impersonation_session_id: null,
+    open_impersonation_session_id: 8,
+    open_impersonation_status: "active",
   } as unknown as WireAgentCard;
-  expect(projectAgentStatus(restartingCard).availability?.reason).toBe("launch_unreachable");
+  expect(projectAgentStatus(impersonatedCard).status).toBe("impersonated");
+  expect(projectAgentStatus(impersonatedCard).availability?.reason).toBe("launch_unreachable");
 });
 
 function card(overrides: Record<string, unknown>): WireAgentCard {

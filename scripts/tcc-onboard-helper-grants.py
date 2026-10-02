@@ -303,13 +303,13 @@ def helper_client() -> Any:
 
 
 def spawn_child(client: Any, workdir: Path, name: str, argv: list[str], tag: str) -> int:
-    from shared import session_env
+    from base.sessions import env_forwarding
 
     # The helper spawn contract wants the child's FULL environment; the
     # registry's session forward view is the sanctioned builder for it.
     # activate_venv=False: the child's cwd is the scratch workdir, outside
-    # this checkout (see shared/session_env.py).
-    child_env = session_env.forward_env_dict(activate_venv=False)
+    # this checkout (see base/sessions/env_forwarding.py).
+    child_env = env_forwarding.forward_env_dict(activate_venv=False)
     try:
         result = client.spawn_process(
             name,

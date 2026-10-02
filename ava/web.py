@@ -13,13 +13,13 @@ import urllib.parse
 import urllib.request
 from dataclasses import dataclass
 
-from ava._batch import DEFAULT_BATCH_MAX_CONCURRENT, run_batch, validate_max_concurrent
-from ava.sdk_validation import coerce_str, coerce_typed
+from ava.sdk_surface.batch import DEFAULT_BATCH_MAX_CONCURRENT, run_batch, validate_max_concurrent
+from ava.sdk_surface.validation import coerce_str, coerce_typed
 from ava.security import scan_content
-from shared.config import settings
-from shared.lm.call import answer_text
-from shared.lm.effort import ReasoningEffort, coerce_effort
-from shared.resilience import ExponentialBackoff, Policy, http_classifier, retry
+from base.config import settings
+from base.host.net.resilience import ExponentialBackoff, Policy, http_classifier, retry
+from base.lm.call import answer_text
+from base.lm.effort import ReasoningEffort, coerce_effort
 
 _log = logging.getLogger(__name__)
 
@@ -45,7 +45,7 @@ class FetchError(WebError):
     pass
 
 
-# Defaults below mirror `shared.config.Settings.web_*` (env override:
+# Defaults below mirror `base.config.Settings.web_*` (env override:
 # `AVA_WEB_MAX_RESULTS` / `AVA_WEB_SEARCH_TIMEOUT_SECONDS` / `AVA_WEB_FETCH_TIMEOUT_SECONDS`).
 # Brave free tier cap is 20 — set higher and Brave returns 422 directly.
 # Read lazily, not at import: the web domain is agent-profile-only (Task #856)

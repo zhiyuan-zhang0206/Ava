@@ -11,15 +11,15 @@ tags:
 
 Ava speaks MCP in both directions. This node is the **outbound** half — Ava's
 agents as MCP clients. The inbound half, `ava mcp serve`, shares only the
-protocol (no daemon, no config layers, no socket): [[cli/mcp_server.ava.okf.md]].
+protocol (no daemon, no config layers, no socket): [[cli/docs/mcp_server.ava.okf.md]].
 
 ## What It Is
-MCP (Model Context Protocol) integrations let agents call external tool servers. Agents invoke tools as `ava.mcps.<server>.<tool>(...)` — calls serialize into **custom newline-delimited JSON** (`{id,method,params}` → `{id,ok,result|error}`, `ava/_mcps_daemon.py`) over a Unix socket to the **shared per-machine MCP daemon** (ops roster session "mcp-daemon", watchdog-managed) managing connections to each server. **Standard JSON-RPC is only used for the daemon↔MCP server hop** — over stdio for local servers (`command`) or Streamable HTTP for remote ones (`url`).
+MCP (Model Context Protocol) integrations let agents call external tool servers. Agents invoke tools as `ava.mcps.<server>.<tool>(...)` — calls serialize into **custom newline-delimited JSON** (`{id,method,params}` → `{id,ok,result|error}`, `ava/mcps/_daemon.py`) over a Unix socket to the **shared per-machine MCP daemon** (ops roster session "mcp-daemon", watchdog-managed) managing connections to each server. **Standard JSON-RPC is only used for the daemon↔MCP server hop** — over stdio for local servers (`command`) or Streamable HTTP for remote ones (`url`).
 
 ## Core Responsibilities
 - **Tool discovery**: config **lazy reloaded** on every call (`_load_config`); tool lists lazy-loaded on first access (daemon → 24h disk cache → local connection), `__all_for_ava__` prioritizes cache so `help()` triggers no connections — **not a one-time startup load**
 - **Tool invocation**: `ava.mcps.<server>.<tool>(**kwargs)` — sync wrapper over async Unix-socket communication
-- **Safety management**: only `_call_text` joins returned text and passes through `scan_content` (`ava/mcps.py:517`, defined in `ava/security.py:103`); **arguments are never scanned**, nor are `raw` / `_call_raw` images/structuredContent
+- **Safety management**: only `_call_text` joins returned text and passes through `scan_content` (`ava/mcps/__init__.py:_call_text`, defined in `ava/security.py:scan_content`); **arguments are never scanned**, nor are `raw` / `_call_raw` images/structuredContent
 - **Graceful degradation**: daemon path wrapped in `suppress(MCPConnectError, OSError)` → **silently falls back to local stdio** (agent spawns the server itself); raises `MCPConnectError` only if local also fails
 
 ## Architecture
@@ -39,21 +39,21 @@ The four `.mcp.json` layers, `~/.ava/mcp_enabled.json` enable control, `requires
 Native vs installed (mirroring skills), the relative-path `.mcp.json` startup form, per-layer `server_cwd`, and why not `uv run`: [[okf/mcps/installation-startup.ava.okf.md]].
 
 ## Key Dependencies
-- [[cli/mcp_server.ava.okf.md]] — the inbound direction: this cluster AS an MCP server
+- [[cli/docs/mcp_server.ava.okf.md]] — the inbound direction: this cluster AS an MCP server
 - [[mcp-daemon.ava.okf.md]] — MCP daemon subprocess management
-- [[state.ava.okf.md]] — agent identity for socket path
+- [[agent/docs/state.ava.okf.md]] — agent identity for socket path
 
 ## Entry Points
-- `ava/mcps.py` — agent-facing tool invocation interface
+- `ava/mcps/__init__.py` — agent-facing tool invocation interface
 - `ava/mcp_config.py` — config loading, four-layer merging, `installed_mcp_dir`
-- `ava/_mcp_oauth.py` — OAuth 2.1 authorization-code + PKCE client builder (browser flow, loopback callback, per-server token storage)
-- `ava/_mcps_daemon.py` — **shared daemon process main loop** (`python -m ava._mcps_daemon`): binds the shared Unix socket (`$AVA_HOME/run/mcp_daemon.sock`) and manages every MCP server's session for every agent connection (per-connection isolation + `"shared"` server buckets)
-- `ava/_mcp_browser.py` — in-daemon line-protocol client for the browser-mcp service (the `"shared": "browser"` chrome path; process-less replacement for `services.browser.mcp_wrapper`)
+- `ava/mcps/_oauth.py` — OAuth 2.1 authorization-code + PKCE client builder (browser flow, loopback callback, per-server token storage)
+- `ava/mcps/_daemon.py` — **shared daemon process main loop** (`python -m ava.mcps._daemon`): binds the shared Unix socket (`$AVA_HOME/run/mcp_daemon.sock`) and manages every MCP server's session for every agent connection (per-connection isolation + `"shared"` server buckets)
+- `ava/mcps/_browser.py` — in-daemon line-protocol client for the browser-mcp service (the `"shared": "browser"` chrome path; process-less replacement for `services.browser.mcp_wrapper`)
 - `agent/mcp_daemon.py` — **no-op daemon handle** kept for boot-path compatibility (the daemon is now a supervised cluster service, never a per-agent child)
 - `cli/commands/extensions/mcp.py` — `ava mcp install/uninstall/upgrade/ls/add/remove/enable/disable`
 - `cli/commands/extensions/_pkg_source.py` — install source fetching (git URL / local path), shared with `ava plugins install`
-- `shared/install_registry.py` — install registry (`type="mcp"` rows = installed MCPs)
-- `shared/mcp_enabled.py` — enable/disable configuration management
+- `base/packages/extensions/install_registry.py` — install registry (`type="mcp"` rows = installed MCPs)
+- `base/packages/plugins/mcp_enabled.py` — enable/disable configuration management
 - `ava_builtins/mcps/chrome/.mcp.json` — chrome server definition (`"shared": "browser"` — the daemon dials the browser-mcp service directly; the `services.browser.mcp_wrapper` stdio bridge is retained only as the declared command for hosts running older daemons); scanned by `ava/mcp_config.py:builtin_mcp_paths()`
 
 ## Current MCP Servers

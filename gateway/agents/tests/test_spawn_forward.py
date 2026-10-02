@@ -1,0 +1,319 @@
+"""Cross-machine spawn forward (`gateway/agents/router.py:post_agents`) unit tests —
+
+Verify "body.machine != local → _forward_spawn_to_remote is called" routing decision + error propagation.
+Actual httpx network calls are not made (mock `_forward_spawn_to_remote` intercepts); only validate router
+branch + body passthrough.
+"""
+
+from __future__ import annotations
+
+from typing import Any
+
+import psycopg
+import pytest
+from fastapi.testclient import TestClient
+
+from base.agents.observation.evidence import AvailabilityReason
+from gateway.agents import forward
+from gateway.agents import router as app_module
+from gateway.app import app
+from ops import cluster_rpc
+from ops.rpc_schemas import LaunchAgentRequest, SpawnedAgent
+
+
+@pytest.fixture
+def _force_local_machine(set_machine_identity) -> str:
+    """Sets this unit's identity at the source via set_machine_identity so every
+    machine_name() / machine_role() call site sees role=agent-runner, name='local-test'."""
+    set_machine_identity(role="agent-runner", name="local-test")
+    return "local-test"
+
+
+class TestRouting:
+    @pytest.mark.parametrize("failure", ["exception", "missing"])
+    def test_receipt_read_failure_keeps_accepted_creation(
+        self,
+        _force_local_machine: str,
+        monkeypatch: pytest.MonkeyPatch,
+        db_conn: psycopg.Connection,
+        failure: str,
+    ) -> None:
+        async def _capture_forward(_target: str, body: LaunchAgentRequest) -> SpawnedAgent:
+            return SpawnedAgent(id=body.agent_id)
+
+        def _unreadable(_conn: psycopg.Connection, _agent_id: int) -> None:
+            if failure == "exception":
+                raise RuntimeError("receipt read unavailable")
+
+        monkeypatch.setattr(app_module, "_forward_spawn_to_remote", _capture_forward)
+        monkeypatch.setattr(app_module.snapshot_module, "select_one", _unreadable)
+        with TestClient(app) as client:
+            resp = client.post("/api/agents", json={"machine": "local-test"})
+        assert resp.status_code == 201
+        body = resp.json()
+        assert db_conn.execute("SELECT id FROM agents_meta WHERE id=%s", (body["id"],)).fetchone()
+        assert body["accepted"] is True
+        assert body["execution_observed"] is False
+        assert body["reason"] == "unknown"
+        assert body["observed_at"]
+
+    def test_machine_eq_local_forwards_to_local_target(
+        self,
+        _force_local_machine: str,
+        monkeypatch: pytest.MonkeyPatch,
+        db_conn: psycopg.Connection,
+    ) -> None:
+        """body.machine == local → spawn is HTTP-uniform: still forwarded, with
+        target == local (the co-located runner's ops server over localhost)."""
+        captured: dict[str, Any] = {}
+
+        async def _capture_forward(target: str, body: LaunchAgentRequest) -> SpawnedAgent:
+            captured["target"] = target
+            captured["body"] = body
+            return SpawnedAgent(id=body.agent_id)
+
+        monkeypatch.setattr(app_module, "_forward_spawn_to_remote", _capture_forward)
+        db_conn.execute(
+            "INSERT INTO machine_probe (machine_name,online,agent_host_online) "
+            "VALUES ('local-test',TRUE,FALSE)"
+        )
+        db_conn.commit()
+        with TestClient(app) as client:
+            resp = client.post("/api/agents", json={"machine": "local-test"})
+        assert resp.status_code == 201
+        assert resp.json()["id"] == captured["body"].agent_id
+        assert resp.json()["accepted"] is True
+        assert resp.json()["execution_observed"] is False
+        assert resp.json()["reason"] == "host_unavailable"
+        assert resp.json()["observed_at"]
+        assert captured["target"] == "local-test"
+
+    def test_machine_none_forwards_to_local_target(
+        self, _force_local_machine: str, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """body.machine absent → equivalent to local; still forwarded, target == local."""
+        captured: dict[str, Any] = {}
+
+        async def _capture_forward(target: str, body: LaunchAgentRequest) -> SpawnedAgent:
+            captured["target"] = target
+            captured["body"] = body
+            return SpawnedAgent(id=body.agent_id)
+
+        monkeypatch.setattr(app_module, "_forward_spawn_to_remote", _capture_forward)
+        with TestClient(app) as client:
+            resp = client.post("/api/agents", json={})
+        assert resp.status_code == 201
+        assert captured["target"] == "local-test"
+
+    def test_local_gateway_only_target_400(
+        self,
+        set_machine_identity,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """A target the registry resolves to gateway-only (no agent-runner
+        capability) returns 400 + reason='spawn_target_not_agent_runner' via the
+        wire contract (a bare HTTPException would carry no reason and trip the SDK
+        into a confusing KeyError), and never forwards. The check reads the
+        registry for the local target too — no self-introspection."""
+        set_machine_identity(role="gateway", name="gw-only")
+        # The registry says the (local) target is gateway-only — overrides the
+        # conftest autouse stub that defaults the local machine to agent-runner.
+        monkeypatch.setattr("base.cluster.machines.lookup_role", lambda _name: ["gateway"])  # pyright: ignore[reportUnknownArgumentType]
+        forwarded: list[str] = []
+
+        async def _should_not_forward(target: str, body: LaunchAgentRequest) -> SpawnedAgent:
+            forwarded.append(target)
+            return SpawnedAgent(id=0)
+
+        monkeypatch.setattr(app_module, "_forward_spawn_to_remote", _should_not_forward)
+        with TestClient(app) as client:
+            resp = client.post("/api/agents", json={})
+        assert resp.status_code == 400
+        body = resp.json()
+        assert body["reason"] == "spawn_target_not_agent_runner"
+        assert "agent-runner" in body["detail"]
+        assert forwarded == []  # guard fires before any forward
+
+    def test_paused_target_409_no_forward(
+        self,
+        set_machine_identity,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """A spawn targeting a PAUSED machine (operator `ava cluster pause`) is
+        refused with 409 + reason='machine_paused' before any forward — the
+        paused machine is deliberately out of the cluster (agents terminated,
+        ops server may be unreachable), so a spawn would fail at dial time
+        anyway; the precise wire error is what schedules / peers see."""
+        set_machine_identity(role="agent-runner", name="local-test")
+        monkeypatch.setattr("base.cluster.machines.lookup_role", lambda _name: ["agent-runner"])  # pyright: ignore[reportUnknownArgumentType]
+        monkeypatch.setattr("base.cluster.machines.is_paused", lambda _name: True)  # pyright: ignore[reportUnknownArgumentType]
+        forwarded: list[str] = []
+
+        async def _should_not_forward(target: str, body: LaunchAgentRequest) -> SpawnedAgent:
+            forwarded.append(target)
+            return SpawnedAgent(id=0)
+
+        monkeypatch.setattr(app_module, "_forward_spawn_to_remote", _should_not_forward)
+        with TestClient(app) as client:
+            resp = client.post("/api/agents", json={"machine": "paused-box"})
+        assert resp.status_code == 409
+        body = resp.json()
+        assert body["reason"] == "machine_paused"
+        assert "resume" in body["detail"]
+        assert forwarded == []  # guard fires before any forward
+
+    def test_machine_neq_local_forwards(
+        self, _force_local_machine: str, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """body.machine != local → _forward_spawn_to_remote is called, body passthrough."""
+        captured: dict[str, Any] = {}
+
+        async def _capture_forward(target: str, body: LaunchAgentRequest) -> SpawnedAgent:
+            captured["target"] = target
+            captured["body"] = body
+            return SpawnedAgent(id=body.agent_id)
+
+        monkeypatch.setattr(app_module, "_forward_spawn_to_remote", _capture_forward)
+        # The pre-dispatch capability check resolves the target's role; stub it as
+        # a runner so the forward proceeds (the lookup itself is exercised by the
+        # 404 / no-capability tests).
+        monkeypatch.setattr("base.cluster.machines.lookup_role", lambda _name: ["agent-runner"])  # pyright: ignore[reportUnknownArgumentType]
+        monkeypatch.setattr("base.cluster.machines.is_paused", lambda _name: False)  # pyright: ignore[reportUnknownArgumentType]
+        with TestClient(app) as client:
+            resp = client.post(
+                "/api/agents",
+                json={"machine": "remote-mac", "spawner": "user"},
+            )
+        assert resp.status_code == 201
+        assert resp.json()["id"] == captured["body"].agent_id
+        assert resp.json()["accepted"] is True
+        assert resp.json()["execution_observed"] is False
+        assert resp.json()["reason"] == "unknown"
+        assert captured["target"] == "remote-mac"
+        # The forward op is the launch half of the #1236 split — the row was
+        # already created by the gateway, so the body carries the new agent id,
+        # not the REST request (which has no machine / spawner on the wire op).
+        launch_body = captured["body"]
+        assert launch_body.agent_id > 0
+        assert launch_body.config is None
+        assert launch_body.prompt is None  # first prompt, if any, was committed with the row
+        assert launch_body.launch_attempt_id is not None
+
+    def test_registered_remote_runner_is_forwarded(
+        self, _force_local_machine: str, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A registered remote runner is always forwarded to — there is no
+        deployment gate on spawn routing. Single box is just the special case
+        where the target's ops server is at localhost."""
+        captured: dict[str, Any] = {}
+
+        async def _capture_forward(target: str, body: LaunchAgentRequest) -> SpawnedAgent:
+            captured["target"] = target
+            return SpawnedAgent(id=body.agent_id)
+
+        monkeypatch.setattr(app_module, "_forward_spawn_to_remote", _capture_forward)
+        monkeypatch.setattr("base.cluster.machines.lookup_role", lambda _name: ["agent-runner"])  # pyright: ignore[reportUnknownArgumentType]
+        monkeypatch.setattr("base.cluster.machines.is_paused", lambda _name: False)  # pyright: ignore[reportUnknownArgumentType]
+        with TestClient(app) as client:
+            resp = client.post("/api/agents", json={"machine": "remote-mac"})
+        assert resp.status_code == 201
+        assert captured["target"] == "remote-mac"
+
+    def test_machine_not_registered_propagates_404(
+        self, _force_local_machine: str, db_conn: psycopg.Connection
+    ) -> None:
+        """A target not in the machines table → the pre-dispatch lookup_role raises
+        MachineNotRegistered → the app's AvaAgentError handler emits 404 + reason
+        (no opaque 502 from dialing a non-existent ops server).
+
+        Wire protocol: AvaAgentError subclass → JSONResponse status=cls.http_status,
+        body={detail, reason}. MachineNotRegistered.http_status=404.
+        """
+        with TestClient(app) as client:
+            resp = client.post("/api/agents", json={"machine": "ghost-mac"})
+        assert resp.status_code == 404
+        body = resp.json()
+        assert body["reason"] == "machine_not_registered"
+        assert "ghost-mac" in body["detail"]
+
+    def test_cross_machine_gateway_unavailable_names_committed_agent(
+        self, _force_local_machine: str, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A post-commit forward error returns 502 with the committed identity."""
+
+        async def _forward_raises(*args: Any, **kw: Any) -> None:
+            raise forward.LaunchForwardError(
+                AvailabilityReason.LAUNCH_UNREACHABLE, "target unreachable after 3 retries"
+            )
+
+        monkeypatch.setattr(app_module, "_forward_spawn_to_remote", _forward_raises)
+        monkeypatch.setattr("base.cluster.machines.lookup_role", lambda _name: ["agent-runner"])  # pyright: ignore[reportUnknownArgumentType]
+        monkeypatch.setattr("base.cluster.machines.is_paused", lambda _name: False)  # pyright: ignore[reportUnknownArgumentType]
+        with TestClient(app) as client:
+            resp = client.post("/api/agents", json={"machine": "remote-mac"})
+        assert resp.status_code == 502
+        assert resp.json()["reason"] == "agent_launch_failed"
+        assert resp.json()["agent_id"] > 0
+        assert resp.json()["state"]["availability"]["reason"] == "launch_unreachable"
+
+    def test_mismatched_runner_receipt_cannot_replace_committed_id(
+        self, _force_local_machine: str, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        async def _wrong_id(_target: str, body: LaunchAgentRequest) -> SpawnedAgent:
+            return SpawnedAgent(id=body.agent_id + 1)
+
+        monkeypatch.setattr(app_module, "_forward_spawn_to_remote", _wrong_id)
+        with TestClient(app) as client:
+            response = client.post("/api/agents", json={})
+        assert response.status_code == 502
+        body = response.json()
+        assert body["state"]["availability"]["reason"] == "launch_unreachable"
+        assert body["agent_id"] > 0
+
+
+@pytest.mark.asyncio
+async def test_spawn_forward_classifies_rpc_unreachable_and_uses_versioned_kind(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from uuid import uuid4
+
+    from ops.cluster_rpc import ClusterOpUnreachable
+
+    seen: list[tuple[str, dict[str, object]]] = []
+    attempt_id = uuid4()
+
+    async def _fail(
+        *, target_machine: str, kind: str, payload: dict[str, object]
+    ) -> dict[str, object]:
+        seen.append((kind, payload))
+        raise ClusterOpUnreachable("offline")
+
+    monkeypatch.setattr(cluster_rpc, "dispatch_to_machine", _fail)
+    with pytest.raises(forward.LaunchForwardError) as raised:
+        await forward._forward_spawn_to_remote(
+            "runner", LaunchAgentRequest(agent_id=4, launch_attempt_id=attempt_id)
+        )
+    assert seen == [("spawn-launch-v2", {"agent_id": 4, "launch_attempt_id": str(attempt_id)})]
+    assert raised.value.reason == AvailabilityReason.LAUNCH_UNREACHABLE
+
+
+@pytest.mark.asyncio
+async def test_spawn_forward_preserves_runner_rejection_detail(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from ops.cluster_rpc import ClusterOpFailed
+
+    async def _fail(**_kwargs: object) -> dict[str, object]:
+        raise ClusterOpFailed(
+            {
+                "error": "InvalidModelConfig: key missing",
+                "reason": "invalid_model_config",
+                "detail": "key missing",
+            }
+        )
+
+    monkeypatch.setattr(cluster_rpc, "dispatch_to_machine", _fail)
+    with pytest.raises(forward.LaunchForwardError) as raised:
+        await forward._forward_spawn_to_remote("runner", LaunchAgentRequest(agent_id=4))
+    assert raised.value.reason == AvailabilityReason.LAUNCH_REJECTED
+    assert "invalid_model_config: key missing" in str(raised.value)

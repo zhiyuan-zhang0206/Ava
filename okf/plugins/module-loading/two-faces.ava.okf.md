@@ -13,7 +13,7 @@ A plugin loads in up to two faces. `plugin.py` is the SDK **surface**:
 namespaces, wraps, and the other registrations an agent-launched child needs to
 run agent-authored code — its imports must stay off the agent runtime (no
 `agent.state`, `agent.hooks`, `agent.graph.*`, or LangChain chain;
-`tests/agent/test_lazy_child_imports.py` locks this in clean subprocesses).
+`agent/tests/test_lazy_child_imports.py` locks this in clean subprocesses).
 `agent_runtime.py` is the optional **face** carrying the agent-side
 registrations (state fields, graph hooks, system-prompt sections).
 

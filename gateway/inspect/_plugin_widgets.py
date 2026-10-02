@@ -5,7 +5,7 @@ Not a router: ``gateway/inspect/router.py`` mounts the single endpoint
 (kept as its own module so agent_inspect stays under the per-file line budget).
 The extension surface of the inspector panel: a plugin embeds widgets for
 every agent from its own Python half (``register_inspect_widget`` at
-``inspector.py`` import — see ``shared/plugin_inspector.py``).
+``inspector.py`` import — see ``base/packages/plugins/inspector.py``).
 
 The registry is built **in process** like the plugin-metric one (task #180
 PR D): the shipped builtin plugins' ``inspector.py`` modules are imported
@@ -39,15 +39,15 @@ from fastapi import HTTPException
 from psycopg import Cursor
 from psycopg_pool import ConnectionPool
 
-from gateway.schemas import InspectWidgetResult, InspectWidgetTask
-from shared import plugin_load_report, plugins_config
-from shared.plugin_context import PluginContext
-from shared.plugin_inspector import (
+from base.agents.tasks.priority import Priority
+from base.packages.plugins import enable_config, load_report
+from base.packages.plugins.context import PluginContext
+from base.packages.plugins.inspector import (
     InspectWidgetSpec,
     drop_plugin_inspect_widgets,
     registered_inspect_widgets,
 )
-from shared.tasks.priority import Priority
+from gateway.inspect.schemas import InspectWidgetResult, InspectWidgetTask
 
 # The shipped-plugin inspector directory — every builtin plugin dir with an
 # inspector.py is part of the in-process registry (the metric loader's
@@ -61,8 +61,8 @@ def _enabled_inspector_modules() -> list[Path]:
     process registry against."""
     if not _PLUGINS_DIR.is_dir():
         return []
-    installed = plugins_config.installed_plugin_dirs()
-    config = plugins_config.load_for_runtime(set(installed))
+    installed = enable_config.installed_plugin_dirs()
+    config = enable_config.load_for_runtime(set(installed))
     modules: list[Path] = []
     for plugin_dir in sorted(_PLUGINS_DIR.iterdir()):
         module = plugin_dir / "inspector.py"
@@ -100,7 +100,7 @@ def _load_inspect_widgets() -> list[InspectWidgetSpec]:
             raise
         except BaseException as exc:
             sys.modules.pop(module_name, None)
-            plugin_load_report.report_plugin_load_failure(plugin, exc)
+            load_report.report_plugin_load_failure(plugin, exc)
             drop_plugin_inspect_widgets(plugin)
             continue
         enabled.add(plugin)

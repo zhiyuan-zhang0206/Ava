@@ -29,10 +29,10 @@ touch; the full documents are the authority — this is the quick reference.
 ## R2 — Single Source of Truth (r2-single-source-of-truth.ava.okf.md)
 
 - **One declaration registry per fact family**: env keys go through
-  `shared/env_registry.py` (no raw `os.environ` — linted, but no new
-  hand-maintained parallel sets); events through `shared/events/contract.py`;
-  retry through `shared/resilience.py`.
-- **The only retry loop**: `shared/resilience.py` claims to be it. New
+  `base/host/env/registry.py` (no raw `os.environ` — linted, but no new
+  hand-maintained parallel sets); events through `base/events/contract.py`;
+  retry through `base/host/net/resilience.py`.
+- **The only retry loop**: `base/host/net/resilience.py` claims to be it. New
   retry loops, new jitter formulas, new transient-classifier sets are
   violations (D1).
 - **One idempotency mechanism**: two idempotency tables/implementations is

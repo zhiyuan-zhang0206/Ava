@@ -7,8 +7,9 @@ Two surfaces:
   system note injected at cold start + after every compact (same carrier as the
   memory index).
 
-Skills are faked by pointing `ava.skills._skills_dir` at a tmpdir and treating
-every dir there as an enabled overlay entry — same shape as tests/ava/test_skills.py.
+Skills are faked by running in a per-test unit home (`unit_home`) and treating
+every dir under `<home>/skills` as an enabled overlay entry — same shape as
+ava/tests/test_skills.py.
 """
 
 from __future__ import annotations
@@ -20,28 +21,29 @@ import pytest
 import ava.skills as skills_mod
 from agent.graph.capabilities import resolve_prompt_skills
 from agent.graph.context_notes import preloaded_skills_note
-from shared.config import FIELD_INFOS, AgentSettings, per_agent_field_names, settings
-from shared.message_kwargs import NoteTag
+from base.agents.messages.kwargs import NoteTag
+from base.config import FIELD_INFOS, AgentSettings, per_agent_field_names, settings
+from base.paths import skills_dir
 
 
 @pytest.fixture(autouse=True)
-def _isolate_load_dir(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    """Point _skills_dir at a non-existent path by default so the real
-    ~/.agents/skills/ never leaks into a scan; fake_skills_dir re-points it."""
-    monkeypatch.setattr(skills_mod, "_skills_dir", lambda: tmp_path / "no-skills")
+def _isolate_load_dir(unit_home: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Run in a per-test unit home whose `skills/` does not exist by default so
+    the real ~/.agents/skills/ never leaks into a scan; fake_skills_dir creates it."""
 
     def _all_enabled() -> set[str]:
-        d = skills_mod._skills_dir()
+        d = skills_dir()
         return {p.name for p in d.iterdir() if p.is_dir()} if d.is_dir() else set()
 
-    monkeypatch.setattr("shared.install_registry.loadable_skill_names", _all_enabled)
+    monkeypatch.setattr(
+        "base.packages.extensions.install_registry.loadable_skill_names", _all_enabled
+    )
 
 
 @pytest.fixture
-def fake_skills_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    d = tmp_path / "skills"
+def fake_skills_dir(unit_home: Path) -> Path:
+    d = skills_dir()
     d.mkdir()
-    monkeypatch.setattr(skills_mod, "_skills_dir", lambda: d)
     return d
 
 
@@ -67,8 +69,8 @@ def test_field_default_is_empty() -> None:
 
 def test_env_comma_string_parses() -> None:
     """The env form (a comma string) splits into stripped entries."""
-    s = AgentSettings(AVA_SKILLS_TO_EXPAND_AT_START="ultra_speed, ava_code.pr")  # pyright: ignore[reportArgumentType]
-    assert s.skills_to_expand_at_start == ["ultra_speed", "ava_code.pr"]
+    s = AgentSettings(AVA_SKILLS_TO_EXPAND_AT_START="ultra_speed, ava_memory.consolidation")  # pyright: ignore[reportArgumentType]
+    assert s.skills_to_expand_at_start == ["ultra_speed", "ava_memory.consolidation"]
 
 
 def test_field_is_per_agent_overridable() -> None:
@@ -87,28 +89,34 @@ def test_resolve_by_bare_name(fake_skills_dir: Path) -> None:
 
 def test_resolve_by_dotted_identifier(fake_skills_dir: Path) -> None:
     """A namespaced skill resolves by its `.`-identifier, not just bare name."""
-    parent = fake_skills_dir / "ava-code"
-    _write_skill(parent, "pr", "name: pr\ndescription: open a PR")
-    resolved = resolve_prompt_skills(["ava-code.pr"], config_field="skills_to_expand_at_start")
-    assert [skills_mod.identifier(s) for s in resolved] == ["ava-code:pr"]
+    parent = fake_skills_dir / "ava-memory"
+    _write_skill(parent, "consolidation", "name: consolidation\ndescription: merge notes")
+    resolved = resolve_prompt_skills(
+        ["ava-memory.consolidation"], config_field="skills_to_expand_at_start"
+    )
+    assert [skills_mod.identifier(s) for s in resolved] == ["ava-memory:consolidation"]
 
 
 def test_resolve_accepts_the_python_spelling_of_a_dash_skill(fake_skills_dir: Path) -> None:
     """A config value still written in the underscore (Python) form resolves to
     the dash-named skill — the backcompat that keeps a preset row written before
     the rename working."""
-    parent = fake_skills_dir / "ava-code"
-    _write_skill(parent, "pr", "name: pr\ndescription: open a PR")
-    resolved = resolve_prompt_skills(["ava_code.pr"], config_field="skills_to_expand_at_start")
-    assert [skills_mod.identifier(s) for s in resolved] == ["ava-code:pr"]
+    parent = fake_skills_dir / "ava-memory"
+    _write_skill(parent, "consolidation", "name: consolidation\ndescription: merge notes")
+    resolved = resolve_prompt_skills(
+        ["ava_memory.consolidation"], config_field="skills_to_expand_at_start"
+    )
+    assert [skills_mod.identifier(s) for s in resolved] == ["ava-memory:consolidation"]
 
 
 def test_resolve_accepts_the_plugin_colon_spelling(fake_skills_dir: Path) -> None:
     """An ecosystem-style `plugin:skill` reference folds to the `.` form."""
-    parent = fake_skills_dir / "ava-code"
-    _write_skill(parent, "pr", "name: pr\ndescription: open a PR")
-    resolved = resolve_prompt_skills(["ava-code:pr"], config_field="skills_to_expand_at_start")
-    assert [skills_mod.identifier(s) for s in resolved] == ["ava-code:pr"]
+    parent = fake_skills_dir / "ava-memory"
+    _write_skill(parent, "consolidation", "name: consolidation\ndescription: merge notes")
+    resolved = resolve_prompt_skills(
+        ["ava-memory:consolidation"], config_field="skills_to_expand_at_start"
+    )
+    assert [skills_mod.identifier(s) for s in resolved] == ["ava-memory:consolidation"]
 
 
 def test_resolve_wildcard_selects_whole_catalog(fake_skills_dir: Path) -> None:
@@ -208,12 +216,17 @@ def test_note_heading_uses_dotted_access_path(
     fake_skills_dir: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A namespaced skill's heading is its ava.skills access path (attr form)."""
-    parent = fake_skills_dir / "ava_code"
-    _write_skill(parent, "pr", "name: pr\ndescription: open a PR", body="pr playbook")
-    _expand(monkeypatch, ["ava_code.pr"])
+    parent = fake_skills_dir / "ava_memory"
+    _write_skill(
+        parent,
+        "consolidation",
+        "name: consolidation\ndescription: merge notes",
+        body="consolidation playbook",
+    )
+    _expand(monkeypatch, ["ava_memory.consolidation"])
 
     note = preloaded_skills_note()
     assert note is not None
     assert isinstance(note.content, str)  # pyright: ignore[reportUnknownMemberType]
-    assert "## ava.skills.ava-code:pr" in note.content
-    assert "pr playbook" in note.content
+    assert "## ava.skills.ava-memory:consolidation" in note.content
+    assert "consolidation playbook" in note.content

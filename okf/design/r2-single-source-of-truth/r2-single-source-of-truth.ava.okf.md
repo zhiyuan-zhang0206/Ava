@@ -12,12 +12,12 @@ tags:
 > Design lead #2862 · design v0.4 (2026-08-07) · **status: convergence point A LANDED on main (2026-08-06); B/C/D remain planned**
 
 > Landing status (audit round-2 config.md §4): **A (EnvRegistry) is live** —
-> `shared/env_registry.py` projections (child_env / env_authority_drop_set /
-> env_keep_set) derive from the field registry, and test_env_registry.py +
+> `base/host/env/registry.py` projections (child_env / env_authority_drop_set /
+> env_keep_set) derive from the field registry, and test_registry.py +
 > test_gateway_consumer_guard.py are derivation-rule verifiers, not snapshot
-> seams. Residual: `_DERIVED_FIELDS` / `_IDENTITY_FIELDS` / `_GUIDE_FIELDS` /
-> `_HEALTH_PORT_SERVICES` in env_registry.py stay hand-written consumption
-> declarations — A3 holds for scope-derived projections, not for those four
+> seams. Residual: `_DERIVED_FIELDS` / `_IDENTITY_FIELDS` /
+> `_HEALTH_PORT_SERVICES` in base/host/env/registry.py stay hand-written consumption
+> declarations — A3 holds for scope-derived projections, not for those three
 > hand sets (test-anchor TODO). B/C/D below are still planned.
 
 ## Problem in one sentence
@@ -36,7 +36,7 @@ The pattern is uniform across four convergence points, but **the mechanism is in
 
 ### A. Env keys — `EnvRegistry` (declaration registry, see [[okf/design/design.ava.okf.md|lexicon]])
 
-Moved to [[okf/design/r2-single-source-of-truth/env-registry.ava.okf.md|R2 Env Registry]] — every env key declared exactly once; forwarding/keep-drop/seed-allowlist are pure projections; invariants A1–A3.
+Moved to [[okf/design/r2-single-source-of-truth/env-registry.ava.okf.md|R2 Env Registry]] — declared keys, forwarding and keep/drop projections; invariants A1–A3.
 
 ### B. Skill names — `SkillIdentity` (an entity, not a string)
 
@@ -48,7 +48,7 @@ Source-sync gap (405 input): repo `.agents/skills/` does not auto-enter the `~/.
 
 ### C. Event contracts — `EventSpec` (one declaration per event)
 
-`shared/events/contract.py` holds `EVENTS: dict[str, EventSpec]` — name × category × payload TypedDict × retention × destination (`events`|`file`) — the single fact source. Writers add one line; producers emit through it (unknown name → fail-fast); the 15 files / 71 `FROM events` read sites consume SQL fragments generated from the TypedDicts (new literal → lint fails); `shared/events/registry.md` becomes a generated artifact. Scope also absorbed: the LLM error family, SSE role lists, and rollup grid constants derive from the registry (add a role = change one place). `sse_drop.kind` is legalized (declared in the payload, zero migration — it is live data).
+`base/events/contract.py` holds `EVENTS: dict[str, EventSpec]` — name × category × payload TypedDict × retention × destination (`events`|`file`) — the single fact source. Writers add one line; producers emit through it (unknown name → fail-fast); the 15 files / 71 `FROM events` read sites consume SQL fragments generated from the TypedDicts (new literal → lint fails); `base/events/registry.md` becomes a generated artifact. Scope also absorbed: the LLM error family, SSE role lists, and rollup grid constants derive from the registry (add a role = change one place). `sse_drop.kind` is legalized (declared in the payload, zero migration — it is live data).
 
 ### D. Retry — `resilience.Policy` (one implementation)
 
@@ -70,4 +70,4 @@ Invariants: D1 exactly one retry loop in the repo (grep-provable); D2 one error-
 
 ## Related as-is nodes
 
-[[../../../shared/shared.ava.okf.md]] · [[../../../ava/ava.ava.okf.md]] · [[okf/skills/skills.ava.okf.md]]
+[[../../../base/docs/base.ava.okf.md]] · [[../../../ava/docs/ava.ava.okf.md]] · [[okf/skills/skills.ava.okf.md]]

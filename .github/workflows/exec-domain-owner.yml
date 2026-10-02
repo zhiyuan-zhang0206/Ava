@@ -3,24 +3,18 @@ on:
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
     paths:
-      - 'shared/incarnation_resources.py'
-      - 'tests/agent/test_incarnation_resources*.py'
-      - 'migrations/*incarnation-resources*'
+      - 'base/agents/incarnation/resources.py'
+      - 'base/agents/incarnation/tests/test_resources*.py'
       - '.github/workflows/exec-domain-owner.yml'
-      - 'agent/graph/_exec_process.py'
-      - 'shared/winjob.py'
+      - 'agent/graph/exec/_process.py'
       - 'tests/agent/test_exec_domain_confirmation.py'
       - 'agent/exec*owner*.py'
-      - 'agent/graph/_exec_owned_run.py'
-      - 'shared/exec_owner*.py'
-      - 'shared/resource_admission.py'
-      - 'shared/winjob_pipes.py'
-      - 'shared/winjob_spawn.py'
-      - 'shared/exec_process_domain.py'
+      - 'agent/graph/exec/_owned_run.py'
+      - 'base/agents/incarnation/exec_owner*.py'
+      - 'base/agents/incarnation/resource_admission.py'
+      - 'base/native_process/exec_domain.py'
       - 'tests/agent/test_exec_owner_entry.py'
       - 'tests/agent/test_resource_admission.py'
-      - 'shared/runtime_admission.py'
-      - 'tests/agent/test_publication_runtime_admission.py'
 permissions:
   contents: read
 jobs:
@@ -43,10 +37,8 @@ jobs:
         run: |
           mkdir -p proof
           git rev-parse HEAD > proof/head-sha.txt
-          uv run pyright shared/incarnation_resources.py shared/resource_admission.py shared/exec_owner_protocol.py shared/exec_owner_recovery.py agent/graph/_exec_owned_run.py agent/exec_domain_owner.py agent/exec_owner_child.py tests/agent/test_incarnation_resources.py tests/ava/test_migration_baseline.py tests/agent/test_resource_admission.py
-
-          uv run pyright shared/runtime_admission.py tests/agent/test_publication_runtime_admission.py
-          timeout 240 uv run pytest tests/agent/test_incarnation_resources.py tests/ava/test_migration_baseline.py tests/agent/test_resource_admission.py tests/agent/test_publication_runtime_admission.py -q --junitxml=proof/resource-fences.xml
+          uv run pyright base/agents/incarnation/resources.py base/agents/incarnation/resource_admission.py base/agents/incarnation/exec_owner_protocol.py base/agents/incarnation/exec_owner_recovery.py agent/graph/exec/_owned_run.py agent/exec_domain_owner.py agent/exec_owner_child.py base/agents/incarnation/tests/test_resources.py tests/ava/test_migration_baseline.py tests/agent/test_resource_admission.py
+          timeout 240 uv run pytest base/agents/incarnation/tests/test_resources.py tests/ava/test_migration_baseline.py tests/agent/test_resource_admission.py -q --junitxml=proof/resource-fences.xml
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         if: always()
         with:
@@ -57,7 +49,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-24.04, macos-14, windows-latest]
+        os: [ubuntu-24.04, macos-14]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 15
     env:
@@ -76,27 +68,8 @@ jobs:
         run: |
           mkdir -p proof
           git rev-parse HEAD > proof/head-sha.txt
-          # The existing cross-platform domain uses IS_WINDOWS, which pyright
-          # cannot narrow; type its POSIX API surface explicitly, and check the
-          # native Job implementation against Windows separately on every lane.
-          uv run pyright --pythonplatform Linux shared/winjob.py shared/exec_process_domain.py agent/graph/_exec_process.py tests/agent/test_exec_domain_confirmation.py
-          uv run pyright --pythonplatform Windows shared/winjob.py shared/winjob_pipes.py shared/exec_owner_protocol.py
+          uv run pyright base/native_process/exec_domain.py agent/graph/exec/_process.py tests/agent/test_exec_domain_confirmation.py
           uv run pytest --confcutdir=tests/agent tests/agent/test_exec_domain_confirmation.py tests/agent/test_exec_owner_entry.py -q --junitxml=proof/native-domain.xml
-      - name: Original buffered-control regression must fail on Linux
-        if: matrix.os == 'ubuntu-24.04'
-        shell: bash
-        run: |
-          git fetch --no-tags --depth=1 origin 4faff03726be6135b9a43c8b1e555c15182c6155
-          cp agent/exec_domain_owner.py proof/current-owner.py
-          trap 'cp proof/current-owner.py agent/exec_domain_owner.py' EXIT
-          git show 4faff03726be6135b9a43c8b1e555c15182c6155:agent/exec_domain_owner.py > agent/exec_domain_owner.py
-          set +e
-          uv run pytest --confcutdir=tests/agent tests/agent/test_exec_owner_entry.py::test_completed_owner_exits_while_original_host_keeps_control_open -q > proof/old-buffered-control.txt 2>&1
-          status=$?
-          set -e
-          test "$status" = 1
-          grep -F '_enter_buffered_busy' proof/old-buffered-control.txt
-          grep -F 'FAILED tests/agent/test_exec_owner_entry.py::test_completed_owner_exits_while_original_host_keeps_control_open' proof/old-buffered-control.txt
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         if: always()
         with:

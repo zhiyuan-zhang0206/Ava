@@ -5,7 +5,7 @@
 # the old schema.
 #
 # Steps:
-#   1. .venv/bin/python scripts/dump_openapi.py -> ui/web/openapi.json
+#   1. .venv/bin/python scripts/codegen/dump_openapi.py -> ui/web/openapi.json
 #      (FastAPI app.openapi() exports Pydantic models as an OpenAPI 3.1 spec)
 #   2. cd ui/web && openapi-typescript ./openapi.json -o src/lib/types-generated.ts
 #      (OpenAPI spec -> TypeScript types, components["schemas"]["X"] shape)
@@ -18,5 +18,5 @@ set -e
 
 cd "$(dirname "$0")/.."  # repo root
 
-.venv/bin/python scripts/dump_openapi.py
+.venv/bin/python scripts/codegen/dump_openapi.py
 (cd ui/web && npx --no-install openapi-typescript ./openapi.json -o src/lib/types-generated.ts)

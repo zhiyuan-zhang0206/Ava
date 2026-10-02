@@ -13,9 +13,9 @@ from collections.abc import Awaitable, Callable
 from contextlib import suppress
 from typing import Any
 
+from base.config import settings
+from base.host.net.resilience import Policy, aretry
 from services.browser.protocol import Response
-from shared.config import settings
-from shared.resilience import Policy, aretry
 
 LINE_LIMIT = 64 * 1024 * 1024
 _TRANSPORT_ERRNOS = frozenset({32, 54, 61})  # EPIPE, ECONNRESET, ECONNREFUSED

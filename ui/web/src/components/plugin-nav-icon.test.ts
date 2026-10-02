@@ -1,6 +1,6 @@
 // The nav vocabularies have two halves each, and each pair must be one set.
 //
-// `shared/plugin_ui_contributions.py:NAV_ICONS` is what a manifest may declare;
+// `base/packages/plugins/ui_contributions.py:NAV_ICONS` is what a manifest may declare;
 // `PLUGIN_NAV_ICONS` is what the console can draw. A name in the validator but
 // not the map renders a fallback icon nobody asked for; a name in the map but
 // not the validator is a promise no manifest can use. Neither shows up at
@@ -17,13 +17,13 @@ import { NAV_LOCATIONS } from "@/lib/plugin-nav";
 
 function validatorTuple(name: string): string[] {
   const source = readFileSync(
-    resolve(__dirname, "../../../../shared/plugin_ui_contributions.py"),
+    resolve(__dirname, "../../../../base/packages/plugins/ui_contributions.py"),
     "utf-8",
   );
   // Non-greedy to the first `)`, so a one-line tuple (NAV_LOCATIONS) and a
   // multi-line one (NAV_ICONS) both read correctly.
   const block = new RegExp(`^${name} = \\(([\\s\\S]*?)\\)`, "m").exec(source);
-  expect(block, `${name} tuple not found in plugin_ui_contributions.py`).not.toBeNull();
+  expect(block, `${name} tuple not found in packages/plugins/ui_contributions.py`).not.toBeNull();
   return [...block![1].matchAll(/"([a-z0-9-]+)"/g)].map((m) => m[1]);
 }
 

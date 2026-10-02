@@ -1,47 +1,38 @@
 {
   "complexity": {
     "tests/gateway/loki_fake.py::FakeLoki._match": 34,
-    "tests/gateway/stats_dashboard/test_routes.py::test_dashboard_shards_long_loki_windows_and_merges_aggregates": 20,
     "tests/gateway/test_agents_endpoints.py::test_get_models_reasoning_effort_options_match_factory_tables": 35,
     "tests/gateway/test_agents_endpoints.py::test_get_models_returns_grouped_supported_models": 17,
-    "tests/gateway/test_cluster_endpoints.py::TestSpawnUpdate.test_spawn_update_launches_the_updater_session": 15,
-    "tests/gateway/test_fleet_graph_resilience.py::test_archive_fetch_failure_serves_stale_graph_and_negative_caches": 16,
-    "tests/gateway/test_loki_events.py::TestGlobalQueryBudget.test_observes_every_transition_and_types_local_rejections": 18,
-    "tests/gateway/test_mcp_clients.py::test_create_shows_token_once_and_list_redacts_credentials": 18,
-    "tests/gateway/test_metrics_aggregate_equivalence.py::test_equivalence_full_thread": 24,
-    "tests/gateway/test_metrics_router.py::test_metrics_agents_multi_agent": 17,
-    "tests/gateway/test_notices_endpoint.py::test_escalations_return_open_task_notices_with_task_context": 16,
-    "tests/gateway/test_ops_monitor.py::test_ops_monitor_empty_envelope_and_zero_fill": 15,
-    "tests/gateway/test_ops_monitor.py::test_ops_monitor_llm_wires_prometheus_and_loki": 16,
-    "tests/gateway/test_pages.py::test_register_page_same_name_auto_closes_then_creates": 16,
-    "tests/gateway/test_run_timeline.py::test_aggregate_turn_timeline_joins_usage_and_marks_compact_boundary": 15,
-    "tests/gateway/test_status_cluster.py::TestClusterPanel.test_machines_list_local_plus_remote": 17,
-    "tests/gateway/test_status_cluster.py::TestDetachedRecoveryDial.test_transition_window_simulation": 21,
-    "tests/gateway/test_tasks_router.py::TestGetTaskFields.test_full_is_backward_compatible_and_summary_is_metadata_only": 15,
-    "tests/gateway/test_upload_endpoint.py::TestUploadFile.test_upload_single_file_saves_and_inserts_one_inbound": 15
-  },
-  "directories": {
-    "tests/gateway": 118
+    "tests/gateway/test_pages.py::test_register_page_same_name_auto_closes_then_creates": 16
   },
   "files": {
-    "tests/gateway/stats_dashboard/test_routes.py": 1223,
-    "tests/gateway/test_agent_inspect.py": 823,
-    "tests/gateway/test_agents_endpoints.py": 1403,
-    "tests/gateway/test_agents_internals.py": 1323,
+    "tests/gateway/test_agents_endpoints.py": 1401,
+    "tests/gateway/test_agents_internals.py": 1276,
     "tests/gateway/test_alerts_api.py": 1014,
-    "tests/gateway/test_auth.py": 1161,
-    "tests/gateway/test_cluster_endpoints.py": 2799,
-    "tests/gateway/test_config_api.py": 1004,
-    "tests/gateway/test_fleet_graph.py": 1049,
-    "tests/gateway/test_idempotency.py": 859,
-    "tests/gateway/test_loki_events.py": 2716,
-    "tests/gateway/test_memory_search.py": 1424,
-    "tests/gateway/test_notices_endpoint.py": 1402,
-    "tests/gateway/test_operations.py": 1554,
-    "tests/gateway/test_sse.py": 842,
-    "tests/gateway/test_status_cluster.py": 1204,
-    "tests/gateway/test_tasks_router.py": 811,
-    "tests/gateway/test_timeline.py": 2797,
-    "tests/gateway/test_ttl_reaper.py": 1668
+    "tests/gateway/test_cluster_endpoints.py": 1200
+  },
+  "patch_targets": {
+    "tests/gateway/test_agents_endpoints.py::gateway.agents.router._forward_spawn_to_remote": 1,
+    "tests/gateway/test_agents_endpoints.py::gateway.routers.memory._backend_topk": 1,
+    "tests/gateway/test_alerts_api.py::gateway.alerts.router._notify_im": 10,
+    "tests/gateway/test_cluster_endpoints.py::ops.cluster_status._supervisor_online": 1,
+    "tests/gateway/test_cluster_status_fields.py::ops.cluster_status._collect_sessions": 1,
+    "tests/gateway/test_runtime_metrics.py::gateway.middleware.runtime_metrics._sse_active_connections": 2
+  },
+  "tests_location": {
+    "tests/gateway/test_agents_endpoints.py::top-level": 1,
+    "tests/gateway/test_agents_internals.py::top-level": 1,
+    "tests/gateway/test_alerts_api.py::top-level": 1,
+    "tests/gateway/test_caller_protocol_path.py::top-level": 1,
+    "tests/gateway/test_cluster_endpoints.py::top-level": 1,
+    "tests/gateway/test_cluster_status_fields.py::top-level": 1,
+    "tests/gateway/test_delivery_publish.py::top-level": 1,
+    "tests/gateway/test_labels.py::top-level": 1,
+    "tests/gateway/test_okf_graph.py::top-level": 1,
+    "tests/gateway/test_operations_config.py::top-level": 1,
+    "tests/gateway/test_pages.py::top-level": 1,
+    "tests/gateway/test_request_principal.py::top-level": 1,
+    "tests/gateway/test_route_contracts.py::top-level": 1,
+    "tests/gateway/test_runtime_metrics.py::top-level": 1
   }
 }

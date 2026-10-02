@@ -159,13 +159,11 @@ export const GROUP_ENV_VARS: Record<string, string[]> = {
     "DASHSCOPE_API_KEY",
   ],
   "config-general": [
-    "AVA_HOME",
     "AVA_TIMEZONE",
     "AVA_MESSAGE_TIMESTAMPS",
     "AVA_MESSAGE_TIMESTAMP_WEEKDAY",
     "AVA_TIMELINE_COMPACT_HISTORY",
     "AVA_TRACK_BRANCH",
-    "AVA_CLUSTER_REGISTRY",
     "AVA_MACHINE_NAME",
     "AVA_MACHINE_DESCRIPTION",
     "AVA_MEMORY_REMOTE",
@@ -203,32 +201,18 @@ export const GROUP_ENV_VARS: Record<string, string[]> = {
     "AVA_MILVUS_DATA_DIR",
     "AVA_MEMORY_ROOT",
     "AVA_PROJECT_ROOT",
-    "AVA_WATCHDOG_INTERVAL_SECONDS",
     "AVA_OPS_CONCURRENCY",
   ],
   "config-health": [
     "AVA_FRONTEND_HEALTHCHECK_URL",
     "AVA_GATEWAY_HEALTH_URL",
-    "AVA_LABELER_HEALTH_URL",
-    "AVA_HEARTBEAT_HEALTH_URL",
-    "AVA_TASK_MAINTENANCE_HEALTH_URL",
-    "AVA_EVENTS_MAINTENANCE_HEALTH_URL",
-    "AVA_MEMORY_INDEXER_HEALTH_URL",
     "AVA_LABELER_HEALTH_PORT",
     "AVA_HEARTBEAT_HEALTH_PORT",
     "AVA_TASK_MAINTENANCE_HEALTH_PORT",
     "AVA_EVENTS_MAINTENANCE_HEALTH_PORT",
     "AVA_MEMORY_INDEXER_HEALTH_PORT",
     "AVA_OPS_HEALTH_PORT",
-    "AVA_LABELER_PIDFILE",
-    "AVA_HEARTBEAT_PIDFILE",
-    "AVA_TASK_MAINTENANCE_PIDFILE",
-    "AVA_EVENTS_MAINTENANCE_PIDFILE",
     "AVA_GATEWAY_PIDFILE",
-    "AVA_GATEWAY_WATCHDOG_PIDFILE",
-    "AVA_AGENT_RUNNER_WATCHDOG_PIDFILE",
-    "AVA_MEMORY_INDEXER_PIDFILE",
-    "AVA_OPS_PIDFILE",
   ],
 };
 
@@ -236,9 +220,10 @@ export const GROUP_ENV_VARS: Record<string, string[]> = {
 // them. Admission criterion is editorial, not structural: a field belongs
 // here only if a human should NOT reach for the panel to change it. Three
 // buckets today:
-//   - AVA_CLUSTER_SECRET: the cluster-wide pre-shared secret. Rotating it is a
-//     multi-step out-of-band dance (every runner re-enrolled), never a panel
-//     edit; hiding it also keeps it out of the write-only secret editor below.
+//   - AVA_CLUSTER_SECRET: the gateway's human bearer. The backend serves it
+//     read-only (no config write may choose it); it rotates only through
+//     scripts/data_plane_ops/rotate_cluster_secret.py, which re-issues every remote unit's
+//     bundle, so the panel has nothing to show for it.
 //   - AVA_GATEWAY_MAX_RETRIES / AVA_GATEWAY_RETRY_DELAY_SECONDS: SDK→gateway
 //     transport micro-tuning with no operator-facing consequence. For a genuine
 //     need, ask the Ava Guide agent — it edits .env via the `ava` CLI.
@@ -336,7 +321,7 @@ export function isDeprecated(field: ConfigFieldView): boolean {
  * Render a config value for display — shared by the editable field rows and the
  * per-model resolution view so one value never reads two ways.
  *
- * Values arrive typed `object` on the wire (`shared/api_contracts/config.py`),
+ * Values arrive typed `object` on the wire (`base/api_contracts/config.py`),
  * so a field the backend ever grows a structured (list/dict) value for lands
  * here as-is. `String()` on a plain object is always the content-free
  * "[object Object]"; stringify it instead so such a field still shows something

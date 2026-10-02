@@ -11,10 +11,10 @@ import re as _re
 import tempfile
 from typing import Any
 
-from ava.sdk_validation import coerce_str
+from ava.sdk_surface.validation import coerce_str
 from ava.shell import background
 from ava.shell import sessions as _sessions
-from shared.daemon.schedules.watcher import (
+from base.daemon.schedules.watcher import (
     DEFAULT_STANDING_CRON_MAX_SECONDS,
     build_at_script,
     build_cron_script,
@@ -24,10 +24,10 @@ from shared.daemon.schedules.watcher import (
     validate_cron,
     validate_timezone,
 )
-from shared.daemon.schedules.watcher import (
+from base.daemon.schedules.watcher import (
     CronExprError as CronExprError,
 )
-from shared.dotenv_boot import watcher_runner_env
+from base.host.env.dotenv_boot import watcher_runner_env
 
 __all_for_ava__ = [
     "at",
@@ -71,7 +71,7 @@ def _watchers_dir() -> _pl.Path:
     # needs to outlive launch, and the bootstrap self-deletes both files when
     # the watcher exits (see _build_boot), so the dir stays empty except while
     # a watcher is actually running; stale pairs are pruned at the next launch.
-    from shared.paths import ava_home
+    from base.paths import ava_home
 
     home = ava_home()
     slug = home.name.lstrip(".") or "cluster"
@@ -140,7 +140,7 @@ def _build_boot(script_path: _pl.Path, watchdog_secs: float | None, agent_id: in
 
     Agent identity is INLINED as ``AVA_AGENT_ID`` into the bootstrap, because
     the session machinery deliberately does NOT forward it: the env allowlist
-    ``shared/env_registry.py`` ``child_env`` (Task #856) drops every
+    ``base/host/env/registry.py`` ``child_env`` (Task #856) drops every
     agent-scope / non-modeled ``AVA_*`` knob from session children. Without
     the inline, a watcher child would see ``ava.self.AGENT_ID=None`` and its
     wake-up ``send_message`` would hit ``/api/agents/None/messages`` → 422 →
@@ -215,7 +215,7 @@ def _build_boot(script_path: _pl.Path, watchdog_secs: float | None, agent_id: in
         "import time\n"
         "\n"
         # Identity is NOT inherited: the session env allowlist
-        # (shared/env_registry.py child_env, Task #856) drops
+        # (base/host/env/registry.py child_env, Task #856) drops
         # AVA_AGENT_ID from session children, so without this line the child
         # would see ava.self.AGENT_ID=None and its wake-up send_message would
         # 422 on /api/agents/None/messages (Task #964). Inline the spawning
@@ -231,7 +231,7 @@ def _build_boot(script_path: _pl.Path, watchdog_secs: float | None, agent_id: in
         # AVA_PROCESS_PROFILE from the creating process's env,
         # but the watcher is an agent subprocess and needs the agent profile
         # to import ava without hitting the per-process config guard
-        # (agent/db.py reads settings.agent at module level, and the runner
+        # (agent/db/__init__.py reads settings.agent at module level, and the runner
         # profile does not construct the agent domain — Task #856 fail-fast).
         f'os.environ["AVA_PROCESS_PROFILE"] = "agent"\n'
         "\n"
@@ -328,7 +328,7 @@ def _spawn(
     # The session's shell TTL IS this watcher's target deadline (user ruling
     # 2026-09-14, task #3411): launch = created + timeout, cron = cron_end_at,
     # at = fires_at + grace — derived once, here, by
-    # `shared.daemon.schedules.watcher.session_deadline`. Written as the
+    # `base.daemon.schedules.watcher.session_deadline`. Written as the
     # system-side TRUE value: a 7-day standing cron is a normal watcher,
     # exempt from the 24h user-session cap. `ava.shell.sessions.renew` can
     # move this same deadline later, exactly like any other session's TTL —
@@ -454,7 +454,7 @@ def cron(
     Returns:
         The watcher's session id; kill it to stop the schedule.
     """
-    from shared.config import cluster_tz_name, host_tz_name
+    from base.config import cluster_tz_name, host_tz_name
 
     expr = coerce_str(expr, "expr")
     message = coerce_str(message, "message")
@@ -524,7 +524,7 @@ def at(
     Returns:
         The watcher's session id; kill that session to cancel.
     """
-    from shared.config import cluster_tz_name
+    from base.config import cluster_tz_name
 
     when = coerce_str(when, "when", allow_types=(datetime.datetime, datetime.timedelta))
     message = coerce_str(message, "message")

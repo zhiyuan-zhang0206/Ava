@@ -13,14 +13,14 @@ one MCP tool per gateway route, no logic of its own, so an external agent
 (Claude Code, Codex, any MCP client) drives the same cluster the web UI and the
 `ava` CLI drive, with the same auth and the same failure modes.
 
-Which cluster it drives is not a parameter: `shared.machine.gateway_api_base`
-resolves the gateway of the checkout this `ava` belongs to, and
-`gateway_auth_headers` presents that cluster's secret. So the prod `ava` on PATH
-serves prod, and a worktree's `.venv/bin/ava` serves that worktree's cluster —
-the same rule every other verb follows.
+Which cluster it drives is not a parameter: `base.cluster.machine.gateway_api_base`
+resolves the gateway of the home this process resolves (`AVA_HOME`, else `~/.ava`),
+and `gateway_auth_headers` presents that cluster's secret. The host's global `ava`
+only forwards to the cluster `AVA_HOME` names, and refuses without it — the same
+rule every other verb follows.
 
 Transport is stdio: **stdout is the JSON-RPC channel**, so nothing on this path
-may print. Diagnostics go to stderr (where `shared.log.logger` already writes).
+may print. Diagnostics go to stderr (where `base.log.logger` already writes).
 
 The client-side `ava mcp` verbs (install / add / list / ...) manage servers Ava's
 own agents connect *out* to; `serve` is the opposite direction — Ava as the
@@ -36,7 +36,7 @@ from mcp.server.mcpserver import MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
 from pydantic import Field
 
-from shared.api_contracts.mcp_tool_contract import (
+from base.api_contracts.mcp_tool_contract import (
     project_message,
     server_instructions,
     tool_description,
@@ -50,7 +50,7 @@ _SPAWN_TIMEOUT_S = 90.0
 # Provenance of everything this server creates. `spawner` is free-form and
 # groups these agents under their own root in the fleet views, so an operator
 # can see at a glance which agents an external tool created. `source` must be
-# one of the envelope's legal kinds (shared/agents/messages/envelope.py:validate_source), and
+# one of the envelope's legal kinds (base/agents/messages/envelope.py:validate_source), and
 # `user` is the honest one: an MCP client acts for the human driving it, and the
 # receiving agent should read the message exactly as it reads one typed into the
 # web UI.
@@ -111,7 +111,7 @@ async def _request(
     Raises:
         ToolError: the gateway rejected the call, or could not be reached.
     """
-    from shared.machine import gateway_api_base, gateway_auth_headers
+    from base.cluster.machine import gateway_api_base, gateway_auth_headers
 
     url = f"{gateway_api_base()}{path}"
     try:
@@ -217,7 +217,7 @@ def cmd_mcp_serve() -> int:
     gateway configured, rather than starting a server whose every tool would
     error one call later.
     """
-    from shared.machine import gateway_api_base
+    from base.cluster.machine import gateway_api_base
 
     # Resolve up front: an unconfigured checkout is an install problem, and the
     # message is far more useful on the terminal that ran `serve` than buried in

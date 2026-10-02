@@ -1,20 +1,29 @@
 {
+  "ambient_state": {
+    "gateway/routers/fleet_graph.py::ambient-container:_stale_emit_at": 1,
+    "gateway/routers/frontend_telemetry.py::ambient-container:_session_windows": 1,
+    "gateway/routers/memory.py::hidden-cache:_cached_memory_graph": 1,
+    "gateway/routers/memory.py::hidden-singleton:_search_semaphore": 1,
+    "gateway/routers/pages.py::ambient-container:_page_host_cache": 1,
+    "gateway/routers/uploads.py::ambient-container:_agent_locks": 1
+  },
   "complexity": {
-    "gateway/routers/agents.py::_validate_fork_config": 21,
     "gateway/routers/config.py::put_config": 24,
     "gateway/routers/fleet_graph.py::_merge_edge_rows": 15,
     "gateway/routers/fleet_graph.py::get_fleet_graph": 17,
-    "gateway/routers/run_timeline.py::_bucket_rows": 25,
-    "gateway/routers/run_timeline.py::aggregate_turn_timeline": 28,
-    "gateway/routers/run_timeline_strip.py::_strip_messages_for_window": 19,
-    "gateway/routers/timeline.py::_initial_window": 18,
-    "gateway/routers/timeline.py::get_timeline": 22
+    "gateway/routers/tests/test_fleet_graph_resilience.py::test_archive_fetch_failure_serves_stale_graph_and_negative_caches": 16,
+    "gateway/routers/tests/test_tasks_router.py::TestGetTaskFields.test_full_is_backward_compatible_and_summary_is_metadata_only": 15,
+    "gateway/routers/tests/test_upload_endpoint.py::TestUploadFile.test_upload_single_file_saves_and_inserts_one_inbound": 15
   },
-  "directories": {
-    "gateway/routers": 55
+  "files": {
+    "gateway/routers/tests/test_config_api.py": 1004,
+    "gateway/routers/tests/test_fleet_graph.py": 1049,
+    "gateway/routers/tests/test_memory_search.py": 1424,
+    "gateway/routers/tests/test_tasks_router.py": 811
   },
-  "private_imports": {
-    "gateway/routers/_machine_pause.py::ops.ops_lifecycle._force_mark_terminated": 1,
-    "gateway/routers/status.py::ops.cluster._check_pidfile": 1
+  "patch_targets": {
+    "gateway/routers/tests/test_fleet_graph.py::gateway.lgtm.telemetry_staleness._source_states": 1,
+    "gateway/routers/tests/test_fleet_graph_resilience.py::gateway.lgtm.telemetry_staleness._source_states": 1,
+    "gateway/routers/tests/test_fleet_graph_stale_events.py::gateway.lgtm.telemetry_staleness._source_states": 1
   }
 }

@@ -5,10 +5,10 @@ from typing import NoReturn
 
 import ava
 from ava.attachment_transport import attach as attach
-from ava.sdk_validation import coerce_str, coerce_typed
-from shared.config import settings
-from shared.config.turn_view import turn_settings
-from shared.lifecycle import AgentRestart, AgentTermination, SystemHalt
+from ava.sdk_surface.validation import coerce_str, coerce_typed
+from base.agents.lifecycle import AgentRestart, AgentTermination, SystemHalt
+from base.config import settings
+from base.config.turn_view import turn_settings
 
 # Deliberately NOT in __all_for_ava__ (importable, but out of the rendered SDK
 # docs): AgentRestart / AgentTermination are framework control-flow exceptions
@@ -60,7 +60,7 @@ def __getattr__(name: str) -> object:
         return ava.agent_identity.agent_id()
     if name == "MACHINE_SPEC":
         import ava
-        from shared.machine import machine_description, machine_name
+        from base.cluster.machine import machine_description, machine_name
 
         return ava.const(
             (machine_name(), machine_description() or ""),
@@ -71,7 +71,7 @@ def __getattr__(name: str) -> object:
         )
     if name == "SELF_MACHINE_NAME":
         import ava
-        from shared.machine import machine_name
+        from base.cluster.machine import machine_name
 
         return ava.const(
             machine_name(),
@@ -81,7 +81,7 @@ def __getattr__(name: str) -> object:
             ),
         )
     if name == "InvalidConfigOverlay":
-        from shared.plugin_config_registry import InvalidConfigOverlay
+        from base.packages.plugins.config_registration import InvalidConfigOverlay
 
         return InvalidConfigOverlay
     # Plugin members land on ava.self via register_namespace_member (ava_fleet
@@ -98,7 +98,7 @@ def __getattr__(name: str) -> object:
 
 
 # `InvalidConfigOverlay` is lazily bound via module __getattr__ —
-# `from shared.plugin_config_registry import X` anywhere in ava.self triggers
+# any eager `from base.packages.plugins.config_registration import ...` in ava.self triggers
 # agent.__init__ → agent.graph._base_prompt calling `ava.help(...)`
 # which reverse-accesses an ava attribute, while ava.__init__ is still
 # running line 91 `import ava.self` and ava.help isn't registered yet →
@@ -128,7 +128,7 @@ def _publish_self_inbound_wake() -> None:
     """Best-effort Redis wake for a self-inserted inbound (restart / terminate /
     compact / update), over the agent's own SDK redis handle (`ava.REDIS`).
 
-    Same contract as `shared.db.publish_inbound_wake`: never raises (the claim
+    Same contract as `base.db.publish_inbound_wake`: never raises (the claim
     loop's SELECT recheck delivers the row regardless), but a `NoPermissionError`
     is logged rather than swallowed — it means this agent's redis ACL user is not
     granted its own `<prefix>:inbound:*` channel (an ACL / channel-prefix
@@ -137,8 +137,8 @@ def _publish_self_inbound_wake() -> None:
     from redis.exceptions import ResponseError
 
     from ava import agent_identity
-    from shared.cluster import inbound_channel
-    from shared.log import logger
+    from base.cluster import inbound_channel
+    from base.log import logger
 
     channel = inbound_channel(agent_identity.require_agent_id())
     try:
@@ -170,18 +170,18 @@ def restart(config_overlay: dict[str, object] | None = None) -> NoReturn:
     agent_identity.assert_self_action("restart")
     payload_json: str | None = None
     if config_overlay:
-        from shared.plugin_config_registry import validate_config_overlay
+        from base.packages.plugins.config_registration import validate_config_overlay
 
         validate_config_overlay(config_overlay)
         # Settle a withdrawn llm_model before it is stored (task #4306): the
         # rewrite is reported in this agent's own log — the spawner-visible
         # receipt for the self-restart path.
-        from shared.lm.registry import normalize_overlay_llm_model
+        from base.lm.registry import normalize_overlay_llm_model
 
         config_overlay = dict(config_overlay)
         model_receipt = normalize_overlay_llm_model(config_overlay)
         if model_receipt is not None:
-            from shared.log import logger
+            from base.log import logger
 
             logger.warning(
                 "restart config_overlay llm_model {requested!r} is withdrawn; "
@@ -269,7 +269,7 @@ def pause_heartbeat(duration: float) -> None:
             "WHERE id = %s",
             (float(duration), agent_identity.agent_id()),
         )
-        from shared import telemetry
+        from base import telemetry
 
         telemetry.emit(
             "telemetry",
@@ -303,7 +303,7 @@ def compact(summary: str) -> NoReturn:
             "VALUES (%s, %s, 'compact_summary')",
             (agent_identity.agent_id(), summary),
         )
-        from shared.audit_events import insert_event_log
+        from base.telemetry.audit_events import insert_event_log
 
         insert_event_log(
             event_type="compact",
@@ -317,8 +317,8 @@ def compact(summary: str) -> NoReturn:
     # never-raise primitive so redis can never interrupt this lifecycle exit.
     # Imported here, not at module scope: `import ava` must not pull the redis /
     # live-events stacks into every exec child (startup-path laziness, task #3816).
-    from shared.live_events import CompactRequest
-    from shared.redis_client import publish_best_effort_sync
+    from base.events.live.projection import CompactRequest
+    from base.events.live.redis_client import publish_best_effort_sync
 
     publish_best_effort_sync(
         settings.data_plane.events_channel,
@@ -335,14 +335,9 @@ def compact(summary: str) -> NoReturn:
 
 
 def update() -> NoReturn:
-    """Removed — updates go through the CLI only; calling it now raises
-    `RuntimeError`.
-
-        ava cluster update                 # smooth (default)  # lint-docstring: ok CLI command name
-        ava cluster update --mode force    # force: ~10s drain  # lint-docstring: ok CLI command name
-    """
+    """Removed — updating the machines is an operator action (the operator runs
+    `python -m cli.fleet_update`); calling this raises `RuntimeError`."""
     raise RuntimeError(
-        "ava.self.update() has been removed; update the cluster from the CLI "
-        "instead: `ava cluster update` (smooth) or `ava cluster update --mode "
-        "force` (force-kill stragglers)."
+        "ava.self.update() has been removed; a cluster update is an operator action: "
+        "run `python -m cli.fleet_update` from the operator's terminal."
     )

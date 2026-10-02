@@ -6,30 +6,35 @@
 > updated. Corrected here.
 >
 > **Built** — `ava/security.py` (~240 lines), a rule-based scanner gated on
-> `AVA_SECURITY_SCAN_ENABLED` (`shared/config/agent.py`), **default on**. It is
+> `AVA_SECURITY_SCAN_ENABLED` (`base/config/agent.py`), **default on**. It is
 > wired into every one of these ingestion points:
 >
 > | Call site | Source tag |
 > |---|---|
 > | `ava/files.py` — `ava.files.read` | `file.read:<path>` |
 > | `ava/web.py` — `web.search` results, `web.fetch` answers | `web.search` / `web.fetch` |
-> | `ava/mcps.py` — **every MCP tool return** | `mcps.<server>.<tool>` |
+> | `ava/mcps/__init__.py` — **every MCP tool return** | `mcps.<server>.<tool>` |
 > | `agent/graph/_chat_inbound.py` — **inbound chat** | `inbound.chat:<source>` |
+| `agent/graph/claim/_dispatch.py` — **inbound system notes** (peer-authored task notes) | `inbound.system_note:<source>` |
 > | `ava_builtins/plugins/ava_code/plugin.py` — the `AGENTS.md` auto-injection | `context-file:<path>` |
 >
 > Design points worth keeping: a hit **does not mutate the content** (no marker
 > prepended, so the scan is trivially idempotent and never corrupts what the agent
-> reads) — findings are buffered in-memory during the exec turn and surface as a
-> SECURITY system note in the same exec's messages delta, injected by the exec
-> node (`agent/graph/_exec.py`) after the exec-result ToolMessage; there is no
-> side-channel file (user ruling 2026-08-11). Memory writes have their own guard
+> reads) — findings raised during an exec turn are buffered in the exec child and
+> surface as a SECURITY system note in the same exec's messages delta, injected by
+> the exec node (`agent/graph/exec/node.py`) after the exec-result ToolMessage;
+> findings on inbound chat / system notes are returned by the scan and appended by
+> the claim node (`agent/graph/claim/_dispatch.py`) in its own delta right behind the
+> flagged message — the agent host holds no findings buffer, because one process
+> interleaves many agents' turns; there is no side-channel file (user ruling
+> 2026-08-11). Memory writes have their own guard
 > in `ava/files.py`, stamping `injection-risk: flagged` on a note whose body
 > carries already-flagged content, which is candidate defense #3 below in its
 > cheap form.
 >
 > **Not built** — everything structural: the sandboxed deprivileged reader, egress
 > allowlisting, privilege separation. (On-install skill scanning **is** built —
-> `shared/packages/skills/skill_scan.py` refuses a third-party skill package carrying critical
+> `base/packages/skills/scan.py` refuses a third-party skill package carrying critical
 > supply-chain patterns; see
 > [`skill-supply-chain-trust.md`](skill-supply-chain-trust.md).) Those remain
 > deferred for the reasons this doc lays out, and they are the ones that would
@@ -164,7 +169,7 @@ Two ingestion points from the surface map above have **zero** `scan_content` cal
 and both are load-bearing:
 
 1. **The content-source skills** (`web-sources` — rss / youtube / generic —
-   plus `web_media`, and the x / zhihu / xiaohongshu / douyin family). These are
+   plus `web-ai` / `audio-transcribe`, and the x / zhihu / xiaohongshu / douyin family). These are
    *by definition* untrusted third-party content, and they are the one category the
    surface map calls out as such. They fetch through their own scripts rather than
    `ava.web.*`, so they bypass the scanned path entirely. This is the widest gap.

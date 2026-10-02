@@ -14,15 +14,18 @@ Mapping semantics (W1.1 v1 row set + G6 rulings):
   restart = always (the W1.1 default), attach = root (static services);
 - the per-(machine x home) subset is `spec.capabilities & target
   capabilities` — the single readable place "which machine runs this";
-- the two watchdogs the roster still carries are absorbed into the root's
-  built-in health path (E3/G1) and are NOT emitted;
+- application health recovery belongs to root's health monitor; there are
+  no watchdog service rows;
 - session-host classes (interactive shells / watchers / page servers /
   schedule runners / orchestration sessions) spawn at RUNTIME via their
   owning service (E2a) — they are not static manifest rows; their terminal
   attach values (G6b) live in `SESSION_HOST_ATTACH` for the spawn slice;
-- OS-edge / root-internal / retired rows never appear (W1.1 D/E/F).
+- OS-edge / root-internal / retired rows never appear (W1.1 D/E/F);
+- a spec that declares `stop_ceiling_s` (its own SIGTERM cleanup can outlast
+  root's default TERM window) gets `stop_timeout_s = ceiling + STOP_MARGIN_S`,
+  so root's window is derived from the unit's bound and cannot undercut it.
 
-Exec derivation: a spec's `cmd` is a shell command by contract, so the unit
+Development exec derivation: a spec's `cmd` is a shell command, so the unit
 argv is `/bin/sh -c 'cd <repo> && ...'`. When the command is a simple one
 (bare tokens only, no leading assignment), an `exec` prefix replaces the
 shell with the service itself, keeping the unit's pid a direct child of root
@@ -46,23 +49,26 @@ from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path
 from typing import cast, get_args
 
+from base.cluster.machine import MachineRole
 from ops.roster import build_services
-from ops.service_spec import ServiceSpec
+from ops.roster.service_spec import ServiceSpec
+from services.ava_root.inputs import InputSeal
 from services.ava_root.manifest import (
     ManifestError,
     UnitManifest,
     UnitRegistry,
     load_manifests,
 )
-from shared.machine import MachineRole
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 
-_KNOWN_CAPABILITIES = frozenset(get_args(MachineRole))
+# Root's TERM window for a unit that declares a shutdown ceiling is that ceiling
+# plus this margin: the reap, the group-closure read and scheduling all happen
+# inside root's window, so a unit that closes exactly at its own bound must
+# still finish before root gives up on it.
+STOP_MARGIN_S = 5.0
 
-# Roster sessions absorbed into the root's built-in health path (E3/G1): the
-# roster still carries them today, the terminal tree does not.
-ABSORBED_WATCHDOGS: tuple[str, ...] = ("gateway-watchdog", "agent-runner-watchdog")
+_KNOWN_CAPABILITIES = frozenset(get_args(MachineRole))
 
 # G6b attach values for classes that spawn at RUNTIME (never static manifest
 # rows — see the module docstring). Kept here so the spawn slice (W1.3) has
@@ -111,24 +117,26 @@ def build_units(
     *,
     capabilities: Iterable[str],
     repo_root: Path,
+    environments: Mapping[str, dict[str, str]] | None = None,
 ) -> list[dict[str, object]]:
     """K2 unit rows for every spec whose capabilities intersect `capabilities`."""
     chosen = tuple(build_services()) if specs is None else tuple(specs)
     caps = _validated_capabilities(capabilities)
     units: list[dict[str, object]] = []
     for spec in chosen:
-        if spec.session in ABSORBED_WATCHDOGS:
-            continue
         if not (spec.capabilities & caps):
             continue
-        units.append(
-            {
-                "id": spec.session,
-                "exec": _exec_argv(spec.cmd, repo_root),
-                "restart": "always",
-                "attach": "root",
-            }
-        )
+        unit: dict[str, object] = {
+            "id": spec.session,
+            "exec": _exec_argv(spec.cmd, repo_root),
+            "restart": "always",
+            "attach": "root",
+            "env": {} if environments is None else environments[spec.session],
+            "inputs": [InputSeal.capture(path).as_mapping() for path in spec.config_inputs],
+        }
+        if spec.stop_ceiling_s is not None:
+            unit["stop_timeout_s"] = spec.stop_ceiling_s + STOP_MARGIN_S
+        units.append(unit)
     return units
 
 
@@ -154,18 +162,24 @@ def build_manifest(
     capabilities: Iterable[str],
     repo_root: Path | None = None,
     specs: Iterable[ServiceSpec] | None = None,
+    environments: Mapping[str, dict[str, str]] | None = None,
 ) -> dict[str, object]:
     """Build and validate a K2 manifest document (fail-fast, in memory).
 
     The capability set is an explicit input: this module must not read the
     local machine role (the gateway is the single routing point; role calls
-    are allowlisted by scripts/lint_code_structure.py). The wiring slice
+    are allowlisted by scripts/lint/code_structure.py). The wiring slice
     supplies the target's set. `repo_root=None` resolves this checkout.
     """
     resolved_repo = _REPO_ROOT if repo_root is None else repo_root
     caps = _validated_capabilities(capabilities)
     manifest: dict[str, object] = {
-        "units": build_units(specs, capabilities=caps, repo_root=resolved_repo)
+        "units": build_units(
+            specs,
+            capabilities=caps,
+            repo_root=resolved_repo,
+            environments=environments,
+        )
     }
     _validate(manifest)
     return manifest
@@ -174,7 +188,9 @@ def build_manifest(
 def write_manifest(path: Path, manifest: Mapping[str, object]) -> Path:
     """Write the manifest JSON (validate with `build_manifest` first)."""
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+    from base.host.atomic_io import write_text_atomic
+
+    write_text_atomic(path, json.dumps(manifest, indent=2) + "\n", mode=0o600, sync_parent=True)
     return path
 
 
@@ -184,9 +200,12 @@ def generate(
     capabilities: Iterable[str],
     repo_root: Path | None = None,
     specs: Iterable[ServiceSpec] | None = None,
+    environments: Mapping[str, dict[str, str]] | None = None,
 ) -> Path:
     """Build, validate in memory, write, then re-read with `load_manifests`."""
-    manifest = build_manifest(capabilities=capabilities, repo_root=repo_root, specs=specs)
+    manifest = build_manifest(
+        capabilities=capabilities, repo_root=repo_root, specs=specs, environments=environments
+    )
     write_manifest(path, manifest)
     load_manifests(path)  # the consumer's own reader must accept what we wrote
     return path

@@ -15,21 +15,21 @@
 >
 > **S2 is mostly built.** The `extensions` / `extension_blobs` tables and their
 > constraints (the blob size cap, the repo-rows-carry-no-content iff),
-> `shared/extension_registry.py`, and `shared/extension_materialize.py` all
+> `base/packages/extensions/registry.py`, and `base/packages/extensions/materialize.py` all
 > exist and are tested. `ava skill install` writes the cluster row + blob BEFORE
 > touching local disk, and converge lands enabled `kind='skill'` rows onto each
 > machine, refusing to overwrite a locally edited tree.
 >
 > The design's own S2 lock — *install on home A materializes on home B, two
 > homes one PG* — is exercised by
-> `tests/cli/test_extension_two_home_chain.py`.
+> `cli/commands/extensions/tests/test_extension_two_home_chain.py`.
 >
 > A prerequisite the slice walked into rather than introduced: the `extensions`
 > migration is the first post-baseline one to CREATE a table, and a cluster's
 > `ava_runner` read grant is a point-in-time loop issued once at install birth.
 > So on a SPLIT deployment — the only posture where this slice's claim is
 > non-trivial — the materializer hit `permission denied` and reported it as an
-> unreachable registry. Fixed in `shared/cluster/provision.py` (standing
+> unreachable registry. Fixed in `base/cluster/provision.py` (standing
 > `ALTER DEFAULT PRIVILEGES` + a re-affirm from `ava start` after a migration
 > applies); the two-home fixture cannot see it, because it models two homes
 > sharing one connection identity, not two credentials.
@@ -40,7 +40,7 @@
 > that has been up since before it.
 >
 > The adoption sweep runs on every converge
-> (`shared/extension_adopt.py:adopt_local_installs`): user-origin skills this
+> (`base/packages/extensions/adopt.py:adopt_local_installs`): user-origin skills this
 > machine installed before the registry existed become cluster rows, identical
 > content on two machines merges in silence, and differing content is refused
 > with both machines named.
@@ -159,7 +159,7 @@ fork, and recorded in the spawn/restart event trail for free.
 
 ## Capability vocabulary and matching
 
-One closed vocabulary, defined once (a new `shared/capabilities.py`), one
+One closed vocabulary, defined once (a new `base/capabilities.py`), one
 matcher. Candidate initial set:
 
 - `os:darwin` / `os:linux` / `os:windows`, `arch:arm64` / `arch:x86_64`
@@ -244,7 +244,7 @@ What this deliberately does *not* import from dsh: isolate realms / scoped
 registration machinery. dsh needs them because many sessions share one process
 *with no composition filter*; Ava's answer is the resolved-set filter at the
 executor boundary, which is a dict lookup over attribution the `register_*`
-calls already carry (`shared/plugin_context.py`), not a runtime realm.
+calls already carry (`base/packages/plugins/context.py`), not a runtime realm.
 
 ## Converge, enroll, boot — who materializes what, and offline semantics
 
@@ -265,16 +265,15 @@ existing tree-swap machinery (`_copy_tree` staging, user-edit hash guards,
 checkout / this machine's installs" to "the cluster registry".
 
 **Process boot** runs the same `ensure_extensions_materialized()` for the
-agent's own resolved set before `load_extensions()` (`agent/extensions.py`). This closes the offline
+agent's own resolved set before `load_extensions()` (`agent/extensions/__init__.py`). This closes the offline
 window structurally: a machine that was down during an install converges the
 moment anything on it starts, and an agent never boots against a tree older
 than the policy row it just read. Boot already requires the cluster DB (the
 checkpointer), so this adds no new liveness dependency; if the DB is down,
 agents were not booting anyway.
 
-**`ava enroll`** changes not at all — which is the point. An enrolled runner's
-cluster identity is the gateway URL + secret; its extension state is no longer
-part of its identity, because it has none: first `ava start` after enroll
+**Runner first start** binds the gateway URL and secret as identity. Extension
+state remains outside that identity: the same `ava start`
 probes capabilities, registers them, and materializes exactly what the cluster
 says. A new machine is fungible by construction — no "did we remember to
 install the skills here" step, which is the drift-generator today.
@@ -312,10 +311,10 @@ Adoption, not flag-day:
    /api/inventory` write path retarget to the cluster row (`default_enabled`),
    turning today's cross-machine inventory UI from a per-machine toggle panel
    into a cluster-policy panel with a per-machine *runnability* column.
-4. **Down path**: each slice's `.down.sql` drops its tables/column; content is
-   already materialized on every machine, and the demoted local caches are
-   valid pre-migration authorities again, so rollback loses nothing but the
-   cluster-level view. Lossy steps (deleting local authority files) simply
+4. **Reversal path**: a later forward migration drops a slice's tables/column
+   (there are no down migrations); content is already materialized on every
+   machine, and the demoted local caches are valid pre-migration authorities
+   again, so reversal loses nothing but the cluster-level view. Lossy steps (deleting local authority files) simply
    don't happen — the files stay, they just stop being read as truth.
 
 ## What legitimately stays per-machine
@@ -390,5 +389,5 @@ Adoption, not flag-day:
 | **S1 — decision + spec** (landed) | `decisions/2026-08-21-extension-ownership-three-tiers.md` (three tiers; machine demoted to derived constraint; version-canary non-goal) + the plugin-spec-v2 S5 revision above, incl. the `hostCapabilities` split. No code. | — |
 | **S2 — skills first** (tables + install-write + materialization landed, cross-machine chain locked; boot materialization, adoption sweep and sync event pending) | `extensions`/`extension_blobs` migrations; `ava skill install` writes row + blob; converge + boot materialization for `kind='skill'`; adoption sweep; the sync event. Skills are pure text, no runtime, no requirements — validates the whole chain at minimum risk. | install on home A materializes on home B (two homes, one PG); adoption conflict refused with both machines named; user-edit hash guard survives the source change |
 | **S3 — per-agent activation** | `agents_meta.extension_overlay` migration; spawn API + preset + `ava.agents.spawn` field; resolution in `load_extensions()` (or the turn boundary, per PR #49 ordering); event-trail recording. | overlay survives restart; overlay-disabled plugin is absent from the agent turn composition; unknown name refused at spawn |
-| **S4 — plugins + capability matching** | plugin rows to the registry; `shared/capabilities.py` + probes + `machine_capabilities` registration; the matcher; placement constraint + boot re-check; `plugins_config.json` demoted to cache; not-runnable rows in status/inventory/inspect. | requirement-missing machine is refused as placement for a requiring agent; a default-enabled-but-not-runnable pair is queryable, not silent; cache rewrite is idempotent |
+| **S4 — plugins + capability matching** | plugin rows to the registry; `base/capabilities.py` + probes + `machine_capabilities` registration; the matcher; placement constraint + boot re-check; `plugins_config.json` demoted to cache; not-runnable rows in status/inventory/inspect. | requirement-missing machine is refused as placement for a requiring agent; a default-enabled-but-not-runnable pair is queryable, not silent; cache rewrite is idempotent |
 | **S5 — MCP** | `kind='mcp'` rows + `requires` → vocabulary unification; `mcp_enabled.json` demoted. Routing endgame stays #1212. | machine-singleton browser server expressed via requirements matches only the capable machine |

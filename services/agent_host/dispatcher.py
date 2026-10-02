@@ -54,16 +54,16 @@ from datetime import UTC, datetime
 from functools import partial
 from typing import Protocol, cast
 
-from agent.turn_progress import (
+from agent.turn.progress import (
     admission_wait_age_s,
     turn_progress_age_s,
     turn_progress_snapshot,
 )
+from base.agents.observation.db_wait import database_wait_snapshot
+from base.deploy.maintenance import admission
+from base.deploy.stop_timing import CANCEL_UNWIND_TIMEOUT_S, CLOCK_READ_TIMEOUT_S
+from base.log import logger
 from services.agent_host.runtime import _active_turn_config_fingerprint
-from shared import maintenance
-from shared.hosted_db_wait import database_wait_snapshot
-from shared.log import logger
-from shared.stop_timing import CANCEL_UNWIND_TIMEOUT_S, CLOCK_READ_TIMEOUT_S
 
 # The pattern one subscription covers: every agent's inbound channel. Kept
 # derived from `inbound_channel` (via the shared prefix) so the publish side
@@ -570,8 +570,8 @@ class InboundWakeDispatcher:
         its own failures leave a healthy subscription alone and retry with
         bounded backoff. This shared scan supplies durable recovery for all agents.
         """
-        from shared.cluster import redis_channel_prefix
-        from shared.redis_client import open_async_redis, retry_auth_failures_async
+        from base.cluster import redis_channel_prefix
+        from base.events.live.redis_client import open_async_redis, retry_auth_failures_async
 
         pattern = f"{redis_channel_prefix()}{_INBOUND_PATTERN_SUFFIX}"
         while True:
@@ -721,7 +721,7 @@ class InboundWakeDispatcher:
             return
         if self._stale_after_s is None:
             raise RuntimeError("hosted pending scan configured without stale_after_s")
-        if maintenance.in_stop_leg():
+        if admission.in_stop_leg():
             # Leave pending rows for the start leg, which scans even while held;
             # pub/sub has no replay. The operator owns stop-leg cancellation.
             return

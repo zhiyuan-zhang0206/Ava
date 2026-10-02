@@ -51,15 +51,16 @@ middle integration layer is a documented vacuum — 9 integration tests for
 ```bash
 # in the worktree
 bash scripts/setup-worktree.sh   # first use only
-.venv/bin/pytest <touched-test-files> -q
-.venv/bin/pyright                  # guarded pre-push locally; CI enforces independently
+.venv/bin/pytest -n 2 <touched-test-files> -q   # only files that bear on the change, never a directory
+git diff --name-only --diff-filter=ACMR -z origin/main...HEAD -- '*.py' \
+  | xargs -0 -r .venv/bin/pyright               # changed files only; whole-repo pyright is CI's
 ```
 
 See `.agents/skills/run-local-tests/SKILL.md` for the full matrix. Rules:
 
 - A failing local run is always a finding; a passing local run is only
   evidence when it exercised the changed path.
-- Never run dev/test scripts that can touch production (os_cron
+- Never run dev/test scripts that can touch production (cron
   registration, migrations, IM sends) outside the pytest guardrails — a
   non-pytest script does not get conftest's env lockdown (G6).
 

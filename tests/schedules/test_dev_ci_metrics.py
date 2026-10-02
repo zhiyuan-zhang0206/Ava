@@ -111,6 +111,17 @@ def test_report_failure_uses_exact_label_and_existing_message(
     send.assert_called_once_with(
         17,
         "Dev/CI metrics collection failed:\nexporter failed\n"
-        "Check the schedule log; backfill with `scripts/ci_runs_export.py --repo "
+        "Check the schedule log; backfill with `scripts/ci/runs_export.py --repo "
         "zhiyuan-zhang0206/Ava --print-snapshot`.",
     )
+
+
+def test_load_exporter_resolves_under_scripts_ci() -> None:
+    """The loader must resolve runs_export.py from its post-move home (scripts/ci/)."""
+    module = _load()
+    saved_path = list(sys.path)
+    try:
+        loaded = module._load_exporter()
+        assert Path(loaded.__file__).resolve() == _ROOT / "scripts" / "ci" / "runs_export.py"
+    finally:
+        sys.path[:] = saved_path

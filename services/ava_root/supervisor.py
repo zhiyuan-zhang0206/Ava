@@ -1,29 +1,9 @@
-"""The supervise loop: spawn units, follow restart policy, keep the tree alive.
+"""One owner for application service births and native custody.
 
-This is the platform-neutral core of the root supervisor. It owns the process
-table of one tree:
-
-- `up` / `down` / `restart` act on subtrees (a unit and its attach descendants);
-- `tree_view` and the `attach_*` seams give the health runner and the tree
-  self-check their read/write surfaces on `status()`;
-- `revival_deferral` answers why a would-be reviver must not act on a unit
-  right now — operator intent, an in-flight retry, or a `never` policy — so a
-  second reviver (the health runner) never fights this supervisor;
-- an unexpected exit follows the unit's restart policy, with exponential
-  backoff for repeats;
-- every child process is reaped through its own wait task — no orphaned exit
-  status is left behind anywhere in the tree;
-- an upgrade is prepared under this same lock — the tree snapshot lands in the
-  handoff file (see `handoff.py`); the daemon replaces the process image by
-  exec after flushing the accepted response, and the successor generation
-  attaches the very same children by pid instead of respawning them.
-
-Chain discipline (I2) shows up here as what this code deliberately does *not*
-do: units are spawned as plain children (no double-fork, no new session, no
-detach), so a unit's parent is this process for its whole life. A manual
-`restart` replaces a unit's generation start-new-before-stop-old — a failed
-new start must not take the old instance down — and this process itself never
-exits for a unit action.
+Children stay in the permission ancestry. Stop captures their native births
+before signalling, preserves uncertain custody, and never escalates implicitly.
+The health monitor is the sole retry scheduler; an unexplained leader exit
+requires reconciliation rather than permission to launch a duplicate.
 """
 
 from __future__ import annotations
@@ -31,23 +11,21 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
-from contextlib import suppress
-from dataclasses import dataclass, field
-from enum import StrEnum
 from pathlib import Path
-from time import monotonic
+from time import monotonic, time
 from typing import Protocol
 
-from services.ava_root.handoff import (
-    ChildState,
-    HandoffFile,
-    HandoffUnit,
-    ProcessHandle,
-    adopt_child,
-    probe_child,
-    write_handoff,
+import psutil
+
+from base.deploy.release.runtime_interpreter import LoadedRuntimeIdentity
+from base.host.env.registry import (
+    MANIFEST_CERTIFICATION_FINALIZER_ENV,
+    MANIFEST_CERTIFICATION_SECRET_ENV,
+    manifest_certification_secret_env,
 )
-from services.ava_root.ipc import (
+from base.native_process.child_env import inherited_process_env
+from base.native_process.ownership import OwnedProcess
+from base.native_process.root_control.ipc import (
     ErrorCode,
     RequestPayload,
     ResponsePayload,
@@ -55,19 +33,27 @@ from services.ava_root.ipc import (
     error_response,
     ok_response,
 )
+from services.ava_root import intent_store
+from services.ava_root.alerts import UnitAlertFacts
+from services.ava_root.custody import require_clear
+from services.ava_root.group_scope import group_closed, record_survivors
+from services.ava_root.intent_store import (
+    IntentRecord,
+    IntentSource,
+    RestartFailure,
+    RestartStage,
+    UnitIntent,
+    merge_record_for_boot,
+)
 from services.ava_root.manifest import (
-    DesiredState,
     RestartPolicy,
-    UnitManifest,
     UnitRegistry,
+    UnitState,
     UnknownUnitError,
 )
-from shared.env_registry import (
-    MANIFEST_CERTIFICATION_FINALIZER_ENV,
-    MANIFEST_CERTIFICATION_SECRET_ENV,
-    manifest_certification_secret_env,
-)
-from shared.process_env import inherited_process_env
+from services.ava_root.reconciling import ReconcilingMixin
+from services.ava_root.stopping import StoppingMixin, SupervisorConfig
+from services.ava_root.unit_records import _Generation, _UnitRuntime
 
 _log = logging.getLogger(__name__)
 
@@ -83,61 +69,6 @@ def _unit_env(unit_id: str) -> dict[str, str]:
         env.pop(MANIFEST_CERTIFICATION_SECRET_ENV, None)
         env.pop(MANIFEST_CERTIFICATION_FINALIZER_ENV, None)
     return env
-
-
-@dataclass(frozen=True, slots=True)
-class SupervisorConfig:
-    """Timing policy for the supervise loop (test-tunable)."""
-
-    backoff_base_s: float = 1.0
-    """First restart delay; doubles per consecutive failure up to `backoff_max_s`."""
-
-    backoff_max_s: float = 30.0
-    """Ceiling for the restart delay."""
-
-    stable_after_s: float = 30.0
-    """A generation that lived at least this long resets the failure streak."""
-
-    stop_timeout_s: float = 10.0
-    """Grace period between a polite stop request and the forceful kill."""
-
-
-class UnitState(StrEnum):
-    """What a unit's process is doing right now."""
-
-    RUNNING = "running"
-    STOPPED = "stopped"
-    BACKOFF = "backoff"
-
-
-@dataclass(slots=True)
-class _Generation:
-    """One process instance of a unit.
-
-    `exited` is set as the *last* action of the wait task, so any coroutine
-    that observes the event also observes the exit fully processed.
-    """
-
-    proc: ProcessHandle
-    started_at: float
-    exited: asyncio.Event = field(default_factory=asyncio.Event)
-
-
-@dataclass(slots=True)
-class _UnitRuntime:
-    """Mutable per-unit state owned by the supervisor."""
-
-    manifest: UnitManifest
-    desired: DesiredState = DesiredState.STOPPED
-    state: UnitState = UnitState.STOPPED
-    generation: _Generation | None = None
-    restart_count: int = 0
-    failure_streak: int = 0
-    last_exit: str | None = None
-    last_error: str | None = None
-    backoff_until: float | None = None
-    watch_task: asyncio.Task[None] | None = None
-    restart_task: asyncio.Task[None] | None = None
 
 
 class HealthSource(Protocol):
@@ -156,7 +87,7 @@ class MetricsSource(Protocol):
         ...
 
 
-class Supervisor:
+class Supervisor(StoppingMixin, ReconcilingMixin):
     """Owns the lifecycle of every unit in one registry.
 
     All mutating verbs serialize on one lock, so overlapping commands are
@@ -178,126 +109,68 @@ class Supervisor:
         self._units: dict[str, _UnitRuntime] = {
             manifest.id: _UnitRuntime(manifest=manifest) for manifest in registry.units
         }
+        self._reconcile_reports: dict[str, str] = {}
         self._lock = asyncio.Lock()
         self._started_at: float | None = None
         self._running = False
         self._health: HealthSource | None = None
         self._metrics: MetricsSource | None = None
-        self._upgrade_pending = False
+        self._runtime_identity: LoadedRuntimeIdentity | None = None
+        self._home: Path | None = None
 
     # ── lifecycle ────────────────────────────────────────────────────────────
 
-    async def start(self, *, handoff: HandoffFile | None = None) -> None:
-        """Bring up the whole tree — fresh, or as the executor of a handoff.
+    async def start(self) -> None:
+        """Start one clean root generation; unresolved custody reconciles first.
 
-        Fresh bring-up: parallel, no dependency order, every unit goes through
-        the start path. Given a handoff (this process is the exec'd successor
-        of its writer), still-running units are attached in place — same
-        processes, same pids, no spawn — and every other unit follows its
-        carried desired state (stopped stays stopped; running goes through the
-        start path).
+        The custody gate clears every record it can prove gone and refuses only
+        on one that keeps an unproven fact, naming its steps and evidence (see
+        `custody.require_clear`). Each unit's stored record is merged first
+        (conservative, see
+        `intent_store.merge_record_for_boot`): a recorded operator stop holds
+        its unit down; a stop the root gave itself is superseded; a recorded
+        replacement failure is carried until a fresh generation proves it gone.
         """
+        require_clear(self._run_dir)
         self._log_dir.mkdir(parents=True, exist_ok=True)
         async with self._lock:
             self._running = True
             self._started_at = monotonic()
-            if handoff is None:
-                for runtime in self._units.values():
-                    runtime.desired = DesiredState.RUNNING
-                await asyncio.gather(
-                    *(self._start_unit(runtime) for runtime in self._units.values())
+            for runtime in self._units.values():
+                self._boot_intent(runtime)
+            await asyncio.gather(
+                *(
+                    self._start_unit(runtime)
+                    for runtime in self._units.values()
+                    if runtime.intent is UnitIntent.RUNNING
                 )
-                return
-            await self._start_from_handoff(handoff)
-
-    async def _start_from_handoff(self, handoff: HandoffFile) -> None:
-        """Execute a handoff: attach what is still running, start the rest."""
-        entries = {unit.unit_id: unit for unit in handoff.units}
-        attached = 0
-        started = 0
-        for runtime in self._units.values():
-            entry = entries.pop(runtime.manifest.id, None)
-            if entry is None:
-                # A unit the outgoing generation did not know about (roster
-                # grew mid-upgrade — out of scope): normal bring-up semantics.
-                runtime.desired = DesiredState.RUNNING
-                await self._start_unit(runtime)
-                started += 1
-                continue
-            runtime.desired = entry.desired
-            pid = entry.pid
-            started_at = entry.started_at
-            if (
-                pid is not None
-                and started_at is not None
-                and self._attach(runtime, pid, started_at)
-            ):
-                attached += 1
-                continue
-            if runtime.desired is DesiredState.RUNNING:
-                await self._start_unit(runtime)
-                started += 1
-        if entries:
-            _log.warning(
-                "handoff carries %d unit(s) not in this registry %s; their processes "
-                "are left untouched (roster shrink mid-upgrade is out of scope)",
-                len(entries),
-                sorted(entries),
             )
-        _log.info(
-            "handoff takeover: %d unit(s) attached to their carried pids, %d started",
-            attached,
-            started,
-        )
-
-    def _attach(self, runtime: _UnitRuntime, pid: int, started_at: float) -> bool:
-        """Adopt an inherited live child in place of spawning; False if it is gone.
-
-        The child predates this process image but not the process: the exec kept
-        the pid and the parent/child relation, so it is simply this process's to
-        wait for — the reaper is re-attached (see `handoff.adopt_child`) and no
-        new process is spawned.
-        """
-        probe = probe_child(pid)
-        if probe.state is ChildState.LIVE:
-            generation = _Generation(proc=adopt_child(pid), started_at=started_at)
-            runtime.generation = generation
-            runtime.state = UnitState.RUNNING
-            runtime.watch_task = asyncio.create_task(self._watch(runtime, generation))
-            _log.info(
-                "unit %s: attached to the carried generation (pid %s)",
-                runtime.manifest.id,
-                pid,
-            )
-            return True
-        if probe.state is ChildState.EXITED and probe.returncode is not None:
-            runtime.last_exit = _describe_exit(probe.returncode)
-            _log.info(
-                "unit %s: carried pid %s had already exited (%s); starting fresh",
-                runtime.manifest.id,
-                pid,
-                runtime.last_exit,
-            )
-        else:
-            _log.warning(
-                "unit %s: carried pid %s is not this process's child anymore; starting fresh",
-                runtime.manifest.id,
-                pid,
-            )
-        return False
 
     async def shutdown(self) -> None:
-        """Stop the whole tree (children before parents) and drain the tasks."""
+        """Stop the whole tree (children before parents) and drain the tasks.
+
+        A refused unit keeps its generation and custody, and the units after it
+        are still stopped; the refusals are then raised together, before any
+        watch is cancelled, so each refused unit's reap is still observed.
+        """
+        refusals: list[Exception] = []
         async with self._lock:
             self._running = False
             for unit_id in self._registry.all_stop_order():
                 runtime = self._units[unit_id]
-                runtime.desired = DesiredState.STOPPED
-                await self._stop_unit(runtime)
+                self._set_intent(runtime, UnitIntent.STOPPED, IntentSource.SELF)
+                try:
+                    await self._stop_unit(runtime)
+                except Exception as exc:
+                    refusals.append(exc)
+        if refusals:
+            raise ExceptionGroup(
+                f"root shutdown retained custody of {len(refusals)} unit(s)", refusals
+            )
         pending = [
             task
             for runtime in self._units.values()
-            for task in (runtime.watch_task, runtime.restart_task)
+            for task in (runtime.watch_task,)
             if task is not None
         ]
         for task in pending:
@@ -305,151 +178,99 @@ class Supervisor:
         await asyncio.gather(*pending, return_exceptions=True)
         for runtime in self._units.values():
             runtime.watch_task = None
-            runtime.restart_task = None
 
     # ── control verbs ────────────────────────────────────────────────────────
 
     async def up(self, unit_id: str) -> dict[str, object]:
-        """Ensure `unit_id` and its subtree are running; idempotent per unit."""
-        subtree = self._registry.subtree(unit_id)
+        """Ensure a unit and its subtree are running; idempotent per unit."""
         async with self._lock:
-            results: list[dict[str, object]] = []
-            for member in subtree:
-                runtime = self._units[member]
-                runtime.desired = DesiredState.RUNNING
-                await self._cancel_task(runtime.restart_task)
-                runtime.restart_task = None
-                if self._is_active(runtime):
-                    action = "already-running"
-                else:
-                    await self._start_unit(runtime)
-                    action = "started" if self._is_active(runtime) else "failed"
-                results.append(self._unit_result(runtime, action))
+            return await self._up_locked(unit_id)
+
+    async def _up_locked(self, unit_id: str) -> dict[str, object]:
+        results: list[dict[str, object]] = []
+        for member in self._registry.subtree(unit_id):
+            runtime = self._units[member]
+            self._set_intent(runtime, UnitIntent.RUNNING, IntentSource.OPERATOR)
+            if self._is_active(runtime):
+                action = "already-running"
+            else:
+                await self._start_unit(runtime)
+                action = "started" if self._is_active(runtime) else "failed"
+            results.append(self._unit_result(runtime, action))
         return {"verb": Verb.UP.value, "units": results}
 
-    async def down(self, unit_id: str) -> dict[str, object]:
-        """Stop `unit_id` and its subtree, children before parents."""
-        order = self._registry.stop_order(unit_id)
+    async def down(self, unit_id: str, *, force: bool = False) -> dict[str, object]:
+        """Stop a unit and its subtree, children before parents."""
         async with self._lock:
-            results: list[dict[str, object]] = []
-            for member in order:
-                runtime = self._units[member]
-                runtime.desired = DesiredState.STOPPED
-                was_active = self._is_active(runtime)
-                await self._stop_unit(runtime)
-                action = "stopped" if was_active else "already-stopped"
-                results.append(self._unit_result(runtime, action))
+            return await self._down_locked(unit_id, force=force)
+
+    async def _down_locked(self, unit_id: str, *, force: bool = False) -> dict[str, object]:
+        results: list[dict[str, object]] = []
+        for member in self._registry.stop_order(unit_id):
+            runtime = self._units[member]
+            self._set_intent(runtime, UnitIntent.STOPPED, IntentSource.OPERATOR)
+            was_active = self._is_active(runtime)
+            await self._stop_unit(runtime, force=force)
+            action = "stopped" if was_active else "already-stopped"
+            results.append(self._unit_result(runtime, action))
         return {"verb": Verb.DOWN.value, "units": results}
 
     async def restart(self, unit_id: str) -> dict[str, object]:
-        """Roll `unit_id`'s subtree: start every fresh generation first, then
-        stop the old ones (children before parents). A unit whose fresh start
-        fails keeps its running old generation — that is the point of the
-        ordering."""
-        subtree = self._registry.subtree(unit_id)
+        """Stop then replace a subtree under one mutation lock.
+
+        A restart means "keep it running, replace it": it never turns a failed
+        self-rescue into a stop, and it never rewrites an explicit stop into a
+        run unless this verb is that operator word. Each member ends either with
+        a fresh active generation or with an explicit `restart_failed` state
+        (intent stays running) that the health monitor counts and retries under
+        its backoff. A member whose stop was refused keeps its old generation
+        while the rest of the subtree is still processed; refusals are raised
+        together afterwards. Spawn acceptance is not readiness; callers must
+        observe the new generation.
+        """
         async with self._lock:
-            results: list[dict[str, object]] = []
-            replaced: list[tuple[_UnitRuntime, _Generation | None]] = []
-            for member in subtree:
+            members = self._registry.subtree(unit_id)
+            for member in members:
                 runtime = self._units[member]
-                runtime.desired = DesiredState.RUNNING
-                await self._cancel_task(runtime.restart_task)
-                runtime.restart_task = None
-                old = runtime.generation
+                if runtime.intent is not UnitIntent.RUNNING:
+                    self._set_intent(runtime, UnitIntent.RUNNING, IntentSource.OPERATOR)
+            refusals: list[Exception] = []
+            refused: set[str] = set()
+            for member in self._registry.stop_order(unit_id):
+                runtime = self._units[member]
                 try:
-                    await self._spawn(runtime)
-                except OSError as exc:
-                    runtime.last_error = f"spawn failed: {exc}"
-                    _log.error("unit %s: restart spawn failed: %s", member, exc)
-                    if old is None:
-                        runtime.state = UnitState.STOPPED
-                        self._maybe_schedule_restart(runtime)
+                    await self._stop_unit(runtime)
+                except Exception as exc:
+                    refused.add(member)
+                    refusals.append(exc)
+                    self._record_restart_failure(runtime, RestartStage.DOWN, str(exc))
+            results: list[dict[str, object]] = []
+            for member in members:
+                runtime = self._units[member]
+                if member in refused:
+                    results.append(self._unit_result(runtime, "refused"))
+                    continue
+                try:
+                    await self._start_unit(runtime)
+                except Exception as exc:
+                    runtime.last_error = f"restart failed: {exc}"
+                    self._record_restart_failure(runtime, RestartStage.UP, str(exc))
                     results.append(self._unit_result(runtime, "failed"))
                     continue
-                if old is not None:
+                if self._is_active(runtime):
                     runtime.restart_count += 1
-                replaced.append((runtime, old))
-                result = self._unit_result(runtime, "replaced" if old is not None else "started")
-                results.append(result)
-            for runtime, old in reversed(replaced):
-                if old is not None:
-                    await self._stop_generation(runtime, old)
-        return {"verb": Verb.RESTART.value, "units": results}
-
-    async def upgrade(self) -> dict[str, object]:
-        """Prepare the in-place exec replacement: snapshot the tree to handoff.
-
-        Runs under the mutation lock, so the snapshot is consistent with every
-        verb this supervisor serves. The response is acceptance-shaped: actual
-        completion is observed by the caller through `status()` — same root
-        pid, reset uptime, continuous units — because the exec happens only
-        after this response is flushed (the daemon owns that step). Steady
-        state is assumed: a unit mid-restart or mid-backoff is recorded with a
-        warning and carried as best the handoff can.
-        """
-        async with self._lock:
-            entries: list[HandoffUnit] = []
-            running = 0
-            for runtime in self._units.values():
-                entry = self._handoff_entry(runtime)
-                if entry.pid is not None:
-                    running += 1
-                entries.append(entry)
-            handoff = HandoffFile.stamp(os.getpid(), tuple(entries))
-            path = write_handoff(self._run_dir, handoff)
-            self._upgrade_pending = True
-            _log.info(
-                "upgrade accepted: handoff for %d unit(s), %d live, written to %s",
-                len(entries),
-                running,
-                path,
-            )
-            return {
-                "verb": Verb.UPGRADE.value,
-                "accepted": True,
-                "root_pid": os.getpid(),
-                "units_total": len(entries),
-                "units_running": running,
-            }
-
-    def take_pending_upgrade(self) -> bool:
-        """One-shot: True when an accepted upgrade awaits its exec.
-
-        The daemon calls this after the upgrade response has been flushed;
-        True means the handoff is on disk and the process image may now be
-        replaced.
-        """
-        pending = self._upgrade_pending
-        self._upgrade_pending = False
-        return pending
-
-    def _handoff_entry(self, runtime: _UnitRuntime) -> HandoffUnit:
-        """One unit's carried state; warns when the steady-state assumption bends."""
-        restart_task = runtime.restart_task
-        if runtime.state is UnitState.BACKOFF or (
-            restart_task is not None and not restart_task.done()
-        ):
-            _log.warning(
-                "upgrade: unit %s is not in steady state (state=%s); carrying its "
-                "desired state only",
-                runtime.manifest.id,
-                runtime.state.value,
-            )
-        generation = runtime.generation
-        if generation is None or generation.proc.returncode is not None:
-            return HandoffUnit(unit_id=runtime.manifest.id, desired=runtime.desired)
-        pid = generation.proc.pid
-        try:
-            pgid = os.getpgid(pid)
-        except ProcessLookupError:
-            pgid = None
-        return HandoffUnit(
-            unit_id=runtime.manifest.id,
-            desired=runtime.desired,
-            pid=pid,
-            pgid=pgid,
-            started_at=generation.started_at,
-        )
+                    results.append(self._unit_result(runtime, "restarted"))
+                else:
+                    detail = runtime.last_error or "replacement did not start"
+                    self._record_restart_failure(runtime, RestartStage.UP, detail)
+                    results.append(self._unit_result(runtime, "failed"))
+            if len(refusals) == 1:
+                raise refusals[0]
+            if refusals:
+                raise ExceptionGroup(
+                    f"root restart refused to stop {len(refusals)} unit(s)", refusals
+                )
+            return {"verb": Verb.RESTART.value, "units": results}
 
     async def status(self) -> dict[str, object]:
         """The tree snapshot: structure, health, and restart counters."""
@@ -461,23 +282,43 @@ class Supervisor:
                 "id": runtime.manifest.id,
                 "attach": runtime.manifest.attach,
                 "exec": list(runtime.manifest.exec),
+                "manifest_digest": runtime.manifest.digest(),
                 "restart": runtime.manifest.restart.value,
-                "desired": runtime.desired.value,
+                "intent": runtime.intent.value,
+                "intent_source": runtime.intent_source.value,
+                "restart_failed": None
+                if runtime.restart_failed is None
+                else {
+                    "stage": runtime.restart_failed.stage.value,
+                    "since": runtime.restart_failed.since,
+                    "detail": runtime.restart_failed.detail,
+                },
                 "state": runtime.state.value,
                 "pid": self._pid(runtime),
+                "create_time": runtime.generation.identity.birth
+                if runtime.generation and runtime.generation.identity
+                else None,
+                "starttime": runtime.generation.identity.starttime
+                if runtime.generation and runtime.generation.identity
+                else None,
                 "restart_count": runtime.restart_count,
-                "failure_streak": runtime.failure_streak,
                 "last_exit": runtime.last_exit,
                 "last_error": runtime.last_error,
             }
-            if runtime.backoff_until is not None:
-                entry["backoff_in_s"] = max(0.0, runtime.backoff_until - monotonic())
             units.append(entry)
+        own_identity = OwnedProcess.capture(psutil.Process())
         root: dict[str, object] = {
-            "pid": os.getpid(),
+            "pid": own_identity.pid,
+            "create_time": own_identity.birth,
+            "starttime": own_identity.starttime,
             "uptime_s": monotonic() - self._started_at if self._started_at is not None else 0.0,
             "unit_count": len(self._units),
+            "launch_digest": self._registry.launch_digest,
             "running": self._running,
+            "home": str(self._home) if self._home is not None else None,
+            "runtime": self._runtime_identity.model_dump(mode="json")
+            if self._runtime_identity
+            else None,
         }
         snapshot: dict[str, object] = {
             "root": root,
@@ -489,6 +330,15 @@ class Supervisor:
         if self._metrics is not None:
             snapshot["metrics"] = self._metrics.metrics_snapshot()
         return snapshot
+
+    def bind_runtime(self, identity: LoadedRuntimeIdentity, *, home: Path) -> None:
+        """Deployment wiring binds loaded code once, before any service birth."""
+        if self._running or self._runtime_identity is not None:
+            raise RuntimeError("root runtime identity is already bound or running")
+        if not home.is_absolute() or home.resolve(strict=True) != home:
+            raise RuntimeError("root runtime home is not canonical")
+        self._home = home
+        self._runtime_identity = identity
 
     def attach_health(self, source: HealthSource) -> None:
         """Embed the health runner's snapshot in `status()`; absent until wired."""
@@ -516,31 +366,51 @@ class Supervisor:
         ]
         return {"root_pid": os.getpid(), "units": units}
 
+    def health_generation(self, unit_id: str) -> tuple[OwnedProcess, float] | None:
+        """The retained native generation and its monotonic launch time."""
+        runtime = self._units.get(unit_id)
+        if runtime is None:
+            raise UnknownUnitError(f"unknown unit {unit_id!r}")
+        generation = runtime.generation
+        if generation is None or generation.identity is None:
+            return None
+        return generation.identity, generation.started_at
+
     def revival_deferral(self, unit_id: str) -> str | None:
-        """Why a would-be reviver must not act on `unit_id` right now, if any.
+        """Preserve explicit stop, retained custody, and never-restart policy.
 
-        The health runner asks this before restarting a unit; a non-None answer
-        means somebody else owns the situation and the round only reports:
-
-        - ``"held down"`` — the operator stops it (`desired` is STOPPED);
-          deliberate operator intent is never fought.
-        - ``"already scheduled"`` — a policy retry is already in flight; there
-          is a single scheduling source, and it is this supervisor.
-        - ``"policy never"`` — the manifest says this unit is not brought back.
-
-        Raises `UnknownUnitError` for a unit outside this registry.
+        Classification reads the unit's intent — the policy fact — never a
+        mechanical transition residue: only an explicit stop is the expected,
+        silent state. A recorded replacement failure is deliberately not a
+        deferral: suppressing the action here would recreate exactly the
+        silence class the record exists to surface (task #4872) — its retry
+        cadence belongs to the health monitor's backoff.
         """
         runtime = self._units.get(unit_id)
         if runtime is None:
             raise UnknownUnitError(f"unknown unit {unit_id!r}")
-        if runtime.desired is not DesiredState.RUNNING:
+        if runtime.intent is not UnitIntent.RUNNING:
             return "held down"
-        task = runtime.restart_task
-        if task is not None and not task.done():
-            return "already scheduled"
+        if runtime.generation is not None and not self._is_active(runtime):
+            return "native custody requires reconciliation"
         if runtime.manifest.restart is RestartPolicy.NEVER:
             return "policy never"
         return None
+
+    def unit_alert_facts(self, unit_id: str) -> UnitAlertFacts:
+        """The alert-relevant facts of one unit: intent, recorded failure, custody.
+
+        `custody_held` reads `revival_deferral`'s reconciliation clause — a
+        retained generation that is not active holds revival until reconciled.
+        """
+        runtime = self._units.get(unit_id)
+        if runtime is None:
+            raise UnknownUnitError(f"unknown unit {unit_id!r}")
+        return UnitAlertFacts(
+            intent_running=runtime.intent is UnitIntent.RUNNING,
+            restart_failed=runtime.restart_failed,
+            custody_held=runtime.generation is not None and not self._is_active(runtime),
+        )
 
     async def dispatch(self, request: RequestPayload) -> ResponsePayload:
         """Serve one validated K1 request; business errors become error codes."""
@@ -549,14 +419,6 @@ class Supervisor:
         try:
             if verb is Verb.STATUS:
                 return ok_response(await self.status())
-            if verb is Verb.UPGRADE:
-                try:
-                    return ok_response(await self.upgrade())
-                except OSError as exc:
-                    _log.error("upgrade handoff write failed: %s", exc)
-                    return error_response(
-                        ErrorCode.INTERNAL, f"upgrade handoff write failed: {exc}"
-                    )
             if name is None:
                 # parse_request already rejects this shape; kept as a guard so a
                 # future verb cannot fall through to a confusing failure.
@@ -565,8 +427,8 @@ class Supervisor:
                 )
             if verb is Verb.UP:
                 return ok_response(await self.up(name))
-            if verb is Verb.DOWN:
-                return ok_response(await self.down(name))
+            if verb in {Verb.DOWN, Verb.FORCE_DOWN}:
+                return ok_response(await self.down(name, force=verb is Verb.FORCE_DOWN))
             if verb is Verb.RESTART:
                 return ok_response(await self.restart(name))
         except UnknownUnitError as exc:
@@ -575,8 +437,95 @@ class Supervisor:
 
     # ── internals ────────────────────────────────────────────────────────────
 
+    def _set_intent(self, runtime: _UnitRuntime, intent: UnitIntent, source: IntentSource) -> None:
+        """Record a unit's policy fact and persist it for the next root."""
+        runtime.intent = intent
+        runtime.intent_source = source
+        self._write_record(runtime)
+
+    def _write_record(self, runtime: _UnitRuntime) -> None:
+        intent_store.write(
+            self._run_dir,
+            runtime.manifest.id,
+            IntentRecord(runtime.intent, runtime.intent_source, runtime.restart_failed),
+        )
+
+    def _boot_intent(self, runtime: _UnitRuntime) -> None:
+        """Merge this unit's stored record into a fresh root generation."""
+        record = intent_store.read(self._run_dir, runtime.manifest.id)
+        merged = merge_record_for_boot(record)
+        if merged.note is not None:
+            _log.info("unit %s: %s", runtime.manifest.id, merged.note)
+        runtime.intent = merged.intent
+        runtime.intent_source = merged.source
+        runtime.restart_failed = merged.restart_failed
+        if record is None or (
+            record.intent,
+            record.source,
+            record.restart_failed,
+        ) != (merged.intent, merged.source, merged.restart_failed):
+            self._write_record(runtime)
+
+    def _record_restart_failure(
+        self, runtime: _UnitRuntime, stage: RestartStage, detail: str
+    ) -> None:
+        """Record one member's failed replacement half; store first, then signal."""
+        previous = runtime.restart_failed
+        since = previous.since if previous is not None else time()
+        failure = RestartFailure(stage=stage, since=since, detail=detail)
+        runtime.restart_failed = failure
+        self._write_record(runtime)
+        if previous is None or previous.stage is not stage:
+            self._emit_restart_failed(runtime, failure)
+
+    def _clear_restart_failure(self, runtime: _UnitRuntime) -> None:
+        """Clear a recorded failure once a fresh generation proved it gone."""
+        previous = runtime.restart_failed
+        if previous is None:
+            return
+        runtime.restart_failed = None
+        self._write_record(runtime)
+        self._emit_restart_cleared(runtime, previous)
+
+    @staticmethod
+    def _emit_restart_failed(runtime: _UnitRuntime, failure: RestartFailure) -> None:
+        try:
+            from base.log import logger
+
+            logger.warning(
+                "unit {unit} replacement failed at its {stage} half — explicit failure state "
+                "recorded; intent stays running and the health monitor retries under its backoff",
+                event="root_restart_failed",
+                unit=runtime.manifest.id,
+                stage=failure.stage.value,
+                detail=failure.detail,
+            )
+        except Exception:
+            # Fan-out may lag or fail; the record is already stored, so never
+            # let a signal failure corrupt the transition that produced it.
+            _log.exception("unit %s: restart-failure event fan-out failed", runtime.manifest.id)
+
+    @staticmethod
+    def _emit_restart_cleared(runtime: _UnitRuntime, failure: RestartFailure) -> None:
+        try:
+            from base.log import logger
+
+            logger.info(
+                "unit {unit} replacement succeeded — failure state cleared after "
+                "{failed_for_s:.0f}s",
+                event="root_restart_cleared",
+                unit=runtime.manifest.id,
+                failed_for_s=max(0.0, time() - failure.since),
+            )
+        except Exception:
+            _log.exception("unit %s: restart-cleared event fan-out failed", runtime.manifest.id)
+
     async def _start_unit(self, runtime: _UnitRuntime) -> None:
-        """Spawn a stopped unit; a spawn failure is recorded, never raised."""
+        """Spawn a stopped unit; a spawn failure is recorded, never raised.
+
+        A fresh active generation is the only proof that a recorded replacement
+        failure is gone, so success clears it on every activation path.
+        """
         if self._is_active(runtime):
             return
         try:
@@ -585,37 +534,56 @@ class Supervisor:
             runtime.state = UnitState.STOPPED
             runtime.last_error = f"spawn failed: {exc}"
             _log.error("unit %s failed to start: %s", runtime.manifest.id, exc)
-            self._maybe_schedule_restart(runtime)
+            return
+        self._clear_restart_failure(runtime)
 
     async def _spawn(self, runtime: _UnitRuntime) -> None:
         """Fork+exec one fresh generation of `runtime`.
 
         The caller holds the mutation lock. Units are spawned as plain
-        children — no new session, no detaching, `close_fds=True` so the
-        instance lock cannot leak into the tree.
+        children, each leading its own process group (setpgid, never a new
+        session, so the permission ancestry and session are root's), with
+        `close_fds=True` so the instance lock cannot leak into the tree. The
+        group is the unit's stop scope: see `_stop_posix_generation`.
         """
         manifest = runtime.manifest
+        for item in manifest.inputs:
+            item.require_unchanged()
         # One directory per unit (G5): the unit owns its log space, so naming /
         # rotation policy can land inside it without another layout change.
         log_path = self._log_dir / manifest.id / "output.log"
         log_path.parent.mkdir(parents=True, exist_ok=True)
         log_fd = os.open(log_path, os.O_CREAT | os.O_WRONLY | os.O_APPEND, 0o644)
         try:
+            custody = self._new_custody(manifest.id)
+            env = _unit_env(manifest.id) | dict(manifest.env)
             proc = await asyncio.create_subprocess_exec(
                 *manifest.exec,
                 stdin=asyncio.subprocess.DEVNULL,
                 stdout=log_fd,
                 stderr=asyncio.subprocess.STDOUT,
-                env=_unit_env(manifest.id),
+                env=env,
                 close_fds=True,
+                process_group=0,
             )
         finally:
             os.close(log_fd)
-        generation = _Generation(proc=proc, started_at=monotonic())
+        try:
+            identity = OwnedProcess.capture(psutil.Process(proc.pid))
+        except psutil.NoSuchProcess:
+            identity = None
+        generation = _Generation(
+            proc=proc,
+            started_at=monotonic(),
+            identity=identity,
+            custody=custody,
+            tracked={identity} if identity else set(),
+        )
+        if identity is not None:
+            custody.retain(generation.tracked, proc.pid)
         runtime.generation = generation
         runtime.state = UnitState.RUNNING
         runtime.last_error = None
-        runtime.backoff_until = None
         runtime.watch_task = asyncio.create_task(self._watch(runtime, generation))
         _log.info(
             "unit %s started (pid %s): %s",
@@ -625,133 +593,31 @@ class Supervisor:
         )
 
     async def _watch(self, runtime: _UnitRuntime, generation: _Generation) -> None:
-        """Reap one generation, then apply the restart policy.
+        """Reap one generation, retaining unexpected native custody.
 
         Everything after `await proc.wait()` is synchronous — `exited` must be
         the final action so waiters never observe a half-processed exit.
         """
         returncode = await generation.proc.wait()
+        # asyncio's child watcher reaped the leader with waitpid a few loop
+        # turns before this resumes, on every POSIX host. A live member keeps the
+        # number reserved, so an empty group is the unit's closure and the
+        # members listed are its survivors; only a group that empties inside
+        # that window, its number then taken by another process, misleads this
+        # read. Once the survivors exit, a later group with that number may be a
+        # stranger's, so no later stop signals by it.
+        pgid = generation.proc.pid
+        generation.scope_closed_at_exit = group_closed(pgid)
+        if not generation.scope_closed_at_exit:
+            record_survivors(runtime.manifest.id, pgid, generation.tracked, generation.custody)
         if runtime.generation is generation:
-            runtime.generation = None
             runtime.last_exit = _describe_exit(returncode)
-            runtime.backoff_until = None
-            if runtime.desired is DesiredState.STOPPED or not self._running:
-                runtime.state = UnitState.STOPPED
-            else:
-                lifetime = monotonic() - generation.started_at
-                if lifetime >= self._config.stable_after_s:
-                    runtime.failure_streak = 0
-                if self._should_restart(runtime.manifest, returncode):
-                    _log.warning(
-                        "unit %s exited (%s); restarting per policy %s",
-                        runtime.manifest.id,
-                        _describe_exit(returncode),
-                        runtime.manifest.restart.value,
-                    )
-                    self._schedule_restart(runtime)
-                else:
-                    runtime.state = UnitState.STOPPED
-                    _log.info(
-                        "unit %s exited (%s); policy %s holds it stopped",
-                        runtime.manifest.id,
-                        _describe_exit(returncode),
-                        runtime.manifest.restart.value,
-                    )
-        generation.exited.set()
-
-    def _should_restart(self, manifest: UnitManifest, returncode: int) -> bool:
-        """Whether an exited generation should be brought back."""
-        if manifest.restart is RestartPolicy.ALWAYS:
-            return True
-        if manifest.restart is RestartPolicy.ON_FAILURE:
-            return returncode != 0
-        return False
-
-    def _maybe_schedule_restart(self, runtime: _UnitRuntime) -> None:
-        """Arm a backoff retry after a failed spawn, when policy allows one."""
-        if runtime.desired is not DesiredState.RUNNING or not self._running:
-            return
-        if runtime.manifest.restart is RestartPolicy.NEVER:
-            return
-        self._schedule_restart(runtime)
-
-    def _schedule_restart(self, runtime: _UnitRuntime) -> None:
-        """Schedule the next start attempt with exponential backoff."""
-        existing = runtime.restart_task
-        if existing is not None and not existing.done():
-            existing.cancel()
-        # Clamp the exponent before the float multiply: `2 ** streak` beyond
-        # ~1023 overflows the int-to-float conversion and would raise inside
-        # `_watch`, killing the watch task before `generation.exited` is set
-        # (the delay is capped at `backoff_max_s` below either way).
-        delay = min(
-            self._config.backoff_base_s * (2 ** min(runtime.failure_streak, 64)),
-            self._config.backoff_max_s,
-        )
-        runtime.failure_streak += 1
-        runtime.state = UnitState.BACKOFF
-        runtime.backoff_until = monotonic() + delay
-        _log.info(
-            "unit %s restarting in %.2fs (attempt %d)",
-            runtime.manifest.id,
-            delay,
-            runtime.failure_streak,
-        )
-        runtime.restart_task = asyncio.create_task(self._restart_after(runtime, delay))
-
-    async def _restart_after(self, runtime: _UnitRuntime, delay: float) -> None:
-        """The backoff timer: spawn when it elapses, or retire quietly."""
-        await asyncio.sleep(delay)
-        async with self._lock:
-            if not self._running or runtime.desired is not DesiredState.RUNNING:
-                return
-            if runtime.generation is not None:
-                return
-            try:
-                await self._spawn(runtime)
-            except OSError as exc:
-                runtime.last_error = f"spawn failed: {exc}"
-                runtime.state = UnitState.STOPPED
-                _log.error("unit %s restart attempt failed: %s", runtime.manifest.id, exc)
-                self._maybe_schedule_restart(runtime)
-                return
-            runtime.restart_count += 1
-
-    async def _stop_unit(self, runtime: _UnitRuntime) -> None:
-        """Terminate a unit's current generation (TERM, then KILL on timeout)."""
-        await self._cancel_task(runtime.restart_task)
-        runtime.restart_task = None
-        generation = runtime.generation
-        if generation is None:
             runtime.state = UnitState.STOPPED
-            return
-        await self._stop_generation(runtime, generation)
-
-    async def _stop_generation(self, runtime: _UnitRuntime, generation: _Generation) -> None:
-        """Ask one generation to stop; force the kill after the grace period."""
-        proc = generation.proc
-        if proc.returncode is None:
-            proc.terminate()
-        try:
-            await asyncio.wait_for(generation.exited.wait(), self._config.stop_timeout_s)
-        except TimeoutError:
-            _log.warning(
-                "unit %s did not stop within %.1fs; killing pid %s",
-                runtime.manifest.id,
-                self._config.stop_timeout_s,
-                proc.pid,
-            )
-            proc.kill()
-            await generation.exited.wait()
-
-    @staticmethod
-    async def _cancel_task(task: asyncio.Task[None] | None) -> None:
-        """Cancel and await a task if it is still pending (safe on None/done)."""
-        if task is None:
-            return
-        task.cancel()
-        with suppress(asyncio.CancelledError):
-            await task
+            if not generation.closing:
+                runtime.last_error = "unexpected exit; native custody requires reconciliation"
+        # Only a stop owner releases custody (`_stop_exited_generation` for an
+        # unexpected exit); until then it blocks revival and a duplicate root.
+        generation.exited.set()
 
     @staticmethod
     def _is_active(runtime: _UnitRuntime) -> bool:

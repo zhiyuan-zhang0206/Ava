@@ -30,8 +30,8 @@ Never restore an artifact into the live database.
 From the checkout that owns the backup cluster, run either command:
 
 ```bash
-.venv/bin/python scripts/restore_drill.py
-.venv/bin/python scripts/restore_drill.py /absolute/path/to/<db>-<utc>.dump.enc
+.venv/bin/python scripts/data_plane_ops/restore_drill.py
+.venv/bin/python scripts/data_plane_ops/restore_drill.py /absolute/path/to/<db>-<utc>.dump.enc
 ```
 
 The first command selects the newest managed local artifact. The script creates
@@ -59,7 +59,7 @@ Expected facts:
 - `agents`, `checkpoint_blobs`, `checkpoints`, and `checkpoint_writes` are all
   present in the restored schema and their counts are printed.
 - `sample_agent` names a restored checkpoint thread; `messages` is read through
-  `shared.agents.history.checkpoint.load_checkpoint_messages_full`, not raw table bytes.
+  `base.agents.history.checkpoint.load_checkpoint_messages_full`, not raw table bytes.
 - The successful checkpoint-reader call is the service smoke: it proves the
   restored LangGraph schema and serialized conversation data are usable.
 
@@ -72,7 +72,7 @@ For an operator investigating an artifact, the transform it performs is:
 scratch_dir=$(mktemp -d)
 chmod 700 "$scratch_dir"
 key_file="$scratch_dir/backup.key"
-.venv/bin/python -c 'import hashlib; from shared.config import settings; print(hashlib.sha256(settings.data_plane.cluster_secret.encode()).hexdigest())' > "$key_file"
+.venv/bin/python -c 'from services.gateway_side.backup.passphrase import logical_backup_passphrase; print(logical_backup_passphrase())' > "$key_file"
 chmod 600 "$key_file"
 openssl enc -d -aes-256-cbc -pbkdf2 -salt -kfile "$key_file" -in /absolute/path/to/<db>-<utc>.dump.enc -out "$scratch_dir/backup.dump"
 chmod 600 "$scratch_dir/backup.dump"
@@ -80,18 +80,22 @@ chmod 600 "$scratch_dir/backup.dump"
 # gzip --decompress --stdout "$scratch_dir/backup.dump" > "$scratch_dir/backup.dump.raw" && mv "$scratch_dir/backup.dump.raw" "$scratch_dir/backup.dump"
 ```
 
-The key file is the SHA-256 hex digest of the cluster secret. It is private,
-never passed on argv, and must be deleted with the scratch directory after the
-drill. The cluster secret itself lives in the surviving unit's `.env`
-(`$AVA_HOME/.env`, mode 0600) — in a disaster-recovery scenario the secret from
-any surviving runner (or the gateway) is sufficient to decrypt every artifact,
-because the passphrase is derived from the cluster secret alone, not from any
-per-host value. Note: rotating the cluster secret makes artifacts encrypted
-under the previous value unrecoverable — after any rotation, keep the prior
-secret in escrow (or re-run a backup) until the old artifacts have been
-retired. The archive's compression CRC and `pg_restore` failure path detect
-corruption; the artifact is encrypted with AES-256-CBC and inherits the local
-artifact's 0600 threat model.
+The key file holds the logical-backup passphrase from its one resolution
+(`services/gateway_side/backup/passphrase.py`, the same one every backup and
+restore uses): the pinned `$AVA_HOME/backups/logical-backup.passphrase`. A
+gateway birth mints it; a home born earlier carries `sha256(secret)`, pinned
+once. It never changes with the cluster secret and is never
+derived: a home without it refuses. It is private, never passed on argv, and
+must be deleted with the scratch directory after the drill. Only the gateway
+holds it, so disaster recovery needs that file: keep an escrowed copy with the
+gateway's other backup keys. An artifact an empty-secret home wrote before its
+cutover pinned a minted passphrase was encrypted under the public
+`sha256("")`; restore it with
+`.venv/bin/python scripts/data_plane_ops/restore_drill.py <artifact> --legacy-empty-secret-passphrase`
+(by hand: the key file holds `printf '' | shasum -a 256 | cut -d' ' -f1`).
+The archive's compression CRC and `pg_restore` failure path detect corruption;
+the artifact is encrypted with AES-256-CBC and inherits the local artifact's
+0600 threat model.
 
 To complete a manual investigation, use a scratch Postgres URL only:
 
@@ -109,49 +113,35 @@ checkpoint conversation must be proved.
 ## Off-site encrypted copy
 
 After local encryption succeeds and before local pruning, the gateway publishes
-the `.dump.enc` artifact through the shared backup store contract — the same
-backend switch as the physical PITR plane (`AVA_PITR_STORE_BACKEND`), under
-the `ava-logical/` namespace. The publish is if-absent and store-verified
-(ACK: pin_token, size, checksum). It is optional: a missing or unconfigured
-store, or a failed publish, emits a warning but never discards the local
-artifact — the local copy remains the primary. Because only encrypted
-artifacts reach the store, its access model does not expose database contents.
-Remote objects are append-only (the store contract has no delete verb); remote
-retention is a shared planner concern and a follow-up.
+the `.dump.enc` artifact to Aliyun OSS under the `ava-logical/` namespace
+(`services/gateway_side/backup/offsite.py`). It needs
+`AVA_BACKUP_OFFSITE_ENDPOINT`, `AVA_BACKUP_OFFSITE_BUCKET` and
+`AVA_BACKUP_OFFSITE_CREDENTIALS_FILE` (set through `ava config set`); a home
+without all three skips the leg with one INFO log line. The publish is
+if-absent (server-enforced `x-oss-forbid-overwrite` on completion; the bucket
+must stay versioning-off) and verified (per-part `Content-MD5` plus the
+multipart ETag chain). It is optional: a failed publish or an unusable
+credentials file logs the cause but never discards the local artifact — the
+local copy remains the primary. Success is judged by the destination, not by
+silence: the log line `[backup] off-site published
+ava-logical/<name> (size=..., pin=..., checksum=md5:...)` and the object itself,
+its size equal to the local `.dump.enc`. To publish one existing artifact by
+hand: `python -m services.backup --publish-offsite /abs/path/<name>.dump.enc`
+(`--offsite-root PREFIX` publishes under another prefix, for a scratch
+check). Only encrypted artifacts reach the bucket, so its access model does
+not expose database contents. Nothing here deletes a remote object; remote expiry
+belongs to the bucket's lifecycle policy.
 
-## Migration rollback-snapshot archive
+## Migration rollback snapshots
 
 Tables named `*_backfill_*` are finite migration recovery snapshots, not
 durable application state. The migration lint requires a later forward
 migration with `DROP TABLE IF EXISTS` for every such table. Before that forward
-retirement may run against a populated table, preserve its recovery data with
-the official three-step workflow from the gateway checkout:
-
-```bash
-.venv/bin/ava pitr snapshot archive <table>
-.venv/bin/ava pitr snapshot verify <table>
-.venv/bin/ava pitr snapshot retire <table>
-```
-
-`archive` creates a custom-format dump of the one table, encrypts it with the
-configured PITR AES-GCM key, and publishes it under a content-addressed
-rollback-snapshot object name through the configured offsite store. The local
-owner-only evidence record at `$AVA_HOME/rollback-snapshot-archives/<table>.json`
-contains the backend acknowledgement: object name, generation pin, checksum,
-and metadata.
-
-`verify` downloads exactly that recorded generation through the viewer path,
-authenticates and decrypts it, restores it into a throwaway PostgreSQL cluster,
-and reads the restored table. It then records successful verification in the
-same local evidence record. `retire` refuses until that verification exists;
-once it does, it performs the idempotent `DROP TABLE IF EXISTS` on the live
-snapshot table. Do not delete or edit the evidence record between these steps:
-the record is the guard that binds retirement to the archived, drilled object.
-Verification requires the record key ID to match the currently configured PITR key.
-Before reusing a rollback-snapshot table name, delete its old evidence record.
-
-## Sibling procedure
-
-This document covers the logical `.dump.enc` artifact. To prove the physical
-PITR chain restores to a chosen point in time, use the isolated physical
-restore drill: [`physical-restore-drill.md`](physical-restore-drill.md).
+retirement may run against a populated table, keep its recovery data by hand:
+dump the one table with `pg_dump --format=custom --table=public.<table>` through
+the owner dial the scheduled dump uses (`services.backup.dump_source()`) into
+`$AVA_HOME/backups/<table>.dump` (mode 0600), confirm it with
+`pg_restore --list` (the listing must name `TABLE DATA public <table>`), and
+keep the file until the migration is verified in production. The dump is not
+encrypted and is not published off-site; delete it once the snapshot has no
+further use.

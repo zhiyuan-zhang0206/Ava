@@ -1,7 +1,7 @@
 """`ava` CLI argparse surface — per-domain parser builders + their `_h_*` handlers.
 
 `cli.main` imports this package at module level (settings-free: nothing here
-imports ``cli.commands`` / ``shared.config``, so ``ava --help`` builds the tree
+imports ``cli.commands`` / ``base.config``, so ``ava --help`` builds the tree
 on a host with no .env) and calls :func:`build_parser` from ``main()``. Each
 builder binds its own module's handler directly (``set_defaults(func=_h_x)``);
 a test that fakes a handler patches the parser module that defines it, before
@@ -11,9 +11,10 @@ module docstring.
 
 One module per domain:
 
-- ``host`` — start/stop/restart/status/converge/firewall/trace
+- ``host`` — init/start/stop/restart/status/converge/firewall/trace
 - ``cluster`` — the whole-cluster verbs
 - ``agents`` — agents + notices
+- ``backup`` — scheduled backup operation custody
 - ``plugins`` — plugins + skill
 - ``mcp`` — mcp + memory initialization, refresh, and search
 - ``management`` — config + presets + schedules
@@ -24,11 +25,13 @@ from __future__ import annotations
 import argparse
 
 from cli.parsers.agents import _add_agents_parser
+from cli.parsers.backup import _add_backup_parser
 from cli.parsers.cluster import _add_cluster_parser
 from cli.parsers.computer import _add_computer_parser
 from cli.parsers.host import (
     _add_converge_parser,
     _add_firewall_parser,
+    _add_init_parser,
     _add_lgtm_parser,
     _add_pause_parser,
     _add_restart_parser,
@@ -47,7 +50,6 @@ from cli.parsers.management import (
 )
 from cli.parsers.mcp import _add_mcp_parser, _add_memory_parser
 from cli.parsers.packages import _add_packages_parser
-from cli.parsers.pitr import _add_pitr_parser
 from cli.parsers.plugins import _add_plugins_parser, _add_skill_parser
 from cli.parsers.pty import _add_pty_parser
 
@@ -64,6 +66,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     sub = parser.add_subparsers(dest="cmd", required=True)
 
+    _add_init_parser(sub)
     _add_start_parser(sub)
     _add_stop_parser(sub)
     _add_pause_parser(sub)
@@ -78,7 +81,7 @@ def build_parser() -> argparse.ArgumentParser:
     _add_computer_parser(sub)
     _add_trace_parser(sub)
     _add_logs_parser(sub)
-    _add_pitr_parser(sub)
+    _add_backup_parser(sub)
     _add_agents_parser(sub)
     _add_impersonation_parser(sub)
     _add_config_parser(sub)

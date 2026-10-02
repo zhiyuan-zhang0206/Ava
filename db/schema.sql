@@ -5,7 +5,7 @@
 -- reflected here, so this file always describes the latest schema.
 --
 -- Who uses this file (fresh-DB bootstrap — applies the whole baseline):
---   - `shared.cluster.provision_database` — a new cluster's DB is created and this
+--   - `base.cluster.provision_database` — a new cluster's DB is created and this
 --     file applied as the owning role (the real production fresh-bootstrap path)
 --   - `docker-compose.yml` mounts it to /docker-entrypoint-initdb.d/01-schema.sql,
 --     applied automatically by the image on the first Postgres container startup
@@ -16,7 +16,7 @@
 --     constraint sync
 --
 -- Who does not use this file:
---   - `shared.migrations.apply_pending_migrations` — it applies the post-baseline
+--   - `base.deploy.schema.migrations.apply_pending_migrations` — it applies the post-baseline
 --     `migrations/*.sql` deltas one by one, doesn't read this file. A fresh DB is
 --     already at the baseline (via one of the paths above), so apply then only
 --     runs deltas not already folded into this file's applied-set seed;
@@ -30,10 +30,10 @@
 --     (claiming and self-lifecycle); agents_meta and agents (process state and
 --     its own label); machine_units, machines, and host_deploy_state (unit
 --     registration and deploy posture); api_idempotency (runner /ops dedupe);
---     agent_tasks, agent_watchers, agent_pages, and agent_shell_ttls (SDK
+--     agent_tasks, agent_pages, and agent_shell_ttls (SDK
 --     lifecycle); heartbeat_pause_log (pause history); and the LangGraph
 --     checkpoints, checkpoint_blobs, and checkpoint_writes (agent state).
---   - `shared.cluster.provision.ensure_runner_role` is the sole grant list and
+--   - `base.cluster.authority.groups.ensure_groups` is the sole grant list and
 --     re-affirms it after migrations. All other writes travel through
 --     `ava_gateway`, so runner credentials cannot create agents, run DDL, or
 --     mutate gateway-owned tables.
@@ -88,9 +88,6 @@ CREATE TABLE agents (
 --   running    — a claimed process, including bootstrap and active execution;
 --                running an LLM / exec turn (any node: claim got a batch / before_llm / llm /
 --                before_exec / exec / after_exec)
---   restarting — UPDATE before graceful exit, after the agent receives a restart inbound. The gateway
---                restart watcher sees this state → auto-resurrects to spawn a fresh process
---                attached to the same agent (new PID, LangGraph state preserved)
 --   terminated — UPDATE before graceful exit, after the process receives a terminate inbound
 --
 -- After launch, `_launch_agent_process` polls pid to confirm the child claimed the row. No claim within the
@@ -132,23 +129,22 @@ CREATE TABLE agents_meta (
     born_spawner               TEXT,
     fork_source_agent_id       BIGINT REFERENCES agents(id),
     fork_source_checkpoint_id  TEXT,
-    status                     TEXT NOT NULL CHECK (status IN ('running', 'idling', 'restarting', 'terminated')),
+    status                     TEXT NOT NULL CHECK (status IN ('running', 'idling', 'terminated')),
     pid                        INTEGER,                  -- filled while a process owns the running/idling row, for ops ps lookup / force kill
     spawned_at                 TIMESTAMPTZ NOT NULL DEFAULT now(),
     started_at                 TIMESTAMPTZ,              -- filled alongside pid and lease by agent._starting.claim_agent_row
     session_index              BIGINT NOT NULL DEFAULT 0,  -- unified shell+watcher session sequence number, auto-incrementing; ava.shell.new()/ava.watcher.launch() atomically take the next via UPDATE ... RETURNING
-    machine                    TEXT NOT NULL DEFAULT 'unknown',  -- physical machine identifier, for multi-machine deployment (private network + central Postgres); source = $AVA_HOME/machine_name, written on INSERT in the create path (spawn_agent), claim_agent_row only verifies
+    machine                    TEXT NOT NULL DEFAULT 'unknown',  -- physical machine identifier, for multi-machine deployment (private network + central Postgres); source = AVA_MACHINE_NAME, written on INSERT in the create path (spawn_agent), claim_agent_row only verifies
     status_changed_at          TIMESTAMPTZ NOT NULL DEFAULT now(),  -- when the row last entered its current status; maintained by the agents_meta_status_changed_at trigger. Lets the restarter reap unclaimed idling rows older than a grace (unlike spawned_at, this resets on resurrect's terminated -> idling)
-    last_active_at             TIMESTAMPTZ NOT NULL DEFAULT now(),  -- when the agent last did REAL work: written = now() by the agent process on every completed LLM turn (agent/graph/_llm.py). Deliberately NOT touched by ops lifecycle churn (rollout quiesce / restarter respawn / self.update / stop-start) — for an idle agent that whole cycle runs without an LLM turn, so this survives it. The heartbeat daemon's idle clock reads THIS (not status_changed_at, which every status flip incl. ops restarts bumps) so an ops event never resets an agent's idle timer. Backfilled from status_changed_at at add time.
+    last_active_at             TIMESTAMPTZ NOT NULL DEFAULT now(),  -- when the agent last did REAL work: written = now() by the agent process on every completed LLM turn (agent/graph/llm/node.py). Deliberately NOT touched by ops lifecycle churn (rollout quiesce / restarter respawn / self.update / stop-start) — for an idle agent that whole cycle runs without an LLM turn, so this survives it. The heartbeat daemon's idle clock reads THIS (not status_changed_at, which every status flip incl. ops restarts bumps) so an ops event never resets an agent's idle timer. Backfilled from status_changed_at at add time.
     heartbeat_paused_until     TIMESTAMPTZ,              -- pause window for the gateway heartbeat daemon; set to now()+duration by ava.self.pause_heartbeat(). While in the future, the daemon skips this agent's idle-nudge. NULL = never paused.
     last_heartbeat_at          TIMESTAMPTZ,              -- when the heartbeat daemon last inserted a check-in inbound for this agent. A durable cadence floor: once a heartbeat is consumed without a completed LLM turn, the daemon still waits AVA_HEARTBEAT_INTERVAL_SECONDS before inserting another, rather than selecting the same idle row every dispatch step. NULL = never reminded / pre-migration row.
     heartbeat_backoff_level    INTEGER NOT NULL DEFAULT 0 CHECK (heartbeat_backoff_level BETWEEN 0 AND 16),  -- platform-side nudge backoff (B7): consecutive no-op nudges raise the level, stretching the reminder floor to heartbeat_interval * 2^level (cap 24h); reset to 0 on real inbound or an agent pause.
     last_message_text          TEXT,                     -- text of the last AI message produced by this agent; survives compact (which replaces the entire checkpoint). Written by the agent process after each LLM turn; read by get_last_message API. NULL = no AI message yet.
     config_overlay             JSONB,                    -- per-agent config overlay (currently llm_model); authoritative source read at agent boot after spawn/respawn/resurrect. NULL = cluster defaults.
-    birth_config               JSONB,                    -- the values the cluster defaults resolved to at THIS agent's birth, for every per-agent field the registry declares lifecycle="frozen" (shared/config: the brain + the system-prompt-shaping set). Stamped once at the spawn boundary (shared/birth_config.py), replayed on every restart/respawn/resurrect/compact, and inherited verbatim by a fork. Deliberately a SEPARATE column from config_overlay so provenance survives: config_overlay = "someone chose this for this agent", birth_config = "nobody chose; this was merely the cluster default that day". Resolution order everywhere is config_overlay > birth_config > current config. NULL = resolve every frozen field live (pre-column rows the backfill skipped). A migration that rewrites a frozen field's stored VALUE must rewrite this column too — it is a second home for values that used to live only in config_overlay (precedent: 20260725T060802_pin-haiku-dated-model-id.sql rewrites config_overlay->>'llm_model'). The skill-name renames are NOT such a case: they canonicalize agent_presets.config only, since shared/packages/skills/skill_names.py folds dash and underscore so an already-stored per-agent value still resolves. See migrations/20260731T071400_agent-birth-config.sql.
+    birth_config               JSONB,                    -- the values the cluster defaults resolved to at THIS agent's birth, for every per-agent field the registry declares lifecycle="frozen" (base/config: the brain + the system-prompt-shaping set). Stamped once at the spawn boundary (base/agents/birth_config.py), replayed on every restart/respawn/resurrect/compact, and inherited verbatim by a fork. Deliberately a SEPARATE column from config_overlay so provenance survives: config_overlay = "someone chose this for this agent", birth_config = "nobody chose; this was merely the cluster default that day". Resolution order everywhere is config_overlay > birth_config > current config. NULL = resolve every frozen field live (pre-column rows the backfill skipped). A migration that rewrites a frozen field's stored VALUE must rewrite this column too — it is a second home for values that used to live only in config_overlay (precedent: 20260725T060802_pin-haiku-dated-model-id.sql rewrites config_overlay->>'llm_model'). The skill-name renames are NOT such a case: they canonicalize agent_presets.config only, since base/packages/skills/names.py folds dash and underscore so an already-stored per-agent value still resolves. See migrations/20260731T071400_agent-birth-config.sql.
     preset_name                TEXT,                     -- spawn-time preset reference (display only): which agent_presets row supplied the base the resolved config_overlay carries. NULL = no preset. Copied verbatim by a fork without its own preset; cleared semantics live in decisions/2026-09-10-preset-in-config-overlay-fork-cache.md
-    termination_source         TEXT CHECK (termination_source IN ('user', 'exit', 'reaper', 'launch-confirm', 'integrity')),  -- WHO/WHAT terminated the row; meaningful only while status='terminated'. Value set = shared.agents.TerminationSource (locked by tests/test_db_check_enum_sync.py); stamped in the SAME statement as the status flip by every terminated-write site (enforced by scripts/lint_termination_source.py). 'user' = force-kill / terminate-of-already-dead (ops_lifecycle._force_mark_terminated); 'exit' = agent's own graceful process-exit finalize (mark_agent_exited_op); 'reaper' = restarter corpse reaper forced it (dead pid / stale unclaimed idling row); 'launch-confirm' = a launch that never confirmed forced it — the launcher's confirm poll timing out (agent_launch) or the child's own early-boot schema/placement gate rejecting the boot before it claimed the row (agent/_starting.py); 'integrity' = the framework found the row's own state self-inconsistent and killed it (respawn_agent: status='restarting' with no 'restart' inbound), deliberately NOT resurrectable since the row's history is corrupt and a retry loop would bury a one-time fault. CrashResurrectController resurrects ONLY 'reaper' + 'launch-confirm' (involuntary/system-detected + self-healing); 'user'/'exit'/'integrity'/NULL are never auto-resurrected. NULL = pre-column legacy row → conservatively not eligible. Cleared to NULL on the terminated→idling resurrect transition (per-death). CHECK permits NULL.
-    closed_at                  TIMESTAMPTZ,              -- closure marker (never auto-resurrect): non-NULL = the user closed this agent ('close it — never bring it back'). Every automatic resurrection path (delivery chat, compact, the delivery watchdog's terminated-owner retry, hosted-turn recovery) skips it; queued work stays pending and dead-letters on the existing thresholds. Cleared ONLY by an explicit manual resurrect, which reopens the agent and records 'reopened' on the resurrect event. Stamped by every terminate path carrying final=true (graceful acceptance / force fence / the metadata-only mark on an already-terminated row); keeps the FIRST closure time. Guard predicate: shared/lifecycle_acceptance.CLOSED_AGENT.
+    termination_source         TEXT CHECK (termination_source IN ('user', 'exit', 'reaper', 'launch-confirm', 'integrity')),  -- WHO/WHAT terminated the row; meaningful only while status='terminated'. Value set = base.agents.TerminationSource (locked by tests/test_db_check_enum_sync.py); stamped in the SAME statement as the status flip by every terminated-write site (enforced by scripts/lint_termination_source.py). 'user' = force-kill / terminate-of-already-dead (ops_lifecycle._force_mark_terminated); 'exit' = agent's own graceful process-exit finalize (mark_agent_exited_op); 'reaper' = restarter corpse reaper forced it (dead pid / stale unclaimed idling row); 'launch-confirm' = a launch that never confirmed forced it — the launcher's confirm poll timing out (agent_launch) or the child's own early-boot schema/placement gate rejecting the boot before it claimed the row (agent/_starting.py); 'integrity' = the framework found the row's own state self-inconsistent and killed it (historical rows only; no code writes it now), deliberately NOT resurrectable since the row's history is corrupt and a retry loop would bury a one-time fault. CrashResurrectController resurrects ONLY 'reaper' + 'launch-confirm' (involuntary/system-detected + self-healing); 'user'/'exit'/'integrity'/NULL are never auto-resurrected. NULL = pre-column legacy row → conservatively not eligible. Cleared to NULL on the terminated→idling resurrect transition (per-death). CHECK permits NULL.
     last_force_terminate_inbound_id BIGINT,              -- monotonic explicit-kill fence: every force termination (including an already-terminated row) inserts a kind='terminate' inbound under the agents_meta row lock and stores its id here. Pending-work resurrection (chat/compact_request) requires its exact pending inbound id to be greater than this fence, so older work cannot reverse a later kill. No FK on purpose: inbound retention must not erase lifecycle intent. Never cleared; NULL = no force intent recorded.
     last_resurrect_inbound_id  BIGINT,                  -- incarnation-epoch fence: every resurrection inserts its kind='resurrect' inbound under the agents_meta row lock and stores its id here. A lifecycle command (restart/terminate) whose intent predates the fence is superseded by that resurrection - acceptance settles it as superseded (payload names the resurrect) instead of adopting it - so a delayed terminate created before a resurrect can never kill the incarnation the resurrect just admitted (#2158). No FK on purpose: inbound retention must not erase lifecycle intent. Never cleared; NULL = no resurrection recorded.
     last_resurrect_at          TIMESTAMPTZ,              -- when CrashResurrectController last auto-resurrected this agent; the per-agent backoff clock (pin-heal shape). A crash corpse is skipped until now() - last_resurrect_at exceeds AVA_AUTO_RESURRECT_BACKOFF_SECONDS, so a resurrect that keeps failing (outage / poison message) retries on a fixed cadence instead of a tight loop and self-heals when the cause clears. NULL = never auto-resurrected.
@@ -156,18 +152,17 @@ CREATE TABLE agents_meta (
     last_claim_loop_at         TIMESTAMPTZ,              -- when a process-mode agent last began an idling claim-loop round (agent/db.py:wait_for_inbound). The out-of-process wedged detector treats a non-NULL value stale past the idling threshold as evidence that the fallback SELECT loop stopped advancing even if no inbound has arrived. NULL is unknown (pre-migration / pre-rollout) and is deliberately not considered stale.
     wake_suppressed_until      TIMESTAMPTZ,              -- delivery auto-resurrect and watchdog wake suppression deadline after repeated resurrection failures. New peer/user chats remain pending and become eligible again after expiry. Cleared by a successful resurrection spawn or inbound claim. NULL = not suppressed.
     wake_suppress_reason       TEXT,                     -- operator-readable cause paired with wake_suppressed_until; currently 'resurrect_failed'. Cleared with the deadline on successful recovery.
-    lease_expires_at           TIMESTAMPTZ,              -- R1 (Task #1021): the agent-process lease — liveness is a lease-expiry judgment (`lease_expires_at > now()`), status stays lifecycle intent. Written by the agent process at claim/start (now()+lease TTL, agent/db.py / agent/_starting.py), cleared on terminate/resurrect by the ops lifecycle; read by the heartbeat daemon and the reaper (shared/db.py ALIVE_SQL). NULL = row has no lease (pre-R1 legacy, or terminated).
+    lease_expires_at           TIMESTAMPTZ,              -- R1 (Task #1021): the agent-process lease — liveness is a lease-expiry judgment (`lease_expires_at > now()`), status stays lifecycle intent. Written by the agent process at claim/start (now()+lease TTL, agent/db.py / agent/_starting.py), cleared on terminate/resurrect by the ops lifecycle; read by the heartbeat daemon and the reaper (base/db/__init__.py ALIVE_SQL). NULL = row has no lease (pre-R1 legacy, or terminated).
     liveness_state             TEXT NOT NULL DEFAULT 'unknown' CHECK (liveness_state IN ('online', 'offline', 'unknown')),  -- gateway-owned derived liveness projection (Task #1174): 'online' = machine reachable AND (process lease alive where one is held); 'offline' = machine unreachable (2 consecutive failed status_probe) or lease expired; 'unknown' = not yet judged (fresh rows / unregistered machine). Written ONLY by the gateway heartbeat daemon's liveness pass — status stays lifecycle intent (R1 invariant #1); the frontend renders offline distinctly. 'terminated' rows are never judged.
     last_probe_at             TIMESTAMPTZ,              -- when the gateway liveness pass last judged this row (Task #1174).
     last_turn_fatal_at        TIMESTAMPTZ,              -- first fatal turn crash since the last completed LLM turn (the corpse marker: NULL = healthy, set = crash-dead). Stamped with COALESCE (never refreshed while dead) by the hosted runner at crash catch time (agent/hosted_ownership.stamp_turn_fatal); cleared by a completed LLM turn (_persist_last_active) and the resurrect transition. The agent_host beat's reaper terminates marked idling rows past CORPSE_REAP_GRACE_S with termination_source='reaper', and a crash under an already-set mark (a retry dying again) terminates the row at its own settle point via agent/corpse_reap.reap_recrashed_corpse without waiting out the grace; renew_hosted_owner skips marked rows so their lease decays. Each reaper termination also commits that death's near-field recovery wake (one hosted_turn_recovery-marked chat, task #4039).
-    permanent_reject_streak    INTEGER NOT NULL DEFAULT 0 CHECK (permanent_reject_streak >= 0),  -- consecutive PERMANENT-class provider rejections since the last completed LLM turn (the recovery circuit breaker, task #3617): +1 at each permanent fatal turn settlement (agent/runloop.py), reset to 0 by the same completed-turn UPDATE that clears last_turn_fatal_at (agent/graph/_llm.py::_persist_last_active). >= 2 halts every automatic recovery path (event-path resurrect / watchdog re-dispatch+retry / the stalled crash-marked harvest op / the relaxed reaper-marked trigger) until a turn succeeds; a manual resurrect stays exempt. See shared/recovery_breaker.py.
-    last_permanent_reject_reason TEXT,                   -- the CIRCUIT_REASON_* class (agent/state_channels) of the current consecutive permanent-reject streak: written in the SAME statement as the permanent_reject_streak +1 by shared/recovery_breaker.record_permanent_reject_turn, cleared with the streak by the completed-turn UPDATE. 'billing' + streak >= 2 is the billing batch-recovery whitelist (task #3919). NULL = no permanent rejection on the current streak (incl. pre-column rows — never guessed).
+    permanent_reject_streak    INTEGER NOT NULL DEFAULT 0 CHECK (permanent_reject_streak >= 0),  -- consecutive PERMANENT-class provider rejections since the last completed LLM turn (the recovery circuit breaker, task #3617): +1 at each permanent fatal turn settlement (agent/runloop.py), reset to 0 by the same completed-turn UPDATE that clears last_turn_fatal_at (agent/graph/llm/node.py::_persist_last_active). >= 2 halts every automatic recovery path (event-path resurrect / watchdog re-dispatch+retry / the stalled crash-marked harvest op / the relaxed reaper-marked trigger) until a turn succeeds; a manual resurrect stays exempt. See base/agents/recovery_breaker.py.
+    last_permanent_reject_reason TEXT,                   -- the CIRCUIT_REASON_* class (agent/state_channels) of the current consecutive permanent-reject streak: written in the SAME statement as the permanent_reject_streak +1 by base/agents/recovery_breaker.record_permanent_reject_turn, cleared with the streak by the completed-turn UPDATE. 'billing' + streak >= 2 is the billing batch-recovery whitelist (task #3919). NULL = no permanent rejection on the current streak (incl. pre-column rows — never guessed).
     runtime_generation UUID,
     runtime_kind TEXT CHECK (runtime_kind IN ('process', 'hosted')),
     runtime_owner UUID,
     last_admission_outcome TEXT CHECK (last_admission_outcome IN
-        ('admitted', 'maintenance_hold', 'publication_deferred',
-         'resource_fence', 'admission_guard_refused')),
+        ('admitted', 'maintenance_hold', 'resource_fence', 'admission_guard_refused')),
     last_admission_at TIMESTAMPTZ,
     CONSTRAINT agents_meta_admission_observation_pair_check
         CHECK ((last_admission_outcome IS NULL) = (last_admission_at IS NULL)),
@@ -204,14 +199,6 @@ COMMENT ON COLUMN agents_meta.last_resurrect_inbound_id IS
     'predates the fence is superseded by that resurrection; acceptance settles '
     'it instead of dispatching it. Deliberately no foreign key: inbound '
     'retention must not erase lifecycle intent.';
-
-COMMENT ON COLUMN agents_meta.closed_at IS
-    'When the user closed this agent: a termination that never auto-resurrects. '
-    'Non-NULL = closed — every automatic resurrection path skips the agent and '
-    'its queued work dead-letters on the existing thresholds; only an explicit '
-    'manual resurrect clears the column (reopening, audited via the resurrect '
-    'event payload). Stamped by every terminate path carrying final=true; keeps '
-    'the first closure time. NULL = open.';
 
 COMMENT ON COLUMN agents_meta.last_permanent_reject_reason IS
     'The reason class of the current consecutive permanent-reject streak '
@@ -265,8 +252,8 @@ CREATE INDEX heartbeat_pause_log_agent_created_idx
 -- row; the BIGSERIAL id draws from the owning sequence. UPDATE/DELETE stay
 -- out — the trail is append-only and no runner path rewrites rows.
 -- Gated on the role's existence: fresh bootstrap applies this baseline before
--- install birth creates ava_runner, and shared/cluster/provision.py's
--- ensure_runner_role grants the audited surface at birth.
+-- install birth creates ava_runner, and base/cluster/authority/groups.py's
+-- ensure_groups grants the audited surface at birth.
 DO $$
 BEGIN
     IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'ava_runner') THEN
@@ -375,9 +362,8 @@ CREATE TABLE inbound_messages (
                    'compact_request',   -- triggered by UI "/compact" / admin; on claim, runs the backend LLM to generate a summary, then replaces
                    'cancel',            -- /api/cancel pause; in-flight llm/exec interrupts on it, claim halts to idle (agent stays alive, resumable)
                    'terminate',         -- ava.terminate() / admin terminate; claim appends lifecycle marker + goto END
-                   'restart',           -- ava.restart() / admin restart; claim only marks RESTARTING + goto END (no message appended)
-                                        -- the gateway watcher sees restarting and auto-respawns a fresh process + delivers 'restart_completed'
-                   'restart_completed', -- INSERTed by respawn_agent; after the new process is up, claim appends lifecycle marker
+                   'restart',           -- ava.restart() / admin restart; applied as a hosted lifecycle command (no message appended)
+                   'restart_completed', -- historical rows only (written by the retired respawn path); claim still renders the lifecycle marker
                    'resurrect',         -- INSERTed by resurrect_agent; after the new process is up, claim appends lifecycle marker
                    'fork',              -- INSERTed by spawn_agent on a fork; the new process's first claim appends an identity marker (you are now agent N, forked from agent:M)
                    'heartbeat',         -- INSERTed by heartbeat daemon; idle-agent nudge delivered as a system note
@@ -846,7 +832,7 @@ CREATE INDEX alerts_status_starts_idx ON alerts (status, starts_at DESC);
 -- is an in-place status UPDATE and no runner path deletes rows, so the write
 -- surface is SELECT / INSERT / UPDATE, no DELETE. Gated on the role's
 -- existence: fresh bootstrap applies this baseline before install birth
--- creates ava_runner, and shared/cluster/provision.py's ensure_runner_role
+-- creates ava_runner, and base/cluster/authority/groups.py's ensure_groups
 -- grants the audited surface at birth.
 DO $$
 BEGIN
@@ -1183,7 +1169,7 @@ CREATE TABLE machines (
 -- only after 2 consecutive failed probes) and the true start of the current
 -- failed-probe transition (NULL while reachable). Deliberately NOT a machines-table
 -- column: the machines row is a recomputed composition of machine_units
--- (shared/machines.py _recompute_machine_row) and any column there would be
+-- (base/cluster/machines.py _recompute_machine_row) and any column there would be
 -- clobbered by register_self.
 CREATE TABLE machine_probe (
     machine_name         TEXT PRIMARY KEY,
@@ -1218,195 +1204,39 @@ CREATE TABLE machine_units (
 -- 0047. The other 0010 table, plugins_config_overrides, was dropped in 0035.)
 
 -- ─────────────── deployment_state (R1 — Task #1021) ───────────────
--- Cluster-level deployment state: phase/kind + the deploy lease + the last
--- outcome — the single authority for "is a deploy running, of what kind"
--- (replaces cluster_update_lock + session-name probing; R1 wave, Task
--- #1021). Singleton row (id=1 CHECK); `phase` is stable/updating/settling,
--- `kind` names the orchestration (rollout/restart/update), `holder`+`expires_at`
--- are the deploy lease, and `outcome` is the most recent orchestration result —
--- a RECORD, never a phase (a failure is a fact in here). shared/cluster_lock.py
--- acquires/renews/releases the lease; shared/last_update.py mirrors the last
--- outcome from cluster_last_update.
+-- Cluster singleton row (id=1 CHECK). It holds the client-side code-version
+-- gate's minimum (base/db/code_version_gate.py); the deploy lease, the last
+-- update's outcome and the publication evidence it once carried are retired
+-- (decisions/2026-10-01-contract-the-retired-deploy-storage.md).
 CREATE TABLE deployment_state (
     id           INT PRIMARY KEY DEFAULT 1 CHECK (id = 1),
-    phase        TEXT NOT NULL DEFAULT 'stable'
-                 CHECK (phase IN ('stable', 'updating', 'settling')),
-    kind         TEXT CHECK (kind IN ('rollout', 'restart', 'update')),
-    holder       TEXT,
-    acquired_at  TIMESTAMPTZ,
-    expires_at   TIMESTAMPTZ,
-    settle_hosts TEXT[],
-    settle_note  TEXT,
-    settle_started_at TIMESTAMPTZ,
-    -- last_outcome: the most recent orchestration result — a RECORD, never a
-    -- phase (a failure is a fact in here; the enumeration is the same six
-    -- values shared/last_update.py already serves). outcome stays NULL while a
-    -- rollout executes, and stays NULL if the orchestration dies: the reader
-    -- derives RUNNING/ORPHANED from the deploy lease, exactly as
-    -- shared/last_update.py does for cluster_last_update today.
-    outcome      TEXT CHECK (outcome IN
-                    ('clean', 'recovered', 'incomplete', 'aborted', 'running', 'orphaned')),
-    failing_step TEXT,
-    started_at   TIMESTAMPTZ,
-    ended_at     TIMESTAMPTZ,
-    origin       TEXT,
-    target_sha   TEXT,
-    observed_by  TEXT,
-    log_path     TEXT,
-    pin_advanced BOOLEAN NOT NULL DEFAULT FALSE,
-    -- Operation-bound typed evidence, not an independent registry. NULL refuses.
-    managed_writer_evidence JSONB
+    -- The lowest code version allowed to write (client-side gate,
+    -- base/db/code_version_gate.py): raised to the gateway's own version at every
+    -- gateway start, read by every pooled session. 0 = nothing recorded yet.
+    min_code_version BIGINT NOT NULL DEFAULT 0
 );
 
 INSERT INTO deployment_state (id) VALUES (1) ON CONFLICT (id) DO NOTHING;
 
 COMMENT ON TABLE deployment_state IS
-    'Cluster-level deployment state: phase/kind + the deploy lease + last outcome — the single authority for "is a deploy running, of what kind" (replaces cluster_update_lock + session probing; R1 wave, Task #1021).';
+    'Cluster singleton row (id=1) holding the code-version gate''s minimum, min_code_version. The deploy lease, last-update outcome and publication evidence it once carried were retired (decisions/2026-10-01-contract-the-retired-deploy-storage.md).';
 
-COMMENT ON COLUMN deployment_state.managed_writer_evidence IS
-    'Versioned operation-bound managed-writer closure evidence; NULL is unknown, never permission.';
-
--- Runtime admission must serialize with rollout writers, but agent processes
--- dial as ava_runner and must not receive UPDATE on deployment_state. This
--- fixed security-definer operation grants only the row lock; callers still
--- read the publication columns through their ordinary SELECT privilege.
-CREATE OR REPLACE FUNCTION public.lock_runtime_publication_admission()
-RETURNS void
-LANGUAGE sql
-SECURITY DEFINER
-SET search_path = pg_catalog
-AS $function$
-    SELECT NULL::void
-    FROM public.deployment_state
-    WHERE id = 1
-    FOR UPDATE
-$function$;
-
-REVOKE ALL ON FUNCTION public.lock_runtime_publication_admission() FROM PUBLIC;
-
-DO $$
-BEGIN
-    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'ava_runner') THEN
-        GRANT EXECUTE ON FUNCTION public.lock_runtime_publication_admission() TO ava_runner;
-    END IF;
-END
-$$;
-
-COMMENT ON FUNCTION public.lock_runtime_publication_admission() IS
-    'Take the deployment publication row lock for least-privilege runtime admission without granting rollout writes.';
+COMMENT ON COLUMN deployment_state.min_code_version IS
+    'Lowest code version (first-parent commit count of the process''s loaded commit) allowed to write; every gateway start raises it with GREATEST, every pooled session reads it and a lower process exits (decisions/2026-09-30-client-side-code-version-gate.md). Lowered only by hand after a rollback.';
 
 -- ─────────────── host_deploy_state (R1 — Task #1021) ───────────────
--- Host-level deploy posture + updater lease, one row per machine (replaces the
--- cluster_paused file, updating.flag, session probing and updater-log-mtime
--- liveness; R1 wave, Task #1021). `posture` is idle/paused/converging;
--- `updater_lease_expires_at` is the updater process's lease. Owned by
--- shared/host_deploy_state.py.
+-- Host-level deploy posture, one row per machine (replaces the cluster_paused
+-- file, updating.flag and session probing; R1 wave, Task #1021). `posture` is
+-- idle/paused. Owned by base/deploy/state/host_deploy_state.py.
 CREATE TABLE host_deploy_state (
     machine                  TEXT PRIMARY KEY,
     posture                  TEXT NOT NULL DEFAULT 'idle'
-                             CHECK (posture IN ('idle', 'paused', 'converging')),
-    updater_lease_expires_at TIMESTAMPTZ,
-    -- the pause-window anchor: written at the pause transition (posture ->
-    -- 'paused'), preserved through 'converging', cleared at idle/unpause. The
-    -- updater-outcome reader uses it to scope "which log runs belong to this
-    -- pause window" (replaces the cluster_paused file mtime; Task #1021).
-    paused_at                 TIMESTAMPTZ,
-    -- The stranded-hold record (task #3132): set while this host's pause is a
-    -- maintenance hold that has lost its owner (a failed updater leg left it).
-    -- Read by the gateway-side alarm + every roster surface, because the held
-    -- host's own probe is usually down with it.
-    stranded_hold_since      TIMESTAMPTZ,
-    stranded_hold_reason     TEXT,
-    -- The bounded automatic recovery of that hold (task #3142): per-episode
-    -- attempt budget + the latest attempt's outcome note. Written by the pause
-    -- controller (reservation) and the detached recovery executor; cleared with
-    -- the record above, so each episode starts with a fresh budget. See
-    -- ops/hold_recovery.py and cli/commands/_hold_recover.py.
-    stranded_hold_attempts      INTEGER NOT NULL DEFAULT 0,
-    stranded_hold_attempted_at  TIMESTAMPTZ,
-    stranded_hold_recovery_note TEXT,
+                             CHECK (posture IN ('idle', 'paused')),
     updated_at               TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
 COMMENT ON TABLE host_deploy_state IS
-    'Host-level deploy posture + updater lease, one row per machine (replaces the cluster_paused file, updating.flag, session probing and updater-log-mtime liveness; R1 wave, Task #1021).';
-
-COMMENT ON COLUMN host_deploy_state.stranded_hold_since IS
-    'When this host''s pause became a STRANDED maintenance hold — an ownerless '
-    'hold left by a failed updater leg; NULL when no such record. Stamped once '
-    'by the pause controller and preserved until the verdict clears (task #3132).';
-
-COMMENT ON COLUMN host_deploy_state.stranded_hold_reason IS
-    'The updater verdict that left the stranded hold (e.g. "updater exited '
-    'rc=1"); display/alert context, never a judgment input (task #3132).';
-
-COMMENT ON COLUMN host_deploy_state.stranded_hold_attempts IS
-    'Automatic recovery attempts this stranded-hold episode has consumed (task '
-    '#3142); reset when the record clears.';
-
-COMMENT ON COLUMN host_deploy_state.stranded_hold_attempted_at IS
-    'Postgres timestamp of the last reserved automatic recovery attempt (task '
-    '#3142).';
-
-COMMENT ON COLUMN host_deploy_state.stranded_hold_recovery_note IS
-    'The latest recovery attempt''s outcome or error summary, for the '
-    'operator; display context, never a judgment input (task #3142).';
-
--- ─────────────── cluster_pin ───────────────
--- The cluster's pinned commit (cluster_target_sha) — the standing record of which
--- git commit the whole cluster should be on. The gateway writes it after a
--- rollout reaches its target; `ava status` compares each node's HEAD against it to
--- surface drift. The persisted form of the per-rollout target_sha (the SHA-pinned
--- rollout); first step of commit-level pinning (persist + visualize now, fail-fast
--- later). Singleton row; target_sha NULL = no rollout has pinned yet.
--- See future/infra/commit-pinned-cluster.md.
-CREATE TABLE cluster_pin (
-    id         INT PRIMARY KEY DEFAULT 1 CHECK (id = 1),
-    target_sha TEXT,
-    updated_at TIMESTAMPTZ,
-    updated_by TEXT,
-    last_known_good_sha TEXT,
-    last_known_good_at TIMESTAMPTZ,
-    pending_known_good_sha TEXT,
-    pending_known_good_at TIMESTAMPTZ
-);
-INSERT INTO cluster_pin (id, target_sha) VALUES (1, NULL);
-
--- ─────────────── cluster_last_update ───────────────
--- The last cluster update's outcome, as a first-class fact rather than an inference
--- from a pin/head mismatch. A failed rollout used to surface only as a yellow
--- warning on a sha mismatch, with no statement that an update had failed, when,
--- toward what, or why (the 2026-07-30 incident). Singleton, like cluster_pin: one
--- standing record, overwritten by each rollout — so a successful one CLEARS a
--- previous failure by replacing it.
---
--- outcome is NULL while a rollout executes, and STAYS NULL if its orchestration
--- dies. That is the design: the row is written ahead of the work, and a NULL
--- outcome whose holder no longer holds the deploy lease is how a reader observes
--- a death the dying process could not report. See shared/last_update.py.
-CREATE TABLE cluster_last_update (
-    id           INT PRIMARY KEY DEFAULT 1 CHECK (id = 1),
-    target_sha   TEXT,
-    origin       TEXT,
-    holder       TEXT,
-    started_at   TIMESTAMPTZ,
-    ended_at     TIMESTAMPTZ,
-    outcome      TEXT,
-    failing_step TEXT,
-    -- An EXTERNAL observer's sentence about this attempt. The orchestration that
-    -- dies files nothing, but the processes that clean up after it — today the
-    -- auto-rollback, which the health probe shells into — provably witness the
-    -- death. They record what they did ("rolled back to X"), which is the half
-    -- that makes the surfaced failure actionable rather than merely visible.
-    observed_by  TEXT,
-    -- The rollout session's own log file, recorded by the intent write from the
-    -- path spawn_rollout created before launching the orchestration. Named here so
-    -- a surface can point at THE log instead of the rollout-<epoch>.log glob; NULL
-    -- for a foreground `ava update --local`, which has no log of its own.
-    log_path     TEXT,
-    pin_advanced BOOLEAN NOT NULL DEFAULT FALSE
-);
-INSERT INTO cluster_last_update (id) VALUES (1);
+    'Host-level deploy posture (idle/paused), one row per machine: written by ava stop, pause, maintenance and start; read by the gateway 503 middleware, ava status and the deploy window.';
 
 -- ─────────────── cluster_defaults ───────────────
 -- Cluster-level defaults a NEW agent's birth stamp reads. Singleton row; today it
@@ -1417,7 +1247,7 @@ INSERT INTO cluster_last_update (id) VALUES (1);
 -- above this section's neighbours: config is single-source in each unit's `.env`).
 -- Nothing reads this into `settings` and no process consults it for its own
 -- behavior; it is an input to exactly one event — resolving a `lifecycle="frozen"`
--- field at agent birth (shared/birth_config.py) — whose output is written onto the
+-- field at agent birth (base/agents/birth_config.py) — whose output is written onto the
 -- agent's own `agents_meta.birth_config`.
 --
 -- llm_model NULL = no cluster choice; birth resolution falls through to the
@@ -1489,42 +1319,6 @@ CREATE TABLE schedule_fire_log (
     created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
     UNIQUE (schedule_id, slot_fire_at)
 );
-
--- ─────────────── agent_watchers (R1 — Task #1021) ───────────────
--- The watcher registry — the "should it exist?" half of the design's
--- registry × lease frame for ava.watcher.at/cron/launch sessions. Written at
--- spawn; a watcher that exits CLEANLY deletes its own row; a KILLED watcher
--- (stop / rollout reap / SIGKILL) leaves the row, and the agent's boot
--- reconcile rebuilds cron watchers from the stored expression or marks
--- one-shots 'missed'. Liveness is the session itself, so there is no lease
--- column.
-CREATE TABLE agent_watchers (
-    session_id     INTEGER NOT NULL,      -- the watcher's shell-session id (per-agent counter)
-    agent_id       BIGINT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,  -- the spawning agent
-    PRIMARY KEY (agent_id, session_id),
-    kind           TEXT NOT NULL CHECK (kind IN ('at', 'cron', 'launch')),
-    name           TEXT NOT NULL,         -- the lowercase slug
-    -- rebuild source of truth — the payload each kind was spawned with:
-    message        TEXT,                  -- at/cron wake message
-    fires_at       TIMESTAMPTZ,           -- kind='at'
-    cron_expr      TEXT,                  -- kind='cron'
-    cron_timezone  TEXT,                  -- kind='cron'
-    cron_end_at    TIMESTAMPTZ,           -- kind='cron' (NULL = standing)
-    timeout_secs   REAL,                  -- kind='launch'
-    notify         TEXT NOT NULL DEFAULT 'always'
-                   CHECK (notify IN ('always', 'failure', 'agent')),  -- completion notice policy
-    template_version INTEGER,             -- watcher template generation at spawn (issue #1330)
-    generation     TEXT,                  -- PTY allocation generation at spawn (NULL = legacy)
-    status         TEXT NOT NULL DEFAULT 'running'
-                   CHECK (status IN ('running', 'rebuilt', 'missed', 'reaped')),
-    created_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
-    updated_at     TIMESTAMPTZ NOT NULL DEFAULT now()
-);
-
-CREATE INDEX agent_watchers_agent_idx ON agent_watchers (agent_id);
-
-COMMENT ON TABLE agent_watchers IS
-    'Watcher registry: every ava.watcher.at/cron/launch session, keyed by its shell-session id. Written at spawn, deleted on clean exit; a killed watcher leaves its row and the agent boot reconcile rebuilds current-generation cron / marks missed one-shots. Superseded generation rows are retained as reaped history (R1 wave, Task #1021).';
 
 -- ─────────────── agent_presets ───────────────
 -- Named config templates for spawning agents. A preset bundles a flat per-agent
@@ -1599,7 +1393,7 @@ CREATE INDEX IF NOT EXISTS idx_mcp_clients_token_hash ON mcp_clients (token_hash
 -- decisions/2026-08-21-extension-ownership-three-tiers.md.
 
 CREATE TABLE extension_blobs (
-    content_hash TEXT PRIMARY KEY,      -- shared.install_registry.tree_hash of the landed tree
+    content_hash TEXT PRIMARY KEY,      -- base.packages.extensions.install_registry.tree_hash of the landed tree
     archive      BYTEA NOT NULL,        -- tar of that tree, IGNORED_NAMES excluded
     size_bytes   INTEGER NOT NULL,
     created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -1607,8 +1401,8 @@ CREATE TABLE extension_blobs (
     -- trees (markdown, a little Python); large artifacts are host provisioning
     -- and do not belong in the cluster's data plane. 8 MiB is far above any
     -- real package and far below "someone put a model checkpoint in Postgres".
-    -- shared/extension_registry.py:MAX_BLOB_BYTES carries the same number and
-    -- tests/shared/test_extension_registry.py pins the two together by writing
+    -- base/packages/extensions/registry.py:MAX_BLOB_BYTES carries the same number and
+    -- base/packages/extensions/tests/test_extensions_registry.py pins the two together by writing
     -- exactly the cap and exactly one byte over.
     CONSTRAINT extension_blobs_size_cap CHECK (size_bytes > 0 AND size_bytes <= 8388608),
     -- The declared size must BE the archive's size — otherwise the cap is
@@ -1793,7 +1587,7 @@ CREATE INDEX agent_impersonation_messages_unacknowledged_delivery
     WHERE acknowledged_at IS NULL;
 
 -- Every termination writer (including force/reaper) revokes in its own atomic
--- status transaction. Restart uses 'restarting' and preserves the active lease.
+-- status transaction. Restart keeps the status and preserves the active lease.
 -- Protocol-v1 manifest admission closes with the lease, like every other end.
 CREATE OR REPLACE FUNCTION revoke_terminated_impersonation() RETURNS trigger AS $$
 DECLARE
@@ -1879,7 +1673,7 @@ CREATE INDEX agent_impersonation_entries_created ON agent_impersonation_entries(
 -- back. UPDATE/DELETE stay out — the preserve trigger rejects rewrites and no
 -- runner path updates rows. Gated on the role's existence: fresh bootstrap
 -- applies this baseline before install birth creates ava_runner, and
--- shared/cluster/provision.py's ensure_runner_role grants the surface at birth.
+-- base/cluster/authority/groups.py's ensure_groups grants the surface at birth.
 DO $$
 BEGIN
     IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'ava_runner') THEN
@@ -2304,7 +2098,7 @@ CREATE TRIGGER inbound_messages_impersonation_history AFTER INSERT ON inbound_me
 -- ─────────────── plugin_stats ───────────────
 -- Runtime values behind declared statistics-panel cards
 -- (`contributions.ui.stats`): one upsert-only row per (plugin, id), written by
--- the plugin's own refresh code through shared/plugin_stats.py and read into
+-- the plugin's own refresh code through base/packages/plugins/stats.py and read into
 -- GET /api/stats/dashboard. A declared card with no row is the console's
 -- empty state; a failed refresh writes status=error with the reason in detail,
 -- and a value that stops being refreshed keeps its row so staleness is visible.
@@ -2328,7 +2122,7 @@ COMMENT ON TABLE plugin_stats IS
 -- SELECT; no DELETE (a card that stops being reported keeps its last value and
 -- updated_at, which is what makes staleness visible). Gated on the role's
 -- existence: fresh bootstrap applies this baseline before install birth
--- creates ava_runner, and shared/cluster/provision.py's ensure_runner_role
+-- creates ava_runner, and base/cluster/authority/groups.py's ensure_groups
 -- grants the same surface at birth.
 DO $$
 BEGIN
@@ -2386,7 +2180,7 @@ COMMENT ON TABLE understanding_nodes IS
 -- when a rebuild re-cuts the same stretch. Gated on the role's existence:
 -- fresh bootstrap applies this baseline before install birth creates
 -- ava_runner, and
--- shared/cluster/provision.py's ensure_runner_role grants the same surface at
+-- base/cluster/authority/groups.py's ensure_groups grants the same surface at
 -- birth.
 DO $$
 BEGIN
@@ -2443,7 +2237,7 @@ COMMENT ON TABLE hierarchy_jobs IS
 -- (`mark_compact_boundary`'s async twin) — idempotent via the live partial
 -- unique index, best-effort by design. Gated on the role's existence (fresh
 -- bootstrap applies this baseline before install birth creates ava_runner),
--- and shared/cluster/provision.py's ensure_runner_role grants the same
+-- and base/cluster/authority/groups.py's ensure_groups grants the same
 -- surface at birth.
 DO $$
 BEGIN
@@ -2491,13 +2285,13 @@ COMMENT ON TABLE hierarchy_worker_breaker IS
     'Regeneration circuit breaker (task #4674): singleton row; active trip = reset_at IS NULL; operators reset with reset_at + reset_note; re-arms (rearmed_at) only after a reset and a cooled window.';
 
 -- ─────────────── schema_migrations ───────────────
--- Applied-migration registry — maintained by `shared.migrations`. Keyed by
+-- Applied-migration registry — maintained by `base.deploy.schema.migrations`. Keyed by
 -- migration NAME (an applied SET, not a high-water integer). This whole file is
 -- the squashed baseline, so a fresh DB stamps the baseline sentinel and any
 -- non-idempotent deltas already folded into this schema instead of replaying
 -- them. Post-baseline deltas live in
 -- `migrations/YYYYMMDDTHHMMSS_*.sql`; after a successful apply the runner INSERTs
--- the new name. Keep `_BASELINE_NAME` in `shared/migrations.py` in sync with the
+-- the new name. Keep `_BASELINE_NAME` in `base/deploy/schema/migrations.py` in sync with the
 -- sentinel below (CI lint checks it).
 CREATE TABLE schema_migrations (
     name       TEXT PRIMARY KEY,

@@ -22,7 +22,7 @@ import time
 import httpx
 import pytest
 
-from shared.agents import AgentStatus
+from base.agents import AgentStatus
 from tests.e2e._db import wait_for_status
 from tests.e2e._env import E2EEnv
 from tests.e2e.fakes.scenarios.error_recovery import ERROR_MSG, RECOVERY_REPLY

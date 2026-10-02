@@ -4,7 +4,7 @@
 //
 // A theme pack is a partial map of the console's own `:root` color tokens
 // (globals.css) to color literals, validated at manifest load
-// (`shared/plugin_ui_contributions.py`). The console never runs plugin code to
+// (`base/packages/plugins/ui_contributions.py`). The console never runs plugin code to
 // render one: it sets the declared custom properties on the root element and
 // the app's existing components re-read them like any other token change.
 

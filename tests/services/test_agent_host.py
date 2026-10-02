@@ -37,19 +37,19 @@ from psycopg_pool import AsyncConnectionPool
 from pydantic import BaseModel, ConfigDict, Field
 
 import ava.agent_identity
-from agent.corpse_reap import ReapedCorpse
-from agent.hosted_ownership import TurnFatalStamp, TurnSettlement
+from agent.ownership.corpse_reap import ReapedCorpse
+from agent.ownership.hosted import TurnFatalStamp, TurnSettlement
+from base.agents.context import AvaContext
+from base.config import settings
+from base.config.turn_view import turn_settings
+from base.lm.factory import validate_model_config
+from base.packages.plugins.config_registration import _PLUGIN_CONFIG_CLASSES, _PLUGIN_CONFIGS
+from base.packages.plugins.config_view import turn_plugin_config
 from services.agent_host import dispatcher, settlement
 from services.agent_host.dispatcher import TurnScheduler
 from services.agent_host.host import AgentHost
 from services.agent_host.runtime import TurnOutcome, _config_fingerprint
-from shared.config import settings
-from shared.config.turn_view import turn_settings
-from shared.context import AvaContext
-from shared.lm.factory import validate_model_config
-from shared.plugin_config_registry import _PLUGIN_CONFIG_CLASSES, _PLUGIN_CONFIGS
-from shared.plugin_config_view import turn_plugin_config
-from tests.shared.poll_until import poll_until_async
+from tests.base.poll_until import poll_until_async
 
 
 class _HostPluginConfig(BaseModel):
@@ -298,7 +298,7 @@ def _stub_host_transitions(
     flip: Callable[..., Awaitable[bool]],
 ) -> list[int]:
     import services.agent_host.host as host_mod
-    from shared.runtime_incarnation import RuntimeIncarnation
+    from base.native_process.runtime_incarnation import RuntimeIncarnation
 
     stamps: list[int] = []
 
@@ -309,7 +309,6 @@ def _stub_host_transitions(
         owner: UUID,
         *,
         expected_from: str,
-        publication: object | None = None,
     ) -> RuntimeIncarnation | None:
         if not await flip(pool, agent_id, "running", expected_from=expected_from):
             return None
@@ -396,7 +395,7 @@ def wired(monkeypatch: pytest.MonkeyPatch, host_plugin: None) -> _Build:
         # settlement and refusal are covered by test_hosted_force_quiescence.
         return False
 
-    monkeypatch.setattr("shared.hosted_force.original_host_force", _no_force)
+    monkeypatch.setattr("base.agents.incarnation.hosted_force.original_host_force", _no_force)
 
     def _build(
         rows: dict[int, _Row], results: dict[int, list[dict[str, Any]]] | None = None
@@ -497,7 +496,7 @@ class TestPoolIsolation:
     ) -> None:
         """A busy turn may use the work pool without consuming control capacity."""
         import services.agent_host.host as host_mod
-        from shared.runtime_incarnation import RuntimeIncarnation
+        from base.native_process.runtime_incarnation import RuntimeIncarnation
 
         rows = {11: _Row(status="idling")}
         original, graph, turn_pool = wired(rows)
@@ -511,7 +510,6 @@ class TestPoolIsolation:
             owner: UUID,
             *,
             expected_from: str,
-            publication: object | None = None,
         ) -> RuntimeIncarnation:
             assert expected_from == "idling"
             calls.append(("admit", pool))
@@ -536,7 +534,7 @@ class TestPoolIsolation:
 
         monkeypatch.setattr(host_mod, "admit_hosted_runtime", admit)
         monkeypatch.setattr(settlement, "settle_and_stamp_turn", settle_and_stamp)
-        monkeypatch.setattr("shared.hosted_force.original_host_force", force)
+        monkeypatch.setattr("base.agents.incarnation.hosted_force.original_host_force", force)
         host = AgentHost(
             pool=cast(AsyncConnectionPool[Any], turn_pool),
             control_pool=cast(AsyncConnectionPool[Any], control_pool),
@@ -565,7 +563,7 @@ class TestSettlementReconciles:
     WHEN each pass dispatches — after the settle, and never for a crash.
     Their own gates live in `test_agent_host_abort_reconcile.py` /
     `test_agent_host_turn_reconcile.py`; the row-visible split in
-    `tests/agent/test_reconcile_after_abort.py`.
+    `services/agent_host/tests/test_reconcile_after_abort.py`.
     """
 
     async def _run_ending(
@@ -650,7 +648,7 @@ class TestConcurrentAgentIsolation:
         pass by running to completion before the other starts — which is exactly
         how a process-per-agent assumption would sneak through.
         """
-        # Ids 11/22, never 1: tests/conftest.py pins the session-global process
+        # Ids 11/22, never 1: tests/fixtures/env_bootstrap.py pins the session-global process
         # slot `ava.agent_identity._agent_id = 1` as a placeholder, so an agent numbered 1
         # would read back correctly even if the turn bind did nothing at all.
         rows = {
@@ -691,10 +689,10 @@ class TestConcurrentAgentIsolation:
 
         Asserted on the turn contextvar rather than `ava.agent_identity.agent_id()`,
         because that read legitimately falls through to the process bootstrap
-        slot — which tests/conftest.py pins to 1 for the whole session, and which
+        slot — which tests/fixtures/env_bootstrap.py pins to 1 for the whole session, and which
         the real host never sets at all (it never calls `establish`).
         """
-        from shared.turn_identity import current_turn_agent_id
+        from base.native_process.turn_identity import current_turn_agent_id
 
         host, _, _ = wired({11: _Row(overlay={"llm_model": "model-for-11"})})
         assert current_turn_agent_id() is None
@@ -879,7 +877,7 @@ class TestTurnLoop:
         self, wired: _Build, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """Renewal first, reap second: a reap failure must not starve leases.
-        The reap publishes each corpse snapshot itself (agent/corpse_reap),
+        The reap publishes each corpse snapshot itself (agent/ownership/corpse_reap.py),
         and the reaped corpses' recovery attempt rides right after the reap."""
         import services.agent_host.host as host_mod
 
@@ -974,7 +972,7 @@ class TestTurnLoop:
         self, wired: _Build, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         import services.agent_host.host as host_mod
-        from shared.runtime_incarnation import RuntimeIncarnation
+        from base.native_process.runtime_incarnation import RuntimeIncarnation
 
         flips: list[tuple[int, str, str]] = []
 
@@ -1028,7 +1026,7 @@ class TestTurnLoop:
     ) -> None:
         """Hosted exit uses the admitted owner's durable apply, not process exit RPC."""
         import services.agent_host.host as host_mod
-        from shared.runtime_incarnation import RuntimeIncarnation
+        from base.native_process.runtime_incarnation import RuntimeIncarnation
 
         notified: list[int] = []
 
@@ -1059,7 +1057,7 @@ class TestTurnLoop:
     ) -> None:
         """A returned graph releases its cache before the owner-fenced application."""
         import services.agent_host.host as host_mod
-        from shared.runtime_incarnation import RuntimeIncarnation
+        from base.native_process.runtime_incarnation import RuntimeIncarnation
 
         notified: list[int] = []
 
@@ -1107,7 +1105,7 @@ class TestTurnLoop:
         recovery turn it just scheduled."""
         import time as _time
 
-        from agent.turn_progress import _PROGRESS, turn_progress_age_s
+        from agent.turn.progress import _PROGRESS, turn_progress_age_s
 
         host, _, _ = wired({11: _Row(overlay={"llm_model": "model-for-11"})})
         # A stale entry as a long-ago turn would leave behind...
@@ -1128,7 +1126,7 @@ class TestTurnLoop:
         """
         import time as _time
 
-        from agent.turn_progress import _PROGRESS, turn_progress_age_s
+        from agent.turn.progress import _PROGRESS, turn_progress_age_s
 
         host, _, _ = wired({11: _Row(status="terminated")})
         _PROGRESS[11] = [_time.monotonic() - 99999.0]
@@ -1168,7 +1166,7 @@ class TestTurnStallGuard:
     """
 
     async def _stall_settings(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        from shared.config import settings
+        from base.config import settings
 
         monkeypatch.setattr(settings.daemon, "host_turn_progress_scan_interval_seconds", 0.01)
         monkeypatch.setattr(settings.daemon, "host_turn_no_progress_timeout_seconds", 0.05)
@@ -1202,7 +1200,7 @@ class TestTurnStallGuard:
         self, wired: _Build, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         import services.agent_host.stall_guard as guard_mod
-        from agent.turn_progress import mark_turn_progress
+        from agent.turn.progress import mark_turn_progress
 
         await self._stall_settings(monkeypatch)
         host, _, _ = wired({11: _Row(overlay={"llm_model": "model-for-11"})})
@@ -1297,12 +1295,10 @@ class TestRunnability:
         assert host.stats.wakes_skipped == 1
         assert host.stats.turns_started == 0
 
-    @pytest.mark.parametrize("status", ["terminated", "restarting"])
-    async def test_unrunnable_statuses_are_skipped(self, wired: _Build, status: str) -> None:
+    async def test_a_terminated_agents_wake_is_skipped(self, wired: _Build) -> None:
         """A terminated agent's wake belongs to the delivery watchdog's resurrect
-        path; `restarting` belongs to the respawn path. Either state means someone
-        else owns this row right now."""
-        host, graph, _ = wired({1: _Row(status=status)})
+        path, so someone else owns this row right now."""
+        host, graph, _ = wired({1: _Row(status="terminated")})
         await asyncio.wait_for(host.run_turn(1), 2)
         assert graph.observations == []
         assert host.stats.wakes_skipped == 1
@@ -1428,7 +1424,7 @@ class TestNormalizedModelConfig:
 
     @pytest.fixture(autouse=True)
     def _load_provider_plugins(self) -> None:
-        from shared.lm.plugin_providers import ensure_provider_plugins_loaded
+        from base.lm.plugin_providers import ensure_provider_plugins_loaded
 
         ensure_provider_plugins_loaded()
 
@@ -1436,7 +1432,7 @@ class TestNormalizedModelConfig:
     def withdrawn_model(self, monkeypatch: pytest.MonkeyPatch, _load_provider_plugins: None) -> str:
         from dataclasses import replace
 
-        from shared.lm.registry import MODELS
+        from base.lm.registry import MODELS
 
         model = "deepseek-retired-fixture"
         monkeypatch.setitem(
@@ -1632,7 +1628,7 @@ class TestBounds:
         self, wired: _Build, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """An explicitly configured admission bound still queues excess agents."""
-        from shared.config import settings
+        from base.config import settings
 
         monkeypatch.setattr(settings.daemon, "host_max_concurrent_turns", 2)
         rows = {i: _Row() for i in (1, 2, 3)}
@@ -1661,7 +1657,7 @@ class TestBounds:
         """Admission precedes the runtime claim: an agent queued for a slot has
         touched no row, runtime or checkpoint — and the queue is visible while
         it waits (task #3584 review: lock the pre-claim property in)."""
-        from shared.config import settings
+        from base.config import settings
 
         monkeypatch.setattr(settings.daemon, "host_max_concurrent_turns", 1)
         host, graph, _ = wired({1: _Row(), 2: _Row()})
@@ -1691,7 +1687,7 @@ class TestBounds:
     async def test_the_lru_cap_evicts_the_least_recently_used(
         self, wired: _Build, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        from shared.config import settings
+        from base.config import settings
 
         monkeypatch.setattr(settings.daemon, "host_agent_cache_size", 2)
         host, _, _ = wired({i: _Row() for i in (1, 2, 3)})
@@ -1706,7 +1702,7 @@ class TestBounds:
     ) -> None:
         """The size cap alone keeps a long-silent agent warm forever on a
         lightly loaded runner; the TTL is the other half."""
-        from shared.config import settings
+        from base.config import settings
 
         host, _, _ = wired({i: _Row() for i in (1, 2)})
         await asyncio.wait_for(host.run_turn(1), 2)

@@ -4,7 +4,7 @@
 // create (natural-language via a writer agent, or a raw script), edit, and
 // start/stop/restart/delete.
 //
-// Backed by /api/schedules (gateway/routers/schedules.py). The gateway's
+// Backed by /api/schedules (gateway/schedules/router.py). The gateway's
 // ScheduleManager supervises one session per enabled schedule; this page is
 // the management surface. Supersedes the Cron tab (removed once migration lands).
 

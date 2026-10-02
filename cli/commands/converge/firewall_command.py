@@ -1,7 +1,7 @@
 """`ava firewall` — the standalone face of the ALF allowlist manifest.
 
 The converge step (`firewall.ensure_firewall_allowlist`) converges the
-allowlist automatically on every `ava start` / `ava update`. These verbs give an
+allowlist automatically on every source `ava start`. These verbs give an
 operator the same machinery on demand, without a full converge:
 
 - `ava firewall status` — read-only: verdict, manifest coverage, stale rules,
@@ -19,8 +19,8 @@ from __future__ import annotations
 
 import sys
 
+from base.host import macos_firewall as fw
 from cli.commands.converge.firewall import _report_missing, audit_this_host
-from shared import macos_firewall as fw
 
 
 def cmd_firewall_status() -> int:

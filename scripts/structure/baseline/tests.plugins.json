@@ -5,9 +5,5 @@
     "tests/plugins/test_plugin_metrics_logql.py::test_cost_dashboard_windows_and_telemetry_contract": 15,
     "tests/plugins/test_plugin_metrics_logql.py::test_dashboard_json_matches_core_registrations": 30,
     "tests/plugins/test_plugin_metrics_logql.py::test_pr_flow_panels_match_the_otlp_contract": 27
-  },
-  "files": {
-    "tests/plugins/ava_fleet/test_task_maintenance_daemon.py": 818,
-    "tests/plugins/test_ava_memory_write.py": 1181
   }
 }

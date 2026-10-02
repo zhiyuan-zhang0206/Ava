@@ -34,9 +34,9 @@ from agent.graph.llm_errors import (
     _parse_provider_error_type,
 )
 from agent.llm.cache import prepare_invocation
-from shared.config import settings
-from shared.config.turn_view import turn_settings
-from shared.log import logger
+from base.config import settings
+from base.config.turn_view import turn_settings
+from base.log import logger
 
 
 async def _consume_llm(
@@ -89,8 +89,8 @@ async def _consume_llm(
     assembly — a signature-only block filled with `thinking=""` round-trips
     the endpoint, so no doubled re-request is needed.
     """
-    from shared.lm.factory import provider_key_of_model
-    from shared.lm.registry import resolve_setting
+    from base.lm.factory import provider_key_of_model
+    from base.lm.registry import resolve_setting
 
     model = turn_settings.lm.llm_model
     # One resolution feeds BOTH segments of a stalled call: the stream
@@ -269,7 +269,7 @@ async def _consume_stream_with_stall_timeout(
 
     Extracted to module-level helper: reduces `_llm_node_impl`'s statement
     count (PLR0915) + lets unit tests drive directly
-    (`tests/agent/test_llm_stream_stall.py`).
+    (`agent/graph/llm/tests/test_llm_stream_stall.py`).
     """
     chunk_idx = 0
     first_ts: float | None = None
@@ -351,7 +351,7 @@ async def _stream_with_cache_retry(
     prepare_invocation picks the request shape: a live explicit Gemini cache
     strips the SystemMessage and binds cached_content (tools come from the
     cache); everything else takes the plain path (bind_tools at use site
-    rather than build_chat_model — the factory lives in `shared`, which can't
+    rather than build_chat_model — the factory lives in `base`, which can't
     import agent.llm.execute_code; bind_tools returns a new Runnable, cheap).
     A stale cache reference 403s on the wire — invalidate the memo and rerun
     once on the plain path.
@@ -427,8 +427,8 @@ async def _stream_with_cache_retry(
             (last_ts - first_ts) * 1000.0 if first_ts is not None and last_ts is not None else None
         )
 
-    from shared.lm.concurrency import get_limiter
-    from shared.lm.factory import provider_key_of_model
+    from base.lm.concurrency import get_limiter
+    from base.lm.factory import provider_key_of_model
 
     provider = provider_key_of_model(getattr(llm, "model_name", "") or "")
     async with get_limiter().async_acquire(provider):

@@ -11,12 +11,12 @@ conventions/reachability-and-credentials.md). When `AVA_OBSERVABILITY_URL`
 is empty the check is a no-op: the observatory is local and the `lgtm`
 healthcheck keeps the native stack alive. When it is set, the gateway dials
 the station through the reachability contract — the address the station
-unit advertises in `machine_units` (`shared.machines.unit_dial_url`), not a
-bare connect — and authenticates with the cluster bearer, exactly like the
-collector relay that ships telemetry to it.
+unit advertises in `machine_units` (`base.cluster.machines.unit_dial_url`), not a
+bare connect — and authenticates with the cluster's telemetry token, exactly
+like the collector relay that ships telemetry to it.
 
 The probe is an OTLP round-trip: `POST <advertised url>/v1/traces` with an
-empty `ExportTraceServiceRequest` and `Authorization: Bearer <secret>`. Any
+empty `ExportTraceServiceRequest` and `Authorization: Bearer <telemetry token>`. Any
 2xx counts as alive (the station's `otlp/remote` receiver authenticates and
 accepts the empty batch); a connection failure, timeout, 401, or 4xx/5xx
 means the station's ingress is not serving.
@@ -37,12 +37,12 @@ import urllib.request
 from datetime import UTC, datetime
 from typing import Any
 
-import shared.db
-from shared.config import settings
-from shared.log import init_gateway_process, logger
-from shared.station_endpoint import StationTarget as _StationTarget
-from shared.station_endpoint import resolve_station_target
-from shared.transition import transition_severity
+from base import db
+from base.config import settings
+from base.deploy.transition import transition_severity
+from base.log import init_gateway_process, logger
+from base.telemetry.station_endpoint import StationTarget as _StationTarget
+from base.telemetry.station_endpoint import resolve_station_target, validated_observability_base
 
 _log = logging.getLogger("services.heartbeat.station_probe")
 
@@ -70,11 +70,9 @@ def _configured_observability_base() -> str:
     """The validated AVA_OBSERVABILITY_URL base, or "" when unset/malformed.
 
     The same validation the collector fan-out uses
-    (cli/commands/observability/observatory_urls.py) — the two consumer paths can never
+    (base.telemetry.station_endpoint) — the two consumer paths can never
     disagree about where the station is.
     """
-    from cli.commands.observability.observatory_urls import validated_observability_base
-
     return validated_observability_base(settings.observability.observability_url)
 
 
@@ -111,7 +109,10 @@ def resolve_target() -> _StationTarget | None:
 
 
 def _station_answers(url: str) -> bool:
-    """One bearer-authenticated OTLP round-trip; any 2xx = the ingress serves."""
+    """One bearer-authenticated OTLP round-trip; any 2xx = the ingress serves.
+
+    The bearer is the cluster's telemetry token, derived from this gateway's
+    human secret (the station accepts the same token from its capability)."""
     secret = settings.data_plane.cluster_secret
     if not secret:
         # A remote observatory without a cluster secret cannot authenticate a
@@ -123,7 +124,12 @@ def _station_answers(url: str) -> bool:
             url,
         )
         return True
-    headers = {"Authorization": f"Bearer {secret}", "Content-Type": "application/json"}
+    from base.cluster.authority.api import telemetry_token
+
+    headers = {
+        "Authorization": f"Bearer {telemetry_token(secret)}",
+        "Content-Type": "application/json",
+    }
     req = urllib.request.Request(  # noqa: S310 — advertised private-network endpoint, deliberate
         f"{url.rstrip('/')}/v1/traces",
         method="POST",
@@ -159,7 +165,7 @@ def _alert_edges(target: _StationTarget, *, ok: bool, now: datetime) -> None:
     the shared transition clock, resolve on recovery, IM-notify on notify
     edges. Best-effort: alerting must never break the probe.
     """
-    from shared.alerts import (
+    from base.telemetry.alerts import (
         display_language,
         fingerprint,
         notify_im,
@@ -177,7 +183,7 @@ def _alert_edges(target: _StationTarget, *, ok: bool, now: datetime) -> None:
             return
         identity = {"alertname": _ALERTNAME, "station": target.url}
         try:
-            with shared.db.connect() as conn:
+            with db.connect() as conn:
                 severity = transition_severity(
                     state["transition_since"],
                     now,
@@ -230,7 +236,7 @@ def _alert_edges(target: _StationTarget, *, ok: bool, now: datetime) -> None:
     if not recovered:
         return
     try:
-        with shared.db.connect() as conn:
+        with db.connect() as conn:
             with conn.cursor() as cur:
                 cur.execute(
                     "SELECT starts_at, fingerprint, severity FROM alerts "

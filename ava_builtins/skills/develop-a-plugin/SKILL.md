@@ -8,7 +8,7 @@ description: Develops Ava plugins locally, verifies them across restart, and pro
 Developing a plugin is **L3** of the four-layer modification model (see the
 `ava-modification-layers` skill): it happens entirely inside your deployment,
 gated by the deployment owner. It does **not** ride the kernel pipeline — no
-worktree/PR/CI against the kernel repo, no `ava cluster update`. Design record:
+worktree/PR/CI against the kernel repo, no fleet update. Design record:
 `decisions/2026-08-19-four-layer-modification-model.md`.
 
 **Plugins live in their own repos** (user ruling, issue #42). The builtin
@@ -71,7 +71,7 @@ supply-chain scan that `ava plugins install` runs — read it in full first.
 ### 4. Maintain per-plugin
 
 Version, upgrade, and roll back the plugin against **its own repo**, at the
-restart boundary. `ava cluster update` never touches external plugins — it is
+restart boundary. The fleet update never touches external plugins — it is
 the L4 kernel rollout. Disable is `ava plugins disable <name>`; removal of a
 registry-tracked install is `ava plugins uninstall <name>`.
 

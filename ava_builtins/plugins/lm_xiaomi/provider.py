@@ -11,8 +11,8 @@ if TYPE_CHECKING:
     # `_TYPE_CHECKING_ALLOWED`).
     from langchain_core.language_models.chat_models import BaseChatModel
 
-from shared.lm.effort import clamp_effort
-from shared.lm.provider_api import (
+from base.lm.effort import clamp_effort
+from base.lm.provider_api import (
     BuildContext,
     PricePeriod,
     PriceRates,
@@ -21,7 +21,7 @@ from shared.lm.provider_api import (
     register,
     require_key,
 )
-from shared.lm.registry import ModelSpec, ModelTuning
+from base.lm.registry import ModelSpec, ModelTuning
 
 _MIMO_EFFORT_LEVELS = ("none", "high")
 
@@ -53,7 +53,7 @@ def build(ctx: BuildContext) -> BaseChatModel:
     """mimo-* branch: ReasoningContentChatModel (OpenAI-compatible).
     Auth uses the `api-key` header; deep thinking on/off rides top-level
     `thinking` in the POST body via `mimo_extra_body`."""
-    from shared.lm.compat.openai_reasoning import ReasoningContentChatModel
+    from base.lm.compat.openai_reasoning import ReasoningContentChatModel
 
     # Xiaomi MiMo API is OpenAI-compatible (https://api.xiaomimimo.com/v1).
     # Auth uses the `api-key` header (not the standard `Authorization: Bearer`).
@@ -130,7 +130,7 @@ register(
         ),
         # Removed 2026-09-23: mimo-v2.5-pro-ultraspeed returns "Unsupported
         # model" (checked 2026-09-22). Historical prices remain in
-        # shared/lm/pricing_catalog_archive.json; stale configs fail validation.
+        # base/lm/pricing_catalog_archive.json; stale configs fail validation.
         "mimo-v2.6-pro": ModelSpec(
             provider="mimo",
             spawnable=True,

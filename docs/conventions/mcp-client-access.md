@@ -2,7 +2,7 @@
 
 The gateway exposes the cluster control plane as a standard MCP server over
 [Streamable HTTP] at `/mcp` (design task #1212 step 1; implementation
-[`gateway/mcp_endpoint.py`](../../gateway/mcp_endpoint.ava.okf.md)). Any MCP
+[`gateway/mcp_server/endpoint.py`](../../gateway/mcp_server/docs/mcp-endpoint.ava.okf.md)). Any MCP
 client — Claude Code, Codex, anything speaking the protocol — drives the fleet
 through it: the same seven control tools the stdio `ava mcp serve` offered
 (list_agents / get_agent / spawn_agent / send_message / get_messages /
@@ -16,19 +16,25 @@ The endpoint ships **off** — flag-gated so a cluster that does not use it is
 completely unaffected (off, `/mcp` answers 404):
 
 ```bash
-ava config set AVA_MCP_ENDPOINT_ENABLED=true
-# restart_required=gateway: the flag is read at gateway start
+# in the gateway home's .env, on the gateway host:
+AVA_MCP_ENDPOINT_ENABLED=true
+# then restart the gateway: the flag is read at gateway start
 ```
 
-Enabling it is a cluster config change (`cluster-pinned` scope); do it after
+The flag decides whether MCP client tokens authenticate at all, and those
+tokens outlive every write generation, so no config write sets it: `ava config
+set` (API or `--local`) refuses it and the settings panel shows it read-only,
+as for `AVA_AUTH_MIDDLEWARE_ENABLED`. Edit the gateway `.env` on its host, after
 the rollout that ships the endpoint code.
 
 ## Connect a client
 
-Create one credential per external client through the cluster-authenticated
-admin API. Choose `read` for inspection only, or `write` when the client must
-spawn, message, or terminate agents. The plaintext token appears only in this
-response; the gateway stores its SHA-256 hash:
+Create one credential per external client through the admin API, with the
+human cluster secret (or from a browser session logged in with it). A client
+token outlives every write generation, so a machine API token or a
+runner-minted session gets 403 here. Choose `read` for inspection only, or
+`write` when the client must spawn, message, or terminate agents. The plaintext
+token appears only in this response; the gateway stores its SHA-256 hash:
 
 ```bash
 curl -s http://<gateway-host>/api/mcp/clients \

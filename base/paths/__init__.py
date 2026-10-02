@@ -1,0 +1,322 @@
+"""$AVA_HOME path resolution — single-point entry shared by gateway /
+agent / subprocess.
+
+`base.host.env.dotenv_boot.resolve_ava_home` is the path source (`$AVA_HOME`,
+else `~/.ava`, read on every call); this door adds first-access mkdir side
+effects, so calling a helper means "the directory is ready and writable". The
+three process classes inherit the same variable, no manual passing required.
+The package holds only this door; its doc nodes (`docs/paths.ava.okf.md`,
+`docs/lock-discipline.ava.okf.md`) sit beside it.
+"""
+
+from pathlib import Path
+
+from base.config import settings
+from base.host.env.dotenv_boot import home_checkout_error, resolve_ava_home
+from base.host.private_storage import ensure_private_dir
+
+
+def ava_home() -> Path:
+    """User data root directory; create if missing."""
+    return ensure_private_dir(resolve_ava_home())
+
+
+def run_dir() -> Path:
+    """Runtime directory for pid/sock files ($AVA_HOME/run); create if missing.
+
+    Keeps per-unit ephemeral runtime artifacts (pidfiles and unix sockets)
+    under one subdirectory so the $AVA_HOME top level stays lean."""
+    target = ava_home() / "run"
+    target.mkdir(parents=True, exist_ok=True)
+    return target
+
+
+def pid_path(service_name: str) -> Path:
+    """Pidfile path for a named service ($AVA_HOME/run/<service>.pid).
+
+    The single source of truth for pidfile naming — all daemons write their
+    pid through this function so a future move is one-line."""
+    return run_dir() / f"{service_name}.pid"
+
+
+def plugins_config_path() -> Path:
+    """plugins.json path — returns the path only; load() decides whether to write defaults."""
+    return ava_home() / "plugins.json"
+
+
+def install_registry_path() -> Path:
+    """Install registry file ($AVA_HOME/installed.json) — records externally
+    installed packages and their enable state. Returns the path only; the
+    registry module decides read/write."""
+    return ava_home() / "installed.json"
+
+
+def plugins_dir() -> Path:
+    """External plugin directory (~/.ava/plugins/); create if missing."""
+    target = ava_home() / "plugins"
+    target.mkdir(parents=True, exist_ok=True)
+    return target
+
+
+def repo_root() -> Path:
+    """Repository root, derived from this module's location (`base/paths/__init__.py`)."""
+    return Path(__file__).resolve().parents[2]
+
+
+def prod_service_checkout_error(repo: Path) -> str | None:
+    """Why `repo` must not launch services for this unit, or None when it may.
+
+    The 01:13 worktree accident (Task #966): `repo_root()` is "whoever imported
+    base/paths/__init__.py", and a prod daemon bound to a dev clone's or worktree's
+    code loses its floor when that checkout is deleted — routine worktree
+    cleanup. A home that carries its own `<home>/source` checkout (the prod home
+    `~/.ava`) may only launch services from that checkout; a home with none (a
+    test home) accepts any. The rule is `dotenv_boot.home_checkout_error`, shared
+    with the CLI's pre-Settings gate.
+    """
+    return home_checkout_error(repo)
+
+
+def repo_plugins_dir() -> Path:
+    """Built-in plugin directory (<repo>/ava_builtins/plugins/). Derived from this module's path."""
+    return repo_root() / "ava_builtins" / "plugins"
+
+
+def logs_dir() -> Path:
+    """Per-unit log directory ($AVA_HOME/logs); create if missing."""
+    target = ava_home() / "logs"
+    target.mkdir(parents=True, exist_ok=True)
+    return target
+
+
+def chrome_mcp_socket() -> Path:
+    """Unix socket of the per-machine shared chrome MCP service
+    ($AVA_HOME/run/chrome-mcp.<cdp_port>.sock). Keyed by the CDP port so
+    co-hosted clusters (each with its own browser_cdp_port) get distinct
+    sockets; the per-agent chrome bridge dials this, the daemon listens on it."""
+    return run_dir() / f"chrome-mcp.{settings.services.browser_cdp_port}.sock"
+
+
+def permissions_helper_socket() -> Path:
+    """Unix socket of this cluster's macOS permissions helper daemon
+    ($AVA_HOME/run/permissions-helper.<port>.sock). Keyed by the per-cluster
+    helper port so co-hosted clusters get distinct sockets; the per-agent client
+    dials this, the signed launchd helper listens on it. (The TCC grant the
+    helper relies on is shared machine-wide via a fixed bundle id, but the
+    process and socket are per-cluster.)"""
+    return run_dir() / f"permissions-helper.{settings.services.permissions_helper_port}.sock"
+
+
+def permissions_helper_app_dir() -> Path:
+    """Stable install directory for the macOS permissions-helper app.
+
+    The app lives outside the source checkout so a release checkout cannot
+    replace it or change its freshness metadata beneath a running helper.
+    """
+    return ava_home() / "helper"
+
+
+def traces_dir() -> Path:
+    """Per-unit trace mirror directory ($AVA_HOME/traces); create if missing.
+
+    Holds the local OTLP-JSON span mirror written by the OTel Collector
+    sidecar's file exporter (task #1266): the active `spans.jsonl` plus
+    rotated `spans-<ISO-timestamp>.jsonl` backups, each line one
+    `ExportTraceServiceRequest`. `ava trace ship` replays a window of it
+    straight to Tempo when the live fan-out missed data."""
+    target = ava_home() / "traces"
+    target.mkdir(parents=True, exist_ok=True)
+    return target
+
+
+def otel_collector_dir() -> Path:
+    """Per-unit OTel Collector sidecar root ($AVA_HOME/otel-collector); create
+    if missing.
+
+    Owns the pinned otelcol-contrib binary, the generated config.yaml (from
+    the repo template, baked at converge) and the file_storage persistent
+    queue directory. One sidecar per machine — see
+    `cli/commands/converge/host.py:_ensure_otel_collector_step`."""
+    target = ava_home() / "otel-collector"
+    target.mkdir(parents=True, exist_ok=True)
+    return target
+
+
+def otel_collector_binary() -> Path:
+    """Path of the pinned otelcol-contrib binary."""
+    return otel_collector_dir() / "otelcol-contrib"
+
+
+def otel_collector_config() -> Path:
+    """Path of the generated sidecar config.yaml (baked at converge)."""
+    return otel_collector_dir() / "config.yaml"
+
+
+def memory_dir() -> Path:
+    """Per-unit memory git repo root ($AVA_HOME/memory). Returns the path only;
+    the caller (memory_repo) runs git init / clone.
+
+    On a unit that also carries 'gateway' capability, this is the agent-runner's
+    authoring checkout (machine-<name> branch); the gateway indexes from a
+    separate consolidated checkout returned by gateway_memory_dir()."""
+    return ava_home() / "memory"
+
+
+def gateway_memory_dir() -> Path:
+    """Gateway's consolidated memory checkout path. On a combined unit
+    (gateway+agent-runner on one host) this is $AVA_HOME/gateway/memory to
+    keep the gateway's index source (main branch) separate from the
+    agent-runner's authoring checkout (machine-<name> branch at memory_dir()).
+    On a gateway-only unit it is the same as memory_dir(). Returns the path
+    only."""
+    from base.cluster.machine import is_agent_runner
+
+    if is_agent_runner():
+        return ava_home() / "gateway" / "memory"
+    return memory_dir()
+
+
+def skills_dir() -> Path:
+    """Per-unit skill load dir ($AVA_HOME/skills) — the single directory the
+    skill scanner reads; repo + plugin skills are converged into it."""
+    return ava_home() / "skills"
+
+
+def mcps_dir() -> Path:
+    """Per-unit installed-MCP load dir ($AVA_HOME/mcps) — where `ava mcp install`
+    lands each installed MCP package (`<name>/` holding its own `.mcp.json` +
+    `pyproject.toml` + `.venv`). The MCP config loader scans each `<name>/.mcp.json`
+    here as its installed layer, gated by the install registry; built-in MCPs stay in
+    the repo's `<repo>/ava_builtins/mcps/`. Symmetric with `skills_dir()` / `plugins_dir()`."""
+    return ava_home() / "mcps"
+
+
+def workspace_dir(agent_id: int) -> Path:
+    """Per-agent workspace ($AVA_HOME/workspaces/<agent_id>); create if missing.
+
+    A stable scratch area for files an agent produces or downloads. Survives
+    restarts and termination, is not git-managed, and is never garbage-collected
+    by the framework — cleanup is an ops decision. Cross-agent sharing happens
+    by passing absolute paths in messages, not by writing into each other's
+    workspace."""
+    if agent_id is None:  # pyright: ignore[reportUnnecessaryComparison] — guards a bad call, type hint alone won't catch it at runtime
+        raise ValueError(
+            "workspace_dir(None) — pass a real agent_id. Check "
+            "ava.agent_identity.agent_id() is not None first (pre-bootstrap has no "
+            "workspace); callers that need a pre-bootstrap fallback use Path.home() "
+            "explicitly instead of calling workspace_dir()."
+        )
+    target = ava_home() / "workspaces" / str(agent_id)
+    target.mkdir(parents=True, exist_ok=True)
+    return target
+
+
+def workspace_dir_readonly(agent_id: int) -> Path:
+    """Per-agent workspace path ($AVA_HOME/workspaces/<agent_id>) with NO
+    create side effect — the read path for ANOTHER agent's workspace (the
+    inherited-memory note scans an ancestor's `memory/`). `workspace_dir`
+    deliberately ensures its target; a reader must not manufacture a
+    workspace that does not exist."""
+    return ava_home() / "workspaces" / str(agent_id)
+
+
+def exec_run_dir() -> Path:
+    """Per-unit exec-subprocess scratch dir ($AVA_HOME/run/exec) — request /
+    result envelopes for one execute_code run each (agent/graph/exec/protocol.py),
+    pruned per agent subdir. Create if missing."""
+    target = run_dir() / "exec"
+    target.mkdir(parents=True, exist_ok=True)
+    return target
+
+
+def root_run_dir() -> Path:
+    """ava-root supervisor runtime dir ($AVA_HOME/run/ava-root). Create if missing.
+
+    One directory per (machine x home) unit: the control socket
+    (`ava-root.sock`), the instance lock (`ava-root.lock`), the unit log tree
+    (`logs/<unit>/output.log`) and the generated unit manifest
+    (`manifests.json`) all live here, so the daemon's `--run-dir` argument is
+    this single path."""
+    target = run_dir() / "ava-root"
+    target.mkdir(parents=True, exist_ok=True)
+    return target
+
+
+def root_manifests_path() -> Path:
+    """The K2 unit manifest the root supervisor reads ($AVA_HOME/run/ava-root/manifests.json).
+
+    Regenerated by every root-driven `ava start`
+    (`services.ava_root_glue.manifests.generate`) before the daemon is
+    (re)spawned, so the running tree's shape always matches this file at
+    launch time."""
+    return root_run_dir() / "manifests.json"
+
+
+def quarantined_exec_requests_dir() -> Path:
+    """Per-unit quarantine for exec request envelopes ($AVA_HOME/quarantined-exec-requests).
+
+    Stale evidence moved out of run/exec (base/agents/incarnation/exec_request_evidence.py): the
+    files stay for inspection beside their JSON receipt, one event subdirectory
+    per quarantine pass. Create if missing."""
+    target = ava_home() / "quarantined-exec-requests"
+    target.mkdir(parents=True, exist_ok=True)
+    return target
+
+
+def monitors_dir() -> Path:
+    """Per-unit monitor-script directory ($AVA_HOME/monitors)."""
+    return ava_home() / "monitors"
+
+
+def launch_failures_path() -> Path:
+    """Path of the `$AVA_HOME/last_launch_failures` file — the session names the
+    last `ava start` on this host could not launch.
+
+    Exists because the rollout's local leg runs `ava start` in a FRESH child
+    process (`update._boot_gateway_fresh`), and an exit code cannot carry names.
+    The parent orchestration needs the names to put them in the ROLLOUT
+    aftermath block, and it cannot compute them itself: its own interpreter is
+    the pre-pull one, so its service roster is the old tree's. The child has the
+    new tree's roster and writes what it actually failed to launch.
+
+    Written by every `ava start` (an empty failure set unlinks it), so a read is
+    never stale; taken — read then unlinked — by whoever consumes it.
+
+    Returns the path only; ``base.deploy.lifecycle.launch_failures`` owns read/write.
+    """
+    return ava_home() / "last_launch_failures"
+
+
+def running_sha_path() -> Path:
+    """Path of the `$AVA_HOME/running_sha` file that records the commit the
+    gateway was last started on.
+
+    Written by `ava start` (on every host, regardless of role) right before
+    launching services; read by the update change-detection path so a manual
+    `git pull` between start and update cannot hide code changes (the diff is
+    against the running commit, not the current HEAD). Absent file = first-ever
+    start or uninitialised; the reader falls back to HEAD.
+
+    Returns the path only; ``base.deploy.git.running_sha`` owns read/write.
+    """
+    return ava_home() / "running_sha"
+
+
+def computer_mcp_socket() -> Path:
+    """Unix socket of the per-machine shared computer MCP service
+    ($AVA_HOME/run/computer-mcp.sock). The per-agent bridge / the MCP daemon's
+    direct dial connect here; the computer-mcp daemon listens on it. One
+    service per machine (the desktop is one shared screen), so no port key."""
+    return run_dir() / "computer-mcp.sock"
+
+
+def mcp_daemon_shared_socket() -> str:
+    """Filesystem path of the per-machine shared MCP daemon socket — one
+    socket under `$AVA_HOME/run` serving every agent on the machine (the daemon
+    isolates sessions per client connection; see ava/mcps/_daemon.py). The
+    single source of truth for the naming convention: the daemon binds here and
+    the client (ava.mcps) connects here. Lives in base/ so the agent kernel
+    can import it without going through the agent-facing `ava.mcps`, which
+    AVA_SDK_DISABLE may replace with a stub. Run as an agent-runner service
+    (ops roster session "mcp-daemon"), watchdog-managed like browser-mcp."""
+    return str(run_dir() / "mcp_daemon.sock")

@@ -3,9 +3,10 @@
 Skills under `ava_builtins/skills/` that were **copied from an upstream source
 and adapted**, rather than authored here. One row per vendored skill.
 
-Vendoring is the settled posture for external capability packs
-([`default-skills.md`](../default-skills.md)): an unadapted install carries
-harness-specific machinery that does not hold in Ava, so we copy, strip, rewire
+Vendoring is the settled posture for external capability packs: an unadapted
+install carries machinery specific to whatever other tool it was written for
+(cross-references by that tool's skill namespace, assumptions about that
+tool's native features) that does not hold in Ava, so we copy, strip, rewire
 to `ava.*` idioms, and own the sync cost.
 
 Anything landed here is stamped `trust="builtin"` by converge

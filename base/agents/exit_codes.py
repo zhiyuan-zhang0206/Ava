@@ -1,0 +1,46 @@
+"""Subprocess exit code constants.
+
+Standalone top-level module (not under ava/) — because
+ava/__init__.py triggers `_AvaEnv()` to read env and initialize
+DB/Redis connections, which is only valid in a subprocess; importing
+from an agent loop (agent/) process would blow up. Exit code constants
+themselves have no env dependency; putting them at the top level lets
+both sides import without triggering ava SDK initialization side
+effects.
+"""
+
+IDLE_EXIT_CODE = 42  # `ava.self.terminate()` / `ava.self.restart()`: this turn ends (halted=True)
+SYSTEM_HALT_EXIT_CODE = 43  # `ava.self.compact(summary)`: agent altered control flow
+
+# `ava restart` refused BEFORE stopping anything: its
+# validate-before-kill preflight failed, so the host is untouched and still serving.
+# Read by the detached updater shell, which must recover a host that is DOWN
+# (`ava start`) and must NOT `ava start` over one that is deliberately still up.
+# Distinct from a generic failure (1) precisely because "may be down" is the safe
+# reading of any *other* non-zero code.
+RESTART_DECLINED_EXIT_CODE = 3
+
+# `ava start` / `ava restart` ran every step successfully and launched this host's
+# services, but at least one of them never passed its liveness probe within
+# `base.deploy.progress_timeout.SERVICE_READY_TIMEOUT_S`. The status snapshot printed just
+# before the exit names which (`cli.commands._probe`).
+#
+# Its own code rather than 1, because the two ask a program to do different things.
+# 1 means a start STEP failed — converge, the data plane, migrations, the schema
+# assertion, machine registration — so the host may have no services at all and
+# nothing about it is trustworthy. This code means the sequence completed and the
+# host is up but incompletely: retrying `ava start` is idempotent and reasonable.
+#
+# It must NOT be 3: `RESTART_DECLINED_EXIT_CODE` means "nothing was stopped, host
+# still serving -> do NOT start over it". A restart that stopped services and came
+# back with one not serving is the opposite of that, and routing it into the
+# decline branch would leave a half-down host untouched; the correct response to
+# this code is the idempotent `ava start`.
+SERVICES_NOT_READY_EXIT_CODE = 4
+
+# A service process found the cluster's `deployment_state.min_code_version` above
+# its own code version and exited at once (`base.db.code_version_gate`): it is
+# stale code that must not write. Its own code so an operator reading a unit's
+# last exit tells "refused by the gate, update this host" apart from a crash. It
+# is neither 3 (the host is still serving) nor 4 (the start sequence completed).
+CODE_BEHIND_MINIMUM_EXIT_CODE = 78

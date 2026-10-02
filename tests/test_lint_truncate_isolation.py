@@ -1,9 +1,9 @@
 """The per-test TRUNCATE list stays in sync with the schema.
 
-tests/conftest.py truncates a hand-written table list before every test
+tests/fixtures/provisioning.py truncates a hand-written table list before every test
 (`_PER_TEST_TRUNCATE_TABLES`). A migration adding a new per-test data table
 that nobody adds to that list silently shares state across tests — the R1
-`deployment_state` near-miss and today's `agent_watchers` (audit round-2
+`deployment_state` near-miss and the retired `agent_watchers` (audit round-2
 cc-docs-tests P2) are the shape of that drift. This test derives the real
 isolation closure from the live test DB and fails when a public table is
 outside it:
@@ -24,27 +24,29 @@ from pathlib import Path
 
 import psycopg
 
-from shared.config import settings
+from base.config import settings
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
-_CONFTEST = _REPO_ROOT / "tests" / "conftest.py"
+_PROVISIONING = _REPO_ROOT / "tests" / "fixtures" / "provisioning.py"
 
 
-def _truncate_list_from_conftest() -> set[str]:
-    """AST-parse `_PER_TEST_TRUNCATE_TABLES` from the root conftest — the same
+def _truncate_list_from_provisioning() -> set[str]:
+    """AST-parse `_PER_TEST_TRUNCATE_TABLES` from the provisioning plugin — the same
     source the SQL is built from, so the guard can never drift from it."""
-    tree = ast.parse(_CONFTEST.read_text(encoding="utf-8"))
+    tree = ast.parse(_PROVISIONING.read_text(encoding="utf-8"))
     for node in tree.body:
         if isinstance(node, ast.Assign) and any(
             isinstance(t, ast.Name) and t.id == "_PER_TEST_TRUNCATE_TABLES" for t in node.targets
         ):
-            assert isinstance(node.value, ast.Tuple), "conftest constant must be a tuple literal"
+            assert isinstance(node.value, ast.Tuple), (
+                "provisioning constant must be a tuple literal"
+            )
             values: set[str] = set()
             for elt in node.value.elts:
                 if isinstance(elt, ast.Constant) and isinstance(elt.value, str):
                     values.add(elt.value)
             return values
-    raise AssertionError("_PER_TEST_TRUNCATE_TABLES not found in tests/conftest.py")
+    raise AssertionError("_PER_TEST_TRUNCATE_TABLES not found in tests/fixtures/provisioning.py")
 
 
 _MIGRATIONS_DIR = _REPO_ROOT / "migrations"
@@ -84,8 +86,6 @@ def _schema_tables() -> set[str]:
     # per-test checkpoint data; checkpoint_migrations is infra bookkeeping.
     tables.update({"checkpoints", "checkpoint_blobs", "checkpoint_writes", "checkpoint_migrations"})
     for mig in sorted(_MIGRATIONS_DIR.glob("*.sql")):
-        if mig.name.endswith(".down.sql"):
-            continue
         text = _strip_sql_comments(mig.read_text(encoding="utf-8"))
         tables.update(_CREATE_TABLE_RE.findall(text))
         tables.difference_update(_DROP_TABLE_RE.findall(text))
@@ -140,13 +140,11 @@ _EXEMPT: dict[str, str] = {
     "checkpoint_migrations": "LangGraph migration bookkeeping — never test data",
     "agent_metric_collection": "migration-seeded collection cutover singleton — "
     "read-only after installation, never test data",
-    "cluster_pin": "cluster singleton state — infra, not test data",
-    "cluster_last_update": "cluster singleton outcome row — infra (mirrored into "
-    "deployment_state by the R1 migration)",
     "cluster_defaults": "cluster singleton defaults — infra, not test data",
-    "deployment_state": "R1 singleton (id=1, CHECK) — UPDATE-only consumers "
-    "(shared/cluster_lock.py), row seeded by the migration; truncating it would "
-    "delete the row mid-session. Tests self-clean via acquire/release pairs",
+    "deployment_state": "R1 singleton (id=1, CHECK) — its live consumer is the "
+    "code-version gate (base/db/code_version_gate.py); the row is seeded by the "
+    "migration and truncating it would delete the row mid-session. Tests that write "
+    "it restore it",
 }
 
 
@@ -154,7 +152,7 @@ def test_truncate_list_covers_every_public_table() -> None:
     """Every public table is truncated per test (directly, via FK cascade, or
     explicitly exempted) — a new table silently added by a migration fails
     this guard instead of leaking state across tests."""
-    truncate = _truncate_list_from_conftest()
+    truncate = _truncate_list_from_provisioning()
     tables = _schema_tables()
     with psycopg.connect(settings.data_plane.db_url, autocommit=True) as conn:
         edges = _fk_edges(conn)
@@ -164,14 +162,14 @@ def test_truncate_list_covers_every_public_table() -> None:
     assert not uncovered, (
         "per-test data tables not covered by the TRUNCATE list (or FK cascade "
         f"from it, or the exemption list): {uncovered} — add them to "
-        "tests/conftest.py _PER_TEST_TRUNCATE_TABLES or justify the exemption"
+        "tests/fixtures/provisioning.py _PER_TEST_TRUNCATE_TABLES or justify the exemption"
     )
 
 
 def test_exemption_list_has_no_stale_entries() -> None:
     """An exemption whose table no longer exists (or is now covered by the
     TRUNCATE list) must be dropped — the exemption list is a liability ledger."""
-    truncate = _truncate_list_from_conftest()
+    truncate = _truncate_list_from_provisioning()
     tables = _schema_tables()
     with psycopg.connect(settings.data_plane.db_url, autocommit=True) as conn:
         edges = _fk_edges(conn)

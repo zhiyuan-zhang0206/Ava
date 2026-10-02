@@ -26,21 +26,21 @@ Each child is a self-contained CLI the agent runs with bash; it drives the
 browser itself and prints JSON to stdout, mirroring the `web-sources` adapters.
 The common mechanic — open a fresh chat, type the prompt, submit, wait for the
 streamed answer to finish — lives once in
-`ava_builtins/skill_support/web_ai/webchat.py`, which the children import.
+`ava_builtins/skills/web-ai/scripts/webchat.py`, which the children import.
 Messages can also carry a **local file
 attachment** (`console --file`, e.g. hand a PDF or image to the flat-rate seat
 for analysis) and **continue an existing conversation** (`console
 --continue-url`, `deep-research reply`) instead of always opening a fresh one.
 
 ```bash
-python $AVA_HOME/skills/web-ai/<child>/reference/<entry>.py <args>
+python $AVA_HOME/skills/web-ai/<child>/scripts/<entry>.py <args>
 ```
 
 Bare `python` is deliberate, not shorthand: every agent process (and every
 `ava.shell` command it runs, one-shot or persistent) descends from
 `services.ava_root`, which is launched with this checkout's venv `bin/`
 (`Scripts\` on Windows) already first on `PATH`
-(`cli/commands/_root_driver.py::_root_child_env`, `shared/session_env.py::
+(`cli/commands/lifecycle/root_driver.py::root_child_env`, `base/sessions/env_forwarding.py::
 forward_env_dict`) — so `python` always resolves to the right interpreter for
 prod home, a dev worktree cluster, or Windows alike, with no
 `.venv/bin/` / `$AVA_HOME/source/.venv/bin/` / `Scripts\` prefix needed.
@@ -76,7 +76,7 @@ These web UIs change without notice. When a child raises "composer not found" /
 "prompt did not register" / "answer empty", the fix is almost always one drifted
 CSS selector: open the site in the shared browser, inspect the live composer /
 send button / answer node, and update the relevant list in `SITES`
-(`ava_builtins/skill_support/web_ai/_sites.py`). Selectors are tried in order, so prepend
+(`ava_builtins/skills/web-ai/scripts/_sites.py`). Selectors are tried in order, so prepend
 the new one and keep the old as a fallback.
 
 ## Boundaries

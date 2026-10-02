@@ -10,11 +10,11 @@ from pydantic import (
     NonNegativeInt,
 )
 
+from base.agents.observation.evidence import AgentObservation
+from base.agents.observation.snapshot import OpenNotice
+from base.agents.tasks.priority import Priority
 from gateway.schemas.stats import StatsWindowHours
 from ops.rpc_schemas import ShellInfo
-from shared.agent_observation import AgentObservation
-from shared.agent_snapshot import OpenNotice
-from shared.tasks.priority import Priority
 
 
 class AgentCost(BaseModel):
@@ -129,9 +129,9 @@ class HeartbeatInfo(BaseModel):
     """Idle check-in heartbeat state for one agent — mutually-exclusive display
     states the panel renders:
 
-    - idle-family (idling / restarting — the statuses the fleet view
-      projects to "Idle") & not paused & no fresh wake queued: `next_at` is
-      set — the daemon's projected check-in due time: the later of
+    - idling (the status the fleet view projects to "Idle") & not paused & no
+      fresh wake queued: `next_at` is set — the daemon's projected check-in due
+      time: the later of
       `last_active_at + idle_threshold + (id mod JITTER_SPAN_S)` and
       `last_heartbeat_at + interval_s` when a prior check-in exists. The daemon
       dispatches the actual check-in at its first poll tick at/after that (at
@@ -139,7 +139,7 @@ class HeartbeatInfo(BaseModel):
       check-in, and never later than what the daemon does. An overdue
       projection renders as "due" in the frontend, never as a past time;
       everything else off.
-    - idle-family & not paused & a *fresh* wake already queued (created within
+    - idling & not paused & a *fresh* wake already queued (created within
       the daemon's 900s `STALE_PENDING_S` freshness window): `heartbeat_pending`
       is True — the daemon suppresses check-ins while a fresh inbound is pending
       (its `NOT EXISTS` guard, windowed by `STALE_PENDING_S`), so no future
@@ -334,7 +334,7 @@ class PluginMetricResult(BaseModel):
     """One plugin metric rendered for the inspector surface — an element of
     GET /api/agents/{id}/inspect/metrics.
 
-    Mirrors the registered MetricSpec (see `shared/plugin_metrics.py`):
+    Mirrors the registered MetricSpec (see `base/telemetry/metrics/plugin_metrics.py`):
     `panel` selects the payload — `timeseries` / `barchart` / `table` metrics
     carry `series` (a bounded recent window, 24h in 1h buckets by default, so
     at most a couple of dozen points), `stat` metrics carry `value` (the
@@ -379,7 +379,7 @@ class InspectWidgetResult(BaseModel):
     GET /api/agents/{id}/inspect/widgets.
 
     The resolved twin of a registered `InspectWidgetSpec`
-    (`shared/plugin_inspector.py`): `plugin` + `id` name the registration,
+    (`base/packages/plugins/inspector.py`): `plugin` + `id` name the registration,
     `kind` selects the console renderer (a closed set; an unknown kind is
     skipped by the console), and the payload field the kind reads (`tasks`)
     carries the kernel-resolved rows. A widget with an empty payload is

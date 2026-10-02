@@ -17,18 +17,18 @@ from langgraph.types import Command
 from psycopg_pool import AsyncConnectionPool
 
 from agent import state as states
-from agent.graph._exec import exec_node
 from agent.graph.claim.node import claim_node
-from agent.hosted_ownership import admit_hosted_runtime, settle_hosted_runtime
+from agent.graph.exec.node import exec_node
 from agent.impersonation import protect_native_hooks
+from agent.ownership.hosted import admit_hosted_runtime, settle_hosted_runtime
 from agent.startup import wrap_saver_writes_with_nstep_interval
+from base.agents.context import AvaContext
+from base.agents.history.delta_read_compat import wrap_saver_reads_with_delta_reconstruction
+from base.cluster.machine import machine_name
+from base.db import create_agent, insert_inbound_message
+from base.deploy.maintenance import admission, cohort, pause_owner
 from services.agent_host.host import AgentHost
 from services.agent_host.runtime import TurnOutcome
-from shared import maintenance, maintenance_cohort, pause_owner
-from shared.agents.history.delta_read_compat import wrap_saver_reads_with_delta_reconstruction
-from shared.context import AvaContext
-from shared.db import create_agent, insert_inbound_message
-from shared.machine import machine_name
 
 WHEN = datetime(2026, 9, 6, tzinfo=UTC)
 
@@ -92,12 +92,12 @@ async def test_original_idle_cohort_preserves_pending_messages_and_rejects_succe
     assert await settle_hosted_runtime(aops_pool, incarnation)
     message = insert_inbound_message(db_conn, agent, "pending work", "user")
     pause_owner.begin_maintenance("move", WHEN)
-    hold = maintenance_cohort.prepare(
+    hold = cohort.prepare(
         db_conn, machine=machine_name(), host_owner=owner, holder="move", acquired_at=WHEN
     )
     assert set(hold.commands) == {agent}
     assert (
-        maintenance_cohort.prepare(
+        cohort.prepare(
             db_conn, machine=machine_name(), host_owner=owner, holder="move", acquired_at=WHEN
         )
         == hold
@@ -113,82 +113,6 @@ async def test_original_idle_cohort_preserves_pending_messages_and_rejects_succe
     ).fetchone() == ("pending",)
 
 
-async def _idle_hosted_host(
-    aops_pool: AsyncConnectionPool[Any], monkeypatch: pytest.MonkeyPatch
-) -> AgentHost:
-    """A real AgentHost over a minimal claim-only graph, with runtime mocks."""
-    saver = AsyncPostgresSaver(aops_pool)
-    await saver.setup()
-    wrap_saver_writes_with_nstep_interval(saver, 100)
-    builder: Any = StateGraph(states.AgentState, context_schema=AvaContext)
-
-    async def route(_state: Any, _runtime: Any, _config: Any) -> Command[Any]:
-        return Command(goto="__end__")
-
-    builder.add_node("claim", claim_node, destinations=("before_llm", "__end__", "claim"))
-    builder.add_node("before_llm", protect_native_hooks(route), destinations=("__end__",))
-    builder.add_edge(START, "claim")
-    graph = builder.compile(checkpointer=saver)
-    host = AgentHost(pool=aops_pool, checkpointer=saver, graph=graph, machine=machine_name())
-    monkeypatch.setattr(host, "_runtime_for", AsyncMock(return_value=object()))
-    monkeypatch.setattr("services.agent_host.runtime.validate_model_config", MagicMock())
-    return host
-
-
-async def test_idle_hosted_cohort_consumes_restart_under_rollout_phase(
-    db_conn: psycopg.Connection[Any],
-    aops_pool: AsyncConnectionPool[Any],
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """The rollout's own pause must not defer the drain it requires (issue #2159).
-
-    A non-stable deployment phase freezes ordinary runtime births. An idle
-    hosted agent this boot already owns, with one pending maintenance restart,
-    is not a birth: the held wake applies exactly that restart, so the drain
-    must record its receipt and certify. Without the continuation exemption
-    every held wake is deferred silently and the hold is retained after the
-    whole 300s timeout — no receipt, no failure, nothing to route on.
-    """
-    host = await _idle_hosted_host(aops_pool, monkeypatch)
-    agent = _agent(db_conn)
-    incarnation = await admit_hosted_runtime(
-        aops_pool, agent, machine_name(), host._owner, expected_from="idling"
-    )
-    assert incarnation is not None
-    assert await settle_hosted_runtime(aops_pool, incarnation)
-
-    saved = db_conn.execute(
-        "SELECT phase, kind, holder FROM deployment_state WHERE id=1"
-    ).fetchone()
-    db_conn.execute("UPDATE deployment_state SET phase='updating', kind='rollout' WHERE id=1")
-    db_conn.commit()
-    try:
-        pause_owner.begin_maintenance("move", WHEN)
-        hold = maintenance_cohort.prepare(
-            db_conn, machine=machine_name(), host_owner=host._owner, holder="move", acquired_at=WHEN
-        )
-        assert set(hold.commands) == {agent}
-
-        wakes = await host.pending_inbound_wakes(stale_after_s=300)
-        assert [wake.agent_id for wake in wakes] == [agent]
-        await asyncio.wait_for(host.run_turn(agent), 20)
-
-        current = maintenance.require_operation("move", WHEN)
-        assert current.maintenance is not None
-        assert current.maintenance.drained == (agent,)
-        maintenance_cohort.verify_drained(db_conn, current.maintenance)
-        assert db_conn.execute(
-            "SELECT status, applied_at IS NOT NULL FROM inbound_messages WHERE id=%s",
-            (hold.commands[agent],),
-        ).fetchone() == ("claimed", True)
-    finally:
-        db_conn.execute(
-            "UPDATE deployment_state SET phase=%s, kind=%s, holder=%s WHERE id=1", saved
-        )
-        db_conn.commit()
-
-
-@pytest.mark.real_cluster_spawn
 async def test_admitted_model_finishes_real_exec_and_after_exec_before_drain_receipt(  # noqa: PLR0915 — one real graph/exec/DB boundary
     db_conn: psycopg.Connection[Any],
     aops_pool: AsyncConnectionPool[Any],
@@ -278,16 +202,16 @@ async def test_admitted_model_finishes_real_exec_and_after_exec_before_drain_rec
     try:
         await asyncio.wait_for(entered.wait(), 5)
         pause_owner.begin_maintenance("move", WHEN)
-        hold = maintenance_cohort.prepare(
+        hold = cohort.prepare(
             db_conn, machine=machine_name(), host_owner=host._owner, holder="move", acquired_at=WHEN
         )
         assert not hold.drained
         finish.set()
         await asyncio.wait_for(work, 15)
-        current = maintenance.require_operation("move", WHEN)
+        current = admission.require_operation("move", WHEN)
         assert current.maintenance is not None
         assert current.maintenance.drained == (agent,)
-        maintenance_cohort.verify_drained(db_conn, current.maintenance)
+        cohort.verify_drained(db_conn, current.maintenance)
         reader = AsyncPostgresSaver(aops_pool)
         wrap_saver_reads_with_delta_reconstruction(reader)
         cold = await reader.aget_tuple(config)
@@ -304,8 +228,8 @@ async def test_admitted_model_finishes_real_exec_and_after_exec_before_drain_rec
         # Drop the old host's in-memory graph/cache: recovery consumes the
         # durable restart pointer and real cold checkpoint after explicit release.
         assert current.maintenance is not None
-        from cli.commands._pause_resume import resume_after_start
-        from shared import start_serving
+        from base.deploy.lifecycle import start_serving
+        from cli.commands.lifecycle._pause_resume import resume_after_start
 
         monkeypatch.setattr("ops.cluster_pause._unpause_local_cluster", MagicMock())
         monkeypatch.setattr("ops.agent_pause._wake", MagicMock())
@@ -313,11 +237,11 @@ async def test_admitted_model_finishes_real_exec_and_after_exec_before_drain_rec
 
         @resume_after_start
         def ready_start() -> int:
-            maintenance.require_start_allowed()
+            admission.require_start_allowed()
             return 0
 
         assert ready_start() == 0
-        assert not maintenance.held()
+        assert not admission.held()
         successor = AgentHost(
             pool=aops_pool,
             checkpointer=AsyncPostgresSaver(aops_pool),

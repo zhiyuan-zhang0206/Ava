@@ -1,13 +1,10 @@
 // useAllPages — every agent's currently-open pages (registered HTML servers),
-// fleet-wide. The many-agent twin of useAgentPages: one initial fetch of
-// GET /api/pages kept live by the same SSE page_opened / page_closed deltas,
-// folded by the R4 fold owner (lib/fold/pages.ts) — this hook only reads.
+// fleet-wide. The many-agent twin of useAgentPages: GET /api/pages returns
+// authoritative rows, and page_opened/page_closed invalidate this Query through
+// the fold owner. This hook only reads.
 //
-//   ["all-pages"] query → api.listAllPages() — one initial fetch. staleTime
-//     Infinity: after the seed, the fold owns the cache (same no-poll-
-//     overwrite contract as useAgentPages).
-//   reconnect → the fold owner invalidates all queries, repairing missed
-//     events.
+// The fold owner coalesces hints and trails an in-flight GET; reconnect repairs
+// events missed while disconnected.
 
 "use client";
 
@@ -24,8 +21,7 @@ export function useAllPages(): PageRow[] {
   const { data: pages = [], error } = useQuery({
     queryKey: ALL_PAGES_QUERY_KEY,
     queryFn: () => api.listAllPages(),
-    // SSE-driven: page_opened/page_closed fold into this cache, so it stays
-    // fresh from one fetch — no polling, no overwrite-on-refetch race.
+    // Page events invalidate through the fold owner; there is no polling.
     staleTime: Infinity,
     gcTime: 30 * 60_000,
   });

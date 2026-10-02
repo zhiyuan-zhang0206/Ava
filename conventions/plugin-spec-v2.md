@@ -49,7 +49,7 @@ No Cordis-style "everything is a plugin" runtime unification — see the
 borrow/not-borrow section.
 
 - A Claude Code plugin package is already a mixed release unit (skills +
-  commands + `.mcp.json`); `ava_builtins/plugins/ava_code` ships skills in the
+  commands + `.mcp.json`); `ava_builtins/plugins/ava_fleet` ships skills in the
   same repo. One manifest declares all contribution surfaces; the host
   dispatches each to its existing executor (the VS Code model).
 - Unifying runtimes is a misfit: skills are pure text with no runtime, MCP is a
@@ -113,15 +113,15 @@ Example (the shape `ava_code` would declare):
 
 | Field | Meaning | Closes |
 |---|---|---|
-| `name` | Unique identity; dash/underscore-folded to the directory name (registry already folds via `shared.packages.skills.skill_names.match_key`) | duplicate rows / name collisions |
+| `name` | Unique identity; dash/underscore-folded to the directory name (registry already folds via `base.packages.skills.names.match_key`) | duplicate rows / name collisions |
 | `version` (semver) | Package version; recorded beside `installed_hash` as `installed_version` when the registry schema v2 fields land (S3) | no version awareness (A1) |
 | `engines.ava` (semver range) | Host compatibility interval (npm `engines` / VS Code `engines.vscode` shape); compared against the **derived host version** (`YYYY.M.D` from the checkout's commit date — [`host-versioning.md`](host-versioning.md)), checked at install/upgrade, at content-channel refresh landing, and at load. Required **unless** `requires_commit` is present | framework evolution silently breaking plugins (A3) |
 | `requires_commit` (commit SHA) | The host must *contain* this commit (`git merge-base --is-ancestor`) — the exactness layer beside the date axis, for content that needs a fresh kernel capability. Same enforcement points as `engines.ava` | content riding ahead of the code it needs, without a bump discipline |
 | `dependencies.plugins` | Plugin-to-plugin dependencies `{"other": ">=1.0"}`; resolved before load, missing → `failed`, never silently skipped (resolution lands S3) | load order by luck (A8) |
 | `dependencies.pythonPackages` | The Python dependency ranges this package is known to work with. For MCP packages this is the **mirror / validation anchor** of `pyproject.toml` dependencies. **Hard enforcement** (user ruling 2026-08-13): a declared range without an upper bound is a validator error, and an install/upgrade whose pyproject range falls outside the declared range is refused | **#1198, permanently**: unbounded or drifting pyproject ranges are stopped at install time |
 | `dependencies.hostCapabilities` | Host capability declarations — `db: none|ro|rw`, `network: none|local|any`, `shell: none|any`, `display: none|required`, `unixSocket: none|required`. **Two kinds of claim in one object** (S5): `display` / `unixSocket` are HOST REQUIREMENTS matched against the machine's capability set to decide placement, while `db` / `network` / `shell` are RESOURCE ACCESS gated by the context at injection time. The execution side of both lands with the context model (S5); today the manifest only declares, and MCP runtime keeps its existing `requires` check | context/capability declarations unified (D12/D13); generalizes the MCP `requires` keys |
-| `contributions.*` | Declared contribution surfaces (VS Code `contributes` analog). **The declaration is documentation; registration is fact.** The diff between the two is already computed and readable — `ava plugins inspect <name>` reports it (`agent/plugin_catalog.py:declared_vs_registered`, over the attribution ledger every `register_*` writes); S3 turns that same computation into the load-time gate (declared-but-not-registered = warning, registered-but-not-declared = fail-fast) | surfaces pre-checkable, listable, auditable |
-| `contributions.ui` | The console surfaces this package contributes, as data: `agentInspect` sections, `nav` entries, `stats` cards, `themes` token packs. Closed type set, closed icon vocabulary, and a theme token vocabulary that is the console's own `:root` custom properties — validated by `shared/plugin_ui_contributions.py`. No registration side: the console reads the declaration itself (a `stats` card's label is declaration; its value is runtime data in `plugin_stats`, written by the plugin's own code). Design + the runtime slices: [`future/frontend-plugin-contributions.md`](../future/frontend-plugin-contributions.md) | a plugin can put a panel, a page, a live card, or a skin in front of the user without a frontend fork |
+| `contributions.*` | Declared contribution surfaces (VS Code `contributes` analog). **The declaration is documentation; registration is fact.** The diff between the two is already computed and readable — `ava plugins inspect <name>` reports it (`agent/extensions/catalog.py:declared_vs_registered`, over the attribution ledger every `register_*` writes); S3 turns that same computation into the load-time gate (declared-but-not-registered = warning, registered-but-not-declared = fail-fast) | surfaces pre-checkable, listable, auditable |
+| `contributions.ui` | The console surfaces this package contributes, as data: `agentInspect` sections, `nav` entries, `stats` cards, `themes` token packs. Closed type set, closed icon vocabulary, and a theme token vocabulary that is the console's own `:root` custom properties — validated by `base/packages/plugins/ui_contributions.py`. No registration side: the console reads the declaration itself (a `stats` card's label is declaration; its value is runtime data in `plugin_stats`, written by the plugin's own code). Design + the runtime slices: [`future/frontend-plugin-contributions.md`](../future/frontend-plugin-contributions.md) | a plugin can put a panel, a page, a live card, or a skin in front of the user without a frontend fork |
 | `config.schema` / `config.perAgentFields` | Pointer to the config schema (the Pydantic model, or a declarative schema) + which fields per-agent overlays may override | PR-E; pre-install config validation without importing plugin code |
 | `lifecycle.*` | See the lifecycle section | dispose contract (C9/C10) |
 
@@ -130,7 +130,7 @@ Example (the shape `ava_code` would declare):
 | Lane | Mechanism | For |
 |---|---|---|
 | Declarative | `contributions.ui` in the manifest (`agentInspect` proxied sections, `nav`, `themes`) — data the console reads itself; there is no registration side | plugin-*served* content, links, skins |
-| Runtime registry | `register_inspect_widget()` at `inspector.py` import (`shared/plugin_inspector.py`) — the gateway imports each ENABLED builtin plugin's `inspector.py` under its `PluginContext` and serves `GET /api/agents/{id}/inspect/widgets`; the console renders closed-set widget kinds from the resolved payload | host-rendered widgets whose payload is per-agent data (an agent's active tasks), where no static declaration can name the rows |
+| Runtime registry | `register_inspect_widget()` at `inspector.py` import (`base/packages/plugins/inspector.py`) — the gateway imports each ENABLED builtin plugin's `inspector.py` under its `PluginContext` and serves `GET /api/agents/{id}/inspect/widgets`; the console renders closed-set widget kinds from the resolved payload | host-rendered widgets whose payload is per-agent data (an agent's active tasks), where no static declaration can name the rows |
 
 The inspector-widget registry resolves each widget's payload server-side —
 the console never receives a row it cannot address — and a widget with no
@@ -164,18 +164,21 @@ list uses 150: the work queue sits directly below the built-in `page` section.)
 
 ### Version ranges
 
-A semver range is a conjunction (AND) of clauses, comma- or space-separated:
+A manifest version range is a conjunction (AND) of clauses, comma- or space-separated:
 `>=1,<2`. Operators: `>=`, `>`, `<=`, `<`, `==`, `=`; a bare version means
-`==`. No OR, no wildcards, no prerelease ordering — prerelease suffixes are
-accepted on versions but not ordered. **An upper bound (`<`/`<=`/`==`) is a
-hard validator requirement for `dependencies.pythonPackages` entries** — the
+`==`. No OR or wildcards. Prereleases sort below the matching final release;
+dev/alpha/beta/rc labels follow PEP 440 order. A range admits a prerelease
+only when a clause explicitly names one. Other suffixes remain valid and sort
+lexically among themselves below the final release. **An upper bound
+(`<`/`<=`/`==`) is a hard validator requirement for
+`dependencies.pythonPackages` entries** — the
 #1198 lesson: unbounded = eventually pulled past the break.
 
 ## Implemented today (S0–S2)
 
-The validator lives in `shared/plugin_manifest.py` (parse + validate +
+The validator lives in `base/packages/plugins/manifest.py` (parse + validate +
 range algebra + the pyproject mirror check), with the `contributions.ui`
-schema in `shared/plugin_ui_contributions.py`. Enforcement points:
+schema in `base/packages/plugins/ui_contributions.py`. Enforcement points:
 
 | Surface | What runs | When |
 |---|---|---|
@@ -295,7 +298,7 @@ machine satisfying it.
   and consumed by two different mechanisms at two different moments — install /
   placement versus injection.
 - **Test context rules** (specifying existing discipline): env block before
-  project imports; derived keys to a tmp-home `.env`; `shared/test_db_guard.py`
+  project imports; derived keys to a tmp-home `.env`; `base/db/test_db_guard.py`
   fail-closed validation remains the single rule source.
 - **Multi-tenant**: today one user, context rooted at `AVA_HOME`; the tenant
   dimension extends with #1212 Step 5. This spec only requires context to be
@@ -399,8 +402,9 @@ through `ServiceSpec`; it publishes shared `plugin_stats` rows even while agents
 are idle or paused. Hosts read their own credentials and never copy tokens into
 agent state or the shared statistics table.
 
-An external plugin may define the watchdog's `main()` in `services.py` and set
+An external plugin may keep its protocol health probes in `services.py` and set
 `healthcheck_module=__name__`. Ops registers that exact module before executing
-it, so the watchdog can import it without an agent having loaded the plugin.
+it, so root health monitoring can import it without an agent having loaded the
+plugin.
 Keep the declaration/healthcheck surface lightweight and load the provider
 collector only inside the separate service process.

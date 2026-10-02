@@ -7,18 +7,52 @@ description: Runs the Ava repo's Python, frontend, and end-to-end checks and dia
 
 ## Test layering
 
-- **Full test suites run in CI only** (user ruling 2026-09-22). Never launch
-  a local repository-wide or full-backend run, including after a `shared/`
-  change. Run bounded tests selected from the changed behavior and its direct
-  consumers locally; leave broad verification to CI.
-- **Commit hooks** run lints and codegen checks. For targeted local verification,
-  skip the full-suite `frontend-vitest` pre-push hook by name and record the
-  targeted tests run instead; do not bypass the other hooks.
+- **Local checks cover only what you changed** (user ruling 2026-09-22; pyright
+  included 2026-10-01). Whole-repository runs saturate the shared dev host and
+  duplicate what CI runs on every PR, so they belong to CI alone:
+  - **Never** run `pyright` without file arguments, `pytest` without file
+    arguments, `pytest tests/` or any other whole directory, or any full suite
+    (backend or frontend) locally — including after a `base/` change. Widen by
+    dependency (see "Pick targeted tests by dependency" below), never by
+    directory.
+  - **pytest**: the test files you added or changed, plus the test files that
+    execute the code you changed, and nothing else — always with `-n 2` for
+    parallelism. The test is relevance, not a count: the changed module's own
+    tests, then the direct consumers that assert over what you touched. Anything
+    that does not bear on your change is CI's job.
+  - **pyright**: only the `.py` files you changed (command below).
+  - **UI**: eslint and vitest on the changed paths. `tsc --noEmit` is
+    project-wide by nature, so run it once after your last UI edit.
+  - **Never repeat a check on unchanged code.** Re-run a check only after you
+    edited something it covers; after a failure, fix and re-run just the failing
+    files. A second identical run with no edit in between tells you nothing.
+- **Commit hooks** judge what the commit changes: the per-file lints take the
+  changed files, a whole-project check runs only when one of its inputs changed,
+  and ESLint lints the changed frontend files. They run no tests. For targeted
+  local verification, skip the full-suite `frontend-vitest` pre-push hook by name
+  and record the targeted tests run instead; do not bypass the other hooks.
 - **Local tests before push** — mandatory. After commit and before `git push`,
-  run tests for the areas you touched:
-  - Python: `.venv/bin/pytest <selected-test-files-or-node-ids>`
-  - Frontend: `cd ui/web && npx vitest run <selected-test-files>`, plus relevant
-    eslint checks, `npx next typegen`, and `npx tsc --noEmit`.
+  run the checks above for the areas you touched:
+  - Python tests: `.venv/bin/pytest -n 2 <selected-test-files-or-node-ids>`.
+  - Python types: pyright on the branch's changed files only. The pipeline
+    handles an empty list (no `.py` change: nothing runs, exit 0), deleted
+    files (`--diff-filter=ACMR`) and paths with spaces (`-z` / `-0`):
+
+    ```bash
+    git diff --name-only --diff-filter=ACMR -z origin/main...HEAD -- '*.py' \
+      | xargs -0 -r .venv/bin/pyright
+    ```
+
+    Before committing, this variant also sees uncommitted and new files:
+
+    ```bash
+    { git diff --name-only --diff-filter=ACMR -z "$(git merge-base origin/main HEAD)" -- '*.py'
+      git ls-files -z --others --exclude-standard -- '*.py'; } | xargs -0 -r .venv/bin/pyright
+    ```
+  - Frontend, from `cd ui/web`: `npx vitest related --run <changed-source-files>`
+    (every test that imports them; or `npx vitest run <selected-test-files>`),
+    `npx eslint <changed-files>`, then `npx next typegen` and
+    `npx tsc --noEmit` once.
   Failures must be fixed before pushing; do not rely on CI to catch them.
   A new test must be **shown to fail without the fix** — run it against the
   stashed pre-change code, or invert its assertion momentarily.
@@ -27,21 +61,33 @@ description: Runs the Ava repo's Python, frontend, and end-to-end checks and dia
   but a later `uv sync` in that worktree writes through the symlink and
   re-points the shared venv's editable `.pth` here — breaking every other
   checkout that uses that venv
-  ([rationale](../../../conventions/dev-setup.md#per-worktree-cluster-dev-flow)).
-  No venv yet? Build the worktree's own (`env -u VIRTUAL_ENV python
-  scripts/guard_editable_venv.py . && env -u VIRTUAL_ENV uv sync`),
-  or for a test-only run reuse another worktree's real venv:
+  ([rationale](../../../conventions/dev-setup.md#development-in-a-worktree)).
+  No venv yet? Run `bash scripts/setup-worktree.sh` inside the worktree (it
+  builds the worktree's own), or for a test-only run reuse another worktree's real venv:
   `PYTHONPATH=<this-worktree> <other-worktree>/.venv/bin/python -m pytest ...`
   (PYTHONPATH outranks that venv's `.pth`, so the tests run against this
-  worktree's code).
+  worktree's code). This shortcut is only valid when every tested subprocess
+  preserves that import path. Python `-I` ignores `PYTHONPATH` and imports the
+  reused venv's editable checkout. Tests that launch isolated Python children
+  need this worktree's own real venv. Verify the child import with
+  `.venv/bin/python -I -c 'import agent; print(agent.__file__)'` before trusting
+  a cross-process result.
+- **Native lifecycle proof uses the release interpreter build.** Matching only
+  Python's major/minor version is insufficient: managed builds can omit optional
+  OS bindings exposed by a distribution Python. Record the exact interpreter,
+  build and native capabilities; do not substitute a system interpreter to turn
+  a failed release-environment test green. Exercise cleanup as well as startup.
 - **Every worktree `uv` command needs `env -u VIRTUAL_ENV`**, including
   `uv run` and `uv pip`. Never run bare `uv pip install`: it can target an
   inherited shared production environment and remove its launcher (#4629).
-- **Pick targeted tests by dependency, not only by directory.** Shared changes
+- **Pick targeted tests by dependency, not by directory.** Shared changes
   can break consumer-side enum or field-set assertions. Locate those consumers
-  and include their specific tests locally, rather than expanding to the full
-  backend suite. For a new enum member, search with
-  `rg 'set\(<EnumName>\)|list\(<EnumName>\)' tests/`. CI must still run the full
+  and include their specific test files locally, rather than expanding to a
+  directory or the full backend suite. `.venv/bin/python scripts/audit/where_used.py
+  <module-or-symbol>` lists them (its TESTS group) with every other reference in
+  one call. For a new enum member,
+  search with
+  `rg 'set\(<EnumName>\)|list\(<EnumName>\)' -g '**/tests/**'`. CI must still run the full
   suite before merge; an unrun or skipped CI suite is not a pass.
   ([postmortem](../../../postmortems/0003-touched-areas-is-not-the-blast-radius.md))
 
@@ -54,10 +100,10 @@ description: Runs the Ava repo's Python, frontend, and end-to-end checks and dia
   rather than actually permissive.
 - **The reverse is not symmetric, deliberately.** A few CI steps have no local
   hook because they need a toolchain a dev machine may not have:
-  `scripts/migration_smoke.py` boots a throwaway Postgres and shells out to
+  `scripts/ci/migration_smoke.py` boots a throwaway Postgres and shells out to
   `psql`. A hook that fails for reasons unrelated to your commit is what breeds
   the `--no-verify` habit, so it stays CI-only. The cheap half of the migration
-  gate (`scripts/lint_migrations.py` — filename format, up/down pairing,
+  gate (`scripts/content_lint/lint_migrations.py` — filename format, up/down pairing,
   baseline seed) *is* a local hook, gated on `migrations/` + `db/schema.sql`.
 - **Positional test paths run grouped by directory, whatever order you pass.**
   pytest 9 hides a conftest's fixtures (autouse ones included) from any directory
@@ -66,7 +112,12 @@ description: Runs the Ava repo's Python, frontend, and end-to-end checks and dia
   sorts the paths before collection and stops a run whose collection still splits
   a directory.
 - **Full non-e2e + e2e + coverage threshold runs in CI** — it's the merge gate.
-- **Framework pre-push hooks** run pyright, frontend tsc, eslint and vitest. Install
+- **Framework pre-push hooks** run pyright (scoped to the branch's own changed
+  `.py` files, same local-only-changed-files rule as above) and, on frontend
+  changes, tsc, whole-project eslint and vitest. They also rerun the pre-commit
+  stage over the branch diff, re-check the generated-artifact hooks whose inputs
+  the branch deleted, and scan every test for patch targets when the branch
+  touches Python (none of this runs pytest). Install
   both stages from the main clone's stable `.venv`, never a worktree:
   `.venv/bin/pre-commit install --hook-type pre-commit --hook-type pre-push`.
   See [the hook runbook](../../../conventions/runbook.md#git-hooks-pre-commit--pre-push)
@@ -89,7 +140,7 @@ Both are guardrails from real escapes; the rules are condensed in
   easy to get wrong: it provisions a real throwaway Postgres, so a "dependency is
   down" fixture that patches only the seam today's code calls leaves every other
   route live and the test passes against the bug it was written to catch — patch
-  **every** route (`shared.db.connect` *and* `shared.db.pool`), and prove it red.
+  **every** route (`base.db.connect` *and* `base.db.pool`), and prove it red.
   ([postmortem](../../../postmortems/0002-db-down-tests-pass-for-the-wrong-reason.md))
 - **Verify the world, not the self-report.** An end-to-end assertion re-runs the
   command or re-reads the file **externally**, and asserts that untouched files
@@ -109,14 +160,16 @@ Uses throwaway Postgres + Redis (reuses `tests/_containers.py`), not Docker.
 env -u VIRTUAL_ENV uv sync
 .venv/bin/playwright install chromium
 
-# Run (locally)
-.venv/bin/pytest tests/e2e/ -v
+# Run (locally): one scenario file, no `-n` (e2e cannot run in parallel with itself)
+.venv/bin/pytest tests/e2e/test_message_flow.py -v
 
 # Watch the real browser
-HEADED=1 .venv/bin/pytest tests/e2e/ -v
+HEADED=1 .venv/bin/pytest tests/e2e/test_message_flow.py -v
 ```
 
-CI runs as an independent `e2e` job (`.github/workflows/ci.yml`); on failure uploads
+Run only the scenario file you changed or are reproducing; the whole `tests/e2e/`
+directory is a full suite and belongs to CI's independent `e2e` job
+(`.github/workflows/ci.yml`), which on failure uploads
 `tmp/e2e-logs/` + `~/.ava/logs/agent-*.log` as artifacts.
 
 **Resource isolation** (runs concurrently with dev, but e2e cannot run in parallel with itself):
@@ -130,12 +183,8 @@ CI runs as an independent `e2e` job (`.github/workflows/ci.yml`); on failure upl
 | AVA_HOME          | `~/.ava`          | `tmp/ava_e2e_home/` |
 
 **LLM mock injection path**: `AVA_LLM_OVERRIDE=tests.e2e.fakes.scenarios.<name>:build`
-→ `shared/lm/factory.py:build_chat_model` detects env and goes through importlib + factory; unset env
+→ `base/lm/factory.py:build_chat_model` detects env and goes through importlib + factory; unset env
 takes the original path (no impact in prod).
-
-**Three-layer env inheritance**: pytest setenv → gateway subprocess → gateway launches the
-agent detached with an explicit child env dict (`ops.agent_launch.agent_spawn_env_dict`) —
-nothing is inherited implicitly, and no value rides argv (issue #974).
 
 See `tests/e2e/README.md` for details.
 
@@ -153,7 +202,7 @@ This is self-limiting now: each throwaway instance holds an `flock` on an
 for its whole life, and the next `throwaway_postgres` reaps the instances whose
 lock the kernel has released. So a killed run's orphan lives until the next test
 run, not until reboot, and only instances that positively identify as throwaway
-are ever touched (`shared/pg_tools.py` documents the safety argument). The lock
+are ever touched (`base/cluster/dataplane/pg_tools.py` documents the safety argument). The lock
 sits in the instance dir rather than a side registry so that it shares that
 cluster's exact lifetime — nothing can prune the lock while the cluster it
 describes keeps running — and so two UNIX users on one shared scratch base
@@ -161,12 +210,12 @@ describes keeps running — and so two UNIX users on one shared scratch base
 platform default (`/dev/shm` on Linux, else the OS temp dir); a restore that
 declares its footprint may land on the disk fallback (`/var/tmp`, or
 `AVA_PG_THROWAWAY_BASE` when set) — the sweep covers every base
-(`shared/pg_throwaway_base.throwaway_roots`).
+(`base/pg_throwaway_base.throwaway_roots`).
 
 To sweep without starting a test run — e.g. a box wedged right now:
 
 ```bash
-.venv/bin/python -c 'from shared.pg_tools import sweep_orphaned_throwaway_clusters as s; print(s())'
+.venv/bin/python -c 'from base.cluster.dataplane.pg_tools import sweep_orphaned_throwaway_clusters as s; print(s())'
 ```
 
 Instances leaked *before* this mechanism existed carry no lock, so the sweep cannot
@@ -178,8 +227,7 @@ Doing that by hand, two things save you from stopping the wrong postmaster:
 
 - **`ppid` does not discriminate.** Every postmaster on the box has `ppid 1`, real
   clusters included — they are all detached, which is the whole reason they survive.
-- **The path does.** A real cluster's data dir is `$AVA_HOME/pg` (`~/.ava`,
-  `~/.ava-<worktree>`); a throwaway's is `<throwaway base>/ava-pg-*/data`. That is
+- **The path does.** A real cluster's data dir is `$AVA_HOME/pg` (`~/.ava`); a throwaway's is `<throwaway base>/ava-pg-*/data`. That is
   the same distinction `_resolved_throwaway_dir` encodes, and on a live box it
   separates real clusters from corpses immediately.
 

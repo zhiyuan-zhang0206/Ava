@@ -3,9 +3,54 @@
 Notable changes, newest first. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Ava is pre-1.0; the
 per-release PR-level detail lives in the annotated release tags (`git tag -n99`)
-and the matching GitHub Releases, cut by `scripts/release_cut.py`.
+and the matching GitHub Releases, cut by `scripts/ci/release_cut.py`.
 
 ## [Unreleased]
+
+### Removed
+- Port-block allocation and the start-time port scan and `.env` drift check:
+  every home records one fixed port table (25 slots,
+  `base/host/env/port_table.py`) at birth, and the health-port-base start option
+  and the WSL default base are gone. The retired `restarter` and `coordinator`
+  slots are dropped from the table, so a `start-intent.json` whose `record.ports`
+  still carries them is refused at start until the two keys are deleted by hand.
+- The retained-image release path (image preparation, the image-exec handoff, the
+  finite executor, the fleet coordinator, write-generation rotation by rollout,
+  PITR activation and their CI workflows) and the `shared/` release-probe shell.
+  A cluster is updated from source with `python -m cli.fleet_update`
+  ([decision](decisions/2026-09-30-remove-release-image-path.md)).
+- The update straggler reap: a drain that truncated and released an agent still
+  in a long turn, with its `reaped` hold receipts, settle-at-boot, four events
+  and the `AVA_UPDATE_STRAGGLER_REAP_SECONDS` and
+  `AVA_UPDATE_QUIESCE_TIMEOUT_SECONDS` settings. A stop still never kills a
+  straggler; it waits out `--timeout` and the operator escalates with `--force`
+  ([decision](decisions/2026-09-30-remove-straggler-reap.md)).
+- The managed-writer publication fence (`base/deploy/writers/`): hosted admission
+  no longer locks `deployment_state` or defers a birth on its phase, and always
+  advertises protocol zero ([decision](decisions/2026-09-30-remove-publication.md)).
+- The cluster deploy lease (`base.deploy.state.cluster_lock`), `ava cluster
+  recover`, the roster's `deploy_hold` field and banner, and the lease readers in
+  the deploy window, heartbeat, log sink, package refresh and `ava stop`. A
+  stranded pause is read with `ava maintenance status` and ended with
+  `ava maintenance resume --cancel` or `repair`; an unreadable journal is removed
+  by hand ([decision](decisions/2026-09-30-remove-deployment-lease.md)).
+
+### Changed
+- The bottom-layer package `shared` is now `base` (`base < ava < agent <
+  gateway < cli`), with no compatibility aliases: external plugins, schedules
+  and skills that import `shared.*` must import `base.*`.
+- The internal database plane always authenticates, whatever
+  `AVA_CLUSTER_SECRET` says: `pg_hba` admits only the OS-user administrator by
+  peer on the owner-only socket and SCRAM application logins; PgBouncer always
+  uses SCRAM against the active write generation's verifier userlist (plus the
+  `ava_pooler_admin` console entry) and restarts when it changes. The schema
+  owner is NOLOGIN, `AVA_DB_ADMIN_PASSWORD` and local `AVA_RUNNER_DB_PASSWORD`
+  are retired, and `.env` holds a credential-free `AVA_DB_URL`. First start
+  mints write generation 0 (`ava_g0_gateway` / `ava_g0_runner`, inheriting the
+  NOLOGIN groups `ava_gateway` / `ava_runner`); the root launcher delivers each
+  service its class login. A home born earlier (no ledger) is refused, and no
+  conversion exists; `scripts/data_plane_ops/rotate_data_plane_secrets.py` now rotates Redis
+  credentials only.
 
 ### Added
 - The Ops dashboard gains a `Dev/CI` row backed by daily GitHub Actions run
@@ -65,6 +110,12 @@ and the matching GitHub Releases, cut by `scripts/release_cut.py`.
   a `chrome_page_ttl_expired` / `chrome_page_ttl_renewed` event (task #3035).
 
 ### Changed
+- Redis always authenticates, including a single box with an empty
+  `AVA_CLUSTER_SECRET`: first start mints `AVA_REDIS_ADMIN_PASSWORD` (the
+  `requirepass`) and the runtime ACL password in `AVA_REDIS_URL`, and no ACL user
+  is ever created `nopass`. The passwords do not rotate per rollout. `ava start`
+  refuses a home born without them; re-birth it as a new home. The bearer
+  still decides only Redis's network reach.
 - The ops-facing `ava` CLI moves its remaining argument checks to the parse
   layer (task #4092 batch B4, user ruling 2026-09-20): `schedules create`
   requires exactly one of `--script` / `--script-file`; `schedules update`
@@ -327,6 +378,13 @@ and the matching GitHub Releases, cut by `scripts/release_cut.py`.
   slugs) out of code, CI, and tests.
 
 ### Removed
+- The one-time fleet cutover tooling: `scripts/cutover_*` (home adoption,
+  inventory, legacy OS jobs, data-plane authority conversion, database-records
+  survey and repair), `cli/cutover_hold.py` with the start / `ava maintenance`
+  / `ava cluster recover` refusals of the cutover hold,
+  `shared/predecessor_closure.py`, the `CutoverAuthority` ledger capability
+  and their runbooks. A home born before the always-authenticated data plane
+  is refused and no longer names a conversion.
 - `ava logs` CLI (list live sessions / tail one session's log) — replaced by
   the Loki query path above; see `deploy/lgtm/README.md`.
 

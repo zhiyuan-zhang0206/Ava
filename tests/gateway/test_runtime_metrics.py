@@ -12,7 +12,8 @@ import psutil
 import pytest
 from fastapi import Request
 
-from gateway import _runtime_metrics, sse
+from gateway.events import sse
+from gateway.middleware import runtime_metrics
 
 
 class _TimerHandle:
@@ -68,10 +69,10 @@ def test_runtime_monitor_callback_emits_process_and_loop_metrics(
     def capture_emit(_category: str, event_name: str, *, attributes: dict[str, Any]) -> None:
         emitted.append((event_name, attributes))
 
-    monkeypatch.setattr(_runtime_metrics.telemetry, "emit", capture_emit)
+    monkeypatch.setattr(runtime_metrics.telemetry, "emit", capture_emit)
     loop = _Loop()
     process = _Process()
-    monitor = _runtime_metrics.GatewayRuntimeMonitor(
+    monitor = runtime_metrics.GatewayRuntimeMonitor(
         loop=loop,  # type: ignore[arg-type]
         process=cast(psutil.Process, process),
         tick_interval_s=1.0,
@@ -112,7 +113,7 @@ def test_runtime_monitor_reschedules_after_sampling_failure(
 ) -> None:
     loop = _Loop()
     process = _Process()
-    monitor = _runtime_metrics.GatewayRuntimeMonitor(
+    monitor = runtime_metrics.GatewayRuntimeMonitor(
         loop=loop,  # type: ignore[arg-type]
         process=cast(psutil.Process, process),
         tick_interval_s=1.0,
@@ -160,14 +161,14 @@ class _RedisClient:
 
 def test_sse_metrics_initialize_idle_modes_at_zero(monkeypatch: pytest.MonkeyPatch) -> None:
     emitted: list[dict[str, Any]] = []
-    monkeypatch.setattr(_runtime_metrics, "_sse_active_connections", {"filtered": 9})
+    monkeypatch.setattr(runtime_metrics, "_sse_active_connections", {"filtered": 9})
 
     def capture_emit(_category: str, _event_name: str, *, attributes: dict[str, Any]) -> None:
         emitted.append(attributes)
 
-    monkeypatch.setattr(_runtime_metrics.telemetry, "emit", capture_emit)
+    monkeypatch.setattr(runtime_metrics.telemetry, "emit", capture_emit)
 
-    _runtime_metrics._initialize_sse_metrics()
+    runtime_metrics._initialize_sse_metrics()
 
     assert emitted == [
         {"mode": "filtered", "active_connections": 0},
@@ -184,7 +185,7 @@ def test_sse_stream_lifecycle_increments_and_decrements_active_gauge(
     mode: Literal["filtered", "throttled"],
 ) -> None:
     emitted: list[dict[str, Any]] = []
-    monkeypatch.setattr(_runtime_metrics, "_sse_active_connections", {})
+    monkeypatch.setattr(runtime_metrics, "_sse_active_connections", {})
 
     def open_redis(_url: str) -> _RedisClient:
         return _RedisClient()
@@ -199,7 +200,7 @@ def test_sse_stream_lifecycle_increments_and_decrements_active_gauge(
     def capture_emit(_category: str, _event_name: str, *, attributes: dict[str, Any]) -> None:
         emitted.append(attributes)
 
-    monkeypatch.setattr(_runtime_metrics.telemetry, "emit", capture_emit)
+    monkeypatch.setattr(runtime_metrics.telemetry, "emit", capture_emit)
 
     async def run_stream() -> None:
         request = cast(Request, _Request())

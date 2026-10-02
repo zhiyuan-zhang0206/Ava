@@ -68,15 +68,7 @@ too; the next layer's rebase onto `main` drops the already-applied commits.
 
 ### Merge queue (mandatory)
 
-PRs merge through the **Trunk** merge queue — not by direct merge.
-**QA gate:** the queue's merge conditions require the
-`qa-approved` label — a PR without it is never merged, even with green CI
-and an enqueued position (it waits in the queue until QA labels it). The
-label is applied by QA / the maintainers only, and only on a final PASS /
-PASS-with-nits conclusion; BLOCK / CONDITIONAL never carry it and a later
-BLOCK removes it immediately. Authors never self-apply the label; review and
-QA evidence must match the exact head SHA, and any new commit after a PASS
-still requires a delta re-review before the label is (re)applied. Submitting is
+PRs merge through the **Trunk** merge queue — not by direct merge. Submitting is
 `.venv/bin/python scripts/ci_utils.py <PR#> --wait --merge` (requires
 `~/.trunk/api-token`; ci_utils polls to green, submits, then waits for the
 queue to land the PR). Trunk batches queued PRs into one test draft
@@ -101,25 +93,35 @@ Still on you:
 
 ### Steps
 
-1. `git worktree add -b ava-<id>-<task> .worktrees/ava-<id>-<task> main`
-2. Develop and commit in the new worktree (run `bash scripts/setup-worktree.sh`
-   on first use; a fresh worktree needs its own real `.venv` first — worktree uv
-   iron rule in [runbook](../../../conventions/runbook.md): discard an inherited
-   `VIRTUAL_ENV`, then `python scripts/guard_editable_venv.py .` and
-   `env -u VIRTUAL_ENV uv sync`). A worktree
-   `.venv` must be a real directory under this checkout, **never a symlink**
-   to a shared venv (`ln -s ~/Ava/.venv .venv`): a later `uv sync` then writes
-   through the symlink and re-points the shared venv's editable `.pth` at this
-   worktree — breaking every other checkout that uses that venv (pyright
-   phantom-error storms; a prod exec outage). Setting up manually:
-   `env -u VIRTUAL_ENV python scripts/guard_editable_venv.py . && env -u VIRTUAL_ENV uv sync`,
+1. `bash scripts/setup-worktree.sh <task>` — the only way to create a worktree;
+   run it from the main clone or any worktree. It fetches `origin/main`, creates
+   `.worktrees/<task>` on branch `ava-<task>` under the main clone (`--branch NAME`
+   / `--base REF` override), builds the worktree's own real `.venv`, runs the locked
+   install and `npm ci` for `ui/web`, and fails unless the shared hooks, the
+   editable-install guard and a clean `git status` hold. The last stdout line is
+   `worktree ready: <path> (branch <branch>)`; `cd` there (a script cannot change
+   your shell's directory). Re-running it only re-bootstraps; if it stops midway the
+   worktree is kept, so run `bash scripts/setup-worktree.sh` with no argument inside
+   it to resume. Never hand-make a worktree with `git worktree add`. A worktree
+   made by another tool (Claude Code's own lands in `.claude/worktrees/<name>/`
+   with no dependencies) is completed by the same no-argument run inside it; the
+   main clone is refused.
+2. Develop and commit in that worktree. Its `.venv` is a real directory under the
+   checkout, **never a symlink** to a shared venv (`ln -s ~/Ava/.venv .venv`): a
+   later `uv sync` then writes through the symlink and re-points the shared venv's
+   editable `.pth` at this worktree — breaking every other checkout that uses that
+   venv (pyright phantom-error storms; a prod exec outage). Troubleshooting only
+   (the script already does this; worktree uv iron rule in
+   [runbook](../../../conventions/runbook.md)):
+   `env -u VIRTUAL_ENV python scripts/host_ops/guard_editable_venv.py . && env -u VIRTUAL_ENV uv sync --frozen`,
    then confirm `.venv/lib/python3.12/site-packages/_editable_impl_ava.pth`
    names this worktree. For a test-only run with no worktree venv of its own,
    reuse another worktree's real venv instead — see
    [run-local-tests](../run-local-tests/SKILL.md).
 3. Rebase onto latest main: `git fetch origin main && git rebase origin/main`
-4. Run targeted local tests before pushing; full test suites run only in CI
-   (including for shared-layer changes; user ruling 2026-09-22) — see [`.agents/skills/run-local-tests/SKILL.md`](../run-local-tests/SKILL.md).
+4. Run local checks on only what you changed before pushing (pytest on the
+   affected test files, `-n 2`; pyright on the changed files only); full suites and whole-repo pyright run only in CI (including for
+   `base/` changes; user ruling 2026-09-22, pyright included 2026-10-01) — see [`.agents/skills/run-local-tests/SKILL.md`](../run-local-tests/SKILL.md).
    An explicit user CI-only constraint overrides local execution; record the
    skipped local gates and confirm that the corresponding CI checks actually run.
 5. Push branch → `gh pr create --base main`
@@ -155,7 +157,7 @@ Still on you:
    The watcher persists the settled verdict to `ci-verdict-<pr>.txt` in your
    workspace before it tries to deliver, and retries transport failures for
    ~10 minutes:
-   an update wave or `ava cluster update` refuses connections for minutes —
+   an update wave (`python -m cli.fleet_update`) refuses connections for minutes —
    longer than any single send survives. If no wake arrives, read that file;
    the verdict is there. For a persistent owner-URL config error, delivery
    stops after one attempt and the exit notice names the absolute verdict
@@ -175,7 +177,7 @@ Still on you:
    (instant-fail): change the SHA (rebase) before resubmitting.
 8. Verify it landed (when not using `--merge`): `gh pr view <PR#>` →
    state `MERGED`; the queue may take 10-30 min. Before removing the
-   worktree, run `python scripts/check_worktree_remove.py <path>` and
+   worktree, run `.venv/bin/python scripts/check_worktree_remove.py <path>` (a python without psutil exits 3, no verdict; it reads this machine's own `$AVA_HOME`, else `~/.ava`, so run it bare, without an `AVA_HOME=<tmp>` prefix) and
    **abort the removal if it reports live sessions or
    processes anchored under the path** — a cluster-owned session anchored
    there (a schedule launched by a gateway that ran from the worktree,
@@ -197,8 +199,9 @@ file-tree diff with ★ critical paths + prose data flow.
 
 The commit-stage `types-codegen-fresh` hook needs `ui/web/node_modules`.
 A fresh worktree without these dependencies can fail this hook even on clean
-`main`. The frontend tsc, eslint and vitest hooks run at pre-push; their shared
-guard reports a visible skip when tooling is unavailable.
+`main`. The frontend tsc, whole-project eslint and vitest hooks run at pre-push, and
+the changed-files eslint hook at commit; each reports a visible skip when tooling
+is unavailable.
 
 If dependencies cannot be installed, skip **only that hook by name**, so every
 other commit hook still runs:
@@ -210,7 +213,7 @@ SKIP=types-codegen-fresh git commit -m "..."
 **Never reach for `--no-verify`.** It is not "skip the broken hook" — it disables
 *every* hook at once, including the lints that have no other local gate
 (`lint-ava-okf`, `lint-doc-symbols`, `lint-doc-anchors`, `lint-doc-roster`,
-`lint-agents-md-size`, `lint-skill-*`, `lint-fail-fast`, `lint-no-os-environ`,
+`lint-agents-md-size`, `lint-skill-*`, `lint-no-os-environ`,
 …). The failure mode is
 silent: the commit succeeds, and you learn nothing about what you turned off.
 
@@ -225,8 +228,8 @@ the error. Skipping is only for a hook this machine cannot execute at all.
 
 Merge proves repository integration, not production health. Deployment is a
 separate, explicitly authorized operation by one designated operator; follow
-`ava-self-development` for rollout and recovery verification. Contributors and
-QA agents do not launch competing updates or production fixes.
+`ava-self-development` for rollout and recovery verification. Contributors
+do not launch competing updates or production fixes.
 
 Before merge, mandatory: `grep -rn "<old-name>" conventions/ future/ AGENTS.md`
 to zero out references. Docs go in the same PR as code — **don't** leave a

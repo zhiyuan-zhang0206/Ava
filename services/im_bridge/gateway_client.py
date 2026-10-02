@@ -11,8 +11,8 @@ from typing import Any, Literal
 
 import httpx
 
+from base.config import settings
 from services.im_bridge.types import AgentDetail, AgentDirectoryPage
-from shared.config import settings
 
 _log = logging.getLogger("services.im_bridge.gateway_client")
 

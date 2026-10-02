@@ -5,13 +5,11 @@
 `ava-browser` session's process tree. That is enough while Chrome is *in* the
 tree. It stops being enough after a `SingletonLock` handoff: Chrome's launched
 process forwards its command line to another browser process and exits, and the
-survivor is no longer a descendant of the session (`daemon.py`
-`_supervise_chrome` documents the handoff and infers liveness from CDP because of
-it). The session kill then reports success while Chrome keeps running and keeps
-this cluster's CDP port, so the next launch meets the daemon's port guard and
-refuses. Observed on the `win` runner 2026-07-28, cleared by hand.
+survivor is no longer a descendant of the session. The session kill then reports
+success while Chrome keeps running and holds this cluster's CDP port, so the
+next launch meets the daemon's port guard and refuses.
 
-A better tree walk cannot fix this. `shared.proc.kill_process_tree` resolves
+A better tree walk cannot fix this. `base.host.proc.kill_process_tree` resolves
 descendants by ppid, and the ppid link to the session is exactly what the handoff
 destroyed — the orphan is not a descendant of anything we hold. What is missing is
 a way to *name* Ava's Chrome without walking to it. That is this module: naming it
@@ -56,12 +54,11 @@ operator one manual kill, and a wrong kill costs them their logged-in browser.
 
 ## Platform
 
-Both, unbranched. A `SingletonLock` handoff is Chrome's behaviour, not Windows'.
-POSIX makes it rare — the daemon `os.execvp`s, so the pane's process *is* Chrome
-and there is no launcher left to hand off from — but a Chrome that detaches from
-that exec'd process leaves the identical orphan on the identical CDP port, and
-nothing in the identification is platform-specific. `psutil` supplies argv on
-both, so there is no reason to make POSIX carry the known gap Windows just closed.
+POSIX. A `SingletonLock` handoff is Chrome's behaviour. The daemon `os.execvp`s,
+so the pane's process *is* Chrome and there is no launcher left to hand off from —
+but a Chrome that detaches from that exec'd process leaves the identical orphan
+on the identical CDP port, and
+nothing in the identification depends on a particular POSIX host.
 """
 
 from __future__ import annotations
@@ -71,8 +68,8 @@ from pathlib import Path
 
 import psutil
 
-from shared.log import logger
-from shared.proc import kill_process_tree
+from base.host.proc import kill_process_tree
+from base.log import logger
 
 from .profile import profile_dir
 

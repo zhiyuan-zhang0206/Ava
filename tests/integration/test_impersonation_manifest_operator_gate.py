@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
-from pathlib import Path
 from threading import Event as ThreadEvent
 from threading import Thread
 from typing import Any
@@ -13,12 +12,10 @@ import httpx
 import psycopg
 import pytest
 
-from ava import impersonation_replay as reader
-from cli.commands import release_services as release_services
-from ops.spec import ServiceSpec
-from shared.agents import impersonation as leases
-from shared.agents.impersonation import impersonation_history as history
-from shared.agents.impersonation_manifest import (
+from ava.impersonation import replay as reader
+from base.agents import impersonation as leases
+from base.agents.impersonation import history as history
+from base.agents.impersonation_manifest import (
     LocalParticipant,
     alert_if_participant_still_open,
     bind_local_participant,
@@ -31,18 +28,17 @@ from shared.agents.impersonation_manifest import (
     stage_central_expected_event,
     unbind_local_participant,
 )
-from shared.alerts import upsert_alert
-from shared.audit_events import prepare_event_log
-from shared.config import settings
-from shared.db import create_agent
-from shared.env_registry import MANIFEST_CERTIFICATION_SECRET_ENV
-from shared.loki_index_labels import EVENT_STREAM_RETENTION
-from shared.machine import machine_name
-from shared.runtime_incarnation import RuntimeIncarnation
-from shared.runtime_release import VerifiedRelease
-from shared.telemetry import Event
+from base.cluster.machine import machine_name
+from base.config import settings
+from base.db import create_agent
+from base.host.env.registry import MANIFEST_CERTIFICATION_SECRET_ENV
+from base.native_process.runtime_incarnation import RuntimeIncarnation
+from base.telemetry import Event
+from base.telemetry.alerts import upsert_alert
+from base.telemetry.audit_events import prepare_event_log
+from base.telemetry.loki_index_labels import EVENT_STREAM_RETENTION
+from tests.base import test_history as history_cases
 from tests.impersonation_support import attested_caller
-from tests.shared import test_impersonation_history as history_cases
 
 _CERTIFICATION_SECRET = "test-manifest-certification-secret-000001"  # noqa: S105 -- test proof
 
@@ -352,7 +348,7 @@ def test_v1_reader_excludes_same_agent_supervisor_sdk_events_from_receipt(
         )
 
     leases.release(str(v1_lease["id"]), attested_caller(v1_lease), "Executor finished")
-    monkeypatch.setattr(reader, "_get", get)
+    monkeypatch.setattr(reader, "get", get)
     reader.consume_recorded_events(history.resolve(owner.agent_id, 0))
 
     assert all(request["impersonation_session"] == f"{owner.agent_id}:0" for request in reads)
@@ -414,7 +410,7 @@ def test_v1_reader_keeps_tagged_expected_send_and_excludes_same_agent_audit(
         )
 
     leases.release(str(v1_lease["id"]), attested_caller(v1_lease), "Sent an update")
-    monkeypatch.setattr(reader, "_get", get)
+    monkeypatch.setattr(reader, "get", get)
     reader.consume_recorded_events(history.resolve(owner.agent_id, 0))
 
     consumed = [
@@ -426,10 +422,10 @@ def test_v1_reader_keeps_tagged_expected_send_and_excludes_same_agent_audit(
     assert history.resolve(owner.agent_id, 0)["events_completed_at"] is not None
 
 
-def test_finalizer_proof_is_private_in_root_tree_and_release_metadata(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+def test_finalizer_proof_is_private_to_the_agent_host_in_the_root_tree(
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The agent-host can receive the proof without exposing it in a launch receipt."""
+    """The agent-host can receive the proof; no other root unit is launched with it."""
     from services.ava_root import supervisor
 
     monkeypatch.setattr(
@@ -445,42 +441,6 @@ def test_finalizer_proof_is_private_in_root_tree_and_release_metadata(
     assert agent_host_env["AVA_MANIFEST_CERTIFICATION_FINALIZER"] == "1"
     assert MANIFEST_CERTIFICATION_SECRET_ENV not in supervisor._unit_env("gateway")
 
-    root = tmp_path / "image"
-    root.mkdir()
-    executable = root / "otelcol"
-    executable.write_bytes(b"not executed")
-    image = VerifiedRelease("a" * 64, "b" * 64, root, executable, root)
-    spec = ServiceSpec(
-        session="otel-collector",
-        cmd=str(executable),
-        capabilities=frozenset({"gateway"}),
-        requires_db=False,
-        curl_url="http://127.0.0.1:4318/healthz",
-    )
-
-    def first_proof(_spec: ServiceSpec) -> dict[str, str]:
-        return {MANIFEST_CERTIFICATION_SECRET_ENV: "first-proof"}
-
-    monkeypatch.setattr(
-        release_services,
-        "_service_extra_env",
-        first_proof,
-    )
-    first = release_services._command(spec, image)
-
-    def second_proof(_spec: ServiceSpec) -> dict[str, str]:
-        return {MANIFEST_CERTIFICATION_SECRET_ENV: "second-proof"}
-
-    monkeypatch.setattr(
-        release_services,
-        "_service_extra_env",
-        second_proof,
-    )
-    second = release_services._command(spec, image)
-    assert first.environment[MANIFEST_CERTIFICATION_SECRET_ENV] == "first-proof"
-    assert second.environment[MANIFEST_CERTIFICATION_SECRET_ENV] == "second-proof"
-    assert first.identity.command_digest == second.identity.command_digest
-
 
 def test_held_sdk_finally_is_admitted_before_close_and_seals_with_its_receipt(
     db_conn: psycopg.Connection[Any],
@@ -489,8 +449,9 @@ def test_held_sdk_finally_is_admitted_before_close_and_seals_with_its_receipt(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A real SDK metering wrapper retains its pre-close admission through ``finally``."""
-    from ava import agent_identity, sdk_metering
+    from ava import agent_identity
     from ava.external import Attachment
+    from ava.sdk_surface import metering
 
     participant = LocalParticipant(str(v1_lease["id"]), owner.agent_id, 0, "held-sdk-finally")
     assert open_local_participant(
@@ -507,7 +468,7 @@ def test_held_sdk_finally_is_admitted_before_close_and_seals_with_its_receipt(
 
     # This is the production SDK recorder shape for ava.agents.send_message,
     # not a direct hand-built telemetry event.
-    recorded_send = sdk_metering._make_recorder(held_send, "agents.send_message")
+    recorded_send = metering._make_recorder(held_send, "agents.send_message")
     worker = Thread(target=recorded_send)
     worker.start()
     assert entered.wait(timeout=2)
@@ -585,7 +546,7 @@ def test_transient_capture_failure_stays_sticky_until_the_failed_receipt_persist
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Neither a failed writer nor an alert failure can turn a lost event into a seal."""
-    import shared.agents.impersonation_manifest as manifest
+    import base.agents.impersonation_manifest as manifest
 
     participant = LocalParticipant(str(v1_lease["id"]), owner.agent_id, 0, "sticky-capture-failure")
     assert open_local_participant(
@@ -673,7 +634,7 @@ def test_certifier_rejects_a_durable_entry_with_the_right_key_but_wrong_digest(
     ).fetchone()
     assert expected is not None
     key, event_at = expected
-    from shared.agents.impersonation.impersonation_events import consume_events
+    from base.agents.impersonation.events import consume_events
 
     assert (
         consume_events(
@@ -705,7 +666,7 @@ def test_final_envelope_reader_splits_before_the_gateway_offset_ceiling(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A permitted manifest never asks the public reader for offset 11,000."""
-    from ava import impersonation_replay as reader
+    from ava.impersonation import replay as reader
 
     leases.release(str(v1_lease["id"]), attested_caller(v1_lease), "No emitted events")
     lease = history.resolve(owner.agent_id, 0)
@@ -730,7 +691,7 @@ def test_final_envelope_reader_splits_before_the_gateway_offset_ceiling(
             json={"items": [], "meta": {"has_more": has_more}},
         )
 
-    monkeypatch.setattr(reader, "_get", get)
+    monkeypatch.setattr(reader, "get", get)
     expected, actual, conflicting = reader._indexed_manifest_items(lease)
     assert expected == actual == {}
     assert not conflicting

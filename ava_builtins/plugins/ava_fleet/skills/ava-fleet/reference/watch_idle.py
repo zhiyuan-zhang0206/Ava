@@ -7,7 +7,7 @@ and judge that agent's progress against the goal.
 
 Delivery survives a restart window: the wake send retries with doubling gaps
 (10s to a 160s cap, ~10.5 min in total) because a gateway / agent restart
-window (an update wave, `ava cluster update`) outlasts the SDK's own 3 quick
+window (an update wave, the fleet update) outlasts the SDK's own 3 quick
 retries; if every attempt fails the watcher exits 2.
 
 Runtime notes:
@@ -29,7 +29,7 @@ import time
 import redis
 
 import ava
-from shared.config import settings
+from base.config import settings
 
 # Substitute before launching: the id of the agent you want to watch.
 TARGET_AGENT_ID = 0

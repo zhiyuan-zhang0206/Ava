@@ -228,7 +228,7 @@ class TestInvokeTimeout:
                 super().__init__()
                 self.runnable = _HangingRunnable()
 
-        from shared.config import settings as _settings
+        from base.config import settings as _settings
 
         monkeypatch.setattr(_settings.lm, "llm_compact_timeout_seconds", 0.05)
         llm = _HangingLLM()
@@ -236,7 +236,7 @@ class TestInvokeTimeout:
             await ainvoke_with_cache_retry(cast(BaseChatModel, llm), [_SYSTEM, *_CONVO])
 
     async def test_fast_call_returns_within_bound(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        from shared.config import settings as _settings
+        from base.config import settings as _settings
 
         monkeypatch.setattr(_settings.lm, "llm_compact_timeout_seconds", 60.0)
         llm = _StubLLM()

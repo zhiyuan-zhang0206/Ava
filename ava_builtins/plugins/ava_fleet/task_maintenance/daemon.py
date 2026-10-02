@@ -32,10 +32,9 @@ speaks — posting a notice or a message; it never changes task state.
 Usage:
     .venv/bin/python -m ava_builtins.plugins.ava_fleet.task_maintenance.daemon
 
-Kept alive by the gateway watchdog's 60s healthcheck
-(`ava_builtins/plugins/ava_fleet/task_maintenance/healthcheck.py`), wired via
-the plugin's `services()` ServiceSpec.healthcheck_module — so the schema-drift
-exit in `_dispatch_loop` is revived on the next round instead of staying dead.
+Kept alive by the root supervisor's health monitor through the `/healthz`
+identity probe of the plugin's `services()` entry — so the schema-drift exit in
+`_dispatch_loop` is revived on the next round instead of staying dead.
 """
 
 import asyncio
@@ -45,28 +44,34 @@ import os
 import sys
 import time
 from collections import defaultdict
+from pathlib import Path
 
 import psycopg
 from psycopg_pool import ConnectionPool
 
-import shared.db
-from services.pidfile import acquire_pidfile, pidfile_holds_daemon, remove_pidfile
-from shared import telemetry
-from shared.config import settings
-from shared.daemon_health import (
+import base.db
+from base import telemetry
+from base.config import settings
+from base.daemon.health import (
     Liveness,
     health_port,
     start_health_server,
     stop_health_server,
 )
-from shared.daemon_shutdown import install_graceful_shutdown
-from shared.db_transaction import write_transaction
-from shared.live_announce import publish_agent_updated_sync
-from shared.log import init_gateway_process
+from base.daemon.shutdown import install_graceful_shutdown
+from base.db.transaction import write_transaction
+from base.events.live.announce import publish_agent_updated_sync
+from base.log import init_gateway_process
+from base.paths import pid_path
+from services.pidfile import acquire_pidfile, pidfile_holds_daemon, remove_pidfile
 
 _log = logging.getLogger("ava_builtins.plugins.ava_fleet.task_maintenance.daemon")
 
-_PIDFILE = settings.services.task_maintenance_pidfile
+
+def _pidfile() -> Path:
+    return pid_path("task_maintenance")
+
+
 _LIVENESS_TIMEOUT_S = 60.0
 _LIVENESS_BEAT_STEP_S = 30.0
 
@@ -108,7 +113,7 @@ def _deliver_message(
     publish_agent_updated_sync(agent_id)
     # The connection context commits before the best-effort wake. A missing
     # subscriber is expected for a terminated agent and does not resurrect it.
-    shared.db.publish_inbound_wake(agent_id, str(inbound_id))
+    base.db.publish_inbound_wake(agent_id, str(inbound_id))
 
 
 # ── Reminder pass ──────────────────────────────────────────────────────────────
@@ -453,13 +458,13 @@ def _run_escalate(pool: ConnectionPool, escalate_n: int) -> int:
 
 
 def _write_pidfile() -> None:
-    if not acquire_pidfile(_PIDFILE, "ava_builtins.plugins.ava_fleet.task_maintenance.daemon"):
-        _log.info("[task_maintenance] daemon already running (pidfile=%s), exiting", _PIDFILE)
+    if not acquire_pidfile(_pidfile(), "ava_builtins.plugins.ava_fleet.task_maintenance.daemon"):
+        _log.info("[task_maintenance] daemon already running (pidfile=%s), exiting", _pidfile())
         sys.exit(1)
 
 
 def _remove_pidfile() -> None:
-    remove_pidfile(_PIDFILE)
+    remove_pidfile(_pidfile())
 
 
 def _is_running() -> bool:
@@ -467,7 +472,9 @@ def _is_running() -> bool:
 
     Pid-reuse-safe: a live pid whose argv does not name this daemon's module
     is a recycled pid, not a running instance (audit round 2, P1)."""
-    return pidfile_holds_daemon(_PIDFILE, "ava_builtins.plugins.ava_fleet.task_maintenance.daemon")
+    return pidfile_holds_daemon(
+        _pidfile(), "ava_builtins.plugins.ava_fleet.task_maintenance.daemon"
+    )
 
 
 async def _sleep_with_liveness(liveness: Liveness, total_s: float) -> None:
@@ -517,19 +524,19 @@ async def run() -> None:
     if _is_running():
         _log.info(
             "[task-maintenance] daemon already running (pidfile=%s), exiting",
-            _PIDFILE,
+            _pidfile(),
         )
         sys.exit(1)
 
     # Pidfile before the healthz bind — see services/restarter/daemon.py:run().
     _write_pidfile()
-    _log.info("[task-maintenance] pidfile written: %s", _PIDFILE)
+    _log.info("[task-maintenance] pidfile written: %s", _pidfile())
 
     liveness = Liveness(_LIVENESS_TIMEOUT_S)
     health = await start_health_server("task_maintenance", liveness=liveness)
     _log.info("[task-maintenance] healthz listening on :%s", health_port("task_maintenance"))
 
-    pool = shared.db.pool()
+    pool = base.db.pool()
     try:
         await _dispatch_loop(pool, liveness)
     finally:
@@ -540,7 +547,7 @@ async def run() -> None:
 
 
 def main() -> None:
-    from shared.migrations import assert_schema_current
+    from base.deploy.schema.migrations import assert_schema_current
 
     assert_schema_current(settings.data_plane.db_url)
     init_gateway_process(name="task_maintenance")

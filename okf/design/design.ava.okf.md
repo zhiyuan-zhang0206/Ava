@@ -21,8 +21,8 @@ The audit Round 1 (2026-08-07) traced 48h of incidents to **four root design pro
 
 | Root | Problem | Concept node | Status |
 |---|---|---|---|
-| **R1** | State / liveness has no explicit model — "what is happening now" is an implicit conjunction of signals | [[okf/design/r1-state-liveness/r1-state-liveness.ava.okf.md]] | Design v3.3 · **partially landed**: `host_deploy_state` + `deployment_state` table, agent/updater leases on main |
-| **R2** | Single-source-of-truth discipline missing — every incident appended a copy of the logic at the incident site | [[okf/design/r2-single-source-of-truth/r2-single-source-of-truth.ava.okf.md]] | Design v0.4 · **partially landed**: `env_registry.py`, `SkillIdentity` (`shared/packages/skills/skill_names.py`), `EventSpec` registry (`shared/events/contract.py`) on main; retry convergence still in flight |
+| **R1** | State / liveness has no explicit model — "what is happening now" is an implicit conjunction of signals | [[okf/design/r1-state-liveness/r1-state-liveness.ava.okf.md]] | Design v3.3 · **partially landed**: the `host_deploy_state` posture row and agent leases on main; the cluster deploy lease and updater lease were retired |
+| **R2** | Single-source-of-truth discipline missing — every incident appended a copy of the logic at the incident site | [[okf/design/r2-single-source-of-truth/r2-single-source-of-truth.ava.okf.md]] | Design v0.4 · **partially landed**: `env_registry.py`, `SkillIdentity` (`base/packages/skills/names.py`), `EventSpec` registry (`base/events/contract.py`) on main; retry convergence still in flight |
 | **R3** | Cross-process boundary contracts have no owner — contracts survive on comments and goodwill | [[okf/design/r3-boundary-contracts.ava.okf.md]] | Design v0.3 · **partially landed**: `contracts.py`, `skill_index.py`, page-server supervision, notices unified write API on main; doorplate enforcement still in flight |
 | **R4** | Frontend: layout contract has zero enforcement; realtime fold layer is a cognitive single point | [[okf/design/r4-frontend-projection.ava.okf.md]] | Design v0.6 · **partially landed**: fold layer (`ui/web/src/lib/fold/`) on main; layout invariants / two-layer defense still in flight |
 | **R5** | Skill / MCP / plugin install & update | — (design lead #2884 in progress) | **In design — not written up** |
@@ -45,11 +45,11 @@ The consolidated lexicon (single source of truth / registry / lease / doorplate 
 | R1 Q1 | State storage shape: two tables vs single table + JSONB hosts column | Two tables |
 | R1 Q2 | Deployment phase enumeration: three states vs five | Three states (`stable`/`updating`/`settling`) |
 | R2 Q1 | Idempotency/delivery semantics (SDK non-idempotent no-retry vs IM bridge retry-all-5xx) | User decides now, or defer to R3 |
-| R3 Q1 | Physical location of contract declarations: shared contract module vs route decorators | Shared module (`shared/api_contracts/contracts.py`) |
+| R3 Q1 | Physical location of contract declarations: shared contract module vs route decorators | Shared module (`base/api_contracts/contracts.py`) |
 | R3 Q2 | IM bridge pause decoupling: direct DB read vs gateway exempt route | Direct DB read |
 | R4 Q1 | Notice data contract shape: merged `GET /api/notices` vs frontend single-hook convergence | Merged endpoint |
 | R4 Q2 | e2e defense strength: Playwright in CI mandatory vs manual | In CI |
 
 ## Related as-is nodes
 
-Current-system descriptions these designs will change: [[cli/cli.ava.okf.md]] (orchestration/update legs) · [[gateway/gateway.ava.okf.md]] (pause middleware, API surface) · [[shared/shared.ava.okf.md]] (env keys, events, telemetry) · [[ui/web/web.ava.okf.md]] · [[agent/agent.ava.okf.md]] (lifecycle) · [[services/services.ava.okf.md]] (daemons).
+Current-system descriptions these designs will change: [[cli/docs/cli.ava.okf.md]] (orchestration/update legs) · [[gateway/docs/gateway.ava.okf.md]] (pause middleware, API surface) · [[base/docs/base.ava.okf.md]] (env keys, events, telemetry) · [[ui/web/docs/web.ava.okf.md]] · [[agent/docs/agent.ava.okf.md]] (lifecycle) · [[services/docs/services.ava.okf.md]] (daemons).

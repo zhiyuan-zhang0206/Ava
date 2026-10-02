@@ -8,7 +8,7 @@ backend tag landing without a frontend branch is exactly the regression class
 the user hit as "UNRECOGNIZED SYSTEM_MARKER (FRONTEND NOT ADAPTED)" (#1017).
 
 This test machine-checks the contract in the backend job (milliseconds, no
-browser): the backend enum is AST-parsed from `shared/message_kwargs.py` (the
+browser): the backend enum is AST-parsed from `base/agents/messages/kwargs.py` (the
 single source of truth), the frontend sets are read from `markers.tsx`, and a
 backend member with no frontend branch fails CI immediately.
 
@@ -17,7 +17,7 @@ its chip and never the alarm — lives in
 `ui/web/src/components/timeline.test.tsx` ("Marker contract: every
 dispatch-set source renders without the red alarm").
 
-Companion backend-internal contract: `tests/gateway/test_timeline.py`
+Companion backend-internal contract: `gateway/agents/tests/test_timeline.py`
 `TestAvaMsgTypeDispatch` asserts every AvaMsgType member dispatches to its
 intended item kind and never hits the HumanMessage catch-all.
 """
@@ -32,13 +32,13 @@ from pathlib import Path
 import pytest
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
-_MESSAGE_KWARGS = _REPO_ROOT / "shared" / "message_kwargs.py"
+_MESSAGE_KWARGS = _REPO_ROOT / "base" / "agents" / "messages" / "kwargs.py"
 _MARKERS_TS = _REPO_ROOT / "ui" / "web" / "src" / "components" / "timeline" / "markers.tsx"
 _SYSTEM_NOTE_WRITER_DIRS = ("agent", "ava_builtins", "demos")
 
 
 def _note_tag_members() -> set[str]:
-    """AST-extract the NoteTag StrEnum member values from shared/message_kwargs.py."""
+    """AST-extract the NoteTag StrEnum member values from base/agents/messages/kwargs.py."""
     tree = ast.parse(_MESSAGE_KWARGS.read_text())
     for node in tree.body:
         if (
@@ -55,7 +55,7 @@ def _note_tag_members() -> set[str]:
                 and isinstance(stmt.value, ast.Constant)
                 and isinstance(stmt.value.value, str)
             }
-    raise AssertionError("NoteTag StrEnum not found in shared/message_kwargs.py")
+    raise AssertionError("NoteTag StrEnum not found in base/agents/messages/kwargs.py")
 
 
 def _frontend_dispatch_members() -> set[str]:
@@ -92,34 +92,43 @@ def test_note_tag_and_frontend_dispatch_sets_agree() -> None:
     )
 
 
+def _note_writer_sources() -> list[Path]:
+    """Every production `.py` under the framework note writers' directories."""
+    return [
+        path
+        for directory in _SYSTEM_NOTE_WRITER_DIRS
+        for path in (_REPO_ROOT / directory).rglob("*.py")
+        if "tests" not in path.relative_to(_REPO_ROOT).parts
+    ]
+
+
 def test_system_note_writers_use_notetag_values() -> None:
     """Framework note writers must use the closed NoteTag vocabulary."""
-    for directory in _SYSTEM_NOTE_WRITER_DIRS:
-        for path in (_REPO_ROOT / directory).rglob("*.py"):
-            tree = ast.parse(path.read_text(), filename=path)
-            for node in ast.walk(tree):
-                if not (
-                    isinstance(node, ast.Call)
-                    and isinstance(node.func, ast.Name)
-                    and node.func.id == "system_note_message"
-                ):
-                    continue
-                tag = next((kw.value for kw in node.keywords if kw.arg == "tag"), None)
-                assert tag is not None, f"{path.relative_to(_REPO_ROOT)}:{node.lineno} lacks tag="
-                is_member = (
-                    isinstance(tag, ast.Attribute)
-                    and isinstance(tag.value, ast.Name)
-                    and tag.value.id == "NoteTag"
-                )
-                is_validated_inbound_tag = (
-                    isinstance(tag, ast.Call)
-                    and isinstance(tag.func, ast.Name)
-                    and tag.func.id == "_system_note_tag"
-                )
-                assert is_member or is_validated_inbound_tag, (
-                    f"{path.relative_to(_REPO_ROOT)}:{node.lineno} must pass tag=NoteTag.<member> "
-                    "or the validated inbound NoteTag helper"
-                )
+    for path in _note_writer_sources():
+        tree = ast.parse(path.read_text(), filename=path)
+        for node in ast.walk(tree):
+            if not (
+                isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Name)
+                and node.func.id == "system_note_message"
+            ):
+                continue
+            tag = next((kw.value for kw in node.keywords if kw.arg == "tag"), None)
+            assert tag is not None, f"{path.relative_to(_REPO_ROOT)}:{node.lineno} lacks tag="
+            is_member = (
+                isinstance(tag, ast.Attribute)
+                and isinstance(tag.value, ast.Name)
+                and tag.value.id == "NoteTag"
+            )
+            is_validated_inbound_tag = (
+                isinstance(tag, ast.Call)
+                and isinstance(tag.func, ast.Name)
+                and tag.func.id == "_system_note_tag"
+            )
+            assert is_member or is_validated_inbound_tag, (
+                f"{path.relative_to(_REPO_ROOT)}:{node.lineno} must pass tag=NoteTag.<member> "
+                "or the validated inbound NoteTag helper"
+            )
 
 
 def test_send_system_note_default_tag_is_live_notetag_value() -> None:

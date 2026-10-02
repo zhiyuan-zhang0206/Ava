@@ -2,16 +2,38 @@
 
 from __future__ import annotations
 
+import os
+import subprocess
 import subprocess as _subprocess
+import sys
+import time
+from collections.abc import Callable, Iterator
 from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import Mock
 
+import psutil
 import pytest
 
-from cli.commands import _probe
-from cli.commands import _repo as _repo_mod
+import cli.commands._probe as _probe_commands
+import cli.commands._repo as _repo_commands
+import cli.commands._setup as _setup_commands
+import cli.commands.converge.host as converge_host
+import cli.commands.lifecycle.root_driver as _root_driver_commands
+from base.deploy.lifecycle.start_serving import RootBirth
+from base.deploy.maintenance import pause_owner
+from base.deploy.maintenance.state import MaintenanceHold
+from base.native_process import pid_starttime_ticks
+from base.sessions.record import SessionRecord
+from cli.commands.lifecycle import _temporary_stop as command
+from cli.commands.lifecycle import root_driver
+from cli.commands.lifecycle import service_stop as stop
+from tests.agent.test_maintenance import WHEN
+from tests.e2e._proc import kill_group_if_alive
 
 # Explicit shared surface: every name the split test modules import from here.
 __all__ = [
+    "Launcher",
     "_FakeResponse",
     "_FakeResult",
     "_FakeSessionBackend",
@@ -21,9 +43,12 @@ __all__ = [
     "_noop_start_prechecks",
     "_patch_gateway_http",
     "_real_register_machine_or_die",
-    "_real_wait_for_services_ready",
     "_sess",
     "_spec",
+    "dependencies",
+    "drained",
+    "home",
+    "launch",
 ]
 
 
@@ -34,13 +59,9 @@ def _sess(service: str) -> str:
 
 
 # _noop_start_prechecks (autouse) monkey-patches _register_machine_or_die on the
-# _cli module. Keep a reference to the real implementation so tests can exercise
+# definition module. Keep a reference to the real implementation so tests can exercise
 # its actual behaviour.
-_real_register_machine_or_die = _repo_mod._register_machine_or_die
-# Likewise for _wait_for_services_ready: the autouse fixture noops it on the _cli
-# namespace (so the start-path tests don't stall on real probes), so the tests
-# that exercise the wait itself must call the captured real implementation.
-_real_wait_for_services_ready = _probe._wait_for_services_ready
+_real_register_machine_or_die = _repo_commands._register_machine_or_die
 
 
 class _FakeResult:
@@ -52,7 +73,7 @@ class _FakeResult:
 
 # Captured before any monkeypatch: the start-path tests stub subprocess.run to
 # intercept session / docker / probe commands, but `ava start`'s migration step
-# consults git (`shared.migrations._tracked_migration_paths`, Task #998) — a
+# consults git (`base.deploy.schema.migrations._tracked_migration_paths`, Task #998) — a
 # blank fake result would trip the git-tracking gate's fail-closed path and
 # abort cmd_start. `git` invocations therefore reach the real binary (read-only
 # rev-parse / ls-files, milliseconds).
@@ -73,8 +94,7 @@ def _git_aware(fake):
 class _FakeSessionBackend:
     """In-memory session backend: records new/kill, answers has_session from a set.
 
-    Stands in for the service backend (native supervisor on POSIX, winproc
-    on Windows).
+    Stands in for the native service supervisor.
     """
 
     def __init__(self) -> None:
@@ -135,12 +155,12 @@ def _fake_session_backends(
 ) -> tuple[_FakeSessionBackend, _FakeSessionBackend]:
     """The session backends, faked in-memory for every test in an importing module.
 
-    `ava start` / `ava stop` drive the service backend (native supervisor on
-    POSIX, winproc on Windows) for service sessions; it must not reach the
+    `ava start` / `ava stop` drive the native supervisor for service sessions;
+    they must not reach the
     real supervisor in unit tests (a real launch would fork a daemon, a real
     kill could touch the dev host's sessions). Returns (service, shell).
     """
-    import shared.session_backend as _sb
+    import base.sessions.backend as _sb
 
     service = _FakeSessionBackend()
     shell = _FakeSessionBackend()
@@ -150,20 +170,22 @@ def _fake_session_backends(
 
 
 @pytest.fixture(autouse=True)
-def _noop_start_prechecks(monkeypatch: pytest.MonkeyPatch) -> None:
+def _noop_start_prechecks(serving_root: RootBirth, monkeypatch: pytest.MonkeyPatch) -> None:
     """cmd_start's multi-machine setup collection + converge_host + register_self
     are all noop in an importing module — here we test session / docker / stop / status call shapes,
-    orthogonal to setup. Setup behavior itself is left to shared/test_machine.py + the setup-ergonomics tests in `test_commands_start.py`.
+    orthogonal to setup. Setup behavior itself is left to base/test_machine.py + the setup-ergonomics tests in `test_commands_start.py`.
 
     Default role="gateway" (full service set). To test secondary, explicitly override:
-        monkeypatch.setattr(_repo_mod, "_roles_or_none", lambda: frozenset({"agent-runner"}))
-        monkeypatch.setattr(_setup, "_collect_setup_values", lambda _a: (..., []))"""
+        monkeypatch.setattr(_cli, "_roles_or_none", lambda: frozenset({"agent-runner"}))
+        monkeypatch.setattr(_cli, "_collect_setup_values", lambda: (..., []))"""
+    from base.deploy.release.runtime_interpreter import LoadedRuntimeIdentity
 
-    from cli.commands import _probe, _setup
-    from cli.commands import _repo as _repo_mod
-    from cli.commands.converge import host as converge_host
+    def fixture_runtime(_self: object) -> LoadedRuntimeIdentity:
+        return serving_root.runtime
 
-    def _fake_collect(_args: dict[str, str | None]) -> tuple[dict[str, str], list]:
+    monkeypatch.setattr("cli.start_runtime.StartRuntime.identity", fixture_runtime)
+
+    def _fake_collect() -> tuple[dict[str, str], list]:
         return {
             "machine_name": "test-machine",
             "machine_role": "gateway",
@@ -171,71 +193,62 @@ def _noop_start_prechecks(monkeypatch: pytest.MonkeyPatch) -> None:
             "gateway_url": "http://test-gateway:8000",
         }, []
 
-    monkeypatch.setattr(_setup, "_collect_setup_values", _fake_collect)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_setup_commands, "_collect_setup_values", _fake_collect)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_root_driver_commands, "admit_live_start", lambda *_a, **_kw: False)  # pyright: ignore[reportUnknownArgumentType] — untyped test double
     monkeypatch.setattr(converge_host, "converge_host", lambda *_a, **_kw: None)  # pyright: ignore[reportUnknownArgumentType]
     # The per-cluster pg/redis bring-up (`_ensure_gateway_data_plane`) starts a real
     # native instance under $AVA_HOME. These tests assert session/stop/status call
     # shapes, not infra, so stub it to a noop — keeping them hermetic regardless of
     # the dev host's pg/redis.
-    from cli.commands import start as _start_mod
+    from cli.commands.lifecycle import start as _start_mod
 
     monkeypatch.setattr(_start_mod, "_ensure_gateway_data_plane", lambda: 0)
+    monkeypatch.setattr("cli.commands.data_plane.bringup.prepare_gateway_schema", lambda: None)
+    monkeypatch.setattr(
+        "cli.commands.data_plane.bringup.complete_gateway_data_plane",
+        lambda **_kw: None,  # pyright: ignore[reportUnknownArgumentType] — untyped test double
+    )
+    from cli.commands.lifecycle.root_driver import LaunchOutcome
 
-    # Source-integrity tests cover repair separately. A prior rollout's fake
-    # installed SHA must not make these call-shape tests run a real uv sync.
-    def _skip_source_integrity(_repo: Path) -> int:
-        return 0
+    monkeypatch.setattr(
+        _root_driver_commands,
+        "_launch_service_tree",
+        lambda roster, *_a, **_kw: LaunchOutcome(roster, ()),  # pyright: ignore[reportUnknownArgumentType] — untyped test double
+    )
+    monkeypatch.setattr(
+        _root_driver_commands,
+        "wait_for_service_tree",
+        lambda *_a, **_kw: _probe_commands.ReadinessWait((), 0.0, sessions_gone=False),  # pyright: ignore[reportUnknownArgumentType] — untyped test double
+    )
 
-    monkeypatch.setattr(_start_mod, "_verify_source_integrity", _skip_source_integrity)
     # _roles_or_none (stop/status/converge) + machine_role (cmd_start service
-    # resolution) both read settings + the machine_serve_* files; test env has
-    # no file → empty/Missing. Pin both to gateway so the default path is the
+    # resolution) both read the AVA_MACHINE_SERVE_* settings; the test env sets only
+    # the agent-runner flag. Pin both to gateway so the default path is the
     # full-service gateway box, deterministic regardless of the dev host's
-    # machine_serve_* files. Agent-runner tests override machine_role explicitly.
-    monkeypatch.setattr(_repo_mod, "_roles_or_none", lambda: frozenset({"gateway"}))
-    monkeypatch.setattr("shared.machine.machine_role", lambda: frozenset({"gateway"}))
+    # environment. Agent-runner tests override machine_role explicitly.
+    monkeypatch.setattr(_repo_commands, "_roles_or_none", lambda: frozenset({"gateway"}))
+    monkeypatch.setattr("base.cluster.machine.machine_role", lambda: frozenset({"gateway"}))
     # register_self goes to central DB UPSERT; test does not need real writes. cmd_start goes
     # through _register_machine_or_die which internally imports register_self, directly patch the helper to return 0.
-    monkeypatch.setattr(_repo_mod, "_register_machine_or_die", lambda _resolved, _role: 0)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_repo_commands, "_register_machine_or_die", lambda _resolved, _role: 0)  # pyright: ignore[reportUnknownArgumentType]
     # secondary path will run _probe_gateway_or_die; primary does not call it, adding here
     # ensures secondary tests can also reuse the default noop.
-    monkeypatch.setattr(_repo_mod, "_probe_gateway_or_die", lambda _url: 0)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_repo_commands, "_probe_gateway_or_die", lambda _url: 0)  # pyright: ignore[reportUnknownArgumentType]
     # _assert_schema_current_or_die truly calls DB; tests don't need real schema query, directly patch.
-    monkeypatch.setattr(_repo_mod, "_assert_schema_current_or_die", lambda: 0)
-    # The start path now polls launched services' probes before the status
-    # snapshot. These tests stub subprocess, so the real probes (milvus tcp /
-    # watchdog pidfile) would report not-ready and stall the wait to its timeout.
-    # The wait itself is covered by its own unit tests below; noop it here.
-    # Returns a ReadinessWait whose `unready` is empty (= all ready), which keeps the
-    # start path's readiness gate satisfied. tests/cli/test_start_readiness_gate.py is
-    # where a non-empty verdict and the exit code it produces are exercised.
-    monkeypatch.setattr(
-        _probe,
-        "_wait_for_services_ready",
-        lambda *_a, **_kw: _probe.ReadinessWait((), 0.0, sessions_gone=False),  # pyright: ignore[reportUnknownArgumentType]
-    )
-    # `_launch_sessions`' idempotence guard asks the service's probe as well as
-    # the session (issue #1015: a live session with a dead daemon behind it must be
-    # relaunched, not skipped). Same reason as the readiness wait right above: these
-    # tests stub subprocess, so every real probe reports down and each "already
-    # running" session would be torn down and relaunched — a call-shape assertion
-    # would then be measuring the husk path instead. That path has its own tests in
-    # tests/cli/test_start_husk_session.py.
-    monkeypatch.setattr(_probe, "_husk_session_reason", lambda _spec: None)  # pyright: ignore[reportUnknownArgumentType]
-    # _ensure_frontend_deps shells out to `npm ci` when frontend deps are stale;
-    # these tests assert session call shape, not dep install, and must stay hermetic
-    # regardless of whether this checkout happens to have ui/web/node_modules.
-    from cli.commands import _session_lifecycle as _session_mod
+    monkeypatch.setattr(_repo_commands, "_assert_schema_current_or_die", lambda: 0)
+    # Root service preparation must not install frontend dependencies in unit tests.
+    from cli.commands import _repo
+    from cli.commands.lifecycle import root_driver
 
-    monkeypatch.setattr(_session_mod, "_ensure_frontend_deps", lambda _repo: None)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_repo, "_ensure_frontend_deps", lambda _repo: None)  # pyright: ignore[reportUnknownArgumentType]
 
     # These call-shape tests use the suite's owner DB URL, not an enrolled
     # runner's bootstrap projection. Credential forwarding has its own tests
     # in test_agent_profile_launch_env.py.
-    def _fixture_runner_url(_url: str) -> str:
+    def _fixture_runner_url() -> str:
         return "postgresql://ava_runner:test-runner@127.0.0.1:1/ava_citest"
 
-    monkeypatch.setattr(_session_mod, "runner_db_url_projection", _fixture_runner_url)
+    monkeypatch.setattr(root_driver, "runner_db_url_projection", _fixture_runner_url)
 
 
 @pytest.fixture(autouse=True)
@@ -249,12 +262,12 @@ def _hermetic_gateway_base(monkeypatch: pytest.MonkeyPatch) -> None:
     on a renamed field. Resolve it to an unreachable stub by default: tests that
     assert on the response mock httpx on top; the rest take the graceful
     'unreachable' path deterministically, matching CI where no gateway is up."""
-    monkeypatch.setattr("shared.machine.gateway_api_base", lambda: "http://gw:8000")
+    monkeypatch.setattr("base.cluster.machine.gateway_api_base", lambda: "http://gw:8000")
 
 
 def _spec(service: str):
     from cli.commands._repo import ServiceSpec
-    from ops.service_spec import (
+    from ops.roster.service_spec import (
         _GATEWAY,  # typed frozenset[MachineRole]; capability irrelevant to probe tests
     )
 
@@ -286,4 +299,84 @@ class _FakeResponse:
 
 def _patch_gateway_http(monkeypatch: pytest.MonkeyPatch) -> None:
     """Stub gateway URL/headers resolution so the HTTP helpers don't hit settings."""
-    monkeypatch.setattr("shared.machine.gateway_api_base", lambda: "http://gw:8000")
+    monkeypatch.setattr("base.cluster.machine.gateway_api_base", lambda: "http://gw:8000")
+
+
+Launcher = Callable[[str, str], subprocess.Popen[str]]
+
+
+@pytest.fixture
+def home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    monkeypatch.setenv("AVA_HOME", str(tmp_path))
+    monkeypatch.setattr(stop, "get_shell_backend", lambda: SimpleNamespace(list_sessions=list))
+    monkeypatch.setattr(root_driver, "_root_tree_selection", dict)
+    monkeypatch.setattr(root_driver, "_stop_root_service_tree", Mock(return_value=0))
+    monkeypatch.setattr(_root_driver_commands, "_stop_root_service_tree", Mock(return_value=0))
+    monkeypatch.setattr(_root_driver_commands, "_root_tree_plan", Mock(return_value=[]))
+
+    # Stop intentionally consumes the ambient override. Every independent test
+    # CLI still needs its explicit private binding when the checkout currently
+    # points at an isolated native-proof home: the PTY CLI children inherit it.
+    monkeypatch.setenv("HOME", str(tmp_path))
+    return tmp_path
+
+
+@pytest.fixture
+def launch(home: Path) -> Iterator[Callable[[str, str], subprocess.Popen[str]]]:
+    processes: list[subprocess.Popen[str]] = []
+
+    def create(name: str, code: str) -> subprocess.Popen[str]:
+        proc = subprocess.Popen(  # noqa: S603 — test-owned Python and fixed fixture scripts
+            [sys.executable, "-u", "-c", code],
+            cwd=home,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            start_new_session=True,
+        )
+        processes.append(proc)
+        assert proc.stdout is not None and proc.stdout.readline().strip() == "ready"
+        SessionRecord(
+            proc.pid,
+            psutil.Process(proc.pid).create_time(),
+            "private-test",
+            str(home),
+            time.time(),
+            pid_starttime_ticks(proc.pid),
+            pgid=os.getpgid(proc.pid),
+        ).write(home / "run/sessions" / f"{name}.json")
+        return proc
+
+    yield create
+    for proc in processes:
+        # Test fixture cleanup alone may kill the exact private process group it
+        # created, after the assertions prove strict stop left it alive.
+        kill_group_if_alive(proc)
+        proc.wait(timeout=5)
+        if proc.stdout:
+            proc.stdout.close()
+        if proc.stderr:
+            proc.stderr.close()
+
+
+def drained() -> None:
+    pause_owner.begin_maintenance("local", WHEN)
+    pause_owner.change_maintenance("local", WHEN, MaintenanceHold(), MaintenanceHold("drained"))
+
+
+def dependencies(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(_root_driver_commands, "_stop_root_service_tree", lambda **_kwargs: 0)  # pyright: ignore[reportUnknownArgumentType] — untyped test double
+    monkeypatch.setattr(_root_driver_commands, "_root_tree_plan", lambda _preserve: [])  # pyright: ignore[reportUnknownArgumentType] — untyped test double
+    monkeypatch.setattr(command, "pause_agents", lambda _timeout, **_kw: drained())  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(command, "machine_role", lambda: frozenset({"agent-runner"}))
+    monkeypatch.setattr(
+        command,
+        "build_services",
+        lambda: [
+            SimpleNamespace(session="worker", requires_db=False),
+            SimpleNamespace(session="browser", requires_db=False),
+        ],
+    )
+    monkeypatch.setattr(command, "ops_quiescent", lambda _timeout: None)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr("base.host.proc.hosting_supervised_session", lambda: None)
+    monkeypatch.setattr("base.deploy.state.host_deploy_state.set_posture", lambda _value: None)  # pyright: ignore[reportUnknownArgumentType]

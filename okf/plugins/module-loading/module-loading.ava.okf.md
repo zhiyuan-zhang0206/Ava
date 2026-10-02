@@ -9,7 +9,7 @@ tags:
 # Plugin Module Loading
 
 ## One loader contract, three production call sites
-`agent/extensions.py:load_extensions()` imports every enabled plugin's
+`agent/extensions/__init__.py:load_extensions()` imports every enabled plugin's
 `plugin.py` (plus its optional `agent_runtime.py` face on the full form) by
 path, and `ava.sdk_surface.plugin_loader.scan_and_load()` does the same for the external
 plugins at host boot (`agent/process_boot.py:load_process_extensions`). The
@@ -25,7 +25,7 @@ the `register_*` calls it triggers.
 The name given to `importlib.util.spec_from_file_location` is **dotted**
 (`ava_builtins.plugins.<name>.plugin` built-in, `plugins.<name>.plugin`
 external), so importlib sets `__package__` and a `from . import x` inside
-`plugin.py` resolves. A directory under `shared/paths.py:repo_plugins_dir()`
+`plugin.py` resolves. A directory under `base/paths/__init__.py:repo_plugins_dir()`
 is built-in; anything else is external.
 
 Load order is the `config.plugins` dict order (alphabetical), one by one —
@@ -43,7 +43,7 @@ Per-face containment, the face's dotted name, and the load forms in full:
 
 ## Disabled means never imported
 The enable set comes from the per-machine `plugins_config.json`, read by both
-loaders through `shared/plugins_config`: host boot via `load_for_runtime()`
+loaders through `base/plugins_config`: host boot via `load_for_runtime()`
 and the graph loader via `load()`, each falling back to
 `load(allow_dangling=True)` when a config entry's plugin directory is gone —
 every dangling name is reported once per process through the canonical
@@ -54,7 +54,7 @@ plugins disable` changed nothing about startup). Host boot passes the enabled
 set of the *external* plugins it scans; the graph build adds the built-ins.
 Machine-level roster paths sit outside the enable plane by design: the
 `services.py` roster and the shipped-`metrics.py` scan key on presence, not
-enable-state (`ops/spec.py:_plugin_services`).
+enable-state (`ops/spec.py:plugin_services`).
 
 ## The external `plugins` prefix is registered, not resolved from sys.path
 `register_plugin_parent_packages` (`ava/sdk_surface/plugin_loader.py`, applied by the loader for
@@ -73,7 +73,7 @@ A plugin whose `plugin.py` raises at import (missing sibling, syntax error,
 top-level exception) degrades to a **skip with a loud report**, never a
 blocked `import ava` / host boot / graph build: `safe_load_plugin_module`
 drops the half-executed module from `sys.modules`, and
-`shared/plugin_load_report.py:report_plugin_load_failure` emits a loguru ERROR
+`base/packages/plugins/load_report.py:report_plugin_load_failure` emits a loguru ERROR
 carrying the traceback plus one `plugin_load_failed` telemetry event (anomaly
 tier). The remaining enabled plugins keep loading; a config entry whose
 plugin directory is gone (`DanglingPlugin`) is reported and treated as
@@ -82,14 +82,14 @@ not a plugin failure.
 
 The same containment applies at the other plugin-code load sites, each
 reporting through the one reporter: a plugin's `provider.py`
-(`shared/lm/plugin_providers.py`), `services.py` (`ops/spec.py`), `setup.py`
+(`base/lm/plugin_providers.py`), `services.py` (`ops/spec.py`), `setup.py`
 (`cli/commands/extensions/_plugin_scaffold.py`), a built-in plugin's `metrics.py`
 (`gateway/inspect/_plugin_metrics.py`), the gateway plugin inspector's
 `inspector.py` (`gateway/inspect/_plugin_widgets.py`), and the launched
 child's `import ava` self-load (`ava.ensure_plugins_loaded`, plus a stderr
 line — a child usually has no log sink). One contained site stays off that
 reporter: `default_config.py` images surface as `error`-status entries on the
-plugin-update result (`shared/plugins_config.py:update_all_disk_images`).
+plugin-update result (`base/packages/plugins/enable_config.py:update_all_disk_images`).
 
 ## Semantics boundary: what stays fail-closed
 Containment covers *code* that fails to load; inventory and contract conflicts
@@ -117,5 +117,5 @@ In full: [[okf/plugins/module-loading/reload-semantics.ava.okf.md]].
 
 ## Key Dependencies
 - [[okf/plugins/plugins.ava.okf.md]] — the injection surfaces the import registers into
-- [[agent/graph/graph.ava.okf.md]] — `build_graph()` calls the loader (`agent.extensions.load_extensions`) before wiring nodes
+- [[agent/graph/docs/graph.ava.okf.md]] — `build_graph()` calls the loader (`agent.extensions.load_extensions`) before wiring nodes
 - [[extensions.ava.okf.md]] — the `ava.extend.wrap` layer a reload re-installs from a pristine core

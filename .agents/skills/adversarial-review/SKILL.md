@@ -86,8 +86,8 @@ matters + suggested fix**. Match the diff against
   retention) and match what the emitter writes; consumers read declared
   keys; retention has one source of truth.
 - Schema vs migrations: new migrations reflected in `db/schema.sql` in the
-  same PR; lossy operations expand-contract with a paired `.down.sql` whose
-  preconditions still hold (a down that silently drops live data is P0).
+  same PR; lossy operations expand-contract (the drop is its own later
+  migration); a merged migration is never edited, deleted or renamed.
 - API: changed endpoints — every consumer updated in the same PR (frontend
   types, tests, services; the main-red-after-merge class).
 - Process boundaries (R3 doorplates): idempotency declared, pause exemption
@@ -99,7 +99,7 @@ matters + suggested fix**. Match the diff against
 - Swallowed exceptions: top-level `except Exception` that logs and
   continues — what does the caller believe happened? A caught exception
   that still advances state is data loss.
-- Retry loops converge on `shared/resilience.py`; new hand-rolled loops
+- Retry loops converge on `base/host/net/resilience.py`; new hand-rolled loops
   with divergent backoff/jitter/classifier are violations.
 - Async called as sync: a never-awaited coroutine silently never runs (the
   redis `disconnect()` class).
@@ -136,7 +136,7 @@ matters + suggested fix**. Match the diff against
 - Fake-green channels: `|| true`, flaky groups allowed to fail, skips on
   missing deps, coverage sets drifting from CI's, gates with fallbacks below
   the real threshold, e2e without proof-of-work.
-- Tests that can reach the real world: Telegram, os_cron/launchd, migration
+- Tests that can reach the real world: Telegram, cron/launchd, migration
   application, prod `.env` leakage through the shell. Non-pytest scripts
   bypass conftest guards.
 - The behavior change is locked by a test asserting the new behavior;
@@ -165,14 +165,14 @@ matters + suggested fix**. Match the diff against
 
 ### D9 OKF documentation sync
 
-Docs must track code — a feature that lands without a co-located
-`.ava.okf.md` update is an invisible feature (the zombie-escalation class:
+Docs must track code — a feature that lands without an OKF update in the
+package's `docs/` is an invisible feature (the zombie-escalation class:
 merged 2026-08-10, user ruled it out because no OKF record existed).
 Check, for every functional PR (feat / refactor / behavior change):
 
-- [ ] Does the diff include or update the co-located `.ava.okf.md` for the
-      touched domain (`<dir>.ava.okf.md` next to the code it describes, or
-      `okf/<domain>.ava.okf.md` for the domain overviews)?
+- [ ] Does the diff include or update the `.ava.okf.md` for the touched
+      domain (`<dir>/docs/<dir>.ava.okf.md` for the domain overview, or
+      `okf/<domain>.ava.okf.md` for the cross-domain ones)?
 - [ ] If not: is an exemption explicitly declared in the PR description?
       Legitimate exemptions only:
       - pure bug fix (no behavior / contract change)

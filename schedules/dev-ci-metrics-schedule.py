@@ -10,12 +10,12 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 import ava
-import shared
+import base
 from ava.agents import AgentStatus as S
 from schedules.agent_status_guard import ensure_agent_status_members
 from schedules.catchup import claimed_slot
 from schedules.daily_host import report_agent, run_daily_loop
-from shared.config import settings
+from base.config import settings
 
 ensure_agent_status_members(S, {"IDLING", "RUNNING", "TERMINATED"}, schedule_name="dev-ci-metrics")
 
@@ -23,7 +23,7 @@ CRON = "20 6 * * *"
 TZ = settings.general.timezone
 _REPORT_AGENT_ENV = "AVA_CI_METRICS_REPORT_AGENT"
 _REPORT_LABEL = "Ava \u8d1f\u8d23\u4eba"
-_REPO_ROOT = Path(shared.__file__).resolve().parents[1]
+_REPO_ROOT = Path(base.__file__).resolve().parents[1]
 
 
 def _report_agent() -> int:
@@ -33,7 +33,7 @@ def _report_agent() -> int:
 def _report_failure(detail: str) -> None:
     message = (
         f"Dev/CI metrics collection failed:\n{detail[-1000:]}\n"
-        "Check the schedule log; backfill with `scripts/ci_runs_export.py --repo "
+        "Check the schedule log; backfill with `scripts/ci/runs_export.py --repo "
         "zhiyuan-zhang0206/Ava --print-snapshot`."
     )
     try:
@@ -44,14 +44,14 @@ def _report_failure(detail: str) -> None:
 
 
 def _load_exporter() -> Any:
-    scripts_dir = _REPO_ROOT / "scripts"
+    scripts_dir = _REPO_ROOT / "scripts" / "ci"
     if str(scripts_dir) not in sys.path:
         sys.path.insert(0, str(scripts_dir))
-    return __import__("ci_runs_export")
+    return __import__("runs_export")
 
 
 def _snapshot(exporter: Any) -> dict[str, Any]:
-    from shared.paths import ava_home
+    from base.paths import ava_home
 
     path = ava_home() / exporter._STATE_DIR_RELATIVE / "snapshot.json"
     loaded = json.loads(path.read_text(encoding="utf-8"))

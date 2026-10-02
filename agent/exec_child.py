@@ -5,11 +5,11 @@ a stuck native call (numpy / ctypes / an `except BaseException` swallow loop)
 can be SIGKILLed without touching the agent process — issue #184. The agent
 process stays alive; this child is disposable.
 
-Contract with the parent (`agent/graph/_exec_subprocess.py`), all through
+Contract with the parent (`agent/graph/exec/_subprocess.py`), all through
 files + signals:
 
 - Request envelope: `AVA_EXEC_REQUEST_FILE` — the code, the agent id, the
-  timeout, and the typed state snapshot (`agent/graph/exec_protocol.py`).
+  timeout, and the typed state snapshot (`agent/graph/exec/protocol.py`).
 - Output: fd 1/2, merged into one pipe by the parent (`stderr=STDOUT`). Only
   the agent's own output goes there: framework logs use the file sink
   (`init_subprocess_logger` adds no stderr handler), and stdout/stderr are
@@ -21,8 +21,8 @@ files + signals:
   from its own cancel/timeout flags.
 - POSIX signals: SIGINT -> KeyboardInterrupt, SIGTERM -> TimeoutError, both raised
   at the next bytecode boundary (the same semantics the old in-thread ctypes
-  injection had). POSIX gets a grace period before the parent closes the
-  process group; Windows cancel/timeout immediately closes the Job Object;
+  injection had). The parent allows a grace period before closing the
+  process group;
   a watchdog `os._exit(124)` bounds this child's life if the parent dies first.
 
 Identity: `ava.agent_identity.establish(agent_id, owns_loop=True)` — owns_loop stays
@@ -30,7 +30,7 @@ True so `ava.self.terminate/restart/compact` keep working exactly as they do
 in the agent process (their inbound INSERTs go to the same database over
 `ava.DB`); the resulting `LifecycleExit` is caught here and reported as a
 lifecycle outcome. The parent reconstructs the exception from the name
-(`agent.graph._exec_result.lifecycle_exception_from_name`).
+(`agent.graph.exec._result.lifecycle_exception_from_name`).
 
 Per-agent config: the host exports its bound framework and plugin pins through
 `AVA_AGENT_CONFIG_OVERLAY`. Direct embedding callers may also pass
@@ -55,23 +55,22 @@ from typing import Any, Literal, cast
 
 # isort: split
 # First import after stdlib, BEFORE the heavy `import ava` inside `_run`:
-# importing shared.log runs `logger.remove()` (dropping loguru's default
+# importing base.log runs `logger.remove()` (dropping loguru's default
 # stderr handler). Without this, a Settings-construction warning that fires
 # during the ava import chain (e.g. `_warn_when_timezone_unset` on a host
-# without AVA_TIMEZONE — shared/config/general.py logs it on loguru directly)
+# without AVA_TIMEZONE — base/config/general.py logs it on loguru directly)
 # lands on stderr, which the parent pipes straight into the agent's exec
 # output. CI caught this leak twice (2026-08-21, PR #256 shard 1): once
 # unfixed, once after the import sorter silently moved the guard below the
 # heavy import — the split markers above and below pin the order.
-import shared.log  # noqa: F401  # pyright: ignore[reportUnusedImport]  # side effect is the point
+import base.log  # noqa: F401  # pyright: ignore[reportUnusedImport]  # side effect is the point
 
 # isort: split
 # Envelope types the boot path references: a leaf module (stdlib + small shared
 # helpers, no serde — `loads_typed` stays deferred), so importing it here keeps
 # the child's early-import order intact.
-from agent.graph.exec_protocol import RequestPayload
-from shared.log import init_subprocess_logger, logger
-from shared.winjob import EXEC_JOB_GATE_ENV, await_parent_job_gate
+from agent.graph.exec.protocol import RequestPayload
+from base.log import init_subprocess_logger, logger
 
 # Covers child runtime setup after initial module imports, ending immediately
 # before agent-authored code begins. The parent-owned exec duration includes
@@ -134,7 +133,7 @@ def _arm_watchdog(timeout_s: float) -> None:
     """Hard-exit past (timeout + parent kill grace + margin) — the belt to the
     parent's braces. Only fires when the parent itself died (or its signals
     were lost); a parent that is alive SIGKILLs this child first."""
-    from agent.graph.exec_protocol import KILL_GRACE_S
+    from agent.graph.exec.protocol import KILL_GRACE_S
 
     margin = float(os.environ.get("AVA_EXEC_WATCHDOG_MARGIN_S", WATCHDOG_MARGIN_S))
     delay = timeout_s + KILL_GRACE_S + margin
@@ -156,7 +155,7 @@ def _pop_overlay_env() -> tuple[dict[str, object] | None, dict[str, object] | No
     must not re-read the env."""
     import json as _json
 
-    from shared.env_registry import AGENT_BIRTH_CONFIG_ENV, AGENT_CONFIG_OVERLAY_ENV
+    from base.host.env.registry import AGENT_BIRTH_CONFIG_ENV, AGENT_CONFIG_OVERLAY_ENV
 
     maps: dict[str, dict[str, object] | None] = {}
     for env_name in (AGENT_BIRTH_CONFIG_ENV, AGENT_CONFIG_OVERLAY_ENV):
@@ -183,7 +182,7 @@ def _apply_overlay_scope(
     """Apply both maps at one scope — birth first, overlay on top (the same
     precedence the host uses when it resolves stored configuration).
     Returns True when at least one map applied."""
-    from shared.plugin_config_registry import apply_config_overlay
+    from base.packages.plugins.config_registration import apply_config_overlay
 
     applied = False
     for value in (birth, overlay):
@@ -202,14 +201,14 @@ def _init_logger(agent_id: int | None) -> None:
     With the sink in place, the boot timing line becomes the child's first
     event-pipeline record, so the OTLP side is armed for deferred export here,
     before any record can flow (task #3816 M4b; see
-    `shared.telemetry.otlp.telemetry_otlp_defer`). A failed sink registration skips the arm."""
+    `base.telemetry.otlp.telemetry_otlp_defer`). A failed sink registration skips the arm."""
     if agent_id is None:
         return
     init_subprocess_logger(agent_id=agent_id)
     try:
-        from shared.log import _add_postgres_sink
+        from base.log import add_postgres_sink
 
-        _add_postgres_sink(process="agent-exec", agent_id=agent_id)
+        add_postgres_sink(process="agent-exec", agent_id=agent_id)
     except Exception:
         logger.warning(
             "[exec-child] event pipeline sink unavailable — sdk_call events "
@@ -217,7 +216,7 @@ def _init_logger(agent_id: int | None) -> None:
             agent_id=agent_id,
         )
         return
-    from shared.telemetry.otlp import telemetry_otlp
+    from base.telemetry.otlp import telemetry_otlp
 
     telemetry_otlp.defer_until_exit()
 
@@ -226,7 +225,7 @@ def _emit_child_boot_timing() -> None:
     """Record the child-ready boundary before executing agent-authored code."""
     duration_ms = (time.perf_counter() - _CHILD_BOOT_STARTED_AT) * 1000
     extra: dict[str, object] = {}
-    module = sys.modules.get("shared.telemetry.otlp.telemetry_otlp")
+    module = sys.modules.get("base.telemetry.otlp.telemetry_otlp")
     if module is not None and hasattr(module, "deferred_state"):
         # Diagnostic marker (task #3816 M4b): held for deferred export?
         extra["otlp_deferred"] = module.deferred_state()
@@ -328,7 +327,7 @@ def _run_code(code: str, payload: Any) -> None:
         register_agent_source,
     )
     from ava.sdk_surface.help import HelpRouter
-    from shared import sdk_telemetry
+    from base.agents.sdk import telemetry as sdk_usage_telemetry
 
     # Register the source so `<agent_code>` frames resolve their offending
     # line in tracebacks (exec'd code is invisible to linecache).
@@ -357,10 +356,10 @@ def _run_code(code: str, payload: Any) -> None:
         # contract as the old in-process worker had). It yields the block's full
         # runtime tally — the block's real SDK-call counts, not a scan of its
         # text. Read in the finally so a crash keeps what already ran.
-        with sdk_telemetry.recording() as tally:
+        with sdk_usage_telemetry.recording() as tally:
             exec(compile(code, "<agent_code>", "exec"), fresh_globals)
     except BaseException as exc:
-        from shared.lifecycle import LifecycleExit
+        from base.agents.lifecycle import LifecycleExit
 
         if isinstance(exc, LifecycleExit):
             # Lifecycle (terminate/restart/compact): SDK already INSERTed the
@@ -382,7 +381,7 @@ def _run_code(code: str, payload: Any) -> None:
         sys.stdout.write(format_agent_traceback(exc))
         sys.stdout.flush()
     finally:
-        payload.sdk_calls = sdk_telemetry.tally_entries(tally)
+        payload.sdk_calls = sdk_usage_telemetry.tally_entries(tally)
 
 
 def _finalize_telemetry() -> None:
@@ -393,23 +392,23 @@ def _finalize_telemetry() -> None:
     happen in-life: an exec child defers its OTLP bring-up (task #3816 M4b),
     and `_ensure()` refuses to construct the providers once the interpreter is
     finalizing — an exit-time completion would leave the backlog mirror-only.
-    The exit seam (`shared.telemetry._drain_on_exit`, task #4320) carries a
+    The exit seam (`base.telemetry._drain_on_exit`, task #4320) carries a
     live pipeline's tail batch; a deferred hold is not a live pipeline.
 
-    The emitter loads `shared.telemetry` off its first record, so a zero-record
+    The emitter loads `base.telemetry` off its first record, so a zero-record
     child skips everything here and exits without the telemetry / OTel imports
     (task #3816 M3). For a child with records, `telemetry_otlp.finalize()`
     completes a deferred hold — the backend comes up and the backlog ships here
     when the child lived below saturation and the max-age bound (task #3816
     M4b) — and stays a plain flush for a never-deferred backend.
     """
-    if "shared.telemetry" not in sys.modules:
+    if "base.telemetry" not in sys.modules:
         return
-    from shared import telemetry
+    from base import telemetry
 
     telemetry.sync()
-    if "shared.telemetry.otlp.telemetry_otlp" in sys.modules:
-        from shared.telemetry.otlp import telemetry_otlp
+    if "base.telemetry.otlp.telemetry_otlp" in sys.modules:
+        from base.telemetry.otlp import telemetry_otlp
 
         telemetry_otlp.finalize()
 
@@ -454,7 +453,7 @@ def _run(request_path: str, result_path: str) -> None:
     """Child body: read the request, set up identity + plugins + state, run the
     code, write the result envelope."""
     _import_runtime()
-    from agent.graph.exec_protocol import ResultPayload, read_request, write_result
+    from agent.graph.exec.protocol import ResultPayload, read_request, write_result
     from ava.attachment_transport import media_gated_members, take_attachments
     from ava.sdk_surface.discovery import hidden_surface_members
     from ava.security import take_findings
@@ -470,12 +469,12 @@ def _run(request_path: str, result_path: str) -> None:
     if request.agent_id is not None:
         agent_identity.establish(request.agent_id, owns_loop=True)
         if request.incarnation is not None:
-            from shared.runtime_incarnation import bind_child_incarnation
+            from base.native_process.runtime_incarnation import bind_child_incarnation
 
             bind_child_incarnation(request.incarnation)
         _init_logger(request.agent_id)
         # No eager OTLP warmup: the backend comes up lazily on the first export
-        # (`_ensure()` in shared/telemetry/otlp/telemetry_otlp.py), so a zero-record
+        # (`_ensure()` in base/telemetry/otlp/telemetry_otlp.py), so a zero-record
         # child never imports the OTel SDK at all (task #3816 M3).
     # Two-phase overlay application, mirroring the agent process's own boot:
     # framework fields early (before any settings read), plugin fields after
@@ -543,13 +542,12 @@ def main() -> None:
     semantics, not the exit code (a non-zero exit would add nothing the
     envelope does not already say, and the parent treats a missing envelope
     as the crash path anyway)."""
-    await_parent_job_gate(os.environ.get(EXEC_JOB_GATE_ENV))
     request_path = os.environ.get("AVA_EXEC_REQUEST_FILE")
     result_path = os.environ.get("AVA_EXEC_RESULT_FILE")
     if not request_path or not result_path:
         sys.stderr.write(
             "agent.exec_child needs AVA_EXEC_REQUEST_FILE and AVA_EXEC_RESULT_FILE "
-            "in the environment — spawn it via agent.graph._exec_subprocess\n"
+            "in the environment — spawn it via agent.graph.exec._subprocess\n"
         )
         raise SystemExit(2)
     try:
@@ -586,8 +584,8 @@ def _write_crashed_result(
         "sdk_calls": None,
     }
     try:
-        from agent.graph.exec_protocol import ResultPayload as RuntimeResultPayload
-        from agent.graph.exec_protocol import write_result as runtime_write_result
+        from agent.graph.exec.protocol import ResultPayload as RuntimeResultPayload
+        from agent.graph.exec.protocol import write_result as runtime_write_result
 
         runtime_write_result(
             Path(result_path),

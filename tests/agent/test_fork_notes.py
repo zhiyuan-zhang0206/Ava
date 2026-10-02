@@ -18,6 +18,7 @@ registrations on teardown.
 from __future__ import annotations
 
 import sys
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any, cast
 
@@ -39,19 +40,27 @@ from agent.graph.claim._dispatch import (
 from agent.graph.claim.node import claim_node
 from agent.messages import NoteTag
 from agent.state import AgentState
-from tests.conftest import spawn_agent
+from base.paths import skills_dir
+from tests.fixtures.units import spawn_agent
 
 from .test_claim import _config, _insert_inbound_kind, _make_runtime  # reuse the claim harness
+
+
+@pytest.fixture
+def skills_unit(unit_home: Path, set_machine_identity: Callable[..., None]) -> None:
+    """A per-test unit home, so `<home>/skills` is this test's own skill load dir,
+    that still names its machine: the fork tail renders a capability index."""
+    set_machine_identity("agent-runner", "test-machine")
 
 
 @pytest.fixture(autouse=True)
 def memory_plugin() -> Any:
     """Load ava_memory through the real plugin-registration path (mirrors
-    tests/plugins/test_ava_memory_notes.py) so the memory-note registrations
+    ava_builtins/plugins/ava_memory/tests/test_ava_memory_notes.py) so the memory-note registrations
     exist regardless of what earlier modules cleared."""
     from agent.state import clear_plugin_registrations
-    from shared.plugin_config_registry import bind_from_disk
-    from shared.plugin_context import PluginContext
+    from base.packages.plugins.config_registration import bind_from_disk
+    from base.packages.plugins.context import PluginContext
 
     clear_plugin_registrations()
     for name in list(sys.modules):
@@ -278,32 +287,30 @@ async def test_fork_rebuild_preserves_prefix_bytes_until_first_stripped_note(
     assert set(grafted_tags[1:]) == {"agent_id", "agent_memory"}  # pyright: ignore[reportUnknownArgumentType]
 
 
+@pytest.mark.usefixtures("skills_unit")
 async def test_fork_tail_grafts_delta_skills_from_inbound_payload(
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
-    tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Scenario 2b: a skill the fork's config added (source never had it) rides
     the fork inbound payload and lands as a full-body note at the TAIL — after
     the fork marker and the on_fork notes, never inside the cached prefix."""
-    import ava.skills as skills_mod
-
-    skills_dir = tmp_path / "skills"
-    skills_dir.mkdir()
-    extra = skills_dir / "extra"
+    load_dir = skills_dir()
+    load_dir.mkdir()
+    extra = load_dir / "extra"
     extra.mkdir()
     (extra / "SKILL.md").write_text(
         "---\nname: extra\ndescription: the extra skill\n---\n\nEXTRA SKILL BODY\n",
         encoding="utf-8",
     )
-    monkeypatch.setattr(skills_mod, "_skills_dir", lambda: skills_dir)
 
     def _all_enabled() -> set[str]:
-        d = skills_mod._skills_dir()
-        return {p.name for p in d.iterdir() if p.is_dir()} if d.is_dir() else set()
+        return {p.name for p in load_dir.iterdir() if p.is_dir()}
 
-    monkeypatch.setattr("shared.install_registry.loadable_skill_names", _all_enabled)
+    monkeypatch.setattr(
+        "base.packages.extensions.install_registry.loadable_skill_names", _all_enabled
+    )
 
     tid = spawn_agent()
     with db_conn.cursor() as cur:

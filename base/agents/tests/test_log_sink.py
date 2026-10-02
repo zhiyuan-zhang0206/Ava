@@ -1,0 +1,375 @@
+"""Unit tests for the loguru -> event-emitter adapter — locks event resolution /
+agent_id sentinel / payload shape on the JSONL mirror (the durable local copy
+of the unified event stream).
+
+The loguru handler enqueues into the unified emitter (`base.telemetry`),
+whose drain thread batch-writes; `_last_event` flushes the queue first so
+assertions see the written lines without sleeps. The Postgres `events` copy
+was retired with the LGTM cutover (task #1197 close-C) and dropped with the
+archive cleanup (task #1281/#1823); these assertions read the day-stamped
+JSONL mirror
+(`logs_dir()/events-YYYYMMDD.jsonl`) instead — same row shape, one JSON
+object per line.
+"""
+
+from __future__ import annotations
+
+import json
+from datetime import UTC, datetime
+from pathlib import Path
+from typing import cast
+
+import psycopg
+import pytest
+from loguru import logger as _global_logger
+
+from base import telemetry
+from base.log import _postgres_sink, add_postgres_sink
+
+
+@pytest.fixture
+def sink_logger():
+    """Register the loguru -> emitter adapter + bind agent_id, cleanup after yield.
+
+    The adapter enqueues (non-blocking); tests flush via `_last_event`. bind
+    agent_id="-" simulates the gateway init form; within tests when the agent
+    process perspective is needed, logger.bind() overrides it.
+    """
+    add_postgres_sink()  # eager open pipeline (pool + drain thread)
+    _global_logger.remove()
+    sink_id = _global_logger.add(_postgres_sink, level="INFO", enqueue=False, catch=False)
+    _global_logger.configure(extra={"agent_id": "-"})
+    yield _global_logger
+    _global_logger.remove(sink_id)
+
+
+@pytest.fixture(autouse=True)
+def _isolate_events_mirror(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Each test's event mirror lives in its own tmp dir, never the
+    worker-shared session home (audit M-2): the drain thread appends to
+    `logs_dir()` by day, so a later test in the same worker would otherwise
+    read earlier tests' lines (order-dependent failures or false passes).
+
+    `paths.ava_home` is the patch target rather than `paths.logs_dir` because
+    the telemetry module bound `logs_dir` at import time — patching the path
+    function itself would make the drain write to the session home while
+    `_last_event` read the tmp dir. Both sides resolve `ava_home()` at call
+    time, so one patch redirects the whole pipeline consistently."""
+    from base import paths
+
+    monkeypatch.setattr(paths, "ava_home", lambda: tmp_path / "ava_home")
+
+
+def _last_event() -> tuple[str, int | None, str, dict]:
+    """Flush the emitter, then return the last mirror line (event_name,
+    agent_id, level, attributes). Fail loud on an empty mirror."""
+    from base.paths import logs_dir
+
+    telemetry.sync()
+    day = datetime.now(UTC).strftime("%Y%m%d")
+    path = logs_dir() / f"events-{day}.jsonl"
+    if not path.exists():
+        raise AssertionError("events mirror is empty — test didn't emit any event")
+    lines = [ln for ln in path.read_text(encoding="utf-8").splitlines() if ln.strip()]
+    assert lines, "events mirror is empty — test didn't emit any event"
+    obj = json.loads(lines[-1])
+    return obj["event_name"], obj.get("agent_id"), obj.get("level"), obj.get("attributes", {})
+
+
+def test_sink_event_resolution_explicit_event(sink_logger) -> None:
+    """Explicit event= has priority, not overridden by label= fallback."""
+    sink_logger.info("foo", event="turn_end", label="ignored")  # pyright: ignore[reportUnknownMemberType]
+    event, _agent_id, _level, payload = _last_event()
+    assert event == "turn_end"
+    assert payload["label"] == "ignored"  # label still in payload, not lost
+
+
+def test_sink_event_resolution_label_fallback(sink_logger) -> None:
+    """When no event=, falls back to label= (compatible with existing [exec]/[claim] pattern)."""
+    sink_logger.info("[{label}] {body}", label="exec", body="output...")  # pyright: ignore[reportUnknownMemberType]
+    event, _agent_id, _level, _payload = _last_event()
+    assert event == "exec"
+
+
+def test_sink_event_resolution_log_default(sink_logger) -> None:
+    """Bare logger.info with no event/label → defaults to "log"."""
+    sink_logger.info("bare message")  # pyright: ignore[reportUnknownMemberType]
+    event, _agent_id, _level, _payload = _last_event()
+    assert event == "log"
+
+
+def test_sink_empty_event_raises(sink_logger) -> None:
+    """Explicit event="" must raise (caller bug, should not silently fall through).
+    catch=False lets ValueError propagate out; in real deployment with catch=True,
+    loguru would write the stack to stderr, but this test cannot assert stderr behavior."""
+    with pytest.raises(ValueError, match="empty event"):
+        sink_logger.info("foo", event="")  # pyright: ignore[reportUnknownMemberType]
+
+
+def test_sink_agent_id_dash_sentinel_maps_to_null(sink_logger) -> None:
+    """agent_id="-" (gateway init default) → DB NULL."""
+    sink_logger.info("from gateway", event="sse_drop")  # pyright: ignore[reportUnknownMemberType]
+    _event, agent_id, _level, _payload = _last_event()
+    assert agent_id is None
+
+
+def _insert_agent(db: psycopg.Connection) -> int:
+    """The mirror keeps the agent dimension; use a real agents row (the row the events would have referenced) so the assertion is against a real id."""
+    with db.cursor() as cur:
+        cur.execute("INSERT INTO agents (label) VALUES ('sink-test') RETURNING id")
+        row = cur.fetchone()
+    assert row is not None, "INSERT ... RETURNING must return a row"
+    return row[0]
+
+
+def test_sink_agent_id_numeric_string_converts_to_int(
+    sink_logger,
+    db_conn: psycopg.Connection,
+) -> None:
+    """agent_id="42" (the string `init_subprocess_logger` binds) → the mirror row carries 42."""
+    tid = _insert_agent(db_conn)
+    db_conn.commit()
+    sink_logger.bind(agent_id=str(tid)).info("from agent", event="sse_drop")  # pyright: ignore[reportUnknownMemberType]
+    _event, agent_id, _level, _payload = _last_event()
+    assert agent_id == tid
+
+
+def test_stdlib_intercept_routes_through_sink(sink_logger) -> None:
+    """stdlib `logging.getLogger(...).info(...)` goes through _StdlibInterceptHandler →
+    loguru sink → the unified event stream. Verifies that service modules (e.g.
+    `services/agent_ops/daemon.py` that use stdlib logging) have their logs reach
+    the event stream after the upgrade, without needing to rewrite callsites line by line."""
+    import logging
+
+    from base.log import _install_stdlib_intercept
+
+    _install_stdlib_intercept()
+    stdlib_log = logging.getLogger("test.stdlib.intercept")
+    stdlib_log.warning("stdlib warn via intercept handler")
+    event, _agent_id, level, payload = _last_event()
+    assert level == "warning"
+    # event defaults to "log" (no explicit event=), message goes into payload.msg
+    assert event == "log"
+    assert payload["msg"] == "stdlib warn via intercept handler"
+
+
+def test_sink_agent_id_int_kwarg_overrides_bind(sink_logger, db_conn: psycopg.Connection) -> None:
+    """log call passing agent_id=N overrides the bind default — used by base/agents/contract.py for cross-process
+    lifecycle events (the caller process bind may not be the target)."""
+    tid = _insert_agent(db_conn)
+    db_conn.commit()
+    sink_logger.info("spawned", event="agent_spawned", agent_id=tid)  # pyright: ignore[reportUnknownMemberType]
+    _event, agent_id, _level, _payload = _last_event()
+    assert agent_id == tid
+
+
+def test_sink_payload_excludes_meta_columns_includes_msg(
+    sink_logger,
+) -> None:
+    """payload jsonb does not duplicate agent_id/event (columns already store them); msg goes into payload
+    as a debug grep entry point."""
+    sink_logger.info("hello {name}", event="sse_drop", name="world", custom_field=1)  # pyright: ignore[reportUnknownMemberType]
+    _event, _agent_id, _level, payload = _last_event()
+    assert "agent_id" not in payload
+    assert "agent_id" not in payload
+    assert "event" not in payload
+    assert payload["msg"] == "hello world"  # loguru formatted
+    assert payload["name"] == "world"
+    assert payload["custom_field"] == 1
+
+
+def test_sink_preserves_llm_usage_source_in_payload(sink_logger) -> None:
+    """A usage-path discriminator must not be consumed as event provenance."""
+    sink_logger.info(  # pyright: ignore[reportUnknownMemberType]
+        "metered web answer",
+        event="llm_usage",
+        source="web.fetch",
+        transport_source="system",
+        calls=1,
+    )
+
+    _event, _agent_id, _level, payload = _last_event()
+    assert payload["source"] == "web.fetch"
+    assert "transport_source" not in payload
+
+
+def test_sink_level_is_recorded(sink_logger) -> None:
+    """WARNING / ERROR level goes into DB level column — used by sidebar warn_24h/err_24h."""
+    sink_logger.warning("uh oh", event="sse_drop")  # pyright: ignore[reportUnknownMemberType]
+    _event, _agent_id, level, _payload = _last_event()
+    assert level == "warning"
+
+    sink_logger.error("boom", event="sse_drop")  # pyright: ignore[reportUnknownMemberType]
+    _event, _agent_id, level, _payload = _last_event()
+    assert level == "error"
+
+
+# ─── exception → payload (traceback / type / value) ───
+#
+# 161 incident: turn_end ok=False but events.payload had no traceback — logger.opt
+# (exception=True) left a stack in stderr / file sink, but _postgres_sink only dumped
+# extra, record["exception"] was not consumed, so the DB couldn't diagnose whether the LLM
+# had a timeout or a decode error. Fix: _postgres_sink detects record["exception"] and automatically
+# injects traceback / exception_type / exception_value into payload.
+
+
+def test_sink_exception_includes_traceback_in_payload(
+    sink_logger,
+) -> None:
+    """When logger.opt(exception=True), payload should carry traceback / exception_type /
+    exception_value fields — for diagnosing exception turns in the event stream (turn_end ok=False
+    / process_exit reason='exception:X' scenarios)."""
+    try:
+        raise RuntimeError("simulated LLM timeout")  # noqa: TRY301 — set sys.exc_info()
+    except RuntimeError:
+        sink_logger.opt(exception=True).warning("turn ended", event="turn_end", ok=False)  # pyright: ignore[reportUnknownMemberType]
+
+    _event, _agent_id, _level, payload = _last_event()
+    assert payload["exception_type"] == "RuntimeError"
+    assert payload["exception_value"] == "simulated LLM timeout"
+    assert "Traceback" in payload["traceback"]
+    assert "RuntimeError: simulated LLM timeout" in payload["traceback"]
+
+
+def test_sink_no_exception_no_extra_fields(sink_logger) -> None:
+    """Normal logger.info should not have traceback / exception_* fields — avoids payload bloat,
+    and lets consumers (sidebar / SQL) use `payload ? 'traceback'` to detect exception turns."""
+    sink_logger.info("normal turn", event="turn_end", ok=True)  # pyright: ignore[reportUnknownMemberType]
+    _event, _agent_id, _level, payload = _last_event()
+    assert "traceback" not in payload
+    assert "exception_type" not in payload
+    assert "exception_value" not in payload
+
+
+def test_sink_opt_exception_without_active_exc_skips_garbage_payload(
+    sink_logger,
+) -> None:
+    """`logger.opt(exception=True)` when sys.exc_info() == (None,None,None) still
+    sets record["exception"] as a namedtuple with all three fields None (not Python None).
+    Previously the sink would format that directly, producing `traceback="NoneType: None\\n"` + exception_value=
+    "None" garbage payload (observed in 167/168 events).
+
+    Fix: `exc.type is not None` guard skips empty records. This test locks the guard behavior —
+    even if a caller mistakenly uses opt(exception=True), no garbage fields will pollute the payload."""
+    # outside an except block, opt(exception=True) → no active exception
+    sink_logger.opt(exception=True).warning("no active exc", event="sse_drop")  # pyright: ignore[reportUnknownMemberType]
+
+    _event, _agent_id, _level, payload = _last_event()
+    assert "traceback" not in payload, (
+        f"empty exception should not inject traceback; got {payload.get('traceback')!r}"  # pyright: ignore[reportUnknownMemberType]
+    )
+    assert "exception_type" not in payload
+    assert "exception_value" not in payload
+
+
+# ─── levels pass through untouched ──────────────────────────────────────────
+#
+# `_message_to_params` is pure: a record's level is the level the caller logged.
+# Predictable side effects of an update window (slow pool acquires, DB-outage
+# pauses, query cancellations) keep their WARNING; the sink consults no deploy
+# state and never reads the database.
+
+
+def test_slow_acquire_and_db_outage_warnings_keep_their_level(sink_logger) -> None:
+    """db_pool_acquire_slow, every db_outage_* category and the query-cancellation
+    line stay WARNING in the events row — nothing rewrites them."""
+    sink_logger.warning(  # pyright: ignore[reportUnknownMemberType]
+        "[db pool] acquire took 2.0s (slow — Postgres under load)",
+        event="db_pool_acquire_slow",
+        name="ops",
+        elapsed=2.0,
+    )
+    _event, _agent_id, level, _payload = _last_event()
+    assert level == "warning"
+
+    for event in ("db_outage_wait", "db_outage_pause", "db_outage_reconcile_retry"):
+        sink_logger.warning("db unreachable — pausing", event=event, agent_id="-")  # pyright: ignore[reportUnknownMemberType]
+        _event, _agent_id, level, _payload = _last_event()
+        assert level == "warning", f"{event} must keep its WARNING level"
+
+    sink_logger.warning("query cancellation failed: cancellation timeout expired")  # pyright: ignore[reportUnknownMemberType]
+    _event, _agent_id, level, _payload = _last_event()
+    assert level == "warning"
+
+
+def test_stdlib_intercept_emit_never_raises(monkeypatch: pytest.MonkeyPatch) -> None:
+    """`_StdlibInterceptHandler.emit` must never propagate (audit 2026-08-08 +
+    #1862): stdlib `Handler.handle` has no try/except around emit, so a
+    formatting TypeError inside a log call (im_bridge's `%d`-with-str-args
+    SSE reconnect crash) or a shallow call stack (`sys._getframe(6)`
+    ValueError) would otherwise kill the logger's caller."""
+    import logging
+
+    from base.log import _StdlibInterceptHandler
+
+    handler = _StdlibInterceptHandler()
+    seen: list[logging.LogRecord] = []
+    handler.handleError = seen.append  # type: ignore[method-assign]
+
+    # getMessage raises TypeError (%d with a str argument).
+    bad = logging.LogRecord("x", logging.WARNING, "path.py", 1, "%d", ("str",), None)
+    handler.emit(bad)
+    assert seen == [bad], "handleError not called for a formatting-failure record"
+
+    # Shallow call stack: sys._getframe(6) raises ValueError (handled).
+    seen.clear()
+    good = logging.LogRecord("x", logging.WARNING, "path.py", 1, "fine", (), None)
+    handler.emit(good)
+    assert seen == [], "a healthy record must not hit handleError"
+
+
+# ─── call-site contract: the delta read-compat reconstruction (task #3897) ──
+#
+# `_log_reconstruction` was a label-only call site whose label was not a
+# registry entry: every read of a delta-written checkpoint derived its
+# event_name from the label fallback, `telemetry.emit` raised inside the sink
+# (the row was lost) and loguru logged the internal error on every such read.
+# The call now passes an explicit `event=` — registered as `delta_read_compat`
+# in base/events/registry.py (naming rules §6.2: label is display-only).
+
+
+def test_sink_delta_read_compat_reconstruction_is_a_registered_event(sink_logger) -> None:
+    """The reconstruction line lands as its registered event, end to end.
+
+    Drives the real `_log_reconstruction` through the real loguru → emitter
+    sink. Before the fix the call raised `ValueError` inside the sink
+    (catch=False here) and nothing reached the mirror; this locks both the
+    explicit `event=` at the call site and the name's registration."""
+    from types import SimpleNamespace
+
+    from langgraph.checkpoint.base import CheckpointTuple
+
+    from base.agents.history.delta_read_compat import _log_reconstruction
+
+    tuple_ = cast(
+        CheckpointTuple,
+        SimpleNamespace(
+            config={"configurable": {"thread_id": "thread-1"}},
+            checkpoint={"id": "checkpoint-1"},
+        ),
+    )
+    _log_reconstruction(tuple_, 3)
+
+    # Find the row by name rather than taking the mirror's last line: ambient
+    # metered `sdk_call` rows can land in the per-test mirror after this test's
+    # own row. (The historical source was the conftest cluster-spawn guard's
+    # `ava.mcps` probe, fixed in task #3950; the find-by-name defense stays for
+    # any other ambient emitter.)
+    from base.paths import logs_dir
+
+    telemetry.sync()
+    day = datetime.now(UTC).strftime("%Y%m%d")
+    rows = [
+        json.loads(line)
+        for line in (logs_dir() / f"events-{day}.jsonl").read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    matches = [row for row in rows if row["event_name"] == "delta_read_compat"]
+    assert matches, (
+        f"no delta_read_compat row in the mirror (got {[r['event_name'] for r in rows]})"
+    )
+    payload = matches[-1]["attributes"]
+    assert payload["label"] == "delta-read-compat"
+    assert payload["body"] == (
+        "reconstructed messages for thread=thread-1 checkpoint=checkpoint-1: 3 messages"
+    )

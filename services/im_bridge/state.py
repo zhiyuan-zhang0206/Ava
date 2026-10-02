@@ -7,7 +7,7 @@ import logging
 from dataclasses import dataclass
 from pathlib import Path
 
-from shared.config import settings
+from base.paths import ava_home
 
 _log = logging.getLogger("services.im_bridge.state")
 
@@ -15,7 +15,7 @@ _log = logging.getLogger("services.im_bridge.state")
 def _switch_state_path() -> Path:
     """Per-chat switch persistence — survives daemon restarts/updates."""
 
-    path = Path(settings.general.ava_home) / "state" / "im_bridge" / "switch_state.json"
+    path = ava_home() / "state" / "im_bridge" / "switch_state.json"
     path.parent.mkdir(parents=True, exist_ok=True)
     return path
 
@@ -68,7 +68,7 @@ class _OutboxEntry:
 def _outbox_path() -> Path:
     """Pending-inbound persistence — survives daemon restarts/updates."""
 
-    path = Path(settings.general.ava_home) / "state" / "im_bridge" / "outbox.jsonl"
+    path = ava_home() / "state" / "im_bridge" / "outbox.jsonl"
     path.parent.mkdir(parents=True, exist_ok=True)
     return path
 

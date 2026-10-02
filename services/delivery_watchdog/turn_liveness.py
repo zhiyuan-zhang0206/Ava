@@ -10,17 +10,21 @@ import time
 from typing import NamedTuple, Protocol, TypeGuard, cast
 from uuid import UUID
 
+from psycopg.types.json import Jsonb
 from psycopg_pool import ConnectionPool
 
-import shared.db
-import shared.redis_client
-from shared import telemetry
-from shared.hosted_db_wait import database_wait_matches
-from shared.lifecycle_acceptance import HOSTED_TURN_RECOVERY_MARKER
+import base.events.live.redis_client
+from base import telemetry
+from base.agents.incarnation.lifecycle_acceptance import HOSTED_TURN_RECOVERY_MARKER
+from base.agents.observation.db_wait import database_wait_matches
 
 _log = logging.getLogger("services.delivery_watchdog.turn_liveness")
 
 HOSTED_TURN_RECOVERY_COOLDOWN_S = 600.0
+HOSTED_TURN_RECOVERY_WAKE_TEXT = (
+    "Your previous hosted turn stopped making progress and was restarted "
+    "by the delivery watchdog. Continue from the latest checkpoint."
+)
 
 
 class _RedisReader(Protocol):
@@ -147,28 +151,33 @@ async def _detect_hosted_turn_wedges(
     return wedges
 
 
-def _queue_hosted_turn_recovery(pool: ConnectionPool, agent_id: int) -> int:
-    """Create durable work so guarded resurrection retries survive restarts.
+def _recovery_trigger(pool: ConnectionPool, agent_id: int) -> int:
+    """The pending recovery wake the force terminate committed for `agent_id`.
 
-    The chat carries the `HOSTED_TURN_RECOVERY_MARKER` payload: it is a
-    system-source message, but it is this recovery's own wake-up call, so the
-    notice predicate must let it through both resurrection channels (the
-    direct call below and the watchdog's terminated-owner retry) — unlike a
-    plain system notification, which never resurrects (task #3687 review,
-    Ava #3242)."""
+    The wake is part of the termination's own transaction
+    (`terminate_agent_op(recovery_wake=...)`), so it is already durable: the
+    direct resurrection below and the watchdog's terminated-owner retry both
+    work from it, and neither can lose it to a restart. It carries the
+    `HOSTED_TURN_RECOVERY_MARKER` payload: a system-source message that is this
+    recovery's own wake-up call, so the notice predicate lets it through both
+    resurrection channels — unlike a plain system notification, which never
+    resurrects (task #3687 review, Ava #3242)."""
     with pool.connection() as conn:
-        return shared.db.insert_inbound_message(
-            conn,
-            agent_id,
-            "Your previous hosted turn stopped making progress and was restarted "
-            "by the delivery watchdog. Continue from the latest checkpoint.",
-            source="system",
-            payload={HOSTED_TURN_RECOVERY_MARKER: True},
-        )
+        row = conn.execute(
+            "SELECT m.id FROM inbound_messages m JOIN agents_meta a ON a.id = m.agent_id "
+            "WHERE m.agent_id = %s AND m.kind = 'chat' AND m.status = 'pending' "
+            "AND m.id > COALESCE(a.last_force_terminate_inbound_id, 0) "
+            "AND m.payload @> %s ORDER BY m.id LIMIT 1",
+            (agent_id, Jsonb({HOSTED_TURN_RECOVERY_MARKER: True})),
+        ).fetchone()
+    if row is None:
+        raise RuntimeError(f"force-terminated agent {agent_id} has no pending recovery wake")
+    return int(row[0])
 
 
 async def _recover_hosted_turn(pool: ConnectionPool, wedge: _HostedTurnWedge) -> None:
-    """Record evidence, force-terminate the hosted incarnation, then resurrect."""
+    """Record evidence, force-terminate the hosted incarnation together with its
+    recovery wake, then resurrect."""
     _log.error(
         "[delivery] host_turn_wedged_recovery agent_id=%s age_s=%.1f "
         "last_marks=%s machine=%s heartbeat_missing=%s",
@@ -199,15 +208,16 @@ async def _recover_hosted_turn(pool: ConnectionPool, wedge: _HostedTurnWedge) ->
         )
 
     try:
-        from ops.ops_lifecycle import resurrect_if_terminated, terminate_agent_op
+        from ops.lifecycle import resurrect_if_terminated, terminate_agent_op
         from ops.rpc_schemas import TerminateAgentRequest
 
         await terminate_agent_op(
             wedge.agent_id,
             TerminateAgentRequest(force=True, source="system"),
             pool,
+            recovery_wake=HOSTED_TURN_RECOVERY_WAKE_TEXT,
         )
-        trigger_id = await asyncio.to_thread(_queue_hosted_turn_recovery, pool, wedge.agent_id)
+        trigger_id = await asyncio.to_thread(_recovery_trigger, pool, wedge.agent_id)
         status = await resurrect_if_terminated(
             wedge.agent_id,
             trigger_inbound_id=trigger_id,
@@ -220,9 +230,11 @@ async def _recover_hosted_turn(pool: ConnectionPool, wedge: _HostedTurnWedge) ->
             status,
         )
     except Exception:
-        # The durable recovery chat is picked up by the watchdog's existing
-        # terminated-owner resurrection retry if the first resurrection loses
-        # a race with hosted-force quiescence.
+        # Once the terminate has committed, so has its recovery chat: the
+        # watchdog's existing terminated-owner resurrection retry resumes the
+        # agent from it if this attempt dies or loses a race with hosted-force
+        # quiescence. A failure before the commit leaves the agent running and
+        # wedged, so a later scan finds it again.
         _log.exception("[delivery] hosted turn recovery failed for agent %s", wedge.agent_id)
 
 
@@ -257,6 +269,6 @@ def _maybe_spawn_hosted_turn_recoveries(
 
 async def scan_hosted_turn_liveness(pool: ConnectionPool, threshold_s: float) -> None:
     """Run one Redis-confirmed scan on the delivery watchdog's existing tick."""
-    redis_client = cast(_RedisReader, shared.redis_client.get_async_redis())
+    redis_client = cast(_RedisReader, base.events.live.redis_client.get_async_redis())
     wedges = await _detect_hosted_turn_wedges(pool, threshold_s, redis_client)
     _maybe_spawn_hosted_turn_recoveries(pool, wedges)

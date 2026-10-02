@@ -16,11 +16,11 @@ Design doc: see `docs/superpowers/specs/2026-05-07-e2e-happy-path-design.md`
 uv sync
 .venv/bin/playwright install chromium
 
-# Run all
-.venv/bin/pytest tests/e2e/ -v
+# Run one scenario file (the whole directory is CI's e2e job, never a local run)
+.venv/bin/pytest tests/e2e/test_message_flow.py -v
 
 # See the real browser (development debugging)
-HEADED=1 .venv/bin/pytest tests/e2e/ -v
+HEADED=1 .venv/bin/pytest tests/e2e/test_message_flow.py -v
 ```
 
 On failure, full tracebacks are in `tmp/e2e-logs/{gateway,frontend}.log` and
@@ -30,7 +30,7 @@ On failure, full tracebacks are in `tmp/e2e-logs/{gateway,frontend}.log` and
 
 1. In `fakes/scenarios/`, add a module, define `SCRIPT: tuple[AIMessage, ...]`
    and `def build(model: str) -> ScriptedFakeChatModel`. The `build` signature must
-   match the `shared/lm/factory.py:_LLMFactory` Protocol (takes model name → returns
+   match the `base/lm/factory.py:_LLMFactory` Protocol (takes model name → returns
    BaseChatModel); the `isinstance(BaseChatModel)` at the end of `_resolve_override`
    catches bad factories immediately at build time.
 2. The test function uses `@pytest.mark.scenario("tests.e2e.fakes.scenarios.<name>:build")`.
@@ -70,11 +70,9 @@ multi-chunk.
   a fresh generation before gateway launch; after its health checks, the process
   restarter or hosted agent-host marks that generation serving. The fixture clears
   it after each test, because the file-backed marker outlives database truncation.
-- **AVA_* env forwarding**: the gateway launches an agent as a detached, native process
-  with an explicitly built child env dict (`ops.agent_launch.agent_spawn_env_dict`), so the
-  test's `AVA_*` overrides reach it. Sessions (daemons, agent shells) need the same
-  explicitness — the env is handed over out-of-band, never argv — and get it from the
-  built env dict / 0600 envfile (argv is world-readable, issue #974).
+- **AVA_* env forwarding**: sessions (daemons, agent shells) get an explicitly built env —
+  handed over out-of-band, never argv — from the built env dict / 0600 envfile (argv is
+  world-readable, issue #974).
 
 ## Current scenarios
 
@@ -114,7 +112,7 @@ restarter / `resurrect_agent` INSERT of these rows is the only definitive marker
   mobile) against `tests/e2e/__snapshots__/test_visual_regression/`, compared
   with the browser-native pixel diff (0.1% ratio, channel delta 16).
 - `test_preview_visual_gate.py` — the five-surface post-deploy matrix (same
-  shared engine as the deployment gate: `scripts/post_deploy_visual_matrix.py`)
+  shared engine as the deployment gate: `scripts/post_deploy_visual/matrix.py`)
   against the committed goldens under
   `tests/e2e/__snapshots__/preview-gate/`. Blocking on every PR. Goldens are
   minted and refreshed only on the ubuntu CI runner via the

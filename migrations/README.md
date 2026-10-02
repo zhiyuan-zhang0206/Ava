@@ -1,10 +1,9 @@
 # migrations/
 
-Post-baseline schema deltas. Each is a pair:
+Post-baseline schema deltas, one forward file each:
 
 ```
-YYYYMMDDTHHMMSS_<kebab-name>.sql        -- forward
-YYYYMMDDTHHMMSS_<kebab-name>.down.sql   -- reverse (mandatory)
+YYYYMMDDTHHMMSS_<kebab-name>.sql
 ```
 
 - **Timestamp prefix** = second-precision UTC (`date -u +%Y%m%dT%H%M%S`). It
@@ -12,17 +11,14 @@ YYYYMMDDTHHMMSS_<kebab-name>.down.sql   -- reverse (mandatory)
   branches never fight over the "next number". Names sort ≈ chronologically;
   `apply_pending_migrations` applies every file whose name is not yet in the
   DB's applied set, in name order.
-- **Data-destroying downs are guarded.** A down that would destroy data with
-  no surviving source (e.g. dropping a table whose dual-write mirrors were
-  removed) raises unless the operator confirms first; the guard and the exact
-  confirmation command are declared at the top of the down file. `rollback_to`
-  / `apply_down` do not bypass guards — a rollback crossing such a migration
-  stops at it with the file's message, and the operator dumps what must be
-  kept, confirms, and re-runs. The reversibility rule applies to schema shape;
-  a value-destroying down may be deliberately best-effort or refused.
-- **`.down.sql` is mandatory** for every file here — the baseline is the
-  rollback floor, so everything above it must be reversible (enforced by
-  `scripts/lint_migrations.py`).
+- **No down migrations.** A mistake is fixed forward by a new migration, and
+  lossy operations go expand-contract (the drop is its own later migration,
+  after the code that stopped using the object has shipped).
+- **A merged migration is immutable.** A file already on main is never edited,
+  deleted or renamed — only new files are added
+  (`scripts/content_lint/lint_migrations.py`, against the merge-base with
+  `origin/main`). A DB that applied it never re-runs it, so changing the file
+  forks what a fresh DB builds from what applied DBs hold.
 - The current full schema lives in **`db/schema.sql`** (the squashed baseline a
   fresh DB bootstraps from); a new migration must also reflect its change there.
 
@@ -31,9 +27,9 @@ YYYYMMDDTHHMMSS_<kebab-name>.down.sql   -- reverse (mandatory)
 The 101 deltas through `20260921T211400_watcher-agent-notify` are folded into
 `db/schema.sql`. Fresh databases stamp the baseline sentinel and
 `20260923T031516_schema-baseline`; the retired history's seed rows are absent.
-Subsequent deltas remain paired and must also be reflected in the current schema.
+Subsequent deltas must also be reflected in the current schema.
 
-`shared/migration_history.py` keeps the exact frozen inventories for this reset
+`base/deploy/schema/migration_history.py` keeps the exact frozen inventories for this reset
 and the 2026-08-14 reset (59 names). The earlier inventory remains necessary
 because restores before 2026-08-14 have not been ruled out. Before deleting any
 tracking rows, the runner refuses partial generations. A database without the
@@ -44,8 +40,7 @@ Upgrade older restores through the release immediately before the applicable
 reset. Integer-keyed history is unsupported; restore it under its matching
 release before advancing. Current live databases already use the applied set.
 
-The current anchor is a rollback floor. Rolling back across it is refused before
-any down migration executes: the folded history includes strict DDL, so replaying
-an older release cannot safely restore it. Recover across the boundary with a
-matching pre-reset database backup, or fix forward. Merge does not authorize a
+Replaying an older release across the current anchor cannot safely restore the
+folded strict DDL. Recover across the boundary with a matching pre-reset database
+backup, or fix forward. Merge does not authorize a
 runtime rollout or a restore.
