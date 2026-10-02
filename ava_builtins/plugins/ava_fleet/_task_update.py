@@ -18,6 +18,8 @@ if TYPE_CHECKING:
     # Annotation-only here; the runtime import sits at the raise site so plugin
     # autoload stays off the psycopg stack (task #3816).
     import psycopg
+
+    from base.telemetry import Event
 from base.agents.tasks.status import TaskStatus
 
 # The statuses update() may assign to a task. base/agents/tasks/task_status.TaskStatus is
@@ -242,7 +244,7 @@ def _write_task_update(
     owner: int | None,
     owner_changing: bool,  # noqa: FBT001 — internal helper flag, always passed by name
     actor: int | None,
-) -> tuple[int | None, str, int | None]:
+) -> tuple[int | None, str, int | None, Event]:
     """Apply an update() row write inside the caller's transaction.
 
     Holds the row FOR UPDATE, enforces root immutability, parent-close, and
@@ -309,8 +311,8 @@ def _write_task_update(
         changes.append("note appended")
 
     new_owner = _owner_change_payload(payload, owner, old_owner, owner_changing)
-    _log_task_update(actor, payload, owner_changing, new_owner)
-    return old_owner, current_title, new_owner
+    event = _log_task_update(cur, actor, payload, owner_changing, new_owner)
+    return old_owner, current_title, new_owner, event
 
 
 def _owner_change_payload(
@@ -329,18 +331,23 @@ def _owner_change_payload(
 
 
 def _log_task_update(
+    cur: psycopg.Cursor,
     actor: int | None,
     payload: dict[str, object],
     owner_changing: bool,  # noqa: FBT001 — internal helper flag, always passed by name
     new_owner: int | None,
-) -> None:
-    """Record a task_update audit event (category=audit, kind=task_update)."""
-    from base.telemetry.audit_events import insert_event_log  # deferred (task #3816)
+) -> Event:
+    """Record a task_update audit fact in the caller's transaction; the caller emits it
+    after the commit."""
+    from base.telemetry.audit_events import prepare_event_log, record_audit  # deferred (task #3816)
 
-    insert_event_log(
-        event_type="task_update",
-        agent_id=actor,
-        source="self",
-        target_agent_id=new_owner if owner_changing else None,
-        payload=payload,
+    return record_audit(
+        cur.connection,
+        prepare_event_log(
+            event_type="task_update",
+            agent_id=actor,
+            source="self",
+            target_agent_id=new_owner if owner_changing else None,
+            payload=payload,
+        ),
     )

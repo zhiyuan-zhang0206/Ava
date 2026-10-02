@@ -101,4 +101,4 @@ Notifications (`send_system_note`) are executed **after** the transaction commit
 
 ## Event Log
 
-Every `create`, `update`, and `log` writes a structured event log via `insert_event_log`, recording `agent_id` (the actor), `payload` (the changes), and `target_agent_id` (new owner on owner changes), used for auditing and fleet view replay.
+Every `create`, `update`, and `log` records an audit fact in `audit_events` in the same transaction (`record_audit`), recording `agent_id` (the actor), `payload` (the changes), and `target_agent_id` (new owner on owner changes), used for auditing and fleet view replay.

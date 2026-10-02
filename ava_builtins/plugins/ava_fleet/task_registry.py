@@ -23,6 +23,8 @@ if TYPE_CHECKING:
     # site so plugin autoload stays off the psycopg stack (task #3816).
     import psycopg
 
+    from base.telemetry import Event
+
 from ._task_update import (
     _DEFAULT_PRIORITY,
     _STATUSES,
@@ -176,8 +178,11 @@ def _insert_task(
     token_budget: int | None,
     usd_budget: float | None,
     actor: int,
-) -> Task:
-    """INSERT a task row + its create event log inside the caller's transaction.
+) -> tuple[Task, Event]:
+    """INSERT a task row + record its create audit fact inside the caller's transaction.
+
+    Returns the task and the recorded event; the caller emits the event after
+    its transaction commits.
 
     Rejects duplicate in_progress titles -- prevents agents from creating
     the same task twice (#60, #253)."""
@@ -219,24 +224,27 @@ def _insert_task(
     if row is None:
         raise RuntimeError("expected exactly one row: task insert")
     task = _row_to_task(row)
-    from base.telemetry.audit_events import insert_event_log  # deferred (task #3816)
+    from base.telemetry.audit_events import prepare_event_log, record_audit  # deferred (task #3816)
 
-    insert_event_log(
-        event_type="task_create",
-        agent_id=actor,
-        source="self",
-        payload={
-            "task_id": task.id,
-            "title": title,
-            "parent_id": effective_parent,
-            "owner": effective_owner,
-            "remind_interval_seconds": remind_interval_seconds,
-            "priority": priority,
-            "token_budget": token_budget,
-            "usd_budget": usd_budget,
-        },
+    event = record_audit(
+        cur.connection,
+        prepare_event_log(
+            event_type="task_create",
+            agent_id=actor,
+            source="self",
+            payload={
+                "task_id": task.id,
+                "title": title,
+                "parent_id": effective_parent,
+                "owner": effective_owner,
+                "remind_interval_seconds": remind_interval_seconds,
+                "priority": priority,
+                "token_budget": token_budget,
+                "usd_budget": usd_budget,
+            },
+        ),
     )
-    return task
+    return task, event
 
 
 def create(
@@ -286,7 +294,7 @@ def create(
         # task as its parent. Validate here for a friendly error instead of a
         # raw foreign-key violation from the INSERT.
         _ensure_parent_exists(cur, parent)
-        task = _insert_task(
+        task, created_event = _insert_task(
             cur,
             title,
             description,
@@ -298,6 +306,9 @@ def create(
             usd_budget,
             actor,
         )
+    from base import telemetry  # deferred (task #3816)
+
+    telemetry.emit_prepared(created_event)
 
     # Notify the assigned owner when it differs from the creator — same
     # post-transaction pattern as update() to avoid waking an agent inside a
@@ -460,7 +471,7 @@ def update(
         if parent_id is not _UNSET:
             sets.append("parent_id = %s")
             params.append(resolve_reparent(cur, task_id, parent_id))
-        old_owner, current_title, new_owner = _write_task_update(
+        old_owner, current_title, new_owner, updated_event = _write_task_update(
             cur,
             task_id,
             status,
@@ -476,6 +487,10 @@ def update(
         )
         if parent_id is not _UNSET:
             changes.append("parent → root" if parent_id is None else f"parent → #{parent_id}")
+
+    from base import telemetry  # deferred (task #3816)
+
+    telemetry.emit_prepared(updated_event)
 
     # Agent-scoped side effects run after the row change commits: telling an
     # agent auto-wakes it, so keep it out of the transaction. System tooling

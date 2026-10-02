@@ -12,9 +12,7 @@ from pathlib import Path
 
 import pytest
 
-_AUDIT_HELPERS = frozenset(
-    {"insert_event_log", "insert_event_log_async", "insert_event_log_many", "prepare_event_log"}
-)
+_AUDIT_HELPERS = frozenset({"prepare_event_log"})
 _DIRECT_AUDIT_EMITTERS = frozenset({"emit", "prepare_event"})
 _INVENTORY: dict[str, str] = {
     "agent/turn/runloop.py::_record_permanent_reject_outcome": "ineligible",
@@ -30,8 +28,7 @@ _INVENTORY: dict[str, str] = {
     "ava_builtins/plugins/ava_fleet/_task_update.py::_log_task_update": "local",
     "ava_builtins/plugins/ava_fleet/plugin.py::set_label": "local",
     "ava_builtins/plugins/ava_fleet/task_registry.py::_insert_task": "local",
-    "gateway/mcp_server/endpoint.py::_AuditMiddleware.__call__": "ineligible",
-    "gateway/mcp_server/endpoint.py::_AuditMiddleware.__call__#2": "ineligible",
+    "gateway/mcp_server/endpoint.py::_record_tool_call": "ineligible",
     "ops/agents/spawn.py::_record_birth_event": "central",
     "ops/agents/wake.py::_stage_resurrect_event": "central",
     "ops/lifecycle/billing_recovery.py::_record_run_event": "ineligible",
@@ -215,12 +212,12 @@ def test_scope_keys_survive_line_drift_and_require_count_and_name_updates(tmp_pa
     root.mkdir()
     path = root / "producer.py"
     source = (
-        "from base.telemetry.audit_events import insert_event_log\n"
-        "insert_event_log(event_type='module')\n"
+        "from base.telemetry.audit_events import prepare_event_log\n"
+        "prepare_event_log(event_type='module')\n"
         "class Producer:\n"
         "    async def emit(self):\n"
-        "        insert_event_log(event_type='first')\n"
-        "        insert_event_log(event_type='second')\n"
+        "        prepare_event_log(event_type='first')\n"
+        "        prepare_event_log(event_type='second')\n"
     )
     path.write_text(source, encoding="utf-8")
     inventory = {
@@ -233,7 +230,7 @@ def test_scope_keys_survive_line_drift_and_require_count_and_name_updates(tmp_pa
     path.write_text("\n" * 5 + source, encoding="utf-8")
     _assert_classified(_audit_roots(root), inventory)
 
-    path.write_text(source + "        insert_event_log(event_type='third')\n", encoding="utf-8")
+    path.write_text(source + "        prepare_event_log(event_type='third')\n", encoding="utf-8")
     with pytest.raises(AssertionError, match=r"producer\.py::Producer\.emit#3"):
         _assert_classified(_audit_roots(root), inventory)
 
@@ -246,9 +243,9 @@ def test_an_unclassified_new_audit_construction_root_fails(tmp_path: Path) -> No
     root = tmp_path / "root"
     root.mkdir()
     (root / "new_producer.py").write_text(
-        "from base.telemetry.audit_events import insert_event_log\n"
+        "from base.telemetry.audit_events import prepare_event_log\n"
         "def emit():\n"
-        "    insert_event_log(event_type='send_message', agent_id=1, source='agent:1')\n",
+        "    prepare_event_log(event_type='send_message', agent_id=1, source='agent:1')\n",
         encoding="utf-8",
     )
     with pytest.raises(AssertionError, match=r"new_producer\.py::emit"):
@@ -259,9 +256,9 @@ def test_a_package_local_tests_directory_is_not_a_production_audit_root(tmp_path
     root = tmp_path / "root"
     (root / "pkg" / "tests").mkdir(parents=True)
     emitter = (
-        "from base.telemetry.audit_events import insert_event_log\n"
+        "from base.telemetry.audit_events import prepare_event_log\n"
         "def emit():\n"
-        "    insert_event_log(event_type='send_message', agent_id=1, source='agent:1')\n"
+        "    prepare_event_log(event_type='send_message', agent_id=1, source='agent:1')\n"
     )
     (root / "pkg" / "producer.py").write_text(emitter, encoding="utf-8")
     (root / "pkg" / "tests" / "test_producer.py").write_text(emitter, encoding="utf-8")
@@ -287,7 +284,7 @@ def test_an_unclassified_aliased_audit_helper_fails(tmp_path: Path) -> None:
     root = tmp_path / "root"
     root.mkdir()
     (root / "new_producer.py").write_text(
-        "from base.telemetry.audit_events import insert_event_log as audit\n"
+        "from base.telemetry.audit_events import prepare_event_log as audit\n"
         "def emit():\n"
         "    audit(event_type='send_message', agent_id=1, source='agent:1')\n",
         encoding="utf-8",
@@ -313,7 +310,7 @@ def test_an_unclassified_import_base_audit_helper_fails(tmp_path: Path) -> None:
     (root / "new_producer.py").write_text(
         "import base\n"
         "def emit():\n"
-        "    base.telemetry.audit_events.insert_event_log(\n"
+        "    base.telemetry.audit_events.prepare_event_log(\n"
         "        event_type='send_message', agent_id=1, source='agent:1'\n"
         "    )\n",
         encoding="utf-8",

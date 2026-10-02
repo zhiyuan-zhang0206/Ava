@@ -297,20 +297,26 @@ def compact(summary: str) -> NoReturn:
     from ava import agent_identity
 
     agent_identity.assert_self_action("compact")
-    with ava.DB.cursor() as cur:
+    from base import telemetry
+    from base.telemetry.audit_events import prepare_event_log, record_audit
+
+    # The inbound and its audit fact commit together.
+    with ava.DB.transaction(), ava.DB.cursor() as cur:
         cur.execute(
             "INSERT INTO inbound_messages (agent_id, content, kind) "
             "VALUES (%s, %s, 'compact_summary')",
             (agent_identity.agent_id(), summary),
         )
-        from base.telemetry.audit_events import insert_event_log
-
-        insert_event_log(
-            event_type="compact",
-            agent_id=agent_identity.agent_id(),
-            source="self",
-            payload={"compact_kind": "summary", "length": len(summary)},
+        compact_event = record_audit(
+            cur.connection,
+            prepare_event_log(
+                event_type="compact",
+                agent_id=agent_identity.agent_id(),
+                source="self",
+                payload={"compact_kind": "summary", "length": len(summary)},
+            ),
         )
+    telemetry.emit_prepared(compact_event)
     # Best-effort: a publish failure must not stop the wake + SystemHalt below.
     # The durable compact_summary inbound is already committed; if this live-UI
     # event is lost the frontend recovers on its next fetch. Routed through the
