@@ -5,20 +5,17 @@ computer_session_start / computer_action / computer_session_end rows whose
 `attributes.task_id` matches (Phase 2, task #1101). The replay page and any
 audit consumer read one endpoint instead of hand-joining three event names.
 
-Reads Loki (task #1197): the event stream lives in the LGTM stack, and a
-trace is always a small bounded read (500 rows) — the exact SQL shape the
-PG path used, minus the table.
+These are audit events, read from `audit_events` with no time window (the
+record is permanent), and a trace is always a small bounded read (500 rows).
 """
 
 from __future__ import annotations
 
 from typing import Any
 
-import httpx
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Request
 
-from gateway.lgtm import loki_events, loki_query_budget
-from gateway.lgtm.backend_failure import raise_backend_unavailable
+from gateway.events import audit_rows
 
 router = APIRouter()
 
@@ -34,6 +31,7 @@ _TRACE_LIMIT = 500
 
 @router.get("/api/computer/traces")
 def get_computer_trace(
+    request: Request,
     task_id: int = Query(..., ge=1, description="task id whose desktop trail to read"),
 ) -> dict[str, Any]:
     """The desktop-action trail for one task: session envelope + actions.
@@ -45,17 +43,14 @@ def get_computer_trace(
     envelope rows (may be null while a session is open); `actions` carries
     the computer_action rows with the replay-relevant payload keys.
     """
-    try:
-        rows, _has_more = loki_events.query_events(
+    with request.app.state.db_pool.connection() as conn:
+        rows, _has_more = audit_rows.query_events(
+            conn,
             attribute_filters={"task_id": str(task_id)},
             event_names=list(_TRACE_EVENT_NAMES),
             limit=_TRACE_LIMIT,
             direction="forward",
         )
-    except loki_query_budget.LokiQueryBudgetError:
-        raise
-    except httpx.HTTPError as exc:
-        raise_backend_unavailable(exc)
     if not rows:
         raise HTTPException(status_code=404, detail=f"no computer-use trace for task {task_id}")
     actions: list[dict[str, Any]] = []

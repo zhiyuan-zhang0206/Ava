@@ -1,71 +1,57 @@
 """`GET /api/computer/traces?task_id=N` — one task's desktop-action trail.
 
-Loki-backed via the `FakeLoki` stand-in (monkeypatched onto
-`gateway.lgtm.loki_events`), same filter/window semantics as the real module.
+Read from `audit_events` (the computer_* events are audit), with no time window.
 """
 
 from __future__ import annotations
 
+import json
+import uuid
 from typing import Any
 
-import httpx
-import pytest
+import psycopg
 from fastapi.testclient import TestClient
 
 from gateway.app import app
-from gateway.lgtm import loki_events
-from tests.gateway.loki_fake import FakeLoki
-
-
-@pytest.fixture
-def loki_fake(monkeypatch: pytest.MonkeyPatch) -> FakeLoki:
-    fake = FakeLoki()
-    monkeypatch.setattr("gateway.lgtm.loki_events.query_events", fake.query_events)
-    return fake
 
 
 def _insert_event(
-    fake: FakeLoki,
+    db: psycopg.Connection,
     *,
     agent_id: int,
     event: str,
     attributes: dict[str, object],
-    ts_offset_seconds: float = 0.0,
+    seconds_ago: float = 0.0,
 ) -> None:
-    fake.add(
-        event=event,
-        agent_id=agent_id,
-        payload=attributes,
-        ts_offset_hours=-ts_offset_seconds / 3600,
+    db.execute(
+        "INSERT INTO audit_events (event_uid, ts, agent_id, machine, process, event_name, level, "
+        "source, attributes) VALUES (%s, now() - (%s * interval '1 second'), %s, 'm', 'p', %s, "
+        "'info', 'test', %s::jsonb)",
+        (uuid.uuid4().int % (1 << 62), seconds_ago, agent_id, event, json.dumps(attributes)),
     )
+    db.commit()
+
+
+def _get(task_id: int) -> tuple[int, dict[str, Any]]:
+    with TestClient(app) as client:
+        response = client.get(f"/api/computer/traces?task_id={task_id}")
+    return response.status_code, response.json()
 
 
 def _trace(task_id: int) -> dict[str, Any]:
-    resp = TestClient(app).get(f"/api/computer/traces?task_id={task_id}")
-    assert resp.status_code == 200, resp.text
-    return resp.json()
+    status, body = _get(task_id)
+    assert status == 200, body
+    return body
 
 
 class TestComputerTrace:
-    def test_loki_failure_is_retriable_503(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        def unavailable(**_kwargs: Any) -> tuple[list[dict[str, Any]], bool]:
-            raise httpx.ConnectError("loki unavailable")
+    def test_empty_task_404(self, db_conn: psycopg.Connection) -> None:
+        assert _get(999)[0] == 404
 
-        monkeypatch.setattr(loki_events, "query_events", unavailable)
-        with TestClient(app) as client:
-            response = client.get("/api/computer/traces?task_id=1")
-        assert response.status_code == 503
-        assert response.headers["retry-after"] == "1"
-        assert "ConnectError" in response.json()["detail"]
-
-    def test_empty_task_404(self, loki_fake: FakeLoki) -> None:
-        resp = TestClient(app).get("/api/computer/traces?task_id=999")
-        assert resp.status_code == 404
-
-    def test_assembles_trace_chronologically(self, loki_fake: FakeLoki) -> None:
+    def test_assembles_trace_chronologically(self, db_conn: psycopg.Connection) -> None:
         aid = 1
         _insert_event(
-            loki_fake,
+            db_conn,
             agent_id=aid,
             event="computer_session_start",
             attributes={
@@ -73,10 +59,10 @@ class TestComputerTrace:
                 "first_tool": "snapshot",
                 "first_action_at": "2026-08-10T12:00:00+00:00",
             },
-            ts_offset_seconds=-30,
+            seconds_ago=30,
         )
         _insert_event(
-            loki_fake,
+            db_conn,
             agent_id=aid,
             event="computer_action",
             attributes={
@@ -88,10 +74,10 @@ class TestComputerTrace:
                 "path": "/tmp/snap.png",  # noqa: S108
                 "error": None,
             },
-            ts_offset_seconds=-20,
+            seconds_ago=20,
         )
         _insert_event(
-            loki_fake,
+            db_conn,
             agent_id=aid,
             event="computer_action",
             attributes={
@@ -103,10 +89,10 @@ class TestComputerTrace:
                 "path": None,
                 "error": None,
             },
-            ts_offset_seconds=-10,
+            seconds_ago=10,
         )
         _insert_event(
-            loki_fake,
+            db_conn,
             agent_id=aid,
             event="computer_session_end",
             attributes={
@@ -119,7 +105,7 @@ class TestComputerTrace:
         )
         # a different task's rows must not leak in
         _insert_event(
-            loki_fake,
+            db_conn,
             agent_id=aid,
             event="computer_action",
             attributes={"task_id": 43, "action": "key", "outcome": "ok"},
@@ -136,13 +122,13 @@ class TestComputerTrace:
         assert [a["action"] for a in actions] == ["snapshot", "click"]
         assert actions[0]["path"] == "/tmp/snap.png"  # noqa: S108
         assert actions[1]["coords"] == "100,200"
-        # chronological: ts ascending (Loki ids are stable hashes, not monotonic)
+        # chronological: ts ascending
         assert actions[0]["ts"] < actions[1]["ts"]
 
-    def test_open_session_has_null_end(self, loki_fake: FakeLoki) -> None:
+    def test_open_session_has_null_end(self, db_conn: psycopg.Connection) -> None:
         aid = 1
         _insert_event(
-            loki_fake,
+            db_conn,
             agent_id=aid,
             event="computer_session_start",
             attributes={
@@ -152,7 +138,7 @@ class TestComputerTrace:
             },
         )
         _insert_event(
-            loki_fake,
+            db_conn,
             agent_id=aid,
             event="computer_action",
             attributes={"task_id": 7, "action": "click", "outcome": "ok"},

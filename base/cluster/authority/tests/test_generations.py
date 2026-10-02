@@ -157,12 +157,13 @@ def test_gateway_group_holds_the_full_dml_surface(authority_postgres: AuthorityC
 @pytest.mark.parametrize(
     ("login", "group"), [("ava_g0_gateway", "ava_gateway"), ("ava_g0_runner", "ava_runner")]
 )
-def test_both_groups_append_audit_events_but_cannot_rewrite_them(
-    authority_postgres: AuthorityCluster, login: str, group: str
+@pytest.mark.parametrize("table", ["audit_events", "telemetry_events"])
+def test_both_groups_append_event_tables_but_cannot_rewrite_them(
+    authority_postgres: AuthorityCluster, login: str, group: str, table: str
 ) -> None:
     with authority_postgres.admin() as conn:
         rows = conn.execute(_PRIVILEGE_MATRIX, {"login": login, "group": group}).fetchall()
-    held = {row[2] for row in rows if row[:2] == ("table", "audit_events") and row[3]}
+    held = {row[2] for row in rows if row[:2] == ("table", table) and row[3]}
     assert held == {"SELECT", "INSERT"}
 
 

@@ -84,6 +84,7 @@ from services.events_maintenance.jsonl_replay import replay_gap_days
 from services.events_maintenance.observed_metrics import recover_observations
 from services.events_maintenance.resolution import run_resolution_slice
 from services.events_maintenance.rollup import compute_rollup
+from services.events_maintenance.telemetry_replay import recover_telemetry_events
 from services.pidfile import acquire_pidfile, pidfile_holds_daemon, remove_pidfile
 
 _log = logging.getLogger("services.events_maintenance.daemon")
@@ -135,6 +136,16 @@ def _run_maintenance(
             _log.info("[events-maintenance] recovered %d metric observations", recovered)
     except Exception:
         _log.exception("[events-maintenance] observed metrics recovery incomplete")
+    progress.beat()
+    # The telemetry_events record is independent too: its writer reports its own failures and
+    # the mirror holds what it missed.
+    try:
+        with pool.connection() as conn:
+            replayed = recover_telemetry_events(conn)
+        if replayed:
+            _log.info("[events-maintenance] replayed %d telemetry events from the mirror", replayed)
+    except Exception:
+        _log.exception("[events-maintenance] telemetry events replay incomplete")
     progress.beat()
     with pool.connection() as conn:
         result = compute_rollup(conn, now_utc=now, config=config)

@@ -4,7 +4,7 @@ Every application privilege is granted to one of two groups, never to a login:
 
 - ``ava_gateway``: the owner's DML surface without DDL or ownership. SELECT,
   INSERT, UPDATE, DELETE on every table (SELECT and INSERT only on the
-  append-only ``audit_events``); USAGE, SELECT, UPDATE on every
+  append-only ``audit_events`` and ``telemetry_events``); USAGE, SELECT, UPDATE on every
   sequence; EXECUTE on every routine, including those revoked from PUBLIC;
   PostgreSQL 17 ``MAINTAIN`` on the checkpoint tables the blob vacuum
   maintains. No TRUNCATE, REFERENCES or TRIGGER.
@@ -46,7 +46,7 @@ CHECKPOINT_TABLES = ("checkpoints", "checkpoint_blobs", "checkpoint_writes")
 
 # Tables the gateway group may read and append but never rewrite. The blanket
 # DML grant below includes UPDATE and DELETE, so they are revoked per table.
-_GATEWAY_APPEND_ONLY_TABLES = ("audit_events",)
+_GATEWAY_APPEND_ONLY_TABLES = ("audit_events", "telemetry_events")
 
 # The runner matrix: (privileges, tables). Privilege strings are module
 # constants spliced as SQL; table names are quoted identifiers. Each entry is a
@@ -79,6 +79,8 @@ _RUNNER_TABLE_GRANTS: tuple[tuple[LiteralString, tuple[str, ...]], ...] = (
     # Audit events are appended by the producing runner process; the table's
     # triggers reject every rewrite.
     ("SELECT, INSERT", ("audit_events",)),
+    # Telemetry and log events are appended by every emitter's drain thread.
+    ("SELECT, INSERT", ("telemetry_events",)),
     # Plugin statistics cards; stale rows age in place, never deleted.
     ("SELECT, INSERT, UPDATE", ("plugin_stats",)),
     ("SELECT, INSERT", ("agent_metric_observations",)),
@@ -165,6 +167,12 @@ def _grant_runner(conn: Conn, owner: str, runner: str) -> None:
         for table in tables:
             _grant(conn, f"GRANT {privileges} ON {{}} TO {{}}", table, runner)
     _grant(conn, "GRANT USAGE, SELECT ON SEQUENCE agent_shell_ttl_renewals_id_seq TO {}", runner)
+    # The writer creates the next month's partition itself (SECURITY DEFINER).
+    _grant(
+        conn,
+        "GRANT EXECUTE ON FUNCTION public.ensure_telemetry_event_partitions(integer, integer) TO {}",
+        runner,
+    )
     grant_event_log_runner_access(conn, runner)
 
 
