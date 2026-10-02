@@ -1,6 +1,5 @@
 {
   "ambient_state": {
-    "services/browser/daemon.py::import-time-read:_CDP_PORT": 1,
     "services/browser/gateway_session.py::ambient-container:_inject_tasks": 1,
     "services/browser/gateway_session.py::ambient-container:_verify_tasks": 1,
     "services/browser/gateway_session.py::asyncio-task:_spawn_inject": 1,

@@ -1,6 +1,0 @@
-{
-  "ambient_state": {
-    "services/milvus/daemon.py::import-time-read:DATA_DIR": 1,
-    "services/milvus/daemon.py::import-time-read:PORT": 1
-  }
-}

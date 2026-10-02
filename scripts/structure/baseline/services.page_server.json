@@ -1,7 +1,4 @@
 {
-  "ambient_state": {
-    "services/page_server/daemon.py::import-time-read:_POLL_INTERVAL_S": 1
-  },
   "files": {
     "services/page_server/tests/test_page_server_daemon.py": 855
   }

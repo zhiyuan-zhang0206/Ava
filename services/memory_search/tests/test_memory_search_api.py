@@ -13,11 +13,12 @@ import numpy as np
 import pytest
 from fastapi.testclient import TestClient
 
-from services.memory_search.app import _MAX_BATCH_ROWS, build_app
+from services.memory_search.app import build_app
 from services.memory_search.store import MemoryStore
 
 _DIM = 8
 _FP = "test:gemini:dim=8"
+_MAX_BATCH_ROWS = 6
 
 
 def _vec(seed: int) -> np.ndarray:
@@ -30,7 +31,7 @@ def _store(tmp_path: Path) -> MemoryStore:
 
 
 def _client(tmp_path: Path) -> TestClient:
-    return TestClient(build_app(_store(tmp_path)))
+    return TestClient(build_app(_store(tmp_path), _MAX_BATCH_ROWS))
 
 
 def _upsert_body(path: str, seed: int, *, mtime: float = 1.0) -> dict[str, object]:
@@ -197,7 +198,7 @@ def test_upsert_batch_saves_once_while_single_upserts_save_each_row(
 
     monkeypatch.setattr(store, "save", _save)
     rows = [_upsert_body(f"/{idx}.md", idx) for idx in range(5)]
-    with TestClient(build_app(store)) as client:
+    with TestClient(build_app(store, _MAX_BATCH_ROWS)) as client:
         assert client.post("/upsert_batch", json={"rows": rows}).status_code == 200
         assert len(save_calls) == 1
         for row in rows:
@@ -205,29 +206,17 @@ def test_upsert_batch_saves_once_while_single_upserts_save_each_row(
         assert len(save_calls) == 1 + len(rows)
 
 
-def test_batch_rows_cap_follows_config(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The wire batch bound is cluster config, resolved at import: reloading
-    the app under a shortened value rebuilds the models with the shorter cap
-    (task #3696)."""
-    import importlib
-
-    from pydantic import ValidationError
-
-    import services.memory_search.app as app_module
-    from base.config import settings
-
-    try:
-        with monkeypatch.context() as m:
-            m.setattr(settings.services, "memory_search_max_batch_rows", 2)
-            reloaded = importlib.reload(app_module)
-            assert reloaded._MAX_BATCH_ROWS == 2
-            row = reloaded.UpsertBody(
-                path="/a.md", mtime=1.0, content_hash="h", kind="body", chunk_idx=0, vector=[0.0]
-            )
-            with pytest.raises(ValidationError):
-                reloaded.UpsertBatchBody(rows=[row] * 3)
-    finally:
-        importlib.reload(app_module)
+def test_batch_rows_cap_is_the_one_the_app_was_built_with(tmp_path: Path) -> None:
+    """The wire batch bound is cluster config handed to `build_app` by the daemon (task
+    #3696): a shorter cap rejects a batch the default cap accepts, on both batch endpoints."""
+    rows = [_upsert_body(f"/{idx}.md", idx) for idx in range(3)]
+    entries = [{"path": row["path"], "kind_limits": {}} for row in rows]
+    with TestClient(build_app(_store(tmp_path), 2)) as small:
+        assert small.post("/upsert_batch", json={"rows": rows}).status_code == 422
+        assert small.post("/delete_stale_batch", json={"entries": entries}).status_code == 422
+    with TestClient(build_app(_store(tmp_path), 3)) as exact:
+        assert exact.post("/upsert_batch", json={"rows": rows}).status_code == 200
+        assert exact.post("/delete_stale_batch", json={"entries": entries}).status_code == 200
 
 
 def test_upsert_batch_rejects_empty_oversized_and_wrong_dim(tmp_path: Path) -> None:

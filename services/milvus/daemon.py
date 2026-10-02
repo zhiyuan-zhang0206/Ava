@@ -23,12 +23,11 @@ import sys
 from base.config import settings
 from base.paths import logs_dir
 
-DATA_DIR = settings.services.milvus_data_dir
-PORT = settings.services.milvus_port
-
 
 def main() -> None:
-    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    data_dir = settings.services.milvus_data_dir
+    port = settings.services.milvus_port
+    data_dir.mkdir(parents=True, exist_ok=True)
     # Redirect stdout/stderr to milvus.log before execvp so a crash inside
     # milvus-lite is postmortem-able — after execvp the wrapper process is gone
     # and there is no Python logger left to catch anything. Without this,
@@ -52,11 +51,11 @@ def main() -> None:
                 "milvus-lite",
                 "server",
                 "--data-dir",
-                str(DATA_DIR),
+                str(data_dir),
                 "--host",
                 "127.0.0.1",
                 "--port",
-                str(PORT),
+                str(port),
             ],
         )
     except OSError as exc:
