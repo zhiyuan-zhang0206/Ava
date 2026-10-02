@@ -3245,7 +3245,7 @@ export interface paths {
          *     the same two fields over the retained 7d window. Both are read in parts
          *     (`gateway/routers/_fleet_tokens.py`): raw rows of the newest two days, the
          *     day-grain ledger before them, and for the all-time score the folded
-         *     `agent_token_totals`, so the read does not scan history.
+         *     `agent_model_tokens_total`, so the read does not scan history.
          *
          *     Edge weight:
          *         lineage (spawn/fork/resurrect): weight = event_count * 2.0 (no time decay,

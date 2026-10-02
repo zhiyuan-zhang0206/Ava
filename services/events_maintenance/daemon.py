@@ -142,7 +142,7 @@ def _run_maintenance(
 ) -> None:
     """One hourly pass: the recoveries (observed metrics, the telemetry mirror replay), the
     cost-ledger rollup of the last closed days (`telemetry_events` → `agent_model_tokens_daily`
-    and `agent_metrics_daily`) and the fold of its settled days into `agent_token_totals`, the hourly checkpoint size/row-count telemetry sample, and the
+    and `agent_metrics_daily`) and the fold of its settled days into `agent_model_tokens_total`, the hourly checkpoint size/row-count telemetry sample, and the
     blob VACUUM. One `now` drives the time-based steps.
     Logs what each step did; a no-op pass logs nothing."""
     now = datetime.now(tz=UTC)
