@@ -18,7 +18,7 @@ configuration and Windows system keys) are registered rows. Enabled provider
 plugin bindings declare removable provider keys. Two operation families consume
 these declarations:
 
-- **Forwarding** (`child_env(role, platform)`) — the parent→child env view. `role` uses `AVA_PROCESS_PROFILE` (gateway/agent/runner). Native launchers receive an environment dict; secrets never ride argv.
+- **Forwarding** (`child_env(role)`) — the parent→child env view of a daemon / session child (`role` is the gateway or runner profile). Native launchers receive an environment dict; secrets never ride argv.
 - **Keep/drop** (`env_authority_drop_set(role)` / `env_keep_set(role)`) — dotenv_boot's own-environ surgery, as set-membership queries.
 
 Pure test-fixture sets are deleted outright. The authority for derivation is the **consumption matrix** (which process kind actually reads which keys — #1570's lesson); capability/scope metadata only validates.

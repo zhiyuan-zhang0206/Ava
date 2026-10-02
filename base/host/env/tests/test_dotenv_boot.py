@@ -594,8 +594,9 @@ def test_agent_profile_keeps_an_unmodeled_provider_key_from_dotenv(
 ) -> None:
     """The authority pass leaves a plugin key in the agent parent's live env.
 
-    Provider bindings deliberately do not add Settings fields, so this is the
-    prerequisite for `child_env("agent")` to forward their declared key.
+    Provider bindings deliberately do not add Settings fields, so the agent
+    process (and its exec children, which run the same boot) read their declared
+    key from the unit's `.env`.
     """
     monkeypatch.setitem(os.environ, "AVA_PROCESS_PROFILE", "agent")
     # Register the original absence before load_ava_env adds this key directly.
