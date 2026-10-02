@@ -1,0 +1,81 @@
+"""Run-scoped dependency context — what one graph run is handed.
+
+The agent host builds an `AvaContext` for each turn task and passes it via
+`graph.ainvoke(input, context=ctx)`. Graph nodes have the signature
+`(state, runtime: Runtime[AvaContext], config: RunnableConfig)` and read their
+dependencies as `runtime.context.X`:
+
+- **handles** the host built and owns: `llm`, `event_publisher`, `ops_pool`, the cluster
+  `db` (`Database`) and `bus` (`EventBus`) — a node that touches a handle expects it non-None;
+  the eval driver and tests populate only the ones their path needs;
+- **`agent`**: the agent's resolved per-turn configuration (`AgentSlices`, see
+  `base.agents.context.slices`), built by the host when the turn starts.
+
+`frozen=True`: context is read-only during a run. If you need mutable state, split it into a
+separate dataclass.
+"""
+
+from dataclasses import dataclass
+
+from langchain_core.language_models.chat_models import BaseChatModel
+from langchain_core.runnables import RunnableConfig
+from psycopg_pool import AsyncConnectionPool
+
+from base.agents.context.slices import AgentSlices
+from base.db import Database
+from base.events.live.bus import EventBus
+from base.events.live.publisher import AgentEventPublisher
+
+
+def agent_id_from_config(
+    config: RunnableConfig,
+) -> int:  # returns agent_id (LangGraph config key name must be agent_id)
+    """Read agent_id (required) from RunnableConfig (LangGraph checkpointer standard).
+
+    LangGraph's `RunnableConfig` is `TypedDict(total=False)` — all fields are
+    NotRequired, pyright does not allow direct `config["configurable"]["thread_id"]`
+    indexing. This helper centralizes type: ignore + int conversion + fail-fast:
+    missing 'configurable' or missing 'agent_id' raises KeyError immediately,
+    no fallback.
+    """
+    return int(config["configurable"]["thread_id"])  # type: ignore[typeddict-item]  # LangGraph mandates key name, value = agent_id
+
+
+@dataclass(frozen=True)
+class AvaContext:
+    """Run-scoped dependency bundle — see module docstring."""
+
+    # ── handles (host-built; all Optional so the eval driver and tests can build a
+    # context with just the ones their path touches) ──
+
+    llm: BaseChatModel | None = None
+    """LLM provider (Anthropic / DeepSeek / etc). Required by graph runtime
+    (llm_node + claim node's compact path); graph entry points assert
+    non-None at function start."""
+
+    event_publisher: AgentEventPublisher | None = None
+    """Best-effort SSE event fan-out (chat / reasoning / code deltas, exec
+    output chunks, timeline snapshots). Required by graph runtime; graph entry
+    points assert non-None. `emit()` is non-blocking, so a slow central Redis
+    degrades the live view instead of stalling the agent's control flow (the
+    exec poll loop that watches cancel/deadline, the llm stream loop)."""
+
+    ops_pool: AsyncConnectionPool | None = None
+    """Pool for all kernel-side transactional SQL (claim_inbound_batch /
+    reconcile_claimed_inbounds / lifecycle settlement). The
+    pool's `check_connection` health-checks every borrowed conn and
+    transparently reconnects when the remote PG / PgBouncer evicts an idle
+    conn — single-conn alternative silently dies after server idle timeout
+    (agent 57 lost 5h of checkpoints exactly this way). Eval container path does
+    not need an inbound queue (graph runs one round of ainvoke per case);
+    pass None so _claim takes the container early-return path without
+    touching the queue."""
+
+    db: Database | None = None
+    """The cluster Postgres handle, for the code a node calls that opens its own connection."""
+
+    bus: EventBus | None = None
+    """The cluster Redis / live-events handle, for the same."""
+
+    agent: AgentSlices | None = None
+    """This agent's per-turn configuration, resolved by the host when the turn starts."""

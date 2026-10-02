@@ -24,10 +24,11 @@ supplies the package doors and the shrink-only baseline practice the enforcement
   The host turns the two stored maps into pins and binds them in a ContextVar
   around each turn (`base/config/turn_view.py`); plugin config and the turn
   identity are bound the same way.
-- **`AvaContext`** (`base/agents/context.py`) is LangGraph's per-run context. The
+- **`AvaContext`** (`base/agents/context/__init__.py`) is LangGraph's per-run context. The
   host builds one per turn in `services/agent_host/host.py` with the handles (model,
-  event publisher, database pool); its string-level config fields default to live
-  `settings` reads.
+  event publisher, database pool, `Database`, `EventBus`) and the agent's resolved
+  `AgentSlices` (`base/agents/context/slices.py`); graph code is moving from the
+  `turn_settings` view to reading `runtime.context.agent`.
 - **One compiled graph** is shared by every agent in a host
   ([agent runtime](../../agent/docs/agent-runtime.ava.okf.md)).
 
