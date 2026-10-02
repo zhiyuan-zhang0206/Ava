@@ -10,6 +10,7 @@ import pytest
 import cli.commands._probe as _probe_commands
 import ops.roster as _roster
 import ops.roster.service_spec as _service_spec
+from base.daemon.tests.fakes import pin_endpoints
 from cli.commands._repo import _register_machine_or_die
 from cli.commands._setup import SetupValues
 from cli.tests._commands_helpers import _fake_session_backends as _fake_session_backends
@@ -172,10 +173,7 @@ def test_register_agent_runner_advertises_ops_url(monkeypatch: pytest.MonkeyPatc
 
     monkeypatch.setattr("base.cluster.machines.register_self", fake_register_self)
     monkeypatch.setattr("base.cluster.machine.reachable_host", lambda: "10.0.0.2")
-    monkeypatch.setattr(
-        "base.daemon.health.health_port",
-        lambda name: 8106 if name == "ops" else 0,  # pyright: ignore[reportUnknownArgumentType]
-    )
+    pin_endpoints(monkeypatch, port=lambda name: 8106 if name == "ops" else 0)
 
     rc = _register_machine_or_die(
         cast(SetupValues, {"machine_name": "wsl"}), frozenset({"agent-runner"})
@@ -198,10 +196,7 @@ def test_register_agent_runner_loopback_host_exits_nonzero(monkeypatch: pytest.M
 
     monkeypatch.setattr("base.cluster.machines.register_self", _reject)
     monkeypatch.setattr("base.cluster.machine.reachable_host", lambda: "127.0.0.1")
-    monkeypatch.setattr(
-        "base.daemon.health.health_port",
-        lambda name: 8106 if name == "ops" else 0,  # pyright: ignore[reportUnknownArgumentType]
-    )
+    pin_endpoints(monkeypatch, port=lambda name: 8106 if name == "ops" else 0)
 
     rc = _register_machine_or_die(
         cast(SetupValues, {"machine_name": "wsl"}), frozenset({"agent-runner"})

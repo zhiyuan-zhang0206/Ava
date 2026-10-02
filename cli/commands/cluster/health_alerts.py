@@ -69,7 +69,7 @@ def notify_owner(text: str) -> None:
     on_final_failure=log)``."""
     from base.cluster import home_label
     from base.config import settings
-    from base.daemon.health import health_port
+    from base.daemon.endpoints import ServiceEndpoints
     from base.paths import ava_home
 
     if not settings.alerts.im_notify_enabled:
@@ -77,7 +77,7 @@ def notify_owner(text: str) -> None:
         return
 
     base = (settings.services.im_bridge_health_url or "").rstrip("/") or (
-        f"http://127.0.0.1:{health_port('im_bridge')}"
+        f"http://127.0.0.1:{ServiceEndpoints.from_settings().of('im_bridge').health_port}"
     )
     stamped = f"[{home_label(ava_home())}] {text}"
     try:

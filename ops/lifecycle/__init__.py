@@ -243,12 +243,12 @@ async def _cancel_hosted_turn_best_effort(agent_id: int, command_id: int) -> Non
     """
     import httpx
 
-    from base.daemon.health import health_port
+    from base.daemon.endpoints import ServiceEndpoints
 
     try:
         async with httpx.AsyncClient(timeout=httpx.Timeout(2.0)) as client:
             resp = await client.post(
-                f"http://127.0.0.1:{health_port('agent_host')}/cancel-turn",
+                f"http://127.0.0.1:{ServiceEndpoints.from_settings().of('agent_host').health_port}/cancel-turn",
                 json={"agent_id": agent_id, "command_id": command_id},
             )
             resp.raise_for_status()

@@ -740,7 +740,7 @@ def test_notify_owner_stamps_home_label(
 
     import base.cluster
     from base.config import settings
-    from base.daemon.health import health_port
+    from base.daemon.endpoints import ServiceEndpoints
 
     monkeypatch.setattr(settings.alerts, "im_notify_enabled", True)
     monkeypatch.setattr(settings.data_plane, "cluster_secret", "test-secret")
@@ -763,7 +763,10 @@ def test_notify_owner_stamps_home_label(
 
     assert len(sent) == 1
     url, payload, headers = sent[0]
-    assert url == f"http://127.0.0.1:{health_port('im_bridge')}/send"
+    assert (
+        url
+        == f"http://127.0.0.1:{ServiceEndpoints.from_settings().of('im_bridge').health_port}/send"
+    )
     assert headers["Authorization"] == "Bearer test-secret"
     assert payload == {
         "text": "[.ava-preview-42] [health-probe] cluster unhealthy: FAIL: schema health"
