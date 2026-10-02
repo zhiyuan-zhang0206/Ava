@@ -20,7 +20,7 @@ in the contract turns CI red here.
 `_Ok` is the happy path — a correct override, no ignore, type-checks clean.
 
 To see the errors directly, delete an ignore comment and run:
-    .venv/bin/pyright tests/agent/hook_typing_contract.py
+    .venv/bin/pyright agent/hooks/tests/hook_typing_contract.py
 """
 
 from langchain_core.runnables import RunnableConfig
