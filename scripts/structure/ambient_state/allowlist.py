@@ -206,38 +206,10 @@ DB_HANDLE_PACKAGES: dict[str, frozenset[str]] = package_roots(_REPO_ROOT, "db")
 
 # Packages that take their daemon's `ServiceEndpoint` (or the `ServiceEndpoints` table) from
 # their composition root: package dir -> the modules that may call
-# `ServiceEndpoints.from_settings()` (scripts/structure/ambient_state/
-# endpointrule.py). A listed package or root that no longer exists fails as stale.
-ENDPOINT_PACKAGES: dict[str, frozenset[str]] = {
-    "ava_builtins/plugins/ava_fleet/task_maintenance": frozenset(
-        {"ava_builtins/plugins/ava_fleet/task_maintenance/daemon.py"}
-    ),
-    "base/cluster": frozenset({"base/cluster/machines.py"}),
-    "base/telemetry": frozenset({"base/telemetry/alerts.py"}),
-    "cli/commands/cluster": frozenset({"cli/commands/cluster/health_alerts.py"}),
-    "gateway/cluster": frozenset({"gateway/cluster/status.py"}),
-    "ops": frozenset(
-        {
-            "ops/agent_pause/probe.py",
-            "ops/cluster_pause.py",
-            "ops/cluster_status/__init__.py",
-            "ops/lifecycle/__init__.py",
-            "ops/roster/healthz.py",
-        }
-    ),
-    "services/agent_host": frozenset({"services/agent_host/daemon.py"}),
-    "services/agent_ops": frozenset({"services/agent_ops/daemon.py"}),
-    "services/backup_scheduler": frozenset({"services/backup_scheduler/daemon.py"}),
-    "services/delivery_watchdog": frozenset({"services/delivery_watchdog/daemon.py"}),
-    "services/events_maintenance": frozenset({"services/events_maintenance/daemon.py"}),
-    "services/heartbeat": frozenset({"services/heartbeat/daemon.py"}),
-    "services/im_bridge": frozenset({"services/im_bridge/daemon.py"}),
-    "services/labeler": frozenset({"services/labeler/daemon.py"}),
-    "services/memory_indexer": frozenset({"services/memory_indexer/daemon.py"}),
-    "services/page_server": frozenset({"services/page_server/daemon.py"}),
-    "services/schedule_manager": frozenset({"services/schedule_manager/daemon.py"}),
-    "services/ttl_reaper": frozenset({"services/ttl_reaper/daemon.py"}),
-}
+# `ServiceEndpoints.from_settings()` (scripts/structure/ambient_state/endpointrule.py). A package
+# declares `endpoints = [...]` in its own `ambient_roots.toml` (see roots.py); a declared root
+# that no longer exists fails as stale.
+ENDPOINT_PACKAGES: dict[str, frozenset[str]] = package_roots(_REPO_ROOT, "endpoints")
 
 # ── deferred: frozen in the baseline, fix waits on another redesign ────────
 
