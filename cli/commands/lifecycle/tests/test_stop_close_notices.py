@@ -29,6 +29,7 @@ from ops import pty_close_notices
 from tests.cli._commands_helpers import dependencies
 from tests.cli._commands_helpers import home as home
 from tests.path_scoped.pty_reaper import PtyReaper
+from tests.path_scoped.pty_reaper import pty_reaper as pty_reaper
 
 
 def test_stop_records_notice_for_verified_closed_busy_session(
@@ -48,13 +49,13 @@ def test_stop_records_notice_for_verified_closed_busy_session(
 
     assert entry.cmd_stop(require_confirmation=False, keep_infra=True, timeout=15) == 0
     assert len(written) == 1
-    notice = written[0].as_dict()
-    assert notice["agent_id"] == 987
-    assert notice["session_id"] == 2044
-    assert notice["name"] == name
-    assert notice["machine"]
-    assert notice["operation"]
-    assert "operator stop" in notice["reason"]
+    notice = written[0]
+    assert notice.agent_id == 987
+    assert notice.session_id == 2044
+    assert notice.name == name
+    assert notice.machine
+    assert notice.operation
+    assert "operator stop" in notice.reason
 
 
 @pytest.mark.parametrize(
