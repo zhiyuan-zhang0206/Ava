@@ -26,12 +26,14 @@ from psycopg import sql
 from psycopg_pool import ConnectionPool
 
 from base.config import settings
+from base.db.tests.fakes import fake_database
 from services.events_maintenance import blob_vacuum
 from services.events_maintenance.blob_vacuum import (
     in_low_traffic_window,
     run_blob_vacuum,
     vacuum_checkpoint_tables,
 )
+from services.events_maintenance.tests.slices import events_maintenance_db
 
 _SCHEMA = """
 CREATE TABLE checkpoints (
@@ -164,7 +166,7 @@ def test_run_skips_outside_window(monkeypatch: pytest.MonkeyPatch, cluster_tz: s
             return datetime(2026, 8, 10, 10, 0, tzinfo=UTC)  # 03:00 PDT — outside window
 
     monkeypatch.setattr("services.events_maintenance.blob_vacuum.datetime", _Frozen)
-    result = run_blob_vacuum(timezone=cluster_tz)
+    result = run_blob_vacuum(events_maintenance_db(), timezone=cluster_tz)
     assert result.ran is False
     assert result.total_bytes == 0
 
@@ -307,17 +309,14 @@ def test_run_skips_missing_tables_fresh_cluster(
     so an unguarded UndefinedTable would crash-loop the daily window
     (adversarial review of #2226)."""
 
-    def _fake_connect(*_a, **_k):
+    def _fake_connect(*_a: object, **_k: object) -> object:
         return pool.connection()  # PoolConnection — usable as a `with` target
 
-    import base.db
-
-    monkeypatch.setattr(base.db, "connect", _fake_connect)  # pyright: ignore[reportUnknownArgumentType]
     # Drop the tables the fixture created, simulating a greenfield cluster.
     with pool.connection() as conn, conn.cursor() as cur:
         cur.execute("DROP TABLE checkpoint_blobs, checkpoints, checkpoint_writes")
 
-    result = run_blob_vacuum(timezone="UTC", force=True)
+    result = run_blob_vacuum(fake_database(_fake_connect), timezone="UTC", force=True)
     assert result.ran is False
     assert result.total_bytes == 0
 

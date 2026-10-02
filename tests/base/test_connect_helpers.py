@@ -38,6 +38,10 @@ from base.native_process import code_version
 from base.telemetry import process_name
 
 
+def _session_direct_url(_config: object = None) -> str:
+    return settings.data_plane.db_url
+
+
 def test_connect_runs_a_query() -> None:
     with db.connect() as conn, conn.cursor() as cur:
         cur.execute("SELECT 1")
@@ -489,7 +493,7 @@ def test_direct_dials_are_not_gated_and_carry_no_process_name(
     monkeypatch: pytest.MonkeyPatch, stored_minimum: int, _gated_process: list[int]
 ) -> None:
     _set_minimum(_VERSION + 1)
-    monkeypatch.setattr(connections, "direct_db_url", lambda: settings.data_plane.db_url)
+    monkeypatch.setattr(connections, "direct_db_url", _session_direct_url)
     with db.connect(direct=True) as conn:
         params = conn.info.get_parameters()
         assert not params.get("application_name", "").startswith("ava:")

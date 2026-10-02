@@ -11,8 +11,9 @@ from typing import Any
 
 import psycopg
 
+from base.db import Database
 from services.hierarchy_worker import execute as execute_module
-from services.hierarchy_worker import roots
+from services.hierarchy_worker import roots, runner
 from services.hierarchy_worker import scan as scan_module
 from services.hierarchy_worker.config import HierarchyWorkerConfig
 from services.hierarchy_worker.scan import ScanOutcome
@@ -28,5 +29,15 @@ def scan(conn: psycopg.Connection) -> ScanOutcome:
 
 
 def execute_job(job_id: int) -> int:
-    """`execute.execute_job` with the live settings' slice."""
-    return execute_module.execute_job(job_id, hierarchy_config())
+    """`execute.execute_job` with the live settings' slice and the test database."""
+    return execute_module.execute_job(job_id, hierarchy_config(), hierarchy_db())
+
+
+def hierarchy_db() -> Database:
+    """The handle on the test database (the settings the suite's conftest points at the throwaway cluster)."""
+    return Database.from_settings()
+
+
+def run_child(job: runner.ClaimedJob) -> None:
+    """`runner.run_child` with the live settings' slice and the test database."""
+    runner.run_child(job, hierarchy_config(), hierarchy_db())

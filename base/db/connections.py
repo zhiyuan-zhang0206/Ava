@@ -7,8 +7,8 @@ import psycopg
 from psycopg.rows import tuple_row
 from psycopg_pool import AsyncConnectionPool, ConnectionPool
 
-from base.config import settings
 from base.db.code_version_gate import application_name, min_read_due, observe_minimum
+from base.db.config import DbConfig, db_config_from_settings
 from base.host.env.dotenv_boot import PLACEHOLDER_DB_URL
 from base.host.net.url_secret import url_with_port
 from base.log import logger
@@ -270,7 +270,7 @@ def _guard_db_url(url: str) -> str:
     return url
 
 
-def direct_db_url() -> str:
+def direct_db_url(config: DbConfig | None = None) -> str:
     """The admin-plane Postgres URL: this cluster's `AVA_DB_URL` never routed
     through PgBouncer.
 
@@ -298,13 +298,18 @@ def direct_db_url() -> str:
     matches it byte-for-byte), and a home with no record (no gateway capability)
     keeps `AVA_DB_URL` as-is rather than guessing.
     """
+    return _direct_url(config or db_config_from_settings())
+
+
+def _direct_url(cfg: DbConfig) -> str:
+    """`direct_db_url` for one resolved config."""
     from base.cluster import get_record
     from base.cluster.machine import reachable_host
     from base.config.data_plane import gateway_url_host
     from base.host.net.predicates import is_loopback_host
     from base.paths import ava_home
 
-    url = settings.data_plane.db_url
+    url = cfg.db_url
     if url == PLACEHOLDER_DB_URL:
         return url
     try:
@@ -333,7 +338,7 @@ def direct_db_url() -> str:
     # This home's record does not explain the URL's port: a local operator
     # stand-in, or a split runner naming the gateway's pooler. A remote/SaaS plane (Task #1752)
     # is direct by definition — no local pooler exists — so it dials silently.
-    if settings.data_plane.pgbouncer_enabled and (
+    if cfg.pgbouncer_enabled and (
         is_loopback_host(host) or host == reachable_host().lower() or host == gateway_url_host()
     ):
         logger.warning(
@@ -354,12 +359,14 @@ def connect(
     autocommit: bool = False,
     direct: bool = False,
     unbounded: bool = False,
+    config: DbConfig | None = None,
 ) -> psycopg.Connection:
     """Open a new connection to the cluster Postgres.
 
     The single entry point for one-off connections, so call sites stop reading
-    `settings.data_plane.db_url` by hand. By default this dials
-    `settings.data_plane.db_url` — the cluster's one access URL (PgBouncer when
+    `settings.data_plane.db_url` by hand. By default this dials the
+    `db_url` of `DbConfig` (built from the live settings unless `config` names
+    one; a `Database` handle always passes its own) — the cluster's one access URL (PgBouncer when
     enabled, direct Postgres when off; the port is chosen at URL generation, so
     the dial is a plain connect). The returned connection is a context manager:
     `with base.db.connect() as conn: ...`. `autocommit` is passed through for
@@ -404,9 +411,9 @@ def connect(
     """
     from base.config.data_plane import sslmode_for_url
 
-    dp = settings.data_plane
-    url = _guard_db_url(dp.db_url if not direct else direct_db_url())
-    sslmode = sslmode_for_url(url, dp.db_sslmode)
+    cfg = config or db_config_from_settings()
+    url = _guard_db_url(cfg.db_url if not direct else direct_db_url(cfg))
+    sslmode = sslmode_for_url(url, cfg.db_sslmode)
     conn = psycopg.connect(
         url,
         autocommit=autocommit,
@@ -486,6 +493,7 @@ def pool(
     check_connections: bool = False,
     autocommit: bool = False,
     row_factory: Any | None = None,
+    config: DbConfig | None = None,
 ) -> ConnectionPool:
     """Open a ConnectionPool on the cluster Postgres (opened eagerly).
 
@@ -526,12 +534,12 @@ def pool(
     """
     from base.config.data_plane import resolved_pool_size, sslmode_for_url
 
-    dp = settings.data_plane
-    url = _guard_db_url(dp.db_url if not direct else direct_db_url())
+    cfg = config or db_config_from_settings()
+    url = _guard_db_url(cfg.db_url if not direct else direct_db_url(cfg))
     min_size, max_size = resolved_pool_size(
-        min_size, max_size, dp.db_pool_min_size, dp.db_pool_max_size
+        min_size, max_size, cfg.db_pool_min_size, cfg.db_pool_max_size
     )
-    sslmode = sslmode_for_url(url, dp.db_sslmode)
+    sslmode = sslmode_for_url(url, cfg.db_sslmode)
     connection_kwargs: dict[str, Any] = {
         "prepare_threshold": None,
         **({"sslmode": sslmode} if sslmode else {}),
@@ -578,6 +586,7 @@ def async_pool(
     min_size: int,
     max_size: int,
     timeout: float,
+    config: DbConfig | None = None,
     **pool_kwargs: Any,
 ) -> AsyncConnectionPool[psycopg.AsyncConnection]:
     """An unopened async pool on the cluster's access URL (the agent host's pools).
@@ -603,10 +612,10 @@ def async_pool(
     """
     from base.config.data_plane import sslmode_for_url
 
-    dp = settings.data_plane
-    sslmode = sslmode_for_url(dp.db_url, dp.db_sslmode)
+    cfg = config or db_config_from_settings()
+    sslmode = sslmode_for_url(cfg.db_url, cfg.db_sslmode)
     return pool_class(
-        _guard_db_url(dp.db_url),
+        _guard_db_url(cfg.db_url),
         min_size=min_size,
         max_size=max_size,
         timeout=timeout,

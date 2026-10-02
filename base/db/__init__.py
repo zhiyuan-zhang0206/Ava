@@ -25,6 +25,7 @@ from base.agents.messages.inbound_provenance import (
     content_sha256,
     source_assertion_match,
 )
+from base.db.config import DbConfig as DbConfig
 from base.db.connections import PG_KEEPALIVE_KWARGS as PG_KEEPALIVE_KWARGS
 from base.db.connections import (
     PG_STATEMENT_TIMEOUT_SET_SQL as PG_STATEMENT_TIMEOUT_SET_SQL,
@@ -36,6 +37,7 @@ from base.db.connections import connect as connect
 from base.db.connections import connect_url as connect_url
 from base.db.connections import direct_db_url as direct_db_url
 from base.db.connections import pool as pool
+from base.db.handle import Database as Database
 from base.db.transaction import write_transaction
 from base.log import logger
 from base.telemetry import Event

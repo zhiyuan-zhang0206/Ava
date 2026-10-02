@@ -31,8 +31,8 @@ from zoneinfo import ZoneInfo
 
 import psycopg
 
-import base.db
 from base import telemetry
+from base.db import Database
 from base.log import logger
 
 _WINDOW_START_HOUR = 5
@@ -201,7 +201,7 @@ def vacuum_checkpoint_tables(conn: Any) -> VacuumResult:
     return result
 
 
-def run_blob_vacuum(*, timezone: str, force: bool = False) -> VacuumResult:
+def run_blob_vacuum(db: Database, *, timezone: str, force: bool = False) -> VacuumResult:
     """Daemon entry point: skip outside the low-traffic window (unless
     `force`), then dial a direct autocommit connection and vacuum.
 
@@ -214,7 +214,7 @@ def run_blob_vacuum(*, timezone: str, force: bool = False) -> VacuumResult:
     if not force and not in_low_traffic_window(timezone):
         return VacuumResult(ran=False, total_bytes=0, dead_tuples=0)
     try:
-        with base.db.connect(direct=True, autocommit=True) as conn:
+        with db.connect(direct=True, autocommit=True) as conn:
             return vacuum_checkpoint_tables(conn)
     except psycopg.errors.UndefinedTable:
         logger.info(

@@ -11,7 +11,7 @@ from loguru import logger
 
 from base.agents.labels import publish_label_updated
 from base.agents.messages.kwargs import message_content
-from base.db.transaction import write_transaction
+from base.db import Database
 from base.lm.content import content_blocks
 from base.lm.factory import build_chat_model
 from services.labeler.config import LabelerConfig
@@ -144,7 +144,9 @@ def _rejection_reason(label: str, max_chars: int) -> str | None:
     return None
 
 
-async def generate_label_async(agent_id: int, prompt: str, config: LabelerConfig) -> bool | None:
+async def generate_label_async(
+    agent_id: int, prompt: str, config: LabelerConfig, db: Database
+) -> bool | None:
     """Generate a label via the LLM, CAS-write to DB, publish the event.
 
     Returns True when a label was written; False when generation failed
@@ -238,7 +240,7 @@ async def generate_label_async(agent_id: int, prompt: str, config: LabelerConfig
     # auto-labeling forever — the daemon poll matches the same predicate, so
     # an '' row is re-selected and this CAS replaces it. This function never
     # writes '' itself (the `if not label` guard above returns False first).
-    with write_transaction() as conn, conn.cursor() as cur:
+    with db.write_transaction() as conn, conn.cursor() as cur:
         cur.execute(
             "UPDATE agents SET label=%s WHERE id=%s "
             "AND (label IS NULL OR label = '') AND NOT label_user_set",

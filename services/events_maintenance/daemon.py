@@ -63,7 +63,6 @@ from typing import cast
 import psycopg
 from psycopg_pool import ConnectionPool
 
-import base.db
 from base.config import settings
 from base.daemon.health import (
     LivenessGroup,
@@ -75,6 +74,7 @@ from base.daemon.health import (
 from base.daemon.health_schema import DEGRADED, OK, component
 from base.daemon.shutdown import cancel_and_drain, install_graceful_shutdown
 from base.daemon.shutdown import hard_exit as _hard_exit
+from base.db import Database
 from base.deploy.maintenance import admission
 from base.log import init_gateway_process
 from base.paths import pid_path
@@ -111,6 +111,12 @@ def events_maintenance_config() -> EventsMaintenanceConfig:
     )
 
 
+def events_maintenance_db() -> Database:
+    """The handle on the cluster database, built where the daemon (or one of its operator
+    commands) starts."""
+    return Database.from_settings()
+
+
 def _pidfile() -> Path:
     return pid_path("events_maintenance")
 
@@ -126,7 +132,7 @@ class WedgedPassError(RuntimeError):
 
 
 def _run_maintenance(
-    pool: ConnectionPool, progress: LoopProgress, config: EventsMaintenanceConfig
+    pool: ConnectionPool, progress: LoopProgress, config: EventsMaintenanceConfig, db: Database
 ) -> None:
     """One hourly pass: the cost-ledger rollup (Loki → `agent_model_tokens_daily`
     — Loki only retains 84h, so skipping passes permanently loses days), the
@@ -185,7 +191,7 @@ def _run_maintenance(
     # Incremental physical reclamation: a plain VACUUM (no lock) over the
     # checkpoint tables, only inside the measured agent-lowest window
     # (05:00-08:00 CLUSTER time). Logs size + dead tuples each run.
-    vacuum_result = run_blob_vacuum(timezone=config.timezone)
+    vacuum_result = run_blob_vacuum(db, timezone=config.timezone)
     progress.beat()
     if vacuum_result.ran:
         _log.info("[events-maintenance] blob vacuum: %s", vacuum_result.summary())
@@ -271,20 +277,12 @@ async def _sleep_with_liveness(progress: LoopProgress, total_s: float) -> None:
 async def _maintenance_with_liveness(
     pool: ConnectionPool,
     progress: LoopProgress,
-    config: EventsMaintenanceConfig,
-    *,
-    run: Callable[[ConnectionPool], None] | None = None,
+    run: Callable[[ConnectionPool], None],
 ) -> None:
-    """Run one pass within its deadline; unresolved work is not progress.
-    Completion beats before propagating its result; timeout permanently fails
-    the loop. ``run`` remains a test seam.
+    """Run one pass (`run`, handed the pool) within its deadline; unresolved work is
+    not progress. Completion beats before propagating its result; timeout
+    permanently fails the loop.
     """
-    if run is None:
-
-        def run_with_progress(target_pool: ConnectionPool) -> None:
-            _run_maintenance(target_pool, progress, config)
-
-        run = run_with_progress
     fut = asyncio.ensure_future(asyncio.to_thread(run, pool))
     done, _pending = await asyncio.wait({fut}, timeout=progress.timeout_s)
     if fut not in done:
@@ -296,7 +294,7 @@ async def _maintenance_with_liveness(
 
 
 async def _dispatch_loop(
-    pool: ConnectionPool, progress: LoopProgress, config: EventsMaintenanceConfig
+    pool: ConnectionPool, progress: LoopProgress, config: EventsMaintenanceConfig, db: Database
 ) -> None:
     """Main loop: roll immediately on start (fresh after a restart), then every
     interval. The rollup DB work is synchronous psycopg run in a thread so it does
@@ -313,7 +311,11 @@ async def _dispatch_loop(
     while True:
         try:
             if not admission.quiesced():
-                await _maintenance_with_liveness(pool, progress, config)
+                await _maintenance_with_liveness(
+                    pool,
+                    progress,
+                    lambda target_pool: _run_maintenance(target_pool, progress, config, db),
+                )
         except asyncio.CancelledError:
             raise
         except WedgedPassError:
@@ -358,8 +360,7 @@ async def _resolution_loop(
                 await _maintenance_with_liveness(
                     pool,
                     progress,
-                    config,
-                    run=lambda target_pool: _run_resolution(target_pool, progress, config),
+                    lambda target_pool: _run_resolution(target_pool, progress, config),
                 )
         except asyncio.CancelledError:
             raise
@@ -409,12 +410,13 @@ async def run() -> None:
     )
     _log.info("[events-maintenance] healthz listening on :%s", health_port("events_maintenance"))
 
-    pool = base.db.pool()
+    db = events_maintenance_db()
+    pool = db.pool()
     try:
         # One TaskGroup owns the three loops: one that raises cancels its siblings
         # and ends the process, and the supervisor restarts it.
         async with asyncio.TaskGroup() as loops:
-            loops.create_task(_dispatch_loop(pool, dispatch_progress, config))
+            loops.create_task(_dispatch_loop(pool, dispatch_progress, config, db))
             loops.create_task(_resolution_loop(pool, resolution_progress, config))
             loops.create_task(registry_gauge.registry_gauge_loop(pool, gauge_progress))
     finally:

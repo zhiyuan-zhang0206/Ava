@@ -131,7 +131,7 @@ def test_base_db_connect_and_pool_dial_one_url_with_direct_escape() -> None:
     for fn in (base.db.connect, base.db.pool):
         assert "direct" in inspect.signature(fn).parameters
         src = inspect.getsource(fn)
-        assert "dp.db_url if not direct else direct_db_url()" in src
+        assert "cfg.db_url if not direct else direct_db_url(cfg)" in src
         assert "prepare_threshold" in src
     assert "unbounded" in inspect.signature(base.db.connect).parameters
     # Pooled dials restore the baseline session (RESET ALL + statement ceiling)
