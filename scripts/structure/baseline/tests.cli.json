@@ -19,12 +19,7 @@
   },
   "tests_location": {
     "tests/cli/test_converge_lgtm.py::top-level": 1,
-    "tests/cli/test_converge_redis_bridge.py::top-level": 1,
     "tests/cli/test_main_dispatch.py::top-level": 1,
-    "tests/cli/test_otel_bootstrap_relay.py::top-level": 1,
-    "tests/cli/test_pgbouncer_config.py::top-level": 1,
-    "tests/cli/test_pgbouncer_wire.py::top-level": 1,
-    "tests/cli/test_plugin_scaffold.py::top-level": 1,
-    "tests/cli/test_schedules_cmd.py::top-level": 1
+    "tests/cli/test_plugin_scaffold.py::top-level": 1
   }
 }

@@ -15,7 +15,6 @@
     "tests/scripts/test_audit_branch_protection.py::top-level": 1,
     "tests/scripts/test_refresh_test_durations.py::top-level": 1,
     "tests/scripts/test_render_wsl_boot_task.py::top-level": 1,
-    "tests/scripts/test_rotate_cluster_secret.py::top-level": 1,
     "tests/scripts/test_test_selector.py::top-level": 1,
     "tests/scripts/test_update_model_pricing.py::top-level": 1,
     "tests/scripts/test_worktree_sh_clean.py::top-level": 1

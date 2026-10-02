@@ -34,16 +34,12 @@
     "tests/base/test_editable_install.py::top-level": 1,
     "tests/base/test_evidence.py::top-level": 1,
     "tests/base/test_exec_request_evidence.py::top-level": 1,
-    "tests/base/test_no_secrets_on_argv.py::top-level": 1,
     "tests/base/test_pg_owner_authority.py::top-level": 1,
     "tests/base/test_poll_until.py::top-level": 1,
     "tests/base/test_proc.py::top-level": 1,
-    "tests/base/test_recovery_breaker.py::top-level": 1,
     "tests/base/test_scan.py::top-level": 1,
-    "tests/base/test_shutdown.py::top-level": 1,
     "tests/base/test_subreaper_contract.py::top-level": 1,
     "tests/base/test_tags.py::top-level": 1,
-    "tests/base/test_ui_contributions.py::top-level": 1,
-    "tests/base/test_uvicorn_stdlib_intercept.py::top-level": 1
+    "tests/base/test_ui_contributions.py::top-level": 1
   }
 }
