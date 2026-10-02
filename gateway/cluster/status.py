@@ -16,11 +16,11 @@ import logging
 import threading
 import time
 from collections.abc import Mapping
-from datetime import UTC, datetime, timedelta
-from typing import Annotated, Any
+from datetime import UTC, datetime
+from typing import Annotated, Any, cast
 
-import httpx
-from fastapi import APIRouter, Query, Request
+import psycopg
+from fastapi import APIRouter, HTTPException, Query, Request
 from psycopg import Cursor
 from psycopg_pool import ConnectionPool
 from pydantic import ValidationError
@@ -36,11 +36,14 @@ from base.cluster.machine import (
 from base.daemon.endpoints import ServiceEndpoints
 from base.deploy.git.cluster_drift import prod_source_head_sha
 from base.host.resource_sample import ResourceSample
+from base.packages.plugins import stats
 from base.telemetry.observability import cluster_label
-from gateway.cluster import _loki_shards, _roster_rows, _stats_dashboard, roster_probe
+from gateway.cluster import _roster_rows, _stats_events, roster_probe
 from gateway.cluster._health import get_health
 from gateway.cluster.schemas import (
     ClusterPanel,
+    PluginStat,
+    PluginStatStatus,
     ServiceItem,
     ServicesStatus,
     StatsDashboard,
@@ -48,13 +51,12 @@ from gateway.cluster.schemas import (
     SystemStatus,
 )
 from gateway.cluster.snapshots import Snapshot, read_all
-from gateway.lgtm import loki_events, loki_query_budget
-from gateway.lgtm.backend_failure import raise_backend_unavailable
-from gateway.schemas.stats import StatsWindowHours, applied_window
+from gateway.schemas.stats import StatsWindowHours, window_delta
 from ops import cluster_rpc as _cluster_rpc
 from ops.cluster_pause import is_paused as cluster_is_paused
 from ops.cluster_status import ClusterStatus, _check_pidfile
 from ops.cluster_status.schema_mismatch import status as schema_mismatch_status
+from services.events_maintenance import resolution as _resolution
 
 router = APIRouter()
 ARCHIVE_TOTAL_ROWS = 4_813_148  # frozen archive rows at the #1823 drop (pg_dump-verified)
@@ -81,148 +83,49 @@ def get_stats_dashboard(
 
     Data sources:
     - `live_count`: agents_meta table — all non-terminated agents (running/idling)
-    - `tokens` / `cost_usd`: full UTC days from the fleet ledger plus a Loki tail
-    - average turn duration: Loki's unified event stream in 12-hour shards
-    - warning/error counts: per-class counts via the resolution daemon's
-      grouped query (12h shards), split into total / dismissed / net with
-      the daemon's class arithmetic over the SELECTED window (task #1935)
+    - `tokens` / `cost_usd` / average turn duration: the window's `llm_usage` and
+      `turn_end` rows in `telemetry_events` (cost is each row's usage-time snapshot)
+    - warning/error counts: per-class counts of `telemetry_events` rows, split into
+      total / dismissed / net with the resolution daemon's class arithmetic over the
+      SELECTED window (task #1935)
     - `total_events`: archived event row count — frozen historical constant
       (task #1281 parity run; PG events dropped; not a live gauge)
 
     `?hours=` selects the aggregation window (0 = last 5m; 1/6/24/72/168 =
     hours), whitelisted by `StatsWindowHours` (anything else 422s); the served horizon is
-    `applied_window_hours`. Zero-data scenario: tokens all 0, cost_usd 0.0, avg_turn_seconds
-    None (frontend shows "—"). The ledger-first split avoids the fixed-cost
-    full-window token scans; the indexed Loki tail rereads the newest retained
-    ledger day to absorb late writes without double counting.
-
-    A failed recompute (Loki transport error or refused query admission) serves
-    the window's last-good response marked `stale` (its `as_of` keeps the
-    original read time) while it is within `display.stats_dashboard_stale_max_s`;
-    past the cap — or with no last-good payload — the route keeps its retriable
-    503, so a real outage surfaces within the cap. Each degradation episode
-    emits one `stats_dashboard_stale` event, rate-capped per reason by the
-    `stats_dashboard_stale_emit_interval_s` display setting.
+    `applied_window_hours`, which is the requested window. Zero-data scenario: tokens all 0,
+    cost_usd 0.0, avg_turn_seconds None (frontend shows "—"). The window is computed on
+    every request, in one connection, with an 8-second statement timeout.
     """
-    cached = _stats_dashboard.cache_get(hours)
-    if cached is not None:
-        return cached
-    pool = request.app.state.db_pool
     try:
-        return _stats_dashboard.refresh_or_serve(
-            hours, lambda: _compute_stats_dashboard(pool, hours)
-        )
-    except loki_query_budget.LokiQueryBudgetError:
-        # Preserve the admission handler's machine-readable reason.
-        raise
-    except httpx.HTTPError as exc:
-        raise_backend_unavailable(exc)
+        return _compute_stats_dashboard(request.app.state.db_pool, hours)
+    except psycopg.errors.QueryCanceled as exc:
+        raise HTTPException(status_code=503, detail="stats read timed out; retry") from exc
 
 
 def _compute_stats_dashboard(pool: ConnectionPool[Any], hours: StatsWindowHours) -> StatsDashboard:
-    """Assemble a successful payload through the shared Loki query budget."""
+    """Assemble the payload from one pooled connection."""
     cluster = cluster_label()
-
-    # The turn / W/E stats read Loki (task #1197): the PG `events` table was
-    # dropped with the archive cleanup, so a live window cannot be read there.
-    # Do not hold a pooled DB connection while these network queries wait.
     now = datetime.now(UTC)
-    window_start = now - applied_window(hours)[1]
-    # Settled UTC days avoid full-window Loki scans. The global newest
-    # ledger day is reread live while retained, so a late write into that
-    # closed day is neither missed nor double counted. Both small DB reads
-    # finish before any query waits for the shared Loki budget.
-    ledger, tail_spans = _stats_dashboard.ledger_token_plan(
-        pool, window_start=window_start, now=now
-    )
-
-    # Cost snapshots are usage-time values; do not apply today's model
-    # registry prices to historical token counts at read time.
-    tail_sums = {
-        field: sum(
-            loki_events.attribute_aggregate(
-                field=field,
-                agg="sum",
-                event_names=["llm_usage"],
-                categories=["telemetry"],
-                cluster=cluster,
-                from_=tail_start,
-                to=tail_end,
-                timeout_s=8.0,
-            )
-            for tail_start, tail_end in tail_spans
-        )
-        for field in ("in_total", "out_total", "cache_read", "cost_usd")
-    }
-    in_total = ledger.tokens_in + round(tail_sums["in_total"])
-    out_total = ledger.tokens_out + round(tail_sums["out_total"])
-    cache_read = ledger.tokens_cached + round(tail_sums["cache_read"])
-    window_cost_usd = ledger.cost_usd + tail_sums["cost_usd"]
-    cache_hit_pct = round(cache_read / in_total * 100, 2) if in_total else 0.0
-
-    # Twelve-hour shards halve fan-out; every interactive query has an 8-second timeout.
-    turn_end_sum = sum(
-        _loki_shards.query_loki_shards(
-            window_start,
-            now,
-            lambda shard_start, shard_end: loki_events.attribute_aggregate(
-                field="duration_seconds",
-                agg="sum",
-                event_names=["turn_end"],
-                attribute_filters={"ok": "true"},
-                cluster=cluster,
-                from_=shard_start,
-                to=shard_end,
-                timeout_s=8.0,
-            ),
-            shard_width=timedelta(hours=12),
-        )
-    )
-    turn_end_count = sum(
-        _loki_shards.query_loki_shards(
-            window_start,
-            now,
-            lambda shard_start, shard_end: loki_events.count_events(
-                event_names=["turn_end"],
-                attribute_filters={"ok": "true"},
-                cluster=cluster,
-                from_=shard_start,
-                to=shard_end,
-                timeout_s=8.0,
-            ),
-            shard_width=timedelta(hours=12),
-        )
-    )
-    avg_turn_seconds: float | None = turn_end_sum / turn_end_count if turn_end_count else None
-
-    # Per-class counts over the selected window (12h shards), split by
-    # the daemon's class arithmetic (resolution.level_splits) (task #1935).
-    from services.events_maintenance import resolution as _resolution
-
-    class_counts: dict[Any, int] = {}
-    for shard_counts in _loki_shards.query_loki_shards(
-        window_start,
-        now,
-        lambda shard_start, shard_end: loki_events.count_event_classes(
-            from_=shard_start,
-            to=shard_end,
-            cluster=cluster,
-            timeout_s=8.0,
-        ),
-        shard_width=timedelta(hours=12),
-    ):
-        for event_class, count in shard_counts.items():
-            class_counts[event_class] = class_counts.get(event_class, 0) + count
+    window_start = now - window_delta(hours)
     with pool.connection() as conn:
-        with conn.cursor() as cur:
-            cur.execute("SELECT COUNT(*) FROM agents_meta WHERE status != 'terminated'")
-            live_count = int(cur.fetchone()[0])
-
-            # total_events is a historical constant — the frozen pre-cutover
-            # archive's parity row count (task #1281), not a live gauge: the PG
-            # events table was dropped with the #1823 cleanup; the dashboard's
-            # "total events" card shows the archive's size. See ARCHIVE_TOTAL_ROWS.
-            total_events = ARCHIVE_TOTAL_ROWS
+        conn.execute("SET LOCAL statement_timeout = '8s'")
+        totals = _stats_events.window_totals(conn, cluster=cluster, start=window_start, end=now)
+        class_counts = _stats_events.window_class_counts(
+            conn, cluster=cluster, start=window_start, end=now
+        )
+        live_count = int(
+            conn.execute(
+                "SELECT COUNT(*) FROM agents_meta WHERE status != 'terminated'"
+            ).fetchone()[  # type: ignore[index]
+                0
+            ]
+        )
+        # total_events is a historical constant — the frozen pre-cutover
+        # archive's parity row count (task #1281), not a live gauge: the PG
+        # events table was dropped with the #1823 cleanup; the dashboard's
+        # "total events" card shows the archive's size. See ARCHIVE_TOTAL_ROWS.
+        total_events = ARCHIVE_TOTAL_ROWS
 
         # Active class-wide dismissals, read like the daemon reads them.
         splits = _resolution.level_splits(
@@ -231,19 +134,19 @@ def _compute_stats_dashboard(pool: ConnectionPool[Any], hours: StatsWindowHours)
         )
     warning = splits.get("warning", _resolution.LevelSplit(0, 0, 0))
     error = splits.get("error", _resolution.LevelSplit(0, 0, 0))
-
+    cache_hit_pct = round(totals.cache_read / totals.in_total * 100, 2) if totals.in_total else 0.0
     return StatsDashboard(
         live_count=live_count,
         window_hours=hours,
-        applied_window_hours=applied_window(hours)[0],
+        applied_window_hours=int(hours),
         tokens=StatsTokens(
-            input=int(in_total),
-            output=int(out_total),
-            cache_read=int(cache_read),
+            input=totals.in_total,
+            output=totals.out_total,
+            cache_read=totals.cache_read,
             cache_hit_pct=cache_hit_pct,
         ),
-        cost_usd=window_cost_usd,
-        avg_turn_seconds=avg_turn_seconds,
+        cost_usd=totals.cost_usd,
+        avg_turn_seconds=totals.turn_seconds / totals.turn_count if totals.turn_count else None,
         warnings=warning.total,
         errors=error.total,
         warnings_dismissed=warning.dismissed,
@@ -251,9 +154,31 @@ def _compute_stats_dashboard(pool: ConnectionPool[Any], hours: StatsWindowHours)
         errors_dismissed=error.dismissed,
         errors_net=error.net,
         total_events=total_events,
-        plugin_stats=_stats_dashboard.plugin_stat_rows(pool),
+        plugin_stats=_plugin_stat_rows(pool),
         as_of=datetime.now(UTC),
     )
+
+
+def _plugin_stat_rows(pool: ConnectionPool[Any]) -> list[PluginStat]:
+    """The runtime values behind plugin-declared statistics cards, for the response.
+
+    Not windowed: a plugin value is a point in time (`PluginStat`), and the
+    console joins these rows against the `contributions.ui.stats`
+    declarations by `(plugin, id)` — a declared card with no row here renders
+    as an explicit empty state.
+    """
+    return [
+        PluginStat(
+            plugin=row.plugin,
+            id=row.id,
+            value=row.value,
+            detail=row.detail,
+            status=cast(PluginStatStatus, row.status),
+            updated_at=row.updated_at,
+            updated_by=row.updated_by,
+        )
+        for row in stats.read_all(pool)
+    ]
 
 
 def _get_services_status() -> ServicesStatus:

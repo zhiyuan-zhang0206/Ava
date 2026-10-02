@@ -144,29 +144,6 @@ class FleetGraphStale(TypedDict):
     reason: FleetGraphStaleReason
 
 
-# The closed reason vocabulary of `stats_dashboard_stale` (task #3973): the
-# stats-dashboard route names WHY a live recompute failed — a Loki transport
-# failure or a refused query admission. Keep the set closed: consumers rely
-# on it.
-StatsDashboardStaleReason = Literal[
-    "loki_failed",
-    "loki_budget",
-]
-
-
-class StatsDashboardStale(TypedDict):
-    """`stats_dashboard_stale` payload — one degraded stats-dashboard serving episode.
-
-    Emitted when GET /api/stats/dashboard serves its last-good whole response
-    because the live recompute failed (Loki transport failure or refused
-    query admission). One event per degradation episode, not per poll, and a
-    per-reason emission rate cap bounds retry-storm floods (task #3973).
-    """
-
-    route: str
-    reason: StatsDashboardStaleReason
-
-
 class PageServeDirMissing(TypedDict):
     """`page_serve_dir_missing` payload — page-server daemon degradation alert.
 
@@ -307,14 +284,6 @@ EVENTS: dict[str, EventSpec] = {
         payload=FleetGraphStale,
         tier="anomaly",
         site="gateway/routers/fleet_graph.py:_emit_stale (positional emit)",
-    ),
-    "stats_dashboard_stale": telemetry_event(
-        "stats_dashboard_stale",
-        "the stats-dashboard route served its last-good response after a failed "
-        "recompute — one event per degradation episode, not per poll",
-        payload=StatsDashboardStale,
-        tier="anomaly",
-        site="gateway/cluster/_stats_dashboard.py:_emit_stale (positional emit)",
     ),
     "page_serve_dir_missing": EventSpec(
         name="page_serve_dir_missing",

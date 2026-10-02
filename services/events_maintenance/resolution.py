@@ -158,6 +158,35 @@ def _query_class_counts(
     return counts
 
 
+def class_counts(
+    conn: Any, *, start: datetime, end: datetime, cluster: str | None = None
+) -> dict[EventClass, int]:
+    """Counts of the warning, error and critical event classes over `(start, end]`.
+
+    Read from `telemetry_events`; `category` is always telemetry or log there. ``cluster``
+    keeps the rows of that cluster and the rows with no label (the same acceptance as the
+    other dashboard reads). The level predicate is a literal so the partial index on those
+    levels applies.
+    """
+    query = """
+        SELECT category, level, event_name, source, process, count(*)
+        FROM telemetry_events
+        WHERE level IN ('warning', 'error', 'critical')
+          AND ts > %s AND ts <= %s
+    """
+    params: list[Any] = [start, end]
+    if cluster is not None:
+        query += " AND (cluster = %s OR cluster = '')"
+        params.append(cluster)
+    query += " GROUP BY category, level, event_name, source, process"
+    return {
+        EventClass(
+            category=row[0], level=row[1], event_name=row[2], source=row[3], process=row[4]
+        ): int(row[5])
+        for row in conn.execute(query, params).fetchall()
+    }
+
+
 def active_dismissals(conn: Any) -> list[Dismissal]:
     """Load active class dismissals only (agent-scoped rows excluded).
 
