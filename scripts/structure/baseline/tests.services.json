@@ -43,9 +43,7 @@
     "tests/services/test_backup_scheduler_daemon.py::top-level": 1,
     "tests/services/test_backup_scheduler_shutdown.py::top-level": 1,
     "tests/services/test_gate_root.py::top-level": 1,
-    "tests/services/test_healthcheck_browser_reach.py::top-level": 1,
     "tests/services/test_hosted_db_wait_liveness.py::top-level": 1,
-    "tests/services/test_maintenance_readiness.py::top-level": 1,
-    "tests/services/test_numpy_backend.py::top-level": 1
+    "tests/services/test_maintenance_readiness.py::top-level": 1
   }
 }
