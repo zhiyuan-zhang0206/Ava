@@ -62,8 +62,7 @@ restored by task #3689). All sections are **expanded by default**
    `attributes_cost_usd` snapshots from telemetry `llm_usage` events
    (2026-08-23 #384).
 10. **`PR flow`** — PR ready→merged median/p90 by day, Trunk queue depth,
-   QA rounds (mean + re-review share) by day, and new flaky quarantines by
-   day, from the daily export job's Prometheus gauges (task #2139).
+   and new flaky quarantines by day, from the daily export job's Prometheus gauges (task #2139).
 
 The dashboard timezone is `Asia/Shanghai` (2026-08-23 #384). All panels follow
 the dashboard time picker; there are no per-panel `timeFrom` overrides.

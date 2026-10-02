@@ -1,6 +1,6 @@
 """Core PR-flow panels (task #2139) — a separate registration module.
 
-The four PR-flow tiles read what the daily macmini export job
+The three PR-flow tiles read what the daily macmini export job
 (``scripts/pr_flow_export.py``, ``pr_flow_daily`` / ``pr_flow_run`` events)
 publishes as OTLP gauges through ``base/telemetry/otlp/telemetry_otlp.py``: one absolute
 sample per complete cluster-tz day in a rolling 30-day window, re-emitted on
@@ -92,42 +92,6 @@ catalog.register_core_metric(
 
 catalog.register_core_metric(
     MetricSpec(
-        name="core_pr_flow_qa_rounds",
-        title="QA rounds \u2014 mean / re-review share (by day)",
-        description=(
-            "QA traffic per merged PR by complete cluster-tz day \u2014 mean "
-            "ava-qa receipt count and the share of merges whose head moved "
-            "after the receipt (re-review), from the daily PR-flow export job "
-            "(ava_pr_flow_daily_qa_rounds_mean_ratio / "
-            "ava_pr_flow_daily_qa_rereview_share_ratio gauges)."
-        ),
-        event_name="pr_flow_daily",
-        category="telemetry",
-        unit="short",
-        panel="table",
-        query="max by (day) (last_over_time(ava_pr_flow_daily_qa_rounds_mean_ratio[26h]))",
-        query_type="promql",
-        targets=["max by (day) (last_over_time(ava_pr_flow_daily_qa_rereview_share_ratio[26h]))"],
-        target_names=["mean rounds", "re-review share"],
-        thresholds=[],
-        panel_id=2403,
-        section="PR flow",
-        order=2,
-        transformations=[
-            {"id": "joinByField", "options": {"byField": "day", "mode": "outer"}},
-            {
-                "id": "organize",
-                "options": {
-                    "excludeByName": {"Time 1": True, "Time 2": True},
-                    "renameByName": {"Value #A": "mean rounds", "Value #B": "re-review share"},
-                },
-            },
-        ],
-    )
-)
-
-catalog.register_core_metric(
-    MetricSpec(
         name="core_pr_flow_flakes",
         title="Flake \u2014 new quarantines (by day)",
         description=(
@@ -146,7 +110,7 @@ catalog.register_core_metric(
         thresholds=[],
         panel_id=2404,
         section="PR flow",
-        order=3,
+        order=2,
         transformations=[
             {"id": "joinByField", "options": {"byField": "day", "mode": "outer"}},
             {

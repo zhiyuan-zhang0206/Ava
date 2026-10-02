@@ -534,7 +534,7 @@ class PrFlowDaily(TypedDict):
     disposition records each as an ObservableGauge
     (``base/telemetry/otlp/telemetry_otlp.py``) — a counter or histogram would accrue
     across re-emissions. Fields are absent when the day has no such sample
-    (no merges -> no percentile/round values; an unreachable flaky source
+    (no merges -> no percentile values; an unreachable flaky source
     omits ``flake_new_quarantines`` rather than claiming zero).
     """
 
@@ -542,8 +542,6 @@ class PrFlowDaily(TypedDict):
     merged_count: int  # PRs whose merged_at falls on the day
     ready_to_merge_median_seconds: NotRequired[float]
     ready_to_merge_p90_seconds: NotRequired[float]
-    qa_rounds_mean: NotRequired[float]  # ava-qa receipts per merged PR
-    qa_rereview_share: NotRequired[float]  # share with a post-receipt head change
     flake_new_quarantines: NotRequired[int]  # tests quarantined on the day
 
 
@@ -578,7 +576,6 @@ class CiRunsDaily(TypedDict):
     runs: int
     instant_skip_runs: int
     watchdog_runs: int
-    qa_gate_runs: int
     proof_runs: int
     cancelled_runs: int
     superseded_runs: int

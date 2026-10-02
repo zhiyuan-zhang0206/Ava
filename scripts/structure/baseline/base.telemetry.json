@@ -14,7 +14,7 @@
     "base/telemetry/metrics/core/observability.py::import-time-call:base.telemetry.metrics.core.catalog.register_core_metric": 18,
     "base/telemetry/metrics/core/panels.py::import-time-call:base.telemetry.metrics.core.catalog.register_core_metric": 20,
     "base/telemetry/metrics/core/panels.py::import-time-call:base.telemetry.metrics.core.panels._tps": 3,
-    "base/telemetry/metrics/core/pr_flow.py::import-time-call:base.telemetry.metrics.core.catalog.register_core_metric": 4,
+    "base/telemetry/metrics/core/pr_flow.py::import-time-call:base.telemetry.metrics.core.catalog.register_core_metric": 3,
     "base/telemetry/metrics/plugin_metrics.py::ambient-container:_REGISTRY": 1,
     "base/telemetry/otlp/telemetry_otlp.py::thread:_OtlpBackend._ensure": 1,
     "base/telemetry/tracing.py::thread:_start_arm_thread": 1,
