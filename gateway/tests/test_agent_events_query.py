@@ -1,7 +1,6 @@
-"""`GET /api/agents/{agent_id}/events` — historical REST slice over Loki
-(the LGTM read side; task #1197 replaced the PG `events` read).
+"""`GET /api/agents/{agent_id}/events` — historical REST slice over `telemetry_events`.
 
-The route is a thin adapter over `loki_events.query_events`: these tests
+The route is a thin adapter over `telemetry_rows.query_events`: these tests
 monkeypatch the query and lock the parameter mapping (agent scope,
 telemetry/log-only categories, exact level, window, paging) and the
 wire shape.
@@ -9,15 +8,15 @@ wire shape.
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
-import httpx
+import psycopg
 import pytest
 from fastapi.testclient import TestClient
 
 from gateway.app import app
-from gateway.lgtm import loki_events
+from gateway.events import telemetry_rows
 
 
 def _row(
@@ -46,16 +45,16 @@ def _row(
 
 @pytest.fixture
 def fake_query(monkeypatch: pytest.MonkeyPatch) -> dict[str, list[dict[str, Any]]]:
-    """Patch loki_events.query_events; record kwargs, return canned rows."""
+    """Patch telemetry_rows.query_events; record kwargs, return canned rows."""
 
     calls: list[dict[str, Any]] = []
     rows: list[dict[str, Any]] = []
 
-    def _query(**kwargs: Any) -> tuple[list[dict[str, Any]], bool]:
+    def _query(_conn: object, **kwargs: Any) -> tuple[list[dict[str, Any]], bool]:
         calls.append(kwargs)
         return rows, False
 
-    monkeypatch.setattr(loki_events, "query_events", _query)
+    monkeypatch.setattr(telemetry_rows, "query_events", _query)
     return {"calls": calls, "rows": rows}
 
 
@@ -88,7 +87,7 @@ class TestAgentEventsQuery:
     ) -> None:  # type: ignore[no-untyped-def]
         """The old PG contract was category IN (telemetry, log) — audit rows
         (spawn/send_message/...) must not leak into the feed. The route passes
-        the category set to Loki."""
+        the category set to the reader."""
         with TestClient(app) as client:
             client.get("/api/agents/7/events")
         assert fake_query["calls"][0]["categories"] == ["telemetry", "log"]
@@ -122,10 +121,12 @@ class TestAgentEventsQuery:
     def test_no_from_means_default_window(
         self, fake_query: dict[str, list[dict[str, Any]]]
     ) -> None:  # type: ignore[no-untyped-def]
-        # the 24h default lower bound lives in query_events
+        # the 24h default lower bound is the route's
+        before = datetime.now(UTC)
         with TestClient(app) as client:
             client.get("/api/agents/7/events")
-        assert fake_query["calls"][0]["from_"] is None
+        from_ = fake_query["calls"][0]["from_"]
+        assert before - timedelta(hours=24, seconds=5) <= from_ <= before - timedelta(hours=23)
 
     def test_limit_and_offset_passed_through(
         self, fake_query: dict[str, list[dict[str, Any]]]
@@ -155,16 +156,17 @@ class TestAgentEventsQuery:
         assert response.status_code == 422
         assert fake_query["calls"] == []
 
-    def test_loki_failure_is_retriable_503(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        def unavailable(**_kwargs: Any) -> tuple[list[dict[str, Any]], bool]:
-            raise httpx.ReadTimeout("loki timed out")
+    def test_a_read_that_exceeds_its_statement_timeout_is_503(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        def cancelled(_conn: object, **_kwargs: Any) -> tuple[list[dict[str, Any]], bool]:
+            raise psycopg.errors.QueryCanceled("statement timeout")
 
-        monkeypatch.setattr(loki_events, "query_events", unavailable)
+        monkeypatch.setattr(telemetry_rows, "query_events", cancelled)
         with TestClient(app) as client:
             response = client.get("/api/agents/7/events")
         assert response.status_code == 503
-        assert response.headers["retry-after"] == "1"
-        assert "ReadTimeout" in response.json()["detail"]
+        assert response.json()["detail"] == "events read timed out"
 
     def test_unknown_agent_returns_empty(self, fake_query: dict[str, list[dict[str, Any]]]) -> None:  # type: ignore[no-untyped-def]
         with TestClient(app) as client:

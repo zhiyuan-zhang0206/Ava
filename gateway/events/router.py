@@ -2,9 +2,9 @@
 
 The programmatic query surface over the unified event stream (audit /
 telemetry / log). One schema and one correlation key (`trace_id`). Audit rows
-are read from `audit_events` in Postgres (`gateway/events/audit_rows.py`: the
-audit record is permanent); telemetry and log rows come from Loki
-(`gateway/lgtm/loki_events.py`). A request that spans both is answered by one
+are read from `audit_events` (`gateway/events/audit_rows.py`) and telemetry and
+log rows from `telemetry_events` (`gateway/events/telemetry_rows.py`), both in
+Postgres and both permanent. A request that spans both is answered by one
 merge, newest first.
 
 Filters compose (AND): `category` / `event_name` / `tier` / `agent_id` /
@@ -22,7 +22,7 @@ does not need).
 Two hard contract rules keep every query bounded and unambiguous:
   - a lower bound is always in effect — absent both `from` and `hours`,
     `from = now - 24h` is assumed (the old PG scan needed the partition
-    prune; on Loki it keeps the count/list fetch cheap — the API never
+    prune; it keeps the count/list fetch cheap — the API never
     runs an unbounded window);
   - `from` / `to` must carry a timezone offset — a naive timestamp would be
     interpreted in the server's local timezone, silently shifting the
@@ -38,17 +38,14 @@ from dataclasses import asdict, dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Annotated, Any
 
-import httpx
 import psycopg
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
 from base.config import settings
 from base.events.contract import EVENTS, EventTier, tier_for
 from gateway.agents.eval_guard import deny_isolated_result_read
-from gateway.events import audit_rows
+from gateway.events import audit_rows, telemetry_rows
 from gateway.events.schemas import EventRow, EventsMeta, EventsResponse
-from gateway.lgtm import loki_events, loki_query_budget
-from gateway.lgtm.backend_failure import raise_backend_unavailable
 
 router = APIRouter()
 
@@ -59,8 +56,7 @@ _LEVELS = frozenset({"debug", "info", "warning", "error", "critical"})
 _TIERS = ("business", "anomaly", "observation", "noise")
 _IMPERSONATION_SESSION = re.compile(r"^[0-9]+:[0-9]+$")
 
-# Longest window a request may name (audit is permanent, telemetry and log
-# shorter); a protective constant, evaluated at import for the `hours` Query
+# Longest window a request may name; a protective constant, evaluated at import for the `hours` Query
 # bound — not configuration (task #3696 exception inventory: KEEP).
 _MAX_HOURS = 24 * 365
 
@@ -68,8 +64,8 @@ _MAX_HOURS = 24 * 365
 # it bounds the count/list fetch.
 _DEFAULT_WINDOW_HOURS = 24
 
-# Bound on one audit read, below the route's client timeouts.
-_AUDIT_READ_STATEMENT_TIMEOUT_MS = 10_000
+# Bound on one read, below the route's client timeouts.
+_READ_STATEMENT_TIMEOUT_MS = 10_000
 
 
 def _validate(
@@ -148,18 +144,18 @@ class _Filters:
 
 
 @contextmanager
-def _audit_connection(request: Request) -> Generator[psycopg.Connection]:
-    """One pooled connection for an audit read, bounded by a statement timeout."""
+def _read_connection(request: Request) -> Generator[psycopg.Connection]:
+    """One pooled connection for an events read, bounded by a statement timeout."""
     with request.app.state.db_pool.connection() as conn:
-        conn.execute(f"SET LOCAL statement_timeout = {_AUDIT_READ_STATEMENT_TIMEOUT_MS}")
+        conn.execute(f"SET LOCAL statement_timeout = {_READ_STATEMENT_TIMEOUT_MS}")
         yield conn
 
 
 def _sources(category: str | None, event_name: str | None) -> tuple[bool, bool]:
-    """Which stores a request reads: `(audit_events in Postgres, Loki)`.
+    """Which tables a request reads: `(audit_events, telemetry_events)`.
 
-    An explicit category picks one store. Without one, a registered event name
-    picks the store(s) its declared categories live in; anything else reads both.
+    An explicit category picks one table. Without one, a registered event name
+    picks the table(s) its declared categories live in; anything else reads both.
     """
     if category is not None:
         return category == "audit", category != "audit"
@@ -186,16 +182,18 @@ def _count(
     request: Request,
     filters: _Filters,
     use_audit: bool,  # noqa: FBT001 — internal helper flags, always positional
-    use_loki: bool,  # noqa: FBT001
-    loki_categories: list[str],
+    use_telemetry: bool,  # noqa: FBT001
+    telemetry_categories: list[str],
 ) -> int:
-    """Exact filtered row count across the stores the request reads."""
+    """Exact filtered row count across the tables the request reads."""
     total = 0
-    if use_audit:
-        with _audit_connection(request) as conn:
+    with _read_connection(request) as conn:
+        if use_audit:
             total += audit_rows.count_events(conn, **asdict(filters))
-    if use_loki:
-        total += loki_events.count_events(categories=loki_categories, **asdict(filters))
+        if use_telemetry:
+            total += telemetry_rows.count_events(
+                conn, categories=telemetry_categories, **asdict(filters)
+            )
     return total
 
 
@@ -203,34 +201,38 @@ def _read_page(
     request: Request,
     filters: _Filters,
     use_audit: bool,  # noqa: FBT001 — internal helper flags, always positional
-    use_loki: bool,  # noqa: FBT001
-    loki_categories: list[str],
+    use_telemetry: bool,  # noqa: FBT001
+    telemetry_categories: list[str],
     limit: int,
     offset: int,
 ) -> tuple[list[dict[str, Any]], bool]:
     """One newest-first page, and whether another exists.
 
-    One store pages directly. Two stores each give their newest `offset + limit`
+    One table pages directly. Two tables each give their newest `offset + limit`
     rows, which are merged and then sliced: a global page never needs a row
     beyond that depth from either side.
     """
-    both = use_audit and use_loki
+    both = use_audit and use_telemetry
     depth, page_offset = (limit + offset, 0) if both else (limit, offset)
     rows: list[dict[str, Any]] = []
     has_more = False
-    if use_audit:
-        with _audit_connection(request) as conn:
+    with _read_connection(request) as conn:
+        if use_audit:
             page, more = audit_rows.query_events(
                 conn, limit=depth, offset=page_offset, **asdict(filters)
             )
-        rows += page
-        has_more = has_more or more
-    if use_loki:
-        page, more = loki_events.query_events(
-            categories=loki_categories, limit=depth, offset=page_offset, **asdict(filters)
-        )
-        rows += page
-        has_more = has_more or more
+            rows += page
+            has_more = has_more or more
+        if use_telemetry:
+            page, more = telemetry_rows.query_events(
+                conn,
+                categories=telemetry_categories,
+                limit=depth,
+                offset=page_offset,
+                **asdict(filters),
+            )
+            rows += page
+            has_more = has_more or more
     if both:
         rows.sort(key=lambda row: (row["ts"], row["id"]), reverse=True)
         has_more = has_more or len(rows) > limit + offset
@@ -276,7 +278,7 @@ def get_events(
         case-insensitive (unknown value 422s).
       - `tier=<business|anomaly|observation|noise>[,...]`: comma-separated
         display tiers, ORed within the list and ANDed with every other filter.
-        The Loki predicate is derived before pagination so `meta.total` and
+        The tier predicate is applied before pagination so `meta.total` and
         page boundaries stay exact.
       - `from=<ISO-8601>` / `to=<ISO-8601>`: inclusive time window
         (`ts >= from AND ts <= to`); either side may be omitted. Values
@@ -287,16 +289,14 @@ def get_events(
         (`from = now - hours`). Mutually exclusive with `from`.
       - Default window: when neither `from` nor `hours` is given, the last
         24 hours are assumed (`from = now - 24h`) — an unbounded query
-        would scan the whole retention history (6M+ rows across every
-        month partition), so the API never runs one. `meta.window_from`
+        would scan the whole record, so the API never runs one. `meta.window_from`
         always echoes the effective lower bound.
       - `limit` (configured default window — ``display.events_default_limit``,
         100 out of the box — cap 1000) / `offset` (cap 10,000): offset
         paging with stable ordering across same-`ts` rows. The cap bounds the
-        in-memory Loki JSON parse (`limit + offset + 1` rows).
+        rows one read materializes (`limit + offset + 1`).
       - `with_total=1`: also compute the exact filtered row count
-        (`meta.total`) via the Loki count path — one extra full-window
-        aggregation, so it is opt-in; without it `meta.total` is null.
+        (`meta.total`) — one extra full-window count, so it is opt-in; without it `meta.total` is null.
 
     Response: `meta` (opt-in exact filtered `total`, effective
     `window_from`/`window_to`, `limit`/`offset`, `has_more` from the list
@@ -329,26 +329,26 @@ def get_events(
         from_=window_from,
         to=to,
     )
-    use_audit, use_loki = _sources(category, event_name)
-    loki_categories = [category] if category is not None else ["telemetry", "log"]
+    use_audit, use_telemetry = _sources(category, event_name)
+    telemetry_categories = [category] if category is not None else ["telemetry", "log"]
 
     try:
         total = (
-            _count(request, filters, use_audit, use_loki, loki_categories) if with_total else None
+            _count(request, filters, use_audit, use_telemetry, telemetry_categories)
+            if with_total
+            else None
         )
         rows, has_more = _read_page(
-            request, filters, use_audit, use_loki, loki_categories, effective_limit, offset
+            request,
+            filters,
+            use_audit,
+            use_telemetry,
+            telemetry_categories,
+            effective_limit,
+            offset,
         )
-    except loki_query_budget.LokiQueryBudgetError:
-        # Local admission saturation has its own typed 503 contract and
-        # transition metrics; the global handler preserves that reason.
-        raise
-    except httpx.HTTPError as exc:
-        # The failing query shape is recorded by loki_events before the
-        # exception reaches this wire-level retriable response.
-        raise_backend_unavailable(exc)
     except psycopg.errors.QueryCanceled as exc:
-        raise HTTPException(status_code=503, detail="audit events read timed out") from exc
+        raise HTTPException(status_code=503, detail="events read timed out") from exc
 
     items = [
         EventRow(
