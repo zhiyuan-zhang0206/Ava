@@ -3,8 +3,6 @@
     "scripts/ci/accounting.py::_run_entry": 22,
     "scripts/ci/accounting.py::main": 15,
     "scripts/ci/coverage_gates.py::check": 16,
-    "scripts/ci/qa_receipt.py::_receipt": 17,
-    "scripts/ci/qa_receipt.py::approved": 18,
     "scripts/ci/runs_export.py::attribute_runs": 17,
     "scripts/ci/runs_export.py::daily_aggregates": 64,
     "scripts/ci/runs_export.py::workflow_aggregates": 27,

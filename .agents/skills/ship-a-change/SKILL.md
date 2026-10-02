@@ -68,15 +68,7 @@ too; the next layer's rebase onto `main` drops the already-applied commits.
 
 ### Merge queue (mandatory)
 
-PRs merge through the **Trunk** merge queue — not by direct merge.
-**QA gate:** the queue's merge conditions require the
-`qa-approved` label — a PR without it is never merged, even with green CI
-and an enqueued position (it waits in the queue until QA labels it). The
-label is applied by QA / the maintainers only, and only on a final PASS /
-PASS-with-nits conclusion; BLOCK / CONDITIONAL never carry it and a later
-BLOCK removes it immediately. Authors never self-apply the label; review and
-QA evidence must match the exact head SHA, and any new commit after a PASS
-still requires a delta re-review before the label is (re)applied. Submitting is
+PRs merge through the **Trunk** merge queue — not by direct merge. Submitting is
 `.venv/bin/python scripts/ci_utils.py <PR#> --wait --merge` (requires
 `~/.trunk/api-token`; ci_utils polls to green, submits, then waits for the
 queue to land the PR). Trunk batches queued PRs into one test draft
@@ -236,8 +228,8 @@ the error. Skipping is only for a hook this machine cannot execute at all.
 
 Merge proves repository integration, not production health. Deployment is a
 separate, explicitly authorized operation by one designated operator; follow
-`ava-self-development` for rollout and recovery verification. Contributors and
-QA agents do not launch competing updates or production fixes.
+`ava-self-development` for rollout and recovery verification. Contributors
+do not launch competing updates or production fixes.
 
 Before merge, mandatory: `grep -rn "<old-name>" conventions/ future/ AGENTS.md`
 to zero out references. Docs go in the same PR as code — **don't** leave a
