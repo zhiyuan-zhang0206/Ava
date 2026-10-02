@@ -52,6 +52,7 @@ from base.cluster.machine import machine_name
 from base.cluster.transport_encryption import verify_transport_encryption
 from base.config import settings
 from base.daemon.health import health_port, start_health_server, stop_health_server
+from base.daemon.loop_health import LivenessGroup
 from base.daemon.shutdown import cancel_and_drain, install_graceful_shutdown
 from base.daemon.shutdown import hard_exit as _hard_exit
 from base.db.transaction import write_transaction
@@ -478,9 +479,12 @@ async def _main() -> None:
     pool = _open_db_pool()
     _db_pool = pool
     # Redeliver recorded delivery failures whenever the data plane allows
-    # (task #3757): a daemon-lifetime loop that outlives every sender process.
-    # Never fatal; a failed initial config read only skips the loop.
-    outbox_flusher.start(pool)
+    # (task #3757): a resident loop that outlives every sender process, owned with
+    # the server by the TaskGroup below.
+    liveness = LivenessGroup()
+    outbox_progress = liveness.register(
+        "delivery-outbox", outbox_flusher.INITIAL_LIVENESS_TIMEOUT_S
+    )
 
     try:
         # Every /ops dial presents a machine API token of this generation; an
@@ -493,6 +497,7 @@ async def _main() -> None:
             "ops",
             host=bind_host,
             extra_routes={("POST", "/ops"): _ops_route},
+            liveness=liveness,
             components=lambda: health.ops_components(_active_ops),
             extra=lambda: {
                 "maintenance": maintenance_activity.progress(),
@@ -510,13 +515,15 @@ async def _main() -> None:
         )
         _register_boot()
         try:
-            async with server:
-                await server.serve_forever()
+            # One TaskGroup owns the server and the outbox loop: a loop that raises
+            # cancels the server and ends the process, and the supervisor restarts it.
+            async with server, asyncio.TaskGroup() as resident:
+                resident.create_task(server.serve_forever())
+                resident.create_task(outbox_flusher.outbox_loop(pool, outbox_progress))
         finally:
             await stop_health_server(server)
             _remove_pidfile()
     finally:
-        outbox_flusher.stop()
         pool.close()
         _db_pool = None
         _dispatch_sem = None
