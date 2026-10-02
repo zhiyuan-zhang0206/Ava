@@ -13,6 +13,7 @@ from agent.ownership.tests.test_lifecycle_intent import _command
 from agent.tests.test_inbound_ownership import _admit, _agent
 from base.agents.context import AvaContext
 from base.config import settings
+from base.events.live.bus import EventBus
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from base.native_process.turn_identity import bind_turn_identity
 from services.agent_host import host as host_module
@@ -31,7 +32,9 @@ async def test_database_failure_after_graph_return_preserves_completed_work(
     replies: list[str] = []
     graph, saver, config, _history = await _prepare_graph(aops_pool, agent, 100, replies)
     command = None if failure_site == "flush" else _command(db_conn, agent, "restart")
-    host = host_module.AgentHost(pool=aops_pool, checkpointer=saver, graph=graph)
+    host = host_module.AgentHost(
+        pool=aops_pool, checkpointer=saver, graph=graph, bus=EventBus.from_settings()
+    )
     ctx = AvaContext(ops_pool=aops_pool, event_publisher=MagicMock())
     # A real closed PostgreSQL connection supplies the I/O failure. Injection
     # selects only the boundary; checkpoint, graph and lifecycle transactions run.

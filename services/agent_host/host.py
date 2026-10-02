@@ -89,7 +89,6 @@ from base.deploy.maintenance import admission
 from base.events.live.announce import publish_agent_updated
 from base.events.live.bus import EventBus
 from base.events.live.publisher import AgentEventPublisher
-from base.events.live.redis_client import get_async_redis
 from base.log import logger
 from base.native_process.runtime_incarnation import RuntimeIncarnation, current_incarnation
 from base.native_process.turn_identity import bind_turn_identity
@@ -166,7 +165,9 @@ class AgentHost:
         checkpointer: AsyncPostgresSaver,
         graph: _HostGraph,
         machine: str | None = None,
+        bus: EventBus,
     ) -> None:
+        self._bus = bus
         self._pool = pool
         self._control_pool = control_pool if control_pool is not None else pool
         self._checkpointer = checkpointer
@@ -359,7 +360,7 @@ class AgentHost:
                     bind_agent_plugin_config(plugin_pins),
                     recovery_reconstruction_scope(self._checkpointer, str(agent_id)),
                 ):
-                    await publish_agent_updated(EventBus.from_settings(), agent_id)
+                    await publish_agent_updated(self._bus, agent_id)
                     runtime = await self._runtime_for(agent_id, stored.fingerprint)
                     outcome = await self._drive_turns(agent_id, runtime)
             except asyncio.CancelledError:
@@ -605,7 +606,7 @@ class AgentHost:
         the process's Redis client, so creating one is a queue and a task.
         """
         event_publisher = AgentEventPublisher(
-            get_async_redis(), settings.data_plane.events_channel, agent_id=agent_id
+            self._bus.async_redis(), self._bus.channel, agent_id=agent_id
         )
         await event_publisher.start()
         ctx = AvaContext(

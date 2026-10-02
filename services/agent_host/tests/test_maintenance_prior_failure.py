@@ -20,6 +20,7 @@ from base.cluster.machine import machine_name
 from base.config import settings
 from base.db import insert_inbound_message
 from base.deploy.maintenance import admission, cohort, pause_owner
+from base.events.live.bus import EventBus
 from services.agent_host import host as host_module
 from services.agent_host import runtime as runtime_module
 from services.agent_host.runtime import TurnOutcome
@@ -56,7 +57,13 @@ async def _failed_turn(
         config, {"messages": [HumanMessage(content="Original request")]}, as_node="fail"
     )
     await flush_checkpoint(saver, agent)
-    host = host_module.AgentHost(pool=pool, checkpointer=saver, graph=graph, machine=machine_name())
+    host = host_module.AgentHost(
+        pool=pool,
+        checkpointer=saver,
+        graph=graph,
+        machine=machine_name(),
+        bus=EventBus.from_settings(),
+    )
     monkeypatch.setattr(host, "_runtime_for", AsyncMock(return_value=object()))
     monkeypatch.setattr(runtime_module, "validate_model_config", MagicMock())
     ctx = AvaContext(ops_pool=pool, event_publisher=MagicMock())

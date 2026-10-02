@@ -27,6 +27,7 @@ from base.agents.history.delta_read_compat import wrap_saver_reads_with_delta_re
 from base.cluster.machine import machine_name
 from base.db import create_agent, insert_inbound_message
 from base.deploy.maintenance import admission, cohort, pause_owner
+from base.events.live.bus import EventBus
 from services.agent_host.host import AgentHost
 from services.agent_host.runtime import TurnOutcome
 
@@ -190,7 +191,13 @@ async def test_admitted_model_finishes_real_exec_and_after_exec_before_drain_rec
         config, {"messages": [HumanMessage(content="Do the action")], "halted": False}
     )
     ctx = AvaContext(ops_pool=aops_pool, event_publisher=MagicMock(), llm=MagicMock())
-    host = AgentHost(pool=aops_pool, checkpointer=saver, graph=graph, machine=machine_name())
+    host = AgentHost(
+        pool=aops_pool,
+        checkpointer=saver,
+        graph=graph,
+        machine=machine_name(),
+        bus=EventBus.from_settings(),
+    )
     monkeypatch.setattr(host, "_runtime_for", AsyncMock(return_value=object()))
     monkeypatch.setattr("services.agent_host.runtime.validate_model_config", MagicMock())
 
@@ -247,6 +254,7 @@ async def test_admitted_model_finishes_real_exec_and_after_exec_before_drain_rec
             checkpointer=AsyncPostgresSaver(aops_pool),
             graph=builder.compile(checkpointer=AsyncPostgresSaver(aops_pool)),
             machine=machine_name(),
+            bus=EventBus.from_settings(),
         )
         monkeypatch.setattr(successor, "_runtime_for", AsyncMock(return_value=object()))
 

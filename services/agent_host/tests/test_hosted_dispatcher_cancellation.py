@@ -20,7 +20,7 @@ import pytest
 import pytest_asyncio
 from psycopg_pool import AsyncConnectionPool
 
-from base.config import settings
+from base.events.live.bus import EventBus
 from services.agent_host.dispatcher import InboundWakeDispatcher, PendingInboundWake
 
 
@@ -84,7 +84,7 @@ async def test_cancelled_dispatcher_unwinds_after_a_swallowed_pool_check_cancel(
             return []
 
     dispatcher = InboundWakeDispatcher(
-        settings.data_plane.redis_url,
+        EventBus.from_settings(),
         _IdleScheduler(),
         pending_scan=pending,
         stale_after_s=30,
