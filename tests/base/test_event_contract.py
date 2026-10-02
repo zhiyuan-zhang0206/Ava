@@ -208,8 +208,8 @@ def test_llm_error_family_is_the_grafana_four() -> None:
     )
 
 
-def test_payload_keys_are_the_declared_attribute_contract() -> None:
-    assert payload_keys("llm_usage") == (
+_DECLARED_PAYLOAD_KEYS = {
+    "llm_usage": (
         "model",
         "calls",
         "in_total",
@@ -228,46 +228,52 @@ def test_payload_keys_are_the_declared_attribute_contract() -> None:
         "source",
         "cache_mechanism",
         "cache_scope",
-    )
-    assert payload_keys("sse_drop") == ("kind", "n")
-    assert payload_keys("spawn") == ("machine", "fork_from", "fork_checkpoint")
-    assert payload_keys("agent_spawned") == ("spawner", "forked_from")
-    assert payload_keys("sdk_call") == ("fn", "duration", "sample_rate", "detail")
-    assert payload_keys("node_exit") == ("count", "nodes")
-    assert payload_keys("heartbeat_paused") == ("duration_s",)
-    assert payload_keys("task_update") == ("status",)
-    assert payload_keys("process_exit") == ("reason", "pid")
-    assert payload_keys("agent_boot_failed") == ("model", "error_type", "error")
-    assert payload_keys("recall_filter") == ("body", "query_hmac_sha256", "picked_paths")
-    assert payload_keys("passive_recall") == ("search_ms", "filter_ms")
-    assert payload_keys("hook_timing") == ("hook_ms",)
-    assert payload_keys("heartbeat_nudged") == ("idle_minutes",)
-    assert payload_keys("heartbeat_backoff_raised") == ("level", "interval_seconds")
-    assert payload_keys("heartbeat_backoff_reset") == ("previous_level", "reason")
-    assert payload_keys("delivery_stalled") == ("inbound_id", "age_s")
-    assert payload_keys("telemetry_read_stale") == (
+    ),
+    "sse_drop": ("kind", "n"),
+    "spawn": ("machine", "fork_from", "fork_checkpoint"),
+    "agent_spawned": ("spawner", "forked_from"),
+    "sdk_call": ("fn", "duration", "sample_rate", "detail"),
+    "node_exit": ("count", "nodes"),
+    "heartbeat_paused": ("duration_s",),
+    "task_update": ("status",),
+    "process_exit": ("reason", "pid"),
+    "agent_boot_failed": ("model", "error_type", "error"),
+    "recall_filter": ("body", "query_hmac_sha256", "picked_paths"),
+    "passive_recall": ("search_ms", "filter_ms"),
+    "hook_timing": ("hook_ms",),
+    "heartbeat_nudged": ("idle_minutes",),
+    "heartbeat_backoff_raised": ("level", "interval_seconds"),
+    "heartbeat_backoff_reset": ("previous_level", "reason"),
+    "delivery_stalled": ("inbound_id", "age_s"),
+    "telemetry_read_stale": (
         "source",
         "signal",
         "threshold_s",
         "age_s",
         "action",
         "reason",
-    )
-    assert payload_keys("telemetry_read_recovered") == (
+    ),
+    "telemetry_read_recovered": (
         "source",
         "signal",
         "stale_duration_s",
-    )
-    assert payload_keys("otlp_backend_disabled") == ("reason", "endpoint")
-    assert payload_keys("otlp_backend_recovered") == ("endpoint", "disabled_s")
-    assert payload_keys("log") == ("msg",)  # loguru bare-log payload
-    assert payload_keys("page_serve_dir_missing") == (
+    ),
+    "otlp_backend_disabled": ("reason", "endpoint"),
+    "otlp_backend_recovered": ("endpoint", "disabled_s"),
+    "log": ("msg",),  # loguru bare-log payload
+    "page_serve_dir_missing": (
         "agent_id",
         "key",
         "name",
         "serve_dir",
         "port",
-    )
+    ),
+}
+
+
+def test_payload_keys_are_the_declared_attribute_contract() -> None:
+    for event, keys in _DECLARED_PAYLOAD_KEYS.items():
+        assert payload_keys(event) == keys, event
 
 
 def test_payload_keys_unknown_event_empty() -> None:
