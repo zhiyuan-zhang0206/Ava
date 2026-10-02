@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import json as _json
 import uuid as _uuid
-from collections.abc import Callable
+from collections.abc import Callable, Generator
+from contextlib import contextmanager
+from typing import Any
 
 import ava
 from base.agents import EXCEPTION_BY_REASON, ErrorReason, GatewayUnavailable
@@ -29,17 +31,26 @@ from base.host.net.resilience import Policy, http_classifier, retry
 _client: httpx.Client | None = None  # noqa: F821  # pyright: ignore[reportUndefinedVariable]
 
 
+def _swap_client(client: httpx.Client | None) -> httpx.Client | None:  # noqa: F821  # pyright: ignore[reportUndefinedVariable]
+    """Install *client* as the process-wide client and return the one it replaced.
+
+    The only place the module singleton is rebound: the lazy build and
+    `use_client` both go through it."""
+    global _client
+    previous, _client = _client, client
+    return previous
+
+
 def _client_singleton() -> httpx.Client:  # noqa: F821  # pyright: ignore[reportUndefinedVariable]
     """Process-wide httpx client, built on first use so importing the SDK in a
     no-config context does not require the gateway URL to be resolvable until an
-    actual call is made. Tests may inject a client by setting the module global
-    `_client` directly (e.g. a FastAPI TestClient)."""
+    actual call is made. `use_client` installs a different one."""
     import httpx
 
     from base.host.net.http_dial import transport_for_url
 
-    global _client  # noqa: PLW0603 — lazy module singleton
-    if _client is None:
+    client = _client
+    if client is None:
         # The gateway requires auth on every API route of an authenticated
         # cluster. The SDK is a script/agent caller, so it presents a bearer
         # (the cookie path is the browser's): the machine API token its launch
@@ -50,7 +61,7 @@ def _client_singleton() -> httpx.Client:  # noqa: F821  # pyright: ignore[report
         # header — matches the gateway's fail-open when its own secret is unset.
         bearer = gateway_bearer()
         headers = bearer_header(bearer) if bearer else {}
-        _client = httpx.Client(
+        client = httpx.Client(
             base_url=ava.GATEWAY_URL,
             timeout=httpx.Timeout(settings.gateway.gateway_client_http_timeout_seconds),
             headers=headers,
@@ -59,7 +70,20 @@ def _client_singleton() -> httpx.Client:  # noqa: F821  # pyright: ignore[report
             # target) is httpx's own default transport, unchanged.
             transport=transport_for_url(ava.GATEWAY_URL),
         )
-    return _client
+        _swap_client(client)
+    return client
+
+
+@contextmanager
+def use_client(client: Any) -> Generator[Any]:
+    """Route every SDK call in the block through *client* — a FastAPI `TestClient` for an
+    in-process gateway, or any `httpx.Client` — then put back whichever client was installed
+    before (none: the next call builds the default one)."""
+    previous = _swap_client(client)
+    try:
+        yield client
+    finally:
+        _swap_client(previous)
 
 
 # Gateway cold start ~0.6s (measured). Default 3 retries, base interval 1s —
