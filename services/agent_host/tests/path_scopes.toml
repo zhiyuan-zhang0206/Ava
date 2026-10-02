@@ -22,7 +22,6 @@
     "test_agent_host_boot_defer.py",
     "test_agent_host_log_rotate.py",
     "test_agent_host_plugins.py",
-    "test_agent_host_pool_release.py",
     "test_agent_host_recrash_reap.py",
     "test_agent_host_shutdown.py",
     "test_agent_host_turn_reconcile.py",

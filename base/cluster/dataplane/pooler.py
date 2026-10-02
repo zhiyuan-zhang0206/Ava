@@ -7,6 +7,7 @@ line only look. Nothing here starts, stops, repairs or rewrites the pooler.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import Path
 
 from base.cluster import machine, port_preflight
@@ -87,3 +88,53 @@ def pgbouncer_listener_reachable(listen_port: int, admin_password: str) -> bool:
     separates "the pooler process is gone" (repairable by `ensure_pgbouncer`) from
     "the pooler is fine and the backend behind it is not"."""
     return admin_reachable(listen_port, admin_password)
+
+
+@dataclass(frozen=True)
+class PoolerClient:
+    """One client connection the pooler holds, as its admin console lists it."""
+
+    address: str
+    database: str
+    user: str
+    state: str
+    application: str
+
+    def describe(self) -> str:
+        app = f" app={self.application}" if self.application else ""
+        return f"{self.address} db={self.database} user={self.user} state={self.state}{app}"
+
+
+def clients(listen_port: int, admin_password: str, host: str = "127.0.0.1") -> list[PoolerClient]:
+    """The client connections open on the pooler (`SHOW CLIENTS`), sorted by address.
+
+    The admin console's own connection is left out. Raises when the console cannot be
+    read: a caller that reports on behalf of an operator says so rather than showing an
+    empty list for a pooler it never looked at.
+    """
+    from psycopg.rows import dict_row
+
+    from base.db.connections import connect_url
+    from base.host.net.url_secret import url_with_userinfo
+
+    url = url_with_userinfo(
+        f"postgresql://@{host}:{listen_port}/pgbouncer", POOLER_ADMIN, admin_password
+    )
+    with (
+        connect_url(url, autocommit=True, connect_timeout=3, unbounded=True) as conn,
+        conn.cursor(row_factory=dict_row) as cur,
+    ):
+        cur.execute("SHOW CLIENTS")
+        rows = cur.fetchall()
+    found = [
+        PoolerClient(
+            address=f"{row['addr']}:{row['port']}",
+            database=str(row["database"]),
+            user=str(row["user"]),
+            state=str(row["state"]),
+            application=str(row.get("application_name") or ""),
+        )
+        for row in rows
+        if row["database"] != "pgbouncer"
+    ]
+    return sorted(found, key=lambda client: client.address)
