@@ -52,6 +52,15 @@ for your own feature branch:
 git push --force-with-lease
 ```
 
+A conflict in a generated file is never merged by hand: take either side, finish
+the rebase, and run its generator (the pre-push branch-diff hook re-runs the freshness
+hooks and fails a push that skips it). The files: `base/events/registry.md`
+(`scripts/codegen/gen_event_registry.py`), `base/host/env/config_lite_table.json`
+(`scripts/codegen/gen_config_lite_table.py`), the generated block of
+`pyproject.toml` (`scripts/codegen/gen_pyright_test_environments.py`),
+`ui/web/src/lib/types-generated.ts` (`scripts/codegen-types.sh`) and
+`ui/web/src/lib/constants-generated.ts` (`scripts/codegen/dump_frontend_constants.py`).
+
 **Merge method is rebase (mandatory, user ruling 2026-09-27).** The Trunk
 queue rebase-merges each PR: every commit on the branch lands on `main` as is,
 so each commit must stand on its own — a conventional subject, a body that
