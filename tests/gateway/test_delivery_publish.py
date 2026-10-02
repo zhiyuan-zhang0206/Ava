@@ -259,6 +259,12 @@ async def test_peer_message_queues_during_suppression_and_watchdog_recovers_afte
             (delivery.inbound_id,),
         )
         assert cur.fetchone() == ("pending", "chat", "agent:42", "peer work")
+        cur.execute(
+            "SELECT target_agent_id, attributes->>'inbound_id' FROM audit_events "
+            "WHERE agent_id=%s AND event_name='send_message'",
+            (tid,),
+        )
+        assert cur.fetchall() == [(42, str(delivery.inbound_id))]
     with _sync_pool() as pool:
         assert select_terminated_owners_with_pending(pool, 86400.0) == []
 

@@ -416,12 +416,14 @@ def emit_recorded_central_event(event: Event) -> None:
 
     Services such as the computer daemon do not own the transaction that
     produced their operation; this gives them the same record -> commit -> emit
-    order as transaction-owning producers.
+    order as transaction-owning producers: the actor's lease log (when one is
+    open) and `audit_events` both take the tagged event in one short transaction.
     """
-    with write_transaction() as conn:
-        tagged = record_central_event(conn, event)
     from base import telemetry
+    from base.telemetry.audit_events import record_audit
 
+    with write_transaction() as conn:
+        tagged = record_audit(conn, record_central_event(conn, event))
     telemetry.emit_prepared(tagged)
 
 
