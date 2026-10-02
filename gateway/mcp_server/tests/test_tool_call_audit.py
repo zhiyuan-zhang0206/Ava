@@ -28,11 +28,13 @@ async def test_a_tool_call_is_recorded_with_its_outcome(db_conn: psycopg.Connect
     await _record_tool_call(caller, {"tool": "spawn_agent", "outcome": "ok"})
 
     rows = db_conn.execute(
-        "SELECT agent_id, attributes->>'tool', attributes->>'outcome' FROM audit_events "
+        "SELECT agent_id, attributes FROM audit_events "
         "WHERE event_name='mcp_tool_call' AND source=%s",
         (caller.source(),),
     ).fetchall()
-    assert rows == [(None, "spawn_agent", "ok")]
+    [(agent_id, attributes)] = rows
+    assert agent_id is None
+    assert (attributes["tool"], attributes["outcome"]) == ("spawn_agent", "ok")
 
 
 async def test_a_failed_audit_write_does_not_fail_the_tool_call(
