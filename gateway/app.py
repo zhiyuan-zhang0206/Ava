@@ -73,7 +73,6 @@ from base.cluster.auth import cookie_name
 from base.config import settings
 from base.host.system.cron import register_os_cron
 from base.lm.plugin_providers import ensure_provider_plugins_loaded
-from gateway import ttl_reaper
 from gateway._server import main as _run_gateway
 from gateway.agents import completion_notice_flusher, max_id_gauge
 from gateway.agents import conversation as conversation_router
@@ -225,11 +224,6 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
         alerts_router.publish_alert_rows,
     )
 
-    # TTL reaper — enforce serve() page and persistent-shell deadlines (user
-    # ruling 2026-08-25). Owns no request path; a pass that fails logs and
-    # retries on the next interval.
-    app.state.ttl_reaper = ttl_reaper.start_ttl_reaper(app.state.db_pool)
-
     # Register the OS-level health-probe cron (launchd plist on macOS, crontab
     # on Linux). This is the primary registration path — every gateway start
     # refreshes the health probe command on the next gateway restart
@@ -285,7 +279,6 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     finally:
         app.state.mcp_manager = None
         app.state.runtime_metrics.stop()
-        await ttl_reaper.stop_ttl_reaper(app.state.ttl_reaper)
         await reconciliation.stop_grafana_alert_reconciler(app.state.alert_reconciler)
         await app.state.grafana_client.aclose()
         for flusher in (

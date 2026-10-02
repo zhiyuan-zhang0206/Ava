@@ -236,6 +236,9 @@ _PER_TEST_TRUNCATE_TABLES = (
     # im-bridge durable cursors: no FK path; a leaked row would make the next
     # test's bridge resume (or replay) from a stale position.
     "im_bridge_cursors",
+    # ttl-reaper cadence clocks: no FK path; a leaked stamp would make the next
+    # test's slow phase read as not due.
+    "maintenance_state",
 )
 
 

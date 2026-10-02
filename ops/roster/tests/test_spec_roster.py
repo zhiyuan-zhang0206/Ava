@@ -39,6 +39,7 @@ _GATEWAY_SESSIONS = {
     "frontend",
     "otel-collector",
     "pg-backup",
+    "ttl-reaper",
 }
 _AGENT_RUNNER_SESSIONS = {
     "loki",

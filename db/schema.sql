@@ -454,6 +454,14 @@ CREATE TABLE delivery_watchdog_attempts (
 COMMENT ON TABLE delivery_watchdog_attempts IS
     'Delivery watchdog recovery-loop state, one row per (loop kind, agent): last_attempt_at is the cooldown clock; consecutive_failures and suppress_count (resurrect only) are the wake-suppression escalation counters. Survives watchdog restarts.';
 
+CREATE TABLE maintenance_state (
+    kind        TEXT PRIMARY KEY,
+    last_run_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp()
+);
+
+COMMENT ON TABLE maintenance_state IS
+    'ttl-reaper cadence clocks, one row per slow maintenance phase (kind): last_run_at is when the phase was last claimed. Survives service restarts.';
+
 -- Full (non-partial) (agent_id, created_at DESC): select_all's LATERAL
 -- MAX(created_at) per agent is an index-only scan on it (the partial
 -- pending index below cannot serve MAX over all kinds; audit P1-1).

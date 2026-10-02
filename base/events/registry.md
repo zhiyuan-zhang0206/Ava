@@ -336,14 +336,14 @@ consumers: see the comments at each emit point.
 | `loki_query_failed` | a Loki HTTP query failed (timeout / disconnect / non-2xx) — carries the request shape | anomaly | endpoint, duration_s, error, window_from, window_to, query | events |
 | `prom_query_failed` | a Prometheus HTTP query failed (timeout / disconnect / non-2xx) — carries the request shape | anomaly | endpoint, duration_s, error, query | events |
 | `page_serve_dir_missing` | a served page directory disappeared; emitted on degradation and auto-close | anomaly | agent_id, key, name, serve_dir, port | events |
-| `page_ttl_expired` | the gateway TTL reaper terminalized a page row whose expires_at passed; attributes carry agent_id, name, page_id | observation | — | events |
+| `page_ttl_expired` | the TTL reaper terminalized a page row whose expires_at passed; attributes carry agent_id, name, page_id | observation | — | events |
 | `page_language_lookup_failed` | the gateway could not read the page copy language from user_settings (DB failure) and fell back to the default; attributes carry exc_type, exc_message | anomaly | — | events |
 | `page_proxy_502` | the gateway reverse proxy could not reach a registered page server; attributes carry trace_id, agent_id, page, host, port, exc_type, exc_message | anomaly | — | events |
 | `page_proxy_504` | the gateway reverse proxy timed out dialing a registered page server; attributes carry trace_id, agent_id, page, host, port, exc_type, exc_message | anomaly | — | events |
-| `shell_ttl_expired` | the gateway TTL reaper killed a persistent shell whose declared TTL passed; attributes carry agent_id, session_id, mode | observation | — | events |
+| `shell_ttl_expired` | the TTL reaper killed a persistent shell whose declared TTL passed; attributes carry agent_id, session_id, mode | observation | — | events |
 | `chrome_page_ttl_expired` | the browser-mcp TTL sweep closed a Chrome page whose hard deadline passed; attributes carry page_id, url, agent_id (None when no affinity slot still named the page) | observation | — | events |
-| `lifecycle_pointer_done_torn` | the gateway TTL reaper's scan found lifecycle command(s) sitting at done while agents_meta.lifecycle_command_id still pointed at them (an out-of-band torn write, task #3678) — every resurrect of the named agent(s) defers until settled; attributes carry count and samples | anomaly | — | events |
-| `lifecycle_fences_settled_absent_machine` | the gateway TTL reaper settled applied-but-unobserved force-terminate command(s) whose agent's home machine is absent from the machines registry (a decommissioned machine never runs the boot recovery that would observe its fences, task #4143); attributes carry count and samples | observation | — | events |
+| `lifecycle_pointer_done_torn` | the TTL reaper's scan found lifecycle command(s) sitting at done while agents_meta.lifecycle_command_id still pointed at them (an out-of-band torn write, task #3678) — every resurrect of the named agent(s) defers until settled; attributes carry count and samples | anomaly | — | events |
+| `lifecycle_fences_settled_absent_machine` | the TTL reaper settled applied-but-unobserved force-terminate command(s) whose agent's home machine is absent from the machines registry (a decommissioned machine never runs the boot recovery that would observe its fences, task #4143); attributes carry count and samples | observation | — | events |
 
 ## 5. SSE roles (live channel, not persisted, 30)
 

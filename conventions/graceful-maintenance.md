@@ -74,10 +74,10 @@ not spend that budget: the gateway's server marks its shutdown as it begins and
 each stream ends itself within one poll tick, so its client reconnects at once.
 ava-root waits for the gateway's stop longer than that budget plus the lifespan
 cleanup (`ServiceSpec.stop_ceiling_s`, derived from the same setting), so a
-gateway still draining is never reported as a failed stop. The TTL reaper's
-serial remote-dispatch batches stop starting new dispatches once shutdown
-begins, so that cleanup waits for an in-flight dispatch, never the remaining
-batch — deferred rows are re-selected by the next boot's pass.
+gateway still draining is never reported as a failed stop. No remote
+dispatch holds that cleanup: the TTL reaper runs as its own service, whose stop
+cancels its in-flight dispatches, and rows left expired are re-selected by its
+next start.
 
 The existing home-local journal survives a CLI crash, host reboot and an
 offline database. An incomplete drain or stop retains the hold and reports

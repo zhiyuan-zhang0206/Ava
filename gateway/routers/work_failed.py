@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections.abc import Callable
 from typing import Any, NamedTuple, cast
 
 from fastapi import APIRouter, HTTPException, Request
@@ -17,6 +18,7 @@ from base.db.transaction import write_transaction
 from gateway.agents.delivery import deliver_chat_inbound
 from gateway.auth.webhook import authenticate_webhook
 from gateway.schemas.work_failed import FailureDeliveryKind, WorkFailedIn, WorkFailedResult
+from ops.cluster_rpc import worst_case_dispatch_seconds
 
 router = APIRouter()
 _log = logging.getLogger(__name__)
@@ -317,8 +319,16 @@ async def _deliver_failure(
     return await asyncio.to_thread(_create_task_alert, pool, event_id, body)
 
 
-async def reconcile_stale_work_failures(pool: ConnectionPool[Any]) -> int:
-    """Retry stale unfinished deliveries; isolate one bad event from the batch."""
+async def reconcile_stale_work_failures(
+    pool: ConnectionPool[Any], on_event: Callable[[], None] | None = None
+) -> int:
+    """Retry stale unfinished deliveries; isolate one bad event from the batch.
+
+    Each event's delivery runs under a deadline of twice the RPC client's worst
+    dispatch, so one wedged event fails alone and counts as an attempt.
+    `on_event` is called after each event, whatever its outcome, for callers
+    that track progress.
+    """
     failures = await asyncio.to_thread(
         _claim_stale_failures,
         pool,
@@ -332,15 +342,16 @@ async def reconcile_stale_work_failures(pool: ConnectionPool[Any]) -> int:
                     _create_task_alert, pool, failure.event_id, failure.body
                 )
             else:
-                result = await _deliver_failure(
-                    pool,
-                    failure.event_id,
-                    failure.body,
-                    InboundProvenance(
-                        source_verified_by=None,
-                        source_transport="reconcile",
-                    ),
-                )
+                async with asyncio.timeout(2 * worst_case_dispatch_seconds()):
+                    result = await _deliver_failure(
+                        pool,
+                        failure.event_id,
+                        failure.body,
+                        InboundProvenance(
+                            source_verified_by=None,
+                            source_transport="reconcile",
+                        ),
+                    )
             if result.status != "duplicate":
                 completed += 1
         except Exception:
@@ -350,6 +361,8 @@ async def reconcile_stale_work_failures(pool: ConnectionPool[Any]) -> int:
                 failure.delivery_attempts,
                 exc_info=True,
             )
+        if on_event is not None:
+            on_event()
     return completed
 
 

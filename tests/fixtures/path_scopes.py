@@ -261,13 +261,13 @@ PATH_SCOPES: dict[str, Scope] = {
             "gateway/run_timeline/tests",
             "gateway/schedules/tests/test_schedule_manager.py",
             "gateway/tests",
-            "gateway/ttl_reaper/tests",
             "ops/agents/tests/test_caller_write_fence.py",
             "ops/tests/test_cluster_rpc.py",
             "ops/tests/test_inventory_ops.py",
             "ops/tests/test_operations.py",
+            "services/ttl_reaper/tests",
         ),
-        114,
+        116,
     ),
     "tests.path_scoped.integration_tests": Scope(
         (
