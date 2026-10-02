@@ -9,12 +9,12 @@ from psycopg_pool import AsyncConnectionPool, ConnectionPool
 
 from agent.db import claim_inbound_batch
 from agent.ownership.hosted import admit_hosted_runtime, apply_hosted_lifecycle
+from agent.ownership.tests.test_lifecycle_intent import _command
+from agent.tests.test_inbound_ownership import _admit, _agent
 from base.config import settings
 from base.db import PG_KEEPALIVE_KWARGS
 from base.native_process.turn_identity import bind_turn_identity
 from ops.lifecycle.termination import _force_terminate_transaction
-from tests.agent.test_inbound_ownership import _admit, _agent
-from tests.agent.test_lifecycle_intent import _command
 
 
 @pytest.mark.parametrize("applied", [False, True])

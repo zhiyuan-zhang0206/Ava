@@ -8,7 +8,7 @@
     "tests/base/test_uvicorn_stdlib_intercept.py::test_gateway_uvicorn_run_passes_log_config_none": 23
   },
   "directories": {
-    "tests/base": 31
+    "tests/base": 30
   },
   "files": {
     "tests/base/test_config.py": 1705,
@@ -44,7 +44,6 @@
     "tests/base/test_no_secrets_on_argv.py::top-level": 1,
     "tests/base/test_pg_owner_authority.py::top-level": 1,
     "tests/base/test_poll_until.py::top-level": 1,
-    "tests/base/test_predecessor_closure.py::top-level": 1,
     "tests/base/test_proc.py::top-level": 1,
     "tests/base/test_recovery_breaker.py::top-level": 1,
     "tests/base/test_scan.py::top-level": 1,

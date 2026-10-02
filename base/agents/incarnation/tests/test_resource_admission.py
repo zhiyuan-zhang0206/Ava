@@ -74,8 +74,8 @@ def test_malformed_never_downgrades_to_legacy(db_conn: psycopg.Connection) -> No
 def test_actual_owner_receipt_recovers_only_exact_persisted_allocation(
     db_conn: psycopg.Connection, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    from agent.tests.test_exec_owner_entry import _context, _ready, _start
     from base.agents.incarnation import exec_owner_recovery
-    from tests.agent.test_exec_owner_entry import _context, _ready, _start
 
     target = _admitted(db_conn)
     context = _context(tmp_path, target.agent_id)

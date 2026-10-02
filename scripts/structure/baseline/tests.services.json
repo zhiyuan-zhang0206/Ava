@@ -5,7 +5,6 @@
     "tests/services/test_hosted_db_wait_liveness.py::test_real_db_wait_survives_both_stale_paths_and_clears_afterward": 16
   },
   "files": {
-    "tests/services/test_agent_host.py": 1770,
     "tests/services/test_backup.py": 902
   },
   "patch_targets": {
@@ -31,7 +30,6 @@
     "tests/services/test_maintenance_readiness.py::gateway.app._cluster_is_paused": 1
   },
   "tests_location": {
-    "tests/services/test_agent_host.py::top-level": 1,
     "tests/services/test_ava_root_custody.py::top-level": 1,
     "tests/services/test_ava_root_daemon.py::top-level": 1,
     "tests/services/test_ava_root_glue_manifests.py::top-level": 1,
