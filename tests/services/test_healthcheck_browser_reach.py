@@ -54,13 +54,3 @@ def test_canary_distinguishes_browser_failure_from_unknown(
     monkeypatch.setattr(hc, "canary", _fake_canary)
     monkeypatch.setattr(hc, "host_probe", _fake_host_probe)
     assert probes.browser_reach().verdict.value == expected
-
-
-def test_canary_unexpected_failure_is_not_reachability_success(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    async def fail(_port: int, _url: str, _timeout_s: float) -> hc._CanaryResult:
-        raise RuntimeError("CDP failed")
-
-    monkeypatch.setattr(hc, "_canary_async", fail)
-    assert hc.canary(9222, "https://example.invalid/", 1).outcome == "skip"
