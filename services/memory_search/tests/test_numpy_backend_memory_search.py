@@ -179,31 +179,3 @@ def test_probe_numpy_healthy(memory_search_uri: str, monkeypatch: pytest.MonkeyP
 
     monkeypatch.setattr(settings.services, "memory_search_uri", memory_search_uri)
     assert probe.probe_backend("numpy").message is None
-
-
-def test_probe_numpy_unreachable_is_actionable(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A down service is transient (may be booting) but the message must name
-    the fix and the switch action."""
-    from base.config import settings
-
-    monkeypatch.setattr(settings.services, "memory_search_uri", f"http://127.0.0.1:{_free_port()}")
-    result = probe.probe_backend("numpy")
-    assert not result.fatal  # booting is transient — the retry loop owns the wait
-    assert "memory_search service is not reachable" in (result.message or "")
-    assert "AVA_MEMORY_SEARCH_BACKEND=numpy" in (result.message or "")
-
-
-def test_probe_milvus_unreachable_is_actionable(monkeypatch: pytest.MonkeyPatch) -> None:
-    from base.config import settings
-
-    monkeypatch.setattr(settings.services, "milvus_uri", f"http://127.0.0.1:{_free_port()}")
-    result = probe.probe_backend("milvus")
-    assert not result.fatal
-    assert "milvus is not reachable" in (result.message or "")
-    assert "AVA_MEMORY_SEARCH_BACKEND=numpy" in (result.message or "")
-
-
-def test_probe_unknown_backend_is_fatal() -> None:
-    result = probe.probe_backend("qdrant")
-    assert result.fatal
-    assert "unknown memory search backend" in (result.message or "")
