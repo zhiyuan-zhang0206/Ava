@@ -69,7 +69,7 @@ async def _failed_turn(
     monkeypatch.setattr(runtime_module, "validate_model_config", MagicMock())
     ctx = AvaContext(ops_pool=pool, event_publisher=MagicMock())
 
-    async def drive(target: int, _runtime: object) -> TurnOutcome:
+    async def drive(target: int, _runtime: object, _slices: object) -> TurnOutcome:
         return await host._invoke_until_done(target, ctx)
 
     monkeypatch.setattr(host, "_drive_turns", drive)

@@ -605,7 +605,7 @@ class TestSettlementReconciles:
     async def test_settled_abort_reconciles_after_the_settle(
         self, wired: _Build, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        async def drive(_agent: int, _runtime: object) -> TurnOutcome:
+        async def drive(_agent: int, _runtime: object, _slices: object) -> TurnOutcome:
             return TurnOutcome(exited=False, crashed=True, aborted=True)
 
         order: list[str] = []
@@ -619,7 +619,7 @@ class TestSettlementReconciles:
         unclassified crash drops the runtime instead, and the next admission
         (or boot) reconciles."""
 
-        async def drive(_agent: int, _runtime: object) -> TurnOutcome:
+        async def drive(_agent: int, _runtime: object, _slices: object) -> TurnOutcome:
             raise ValueError("unclassified crash")
 
         order: list[str] = []
@@ -636,7 +636,7 @@ class TestSettlementReconciles:
         its unconfirmable claims re-deliver at-least-once (see the pass's
         docstring)."""
 
-        async def drive(_agent: int, _runtime: object) -> TurnOutcome:
+        async def drive(_agent: int, _runtime: object, _slices: object) -> TurnOutcome:
             return TurnOutcome(exited=False, crashed=False)
 
         order: list[str] = []

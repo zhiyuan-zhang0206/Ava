@@ -194,7 +194,7 @@ async def test_cold_idle_resume_uses_pointer_without_an_extra_model_call(
     monkeypatch.setattr(successor, "_runtime_for", AsyncMock(return_value=object()))
     monkeypatch.setattr("services.agent_host.runtime.validate_model_config", MagicMock())
 
-    async def drive(_agent: int, _runtime: Any) -> TurnOutcome:
+    async def drive(_agent: int, _runtime: Any, _slices: object) -> TurnOutcome:
         return await successor._invoke_until_done(_agent, ctx)
 
     monkeypatch.setattr(successor, "_drive_turns", drive)

@@ -81,6 +81,7 @@ from agent.turn.runloop import (
 )
 from agent.turn.trace_checkpoint import attach_trace_checkpoint_ref
 from base.agents.context import AvaContext
+from base.agents.context.slices import AgentSlices
 from base.agents.history.delta_read_compat import recovery_reconstruction_scope
 from base.cluster.machine import machine_name
 from base.config import settings
@@ -365,7 +366,7 @@ class AgentHost:
                 ):
                     await publish_agent_updated(self._bus, agent_id)
                     runtime = await self._runtime_for(agent_id, stored.fingerprint)
-                    outcome = await self._drive_turns(agent_id, runtime)
+                    outcome = await self._drive_turns(agent_id, runtime, AgentSlices.resolve(pins))
             except asyncio.CancelledError:
                 # A cancelled turn (stale-turn scan, force terminate, shutdown)
                 # must not keep its runtime either: the next wake re-runs the
@@ -605,7 +606,9 @@ class AgentHost:
 
     # ── the turn loop ────────────────────────────────────────────────────────
 
-    async def _drive_turns(self, agent_id: int, runtime: _AgentRuntime) -> TurnOutcome:
+    async def _drive_turns(
+        self, agent_id: int, runtime: _AgentRuntime, slices: AgentSlices
+    ) -> TurnOutcome:
         """Build this turn task's context and invoke the graph until it is done.
 
         The event publisher is created per turn task rather than cached with the
@@ -621,6 +624,9 @@ class AgentHost:
             ops_pool=self._pool,
             llm=runtime.llm,
             event_publisher=event_publisher,
+            db=self._db,
+            bus=self._bus,
+            agent=slices,
             # The dispatcher owns subscriptions; an empty claim ends this task.
         )
         try:

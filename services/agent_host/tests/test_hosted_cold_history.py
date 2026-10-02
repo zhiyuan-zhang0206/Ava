@@ -93,7 +93,7 @@ async def test_cold_repair_and_invocation_share_only_unchanged_messages(
         db=Database.from_settings(),
     )
 
-    async def drive(_agent: int, _runtime: Any) -> TurnOutcome:
+    async def drive(_agent: int, _runtime: Any, _slices: object) -> TurnOutcome:
         # Recovery can nest inside this turn without dropping or duplicating its cache.
         with recovery_reconstruction_scope(saver, str(agent)):
             await graph.ainvoke({}, config=config)
