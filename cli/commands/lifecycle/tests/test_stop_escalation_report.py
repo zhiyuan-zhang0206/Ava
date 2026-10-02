@@ -37,3 +37,14 @@ def test_a_stop_without_an_escalation_says_nothing_extra(
     assert capsys.readouterr().err == ""
     journal = json.loads((home / "run/lifecycle-op.json").read_text())
     assert "escalations" not in journal["result"]
+
+
+def test_pooler_clients_at_the_stop_land_in_the_journal(home: Path) -> None:
+    line = "1 client(s) still connected when the pooler stops: 10.1.2.7:5432 db=ava"
+    assert status_journal.begin("stop")
+
+    assert command._finish_stop(owns_journal=True, notes=[], clients=[line]) == 0
+
+    journal = json.loads((home / "run/lifecycle-op.json").read_text())
+    assert journal["result"]["pooler_clients"] == [line]
+    assert "escalations" not in journal["result"]

@@ -32,8 +32,11 @@ from redis.exceptions import RedisError
 
 from base.cluster import ownership
 from base.cluster import postgres as owned_postgres
+from base.cluster.authority import read_pooler_admin
 from base.cluster.dataplane import pooler as pooler_files
 from base.config import settings
+from base.log import logger
+from base.paths import ava_home
 from cli.commands.data_plane import cluster_instance as instance
 from cli.commands.data_plane import pgbouncer as pooler
 from cli.commands.data_plane._pooler_stop import OwnedPooler
@@ -95,6 +98,35 @@ def _require_no_unrecorded(captured: dict[str, OwnedProcess]) -> None:
             continue
 
 
+_CLIENTS_LISTED = 10
+
+
+def _report_pooler_clients(identity: OwnedProcess, report: list[str] | None) -> None:
+    """Say who is still connected to the pooler when it is about to stop (report only).
+
+    The pooler stops by SIGINT, which disconnects its clients, so nothing here gates or
+    changes the stop: the line (stderr, log, and `report` for the stop journal) names the
+    remote clients a coordinated stop should already have stopped first. A console that
+    cannot be read is reported as that, never as an empty list.
+    """
+    try:
+        port = OwnedPooler.from_config(identity, pooler_files.ini_path()).port
+        found = pooler_files.clients(port, read_pooler_admin(ava_home()).password)
+    except Exception as exc:
+        line = f"pooler clients could not be listed before the pooler stop: {exc!r}"
+    else:
+        if not found:
+            logger.info("pooler has no clients at its stop")
+            return
+        shown = "; ".join(client.describe() for client in found[:_CLIENTS_LISTED])
+        more = f"; +{len(found) - _CLIENTS_LISTED} more" if len(found) > _CLIENTS_LISTED else ""
+        line = f"{len(found)} client(s) still connected when the pooler stops: {shown}{more}"
+    print(f"  ! {line}", file=sys.stderr, flush=True)
+    logger.warning(line)
+    if report is not None:
+        report.append(line)
+
+
 async def _redis_command(client: Redis, deadline: float, *args: str) -> object:
     return cast(
         "object",
@@ -151,7 +183,13 @@ async def _request_stop(
             raise TimeoutError("PgBouncer stop incomplete; custody retained")
 
 
-async def _stop(deadline: float, *, save: bool = True, notes: list[str] | None = None) -> list[str]:
+async def _stop(
+    deadline: float,
+    *,
+    save: bool = True,
+    notes: list[str] | None = None,
+    clients: list[str] | None = None,
+) -> list[str]:
     pg = capture_postgres()
     pgb = _capture_pooler()
     port = ownership.configured_redis_port()
@@ -189,6 +227,8 @@ async def _stop(deadline: float, *, save: bool = True, notes: list[str] | None =
             remaining(deadline)
             if not identity.live():
                 raise RuntimeError(f"{name} identity changed before stop")
+            if name == "pgbouncer":
+                _report_pooler_clients(identity, clients)
             await _request_stop(name, identity, client, deadline, save=save, notes=notes)
             wait_for_exit(trees[name], deadline)
             stopped.append(name)
@@ -211,10 +251,16 @@ async def _stop(deadline: float, *, save: bool = True, notes: list[str] | None =
         await asyncio.wait_for(client.aclose(), max(0.001, deadline - time.monotonic()))
 
 
-def stop(timeout: float, *, save: bool = True, notes: list[str] | None = None) -> list[str]:
+def stop(
+    timeout: float,
+    *,
+    save: bool = True,
+    notes: list[str] | None = None,
+    clients: list[str] | None = None,
+) -> list[str]:
     deadline = deadline_after(timeout)
     if sys.platform == "win32":
         raise RuntimeError("native maintenance data-plane stop requires POSIX")
     if settings.data_plane.is_remote:
         raise RuntimeError("maintenance cannot verify a remote-managed data-plane stop")
-    return asyncio.run(_stop(deadline, save=save, notes=notes))
+    return asyncio.run(_stop(deadline, save=save, notes=notes, clients=clients))
