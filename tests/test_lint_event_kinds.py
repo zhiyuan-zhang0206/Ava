@@ -35,145 +35,13 @@ _REPO = Path(__file__).resolve().parents[1]
 _REGISTRY = _REPO / "base" / "events" / "registry.md"
 
 # Kinds whose production site has no static `event=` literal, so scan_kinds
-# cannot see them. Each entry carries its emission site; removing a kind from
-# the code means removing it here too (the reverse gate would otherwise flag
-# the orphaned registry entry).
-_SQL_OR_DYNAMIC_KINDS = frozenset(
-    {
-        # Positional emit calls from daemon alert paths, with no `event=` literal.
-        "delivery_stalled",  # services/delivery_watchdog/daemon.py:_alert_stalled
-        "audit_write_failed",  # base/telemetry/audit_events.py:_report_unrecorded telemetry.emit("telemetry", ...)
-        "loki_write_path_probe_failed",  # services/healthchecks/lgtm.py write-path probe
-        "delivery_poisoned",  # services/delivery_watchdog/dispatch_guard.py:_alert_poisoned
-        "delivery_wake_suppressed",  # services/delivery_watchdog/resurrect_guard.py:_alert_wake_suppressed
-        "billing_resurrect_run",  # ops/lifecycle/billing_recovery.py:_record_run_event telemetry.emit("telemetry", ...)
-        "delivery_recovery_decision",  # services/delivery_watchdog/stall_recovery.py:_request_harvest
-        # Outbox emissions go through the module helper (base/agents/messages/delivery_outbox.py:_emit),
-        # which passes the name positionally — no `event=` literal to scan.
-        "delivery_outbox_flushed",  # base/agents/messages/delivery_outbox.py:flush
-        "delivery_outbox_abandoned",  # base/agents/messages/delivery_outbox.py:_abandon
-        "lifecycle_pointer_done_torn",  # services/ttl_reaper/lifecycle_fences.py:_scan_torn_lifecycle_pointers_blocking (positional emit)
-        "lifecycle_fences_settled_absent_machine",  # services/ttl_reaper/lifecycle_fences.py:settle_absent_machine_fences (positional emit)
-        "heartbeat_nudged",  # services/heartbeat/daemon.py:_alert_idle
-        "heartbeat_backoff_raised",  # services/heartbeat/daemon.py:_raise_backoff_level (positional emit)
-        "heartbeat_backoff_reset",  # services/heartbeat/daemon.py:_sweep_backoff_resets (positional emit)
-        "ci_usage_daily",  # schedules/c9-daily-report-schedule.py:_fire (positional emit)
-        "debt_sweep_daily",  # schedules/debt-sweep-daily-schedule.py:_fire (positional emit)
-        "pr_flow_daily",  # scripts/pr_flow_export.py:_emit_events (positional emit)
-        "pr_flow_run",  # scripts/pr_flow_export.py:_emit_events (positional emit)
-        "ci_runs_daily",  # scripts/ci/runs_export.py:emit_snapshot (positional emit)
-        "ci_workflow_window",  # scripts/ci/runs_export.py:emit_snapshot (positional emit)
-        "ci_runs_run",  # scripts/ci/runs_export.py:emit_snapshot (positional emit)
-        # Dynamic emit: positional-argument form, no `event=` literal.
-        "task_reminder_digest",  # task_maintenance/daemon.py:_run_reminders
-        "task_escalation",  # task_maintenance/daemon.py:_run_escalate
-        "heartbeat_paused",  # ava/self.py:258 telemetry.emit("telemetry", ...)
-        "shell_ttl_renewed",  # ava/shell/sessions.py:_record_renewal telemetry.emit("telemetry", ...)
-        "chrome_page_ttl_expired",  # services/browser/page_lifecycle.py:reap_expired_pages telemetry.emit("log", ...)
-        "chrome_page_ttl_renewed",  # services/browser/page_lifecycle.py:renew_agent_page telemetry.emit("telemetry", ...)
-        "frontend_interaction",  # gateway/routers/frontend_telemetry.py telemetry.emit("telemetry", ...)
-        "editable_pth_repaired",  # base/deploy/release/editable_install.py:repair_editable_ava_pth
-        "editable_direct_url_repaired",  # base/deploy/release/editable_install.py:repair_editable_direct_url
-        "exec_editable_install_poisoned",  # base/deploy/release/editable_install.py:guard_editable_install
-        "lgtm_dashboard_render_failed",  # cli/commands/observability/_lgtm_provisioning.py:_render_ava_ops_dashboard telemetry.emit("telemetry", ...)
-        "postgres_stop_escalated",  # cli/commands/lifecycle/service_stop.py:report_postgres_stop_escalation telemetry.emit("telemetry", ...)
-        "event_log_drop",  # base/telemetry/loss.py:loss_event constructs Event directly
-        "sdk_call",  # ava/sdk_surface/metering.py recorder (via base/sdk_telemetry)
-        # base/packages/plugins/activation.py:emit binds event=PLUGIN_ACTIVATION_EVENT (a
-        # module constant, like sdk_call), so the literal scan cannot see it.
-        "plugin_activation",
-        "gateway_latency",  # gateway/middleware/latency.py:emit_bucket telemetry.emit("telemetry", ...)
-        "sse",  # gateway/middleware/runtime_metrics.py:sse_opened/sse_closed positional emit
-        "gateway_process",  # gateway/middleware/runtime_metrics.py:_emit_snapshot positional emit
-        "gateway_event_loop",  # gateway/middleware/runtime_metrics.py:_emit_snapshot positional emit
-        "auth401_rejected",  # gateway/auth/rejection_log.py:emit_auth401_count telemetry.emit("telemetry", ...)
-        "agent_registry",  # gateway/agents/max_id_gauge.py:emit_max_agent_id telemetry.emit("telemetry", ...)
-        "schedule_stalled",  # services/schedule_manager/manager.py:_report_stalled_schedules telemetry.emit
-        "memory_search_stats",  # services/memory_search/app.py:emit_memory_search_stats (positional emit)
-        "backup_operation_custody",  # services/backup_scheduler/operation/custody.py:report (positional emit)
-        "recovery_drill_failed",  # services/backup_scheduler/daemon.py:_run_due_local_dump_restore (positional emit)
-        "plugin_load_failed",  # base/packages/plugins/load_report.py:report_plugin_load_failure telemetry.emit("telemetry", ...)
-        "converge_file_preserved",  # base/host/converge/preserve_report.py:report_converge_preserve telemetry.emit("telemetry", ...)
-        "loki_query_budget",  # gateway/lgtm/loki_query_budget.py:_emit_observation
-        "telemetry_read_stale",  # gateway/lgtm/telemetry_staleness.py:_emit
-        "telemetry_read_recovered",  # gateway/lgtm/telemetry_staleness.py:_emit
-        "otlp_backend_disabled",  # base/telemetry/otlp/telemetry_otlp.py:_emit_backend_event
-        "otlp_backend_recovered",  # base/telemetry/otlp/telemetry_otlp.py:_emit_backend_event
-        "prom_query_budget",  # gateway/lgtm/prom_metrics.py:_emit_budget_observation
-        # Class-resolution markers select their name from the event level at
-        # runtime; services/events_maintenance/resolution.py emits the reopen
-        # markers and resolution_status, while the gateway emits resolved ones.
-        "warning_resolved",
-        "error_resolved",
-        "warning_reopened",
-        "error_reopened",
-        "resolution_status",
-        "checkpoint_table_sizes",  # services/events_maintenance/blob_vacuum.py telemetry.emit (positional)
-        "pause_lifecycle_wait",  # ops/agent_pause/__init__.py:_emit_lifecycle_wait (positional emit)
-        "pause_orphan_claim_settled",  # base/deploy/maintenance/cohort.py:_emit_orphan_settlements
-        # The fleet-graph stale-serving fallback (task #3925): one positional
-        # emit per degradation episode behind the route's emitter.
-        "fleet_graph_stale",  # gateway/routers/fleet_graph.py:_emit_stale (positional emit)
-        # The stats-dashboard stale-serving fallback (task #3973): same shape,
-        # behind gateway/cluster/_stats_dashboard.py's emitter.
-        "stats_dashboard_stale",  # gateway/cluster/_stats_dashboard.py:_emit_stale (positional emit)
-        # The hierarchy worker's trigger + guardrails (task #4674): positional
-        # emits behind helpers, invisible to the literal scanner.
-        "hierarchy_enqueue_failed",  # base/agents/history/checkpoint_cleanup.py:_enqueue_failed
-        "hierarchy_regen_alert",  # services/hierarchy_worker/execute.py:_try_emit
-        "hierarchy_regen_halt",  # services/hierarchy_worker/execute.py:_try_emit
-        "hierarchy_regen_low_reuse",  # services/hierarchy_worker/execute.py:_try_emit
-        "hierarchy_regen_budget_tripped",  # services/hierarchy_worker/runner.py:_regen_budget_check
-        # Legacy bracketed name: the pre-W8-rename value, still a migrate_events.py
-        # mapping target and present in existing DB rows. New code must not emit it;
-        # the registration survives only to backfill the metric.
-        "exec(cancelled)",
-        "exec(failed)",
-        "exec(thread-stuck)",
-        "exec(timeout)",
-        # audit dynamic event_type: not an `event_type="x"` literal, invisible to the scanner.
-        "spawn",  # ops/agents/spawn.py:349 event_type = "fork" if ... else "spawn"
-        "send_message",  # base/db/__init__.py:497 inbound kind->event_type mapping value
-        "terminate",  # base/db/__init__.py:498 same as above
-        "cancel",  # base/db/__init__.py:500 same as above
-        # Historic producer-less events (registry §7.4): existing DB rows and schema
-        # comments still reference them; registration stays until the unified model
-        # lands and retirement is confirmed.
-        "report_activity",  # no current producer (DB 5,274 rows)
-        "report_breached",  # no current producer (DB 14 rows)
-    }
-)
-
-
-# The process runner and restarter are removed. Keep their event contracts
-# readable for existing DB/OTLP history; these are retired schemas, not live
-# producers or permission to emit new process-runner events.
-_RETIRED_PROCESS_KINDS = frozenset(
-    {
-        "agent_boot_failed",
-        "agent_restarted",
-        "boot_timing",
-        "agent_revived",
-        "agent_terminated",
-        "claim_cas_lost",
-        "claim_cas_lost_exit",
-        "db_outage_pause",
-        "db_outage_reconcile_retry",
-        "db_outage_wait",
-        "db_recovered",
-        "idle_cas_lost",
-        "launch_confirm_extended",
-        "launch_confirm_failed",
-        "launch_confirm_task_crashed",
-        "launch_force_terminated",
-        "launch_force_terminated_skipped",
-        "launch_retry",
-        "process_exit",
-        "respawn_phase1",
-        "respawn_phase2_launch",
-        "restart_handoff_host_unhealthy",
-    }
-)
+# cannot see them, carry their emission site on the declaration (`EventSpec.site`);
+# retired process-runner kinds are marked `retired` — their contracts stay readable
+# for existing DB/OTLP history, and they are not live producers or permission to
+# emit new process-runner events. Removing a kind from the code means removing the
+# declaration (the reverse gate flags an orphaned entry).
+_SQL_OR_DYNAMIC_KINDS = frozenset(name for name, spec in EVENTS.items() if spec.site)
+_RETIRED_PROCESS_KINDS = frozenset(name for name, spec in EVENTS.items() if spec.retired)
 
 
 def _code_kinds() -> tuple[set[str], set[str], set[str]]:
@@ -189,9 +57,9 @@ def test_every_static_event_kind_is_registered() -> None:
     event_kinds, _, _ = _code_kinds()
     unregistered = sorted(k for k in event_kinds if k not in EVENTS)
     assert not unregistered, (
-        "event= kind(s) missing from base/events/contract.py EVENTS: "
+        "event= kind(s) missing from the base/events/declarations modules: "
         f"{unregistered}. Register each in the same PR that introduces it "
-        "(one EventSpec line — base/events/registry.md regenerates)."
+        "(one EventSpec line in its domain module — base/events/registry.md regenerates)."
     )
 
 
@@ -222,7 +90,7 @@ def test_registered_telemetry_events_have_producers() -> None:
     assert not orphaned, (
         "EVENTS telemetry kind(s) with no producer in code: "
         f"{orphaned}. Remove them from the registry, or add the emission site "
-        "(or a `_SQL_OR_DYNAMIC_KINDS` entry with a comment) in the same PR."
+        "(or `site=` on its declaration, naming where it emits) in the same PR."
     )
 
 
@@ -316,8 +184,8 @@ def test_label_only_calls_derive_registered_names() -> None:
     ]
     assert not unregistered, (
         "label-only call(s) with an unregistered label: "
-        f"{unregistered}. Register the label in base/events/contract.py "
-        "EVENTS (one EventSpec line), or pass an explicit event=."
+        f"{unregistered}. Register the label in a base/events/declarations "
+        "module (one EventSpec line), or pass an explicit event=."
     )
 
 

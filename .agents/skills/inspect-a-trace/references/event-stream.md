@@ -53,7 +53,7 @@ becomes `attributes_cost_usd`, and numbers parse as numbers, so
 
 `category` is `audit | telemetry | log`. `level` is
 `debug | info | warning | error | critical`, lowercase. The `event_name`
-vocabulary is the registry in `base/events/contract.py` — read it there
+vocabulary is the registry in `base/events/contract.py`, declared per domain in `base/events/declarations/` — read it there
 rather than guessing a name.
 
 **Multiple extractions in one `| json` stage is a parse error.** Each field

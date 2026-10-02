@@ -641,19 +641,21 @@ repos:
         pass_filenames: false
 
       # base/events/registry.md must stay in sync with the event contract
-      # registry (base/events/contract.py EVENTS + live_events SSE roles) —
+      # registry (base/events/contract.py EVENTS, declared in base/events/declarations,
+      # + live_events SSE roles) —
       # the doc is a generated artifact (R2-C): a new/renamed event or role
       # without regenerating turns this hook red.
       - id: events-registry-fresh
         name: "base/events/registry.md in sync with EVENTS registry (drift: run .venv/bin/python scripts/codegen/gen_event_registry.py)"
         entry: ./scripts/check-events-registry-fresh.sh
         language: system
-        # The EVENTS shards feed the registry too: a spec added/edited in
-        # base/events/registry*.py (e.g. registry_ops.py) must re-run the
-        # freshness check locally, not only in the CI --all-files pass.
-        # contract.py re-exports payload and lifecycle shards; CI verifies
-        # the recursive source-module closure against this pattern.
-        files: ^(base/events/contract\.py$|base/events/registry\.py$|base/events/registry_ops\.py$|base/events/system\.py$|base/events/live/projection\.py$|scripts/codegen/gen_event_registry\.py$|base/events/registry\.md$|base/events/payloads\.py$|base/events/registry_lifecycle\.py$)
+        # The EVENTS domain modules feed the registry too: a spec added/edited in
+        # base/events/declarations/ (one module per domain, discovered by
+        # load_events) must re-run the freshness check locally, not only in the CI
+        # --all-files pass. The pattern covers the whole package, so a new domain
+        # module needs no entry here; CI verifies the recursive source-module
+        # closure against it.
+        files: ^(base/events/__init__\.py$|base/events/contract\.py$|base/events/vocabulary\.py$|base/events/loader\.py$|base/events/declarations/|base/events/live/projection\.py$|scripts/codegen/gen_event_registry\.py$|base/events/registry\.md$)
         pass_filenames: false
 
       # base/host/env/config_lite_table.json must stay in sync with the config

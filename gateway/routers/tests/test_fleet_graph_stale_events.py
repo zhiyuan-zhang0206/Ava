@@ -4,7 +4,7 @@ The ops alert rule `ava-ops-fleet-graph-stale` counts `fleet_graph_stale`
 events, so every stale-serving fallback on GET /api/fleet/graph must emit
 exactly one event per degradation episode — a path that serves stale silently
 is a hole in the alert. One case per reason in the closed vocabulary
-(base.events.contract.FleetGraphStaleReason), plus the by-design
+(base.events.declarations.gateway.FleetGraphStaleReason), plus the by-design
 non-emissions: a healthy response emits nothing, and the per-reason emission
 rate cap collapses repeats.
 """

@@ -20,7 +20,7 @@ from psycopg_pool import ConnectionPool
 
 from base import telemetry
 from base.config import settings
-from base.events.contract import StatsDashboardStaleReason
+from base.events.declarations.gateway import StatsDashboardStaleReason
 from base.packages.plugins import stats
 from base.telemetry.loki_index_labels import ledger_gap_plan, retention_floor
 from gateway.cluster.schemas import PluginStat, PluginStatStatus, StatsDashboard

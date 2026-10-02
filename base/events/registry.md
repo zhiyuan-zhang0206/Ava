@@ -1,7 +1,8 @@
 # Ava event name registry
 
 > This document is **generated**: produced by `scripts/codegen/gen_event_registry.py` from
-> the `EVENTS` registry in `base/events/contract.py` (since 2026-08-08, R2-C).
+> the `EVENTS` registry in `base/events/contract.py`, merged from the domain modules of
+> `base/events/declarations/` (since 2026-08-08, R2-C).
 > Hand edits are flagged as drift by the pre-commit `events-registry-fresh` hook.
 > Inventory method and history: see §8.
 
@@ -12,8 +13,8 @@
 > discriminator is called `role` (§5, live projection, not persisted).
 
 **The registry is the single source of truth for event_name** (the `EVENTS` in
-`base/events/contract.py`). A new event = one row added to the registry
-(`telemetry.emit` fails fast on unregistered names); the tables in this document are
+`base/events/contract.py`). A new event = one `EventSpec` in its domain module under
+`base/events/declarations/` (`telemetry.emit` fails fast on unregistered names); the tables in this document are
 generated from it and never hand-synced. event_names that violate the naming rules
 (§6) must not enter code.
 
@@ -103,27 +104,45 @@ consumers: see the comments at each emit point.
 
 | event_name | meaning | tier | key payload fields | family | destination |
 |------|------|------|-----------------|----|------|
+| `plugin_load_failed` | enabled plugin skipped because it failed to load (fail-soft) | anomaly | plugin, error | — | events |
+| `heartbeat_nudged` | heartbeat reminder | noise | idle_minutes | — | events |
+| `heartbeat_backoff_raised` | no-op nudge backoff level raised | noise | level, interval_seconds | — | events |
+| `heartbeat_backoff_reset` | nudge backoff reset by real inbound or pause | noise | previous_level, reason | — | events |
+| `dangling_tool_pairing_repaired` | dangling tool pairing repaired | anomaly | — | — | events |
+| `delta_read_compat` | delta-written checkpoint messages reconstructed for a plain reader (task #3180 transition layer) | noise | — | — | events |
+| `sdk_call` | SDK call metering | noise | fn, duration, sample_rate, detail | — | events |
+| `plugin_activation` | a plugin injection surface fired (hook / wrap / prompt section) | noise | plugin, surface, identifier, detail, model | — | events |
+| `heartbeat_paused` | heartbeat paused | observation | duration_s | — | events |
+| `shell_ttl_renewed` | shell TTL deadline renewed | observation | session_id, ttl_s, prev_expires_at, new_expires_at | — | events |
+| `screen_capture_notify_failed` | screenshot notify failed | anomaly | — | — | events |
+| `delta_message_suffix` | message history write-body transfer and retained suffix counts; excludes snapshot seed | noise | thread_id, checkpoint_ns, checkpoint_id, candidate_writes, fetched_rows, fetched_bytes, body_batches, retained_writes, reset_found | — | events |
+| `db_outage_wait` | db outage wait | anomaly | — | — | events |
+| `db_outage_pause` | db outage pause | anomaly | — | — | events |
+| `db_outage_reconcile_retry` | db outage reconcile retry | anomaly | — | — | events |
+| `db_recovered` | db recovered | anomaly | — | — | events |
+| `db_pool_acquire_timeout` | db pool acquire timeout | anomaly | — | — | events |
+| `db_pool_acquire_slow` | db pool acquire slow | anomaly | — | — | events |
+| `checkpoint_write_failed` | checkpoint write failed | anomaly | — | — | events |
+| `trace` | otel span export | noise | — | — | events |
+| `history_dump` | pre-compact history dumped to workspace | noise | — | — | events |
+| `checkpoint_trim` | checkpoint trimmed | noise | — | — | events |
+| `recall_filter` | memory recall filter | noise | body, query_hmac_sha256, picked_paths | — | events |
+| `passive_recall` | passive memory recall | noise | search_ms, filter_ms | — | events |
+| `hook_timing` | hook-runner pass — per-hook wall durations, attributing a slow before_llm / before_exec node to its hooks from events alone | noise | hook_ms | — | events |
+| `last_msg` | last-message check | noise | — | — | events |
 | `status_change` | agent status transition — both telemetry (loguru) and audit (audit_events) sides emit this name | noise | from, to | — | events |
-| `frontend_interaction` | tracked frontend interaction (click / page view / settings change) | noise | page, element, session_id, key, value | — | events |
-| `llm_usage` | LLM call metering | observation | model, calls, in_total, out_total, cache_read, reasoning, latency_ms, decode_ms, cost_usd, price_miss, price_hit, price_out, unpriced, task_id, usage_kind, source, cache_mechanism, cache_scope | — | events |
-| `turn_end` | one turn finished | observation | ok, duration_seconds | — | events |
-| `llm_turn_aborted` | turn aborted after retries | anomaly | — | LLM_ERROR | events |
-| `recovery_breaker_halt` | recovery circuit breaker tripped — consecutive permanent provider rejections halted every automatic recovery path until a turn succeeds (task #3617) | anomaly | — | — | events |
-| `compact_turn_aborted` | turn aborted because compaction failed | anomaly | — | — | events |
-| `llm_provider_error` | LLM provider failure | anomaly | error_class, provider, status, error_type, fatal, billing, vendor, model | LLM_ERROR | events |
-| `stream_stalled_retry` | stream stalled, retried (vendor/model/stage/elapsed_s carry the provider-health dimension; elapsed_s also maps to an OTLP histogram) | anomaly | vendor, model, stage, elapsed_s | LLM_ERROR | events |
-| `stream_stall_pair_terminated` | two adjacent stream stalls (stream segment + non-streaming fallback) terminated the call early; retried on the delayed stall schedule | anomaly | vendor, model, stage, timeout_s | — | events |
-| `stream_overloaded_retry` | stream overloaded, retried | anomaly | — | LLM_ERROR | events |
-| `thinking_block_sanitized` | thinking block sanitized | noise | — | — | events |
-| `llm_cancelled` | LLM call cancelled | anomaly | — | — | events |
+| `delivery_stalled` | delivery backlog | anomaly | inbound_id, age_s | — | events |
+| `delivery_poisoned` | delivery backlog — permanently-failing inbound poisoned (dispatch cap reached) | anomaly | inbound_id, dispatch_count, age_s | — | events |
+| `delivery_wake_suppressed` | automatic delivery wakes suppressed after repeated resurrection failures | anomaly | consecutive_failures, suppress_seconds, suppress_count, reason | — | events |
+| `delivery_recovery_decision` | stalled crash-marked recovery decision (harvest / refusal) | anomaly | inbound_id, decision, reason | — | events |
+| `delivery_outbox_flushed` | delivery backlog — a deferred-send record was redelivered (task #3757) | observation | inbound_id, attempts, flush_attempts, age_s, origin_agent_id | — | events |
+| `delivery_outbox_abandoned` | delivery backlog — a deferred-send record abandoned at its budget or on a permanent failure (task #3757) | anomaly | reason, detail, attempts, flush_attempts, age_s, origin_agent_id | — | events |
 | `exec` | execute_code succeeded | observation | body, ok, duration_seconds | — | events |
 | `exec_failed` | execute_code failed | anomaly | exc_type, body | — | events |
-| `plugin_load_failed` | enabled plugin skipped because it failed to load (fail-soft) | anomaly | plugin, error | — | events |
 | `exec_envelope` | exec envelope transfer cost (size + serialize time) — request snapshot / result delta | observation | envelope, op, size_bytes, serialize_ms | — | events |
 | `exec_child_boot` | exec child bootstrap duration before agent-authored code | noise | duration_ms | — | events |
 | `exec_request_quarantine` | stale exec request evidence preserved under the explicit quarantine | observation | reason, event_dir, sources, vanished | — | events |
 | `exec_request_bounded_quarantine` | an unreadable exec request envelope past the bounded-disposition bound (twice the exec node timeout, no live process reference, no live host process) was quarantined without review — the bytes are preserved with a receipt and the recovery path no longer defers on it; off via AVA_EXEC_REQUEST_BOUNDED_QUARANTINE_ENABLED restores unbounded retention | anomaly | — | — | events |
-| `compaction_completed` | applied context compaction size reduction and completed count | noise | compact_kind, compactions, history_chars, summary_chars, summary_history_ratio | — | events |
 | `exec_cancelled` | execute_code cancelled | anomaly | — | — | events |
 | `exec(timeout)` | historical parenthesized name (migration target) | anomaly | — | — | events |
 | `exec(failed)` | historical parenthesized name (migration target) | anomaly | — | — | events |
@@ -133,6 +152,31 @@ consumers: see the comments at each emit point.
 | `exec_node_timeout` | node-level timeout | anomaly | — | — | events |
 | `exec_subprocess_killed` | exec child survived the signal grace period and was SIGKILLed | anomaly | pid, grace | — | events |
 | `exec_memory_guard_killed` | the host memory guard killed the largest exec process domain at critical system memory pressure | anomaly | agent_id, pid, footprint_bytes, running, pressure | — | events |
+| `code` | LLM generated code block | noise | body, ok, duration_seconds | — | events |
+| `text` | LLM text output | noise | — | — | events |
+| `syntax_fix` | syntax repair executed | noise | fixes | — | events |
+| `editable_pth_repaired` | poisoned editable-install pointer repaired to the prod source root | anomaly | — | — | events |
+| `editable_direct_url_repaired` | poisoned editable-install direct_url repaired to the prod source root | anomaly | — | — | events |
+| `exec_editable_install_poisoned` | poisoned editable install repaired before an exec child spawn | anomaly | — | — | events |
+| `frontend_interaction` | tracked frontend interaction (click / page view / settings change) | noise | page, element, session_id, key, value | — | events |
+| `sse_drop` | SSE event dropped | anomaly | kind, n | — | events |
+| `page_restore_alive` | page restore alive | noise | — | — | events |
+| `page_restore_reserved` | page restore reserved | noise | — | — | events |
+| `page_restore_query_failed` | page restore query failed | anomaly | — | — | events |
+| `page_restore_failed` | page restore failed | anomaly | — | — | events |
+| `page_restore_closed` | page restore closed | noise | — | — | events |
+| `page_restore_notified` | page restore notified | noise | — | — | events |
+| `gateway_latency` | gateway endpoint latency — 60s aggregate per route (p50/p95/p99/max/count) | noise | route, p50_ms, p95_ms, p99_ms, max_ms, count | — | events |
+| `sse` | gateway SSE lifecycle — active connections by mode plus open/close counters | noise | mode, active_connections, opened, closed | — | events |
+| `gateway_process` | gateway process CPU, resident memory, and open file descriptors (60s sample) | noise | cpu_percent, rss_bytes, fd_count | — | events |
+| `gateway_event_loop` | gateway event-loop maximum callback lag and slow ticks (60s window) | noise | lag_ms, slow_ticks | — | events |
+| `auth401_rejected` | gateway auth-401 rejections in the 60s window (aggregate count) | noise | count | — | events |
+| `agent_registry` | agent registry max id — the agents-table high-water mark (absolute state, 60s sample) | noise | max_id | — | events |
+| `memory_search_stats` | memory search store rows + last save duration (absolute state, 60s sample) | noise | rows, last_save_seconds | — | events |
+| `gate_auth_probe_failed` | gate auth probe failed — carries the classification (auth/timeout/network/application) and exception shape | anomaly | category, exception_type, exception_value, status, latency_ms | — | events |
+| `fleet_graph_stale` | the fleet-graph route served the stale/last-good graph after a degraded upstream read — one event per degradation episode, not per poll | anomaly | route, reason | — | events |
+| `stats_dashboard_stale` | the stats-dashboard route served its last-good response after a failed recompute — one event per degradation episode, not per poll | anomaly | route, reason | — | events |
+| `chrome_page_ttl_renewed` | Chrome page TTL deadline renewed via the renew_page tool; attributes carry page_id, ttl_s, new_expires_at | observation | — | — | events |
 | `host_stale_running_settled` | hosted boot settle restored rows a previous host instance left running without a task (crash / kill -9); carries n = rows settled | noise | — | — | events |
 | `host_dispatcher_subscribed` | hosted dispatcher subscribed to the inbound wake pattern | noise | — | — | events |
 | `host_recovery_wake_started` | hosted recovery wake started a turn and occupied an in-flight pacing slot | noise | — | — | events |
@@ -171,6 +215,15 @@ consumers: see the comments at each emit point.
 | `host_admission_wait_exceeded` | a hosted turn has queued at the host admission gate (AVA_HOST_MAX_CONCURRENT_TURNS) for at least AVA_HOST_ADMISSION_WAIT_ALERT_SECONDS — carries the agent, its current wait, the limit and the queue depth; reported once per wait episode. Queueing is the configured memory/runtime trade-off working, not an error; a wait this long means the queue is backing up (raise the limit or inspect the turns holding slots). The wait is exempt from stall cancellation — cancelling it would only re-queue it at the tail | anomaly | — | — | events |
 | `hosted_boot_recovery_stalled` | hosted boot recovery was deferred for the same agent on three consecutive boots — retained exec request evidence is not clearing on its own, so the ordinary per-boot warning is escalated to this counted anomaly event; inspect the named evidence and its disposition commands | anomaly | — | — | events |
 | `host_turn_stall_detected` | the hosted dispatcher's durable scan found an in-flight turn whose turn-progress clock (agent/turn/progress.py: node enters, completed LLM steps, streamed LLM chunks) has been silent past the wedged budget while NO pending inbound exists — the turn-level fake-alive shape (process alive, turn dead) that pending-row and pid-based detectors cannot see. The turn task is cancelled and the agent rescheduled; a turn that refuses to unwind instead escalates to a daemon restart | anomaly | — | — | events |
+| `claim_cas_lost` | claim CAS race lost — another lifecycle op owns the row | anomaly | — | — | events |
+| `claim_cas_lost_exit` | claim wait aborted by a lost CAS — process exiting cleanly | anomaly | — | — | events |
+| `idle_cas_lost` | idle-flip CAS race lost — degraded, not fatal | anomaly | — | — | events |
+| `inbound_reconcile` | inbound reconciliation | noise | — | — | events |
+| `inbound_reconcile_sideload_fallback` | inbound reconcile switched from the claim window to settled history | observation | — | — | events |
+| `pause_lifecycle_wait` | preparation bounded-waited in-flight work it did not author | anomaly | waited_s, outcome, agents | — | events |
+| `pause_orphan_claim_settled` | preparation settled an ordinary claim without a live runtime | anomaly | agent, message_id, age_s, outcome | — | events |
+| `host_turn_force_terminated` | this hosted turn ended on its own incarnation's applied force terminate (e.g. the delivery watchdog's hosted-turn wedge recovery): the terminate command was applied but not yet observed, the turn's fail-closed guard read refused, and the pump's own boundary observes the command; not a failure | observation | — | — | events |
+| `host_held_wake_force_terminated` | a held-controls wake stopped quietly because its incarnation's applied force terminate landed — the pump's boundary owns the command's observation, so the wake had nothing left to do; not a failure | observation | — | — | events |
 | `node_enter` | LangGraph node entered — sink-filtered out of the event stream (PR #1758); log files only | noise | — | — | file |
 | `node_exit` | LangGraph node exited | noise | count, nodes | — | events |
 | `process_exit` | agent process exited | noise | reason, pid | — | events |
@@ -178,50 +231,7 @@ consumers: see the comments at each emit point.
 | `halt` | turn stopped (idle/compact/system) | noise | body | — | events |
 | `agent_restarted` | agent restarted (phase2 done) | observation | — | — | events |
 | `restart_handoff_host_unhealthy` | hosted restart ownership could not transfer: agent-host is unhealthy; row left restarting for retry | anomaly | — | — | events |
-| `heartbeat_nudged` | heartbeat reminder | noise | idle_minutes | — | events |
-| `heartbeat_backoff_raised` | no-op nudge backoff level raised | noise | level, interval_seconds | — | events |
-| `heartbeat_backoff_reset` | nudge backoff reset by real inbound or pause | noise | previous_level, reason | — | events |
-| `ci_usage_daily` | daily CI-minute reconciliation totals (C9) | observation | day, window_start, window_end, runs, attributed_runs, unattributed_runs, total_minutes, attributed_minutes, linux_minutes, macos_minutes, appended_runs, est_usd | — | events |
-| `debt_sweep_daily` | daily tech-debt mechanical scan and clearing-worker dispatch | observation | day, scan_status, action, worker_agent_id | — | events |
-| `pr_flow_daily` | daily PR-flow aggregates — ready->merged percentiles and flake discoveries (absolute gauges, one sample per complete day) | observation | day, merged_count, ready_to_merge_median_seconds, ready_to_merge_p90_seconds, flake_new_quarantines | — | events |
-| `pr_flow_run` | PR-flow sampler run — point-in-time Trunk queue depth (absolute state) | observation | queue_depth | — | events |
-| `ci_runs_daily` | daily CI-run aggregates | observation | repo, day, runs, instant_skip_runs, watchdog_runs, proof_runs, cancelled_runs, superseded_runs, superseded_zero_runs, failed_runs, retried_failed_runs, self_healed_runs, abandoned_runs, zombie_runs, prs_completed, prs_with_runs, per_pr_duration_median_minutes, per_pr_duration_p90_minutes, per_pr_runs_median, per_pr_runs_p90, per_pr_runs_executed_median, white_run_share, retry_share, noise_run_share, first_pass_pr_share | — | events |
-| `ci_workflow_window` | trailing workflow fragility | observation | repo, workflow, runs, failed_runs, self_healed_runs, retried_failed_runs, cancelled_runs, superseded_runs, instant_skip_runs, prs_appeared_on, pr_appearance_share, retry_share, exec_median_seconds, exec_p90_seconds | — | events |
-| `ci_runs_run` | CI-run sampler breadcrumb | observation | repo, window_days, window_runs, window_prs, api_requests | — | events |
-| `task_reminder_digest` | overdue-task owner digest | noise | owner_id, task_count, task_ids | — | events |
-| `task_escalation` | stalled-task escalation | observation | owner_id, task_count, task_ids, leg | — | events |
-| `task_usage_record_failed` | task usage recording failed | anomaly | — | — | events |
-| `delivery_stalled` | delivery backlog | anomaly | inbound_id, age_s | — | events |
-| `loki_write_path_probe_failed` | Loki write-path probe failed | anomaly | consecutive_failures, reason | — | events |
-| `loki_write_path_probe_throttled` | Loki write-path probe persistently throttled | anomaly | consecutive_throttles, reason | — | events |
-| `delivery_poisoned` | delivery backlog — permanently-failing inbound poisoned (dispatch cap reached) | anomaly | inbound_id, dispatch_count, age_s | — | events |
-| `delivery_wake_suppressed` | automatic delivery wakes suppressed after repeated resurrection failures | anomaly | consecutive_failures, suppress_seconds, suppress_count, reason | — | events |
-| `delivery_recovery_decision` | stalled crash-marked recovery decision (harvest / refusal) | anomaly | inbound_id, decision, reason | — | events |
-| `delivery_outbox_flushed` | delivery backlog — a deferred-send record was redelivered (task #3757) | observation | inbound_id, attempts, flush_attempts, age_s, origin_agent_id | — | events |
-| `delivery_outbox_abandoned` | delivery backlog — a deferred-send record abandoned at its budget or on a permanent failure (task #3757) | anomaly | reason, detail, attempts, flush_attempts, age_s, origin_agent_id | — | events |
-| `claim_cas_lost` | claim CAS race lost — another lifecycle op owns the row | anomaly | — | — | events |
-| `claim_cas_lost_exit` | claim wait aborted by a lost CAS — process exiting cleanly | anomaly | — | — | events |
-| `idle_cas_lost` | idle-flip CAS race lost — degraded, not fatal | anomaly | — | — | events |
 | `boot_timing` | boot duration | noise | — | — | events |
-| `dangling_tool_pairing_repaired` | dangling tool pairing repaired | anomaly | — | — | events |
-| `delta_read_compat` | delta-written checkpoint messages reconstructed for a plain reader (task #3180 transition layer) | noise | — | — | events |
-| `sdk_call` | SDK call metering | noise | fn, duration, sample_rate, detail | — | events |
-| `plugin_activation` | a plugin injection surface fired (hook / wrap / prompt section) | noise | plugin, surface, identifier, detail, model | — | events |
-| `sse_drop` | SSE event dropped | anomaly | kind, n | — | events |
-| `event_log_drop` | event-pipeline row shed | anomaly | n, queue, last_dropped_at | — | events |
-| `heartbeat_paused` | heartbeat paused | observation | duration_s | — | events |
-| `shell_ttl_renewed` | shell TTL deadline renewed | observation | session_id, ttl_s, prev_expires_at, new_expires_at | — | events |
-| `code` | LLM generated code block | noise | body, ok, duration_seconds | — | events |
-| `text` | LLM text output | noise | — | — | events |
-| `syntax_fix` | syntax repair executed | noise | fixes | — | events |
-| `inbound_reconcile` | inbound reconciliation | noise | — | — | events |
-| `screen_capture_notify_failed` | screenshot notify failed | anomaly | — | — | events |
-| `page_restore_alive` | page restore alive | noise | — | — | events |
-| `page_restore_reserved` | page restore reserved | noise | — | — | events |
-| `page_restore_query_failed` | page restore query failed | anomaly | — | — | events |
-| `page_restore_failed` | page restore failed | anomaly | — | — | events |
-| `page_restore_closed` | page restore closed | noise | — | — | events |
-| `page_restore_notified` | page restore notified | noise | — | — | events |
 | `agent_spawned` | agent process started | observation | spawner, forked_from | — | events |
 | `agent_resurrected` | agent resurrected | observation | — | — | events |
 | `billing_resurrect_run` | billing batch recovery run finished | observation | — | — | events |
@@ -238,34 +248,21 @@ consumers: see the comments at each emit point.
 | `launch_force_terminated` | launch force-terminated | anomaly | — | — | events |
 | `launch_force_terminated_skipped` | launch force-terminate skipped | noise | — | — | events |
 | `launch_retry` | launch retried | observation | — | — | events |
-| `inbound_reconcile_sideload_fallback` | inbound reconcile switched from the claim window to settled history | observation | — | — | events |
-| `delta_message_suffix` | message history write-body transfer and retained suffix counts; excludes snapshot seed | noise | thread_id, checkpoint_ns, checkpoint_id, candidate_writes, fetched_rows, fetched_bytes, body_batches, retained_writes, reset_found | — | events |
-| `pause_lifecycle_wait` | preparation bounded-waited in-flight work it did not author | anomaly | waited_s, outcome, agents | — | events |
-| `pause_orphan_claim_settled` | preparation settled an ordinary claim without a live runtime | anomaly | agent, message_id, age_s, outcome | — | events |
-| `host_turn_force_terminated` | this hosted turn ended on its own incarnation's applied force terminate (e.g. the delivery watchdog's hosted-turn wedge recovery): the terminate command was applied but not yet observed, the turn's fail-closed guard read refused, and the pump's own boundary observes the command; not a failure | observation | — | — | events |
-| `host_held_wake_force_terminated` | a held-controls wake stopped quietly because its incarnation's applied force terminate landed — the pump's boundary owns the command's observation, so the wake had nothing left to do; not a failure | observation | — | — | events |
-| `db_outage_wait` | db outage wait | anomaly | — | — | events |
-| `db_outage_pause` | db outage pause | anomaly | — | — | events |
-| `db_outage_reconcile_retry` | db outage reconcile retry | anomaly | — | — | events |
-| `db_recovered` | db recovered | anomaly | — | — | events |
-| `db_pool_acquire_timeout` | db pool acquire timeout | anomaly | — | — | events |
-| `db_pool_acquire_slow` | db pool acquire slow | anomaly | — | — | events |
-| `checkpoint_write_failed` | checkpoint write failed | anomaly | — | — | events |
-| `editable_pth_repaired` | poisoned editable-install pointer repaired to the prod source root | anomaly | — | — | events |
-| `editable_direct_url_repaired` | poisoned editable-install direct_url repaired to the prod source root | anomaly | — | — | events |
-| `exec_editable_install_poisoned` | poisoned editable install repaired before an exec child spawn | anomaly | — | — | events |
-| `lgtm_dashboard_render_failed` | ava-ops dashboard render failed during converge; the previous provisioning file was kept | anomaly | — | — | events |
-| `converge_file_preserved` | converge kept a locally modified destination instead of overwriting — the current content no longer matches the recorded render; repeats every converge until resolved | anomaly | path, key, surface | — | events |
-| `label_generated` | label auto-generated | noise | — | — | events |
-| `label_generate_failed` | label generation failed | anomaly | — | — | events |
-| `label_generate_skipped` | label generation skipped | noise | — | — | events |
-| `label_generate_empty` | label generation empty | noise | — | — | events |
-| `label_generate_rejected` | label generation rejected as not a label | noise | — | — | events |
-| `label_generate_retired` | label generation given up on after repeated failures | noise | — | — | events |
-| `trace` | otel span export | noise | — | — | events |
 | `idle_wake` | agent woken from idle | noise | degraded, elapsed_s, rounds, timeout_s, wake_state | — | events |
 | `wake_degraded` | RedisInboundListener wake path degraded (instant pub/sub wake off) | anomaly | — | — | events |
 | `wake_restored` | RedisInboundListener wake path recovered (clean consume restored instant wake) | noise | — | — | events |
+| `llm_usage` | LLM call metering | observation | model, calls, in_total, out_total, cache_read, reasoning, latency_ms, decode_ms, cost_usd, price_miss, price_hit, price_out, unpriced, task_id, usage_kind, source, cache_mechanism, cache_scope | — | events |
+| `turn_end` | one turn finished | observation | ok, duration_seconds | — | events |
+| `llm_turn_aborted` | turn aborted after retries | anomaly | — | LLM_ERROR | events |
+| `recovery_breaker_halt` | recovery circuit breaker tripped — consecutive permanent provider rejections halted every automatic recovery path until a turn succeeds (task #3617) | anomaly | — | — | events |
+| `compact_turn_aborted` | turn aborted because compaction failed | anomaly | — | — | events |
+| `llm_provider_error` | LLM provider failure | anomaly | error_class, provider, status, error_type, fatal, billing, vendor, model | LLM_ERROR | events |
+| `stream_stalled_retry` | stream stalled, retried (vendor/model/stage/elapsed_s carry the provider-health dimension; elapsed_s also maps to an OTLP histogram) | anomaly | vendor, model, stage, elapsed_s | LLM_ERROR | events |
+| `stream_stall_pair_terminated` | two adjacent stream stalls (stream segment + non-streaming fallback) terminated the call early; retried on the delayed stall schedule | anomaly | vendor, model, stage, timeout_s | — | events |
+| `stream_overloaded_retry` | stream overloaded, retried | anomaly | — | LLM_ERROR | events |
+| `thinking_block_sanitized` | thinking block sanitized | noise | — | — | events |
+| `llm_cancelled` | LLM call cancelled | anomaly | — | — | events |
+| `compaction_completed` | applied context compaction size reduction and completed count | noise | compact_kind, compactions, history_chars, summary_chars, summary_history_ratio | — | events |
 | `compact_request` | compact requested | noise | — | — | events |
 | `auto_compact` | auto-compact | noise | — | — | events |
 | `compact_reminder` | compact reminder | noise | — | — | events |
@@ -274,37 +271,33 @@ consumers: see the comments at each emit point.
 | `circuit_breaker_compact` | forced overflow compact fired by the open breaker | noise | — | — | events |
 | `heartbeat_circuit_open` | heartbeat consumed while the breaker is open | noise | — | — | events |
 | `emergency_compact` | emergency compaction (overflow self-rescue) | noise | — | — | events |
-| `root_chain_broken` | root self-check found a managed unit no longer a live child of the root process — one alert per episode, held until intact | anomaly | — | — | events |
-| `root_restart_breaker_open` | root health monitor restart breaker opened — repeated non-alive probe rounds held until a probe-alive round | anomaly | — | — | events |
-| `root_restart_failed` | root unit replacement failed at its down|up half — explicit failure state recorded; intent stays running and the health monitor retries under its backoff (task #4872) | anomaly | unit, stage, detail | — | events |
-| `root_restart_cleared` | root unit replacement succeeded — the recorded failure state was cleared (task #4872) | noise | unit, failed_for_s | — | events |
-| `custody_reconcile` | custody record reconcile pass — releases always report; a retained record reports on first sight and evidence change — with its birth and process-group evidence (task #4872) | observation | unit, checked, found, decision, evidence | — | events |
-| `root_unit_alert_fired` | root unit entered an alertable failure state (intent running, and restart_failed, breaker open, or retained custody) — one firing per episode; delivery records the user-channel post (task #4872) | anomaly | unit, kind, since_timestamp_seconds, detail, delivery | — | events |
-| `root_unit_alert_resolved` | root unit alert episode closed — the failure state cleared and the episode resolved (task #4872) | noise | unit, kind, since_timestamp_seconds, failed_for_s, delivery | — | events |
-| `permissions_helper_unhealthy` | permissions helper failed its healthcheck (ping plus launchd job classification) — one alert per episode, held until a ping-alive round | anomaly | — | — | events |
-| `schedule_stalled` | enabled non-completed schedule has had no live session for more than two hours | anomaly | schedule_id, status, stalled_seconds | — | events |
-| `history_dump` | pre-compact history dumped to workspace | noise | — | — | events |
-| `checkpoint_trim` | checkpoint trimmed | noise | — | — | events |
 | `compact_boundary_stamp` | compact boundary stamp failed (segment anchor not recorded) | noise | — | — | events |
-| `recall_filter` | memory recall filter | noise | body, query_hmac_sha256, picked_paths | — | events |
-| `passive_recall` | passive memory recall | noise | search_ms, filter_ms | — | events |
-| `hook_timing` | hook-runner pass — per-hook wall durations, attributing a slow before_llm / before_exec node to its hooks from events alone | noise | hook_ms | — | events |
 | `silent_idle` | silent idle cost-boundary verdict | noise | output_tokens, cumulative_output_tokens, estimated_cost_usd, halted | — | events |
 | `llm_retry` | LLM retry sequence completion | observation | outcome, duration_seconds | — | events |
-| `last_msg` | last-message check | noise | — | — | events |
-| `gateway_latency` | gateway endpoint latency — 60s aggregate per route (p50/p95/p99/max/count) | noise | route, p50_ms, p95_ms, p99_ms, max_ms, count | — | events |
-| `sse` | gateway SSE lifecycle — active connections by mode plus open/close counters | noise | mode, active_connections, opened, closed | — | events |
-| `gateway_process` | gateway process CPU, resident memory, and open file descriptors (60s sample) | noise | cpu_percent, rss_bytes, fd_count | — | events |
-| `gateway_event_loop` | gateway event-loop maximum callback lag and slow ticks (60s window) | noise | lag_ms, slow_ticks | — | events |
-| `auth401_rejected` | gateway auth-401 rejections in the 60s window (aggregate count) | noise | count | — | events |
-| `agent_registry` | agent registry max id — the agents-table high-water mark (absolute state, 60s sample) | noise | max_id | — | events |
-| `memory_search_stats` | memory search store rows + last save duration (absolute state, 60s sample) | noise | rows, last_save_seconds | — | events |
-| `root_health_expected` | root health observation rounds expected, including before the first sample | noise | home_id, expected_since_timestamp_seconds | — | events |
-| `root_diagnostic` | root diagnostic verdict changed; observation only, no recovery authority | anomaly | — | — | events |
-| `root_health_tick` | root completed one service health and diagnostic observation round | noise | home_id, last_tick_timestamp_seconds | — | events |
-| `backup_operation_custody` | backup operation quarantined, blocked on unproven closure, or retired | anomaly | operation, custody, detail | — | events |
-| `postgres_stop_escalated` | a Postgres fast shutdown did not finish within its budget and was ended by an immediate shutdown plus a SIGKILL of the leftover descendants (usually a hung archive command) | anomaly | — | — | events |
-| `recovery_drill_failed` | scheduled logical restore drill failed | anomaly | drill, detail | — | events |
+| `ci_usage_daily` | daily CI-minute reconciliation totals (C9) | observation | day, window_start, window_end, runs, attributed_runs, unattributed_runs, total_minutes, attributed_minutes, linux_minutes, macos_minutes, appended_runs, est_usd | — | events |
+| `debt_sweep_daily` | daily tech-debt mechanical scan and clearing-worker dispatch | observation | day, scan_status, action, worker_agent_id | — | events |
+| `pr_flow_daily` | daily PR-flow aggregates — ready->merged percentiles and flake discoveries (absolute gauges, one sample per complete day) | observation | day, merged_count, ready_to_merge_median_seconds, ready_to_merge_p90_seconds, flake_new_quarantines | — | events |
+| `pr_flow_run` | PR-flow sampler run — point-in-time Trunk queue depth (absolute state) | observation | queue_depth | — | events |
+| `ci_runs_daily` | daily CI-run aggregates | observation | repo, day, runs, instant_skip_runs, watchdog_runs, proof_runs, cancelled_runs, superseded_runs, superseded_zero_runs, failed_runs, retried_failed_runs, self_healed_runs, abandoned_runs, zombie_runs, prs_completed, prs_with_runs, per_pr_duration_median_minutes, per_pr_duration_p90_minutes, per_pr_runs_median, per_pr_runs_p90, per_pr_runs_executed_median, white_run_share, retry_share, noise_run_share, first_pass_pr_share | — | events |
+| `ci_workflow_window` | trailing workflow fragility | observation | repo, workflow, runs, failed_runs, self_healed_runs, retried_failed_runs, cancelled_runs, superseded_runs, instant_skip_runs, prs_appeared_on, pr_appearance_share, retry_share, exec_median_seconds, exec_p90_seconds | — | events |
+| `ci_runs_run` | CI-run sampler breadcrumb | observation | repo, window_days, window_runs, window_prs, api_requests | — | events |
+| `task_reminder_digest` | overdue-task owner digest | noise | owner_id, task_count, task_ids | — | events |
+| `task_escalation` | stalled-task escalation | observation | owner_id, task_count, task_ids, leg | — | events |
+| `task_usage_record_failed` | task usage recording failed | anomaly | — | — | events |
+| `label_generated` | label auto-generated | noise | — | — | events |
+| `label_generate_failed` | label generation failed | anomaly | — | — | events |
+| `label_generate_skipped` | label generation skipped | noise | — | — | events |
+| `label_generate_empty` | label generation empty | noise | — | — | events |
+| `label_generate_rejected` | label generation rejected as not a label | noise | — | — | events |
+| `label_generate_retired` | label generation given up on after repeated failures | noise | — | — | events |
+| `hierarchy_enqueue_failed` | a compact-boundary build job could not be enqueued (best-effort; the reconcile scan backstops) | anomaly | agent_id, error | — | events |
+| `hierarchy_regen_alert` | one build job generated more nodes than the alert threshold (observability only) | anomaly | agent_id, job_id, generated, threshold | — | events |
+| `hierarchy_regen_halt` | generation stopped mid-run at the halt threshold; the remainder is skipped and the continuation waits out the backoff | anomaly | agent_id, job_id, generated, threshold | — | events |
+| `hierarchy_regen_budget_tripped` | the 24h fleet-wide generated-node total crossed the daily budget; the worker stopped claiming until an operator resets the breaker | anomaly | window_nodes, budget_nodes | — | events |
+| `hierarchy_regen_low_reuse` | one build job reused almost none of an established tree's texts — the shape of a full re-cut | anomaly | agent_id, job_id, generated, reused | — | events |
+| `loki_write_path_probe_failed` | Loki write-path probe failed | anomaly | consecutive_failures, reason | — | events |
+| `loki_write_path_probe_throttled` | Loki write-path probe persistently throttled | anomaly | consecutive_throttles, reason | — | events |
+| `event_log_drop` | event-pipeline row shed | anomaly | n, queue, last_dropped_at | — | events |
 | `telemetry_read_stale` | read-side telemetry staleness detected — heartbeat older than threshold | anomaly | source, signal, threshold_s, age_s, action, reason | — | events |
 | `telemetry_read_recovered` | read-side telemetry heartbeat recovered | observation | source, signal, stale_duration_s | — | events |
 | `otlp_backend_disabled` | OTLP backend disabled for this process (init failure / collector unreachable); retry scheduled | anomaly | reason, endpoint | — | events |
@@ -318,23 +311,28 @@ consumers: see the comments at each emit point.
 | `resolution_status` | absolute unresolved + dismissed warning/error class counts over the daemon's fixed six-hour window | noise | unresolved_warnings, unresolved_errors, dismissed_warnings, dismissed_errors, window | — | events |
 | `checkpoint_table_sizes` | checkpoint table physical sizes and live row counts (hourly + after each blob vacuum run) | observation | blobs_bytes, checkpoints_bytes, writes_bytes, blobs_live, checkpoints_live, writes_live | — | events |
 | `audit_write_failed` | an audit event could not be recorded in audit_events (the record is missing; the Loki projection of the same event still went out) | anomaly | event_name, error_class, error | — | events |
-| `gate_auth_probe_failed` | gate auth probe failed — carries the classification (auth/timeout/network/application) and exception shape | anomaly | category, exception_type, exception_value, status, latency_ms | — | events |
-| `fleet_graph_stale` | the fleet-graph route served the stale/last-good graph after a degraded upstream read — one event per degradation episode, not per poll | anomaly | route, reason | — | events |
-| `stats_dashboard_stale` | the stats-dashboard route served its last-good response after a failed recompute — one event per degradation episode, not per poll | anomaly | route, reason | — | events |
-| `chrome_page_ttl_renewed` | Chrome page TTL deadline renewed via the renew_page tool; attributes carry page_id, ttl_s, new_expires_at | observation | — | — | events |
-| `hierarchy_enqueue_failed` | a compact-boundary build job could not be enqueued (best-effort; the reconcile scan backstops) | anomaly | agent_id, error | — | events |
-| `hierarchy_regen_alert` | one build job generated more nodes than the alert threshold (observability only) | anomaly | agent_id, job_id, generated, threshold | — | events |
-| `hierarchy_regen_halt` | generation stopped mid-run at the halt threshold; the remainder is skipped and the continuation waits out the backoff | anomaly | agent_id, job_id, generated, threshold | — | events |
-| `hierarchy_regen_budget_tripped` | the 24h fleet-wide generated-node total crossed the daily budget; the worker stopped claiming until an operator resets the breaker | anomaly | window_nodes, budget_nodes | — | events |
-| `hierarchy_regen_low_reuse` | one build job reused almost none of an established tree's texts — the shape of a full re-cut | anomaly | agent_id, job_id, generated, reused | — | events |
+| `lgtm_dashboard_render_failed` | ava-ops dashboard render failed during converge; the previous provisioning file was kept | anomaly | — | — | events |
+| `converge_file_preserved` | converge kept a locally modified destination instead of overwriting — the current content no longer matches the recorded render; repeats every converge until resolved | anomaly | path, key, surface | — | events |
+| `root_chain_broken` | root self-check found a managed unit no longer a live child of the root process — one alert per episode, held until intact | anomaly | — | — | events |
+| `root_restart_breaker_open` | root health monitor restart breaker opened — repeated non-alive probe rounds held until a probe-alive round | anomaly | — | — | events |
+| `root_restart_failed` | root unit replacement failed at its down|up half — explicit failure state recorded; intent stays running and the health monitor retries under its backoff (task #4872) | anomaly | unit, stage, detail | — | events |
+| `root_restart_cleared` | root unit replacement succeeded — the recorded failure state was cleared (task #4872) | noise | unit, failed_for_s | — | events |
+| `custody_reconcile` | custody record reconcile pass — releases always report; a retained record reports on first sight and evidence change — with its birth and process-group evidence (task #4872) | observation | unit, checked, found, decision, evidence | — | events |
+| `root_unit_alert_fired` | root unit entered an alertable failure state (intent running, and restart_failed, breaker open, or retained custody) — one firing per episode; delivery records the user-channel post (task #4872) | anomaly | unit, kind, since_timestamp_seconds, detail, delivery | — | events |
+| `root_unit_alert_resolved` | root unit alert episode closed — the failure state cleared and the episode resolved (task #4872) | noise | unit, kind, since_timestamp_seconds, failed_for_s, delivery | — | events |
+| `permissions_helper_unhealthy` | permissions helper failed its healthcheck (ping plus launchd job classification) — one alert per episode, held until a ping-alive round | anomaly | — | — | events |
+| `schedule_stalled` | enabled non-completed schedule has had no live session for more than two hours | anomaly | schedule_id, status, stalled_seconds | — | events |
+| `root_health_expected` | root health observation rounds expected, including before the first sample | noise | home_id, expected_since_timestamp_seconds | — | events |
+| `root_diagnostic` | root diagnostic verdict changed; observation only, no recovery authority | anomaly | — | — | events |
+| `root_health_tick` | root completed one service health and diagnostic observation round | noise | home_id, last_tick_timestamp_seconds | — | events |
+| `backup_operation_custody` | backup operation quarantined, blocked on unproven closure, or retired | anomaly | operation, custody, detail | — | events |
+| `postgres_stop_escalated` | a Postgres fast shutdown did not finish within its budget and was ended by an immediate shutdown plus a SIGKILL of the leftover descendants (usually a hung archive command) | anomaly | — | — | events |
+| `recovery_drill_failed` | scheduled logical restore drill failed | anomaly | drill, detail | — | events |
 
 ## 4. Log (bare logs, category=log)
 
 | event_name | meaning | tier | key payload fields | destination |
 |------|------|------|-----------------|------|
-| `log` | bare log line | noise | msg | events |
-| `loki_query_failed` | a Loki HTTP query failed (timeout / disconnect / non-2xx) — carries the request shape | anomaly | endpoint, duration_s, error, window_from, window_to, query | events |
-| `prom_query_failed` | a Prometheus HTTP query failed (timeout / disconnect / non-2xx) — carries the request shape | anomaly | endpoint, duration_s, error, query | events |
 | `page_serve_dir_missing` | a served page directory disappeared; emitted on degradation and auto-close | anomaly | agent_id, key, name, serve_dir, port | events |
 | `page_ttl_expired` | the TTL reaper terminalized a page row whose expires_at passed; attributes carry agent_id, name, page_id | observation | — | events |
 | `page_language_lookup_failed` | the gateway could not read the page copy language from user_settings (DB failure) and fell back to the default; attributes carry exc_type, exc_message | anomaly | — | events |
@@ -342,6 +340,9 @@ consumers: see the comments at each emit point.
 | `page_proxy_504` | the gateway reverse proxy timed out dialing a registered page server; attributes carry trace_id, agent_id, page, host, port, exc_type, exc_message | anomaly | — | events |
 | `shell_ttl_expired` | the TTL reaper killed a persistent shell whose declared TTL passed; attributes carry agent_id, session_id, mode | observation | — | events |
 | `chrome_page_ttl_expired` | the browser-mcp TTL sweep closed a Chrome page whose hard deadline passed; attributes carry page_id, url, agent_id (None when no affinity slot still named the page) | observation | — | events |
+| `log` | bare log line | noise | msg | events |
+| `loki_query_failed` | a Loki HTTP query failed (timeout / disconnect / non-2xx) — carries the request shape | anomaly | endpoint, duration_s, error, window_from, window_to, query | events |
+| `prom_query_failed` | a Prometheus HTTP query failed (timeout / disconnect / non-2xx) — carries the request shape | anomaly | endpoint, duration_s, error, query | events |
 | `lifecycle_pointer_done_torn` | the TTL reaper's scan found lifecycle command(s) sitting at done while agents_meta.lifecycle_command_id still pointed at them (an out-of-band torn write, task #3678) — every resurrect of the named agent(s) defers until settled; attributes carry count and samples | anomaly | — | events |
 | `lifecycle_fences_settled_absent_machine` | the TTL reaper settled applied-but-unobserved force-terminate command(s) whose agent's home machine is absent from the machines registry (a decommissioned machine never runs the boot recovery that would observe its fences, task #4143); attributes carry count and samples | observation | — | events |
 
@@ -410,7 +411,7 @@ Under the unified model `event_name` is a globally unique event name (OTel
 5. **One fact = one event_name, no cross-category near-duplicates**: when the same
    fact exists in both audit and telemetry, distinguish by category, do not mint a
    near-synonym name.
-6. **New event_names must be registered in `EVENTS` in `base/events/contract.py`
+6. **New event_names must be declared in a `base/events/declarations/` module
    first** (this document is generated from it; registration = documented), and the
    PR description cites the registry entry.
 7. **Payload tiering**: only event_names whose payload fields are **branched on** by
@@ -498,8 +499,8 @@ event_name and category; `_TELEMETRY_KINDS` in
 
 ## 8. Inventory method and coverage (reproducible)
 
-1. **Registry**: the `EVENTS` in `base/events/contract.py` is the single source of
-   truth; this document is generated by `scripts/codegen/gen_event_registry.py` (the
+1. **Registry**: the `EVENTS` in `base/events/contract.py`, merged from
+   `base/events/declarations/`, is the single source of truth; this document is generated by `scripts/codegen/gen_event_registry.py` (the
    pre-commit `events-registry-fresh` hook verifies no drift).
 2. **Code-literal cross-check**: `python base/events/scan_kinds.py` — scans
    production Python code (excluding tests/worktrees/node_modules) for `event=`,

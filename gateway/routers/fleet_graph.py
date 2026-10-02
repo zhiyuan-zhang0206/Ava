@@ -36,7 +36,7 @@ from psycopg import errors as pg_errors
 
 from base import telemetry
 from base.config import settings
-from base.events.contract import FleetGraphStaleReason
+from base.events.declarations.gateway import FleetGraphStaleReason
 from base.events.live.redis_client import sync_redis
 from base.log import logger
 from gateway.events import audit_rows
