@@ -48,14 +48,19 @@ def _builds_the_bus(call: ast.Call, buses: set[str]) -> bool:
     )
 
 
-def hits(tree: ast.Module, rel: str) -> list[Hit]:
-    """Every `EventBus.from_settings()` in a governed module that is not one of its roots."""
-    package = package_of(rel)
-    if package is None or rel in allow.BUS_PACKAGES[package]:
-        return []
+def builds(tree: ast.Module) -> list[Hit]:
+    """Every `EventBus.from_settings()` in one module, whatever package it belongs to."""
     buses = _bus_names(tree)
     return [
         Hit(AMBIENT_BUS, _SITE, node.lineno)
         for node in ast.walk(tree)
         if isinstance(node, ast.Call) and _builds_the_bus(node, buses)
     ]
+
+
+def hits(tree: ast.Module, rel: str) -> list[Hit]:
+    """Every `EventBus.from_settings()` in a governed module that is not one of its roots."""
+    package = package_of(rel)
+    if package is None or rel in allow.BUS_PACKAGES[package]:
+        return []
+    return builds(tree)

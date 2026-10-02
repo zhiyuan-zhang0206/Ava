@@ -5,7 +5,11 @@
   "agent/graph": {
     "shim": 3
   },
+  "agent/ownership": {
+    "bus-built": 3
+  },
   "ava": {
+    "bus-built": 1,
     "shim": 1
   },
   "ava/external": {
@@ -14,13 +18,18 @@
   "ava/shell": {
     "shim": 4
   },
+  "ava_builtins/plugins": {
+    "bus-built": 3
+  },
   "base/agents": {
+    "bus-built": 10,
     "shim": 41
   },
   "base/cluster": {
     "shim": 15
   },
   "base/db": {
+    "bus-built": 1,
     "shim": 5
   },
   "base/deploy": {
@@ -32,6 +41,15 @@
   "base/telemetry": {
     "shim": 6
   },
+  "gateway": {
+    "bus-built": 1
+  },
+  "gateway/agents": {
+    "bus-built": 12
+  },
+  "gateway/inspect": {
+    "bus-built": 1
+  },
   "ops": {
     "shim": 1
   },
@@ -39,12 +57,14 @@
     "shim": 4
   },
   "ops/agents": {
+    "bus-built": 2,
     "shim": 4
   },
   "ops/cluster_status": {
     "shim": 2
   },
   "ops/lifecycle": {
+    "bus-built": 7,
     "shim": 6
   },
   "schedules": {
@@ -55,5 +75,8 @@
   },
   "services/ava_root_glue": {
     "self-built": 1
+  },
+  "services/labeler": {
+    "bus-built": 1
   }
 }
