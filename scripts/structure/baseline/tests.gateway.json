@@ -11,7 +11,6 @@
     "tests/gateway/test_cluster_endpoints.py::ops.cluster_status._supervisor_online": 1
   },
   "tests_location": {
-    "tests/gateway/test_okf_graph.py::top-level": 1,
-    "tests/gateway/test_runtime_metrics.py::top-level": 1
+    "tests/gateway/test_okf_graph.py::top-level": 1
   }
 }
