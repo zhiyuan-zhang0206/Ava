@@ -17,6 +17,14 @@ the process and the supervisor restarts it.
    (pub/sub is fire-and-forget) is retried without letting a permanently
    failing inbound create an unbounded wake storm; the per-agent 30s recheck
    stays the double-fault safety net, its degraded-WARNING a dispatcher-health signal.
+   Re-dispatch and poisoning apply only while the owner's host verdict is fresh
+   (`machine_probe` younger than `AVA_DELIVERY_WATCHDOG_HOST_STALENESS_SECONDS`,
+   machine graded online by the two-consecutive-failure rule, agent host
+   alive — the host check is excused inside the one-failure grace window,
+   when the failed probe itself nulls the host verdict); a missing, stale,
+   graded-offline or (outside that window) host-less verdict freezes the row
+   (no counter burn, no poison) and it resumes once the verdict is fresh
+   again (task #4872 route D).
 
 2. **Stall alerting** — WARNING each chat inbound still `pending` past
    `AVA_DELIVERY_WATCHDOG_THRESHOLD_SECONDS` (default 30s) whose owner is in a
@@ -383,6 +391,7 @@ async def _scan_loop(pool: ConnectionPool, progress: LoopProgress) -> None:
     dispatch_threshold = settings.daemon.delivery_watchdog_dispatch_threshold_seconds
     max_dispatch_count = settings.daemon.delivery_watchdog_max_dispatch_count
     dispatch_backoff_steps = settings.daemon.delivery_watchdog_dispatch_backoff_steps_s
+    host_staleness = settings.daemon.delivery_watchdog_host_staleness_seconds
     alert_threshold = settings.daemon.delivery_watchdog_threshold_seconds
     stale_claimed_threshold = settings.daemon.delivery_watchdog_stale_claimed_threshold_seconds
     stale_claimed_idling_threshold = (
@@ -390,12 +399,13 @@ async def _scan_loop(pool: ConnectionPool, progress: LoopProgress) -> None:
     )
     _log.info(
         "[delivery] watchdog started, pid=%s, interval=%.1fs, dispatch_threshold=%.1fs, "
-        "alert_threshold=%.0fs, stale_claimed_threshold=%.0fs, "
+        "host_staleness=%.0fs, alert_threshold=%.0fs, stale_claimed_threshold=%.0fs, "
         "stale_claimed_idling_threshold=%.0fs, "
         "alert set table-backed (reload per tick)",
         os.getpid(),
         interval,
         dispatch_threshold,
+        host_staleness,
         alert_threshold,
         stale_claimed_threshold,
         stale_claimed_idling_threshold,
@@ -423,6 +433,7 @@ async def _scan_loop(pool: ConnectionPool, progress: LoopProgress) -> None:
                 dispatch_threshold,
                 max_dispatch_count,
                 dispatch_backoff_steps,
+                host_staleness,
             )
             newly_alerted, alerted = scan_once(pool, alert_threshold, alerted)
             # Persist the delta: new alerts INSERT, resolved rows DELETE, TTL
