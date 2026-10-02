@@ -120,7 +120,7 @@ async def test_host_refuses_a_turn_owned_by_another_live_instance(
         db=Database.from_settings(),
     )
 
-    async def forbidden_runtime(_agent_id: int, _fingerprint: str) -> None:
+    async def forbidden_runtime(_agent_id: int, _fingerprint: str, _model: str) -> None:
         raise AssertionError("a live other owner must prevent all runtime work")
 
     monkeypatch.setattr(host, "_runtime_for", forbidden_runtime)

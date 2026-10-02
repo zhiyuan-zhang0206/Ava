@@ -189,7 +189,7 @@ def load_process_extensions() -> None:
 # Return type is Any on purpose: the chat-model class must stay out of module
 # scope (the exec child imports this module for the SDK helpers), and Pyright
 # cannot resolve an annotation the module never imports.
-async def boot_agent_scope(agent_id: int) -> Any:
+async def boot_agent_scope(agent_id: int, llm_model: str) -> Any:
     """Agent-scope boot: workspace pre-create, screen-capture notice, chat model.
 
     Everything here is a fact about ONE agent, so the hosted runner runs it per
@@ -201,9 +201,7 @@ async def boot_agent_scope(agent_id: int) -> Any:
     base for `ava.files` / `ava.shell.run`, so it must exist even when the prompt
     section advertising it is off (bench runners).
 
-    The chat model is built from `turn_settings.lm.llm_model`, so callers must
-    bind this agent's framework-scope config first through
-    `base.config.turn_view.bind_agent_config`.
+    The chat model is built for `llm_model`, the agent's model for the turn.
 
     Building it eagerly is safe even though the trace init is still in flight:
     traceloop's LangChain wrap injects its callback handler into every
@@ -224,4 +222,4 @@ async def boot_agent_scope(agent_id: int) -> Any:
     await notify_desktop_permissions_at_startup()
     from base.lm.factory import build_chat_model
 
-    return build_chat_model(turn_settings.lm.llm_model)
+    return build_chat_model(llm_model)
