@@ -47,10 +47,10 @@ the registry cannot rot into a permit wall.
 
 Move the test into the `tests/` directory of the package it tests
 (`.venv/bin/python scripts/structure/tests_location.py --suggest <file>` names the lowest package
-that may legally hold it, or says why none can), with `git mv`. A test moved into a directory that
-`tests/fixtures/path_scopes.py` does not list silently loses the autouse isolation fixtures its
-old directory had: list the new directory there (`tests/ci/test_path_scopes.py` fails when it is
-missing). A test that cannot live in a package is registered in `ALLOWED`, `contract` or
+that may legally hold it, or says why none can), with `git mv`. A test moved into a directory whose
+`path_scopes.toml` does not name it silently loses the autouse isolation fixtures its old
+directory had: name it in the new directory's `path_scopes.toml`
+(`tests/ci/test_path_scopes.py` fails when it is missing). A test that cannot live in a package is registered in `ALLOWED`, `contract` or
 `integration`, with a reason a reviewer can check.
 
 ## Scope and cost
@@ -93,9 +93,10 @@ _SUGGEST = "--suggest"
 _GUIDE = (
     "A top-level test must move into the tests/ directory of the package it tests (`git mv`), "
     "unless it is registered:\n"
-    "  - tests/fixtures/path_scopes.py: if it lists the test's old directory, list the new "
-    "directory there too, or the autouse isolation fixtures silently stop applying to the "
-    "moved test (tests/ci/test_path_scopes.py fails).\n"
+    "  - path_scopes.toml: if the test's old directory has one that names the test, name it in the "
+    "new directory's path_scopes.toml too, or the autouse isolation fixtures silently stop "
+    "applying to the moved test (tests/ci/test_path_scopes.py fails; see "
+    "tests/fixtures/path_scopes.py).\n"
     "  - scripts/structure/tests_location_allowed.py: a test that cannot live in a package is "
     "registered as `contract` (its subject is a repository artifact or the test harness itself, "
     "which no package owns) or `integration` (it spans units that may not import each other), "

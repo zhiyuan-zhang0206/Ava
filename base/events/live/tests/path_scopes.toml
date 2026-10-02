@@ -1,0 +1,6 @@
+# Fixture modules (tests/path_scoped/) that govern this directory's tests: "." is the
+# directory itself, otherwise the test files named here (tests/fixtures/path_scopes.py).
+"tests.path_scoped.agent_tests" = [
+    "test_event_publisher_drop.py",
+    "test_events_wire_format.py",
+]

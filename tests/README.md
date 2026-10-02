@@ -57,14 +57,15 @@ tests/
 │   ├── messages.py
 │   └── state.py
 ├── fixtures/              # Global fixture plugins (DB/Redis isolation, guards), loaded by the repo-root conftest.py
-└── path_scoped/           # Per-directory fixtures (the former conftests), registered by path in tests/fixtures/path_scopes.py
+└── path_scoped/           # Per-directory fixtures (the former conftests), registered by the `path_scopes.toml` files next to the tests they govern
 ```
 
 Fixtures that only some directories' tests take (autouse isolation stand-ins, `short_tmp`,
 `as_machine`, ...) are not in a `conftest.py`, because a conftest does not follow a test into a
-package's `tests/` directory. They live in `tests/path_scoped/` and `PATH_SCOPES` in
-`tests/fixtures/path_scopes.py` lists the paths each applies to; a test moved elsewhere gets its
-new path added there (the file's docstring says how).
+package's `tests/` directory. They live in `tests/path_scoped/`; a `path_scopes.toml` in a test
+directory names the fixture modules that apply there (`tests/fixtures/path_scopes.py` reads them
+all); a test moved elsewhere gets its file named in the destination directory's `path_scopes.toml`
+(that file's docstring says how).
 
 ### Directory Mapping
 
