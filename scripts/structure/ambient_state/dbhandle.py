@@ -84,18 +84,20 @@ def _call_hit(call: ast.Call, names: _Names, *, is_root: bool) -> str | None:
     return None
 
 
+def dials(tree: ast.Module, *, is_root: bool = False) -> list[Hit]:
+    """Every ambient database dial in one module, whatever package it belongs to."""
+    names = _Names(tree)
+    return [
+        Hit(AMBIENT_DB, name, node.lineno)
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and (name := _call_hit(node, names, is_root=is_root)) is not None
+    ]
+
+
 def hits(tree: ast.Module, rel: str) -> list[Hit]:
     """Every ambient database dial in a governed module."""
     package = package_of(rel)
     if package is None:
         return []
-    names = _Names(tree)
-    is_root = rel in allow.DB_HANDLE_PACKAGES[package]
-    found: list[Hit] = []
-    for node in ast.walk(tree):
-        if (
-            isinstance(node, ast.Call)
-            and (name := _call_hit(node, names, is_root=is_root)) is not None
-        ):
-            found.append(Hit(AMBIENT_DB, name, node.lineno))
-    return found
+    return dials(tree, is_root=rel in allow.DB_HANDLE_PACKAGES[package])
