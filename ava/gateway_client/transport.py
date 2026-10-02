@@ -66,8 +66,15 @@ def _client_singleton() -> httpx.Client:  # noqa: F821  # pyright: ignore[report
 # bounded exponential backoff 1s → 2s → 4s → 8s cap (see `_retry_delay_seconds`),
 # a much larger window than the restart time and well within the 10s timeout.
 # env override: `AVA_GATEWAY_MAX_RETRIES` / `AVA_GATEWAY_RETRY_DELAY_SECONDS`.
-_MAX_RETRIES = settings.gateway.gateway_client_max_retries
-_RETRY_DELAY_S = settings.gateway.gateway_client_retry_delay_seconds
+
+
+def _max_retries() -> int:
+    return settings.gateway.gateway_client_max_retries
+
+
+def _base_retry_delay_s() -> float:
+    return settings.gateway.gateway_client_retry_delay_seconds
+
 
 # ── Transient-failure retry policy ──
 # The status set (429/500/502/503/504) lives with the deferred-delivery outbox
@@ -136,7 +143,7 @@ def _agent_jitter_seconds() -> float:
 def _retry_delay_seconds(attempt: int) -> float:
     """Sleep before retry `attempt` (0-based): bounded exponential backoff
     plus the deterministic per-agent jitter offset."""
-    base = min(_RETRY_DELAY_S * _RETRY_BACKOFF_FACTOR**attempt, _RETRY_MAX_DELAY_S)
+    base = min(_base_retry_delay_s() * _RETRY_BACKOFF_FACTOR**attempt, _RETRY_MAX_DELAY_S)
     return base + _agent_jitter_seconds()
 
 
@@ -320,7 +327,7 @@ def post(
     client's configured timeout" — there is deliberately no way to ask for an
     unbounded request.
 
-    `max_retries` overrides the module-wide attempt count (`_MAX_RETRIES`) for
+    `max_retries` overrides the module-wide attempt count (`_max_retries()`) for
     this one call. The default fits routes the gateway works on directly, but
     a call whose failure mode is a *modelled, already-spent* response (e.g.
     memory search, where the gateway answers 503 only after consuming its own
@@ -352,7 +359,7 @@ def post(
     key = idempotency_key or _uuid.uuid4().hex
     headers = {"Idempotency-Key": key} if semantics is Idempotency.AT_LEAST_ONCE_WITH_KEY else None
 
-    retries = _MAX_RETRIES if max_retries is None else max_retries
+    retries = _max_retries() if max_retries is None else max_retries
     return _request_with_retry(
         lambda: _client_singleton().post(
             path, json=json or {}, params=params, timeout=per_call, headers=headers
@@ -384,7 +391,7 @@ def get(
     import httpx
 
     per_call = httpx.USE_CLIENT_DEFAULT if timeout is None else timeout
-    retries = _MAX_RETRIES if max_retries is None else max_retries
+    retries = _max_retries() if max_retries is None else max_retries
     return _request_with_retry(
         lambda: _client_singleton().get(path, params=params, timeout=per_call), retries
     )
@@ -398,10 +405,10 @@ def patch(path: str, json: dict | None = None) -> httpx.Response:  # noqa: F821 
     outcome beyond the first application.
     """
     return _request_with_retry(
-        lambda: _client_singleton().patch(path, json=json or {}), _MAX_RETRIES
+        lambda: _client_singleton().patch(path, json=json or {}), _max_retries()
     )
 
 
 def _delete(path: str) -> httpx.Response:  # noqa: F821  # pyright: ignore[reportUndefinedVariable]
     """Unified DELETE wrapper + transient-failure retry + failure → GatewayUnavailable. Same policy as `post`; DELETE is idempotent by semantics."""
-    return _request_with_retry(lambda: _client_singleton().delete(path), _MAX_RETRIES)
+    return _request_with_retry(lambda: _client_singleton().delete(path), _max_retries())
