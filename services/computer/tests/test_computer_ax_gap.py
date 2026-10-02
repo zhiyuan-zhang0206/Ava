@@ -16,6 +16,7 @@ from services.computer import ax_gap
 from services.computer.ax_gap import Frame, GapRead, VisualBox
 from services.computer.errors import ComputerUseError
 from services.computer.mcp_daemon import ComputerMcpDaemon
+from services.computer.tests.slices import computer_use_config
 from services.permissions_helper import client as helper
 from services.permissions_helper.client import AxNode, AxTreeResult
 
@@ -166,7 +167,11 @@ async def call(
 async def test_include_ocr_gap_appends_only_the_text_the_tree_misses(
     fake_ax: FakeAxHelper, gap: dict[str, Any]
 ) -> None:
-    out = await call(ComputerMcpDaemon(sock="/x.sock"), "ax_tree", {"include_ocr_gap": True})
+    out = await call(
+        ComputerMcpDaemon(computer_use_config(), sock="/x.sock"),
+        "ax_tree",
+        {"include_ocr_gap": True},
+    )
     # "Send" sits inside the Send button's frame (10,20,100,40 logical, x2); the canvas label does not.
     assert '[px:1] text "Canvas label" @640,410 80x20' in out["tree"]
     assert "[px:2]" not in out["tree"] and 'text "Send"' not in out["tree"]
@@ -177,7 +182,11 @@ async def test_ocr_failure_is_soft_the_tree_is_still_returned(
     fake_ax: FakeAxHelper, gap: dict[str, Any]
 ) -> None:
     gap["read"] = GapRead([], 2.0, "swiftc not found on PATH")
-    out = await call(ComputerMcpDaemon(sock="/x.sock"), "ax_tree", {"include_ocr_gap": True})
+    out = await call(
+        ComputerMcpDaemon(computer_use_config(), sock="/x.sock"),
+        "ax_tree",
+        {"include_ocr_gap": True},
+    )
     assert (
         out["tree"].startswith("[e1] window") and out["ocr_gap_error"] == "swiftc not found on PATH"
     )
@@ -188,14 +197,14 @@ async def test_the_gap_needs_a_whole_window_read(
 ) -> None:
     with pytest.raises(ComputerUseError, match="drop scope"):
         await call(
-            ComputerMcpDaemon(sock="/x.sock"),
+            ComputerMcpDaemon(computer_use_config(), sock="/x.sock"),
             "ax_tree",
             {"include_ocr_gap": True, "scope": "e1"},
         )
 
 
 async def test_enable_ax_reaches_the_helper_and_defaults_on(fake_ax: FakeAxHelper) -> None:
-    daemon = ComputerMcpDaemon(sock="/x.sock")
+    daemon = ComputerMcpDaemon(computer_use_config(), sock="/x.sock")
     await call(daemon, "ax_tree")
     assert fake_ax.calls[-1][1]["enable_ax"] is True
     await call(daemon, "ax_tree", {"enable_ax": False})
@@ -205,7 +214,7 @@ async def test_enable_ax_reaches_the_helper_and_defaults_on(fake_ax: FakeAxHelpe
 async def test_a_px_press_clicks_the_text_center_in_logical_points(
     fake_ax: FakeAxHelper, gap: dict[str, Any], clicks: Recorder
 ) -> None:
-    daemon = ComputerMcpDaemon(sock="/x.sock")
+    daemon = ComputerMcpDaemon(computer_use_config(), sock="/x.sock")
     await call(daemon, "ax_tree", {"include_ocr_gap": True})
     out = await call(daemon, "ax_act", {"id": "px:1", "action": "press"})
     assert clicks.clicks == [(320.0, 205.0)]
@@ -230,7 +239,7 @@ async def test_a_px_press_clicks_the_text_center_in_logical_points(
 async def test_px_elements_only_press_and_only_the_latest_ones(
     fake_ax: FakeAxHelper, gap: dict[str, Any], clicks: Recorder, args: dict[str, Any]
 ) -> None:
-    daemon = ComputerMcpDaemon(sock="/x.sock")
+    daemon = ComputerMcpDaemon(computer_use_config(), sock="/x.sock")
     await call(daemon, "ax_tree", {"include_ocr_gap": True})
     with pytest.raises(ComputerUseError):
         await call(daemon, "ax_act", args)
@@ -240,7 +249,7 @@ async def test_px_elements_only_press_and_only_the_latest_ones(
 async def test_a_later_ax_tree_without_the_gap_retires_the_px_ids(
     fake_ax: FakeAxHelper, gap: dict[str, Any], clicks: Recorder
 ) -> None:
-    daemon = ComputerMcpDaemon(sock="/x.sock")
+    daemon = ComputerMcpDaemon(computer_use_config(), sock="/x.sock")
     await call(daemon, "ax_tree", {"include_ocr_gap": True})
     await call(daemon, "ax_tree")
     with pytest.raises(ComputerUseError, match="unknown visual element px:1"):

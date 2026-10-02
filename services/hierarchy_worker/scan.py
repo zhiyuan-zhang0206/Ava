@@ -29,8 +29,8 @@ from datetime import UTC, datetime, timedelta
 
 from psycopg import Connection
 
-from base.config import settings
 from base.log import logger
+from services.hierarchy_worker.config import HierarchyWorkerConfig
 
 # The job kinds: 'compact' seals the batches a new compaction boundary
 # closed; 'tail' (task #3981 C) seals an idle agent's trailing stretch. P2c
@@ -113,9 +113,9 @@ def _pure_continuation(last: _LastJob) -> bool:
     return last.status == "done" and last.failed == 0 and last.skipped > 0 and last.error is None
 
 
-def scan(conn: Connection) -> ScanOutcome:
+def scan(conn: Connection, config: HierarchyWorkerConfig) -> ScanOutcome:
     """Run one scan pass on an autocommit connection; return the pass's effect."""
-    stale_recovered = _recover_stale(conn)
+    stale_recovered = _recover_stale(conn, config)
     boundaries: dict[int, str] = {
         int(thread_id): str(latest)
         for thread_id, latest in conn.execute(_LATEST_BOUNDARY_SQL).fetchall()
@@ -133,8 +133,8 @@ def scan(conn: Connection) -> ScanOutcome:
         if last_processed is None:
             # Baselined in this pass: the boundary itself is the baseline.
             continue
-        enqueued += _consider(conn, agent_id, latest, last_processed)
-    tail_enqueued = _scan_tails(conn, state) if settings.daemon.hierarchy_tail_seal_enabled else 0
+        enqueued += _consider(conn, agent_id, latest, last_processed, config)
+    tail_enqueued = _scan_tails(conn, state, config) if config.hierarchy_tail_seal_enabled else 0
     return ScanOutcome(
         agents_tracked=len(state) + baselined,
         baselined=baselined,
@@ -144,11 +144,10 @@ def scan(conn: Connection) -> ScanOutcome:
     )
 
 
-def _recover_stale(conn: Connection) -> int:
+def _recover_stale(conn: Connection, config: HierarchyWorkerConfig) -> int:
     """Park `running` rows older than a job could legitimately live."""
     cutoff = datetime.now(UTC) - timedelta(
-        seconds=settings.daemon.hierarchy_job_deadline_seconds
-        + settings.daemon.hierarchy_stale_grace_seconds
+        seconds=config.hierarchy_job_deadline_seconds + config.hierarchy_stale_grace_seconds
     )
     cursor = conn.execute(
         "UPDATE hierarchy_jobs"
@@ -203,7 +202,9 @@ def _baseline_new(conn: Connection, boundaries: dict[int, str], state: dict[int,
     return len(new)
 
 
-def _consider(conn: Connection, agent_id: int, latest: str, last_processed: str) -> int:
+def _consider(
+    conn: Connection, agent_id: int, latest: str, last_processed: str, config: HierarchyWorkerConfig
+) -> int:
     """Decide one agent's compact due-ness; enqueue when due. Returns 1 on enqueue."""
     if _live_job(conn, agent_id):
         return 0
@@ -215,8 +216,8 @@ def _consider(conn: Connection, agent_id: int, latest: str, last_processed: str)
     if last is not None and not _clean(last) and not _pure_continuation(last):
         streak = _nonclean_streak(conn, agent_id, KIND_COMPACT)
         delay_s = min(
-            settings.daemon.hierarchy_retry_backoff_seconds * (2 ** (streak - 1)),
-            settings.daemon.hierarchy_retry_backoff_cap_seconds,
+            config.hierarchy_retry_backoff_seconds * (2 ** (streak - 1)),
+            config.hierarchy_retry_backoff_cap_seconds,
         )
         if datetime.now(UTC) - last.finished_at < timedelta(seconds=delay_s):
             return 0
@@ -237,7 +238,7 @@ def _consider(conn: Connection, agent_id: int, latest: str, last_processed: str)
     return cursor.rowcount
 
 
-def _scan_tails(conn: Connection, state: dict[int, str]) -> int:
+def _scan_tails(conn: Connection, state: dict[int, str], config: HierarchyWorkerConfig) -> int:
     """Enqueue tail-seal jobs for idle agents (task #3981 C). Returns the count.
 
     Four gates per agent — idle (its newest checkpoint has been quiet for the
@@ -260,10 +261,10 @@ def _scan_tails(conn: Connection, state: dict[int, str]) -> int:
         ).fetchall()
     }
     now = datetime.now(UTC)
-    idle_window = timedelta(minutes=settings.daemon.hierarchy_tail_idle_minutes)
+    idle_window = timedelta(minutes=config.hierarchy_tail_idle_minutes)
     enqueued = 0
     for agent_id in sorted(latest):
-        if enqueued >= settings.daemon.hierarchy_tail_max_per_tick:
+        if enqueued >= config.hierarchy_tail_max_per_tick:
             # The cap is per tick; the next pass picks the next agents up.
             break
         if agent_id not in state:
@@ -280,7 +281,7 @@ def _scan_tails(conn: Connection, state: dict[int, str]) -> int:
             continue
         if not _has_clean_baseline(conn, agent_id) or _live_job(conn, agent_id):
             continue
-        if not _tail_due_by_history(conn, agent_id, now):
+        if not _tail_due_by_history(conn, agent_id, now, config):
             continue
         cursor = conn.execute(
             "INSERT INTO hierarchy_jobs (agent_id, kind, trigger_boundary, status, include_tail)"
@@ -352,7 +353,9 @@ def _live_job(conn: Connection, agent_id: int) -> bool:
     )
 
 
-def _tail_due_by_history(conn: Connection, agent_id: int, now: datetime) -> bool:
+def _tail_due_by_history(
+    conn: Connection, agent_id: int, now: datetime, config: HierarchyWorkerConfig
+) -> bool:
     """The per-agent tail pacing: interval, backoff, continuation.
 
     Kind-scoped mirror of the compact channel's retry discipline: a clean
@@ -365,14 +368,14 @@ def _tail_due_by_history(conn: Connection, agent_id: int, now: datetime) -> bool
         return True
     if _clean(last):
         return now - last.finished_at >= timedelta(
-            minutes=settings.daemon.hierarchy_tail_min_interval_minutes
+            minutes=config.hierarchy_tail_min_interval_minutes
         )
     if _pure_continuation(last):
         return True
     streak = _nonclean_streak(conn, agent_id, KIND_TAIL)
     delay_s = min(
-        settings.daemon.hierarchy_retry_backoff_seconds * (2 ** (streak - 1)),
-        settings.daemon.hierarchy_retry_backoff_cap_seconds,
+        config.hierarchy_retry_backoff_seconds * (2 ** (streak - 1)),
+        config.hierarchy_retry_backoff_cap_seconds,
     )
     return now - last.finished_at >= timedelta(seconds=delay_s)
 

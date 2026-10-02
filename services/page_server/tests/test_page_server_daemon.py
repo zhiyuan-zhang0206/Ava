@@ -18,6 +18,7 @@ from psycopg_pool import ConnectionPool
 import services.page_server.daemon as psd
 import services.page_server.degradation as page_degradation
 from base.cluster.machine import reset_identity, set_identity
+from services.page_server.tests.slices import page_server_config
 from tests.fixtures.units import spawn_agent
 
 _HOST = "127.0.0.1"
@@ -126,7 +127,7 @@ def _reconcile(
     backoff: dict[tuple[int, str], float],
     degraded: dict[tuple[int, str], psd._DegradedServeDir],
 ) -> None:
-    psd._reconcile_once(pool, managed, backoff, degraded, _HOST)
+    psd._reconcile_once(pool, managed, backoff, degraded, _HOST, page_server_config())
 
 
 def _token_and_session(conn: psycopg.Connection, agent_id: int, name: str) -> tuple[str, str]:

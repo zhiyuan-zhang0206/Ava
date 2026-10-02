@@ -11,10 +11,10 @@ from pathlib import Path
 from psycopg_pool import ConnectionPool
 
 from base import telemetry
-from base.config import settings
 from base.db.transaction import write_transaction
 from base.events.live.projection import PageClosed
 from base.events.live.redis_client import publish_best_effort
+from services.page_server.config import PageServerConfig
 
 _log = logging.getLogger("services.page_server.daemon")
 
@@ -80,13 +80,13 @@ def _emit_missing_serve_dir(row: _PageRow, key: tuple[int, str]) -> None:
         )
 
 
-def _publish_page_closed(row: _PageRow) -> None:
+def _publish_page_closed(row: _PageRow, config: PageServerConfig) -> None:
     """Best-effort PageClosed publication from this sync daemon worker."""
     event = PageClosed(agent_id=row.agent_id, name=row.name)
     with suppress(Exception):
         asyncio.run(
             publish_best_effort(
-                settings.data_plane.events_channel,
+                config.events_channel,
                 event.model_dump_json(),
                 context="page_server_serve_dir_missing",
             )
@@ -100,6 +100,7 @@ def _reconcile_serve_dir(
     degraded: dict[tuple[int, str], _DegradedServeDir],
     backoff: dict[tuple[int, str], float],
     now: float,
+    config: PageServerConfig,
 ) -> bool:
     """Update missing-directory state; return whether spawning must be skipped."""
     state = degraded.get(key)
@@ -124,7 +125,7 @@ def _reconcile_serve_dir(
         _emit_missing_serve_dir(row, key)
     if observations >= _MISSING_SERVE_DIR_CLOSE_AFTER_OBSERVATIONS:
         if _close_row(pool, row.id):
-            _publish_page_closed(row)
+            _publish_page_closed(row, config)
             _emit_missing_serve_dir(row, key)
             _log.warning(
                 "[page-server] auto-closed %s: serve_dir remained unavailable after "
