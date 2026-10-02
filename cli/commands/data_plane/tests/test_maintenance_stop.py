@@ -372,9 +372,11 @@ def test_real_pgbouncer_normal_exit_and_identity_cleanup(
     identity = stop.OwnedProcess.capture(psutil.Process(pid))
     monkeypatch.setattr(settings.data_plane, "redis_url", f"redis://127.0.0.1:{_free_port()}")
     seen_alive: list[bool] = []
-    monkeypatch.setattr(
-        plane, "_report_pooler_clients", lambda *_a: seen_alive.append(identity.live())
-    )
+
+    def note_liveness(_identity: object, _report: object) -> None:
+        seen_alive.append(identity.live())
+
+    monkeypatch.setattr(plane, "_report_pooler_clients", note_liveness)
     try:
         assert stop.stop_data_plane(3) == ["pgbouncer"]
         assert seen_alive == [True], "the clients are listed once, before the pooler is signalled"

@@ -23,13 +23,28 @@ def _client(n: int) -> pooler_files.PoolerClient:
     )
 
 
+def _fake_pooler_config(monkeypatch: pytest.MonkeyPatch) -> None:
+    def from_config(_identity: object, _config: object) -> SimpleNamespace:
+        return SimpleNamespace(port=6432)
+
+    monkeypatch.setattr(plane.OwnedPooler, "from_config", from_config)
+
+
 @pytest.fixture
 def console(monkeypatch: pytest.MonkeyPatch) -> list[pooler_files.PoolerClient]:
     """A readable console listing whatever the test appends."""
     listed: list[pooler_files.PoolerClient] = []
-    monkeypatch.setattr(plane.OwnedPooler, "from_config", lambda *_a: SimpleNamespace(port=6432))
-    monkeypatch.setattr(plane, "read_pooler_admin", lambda _home: SimpleNamespace(password=_ADMIN))
-    monkeypatch.setattr(pooler_files, "clients", lambda _port, _password: list(listed))
+    _fake_pooler_config(monkeypatch)
+
+    def read_admin(_home: object) -> SimpleNamespace:
+        return SimpleNamespace(password=_ADMIN)
+
+    monkeypatch.setattr(plane, "read_pooler_admin", read_admin)
+
+    def list_clients(_port: int, _password: str) -> list[pooler_files.PoolerClient]:
+        return list(listed)
+
+    monkeypatch.setattr(pooler_files, "clients", list_clients)
     return listed
 
 
@@ -72,7 +87,7 @@ def test_no_clients_says_nothing(
 def test_an_unreadable_console_is_reported_as_unreadable_not_as_empty(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    monkeypatch.setattr(plane.OwnedPooler, "from_config", lambda *_a: SimpleNamespace(port=6432))
+    _fake_pooler_config(monkeypatch)
 
     def unreadable(_home: object) -> object:
         raise FileNotFoundError("no admin secret")
