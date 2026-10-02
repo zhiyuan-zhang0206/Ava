@@ -235,7 +235,7 @@ def _guard_service_readiness(
         lambda *_a, **_kw: ready,
     )
     # The root-driven path's wait has the same bound and the same reason to be
-    # stubbed for tests that are not about it (tests/cli/test_root_driver.py opts
+    # stubbed for tests that are not about it (cli/commands/lifecycle/tests/test_root_driver.py opts
     # out with a module-level `real_service_readiness_gate` marker).
     monkeypatch.setattr(
         "cli.commands.lifecycle.root_driver._wait_for_root_services_ready",
