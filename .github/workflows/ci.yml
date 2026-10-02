@@ -1300,7 +1300,7 @@ jobs:
           # service custody is unresolved). The F11 tccd-attribution phase is
           # skipped here because hosted runners restrict `log show`; run the
           # script without --skip-attribution on a dev host for that phase.
-          uv run python scripts/ci/two_section_chain_smoke.py --skip-attribution
+          uv run python -m scripts.ci.two_section_chain_smoke --skip-attribution
 
       - name: Tear down helper launchd job
         if: ${{ always() }}
