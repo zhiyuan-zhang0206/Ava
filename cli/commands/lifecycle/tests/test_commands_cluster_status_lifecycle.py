@@ -5,8 +5,8 @@ from __future__ import annotations
 import pytest
 
 from tests.cli._commands_helpers import _fake_session_backends as _fake_session_backends
+from tests.cli._commands_helpers import _gateway_role_pinned as _gateway_role_pinned
 from tests.cli._commands_helpers import _hermetic_gateway_base as _hermetic_gateway_base
-from tests.cli._commands_helpers import _noop_start_prechecks as _noop_start_prechecks
 
 
 def test_cmd_status_gateway_cluster_serves_line_shows_station(
