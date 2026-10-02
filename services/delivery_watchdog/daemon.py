@@ -93,6 +93,7 @@ from psycopg_pool import ConnectionPool
 import base.db
 from base import telemetry
 from base.config import settings
+from base.daemon import round_loop
 from base.daemon.health import health_port, start_health_server, stop_health_server
 from base.daemon.loop_health import LivenessGroup, LoopProgress
 from base.daemon.shutdown import cancel_and_drain, install_graceful_shutdown
@@ -129,7 +130,7 @@ def _pidfile() -> Path:
 
 
 # Liveness staleness ceiling of the scan loop. It sleeps a short inter-poll
-# interval and `rounds.sleep_with_progress` beats during that wait; the ceiling
+# interval and `round_loop.sleep_with_progress` beats during that wait; the ceiling
 # only has to exceed one beat step, not the whole interval.
 _SCAN_LIVENESS_TIMEOUT_S = 60.0
 # Connections the four loops' concurrent statements can hold at once.
@@ -414,7 +415,7 @@ async def _scan_loop(pool: ConnectionPool, progress: LoopProgress) -> None:
     last_claimed_sweep = 0.0
     while True:
         try:
-            await rounds.sleep_with_progress(progress, interval)
+            await round_loop.sleep_with_progress(progress, interval)
             # Reload the alerted set from the table — it is the single truth;
             # `alerted` below is a per-tick working copy. An unreadable table
             # skips the whole tick (defer rather than re-alert): the loop

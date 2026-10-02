@@ -318,7 +318,7 @@ class RootUnitAlertResolved(TypedDict):
 
 
 class ScheduleStalled(TypedDict):
-    """`schedule_stalled` payload — gateway/schedules/manager.py.
+    """`schedule_stalled` payload — services/schedule_manager/manager.py.
 
     Emitted once after an enabled, non-completed schedule has had no live
     session for more than two hours. A live observation rearms a later outage.

@@ -166,7 +166,7 @@ def test_schedule_launch(
     `new <name> <cwd> <envfile> [cmd_b64]`: the argv carries the 0600
     envfile's path and a base64 command — never the env values; the schedule
     id rides the envfile, not the argv."""
-    from gateway.schedules.manager import ScheduleManager
+    from services.schedule_manager.manager import ScheduleManager
 
     manager = ScheduleManager(None)  # type: ignore[arg-type] — _launch's pool-touching writes are stubbed below
     monkeypatch.setattr(ScheduleManager, "_set_status", lambda *_a, **_k: True)  # pyright: ignore[reportUnknownArgumentType]

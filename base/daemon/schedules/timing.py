@@ -20,6 +20,6 @@ agent/sandbox-domain settings reads into the gateway closure
 from __future__ import annotations
 
 # How long an enabled, non-completed schedule may remain sessionless before
-# the manager raises the stall alert (gateway/schedules/manager.py). Must stay
+# the manager raises the stall alert (services/schedule_manager/manager.py). Must stay
 # above NO_PROGRESS_TIMEOUT_S — see the module docstring for why.
 SCHEDULE_STALL_ALERT_AFTER_S = 2 * 60 * 60
