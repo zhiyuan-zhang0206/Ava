@@ -1,0 +1,59 @@
+{
+  "agent": {
+    "shim": 3
+  },
+  "agent/graph": {
+    "shim": 3
+  },
+  "ava": {
+    "shim": 1
+  },
+  "ava/external": {
+    "shim": 1
+  },
+  "ava/shell": {
+    "shim": 4
+  },
+  "base/agents": {
+    "shim": 41
+  },
+  "base/cluster": {
+    "shim": 15
+  },
+  "base/db": {
+    "shim": 5
+  },
+  "base/deploy": {
+    "shim": 3
+  },
+  "base/packages": {
+    "shim": 1
+  },
+  "base/telemetry": {
+    "shim": 6
+  },
+  "ops": {
+    "shim": 1
+  },
+  "ops/agent_pause": {
+    "shim": 4
+  },
+  "ops/agents": {
+    "shim": 4
+  },
+  "ops/cluster_status": {
+    "shim": 2
+  },
+  "ops/lifecycle": {
+    "shim": 6
+  },
+  "schedules": {
+    "shim": 2
+  },
+  "services": {
+    "shim": 2
+  },
+  "services/ava_root_glue": {
+    "self-built": 1
+  }
+}
