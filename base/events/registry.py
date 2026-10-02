@@ -119,7 +119,7 @@ def _telemetry(
 
 
 _EVENTS_RUNTIME: dict[str, EventSpec] = {
-    # ── audit (category=audit, 25) — registry.md §2, append-only operations ──
+    # ── audit (category=audit) — registry.md §2, append-only operations ──
     # Keep spawn/fork/resurrect and their telemetry mirrors for complete lineage.
     "spawn": _audit("spawn", "new agent born", payload=Spawn, retention_class="lineage"),
     "fork": _audit("fork", "agent forked from another", retention_class="lineage"),
