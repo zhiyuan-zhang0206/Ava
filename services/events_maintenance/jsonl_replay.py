@@ -13,7 +13,6 @@ from typing import cast
 import psycopg
 from psycopg import sql
 
-import base.db
 from base.log import logger
 from base.paths import logs_dir
 from base.telemetry import is_rollup_source
@@ -309,7 +308,9 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
     selected_days = set(cast("list[date]", args.days)) if args.days is not None else None
-    with base.db.connect() as conn:
+    from services.events_maintenance.daemon import events_maintenance_db
+
+    with events_maintenance_db().connect() as conn:
         result = _replay_gap_days(
             conn,
             now_utc=datetime.now(UTC),

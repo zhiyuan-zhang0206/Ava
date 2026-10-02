@@ -22,11 +22,12 @@ import pytest
 
 from base.agents.history.hierarchy.pipeline import MaterializedTree
 from base.config import settings
+from base.db.tests.fakes import fake_database
 from base.events.contract import telemetry_events
 from services.hierarchy_worker import execute as execute_module
 from services.hierarchy_worker import runner
 from services.hierarchy_worker.scan import ScanOutcome, _has_clean_baseline, first_build
-from services.hierarchy_worker.tests.slices import fake_db, hierarchy_config, hierarchy_db, scan
+from services.hierarchy_worker.tests.slices import hierarchy_config, hierarchy_db, scan
 
 # Untyped fixtures and helper calls throughout: the call-site rules stay at warning for this file.
 # pyright: reportUnknownArgumentType = warning
@@ -146,12 +147,12 @@ def test_run_tick_drains_back_to_back_and_scans_once_per_window(
 
     monkeypatch.setattr(runner, "run_child", fake_child)
 
-    runner.run_tick(hierarchy_config(), fake_db(_fake_connect))
+    runner.run_tick(hierarchy_config(), fake_database(_fake_connect))
     assert ran == [1, 2]
     assert len(scanned) == 1  # one due scan, then the claims drain
 
     runner.run_tick(
-        hierarchy_config(), fake_db(_fake_connect)
+        hierarchy_config(), fake_database(_fake_connect)
     )  # inside the fallback window: no re-scan, nothing due
     assert len(scanned) == 1
 
@@ -167,7 +168,7 @@ def test_run_tick_returns_on_a_transient_failure(monkeypatch: pytest.MonkeyPatch
     monkeypatch.setattr(runner, "scan", failing_scan)
 
     runner.run_tick(
-        hierarchy_config(), fake_db(_fake_connect)
+        hierarchy_config(), fake_database(_fake_connect)
     )  # returns — no exception escapes the tick
 
 
@@ -181,7 +182,7 @@ def test_run_tick_raises_on_schema_drift(monkeypatch: pytest.MonkeyPatch) -> Non
     monkeypatch.setattr(runner, "scan", drifted_scan)
 
     with pytest.raises(psycopg.ProgrammingError):
-        runner.run_tick(hierarchy_config(), fake_db(_fake_connect))
+        runner.run_tick(hierarchy_config(), fake_database(_fake_connect))
 
 
 def test_run_tick_is_silent_while_the_switch_is_off(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -195,7 +196,7 @@ def test_run_tick_is_silent_while_the_switch_is_off(monkeypatch: pytest.MonkeyPa
 
     assert settings.daemon.hierarchy_worker_enabled is False  # the shipped default
 
-    runner.run_tick(hierarchy_config(), fake_db(exploding_connect))
+    runner.run_tick(hierarchy_config(), fake_database(exploding_connect))
     assert touched == []
 
 
@@ -357,7 +358,7 @@ def test_run_tick_stops_while_the_breaker_is_tripped(monkeypatch: pytest.MonkeyP
     monkeypatch.setattr(runner, "_regen_budget_check", lambda _conn, _config: True)
     monkeypatch.setattr(runner, "claim_next", lambda _conn: claims.append("claim"))
 
-    runner.run_tick(hierarchy_config(), fake_db(_fake_connect))
+    runner.run_tick(hierarchy_config(), fake_database(_fake_connect))
     assert claims == []
 
 

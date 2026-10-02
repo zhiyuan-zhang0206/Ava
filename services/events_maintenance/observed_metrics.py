@@ -317,14 +317,13 @@ def recover_observations(
 
 def main() -> None:
     """Operator-controlled recovery; this command never changes retained sources."""
-    from base.db import connect
-    from services.events_maintenance.daemon import events_maintenance_config
+    from services.events_maintenance.daemon import events_maintenance_config, events_maintenance_db
 
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--jsonl", type=Path, action="append", default=[])
     parser.add_argument("--archive", action="store_true")
     args = parser.parse_args()
-    with connect() as conn:
+    with events_maintenance_db().connect() as conn:
         deadline = time.monotonic() + _PASS_SECONDS
         if args.jsonl:
             for path in args.jsonl:

@@ -9,7 +9,9 @@ from pathlib import Path
 import psycopg
 import pytest
 
-from services.events_maintenance import jsonl_replay
+from base.db import Database
+from base.db.tests.fakes import fake_database
+from services.events_maintenance import daemon, jsonl_replay
 from services.events_maintenance.jsonl_replay import (
     ReplayResult,
     aggregate_rollup_file,
@@ -253,7 +255,13 @@ def test_cli_filters_days_and_exits_nonzero_for_failed_day(
         def __exit__(self, *exc: object) -> None:
             return None
 
-    monkeypatch.setattr(jsonl_replay.base.db, "connect", _ConnectionContext)
+    def fake_connect(**_kw: object) -> _ConnectionContext:
+        return _ConnectionContext()
+
+    def fake_handle() -> Database:
+        return fake_database(fake_connect)
+
+    monkeypatch.setattr(daemon, "events_maintenance_db", fake_handle)
 
     assert jsonl_replay.main(["--dry-run", "--days", "20260601"]) == 0
     success_output = capsys.readouterr().out

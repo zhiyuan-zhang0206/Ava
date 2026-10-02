@@ -6,9 +6,8 @@ the code under test through the slice.
 
 from __future__ import annotations
 
-from collections.abc import Callable
 from dataclasses import replace
-from typing import Any, cast
+from typing import Any
 
 import psycopg
 
@@ -37,17 +36,6 @@ def execute_job(job_id: int) -> int:
 def hierarchy_db() -> Database:
     """The handle on the test database (the settings the suite's conftest points at the throwaway cluster)."""
     return Database.from_settings()
-
-
-class _FakeDb:
-    """A `Database` stand-in whose `connect` is the given callable (ticks that never reach Postgres)."""
-
-    def __init__(self, connect: Callable[..., Any]) -> None:
-        self.connect = connect
-
-
-def fake_db(connect: Callable[..., Any]) -> Database:
-    return cast(Database, _FakeDb(connect))
 
 
 def run_child(job: runner.ClaimedJob) -> None:

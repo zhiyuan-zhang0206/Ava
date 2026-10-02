@@ -26,7 +26,10 @@ from psycopg_pool import ConnectionPool
 from base.config.daemon import DaemonSettings
 from base.daemon.health import LivenessGroup, LoopProgress
 from services.events_maintenance import daemon
-from services.events_maintenance.tests.slices import events_maintenance_config
+from services.events_maintenance.tests.slices import (
+    events_maintenance_config,
+    events_maintenance_db,
+)
 
 # The pool is never touched — `_run_maintenance` / `_maintenance_with_liveness` are faked.
 _FAKE_POOL: Any = object()
@@ -76,8 +79,7 @@ def test_wedged_pass_fails_without_beating_in_flight(monkeypatch: pytest.MonkeyP
             daemon._maintenance_with_liveness(
                 _FAKE_POOL,
                 progress,
-                events_maintenance_config(),
-                run=lambda _pool: time.sleep(0.05),
+                lambda _pool: time.sleep(0.05),
             )
         )
 
@@ -102,11 +104,7 @@ def test_completed_pass_beats_once_after_worker_finishes(monkeypatch: pytest.Mon
         original_beat()
 
     monkeypatch.setattr(progress, "beat", counting_beat)
-    asyncio.run(
-        daemon._maintenance_with_liveness(
-            _FAKE_POOL, progress, events_maintenance_config(), run=run
-        )
-    )
+    asyncio.run(daemon._maintenance_with_liveness(_FAKE_POOL, progress, run))
 
     assert len(beat_at) == 1
     assert beat_at[0] >= finished_at
@@ -142,7 +140,9 @@ def test_failed_rollup_still_waits_before_retry(monkeypatch: pytest.MonkeyPatch)
     monkeypatch.setattr(progress, "beat", counting_beat)
     config = events_maintenance_config()
     with pytest.raises(asyncio.CancelledError):
-        asyncio.run(daemon._dispatch_loop(_FAKE_POOL, progress, config))  # pool unused
+        asyncio.run(
+            daemon._dispatch_loop(_FAKE_POOL, progress, config, events_maintenance_db())
+        )  # pool unused
 
     assert len(beat_at) == 1
     assert beat_at[0] >= failed_at
@@ -155,7 +155,7 @@ def test_wedged_dispatch_parks_without_entering_retry_sleep(
 ) -> None:
     """A timed-out worker parks by ending its loop without entering either sleep path."""
 
-    async def wedge(_pool: object, progress: LoopProgress, _config: object) -> None:
+    async def wedge(_pool: object, progress: LoopProgress, _run: object) -> None:
         progress.fail("dispatch exceeded hard deadline")
         raise daemon.WedgedPassError("dispatch exceeded hard deadline")
 
@@ -170,7 +170,11 @@ def test_wedged_dispatch_parks_without_entering_retry_sleep(
     monkeypatch.setattr(daemon, "_sleep_with_liveness", forbidden_retry_sleep)
 
     progress = LoopProgress("dispatch", timeout_s=1.0)
-    asyncio.run(daemon._dispatch_loop(_FAKE_POOL, progress, events_maintenance_config()))
+    asyncio.run(
+        daemon._dispatch_loop(
+            _FAKE_POOL, progress, events_maintenance_config(), events_maintenance_db()
+        )
+    )
 
     assert not progress.is_alive()
 
@@ -236,7 +240,10 @@ def test_maintenance_pass_runs_unconditional_slices(monkeypatch: pytest.MonkeyPa
     monkeypatch.setattr(progress, "beat", counting_beat)
 
     daemon._run_maintenance(
-        cast(ConnectionPool, _FakePool()), progress, events_maintenance_config()
+        cast(ConnectionPool, _FakePool()),
+        progress,
+        events_maintenance_config(),
+        events_maintenance_db(),
     )  # every slice faked
 
     for name in (
@@ -358,7 +365,7 @@ def test_run_gives_each_loop_its_own_progress_tracker(monkeypatch: pytest.Monkey
 
     configs: list[object] = []
 
-    async def dispatch(_pool: object, progress: LoopProgress, config: object) -> None:
+    async def dispatch(_pool: object, progress: LoopProgress, config: object, _db: object) -> None:
         received["dispatch"] = progress
         configs.append(config)
 
@@ -378,7 +385,11 @@ def test_run_gives_each_loop_its_own_progress_tracker(monkeypatch: pytest.Monkey
     monkeypatch.setattr(daemon, "start_health_server", fake_start)
     monkeypatch.setattr(daemon, "stop_health_server", fake_stop)
     monkeypatch.setattr(daemon, "health_port", fake_health_port)
-    monkeypatch.setattr(daemon.base.db, "pool", lambda: pool)
+
+    def fake_pool(_self: object) -> _RunPool:
+        return pool
+
+    monkeypatch.setattr(daemon.Database, "pool", fake_pool)
     monkeypatch.setattr(daemon, "_dispatch_loop", dispatch)
     monkeypatch.setattr(daemon, "_resolution_loop", resolution)
     monkeypatch.setattr(daemon.registry_gauge, "registry_gauge_loop", gauge)
