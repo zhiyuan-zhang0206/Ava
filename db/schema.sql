@@ -2500,6 +2500,24 @@ BEGIN
     END IF;
 END $$;
 
+-- ─────────────── im_bridge_cursors ───────────────
+-- im-bridge durable positions (migration 20261002T051710_im-bridge-cursors).
+CREATE TABLE im_bridge_cursors (
+    channel         TEXT        NOT NULL,
+    chat_id         TEXT        NOT NULL,
+    push_agent_id   BIGINT,
+    push_item_id    TEXT,
+    poll_message_id TEXT,
+    poll_create_ms  BIGINT,
+    updated_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (channel, chat_id),
+    CONSTRAINT im_bridge_cursors_push_pair
+        CHECK ((push_agent_id IS NULL) = (push_item_id IS NULL))
+);
+
+COMMENT ON TABLE im_bridge_cursors IS
+    'Durable im-bridge positions: push_* = newest agent item pushed to the chat (for push_agent_id), poll_* = newest handled platform message of a polled conversation (message id, create time in ms; id NULL = time-only position). A restart resumes from here instead of losing what happened while the bridge was down.';
+
 -- ─────────────── schema_migrations ───────────────
 -- Applied-migration registry — maintained by `base.deploy.schema.migrations`. Keyed by
 -- migration NAME (an applied SET, not a high-water integer). This whole file is
