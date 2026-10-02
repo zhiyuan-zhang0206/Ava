@@ -260,7 +260,7 @@ async def sweep_round(pool: ConnectionPool, progress: LoopProgress) -> None:
     notices = await asyncio.to_thread(_reap_expired_notices_blocking, pool)
     for agent_id, nid in notices:
         with suppress(Exception):
-            await lifecycle.publish_notice_resolved(agent_id, nid)
+            await lifecycle.publish_notice_resolved(EventBus.from_settings(), agent_id, nid)
     progress.beat()
     pruned_fire_log, torn_pointers, absent_fences = await _slow_phases(pool)
     if (

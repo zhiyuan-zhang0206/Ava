@@ -71,6 +71,7 @@ from base.agents.context import AvaContext
 from base.cluster.auth import cookie_name
 from base.config import settings
 from base.db import Database
+from base.events.live.bus import EventBus
 from base.host.system.cron import register_os_cron
 from base.lm.plugin_providers import ensure_provider_plugins_loaded
 from gateway._server import main as _run_gateway
@@ -207,6 +208,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     # sleep or a network change comes back on a dead TCP flow and, unbounded, parks
     # the request handler on the OS TCP-retransmit timeout.
     app.state.db = Database.from_settings()
+    app.state.bus = EventBus.from_settings()
     app.state.db_pool = app.state.db.pool(max_size=8)
     # The control plane must never queue behind the saturated data-plane pool.
     # Audit P0-2 follows the 2026-08-23 watchdog misjudgment chain: health and
