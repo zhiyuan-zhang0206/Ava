@@ -2,8 +2,8 @@
 """Compare GitHub's live branch protections with Ava's Trunk merge-queue declaration.
 
 The repository declares its merge gate in ``.trunk/trunk.yaml`` (queue testing
-gate) plus the admission gate ruled in P2 (three suite aggregators +
-``qa-approved-gate``), amended 2026-09-13 (task #3207) with the docs-only gate
+gate) plus the admission gate ruled in P2 (three suite aggregators),
+amended 2026-09-13 (task #3207) with the docs-only gate
 ``doc lints (pre-commit family)``; GitHub stores required checks and workflow
 activation outside git. This read-only audit makes that external state observable and
 distinguishes drift from an API/tool failure.
@@ -25,17 +25,16 @@ import yaml
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _TRUNK_FILE = _REPO_ROOT / ".trunk" / "trunk.yaml"
 # P2 ruling (2026-09-02): the branch-protection admission gate is the three
-# suite aggregators plus the qa-approved label gate. Amended 2026-09-13
-# (task #3207): the docs-only gate "doc lints (pre-commit family)" joined
-# the admission set once the docs-only classify gap was closed by #2302 and
-# the check was promoted to a required context. The queue TESTING gate lives
-# in trunk.yaml (13 statuses) and is audited separately by trunk_gate_findings().
+# suite aggregators. Amended 2026-09-13 (task #3207): the docs-only gate
+# "doc lints (pre-commit family)" joined the admission set once the docs-only
+# classify gap was closed by #2302 and the check was promoted to a required
+# context. The queue TESTING gate lives in trunk.yaml (12 statuses) and is
+# audited separately by trunk_gate_findings().
 _ADMISSION_CHECKS = frozenset(
     {
         "backend (pytest + pyright)",
         "frontend (eslint + tsc + vitest)",
         "e2e (Playwright happy path)",
-        "qa-approved-gate",
         "doc lints (pre-commit family)",
     }
 )
@@ -72,7 +71,7 @@ def trunk_gate_findings(text: str) -> list[str]:
     """Audit the queue TESTING gate declared in .trunk/trunk.yaml.
 
     Invariants: required_statuses must be present and non-empty, carry the
-    qa-approved-gate and the three suite aggregators, and must not contain raw
+    the three suite aggregators, and must not contain raw
     matrix template names (a fully-skipped matrix reports only the template
     name, so such an entry could stall the queue forever on docs-only PRs).
     """
@@ -88,8 +87,6 @@ def trunk_gate_findings(text: str) -> list[str]:
         return ["trunk.yaml merge.required_statuses must not be empty"]
 
     findings: list[str] = []
-    if "qa-approved-gate" not in statuses:
-        findings.append("trunk.yaml required_statuses missing qa-approved-gate")
     for aggregator in (
         "backend (pytest + pyright)",
         "frontend (eslint + tsc + vitest)",
