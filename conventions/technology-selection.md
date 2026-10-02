@@ -83,3 +83,10 @@ Otherwise keep it and write down the condition that would make you revisit.
 
 Ask: will anything read this to decide what to do? Is it a solved problem? Is this change easy to
 undo? If you cannot answer, that is a gate: ask.
+
+## Worked records
+
+Two five-question records written after the fact, as examples of the format:
+[WAL-G over pgBackRest](../decisions/2026-10-02-walg-over-pgbackrest-five-questions.md) (a rung-3
+choice that replaced rung-4 code) and
+[`ava-root`](../decisions/2026-10-02-ava-root-five-questions.md) (a rung-4 choice kept, with its exit written down).
