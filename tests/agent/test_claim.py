@@ -18,7 +18,6 @@ Not tested:
 
 import asyncio
 from collections.abc import Callable
-from pathlib import Path
 from typing import Any, cast
 from unittest.mock import AsyncMock, MagicMock
 
@@ -26,10 +25,8 @@ import psycopg
 import pytest
 from langchain_core.messages import AIMessage, AnyMessage, BaseMessage, HumanMessage, SystemMessage
 from langchain_core.messages.modifier import RemoveMessage
-from langchain_core.runnables import RunnableConfig
 from langgraph.graph import END
 from langgraph.graph.message import REMOVE_ALL_MESSAGES
-from langgraph.runtime import Runtime
 from langgraph.types import Command
 from psycopg_pool import AsyncConnectionPool
 
@@ -37,7 +34,13 @@ from agent.graph import claim_node
 from agent.hooks.compact import compose_summary_message
 from agent.messages import NoteTag, system_note_message
 from agent.state import AgentState, CompactState
-from base.agents.context import AvaContext
+from agent.tests.claim_support import (
+    _await_inbound_visible,
+    _config,
+    _fake_llm,
+    _insert_inbound_kind,
+    _make_runtime,
+)
 from base.config import settings
 from base.db import insert_inbound_message
 from tests.fixtures.units import spawn_agent
@@ -94,52 +97,6 @@ def _pair_compact_cycles(pub: MagicMock) -> list[tuple[dict[str, Any], dict[str,
     return [(s, by_id[s["compact_id"]]) for s in started]
 
 
-def _fake_llm(summary: str = "synthetic compaction summary") -> Any:
-    """Mock LLM — bind_tools(...).ainvoke returns AIMessage(content=summary),
-    matching the call shape of generate_summary (same tool binding as the main llm node)."""
-    llm = MagicMock()
-    llm.bind_tools.return_value.ainvoke = AsyncMock(return_value=AIMessage(content=summary))
-    return llm
-
-
-def _make_runtime(
-    *,
-    ops_pool: AsyncConnectionPool | None = None,
-    llm: Any | None = None,
-    event_publisher: Any | None = None,
-) -> Runtime[AvaContext]:
-    """test helper: assemble AvaContext into Runtime.
-
-    `ops_pool=None` takes the container early-return path;
-
-    InboundCommitted SSE fan-out goes through `ctx.event_publisher.emit`; default to a MagicMock
-    so the node's `assert ctx.event_publisher` passes; tests verifying InboundCommitted pass their own
-    mock to assert `pub.emit.call_args_list`.
-
-    """
-    ctx = AvaContext(
-        ops_pool=ops_pool,
-        llm=llm if llm is not None else _fake_llm(),
-        event_publisher=event_publisher if event_publisher is not None else MagicMock(),
-    )
-    return Runtime(context=ctx)
-
-
-def _insert_inbound_kind(
-    db: psycopg.Connection, tid: int, content: str, kind: str, source: str = "system"
-) -> int:
-    """Directly INSERT an inbound of any kind (bypasses the chat-only helper in base/db/__init__.py)."""
-    with db.cursor() as cur:
-        cur.execute(
-            "INSERT INTO inbound_messages (agent_id, content, kind, source) "
-            "VALUES (%s, %s, %s, %s) RETURNING id",
-            (tid, content, kind, source),
-        )
-        new_id = cur.fetchone()[0]  # type: ignore[index]
-    db.commit()
-    return new_id
-
-
 async def _set_agent_status_async(pool: "AsyncConnectionPool", agent_id: int, status: str) -> None:
     """UPDATE agents_meta.status via `pool` — same pool claim_node uses.
 
@@ -179,29 +136,6 @@ async def _insert_inbound_kind_async(
         row = await cur.fetchone()
     assert row is not None, f"_insert_inbound_kind_async: no RETURNING for agent {agent_id}"
     return row[0]
-
-
-async def _await_inbound_visible(pool: AsyncConnectionPool, inbound_id: int) -> None:
-    """Block until a `db_conn`-committed inbound row is visible on `pool`.
-
-    Setup writes go through the sync `db_conn`; `claim_node` claims the batch
-    through `aops_pool` (a different connection). Under `-n auto` there is a
-    cross-connection window where a just-committed row is not yet visible on the
-    pool, so a single `claim_node` call can read a partial batch and skip the
-    lifecycle flip — surfacing later as a baffling `assert 'idling' ==
-    'restarting'`. Prod never hits this: claim is Redis-pub/sub-driven and re-claims
-    on the next wake, so the still-pending row is picked up. This barrier mirrors
-    that guarantee for the test's one-shot call. Waiting on the LAST-committed
-    setup row suffices: `db_conn` commits sequentially, so its visibility implies
-    every earlier setup write (status, prior inbounds) is visible too.
-    """
-    for _ in range(100):
-        async with pool.connection() as conn, conn.cursor() as cur:
-            await cur.execute("SELECT 1 FROM inbound_messages WHERE id = %s", (inbound_id,))
-            if await cur.fetchone() is not None:
-                return
-        await asyncio.sleep(0.02)
-    raise AssertionError(f"inbound {inbound_id} not visible on the claim pool after 2s")
 
 
 async def _await_status(pool: AsyncConnectionPool, agent_id: int, expected: str) -> None:
@@ -248,16 +182,6 @@ def _set_agent_status(db: psycopg.Connection, agent_id: int, status: str) -> Non
             f"_set_agent_status: agent {agent_id} not updated (rowcount={cur.rowcount})"
         )
     db.commit()
-
-
-def _config(tid: int) -> RunnableConfig:
-    return {
-        "configurable": {
-            "thread_id": str(
-                tid,
-            )
-        }
-    }
 
 
 @pytest.fixture
@@ -759,53 +683,6 @@ async def test_claim_compact_request_retries_then_succeeds(
 # re-injected after compact because REMOVE_ALL wipes the prior copy.
 
 
-def test_memory_index_note_present(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    from types import SimpleNamespace
-
-    from ava_builtins.plugins.ava_memory import notes as _memory_inject
-
-    monkeypatch.setattr(_memory_inject, "memory_dir", lambda: tmp_path)
-    monkeypatch.setattr(
-        _memory_inject,
-        "settings",
-        SimpleNamespace(agent=SimpleNamespace(memory_index_inject_enabled=True)),
-    )
-    (tmp_path / "MEMORY.md").write_text("prod=~/.ava/source\n- people -> people/", encoding="utf-8")
-
-    note = _memory_inject.memory_index_note()
-    assert note is not None
-    assert note.additional_kwargs["ava_msg_type"] == "system_note"  # pyright: ignore[reportUnknownMemberType]
-    assert note.additional_kwargs["ava_note_tag"] == "memory"  # pyright: ignore[reportUnknownMemberType]
-    assert (
-        "prod=~/.ava/source" in note.content  # pyright: ignore[reportUnknownMemberType]
-    )  # raw file content carried through
-
-
-def test_memory_index_note_none_when_absent_empty_or_disabled(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    from types import SimpleNamespace
-
-    from ava_builtins.plugins.ava_memory import notes as _memory_inject
-
-    monkeypatch.setattr(_memory_inject, "memory_dir", lambda: tmp_path)
-    monkeypatch.setattr(
-        _memory_inject,
-        "settings",
-        SimpleNamespace(agent=SimpleNamespace(memory_index_inject_enabled=True)),
-    )
-    assert _memory_inject.memory_index_note() is None  # absent
-    (tmp_path / "MEMORY.md").write_text("   \n\t\n", encoding="utf-8")
-    assert _memory_inject.memory_index_note() is None  # whitespace-only
-    (tmp_path / "MEMORY.md").write_text("real content", encoding="utf-8")
-    monkeypatch.setattr(
-        _memory_inject,
-        "settings",
-        SimpleNamespace(agent=SimpleNamespace(memory_index_inject_enabled=False)),
-    )
-    assert _memory_inject.memory_index_note() is None  # disabled
-
-
 def _compact_tail(update):
     """Assert the transport a compaction now uses — the window is cleared and
     rebuilding the standing head is handed to `init_context` — and return the
@@ -911,36 +788,6 @@ async def test_claim_compact_summary_finalizes_claimed_history(
         )
         rows = cur.fetchall()
     assert [(r[0], r[1]) for r in rows] == [(chat1, "done"), (chat2, "done")]
-
-
-async def test_claim_unknown_kind_raises(
-    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool, monkeypatch: pytest.MonkeyPatch
-):
-    """Unrecognized inbound kind = framework / DB schema desync — immediately raise,
-    do not silently swallow bugs by 'defaulting to chat processing'.
-
-    The DB CHECK constraint prevents production unknown kind, so it cannot be constructed
-    via INSERT path; use monkeypatch to directly feed ClaimedInbound to claim_node to verify
-    the dispatch's `case _:` fallback branch.
-    """
-    from agent.db import ClaimedInbound
-
-    tid = spawn_agent()
-
-    async def fake_claim(_db, _tid, *, lifecycle_only=False):
-        assert not lifecycle_only
-        return [ClaimedInbound(id=99, agent_id=tid, content="x", kind="bogus", source="system")]
-
-    monkeypatch.setattr("agent.graph.claim.node.claim_inbound_batch", fake_claim)  # pyright: ignore[reportUnknownArgumentType]
-
-    with pytest.raises(ValueError, match="Unknown inbound kind"):
-        await claim_node(
-            AgentState(),
-            _make_runtime(ops_pool=aops_pool),
-            _config(
-                tid,
-            ),
-        )
 
 
 async def test_claim_terminate_kind_appends_lifecycle_marker_and_routes_to_end(
@@ -1356,113 +1203,6 @@ async def test_claim_external_terminate_with_older_chat_still_dies(
     assert db_conn.execute(
         "SELECT status,content FROM inbound_messages WHERE agent_id=%s AND kind='chat'", (tid,)
     ).fetchone() == ("pending", "old message before the kill")
-
-
-async def test_claim_terminate_vetoed_by_pending_inbound_after_claim(
-    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool, monkeypatch: pytest.MonkeyPatch
-):
-    """The other half of the race: the batch (terminate alone) is claimed, but a
-    message lands in the queue before the exit is committed. The claim node's
-    final recheck must veto the death and re-enter claim so the fresh message is
-    dispatched — the terminate row is already consumed ('done'), no marker, no
-    END, and the chat stays pending for the re-entered claim to pick up. The
-    message arrives after claim_inbound_batch returns, which is simulated by
-    monkeypatching claim to return only the terminate row while a newer chat
-    stays pending in the table."""
-    from agent.db import ClaimedInbound
-
-    tid = spawn_agent()
-    terminate_id = _insert_inbound_kind(db_conn, tid, "", "terminate", source="self")
-    chat_id = insert_inbound_message(db_conn, tid, "message after the claim", source="user")
-    await _await_inbound_visible(aops_pool, chat_id)
-
-    async def fake_claim(_pool, _agent_id, *, lifecycle_only=False):
-        assert not lifecycle_only
-        # Faithful to claim_inbound_batch: the grab marks lifecycle rows 'done'
-        # atomically, so the vetoed terminate is consumed and never retried.
-        async with _pool.connection() as conn, conn.cursor() as cur:  # pyright: ignore[reportUnknownMemberType]
-            await cur.execute(  # pyright: ignore[reportUnknownMemberType]
-                "UPDATE inbound_messages SET status = 'done' WHERE id = %s", (terminate_id,)
-            )
-        return [
-            ClaimedInbound(
-                id=terminate_id, agent_id=tid, content="", kind="terminate", source="self"
-            )
-        ]
-
-    monkeypatch.setattr("agent.graph.claim.node.claim_inbound_batch", fake_claim)  # pyright: ignore[reportUnknownArgumentType]
-
-    cmd = await claim_node(
-        AgentState(messages=[SystemMessage(content="sys")]),
-        _make_runtime(ops_pool=aops_pool),
-        _config(
-            tid,
-        ),
-    )
-
-    # re-enter claim to dispatch the fresh message — not END, not a wake
-    assert cmd.goto == "claim"
-    assert cmd.goto != END
-    # no terminate marker was committed
-    assert cmd.update["messages"] == []  # type: ignore[index]
-    # the newer chat is still pending for the re-entered claim to pick up
-    with db_conn.cursor() as cur:
-        cur.execute(
-            "SELECT status FROM inbound_messages WHERE agent_id = %s AND kind = 'chat'", (tid,)
-        )
-        chat_row = cur.fetchone()
-        assert chat_row is not None
-        assert chat_row[0] == "pending"
-    # the vetoed terminate row is consumed, never retried
-    with db_conn.cursor() as cur:
-        cur.execute(
-            "SELECT status FROM inbound_messages WHERE agent_id = %s AND kind = 'terminate'", (tid,)
-        )
-        term_row = cur.fetchone()
-        assert term_row is not None
-        assert term_row[0] == "done"
-
-
-async def test_claim_same_batch_newer_chat_vetoes_the_terminate(
-    db_conn: psycopg.Connection,
-    aops_pool: AsyncConnectionPool,
-    monkeypatch: pytest.MonkeyPatch,
-):
-    """Veto half 1: a same-batch chat newer than the terminate keeps the agent
-    alive."""
-    from agent.db import ClaimedInbound
-
-    tid = spawn_agent()
-    terminate_id = _insert_inbound_kind(db_conn, tid, "", "terminate", source="user")
-    chat_id = insert_inbound_message(db_conn, tid, "message in the batch", source="user")
-    await _await_inbound_visible(aops_pool, chat_id)
-
-    async def fake_claim(_pool, _agent_id, *, lifecycle_only=False):
-        assert not lifecycle_only
-        return [
-            ClaimedInbound(
-                id=terminate_id, agent_id=tid, content="", kind="terminate", source="user"
-            ),
-            ClaimedInbound(
-                id=chat_id,
-                agent_id=tid,
-                content="message in the batch",
-                kind="chat",
-                source="user",
-            ),
-        ]
-
-    monkeypatch.setattr("agent.graph.claim.node.claim_inbound_batch", fake_claim)  # pyright: ignore[reportUnknownArgumentType]
-
-    cmd = await claim_node(
-        AgentState(messages=[SystemMessage(content="sys")]),
-        _make_runtime(ops_pool=aops_pool),
-        _config(
-            tid,
-        ),
-    )
-
-    assert cmd.goto != END
 
 
 async def test_claim_restart_kind_hosted_ends_turn_and_stays_runnable(
@@ -2571,75 +2311,7 @@ async def test_claim_mixed_batch_publishes_only_chat_ids(
 # ───────────── _by_who unit tests (case-sensitive dispatch) ─────────────
 
 
-def test_by_who_self_returns_yourself():
-    """source 'self' (ava.self.terminate/restart self-invocation) → 'yourself'.
-    Lock down that the literal 'self' cannot be mutated to 'SELF' / 'XXselfXX' / '' etc. by mutmut."""
-    from agent.graph.claim.node import _by_who
-
-    assert _by_who("self") == "yourself"
-
-
-def test_by_who_uppercase_self_passthrough():
-    """source is case-sensitive — 'SELF' does not match the 'self' branch, falls back to
-    return original value. `_by_who` does not do case-folding (to avoid mistakenly treating
-    'Self' / 'SELF' as self-trigger)."""
-    from agent.graph.claim.node import _by_who
-
-    assert _by_who("SELF") == "SELF"
-    assert _by_who("Self") == "Self"
-    assert _by_who("SELF:UPDATE") == "SELF:UPDATE"
-
-
-def test_by_who_external_source_passthrough():
-    """Non self source ('user' / 'agent:42' / 'system')
-    returns as-is — the marker text shows who triggered it at a glance."""
-    from agent.graph.claim.node import _by_who
-
-    assert _by_who("user") == "user"
-    assert _by_who("user") == "user"
-    assert _by_who("agent:42") == "agent:42"
-    assert _by_who("system") == "system"
-
-
-def test_by_who_self_prefix_does_not_match_self():
-    """'self_xxx' / 'selfish' should not be recognized as 'self' (literal == comparison,
-    not startswith)."""
-    from agent.graph.claim.node import _by_who
-
-    # anti-regression: changing to startswith("self") would make this test fail
-    assert _by_who("selfish") == "selfish"
-    assert _by_who("self_other") == "self_other"
-    assert _by_who("self:other") == "self:other"  # only self is specifically handled
-
-
 # ───────────── _render_restart_completed_marker wording ───────────────
-
-
-def test_render_restart_completed_marker_system_update_no_by_clause():
-    """source='system:update' → 'updated and restarted' with no trailing 'by ...' noise."""
-    from agent.graph.claim.node import _render_restart_completed_marker
-
-    text = _render_restart_completed_marker("system:update")
-    assert "updated and restarted" in text
-    assert "by " not in text  # no actor suffix for system-driven rollout
-
-
-def test_render_restart_completed_marker_plain_self_unchanged():
-    """source='self' (ordinary restart, not update) → 'restarted by yourself', no 'updated'."""
-    from agent.graph.claim.node import _render_restart_completed_marker
-
-    text = _render_restart_completed_marker("self")
-    assert "restarted by yourself" in text
-    assert "updated" not in text
-
-
-def test_render_restart_completed_marker_external_source_unchanged():
-    """Non-update sources → plain 'restarted by <source>' wording."""
-    from agent.graph.claim.node import _render_restart_completed_marker
-
-    text = _render_restart_completed_marker("user")
-    assert "restarted by user" in text
-    assert "updated" not in text
 
 
 # ───────────── _wait_for_batch state machine + retry loop ─────────────
@@ -2986,84 +2658,3 @@ async def test_claim_restart_completed_non_system_update_preserves_update_initia
 
     assert cmd.goto == "before_llm"
     assert cmd.update["update_initiated"] is True  # type: ignore[index]
-
-
-async def test_claim_node_idle_enter_publishes_full_window_snapshot(
-    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool, monkeypatch: pytest.MonkeyPatch
-):
-    """Turn-end fallback: when claim is about to idle (no conversation yet),
-    the wrapper must pass full_window=True so the enter snapshot is the full
-    window — the only race-free view of the finished turn (reconnect GET can
-    read a lagging checkpoint). Pins the will_idle wiring."""
-    import json
-
-    from langchain_core.messages import SystemMessage
-
-    from agent.graph.claim import node as claim_node_mod
-    from agent.graph.claim.node import claim_node
-
-    tid = spawn_agent()
-
-    # stub the body: we only exercise the wrapper + node_lifecycle enter path
-    async def _stub_impl(_state, _runtime, _config):
-        return Command(goto="end")
-
-    monkeypatch.setattr(claim_node_mod, "_claim_node_impl", _stub_impl)  # pyright: ignore[reportUnknownArgumentType]
-
-    pub = MagicMock()
-    state = AgentState()
-    state.messages = [SystemMessage(content="prompt")]
-    await claim_node(
-        state,
-        _make_runtime(ops_pool=aops_pool, event_publisher=pub),
-        _config(
-            tid,
-        ),
-    )
-    snaps = [
-        json.loads(c.args[0]) for c in pub.emit.call_args_list if "timeline_snapshot" in c.args[0]
-    ]
-    assert len(snaps) == 1
-    # will_idle=True (no conversation) → full-window: msg_count = full length,
-    # window renders the whole (short) history — including the system-prompt
-    # item (no Aw-Snap drop rule anymore: incremental snapshots never carry
-    # 0.0 by construction, full-window ones are rare and the frontend's
-    # id-replace merge keeps a single copy either way).
-    assert snaps[0]["msg_count"] == 1
-    assert [it["item_id"] for it in snaps[0]["items"]] == ["0.0"]
-    assert snaps[0]["items"][0]["kind"] == "system_prompt"
-
-
-def test_claim_will_idle_shares_the_impl_and_wrapper_contract() -> None:
-    """One idle predicate for the impl branch and the wrapper's snapshot path:
-    a trailing end-of-session note waives the fresh-window term (resume), and
-    an open breaker parks idle (the wrapper previously omitted that arm)."""
-    from datetime import UTC, datetime
-
-    from langchain_core.messages import HumanMessage, SystemMessage
-
-    from agent.graph.claim.node import claim_will_idle
-    from agent.messages import system_note_message
-    from agent.state_channels import CIRCUIT_REASON_BILLING, CircuitState
-    from base.agents.messages.kwargs import NoteTag
-
-    fresh = AgentState()
-    fresh.messages = [SystemMessage(content="prompt")]
-    assert claim_will_idle(fresh)  # no conversation yet: idle
-
-    resume = AgentState()
-    resume.impersonation_handoff_id = "7:0"
-    note = system_note_message(
-        content="session ended", tag=NoteTag.IMPERSONATION, created_at=datetime.now(UTC)
-    )
-    note.id = "impersonation-handoff:7:0"
-    resume.messages = [SystemMessage(content="prompt"), note]
-    assert not claim_will_idle(resume)  # the note must get its first turn
-
-    resume.halted = True
-    assert claim_will_idle(resume)  # an ended turn still wins
-
-    parked = AgentState()
-    parked.messages = [HumanMessage(content="hello")]
-    parked.circuit = CircuitState(open=True, reason=CIRCUIT_REASON_BILLING)
-    assert claim_will_idle(parked)
