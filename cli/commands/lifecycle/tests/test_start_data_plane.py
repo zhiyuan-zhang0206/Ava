@@ -47,6 +47,11 @@ def test_gateway_data_plane_brings_up_own_instance(monkeypatch: pytest.MonkeyPat
     monkeypatch.setattr(_ci, "ensure_cluster_storage", lambda **kw: own_calls.append(kw) or 0)  # pyright: ignore[reportUnknownArgumentType]
 
     assert _start._ensure_gateway_data_plane() == 0
+    # The root that holds the secret published the telemetry token the station probe reads.
+    from base.cluster.authority.api import read_telemetry_token, telemetry_token
+    from base.paths import ava_home
+
+    assert read_telemetry_token(ava_home().resolve()) == telemetry_token("bearer")
     # The identity comes from the db_url username, not any name derivation.
     assert own_calls == [
         {

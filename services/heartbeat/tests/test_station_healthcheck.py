@@ -17,9 +17,10 @@ from datetime import UTC, datetime
 import pytest
 
 import base.db
-from base.cluster.authority.api import telemetry_token
+from base.cluster.authority.api import publish_telemetry_token, telemetry_token
 from base.config import settings
 from base.db import Database
+from base.paths import ava_home
 from services.heartbeat import station_probe as hc
 
 
@@ -39,8 +40,8 @@ def _clean_state() -> None:
 def _no_remote_observatory(monkeypatch: pytest.MonkeyPatch) -> None:
     """Default: no remote observatory (the no-op posture); tests opt in."""
     monkeypatch.setattr(settings.observability, "observability_url", "")
-    monkeypatch.setattr(settings.data_plane, "cluster_secret", "cluster-token")
     monkeypatch.setattr(hc.settings.observability, "telemetry_otlp_port", 4318)
+    publish_telemetry_token(ava_home(), "cluster-token")
 
 
 def _insert_station_unit(name: str = "station-test-a", url: str = "http://10.0.0.9:4318") -> None:
@@ -139,7 +140,7 @@ def test_station_answers_bearer_otlp_roundtrip(monkeypatch: pytest.MonkeyPatch) 
     monkeypatch.setattr(urllib.request, "urlopen", _open)
     assert hc._station_answers("http://10.0.0.9:4318") is True
     assert seen["url"] == "http://10.0.0.9:4318/v1/traces"
-    # The cluster's telemetry token (derived from the secret), never the secret.
+    # The cluster's telemetry token from the file the start published, never the secret.
     assert seen["auth"] == f"Bearer {telemetry_token('cluster-token')}"
 
 
@@ -162,15 +163,15 @@ def test_station_answers_connection_failure_is_not_alive(monkeypatch: pytest.Mon
     assert hc._station_answers("http://10.0.0.9:4318") is False
 
 
-def test_station_answers_without_secret_warns_and_fails_open(
+def test_station_answers_without_a_published_token_warns_and_fails_open(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """No cluster secret -> cannot authenticate the probe; warn and treat as
+    """No published telemetry token -> cannot authenticate the probe; warn and treat as
     alive rather than alerting on a config problem (fail-open)."""
-    monkeypatch.setattr(settings.data_plane, "cluster_secret", "")
+    publish_telemetry_token(ava_home(), "")
 
     def _fail_if_called(_req: object, **_kw: object) -> None:
-        pytest.fail("must not dial without a secret")
+        pytest.fail("must not dial without a token")
 
     monkeypatch.setattr(urllib.request, "urlopen", _fail_if_called)
     assert hc._station_answers("http://10.0.0.9:4318") is True
