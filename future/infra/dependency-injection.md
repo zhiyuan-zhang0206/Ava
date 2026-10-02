@@ -199,10 +199,14 @@ finish in one change freezes what is left; a finished one has none.
    starts.
 2. **Import-time configuration reads (44 sites).** Read the value at use instead of
    at import. It still reads the global, but it removes the import-order coupling
-   the test fixtures guard and lets overrides reach the value. Done in batches by
-   package, each deleting its `import-time-read` baseline keys: the service daemons
-   (milvus, memory_search, browser, page_server, the gateway health probe). What is
-   left is exactly the `import-time-read` keys still in the baseline.
+   the test fixtures guard and lets overrides reach the value. Done, with the
+   `import-time-read` baseline keys deleted batch by batch: the service daemons, the
+   gateway (schedule runner, SSE), the SDK gateway client, the claim database timeout,
+   the clock lattice and the schedule templates (their timezone is
+   `schedules.catchup.cluster_timezone()`). The `import-time-read` keys still in the
+   baseline are clock, random and home-path reads (process start stamps, the recall-log
+   key, the home captured at load, the tmpfs base, the SDK-disable switch), which the
+   clock and `Platform` injection step takes.
 3. **Composition roots, one process kind per change.** Each root takes over the
    environment, `.env`, bootstrap and stored-config reads for its process and
    constructs the objects. Import-time registries become explicit `register(...)`
