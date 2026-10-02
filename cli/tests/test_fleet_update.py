@@ -40,6 +40,11 @@ class Cluster:
             a: {**_IDLE, "os": o, "head": old}
             for a, o in (("gw", "Linux"), ("mac", "Darwin"), ("lin", "Linux"))
         }
+        self.names = {alias: alias for alias in self.hosts}  # alias -> name the host reports
+        self.silent: set[str] = set()  # aliases whose heartbeat never reaches the roster
+        self.hidden: set[str] = set()  # aliases the roster has no row for
+        self.smoked: list[str] = []  # machine names the gateway smoke-tested
+        self.laptop: dict[str, Any] | None = None  # a roster-only machine no alias reaches
         self.effects: list[tuple[str, str]] = []
         self.fail: dict[tuple[str, str], int] = {}
         self.stop_failures: dict[str, str] = {}
@@ -73,9 +78,30 @@ class Cluster:
             assert (kind == "oneshot") == (host["os"] == "Darwin")
             assert self.hosts["gw"]["up"] if alias != "gw" else not self._runners_up()
             host["up"], host["hold"] = True, ("resumed", None, {})
+        elif kind == "smoke":
+            self.smoked.append(command.partition(" - smoke ")[2].split()[0].strip("'"))
         elif kind == "refresh":
             assert "--force" not in command  # human-only
         return 0
+
+    def _roster_json(self) -> str:
+        online = self.roster_lag <= 0
+        self.roster_reads, self.roster_lag = self.roster_reads + 1, self.roster_lag - 1
+        values = [
+            (
+                self.names[a],
+                h["up"] and online and a not in self.silent,
+                False,
+                h["head"],
+                h["head"],
+                True,
+            )
+            for a, h in self.hosts.items()
+            if a not in self.hidden
+        ]
+        if self.laptop:
+            values.append(("laptop", *self.laptop["row"]))
+        return json.dumps([dict(zip(_ROW, row, strict=True)) for row in values])
 
     def ssh(self, alias: str, command: str, stdin: str | None, emit: Callable[[str], None]) -> int:
         host = self.hosts[alias]
@@ -95,15 +121,12 @@ class Cluster:
         if command.endswith("maintenance status'"):
             emit(hold)
             return 0
+        if "machine_name()" in command:
+            emit(self.names[alias])
+            return 0
         if " - roster" in command:
             assert stdin == fleet_update._GATEWAY_PROGRAM
-            online = self.roster_lag <= 0
-            self.roster_reads, self.roster_lag = self.roster_reads + 1, self.roster_lag - 1
-            values = [
-                (a, h["up"] and online, False, h["head"], h["head"], True)
-                for a, h in self.hosts.items()
-            ]
-            emit(json.dumps([dict(zip(_ROW, row, strict=True)) for row in values]))
+            emit(self._roster_json())
             return 0
         kinds = {
             "git fetch": "fetch",
@@ -252,6 +275,56 @@ def test_a_roster_that_never_agrees_fails_with_its_last_state(
     assert run("up", "--roster-timeout", "30") == 1
     assert cluster.roster_reads == 30 // fleet_update._POLL_S + 1
     assert "roster after 30s: offline ['gw', 'mac', 'lin']" in capsys.readouterr().out
+    assert {k for k, _ in cluster.effects} & {"smoke", "refresh"} == set()
+
+
+_LAPTOP_OFF = {"row": (False, False, None, None, True)}  # online, mismatch, head, running, runner
+
+
+def test_an_unlisted_offline_machine_is_reported_not_required(
+    env: tuple[Cluster, Callable[..., int]], capsys: pytest.CaptureFixture[str]
+) -> None:
+    cluster, run = env
+    assert run("down") == 0
+    cluster.laptop = _LAPTOP_OFF
+    assert run("up") == 0
+    out = capsys.readouterr().out
+    assert "roster: laptop is not listed, not checked: online=False head=None running=None" in out
+    assert cluster.smoked == ["gw", "mac", "lin"]
+    assert [a for k, a in cluster.effects if k == "refresh"] == ["gw", "mac", "lin"]
+    assert "up complete: every listed machine runs" in out
+
+
+def test_a_listed_machine_that_is_offline_fails(
+    env: tuple[Cluster, Callable[..., int]], capsys: pytest.CaptureFixture[str]
+) -> None:
+    cluster, run = env
+    assert run("down") == 0
+    cluster.laptop = _LAPTOP_OFF
+    cluster.silent.add("lin")
+    assert run("up", "--roster-timeout", "10") == 1
+    assert "roster after 10s: offline ['lin']" in capsys.readouterr().out
+    assert {k for k, _ in cluster.effects} & {"smoke", "refresh"} == set()
+
+
+def test_the_roster_name_comes_from_the_host_not_its_ssh_alias(
+    env: tuple[Cluster, Callable[..., int]],
+) -> None:
+    cluster, run = env
+    assert run("down") == 0
+    cluster.names["mac"] = "mac-mini"
+    assert run("up") == 0
+    assert cluster.smoked == ["gw", "mac-mini", "lin"]
+
+
+def test_a_listed_host_with_no_roster_row_is_an_error(
+    env: tuple[Cluster, Callable[..., int]], capsys: pytest.CaptureFixture[str]
+) -> None:
+    cluster, run = env
+    assert run("down") == 0
+    cluster.hidden.add("lin")
+    assert run("up") == 1
+    assert "no roster row for ['lin']" in capsys.readouterr().out
     assert {k for k, _ in cluster.effects} & {"smoke", "refresh"} == set()
 
 

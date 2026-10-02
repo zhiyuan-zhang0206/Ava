@@ -3,8 +3,8 @@
 `down --new SHA`: preflight; stop each runner, then the gateway; switch every
 checkout to NEW. `up`: start the gateway, then each runner (macOS as a one-time
 GUI-session LaunchAgent: helper signing needs the login keychain); check holds
-and the roster; smoke-test each agent-runner; refresh skills. After a failure, fix the cause and
-rerun the whole half. See conventions/runbook.md#updating-a-networked-cluster-in-source-mode.
+and the listed machines' roster rows; smoke-test each listed agent-runner; refresh skills.
+After a failure, fix the cause and rerun the whole half. See conventions/runbook.md#updating-a-networked-cluster-in-source-mode.
 """
 
 from __future__ import annotations
@@ -250,24 +250,52 @@ launchctl bootout "gui/$(id -u)/{label}" || echo "bootout of {label} failed"
 rm -rf "$D"; exit "$rc\""""
 
 
-def _roster(s: Session, args: argparse.Namespace, program: str) -> tuple[list[dict[str, Any]], str]:
-    """The roster and the one commit every machine runs, online, from a checkout at it.
+def _machine_names(s: Session, program: str, aliases: list[str]) -> dict[str, str]:
+    """Each listed host's own machine name (what the roster calls it), asked of the host."""
+    ask = f'{program} -c "from base.cluster.machine import machine_name; print(machine_name())"'
+    names = {alias: s.run(alias, ask, effect=False).split()[-1] for alias in aliases}
+    if len(set(names.values())) != len(names):
+        raise FailedError(f"two listed hosts report one machine name: {names}")
+    return names
 
+
+def _roster(s: Session, args: argparse.Namespace, program: str) -> tuple[list[dict[str, Any]], str]:
+    """The listed machines' roster rows and the one commit they all run, online, at that checkout.
+
+    Only the `--gateway`/`--runner` machines are required; the rest of the roster (a laptop
+    that is off) is reported and left alone. A listed host is matched to its row by the
+    machine name it reports, not by its SSH alias; no row for it is an error.
     `online` follows the heartbeat: a machine just started is re-read until --roster-timeout."""
+    names = _machine_names(s, program, [args.gateway, *args.runner])
+    wanted = set(names.values())
     deadline = time.monotonic() + args.roster_timeout
     while True:
         out = s.run(args.gateway, f"{program} roster", effect=False, stdin=_GATEWAY_PROGRAM)
         rows = json.loads(out.splitlines()[-1])
-        offline = [row["name"] for row in rows if not row["online"] or row["identity_mismatch"]]
-        commits = {(row["head_sha"], row["running_sha"]) for row in rows}
-        commit = rows[0]["head_sha"]
+        if missing := sorted(wanted - {row["name"] for row in rows}):
+            raise FailedError(f"no roster row for {missing} (host aliases to names: {names})")
+        listed = [row for row in rows if row["name"] in wanted]
+        offline = [row["name"] for row in listed if not row["online"] or row["identity_mismatch"]]
+        commits = {(row["head_sha"], row["running_sha"]) for row in listed}
+        commit = listed[0]["head_sha"]
         if not offline and commit is not None and commits == {(commit, commit)}:
-            return rows, commit
+            _report_unlisted(s, rows, wanted)
+            return listed, commit
         if time.monotonic() >= deadline:
+            _report_unlisted(s, rows, wanted)
             raise FailedError(
                 f"roster after {args.roster_timeout}s: offline {offline}; commits {commits}"
             )
         time.sleep(_POLL_S)
+
+
+def _report_unlisted(s: Session, rows: list[dict[str, Any]], wanted: set[str]) -> None:
+    for row in rows:
+        if row["name"] not in wanted:
+            s.say(
+                f"roster: {row['name']} is not listed, not checked: online={row['online']} "
+                f"head={row['head_sha']} running={row['running_sha']}"
+            )
 
 
 def _refresh(s: Session, args: argparse.Namespace) -> None:
@@ -294,7 +322,7 @@ def up(s: Session, args: argparse.Namespace) -> None:
         smoke = f"{program} smoke {shlex.quote(name)} {args.smoke_timeout}"
         s.run(args.gateway, smoke, stdin=_GATEWAY_PROGRAM)
     _refresh(s, args)
-    s.say(f"up complete: every machine runs {commit[:12]}")
+    s.say(f"up complete: every listed machine runs {commit[:12]}")
 
 
 def main(argv: list[str] | None = None) -> int:
