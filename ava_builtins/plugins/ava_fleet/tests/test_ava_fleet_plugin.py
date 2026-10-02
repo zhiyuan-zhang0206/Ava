@@ -25,6 +25,7 @@ import ava
 import ava.agents
 from agent.graph.system_prompt import build_system_prompt
 from agent.state import clear_plugin_registrations
+from base.agents.context.slices import AgentSlices
 from base.agents.observation.snapshot import select_one
 from base.packages.plugins.context import PluginContext
 
@@ -101,13 +102,13 @@ def test_member_torn_down_on_clear(_load_activity_plugin: None):
 
 
 def test_plugin_registers_prompt_section(_load_activity_plugin: None):
-    prompt = build_system_prompt()
+    prompt = build_system_prompt(AgentSlices.resolve())
     assert "ava.self.set_label" in prompt
 
 
 def test_prompt_assigns_shared_milestone_reporting(_load_activity_plugin: None):
     """The rendered prompt carries the reporting contract with the plugin."""
-    prompt = build_system_prompt()
+    prompt = build_system_prompt(AgentSlices.resolve())
 
     assert prompt.count("One reporter per milestone") == 1
     assert "single reporter and action owner" in prompt
@@ -126,7 +127,7 @@ def test_prompt_section_idle_vs_terminate_rule(_load_activity_plugin: None):
     (heartbeat pause etc.) itself."""
     from ava_builtins.plugins.ava_fleet.agent_runtime import _fleet_self_section
 
-    section = _fleet_self_section()
+    section = _fleet_self_section(AgentSlices.resolve())
     # Waiting branch: end the turn idle, the awaited event still wakes you.
     assert "end the turn idle" in section
     # Done branch: end your own process instead of idling on.
@@ -142,23 +143,19 @@ def test_prompt_section_idle_vs_terminate_rule(_load_activity_plugin: None):
     assert "ava.agents.terminate" not in section
 
 
-def test_prompt_section_dismiss_notice_after_dialog_reply(
-    _load_activity_plugin: None,
-):
+def test_prompt_section_dismiss_notice_after_dialog_reply(_load_activity_plugin: None):
     """When the user has already answered in the dialog, the agent must
     actively dismiss the pending notice instead of leaving it open — and the
     rule is phrased semantically (no dismiss_notice call name)."""
     from ava_builtins.plugins.ava_fleet.agent_runtime import _fleet_self_section
 
-    section = _fleet_self_section()
+    section = _fleet_self_section(AgentSlices.resolve())
     assert "dismiss that notice yourself" in section
     assert "already replied in the dialog" in section
     assert "dismiss_notice" not in section
 
 
-def test_prompt_section_queue_delivery_mandate(
-    _load_activity_plugin: None,
-):
+def test_prompt_section_queue_delivery_mandate(_load_activity_plugin: None):
     """The Fleet section must make queue delivery mandatory: what the user
     must decide (or should know) is delivered through the queue — never left
     in chat for the user to discover later — and it is queued even when the
@@ -169,7 +166,7 @@ def test_prompt_section_queue_delivery_mandate(
     section already names."""
     from ava_builtins.plugins.ava_fleet.agent_runtime import _fleet_self_section
 
-    section = _fleet_self_section()
+    section = _fleet_self_section(AgentSlices.resolve())
     assert "Queue delivery is mandatory" in section
     assert "never left in the chat" in section
     assert "offline" in section
@@ -190,10 +187,10 @@ def test_prompt_section_reduce_context_switch_gating(
     from base.config import settings
 
     monkeypatch.setattr(settings.agent, "reduce_context_switch", True)
-    assert "Queue, never push" in _reduce_context_switch_section()
+    assert "Queue, never push" in _reduce_context_switch_section(AgentSlices.resolve())
 
     monkeypatch.setattr(settings.agent, "reduce_context_switch", False)
-    assert _reduce_context_switch_section() == ""
+    assert _reduce_context_switch_section(AgentSlices.resolve()) == ""
 
 
 def test_prompt_section_reduce_context_switch_content(
@@ -209,7 +206,7 @@ def test_prompt_section_reduce_context_switch_content(
     from base.config import settings
 
     monkeypatch.setattr(settings.agent, "reduce_context_switch", True)
-    section = _reduce_context_switch_section()
+    section = _reduce_context_switch_section(AgentSlices.resolve())
 
     assert "Queue, never push" in section
     assert "irreversible risk in motion" in section
@@ -231,10 +228,12 @@ def test_reduce_context_switch_reaches_the_prompt(
     from base.config import settings
 
     monkeypatch.setattr(settings.agent, "reduce_context_switch", True)
-    assert "## Reduce context switch for the human" in build_system_prompt()
+    assert "## Reduce context switch for the human" in build_system_prompt(AgentSlices.resolve())
 
     monkeypatch.setattr(settings.agent, "reduce_context_switch", False)
-    assert "## Reduce context switch for the human" not in build_system_prompt()
+    assert "## Reduce context switch for the human" not in build_system_prompt(
+        AgentSlices.resolve()
+    )
 
 
 def test_prompt_section_task_conversion_contract(_load_activity_plugin: None):
@@ -242,7 +241,7 @@ def test_prompt_section_task_conversion_contract(_load_activity_plugin: None):
     task without inventing registry routing behavior."""
     from ava_builtins.plugins.ava_fleet.agent_runtime import _fleet_self_section
 
-    section = _fleet_self_section()
+    section = _fleet_self_section(AgentSlices.resolve())
     assert "## Fleet task interaction" in section
     assert "create directly with `ava.tasks.create`" in section
     assert "do not add an ask-someone-first round" in section
@@ -260,7 +259,7 @@ def test_prompt_section_task_conversion_is_domain_instance_only(
     cross-domain future-signal rule or platform-specific policy."""
     from ava_builtins.plugins.ava_fleet.agent_runtime import _fleet_self_section
 
-    section = _fleet_self_section()
+    section = _fleet_self_section(AgentSlices.resolve())
     for phrase in (
         "when in doubt, record it",
         "act on it this turn",
@@ -277,7 +276,7 @@ def test_prompt_section_numeric_identifier_prefixes(_load_activity_plugin: None)
     """Fleet references identify agents, tasks, and pull requests by kind."""
     from ava_builtins.plugins.ava_fleet.agent_runtime import _fleet_self_section
 
-    section = _fleet_self_section()
+    section = _fleet_self_section(AgentSlices.resolve())
 
     for identifier in ("Ava #<id>", "task #<id>", "PR #<id>"):
         assert identifier in section
@@ -290,7 +289,7 @@ def test_task_conversion_absent_when_plugin_disabled():
     clear_plugin_registrations()
     ava.clear_registered_namespaces()
 
-    prompt = build_system_prompt()
+    prompt = build_system_prompt(AgentSlices.resolve())
 
     assert "## Fleet task interaction" not in prompt
     assert "create directly with `ava.tasks.create`" not in prompt

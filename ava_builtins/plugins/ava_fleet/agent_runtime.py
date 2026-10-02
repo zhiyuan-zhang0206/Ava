@@ -11,11 +11,12 @@ in `plugin.py` and loads in agent-launched children too (task #3633).
 from __future__ import annotations
 
 from agent.graph.system_prompt import register_system_prompt_section
+from base.agents.context.slices import AgentSlices
 from base.config import settings
 
 
 @register_system_prompt_section
-def _fleet_self_section() -> str:
+def _fleet_self_section(_slices: AgentSlices) -> str:
     return (
         "## Fleet\n\n"
         "You are one agent in a fleet — a graph of agents working toward a "
@@ -150,7 +151,7 @@ def _fleet_self_section() -> str:
 
 
 @register_system_prompt_section
-def _reduce_context_switch_section() -> str:
+def _reduce_context_switch_section(_slices: AgentSlices) -> str:
     """Toggle via settings.agent.reduce_context_switch (env
     AVA_REDUCE_CONTEXT_SWITCH, default on): the platform default for how work
     reaches the human — queue-never-push, one notice per manager updated in

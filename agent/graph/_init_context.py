@@ -88,7 +88,11 @@ async def init_context_node(
         # workspace, and nothing the notes describe. The head is the system
         # prompt alone, keeping an eval's context deterministic. Same signal
         # `_claim` uses for its container early-return.
-        notes = [] if runtime.context.ops_pool is None else context_notes()
+        notes = (
+            []
+            if runtime.context.ops_pool is None
+            else context_notes(runtime.context.require_agent())
+        )
         logger.info(
             "[init-context] establishing: {} note(s) + {} tail message(s), resume={}",
             len(notes),
@@ -103,11 +107,11 @@ async def init_context_node(
         # recorded, so the drift check names it one extra time, where the reverse
         # order would mark it known and drop it silently until the next
         # compaction.
-        indexed = indexed_skill_identifiers()
+        indexed = indexed_skill_identifiers(runtime.context.require_agent().prompt)
         return Command[NodeName](
             update={
                 "messages": [
-                    SystemMessage(content=build_system_prompt()),
+                    SystemMessage(content=build_system_prompt(runtime.context.require_agent())),
                     *notes,
                     *reset.tail,
                 ],

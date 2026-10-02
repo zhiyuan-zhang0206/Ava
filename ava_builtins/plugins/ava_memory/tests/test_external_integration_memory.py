@@ -15,6 +15,7 @@ import ava
 from agent import state as state_module
 from ava import agent_identity, external
 from base.agents import impersonation as leases
+from base.agents.context.slices import AgentSlices
 from base.agents.messages.caller_identity import CallerIdentity
 from base.cluster.machine import machine_name
 from base.config import settings
@@ -174,7 +175,7 @@ def test_external_memory_rechecks_lease_before_filesystem_effects(
             if operation == "write":
                 sdk.write("expired-note", "Must not be written.")
             else:
-                notes.per_agent_memory_note()
+                notes.per_agent_memory_note(AgentSlices.resolve())
         assert not list(tmp_path.iterdir())
     finally:
         with pytest.raises(leases.ImpersonationError, match="expired"):

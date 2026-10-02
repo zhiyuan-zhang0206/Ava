@@ -28,8 +28,8 @@ from agent.hooks.compact import auto_compact_will_fire
 from agent.messages import tail_has_recallable_inbound
 from agent.state import AgentState, MemoryState
 from base.agents.context import AvaContext
+from base.agents.context.slices import AgentSlices
 from base.config import settings
-from base.config.turn_view import turn_settings
 from base.log import logger
 
 from .inherit import inherited_memory_note
@@ -166,7 +166,7 @@ reporting, not silently working around."""
 
 
 @register_system_prompt_section
-def memory_discipline_section() -> str:
+def memory_discipline_section(slices: AgentSlices) -> str:
     """Toggle via settings.agent.prompt_memory_behavior_enabled (env
     AVA_SYSTEM_PROMPT_MEMORY, default on). Empty when both stores are switched
     off — with nothing to write to, the discipline would describe a capability
@@ -175,7 +175,7 @@ def memory_discipline_section() -> str:
     deliberately does not repeat them."""
     from base.lm.registry import resolve_setting
 
-    if not resolve_setting("prompt_memory_behavior_enabled", model=turn_settings.lm.llm_model):
+    if not resolve_setting("prompt_memory_behavior_enabled", model=slices.brain.llm_model):
         return ""
     if not (
         settings.agent.memory_index_inject_enabled or settings.agent.memory_per_agent_inject_enabled

@@ -780,7 +780,7 @@ def test_compact_contract_lives_in_docstring_and_reaches_prompt(_ava_compact_loa
 
     # The contract must actually reach the prompt — otherwise the short triggers
     # below point at something the agent / forced-compact model never sees.
-    system_prompt = build_system_prompt()
+    system_prompt = build_system_prompt(AgentSlices.resolve())
     for section in _COMPACT_SECTIONS:
         assert section in system_prompt, f"section {section!r} not rendered into the system prompt"
 

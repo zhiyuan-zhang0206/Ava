@@ -5,10 +5,7 @@
   },
   "agent/graph": {
     "shim": 3,
-    "turn-settings-read": 11
-  },
-  "agent/hooks": {
-    "turn-settings-read": 1
+    "turn-settings-read": 2
   },
   "agent/ownership": {
     "bus-built": 3
@@ -26,7 +23,7 @@
   },
   "ava_builtins/plugins": {
     "bus-built": 3,
-    "turn-settings-read": 9
+    "turn-settings-read": 4
   },
   "base/agents": {
     "bus-built": 10,

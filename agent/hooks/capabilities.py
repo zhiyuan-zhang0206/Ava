@@ -86,7 +86,9 @@ class _NewlyInstalledSkillsHook(Hook):
             return None
 
         known = state.capabilities.indexed
-        drift = index_drift(known if known is not None else set())
+        drift = index_drift(
+            known if known is not None else set(), runtime.context.require_agent().prompt
+        )
         if known is None:
             # No snapshot for this window — a checkpoint written before the
             # field existed. Adopt the live catalog as the baseline silently:

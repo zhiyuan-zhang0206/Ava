@@ -58,7 +58,7 @@ register_before_llm(_DemoHook())
 
 
 @register_system_prompt_section
-def demo_section() -> str:
+def demo_section(_slices: object) -> str:
     return "## Demo"
 
 
@@ -190,7 +190,7 @@ register_before_llm(_DeclaredHook())
 
 
 @register_system_prompt_section
-def demo_section() -> str:
+def demo_section(_slices: object) -> str:
     return "## Declared"
 
 
