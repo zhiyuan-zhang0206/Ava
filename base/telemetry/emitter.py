@@ -5,7 +5,8 @@ one correlation key (`trace_id`). This module is its only writer.
 
 Pipeline (Layer 1): a bounded queue and drain thread batch every event into
 local JSONL mirrors, best-effort compact metrics, and OTLP logs/metrics. Live
-event reads use Loki/Prometheus; the retired Postgres archive is never revived.
+event reads use Loki/Prometheus; the retired Postgres archive is never revived
+(audit events: the `audit_events` table is their record, this pipeline a projection).
 
 Backpressure sheds non-audit records under overload. Trace ids are captured at
 enqueue, and machine and cluster dimensions are always populated.

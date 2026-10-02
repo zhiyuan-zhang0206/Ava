@@ -3,7 +3,8 @@
 Every application privilege is granted to one of two groups, never to a login:
 
 - ``ava_gateway``: the owner's DML surface without DDL or ownership. SELECT,
-  INSERT, UPDATE, DELETE on every table; USAGE, SELECT, UPDATE on every
+  INSERT, UPDATE, DELETE on every table (SELECT and INSERT only on the
+  append-only ``audit_events``); USAGE, SELECT, UPDATE on every
   sequence; EXECUTE on every routine, including those revoked from PUBLIC;
   PostgreSQL 17 ``MAINTAIN`` on the checkpoint tables the blob vacuum
   maintains. No TRUNCATE, REFERENCES or TRIGGER.
@@ -43,6 +44,10 @@ from base.cluster.authority.model import (
 
 CHECKPOINT_TABLES = ("checkpoints", "checkpoint_blobs", "checkpoint_writes")
 
+# Tables the gateway group may read and append but never rewrite. The blanket
+# DML grant below includes UPDATE and DELETE, so they are revoked per table.
+_GATEWAY_APPEND_ONLY_TABLES = ("audit_events",)
+
 # The runner matrix: (privileges, tables). Privilege strings are module
 # constants spliced as SQL; table names are quoted identifiers. Each entry is a
 # write path a runner process performs directly (not through the gateway API).
@@ -71,6 +76,9 @@ _RUNNER_TABLE_GRANTS: tuple[tuple[LiteralString, tuple[str, ...]], ...] = (
     ("SELECT, INSERT", ("agent_shell_ttl_renewals",)),
     # ava.self.pause_heartbeat append-only trail (task #1932).
     ("SELECT, INSERT", ("heartbeat_pause_log",)),
+    # Audit events are appended by the producing runner process; the table's
+    # triggers reject every rewrite.
+    ("SELECT, INSERT", ("audit_events",)),
     # Plugin statistics cards; stale rows age in place, never deleted.
     ("SELECT, INSERT, UPDATE", ("plugin_stats",)),
     ("SELECT, INSERT", ("agent_metric_observations",)),
@@ -138,6 +146,8 @@ def _grant_gateway(conn: Conn, owner: str, gateway: str) -> None:
     _grant(conn, "GRANT EXECUTE ON ALL ROUTINES IN SCHEMA public TO {}", gateway)
     for table in CHECKPOINT_TABLES:
         _grant(conn, "GRANT MAINTAIN ON {} TO {}", table, gateway)
+    for table in _GATEWAY_APPEND_ONLY_TABLES:
+        _grant(conn, "REVOKE UPDATE, DELETE ON {} FROM {}", table, gateway)
     default = "ALTER DEFAULT PRIVILEGES FOR ROLE {} IN SCHEMA public GRANT "
     _grant(conn, default + "SELECT, INSERT, UPDATE, DELETE ON TABLES TO {}", owner, gateway)
     _grant(conn, default + "USAGE, SELECT, UPDATE ON SEQUENCES TO {}", owner, gateway)

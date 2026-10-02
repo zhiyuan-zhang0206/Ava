@@ -1,21 +1,27 @@
 """Audit-event entry point — the category=audit side of the unified event stream.
 
 Every agent operation (spawn, send_message, terminate, compact, status_change,
-skill_invoked, ...) is recorded through these helpers, which enqueue into the
-unified emitter (`base.telemetry`) — the single write path for every event in
-every process. The emitter's drain thread appends each batch to the day-stamped
-JSONL mirror (the durable local copy) and exports it to the OTLP backend
-(Loki/Prometheus); the Postgres `events` table was frozen at the LGTM
-cutover (task #1197, user ruling 2026-08-12) and dropped with the archive
-cleanup (task #1281/#1823) — the read side is Loki, and the JSONL mirror is the
-durable backfill.
+skill_invoked, ...) is an audit event, and Postgres is its system of record: the
+``audit_events`` table is append-only and permanent
+(decisions/2026-10-02-audit-events-in-postgres.md). Loki and the day-stamped
+JSONL mirror receive the same event through the unified emitter
+(`base.telemetry`) as a projection that sheds under overload, truncates long
+lines and expires after 84 hours; losing the projection loses no record.
 
-The former contract — "the INSERT rides in the caller's transaction, no
-separate commit" — is deliberately gone: the design (event-system refactor,
-Layer 1) makes the emitter's batch the single write path for every event, and
-the emitter's JSONL mirror is the durable fallback for the window between
-enqueue and batch commit. Callers no longer pass a cursor; nothing here
-touches the DB on the calling thread.
+Two primitives record an event, and a lint (`scripts/content_lint/lint_audit_record.py`)
+requires every audit emit site to use one:
+
+- :func:`record_audit` — INSERT inside the caller's own transaction, so the
+  row commits or rolls back with the business write. The caller emits the
+  returned event after its commit.
+- :func:`record_audit_standalone` — for a producer that owns no transaction
+  (the effect already happened, or another process owns it): one short write
+  transaction, then the emit. A failed write raises; it is never degraded to a
+  projection-only emit.
+
+`insert_event_log*` below is the enqueue-only API that predates the table. It
+records nothing in Postgres; the call sites still on it are frozen in the lint's
+``_BASELINE`` and move to the primitives above.
 
 Payload tiering
 ---------------
@@ -33,11 +39,14 @@ branching on a payload's fields; do not model display-only events.
 
 from __future__ import annotations
 
+import json
 from typing import Any, Literal
 
+import psycopg
 from pydantic import BaseModel, ConfigDict
 
 from base import telemetry
+from base.events.contract import EVENTS
 
 
 class SkillInvokedPayload(BaseModel):
@@ -182,3 +191,89 @@ async def insert_event_log_async(
         target_agent_id=target_agent_id,
         payload=payload,
     )
+
+
+_INSERT_AUDIT_EVENT = (
+    "INSERT INTO audit_events (event_uid, ts, trace_id, span_id, agent_id, machine, process, "
+    "event_name, level, source, target_agent_id, attributes) "
+    "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb) "
+    "ON CONFLICT (event_uid) DO NOTHING"
+)
+
+
+def audit_event_uid(event: telemetry.Event) -> int:
+    """The event's stream surrogate id as the signed 64-bit `audit_events.event_uid`.
+
+    The id is the one the JSONL mirror and Loki already carry for the same
+    event (`telemetry.event_id`, an unsigned blake2b-64 over the serialized
+    line and its nanosecond timestamp). Postgres has no unsigned bigint, so
+    values from 2**63 up wrap to the negative half; the mapping is a bijection.
+    """
+    uid = telemetry.event_id(telemetry.event_line(event), int(event.ts.timestamp() * 1_000_000_000))
+    return uid - (1 << 64) if uid >= 1 << 63 else uid
+
+
+def record_audit(conn: psycopg.Connection, event: telemetry.Event) -> telemetry.Event:
+    """INSERT one audit event into `audit_events` inside the caller's transaction.
+
+    The row commits or rolls back with the business write that produced the
+    fact, so no fact is recorded for an operation that did not happen and none
+    is missing for one that did. Pass the exact event that will be emitted
+    (after any session tagging), and emit it with `telemetry.emit_prepared`
+    only after the transaction commits — Loki then carries the same bytes the
+    row holds. Returns the event unchanged so the caller can hand it on.
+
+    Idempotent on the event's stream id: a redelivered identical event inserts
+    nothing. A contract violation (not an audit event, or a name the registry
+    does not declare as audit) raises ValueError; a database failure
+    propagates to the caller's transaction.
+    """
+    spec = EVENTS.get(event.event_name)
+    if (
+        event.category != "audit"
+        or spec is None
+        or "audit"
+        not in {
+            spec.category,
+            *spec.extra_categories,
+        }
+    ):
+        raise ValueError(
+            f"record_audit() needs a registered category=audit event, got "
+            f"category={event.category!r} event_name={event.event_name!r}"
+        )
+    conn.execute(
+        _INSERT_AUDIT_EVENT,
+        (
+            audit_event_uid(event),
+            event.ts,
+            event.trace_id,
+            event.span_id,
+            event.agent_id,
+            event.machine,
+            event.process,
+            event.event_name,
+            event.level,
+            event.source,
+            event.target_agent_id,
+            json.dumps(event.attributes, default=str, ensure_ascii=False),
+        ),
+    )
+    return event
+
+
+def record_audit_standalone(event: telemetry.Event) -> None:
+    """Record one audit event in its own write transaction, then emit it.
+
+    For a producer that owns no business transaction: the effect already
+    happened, or another process owns it. The row is written and committed
+    first; only then is the event handed to the emitter as the Loki
+    projection. A failed write raises to the caller and nothing is emitted —
+    there is no projection-only fallback. The window this does not cover is a
+    process that dies after the effect and before this call.
+    """
+    from base.db.transaction import write_transaction
+
+    with write_transaction() as conn:
+        record_audit(conn, event)
+    telemetry.emit_prepared(event)
