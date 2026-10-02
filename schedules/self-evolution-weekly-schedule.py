@@ -15,8 +15,7 @@ from pathlib import Path
 import ava
 from ava.agents import AgentStatus as S
 from schedules.agent_status_guard import ensure_agent_status_members
-from schedules.catchup import catch_up, fire_slot_once
-from base.config import settings
+from schedules.catchup import catch_up, cluster_timezone, fire_slot_once
 from base.telemetry.observability import observability_refusal_detail
 from base.daemon.schedules.watcher import next_fire
 
@@ -30,11 +29,6 @@ ensure_agent_status_members(
 
 LABEL = "self-evolution"
 PROMPT = "Read and run $AVA_HOME/skills/ava-self-evolution/SKILL.md for this week."
-# Cluster wall clock (`AVA_TIMEZONE`, cluster-pinned), never the host's OS
-# timezone — a weekly cron is the case where a host-local reading lands the run
-# on the wrong CALENDAR DAY, not merely at the wrong hour. Read at process
-# start; `ava schedules restart <id>` adopts a changed AVA_TIMEZONE.
-TIMEZONE = settings.general.timezone
 
 # Main weekly check: Tuesday 00:00 cluster time
 MONDAY_CRON = "0 0 * * 2"
@@ -242,7 +236,7 @@ def _main_loop() -> None:
             (MONDAY_CRON, MONDAY_TRIGGER),
             (THURSDAY_CRON, THURSDAY_TRIGGER),
         ],
-        timezone=TIMEZONE,
+        timezone=cluster_timezone(),
         fire=fire_weekly_trigger,
     )
 
@@ -253,10 +247,14 @@ def _main_loop() -> None:
         # a fraction of a second past the hour; croniter get_next (strictly > base)
         # would then jump to the next day (deterministic miss, observed 2026-08-06).
         # Tolerance window = [-120s, +90s].
-        nxt_monday = next_fire(MONDAY_CRON, after=now - timedelta(minutes=2), timezone=TIMEZONE)
+        nxt_monday = next_fire(
+            MONDAY_CRON, after=now - timedelta(minutes=2), timezone=cluster_timezone()
+        )
         wait_monday = (nxt_monday - now).total_seconds()
 
-        nxt_thursday = next_fire(THURSDAY_CRON, after=now - timedelta(minutes=2), timezone=TIMEZONE)
+        nxt_thursday = next_fire(
+            THURSDAY_CRON, after=now - timedelta(minutes=2), timezone=cluster_timezone()
+        )
         wait_thursday = (nxt_thursday - now).total_seconds() if thursday_enabled else float("inf")
 
         wait = min(wait_monday, wait_thursday)

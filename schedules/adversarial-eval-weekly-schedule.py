@@ -20,7 +20,6 @@ from typing import Any, TypedDict, cast
 import ava
 from ava.agents import AgentRow
 from ava.agents import AgentStatus as S
-from base.config import settings
 from base.paths import ava_home
 from base.daemon.schedules.watcher import next_fire
 
@@ -33,7 +32,7 @@ from schedules.adversarial_eval_cases import (
     write_scenario,
 )
 from schedules.agent_status_guard import ensure_agent_status_members
-from schedules.catchup import catch_up, fire_slot_once
+from schedules.catchup import catch_up, cluster_timezone, fire_slot_once
 
 ensure_agent_status_members(
     S,
@@ -41,7 +40,6 @@ ensure_agent_status_members(
     schedule_name="adversarial-eval-weekly",
 )
 
-TIMEZONE = settings.general.timezone
 CRON = "0 4 * * 3"
 OWNER_LABEL = "adversarial-eval-owner"
 POLL_SECONDS = 30
@@ -502,9 +500,9 @@ def _fire_weekly_batch(_trigger: None) -> None:
 
 def main() -> None:
     """Catch up missed Wednesday slots, then keep serving future weeks."""
-    catch_up([(CRON, None)], timezone=TIMEZONE, fire=_fire_weekly_batch)
+    catch_up([(CRON, None)], timezone=cluster_timezone(), fire=_fire_weekly_batch)
     while True:
-        nxt = next_fire(CRON, after=datetime.now(UTC), timezone=TIMEZONE)
+        nxt = next_fire(CRON, after=datetime.now(UTC), timezone=cluster_timezone())
         while datetime.now(UTC) < nxt:
             time.sleep(60)
         fire_slot_once(nxt, None, fire=_fire_weekly_batch)

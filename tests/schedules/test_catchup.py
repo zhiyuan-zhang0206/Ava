@@ -17,6 +17,7 @@ from unittest.mock import Mock
 import psycopg
 import pytest
 
+from base.config import settings
 from schedules.catchup import catch_up, claimed_slot, fire_slot_once
 
 _ROOT = Path(__file__).resolve().parents[2]
@@ -71,7 +72,7 @@ def test_daily_loop_skips_an_already_seen_slot_and_sleeps_until_next_fire(
         module._main_loop()
 
     catch_up_call.assert_called_once_with(
-        [(module.CRON, None)], timezone=module.TZ, fire=module._fire
+        [(module.CRON, None)], timezone=settings.general.timezone, fire=module._fire
     )
     assert [call.kwargs["after"] for call in next_fire_call.call_args_list] == [
         now - timedelta(minutes=2),
@@ -329,3 +330,14 @@ def test_daily_host_owns_catch_up_and_slot_claims() -> None:
     }
 
     assert {"catch_up", "fire_slot_once"} <= calls
+
+
+def test_cluster_timezone_follows_the_setting_when_it_is_read(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from schedules.catchup import cluster_timezone
+
+    monkeypatch.setattr(settings.general, "timezone", "Asia/Kathmandu")
+    assert cluster_timezone() == "Asia/Kathmandu"
+    monkeypatch.setattr(settings.general, "timezone", "America/Los_Angeles")
+    assert cluster_timezone() == "America/Los_Angeles"
