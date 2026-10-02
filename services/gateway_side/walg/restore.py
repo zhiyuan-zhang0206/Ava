@@ -60,6 +60,11 @@ RESTORE_TIMEOUT_S = 2 * 3600
 extrapolated durations are under twenty minutes."""
 
 _POLL_S = 0.2
+# What the server says when it refuses a connection for good, matched on its (English, see
+# `lc_messages` in `recovery_argv`) text: libpq reports no SQLSTATE for a failed connect.
+_REFUSED = re.compile(
+    r'(?:role|database) ".*" does not exist|authentication failed|no pg_hba\.conf entry'
+)
 _CLEAN_STOP_TIMEOUT_S = 60
 _TOOL_TIMEOUT_S = 60
 
@@ -198,6 +203,8 @@ def recovery_argv(
         "-c",
         "hot_standby=on",
         "-c",
+        "lc_messages=C",
+        "-c",
         f"restore_command={postgres_command('wal-fetch', '%f', '%p')}",
         "-c",
         "recovery_target_action=promote",
@@ -215,16 +222,24 @@ def _wait_promoted(process: subprocess.Popen[bytes], instance: RestoredInstance,
             raise RestoreError(
                 f"recovery failed, postgres exited {process.returncode}: {_log_tail(log)}"
             )
-        # Still starting up or replaying WAL: not accepting connections yet.
-        with (
-            suppress(psycopg.OperationalError),
-            connect_url(instance.url("postgres"), autocommit=True, connect_timeout=2) as conn,
-        ):
-            row = conn.execute(
-                "SELECT NOT pg_is_in_recovery(), (SELECT timeline_id FROM pg_control_checkpoint())"
-            ).fetchone()
-            if row is not None and row[0]:
-                return int(row[1])
+        try:
+            with connect_url(instance.url("postgres"), autocommit=True, connect_timeout=2) as conn:
+                row = conn.execute(
+                    "SELECT NOT pg_is_in_recovery(), "
+                    "(SELECT timeline_id FROM pg_control_checkpoint())"
+                ).fetchone()
+                if row is not None and row[0]:
+                    return int(row[1])
+        except psycopg.OperationalError as exc:
+            # Starting up, replaying WAL and a socket that is not there yet all mean "wait".
+            # A refusal by the server (no such role, authentication) never changes: ending
+            # here beats running out the two-hour bound.
+            if _REFUSED.search(str(exc)):
+                raise RestoreError(
+                    f"the recovered instance refuses {instance.user!r}: {str(exc).strip()} "
+                    "(the superuser of a restored cluster is the OS user that ran initdb on "
+                    f"the source; name it with --user): {_log_tail(log)}"
+                ) from None
         time.sleep(_POLL_S)
     raise RestoreError(f"recovery did not finish within {RESTORE_TIMEOUT_S}s: {_log_tail(log)}")
 

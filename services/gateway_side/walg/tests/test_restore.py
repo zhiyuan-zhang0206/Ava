@@ -314,6 +314,7 @@ def test_the_postmaster_command_line_holds_every_safety_setting_and_no_secret(
     wanted = {
         "archive_mode=off",
         "listen_addresses=",
+        "lc_messages=C",
         "recovery_target_action=promote",
         "recovery_target_lsn=0/3000060",
         "max_connections=500",
@@ -356,3 +357,31 @@ def test_control_settings_refuses_a_directory_without_a_control_file(tmp_path: P
     empty.mkdir()
     with pytest.raises(RestoreError, match="pg_controldata"):
         restore.control_settings(empty)
+
+
+def test_a_role_the_restored_cluster_does_not_have_fails_at_once(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, socket_dirs: list[Path]
+) -> None:
+    """The cluster's superuser is the source's initdb user. A role Postgres refuses never
+    becomes valid, so the wait for promotion must end with Postgres' answer, not run out
+    its two-hour bound."""
+    sandbox = make_sandbox(tmp_path, monkeypatch)
+    monkeypatch.setattr(restore, "RESTORE_TIMEOUT_S", 60)
+    with archiving_postgres() as pg:
+        scenario = _scenario(sandbox, pg)
+        started = time.monotonic()
+        with (
+            pytest.raises(RestoreError, match=r"refuses .*not_the_superuser.*does not exist"),
+            restored_instance(
+                tmp_path / "restored",
+                backup=scenario.backup,
+                target=RecoveryTarget(),
+                report=lambda _line: None,
+                user="not_the_superuser",
+                keep_data=False,
+            ),
+        ):
+            pytest.fail("a restore as a missing role must not yield an instance")
+    assert time.monotonic() - started < 30
+    assert socket_dirs
+    assert not any(path.exists() for path in socket_dirs)

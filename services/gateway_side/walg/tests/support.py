@@ -73,6 +73,10 @@ class Sandbox:
         log = self.store_dir / "env.log"
         return log.read_text().splitlines() if log.exists() else []
 
+    def verify_env_log(self) -> list[str]:
+        log = self.store_dir / "verify-env.log"
+        return log.read_text().splitlines() if log.exists() else []
+
     def calls(self) -> list[str]:
         log = self.store_dir / "calls.log"
         return log.read_text().splitlines() if log.exists() else []
