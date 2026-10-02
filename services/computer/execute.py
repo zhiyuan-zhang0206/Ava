@@ -6,6 +6,7 @@ import json
 from typing import Any
 
 import services.computer.ocr as ocr_mod
+from services.computer import ax_tools
 from services.computer.errors import ComputerUseError
 from services.computer.ocr_text import _click_text_tool, _find_text_tool
 from services.computer.screen import _capture_screen, _current_scale, _to_logical
@@ -237,6 +238,20 @@ def _execute(
     raise ComputerUseError(f"unknown tool {tool!r}")
 
 
+def _execute_tool(
+    tool: str,
+    args: dict[str, Any],
+    agent_id: int,
+    pointer: tuple[float, float] | None = None,
+    scale: float | None = None,
+    ocr_cache: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """The daemon's entry: the accessibility tools, else `_execute`."""
+    if tool == "ax_tree":
+        return ax_tools.ax_tree_tool(args, agent_id, scale)
+    return _execute(tool, args, agent_id, pointer=pointer, scale=scale, ocr_cache=ocr_cache)
+
+
 # MCP tool declarations (list_tools shape: name / description / input_schema).
 _TOOLS: list[dict[str, Any]] = [
     {
@@ -431,4 +446,5 @@ _TOOLS: list[dict[str, Any]] = [
             },
         },
     },
+    *ax_tools.TOOL_DECLARATIONS,
 ]
