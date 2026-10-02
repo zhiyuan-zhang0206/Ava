@@ -34,6 +34,7 @@ from psycopg_pool import ConnectionPool
 import base.sessions.pty.cli
 from base.cluster.machine import machine_name, reachable_host
 from base.config import settings
+from base.daemon.endpoints import ServiceEndpoint, ServiceEndpoints
 from base.daemon.health import start_health_server, stop_health_server
 from base.daemon.loop_health import LivenessGroup, LoopProgress
 from base.daemon.shutdown import cancel_and_drain, install_graceful_shutdown
@@ -42,7 +43,7 @@ from base.db import Database
 from base.db.transaction import write_transaction
 from base.deploy.maintenance import admission
 from base.log import init_gateway_process
-from base.paths import ava_home, pid_path
+from base.paths import ava_home
 from base.sessions.backend import PtySessionBackend, SessionBackend, get_shell_backend
 from base.sessions.page_session import page_session_name
 from base.sessions.record import SessionRecord
@@ -74,8 +75,12 @@ def page_server_config() -> PageServerConfig:
     )
 
 
+def _endpoint() -> ServiceEndpoint:
+    return ServiceEndpoints.from_settings().of("page_server")
+
+
 def _pidfile() -> Path:
-    return pid_path("page_server")
+    return _endpoint().pidfile
 
 
 # A new PTY host needs a short window to finish its interactive-shell startup
@@ -678,7 +683,7 @@ async def run() -> None:
     liveness = LivenessGroup()
     reconcile_progress = liveness.register("reconcile", _LIVENESS_TIMEOUT_S)
     dead_pages_progress = liveness.register("dead_show_pages", _DEAD_PAGES_LIVENESS_TIMEOUT_S)
-    health = await start_health_server("page_server", liveness=liveness)
+    health = await start_health_server("page_server", _endpoint().health_port, liveness=liveness)
     pool = Database.from_settings().pool()
     config = page_server_config()
     try:

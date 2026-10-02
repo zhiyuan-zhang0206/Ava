@@ -28,13 +28,13 @@ from loguru import logger
 from psycopg_pool import ConnectionPool
 
 from base.config import settings
-from base.daemon.health import Liveness, health_port, start_health_server, stop_health_server
+from base.daemon.endpoints import ServiceEndpoint, ServiceEndpoints
+from base.daemon.health import Liveness, start_health_server, stop_health_server
 from base.daemon.shutdown import cancel_and_drain, install_graceful_shutdown
 from base.daemon.shutdown import hard_exit as _hard_exit
 from base.db import Database
 from base.deploy.maintenance import admission
 from base.log import init_gateway_process
-from base.paths import pid_path
 from services.labeler.config import LabelerConfig
 from services.labeler.labeler import generate_label_async
 from services.pidfile import acquire_pidfile, pidfile_holds_daemon, remove_pidfile
@@ -56,8 +56,12 @@ def labeler_config() -> LabelerConfig:
     )
 
 
+def _endpoint() -> ServiceEndpoint:
+    return ServiceEndpoints.from_settings().of("labeler")
+
+
 def _pidfile() -> Path:
-    return pid_path("labeler")
+    return _endpoint().pidfile
 
 
 # Per-agent failure backoff. A label that persistently fails (bad key, rate
@@ -300,8 +304,9 @@ async def run() -> None:
     _log.info("[labeler] pidfile written: %s", _pidfile())
 
     liveness = Liveness(_LIVENESS_TIMEOUT_S)
-    health = await start_health_server("labeler", liveness=liveness)
-    _log.info("[labeler] healthz listening on :%s", health_port("labeler"))
+    endpoint = _endpoint()
+    health = await start_health_server("labeler", endpoint.health_port, liveness=liveness)
+    _log.info("[labeler] healthz listening on :%s", endpoint.health_port)
 
     db = Database.from_settings()
     pool = db.pool()
