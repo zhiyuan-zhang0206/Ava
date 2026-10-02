@@ -1,6 +1,5 @@
 {
   "tests_location": {
-    "tests/ci/test_converge_local_git_hooks.py::top-level": 1,
-    "tests/ci/test_owned_gateway_port.py::top-level": 1
+    "tests/ci/test_converge_local_git_hooks.py::top-level": 1
   }
 }
