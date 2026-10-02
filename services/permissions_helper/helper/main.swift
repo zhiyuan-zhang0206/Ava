@@ -679,15 +679,16 @@ func axWindowInfo(_ req: [String: Any]) throws -> [String: Any] {
 
 // MARK: - AX tree
 
-/// Read-only accessibility-tree walk of one application window (`ax_tree`).
+/// Accessibility-tree walk of one application window (`ax_tree`, read-only)
+/// and single-element actions on what it returned (`ax_act`).
 /// The helper serves one request at a time, so a walk is bounded three ways: a
 /// node cap, a depth cap and a total time budget, plus a per-element messaging
 /// timeout so one hung target app cannot hold the socket for the system default
 /// (about six seconds). Whatever was read when a bound trips is returned with
-/// `truncated` / `timed_out` set; filtering, collapsing and rendering belong to
-/// the Python side. Element ids ("e<N>") index a table of live element
-/// references that lives until the next unscoped walk, which only a later
-/// `scope` drill-down needs.
+/// `truncated` / `timed_out` set; filtering, collapsing, rendering and stable
+/// ids belong to the Python side, which tells nodes apart across walks by the
+/// fingerprint each carries. `ax_act` addresses a node by the raw id of the
+/// latest walk and answers `stale` when that element is gone or changed.
 private let axTreeAttributes: [String] = [
     kAXRoleAttribute, kAXSubroleAttribute, kAXTitleAttribute, kAXDescriptionAttribute,
     kAXValueAttribute, kAXIdentifierAttribute, kAXPositionAttribute, kAXSizeAttribute,
@@ -703,8 +704,44 @@ private let axTreeFrameworkMarkers: [(marker: String, name: String)] = [
     ("Chromium Embedded Framework.framework", "cef"),
 ]
 
-private var axElementTable: [Int: AXUIElement] = [:]
+/// A live element reference plus the signature (role, identifier, title,
+/// description) it had when it was read; `ax_act` refuses an element whose
+/// signature changed since, so a recycled row is never acted on by mistake.
+private struct AXEntry {
+    let element: AXUIElement
+    let sig: String
+}
+
+/// Raw ids ("1", "2", ...) of the last walks; the client maps them to its own
+/// stable ids through each node's fingerprint. An unscoped walk replaces the
+/// table, a scoped one adds to it.
+private var axElementTable: [Int: AXEntry] = [:]
 private var axNextElementID = 1
+
+private func fnv1a(_ text: String) -> String {
+    var hash: UInt64 = 0xcbf29ce484222325
+    for byte in text.utf8 {
+        hash ^= UInt64(byte)
+        hash = hash &* 0x100000001b3
+    }
+    return String(hash, radix: 16)
+}
+
+/// The identity text that distinguishes siblings of one role: the explicit
+/// identifier, else the title, else the description. Values are excluded
+/// (they change as the user types). A window keeps its title so two windows of
+/// one app never share a fingerprint.
+private func axDiscriminator(_ values: [AnyObject?]) -> String {
+    for index in [5, 2, 3] {
+        if let v = axString(values[index]) { return String(v.prefix(60)) }
+    }
+    return ""
+}
+
+private func axSignature(role: String?, values: [AnyObject?]) -> String {
+    let parts = [role, axString(values[5]), axString(values[2]), axString(values[3])]
+    return fnv1a(parts.map { $0 ?? "" }.joined(separator: "\u{1f}"))
+}
 
 private func axBatch(_ element: AXUIElement, _ attributes: [String]) -> [AnyObject?]? {
     var out: CFArray?
@@ -806,12 +843,14 @@ func axTree(_ req: [String: Any]) throws -> [String: Any] {
     ]
 
     let root: AXUIElement
-    if let scope = req["scope"] as? String {
-        guard scope.hasPrefix("e"), let id = Int(scope.dropFirst()), let scoped = axElementTable[id]
-        else { throw OpError.bad("unknown scope \(scope): ids are valid until the next ax_tree without scope") }
+    let scopeFingerprint = req["scope_fp"] as? String
+    if let scopeID = numericDouble(req["scope"]).map({ Int($0) }) {
+        guard let scoped = axElementTable[scopeID]?.element
+        else { throw OpError.bad("unknown scope \(scopeID): the element table was replaced by a later walk") }
+        guard scopeFingerprint != nil else { throw OpError.bad("a scoped ax_tree needs scope_fp") }
         var scopedPid: pid_t = 0
         guard AXUIElementGetPid(scoped, &scopedPid) == .success, scopedPid == app.processIdentifier
-        else { throw OpError.bad("scope \(scope) does not belong to \(appName)") }
+        else { throw OpError.bad("scope \(scopeID) does not belong to \(appName)") }
         AXUIElementSetMessagingTimeout(scoped, messagingTimeout)
         root = scoped
     } else {
@@ -827,13 +866,14 @@ func axTree(_ req: [String: Any]) throws -> [String: Any] {
 
     let started = Date()
     var nodes: [[String: Any]] = []
-    var queue: [(element: AXUIElement, parent: Int?, depth: Int)] = [(root, nil, 0)]
+    var queue: [(element: AXUIElement, parent: Int?, parentFp: String, depth: Int)] = [(root, nil, "", 0)]
+    var siblingCounts: [String: Int] = [:]
     var head = 0
     var truncated = false
     var timedOut = false
     var unreadable = 0
     while head < queue.count {
-        let (element, parent, depth) = queue[head]
+        let (element, parent, parentFp, depth) = queue[head]
         head += 1
         if nodes.count >= maxNodes { truncated = true; break }
         if Date().timeIntervalSince(started) > budget { timedOut = true; break }
@@ -841,9 +881,24 @@ func axTree(_ req: [String: Any]) throws -> [String: Any] {
         let role = axString(values[0])
         let id = axNextElementID
         axNextElementID += 1
-        axElementTable[id] = element
+        axElementTable[id] = AXEntry(element: element, sig: axSignature(role: role, values: values))
 
-        var node: [String: Any] = ["id": id, "depth": depth]
+        // Path fingerprint: parent fingerprint + role + discriminator + the
+        // ordinal among same-keyed siblings. It survives value edits and
+        // sibling reordering of other kinds, and a scoped walk's root keeps the
+        // fingerprint the client already knows it by.
+        let fingerprint: String
+        if depth == 0, let known = scopeFingerprint {
+            fingerprint = known
+        } else {
+            let segment = (role ?? "") + "|" + axDiscriminator(values)
+            let ordinalKey = parentFp + "/" + segment
+            let ordinal = siblingCounts[ordinalKey, default: 0]
+            siblingCounts[ordinalKey] = ordinal + 1
+            fingerprint = fnv1a(ordinalKey + "#" + String(ordinal))
+        }
+
+        var node: [String: Any] = ["id": id, "depth": depth, "fp": fingerprint]
         if let parent = parent { node["parent"] = parent }
         if let role = role { node["role"] = role }
         if let v = axString(values[1]) { node["subrole"] = v }
@@ -873,13 +928,80 @@ func axTree(_ req: [String: Any]) throws -> [String: Any] {
             if !children.isEmpty { truncated = true }
             continue
         }
-        for child in children { queue.append((child, id, depth + 1)) }
+        for child in children { queue.append((child, id, fingerprint, depth + 1)) }
     }
     meta.merge([
         "nodes": nodes, "visited": nodes.count, "truncated": truncated, "timed_out": timedOut,
         "unreadable": unreadable, "elapsed_ms": Int(Date().timeIntervalSince(started) * 1000),
     ]) { $1 }
     return meta
+}
+
+private let axActionTable: [String: String] = [
+    "press": kAXPressAction, "show_menu": kAXShowMenuAction,
+]
+
+/// Perform one action on an element of the latest walk. Outcomes:
+///   stale     -> {"stale": true, "completed": false}: the id is not in the table,
+///                or the element no longer answers / no longer has the role,
+///                identifier, title and description it had when it was read.
+///   completed -> {"completed": true, ...}: the app accepted the action.
+///   unanswered-> {"completed": false, "unanswered": true}: the app did not
+///                answer within the timeout; the action may still have run.
+/// Anything else (no such action, attribute not settable, AX error) throws.
+/// The value of `set_value` is written and never echoed or logged.
+func axAct(_ req: [String: Any]) throws -> [String: Any] {
+    guard let appName = req["app"] as? String, let action = req["action"] as? String,
+          let rawID = numericDouble(req["id"]).map({ Int($0) })
+    else { throw OpError.bad("ax_act needs string app, string action and numeric id") }
+    guard let app = NSWorkspace.shared.runningApplications.first(where: {
+        $0.localizedName == appName || $0.bundleIdentifier == appName
+    }) else { throw OpError.bad("app not running: \(appName)") }
+    let timeout = Float(max(0.1, min((numericDouble(req["timeout_ms"]) ?? 2000) / 1000, 10)))
+    let stale: [String: Any] = ["stale": true, "completed": false]
+    guard let entry = axElementTable[rawID] else { return stale }
+    var elementPid: pid_t = 0
+    guard AXUIElementGetPid(entry.element, &elementPid) == .success, elementPid == app.processIdentifier
+    else { return stale }
+    AXUIElementSetMessagingTimeout(entry.element, timeout)
+    guard let values = axBatch(entry.element, axTreeAttributes) else { return stale }
+    let role = axString(values[0])
+    guard axSignature(role: role, values: values) == entry.sig else { return stale }
+
+    var status: AXError
+    switch action {
+    case "press", "show_menu":
+        let name = axActionTable[action]!
+        let offered = axActionNames(entry.element)
+        guard offered.contains(name) else {
+            throw OpError.bad("element does not offer \(name) (it offers: \(offered.joined(separator: ", ")))")
+        }
+        status = AXUIElementPerformAction(entry.element, name as CFString)
+    case "focus":
+        status = AXUIElementSetAttributeValue(entry.element, kAXFocusedAttribute as CFString, kCFBooleanTrue)
+    case "set_value":
+        guard let text = req["value"] as? String else { throw OpError.bad("set_value needs string value") }
+        var settable = DarwinBoolean(false)
+        guard AXUIElementIsAttributeSettable(entry.element, kAXValueAttribute as CFString, &settable) == .success,
+              settable.boolValue
+        else { throw OpError.bad("element value is not settable") }
+        status = AXUIElementSetAttributeValue(entry.element, kAXValueAttribute as CFString, text as CFString)
+    default:
+        throw OpError.bad("unknown ax_act action: \(action)")
+    }
+    var result: [String: Any] = ["action": action, "completed": status == .success]
+    if let role = role { result["role"] = role }
+    if let label = axString(values[2]) ?? axString(values[3]) { result["label"] = String(label.prefix(80)) }
+    if let (pos, dim) = axFrame(values[6], values[7]) {
+        result["x"] = Double(pos.x); result["y"] = Double(pos.y)
+        result["w"] = Double(dim.width); result["h"] = Double(dim.height)
+    }
+    switch status {
+    case .success: break
+    case .cannotComplete: result["unanswered"] = true
+    default: throw OpError.bad("ax_act \(action) failed: AXError \(status.rawValue)")
+    }
+    return result
 }
 
 // MARK: - Root keeper
@@ -1451,7 +1573,7 @@ private let rootKeeper = RootKeeper()
 func dispatch(_ req: [String: Any]) -> [String: Any] {
     let id = req["id"]
     let method = req["method"] as? String ?? ""
-    let axGatedMethods: Set<String> = ["click", "type", "key", "scroll", "ax_window_info", "ax_tree"]
+    let axGatedMethods: Set<String> = ["click", "type", "key", "scroll", "ax_window_info", "ax_tree", "ax_act"]
     if axGatedMethods.contains(method) && !axTrustedOrPrompt() {
         return ["id": id as Any, "ok": false, "error": axGrantError]
     }
@@ -1460,7 +1582,7 @@ func dispatch(_ req: [String: Any]) -> [String: Any] {
         switch method {
         case "ping":
             result = ["pong": true, "pid": Int(getpid()), "root_stop_intent_v1": true, "helper_shutdown_v1": true,
-                      "root_seed_report_v1": true, "ax_tree_v1": true,
+                      "root_seed_report_v1": true, "ax_tree_v1": true, "ax_act_v1": true,
                       "preflight_screen": CGPreflightScreenCaptureAccess(),
                       "ax_trusted": AXIsProcessTrusted()]
         case "file_list": result = try fileList(req)
@@ -1472,6 +1594,7 @@ func dispatch(_ req: [String: Any]) -> [String: Any] {
         case "scroll": result = try scroll(req)
         case "ax_window_info": result = try axWindowInfo(req)
         case "ax_tree": result = try axTree(req)
+        case "ax_act": result = try axAct(req)
         case "window_info": result = try windowInfo(req)
         case "session_info": result = sessionInfo()
         case "screen_size": result = try screenSize(req)

@@ -194,6 +194,7 @@ async def test_list_tools_and_ping() -> None:
         "session_info",
         "frontmost_app",
         "ax_tree",
+        "ax_act",
     }
     ping = await d._dispatch(_req("ping"))
     assert ping["ok"] is True
