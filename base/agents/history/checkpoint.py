@@ -19,7 +19,7 @@ store returns the last committed snapshot, so a slightly stale view is
 acceptable on cold-load paths.
 
 Schema is a precondition, not a read-side effect. Fresh install creates it;
-later upstream changes travel through paired Ava migrations, and ``ava start``
+later upstream changes travel through Ava timestamp migrations, and ``ava start``
 verifies the complete applied set. These helpers only perform SELECTs so they
 also work under the least-privilege ``ava_runner`` role; a missing/outdated
 schema is a store failure, never an invitation for a request path to attempt

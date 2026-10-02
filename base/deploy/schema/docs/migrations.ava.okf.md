@@ -1,7 +1,7 @@
 ---
 type: doc
 title: Schema Migrations (baseline + deltas)
-description: '`db/schema.sql` is the squashed baseline and the rollback floor; `migrations/YYYYMMDDTHHMMSS_<name>.sql` are post-baseline deltas tracked as an applied SET, not a high-water integer. `base/deploy/schema/migrations.py` applies them and asserts version in both directions at every daemon start.'
+description: '`db/schema.sql` is the squashed baseline; `migrations/YYYYMMDDTHHMMSS_<name>.sql` are post-baseline deltas tracked as an applied SET, not a high-water integer. `base/deploy/schema/migrations.py` applies them and asserts version in both directions at every daemon start.'
 tags:
 - base
 - library
