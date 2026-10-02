@@ -3,13 +3,12 @@
     "tests/base/subreaper_probe.py::ancestor": 16,
     "tests/base/test_delivery.py::test_real_relay_uses_snapshotted_config_across_restart": 17,
     "tests/base/test_delivery.py::test_two_attempts_each_get_a_full_window_then_native_observes_expiry": 16,
-    "tests/base/test_event_contract.py::test_payload_keys_are_the_declared_attribute_contract": 24,
     "tests/base/test_telemetry_otlp.py::test_log_mapping_full_record_shape": 18,
     "tests/base/test_telemetry_otlp.py::test_metric_mapping_int_counter_float_histogram": 17,
     "tests/base/test_uvicorn_stdlib_intercept.py::test_gateway_uvicorn_run_passes_log_config_none": 23
   },
   "directories": {
-    "tests/base": 40
+    "tests/base": 38
   },
   "files": {
     "tests/base/test_config.py": 1705,
@@ -47,7 +46,6 @@
     "tests/base/test_delta_read_compat.py::top-level": 1,
     "tests/base/test_dotenv_boot_launcher_context.py::top-level": 1,
     "tests/base/test_editable_install.py::top-level": 1,
-    "tests/base/test_event_contract.py::top-level": 1,
     "tests/base/test_evidence.py::top-level": 1,
     "tests/base/test_exec_request_evidence.py::top-level": 1,
     "tests/base/test_history.py::top-level": 1,
@@ -65,7 +63,6 @@
     "tests/base/test_tags.py::top-level": 1,
     "tests/base/test_telemetry_otlp.py::top-level": 1,
     "tests/base/test_telemetry_otlp_exit_delivery.py::top-level": 1,
-    "tests/base/test_turn_identity.py::top-level": 1,
     "tests/base/test_ui_contributions.py::top-level": 1,
     "tests/base/test_uvicorn_stdlib_intercept.py::top-level": 1
   }

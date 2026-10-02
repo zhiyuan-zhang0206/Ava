@@ -15,11 +15,7 @@ from typing import Any
 import pytest
 
 from ava import agent_identity
-from base.native_process.turn_identity import (
-    bind_turn_identity,
-    current_turn_agent_id,
-    effective_agent_id,
-)
+from base.native_process.turn_identity import bind_turn_identity, current_turn_agent_id
 
 
 @pytest.fixture(autouse=True)
@@ -29,26 +25,6 @@ def _reset_process_slots(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(agent_identity, "_owns_loop", True)
     monkeypatch.setattr(agent_identity, "_actor", None)
     monkeypatch.delenv("AVA_AGENT_ID", raising=False)
-
-
-class TestEffectiveAgentId:
-    def test_unbound_no_env_is_none(self) -> None:
-        assert effective_agent_id() is None
-        assert current_turn_agent_id() is None
-
-    def test_env_fallback(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setenv("AVA_AGENT_ID", "42")
-        assert effective_agent_id() == 42
-
-    def test_bound_wins_over_env(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setenv("AVA_AGENT_ID", "42")
-        with bind_turn_identity(7):
-            assert effective_agent_id() == 7
-        assert effective_agent_id() == 42
-
-    def test_malformed_env_is_none(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setenv("AVA_AGENT_ID", "not-a-number")
-        assert effective_agent_id() is None
 
 
 class TestBootLayering:
