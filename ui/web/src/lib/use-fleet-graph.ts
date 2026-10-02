@@ -16,7 +16,6 @@ const EMPTY_GRAPH: FleetGraph = {
   nodes: [],
   edges: [],
   stale: false,
-  truncated: false,
   telemetry_stale: false,
   snapshot_at: null,
 };
