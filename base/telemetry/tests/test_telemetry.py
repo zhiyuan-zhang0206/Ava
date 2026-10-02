@@ -517,8 +517,7 @@ def _mk_event(category: str, event_name: str) -> telemetry.Event:
 
 
 def test_regular_events_shed_immediately_when_full() -> None:
-    """A telemetry event on a full queue is shed at once (put_nowait) — the
-    pre-existing drop semantics, pinned so the audit lane is the only change."""
+    """A telemetry event on a full queue is shed at once (put_nowait)."""
     pipe = telemetry._EventPipeline.__new__(telemetry._EventPipeline)
     pipe._dropped_lock = threading.Lock()
     pipe.dropped = 0
@@ -535,49 +534,22 @@ def test_regular_events_shed_immediately_when_full() -> None:
     assert pipe.dropped == 1
 
 
-def test_audit_events_block_with_cap_before_shedding() -> None:
-    """An audit event on a full queue blocks (bounded backpressure, up to
-    _AUDIT_BLOCK_S) before it sheds — the durable lane. Only past the cap
-    does it drop, counted like any other shed."""
+def test_audit_events_are_shed_like_any_other_event_on_a_full_queue() -> None:
+    """Their record is `audit_events`, so the projection takes no blocking lane."""
     pipe = telemetry._EventPipeline.__new__(telemetry._EventPipeline)
     pipe._dropped_lock = threading.Lock()
     pipe.dropped = 0
 
     class _FullQueue:
-        def __init__(self) -> None:
-            self.put_timeouts: list[float | None] = []
-
         def put_nowait(self, event: object) -> None:
             raise queue.Full
 
         def put(self, event: object, timeout: float | None = None) -> None:
-            self.put_timeouts.append(timeout)
-            raise queue.Full
+            raise AssertionError("no event may block its producer")
 
-    fq = _FullQueue()
-    pipe._queue = fq  # type: ignore[attr-defined]
+    pipe._queue = _FullQueue()  # type: ignore[attr-defined]
     telemetry._EventPipeline.enqueue(pipe, _mk_event("audit", "send_message"))
     assert pipe.dropped == 1
-    assert fq.put_timeouts == [telemetry._AUDIT_BLOCK_S]
-
-
-def test_audit_events_land_once_a_slot_frees() -> None:
-    """The audit put succeeds (and nothing is dropped) when the drain thread
-    frees a slot within the cap — the healthy-path behavior of the lane."""
-    pipe = telemetry._EventPipeline.__new__(telemetry._EventPipeline)
-    pipe._dropped_lock = threading.Lock()
-    pipe.dropped = 0
-
-    class _FreesQueue:
-        def put_nowait(self, event: object) -> None:
-            raise queue.Full
-
-        def put(self, event: object, timeout: float | None = None) -> None:
-            assert timeout == telemetry._AUDIT_BLOCK_S
-
-    pipe._queue = _FreesQueue()  # type: ignore[attr-defined]
-    telemetry._EventPipeline.enqueue(pipe, _mk_event("audit", "spawn"))
-    assert pipe.dropped == 0
 
 
 def test_sync_bounds_a_stalled_caller_flush(monkeypatch: pytest.MonkeyPatch) -> None:
