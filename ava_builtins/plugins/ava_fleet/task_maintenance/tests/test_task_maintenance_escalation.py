@@ -143,7 +143,7 @@ def test_delegator_escalation_retries_after_delivery_failure(
     """A failed digest leaves no marker (no message landed), so the next sweep
     retries; once it lands, later sweeps stay quiet."""
     parent_owner, _owner, tid = _stalled_subtask(db_conn)
-    real = daemon._deliver_message
+    real = daemon.deliver_message
     attempts = {"n": 0}
 
     def _flaky(
@@ -158,7 +158,7 @@ def test_delegator_escalation_retries_after_delivery_failure(
             raise psycopg.OperationalError("db blip")
         real(pool_, agent_id, message, escalate_task_ids=escalate_task_ids)
 
-    monkeypatch.setattr(daemon, "_deliver_message", _flaky)
+    monkeypatch.setattr(daemon, "deliver_message", _flaky)
     assert _run_escalate(pool, 3) == 0  # delivery failed: nothing was sent
     assert _inbound_messages(db_conn, parent_owner) == []
     assert _escalated_at(db_conn, tid) is None
