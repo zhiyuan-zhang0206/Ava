@@ -10,6 +10,7 @@ from langgraph.graph.state import CompiledStateGraph
 
 from agent.graph.llm_errors import FatalLLMStreamError, FatalProviderError
 from agent.hooks.compact import CompactionFailedError
+from agent.startup import CHECKPOINT_INTERVAL_KEY
 from agent.state import BaseAgentState
 from agent.state_channels import (
     CIRCUIT_REASON_AUTH,
@@ -386,11 +387,13 @@ async def _handle_fatal_llm_error(
     return input_update
 
 
-def graph_config(agent_id: int, tags: list[str], metadata: dict[str, object]) -> RunnableConfig:
-    """LangGraph invoke config: thread_id + infinite recursion limit + the
-    trace fields (run_name / metadata / tags) for backend filtering."""
+def graph_config(
+    agent_id: int, tags: list[str], metadata: dict[str, object], checkpoint_interval: int
+) -> RunnableConfig:
+    """LangGraph invoke config: thread_id + the turn's checkpoint interval + infinite recursion
+    limit + the trace fields (run_name / metadata / tags) for backend filtering."""
     return {
-        "configurable": {"thread_id": str(agent_id)},
+        "configurable": {"thread_id": str(agent_id), CHECKPOINT_INTERVAL_KEY: checkpoint_interval},
         "recursion_limit": _RECURSION_LIMIT_INF,
         "run_name": f"ava-agent-{agent_id}",
         "metadata": metadata,
