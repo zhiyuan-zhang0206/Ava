@@ -57,15 +57,12 @@ def test_schema_health_db_flake_is_healthy(monkeypatch: pytest.MonkeyPatch) -> N
         def __init__(self, *a: object, **kw: object) -> None:
             raise ConnectionError("pgbouncer blip")
 
-    import base.db
-
-    monkeypatch.setattr(base.db, "connect", _FlakyConnect)
+    patch_database(monkeypatch, connect=_FlakyConnect)
     assert cluster_health._schema_health() is True
 
 
 def test_schema_health_real_skew_is_unhealthy(monkeypatch: pytest.MonkeyPatch) -> None:
     """A genuine code/DB migration-set disagreement still fails the check."""
-    import base.db
     from base.deploy.schema.migrations import CodeBehindSchema
 
     class _AheadConnect:
@@ -91,18 +88,17 @@ def test_schema_health_real_skew_is_unhealthy(monkeypatch: pytest.MonkeyPatch) -
         def execute(self, *a: object) -> None:
             raise CodeBehindSchema("DB has migrations this checkout lacks")
 
-    monkeypatch.setattr(base.db, "connect", _AheadConnect)
+    patch_database(monkeypatch, connect=_AheadConnect)
     assert cluster_health._schema_health() is False
 
 
 def test_agent_population_db_error_is_environment_class(monkeypatch: pytest.MonkeyPatch) -> None:
     """A failed population query is not evidence that the running code regressed."""
-    import base.db
 
     def _down(**_kwargs: object) -> object:
         raise ConnectionError("pgbouncer unavailable")
 
-    monkeypatch.setattr(base.db, "connect", _down)
+    patch_database(monkeypatch, connect=_down)
     assert cluster_health._agent_population_failure_class(1) == "environment"
 
 

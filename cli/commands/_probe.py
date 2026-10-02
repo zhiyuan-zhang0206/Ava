@@ -251,9 +251,9 @@ def _alert_db_connect() -> Any:
     caller's. Indirection costs one line and keeps a test able to fake only this
     alert's DB.
     """
-    import base.db
+    from base.db import Database
 
-    return base.db.connect()
+    return Database.from_settings().connect()
 
 
 def _unresolved_alert_instance(conn: Any, service: str) -> tuple[str, str] | None:

@@ -22,6 +22,7 @@ import pytest
 from pydantic import SecretStr
 
 from base.config import settings
+from base.db.tests.fakes import patch_database
 from cli.commands.cluster import _provider_guard
 
 
@@ -241,7 +242,6 @@ def test_halted_agents_count_reads_the_recovery_breaker_halt(
 ) -> None:
     """`permanent_reject_streak` is the durable halt flag (task #3617) and the
     window bounds the count to the active wave."""
-    import base.db
     from base.agents.recovery_breaker import HALT_AFTER_CONSECUTIVE_PERMANENT_REJECTS
 
     queries: list[tuple[str, tuple[object, ...]]] = []
@@ -269,7 +269,7 @@ def test_halted_agents_count_reads_the_recovery_breaker_halt(
         def cursor(self) -> _Cursor:
             return _Cursor()
 
-    monkeypatch.setattr(base.db, "connect", _Connection)
+    patch_database(monkeypatch, connect=_Connection)
 
     assert _provider_guard._halted_agents_count(24) == 4
     query, params = queries[0]
@@ -279,12 +279,11 @@ def test_halted_agents_count_reads_the_recovery_breaker_halt(
 
 
 def test_halted_agents_count_db_error_is_fail_open(monkeypatch: pytest.MonkeyPatch) -> None:
-    import base.db
 
     def _down(*_args: object, **_kwargs: object) -> object:
         raise ConnectionError("db down")
 
-    monkeypatch.setattr(base.db, "connect", _down)
+    patch_database(monkeypatch, connect=_down)
 
     assert _provider_guard._halted_agents_count(24) is None
 
