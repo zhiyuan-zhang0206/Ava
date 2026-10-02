@@ -639,6 +639,7 @@ def get_run_timeline(
             for event in post_window_events
         )
         layers, summary, pending = _narrative_for_window(
+            db,
             agent_id,
             window_start,
             window_end,
@@ -670,6 +671,7 @@ def get_run_timeline(
 
 
 def _narrative_for_window(
+    db: Database,
     agent_id: int,
     window_start: datetime,
     window_end: datetime,
@@ -695,8 +697,8 @@ def _narrative_for_window(
     from base.agents.history.hierarchy.store import load_coverage_extent, load_window_nodes
 
     try:
-        nodes = load_window_nodes(agent_id, window_start, window_end)
-        extent = load_coverage_extent(agent_id)
+        nodes = load_window_nodes(db, agent_id, window_start, window_end)
+        extent = load_coverage_extent(db, agent_id)
         selection = select_layers(
             nodes,
             window_start=window_start,
@@ -723,7 +725,7 @@ def _narrative_for_window(
     )
     summary = None
     if selection.coverage != "full":
-        text = _latest_compact_summary(agent_id)
+        text = _latest_compact_summary(db, agent_id)
         if text:
             summary = RunTimelineSummary(text=text)
     pending: list[RunTimelinePendingSpan] | None = None
@@ -771,7 +773,7 @@ def _inbounds_for_window(
     ]
 
 
-def _latest_compact_summary(agent_id: int) -> str | None:
+def _latest_compact_summary(db: Database, agent_id: int) -> str | None:
     """The agent's most recent compact summary — the raw-context fallback text.
 
     One latest-snapshot checkpoint read (the same read the context panel does);
@@ -781,7 +783,7 @@ def _latest_compact_summary(agent_id: int) -> str | None:
     from base.agents.messages.kwargs import AvaMsgType, message_content, read_ava_kwargs
 
     try:
-        messages = load_checkpoint_messages(agent_id)
+        messages = load_checkpoint_messages(db, agent_id)
     except Exception:
         logger.exception("compact summary read failed for agent {}", agent_id)
         return None

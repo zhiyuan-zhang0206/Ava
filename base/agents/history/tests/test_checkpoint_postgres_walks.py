@@ -23,6 +23,11 @@ from base.agents.history import checkpoint_postgres_walks
 from base.agents.history.checkpoint import load_checkpoint_messages_segment
 from base.agents.history.delta_read_compat import wrap_saver_reads_with_delta_reconstruction
 from base.config import settings
+from base.db import Database
+
+
+def _db() -> Database:
+    return Database.from_settings()
 
 
 def _append_delta_checkpoint(
@@ -124,7 +129,7 @@ async def test_historical_walk_page_boundary_and_compact_segment(
     # newest page, read by the gateway as one retained compaction segment.
     assert "configurable" in target
     segment = load_checkpoint_messages_segment(
-        int(thread), cast(str, target["configurable"]["checkpoint_id"])
+        _db(), int(thread), cast(str, target["configurable"]["checkpoint_id"])
     )
     assert [message.id for message in segment] == ["write-1"]
 

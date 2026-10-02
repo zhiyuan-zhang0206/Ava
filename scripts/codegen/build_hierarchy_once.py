@@ -28,6 +28,7 @@ from base.agents.history.hierarchy.pipeline import MaterializedTree, build_agent
 from base.agents.history.hierarchy.store import load_known_texts, write_tree
 from base.agents.observation.snapshot import agent_effective_model
 from base.config import settings
+from base.db import Database
 from base.lm.factory import close_chat_model
 
 # How many failed-node lines the report shows before folding the rest into a
@@ -82,11 +83,12 @@ def main(argv: list[str] | None = None) -> int:
     )
     print(f"target: {_db_label()} | agent {args.agent_id} | model {model}")
 
-    known = load_known_texts(args.agent_id)
+    db = Database.from_settings()
+    known = load_known_texts(db, args.agent_id)
     llm = build_generation_llm(model)
     try:
         tree = build_agent_tree(
-            args.agent_id, llm=llm, model=model, known_texts=known, tools=[execute_code]
+            db, args.agent_id, llm=llm, model=model, known_texts=known, tools=[execute_code]
         )
     finally:
         close_chat_model(llm)
@@ -97,7 +99,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.dry_run:
         print("dry-run - nothing written")
     else:
-        written = write_tree(args.agent_id, tree.nodes, model=model)
+        written = write_tree(db, args.agent_id, tree.nodes, model=model)
         print(f"upserted {written} node row(s)")
     if tree.errors:
         print("failed node(s) are not written - re-running retries them")

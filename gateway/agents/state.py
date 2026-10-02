@@ -494,7 +494,7 @@ def get_agent_messages(
         if not agent_exists(conn, agent_id):
             raise HTTPException(status_code=404, detail=f"agent {agent_id} not found")
     try:
-        messages = load_checkpoint_messages(agent_id)
+        messages = load_checkpoint_messages(request.app.state.db, agent_id)
     except CheckpointReadError as exc:
         _log.warning("messages endpoint: checkpoint read failed for agent %s: %r", agent_id, exc)
         raise HTTPException(
@@ -520,9 +520,7 @@ def get_agent_messages(
     dependencies=[Depends(deny_isolated_result_read)],
 )
 def get_trace_checkpoint_messages(
-    agent_id: int,
-    trace_id: str,
-    request: Request,
+    agent_id: int, trace_id: str, request: Request
 ) -> TraceCheckpointMessagesResponse:
     """Full turn content for one OTel trace, resolved on demand from checkpoints.
 
@@ -540,11 +538,12 @@ def get_trace_checkpoint_messages(
 
     404: agent_id does not exist. 503: checkpoint store read failed.
     """
+    db = request.app.state.db
     with request.app.state.db_pool.connection() as conn:
         if not agent_exists(conn, agent_id):
             raise HTTPException(status_code=404, detail=f"agent {agent_id} not found")
     try:
-        checkpoint_id, messages = load_checkpoint_messages_by_trace(agent_id, trace_id)
+        checkpoint_id, messages = load_checkpoint_messages_by_trace(db, agent_id, trace_id)
     except CheckpointReadError as exc:
         _log.warning(
             "trace messages endpoint: checkpoint read failed for agent %s trace %s: %r",
@@ -695,7 +694,7 @@ def get_token_usage(agent_id: int, request: Request) -> TokenUsageResponse:
         _log.warning("token-usage: config_overlay read failed for agent %s: %r", agent_id, exc)
 
     try:
-        messages = load_checkpoint_messages(agent_id)
+        messages = load_checkpoint_messages(request.app.state.db, agent_id)
     except CheckpointReadError as exc:
         _log.warning(
             "token-usage: checkpoint read failed for agent %s, returning 0/0/0: %r",
@@ -778,7 +777,7 @@ def get_context_breakdown(agent_id: int, request: Request) -> ContextBreakdownRe
         _log.warning("context-breakdown: %s", exc)
 
     try:
-        messages = load_checkpoint_messages(agent_id)
+        messages = load_checkpoint_messages(request.app.state.db, agent_id)
     except CheckpointReadError as exc:
         _log.warning(
             "context-breakdown: checkpoint read failed for agent %s, returning empty: %r",

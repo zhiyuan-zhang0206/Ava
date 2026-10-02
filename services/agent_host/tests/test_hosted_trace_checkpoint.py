@@ -20,6 +20,7 @@ from agent.tests.test_inbound_ownership import _agent
 from base.agents.context import AvaContext
 from base.agents.history.checkpoint import load_checkpoint_messages_by_trace
 from base.config import settings
+from base.db import Database
 from base.events.live.bus import EventBus
 from services.agent_host import host as host_module
 
@@ -74,7 +75,7 @@ async def test_host_trace_reads_final_messages_after_nstep_flush(
     assert len(traces) == 1
     # This is the actual gateway trace-content reader, using fresh connections.
     checkpoint_id, messages = await asyncio.to_thread(
-        load_checkpoint_messages_by_trace, agent_id, traces[0]
+        load_checkpoint_messages_by_trace, Database.from_settings(), agent_id, traces[0]
     )
     assert checkpoint_id is not None
     assert [message.text for message in messages] == ["prior question", "final response"]

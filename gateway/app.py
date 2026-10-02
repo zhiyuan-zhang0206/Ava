@@ -244,7 +244,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     # /mcp answers 404 through the mcp_gateway wrapper and nothing changes.
     mcp_manager = None
     if settings.gateway.mcp_endpoint_enabled:
-        mcp_manager = mcp_server_endpoint.build_manager(app.state.db_pool)
+        mcp_manager = mcp_server_endpoint.build_manager(app.state.db_pool, app.state.db)
         app.state.mcp_manager = mcp_manager
 
     try:

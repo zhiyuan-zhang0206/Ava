@@ -84,14 +84,14 @@ def execute_job(job_id: int, config: HierarchyWorkerConfig, db: Database) -> int
         # computes the cursor it may advance to; a tail run computes its seal
         # target below instead.
         advance_target = (
-            _advance_target(agent_id, trigger_boundary) if kind == KIND_COMPACT else None
+            _advance_target(db, agent_id, trigger_boundary) if kind == KIND_COMPACT else None
         )
         # The tail delta gate's value: the newest checkpoint read *before* the
         # load — a conservative lower bound of what this run seals (a write
         # after the read triggers the next job instead of being skipped, the
         # same rule as the cursor's advance target).
-        tail_seal_target = latest_checkpoint_id(agent_id) if kind == KIND_TAIL else None
-        known = load_known_texts(agent_id)
+        tail_seal_target = latest_checkpoint_id(db, agent_id) if kind == KIND_TAIL else None
+        known = load_known_texts(db, agent_id)
         deadline = started + config.hierarchy_job_budget_seconds
         # One model for the whole job (not one per chunk): its client pool is
         # reused across the run and closed as soon as generation ends, so
@@ -105,6 +105,7 @@ def execute_job(job_id: int, config: HierarchyWorkerConfig, db: Database) -> int
         halt_nodes = None if include_tail else config.hierarchy_regen_halt_nodes_per_job
         try:
             tree = build_agent_tree(
+                db,
                 agent_id,
                 llm=llm,
                 model=model,
@@ -117,7 +118,7 @@ def execute_job(job_id: int, config: HierarchyWorkerConfig, db: Database) -> int
             )
         finally:
             close_chat_model(llm)
-        written = write_tree(agent_id, tree.nodes, model=model)
+        written = write_tree(db, agent_id, tree.nodes, model=model)
         error: str | None = None
         if tree.halted:
             error = (
@@ -172,9 +173,9 @@ def execute_job(job_id: int, config: HierarchyWorkerConfig, db: Database) -> int
         return 1
 
 
-def _advance_target(agent_id: int, trigger_boundary: str) -> str:
+def _advance_target(db: Database, agent_id: int, trigger_boundary: str) -> str:
     """The cursor value this run may advance to (see the module docstring)."""
-    newest = list_compact_boundary_checkpoint_ids(agent_id, limit=1)
+    newest = list_compact_boundary_checkpoint_ids(db, agent_id, limit=1)
     if newest and newest[0] > trigger_boundary:
         return newest[0]
     return trigger_boundary
