@@ -6,7 +6,6 @@
   },
   "files": {
     "tests/gateway/test_agents_endpoints.py": 1401,
-    "tests/gateway/test_agents_internals.py": 1276,
     "tests/gateway/test_alerts_api.py": 1014,
     "tests/gateway/test_cluster_endpoints.py": 1200
   },
