@@ -195,7 +195,6 @@ DEFERRED: dict[str, str] = {
         "gateway/cluster/_stats_dashboard.py::ambient-container:_stale_emit_at",
         "gateway/inspect/_metrics_health.py::ambient-container:_last_logged",
         "gateway/routers/fleet_graph.py::ambient-container:_stale_emit_at",
-        "services/delivery_watchdog/daemon.py::ambient-container:_resurrect_suppressions",
         "services/healthchecks/permissions_helper.py::global-rebind:_reported_unhealthy",
     )
 }

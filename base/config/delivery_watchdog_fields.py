@@ -29,7 +29,7 @@ class DeliveryWatchdogFields:
     delivery_watchdog_max_resurrect_per_tick: int = Field(
         default=3,
         alias="AVA_DELIVERY_WATCHDOG_MAX_RESURRECT_PER_TICK",
-        description="Ceiling on how many terminated-owner resurrect retries the delivery watchdog spawns per tick (Task #689 G4). A pile of dead letters drains over ticks; the cap plus the 60s per-agent cooldown and 2-way concurrency semaphore prevent an LLM wake storm when many terminated agents hold pending chats.",
+        description="Ceiling on how many terminated-owner resurrect retries the delivery watchdog starts per round (Task #689 G4). A pile of dead letters drains over rounds; the cap plus the 60s per-agent cooldown and 2-way concurrency semaphore prevent an LLM wake storm when many terminated agents hold pending chats.",
         json_schema_extra={
             "capability": "gateway",
             "restart_required": "all",
