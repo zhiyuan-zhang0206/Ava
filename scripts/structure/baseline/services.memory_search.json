@@ -1,9 +1,5 @@
 {
   "ambient_state": {
-    "services/memory_search/app.py::asyncio-task:build_app.lifespan": 1,
-    "services/memory_search/app.py::import-time-read:_MAX_BATCH_ROWS": 1,
-    "services/memory_search/daemon.py::import-time-read:_DATA_FILE": 1,
-    "services/memory_search/daemon.py::import-time-read:_PIDFILE": 1,
-    "services/memory_search/daemon.py::import-time-read:_PORT": 1
+    "services/memory_search/app.py::asyncio-task:build_app.lifespan": 1
   }
 }

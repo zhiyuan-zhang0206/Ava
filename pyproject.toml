@@ -1203,6 +1203,11 @@ reportUnknownMemberType = "error"
 reportUnknownArgumentType = "error"
 
 [[tool.pyright.executionEnvironments]]
+root = "services/milvus/tests"
+reportUnknownMemberType = "error"
+reportUnknownArgumentType = "error"
+
+[[tool.pyright.executionEnvironments]]
 root = "services/page_server/tests"
 reportUnknownMemberType = "error"
 reportUnknownArgumentType = "error"

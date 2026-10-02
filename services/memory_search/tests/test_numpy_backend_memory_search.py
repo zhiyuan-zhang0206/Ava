@@ -47,7 +47,7 @@ def memory_search_uri(tmp_path_factory: pytest.TempPathFactory) -> Iterator[str]
     data_file = tmp_path_factory.mktemp("memory-search") / "vectors.npz"
     server = uvicorn.Server(
         uvicorn.Config(
-            build_app(MemoryStore(data_file, dim=_DIM, fingerprint=_FP)),
+            build_app(MemoryStore(data_file, dim=_DIM, fingerprint=_FP), 500),
             host="127.0.0.1",
             port=port,
             log_level=None,

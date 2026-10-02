@@ -55,7 +55,6 @@ from .degradation import (
 
 _log = logging.getLogger("services.page_server.daemon")
 
-_POLL_INTERVAL_S = settings.daemon.page_server_poll_interval_seconds
 _LIVENESS_TIMEOUT_S = 60.0
 
 
@@ -630,7 +629,7 @@ async def _reconcile_loop(pool: ConnectionPool, liveness: Liveness) -> None:
     while True:
         liveness.beat()
         try:
-            await asyncio.sleep(_POLL_INTERVAL_S)
+            await asyncio.sleep(settings.daemon.page_server_poll_interval_seconds)
             await asyncio.to_thread(_reconcile_once, pool, managed, backoff, degraded, host)
         except asyncio.CancelledError:
             raise

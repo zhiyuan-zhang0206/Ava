@@ -10,7 +10,7 @@ env overrides (via base.config.settings):
 - `AVA_BROWSER_ENABLED` — gate (the ava-browser session only starts when true)
 - `AVA_CHROME_BINARY` — explicit Chrome path; else the platform default
 
-The CDP port is fixed at 9222 (`_CDP_PORT`).
+The CDP port is `settings.services.browser_cdp_port` (default 9222).
 
 The profile lives at `$AVA_HOME/chrome-profile/` — dedicated and persistent,
 separate from the user's daily Chrome profile (isolated cookie jar; the user
@@ -39,7 +39,6 @@ from . import profile as browser_profile
 from .probe import cdp_url
 from .profile import profile_dir as _profile_dir
 
-_CDP_PORT = settings.services.browser_cdp_port  # the recorded/`.env` port; default 9222
 _CDP_TIMEOUT_S = 2.0
 
 
@@ -91,7 +90,8 @@ def main() -> None:
     # session log — this also guards healthcheck-triggered respawns, not just the first
     # launch (the converge preflight only runs at `ava start`).
     assert_browser_capable()
-    if _cdp_reachable(_CDP_PORT):
+    cdp_port = settings.services.browser_cdp_port  # the recorded/`.env` port; default 9222
+    if _cdp_reachable(cdp_port):
         # Something already serves this CDP port — either a manually-started
         # Chrome holding the profile lock, or one of ours that outlived its
         # session on a `SingletonLock` handoff. Launching a second Chrome on the
@@ -109,7 +109,7 @@ def main() -> None:
         # profile is deliberately not swept — it cannot be positively identified
         # as ours — so that case stays the operator's to quit.
         print(  # noqa: T201 — pre-redirect, surfaces in the session log
-            f"ava-browser: CDP port {_CDP_PORT} already served by another Chrome; "
+            f"ava-browser: CDP port {cdp_port} already served by another Chrome; "
             f"refusing to start a second instance on {_profile_dir()}. "
             "To clear it: `ava stop --stop-browser` then `ava start` — that sweeps any "
             "Chrome running on this cluster's profile, including one left behind by a "
@@ -138,7 +138,7 @@ def main() -> None:
     os.dup2(log_fd, 1)
     os.dup2(log_fd, 2)
     os.close(log_fd)
-    _launch(binary, _chrome_args(binary, _CDP_PORT, profile))
+    _launch(binary, _chrome_args(binary, cdp_port, profile))
 
 
 if __name__ == "__main__":
