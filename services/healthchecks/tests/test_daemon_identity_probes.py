@@ -14,8 +14,8 @@ import importlib
 from functools import partial
 from typing import cast
 
-from base.daemon.health import DaemonProbe, health_port, probe_daemon
-from base.paths import pid_path
+from base.daemon.endpoints import ServiceEndpoints
+from base.daemon.health import DaemonProbe, probe_daemon
 from ops import roster
 from ops.roster.service_spec import ServiceSpec
 
@@ -38,14 +38,22 @@ def test_every_standard_daemon_probe_is_scoped_to_its_name_url_and_pidfile() -> 
         name = cast("str", spec.health_name)
         probe = _inner_probe(spec)
         assert probe.func is probe_daemon, spec.session
-        assert probe.args == (name, f"http://localhost:{health_port(name)}/healthz"), spec.session
-        assert probe.keywords == {"pidfile": pid_path(name)}, spec.session
+        assert probe.args == (
+            name,
+            f"http://localhost:{ServiceEndpoints.from_settings().of(name).health_port}/healthz",
+        ), spec.session
+        assert probe.keywords == {"pidfile": ServiceEndpoints.from_settings().of(name).pidfile}, (
+            spec.session
+        )
 
 
 def test_every_standard_daemon_records_the_pidfile_its_probe_reads() -> None:
-    """The daemon writes `pid_path(health name)` and the roster probe cross-checks
+    """The daemon writes the pidfile of its health name and the roster probe cross-checks
     that same file, so the two cannot drift apart (a hyphenated `agent-host.pid`
     once sat beside the underscored health name)."""
     for spec in _standard_daemons():
         module = importlib.import_module(spec.cmd.rsplit(" ", 1)[1])
-        assert module._pidfile() == pid_path(cast("str", spec.health_name)), spec.session
+        assert (
+            module._pidfile()
+            == ServiceEndpoints.from_settings().of(cast("str", spec.health_name)).pidfile
+        ), spec.session

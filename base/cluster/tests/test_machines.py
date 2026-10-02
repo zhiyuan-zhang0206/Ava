@@ -14,6 +14,7 @@ import pytest
 from base.agents import MachineNotRegistered
 from base.cluster import machines
 from base.config import settings
+from base.daemon.tests.fakes import pin_endpoints
 
 
 @pytest.fixture(autouse=True)
@@ -474,10 +475,7 @@ def test_unit_dial_url_single_box_is_loopback_ops(monkeypatch: pytest.MonkeyPatc
     to localhost, so the advertised ops URL is loopback (single box needs no
     reachable address)."""
     monkeypatch.setattr("base.cluster.machine.reachable_host", lambda: "localhost")
-    monkeypatch.setattr(
-        "base.daemon.health.health_port",
-        lambda name: 8600 if name == "ops" else 0,  # pyright: ignore[reportUnknownArgumentType]
-    )
+    pin_endpoints(monkeypatch, port=lambda name: 8600 if name == "ops" else 0)
     assert machines.unit_dial_url(frozenset({"gateway", "agent-runner"})) == "http://localhost:8600"
 
 
@@ -490,10 +488,7 @@ def test_unit_dial_url_gateway_runner_uses_reachable_host(
     rejects every page registration from agents on the gateway box
     (2026-08-12 serve outage)."""
     monkeypatch.setattr("base.cluster.machine.reachable_host", lambda: "10.0.0.2")
-    monkeypatch.setattr(
-        "base.daemon.health.health_port",
-        lambda name: 8600 if name == "ops" else 0,  # pyright: ignore[reportUnknownArgumentType]
-    )
+    pin_endpoints(monkeypatch, port=lambda name: 8600 if name == "ops" else 0)
     assert machines.unit_dial_url(frozenset({"gateway", "agent-runner"})) == "http://10.0.0.2:8600"
 
 
@@ -501,10 +496,7 @@ def test_unit_dial_url_split_runner_is_reachable_ops(monkeypatch: pytest.MonkeyP
     """agent-runner only: the remote gateway must reach it, so the URL carries
     `reachable_host()`, not loopback."""
     monkeypatch.setattr("base.cluster.machine.reachable_host", lambda: "10.0.0.2")
-    monkeypatch.setattr(
-        "base.daemon.health.health_port",
-        lambda name: 8600 if name == "ops" else 0,  # pyright: ignore[reportUnknownArgumentType]
-    )
+    pin_endpoints(monkeypatch, port=lambda name: 8600 if name == "ops" else 0)
     assert machines.unit_dial_url(frozenset({"agent-runner"})) == "http://10.0.0.2:8600"
 
 
@@ -538,10 +530,7 @@ def test_unit_dial_url_agrees_across_both_writers(monkeypatch: pytest.MonkeyPatc
     from base.cluster.machine import machine_role, reset_identity, set_identity
 
     monkeypatch.setattr("base.cluster.machine.reachable_host", lambda: "10.0.0.7")
-    monkeypatch.setattr(
-        "base.daemon.health.health_port",
-        lambda name: 8600 if name == "ops" else 0,  # pyright: ignore[reportUnknownArgumentType]
-    )
+    pin_endpoints(monkeypatch, port=lambda name: 8600 if name == "ops" else 0)
     set_identity(name="split-runner", role="agent-runner")
     try:
         # `ava start` passes its resolved capability set; the daemon passes machine_role().

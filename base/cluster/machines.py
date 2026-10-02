@@ -219,14 +219,14 @@ def unit_dial_url(roles: MachineRoles) -> str | None:
     # here would freeze it at import) and keeps the health-server module off
     # `base.cluster.machines`'s import path.
     from base.cluster.machine import reachable_host
-    from base.daemon.health import health_port
+    from base.daemon.endpoints import ServiceEndpoints
 
     if "gateway" not in roles and "agent-runner" not in roles:
         return _station_ingress_url()  # pure observability-station: its OTLP ingress
     if "agent-runner" not in roles:
         return _gateway_reachable_url()
     host = reachable_host()
-    return f"http://{host}:{health_port('ops')}"
+    return f"http://{host}:{ServiceEndpoints.from_settings().of('ops').health_port}"
 
 
 def _gateway_reachable_url() -> str:

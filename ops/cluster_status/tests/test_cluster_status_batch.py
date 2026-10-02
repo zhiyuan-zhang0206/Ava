@@ -388,7 +388,7 @@ def test_agent_host_liveness_is_probed_only_on_a_runner(
     snapshot_dependencies: HostDeployState,
     runner: bool,
 ) -> None:
-    from base.paths import pid_path
+    from base.daemon.endpoints import ServiceEndpoints
 
     probes: list[str] = []
 
@@ -406,7 +406,7 @@ def test_agent_host_liveness_is_probed_only_on_a_runner(
     monkeypatch.setattr(cluster_status, "_read_resource_sample", lambda: None)
     snapshot = cluster_status.status_snapshot()
     assert snapshot.agent_host_online is (True if runner else None)
-    assert (str(pid_path("agent_host")) in probes) is runner
+    assert (str(ServiceEndpoints.from_settings().of("agent_host").pidfile) in probes) is runner
     assert "restarter_online" not in snapshot.model_dump()
 
 
