@@ -188,14 +188,6 @@ _INDEPENDENT_CLOCKS: dict[tuple[str, str], str] = {
         "_CLAUDE_EXTENDED_THINKING_DEFAULT_BUDGET",
     ): "LLM thinking-token budget, not a wall-clock constant",
     (
-        "gateway/schedule_runner.py",
-        "_STALL_TIMEOUT_S",
-    ): "independent family (schedule breaker): settings alias, not part of the audited lattice",
-    (
-        "gateway/schedule_runner.py",
-        "_STALL_CHECK_INTERVAL_S",
-    ): "independent family (schedule breaker): settings alias, not part of the audited lattice",
-    (
         "base/daemon/schedules/watcher.py",
         "AT_SESSION_TTL_GRACE_SECONDS",
     ): "independent: the at-watcher session's post-fire reclamation window (wake delivery + "

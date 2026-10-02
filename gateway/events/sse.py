@@ -41,11 +41,6 @@ from gateway.middleware import runtime_metrics, stopping
 
 _log = logging.getLogger(__name__)
 
-# Client disconnect-detection polling window; deltas shorter than this
-# are negligible compared to network RTT. env override:
-# `AVA_SSE_DISCONNECT_POLL_SECONDS`.
-_DISCONNECT_POLL_SECONDS = settings.gateway.sse_disconnect_poll_seconds
-
 # Exceptions Redis IO may raise — pubsub connection raises
 # ConnectionError / TimeoutError on Redis restart / network jitter;
 # OSError as a fallback for the socket layer (BrokenPipe etc.).
@@ -202,7 +197,10 @@ async def event_stream(
                 msg = await retry_auth_failures_async(
                     lambda: pubsub.get_message(
                         ignore_subscribe_messages=True,
-                        timeout=_DISCONNECT_POLL_SECONDS,
+                        # Client disconnect-detection polling window; deltas shorter
+                        # than this are negligible compared to network RTT. env
+                        # override: `AVA_SSE_DISCONNECT_POLL_SECONDS`.
+                        timeout=settings.gateway.sse_disconnect_poll_seconds,
                     )
                 )
             except _REDIS_IO_ERRORS + _REDIS_ACL_ERRORS as exc:

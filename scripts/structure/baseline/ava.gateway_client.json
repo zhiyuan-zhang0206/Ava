@@ -1,8 +1,6 @@
 {
   "ambient_state": {
-    "ava/gateway_client/transport.py::global-rebind:_client": 1,
-    "ava/gateway_client/transport.py::import-time-read:_MAX_RETRIES": 1,
-    "ava/gateway_client/transport.py::import-time-read:_RETRY_DELAY_S": 1
+    "ava/gateway_client/transport.py::global-rebind:_client": 1
   },
   "complexity": {
     "ava/gateway_client/transport.py::post": 17
