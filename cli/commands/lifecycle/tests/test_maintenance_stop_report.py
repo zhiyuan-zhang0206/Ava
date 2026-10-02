@@ -26,11 +26,11 @@ from base.sessions.record import SessionRecord
 from cli.commands.lifecycle import _maintenance_stop_report as report
 from cli.commands.lifecycle import _temporary_stop as command
 from cli.commands.lifecycle import service_stop as stop
+from cli.commands.lifecycle.tests.stop_support import Launcher
+from cli.commands.lifecycle.tests.stop_support import home as home
+from cli.commands.lifecycle.tests.stop_support import launch as launch
 from cli.commands.lifecycle.tests.test_stop_terminals import _unkillable
 from tests.agent.test_maintenance import WHEN
-from tests.cli._commands_helpers import Launcher
-from tests.cli._commands_helpers import home as home
-from tests.cli._commands_helpers import launch as launch
 
 pytestmark = pytest.mark.skipif(sys.platform == "win32", reason="real POSIX signal contract")
 

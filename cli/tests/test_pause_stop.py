@@ -20,13 +20,13 @@ from base.sessions.backend import PtySessionBackend
 from cli.commands.lifecycle import _temporary_stop as command
 from cli.commands.lifecycle import stop as entry
 from cli.commands.lifecycle._pause_resume import StartDelegation, resume_after_start
+from cli.commands.lifecycle.tests.stop_support import Launcher, dependencies, drained
+from cli.commands.lifecycle.tests.stop_support import home as home
+from cli.commands.lifecycle.tests.stop_support import launch as launch
 from cli.parsers import build_parser
 from ops import agent_pause
 from tests.agent.test_maintenance import WHEN
 from tests.agent.test_maintenance import isolate as isolate
-from tests.cli._commands_helpers import Launcher, dependencies, drained
-from tests.cli._commands_helpers import home as home
-from tests.cli._commands_helpers import launch as launch
 from tests.path_scoped.pty_reaper import PtyReaper
 
 _NORMAL = "import signal,sys,time\nsignal.signal(signal.SIGTERM,lambda *_:sys.exit(0))\nprint('ready',flush=True)\nwhile True:time.sleep(.02)"

@@ -44,9 +44,9 @@ from cli.commands.lifecycle import service_stop as strict
 from cli.commands.lifecycle import stop as entry
 from cli.commands.lifecycle._maintenance_stop_report import StopIncompleteError
 from cli.commands.lifecycle.service_stop import OwnedProcess
+from cli.commands.lifecycle.tests.stop_support import dependencies
+from cli.commands.lifecycle.tests.stop_support import home as home
 from ops import pty_close_notices
-from tests.cli._commands_helpers import dependencies
-from tests.cli._commands_helpers import home as home
 from tests.path_scoped.pty_reaper import PtyReaper
 
 # A regular interruptible job: NO signal handlers of its own — it relies on
