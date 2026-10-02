@@ -46,15 +46,10 @@ def _no_sleep(_: float) -> None:
     return None
 
 
-def _labels_runner(labels: list[str], calls: list[list[str]]):
+def _gh_runner(calls: list[list[str]]):
     def run(command: list[str], **_: object) -> subprocess.CompletedProcess[str]:
         calls.append(command)
-        return subprocess.CompletedProcess(
-            command,
-            0,
-            stdout=json.dumps({"labels": [{"name": label} for label in labels]}),
-            stderr="",
-        )
+        return subprocess.CompletedProcess(command, 0, stdout="{}", stderr="")
 
     return run
 
@@ -113,11 +108,11 @@ def _urlopen_sequence(
 def test_trunk_queue_submits_and_reports_merged(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    label_calls: list[list[str]] = []
+    gh_calls: list[list[str]] = []
     requests: list[urllib.request.Request] = []
     monkeypatch.setattr(ci_utils, "_queue_cooldown_seconds", _no_cooldown)
     monkeypatch.setattr(ci_utils, "check_ci", _all_green)
-    monkeypatch.setattr(ci_utils.subprocess, "run", _labels_runner(["qa-approved"], label_calls))
+    monkeypatch.setattr(ci_utils.subprocess, "run", _gh_runner(gh_calls))
     monkeypatch.setattr(
         ci_utils.urllib.request,
         "urlopen",
@@ -363,45 +358,14 @@ def test_json_query_includes_draft_fields(
     assert payload["core_skipped"] == ["backend shard (1/16)"]
 
 
-def test_trunk_flow_refuses_to_submit_without_qa_approved_label(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-) -> None:
-    label_calls: list[list[str]] = []
-    requests: list[urllib.request.Request] = []
-    monkeypatch.setattr(ci_utils, "_queue_cooldown_seconds", _no_cooldown)
-    monkeypatch.setattr(ci_utils, "check_ci", _all_green)
-    monkeypatch.setattr(ci_utils.subprocess, "run", _labels_runner([], label_calls))
-    monkeypatch.setattr(
-        ci_utils.urllib.request,
-        "urlopen",
-        _urlopen_sequence(
-            [_TrunkResponse({"accepted": True}), _TrunkResponse({"state": "merged"})], requests
-        ),
-    )
-
-    assert (
-        ci_utils._trunk_merge_flow(
-            "42",
-            "zhiyuan-zhang0206/Ava",
-            "medium",
-            every=1,
-            timeout=0,
-            token="trunk-token",  # noqa: S106 — test fixture
-        )
-        == 1
-    )
-    assert requests == []
-    assert "PR #42 lacks the qa-approved label — not submitting to Trunk" in capsys.readouterr().err
-
-
-def test_trunk_flow_submits_when_qa_approved_label_is_present(
+def test_trunk_flow_submits_without_reading_pr_labels(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    label_calls: list[list[str]] = []
+    gh_calls: list[list[str]] = []
     requests: list[urllib.request.Request] = []
     monkeypatch.setattr(ci_utils, "_queue_cooldown_seconds", _no_cooldown)
     monkeypatch.setattr(ci_utils, "check_ci", _all_green)
-    monkeypatch.setattr(ci_utils.subprocess, "run", _labels_runner(["qa-approved"], label_calls))
+    monkeypatch.setattr(ci_utils.subprocess, "run", _gh_runner(gh_calls))
     monkeypatch.setattr(
         ci_utils.urllib.request,
         "urlopen",
@@ -421,10 +385,9 @@ def test_trunk_flow_submits_when_qa_approved_label_is_present(
         )
         == 0
     )
-    assert label_calls == [
-        ["gh", "pr", "view", "42", "--repo", "zhiyuan-zhang0206/Ava", "--json", "labels"],
-        # Advisory base-freshness reads (task #2496): the labels-stub returns
-        # JSON for them too, which the SHA guard treats as unreadable -> no-op.
+    # The only gh read is the advisory base-freshness one (task #2496); the stub's non-SHA output
+    # makes the SHA guard treat it as unreadable -> no-op. No label is consulted before submit.
+    assert gh_calls == [
         [
             "gh",
             "pr",
@@ -438,8 +401,7 @@ def test_trunk_flow_submits_when_qa_approved_label_is_present(
             ".baseRefOid",
         ],
     ]
-    # (ls-remote never runs: the labels-stub's non-SHA output makes the
-    # advisory check bail early — the SHA guard is the no-op path.)
+    # (ls-remote never runs: the stub's non-SHA output makes the advisory check bail early.)
     assert len(requests) == 2
 
 
@@ -450,11 +412,11 @@ def test_trunk_submit_resumes_watch_on_real_http_409_error(
     Conflict ..."), so the submit must treat THAT shape — not the literal
     string "HTTP 409" — as "already in the queue" (2026-09-04: duplicate
     submissions were retried twice and exited 4 instead of resuming watch)."""
-    label_calls: list[list[str]] = []
+    gh_calls: list[list[str]] = []
     requests: list[urllib.request.Request] = []
     monkeypatch.setattr(ci_utils, "_queue_cooldown_seconds", _no_cooldown)
     monkeypatch.setattr(ci_utils, "check_ci", _all_green)
-    monkeypatch.setattr(ci_utils.subprocess, "run", _labels_runner(["qa-approved"], label_calls))
+    monkeypatch.setattr(ci_utils.subprocess, "run", _gh_runner(gh_calls))
     responses: list[_TrunkResponse | urllib.error.URLError] = [
         urllib.error.HTTPError(
             "https://api.trunk.io/v1/submitPullRequest",
@@ -525,11 +487,11 @@ def test_trunk_watch_keeps_polling_through_testing_state(
 def test_trunk_flow_resumes_watch_when_submit_reports_already_queued(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    label_calls: list[list[str]] = []
+    gh_calls: list[list[str]] = []
     requests: list[urllib.request.Request] = []
     monkeypatch.setattr(ci_utils, "_queue_cooldown_seconds", _no_cooldown)
     monkeypatch.setattr(ci_utils, "check_ci", _all_green)
-    monkeypatch.setattr(ci_utils.subprocess, "run", _labels_runner(["qa-approved"], label_calls))
+    monkeypatch.setattr(ci_utils.subprocess, "run", _gh_runner(gh_calls))
     monkeypatch.setattr(
         ci_utils.urllib.request,
         "urlopen",
@@ -567,11 +529,11 @@ def test_trunk_submit_accepts_plain_text_ok_body(
     """submitPullRequest answers 200 with a plain-text 'OK' body (verified live
     2026-09-01); a 200 must count as success regardless of body shape, or a
     successful submit would be misread as an error and retried into a 409."""
-    label_calls: list[list[str]] = []
+    gh_calls: list[list[str]] = []
     requests: list[urllib.request.Request] = []
     monkeypatch.setattr(ci_utils, "_queue_cooldown_seconds", _no_cooldown)
     monkeypatch.setattr(ci_utils, "check_ci", _all_green)
-    monkeypatch.setattr(ci_utils.subprocess, "run", _labels_runner(["qa-approved"], label_calls))
+    monkeypatch.setattr(ci_utils.subprocess, "run", _gh_runner(gh_calls))
     monkeypatch.setattr(
         ci_utils.urllib.request,
         "urlopen",
@@ -599,13 +561,12 @@ def test_trunk_submit_accepts_plain_text_ok_body(
 
 
 def _trunk_runner(
-    labels: list[str],
     *,
     base_sha: str | None,
     main_sha: str | None,
     calls: list[list[str]],
 ):
-    """Stand in for gh/git subprocess calls: labels, baseRefOid, and ls-remote."""
+    """Stand in for gh/git subprocess calls: baseRefOid and ls-remote."""
 
     def run(command: list[str], **_: object) -> subprocess.CompletedProcess[str]:
         calls.append(command)
@@ -617,9 +578,7 @@ def _trunk_runner(
             if base_sha is None:
                 return subprocess.CompletedProcess(command, 1, "", "boom")
             return subprocess.CompletedProcess(command, 0, f"{base_sha}\n", "")
-        return subprocess.CompletedProcess(
-            command, 0, json.dumps({"labels": [{"name": label} for label in labels]}), ""
-        )
+        return subprocess.CompletedProcess(command, 1, "", "unmatched")
 
     return run
 
@@ -634,7 +593,7 @@ def test_trunk_flow_warns_but_submits_when_base_lags_main(
     monkeypatch.setattr(
         ci_utils.subprocess,
         "run",
-        _trunk_runner(["qa-approved"], base_sha="a" * 40, main_sha="b" * 40, calls=calls),
+        _trunk_runner(base_sha="a" * 40, main_sha="b" * 40, calls=calls),
     )
     monkeypatch.setattr(
         ci_utils.urllib.request,
@@ -669,7 +628,7 @@ def test_trunk_flow_refuses_when_require_fresh_base_and_stale(
     monkeypatch.setattr(
         ci_utils.subprocess,
         "run",
-        _trunk_runner(["qa-approved"], base_sha="a" * 40, main_sha="b" * 40, calls=calls),
+        _trunk_runner(base_sha="a" * 40, main_sha="b" * 40, calls=calls),
     )
     monkeypatch.setattr(
         ci_utils.urllib.request,
@@ -704,7 +663,7 @@ def test_trunk_flow_skips_warning_when_base_is_current_main(
     monkeypatch.setattr(
         ci_utils.subprocess,
         "run",
-        _trunk_runner(["qa-approved"], base_sha="a" * 40, main_sha="a" * 40, calls=calls),
+        _trunk_runner(base_sha="a" * 40, main_sha="a" * 40, calls=calls),
     )
     monkeypatch.setattr(
         ci_utils.urllib.request,
@@ -738,7 +697,7 @@ def test_trunk_flow_degrades_when_freshness_reads_fail(
     monkeypatch.setattr(
         ci_utils.subprocess,
         "run",
-        _trunk_runner(["qa-approved"], base_sha=None, main_sha=None, calls=calls),
+        _trunk_runner(base_sha=None, main_sha=None, calls=calls),
     )
     monkeypatch.setattr(
         ci_utils.urllib.request,
@@ -772,7 +731,7 @@ def test_trunk_flow_warns_distinctly_when_require_mode_cannot_verify_freshness(
     monkeypatch.setattr(
         ci_utils.subprocess,
         "run",
-        _trunk_runner(["qa-approved"], base_sha=None, main_sha=None, calls=calls),
+        _trunk_runner(base_sha=None, main_sha=None, calls=calls),
     )
     monkeypatch.setattr(
         ci_utils.urllib.request,

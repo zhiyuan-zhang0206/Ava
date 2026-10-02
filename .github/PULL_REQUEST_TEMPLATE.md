@@ -39,5 +39,5 @@ surfaces). -->
 ## Tech-debt registration
 <!-- A PR that knowingly introduces debt (a deliberate shortcut, deferred work/TODO, or
 suppression) must add or extend a fingerprinted entry in `future/tech-debt/ledger.md`.
-Write `none` when this PR introduces no such debt. Review and QA enforce this starter
+Write `none` when this PR introduces no such debt. Review enforces this starter
 obligation; there is no CI gate yet. -->

@@ -79,7 +79,7 @@ investigate it as a regression. Do not launch a third automatic rerun without a
 filed case; appendix A defines the release gate.
 
 **Lintability — not lintable (operational).** Attempt history is CI state, so
-the rule belongs in QA or merge-queue tooling rather than a repository lint.
+the rule belongs in merge-queue tooling rather than a repository lint.
 
 ## 3. Redirect resources; never inherit ambient host state
 
@@ -168,7 +168,7 @@ gate, bounded poll, or hermetic read. Admit a test only when its root cause is
 unknown and it has failed at least twice in one day; appendix C governs exit.
 
 **Lintability — not lintable (operational).** Marker admission and removal are
-QA decisions. CI can audit marker counts and justification, but no repository
+reviewer decisions. CI can audit marker counts and justification, but no repository
 lint can determine whether the root cause remains unknown.
 
 ## 6. Wait for the production read path, not an assumed runner speed
@@ -307,18 +307,18 @@ its own teardown, and the CI annotation of the counts job lists what it found.
 changed is a runtime property; a static lint only sees an assignment that
 bypasses `monkeypatch`.
 
-## Appendix: CI/QA ruling adopted 2026-09-01 21:01
+## Appendix: CI ruling adopted 2026-09-01 21:01
 
 **Provenance.** User ruling of 2026-09-01 21:01, adopted in full (items A-E).
 Items A-C appear verbatim below in faithful English translation; D is this
 document and E is summarized. The source ruling was in Chinese. It is binding
-on CI/QA practice.
+on CI practice.
 
 ### A. Rerun cap
 
 When the same test fails on two consecutive attempts, a third automatic rerun
 is forbidden and the queue auto-freezes. A case recording registration and
-attribution (regression or flake) must be filed before the QA line or P0 lead
+attribution (regression or flake) must be filed before the reviewer or P0 lead
 may release it.
 
 ### B. Mandatory deflake

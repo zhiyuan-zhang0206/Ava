@@ -29,14 +29,14 @@ protection; the old orchestrator controls the first rollout of a new safeguard.
 2. Implement code, documentation and behavior tests together. Follow explicit
    user test-location constraints. When local tests or cluster boot are
    forbidden, use selected tests and required integration gates in CI.
-3. Obtain review and QA against the exact PR head SHA. Prior-head approval
+3. Obtain review against the exact PR head SHA. Prior-head approval
    does not approve later changes. Record real CI runs and negative controls;
    skipped checks or no workflow runs do not prove behavior.
 4. Enqueue only after required review, CI and user/coordinator clearance.
    Merge proves repository integration, not production health.
 5. Only the designated operator performs the separately authorized rollout.
-   Contributors and QA agents must not launch competing deployments, bulk
-   lifecycle operations, or production hotfixes.
+   Contributors must not launch competing deployments, bulk lifecycle
+   operations, or production hotfixes.
 
 ## Deployment gates
 
@@ -49,7 +49,7 @@ drain timeouts or assume old code understands a new flag. Record before rollout:
 - Fixed target SHA; current installed/running versions; gateway, runner,
   schema and plugin compatibility.
 - No conflicting rollout, live lease or unauthorized lifecycle actor.
-- CI and exact-head QA/review evidence.
+- CI and exact-head review evidence.
 - Verified recovery point and supported rollback or fix-forward plan.
 - Safe bootstrapping under the old imported orchestrator.
 

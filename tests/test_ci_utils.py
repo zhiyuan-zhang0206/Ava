@@ -87,15 +87,10 @@ def _urlopen_sequence(
     return urlopen
 
 
-def _labels_runner(labels: list[str], calls: list[list[str]]):
+def _gh_runner(calls: list[list[str]]):
     def run(command: list[str], **_: object) -> subprocess.CompletedProcess[str]:
         calls.append(command)
-        return subprocess.CompletedProcess(
-            command,
-            0,
-            stdout=json.dumps({"labels": [{"name": label} for label in labels]}),
-            stderr="",
-        )
+        return subprocess.CompletedProcess(command, 0, stdout="{}", stderr="")
 
     return run
 
@@ -674,7 +669,7 @@ _QA_APPROVED_GATE_FAILURE = _check("qa-approved-gate", "FAILURE", workflow="QA a
     ],
 )
 def test_qa_failure_is_excluded_from_ci_verdict(gh: Any, has_workflows: Any, gate: dict) -> None:
-    """The queue enforces both QA checks outside the CI verdict."""
+    """Both retired QA checks stay outside the CI verdict on older heads."""
     gh([_check("backend (pytest + pyright)", "SUCCESS"), gate])
     has_workflows(True)
     r = ci_utils.check_ci("57")
@@ -833,11 +828,11 @@ def test_wait_timeout_while_pending_exits_one(monkeypatch, poll, capsys) -> None
 
 def test_wait_merge_trunk_submits_and_lands_when_green(no_sleep, poll, monkeypatch, capsys) -> None:
     poll(CIStatus.ALL_PASSED)
-    label_calls: list[list[str]] = []
+    gh_calls: list[list[str]] = []
     requests: list[urllib.request.Request] = []
     monkeypatch.setattr(ci_utils, "_queue_cooldown_seconds", lambda *_a, **_k: 0)
     monkeypatch.setenv("TRUNK_API_TOKEN", "test-token")
-    monkeypatch.setattr(ci_utils.subprocess, "run", _labels_runner(["qa-approved"], label_calls))
+    monkeypatch.setattr(ci_utils.subprocess, "run", _gh_runner(gh_calls))
     monkeypatch.setattr(
         ci_utils.urllib.request,
         "urlopen",
@@ -851,7 +846,7 @@ def test_wait_merge_trunk_submits_and_lands_when_green(no_sleep, poll, monkeypat
         ),
     )
     # --merge implies --wait: with the Trunk default queue, submit the PR
-    # (qa-approved label verified first), then wait for the queue to land it.
+    # then wait for the queue to land it.
     assert ci_utils.main(["1243", "--merge"]) == 0
     assert requests[0].full_url == "https://api.trunk.io/v1/submitPullRequest"
     assert requests[0].get_header("X-api-token") == "test-token"
@@ -865,7 +860,7 @@ def test_wait_merge_trunk_submits_and_lands_when_green(no_sleep, poll, monkeypat
     }
     assert requests[1].full_url == "https://api.trunk.io/v1/getSubmittedPullRequest"
     assert "PR #1243 merged by the Trunk merge queue" in capsys.readouterr().out
-    assert label_calls[0][:4] == ["gh", "pr", "view", "1243"]
+    assert gh_calls[0][:4] == ["gh", "pr", "view", "1243"]
 
 
 def test_wait_merge_trunk_failed_state_prints_full_payload(
@@ -878,7 +873,7 @@ def test_wait_merge_trunk_failed_state_prints_full_payload(
     poll(CIStatus.ALL_PASSED)
     monkeypatch.setattr(ci_utils, "_queue_cooldown_seconds", lambda *_a, **_k: 0)
     monkeypatch.setenv("TRUNK_API_TOKEN", "test-token")
-    monkeypatch.setattr(ci_utils.subprocess, "run", _labels_runner(["qa-approved"], []))
+    monkeypatch.setattr(ci_utils.subprocess, "run", _gh_runner([]))
     monkeypatch.setattr(
         ci_utils.urllib.request,
         "urlopen",
@@ -902,7 +897,7 @@ def test_wait_merge_trunk_submit_failure_exits_four(no_sleep, poll, monkeypatch,
     poll(CIStatus.ALL_PASSED)
     monkeypatch.setattr(ci_utils, "_queue_cooldown_seconds", lambda *_a, **_k: 0)
     monkeypatch.setenv("TRUNK_API_TOKEN", "test-token")
-    monkeypatch.setattr(ci_utils.subprocess, "run", _labels_runner(["qa-approved"], []))
+    monkeypatch.setattr(ci_utils.subprocess, "run", _gh_runner([]))
     monkeypatch.setattr(
         ci_utils.urllib.request,
         "urlopen",
@@ -1339,7 +1334,6 @@ def _diag_pr_view(mergeable: str = "MERGEABLE", checks: list[dict] | None = None
     return json.dumps(
         {
             "mergeable": mergeable,
-            "labels": [{"name": "qa-approved"}],
             "headRefOid": "aaaa1111aaaa1111aaaa1111aaaa1111aaaa1111",
             "state": "OPEN",
             "statusCheckRollup": checks or [],

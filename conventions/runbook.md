@@ -1090,7 +1090,7 @@ invocation: `scripts/post_deploy_visual/check.py --check --base-url
 gate (frontend entry), never the gateway API origin, and the script refuses a
 base URL that answers the gateway health JSON up front.
 
-No command updates a golden implicitly. After QA or #405 confirms a report,
+No command updates a golden implicitly. After a reviewer or #405 confirms a report,
 roll it forward with `scripts/post_deploy_visual/check.py --accept-wave <sha>
 --accepted-by <reviewer>`; this appends the reviewer, UTC timestamp, SHA, and
 capture list to the 0600 `acceptance-audit.jsonl`. If the exported cookie leaks,
