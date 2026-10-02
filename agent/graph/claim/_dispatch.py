@@ -289,9 +289,7 @@ async def _handle_compact_request(
     summary = ""
     for attempt in range(1, COMPACT_MAX_ATTEMPTS + 1):
         try:
-            summary = await generate_summary(
-                state.messages, ctx.llm, ctx.require_agent().brain.llm_model
-            )
+            summary = await generate_summary(state.messages, ctx.llm, ctx.require_agent())
             break
         except Exception as e:
             last_error = e

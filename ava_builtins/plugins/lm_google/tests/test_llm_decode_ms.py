@@ -63,7 +63,7 @@ def _plain_invocation(llm: MagicMock) -> LlmInvocation:
 
 
 def _patch_prepare(monkeypatch: pytest.MonkeyPatch, invocation_factory):
-    async def _fake_prepare(llm, messages):
+    async def _fake_prepare(llm, messages, _policy):
         return invocation_factory(llm)
 
     monkeypatch.setattr("agent.graph.llm._stream.prepare_invocation", _fake_prepare)  # pyright: ignore[reportUnknownArgumentType]

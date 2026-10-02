@@ -10,6 +10,7 @@ from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
 from agent.llm.cache import ainvoke_with_cache_retry
+from base.agents.context.slices import AgentSlices
 
 _SYSTEM = SystemMessage(content="You are a test agent. " * 100)
 
@@ -72,7 +73,9 @@ class TestInvokeTimeout:
         monkeypatch.setattr(_settings.lm, "llm_compact_timeout_seconds", 0.05)
         llm = _HangingLLM()
         with pytest.raises(TimeoutError):
-            await ainvoke_with_cache_retry(cast(BaseChatModel, llm), [_SYSTEM, *_CONVO])
+            await ainvoke_with_cache_retry(
+                cast(BaseChatModel, llm), [_SYSTEM, *_CONVO], AgentSlices.resolve().llm_policy
+            )
 
     async def test_fast_call_returns_within_bound(self, monkeypatch: pytest.MonkeyPatch) -> None:
         from base.config import settings as _settings
@@ -80,7 +83,7 @@ class TestInvokeTimeout:
         monkeypatch.setattr(_settings.lm, "llm_compact_timeout_seconds", 60.0)
         llm = _StubLLM()
         out, used_cache = await ainvoke_with_cache_retry(
-            cast(BaseChatModel, llm), [_SYSTEM, *_CONVO]
+            cast(BaseChatModel, llm), [_SYSTEM, *_CONVO], AgentSlices.resolve().llm_policy
         )
         assert out.content == "done"  # pyright: ignore[reportUnknownMemberType]
         assert used_cache is False  # plain path (no cache memo)

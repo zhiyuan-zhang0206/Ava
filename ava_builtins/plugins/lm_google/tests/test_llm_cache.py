@@ -12,6 +12,7 @@ from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from agent.llm.cache import ainvoke_with_cache_retry, prepare_invocation
 from ava_builtins.plugins.lm_google import gemini_cache
 from ava_builtins.plugins.lm_google.gemini_cache import CacheRef
+from base.agents.context.slices import AgentSlices
 
 _SYSTEM = SystemMessage(content="You are a test agent. " * 100)
 _CONVO = [HumanMessage(content="hi"), AIMessage(content="hello")]
@@ -69,7 +70,9 @@ class TestPrepareInvocation:
             "get_or_create_cache",
             lambda *_a, **_k: _async_return(ref),  # pyright: ignore[reportUnknownArgumentType]
         )
-        inv = await prepare_invocation(cast(BaseChatModel, llm), [_SYSTEM, *_CONVO])
+        inv = await prepare_invocation(
+            cast(BaseChatModel, llm), [_SYSTEM, *_CONVO], AgentSlices.resolve().llm_policy
+        )
         assert inv.cache_ref is ref
         assert inv.messages == _CONVO  # SystemMessage stripped
         assert llm.bind_kwargs == {"cached_content": "cachedContents/t1"}  # pyright: ignore[reportUnknownMemberType]
@@ -83,7 +86,9 @@ class TestPrepareInvocation:
             "get_or_create_cache",
             lambda *_a, **_k: _async_return(None),  # pyright: ignore[reportUnknownArgumentType]
         )
-        inv = await prepare_invocation(cast(BaseChatModel, llm), [_SYSTEM, *_CONVO])
+        inv = await prepare_invocation(
+            cast(BaseChatModel, llm), [_SYSTEM, *_CONVO], AgentSlices.resolve().llm_policy
+        )
         assert inv.cache_ref is None
         assert inv.messages == [_SYSTEM, *_CONVO]
         assert "tools" in (llm.bind_kwargs or {})  # pyright: ignore[reportUnknownMemberType]
@@ -99,7 +104,9 @@ class TestPrepareInvocation:
             return _async_return(None)
 
         monkeypatch.setattr(gemini_cache, "get_or_create_cache", _spy)
-        inv = await prepare_invocation(cast(BaseChatModel, _StubLLM()), list(_CONVO))
+        inv = await prepare_invocation(
+            cast(BaseChatModel, _StubLLM()), list(_CONVO), AgentSlices.resolve().llm_policy
+        )
         assert inv.cache_ref is None and not called
 
     async def test_cache_not_attempted_with_second_system_message(
@@ -119,6 +126,7 @@ class TestPrepareInvocation:
         inv = await prepare_invocation(
             cast(BaseChatModel, _StubLLM()),
             [_SYSTEM, HumanMessage(content="x"), SystemMessage(content="later")],
+            AgentSlices.resolve().llm_policy,
         )
         assert inv.cache_ref is None and not called
 
@@ -132,7 +140,7 @@ class TestAinvokeWithCacheRetry:
             lambda *_a, **_k: _async_return(_ref()),  # pyright: ignore[reportUnknownArgumentType]
         )
         response, used_cache = await ainvoke_with_cache_retry(
-            cast(BaseChatModel, llm), [_SYSTEM, *_CONVO]
+            cast(BaseChatModel, llm), [_SYSTEM, *_CONVO], AgentSlices.resolve().llm_policy
         )
         assert response.content == "done"  # pyright: ignore[reportUnknownMemberType]
         assert used_cache is True  # cache-bound attempt succeeded
@@ -162,7 +170,7 @@ class TestAinvokeWithCacheRetry:
         )
         monkeypatch.setattr(gemini_cache, "invalidate", lambda ref: invalidated.append(ref.name))  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
         response, used_cache = await ainvoke_with_cache_retry(
-            cast(BaseChatModel, llm), [_SYSTEM, *_CONVO]
+            cast(BaseChatModel, llm), [_SYSTEM, *_CONVO], AgentSlices.resolve().llm_policy
         )
         assert response.content == "done"  # pyright: ignore[reportUnknownMemberType]
         assert used_cache is False  # stale-cache retry landed on the plain path
@@ -179,7 +187,9 @@ class TestAinvokeWithCacheRetry:
             lambda *_a, **_k: _async_return(_ref()),  # pyright: ignore[reportUnknownArgumentType]
         )
         with pytest.raises(ValueError, match="boom"):
-            await ainvoke_with_cache_retry(cast(BaseChatModel, llm), [_SYSTEM, *_CONVO])
+            await ainvoke_with_cache_retry(
+                cast(BaseChatModel, llm), [_SYSTEM, *_CONVO], AgentSlices.resolve().llm_policy
+            )
         assert len(llm.runnable.calls) == 1  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
 
     async def test_plain_path_error_not_retried(self, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -202,7 +212,9 @@ class TestAinvokeWithCacheRetry:
             lambda *_a, **_k: _async_return(None),  # pyright: ignore[reportUnknownArgumentType]
         )
         with pytest.raises(ClientError):
-            await ainvoke_with_cache_retry(cast(BaseChatModel, llm), [_SYSTEM, *_CONVO])
+            await ainvoke_with_cache_retry(
+                cast(BaseChatModel, llm), [_SYSTEM, *_CONVO], AgentSlices.resolve().llm_policy
+            )
         assert len(llm.runnable.calls) == 1  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
 
 

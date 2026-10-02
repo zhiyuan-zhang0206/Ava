@@ -22,8 +22,7 @@
     "shim": 4
   },
   "ava_builtins/plugins": {
-    "bus-built": 3,
-    "turn-settings-read": 4
+    "bus-built": 3
   },
   "base/agents": {
     "bus-built": 10,
