@@ -14,7 +14,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
-from base.config import format_timestamp
+from base.clock import Clock
 
 _TS_FIELDS = frozenset({"created_at", "updated_at", "last_reminded_at"})
 
@@ -26,5 +26,5 @@ def render_task_timestamps(row: tuple[Any, ...], col_names: str) -> tuple[Any, .
     for i, name in enumerate(col_names.split(", ")):
         value = out[i]
         if isinstance(value, datetime) and name in _TS_FIELDS:
-            out[i] = format_timestamp(value)
+            out[i] = Clock.from_settings().format_timestamp(value)
     return tuple(out)

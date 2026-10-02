@@ -454,7 +454,8 @@ def cron(
     Returns:
         The watcher's session id; kill it to stop the schedule.
     """
-    from base.config import cluster_tz_name, host_tz_name
+    from base.clock import Clock
+    from base.config import host_tz_name
 
     expr = coerce_str(expr, "expr")
     message = coerce_str(message, "message")
@@ -468,7 +469,11 @@ def cron(
     # Default to the cluster clock when authoritative; a settings-lite
     # process (no authoritative cluster timezone) falls back to this host's
     # own zone — the same wall clock its other displays use.
-    tz = timezone if timezone is not None else (cluster_tz_name() or host_tz_name())
+    tz = (
+        timezone
+        if timezone is not None
+        else (Clock.from_settings().authoritative_timezone or host_tz_name())
+    )
     validate_timezone(tz)
     if end_time is None:
         # Standing-cron cap (task #2617): no end_time means the DEFAULT
@@ -524,7 +529,7 @@ def at(
     Returns:
         The watcher's session id; kill that session to cancel.
     """
-    from base.config import cluster_tz_name
+    from base.clock import Clock
 
     when = coerce_str(when, "when", allow_types=(datetime.datetime, datetime.timedelta))
     message = coerce_str(message, "message")
@@ -544,7 +549,7 @@ def at(
     code = build_at_script(
         when_iso=due_at.isoformat(),
         message=message,
-        timezone=cluster_tz_name(),
+        timezone=Clock.from_settings().authoritative_timezone,
     )
     # The one-shot script sleeps until `when`, wakes you once, and exits — it
     # ends itself, so no watchdog.

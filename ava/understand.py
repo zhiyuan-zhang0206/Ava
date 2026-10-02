@@ -18,6 +18,7 @@ from zoneinfo import ZoneInfo
 from ava import files as _files
 from ava.sdk_surface.batch import DEFAULT_BATCH_MAX_CONCURRENT, run_batch, validate_max_concurrent
 from ava.sdk_surface.validation import coerce_str
+from base.clock import Clock
 from base.config import settings
 from base.lm.attach_constants import ATTACH_MEDIA_MIME
 from base.lm.effort import (
@@ -71,7 +72,7 @@ def _save_understand_output(prompt: str, result: str, *, source: str) -> Path | 
     d = workspace_dir(agent_id) / _OVERFLOW_DIRNAME
     d.mkdir(parents=True, exist_ok=True)
     try:
-        tz = ZoneInfo(settings.general.timezone)
+        tz = Clock.from_settings().explicit_zone()
     except Exception:
         tz = ZoneInfo("UTC")
     now = datetime.now(tz)

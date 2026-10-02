@@ -46,8 +46,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from base.clock import Clock
 from base.cluster.machine import is_agent_runner, is_gateway, machine_name
-from base.config import cluster_tz, settings
+from base.config import settings
 from base.host.proc import run_bounded
 from base.native_process.os_platform import CREATE_NO_WINDOW
 from base.paths import gateway_memory_dir, memory_dir
@@ -605,7 +606,7 @@ def status() -> RepoStatus:
                 fetch_head.stat().st_mtime,
                 tz=datetime.UTC,
             )
-            .astimezone(cluster_tz())
+            .astimezone(Clock.from_settings().zone())
             .isoformat(timespec="seconds")
         )
     else:
