@@ -45,15 +45,6 @@ _IANA = available_timezones()
 assert "Asia/Shanghai" in _IANA, "no tz database available; the zone-name check cannot run"
 
 
-def _module_constant(tree: ast.Module, name: str) -> ast.expr:
-    for node in tree.body:
-        if isinstance(node, ast.Assign) and any(
-            isinstance(t, ast.Name) and t.id == name for t in node.targets
-        ):
-            return node.value
-    raise AssertionError(f"no module-level {name} assignment")
-
-
 def _cron_literals(tree: ast.Module) -> list[str]:
     return [
         node.value
@@ -68,10 +59,38 @@ def _tree(filename: str) -> ast.Module:
     return ast.parse((_SCHEDULES / filename).read_text(encoding="utf-8"))
 
 
-@pytest.mark.parametrize(("filename", "constant"), sorted(_CLUSTER_CLOCK_TEMPLATES.items()))
-def test_template_timezone_is_the_cluster_setting(filename: str, constant: str) -> None:
-    """The timezone constant is read from config, never spelled out in the file."""
-    assert ast.unparse(_module_constant(_tree(filename), constant)) == "settings.general.timezone"
+def _timezone_arguments(tree: ast.Module) -> list[str]:
+    """Every timezone a template hands on: a `timezone=` keyword, an argument of
+    `ZoneInfo(...)`, or the second argument of `run_daily_loop(cron, tz, fire)`."""
+    found: list[str] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        found += [ast.unparse(kw.value) for kw in node.keywords if kw.arg == "timezone"]
+        callee = ast.unparse(node.func)
+        if callee == "ZoneInfo" and node.args:
+            found.append(ast.unparse(node.args[0]))
+        if callee == "run_daily_loop" and len(node.args) > 1:
+            found.append(ast.unparse(node.args[1]))
+    return found
+
+
+@pytest.mark.parametrize(
+    "path",
+    sorted(p for p in _SCHEDULES.glob("*-schedule.py") if p.name != "trace-ship-tempo-schedule.py"),
+    ids=lambda p: p.name,
+)
+def test_template_timezone_is_the_cluster_setting(path: Path) -> None:
+    """Every timezone a template uses is `cluster_timezone()` (the cluster setting, read when
+    the schedule runs), never spelled out in the file and never held in a module constant."""
+    tree = _tree(path.name)
+    arguments = _timezone_arguments(tree)
+    assert arguments, f"{path.name} passes no timezone"
+    assert set(arguments) == {"cluster_timezone()"}, arguments
+    assert not any(
+        isinstance(node, ast.Attribute) and ast.unparse(node) == "settings.general.timezone"
+        for node in ast.walk(tree)
+    ), f"{path.name} reads settings itself"
 
 
 @pytest.mark.parametrize("path", sorted(_SCHEDULES.glob("*-schedule.py")), ids=lambda p: p.name)

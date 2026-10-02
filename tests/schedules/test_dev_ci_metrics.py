@@ -11,6 +11,8 @@ from unittest.mock import Mock
 
 import pytest
 
+from base.config import settings
+
 _ROOT = Path(__file__).resolve().parents[2]
 _SCHEDULE = _ROOT / "schedules" / "dev-ci-metrics-schedule.py"
 
@@ -35,7 +37,7 @@ def test_fire_runs_default_repo_and_logs_previous_complete_day(
     exporter = SimpleNamespace(DEFAULT_REPO="owner/repo", main=lambda args: calls.append(args) or 0)
     # Pin the cluster timezone: the day label must follow the cluster wall
     # clock, not the test environment's zone (CI has no cluster config).
-    monkeypatch.setattr(module, "TZ", "Asia/Shanghai")
+    monkeypatch.setattr(settings.general, "timezone", "Asia/Shanghai")
     monkeypatch.setattr(module, "claimed_slot", lambda: datetime(2026, 9, 3, 22, 20, tzinfo=UTC))
     monkeypatch.setattr(module, "_load_exporter", lambda: exporter)
     monkeypatch.setattr(

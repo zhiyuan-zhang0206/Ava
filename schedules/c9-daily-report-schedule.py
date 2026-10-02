@@ -30,9 +30,8 @@ import ava
 import base
 from ava.agents import AgentStatus as S
 from schedules.agent_status_guard import ensure_agent_status_members
-from schedules.catchup import claimed_slot
+from schedules.catchup import claimed_slot, cluster_timezone
 from schedules.daily_host import report_agent, run_daily_loop
-from base.config import settings
 from base.log import init_gateway_process
 
 ensure_agent_status_members(
@@ -42,9 +41,6 @@ ensure_agent_status_members(
 )
 
 CRON = "0 5 * * *"
-# The cluster default is Asia/Shanghai. Config-derived like the other
-# built-ins: one cluster wall clock even when operators change it.
-TZ = settings.general.timezone
 _REPORT_AGENT_ENV = "AVA_CI_USAGE_REPORT_AGENT"
 _REPORT_LABEL = "Ava \u8d1f\u8d23\u4eba"
 # The gateway materializes this script to ~/.ava/schedules/<id>/ before
@@ -85,7 +81,7 @@ def window_bounds(slot_end: datetime) -> tuple[str, str, str]:
     UTC ISO since/until pair plus the window's day label (cluster-tz date).
     """
     since = slot_end - timedelta(hours=24)
-    day = slot_end.astimezone(ZoneInfo(TZ))
+    day = slot_end.astimezone(ZoneInfo(cluster_timezone()))
     return (
         since.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
         slot_end.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
@@ -172,7 +168,7 @@ def _fire(_payload: None) -> None:
 
 
 def _main_loop() -> None:
-    run_daily_loop(CRON, TZ, _fire)
+    run_daily_loop(CRON, cluster_timezone(), _fire)
 
 
 if __name__ == "__main__":
