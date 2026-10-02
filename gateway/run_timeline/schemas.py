@@ -9,7 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 
 class RunTimelineWindow(BaseModel):
-    """The inclusive Loki window used to derive one timeline."""
+    """The inclusive window used to derive one timeline."""
 
     model_config = ConfigDict(frozen=True)
 

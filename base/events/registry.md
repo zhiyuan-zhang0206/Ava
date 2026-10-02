@@ -311,6 +311,7 @@ consumers: see the comments at each emit point.
 | `resolution_status` | absolute unresolved + dismissed warning/error class counts over the daemon's fixed six-hour window | noise | unresolved_warnings, unresolved_errors, dismissed_warnings, dismissed_errors, window | — | events |
 | `checkpoint_table_sizes` | checkpoint table physical sizes and live row counts (hourly + after each blob vacuum run) | observation | blobs_bytes, checkpoints_bytes, writes_bytes, blobs_live, checkpoints_live, writes_live | — | events |
 | `audit_write_failed` | an audit event could not be recorded in audit_events (the record is missing; the Loki projection of the same event still went out) | anomaly | event_name, error_class, error | — | events |
+| `telemetry_store_failed` | a batch of telemetry/log events did not land in telemetry_events (the JSONL mirror and Loki still hold them) | anomaly | rows, consecutive_failures, error_class, error | — | events |
 | `lgtm_dashboard_render_failed` | ava-ops dashboard render failed during converge; the previous provisioning file was kept | anomaly | — | — | events |
 | `converge_file_preserved` | converge kept a locally modified destination instead of overwriting — the current content no longer matches the recorded render; repeats every converge until resolved | anomaly | path, key, surface | — | events |
 | `root_chain_broken` | root self-check found a managed unit no longer a live child of the root process — one alert per episode, held until intact | anomaly | — | — | events |

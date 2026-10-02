@@ -101,6 +101,39 @@ END $$;
 SQL
 echo "  ok"
 
+echo "-> telemetry_events is append-only and partitioned: INSERT lands in its month, UPDATE / DELETE / TRUNCATE are rejected"
+psql -d "$TEST_DB" -v ON_ERROR_STOP=1 <<'SQL'
+SELECT ensure_telemetry_event_partitions(3);
+INSERT INTO telemetry_events (event_uid, ts, machine, cluster, process, category, event_name, level, source)
+    VALUES (1, now(), 'smoke-machine', 'smoke', 'smoke', 'telemetry', 'llm_usage', 'info', 'system');
+DO $$
+DECLARE
+    statement TEXT;
+BEGIN
+    IF (SELECT tableoid::regclass::text FROM telemetry_events WHERE event_uid = 1) = 'telemetry_events_default' THEN
+        RAISE EXCEPTION 'the current month has no partition';
+    END IF;
+    FOREACH statement IN ARRAY ARRAY[
+        'UPDATE telemetry_events SET level = ''error''',
+        'DELETE FROM telemetry_events',
+        'TRUNCATE telemetry_events'
+    ] LOOP
+        BEGIN
+            EXECUTE statement;
+            RAISE EXCEPTION 'telemetry_events accepted: %', statement;
+        EXCEPTION WHEN raise_exception THEN
+            IF SQLERRM NOT LIKE 'telemetry_events is append-only%' THEN
+                RAISE;
+            END IF;
+        END;
+    END LOOP;
+    IF (SELECT count(*) FROM telemetry_events) <> 1 THEN
+        RAISE EXCEPTION 'telemetry_events lost its row';
+    END IF;
+END $$;
+SQL
+echo "  ok"
+
 echo "-> trigger smoke: exercise agents_meta termination triggers"
 psql -d "$TEST_DB" -v ON_ERROR_STOP=1 <<'SQL'
 INSERT INTO agents (label) VALUES ('smoke-agent');

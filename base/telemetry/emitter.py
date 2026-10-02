@@ -4,9 +4,11 @@ One event stream serves audit, telemetry, and log records under one schema and
 one correlation key (`trace_id`). This module is its only writer.
 
 Pipeline (Layer 1): a bounded queue and drain thread batch every event into
-local JSONL mirrors, best-effort compact metrics, and OTLP logs/metrics. Live
-event reads use Loki/Prometheus; the retired Postgres archive is never revived
-(audit events: the `audit_events` table is their record, this pipeline a projection).
+local JSONL mirrors, the `telemetry_events` table (telemetry and log events), best-effort
+compact metrics, and OTLP logs/metrics. The record of an event is a Postgres table: audit
+events in `audit_events` (written before the event is emitted), telemetry and log events in
+`telemetry_events` (written here, from the drain thread, with the mirror as the fallback).
+Loki and Prometheus hold the observation copy for Grafana and short windows.
 
 Backpressure sheds records under overload, audit events included: their record
 is `audit_events`, written before the event is emitted, so shedding the
@@ -15,7 +17,7 @@ cluster dimensions are always populated.
 
 Emit is best-effort and never raises: a broken sink must not crash the caller
 (JSONL mirror + loguru file sinks are the durable backfill for everything
-that reaches the drain thread).
+that reaches the drain thread; the mirror is replayed into `telemetry_events`).
 Startup init (`init_telemetry`) is the one place that fails loud — a process
 whose event pipeline cannot come up should not start silently blind.
 
@@ -320,7 +322,7 @@ _jsonl_failures = 0
 _NO_EMITTER = "_no_emitter"
 
 
-def report_no_pipeline(message: str, **extra: Any) -> None:
+def report_no_pipeline(message: str, *, level: str = "warning", **extra: Any) -> None:
     """Log a drain-thread diagnostic through loguru, marked `_NO_EMITTER` so
     the emitter adapter skips it. Best-effort: never raises, never blocks."""
     with contextlib.suppress(Exception):
@@ -328,18 +330,23 @@ def report_no_pipeline(message: str, **extra: Any) -> None:
 
         # **{_NO_EMITTER: True} — bind() takes literal kwargs, so the marker
         # key must be the constant's VALUE, not its name.
-        logger.bind(**{_NO_EMITTER: True}).warning(message, **extra)
+        logger.bind(**{_NO_EMITTER: True}).log(level.upper(), message, **extra)
 
 
 def _write_batch(events: list[Event]) -> None:
-    """Mirror first, then compact metric projection and OTLP export.
+    """Mirror first, then the telemetry_events record, the compact metric projection
+    and OTLP export.
 
-    Every sink is failure-isolated. The projection never restores the retired
-    Postgres event archive and cannot turn an observation into a billing proof.
+    Every sink is failure-isolated. The projection cannot turn an observation into a
+    billing proof; the telemetry_events sink reports its own failures.
     """
     if not events:
         return
     _append_jsonl(events)
+    with contextlib.suppress(Exception):
+        from base.telemetry.event_store import store_events
+
+        store_events(events)
     try:
         from base.telemetry.metrics.observed_metrics import project_events
 
@@ -498,9 +505,9 @@ class _EventPipeline:
 
 
 def _open_pipeline() -> _EventPipeline:
-    """Build the process pipeline: queue + drain thread. The Postgres events
-    copy is retired (task #1197), so startup no longer depends on the DB —
-    the pipeline writes the JSONL mirror and the OTLP backend only."""
+    """Build the process pipeline: queue + drain thread. Startup does not depend on the
+    DB: the `telemetry_events` sink connects lazily on the drain thread and backs off
+    when the database does not answer, and the JSONL mirror is written first."""
     return _EventPipeline()
 
 
@@ -520,8 +527,8 @@ def init_telemetry(*, process: str = "unknown", agent_id: int | None = None) -> 
     process shares): `init_gateway_process(name)` → process=name; the exec
     child's `add_postgres_sink` → process="agent-exec" plus its agent id. The
     first call opens the drain thread; later calls only refresh the identity
-    binding. The DB is no longer part of the pipeline (task #1197), so startup
-    never depends on it."""
+    binding. Startup never depends on the DB (the `telemetry_events` sink connects
+    lazily on the drain thread)."""
     _state["process"] = process
     _state["agent_id"] = agent_id
     if _state["machine"] is None:
@@ -730,6 +737,10 @@ def _drain_on_exit() -> None:
         from base.telemetry.metrics.observed_metrics import close_projection
 
         close_projection()
+    with contextlib.suppress(Exception):
+        from base.telemetry.event_store import close_store
+
+        close_store()
     with contextlib.suppress(Exception):
         from base.telemetry.otlp import telemetry_otlp  # deferred — heavy OTel imports
 

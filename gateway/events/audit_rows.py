@@ -3,7 +3,7 @@
 `category=audit` events are recorded in Postgres (decisions/2026-10-02-audit-events-in-postgres.md);
 Loki holds only a projection that expires. Every reader that needs audit history reads here:
 `/api/events`, the run timeline, the fleet graph and the neighbors walk. Rows come back in the
-same dict shape `gateway.lgtm.loki_events.query_events` returns, so one merge serves both.
+same dict shape `gateway.events.telemetry_rows.query_events` returns, so one merge serves both.
 
 Row `id` is the event's stream id (the unsigned form of `audit_events.event_uid`), the same value
 the Loki row of that event carries. `line_sha256` is the digest of the recorded row, not of a
@@ -124,9 +124,9 @@ def _where(
     clauses: list[sql.Composable] = []
     params: list[Any] = []
 
-    def add(clause: LiteralString, value: Any) -> None:
+    def add(clause: LiteralString, *values: Any) -> None:
         clauses.append(sql.SQL(clause))
-        params.append(value)
+        params.extend(values)
 
     if tiers is not None:
         tier_clause, possible = _tier_clause(tiers)
@@ -140,13 +140,19 @@ def _where(
         ("trace_id = %s", trace_id),
         ("machine = %s", machine),
         ("level = %s", level.lower() if level is not None else None),
-        ("attributes @> %s::jsonb", json.dumps(attribute_filters) if attribute_filters else None),
         ("ts >= %s", from_),
         ("ts <= %s", to),
     )
     for clause, value in optional:
         if value is not None:
             add(clause, value)
+    # Values compare as text, so a JSON number or boolean matches its string form; a `!=` prefix
+    # negates, and a missing key reads as the empty string (the Loki reader's semantics).
+    for key, value in (attribute_filters or {}).items():
+        if value.startswith("!="):
+            add("COALESCE(attributes ->> %s, '') <> %s", key, value[2:])
+        else:
+            add("COALESCE(attributes ->> %s, '') = %s", key, value)
     where = sql.SQL(" AND ").join(clauses) if clauses else sql.SQL("TRUE")
     return where, params
 

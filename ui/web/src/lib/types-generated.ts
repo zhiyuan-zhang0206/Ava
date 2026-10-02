@@ -919,7 +919,7 @@ export interface paths {
          *     `events.Event` per frame. code_delta chunks pass through immediately,
          *     native streaming. This is the live tail; `GET /api/agents/{id}/events`
          *     (no `/stream`) is the historical REST query over the persisted unified
-         *     event stream (Loki).
+         *     event stream (`telemetry_events`).
          *
          *     Does **not** check agent_exists as a precondition: subscribing to a
          *     non-existent agent is allowed, you just receive no messages. Otherwise
@@ -968,8 +968,7 @@ export interface paths {
          *     from the log line, so `limit`/`offset` paging stays deterministic).
          *     `limit` returns the configured default window (``display.events_default_limit``
          *     — 100 out of the box), capped at 1000 (over-limit 422s); `offset`
-         *     pages further back and is capped at 10,000. Loki has no native offset,
-         *     so the cap bounds the in-memory parse of `limit + offset + 1` rows.
+         *     pages further back and is capped at 10,000.
          *
          *     No agent-existence precondition (same as `…/activity` and `…/pending`):
          *     an unknown agent or an empty window just returns `[]`.
@@ -1081,11 +1080,9 @@ export interface paths {
          *     the immutable born_spawner chain to the top (message ties never form
          *     ancestors), each row's `depth` = hops up (1 = the direct birth parent).
          *     Terminated agents are included (each row carries `status`); `limit` caps
-         *     the neighbor count, strongest first. The tie graph reads the unified event
-         *     stream (task #180 LGTM cutover): audit edge events stitch the frozen PG
-         *     `events` archive with the Loki live tail and the walks run in Python
-         *     (gateway/inspect/neighbors.py) — the retired `agent_neighbors` SQL function died
-         *     with the frozen table it read.
+         *     the neighbor count, strongest first. The tie graph reads the audit
+         *     record: edge events are aggregated from `audit_events` and the walks run in
+         *     Python (gateway/inspect/neighbors.py).
          *
          *     404: agent_id does not exist (AgentNotFound -> handler returns 404 + reason).
          */
@@ -1115,8 +1112,8 @@ export interface paths {
          *     `output` includes "inspector", renders each template for this agent
          *     ({{agent_id}} -> ``agent_id = <n>``), re-validates the rendered query,
          *     substitutes the Grafana time macros with a fixed recent window (24h in 1h
-         *     buckets), and executes each query — LogQL against Loki, SQL read-only
-         *     against the cluster's Postgres.
+         *     buckets), and executes each query on the cluster's Postgres — LogQL
+         *     templates evaluated over `telemetry_events` / `audit_events`, SQL read-only.
          *
          *     Response: one `PluginMetricResult` per registered inspector metric, in
          *     registration order. `timeseries` / `barchart` metrics carry `series`
@@ -1806,9 +1803,8 @@ export interface paths {
         };
         /**
          * Get Cluster Admin Events
-         * @description Slice the unified event stream from Loki (category=telemetry/log) for
-         *     ops debugging without SSH — the LGTM replacement for the PG `events` read
-         *     (task #1197).
+         * @description Slice the unified event stream (category=telemetry/log, read from
+         *     `telemetry_events`) for ops debugging without SSH.
          *
          *     Filters compose (AND):
          *       - `agent_id=N`: only this agent's events (gateway / daemon rows excluded).
@@ -1817,8 +1813,8 @@ export interface paths {
          *       - `since=2h` / `since=2026-05-25T00:00Z`: relative window or absolute
          *         timestamp. Relative format `<int><unit>` with unit `s/m/h/d`.
          *       - `event=spawn,terminate`: comma-separated event names.
-         *       - `grep=<substring>`: substring match on the raw log line (the JSON
-         *         body includes the `msg` payload).
+         *       - `grep=<substring>`: case-insensitive substring match on the event
+         *         name, source and payload (which includes the `msg` text).
          *       - `limit`: max rows to return, capped at 1000 (protective constant).
          *         Omitted returns the configured default
          *         (``display.cluster_events_default_limit`` - 200 out of the box).
@@ -2697,7 +2693,7 @@ export interface paths {
          *         case-insensitive (unknown value 422s).
          *       - `tier=<business|anomaly|observation|noise>[,...]`: comma-separated
          *         display tiers, ORed within the list and ANDed with every other filter.
-         *         The Loki predicate is derived before pagination so `meta.total` and
+         *         The tier predicate is applied before pagination so `meta.total` and
          *         page boundaries stay exact.
          *       - `from=<ISO-8601>` / `to=<ISO-8601>`: inclusive time window
          *         (`ts >= from AND ts <= to`); either side may be omitted. Values
@@ -2708,16 +2704,14 @@ export interface paths {
          *         (`from = now - hours`). Mutually exclusive with `from`.
          *       - Default window: when neither `from` nor `hours` is given, the last
          *         24 hours are assumed (`from = now - 24h`) — an unbounded query
-         *         would scan the whole retention history (6M+ rows across every
-         *         month partition), so the API never runs one. `meta.window_from`
+         *         would scan the whole record, so the API never runs one. `meta.window_from`
          *         always echoes the effective lower bound.
          *       - `limit` (configured default window — ``display.events_default_limit``,
          *         100 out of the box — cap 1000) / `offset` (cap 10,000): offset
          *         paging with stable ordering across same-`ts` rows. The cap bounds the
-         *         in-memory Loki JSON parse (`limit + offset + 1` rows).
+         *         rows one read materializes (`limit + offset + 1`).
          *       - `with_total=1`: also compute the exact filtered row count
-         *         (`meta.total`) via the Loki count path — one extra full-window
-         *         aggregation, so it is opt-in; without it `meta.total` is null.
+         *         (`meta.total`) — one extra full-window count, so it is opt-in; without it `meta.total` is null.
          *
          *     Response: `meta` (opt-in exact filtered `total`, effective
          *     `window_from`/`window_to`, `limit`/`offset`, `has_more` from the list
@@ -7217,7 +7211,7 @@ export interface components {
         };
         /**
          * RunTimelineWindow
-         * @description The inclusive Loki window used to derive one timeline.
+         * @description The inclusive window used to derive one timeline.
          */
         RunTimelineWindow: {
             /**

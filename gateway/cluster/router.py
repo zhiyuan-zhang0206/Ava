@@ -32,8 +32,8 @@ from base.deploy.git.cluster_drift import prod_source_head_sha
 from gateway.cluster import snapshots
 from gateway.cluster.schemas import AgentMachineRow, MachineDeleteResponse
 from gateway.cluster.status import gather_cluster_status
+from gateway.events import telemetry_rows
 from gateway.events.schemas import AgentEventRow, AgentEventsResponse
-from gateway.lgtm import loki_events
 from ops import cluster as _ops
 from ops import cluster_rpc as _cluster_rpc
 from ops.cluster_pause import is_paused as cluster_is_paused
@@ -203,6 +203,7 @@ _EVENTS_MAX_LIMIT = 1000
 
 @router.get("/api/cluster/admin/events", response_model=AgentEventsResponse)
 def get_cluster_admin_events(
+    request: Request,
     agent_id: int | None = None,
     service_only: bool = False,  # noqa: FBT001, FBT002 — FastAPI query param, always passed by name
     level: str | None = None,
@@ -211,9 +212,8 @@ def get_cluster_admin_events(
     grep: str | None = None,
     limit: int | None = None,
 ) -> AgentEventsResponse:
-    """Slice the unified event stream from Loki (category=telemetry/log) for
-    ops debugging without SSH — the LGTM replacement for the PG `events` read
-    (task #1197).
+    """Slice the unified event stream (category=telemetry/log, read from
+    `telemetry_events`) for ops debugging without SSH.
 
     Filters compose (AND):
       - `agent_id=N`: only this agent's events (gateway / daemon rows excluded).
@@ -222,8 +222,8 @@ def get_cluster_admin_events(
       - `since=2h` / `since=2026-05-25T00:00Z`: relative window or absolute
         timestamp. Relative format `<int><unit>` with unit `s/m/h/d`.
       - `event=spawn,terminate`: comma-separated event names.
-      - `grep=<substring>`: substring match on the raw log line (the JSON
-        body includes the `msg` payload).
+      - `grep=<substring>`: case-insensitive substring match on the event
+        name, source and payload (which includes the `msg` text).
       - `limit`: max rows to return, capped at 1000 (protective constant).
         Omitted returns the configured default
         (``display.cluster_events_default_limit`` - 200 out of the box).
@@ -256,16 +256,20 @@ def get_cluster_admin_events(
     since_dt = _parse_since(since) if since else None
     events = [e.strip() for e in event.split(",") if e.strip()] if event else None
 
-    rows, _ = loki_events.query_events(
-        agent_id=agent_id,
-        service_only=service_only,
-        categories=["telemetry", "log"],
-        event_names=events,
-        level_min=level_min,
-        grep=grep,
-        from_=since_dt,
-        limit=limit,
-    )
+    # A lower bound is always in effect; the default is the last 24 hours.
+    window_from = since_dt or datetime.now(UTC) - timedelta(hours=24)
+    with request.app.state.db_pool.connection() as conn:
+        rows, _ = telemetry_rows.query_events(
+            conn,
+            agent_id=agent_id,
+            service_only=service_only,
+            categories=["telemetry", "log"],
+            event_names=events,
+            level_min=level_min,
+            grep=grep,
+            from_=window_from,
+            limit=limit,
+        )
     return AgentEventsResponse(
         items=[
             AgentEventRow(
