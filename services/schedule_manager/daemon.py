@@ -37,12 +37,13 @@ from psycopg_pool import ConnectionPool
 import base.db
 from base.config import settings
 from base.daemon import round_loop
-from base.daemon.health import health_port, start_health_server, stop_health_server
+from base.daemon.endpoints import ServiceEndpoint, ServiceEndpoints
+from base.daemon.health import start_health_server, stop_health_server
 from base.daemon.loop_health import LivenessGroup
 from base.daemon.shutdown import cancel_and_drain, install_graceful_shutdown
 from base.daemon.shutdown import hard_exit as _hard_exit
 from base.log import init_gateway_process
-from base.paths import pid_path, prod_service_checkout_error
+from base.paths import prod_service_checkout_error
 from services.pidfile import acquire_pidfile, pidfile_holds_daemon, remove_pidfile
 from services.schedule_manager import requests
 from services.schedule_manager.manager import POLL_INTERVAL_S, REPO_ROOT, ScheduleManager
@@ -57,8 +58,12 @@ _REQUESTS_INTERVAL_S = 1.0
 _POOL_MAX_SIZE = 4
 
 
+def _endpoint() -> ServiceEndpoint:
+    return ServiceEndpoints.from_settings().of("schedule_manager")
+
+
 def _pidfile() -> Path:
-    return pid_path("schedule_manager")
+    return _endpoint().pidfile
 
 
 def _is_running() -> bool:
@@ -119,8 +124,9 @@ async def run() -> None:
     _log.info("[schedule-manager] pidfile written: %s", _pidfile())
 
     liveness = LivenessGroup()
-    health = await start_health_server("schedule_manager", liveness=liveness)
-    _log.info("[schedule-manager] healthz listening on :%s", health_port("schedule_manager"))
+    endpoint = _endpoint()
+    health = await start_health_server("schedule_manager", endpoint.health_port, liveness=liveness)
+    _log.info("[schedule-manager] healthz listening on :%s", endpoint.health_port)
 
     pool = base.db.pool(max_size=_POOL_MAX_SIZE)
     try:

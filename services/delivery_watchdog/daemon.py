@@ -94,14 +94,14 @@ import base.db
 from base import telemetry
 from base.config import settings
 from base.daemon import round_loop
-from base.daemon.health import health_port, start_health_server, stop_health_server
+from base.daemon.endpoints import ServiceEndpoint, ServiceEndpoints
+from base.daemon.health import start_health_server, stop_health_server
 from base.daemon.loop_health import LivenessGroup, LoopProgress
 from base.daemon.shutdown import cancel_and_drain, install_graceful_shutdown
 from base.daemon.shutdown import hard_exit as _hard_exit
 from base.db.transaction import write_transaction
 from base.deploy.maintenance import admission
 from base.log import init_gateway_process
-from base.paths import pid_path
 from services.delivery_watchdog import (
     dispatch_guard,
     resurrect_retry,
@@ -126,8 +126,12 @@ from services.pidfile import acquire_pidfile, pidfile_holds_daemon, remove_pidfi
 _log = logging.getLogger("services.delivery_watchdog.daemon")
 
 
+def _endpoint() -> ServiceEndpoint:
+    return ServiceEndpoints.from_settings().of("delivery_watchdog")
+
+
 def _pidfile() -> Path:
-    return pid_path("delivery_watchdog")
+    return _endpoint().pidfile
 
 
 # Liveness staleness ceiling of the scan loop. It sleeps a short inter-poll
@@ -527,8 +531,9 @@ async def run() -> None:
     _log.info("[delivery] pidfile written: %s", _pidfile())
 
     liveness = LivenessGroup()
-    health = await start_health_server("delivery_watchdog", liveness=liveness)
-    _log.info("[delivery] healthz listening on :%s", health_port("delivery_watchdog"))
+    endpoint = _endpoint()
+    health = await start_health_server("delivery_watchdog", endpoint.health_port, liveness=liveness)
+    _log.info("[delivery] healthz listening on :%s", endpoint.health_port)
 
     # Four loops share the pool; each borrows a connection only for the length
     # of one short statement batch.

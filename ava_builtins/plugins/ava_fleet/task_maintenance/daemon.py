@@ -52,9 +52,9 @@ from psycopg_pool import ConnectionPool
 import base.db
 from base import telemetry
 from base.config import settings
+from base.daemon.endpoints import ServiceEndpoint, ServiceEndpoints
 from base.daemon.health import (
     Liveness,
-    health_port,
     start_health_server,
     stop_health_server,
 )
@@ -62,14 +62,17 @@ from base.daemon.shutdown import install_graceful_shutdown
 from base.db.transaction import write_transaction
 from base.events.live.announce import publish_agent_updated_sync
 from base.log import init_gateway_process
-from base.paths import pid_path
 from services.pidfile import acquire_pidfile, pidfile_holds_daemon, remove_pidfile
 
 _log = logging.getLogger("ava_builtins.plugins.ava_fleet.task_maintenance.daemon")
 
 
+def _endpoint() -> ServiceEndpoint:
+    return ServiceEndpoints.from_settings().of("task_maintenance")
+
+
 def _pidfile() -> Path:
-    return pid_path("task_maintenance")
+    return _endpoint().pidfile
 
 
 _LIVENESS_TIMEOUT_S = 60.0
@@ -533,8 +536,9 @@ async def run() -> None:
     _log.info("[task-maintenance] pidfile written: %s", _pidfile())
 
     liveness = Liveness(_LIVENESS_TIMEOUT_S)
-    health = await start_health_server("task_maintenance", liveness=liveness)
-    _log.info("[task-maintenance] healthz listening on :%s", health_port("task_maintenance"))
+    endpoint = _endpoint()
+    health = await start_health_server("task_maintenance", endpoint.health_port, liveness=liveness)
+    _log.info("[task-maintenance] healthz listening on :%s", endpoint.health_port)
 
     pool = base.db.pool()
     try:

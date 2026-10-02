@@ -51,13 +51,13 @@ from base.agents import AvaAgentError, ResurrectRefused
 from base.cluster.machine import machine_name
 from base.cluster.transport_encryption import verify_transport_encryption
 from base.config import settings
-from base.daemon.health import health_port, start_health_server, stop_health_server
+from base.daemon.endpoints import ServiceEndpoint, ServiceEndpoints
+from base.daemon.health import start_health_server, stop_health_server
 from base.daemon.loop_health import LivenessGroup
 from base.daemon.shutdown import cancel_and_drain, install_graceful_shutdown
 from base.daemon.shutdown import hard_exit as _hard_exit
 from base.db.transaction import write_transaction
 from base.log import init_gateway_process
-from base.paths import pid_path
 
 # The synchronous op arms and the op modules they call live in
 # `services.agent_ops.dispatch_sync` (split at the file-size ceiling, task
@@ -90,8 +90,12 @@ from services.pidfile import acquire_pidfile, pidfile_holds_daemon, remove_pidfi
 _log = logging.getLogger("services.agent_ops.daemon")
 
 
+def _endpoint() -> ServiceEndpoint:
+    return ServiceEndpoints.from_settings().of("ops")
+
+
 def _pidfile() -> Path:
-    return pid_path("ops")
+    return _endpoint().pidfile
 
 
 # ── Idempotency-key dedup (Task #961) ────────────────────────────────────────
@@ -493,8 +497,10 @@ async def _main() -> None:
         bind_host = _ops_bind_host(acceptance)
         if bind_host != "127.0.0.1":
             verify_transport_encryption(bind_host, authenticated=acceptance is not None)
+        endpoint = _endpoint()
         server = await start_health_server(
             "ops",
+            endpoint.health_port,
             host=bind_host,
             extra_routes={("POST", "/ops"): _ops_route},
             liveness=liveness,
@@ -511,7 +517,7 @@ async def _main() -> None:
             "ava-ops up, machine=%s serving POST /ops on %s:%d",
             our_machine,
             bind_host,
-            health_port("ops"),
+            endpoint.health_port,
         )
         _register_boot()
         try:

@@ -9,8 +9,8 @@ from uuid import uuid4
 import pytest
 
 from base.config import settings
+from base.daemon.endpoints import ServiceEndpoints
 from base.daemon.health import start_health_server, stop_health_server
-from base.paths import pid_path
 from ops.agent_pause.probe import host_identity
 from services.agent_host.daemon import _stats_route
 
@@ -20,7 +20,7 @@ async def test_actual_stats_route_matches_configured_port_home_pid_and_owner(
     tmp_path: Path,
 ) -> None:
     monkeypatch.setenv("AVA_HOME", str(tmp_path))
-    pidfile = pid_path("agent_host")
+    pidfile = ServiceEndpoints.from_settings().of("agent_host").pidfile
     pidfile.write_text(str(os.getpid()))
     host, scheduler = MagicMock(), MagicMock()
     host._owner = uuid4()

@@ -58,13 +58,14 @@ from watchdog.events import FileSystemEvent, FileSystemEventHandler
 from watchdog.observers import Observer
 
 from base.config import settings
-from base.daemon.health import Liveness, health_port, start_health_server, stop_health_server
+from base.daemon.endpoints import ServiceEndpoint, ServiceEndpoints
+from base.daemon.health import Liveness, start_health_server, stop_health_server
 from base.daemon.shutdown import cancel_and_drain, install_graceful_shutdown
 from base.daemon.shutdown import hard_exit as _hard_exit
 from base.deploy.maintenance import admission
 from base.log import init_gateway_process
 from base.native_process.os_platform import CREATE_NO_WINDOW
-from base.paths import gateway_memory_dir, pid_path
+from base.paths import gateway_memory_dir
 from services.memory_indexer.backends.base import MemorySearchBackend, content_hash
 from services.memory_indexer.backends.factory import get_backend
 from services.memory_indexer.backends.probe import probe_backend
@@ -94,8 +95,12 @@ def _memory_root() -> Path:
     return gateway_memory_dir()
 
 
+def _endpoint() -> ServiceEndpoint:
+    return ServiceEndpoints.from_settings().of("memory_indexer")
+
+
 def _pidfile() -> Path:
-    return pid_path("memory_indexer")
+    return _endpoint().pidfile
 
 
 _LOOP_INTERVAL_S = 1.0
@@ -642,10 +647,14 @@ async def run() -> None:
         base_s=settings.services.memory_indexer_reconcile_retry_backoff_seconds,
         cap_s=settings.services.memory_indexer_reconcile_retry_backoff_cap_seconds,
     )
+    endpoint = _endpoint()
     health = await start_health_server(
-        "memory_indexer", liveness=liveness, extra=lambda: _reconcile_health(retry)
+        "memory_indexer",
+        endpoint.health_port,
+        liveness=liveness,
+        extra=lambda: _reconcile_health(retry),
     )
-    _log.info("[indexer] healthz listening on :%s", health_port("memory_indexer"))
+    _log.info("[indexer] healthz listening on :%s", endpoint.health_port)
 
     root = _memory_root()
     root.mkdir(parents=True, exist_ok=True)
