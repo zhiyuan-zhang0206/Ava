@@ -67,6 +67,21 @@ def preserved_subpaths(dest: Path) -> frozenset[tuple[str, ...]]:
     return frozenset(found)
 
 
+def _tree_files(root: Path, skip_subtrees: frozenset[tuple[str, ...]]) -> list[tuple[str, Path]]:
+    """Sorted `(posix relative path, file)` of every counted file under `root`
+    — the one filter `tree_hash` and `differing_paths` share."""
+    files: list[tuple[str, Path]] = []
+    for f in sorted(root.rglob("*")):
+        rel = f.relative_to(root)
+        if any(part in IGNORED_NAMES for part in rel.parts):
+            continue
+        if any(rel.parts[: len(sp)] == sp for sp in skip_subtrees):
+            continue
+        if f.is_file():
+            files.append((rel.as_posix(), f))
+    return files
+
+
 def tree_hash(root: Path, *, skip_subtrees: frozenset[tuple[str, ...]] = frozenset()) -> str:
     """Deterministic content hash of every file under `root` (sorted relative
     path + bytes), ignoring `IGNORED_NAMES` and any `skip_subtrees` (path-part
@@ -76,19 +91,26 @@ def tree_hash(root: Path, *, skip_subtrees: frozenset[tuple[str, ...]] = frozens
     later recompute that differs is the "modified locally" signal (a user edited
     the converge-managed copy). Cheap at this scale (a few MB of markdown)."""
     h = hashlib.sha256()
-    for f in sorted(root.rglob("*")):
-        rel = f.relative_to(root)
-        if any(part in IGNORED_NAMES for part in rel.parts):
-            continue
-        if any(rel.parts[: len(sp)] == sp for sp in skip_subtrees):
-            continue
-        if not f.is_file():
-            continue
-        h.update(rel.as_posix().encode())
+    for rel, f in _tree_files(root, skip_subtrees):
+        h.update(rel.encode())
         h.update(b"\0")
         h.update(f.read_bytes())
         h.update(b"\0")
     return h.hexdigest()
+
+
+def differing_paths(
+    a: Path, b: Path, *, skip_subtrees: frozenset[tuple[str, ...]] = frozenset()
+) -> list[str]:
+    """Sorted relative paths whose bytes differ between trees `a` and `b`
+    (present in only one counts), under the same filter as `tree_hash`."""
+    left = dict(_tree_files(a, skip_subtrees))
+    right = dict(_tree_files(b, skip_subtrees))
+    return sorted(
+        rel
+        for rel in left.keys() | right.keys()
+        if rel not in left or rel not in right or left[rel].read_bytes() != right[rel].read_bytes()
+    )
 
 
 PackageType = Literal["skill", "plugin", "mcp"]
