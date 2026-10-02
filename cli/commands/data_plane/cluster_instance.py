@@ -717,7 +717,13 @@ def stop_cluster_instance() -> int:
     from .pgbouncer import stop_pgbouncer
 
     stop_pgbouncer()
-    owned_postgres.stop(data)
+    from cli.commands.lifecycle.service_stop import PROCESS_CLEANUP_WAIT_S, PROCESS_KILL_WAIT_S
+
+    escalation = owned_postgres.stop(
+        data, immediate_wait=PROCESS_CLEANUP_WAIT_S, kill_wait=PROCESS_KILL_WAIT_S
+    )
+    if escalation is not None:
+        print(f"  ! postgres {escalation.detail}; ended by an immediate shutdown", file=sys.stderr)
     print("  ✓ postgres stopped")
     if port is not None:
         subprocess.run(

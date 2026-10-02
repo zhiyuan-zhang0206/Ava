@@ -34,6 +34,11 @@ admission instead of inventing closure.
 Fast shutdown sends SIGINT through the exact native process boundary, waits
 for captured descendants, then verifies no PostgreSQL process for the retained
 data directory/inode, no process in the retained session, and no listener.
+A fast shutdown still unfinished after its timeout (typically an archive command that
+never returns) is ended when the caller supplies the escalation waits: SIGQUIT to the
+postmaster, then SIGKILL of the descendants captured before the signal that still
+match their recorded birth ([decision](../../../decisions/2026-10-02-pg-stop-escalates-to-immediate.md));
+`stop` returns the `Escalation`. Without the waits it fails with custody retained.
 Linux signals use a PID-retaining descriptor. Reload uses the same receipt and
 native identity gate. Unknown metadata, surviving archive children or a replaced
 pidfile refuse. Clean stop retains the receipt; a subsequent launch replaces it

@@ -63,7 +63,8 @@ finishes its drain and exits while its listeners are being scanned is stopped,
 not a foreign listener. An explicit
 force request alone permits a kill, with a separate bounded settle wait when
 the graceful deadline is spent. The data-plane stop requests [owned PostgreSQL](../../../base/cluster/docs/postgres.ava.okf.md) fast shutdown (SIGINT), so neither waits on idle client connections a drained state
-cannot protect (issue #2307). When the data-plane phase still fails after the
+cannot protect (issue #2307); one still running at its budget's end is ended by an
+immediate shutdown and reported. When the data-plane phase still fails after the
 services phase stopped, `_temporary_stop` compensates with a bounded internal
 `ava start` (restoring services only when native storage admits startup) instead of
 leaving the unit dark; the stop report and journal record the outcome (issue

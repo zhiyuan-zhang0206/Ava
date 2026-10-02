@@ -360,6 +360,13 @@ _EVENTS_OPS: dict[str, EventSpec] = {
         payload=BackupOperationCustody,
         tier="anomaly",
     ),
+    "postgres_stop_escalated": _telemetry(
+        "postgres_stop_escalated",
+        "a Postgres fast shutdown did not finish within its budget and was ended by an "
+        "immediate shutdown plus a SIGKILL of the leftover descendants (usually a hung "
+        "archive command)",
+        tier="anomaly",
+    ),
     "recovery_drill_failed": _telemetry(
         "recovery_drill_failed",
         "scheduled logical restore drill failed",
