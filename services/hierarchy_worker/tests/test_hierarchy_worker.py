@@ -31,7 +31,7 @@ from base.paths import logs_dir
 from services.hierarchy_worker import execute as execute_module
 from services.hierarchy_worker import job as job_module
 from services.hierarchy_worker import roots, runner
-from services.hierarchy_worker.tests.slices import execute_job, hierarchy_config, scan
+from services.hierarchy_worker.tests.slices import execute_job, run_child, scan
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 
@@ -494,7 +494,7 @@ def test_child_round_trip_on_empty_history(
     # popped key the test home's .env fallback is what silently supplies it
     # (task #4120).
     monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-test")
-    runner.run_child(claimed, hierarchy_config())
+    run_child(claimed)
 
     row = db_conn.execute(
         "SELECT status, coalesce(failed, 0), coalesce(skipped, 0) FROM hierarchy_jobs"
@@ -522,7 +522,7 @@ def test_job_main_inits_the_child_process_sinks(
     def fake_init(*, name: str) -> None:
         order.append(f"init:{name}")
 
-    def fake_execute(job_id: int, _config: object) -> int:
+    def fake_execute(job_id: int, _config: object, _db: object) -> int:
         order.append(f"execute:{job_id}")
         return 7
 

@@ -201,6 +201,7 @@ SLICED_PACKAGES: dict[str, frozenset[str]] = package_roots(_REPO_ROOT, "settings
 # nothing else: its entry is the lock. A listed package or root that no longer exists fails
 # as stale.
 DB_HANDLE_PACKAGES: dict[str, frozenset[str]] = {
+    "services/hierarchy_worker": frozenset({"services/hierarchy_worker/roots.py"}),
     "services/labeler": frozenset({"services/labeler/daemon.py"}),
     "services/page_server": frozenset({"services/page_server/daemon.py"}),
 }
