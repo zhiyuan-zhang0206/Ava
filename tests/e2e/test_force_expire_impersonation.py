@@ -14,6 +14,7 @@ from base.events.live.announce import (
     publish_agent_updated_sync,
     publish_impersonation_changed_sync,
 )
+from base.events.live.bus import EventBus
 from tests.base.poll_until import poll_until
 from tests.e2e._env import E2EEnv
 from tests.e2e.fakes.scenarios.force_expire import FIRST_REPLY, RESUMED_REPLY
@@ -40,8 +41,9 @@ def _seed_active_lease(agent_id: int) -> tuple[UUID, int]:
         assert session_row is not None
         session_id = session_row[0]
     publish_inbound_wake(agent_id, "impersonation")
-    publish_impersonation_changed_sync(agent_id)
-    publish_agent_updated_sync(agent_id)
+    bus = EventBus.from_settings()
+    publish_impersonation_changed_sync(bus, agent_id)
+    publish_agent_updated_sync(bus, agent_id)
     return lease_id, session_id
 
 
