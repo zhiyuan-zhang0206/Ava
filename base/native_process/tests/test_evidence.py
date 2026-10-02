@@ -8,7 +8,7 @@ from pathlib import Path
 
 
 def test_runtime_consumers_do_not_load_retired_rollout_authority() -> None:
-    repo = Path(__file__).resolve().parents[2]
+    repo = Path(__file__).resolve().parents[3]
     code = (
         "import sys;sys.path.insert(0,sys.argv[1]);"
         "import base.native_process.evidence;"

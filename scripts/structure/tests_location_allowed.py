@@ -102,6 +102,10 @@ ALLOWED: dict[str, tuple[Category, str]] = {
         "integration",
         "one guard over every launch path (cli, schedule manager, sdk) for secrets on a command line: spans ava, base, cli, services.schedule_manager, no one of which may import all the others",
     ),
+    "tests/base/test_poll_until.py": (
+        "contract",
+        "tests the harness's poll_until helper, tests/base/poll_until.py",
+    ),
     "tests/base/test_proc_contract.py": (
         "contract",
         "scans the git-driving modules of the whole tree for subprocess.run timeouts",
@@ -153,6 +157,10 @@ ALLOWED: dict[str, tuple[Category, str]] = {
     "tests/ci/test_leak_guard_cost.py": (
         "contract",
         "tests the cost of the root leak guard plugin, tests/fixtures/leak_guard.py",
+    ),
+    "tests/ci/test_owned_gateway_port.py": (
+        "contract",
+        "runs the real-uvicorn inherited-socket proof with the e2e harness (tests/e2e/_proc.py), wired by .github/workflows/e2e-owned-port.yml",
     ),
     "tests/ci/test_path_scopes.py": (
         "contract",

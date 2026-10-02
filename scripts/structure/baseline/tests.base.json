@@ -28,10 +28,8 @@
     "tests/base/test_connect_helpers.py::top-level": 1,
     "tests/base/test_delivery.py::top-level": 1,
     "tests/base/test_editable_install.py::top-level": 1,
-    "tests/base/test_evidence.py::top-level": 1,
     "tests/base/test_exec_request_evidence.py::top-level": 1,
     "tests/base/test_pg_owner_authority.py::top-level": 1,
-    "tests/base/test_poll_until.py::top-level": 1,
     "tests/base/test_subreaper_contract.py::top-level": 1,
     "tests/base/test_tags.py::top-level": 1
   }
