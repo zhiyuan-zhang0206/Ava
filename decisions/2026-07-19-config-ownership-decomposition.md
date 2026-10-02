@@ -44,3 +44,9 @@ disease in the API plane, and it squats in the directory the ops layer needs.
   hides ownership exactly where it should be visible.
 - **Splitting by size instead of ownership** — cosmetic; the disease is
   world-dependency, not line count.
+
+Forward link (2026-10-02): the rejection of colocating config classes with their
+owning packages is reversed by
+[dependency injection direction](2026-10-02-dependency-injection-direction.md):
+components receive their own config slice by injection, so nothing imports the
+aggregate from the base layer.
