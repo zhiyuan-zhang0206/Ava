@@ -1,0 +1,20 @@
+{
+  "couldntLoad": "Couldn't load inventory — check the gateway and reload.",
+  "plugins": "Plugins",
+  "mcpServers": "MCP servers",
+  "none": "(none)",
+  "item": "Item",
+  "all": "All",
+  "enableAll": "Enable all",
+  "disableAll": "Disable all",
+  "hostUnreachable": "Host unreachable",
+  "notInstalled": "Not installed on this host",
+  "changeNotApplied": "Change not applied: {reason}",
+  "saveFailed": "Save failed: {error}",
+  "intro": "Enable or disable {noun} per host. A column per machine; click a cell to toggle that item on that host. \"—\" means not installed there; \"?\" means the host was unreachable.",
+  "enabledCount": "{enabled}/{present} enabled",
+  "cantEnable": "Cannot enable on this host",
+  "clickDisable": "Click to disable",
+  "clickEnable": "Click to enable",
+  "noData": "(no data)"
+}

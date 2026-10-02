@@ -20,7 +20,7 @@
 
 import { orderSdkCalls, type SdkCall } from "@/lib/item-summary";
 import type { BackendTimelineItem } from "@/lib/types";
-import enMessages from "../../../messages/en.json";
+import enMessages from "../../../messages/en";
 
 import { classifyMarker } from "./markers";
 import { isLiveCode, isLiveExecution, isLiveReasoning } from "./reasoning-clock";
@@ -29,7 +29,7 @@ import { isLiveCode, isLiveExecution, isLiveReasoning } from "./reasoning-clock"
 // React context), so the translator is an optional parameter: callers with a
 // next-intl translator (Timeline components) pass it for localized output;
 // the standalone tests / en fallback omit it and get the canonical English
-// strings from en.json — keeping the pure layer dependency-free.
+// strings from messages/en — keeping the pure layer dependency-free.
 export type TurnTranslator = (
   key: string,
   values?: Record<string, string | number>,

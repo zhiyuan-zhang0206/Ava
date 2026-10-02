@@ -1,0 +1,19 @@
+{
+  "title": "Memory graph",
+  "backToConversation": "Back to conversation",
+  "refresh": "Refresh memory graph",
+  "loadFailed": "Couldn't load memory graph.",
+  "empty": "No memory notes to graph.",
+  "selectNode": "Click a node to view its content.",
+  "folderNotes": "Notes in this folder",
+  "folderEmpty": "No notes here.",
+  "noteLoadFailed": "Couldn't load this note.",
+  "loading": "Loading…",
+  "ariaLabel": "Memory note graph",
+  "noteCount": "{count, plural, one {# note} other {# notes}}",
+  "folderCount": "{count, plural, one {# folder} other {# folders}}",
+  "edgeCount": "{count, plural, one {# edge} other {# edges}}",
+  "folder": "folder",
+  "reference": "reference",
+  "resetZoom": "Reset zoom"
+}

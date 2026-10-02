@@ -68,7 +68,7 @@ export interface CardConfig {
   // i18n key under the "timeline" namespace + interpolation values — the
   // header renders the translated title when titleKey is present, falling
   // back to `title` (English) otherwise. Keys are hand-kept in sync with
-  // en.json (canonical English source).
+  // messages/en (canonical English source).
   readonly titleKey?: string;
   readonly titleValues?: Record<string, string | number>;
   // Extra classes on the icon + title span (marker color + uppercase tracking).

@@ -1,0 +1,8 @@
+{
+  "agent": "agent {id}",
+  "pending": "{count} pending",
+  "user": "User",
+  "scheduled": "scheduled",
+  "system": "system",
+  "imageAlt": "pending image"
+}
