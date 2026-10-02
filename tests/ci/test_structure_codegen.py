@@ -16,7 +16,7 @@ from unittest.mock import patch
 
 import yaml
 
-from tests.ci.codegen_sources import SourceGraph
+from base.events.tests.codegen_sources import SourceGraph
 
 ROOT = Path(__file__).resolve().parents[2]
 CONFIG = yaml.safe_load((ROOT / ".pre-commit-config.yaml").read_text())
