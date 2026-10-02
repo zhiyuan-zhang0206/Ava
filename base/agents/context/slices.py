@@ -19,9 +19,11 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass, fields
-from typing import Any, cast
+from typing import Any, Literal, cast
 
 from base.host.env.config_lite_table import FIELD_DOMAINS
+
+Cadence = Literal["once_per_compaction", "every_time"]
 
 
 @dataclass(frozen=True)
@@ -70,9 +72,9 @@ class HistoryDump:
 class SdkReminders:
     """When the SDK reminders and hints fire."""
 
-    sdk_code_reminder_cadence: str
+    sdk_code_reminder_cadence: Cadence
     sdk_nameerror_hint_enabled: bool
-    agent_reply_reminder_cadence: str
+    agent_reply_reminder_cadence: Cadence
 
 
 @dataclass(frozen=True)

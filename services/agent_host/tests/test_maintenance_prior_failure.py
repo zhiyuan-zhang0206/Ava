@@ -15,6 +15,7 @@ from agent import state as states
 from agent.impersonation import flush_checkpoint
 from agent.startup import wrap_saver_writes_with_nstep_interval
 from base.agents.context import AvaContext
+from base.agents.context.slices import AgentSlices
 from base.agents.history.delta_read_compat import wrap_saver_reads_with_delta_reconstruction
 from base.cluster.machine import machine_name
 from base.config import settings
@@ -67,7 +68,7 @@ async def _failed_turn(
     )
     monkeypatch.setattr(host, "_runtime_for", AsyncMock(return_value=object()))
     monkeypatch.setattr(runtime_module, "validate_model_config", MagicMock())
-    ctx = AvaContext(ops_pool=pool, event_publisher=MagicMock())
+    ctx = AvaContext(ops_pool=pool, event_publisher=MagicMock(), agent=AgentSlices.resolve())
 
     async def drive(target: int, _runtime: object, _slices: object) -> TurnOutcome:
         return await host._invoke_until_done(target, ctx)

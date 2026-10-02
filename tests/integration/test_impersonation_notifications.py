@@ -19,6 +19,7 @@ from agent.ownership.hosted import admit_hosted_runtime, apply_hosted_lifecycle
 from agent.state import BaseAgentState
 from base.agents import impersonation as leases
 from base.agents.context import AvaContext
+from base.agents.context.slices import AgentSlices
 from base.agents.impersonation.maintenance import remind_expiring_impersonations
 from base.agents.incarnation.hosted_force import original_host_force
 from base.agents.messages.caller_identity import CallerIdentity
@@ -194,7 +195,11 @@ async def test_termination_notices_precede_resurrection_in_native_claim(
     owner, session = await _termination_session(
         db_conn, aops_pool, status="requested" if mode == "live" else "active"
     )
-    runtime = Runtime(context=AvaContext(ops_pool=aops_pool, event_publisher=MagicMock()))
+    runtime = Runtime(
+        context=AvaContext(
+            ops_pool=aops_pool, event_publisher=MagicMock(), agent=AgentSlices.resolve()
+        )
+    )
     await _terminate_native(db_conn, aops_pool, owner, session, runtime, mode)
     if mode == "delayed_resurrection":
         _age_and_sweep_notices(db_conn, owner.agent_id)

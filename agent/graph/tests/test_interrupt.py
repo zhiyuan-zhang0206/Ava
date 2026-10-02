@@ -410,7 +410,7 @@ async def test_auto_compaction_cancels_at_llm_node_without_replacing_context(
     monkeypatch.setattr("agent.hooks.compact.resolve_context_budget", small_budget)
     started, settled = asyncio.Event(), asyncio.Event()
 
-    async def summarizing(_messages: object, _llm: object) -> str:
+    async def summarizing(_messages: object, _llm: object, _model: str) -> str:
         started.set()
         try:
             await asyncio.Future()
@@ -547,13 +547,13 @@ async def test_compaction_returns_through_claim_then_generates_before_compacting
     state = state.model_copy(
         update={"messages": serde.loads_typed(serde.dumps_typed(state.messages))}
     )
-    assert not auto_compact_will_fire(state)
+    assert not auto_compact_will_fire(state, "deepseek-flash")
     _insert(db_conn, tid, "cancel")
     cancelled = await claim_node(state, runtime, config)
     assert cancelled.goto == "claim"
     state = apply(state, cancelled)
     assert state.halted
-    assert not auto_compact_will_fire(state)
+    assert not auto_compact_will_fire(state, "deepseek-flash")
     model.astream.assert_not_called()
 
     db_conn.execute(
@@ -564,7 +564,7 @@ async def test_compaction_returns_through_claim_then_generates_before_compacting
     resumed = await claim_node(state, runtime, config)
     assert resumed.goto == "before_llm"
     state = apply(state, resumed)
-    assert not auto_compact_will_fire(state)
+    assert not auto_compact_will_fire(state, "deepseek-flash")
     assert await _compact_reminder(state, runtime, config) is None
     generated = await llm_node(state, runtime, config)
     assert generated.goto == "after_exec"
@@ -573,4 +573,6 @@ async def test_compaction_returns_through_claim_then_generates_before_compacting
     assert state.compact.version == 1
     summary.assert_awaited_once()
     model.astream.assert_called_once()
-    assert auto_compact_will_fire(state)  # A committed ordinary result re-arms the threshold.
+    assert auto_compact_will_fire(
+        state, "deepseek-flash"
+    )  # A committed ordinary result re-arms the threshold.

@@ -11,6 +11,7 @@ from langgraph.runtime import Runtime
 from psycopg_pool import AsyncConnectionPool
 
 from base.agents.context import AvaContext
+from base.agents.context.slices import AgentSlices
 
 
 def _fake_llm(summary: str = "synthetic compaction summary") -> Any:
@@ -40,6 +41,7 @@ def _make_runtime(
         ops_pool=ops_pool,
         llm=llm if llm is not None else _fake_llm(),
         event_publisher=event_publisher if event_publisher is not None else MagicMock(),
+        agent=AgentSlices.resolve(),
     )
     return Runtime(context=ctx)
 

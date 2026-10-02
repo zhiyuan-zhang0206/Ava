@@ -574,7 +574,7 @@ class TestSettlementReconciles:
         self,
         wired: _Build,
         monkeypatch: pytest.MonkeyPatch,
-        drive: Callable[[int, object], Awaitable[TurnOutcome]],
+        drive: Callable[[int, object, object], Awaitable[TurnOutcome]],
         order: list[str],
     ) -> None:
         host, _, _ = wired({1: _Row()})

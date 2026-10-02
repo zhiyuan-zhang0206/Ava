@@ -32,6 +32,7 @@ from agent.hooks.capabilities import _newly_installed_skills, register_capabilit
 from agent.state import AgentState, CapabilitiesState
 from base import paths
 from base.agents.context import AvaContext
+from base.agents.context.slices import AgentSlices
 from base.agents.messages.kwargs import NoteTag
 from base.config import settings
 
@@ -46,6 +47,7 @@ def _runtime(*, container: bool = False) -> Runtime[AvaContext]:
             ops_pool=None if container else MagicMock(),
             llm=MagicMock(),
             event_publisher=MagicMock(),
+            agent=AgentSlices.resolve(),
         )
     )
 

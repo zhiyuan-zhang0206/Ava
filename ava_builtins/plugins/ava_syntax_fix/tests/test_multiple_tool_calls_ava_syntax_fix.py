@@ -15,6 +15,7 @@ from agent.state import AgentState
 from agent.tests._fakes import make_fake_ops_pool
 from ava_builtins.plugins.ava_syntax_fix.agent_runtime import syntax_fix_before_exec
 from base.agents.context import AvaContext
+from base.agents.context.slices import AgentSlices
 
 
 def _graph(state_cls: type[AgentState], **compile_options: Any) -> Any:
@@ -54,6 +55,7 @@ def _runtime() -> Runtime[AvaContext]:
         context=AvaContext(
             ops_pool=make_fake_ops_pool(),
             event_publisher=MagicMock(),
+            agent=AgentSlices.resolve(),
         )
     )
 

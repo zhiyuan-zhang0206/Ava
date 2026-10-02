@@ -12,6 +12,7 @@ from agent.ownership.inbound import RuntimeOwnershipLostError
 from agent.ownership.tests.test_lifecycle_intent import _command
 from agent.tests.test_inbound_ownership import _admit, _agent
 from base.agents.context import AvaContext
+from base.agents.context.slices import AgentSlices
 from base.config import settings
 from base.db import Database
 from base.events.live.bus import EventBus
@@ -40,7 +41,7 @@ async def test_database_failure_after_graph_return_preserves_completed_work(
         bus=EventBus.from_settings(),
         db=Database.from_settings(),
     )
-    ctx = AvaContext(ops_pool=aops_pool, event_publisher=MagicMock())
+    ctx = AvaContext(ops_pool=aops_pool, event_publisher=MagicMock(), agent=AgentSlices.resolve())
     # A real closed PostgreSQL connection supplies the I/O failure. Injection
     # selects only the boundary; checkpoint, graph and lifecycle transactions run.
     broken = await psycopg.AsyncConnection.connect(settings.data_plane.db_url)

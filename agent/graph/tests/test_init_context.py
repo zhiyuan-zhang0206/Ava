@@ -21,6 +21,7 @@ from psycopg_pool import AsyncConnectionPool
 from agent.graph._init_context import init_context_node
 from agent.state import AgentState, ContextReset
 from base.agents.context import AvaContext
+from base.agents.context.slices import AgentSlices
 from base.config import settings
 from base.db import create_agent
 from base.paths import skills_dir
@@ -33,7 +34,12 @@ def _config(tid: int) -> RunnableConfig:
 def _runtime(ops_pool: AsyncConnectionPool | None) -> Runtime[AvaContext]:
     """`ops_pool=None` takes the container path."""
     return Runtime(
-        context=AvaContext(ops_pool=ops_pool, llm=AsyncMock(), event_publisher=MagicMock())
+        context=AvaContext(
+            ops_pool=ops_pool,
+            llm=AsyncMock(),
+            event_publisher=MagicMock(),
+            agent=AgentSlices.resolve(),
+        )
     )
 
 
@@ -321,7 +327,7 @@ async def test_a_compaction_in_the_same_pass_keeps_its_summary_and_its_head(
     )
     summary_text = "compacted summary " * 100
 
-    async def _fake_generate_summary(messages: list[AnyMessage], llm: object) -> str:
+    async def _fake_generate_summary(messages: list[AnyMessage], llm: object, _model: str) -> str:
         return summary_text
 
     monkeypatch.setattr(compact_mod, "generate_summary", _fake_generate_summary)

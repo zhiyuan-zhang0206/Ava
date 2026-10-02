@@ -207,17 +207,18 @@ class _PassiveMemoryRecallHook(Hook):
     async def __call__(
         self,
         state: AgentState,
-        _runtime: Runtime[AvaContext],
+        runtime: Runtime[AvaContext],
         _config: RunnableConfig,
         /,
     ) -> dict | None:
-        if not turn_settings.agent.passive_memory_recall_enabled:
+        agent = runtime.context.require_agent()
+        if not agent.memory.passive_memory_recall_enabled:
             return None
 
         if not tail_has_recallable_inbound(state.messages):
             return None
 
-        if auto_compact_will_fire(state):
+        if auto_compact_will_fire(state, agent.brain.llm_model):
             logger.info(
                 "[{label}] {body}",
                 label="passive-recall",
@@ -226,10 +227,12 @@ class _PassiveMemoryRecallHook(Hook):
             )
             return None
 
-        deadline = turn_settings.agent.memory_recall_deadline_seconds
+        deadline = agent.memory.memory_recall_deadline_seconds
         try:
             recall = await asyncio.wait_for(
-                passive_memory_recall(state.messages, injected_paths=state.memory.injected_paths),
+                passive_memory_recall(
+                    state.messages, injected_paths=state.memory.injected_paths, agent=agent
+                ),
                 timeout=deadline,
             )
         except TimeoutError:
