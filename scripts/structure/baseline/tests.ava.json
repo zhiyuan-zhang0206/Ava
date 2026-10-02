@@ -3,8 +3,6 @@
     "tests/ava/test_external_integration.py::ava.gateway_client.transport._client": 2
   },
   "tests_location": {
-    "tests/ava/sdk_surface/test_metering.py::top-level": 1,
-    "tests/ava/sdk_surface/test_validation.py::top-level": 1,
     "tests/ava/test_external_integration.py::top-level": 1
   }
 }

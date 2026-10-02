@@ -14,7 +14,7 @@ its capabilities first by default; that instruction is independently toggled,
 ordered after the rebuild nudge, and absent with an empty index.
 
 Skills are faked by running in a per-test unit home (`unit_home`), same shape as
-tests/agent/test_preloaded_skills.py.
+agent/graph/tests/test_preloaded_skills.py.
 """
 
 from __future__ import annotations
