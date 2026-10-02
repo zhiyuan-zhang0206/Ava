@@ -24,7 +24,7 @@ generated from it and never hand-synced. event_names that violate the naming rul
 | mechanism | table/channel | registered event_names | destination |
 |------|------|-------------|------|
 | audit (category=audit) | `events` | 25 | event stream |
-| telemetry (category=telemetry) | `events` | 221 | event stream |
+| telemetry (category=telemetry) | `events` | 222 | event stream |
 | log (category=log) | `events` | 12 | event stream |
 | file-only (destination=file) | file log | 1 | file only (not the stream) |
 | SSE live | Redis → frontend (not persisted) | 30 role | live projection |
@@ -92,7 +92,7 @@ Emit sites and consumers: see the comments at each emit point.
 | `computer_session_end` | computer-use task session closed (idle timeout) | business | task_id, action_count, first_action_at, last_action_at, outcome | events |
 | `mcp_tool_call` | MCP tool invoked through the gateway /mcp endpoint (client-scoped, args redacted) | business | — | events |
 
-## 3. Telemetry events (category=telemetry, 221)
+## 3. Telemetry events (category=telemetry, 222)
 
 Telemetry-side event name resolution (`base/log/__init__.py`): **explicit `event=` →
 `label=` fallback → default `"log"`**. Payload = logger extra fields + `msg`
@@ -277,6 +277,7 @@ consumers: see the comments at each emit point.
 | `root_restart_breaker_open` | root health monitor restart breaker opened — repeated non-alive probe rounds held until a probe-alive round | anomaly | — | — | events |
 | `root_restart_failed` | root unit replacement failed at its down|up half — explicit failure state recorded; intent stays running and the health monitor retries under its backoff (task #4872) | anomaly | unit, stage, detail | — | events |
 | `root_restart_cleared` | root unit replacement succeeded — the recorded failure state was cleared (task #4872) | noise | unit, failed_for_s | — | events |
+| `custody_reconcile` | custody record reconcile pass — every examined record reports released|retained with its birth and process-group evidence (task #4872) | observation | unit, checked, found, decision, evidence | — | events |
 | `root_unit_alert_fired` | root unit entered an alertable failure state (intent running, and restart_failed, breaker open, or retained custody) — one firing per episode; delivery records the user-channel post (task #4872) | anomaly | unit, kind, since_timestamp_seconds, detail, delivery | — | events |
 | `root_unit_alert_resolved` | root unit alert episode closed — the failure state cleared and the episode resolved (task #4872) | noise | unit, kind, since_timestamp_seconds, failed_for_s, delivery | — | events |
 | `permissions_helper_unhealthy` | permissions helper failed its healthcheck (ping plus launchd job classification) — one alert per episode, held until a ping-alive round | anomaly | — | — | events |

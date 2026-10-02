@@ -16,6 +16,7 @@ from pathlib import Path
 
 import pytest
 
+from base.native_process.ownership import OwnedProcess
 from services.ava_root.custody import ServiceCustody, require_clear
 from services.permissions_helper import lifecycle
 
@@ -307,7 +308,7 @@ def test_helper_native_reaping_cannot_race_owned_signal_delivery(tmp_path: Path)
 def test_mutated_custody_is_never_overwritten_or_cleared(tmp_path: Path) -> None:
     record = ServiceCustody(tmp_path, "worker")
     record.path.write_text("replacement authority")
-    for operation in (lambda: record.retain(set()), record.clear):
+    for operation in (lambda: record.retain(set(), group=os.getpid()), record.clear):
         with pytest.raises(RuntimeError, match="custody changed"):
             operation()
         assert record.path.read_text() == "replacement authority"

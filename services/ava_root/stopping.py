@@ -120,7 +120,7 @@ class StoppingMixin:
                 _drop_moved_aside(runtime, custody, living)
                 return
             if living:
-                custody.retain(generation.tracked)
+                custody.retain(generation.tracked, pgid)
                 if expired and not force:
                     raise ownership_retained(runtime.manifest.id, living, pgid, window)
                 self._signal_all(living, force=expired and force)
@@ -175,7 +175,7 @@ class StoppingMixin:
         if identity is None or custody is None:
             raise RuntimeError(f"unit {runtime.manifest.id} has unacknowledged native birth")
         retain_processes(generation.tracked, capture_tree(identity))
-        custody.retain(generation.tracked)
+        custody.retain(generation.tracked, identity.pid)
         generation.closing = True
         return identity, custody
 
@@ -217,7 +217,7 @@ class StoppingMixin:
                 living = capture_group(generation.tracked, identity.pid)
             for item in living:
                 retain_processes(generation.tracked, capture_tree(item))
-            custody.retain(generation.tracked)
+            custody.retain(generation.tracked, identity.pid)
             expired = monotonic() >= deadline
             if expired and not force:
                 raise ownership_retained(runtime.manifest.id, living, identity.pid, window)
