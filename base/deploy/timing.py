@@ -33,8 +33,6 @@ from base.daemon.schedules.timing import SCHEDULE_STALL_ALERT_AFTER_S
 # The wedged threshold is derived, not arbitrary: an agent holding an unconsumed
 # pending inbound for this long is presumed wedged because a healthy agent's
 # longest legitimate stall is one exec node (1200 s) plus the LLM retry budget.
-EXEC_NODE_TIMEOUT_S = settings.sandbox.exec_node_timeout_seconds
-
 # Historical estimate (~770 s) of the LLM retry budget under the retry config;
 # not a single settings field, so stated here as the constant the wedged default
 # was rounded up from (wedged.py: "exec timeout is 1200s + LLM retry budget
@@ -140,7 +138,7 @@ CLOCKS: dict[str, Clock] = {
     ),
     "EXEC_NODE_TIMEOUT_S": Clock(
         "wedged",
-        lambda: EXEC_NODE_TIMEOUT_S,
+        lambda: settings.sandbox.exec_node_timeout_seconds,
         "graph-level exec node timeout (wedged derivation component)",
     ),
     "LLM_RETRY_BUDGET_ESTIMATE_S": Clock(

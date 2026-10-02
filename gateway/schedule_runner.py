@@ -52,6 +52,7 @@ from base.config import settings
 from base.db.transaction import write_transaction
 from base.paths import ava_home, prod_service_checkout_error
 
+
 # A .py schedule script is run in-process, so a single call that hangs (a
 # wedged gateway, a black-holed DB connection, a stuck import) parks the whole
 # runner with no crash and no last_error — 2026-08-03: the self-evolution
@@ -60,8 +61,13 @@ from base.paths import ava_home, prod_service_checkout_error
 # thread's stack and hard-exits after a frame has not advanced for this long,
 # so the ScheduleManager's crash path (backoff + breaker + last_error) gets a
 # chance instead of a zombie.
-_STALL_TIMEOUT_S = settings.gateway.schedule_stall_timeout_seconds
-_STALL_CHECK_INTERVAL_S = settings.gateway.schedule_stall_check_interval_seconds
+def _stall_timeout_s() -> float:
+    return settings.gateway.schedule_stall_timeout_seconds
+
+
+def _stall_check_interval_s() -> float:
+    return settings.gateway.schedule_stall_check_interval_seconds
+
 
 # Frames that legitimately park the main thread for unbounded time — a
 # resident schedule's whole reason for existing is a long sleep between fire
@@ -224,7 +230,7 @@ def _stall_action(schedule_id: int, message: str, run_id: int | None) -> None:
     def record_failure() -> None:
         with suppress(Exception):
             _record_error(schedule_id, message)
-        _record_run_end(run_id, ok=False, note=f"stalled ({_STALL_TIMEOUT_S:.0f}s)")
+        _record_run_end(run_id, ok=False, note=f"stalled ({_stall_timeout_s():.0f}s)")
 
     try:
         # Snapshot descendants while ancestry still proves ownership. Retain
@@ -268,8 +274,8 @@ def _start_stall_guard(schedule_id: int, run_id: int | None) -> threading.Event:
     guard cannot kill the process between a clean return and the completed
     marker write.
 
-    Every ``_STALL_CHECK_INTERVAL_S`` the guard captures the main thread's
-    deepest frame. A frame that has not changed for ``_STALL_TIMEOUT_S`` is a
+    Every ``_stall_check_interval_s()`` the guard captures the main thread's
+    deepest frame. A frame that has not changed for ``_stall_timeout_s()`` is a
     stall (a single call — HTTP, DB, import — that never returned): the guard
     records ``last_error`` and ``os._exit(1)`` so the ScheduleManager's crash
     path (backoff + breaker) relaunches the schedule instead of leaving a
@@ -296,7 +302,7 @@ def _start_stall_guard(schedule_id: int, run_id: int | None) -> threading.Event:
         last_sig: tuple[str, int, str] | None = None
         stalled_since: float | None = None
         while not stop.is_set():
-            time.sleep(_STALL_CHECK_INTERVAL_S)
+            time.sleep(_stall_check_interval_s())
             try:
                 frame = sys._current_frames().get(main_thread_id)
                 if frame is None:
@@ -313,7 +319,7 @@ def _start_stall_guard(schedule_id: int, run_id: int | None) -> threading.Event:
                 continue
             now = time.monotonic()
             if sig == last_sig and stalled_since is not None:
-                if now - stalled_since >= _STALL_TIMEOUT_S:
+                if now - stalled_since >= _stall_timeout_s():
                     message = (
                         f"schedule runner stalled {now - stalled_since:.0f}s in "
                         f"{sig[2]} ({sig[0]}:{sig[1]}) — hard-exiting; check the "
@@ -425,21 +431,21 @@ def run(schedule_id: int) -> int:
         # after the 2026-08-03 self-evolution miss; the command branch was
         # still open). subprocess.run kills the child on expiry and raises
         # TimeoutExpired; the crash path (backoff + breaker) relaunches.
+        stall_timeout_s = _stall_timeout_s()
         try:
             result = subprocess.run(  # noqa: S603 — command is the operator-authored schedule command
                 shlex.split(command),
                 cwd=str(work_dir),
                 check=False,
-                timeout=_STALL_TIMEOUT_S,
+                timeout=stall_timeout_s,
             )
         except subprocess.TimeoutExpired:
             message = (
-                f"command did not finish within {_STALL_TIMEOUT_S:.0f}s "
-                f"(stall timeout): {command!r}"
+                f"command did not finish within {stall_timeout_s:.0f}s (stall timeout): {command!r}"
             )
             _record_error(schedule_id, message)
             logger.error("Schedule {} {}", schedule_id, message)
-            _record_run_end(run_id, ok=False, note=f"stall timeout ({_STALL_TIMEOUT_S:.0f}s)")
+            _record_run_end(run_id, ok=False, note=f"stall timeout ({stall_timeout_s:.0f}s)")
             return 1
         if result.returncode != 0:
             _record_error(schedule_id, f"command exited {result.returncode}: {command!r}")
