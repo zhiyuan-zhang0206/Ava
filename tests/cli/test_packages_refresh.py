@@ -18,11 +18,13 @@ from pathlib import Path
 from typing import cast
 
 import pytest
+from loguru import logger
 
 from base.config import settings
 from base.host.env.dotenv_boot import resolve_ava_home
 from base.packages.extensions import install_registry as reg
 from cli.commands.extensions.packages_refresh import (
+    _Pass,
     effective_interval_seconds,
     is_due,
     parse_duration,
@@ -270,23 +272,58 @@ def test_refresh_reconciles_unknown_baseline_by_content(core_repo: Path) -> None
     assert "# v1" in (home / "skills" / "bar" / "SKILL.md").read_text(encoding="utf-8")
 
 
-def test_refresh_conflict_refuses_then_force_applies(core_repo: Path) -> None:
+def test_core_refresh_replaces_a_hand_edited_copy_and_reports_it(core_repo: Path) -> None:
     c1 = _head(core_repo)
     _seed(core_repo, "foo", applied_rev=c1)
     _write_skill(core_repo, "foo", "# v2\n")
-    _commit_push(core_repo, "foo v2")
+    c2 = _commit_push(core_repo, "foo v2")
     home = _home()
     copy = home / "skills" / "foo" / "SKILL.md"
-    copy.write_text("---\nname: foo\ndescription: MINE\n---\n\nhands off\n", encoding="utf-8")
+    mine = "---\nname: foo\ndescription: MINE\n---\n\nhands off\n"
+    copy.write_text(mine, encoding="utf-8")
 
-    report = run_refresh(repo=core_repo)
-    assert report.items[0].result.startswith("conflict")
-    assert "hands off" in copy.read_text(encoding="utf-8")
-    assert _row("foo").update.failures == 1
-
-    report = run_refresh(repo=core_repo, force=True)
+    warnings: list[str] = []
+    sink = logger.add(lambda m: warnings.append(str(m)), level="WARNING", format="{message}")
+    try:
+        report = run_refresh(repo=core_repo)
+    finally:
+        logger.remove(sink)
     assert report.items[0].result == "applied"
     assert "# v2" in copy.read_text(encoding="utf-8")
+    assert any("local copy replaced" in w and "SKILL.md" in w for w in warnings)
+    assert (home / "skills" / ".foo.prev" / "SKILL.md").read_text(encoding="utf-8") == mine
+    assert _row("foo").update.applied_rev == c2
+    assert _row("foo").update.failures == 0
+
+
+def test_git_channel_copy_edit_still_conflicts_until_force(core_repo: Path, tmp_path: Path) -> None:
+    dest = tmp_path / "skills" / "foo"
+    dest.mkdir(parents=True)
+    (dest / "SKILL.md").write_text("edited\n", encoding="utf-8")
+    pkg = reg.InstalledPackage(
+        name="foo",
+        type="skill",
+        origin="user",
+        source="https://example.invalid/foo.git",
+        content_hash="0" * 64,
+        update=reg.UpdateState(channel="git"),
+    )
+    dest_hash = reg.tree_hash(dest)
+
+    def conflict(*, force: bool) -> str | None:
+        gate = _Pass(
+            check_only=False,
+            only=None,
+            force=force,
+            from_job=False,
+            now=datetime.now(UTC),
+            repo=core_repo,
+        )
+        return gate._local_edit_conflict(pkg, tmp_path, dest, dest_hash)
+
+    blocked = conflict(force=False)
+    assert blocked is not None and blocked.startswith("conflict")
+    assert conflict(force=True) is None
 
 
 def test_refresh_skips_local_source_rows(core_repo: Path, tmp_path: Path) -> None:
