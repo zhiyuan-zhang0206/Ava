@@ -23,8 +23,8 @@ import time
 from collections.abc import Awaitable, Callable
 from typing import Any
 
-from base.config import settings
 from services.im_bridge import copy
+from services.im_bridge.config import ImBridgeConfig
 
 _log = logging.getLogger("services.im_bridge.core.push_watchdog")
 
@@ -35,7 +35,7 @@ PUSH_RECOVERED_HINT_SECONDS = 60  # seconds after first success to hint
 _sleep = asyncio.sleep  # module-local seam: tests patch this name, not asyncio.sleep
 
 
-def retry_backoff_seconds() -> float:
+def retry_backoff_seconds(config: ImBridgeConfig) -> float:
     """Bounded jitter backoff before a retry: base + U(0, jitter).
 
     The measured failure mode is a connection-establishment window of
@@ -43,12 +43,14 @@ def retry_backoff_seconds() -> float:
     window, while the default 1.0 s base plus 0-2.0 s of jitter walks
     past it."""
 
-    base = settings.services.im_push_retry_backoff_seconds
-    jitter = settings.services.im_push_retry_jitter_seconds
+    base = config.im_push_retry_backoff_seconds
+    jitter = config.im_push_retry_jitter_seconds
     return base + random.uniform(0.0, jitter)  # noqa: S311 — spread, not secrecy
 
 
-async def retry_once_after_backoff(attempt: Callable[[], Awaitable[None]]) -> None:
+async def retry_once_after_backoff(
+    attempt: Callable[[], Awaitable[None]], config: ImBridgeConfig
+) -> None:
     """Sleep a bounded jitter backoff, then run one retry attempt.
 
     Exactly one retry — never a loop. A failure of the retry propagates to
@@ -56,7 +58,7 @@ async def retry_once_after_backoff(attempt: Callable[[], Awaitable[None]]) -> No
     path (``send_with_retry``) and the ops-alert fan-out
     (``IMBridgeCore.notify_user``)."""
 
-    await _sleep(retry_backoff_seconds())
+    await _sleep(retry_backoff_seconds(config))
     await attempt()
 
 
@@ -73,7 +75,7 @@ async def send_with_retry(core: Any, channel: str, chat_id: str, reply: Any, ada
     except Exception:
         _log.exception("send failed channel=%s chat=%s", channel, chat_id)
         try:
-            await retry_once_after_backoff(attempt)
+            await retry_once_after_backoff(attempt, core.config)
         except Exception:
             _log.exception("send retry failed channel=%s chat=%s", channel, chat_id)
             await alert_push_failure(core, channel, adapter)

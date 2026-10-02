@@ -16,9 +16,9 @@ from typing import Any
 
 import pytest
 
-from base.config import settings
 from services.im_bridge import push_watchdog
 from services.im_bridge.core import IMBridgeCore
+from services.im_bridge.tests.slices import gateway_client, im_bridge_config
 from services.im_bridge.types import IMAdapter
 
 
@@ -91,7 +91,7 @@ class _RecordingAdapter(IMAdapter):
 
 def test_notify_user_fans_out_to_all_adapters() -> None:
     """Every loaded adapter gets the text; results report per-channel ok."""
-    core = IMBridgeCore()
+    core = IMBridgeCore(im_bridge_config(), gateway_client())
     a1, a2 = _RecordingAdapter(), _RecordingAdapter()
     core.register(a1)
     core.register(a2)
@@ -111,7 +111,7 @@ def test_notify_user_skips_and_isolates_failures(retry_sleeps: list[float]) -> N
     """A channel without an owner chat is skipped; a failing channel does not
     stop the others from receiving the message. The skipped channel pays no
     retry (a permanent condition), the broken one exactly one."""
-    core = IMBridgeCore()
+    core = IMBridgeCore(im_bridge_config(), gateway_client())
     skipped, broken, ok = (
         _RecordingAdapter(skipped=True),
         _RecordingAdapter(error=RuntimeError("platform down")),
@@ -138,7 +138,7 @@ def test_notify_user_skips_and_isolates_failures(retry_sleeps: list[float]) -> N
 def test_notify_user_retry_after_backoff_recovers(retry_sleeps: list[float]) -> None:
     """A transient failure (the ~0.65s connection window, task #4252) is
     healed by exactly one retry after the bounded jitter backoff."""
-    core = IMBridgeCore()
+    core = IMBridgeCore(im_bridge_config(), gateway_client())
     flaky = _RecordingAdapter(error=RuntimeError("connect jitter"), fail_times=1)
     core.register(flaky)
 
@@ -150,15 +150,15 @@ def test_notify_user_retry_after_backoff_recovers(retry_sleeps: list[float]) -> 
     assert flaky.sent == ["hi"]
     assert flaky.attempts == 2
     assert len(retry_sleeps) == 1
-    base = settings.services.im_push_retry_backoff_seconds
-    jitter = settings.services.im_push_retry_jitter_seconds
+    base = core.config.im_push_retry_backoff_seconds
+    jitter = core.config.im_push_retry_jitter_seconds
     assert base <= retry_sleeps[0] <= base + jitter
 
 
 def test_notify_user_double_failure_reports_error(retry_sleeps: list[float]) -> None:
     """Both attempts fail -> the channel keeps its "error: <TypeName>" result
     (the /send gate still sees no delivery), with exactly one retry."""
-    core = IMBridgeCore()
+    core = IMBridgeCore(im_bridge_config(), gateway_client())
     broken = _RecordingAdapter(error=ValueError("boom"))
     core.register(broken)
 
@@ -173,7 +173,7 @@ def test_notify_user_double_failure_reports_error(retry_sleeps: list[float]) -> 
 
 def test_notify_user_empty_core() -> None:
     """No adapters loaded -> empty results, no error (daemon serves nothing)."""
-    core = IMBridgeCore()
+    core = IMBridgeCore(im_bridge_config(), gateway_client())
 
     async def run() -> dict[str, str]:
         return await core.notify_user("hi")

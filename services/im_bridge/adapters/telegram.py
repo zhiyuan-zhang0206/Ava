@@ -24,9 +24,9 @@ from typing import Any
 
 import httpx
 
-from base.config import settings
 from base.log import logger
 from base.paths import ava_home
+from services.im_bridge.config import TelegramCredentialsConfig
 from services.im_bridge.types import IMAdapter, InboundMessage
 
 # Telegram's per-message cap for plain-text messages.
@@ -102,8 +102,15 @@ class TelegramAdapter(IMAdapter):
 
     channel = "telegram"
 
-    def __init__(self, core: Any, *, client: httpx.AsyncClient | None = None) -> None:
+    def __init__(
+        self,
+        core: Any,
+        config: TelegramCredentialsConfig,
+        *,
+        client: httpx.AsyncClient | None = None,
+    ) -> None:
         super().__init__(core)
+        self._config = config
         self._client = client  # injected in tests; else created lazily
         self._owns_client = client is None
         self._poll_task: asyncio.Task[None] | None = None
@@ -116,11 +123,11 @@ class TelegramAdapter(IMAdapter):
 
     @property
     def _token(self) -> str:
-        return settings.telegram.telegram_bot_token
+        return self._config.telegram_bot_token
 
     @property
     def _owner_id(self) -> int:
-        return settings.telegram.telegram_owner_id
+        return self._config.telegram_owner_id
 
     @property
     def _http(self) -> httpx.AsyncClient:
@@ -176,11 +183,11 @@ class TelegramAdapter(IMAdapter):
     # -- inbound ---------------------------------------------------------
 
     async def _poll_loop(self) -> None:
-        delay = settings.telegram.telegram_reconnect_base_delay_seconds
+        delay = self._config.telegram_reconnect_base_delay_seconds
         while not self._stop_event.is_set():
             try:
                 updates = await self._get_updates()
-                delay = settings.telegram.telegram_reconnect_base_delay_seconds
+                delay = self._config.telegram_reconnect_base_delay_seconds
                 for update in updates:
                     await self._handle_update(update)
                     # Ack only after the update was handled: a failure keeps the
@@ -196,7 +203,7 @@ class TelegramAdapter(IMAdapter):
                 logger.warning("telegram poll failed: {}", exc)
                 with contextlib.suppress(TimeoutError):
                     await asyncio.wait_for(self._stop_event.wait(), timeout=delay)
-                delay = min(delay * 2, settings.telegram.telegram_reconnect_max_delay_seconds)
+                delay = min(delay * 2, self._config.telegram_reconnect_max_delay_seconds)
 
     async def _get_updates(self) -> list[dict[str, Any]]:
         offset = self._read_offset()
@@ -205,14 +212,14 @@ class TelegramAdapter(IMAdapter):
                 f"https://api.telegram.org/bot{self._token}/getUpdates",
                 params={
                     "offset": offset,
-                    "timeout": settings.telegram.telegram_poll_timeout_seconds,
+                    "timeout": self._config.telegram_poll_timeout_seconds,
                     "limit": 100,
                     # Telegram wants this as a JSON-array string, not a repeated query param.
                     # callback_query is required or inline-keyboard taps are
                     # dropped by Telegram and never reach the poll loop.
                     "allowed_updates": json.dumps(["message", "callback_query"]),
                 },
-                timeout=settings.telegram.telegram_poll_timeout_seconds + 10.0,
+                timeout=self._config.telegram_poll_timeout_seconds + 10.0,
             )
         except httpx.HTTPError as exc:
             # httpx error text can embed the request URL, which carries the token.
