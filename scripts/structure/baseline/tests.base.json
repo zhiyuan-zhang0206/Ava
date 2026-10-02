@@ -21,7 +21,6 @@
     "tests/base/test_connect_helpers.py::base.db.code_version_gate._last_read_at": 2,
     "tests/base/test_connect_helpers.py::base.native_process.code_version._db_gate_exempt": 1,
     "tests/base/test_connect_helpers.py::base.native_process.code_version._version": 3,
-    "tests/base/test_exec_request_evidence.py::base.agents.incarnation.exec_request_evidence._bounded_disposition_enabled": 1,
     "tests/base/test_no_secrets_on_argv.py::ava.shell.sessions._next_session_index_from_db": 1,
     "tests/base/test_no_secrets_on_argv.py::ava.shell.sessions._record_ttl": 1,
     "tests/base/test_no_secrets_on_argv.py::ava.shell.sessions._shell_prefix": 1,

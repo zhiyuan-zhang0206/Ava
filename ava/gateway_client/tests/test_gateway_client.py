@@ -782,3 +782,16 @@ class TestSendMessageAtLeastOnceWithKey:
         send_message(42, content="hello", source="user")
         headers = mock_client.post.call_args.kwargs["headers"]
         assert headers and headers.get("Idempotency-Key")
+
+
+def test_retry_settings_are_read_when_a_request_retries(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The attempt count and base delay come from the settings at use, not from values
+    captured when the module imported."""
+    from ava.gateway_client import transport
+    from base.config import settings
+
+    monkeypatch.setattr(settings.gateway, "gateway_client_max_retries", 7)
+    monkeypatch.setattr(settings.gateway, "gateway_client_retry_delay_seconds", 0.5)
+    assert transport._max_retries() == 7
+    assert transport._base_retry_delay_s() == 0.5
+    assert transport._retry_delay_seconds(0) >= 0.5

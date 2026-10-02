@@ -20,6 +20,7 @@ import psycopg
 import pytest
 
 from ava import agent_identity
+from base.config import settings
 from gateway.schedule_runner import _script_filename, run
 
 
@@ -251,9 +252,8 @@ def test_run_records_py_sys_exit_bool(
 def test_run_records_stall_timeout(
     db_conn: psycopg.Connection, unit_home: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    import gateway.schedule_runner as sr
 
-    monkeypatch.setattr(sr, "_STALL_TIMEOUT_S", 2.0)
+    monkeypatch.setattr(settings.gateway, "schedule_stall_timeout_seconds", 2.0)
     sid = _insert_schedule(db_conn, script="sleep 60\n", command="bash run.sh")
 
     assert run(sid) == 1
@@ -505,8 +505,8 @@ def _watch_stalls(
     """Record real guard verdicts without exiting the test process."""
     import gateway.schedule_runner as sr
 
-    monkeypatch.setattr(sr, "_STALL_CHECK_INTERVAL_S", 0.02)
-    monkeypatch.setattr(sr, "_STALL_TIMEOUT_S", 0.1)
+    monkeypatch.setattr(settings.gateway, "schedule_stall_check_interval_seconds", 0.02)
+    monkeypatch.setattr(settings.gateway, "schedule_stall_timeout_seconds", 0.1)
     fired: list[str] = []
 
     def record_stall(_sid: int, msg: str, _rid: int | None) -> None:
@@ -550,8 +550,8 @@ def test_stall_guard_ignores_a_legitimately_sleeping_main_thread(
 
     import gateway.schedule_runner as sr
 
-    monkeypatch.setattr(sr, "_STALL_CHECK_INTERVAL_S", 0.02)
-    monkeypatch.setattr(sr, "_STALL_TIMEOUT_S", 0.05)
+    monkeypatch.setattr(settings.gateway, "schedule_stall_check_interval_seconds", 0.02)
+    monkeypatch.setattr(settings.gateway, "schedule_stall_timeout_seconds", 0.05)
     fired: list[str] = []
     monkeypatch.setattr(
         sr,
@@ -754,9 +754,8 @@ def test_run_hung_subprocess_times_out_and_records_error(
     last_error and returns non-zero so the ScheduleManager's crash path
     (backoff + breaker) relaunches instead of the schedule silently eating
     every future fire window (2026-08-08 audit P2-2)."""
-    import gateway.schedule_runner as sr
 
-    monkeypatch.setattr(sr, "_STALL_TIMEOUT_S", 2.0)
+    monkeypatch.setattr(settings.gateway, "schedule_stall_timeout_seconds", 2.0)
     sid = _insert_schedule(db_conn, script="sleep 60\n", command="bash run.sh")
 
     rc = run(sid)
@@ -782,7 +781,7 @@ def test_stall_verdict_closes_run_row(
     sr._stall_action(sid, "stalled in foo", run_id)
 
     assert exited == [1]
-    assert _runs(db_conn, sid) == [(False, f"stalled ({sr._STALL_TIMEOUT_S:.0f}s)")]
+    assert _runs(db_conn, sid) == [(False, f"stalled ({sr._stall_timeout_s():.0f}s)")]
 
 
 def test_main_refuses_on_foreign_checkout(monkeypatch: pytest.MonkeyPatch) -> None:
