@@ -76,6 +76,17 @@ effects; a newly introduced caller flag cannot authorize its own first deploymen
 Current start readiness always requires the complete selected roster to be ready.
 Evidence: [`postmortems/0001`](../postmortems/0001-a-rollout-cannot-deliver-its-own-protection.md).
 
+### A failed restart must not look like an operator stop
+
+"Expected down" comes from a recorded operator intent, never from residual
+state: a classifier that reads "not as desired" as "the operator meant it" turns
+a failed self-rescue into silence. A restart whose second half fails is a
+retryable, alertable state, and any unit that should be running but is held down
+raises an alert from state, not from a threshold. A lock taken by a failed
+restart needs a reconcile path other than `--force`, and a bounded retry needs an
+escalation outcome instead of ending in silence.
+Evidence: [`postmortems/0010`](../postmortems/0010-a-failed-restart-must-not-look-like-an-operator-stop.md).
+
 ### An editable install is a cross-checkout pointer
 
 An editable install writes its source path into the **active virtualenv**; the
