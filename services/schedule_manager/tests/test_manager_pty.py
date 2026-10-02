@@ -23,7 +23,8 @@ from base.cluster import session_name
 from base.deploy.lifecycle.start_serving import RootBirth
 from base.native_process.os_platform import IS_WINDOWS
 from base.sessions.backend import get_shell_backend
-from gateway.schedules import manager as sm
+from gateway.schedules import session_control
+from services.schedule_manager import manager as sm
 
 REPO = Path(__file__).resolve().parents[3]
 
@@ -145,7 +146,7 @@ def _wait_session_gone(name: str, timeout_s: float = 20.0) -> None:
 def test_launch_cwd_is_the_checkout_root() -> None:
     """Schedule sessions start in the checkout root, where `python -m
     gateway.schedule_runner` and the relative `.venv/bin/python` resolve."""
-    assert sm._REPO_ROOT == REPO
+    assert sm.REPO_ROOT == REPO
 
 
 def test_pty_launch_live_capture(
@@ -166,7 +167,7 @@ def test_pty_launch_live_capture(
         "python schedule.py",
     )
     mgr = sm.ScheduleManager(pool)
-    mgr._reconcile()
+    mgr.reconcile()
 
     name = session_name(f"schedule-{sid}")
     backend = get_shell_backend()
@@ -183,7 +184,7 @@ def test_pty_launch_live_capture(
     deadline = time.monotonic() + 60.0
     while time.monotonic() < deadline:
         try:
-            captured = mgr._capture_blocking(sid, 50)
+            captured = session_control.capture_blocking(sid, 50)
         except Exception as exc:
             raise AssertionError(
                 f"capture failed ({exc}); session logs:\n{_dump_logs(home)}"
@@ -205,24 +206,23 @@ def test_pty_crash_then_reconcile_rebuilds(
     EOF closes the session — and the next reconcile relaunches it."""
     sid = _insert_schedule(db_conn, "pty-crash", "exit 1", "bash run.sh")
     mgr = sm.ScheduleManager(pool)
-    mgr._reconcile()
+    mgr.reconcile()
     name = session_name(f"schedule-{sid}")
     backend = get_shell_backend()
     assert backend.has_session(name)
-    _sm = sm
 
     # The runner exits nonzero immediately → session ends on its own.
     _wait_session_gone(name)
 
-    clock = {"t": time.monotonic()}
-    orig = _sm.time.monotonic
-    _sm.time.monotonic = lambda: clock["t"]  # type: ignore[method-assign]
-    try:
-        clock["t"] += _sm._BACKOFF_CAP_S + 1  # clear the first launch's backoff
-        mgr._reconcile()  # relaunch
-        assert backend.has_session(name)
-    finally:
-        _sm.time.monotonic = orig  # type: ignore[method-assign]
+    # Clear the first launch's backoff window.
+    db_conn.execute(
+        "UPDATE schedules SET next_launch_at = clock_timestamp() - interval '1 second' "
+        "WHERE id = %s",
+        (sid,),
+    )
+    db_conn.commit()
+    mgr.reconcile()  # relaunch
+    assert backend.has_session(name)
     assert mgr._reap(sid)
     _wait_session_gone(name)
 
@@ -234,27 +234,24 @@ def test_pty_breaker_trips_after_repeated_crashes(
     crash/relaunch rounds the schedule lands in status='error' and is left
     alone."""
     sid = _insert_schedule(db_conn, "pty-breaker", "exit 1", "bash run.sh")
-    clock = {"t": 0.0}
-    import gateway.schedules.manager as _sm
-
-    orig_monotonic = _sm.time.monotonic
-    _sm.time.monotonic = lambda: clock["t"]  # type: ignore[method-assign]
-    try:
-        mgr = sm.ScheduleManager(pool)
-        name = session_name(f"schedule-{sid}")
-        backend = get_shell_backend()
-        for _ in range(_sm._BREAKER_MAX + 3):
-            mgr._reconcile()
-            if backend.has_session(name):
-                _wait_session_gone(name)
-            clock["t"] += _sm._BACKOFF_CAP_S + 1
-        with db_conn.cursor() as cur:
-            cur.execute("SELECT status FROM schedules WHERE id = %s", (sid,))
-            row = cur.fetchone()
-        assert row is not None and row[0] == "error", f"breaker did not trip: {row}"
-        # A tripped schedule is terminal: reconcile must not relaunch it.
-        before = backend.has_session(name)
-        mgr._reconcile()
-        assert not backend.has_session(name) or before
-    finally:
-        _sm.time.monotonic = orig_monotonic  # type: ignore[method-assign]
+    mgr = sm.ScheduleManager(pool)
+    name = session_name(f"schedule-{sid}")
+    backend = get_shell_backend()
+    for _ in range(sm._BREAKER_MAX + 3):
+        mgr.reconcile()
+        if backend.has_session(name):
+            _wait_session_gone(name)
+        db_conn.execute(
+            "UPDATE schedules SET next_launch_at = clock_timestamp() - interval '1 second' "
+            "WHERE id = %s",
+            (sid,),
+        )
+        db_conn.commit()
+    with db_conn.cursor() as cur:
+        cur.execute("SELECT status FROM schedules WHERE id = %s", (sid,))
+        row = cur.fetchone()
+    assert row is not None and row[0] == "error", f"breaker did not trip: {row}"
+    # A tripped schedule is terminal: reconcile must not relaunch it.
+    before = backend.has_session(name)
+    mgr.reconcile()
+    assert not backend.has_session(name) or before

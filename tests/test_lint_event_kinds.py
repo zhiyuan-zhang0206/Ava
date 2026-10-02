@@ -87,7 +87,7 @@ _SQL_OR_DYNAMIC_KINDS = frozenset(
         "gateway_event_loop",  # gateway/middleware/runtime_metrics.py:_emit_snapshot positional emit
         "auth401_rejected",  # gateway/auth/rejection_log.py:emit_auth401_count telemetry.emit("telemetry", ...)
         "agent_registry",  # gateway/agents/max_id_gauge.py:emit_max_agent_id telemetry.emit("telemetry", ...)
-        "schedule_stalled",  # gateway/schedules/manager.py:_report_stalled_schedules telemetry.emit
+        "schedule_stalled",  # services/schedule_manager/manager.py:_report_stalled_schedules telemetry.emit
         "memory_search_stats",  # services/memory_search/app.py:emit_memory_search_stats (positional emit)
         "backup_operation_custody",  # services/backup_scheduler/operation/custody.py:report (positional emit)
         "recovery_drill_failed",  # services/backup_scheduler/daemon.py:_run_due_local_dump_restore (positional emit)

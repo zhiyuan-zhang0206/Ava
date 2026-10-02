@@ -49,7 +49,7 @@ Browser (frontend:3000) ──HTTP──▶ Gateway (:8000) ──▶ Postgres /
    daemon ──▶ detached process (runner) │   ScheduleManager._launch
 ```
 - **agents**: spawn / lifecycle uniformly goes through `_forward_to_home_machine` → `cluster_rpc` POST `/ops` to the agent-ops daemon, the runner commits durable work and publishes a wake to its agent host — **even if the target is the local machine, there is no in-process shortcut** (`gateway/agents/forward.py:_forward_to_home_machine()`)
-- **schedules**: `gateway/schedules/manager.py:ScheduleManager._launch` is gateway's **only** path that directly manages sessions (agent processes are hosted by the native supervisor on the runner side, not by the gateway)
+- **schedules**: the gateway only queues sync requests and reads log captures (`gateway/schedules/session_control.py`); the `schedule-manager` service launches schedule sessions
 
 - Gateway connects to Postgres via one `base.db.pool()` per process, borrowing one connection per request. Going through the factory rather than constructing a `ConnectionPool` is what gives the borrows `prepare_threshold=None` (never prepare; transaction-pooling-safe under PgBouncer) and `PG_KEEPALIVE_KWARGS` (a request-serving pool outlives host sleeps; without keepalives a borrow on a half-dead socket stalls on the OS TCP-retransmit timeout). Rule 5 (`postgres-dial`) enforces it
 - Event publishing uses a process-level shared `aredis.Redis` instance

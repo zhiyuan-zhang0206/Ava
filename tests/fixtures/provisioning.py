@@ -239,6 +239,9 @@ _PER_TEST_TRUNCATE_TABLES = (
     # ttl-reaper cadence clocks: no FK path; a leaked stamp would make the next
     # test's slow phase read as not due.
     "maintenance_state",
+    # Queued schedule-manager sync requests: no FK (a delete queues one for a
+    # row that is gone); a leaked row would be consumed by the next test.
+    "schedule_sync_requests",
 )
 
 
