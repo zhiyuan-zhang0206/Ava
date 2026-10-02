@@ -290,6 +290,59 @@ BEGIN
     END IF;
 END $$;
 
+-- Log-native lease (protocol v2): sources append event rows while open, the guard
+-- refuses rows for a closed source, and the lease completes by predicate when its
+-- end finds every source sealed (agent termination ends it in SQL).
+INSERT INTO agents (id, label) VALUES (991008, 'log-native-owner-smoke');
+INSERT INTO agents_meta (id, status, machine, runtime_generation, runtime_owner)
+    VALUES (991008, 'idling', 'smoke-machine',
+            '00000000-0000-0000-0000-000000000003',
+            '00000000-0000-0000-0000-000000000004');
+INSERT INTO agent_impersonations (
+    id, agent_id, source, machine, token_hash, status, ttl_seconds, expires_at,
+    accepted_generation, accepted_owner, automatic, event_delivery_protocol_version, activated_at
+) VALUES (
+    '00000000-0000-0000-0000-000000000008', 991008, 'external_agent:log-native-smoke',
+    'smoke-machine', 'log-native-smoke-token', 'active', 300, clock_timestamp() + interval '5 minutes',
+    '00000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-000000000002', TRUE, 2,
+    clock_timestamp()
+);
+INSERT INTO agent_impersonation_event_participants(lease_id, source_key, state)
+VALUES ('00000000-0000-0000-0000-000000000008', 'smoke-source', 'open');
+UPDATE agent_impersonations SET next_entry = next_entry + 1
+WHERE id='00000000-0000-0000-0000-000000000008';
+INSERT INTO agent_impersonation_entries(lease_id, seq, kind, event_key, payload, source_key)
+SELECT id, next_entry - 1, 'sdk_call', 'event:smoke-1', '{}'::jsonb, 'smoke-source'
+FROM agent_impersonations WHERE id='00000000-0000-0000-0000-000000000008';
+SELECT seal_impersonation_event_participant(
+    '00000000-0000-0000-0000-000000000008', 'smoke-source', 'sealed', NULL, 1, NULL
+);
+DO $$
+DECLARE refused BOOLEAN := FALSE;
+BEGIN
+    IF EXISTS (SELECT 1 FROM agent_impersonations
+               WHERE id='00000000-0000-0000-0000-000000000008'
+                 AND events_completed_at IS NOT NULL) THEN
+        RAISE EXCEPTION 'log-native lease completed before it ended';
+    END IF;
+    BEGIN
+        INSERT INTO agent_impersonation_entries(lease_id, seq, kind, event_key, payload, source_key)
+        VALUES ('00000000-0000-0000-0000-000000000008', 9999, 'sdk_call', 'event:smoke-2',
+                '{}'::jsonb, 'smoke-source');
+    EXCEPTION WHEN raise_exception THEN refused := TRUE;
+    END;
+    IF NOT refused THEN RAISE EXCEPTION 'a sealed source accepted another event row'; END IF;
+END $$;
+UPDATE agents_meta SET status = 'terminated' WHERE id = 991008;
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM agent_impersonations
+                   WHERE id='00000000-0000-0000-0000-000000000008'
+                     AND status='expired' AND events_completed_at IS NOT NULL) THEN
+        RAISE EXCEPTION 'ending a fully sealed log-native lease did not complete its event log';
+    END IF;
+END $$;
+
 -- Lifecycle status transitions preserve spawn lineage, even when the parent is
 -- terminated. This protects against a trigger reintroducing a spawner rewrite.
 INSERT INTO agents (id, label) VALUES

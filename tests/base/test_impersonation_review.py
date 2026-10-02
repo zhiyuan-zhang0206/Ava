@@ -20,11 +20,13 @@ from base.agents.messages.chat_delivery import insert_chat_inbound_once
 from base.cluster.machine import machine_name
 from base.db import create_agent
 from base.native_process.runtime_incarnation import RuntimeIncarnation
-from tests.impersonation_support import attested_caller, recorded_tree
+from tests.impersonation_support import attested_caller, recorded_tree, request_legacy_leases
 
 
 @pytest.fixture
-def session(db_conn: psycopg.Connection) -> dict[str, Any]:
+def session(db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
+    # These regressions cover the replay-read consumer, so their lease has no event protocol.
+    request_legacy_leases(monkeypatch)
     agent_id = create_agent(db_conn)
     owner = RuntimeIncarnation(agent_id, uuid4(), uuid4())
     db_conn.execute(

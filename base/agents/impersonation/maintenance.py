@@ -62,7 +62,7 @@ def force_expire_impersonation(
         lock_agent,
     )
     from base.agents.impersonation.history import set_actor
-    from base.agents.impersonation_manifest import close_manifest_admission, is_protocol_v1
+    from base.agents.impersonation_manifest import close_manifest_admission, is_event_protocol
     from base.log import logger
 
     with write_transaction(pool) as conn:
@@ -77,7 +77,7 @@ def force_expire_impersonation(
         if lease is None or lease["session_id"] != session_id:
             return "not_open"
         set_actor(conn, actor)
-        if is_protocol_v1(lease):
+        if is_event_protocol(lease):
             close_manifest_admission(conn, str(lease["id"]))
         inbound_id = None
         if lease["status"] == "active" and not lease["automatic"]:
