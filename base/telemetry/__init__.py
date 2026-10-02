@@ -22,7 +22,6 @@ attribute here is not seen by the emitter's own global reads.
 
 from base.telemetry import otlp as otlp
 from base.telemetry.emitter import (
-    _AUDIT_BLOCK_S,
     _NO_EMITTER,
     _TELEMETRY_KINDS,
     Category,
@@ -55,7 +54,6 @@ from base.telemetry.emitter import (
 )
 
 __all__ = [
-    "_AUDIT_BLOCK_S",
     "_NO_EMITTER",
     "_TELEMETRY_KINDS",
     "Category",
