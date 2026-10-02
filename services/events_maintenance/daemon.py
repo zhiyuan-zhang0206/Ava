@@ -88,6 +88,7 @@ from services.events_maintenance.observed_metrics import recover_observations
 from services.events_maintenance.resolution import run_resolution_slice
 from services.events_maintenance.rollup import compute_rollup
 from services.events_maintenance.telemetry_replay import recover_telemetry_events
+from services.events_maintenance.token_totals import fold_totals
 from services.pidfile import acquire_pidfile, pidfile_holds_daemon, remove_pidfile
 
 _log = logging.getLogger("services.events_maintenance.daemon")
@@ -141,7 +142,7 @@ def _run_maintenance(
 ) -> None:
     """One hourly pass: the recoveries (observed metrics, the telemetry mirror replay), the
     cost-ledger rollup of the last closed days (`telemetry_events` → `agent_model_tokens_daily`
-    and `agent_metrics_daily`), the hourly checkpoint size/row-count telemetry sample, and the
+    and `agent_metrics_daily`) and the fold of its settled days into `agent_token_totals`, the hourly checkpoint size/row-count telemetry sample, and the
     blob VACUUM. One `now` drives the time-based steps.
     Logs what each step did; a no-op pass logs nothing."""
     now = datetime.now(tz=UTC)
@@ -167,7 +168,10 @@ def _run_maintenance(
     progress.beat()
     with pool.connection() as conn:
         result = compute_rollup(conn, now_utc=now)
+        folded = fold_totals(conn, today=now.date())
     progress.beat()
+    if folded:
+        _log.info("[events-maintenance] folded settled ledger days into %d agent totals", folded)
     if result.start_day is not None:
         _log.info(
             "[events-maintenance] rolled %s..%s — %d metric rows, %d token rows",
