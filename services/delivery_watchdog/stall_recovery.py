@@ -78,7 +78,7 @@ async def _request_harvest(pool: ConnectionPool, agent_id: int, inbound_id: int)
 
     try:
         try:
-            async with asyncio.timeout(rounds.RPC_DEADLINE_S):
+            async with asyncio.timeout(rounds.rpc_deadline_s()):
                 decision, reason = await recover_crash_marked_if_stalled(
                     agent_id, stalled_inbound_id=inbound_id
                 )

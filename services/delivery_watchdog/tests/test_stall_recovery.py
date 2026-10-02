@@ -29,7 +29,7 @@ def pool():
 
 @pytest.fixture
 def progress() -> LoopProgress:
-    return LoopProgress("harvest", rounds.LOOP_LIVENESS_TIMEOUT_S)
+    return LoopProgress("harvest", rounds.loop_liveness_timeout_s())
 
 
 def _crash_marked_agent_with_stalled_chats(
@@ -181,7 +181,7 @@ async def test_hung_request_is_cut_at_the_deadline_and_reported_as_an_error(
         emitted.append(kwargs)
 
     monkeypatch.setattr(stall_recovery.telemetry, "emit", record_emit)
-    monkeypatch.setattr(rounds, "RPC_DEADLINE_S", 0.05)
+    monkeypatch.setattr(rounds, "rpc_deadline_s", lambda: 0.05)
 
     await stall_recovery.stall_recovery_round(pool, progress, _THRESHOLD_S)
 

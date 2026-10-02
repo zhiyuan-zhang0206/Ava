@@ -391,7 +391,7 @@ async def test_no_failure_after_the_termination_commit_strands_the_agent(
     assert owners[agent_id] == wakes[0][0]
     # The watchdog's existing terminated-owner retry takes it from here.
     await resurrect_retry.resurrect_round(
-        pool, LoopProgress("resurrect", rounds.LOOP_LIVENESS_TIMEOUT_S), 5, 86400.0
+        pool, LoopProgress("resurrect", rounds.loop_liveness_timeout_s()), 5, 86400.0
     )
     assert set(triggers) == {wakes[0][0]}
 
@@ -452,7 +452,7 @@ async def test_hosted_turn_recovery_has_a_persisted_ten_minute_per_agent_cooldow
         recovered.append(wedge.agent_id)
 
     monkeypatch.setattr(watchdog, "_recover_hosted_turn", fake_recover)
-    progress = LoopProgress("hosted_turn", rounds.LOOP_LIVENESS_TIMEOUT_S)
+    progress = LoopProgress("hosted_turn", rounds.loop_liveness_timeout_s())
 
     await watchdog.hosted_turn_recovery_round(pool, progress, _THRESHOLD_S)
     await watchdog.hosted_turn_recovery_round(pool, progress, _THRESHOLD_S)
@@ -476,10 +476,10 @@ async def test_a_hung_recovery_is_cut_at_the_deadline_and_still_enters_the_coold
         await asyncio.Event().wait()
 
     monkeypatch.setattr(watchdog, "_recover_hosted_turn", hang)
-    monkeypatch.setattr(rounds, "RPC_DEADLINE_S", 0.05)
+    monkeypatch.setattr(rounds, "rpc_deadline_s", lambda: 0.05)
 
     await watchdog.hosted_turn_recovery_round(
-        pool, LoopProgress("hosted_turn", rounds.LOOP_LIVENESS_TIMEOUT_S), _THRESHOLD_S
+        pool, LoopProgress("hosted_turn", rounds.loop_liveness_timeout_s()), _THRESHOLD_S
     )
 
     claimed, _ = attempts.claim_attempts(pool, attempts.HOSTED_TURN, [agent_id], 600.0)
@@ -506,7 +506,7 @@ async def test_a_slow_recovery_is_never_started_twice(
     loop_task = asyncio.create_task(
         watchdog.hosted_turn_recovery_loop(
             pool,
-            LoopProgress("hosted_turn", rounds.LOOP_LIVENESS_TIMEOUT_S),
+            LoopProgress("hosted_turn", rounds.loop_liveness_timeout_s()),
             0.01,
             _THRESHOLD_S,
         )

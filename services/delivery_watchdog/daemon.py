@@ -476,9 +476,9 @@ async def _run_loops(pool: ConnectionPool, liveness: LivenessGroup) -> None:
     failing `/healthz` even while its siblings stay busy."""
     interval = settings.daemon.delivery_watchdog_interval_seconds
     scan = liveness.register("scan", _SCAN_LIVENESS_TIMEOUT_S)
-    resurrect = liveness.register("resurrect", rounds.LOOP_LIVENESS_TIMEOUT_S)
-    harvest = liveness.register("harvest", rounds.LOOP_LIVENESS_TIMEOUT_S)
-    hosted_turn = liveness.register("hosted_turn", rounds.LOOP_LIVENESS_TIMEOUT_S)
+    resurrect = liveness.register("resurrect", rounds.loop_liveness_timeout_s())
+    harvest = liveness.register("harvest", rounds.loop_liveness_timeout_s())
+    hosted_turn = liveness.register("hosted_turn", rounds.loop_liveness_timeout_s())
     async with asyncio.TaskGroup() as loops:
         loops.create_task(_scan_loop(pool, scan))
         loops.create_task(

@@ -11,6 +11,7 @@ from psycopg_pool import ConnectionPool
 
 from base.config import settings
 from base.daemon.loop_health import LivenessGroup, LoopProgress
+from ops.cluster_rpc import worst_case_dispatch_seconds
 from services.delivery_watchdog import attempts, daemon, rounds
 
 
@@ -24,7 +25,7 @@ def pool():
 
 
 def _progress() -> LoopProgress:
-    return LoopProgress("test", rounds.LOOP_LIVENESS_TIMEOUT_S)
+    return LoopProgress("test", rounds.loop_liveness_timeout_s())
 
 
 def _agent(db: psycopg.Connection) -> int:
@@ -237,3 +238,18 @@ def test_finish_restarts_the_cooldown_clock(
     attempts.finish_attempt(pool, attempts.HOSTED_TURN, aid)
 
     assert attempts.claim_attempts(pool, attempts.HOSTED_TURN, [aid], 600.0) == ([], 0)
+
+
+def test_the_job_deadline_is_derived_from_the_cluster_rpc_budget(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(settings.gateway, "cluster_rpc_timeout_seconds", 30.0)
+    monkeypatch.setattr(settings.gateway, "cluster_rpc_max_retries", 3)
+
+    # Four attempts of 30s, plus the 0.5 + 1 + 2 second backoffs at their +50% jitter ceiling.
+    assert worst_case_dispatch_seconds() == pytest.approx(4 * 30.0 + 3.5 * 1.5)
+    assert rounds.rpc_deadline_s() == pytest.approx(2 * worst_case_dispatch_seconds())
+    assert rounds.loop_liveness_timeout_s() > rounds.rpc_deadline_s()
+
+    monkeypatch.setattr(settings.gateway, "cluster_rpc_max_retries", 0)
+    assert worst_case_dispatch_seconds() == pytest.approx(30.0)

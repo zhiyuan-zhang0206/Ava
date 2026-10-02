@@ -265,13 +265,13 @@ async def _recover_within_deadline(pool: ConnectionPool, wedge: _HostedTurnWedge
     terminated-owner retry, exactly as any other failure there does."""
     try:
         try:
-            async with asyncio.timeout(rounds.RPC_DEADLINE_S):
+            async with asyncio.timeout(rounds.rpc_deadline_s()):
                 await _recover_hosted_turn(pool, wedge)
         except TimeoutError:
             _log.error(
                 "[delivery] hosted turn recovery for agent %s exceeded %.0fs",
                 wedge.agent_id,
-                rounds.RPC_DEADLINE_S,
+                rounds.rpc_deadline_s(),
             )
     finally:
         await asyncio.to_thread(attempts.finish_attempt, pool, attempts.HOSTED_TURN, wedge.agent_id)
