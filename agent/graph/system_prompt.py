@@ -186,7 +186,7 @@ def _sdk_expand_section(slices: AgentSlices) -> str:
     pieces: list[str] = []
     seen_targets: set[int] = set()
     # Text-only models drop media-gated members (`ava.self.attach`; ruling 2026-08-28).
-    hidden: frozenset[str] = ava.attachment_transport.media_gated_members()
+    hidden: frozenset[str] = ava.attachment_transport.media_gated_members(slices.brain.llm_model)
     _hidden_token = discovery.hidden_surface_members.set(hidden)
     # Render classes compactly in the system prompt: show name + docstring +
     # field annotations + enum values, skip methods and nested classes. Fields
