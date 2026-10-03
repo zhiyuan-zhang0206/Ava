@@ -33,14 +33,24 @@ def attach_available() -> bool:
     return _attach_unavailable_reason() is None
 
 
-def media_gated_members() -> frozenset[str]:
-    """Dotted ``ava`` member paths unavailable for the current model's media
-    capability — ``ava.self.attach`` on a text-only model (user ruling
-    2026-08-28). The help() renderer hides these from the SDK docs; empty for
-    a media-capable model."""
-    if attach_available():
-        return frozenset()
-    return frozenset({"ava.self.attach"})
+def media_gated_members(model: str) -> frozenset[str]:
+    """Dotted ``ava`` member paths unavailable for `model`'s media capability
+    — ``ava.self.attach`` on a text-only model (user ruling 2026-08-28). The
+    help() renderer hides these from the SDK docs; empty for a media-capable
+    model."""
+    from base.lm.registry import resolve_available_model
+
+    return _gated(_attach_unavailable_reason(resolve_available_model(model)))
+
+
+def own_media_gated_members() -> frozenset[str]:
+    """`media_gated_members` for the model of the process this runs in — the exec child, whose
+    settings carry its agent's overlay."""
+    return _gated(_attach_unavailable_reason())
+
+
+def _gated(unavailable_reason: str | None) -> frozenset[str]:
+    return frozenset() if unavailable_reason is None else frozenset({"ava.self.attach"})
 
 
 def _current_model() -> str:
@@ -48,14 +58,14 @@ def _current_model() -> str:
 
     Capability gates judge the model that will actually run, so a withdrawn id
     is gated as its fallback (task #3212)."""
-    from base.config.turn_view import turn_settings
+    from ava import _settings
     from base.lm.registry import resolve_available_model
 
-    return resolve_available_model(turn_settings.lm.llm_model)
+    return resolve_available_model(_settings.slices().brain.llm_model)
 
 
-def _attach_unavailable_reason() -> str | None:
-    """Why ``attach`` is unavailable for the current agent's model, or None.
+def _attach_unavailable_reason(model: str | None = None) -> str | None:
+    """Why ``attach`` is unavailable for `model` (default: this process's agent's), or None.
 
     A model with an empty attach-modality set (text-only, or an explicit empty
     ``attach_modalities`` declaration) cannot receive any attached media, so
@@ -63,7 +73,7 @@ def _attach_unavailable_reason() -> str | None:
     the member and the call fails with this reason (user ruling 2026-08-28)."""
     from base.lm.registry import attach_modalities_for_model
 
-    model = _current_model()
+    model = model or _current_model()
     if attach_modalities_for_model(model):
         return None
     return f"your model ({model}) is text-only and cannot receive media attachments"

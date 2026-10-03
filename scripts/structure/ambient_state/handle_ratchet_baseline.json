@@ -1,7 +1,6 @@
 {
   "agent": {
-    "shim": 3,
-    "turn-settings-read": 4
+    "shim": 3
   },
   "agent/graph": {
     "shim": 3,
@@ -9,17 +8,6 @@
   },
   "agent/ownership": {
     "bus-built": 3
-  },
-  "ava": {
-    "bus-built": 1,
-    "shim": 1,
-    "turn-settings-read": 2
-  },
-  "ava/external": {
-    "shim": 1
-  },
-  "ava/shell": {
-    "shim": 4
   },
   "ava_builtins/plugins": {
     "bus-built": 3
