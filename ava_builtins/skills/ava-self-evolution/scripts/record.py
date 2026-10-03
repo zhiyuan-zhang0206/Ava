@@ -13,7 +13,7 @@ import sys
 import warnings
 from collections import Counter
 from pathlib import Path
-from typing import Any
+from typing import Any, NamedTuple
 
 from pydantic import ValidationError
 
@@ -235,27 +235,13 @@ def _mode(values: list[str]) -> str:
     return Counter(value for value in values if value).most_common(1)[0][0] if any(values) else ""
 
 
-def build_record(
-    agent_id: int,
-    week: str,
-    events: list[tuple],
-    log_events: list[tuple],
+def _task_prompt(
+    spawner: str,
+    user_messages: list[str],
+    agent_messages: list[dict[str, Any]],
     inbounds: list[dict[str, Any]],
-    meta: tuple,
-    *,
-    leak_paths: LeakPaths | None = None,
-) -> dict[str, Any]:
-    """Assemble the stable trace dataset record for one agent run."""
-    spawner, status, last_message_text = meta
-
-    per_agent_inbounds = [message for message in inbounds if not message["is_broadcast"]]
-    user_messages = [
-        message["content"] for message in per_agent_inbounds if message["source"] == "user"
-    ]
-    agent_messages = [
-        message for message in per_agent_inbounds if message["source"].startswith("agent:")
-    ]
-
+) -> str:
+    """The run's task: the first user message, else the spawner's, else the first system one."""
     task_prompt = user_messages[0] if user_messages else ""
     if not task_prompt.strip() and spawner.startswith("agent:"):
         spawner_messages = [
@@ -271,15 +257,11 @@ def build_record(
         ]
         if system_messages:
             task_prompt = system_messages[0]
+    return task_prompt
 
-    corrections: list[str] = []
-    followup_prompts: list[str] = []
-    for message in user_messages[1:]:
-        if _detect_correction(message):
-            corrections.append(message)
-        else:
-            followup_prompts.append(message)
 
+def _peer_feedback(spawner: str, agent_messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Feedback from agents other than the spawner."""
     spawner_id: int | None = None
     if spawner.startswith("agent:"):
         with contextlib.suppress(IndexError, ValueError):
@@ -294,26 +276,99 @@ def build_record(
             continue
         if _detect_peer_feedback(message["content"]):
             peer_feedback.append({"from_agent": from_agent, "content": message["content"]})
+    return peer_feedback
 
-    turns = sum(1 for event, _ in events if event == "turn_end")
-    models = [str(payload.get("model", "")) for event, payload in events if event == "llm_usage"]
-    tokens_in = sum(
-        int(payload.get("in_total", 0)) for event, payload in events if event == "llm_usage"
-    )
-    tokens_out = sum(
-        int(payload.get("out_total", 0)) for event, payload in events if event == "llm_usage"
-    )
-    code_bodies = [str(payload.get("body", "")) for event, payload in events if event == "code"]
-    exec_ok = sum(1 for event, _ in events if _is_exec_ok(event))
-    exec_failed = sum(1 for event, _ in events if _is_exec_fail(event))
-    exec_outcomes = [event for event, _ in events if _is_exec_ok(event) or _is_exec_fail(event)]
-    last_exec_failed = bool(exec_outcomes) and _is_exec_fail(exec_outcomes[-1])
-    durations = [
-        float(payload.get("duration_seconds", 0))
-        for event, payload in events
-        if event == "turn_end"
-    ]
 
+class _EventStats(NamedTuple):
+    """What one run's telemetry events add up to."""
+
+    turns: int
+    models: list[str]
+    tokens_in: int
+    tokens_out: int
+    code_bodies: list[str]
+    exec_ok: int
+    exec_failed: int
+    last_exec_failed: bool
+    duration_s: float
+
+
+def _event_stats(events: list[tuple]) -> _EventStats:
+    turns = exec_ok = exec_failed = tokens_in = tokens_out = 0
+    models: list[str] = []
+    code_bodies: list[str] = []
+    exec_outcomes: list[str] = []
+    duration = 0.0
+    for event, payload in events:
+        if event == "turn_end":
+            turns += 1
+            duration += float(payload.get("duration_seconds", 0))
+        elif event == "llm_usage":
+            models.append(str(payload.get("model", "")))
+            tokens_in += int(payload.get("in_total", 0))
+            tokens_out += int(payload.get("out_total", 0))
+        elif event == "code":
+            code_bodies.append(str(payload.get("body", "")))
+        if _is_exec_ok(event):
+            exec_ok += 1
+            exec_outcomes.append(event)
+        elif _is_exec_fail(event):
+            exec_failed += 1
+            exec_outcomes.append(event)
+    return _EventStats(
+        turns=turns,
+        models=models,
+        tokens_in=tokens_in,
+        tokens_out=tokens_out,
+        code_bodies=code_bodies,
+        exec_ok=exec_ok,
+        exec_failed=exec_failed,
+        last_exec_failed=bool(exec_outcomes) and _is_exec_fail(exec_outcomes[-1]),
+        duration_s=round(duration, 1),
+    )
+
+
+def _per_agent_messages(
+    inbounds: list[dict[str, Any]],
+) -> tuple[list[str], list[dict[str, Any]]]:
+    """`(user message texts, agent-sourced messages)` addressed to this agent alone."""
+    per_agent = [message for message in inbounds if not message["is_broadcast"]]
+    user_messages = [message["content"] for message in per_agent if message["source"] == "user"]
+    agent_messages = [message for message in per_agent if message["source"].startswith("agent:")]
+    return user_messages, agent_messages
+
+
+def _leak_fields(code_bodies: list[str], agent_id: int, leak_paths: LeakPaths) -> dict[str, Any]:
+    findings = scan(code_bodies, agent_id=agent_id, leak_paths=leak_paths)
+    return {
+        "leak_audit": [
+            {"surface": finding.surface, "evidence": finding.evidence, "tool": finding.tool}
+            for finding in findings
+        ],
+        "invalidated": invalidated(findings),
+    }
+
+
+def build_record(
+    agent_id: int,
+    week: str,
+    events: list[tuple],
+    log_events: list[tuple],
+    inbounds: list[dict[str, Any]],
+    meta: tuple,
+    *,
+    leak_paths: LeakPaths | None = None,
+) -> dict[str, Any]:
+    """Assemble the stable trace dataset record for one agent run."""
+    spawner, status, last_message_text = meta
+
+    user_messages, agent_messages = _per_agent_messages(inbounds)
+    task_prompt = _task_prompt(spawner, user_messages, agent_messages, inbounds)
+
+    corrections = [m for m in user_messages[1:] if _detect_correction(m)]
+    followup_prompts = [m for m in user_messages[1:] if not _detect_correction(m)]
+
+    stats = _event_stats(events)
     compactions = sum(1 for event_type, _ in log_events if event_type == "compact")
     # `report_breached` is retired: only rows written before its producer was removed set this.
     breached = any(event_type == "report_breached" for event_type, _ in log_events)
@@ -330,34 +385,29 @@ def build_record(
         "agent_id": agent_id,
         "week": week,
         "spawner": spawner,
-        "model": _mode(models),
+        "model": _mode(stats.models),
         "task_prompt": task_prompt,
         "followup_prompts": followup_prompts,
         "corrections": corrections,
-        "peer_feedback": peer_feedback,
+        "peer_feedback": _peer_feedback(spawner, agent_messages),
         "transcript": transcript,
         "final_output": last_message_text or "",
-        "turns": turns,
-        "tokens_in": tokens_in,
-        "tokens_out": tokens_out,
-        "tools_called": count_tool_calls(code_bodies),
+        "turns": stats.turns,
+        "tokens_in": stats.tokens_in,
+        "tokens_out": stats.tokens_out,
+        "tools_called": count_tool_calls(stats.code_bodies),
         "skills_touched": _skills_touched(log_events),
         "plugins_activated": plugins_activated,
         "plugins_activated_skipped": plugins_activated_skipped,
-        "exec_ok": exec_ok,
-        "exec_failed": exec_failed,
-        "last_exec_failed": last_exec_failed,
+        "exec_ok": stats.exec_ok,
+        "exec_failed": stats.exec_failed,
+        "last_exec_failed": stats.last_exec_failed,
         "compactions": compactions,
         "breached": breached,
         "terminated": status == "terminated",
-        "duration_s": round(sum(durations), 1),
+        "duration_s": stats.duration_s,
     }
     if leak_paths is not None:
-        findings = scan(code_bodies, agent_id=agent_id, leak_paths=leak_paths)
-        record["leak_audit"] = [
-            {"surface": finding.surface, "evidence": finding.evidence, "tool": finding.tool}
-            for finding in findings
-        ]
-        record["invalidated"] = invalidated(findings)
+        record.update(_leak_fields(stats.code_bodies, agent_id, leak_paths))
     record["label"] = label(record)
     return record

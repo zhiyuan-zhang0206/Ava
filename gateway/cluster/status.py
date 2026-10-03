@@ -54,7 +54,7 @@ from gateway.cluster.snapshots import Snapshot, read_all
 from gateway.schemas.stats import StatsWindowHours, window_delta
 from ops import cluster_rpc as _cluster_rpc
 from ops.cluster_pause import is_paused as cluster_is_paused
-from ops.cluster_status import ClusterStatus, _check_pidfile
+from ops.cluster_status import ClusterStatus, check_pidfile
 from ops.cluster_status.schema_mismatch import status as schema_mismatch_status
 from services.events_maintenance import resolution as _resolution
 
@@ -222,7 +222,7 @@ def _get_services_status() -> ServicesStatus:
             ServiceEndpoints.from_settings().of("memory_indexer").pidfile,
         ),
     ):
-        alive, pid = _check_pidfile(str(pidfile))
+        alive, pid = check_pidfile(str(pidfile))
         items.append(
             ServiceItem(
                 name=name,

@@ -623,6 +623,27 @@ def _dropped_for_replay(drops: _DropKeys, kind: str, table: str | None, name: st
     return (table, name) in keys or (None, name) in keys
 
 
+def _unseeded_ddl(
+    seeded: set[str],
+) -> tuple[list[tuple[str, list[_DdlCandidate], list[tuple[int, int]]]], _DropKeys]:
+    """Each unseeded migration's DDL statements, plus the drops of all of them.
+
+    An object another unseeded migration drops is replay-safe, wherever the file sits.
+    """
+    facts: list[tuple[str, list[_DdlCandidate], list[tuple[int, int]]]] = []
+    all_drops: _DropKeys = {k: set() for k in ("column", "table", "index", "constraint", "trigger")}
+    for entry in sorted(MIGRATIONS_DIR.iterdir()):
+        match = _FILENAME_RE.match(entry.name) if entry.name.endswith(".sql") else None
+        if not match or match.group(1) in seeded:
+            continue
+        masked, do_spans = _mask_nonstatic_sql(entry.read_text(encoding="utf-8"))
+        adds, drops = _ddl_usage(masked)
+        facts.append((match.group(1), adds, do_spans))
+        for kind, keys in drops.items():
+            all_drops[kind] |= keys
+    return facts, all_drops
+
+
 def _check_folded_strict_without_seed() -> list[str]:
     """An unseeded migration must not carry a strict (non-idempotent) DDL
     statement whose object already exists in db/schema.sql.
@@ -646,66 +667,45 @@ def _check_folded_strict_without_seed() -> list[str]:
     masked_schema, _ = _mask_nonstatic_sql(raw_schema)
     catalog = _schema_catalog(masked_schema)
 
-    unseeded: list[tuple[str, Path]] = []
-    for entry in sorted(MIGRATIONS_DIR.iterdir()):
-        if not entry.name.endswith(".sql"):
-            continue
-        match = _FILENAME_RE.match(entry.name)
-        if match and match.group(1) not in seeded:
-            unseeded.append((match.group(1), entry))
-
-    # Collect every unseeded migration's drops first: an object another
-    # unseeded migration drops is replay-safe here, wherever the file sits.
-    facts: list[tuple[str, list[_DdlCandidate], list[tuple[int, int]]]] = []
-    all_drops: _DropKeys = {
-        "column": set(),
-        "table": set(),
-        "index": set(),
-        "constraint": set(),
-        "trigger": set(),
-    }
-    for stem, path in unseeded:
-        masked, do_spans = _mask_nonstatic_sql(path.read_text(encoding="utf-8"))
-        adds, drops = _ddl_usage(masked)
-        facts.append((stem, adds, do_spans))
-        for kind, keys in drops.items():
-            all_drops[kind] |= keys
+    facts, all_drops = _unseeded_ddl(seeded)
 
     errors: list[str] = []
     for stem, adds, do_spans in facts:
         for kind, table, name, idempotent, position in adds:
-            if idempotent:
-                continue
-            if any(start <= position < stop for start, stop in do_spans):
-                continue  # inside a DO block — the block owns its guard
-            if not _is_folded(catalog, kind, table, name):
-                continue
-            if _dropped_for_replay(all_drops, kind, table, name):
-                continue
-            statement = {
-                "column": f"ALTER TABLE {table} ADD COLUMN {name}",
-                "table": f"CREATE TABLE {name}",
-                "index": f"CREATE INDEX {name}",
-                "constraint": f"ADD CONSTRAINT {name} ON {table}",
-                "trigger": f"CREATE TRIGGER {name}",
-            }[kind]
-            subject = {
-                "column": f"column {name!r} of {table}",
-                "table": f"table {name!r}",
-                "index": f"index {name!r} ON {table}",
-                "constraint": f"constraint {name!r} ON {table}",
-                "trigger": f"trigger {name!r} ON {table}",
-            }[kind]
-            # Fix example shown in the error message; plain text, never executed as SQL.
-            stamp = f"INSERT INTO schema_migrations (name) VALUES ('{stem}')"  # noqa: S608
-            errors.append(
-                f"{stem}.sql: `{statement}` is not idempotent, but db/schema.sql "
-                f"already contains the {subject} — a fresh DB replays unseeded "
-                f"migrations and would fail here; stamp {stamp} in db/schema.sql, "
-                f"or make the statement idempotent (IF NOT EXISTS / CREATE OR "
-                f"REPLACE / a guarded DO block)"
-            )
+            if idempotent or any(start <= position < stop for start, stop in do_spans):
+                continue  # idempotent, or inside a DO block — the block owns its guard
+            if _is_folded(catalog, kind, table, name) and not _dropped_for_replay(
+                all_drops, kind, table, name
+            ):
+                errors.append(_replay_failure(stem, kind, table, name))
     return errors
+
+
+def _replay_failure(stem: str, kind: str, table: str | None, name: str) -> str:
+    """The error for one non-idempotent strict DDL statement of an unseeded migration."""
+    statement = {
+        "column": f"ALTER TABLE {table} ADD COLUMN {name}",
+        "table": f"CREATE TABLE {name}",
+        "index": f"CREATE INDEX {name}",
+        "constraint": f"ADD CONSTRAINT {name} ON {table}",
+        "trigger": f"CREATE TRIGGER {name}",
+    }[kind]
+    subject = {
+        "column": f"column {name!r} of {table}",
+        "table": f"table {name!r}",
+        "index": f"index {name!r} ON {table}",
+        "constraint": f"constraint {name!r} ON {table}",
+        "trigger": f"trigger {name!r} ON {table}",
+    }[kind]
+    # Fix example shown in the error message; plain text, never executed as SQL.
+    stamp = f"INSERT INTO schema_migrations (name) VALUES ('{stem}')"  # noqa: S608
+    return (
+        f"{stem}.sql: `{statement}` is not idempotent, but db/schema.sql "
+        f"already contains the {subject} — a fresh DB replays unseeded "
+        f"migrations and would fail here; stamp {stamp} in db/schema.sql, "
+        f"or make the statement idempotent (IF NOT EXISTS / CREATE OR "
+        f"REPLACE / a guarded DO block)"
+    )
 
 
 def _git(*args: str) -> subprocess.CompletedProcess[str]:

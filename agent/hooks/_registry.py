@@ -105,6 +105,67 @@ class Hook(ABC):
         return type(self).__name__
 
 
+def _field_reducer(model_fields: dict[str, Any], key: str) -> Callable[[Any, Any], Any] | None:
+    """The non-trivial reducer the state schema declares for `key`, if any."""
+    field_info = model_fields.get(key)
+    if field_info is None:
+        return None
+    for m in field_info.metadata:
+        if callable(m) and not isinstance(m, type):
+            return m
+        if _state._is_messages_reducer_form(m):
+            # The messages channel's delta form (write
+            # switch, task #3180): co-writes merge
+            # through the guarded single-merge, same
+            # as the working-copy / plugin path.
+            return _state.guarded_add_messages
+    return None
+
+
+def _merge_result(
+    update: dict[str, Any],
+    key_writer: dict[str, str],
+    result: dict[str, Any],
+    hook_label: str,
+    hook_name: HookName,
+    model_fields: dict[str, Any],
+) -> None:
+    """Fold one hook's update into the pass's update, reducer-aware on same-key co-writes."""
+    for key, value in result.items():
+        if key not in update:
+            key_writer[key] = hook_label
+            update[key] = value
+            continue
+        prior = key_writer[key]
+        # Check state schema for a non-trivial reducer on this key.
+        reducer = _field_reducer(model_fields, key)
+        if reducer is None:
+            raise RuntimeError(
+                f"{hook_name} hooks {prior!r} and {hook_label!r} both wrote "
+                f"key {key!r} in one pass — a later write would silently "
+                f"clobber the earlier one. Hooks sharing a node must not "
+                f"co-write a key; sequence the collision (the sibling "
+                f"defers when the other will write)."
+            )
+        # Non-trivial reducer: merge values (e.g. add_messages for
+        # 'messages' appends messages from both hooks).
+        update[key] = reducer(update[key], value)
+
+
+def _log_hook_timings(hook_name: HookName, timings: list[tuple[str, float]]) -> None:
+    if not timings:
+        # Skipped on an empty pass (no hooks registered) — an event
+        # with nothing to attribute is noise.
+        return
+    logger.info(
+        "[hook {node}] {durations}",
+        node=hook_name,
+        durations=", ".join(f"{name} {ms * 1000:.1f}ms" for name, ms in timings),
+        event="hook_timing",
+        hook_ms={name: round(ms * 1000, 1) for name, ms in timings},
+    )
+
+
 def make_hook_runner(
     hook_name: HookName,
     default_next: NodeName | Callable[[_state.AgentState], NodeName],
@@ -185,7 +246,7 @@ def make_hook_runner(
             # co-write detection.  Keys with a non-trivial reducer (e.g. messages →
             # add_messages) allow multiple hooks to co-write without clobbering —
             # the reducer merges the values rather than overwriting.
-            _model_fields = type(state).model_fields  # pyright: ignore[reportUnknownMemberType]
+            model_fields = type(state).model_fields  # pyright: ignore[reportUnknownMemberType]
             # Per-hook timings — one event per hook-runner pass, so a slow
             # before_llm / before_exec node can be attributed to the hook that
             # ate the time without a live debugger (the node span alone is a
@@ -209,49 +270,8 @@ def make_hook_runner(
                     detail=f"{hook.name} wrote {','.join(sorted(result))}",  # pyright: ignore[reportUnknownArgumentType]
                     model=runtime.context.require_agent().brain.llm_model,
                 )
-                for key, value in result.items():
-                    if key in update:
-                        prior = key_writer[key]
-                        this = hook.name
-                        # Check state schema for a non-trivial reducer on this key.
-                        field_info = _model_fields.get(key)  # pyright: ignore[reportUnknownMemberType, reportUnknownArgumentType]
-                        reducer = None
-                        if field_info is not None:
-                            for m in field_info.metadata:  # pyright: ignore[reportUnknownMemberType]
-                                if callable(m) and not isinstance(m, type):
-                                    reducer = m
-                                    break
-                                if _state._is_messages_reducer_form(m):
-                                    # The messages channel's delta form (write
-                                    # switch, task #3180): co-writes merge
-                                    # through the guarded single-merge, same
-                                    # as the working-copy / plugin path.
-                                    reducer = _state.guarded_add_messages
-                                    break
-                        if reducer is None:
-                            raise RuntimeError(
-                                f"{hook_name} hooks {prior!r} and {this!r} both wrote "
-                                f"key {key!r} in one pass — a later write would silently "
-                                f"clobber the earlier one. Hooks sharing a node must not "
-                                f"co-write a key; sequence the collision (the sibling "
-                                f"defers when the other will write)."
-                            )
-                        # Non-trivial reducer: merge values (e.g. add_messages for
-                        # 'messages' appends messages from both hooks).
-                        update[key] = reducer(update[key], value)  # pyright: ignore[reportUnknownArgumentType]
-                    else:
-                        key_writer[key] = hook.name
-                        update[key] = value  # pyright: ignore[reportUnknownArgumentType]
-            if timings:
-                # Skipped on an empty pass (no hooks registered) — an event
-                # with nothing to attribute is noise.
-                logger.info(
-                    "[hook {node}] {durations}",
-                    node=hook_name,
-                    durations=", ".join(f"{name} {ms * 1000:.1f}ms" for name, ms in timings),
-                    event="hook_timing",
-                    hook_ms={name: round(ms * 1000, 1) for name, ms in timings},
-                )
+                _merge_result(update, key_writer, result, hook.name, hook_name, model_fields)
+            _log_hook_timings(hook_name, timings)
             if "goto" in update:
                 next_node = update.pop("goto")
             elif callable(default_next):

@@ -343,6 +343,95 @@ def _land_repo_copy(
     return s.name
 
 
+def _adopt_user_residue(
+    s: _Source,
+    skills_root: Path,
+    registry: reg.Registry,
+    now: str,
+    entry: reg.InstalledPackage,
+    dest: Path,
+    src_hash: str,
+    skip: frozenset[tuple[str, ...]],
+    *,
+    force: bool,
+    landed: list[str],
+    updated: list[str],
+    unchanged: list[str],
+    conflicts: list[str],
+) -> None:
+    """Hand-installed residue of a repo skill: adopt it, overwrite it (force) or flag a conflict."""
+    from base.packages.extensions.install_registry import tree_hash
+
+    # Hand-installed residue of this repo skill (the pre-converge way
+    # to get project skills into the load dir was a manual
+    # `skill install --path .agents/skills/<name>`). This only fires
+    # for names that are still repo-native sources (builtins / plugin
+    # skills); `.agents/skills`-only skills are no longer sources
+    # (issue #146) and a hand-installed copy of one stays user-origin.
+    # Adopt it.
+    if not dest.exists():
+        landed.append(_land_repo_copy(s, skills_root, registry, now, overwrite=False))
+        return
+    if tree_hash(dest, skip_subtrees=skip) == src_hash:
+        entry.origin = s.origin
+        entry.origin_path = str(s.src)
+        entry.source = None
+        entry.path = None
+        entry.ref = None
+        # Adopting a repo skill's own content: it ships under the
+        # checkout's review, so the builtin stamp applies (converge's
+        # `_stamp_trust` sets it on its own adopt path; the update
+        # residue-adopt path had been leaving trust=unreviewed —
+        # audit round 2, skills-plugins #5).
+        entry.trust = "builtin"
+        entry.content_hash = src_hash
+        entry.updated_at = now
+        unchanged.append(s.name)
+    elif force:
+        updated.append(_land_repo_copy(s, skills_root, registry, now, overwrite=True))
+    else:
+        conflicts.append(
+            f"'{s.name}': local copy differs from the repo source (and the "
+            f"source changed) — re-run with --force to adopt the repo version"
+        )
+    return
+
+
+def _update_tracked(
+    s: _Source,
+    skills_root: Path,
+    registry: reg.Registry,
+    now: str,
+    entry: reg.InstalledPackage,
+    dest: Path,
+    src_hash: str,
+    skip: frozenset[tuple[str, ...]],
+    *,
+    force: bool,
+    updated: list[str],
+    unchanged: list[str],
+    conflicts: list[str],
+) -> None:
+    """Tracked repo-native (or builtin-plugin) entry: the update path."""
+    from base.packages.extensions.install_registry import tree_hash
+
+    dest_hash = tree_hash(dest, skip_subtrees=skip)
+    if dest_hash == src_hash:
+        # Content is current; re-anchor a stale recorded source (e.g. a row
+        # written from a deleted worktree — audit 02 #15).
+        if entry.origin_path != str(s.src):
+            entry.origin_path, entry.updated_at = str(s.src), now
+        unchanged.append(s.name)
+    elif dest_hash == entry.content_hash or force:
+        updated.append(_land_repo_copy(s, skills_root, registry, now, overwrite=True))
+    else:
+        conflicts.append(
+            f"'{s.name}': modified locally (content differs from the last synced "
+            f"version) and the source changed — re-run with --force to overwrite "
+            f"your edits with the repo version"
+        )
+
+
 def _update_one(
     s: _Source,
     skills_root: Path,
@@ -378,38 +467,21 @@ def _update_one(
         if entry.source and entry.source.startswith(
             (".agents/skills/", ".claude/skills/", ".ava/skills/")
         ):
-            # Hand-installed residue of this repo skill (the pre-converge way
-            # to get project skills into the load dir was a manual
-            # `skill install --path .agents/skills/<name>`). This only fires
-            # for names that are still repo-native sources (builtins / plugin
-            # skills); `.agents/skills`-only skills are no longer sources
-            # (issue #146) and a hand-installed copy of one stays user-origin.
-            # Adopt it.
-            if not dest.exists():
-                landed.append(_land_repo_copy(s, skills_root, registry, now, overwrite=False))
-                return
-            if tree_hash(dest, skip_subtrees=skip) == src_hash:
-                entry.origin = s.origin
-                entry.origin_path = str(s.src)
-                entry.source = None
-                entry.path = None
-                entry.ref = None
-                # Adopting a repo skill's own content: it ships under the
-                # checkout's review, so the builtin stamp applies (converge's
-                # `_stamp_trust` sets it on its own adopt path; the update
-                # residue-adopt path had been leaving trust=unreviewed —
-                # audit round 2, skills-plugins #5).
-                entry.trust = "builtin"
-                entry.content_hash = src_hash
-                entry.updated_at = now
-                unchanged.append(s.name)
-            elif force:
-                updated.append(_land_repo_copy(s, skills_root, registry, now, overwrite=True))
-            else:
-                conflicts.append(
-                    f"'{s.name}': local copy differs from the repo source (and the "
-                    f"source changed) — re-run with --force to adopt the repo version"
-                )
+            _adopt_user_residue(
+                s,
+                skills_root,
+                registry,
+                now,
+                entry,
+                dest,
+                src_hash,
+                skip,
+                force=force,
+                landed=landed,
+                updated=updated,
+                unchanged=unchanged,
+                conflicts=conflicts,
+            )
             return
         # A genuinely third-party or hand-registered package: converge shadows
         # it, and so does update.
@@ -434,22 +506,70 @@ def _update_one(
             )
         return
 
-    # Tracked repo-native (or builtin-plugin) entry: the update path.
-    dest_hash = tree_hash(dest, skip_subtrees=skip)
-    if dest_hash == src_hash:
-        # Content is current; re-anchor a stale recorded source (e.g. a row
-        # written from a deleted worktree — audit 02 #15).
-        if entry.origin_path != str(s.src):
-            entry.origin_path, entry.updated_at = str(s.src), now
-        unchanged.append(s.name)
-    elif dest_hash == entry.content_hash or force:
-        updated.append(_land_repo_copy(s, skills_root, registry, now, overwrite=True))
-    else:
-        conflicts.append(
-            f"'{s.name}': modified locally (content differs from the last synced "
-            f"version) and the source changed — re-run with --force to overwrite "
-            f"your edits with the repo version"
+    _update_tracked(
+        s,
+        skills_root,
+        registry,
+        now,
+        entry,
+        dest,
+        src_hash,
+        skip,
+        force=force,
+        updated=updated,
+        unchanged=unchanged,
+        conflicts=conflicts,
+    )
+
+
+def _selected_sources(repo: Path, names: list[str] | None) -> list[_Source]:
+    """The repo-native sources to sync: all of them, or the named ones (unknown names warn)."""
+    sources = _repo_native_sources(repo)
+    if names:
+        wanted = set(names)
+        sources = [s for s in sources if s.name in wanted]
+        missing = wanted - {s.name for s in sources}
+        for m in sorted(missing):
+            print(
+                f"[ava skill update] '{m}' is not a repo-native skill of this checkout "
+                f"(repo/plugin builtins are; a user install would be "
+                f"`ava skill upgrade {m}`).",
+                file=sys.stderr,
+            )
+    return sources
+
+
+def _report_update(
+    skills_root: Path,
+    *,
+    force: bool,
+    landed: list[str],
+    updated: list[str],
+    unchanged: list[str],
+    conflicts: list[str],
+    skipped: list[str],
+) -> int:
+    if skipped:
+        print(
+            f"[ava skill update] {len(skipped)} channel-managed package(s) skipped — "
+            "`ava packages refresh` owns their updates (see `ava packages status`)."
         )
+    for name in landed:
+        print(f"[ava skill update] landed '{name}' -> {skills_root / name}")
+    for name in updated:
+        print(f"[ava skill update] updated '{name}'")
+    for name in unchanged:
+        print(f"[ava skill update] '{name}' up to date")
+    for c in conflicts:
+        print(f"[ava skill update] conflict: {c}", file=sys.stderr)
+    if conflicts and not force:
+        print(
+            "  NONE were overwritten; re-run with --force to replace local edits.",
+            file=sys.stderr,
+        )
+        return 1
+    print("  active on the next skill scan; no restart needed.")
+    return 0
 
 
 def cmd_skill_update(
@@ -488,18 +608,7 @@ def cmd_skill_update(
         print(f"[ava skill update] {e}", file=sys.stderr)
         return 1
 
-    sources = _repo_native_sources(repo)
-    if names:
-        wanted = set(names)
-        sources = [s for s in sources if s.name in wanted]
-        missing = wanted - {s.name for s in sources}
-        for m in sorted(missing):
-            print(
-                f"[ava skill update] '{m}' is not a repo-native skill of this checkout "
-                f"(repo/plugin builtins are; a user install would be "
-                f"`ava skill upgrade {m}`).",
-                file=sys.stderr,
-            )
+    sources = _selected_sources(repo, names)
     skills_root = paths.skills_dir()
     skills_root.mkdir(parents=True, exist_ok=True)
     now = datetime.now(UTC).isoformat(timespec="seconds")
@@ -522,27 +631,15 @@ def cmd_skill_update(
                 conflicts=conflicts,
                 skipped=skipped,
             )
-    if skipped:
-        print(
-            f"[ava skill update] {len(skipped)} channel-managed package(s) skipped — "
-            "`ava packages refresh` owns their updates (see `ava packages status`)."
-        )
-    for name in landed:
-        print(f"[ava skill update] landed '{name}' -> {skills_root / name}")
-    for name in updated:
-        print(f"[ava skill update] updated '{name}'")
-    for name in unchanged:
-        print(f"[ava skill update] '{name}' up to date")
-    for c in conflicts:
-        print(f"[ava skill update] conflict: {c}", file=sys.stderr)
-    if conflicts and not force:
-        print(
-            "  NONE were overwritten; re-run with --force to replace local edits.",
-            file=sys.stderr,
-        )
-        return 1
-    print("  active on the next skill scan; no restart needed.")
-    return 0
+    return _report_update(
+        skills_root,
+        force=force,
+        landed=landed,
+        updated=updated,
+        unchanged=unchanged,
+        conflicts=conflicts,
+        skipped=skipped,
+    )
 
 
 def cmd_skill_upgrade(name: str, *, force: bool = False) -> int:

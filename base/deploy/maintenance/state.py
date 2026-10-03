@@ -93,14 +93,7 @@ class MaintenanceHold:
         undelivered = _receipts(raw.get("undelivered", {}), "undelivered receipts")
         repaired = _receipts(raw.get("repaired", {}), "repaired receipts")
         repair_record = _repair_record(raw.get("repair_record"))
-        parked = raw["parked"]
-        if not isinstance(parked, list):
-            raise TypeError("parked agents must be a list")
-        parked_ids = cast(list[object], parked)
-        if any(type(agent) is not int or agent < 1 or agent in parsed for agent in parked_ids):
-            raise ValueError("invalid parked agent IDs")
-        if len(set(parked_ids)) != len(parked_ids):
-            raise ValueError("duplicate parked agent ID")
+        parked_ids = _parked_ids(raw["parked"], parsed)
         return cls(
             phase,
             parsed,
@@ -111,6 +104,17 @@ class MaintenanceHold:
             repair_record,
             tuple(cast(list[int], parked_ids)),
         )
+
+
+def _parked_ids(parked: object, cohort: dict[int, int]) -> list[object]:
+    if not isinstance(parked, list):
+        raise TypeError("parked agents must be a list")
+    parked_ids = cast(list[object], parked)
+    if any(type(agent) is not int or agent < 1 or agent in cohort for agent in parked_ids):
+        raise ValueError("invalid parked agent IDs")
+    if len(set(parked_ids)) != len(parked_ids):
+        raise ValueError("duplicate parked agent ID")
+    return parked_ids
 
 
 def _commands(commands: dict[object, object]) -> dict[int, int]:

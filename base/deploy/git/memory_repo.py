@@ -372,6 +372,55 @@ class RepoStatus:
     last_fetch: str  # ISO ts of `.git/FETCH_HEAD` mtime, or "never"
 
 
+def _reconcile_initialized(branch: str, *, keep_local: bool) -> None:
+    """`init()` on an already-initialized checkout: settle the branch, strip remotes if local-only."""
+    current = _run_git("rev-parse", "--abbrev-ref", "HEAD")
+    if current != branch:
+        if is_gateway() and not is_agent_runner():
+            # gateway-only unit: the memory checkout is the consolidated
+            # pool; an existing checkout on a stale machine-<name> branch
+            # is safe to move onto main (it never authors, so there is no
+            # unpushed authored work to lose).
+            if not keep_local:
+                _run_git("fetch", "origin", "main")
+            _run_git("checkout", "main")
+            if keep_local:
+                _strip_remotes(memory_dir())
+            return
+        raise MemoryBranchMismatch(  # agent-runner (or combined): may have unpushed work
+            f"{memory_dir()} is already a git repo but on branch {current!r}, expected {branch!r}. "
+            f"Manually switch: `git -C {memory_dir()} checkout {branch}` "
+            "(confirm working tree has no unpushed in-flight work)."
+        )
+    if keep_local:
+        _strip_remotes(memory_dir())
+
+
+def _init_without_remote(branch: str) -> None:
+    """`init()` with no memory remote configured: bootstrap from the gateway or birth a local repo."""
+    if is_agent_runner() and not is_gateway():
+        # Split agent-runner without a configured remote: the shared pool
+        # must still reach its agents, so bootstrap from the gateway's
+        # consolidated checkout. Never a silent local stub (2026-08-27
+        # company-mini incident) — when the gateway cannot be reached
+        # either, fail loud instead of birthing an empty pool.
+        try:
+            bootstrap_from_gateway()
+        except MemoryPoolBootstrapFailed as e:
+            raise MemoryRemoteMissing(
+                "memory remote not configured and the gateway pool snapshot "
+                f"fetch failed ({e}). Set AVA_MEMORY_REMOTE for the GitHub sync "
+                "path, fix the gateway URL / cluster secret, or set "
+                "AVA_MEMORY_KEEP_LOCAL=true "
+                "to run an explicitly local-only pool."
+            ) from e
+        return
+    # A gateway-capable unit (single-box fresh install): on first boot its
+    # own gateway half is not serving yet, so there is nothing to fetch
+    # from — a local repo is the only option and stays silent, as before.
+    _init_local_repo(branch, memory_dir())
+
+
 def init() -> None:
     """First-time setup of the memory repo — idempotent.
 
@@ -412,26 +461,7 @@ def init() -> None:
     branch = branch_name()
     keep_local = settings.general.memory_keep_local
     if is_initialized():
-        current = _run_git("rev-parse", "--abbrev-ref", "HEAD")
-        if current != branch:
-            if is_gateway() and not is_agent_runner():
-                # gateway-only unit: the memory checkout is the consolidated
-                # pool; an existing checkout on a stale machine-<name> branch
-                # is safe to move onto main (it never authors, so there is no
-                # unpushed authored work to lose).
-                if not keep_local:
-                    _run_git("fetch", "origin", "main")
-                _run_git("checkout", "main")
-                if keep_local:
-                    _strip_remotes(memory_dir())
-                return
-            raise MemoryBranchMismatch(  # agent-runner (or combined): may have unpushed work
-                f"{memory_dir()} is already a git repo but on branch {current!r}, expected {branch!r}. "
-                f"Manually switch: `git -C {memory_dir()} checkout {branch}` "
-                "(confirm working tree has no unpushed in-flight work)."
-            )
-        if keep_local:
-            _strip_remotes(memory_dir())
+        _reconcile_initialized(branch, keep_local=keep_local)
         return
 
     if keep_local:
@@ -443,27 +473,7 @@ def init() -> None:
     try:
         remote = memory_remote()
     except MemoryRemoteMissing:
-        if is_agent_runner() and not is_gateway():
-            # Split agent-runner without a configured remote: the shared pool
-            # must still reach its agents, so bootstrap from the gateway's
-            # consolidated checkout. Never a silent local stub (2026-08-27
-            # company-mini incident) — when the gateway cannot be reached
-            # either, fail loud instead of birthing an empty pool.
-            try:
-                bootstrap_from_gateway()
-            except MemoryPoolBootstrapFailed as e:
-                raise MemoryRemoteMissing(
-                    "memory remote not configured and the gateway pool snapshot "
-                    f"fetch failed ({e}). Set AVA_MEMORY_REMOTE for the GitHub sync "
-                    "path, fix the gateway URL / cluster secret, or set "
-                    "AVA_MEMORY_KEEP_LOCAL=true "
-                    "to run an explicitly local-only pool."
-                ) from e
-            return
-        # A gateway-capable unit (single-box fresh install): on first boot its
-        # own gateway half is not serving yet, so there is nothing to fetch
-        # from — a local repo is the only option and stays silent, as before.
-        _init_local_repo(branch, memory_dir())
+        _init_without_remote(branch)
         return
 
     # `git clone` into a non-existent directory — cwd is the parent

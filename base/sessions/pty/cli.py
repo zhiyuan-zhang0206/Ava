@@ -704,7 +704,11 @@ def main(argv: list[str] | None = None) -> int:
     if len(args) < 2:
         sys.stderr.write(f"usage: pty_sessions.cli {name} <op> [args]\n")
         return 2
-    op, rest = args[1], args[2:]
+    return _run_session_op(name, args[1], args[2:])
+
+
+def _run_session_op(name: str, op: str, rest: list[str]) -> int:
+    """Run one `<name> <op> [args]` invocation."""
     if op == "has":
         if rest:
             sys.stderr.write(f"usage: pty_sessions.cli {name} has\n")
@@ -719,20 +723,19 @@ def main(argv: list[str] | None = None) -> int:
             return 1
         sys.stdout.write(f"{epoch}\n")
         return 0
-    if op == "new":
-        return _op_new(name, rest)
-    if op == "send":
-        return _op_send(name, rest)
-    if op == "send_keys":
-        return _op_send_keys(name, rest)
-    if op == "capture":
-        return _op_capture(name, rest)
-    if op == "resize":
-        return _op_resize(name, rest)
-    if op == "kill":
-        return _op_kill(name, rest)
-    sys.stderr.write(f"unknown op {op!r} for session {name!r}\n")
-    return 2
+    handlers = {
+        "new": _op_new,
+        "send": _op_send,
+        "send_keys": _op_send_keys,
+        "capture": _op_capture,
+        "resize": _op_resize,
+        "kill": _op_kill,
+    }
+    handler = handlers.get(op)
+    if handler is None:
+        sys.stderr.write(f"unknown op {op!r} for session {name!r}\n")
+        return 2
+    return handler(name, rest)
 
 
 if __name__ == "__main__":

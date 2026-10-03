@@ -250,8 +250,8 @@ def test_fetch_timeline_bounds_pagination(monkeypatch: pytest.MonkeyPatch) -> No
 
 def test_fetch_queue_depth_returns_none_on_trunk_error(monkeypatch: pytest.MonkeyPatch) -> None:
     fake = types.SimpleNamespace(
-        _trunk_post=lambda *_a, **_k: (None, "HTTP 503"),
-        _trunk_target_payload=lambda _repo: {},
+        post=lambda *_a, **_k: (None, "HTTP 503"),
+        target_payload=lambda _repo: {},
     )
     monkeypatch.setattr(pr_flow, "_trunk_client", lambda: contextlib.nullcontext(fake))
     stats = pr_flow.RunStats()
@@ -279,9 +279,9 @@ def test_fetch_quarantined_walks_next_page_token(monkeypatch: pytest.MonkeyPatch
         return ({"quarantined_tests": [{"test_case_id": "b"}], "page": {}}, None)
 
     fake = types.SimpleNamespace(
-        _trunk_post=trunk_post,
-        _trunk_target_payload=lambda _repo: {},
-        _TRUNK_ORG_SLUG="org",
+        post=trunk_post,
+        target_payload=lambda _repo: {},
+        ORG_SLUG="org",
     )
     monkeypatch.setattr(pr_flow, "_trunk_client", lambda: contextlib.nullcontext(fake))
     stats = pr_flow.RunStats()

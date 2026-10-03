@@ -114,6 +114,19 @@ async def _subscribe_error_frame(
     return None
 
 
+async def _close_pubsub(pubsub: Any, client: Any, channel: str) -> None:
+    """Each cleanup step is independently suppressed + logged so one failure does not swallow another."""
+    for step, coro_fn in (
+        ("unsubscribe", lambda: pubsub.unsubscribe(channel)),  # pyright: ignore[reportUnknownMemberType]
+        ("pubsub.aclose", pubsub.aclose),
+        ("client.aclose", client.aclose),
+    ):
+        try:
+            await coro_fn()
+        except Exception as exc:
+            _log.warning("sse cleanup %s failed: %r", step, exc)
+
+
 async def event_stream(
     bus: EventBus,
     agent_id: int,  # ignored in broadcast mode
@@ -240,15 +253,7 @@ async def event_stream(
             time.monotonic() - opened,
             data_frames,
         )
-        for step, coro_fn in (
-            ("unsubscribe", lambda: pubsub.unsubscribe(_channel)),  # pyright: ignore[reportUnknownMemberType]
-            ("pubsub.aclose", pubsub.aclose),
-            ("client.aclose", client.aclose),
-        ):
-            try:
-                await coro_fn()
-            except Exception as exc:
-                _log.warning("sse cleanup %s failed: %r", step, exc)
+        await _close_pubsub(pubsub, client, _channel)
 
 
 async def _drain_redis_messages(

@@ -158,6 +158,43 @@ def send(
     return sent_summary(msg, sent=not dry_run)
 
 
+def _original(message_id: str) -> EmailMessage:
+    """The message with this RFC822 Message-Id (the newest match)."""
+    mid = message_id.strip().strip("<>")
+    ids = _search(f"rfc822msgid:{mid}")
+    if not ids:
+        raise GmailError(f"no message with Message-Id {message_id!r}")
+    _, orig = _full(ids[-1])
+    return orig
+
+
+def _reply_all_cc(orig: EmailMessage, to: list[str], acct: str) -> list[str]:
+    """The original To+Cc minus the reply's recipients and our own address."""
+    cc: list[str] = []
+    seen = {a.lower() for a in to} | {acct}
+    for addr in addr_list(orig["To"]) + addr_list(orig["Cc"]):
+        if addr.lower() not in seen:
+            cc.append(addr)
+            seen.add(addr.lower())
+    return cc
+
+
+def _forward_body(orig: EmailMessage, body: str) -> str:
+    """The optional `body` note above a Gmail-style quote of the original."""
+    quoted = "\n".join(
+        [
+            "---------- Forwarded message ----------",
+            f"From: {(orig['From'] or '').strip()}",
+            f"Date: {(orig['Date'] or '').strip()}",
+            f"Subject: {(orig['Subject'] or '').strip()}",
+            f"To: {(orig['To'] or '').strip()}",
+            "",
+            _body_text(orig),
+        ]
+    )
+    return (body.strip() + "\n\n" + quoted) if body.strip() else quoted
+
+
 def reply(
     message_id: str,
     body: str,
@@ -173,23 +210,13 @@ def reply(
     `reply_all` adds the original To+Cc minus our own address. `attach` is a list
     of file paths to attach. SIDE-EFFECTFUL unless `dry_run` (which composes from
     the fetched original without sending)."""
-    mid = message_id.strip().strip("<>")
-    ids = _search(f"rfc822msgid:{mid}")
-    if not ids:
-        raise GmailError(f"no message with Message-Id {message_id!r}")
-    _, orig = _full(ids[-1])
+    orig = _original(message_id)
     acct = _account().lower()
 
     to = addr_list(orig["Reply-To"]) or addr_list(orig["From"])
     if not to:
         raise GmailError(f"cannot reply to {message_id!r}: original has no Reply-To/From address")
-    cc: list[str] = []
-    if reply_all:
-        seen = {a.lower() for a in to} | {acct}
-        for addr in addr_list(orig["To"]) + addr_list(orig["Cc"]):
-            if addr.lower() not in seen:
-                cc.append(addr)
-                seen.add(addr.lower())
+    cc = _reply_all_cc(orig, to, acct) if reply_all else []
 
     subject = (orig["Subject"] or "").strip()
     if not subject.lower().startswith("re:"):
@@ -238,11 +265,7 @@ def forward(
     block + the extracted body text) below the optional `body` note; the
     original's attachments are carried along, and `attach` adds new ones.
     SIDE-EFFECTFUL unless `dry_run`."""
-    mid = message_id.strip().strip("<>")
-    ids = _search(f"rfc822msgid:{mid}")
-    if not ids:
-        raise GmailError(f"no message with Message-Id {message_id!r}")
-    _, orig = _full(ids[-1])
+    orig = _original(message_id)
 
     to_list = addr_list(to) if isinstance(to, str) else list(to)
     if not to_list:
@@ -252,18 +275,7 @@ def forward(
     subject = (orig["Subject"] or "").strip()
     if not subject.lower().startswith("fwd:"):
         subject = f"Fwd: {subject}"
-    quoted = "\n".join(
-        [
-            "---------- Forwarded message ----------",
-            f"From: {(orig['From'] or '').strip()}",
-            f"Date: {(orig['Date'] or '').strip()}",
-            f"Subject: {(orig['Subject'] or '').strip()}",
-            f"To: {(orig['To'] or '').strip()}",
-            "",
-            _body_text(orig),
-        ]
-    )
-    full_body = (body.strip() + "\n\n" + quoted) if body.strip() else quoted
+    full_body = _forward_body(orig, body)
 
     msg = _compose(
         to=to_list, subject=subject, body=full_body, cc=cc_list or None, attachments=attach

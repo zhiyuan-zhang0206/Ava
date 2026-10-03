@@ -195,6 +195,44 @@ class ComputerMcpDaemon:
         agent_id = req.get("agent_id")
         return await self._call_tool(tool, args, agent_id, req_id)
 
+    def _track_tool_effects(self, tool: str, args: dict[str, Any], result: dict[str, Any]) -> None:
+        """Remember the scale and pointer the tool's result established, for later conversions."""
+        if tool == "snapshot":
+            # click/scroll convert with the scale the caller saw.
+            self._scale = float(result["screen"]["scale"])
+        elif tool == "click_text":
+            # The click landed where OCR found the text; record the
+            # pointer AND the scale its capture measured, so later
+            # click/scroll convert like this call did.
+            self._scale = float(result["scale"])
+            self._pointer = (float(result["x"]), float(result["y"]))
+        if tool == "click" or (tool == "scroll" and "x" in args and "y" in args):
+            self._pointer = (float(args["x"]), float(args["y"]))
+
+    async def _renew_and_note(self, agent_id: int, tool: str, args: dict[str, Any]) -> None:
+        """A live caller renews the lease (success or failure — it is still acting on the
+        screen) and its task session notes the action."""
+        await self._screen.touch(agent_id)
+        task_id = args.get("task_id")
+        if task_id is None:
+            return
+        # Garbage task_id: the computer_action row still carries it
+        # as-is; the envelope just does not form (suppress, not a
+        # silent except:pass — the action is what matters here).
+        tid: int | None = None
+        with suppress(TypeError, ValueError):
+            tid = int(task_id)
+        if tid is None:
+            return
+        try:
+            self._task_sessions.note(tid, agent_id, tool, self._emit_session_event)
+        except Exception as e:  # auxiliary path, see below
+            # The session envelope is auxiliary to the action
+            # itself: never fail the action, but never stay
+            # silent either — a contract mismatch (unregistered
+            # event name, FK hiccup) must be audible.
+            logger.warning(f"[computer-mcp] task-session event failed: {e}")
+
     async def _call_tool(
         self, tool: str, args: dict[str, Any], agent_id: int | None, req_id: int
     ) -> Response:
@@ -224,17 +262,7 @@ class ComputerMcpDaemon:
                     ocr_cache=self._ocr_cache,
                     ax_session=self._ax_session,
                 )
-                if tool == "snapshot":
-                    # click/scroll convert with the scale the caller saw.
-                    self._scale = float(result["screen"]["scale"])
-                elif tool == "click_text":
-                    # The click landed where OCR found the text; record the
-                    # pointer AND the scale its capture measured, so later
-                    # click/scroll convert like this call did.
-                    self._scale = float(result["scale"])
-                    self._pointer = (float(result["x"]), float(result["y"]))
-                if tool == "click" or (tool == "scroll" and "x" in args and "y" in args):
-                    self._pointer = (float(args["x"]), float(args["y"]))
+                self._track_tool_effects(tool, args, result)
             except (PermissionsHelperError, KeyError, TypeError, ValueError, OSError) as e:
                 outcome, error = "error", f"{type(e).__name__}: {e}"
                 result = None
@@ -242,26 +270,7 @@ class ComputerMcpDaemon:
                 outcome, error = "error", f"{type(e).__name__}: {e}"
                 result = None
             if agent_id is not None:
-                # A live caller renews the lease (success or failure — it is
-                # still acting on the screen).
-                await self._screen.touch(agent_id)
-                task_id = args.get("task_id")
-                if task_id is not None:
-                    # Garbage task_id: the computer_action row still carries it
-                    # as-is; the envelope just does not form (suppress, not a
-                    # silent except:pass — the action is what matters here).
-                    tid: int | None = None
-                    with suppress(TypeError, ValueError):
-                        tid = int(task_id)
-                    if tid is not None:
-                        try:
-                            self._task_sessions.note(tid, agent_id, tool, self._emit_session_event)
-                        except Exception as e:  # auxiliary path, see below
-                            # The session envelope is auxiliary to the action
-                            # itself: never fail the action, but never stay
-                            # silent either — a contract mismatch (unregistered
-                            # event name, FK hiccup) must be audible.
-                            logger.warning(f"[computer-mcp] task-session event failed: {e}")
+                await self._renew_and_note(agent_id, tool, args)
             self._emit_action(agent_id, tool, args, outcome, error, result=result)
             if error is not None:
                 return {"id": req_id, "ok": False, "error": error}

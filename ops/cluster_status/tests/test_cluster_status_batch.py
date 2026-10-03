@@ -30,15 +30,15 @@ _RESOURCE = ResourceSample(
 )
 
 
-def test_check_pidfile_ignores_root_level_pidfile(tmp_path: Path) -> None:
+def testcheck_pidfile_ignores_root_level_pidfile(tmp_path: Path) -> None:
     current = tmp_path / "run" / "agent_host.pid"
     current.parent.mkdir()
     (tmp_path / current.name).write_text(str(os.getpid()))
 
-    assert cluster_status._check_pidfile(str(current)) == (False, None)
+    assert cluster_status.check_pidfile(str(current)) == (False, None)
 
     current.write_text(str(os.getpid()))
-    assert cluster_status._check_pidfile(str(current)) == (True, os.getpid())
+    assert cluster_status.check_pidfile(str(current)) == (True, os.getpid())
 
 
 class _Pool:
@@ -68,7 +68,7 @@ def snapshot_dependencies(
     def _no_sessions() -> tuple[list[SessionInfo], int, int]:
         return [], 0, 0
 
-    monkeypatch.setattr(cluster_status, "_check_pidfile", _dead_pidfile)
+    monkeypatch.setattr(cluster_status, "check_pidfile", _dead_pidfile)
     monkeypatch.setattr(cluster_status, "_collect_sessions", _no_sessions)
 
     def _no_agents(_conn: object) -> int:
@@ -397,7 +397,7 @@ def test_agent_host_liveness_is_probed_only_on_a_runner(
         return True, 1234
 
     monkeypatch.setattr(cluster_status, "is_agent_runner", lambda: runner)
-    monkeypatch.setattr(cluster_status, "_check_pidfile", check)
+    monkeypatch.setattr(cluster_status, "check_pidfile", check)
 
     def no_deploy(_pool: object) -> tuple[None, int, None]:
         return None, 0, None

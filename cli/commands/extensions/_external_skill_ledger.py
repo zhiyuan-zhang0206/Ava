@@ -77,6 +77,27 @@ def _valid_digest(value: object) -> bool:
     return isinstance(value, str) and _HEX.fullmatch(value) is not None
 
 
+def _valid_manifest_item(item: dict[str, Any], paths: set[str]) -> bool:
+    kind = item.get("kind")
+    if kind == "file":
+        required = {"kind", "mode", "path", "sha256"}
+    elif kind == "directory":
+        required = {"kind", "mode", "path"}
+    else:
+        return False
+    path = item.get("path")
+    mode = item.get("mode")
+    return not (
+        set(item) != required
+        or not isinstance(path, str)
+        or path in paths
+        or (path != "." and (path.startswith("/") or ".." in Path(path).parts))
+        or not isinstance(mode, int)
+        or not 0 <= mode <= 0o7777
+        or (kind == "file" and not _valid_digest(item.get("sha256")))
+    )
+
+
 def _valid_manifest(value: object) -> bool:
     if not isinstance(value, list):
         return False
@@ -85,32 +106,42 @@ def _valid_manifest(value: object) -> bool:
         if not isinstance(item_value, dict):
             return False
         item = cast(dict[str, Any], item_value)
-        kind = item.get("kind")
-        if kind == "file":
-            required = {"kind", "mode", "path", "sha256"}
-        elif kind == "directory":
-            required = {"kind", "mode", "path"}
-        else:
+        if not _valid_manifest_item(item, paths):
             return False
-        path = item.get("path")
-        mode = item.get("mode")
-        if (
-            set(item) != required
-            or not isinstance(path, str)
-            or path in paths
-            or (path != "." and (path.startswith("/") or ".." in Path(path).parts))
-            or not isinstance(mode, int)
-            or not 0 <= mode <= 0o7777
-            or (kind == "file" and not _valid_digest(item.get("sha256")))
-        ):
-            return False
-        paths.add(path)
+        paths.add(item["path"])
     for item_value in cast(list[object], value):
         if isinstance(item_value, dict):
             item = cast(dict[str, object], item_value)
             if item.get("path") == "." and item.get("kind") == "directory":
                 return True
     return False
+
+
+def _expected_quarantine(path: object) -> str | None:
+    if not isinstance(path, str):
+        return None
+    source_path = Path(path)
+    suffix = hashlib.sha256(path.encode()).hexdigest()[:16]
+    return source_path.with_name(f".{source_path.name}.ava-retained-{suffix}").as_posix()
+
+
+def _valid_claim(
+    claim: dict[str, object], expected_files: set[str], paths: set[str], quarantines: set[str]
+) -> bool:
+    path = claim.get("path")
+    quarantine = claim.get("quarantine")
+    return not (
+        set(claim) != {"path", "quarantine", "state"}
+        or not isinstance(path, str)
+        or not isinstance(quarantine, str)
+        or path not in expected_files
+        or path in paths
+        or quarantine in quarantines
+        or quarantine != _expected_quarantine(path)
+        or Path(quarantine).is_absolute()
+        or ".." in Path(quarantine).parts
+        or claim.get("state") not in {"source", "claiming", "quarantine", "retained"}
+    )
 
 
 def _valid_file_claims(value: object, manifest: object) -> bool:
@@ -128,30 +159,10 @@ def _valid_file_claims(value: object, manifest: object) -> bool:
         if not isinstance(claim_value, dict):
             return False
         claim = cast(dict[str, object], claim_value)
-        path = claim.get("path")
-        quarantine = claim.get("quarantine")
-        expected_quarantine = None
-        if isinstance(path, str):
-            source_path = Path(path)
-            suffix = hashlib.sha256(path.encode()).hexdigest()[:16]
-            expected_quarantine = source_path.with_name(
-                f".{source_path.name}.ava-retained-{suffix}"
-            ).as_posix()
-        if (
-            set(claim) != {"path", "quarantine", "state"}
-            or not isinstance(path, str)
-            or not isinstance(quarantine, str)
-            or path not in expected_files
-            or path in paths
-            or quarantine in quarantines
-            or quarantine != expected_quarantine
-            or Path(quarantine).is_absolute()
-            or ".." in Path(quarantine).parts
-            or claim.get("state") not in {"source", "claiming", "quarantine", "retained"}
-        ):
+        if not _valid_claim(claim, expected_files, paths, quarantines):
             return False
-        paths.add(path)
-        quarantines.add(quarantine)
+        paths.add(cast(str, claim["path"]))
+        quarantines.add(cast(str, claim["quarantine"]))
     return paths == expected_files
 
 
@@ -183,6 +194,47 @@ def _valid_cleanup_item(value: object, *, retained: bool) -> bool:
     )
 
 
+def _check_installed(installed_value: object) -> None:
+    if not isinstance(installed_value, dict):
+        raise _ClientConflictError("Ava ownership ledger is invalid")
+    installed = cast(dict[str, Any], installed_value)
+    if (
+        set(installed) != {"digest", "generation_id", "manifest", "source_digest"}
+        or not all(_valid_digest(installed[key]) for key in ("digest", "source_digest"))
+        or not _valid_id(installed["generation_id"])
+        or not _valid_manifest(installed["manifest"])
+        or _manifest_digest(installed["manifest"]) != installed["digest"]
+    ):
+        raise _ClientConflictError("Ava ownership ledger is invalid")
+
+
+def _check_transaction(transaction_value: object, *, has_installed: bool) -> None:
+    if not isinstance(transaction_value, dict):
+        raise _ClientConflictError("Ava ownership ledger is invalid")
+    transaction = cast(dict[str, Any], transaction_value)
+    if (
+        set(transaction)
+        != {
+            "claim_state",
+            "expected_digest",
+            "expected_manifest",
+            "generation_id",
+            "source_digest",
+            "stage_state",
+        }
+        or not _valid_id(transaction["generation_id"])
+        or not _valid_digest(transaction["source_digest"])
+        or not _valid_digest(transaction["expected_digest"])
+        or not _valid_manifest(transaction["expected_manifest"])
+        or _manifest_digest(transaction["expected_manifest"]) != transaction["expected_digest"]
+        or transaction["claim_state"] not in {"idle", "claiming", "claimed"}
+        or transaction["stage_state"] not in {"preparing", "publishing", "published"}
+        or (transaction["claim_state"] != "idle" and transaction["stage_state"] != "published")
+        or (transaction["claim_state"] != "idle" and not has_installed)
+    ):
+        raise _ClientConflictError("Ava ownership ledger is invalid")
+
+
 def _load_ledger(path: Path, client_key: str) -> dict[str, Any] | None:
     record = _parse_record(path)
     if record is None:
@@ -202,55 +254,17 @@ def _load_ledger(path: Path, client_key: str) -> dict[str, Any] | None:
         raise _ClientConflictError("Ava ownership ledger is invalid")
     installed_value: object = record["installed"]
     if installed_value is not None:
-        if not isinstance(installed_value, dict):
-            raise _ClientConflictError("Ava ownership ledger is invalid")
-        installed = cast(dict[str, Any], installed_value)
-        if (
-            set(installed) != {"digest", "generation_id", "manifest", "source_digest"}
-            or not all(_valid_digest(installed[key]) for key in ("digest", "source_digest"))
-            or not _valid_id(installed["generation_id"])
-            or not _valid_manifest(installed["manifest"])
-            or _manifest_digest(installed["manifest"]) != installed["digest"]
-        ):
-            raise _ClientConflictError("Ava ownership ledger is invalid")
+        _check_installed(installed_value)
     transaction_value: object = record["transaction"]
     if transaction_value is not None:
-        if not isinstance(transaction_value, dict):
+        _check_transaction(transaction_value, has_installed=installed_value is not None)
+    for key, retained in (("garbage", False), ("retained", True)):
+        items: object = record[key]
+        if not isinstance(items, list):
             raise _ClientConflictError("Ava ownership ledger is invalid")
-        transaction = cast(dict[str, Any], transaction_value)
-        if (
-            set(transaction)
-            != {
-                "claim_state",
-                "expected_digest",
-                "expected_manifest",
-                "generation_id",
-                "source_digest",
-                "stage_state",
-            }
-            or not _valid_id(transaction["generation_id"])
-            or not _valid_digest(transaction["source_digest"])
-            or not _valid_digest(transaction["expected_digest"])
-            or not _valid_manifest(transaction["expected_manifest"])
-            or _manifest_digest(transaction["expected_manifest"]) != transaction["expected_digest"]
-            or transaction["claim_state"] not in {"idle", "claiming", "claimed"}
-            or transaction["stage_state"] not in {"preparing", "publishing", "published"}
-            or (transaction["claim_state"] != "idle" and transaction["stage_state"] != "published")
-            or (transaction["claim_state"] != "idle" and installed_value is None)
-        ):
-            raise _ClientConflictError("Ava ownership ledger is invalid")
-    garbage_value: object = record["garbage"]
-    if not isinstance(garbage_value, list):
-        raise _ClientConflictError("Ava ownership ledger is invalid")
-    for item_value in cast(list[object], garbage_value):
-        if not _valid_cleanup_item(item_value, retained=False):
-            raise _ClientConflictError("Ava ownership ledger is invalid")
-    retained_value: object = record["retained"]
-    if not isinstance(retained_value, list):
-        raise _ClientConflictError("Ava ownership ledger is invalid")
-    for item_value in cast(list[object], retained_value):
-        if not _valid_cleanup_item(item_value, retained=True):
-            raise _ClientConflictError("Ava ownership ledger is invalid")
+        for item_value in cast(list[object], items):
+            if not _valid_cleanup_item(item_value, retained=retained):
+                raise _ClientConflictError("Ava ownership ledger is invalid")
     return record
 
 

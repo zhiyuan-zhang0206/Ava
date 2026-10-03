@@ -280,59 +280,64 @@ async def _consume_stream_with_stall_timeout(
     started_at = time.monotonic()
     while True:
         stage_timeout = ttft_timeout if chunk_idx == 0 else inter_chunk_timeout
-        timeout = stage_timeout
-        total_is_next_deadline = False
-        if total_timeout is not None:
-            remaining_total = total_timeout - (time.monotonic() - started_at)
-            if remaining_total <= 0:
-                raise LLMStreamStallTimeoutError(
-                    f"LLM stream exceeded {total_timeout:.1f}s total duration "
-                    f"after {chunk_idx} chunks; abort streaming attempt.",
-                    stage="total",
-                )
-            if remaining_total <= stage_timeout:
-                timeout = remaining_total
-                total_is_next_deadline = True
+        timeout, total_is_next_deadline = _next_timeout(
+            stage_timeout, total_timeout, started_at, chunk_idx
+        )
         try:
             chunk = await asyncio.wait_for(stream_iter.__anext__(), timeout=timeout)
         except StopAsyncIteration:
             if total_timeout is not None and time.monotonic() - started_at >= total_timeout:
-                raise LLMStreamStallTimeoutError(
-                    f"LLM stream exceeded {total_timeout:.1f}s total duration "
-                    f"after {chunk_idx} chunks; abort streaming attempt.",
-                    stage="total",
-                ) from None
+                raise _total_stall(total_timeout, chunk_idx) from None
             return (first_ts, last_ts)
         except TimeoutError as e:
             if total_is_next_deadline:
-                raise LLMStreamStallTimeoutError(
-                    f"LLM stream exceeded {total_timeout:.1f}s total duration "
-                    f"after {chunk_idx} chunks; abort streaming attempt.",
-                    stage="total",
-                ) from e
-            stage_label = "TTFT" if chunk_idx == 0 else f"mid-stream after {chunk_idx} chunks"
-            raise LLMStreamStallTimeoutError(
-                f"LLM stream stalled — no chunk for {stage_timeout:.1f}s ({stage_label}); "
-                f"abort turn. Provider hang / network drop suspected.",
-                stage="ttft" if chunk_idx == 0 else "mid-stream",
-            ) from e
+                assert total_timeout is not None  # noqa: S101
+                raise _total_stall(total_timeout, chunk_idx) from e
+            raise _stage_stall(stage_timeout, chunk_idx) from e
         assert isinstance(chunk, AIMessageChunk)  # noqa: S101
         # Arrival timestamps before fan-out: decode_ms measures the provider's
         # generation window (first token → last token), excluding the
         # synchronous SSE publish cost on our side.
         now = time.monotonic()
         if total_timeout is not None and now - started_at >= total_timeout:
-            raise LLMStreamStallTimeoutError(
-                f"LLM stream exceeded {total_timeout:.1f}s total duration "
-                f"after {chunk_idx} chunks; abort streaming attempt.",
-                stage="total",
-            )
+            raise _total_stall(total_timeout, chunk_idx)
         if first_ts is None:
             first_ts = now
         last_ts = now
         chunks.append(chunk)
         chunk_idx += 1
         handler.process_chunk(chunk)
+
+
+def _stage_stall(stage_timeout: float, chunk_idx: int) -> LLMStreamStallTimeoutError:
+    stage_label = "TTFT" if chunk_idx == 0 else f"mid-stream after {chunk_idx} chunks"
+    return LLMStreamStallTimeoutError(
+        f"LLM stream stalled — no chunk for {stage_timeout:.1f}s ({stage_label}); "
+        f"abort turn. Provider hang / network drop suspected.",
+        stage="ttft" if chunk_idx == 0 else "mid-stream",
+    )
+
+
+def _total_stall(total_timeout: float, chunk_idx: int) -> LLMStreamStallTimeoutError:
+    return LLMStreamStallTimeoutError(
+        f"LLM stream exceeded {total_timeout:.1f}s total duration "
+        f"after {chunk_idx} chunks; abort streaming attempt.",
+        stage="total",
+    )
+
+
+def _next_timeout(
+    stage_timeout: float, total_timeout: float | None, started_at: float, chunk_idx: int
+) -> tuple[float, bool]:
+    """`(timeout for the next chunk, whether the total ceiling is what bounds it)`."""
+    if total_timeout is None:
+        return stage_timeout, False
+    remaining_total = total_timeout - (time.monotonic() - started_at)
+    if remaining_total <= 0:
+        raise _total_stall(total_timeout, chunk_idx)
+    if remaining_total <= stage_timeout:
+        return remaining_total, True
+    return stage_timeout, False
 
 
 async def _stream_with_cache_retry(

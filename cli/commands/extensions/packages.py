@@ -16,9 +16,10 @@ import sys
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import cast
+from typing import Any, cast
 
-from base.packages.extensions.install_registry import InstalledPackage
+from base.packages.extensions import install_registry
+from base.packages.extensions.install_registry import InstalledPackage, UpdateMode
 
 # Column width for the text table's LAST RESULT cell (JSON is untruncated).
 _RESULT_W = 40
@@ -130,23 +131,8 @@ def _fmt_range(manifest: dict[str, object] | None, manifest_error: str | None) -
     return ", ".join(parts) if parts else "-"
 
 
-def cmd_packages_status(*, json_output: bool = False) -> int:
-    """`ava packages status [--json]` — host version, channels, and per-package
-    channel/policy/applied-rev/last-result/declared-range. Read-only."""
-    import json
-
-    from base import paths
-    from base.deploy.git import host_version as host_version_mod
-    from base.packages.extensions import install_registry
-
-    registry = install_registry.load()
-    try:
-        host_bare: str | None = host_version_mod.host_version()
-        host_display: str | None = host_version_mod.host_version_display()
-    except host_version_mod.HostVersionError:
-        host_bare = None
-        host_display = "unknown"
-
+def _status_rows(registry: install_registry.Registry) -> list[_Row]:
+    """One display row per tracked package, by name."""
     rows: list[_Row] = []
     for pkg in sorted(registry.packages, key=lambda p: p.name):
         policy = install_registry.resolved_policy(pkg)
@@ -172,47 +158,97 @@ def cmd_packages_status(*, json_output: bool = False) -> int:
                 host_blocked=host_blocked,
             )
         )
+    return rows
+
+
+def _status_payload(
+    registry: install_registry.Registry,
+    rows: list[_Row],
+    host_bare: str | None,
+    host_display: str | None,
+) -> dict[str, Any]:
+    from base import paths
+
+    return {
+        "host": {
+            "version": host_bare,
+            "display": host_display,
+            "home": str(paths.ava_home()),
+            "registry_schema": registry.version,
+        },
+        "channels": {
+            name: {
+                "remote_url": ch.remote_url,
+                "ref": ch.ref,
+                "last_seen_sha": ch.last_seen_sha,
+                "last_checked_at": ch.last_checked_at,
+                "last_result": ch.last_result,
+            }
+            for name, ch in sorted(registry.channels.items())
+        },
+        "packages": [
+            {
+                "name": r.name,
+                "kind": r.kind,
+                "origin": r.origin,
+                "enabled": r.enabled,
+                "channel": r.channel,
+                "mode": r.mode,
+                "interval_seconds": r.interval_seconds,
+                "applied_rev": r.applied_rev,
+                "last_check_at": r.last_check_at,
+                "last_apply_at": r.last_apply_at,
+                "last_result": r.last_result,
+                "next_check_at": r.next_check_at,
+                "manifest": r.manifest,
+                "manifest_error": r.manifest_error,
+                "host_blocked": r.host_blocked,
+            }
+            for r in rows
+        ],
+    }
+
+
+def _print_rows(rows: list[_Row]) -> None:
+    print(
+        f"  {'NAME':<30} {'KIND':<6} {'ORIGIN':<7} {'CHANNEL':<8} {'MODE':<7} "
+        f"{'INTERVAL':<9} {'APPLIED':<9} {'LAST RESULT':<{_RESULT_W}} "
+        f"{'NEXT CHECK':<10} RANGE"
+    )
+    for r in rows:
+        applied = (r.applied_rev or "-")[:8]
+        last_result = r.last_result or "-"
+        if len(last_result) > _RESULT_W:
+            last_result = last_result[: _RESULT_W - 3] + "..."
+        interval_text = "-" if r.interval_seconds is None else f"{r.interval_seconds // 3600}h"
+        print(
+            f"  {r.name:<30} {r.kind:<6} {r.origin:<7} "
+            f"{(r.channel or '-'):<8} {r.mode:<7} {interval_text:<9} "
+            f"{applied:<9} {last_result:<{_RESULT_W}} "
+            f"{_fmt_due(r.next_check_at):<10} {_fmt_range(r.manifest, r.manifest_error)}"
+        )
+
+
+def cmd_packages_status(*, json_output: bool = False) -> int:
+    """`ava packages status [--json]` — host version, channels, and per-package
+    channel/policy/applied-rev/last-result/declared-range. Read-only."""
+    import json
+
+    from base import paths
+    from base.deploy.git import host_version as host_version_mod
+
+    registry = install_registry.load()
+    try:
+        host_bare: str | None = host_version_mod.host_version()
+        host_display: str | None = host_version_mod.host_version_display()
+    except host_version_mod.HostVersionError:
+        host_bare = None
+        host_display = "unknown"
+
+    rows = _status_rows(registry)
 
     if json_output:
-        payload = {
-            "host": {
-                "version": host_bare,
-                "display": host_display,
-                "home": str(paths.ava_home()),
-                "registry_schema": registry.version,
-            },
-            "channels": {
-                name: {
-                    "remote_url": ch.remote_url,
-                    "ref": ch.ref,
-                    "last_seen_sha": ch.last_seen_sha,
-                    "last_checked_at": ch.last_checked_at,
-                    "last_result": ch.last_result,
-                }
-                for name, ch in sorted(registry.channels.items())
-            },
-            "packages": [
-                {
-                    "name": r.name,
-                    "kind": r.kind,
-                    "origin": r.origin,
-                    "enabled": r.enabled,
-                    "channel": r.channel,
-                    "mode": r.mode,
-                    "interval_seconds": r.interval_seconds,
-                    "applied_rev": r.applied_rev,
-                    "last_check_at": r.last_check_at,
-                    "last_apply_at": r.last_apply_at,
-                    "last_result": r.last_result,
-                    "next_check_at": r.next_check_at,
-                    "manifest": r.manifest,
-                    "manifest_error": r.manifest_error,
-                    "host_blocked": r.host_blocked,
-                }
-                for r in rows
-            ],
-        }
-        print(json.dumps(payload, indent=2))
+        print(json.dumps(_status_payload(registry, rows, host_bare, host_display), indent=2))
         return 0
 
     print(
@@ -232,23 +268,7 @@ def cmd_packages_status(*, json_output: bool = False) -> int:
     if not rows:
         print("  (no tracked packages)")
         return 0
-    print(
-        f"  {'NAME':<30} {'KIND':<6} {'ORIGIN':<7} {'CHANNEL':<8} {'MODE':<7} "
-        f"{'INTERVAL':<9} {'APPLIED':<9} {'LAST RESULT':<{_RESULT_W}} "
-        f"{'NEXT CHECK':<10} RANGE"
-    )
-    for r in rows:
-        applied = (r.applied_rev or "-")[:8]
-        last_result = r.last_result or "-"
-        if len(last_result) > _RESULT_W:
-            last_result = last_result[: _RESULT_W - 3] + "..."
-        interval_text = "-" if r.interval_seconds is None else f"{r.interval_seconds // 3600}h"
-        print(
-            f"  {r.name:<30} {r.kind:<6} {r.origin:<7} "
-            f"{(r.channel or '-'):<8} {r.mode:<7} {interval_text:<9} "
-            f"{applied:<9} {last_result:<{_RESULT_W}} "
-            f"{_fmt_due(r.next_check_at):<10} {_fmt_range(r.manifest, r.manifest_error)}"
-        )
+    _print_rows(rows)
     for r in rows:
         if r.host_blocked is not None:
             print(f"  ! {r.name}: not loadable on this host — {r.host_blocked}")
@@ -357,7 +377,6 @@ def cmd_packages_rollback(name: str, *, force: bool = False) -> int:
     watermark (`applied_rev`) is left where it was: a later refresh applies only
     what changed after the revoked rev."""
     from base import paths
-    from base.packages.extensions import install_registry
     from base.packages.skills.names import match_key
 
     try:
@@ -413,6 +432,17 @@ def cmd_packages_rollback(name: str, *, force: bool = False) -> int:
     return 0
 
 
+def _policy_interval(update_mode: str | None, check_every: str | None) -> int | None:
+    """Validate a policy request; the new check interval in seconds, if one was given."""
+    from cli.commands.extensions.packages_refresh import parse_duration
+
+    if update_mode is None and check_every is None:
+        raise ValueError("pass --update-mode and/or --check-every")
+    if update_mode is not None and update_mode not in ("auto", "notify", "off"):
+        raise ValueError(f"unknown update mode {update_mode!r} (auto | notify | off)")
+    return parse_duration(check_every) if check_every else None
+
+
 def cmd_packages_policy(
     name: str, *, update_mode: str | None = None, check_every: str | None = None
 ) -> int:
@@ -420,21 +450,10 @@ def cmd_packages_policy(
     [--check-every 24h]` — record an explicit policy decision on the row; explicit
     values survive every refresh pass (only None fields are resolved from
     settings)."""
-    from base.packages.extensions import install_registry
     from base.packages.skills.names import match_key
-    from cli.commands.extensions.packages_refresh import parse_duration
 
-    if update_mode is None and check_every is None:
-        print("[ava packages policy] pass --update-mode and/or --check-every", file=sys.stderr)
-        return 1
-    if update_mode is not None and update_mode not in ("auto", "notify", "off"):
-        print(
-            f"[ava packages policy] unknown update mode {update_mode!r} (auto | notify | off)",
-            file=sys.stderr,
-        )
-        return 1
     try:
-        interval = parse_duration(check_every) if check_every else None
+        interval = _policy_interval(update_mode, check_every)
     except ValueError as exc:
         print(f"[ava packages policy] {exc}", file=sys.stderr)
         return 1
@@ -453,17 +472,21 @@ def cmd_packages_policy(
             print(f"[ava packages policy] '{row.name}' vanished from the registry", file=sys.stderr)
             return 1
         if update_mode is not None:
-            fresh.update.mode = update_mode
+            fresh.update.mode = cast("UpdateMode", update_mode)
         if interval is not None:
             fresh.update.interval_seconds = interval
     updated = install_registry.get(row.name)
     if updated is not None:
-        policy = install_registry.resolved_policy(updated)
-        note = "" if policy.channel is not None else "  (no channel — refresh won't act on it)"
-        if policy.mode == "off":
-            note = "  (off — checks and applies are skipped)"
-        print(
-            f"[ava packages policy] '{updated.name}': mode={policy.mode} "
-            f"interval={policy.interval_seconds}s channel={policy.channel or '-'}{note}"
-        )
+        _print_policy(updated)
     return 0
+
+
+def _print_policy(updated: InstalledPackage) -> None:
+    policy = install_registry.resolved_policy(updated)
+    note = "" if policy.channel is not None else "  (no channel — refresh won't act on it)"
+    if policy.mode == "off":
+        note = "  (off — checks and applies are skipped)"
+    print(
+        f"[ava packages policy] '{updated.name}': mode={policy.mode} "
+        f"interval={policy.interval_seconds}s channel={policy.channel or '-'}{note}"
+    )

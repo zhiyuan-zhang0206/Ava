@@ -63,6 +63,44 @@ class ScreenSession:
         self._holder = agent_id
         self._lease_until = now + self._lease_s
 
+    def _step(
+        self,
+        agent_id: int,
+        fut: asyncio.Future[bool],
+        priority: str,
+        now: float,
+        deadline: float,
+        *,
+        queued: bool,
+    ) -> tuple[bool | None, bool]:
+        """One acquire attempt (caller holds the state lock): `(verdict, queued)`.
+
+        The verdict is True when we hold the screen, False on timeout, None to keep waiting.
+        """
+        free = self._holder is None or now >= self._lease_until
+        if free:
+            if self._waiters and self._waiters[0][0] is not fut:
+                # The screen is free but someone queued before us —
+                # join the tail and let them take it first.
+                if not queued:
+                    self._enqueue(fut, priority)
+                    queued = True
+                return None, queued
+            if self._waiters:
+                self._waiters.popleft()
+            self._take(agent_id, now)
+            return True, queued
+        if self._holder == agent_id:
+            # Already the holder — pass through without re-queueing.
+            return True, queued
+        if not queued:
+            self._enqueue(fut, priority)
+            queued = True
+        if now >= deadline:
+            self._dequeue(fut)
+            return False, queued
+        return None, queued
+
     async def acquire(self, agent_id: int, priority: str = "normal") -> bool:
         """Become the holder (or confirm we are), waiting FIFO up to the queue
         timeout. `priority="high"` jumps the queue (FIFO among highs — a P0
@@ -77,30 +115,11 @@ class ScreenSession:
             # quiesce-exempt: a bounded wait to acquire the computer session; no database
             while True:
                 async with self._state_lock:
-                    now = loop.time()
-                    free = self._holder is None or now >= self._lease_until
-                    if free:
-                        if self._waiters and self._waiters[0][0] is not fut:
-                            # The screen is free but someone queued before us —
-                            # join the tail and let them take it first.
-                            if not queued:
-                                self._enqueue(fut, priority)
-                                queued = True
-                        else:
-                            if self._waiters:
-                                self._waiters.popleft()
-                            self._take(agent_id, now)
-                            return True
-                    elif self._holder == agent_id:
-                        # Already the holder — pass through without re-queueing.
-                        return True
-                    else:
-                        if not queued:
-                            self._enqueue(fut, priority)
-                            queued = True
-                        if now >= deadline:
-                            self._dequeue(fut)
-                            return False
+                    verdict, queued = self._step(
+                        agent_id, fut, priority, loop.time(), deadline, queued=queued
+                    )
+                if verdict is not None:
+                    return verdict
                 await asyncio.sleep(_POLL_S)
         except asyncio.CancelledError:
             # A cancelled waiter must not keep occupying its queue slot.

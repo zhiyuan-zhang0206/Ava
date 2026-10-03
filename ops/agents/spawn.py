@@ -153,6 +153,31 @@ def _announce_created_agent(
         logger.exception("agent {} roster announcement failed", agent_id)
 
 
+def _validate_spawn_args(
+    spawner: str,
+    fork_from: int | None,
+    fork_checkpoint: str | None,
+    prompt: str | None,
+    prompt_source: str | None,
+) -> None:
+    if (fork_from is None) != (fork_checkpoint is None):
+        raise ValueError(
+            "fork_from and fork_checkpoint must be provided as a pair (both None or both given)"
+        )
+    if (prompt is None) != (prompt_source is None):
+        raise ValueError(
+            "prompt and prompt_source must be provided as a pair (both None or both given)"
+        )
+    if spawner.startswith("agent:") and _spawner_agent_id_malformed(spawner):
+        raise ValueError(
+            f"spawner has agent: prefix but the id part is not a valid agent id: "
+            f"{spawner!r}. This is often caused by an un-bootstrapped process "
+            f"(ava.agent_identity.establish never called) — the process's own agent id "
+            f"was None, producing 'agent:None'. Fix the caller to establish "
+            f"identity before spawning."
+        )
+
+
 def create_agent_row(
     *,
     spawner: str = "user",
@@ -232,22 +257,7 @@ def create_agent_row(
         ForkCheckpointNotFound: fork_checkpoint does not exist on fork_from.
         ValueError: prompt / prompt_source not provided as a pair.
     """
-    if (fork_from is None) != (fork_checkpoint is None):
-        raise ValueError(
-            "fork_from and fork_checkpoint must be provided as a pair (both None or both given)"
-        )
-    if (prompt is None) != (prompt_source is None):
-        raise ValueError(
-            "prompt and prompt_source must be provided as a pair (both None or both given)"
-        )
-    if spawner.startswith("agent:") and _spawner_agent_id_malformed(spawner):
-        raise ValueError(
-            f"spawner has agent: prefix but the id part is not a valid agent id: "
-            f"{spawner!r}. This is often caused by an un-bootstrapped process "
-            f"(ava.agent_identity.establish never called) — the process's own agent id "
-            f"was None, producing 'agent:None'. Fix the caller to establish "
-            f"identity before spawning."
-        )
+    _validate_spawn_args(spawner, fork_from, fork_checkpoint, prompt, prompt_source)
     # The gateway creates the row for ANY target (the runner's ops server runs
     # as ava_runner and cannot INSERT agents); the launch op re-checks the
     # agent-runner capability on the target itself.

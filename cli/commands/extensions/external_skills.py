@@ -370,15 +370,8 @@ def _ensure_ledger_root(ctx: ConvergeCtx) -> Path:
     return root
 
 
-def _converge_locked(
-    snapshot: _SourceSnapshot,
-    source_manifest: list[dict[str, Any]],
-    source_digest: str,
-    client_home: Path,
-    client_key: str,
-    label: str,
-    ledger_path: Path,
-) -> None:
+def _skills_root_of(client_home: Path) -> Path:
+    """The client's `skills/` directory, created when absent; refuses a non-directory."""
     home_stat = _lstat(client_home)
     if not stat.S_ISDIR(home_stat.st_mode):
         raise _ClientConflictError("client home is not a regular directory")
@@ -387,7 +380,11 @@ def _converge_locked(
         skills_root.mkdir()
     if not stat.S_ISDIR(_lstat(skills_root).st_mode):
         raise _ClientConflictError("skills root is not a regular directory")
-    target = skills_root / _SKILL_NAME
+    return skills_root
+
+
+def _ledger_for(ledger_path: Path, client_key: str, target: Path) -> dict[str, Any]:
+    """The client's ownership ledger, minted fresh when none exists (an unmanaged target refuses)."""
     ledger = _load_ledger(ledger_path, client_key)
     if ledger is None:
         if _exists(target):
@@ -405,6 +402,39 @@ def _converge_locked(
             },
         )
         _write_ledger(ledger_path, ledger)
+    return ledger
+
+
+def _managed_target_current(ledger: dict[str, Any], target: Path, source_digest: str) -> bool:
+    """True when the managed copy is intact and already at `source_digest`.
+
+    Refuses a missing, user-modified or unmanaged target; False means a (re)install is due.
+    """
+    installed = ledger["installed"]
+    if installed is None:
+        if _exists(target):
+            raise _ClientConflictError("unmanaged target was preserved")
+        return False
+    if not _exists(target):
+        raise _ClientConflictError("managed target is missing")
+    _verify_marker(target, ledger["installation_id"], installed["generation_id"])
+    if _tree_digest(target) != installed["digest"]:
+        raise _ClientConflictError("user-modified managed target was preserved")
+    return installed["source_digest"] == source_digest
+
+
+def _converge_locked(
+    snapshot: _SourceSnapshot,
+    source_manifest: list[dict[str, Any]],
+    source_digest: str,
+    client_home: Path,
+    client_key: str,
+    label: str,
+    ledger_path: Path,
+) -> None:
+    skills_root = _skills_root_of(client_home)
+    target = skills_root / _SKILL_NAME
+    ledger = _ledger_for(ledger_path, client_key, target)
     _cleanup_garbage(ledger_path, ledger, skills_root, label)
     recovered = _recover(ledger_path, ledger, skills_root, target)
     if recovered is not None:
@@ -412,17 +442,8 @@ def _converge_locked(
         _cleanup_garbage(ledger_path, ledger, skills_root, label)
         return
     _cleanup_garbage(ledger_path, ledger, skills_root, label)
-    installed = ledger["installed"]
-    if installed is not None:
-        if not _exists(target):
-            raise _ClientConflictError("managed target is missing")
-        _verify_marker(target, ledger["installation_id"], installed["generation_id"])
-        if _tree_digest(target) != installed["digest"]:
-            raise _ClientConflictError("user-modified managed target was preserved")
-        if installed["source_digest"] == source_digest:
-            return
-    elif _exists(target):
-        raise _ClientConflictError("unmanaged target was preserved")
+    if _managed_target_current(ledger, target, source_digest):
+        return
     try:
         _stage_copy(snapshot, source_manifest, skills_root, ledger_path, ledger, source_digest)
     except (OSError, _SourceIntegrityError):

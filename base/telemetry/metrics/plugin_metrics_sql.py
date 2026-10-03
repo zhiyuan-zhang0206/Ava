@@ -274,6 +274,62 @@ def _check_table_ref(
     return j, alias_positions
 
 
+def _check_left_join(
+    tokens: list[tuple[str, str]], j: int, sql: str, offset: int
+) -> tuple[int, set[int]]:
+    """Validate `LEFT JOIN (subquery) [alias] [ON ...]` starting at the LEFT token."""
+    alias_positions: set[int] = set()
+    if j + 1 >= len(tokens) or tokens[j + 1][0] != "word" or tokens[j + 1][1].upper() != "JOIN":
+        raise InvalidMetricQuery(f"LEFT must be followed by JOIN: {sql!r}")
+    j += 2
+    if j >= len(tokens) or tokens[j] != ("op", "("):
+        raise InvalidMetricQuery(
+            f"LEFT JOIN must reference a subquery (bare-table joins are not allowed): {sql!r}"
+        )
+    inner_start = j
+    j = _skip_paren(tokens, j, sql)
+    alias_positions |= _check_from_clauses(
+        tokens[inner_start + 1 : j - 1],
+        sql,
+        offset=offset + inner_start + 1,
+    )
+    # optional alias (bare word, not a clause keyword / ON)
+    if (
+        j < len(tokens)
+        and tokens[j][0] == "word"
+        and tokens[j][1].upper() not in (_FROM_FOLLOW | {"ON"})
+    ):
+        alias_positions.add(offset + j)
+        j += 1
+    j, more = _skip_on_condition(tokens, j, sql, offset)
+    return j, alias_positions | more
+
+
+def _skip_on_condition(
+    tokens: list[tuple[str, str]], j: int, sql: str, offset: int
+) -> tuple[int, set[int]]:
+    """Consume an optional ON condition; alias positions of subqueries nested in it."""
+    alias_positions: set[int] = set()
+    # optional ON condition — consume until a depth-0 clause keyword
+    # (WHERE/GROUP/ORDER/LIMIT/OFFSET) or end; parens recurse.
+    if j < len(tokens) and tokens[j][0] == "word" and tokens[j][1].upper() == "ON":
+        j += 1
+        while j < len(tokens):
+            if tokens[j] == ("op", "("):
+                inner_start = j
+                j = _skip_paren(tokens, j, sql)
+                alias_positions |= _check_from_clauses(
+                    tokens[inner_start + 1 : j - 1],
+                    sql,
+                    offset=offset + inner_start + 1,
+                )
+            elif tokens[j][0] == "word" and tokens[j][1].upper() in _FROM_FOLLOW:
+                break
+            else:
+                j += 1
+    return j, alias_positions
+
+
 def _check_from_item(
     tokens: list[tuple[str, str]], j: int, sql: str, offset: int
 ) -> tuple[int, set[int]]:
@@ -286,50 +342,8 @@ def _check_from_item(
             alias_positions |= more
             continue
         if tokens[j][0] == "word" and tokens[j][1].upper() == "LEFT":
-            if (
-                j + 1 >= len(tokens)
-                or tokens[j + 1][0] != "word"
-                or tokens[j + 1][1].upper() != "JOIN"
-            ):
-                raise InvalidMetricQuery(f"LEFT must be followed by JOIN: {sql!r}")
-            j += 2
-            if j >= len(tokens) or tokens[j] != ("op", "("):
-                raise InvalidMetricQuery(
-                    f"LEFT JOIN must reference a subquery (bare-table "
-                    f"joins are not allowed): {sql!r}"
-                )
-            inner_start = j
-            j = _skip_paren(tokens, j, sql)
-            alias_positions |= _check_from_clauses(
-                tokens[inner_start + 1 : j - 1],
-                sql,
-                offset=offset + inner_start + 1,
-            )
-            # optional alias (bare word, not a clause keyword / ON)
-            if (
-                j < len(tokens)
-                and tokens[j][0] == "word"
-                and tokens[j][1].upper() not in (_FROM_FOLLOW | {"ON"})
-            ):
-                alias_positions.add(offset + j)
-                j += 1
-            # optional ON condition — consume until a depth-0 clause keyword
-            # (WHERE/GROUP/ORDER/LIMIT/OFFSET) or end; parens recurse.
-            if j < len(tokens) and tokens[j][0] == "word" and tokens[j][1].upper() == "ON":
-                j += 1
-                while j < len(tokens):
-                    if tokens[j] == ("op", "("):
-                        inner_start = j
-                        j = _skip_paren(tokens, j, sql)
-                        alias_positions |= _check_from_clauses(
-                            tokens[inner_start + 1 : j - 1],
-                            sql,
-                            offset=offset + inner_start + 1,
-                        )
-                    elif tokens[j][0] == "word" and tokens[j][1].upper() in _FROM_FOLLOW:
-                        break
-                    else:
-                        j += 1
+            j, more = _check_left_join(tokens, j, sql, offset)
+            alias_positions |= more
             continue
         break
     return j, alias_positions

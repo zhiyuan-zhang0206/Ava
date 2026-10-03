@@ -5,37 +5,11 @@
     "cli/commands/lifecycle/root_driver.py::global-rebind:_direct_root_child": 1
   },
   "complexity": {
-    "cli/commands/agents/control.py::send_agent_message": 15,
-    "cli/commands/agents/impersonation_relay.py::relay_inbox": 22,
-    "cli/commands/agents/notices.py::cmd_notices_clear": 20,
-    "cli/commands/agents/notices.py::cmd_notices_list": 21,
     "cli/commands/agents/tests/test_delivery.py::test_real_relay_uses_snapshotted_config_across_restart": 17,
     "cli/commands/agents/tests/test_delivery.py::test_two_attempts_each_get_a_full_window_then_native_observes_expiry": 16,
-    "cli/commands/data_plane/pgbouncer.py::ensure_pgbouncer_step": 16,
-    "cli/commands/extensions/_claude_code_plugin.py::materialize": 22,
-    "cli/commands/extensions/_external_skill_cleanup.py::_cleanup_garbage_item": 15,
-    "cli/commands/extensions/_external_skill_ledger.py::_load_ledger": 34,
-    "cli/commands/extensions/_external_skill_ledger.py::_valid_file_claims": 19,
-    "cli/commands/extensions/_external_skill_ledger.py::_valid_manifest": 20,
-    "cli/commands/extensions/external_skills.py::_converge_locked": 16,
-    "cli/commands/extensions/mcp.py::cmd_mcp_install": 16,
-    "cli/commands/extensions/packages.py::cmd_packages_policy": 20,
-    "cli/commands/extensions/packages.py::cmd_packages_status": 22,
-    "cli/commands/extensions/packages_refresh.py::_Pass._apply_staged": 19,
-    "cli/commands/extensions/packages_refresh.py::_Pass._ls_remote_git": 23,
-    "cli/commands/extensions/packages_refresh.py::_Pass._process_git": 19,
-    "cli/commands/extensions/packages_refresh.py::_Pass._resolve_core_channel": 19,
-    "cli/commands/extensions/packages_refresh.py::_Pass.run": 27,
-    "cli/commands/extensions/plugins.py::cmd_plugins_install": 16,
-    "cli/commands/extensions/skill.py::_update_one": 20,
-    "cli/commands/extensions/skill.py::cmd_skill_update": 16,
-    "cli/commands/extensions/skills_sync.py::_sync_one": 23,
     "cli/commands/extensions/tests/test_packages_refresh.py::test_refresh_applies_only_the_changed_package": 17,
-    "cli/commands/lifecycle/_temporary_stop.py::stop": 22,
-    "cli/commands/lifecycle/start.py::_cmd_start_body": 34,
     "cli/commands/lifecycle/tests/test_gateway_consumer_guard.py::_kind_closure": 18,
     "cli/commands/lifecycle/tests/test_gateway_consumer_guard.py::_repo_internal_import_closure": 15,
-    "cli/commands/observability/logs.py::cmd_logs_retention": 23,
     "cli/commands/observability/tests/test_lgtm_native.py::test_ensure_renders_configs_with_native_paths_and_loopback": 24
   },
   "files": {
@@ -45,8 +19,7 @@
     "cli/commands/observability/tests/test_converge_otel_collector.py": 1249
   },
   "nesting": {
-    "cli/commands/lifecycle/tests/test_gateway_consumer_guard.py::_kind_closure": 6,
-    "cli/commands/observability/trace.py::_post_line": 6
+    "cli/commands/lifecycle/tests/test_gateway_consumer_guard.py::_kind_closure": 6
   },
   "patch_targets": {
     "cli/commands/converge/tests/test_converge_firewall.py::base.host.macos_firewall._VERIFY_RETRY_S": 2,

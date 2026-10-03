@@ -155,19 +155,18 @@ def listener_addrs(port: int) -> set[str]:
     try:
         conns = psutil.net_connections(kind="tcp")
     except (psutil.Error, OSError):
-        conns = None
-    if conns is not None:
-        addrs: set[str] = set()
-        for conn in conns:
-            if conn.status != "LISTEN":
-                continue
-            addr = conn.laddr
-            if len(addr) < 2:
-                continue
-            if addr[1] == port:
-                addrs.add(addr[0])
-        return addrs
+        return _lsof_listener_name_addrs(port)
+    addrs: set[str] = set()
+    for conn in conns:
+        if conn.status != "LISTEN" or len(conn.laddr) < 2:
+            continue
+        if conn.laddr[1] == port:
+            addrs.add(conn.laddr[0])
+    return addrs
 
+
+def _lsof_listener_name_addrs(port: int) -> set[str]:
+    """`listener_addrs` fallback: lsof's machine-readable name fields (POSIX only)."""
     import subprocess
 
     argv = _lsof_argv("-nP", "-Fpn", "-sTCP:LISTEN", f"-iTCP:{port}")
@@ -181,7 +180,7 @@ def listener_addrs(port: int) -> set[str]:
     if out.returncode != 0:
         return set()
 
-    addrs = set()
+    addrs: set[str] = set()
     for line in out.stdout.splitlines():
         if not line.startswith("n"):
             continue

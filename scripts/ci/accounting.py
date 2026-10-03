@@ -124,46 +124,60 @@ def job_minutes(started: str | None, completed: str | None) -> int:
     return max(0, math.ceil((end - start).total_seconds() / 60.0))
 
 
-def _run_entry(run: dict, repo: str) -> dict:
-    """One ledger entry for a CI run: identity from the PR title (synthetic
-    test PRs resolve to their real PR) with the head-commit subject as
-    fallback (push-to-main merge runs)."""
-    pr_number = None
-    agent_id = task_id = None
-    real_pr = _real_pr_of_trunk_branch(str(run.get("head_branch") or ""))
+def _identity_from_prs(
+    run: dict, repo: str, real_pr: int | None
+) -> tuple[int | None, int | None, int | None]:
+    """`(pr_number, agent_id, task_id)` from the run's PR payload, or the trunk branch's real PR."""
     pull_requests = [p for p in run.get("pull_requests", []) if isinstance(p, dict)]
     if pull_requests:
         raw_number = pull_requests[0].get("number")
         pr_number = int(raw_number) if isinstance(raw_number, (int, str)) else None
         title = _pr_title(repo, real_pr if real_pr else pr_number)
         agent_id, task_id = parse_identity(title)
-        if real_pr:
-            pr_number = real_pr
-    elif real_pr is not None:
+        return (real_pr or pr_number), agent_id, task_id
+    if real_pr is not None:
         # Queue test runs on trunk-merge/pr-<n> branches carry no PR payload —
         # the branch name itself names the real PR.
-        pr_number = real_pr
         agent_id, task_id = parse_identity(_pr_title(repo, real_pr))
+        return real_pr, agent_id, task_id
+    return None, None, None
+
+
+def _merged_pr_of(run: dict, repo: str) -> int | None:
+    """The PR a push-to-main merge run landed, from its head commit."""
+    head_sha = str(run.get("head_sha") or "")
+    if not head_sha:
+        return None
+    merged_prs = _gh_api(f"repos/{repo}/commits/{head_sha}/pulls", jq="[.[] | .number] | @json")
+    return merged_prs[0] if merged_prs and isinstance(merged_prs[0], int) else None
+
+
+def _run_identity(run: dict, repo: str) -> tuple[int | None, int | None, int | None]:
+    """`(pr_number, agent_id, task_id)` of a run, by PR title, merge commit, subject or branch."""
+    real_pr = _real_pr_of_trunk_branch(str(run.get("head_branch") or ""))
+    pr_number, agent_id, task_id = _identity_from_prs(run, repo, real_pr)
     if agent_id is None and str(run.get("head_branch") or "") == "main":
         # A push-to-main merge run: the merge commit names the PR it landed.
-        head_sha = str(run.get("head_sha") or "")
-        if head_sha:
-            merged_prs = _gh_api(
-                f"repos/{repo}/commits/{head_sha}/pulls",
-                jq="[.[] | .number] | @json",
-            )
-            if merged_prs and isinstance(merged_prs[0], int):
-                pr_number = merged_prs[0]
-                agent_id, task_id = parse_identity(_pr_title(repo, pr_number))
+        merged = _merged_pr_of(run, repo)
+        if merged is not None:
+            pr_number = merged
+            agent_id, task_id = parse_identity(_pr_title(repo, pr_number))
     if agent_id is None:
-        subject_agent, subject_task = parse_identity(str(run.get("head_commit_msg") or ""))
-        agent_id, task_id = subject_agent, subject_task
+        agent_id, task_id = parse_identity(str(run.get("head_commit_msg") or ""))
     if agent_id is None:
         # Convention-prefix commits aside: agent worktree branches name the
         # agent (`ava-<id>-<slug>`), covering type(scope)-style subjects.
         branch_match = _BRANCH_AGENT_RE.match(str(run.get("head_branch") or ""))
         if branch_match:
             agent_id = int(str(branch_match.group(1)))
+    return pr_number, agent_id, task_id
+
+
+def _run_entry(run: dict, repo: str) -> dict:
+    """One ledger entry for a CI run: identity from the PR title (synthetic
+    test PRs resolve to their real PR) with the head-commit subject as
+    fallback (push-to-main merge runs)."""
+    pr_number, agent_id, task_id = _run_identity(run, repo)
     day = (run.get("created_at") or "")[:10]
     return {
         "run_id": int(run["id"]),
@@ -322,6 +336,29 @@ def _print_report(rows: list[dict], days: int) -> None:
         )
 
 
+def _report(days: int, agent: int | None, *, as_json: bool) -> None:
+    rows = report_rows(load_ledger(DEFAULT_LEDGER), days=days, agent=agent)
+    if as_json:
+        print(json.dumps(rows, indent=2))
+    else:
+        _print_report(rows, days)
+
+
+def _print_entries(entries: list[dict]) -> None:
+    if not entries:
+        print("No CI runs in the window.")
+        return
+    for entry in entries:
+        agent = entry["agent_id"] if entry["agent_id"] is not None else "unattributed"
+        print(
+            f"run {entry['run_id']} day={entry['day']} #{agent} "
+            f"(task {entry['task_id'] if entry['task_id'] is not None else '-'}) "
+            f"pr={entry['pr_number'] if entry['pr_number'] is not None else '-'} "
+            f"{entry['linux_minutes']}L+{entry['macos_minutes']}M min "
+            f"[{entry['conclusion']}]"
+        )
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="CI usage attribution and ledger")
     parser.add_argument(
@@ -341,11 +378,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.report:
         if args.since or args.until or args.append_ledger:
             parser.error("--report is exclusive with --since/--until/--append-ledger")
-        rows = report_rows(load_ledger(DEFAULT_LEDGER), days=args.days, agent=args.agent)
-        if args.json:
-            print(json.dumps(rows, indent=2))
-        else:
-            _print_report(rows, args.days)
+        _report(args.days, args.agent, as_json=args.json)
         return 0
 
     if not args.since or not args.until:
@@ -358,18 +391,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.json:
         print(json.dumps(entries, indent=2))
         return 0
-    if not entries:
-        print("No CI runs in the window.")
-        return 0
-    for entry in entries:
-        agent = entry["agent_id"] if entry["agent_id"] is not None else "unattributed"
-        print(
-            f"run {entry['run_id']} day={entry['day']} #{agent} "
-            f"(task {entry['task_id'] if entry['task_id'] is not None else '-'}) "
-            f"pr={entry['pr_number'] if entry['pr_number'] is not None else '-'} "
-            f"{entry['linux_minutes']}L+{entry['macos_minutes']}M min "
-            f"[{entry['conclusion']}]"
-        )
+    _print_entries(entries)
     return 0
 
 

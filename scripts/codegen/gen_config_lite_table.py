@@ -240,6 +240,17 @@ def _kind(annotation: object) -> str:
     )
 
 
+def _literal_default(row: LiteField, default: object) -> str | bool | int | float:
+    if default is None or default is PydanticUndefined:
+        raise SystemExit(f"{row.name!r}: default_kind=literal but the field has no literal default")
+    if not isinstance(default, (str, bool, int, float)):
+        raise SystemExit(
+            f"{row.name!r}: literal default of type {type(default).__name__} is unsupported — "
+            f"add a named default kind"
+        )
+    return default
+
+
 def _default(row: LiteField, info: FieldInfo, reg: dict[str, Any]) -> tuple[str, object]:
     """Resolve (default kind, literal default), asserting the manifest matches the field.
 
@@ -249,16 +260,7 @@ def _default(row: LiteField, info: FieldInfo, reg: dict[str, Any]) -> tuple[str,
         raise SystemExit(f"{row.name!r}: unknown default_kind {row.default_kind!r}")
     default: object = info.default
     if row.default_kind == "literal":
-        if default is None or default is PydanticUndefined:
-            raise SystemExit(
-                f"{row.name!r}: default_kind=literal but the field has no literal default"
-            )
-        if not isinstance(default, (str, bool, int, float)):
-            raise SystemExit(
-                f"{row.name!r}: literal default of type {type(default).__name__} is unsupported — "
-                f"add a named default kind"
-            )
-        return "literal", default
+        return "literal", _literal_default(row, default)
     if row.default_kind == "none":
         if default is not None:
             raise SystemExit(
@@ -292,6 +294,27 @@ def _default(row: LiteField, info: FieldInfo, reg: dict[str, Any]) -> tuple[str,
 _LiteRow = tuple[str, str, str, str, object, str | None]
 
 
+def _lite_row(row: LiteField, reg: dict[str, Any]) -> _LiteRow:
+    """Validate one manifest row against its registry field; the table row it renders to."""
+    if row.check is not None and row.check not in _ALLOWED_CHECKS:
+        raise SystemExit(
+            f"{row.name!r}: unknown check {row.check!r}; allowed: {sorted(_ALLOWED_CHECKS)}"
+        )
+    ref = reg.get(row.name)
+    if ref is None:
+        raise SystemExit(f"{row.name!r} is in LITE_MANIFEST but not in the live config registry")
+    info = cast(FieldInfo, ref.info)
+    default_kind, value = _default(row, info, reg)
+    return (
+        ref.domain,
+        field_alias(row.name),
+        _kind(info.annotation),
+        default_kind,
+        value,
+        row.check,
+    )
+
+
 def _collect() -> tuple[
     list[tuple[str, _LiteRow]],
     dict[str, str],
@@ -309,30 +332,7 @@ def _collect() -> tuple[
         if row.name in seen:
             raise SystemExit(f"{row.name!r} appears twice in LITE_MANIFEST")
         seen.add(row.name)
-        if row.check is not None and row.check not in _ALLOWED_CHECKS:
-            raise SystemExit(
-                f"{row.name!r}: unknown check {row.check!r}; allowed: {sorted(_ALLOWED_CHECKS)}"
-            )
-        ref = reg.get(row.name)
-        if ref is None:
-            raise SystemExit(
-                f"{row.name!r} is in LITE_MANIFEST but not in the live config registry"
-            )
-        info = cast(FieldInfo, ref.info)
-        default_kind, value = _default(row, info, reg)
-        lite.append(
-            (
-                row.name,
-                (
-                    ref.domain,
-                    field_alias(row.name),
-                    _kind(info.annotation),
-                    default_kind,
-                    value,
-                    row.check,
-                ),
-            )
-        )
+        lite.append((row.name, _lite_row(row, reg)))
     # Registry insertion order IS eager construction order (the build walks the
     # domains in Settings-aggregate order and each model's fields in declaration
     # order) — keeping LITE_FIELDS in that order makes prepare's fail-fast
@@ -347,11 +347,12 @@ def _collect() -> tuple[
     scopes = {name: str(schema_extra(reg[name].info).get("scope")) for name in names}
     capabilities = {name: reg[name].capability for name in names}
     per_agent = [name for name in names if schema_extra(reg[name].info).get("per_agent") is True]
-    required: list[str] = []
-    for name in names:
-        info = cast(FieldInfo, reg[name].info)
-        if info.default is PydanticUndefined and info.default_factory is None:
-            required.append(name)
+    required = [
+        name
+        for name in names
+        if cast(FieldInfo, reg[name].info).default is PydanticUndefined
+        and cast(FieldInfo, reg[name].info).default_factory is None
+    ]
     return lite, domains, aliases, scopes, capabilities, per_agent, required
 
 

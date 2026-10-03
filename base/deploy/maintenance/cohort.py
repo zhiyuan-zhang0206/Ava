@@ -248,14 +248,7 @@ def _classify(
     *,
     host_absent: bool = False,
 ) -> MaintenanceHold:
-    parked = tuple(
-        sorted(
-            row.agent_id
-            for row in rows
-            if row.agent_id not in hold.commands
-            and (row.unowned_idle() or (host_absent and row.cold_hosted_idle()))
-        )
-    )
+    parked = _parked_agents(rows, hold, host_absent=host_absent)
     captured = bool(hold.commands or hold.parked)
     if captured and hold.parked != parked:
         raise RuntimeError("parked native intent changed while preparing")
@@ -263,6 +256,31 @@ def _classify(
     selected = [row for row in rows if row.agent_id in candidates]
     if {row.agent_id for row in selected} != candidates:
         raise RuntimeError("maintenance cohort changed lifecycle while preparing")
+    _require_live_owners(selected, owner, applied)
+    return (
+        hold
+        if captured
+        else MaintenanceHold(commands=dict.fromkeys(sorted(candidates), 0), parked=parked)
+    )
+
+
+def _parked_agents(
+    rows: list[_RuntimeRow], hold: MaintenanceHold, *, host_absent: bool
+) -> tuple[int, ...]:
+    """Agents outside the cohort whose native intent is parked (idle with no live owner)."""
+    return tuple(
+        sorted(
+            row.agent_id
+            for row in rows
+            if row.agent_id not in hold.commands
+            and (row.unowned_idle() or (host_absent and row.cold_hosted_idle()))
+        )
+    )
+
+
+def _require_live_owners(
+    selected: list[_RuntimeRow], owner: UUID | None, applied: set[int]
+) -> None:
     invalid = [
         row.agent_id
         for row in selected
@@ -270,11 +288,6 @@ def _classify(
     ]
     if invalid:
         raise RuntimeError(f"maintenance requires the live original native owner: {invalid}")
-    return (
-        hold
-        if captured
-        else MaintenanceHold(commands=dict.fromkeys(sorted(candidates), 0), parked=parked)
-    )
 
 
 def _applied_capture(
@@ -314,15 +327,7 @@ def _require_resolved(
     enter the bounded wait; maintenance-authored rows refuse immediately — and
     preparation still never freezes past unresolved parked claims.
     """
-    rows = [
-        _CommandRow(*row)
-        for row in conn.execute(
-            "SELECT agent_id, id, kind, status, applied_at IS NOT NULL, payload->'maintenance' "
-            "FROM inbound_messages WHERE agent_id=ANY(%s) AND status IN ('pending','claimed') "
-            "ORDER BY agent_id, id",
-            (list(hold.parked),),
-        ).fetchall()
-    ]
+    rows = _open_commands(conn, list(hold.parked))
     unresolved = [row for row in rows if _unresolved_parked(row, row.agent_id, cold)]
     if not unresolved:
         return
@@ -342,6 +347,46 @@ class _CommandRow(NamedTuple):
     status: str
     applied: bool
     maintenance: object
+
+
+def _open_commands(conn: psycopg.Connection, agents: list[int]) -> list[_CommandRow]:
+    """Every pending/claimed inbound command of `agents`, ordered by agent then id."""
+    return [
+        _CommandRow(*row)
+        for row in conn.execute(
+            "SELECT agent_id, id, kind, status, applied_at IS NOT NULL, payload->'maintenance' "
+            "FROM inbound_messages WHERE agent_id=ANY(%s) AND status IN ('pending','claimed') "
+            "ORDER BY agent_id, id",
+            (agents,),
+        ).fetchall()
+    ]
+
+
+def _member_collisions(
+    rows: list[_CommandRow], hold: MaintenanceHold, operation: dict[str, str]
+) -> list[tuple[int, list[_CommandRow]]]:
+    """Cohort members with a lifecycle command other than this maintenance operation's own."""
+    collisions: list[tuple[int, list[_CommandRow]]] = []
+    for agent_id in sorted(hold.commands):
+        member = [
+            row for row in rows if row.agent_id == agent_id and row.kind in ("restart", "terminate")
+        ]
+        if not member or (len(member) == 1 and member[0].maintenance == operation):
+            continue
+        collisions.append((agent_id, member))
+    return collisions
+
+
+def _parked_collisions(
+    rows: list[_CommandRow], hold: MaintenanceHold, cold: frozenset[int]
+) -> list[tuple[int, list[_CommandRow]]]:
+    """Parked agents' commands that are still unresolved."""
+    return [
+        (agent_id, [row])
+        for agent_id in sorted(hold.parked)
+        for row in rows
+        if row.agent_id == agent_id and _unresolved_parked(row, agent_id, cold)
+    ]
 
 
 def _refuse_inflight_lifecycle(
@@ -368,38 +413,17 @@ def _refuse_inflight_lifecycle(
     agents = sorted(set(hold.commands) | set(hold.parked))
     if not agents:
         return
-    rows = [
-        _CommandRow(*row)
-        for row in conn.execute(
-            "SELECT agent_id, id, kind, status, applied_at IS NOT NULL, payload->'maintenance' "
-            "FROM inbound_messages WHERE agent_id=ANY(%s) AND status IN ('pending','claimed') "
-            "ORDER BY agent_id, id",
-            (agents,),
-        ).fetchall()
-    ]
+    rows = _open_commands(conn, agents)
     operation = {"holder": holder, "acquired_at": acquired_at.isoformat()}
-    lines: list[str] = []
-    blocked: list[int] = []
-    waitable = True
-    for agent_id in sorted(hold.commands):
-        member = [
-            row for row in rows if row.agent_id == agent_id and row.kind in ("restart", "terminate")
-        ]
-        if not member or (len(member) == 1 and member[0].maintenance == operation):
-            continue
-        lines.append(_collision_line(agent_id, member))
-        blocked.append(agent_id)
-        waitable = waitable and all(row.maintenance is None for row in member)
-    for agent_id in sorted(hold.parked):
-        for row in rows:
-            if row.agent_id != agent_id or not _unresolved_parked(row, agent_id, cold):
-                continue
-            lines.append(_collision_line(agent_id, [row]))
-            blocked.append(agent_id)
-            waitable = waitable and row.maintenance is None
-    if not lines:
+    collisions = _member_collisions(rows, hold, operation)
+    collisions.extend(_parked_collisions(rows, hold, cold))
+    if not collisions:
         return
-    raise LifecycleCollisionError("; ".join(lines), sorted(set(blocked)), waitable=waitable)
+    raise LifecycleCollisionError(
+        "; ".join(_collision_line(agent_id, found) for agent_id, found in collisions),
+        sorted({agent_id for agent_id, _ in collisions}),
+        waitable=all(row.maintenance is None for _, found in collisions for row in found),
+    )
 
 
 def _collision_line(agent_id: int, rows: list[_CommandRow]) -> str:

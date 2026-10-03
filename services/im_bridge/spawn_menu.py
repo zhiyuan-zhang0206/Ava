@@ -97,6 +97,20 @@ class SpawnMenuMixin:
                 _log.warning("effort options lookup failed; using generic set")
         return ["low", "medium", "high", "max"]
 
+    async def _pick_preset(self, draft: SpawnDraft, value: str) -> Reply | None:
+        """Record the preset selection into `draft`; a reply when the preset no longer exists."""
+        if value == "none":
+            draft.preset_id = draft.preset_name = draft.preset_label = None
+            return None
+        presets = await self.gateway.list_presets()
+        picked = next((p for p in presets if str(p["id"]) == value), None)
+        if picked is None:
+            return Reply(copy.SPAWN_PRESET_GONE)
+        draft.preset_id = picked["id"]
+        draft.preset_name = picked["name"]
+        draft.preset_label = picked.get("label") or picked["name"]
+        return None
+
     async def _handle_spawn_menu(self, state: ChatState, text: str) -> Reply | list[Reply]:
         """One tap in the spawn menu: record the selection, render the next
         layer; ``spawn:go`` executes with the current draft."""
@@ -107,16 +121,9 @@ class SpawnMenuMixin:
         action = parts[1] if len(parts) > 1 else ""
         value = parts[2] if len(parts) > 2 else ""
         if action == "preset":
-            if value == "none":
-                draft.preset_id = draft.preset_name = draft.preset_label = None
-            else:
-                presets = await self.gateway.list_presets()
-                picked = next((p for p in presets if str(p["id"]) == value), None)
-                if picked is None:
-                    return Reply(copy.SPAWN_PRESET_GONE)
-                draft.preset_id = picked["id"]
-                draft.preset_name = picked["name"]
-                draft.preset_label = picked.get("label") or picked["name"]
+            picked_reply = await self._pick_preset(draft, value)
+            if picked_reply is not None:
+                return picked_reply
             return await self._spawn_layer_model(state)
         if action == "model":
             draft.model = value or None

@@ -630,6 +630,10 @@ def _is_terminated(agent_id: int) -> bool:
     return meta is None or meta[0] == "terminated"
 
 
+def _budget_crossed(budget: float | None, notified_at: object, used: float) -> bool:
+    return budget is not None and notified_at is None and used >= budget
+
+
 def record_task_usage(task_id: int, *, token_count: int, cost_usd: float) -> None:
     """Add one explicitly task-tagged LLM call and notify on a first breach.
 
@@ -663,12 +667,8 @@ def record_task_usage(task_id: int, *, token_count: int, cost_usd: float) -> Non
         ) = row
         new_token_used = token_used + token_count
         new_usd_used = usd_used + cost_usd
-        token_breached = (
-            token_budget is not None and token_notified is None and new_token_used >= token_budget
-        )
-        usd_breached = (
-            usd_budget is not None and usd_notified is None and new_usd_used >= usd_budget
-        )
+        token_breached = _budget_crossed(token_budget, token_notified, new_token_used)
+        usd_breached = _budget_crossed(usd_budget, usd_notified, new_usd_used)
         cur.execute(
             "UPDATE agent_tasks SET token_used = %s, usd_used = %s, "
             "token_budget_notified_at = CASE WHEN %s THEN now() ELSE token_budget_notified_at END, "

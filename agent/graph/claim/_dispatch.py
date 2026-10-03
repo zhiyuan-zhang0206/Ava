@@ -571,6 +571,52 @@ async def _handle_fork(
             st.new_msgs.append(note)
 
 
+async def _dispatch_item(
+    ctx: AvaContext,
+    state: _state.AgentState,
+    agent_id: int,
+    item: ClaimedInbound,
+    st: _BatchState,
+    latest_resurrect_id: int | None,
+) -> None:
+    """Route one claimed inbound to its handler by kind."""
+    kind = item.kind
+    if kind == InboundKind.CHAT:
+        await _handle_chat(item, st)
+    elif kind == InboundKind.SYSTEM_NOTE:
+        await _handle_system_note(item, st)
+    elif kind == InboundKind.COMPACT_SUMMARY:
+        await _handle_compact_summary(ctx, agent_id, item, st)
+    elif kind == InboundKind.COMPACT_REQUEST:
+        await _handle_compact_request(ctx, agent_id, state, item, st)
+    elif kind == InboundKind.CANCEL:
+        await _handle_cancel(ctx, agent_id, st)
+    elif kind == InboundKind.HEARTBEAT:
+        await _handle_heartbeat(ctx, agent_id, item, st, state)
+    elif kind == InboundKind.TERMINATE:
+        await _handle_terminate(ctx, item, st)
+    elif kind == InboundKind.RESTART:
+        await _handle_restart(ctx, agent_id, item, st)
+        await _handle_restart_stateful(state, item, st)
+    elif kind == InboundKind.RESTART_COMPLETED:
+        await _handle_restart_completed(item, st)
+    elif kind == InboundKind.RESURRECT:
+        if item.id == latest_resurrect_id:
+            await _handle_resurrect(item, st)
+    elif kind == InboundKind.FORK:
+        await _handle_fork(agent_id, item, st, state, ctx.require_agent(), ctx.extensions)
+    elif kind == InboundKind.REMINDER:
+        # Lease-expiry reminders are dismissed in the lease's release/expiry
+        # transaction, so one reaching the claim node means that invariant
+        # broke. Render it as a system-sourced chat message instead of
+        # failing the batch: the content is harmless ("lease N expires
+        # at ..."), and a ValueError here would wedge the claim loop on a
+        # stale row.
+        await _handle_chat(item, st)
+    else:
+        raise ValueError(f"Unknown inbound kind: {kind!r} (id={item.id})")
+
+
 async def dispatch_batch(
     ctx: AvaContext,
     state: _state.AgentState,
@@ -598,40 +644,7 @@ async def dispatch_batch(
         # note below is the only writer that can establish attribution again.
         if kind != InboundKind.SYSTEM_NOTE:
             st.active_task_id = None
-        if kind == InboundKind.CHAT:
-            await _handle_chat(item, st)
-        elif kind == InboundKind.SYSTEM_NOTE:
-            await _handle_system_note(item, st)
-        elif kind == InboundKind.COMPACT_SUMMARY:
-            await _handle_compact_summary(ctx, agent_id, item, st)
-        elif kind == InboundKind.COMPACT_REQUEST:
-            await _handle_compact_request(ctx, agent_id, state, item, st)
-        elif kind == InboundKind.CANCEL:
-            await _handle_cancel(ctx, agent_id, st)
-        elif kind == InboundKind.HEARTBEAT:
-            await _handle_heartbeat(ctx, agent_id, item, st, state)
-        elif kind == InboundKind.TERMINATE:
-            await _handle_terminate(ctx, item, st)
-        elif kind == InboundKind.RESTART:
-            await _handle_restart(ctx, agent_id, item, st)
-            await _handle_restart_stateful(state, item, st)
-        elif kind == InboundKind.RESTART_COMPLETED:
-            await _handle_restart_completed(item, st)
-        elif kind == InboundKind.RESURRECT:
-            if item.id == latest_resurrect_id:
-                await _handle_resurrect(item, st)
-        elif kind == InboundKind.FORK:
-            await _handle_fork(agent_id, item, st, state, ctx.require_agent(), ctx.extensions)
-        elif kind == InboundKind.REMINDER:
-            # Lease-expiry reminders are dismissed in the lease's release/expiry
-            # transaction, so one reaching the claim node means that invariant
-            # broke. Render it as a system-sourced chat message instead of
-            # failing the batch: the content is harmless ("lease N expires
-            # at ..."), and a ValueError here would wedge the claim loop on a
-            # stale row.
-            await _handle_chat(item, st)
-        else:
-            raise ValueError(f"Unknown inbound kind: {kind!r} (id={item.id})")
+        await _dispatch_item(ctx, state, agent_id, item, st, latest_resurrect_id)
     if len(st.task_ids) > 1:
         # Claim consumes the whole batch into one LLM turn. More than one task
         # note therefore has no faithful task-level attribution.

@@ -1,8 +1,1 @@
-{
-  "complexity": {
-    "agent/hooks/_registry.py::make_hook_runner.<locals>.run": 17
-  },
-  "nesting": {
-    "agent/hooks/_registry.py::make_hook_runner.<locals>.run": 7
-  }
-}
+{}

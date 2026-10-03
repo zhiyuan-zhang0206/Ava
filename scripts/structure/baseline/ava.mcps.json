@@ -17,8 +17,5 @@
   },
   "files": {
     "ava/mcps/tests/test_daemon.py": 2110
-  },
-  "nesting": {
-    "ava/mcps/_daemon.py::_handle_client": 7
   }
 }

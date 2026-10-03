@@ -135,6 +135,104 @@ async def _probe_machine(name: str, probe: Callable[..., Awaitable[object]]) -> 
         return _UNREACHED
 
 
+def _fire_machine_offline(
+    conn: Any,
+    name: str,
+    *,
+    new_cf: int,
+    transition_since: datetime | None,
+    now: datetime,
+) -> None:
+    """Fire (or escalate) the open "machine offline" alert for a failed probe."""
+    from base.telemetry.alerts import (
+        display_language,
+        fingerprint,
+        notify_im,
+        notify_text,
+        stamp_notified,
+        upsert_alert,
+    )
+
+    identity_labels = {"alertname": "machine offline", "machine": name}
+    stable_fp = fingerprint(identity_labels)
+    assert transition_since is not None  # noqa: S101 — every failed probe persists it
+    severity = transition_severity(
+        transition_since,
+        now,
+        warning_after_s=settings.alerts.transition_warning_seconds,
+        error_after_s=settings.alerts.transition_error_seconds,
+    )
+    if severity is None:
+        return
+    with conn.cursor() as cur:
+        cur.execute(
+            "SELECT starts_at, severity, notified_at FROM alerts "
+            "WHERE labels->>'alertname' = 'machine offline' "
+            "AND labels->>'machine' = %s AND status = 'unresolved' "
+            "ORDER BY starts_at DESC LIMIT 1",
+            (name,),
+        )
+        open_row = cur.fetchone()
+    if open_row is not None and open_row[1] == severity and open_row[2] is not None:
+        return
+    starts_at = open_row[0] if open_row is not None else transition_since
+    labels = {**identity_labels, "severity": severity}
+    elapsed_minutes = max(0.0, (now - transition_since).total_seconds()) / 60.0
+    alert = {
+        "status": "firing",
+        "labels": labels,
+        "annotations": {
+            "summary": (
+                f"machine {name} offline for {elapsed_minutes:.1f} minutes: "
+                f"{new_cf} consecutive failed probes"
+            )
+        },
+        "starts_at": starts_at.isoformat(),
+        "fingerprint": stable_fp,
+    }
+    key, _did_insert, should_notify, _row = upsert_alert(conn, alert, source="machine-probe")
+    lang = display_language(conn)
+    if should_notify and notify_im(notify_text(alert, lang)):
+        stamp_notified(conn, [key])
+
+
+def _resolve_machine_offline(conn: Any, name: str, *, now: datetime) -> None:
+    """Resolve every open "machine offline" alert of a machine that is back online."""
+    from base.telemetry.alerts import (
+        display_language,
+        notify_im,
+        notify_text,
+        stamp_notified,
+        upsert_alert,
+    )
+
+    identity_labels = {"alertname": "machine offline", "machine": name}
+    with conn.cursor() as cur:
+        cur.execute(
+            "SELECT starts_at, fingerprint, severity FROM alerts "
+            "WHERE labels->>'alertname' = 'machine offline' "
+            "AND labels->>'machine' = %s AND status = 'unresolved' "
+            "ORDER BY starts_at DESC",
+            (name,),
+        )
+        open_rows = cur.fetchall()
+    if not open_rows:
+        return
+    lang = display_language(conn)
+    for starts_at, fp, severity in open_rows:
+        alert = {
+            "status": "resolved",
+            "labels": {**identity_labels, "severity": severity},
+            "annotations": {"summary": f"machine {name} back online"},
+            "starts_at": starts_at.isoformat(),
+            "ends_at": now.isoformat(),
+            "fingerprint": fp,
+        }
+        key, _did_insert, should_notify, _row = upsert_alert(conn, alert, source="machine-probe")
+        if should_notify and notify_im(notify_text(alert, lang)):
+            stamp_notified(conn, [key])
+
+
 def _machine_alert_edges(
     conn: Any,
     name: str,
@@ -158,87 +256,10 @@ def _machine_alert_edges(
     (DB errors propagate to the caller's per-pass catch, IM errors are
     swallowed by ``notify_im``).
     """
-    from base.telemetry.alerts import (
-        display_language,
-        fingerprint,
-        notify_im,
-        notify_text,
-        stamp_notified,
-        upsert_alert,
-    )
-
-    identity_labels = {"alertname": "machine offline", "machine": name}
-    stable_fp = fingerprint(identity_labels)
-
     if not ok:
-        assert transition_since is not None  # noqa: S101 — every failed probe persists it
-        severity = transition_severity(
-            transition_since,
-            now,
-            warning_after_s=settings.alerts.transition_warning_seconds,
-            error_after_s=settings.alerts.transition_error_seconds,
-        )
-        if severity is None:
-            return
-        with conn.cursor() as cur:
-            cur.execute(
-                "SELECT starts_at, severity, notified_at FROM alerts "
-                "WHERE labels->>'alertname' = 'machine offline' "
-                "AND labels->>'machine' = %s AND status = 'unresolved' "
-                "ORDER BY starts_at DESC LIMIT 1",
-                (name,),
-            )
-            open_row = cur.fetchone()
-        if open_row is not None and open_row[1] == severity and open_row[2] is not None:
-            return
-        starts_at = open_row[0] if open_row is not None else transition_since
-        labels = {**identity_labels, "severity": severity}
-        elapsed_minutes = max(0.0, (now - transition_since).total_seconds()) / 60.0
-        alert = {
-            "status": "firing",
-            "labels": labels,
-            "annotations": {
-                "summary": (
-                    f"machine {name} offline for {elapsed_minutes:.1f} minutes: "
-                    f"{new_cf} consecutive failed probes"
-                )
-            },
-            "starts_at": starts_at.isoformat(),
-            "fingerprint": stable_fp,
-        }
-        key, _did_insert, should_notify, _row = upsert_alert(conn, alert, source="machine-probe")
-        lang = display_language(conn)
-        if should_notify and notify_im(notify_text(alert, lang)):
-            stamp_notified(conn, [key])
-        return
-
-    if ok and old_online is False:
-        with conn.cursor() as cur:
-            cur.execute(
-                "SELECT starts_at, fingerprint, severity FROM alerts "
-                "WHERE labels->>'alertname' = 'machine offline' "
-                "AND labels->>'machine' = %s AND status = 'unresolved' "
-                "ORDER BY starts_at DESC",
-                (name,),
-            )
-            open_rows = cur.fetchall()
-        if not open_rows:
-            return
-        lang = display_language(conn)
-        for starts_at, fp, severity in open_rows:
-            alert = {
-                "status": "resolved",
-                "labels": {**identity_labels, "severity": severity},
-                "annotations": {"summary": f"machine {name} back online"},
-                "starts_at": starts_at.isoformat(),
-                "ends_at": now.isoformat(),
-                "fingerprint": fp,
-            }
-            key, _did_insert, should_notify, _row = upsert_alert(
-                conn, alert, source="machine-probe"
-            )
-            if should_notify and notify_im(notify_text(alert, lang)):
-                stamp_notified(conn, [key])
+        _fire_machine_offline(conn, name, new_cf=new_cf, transition_since=transition_since, now=now)
+    elif old_online is False:
+        _resolve_machine_offline(conn, name, now=now)
 
 
 async def _record_probe(

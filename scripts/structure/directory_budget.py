@@ -37,3 +37,19 @@ def counts_toward_budget(entry: Path) -> bool:
             return False
         return not is_tests_layer(entry) and bool(entries(entry))
     return entry.is_file() and entry.suffix in {".py", ".pyi"}
+
+
+def selected_under(target: Path, scope: Path, repo_root: Path) -> Path | None:
+    """The part of `target` the budgets govern inside `scope`; None when it is out of scope."""
+    if target == scope or scope in target.parents:
+        selected = target
+    elif target in scope.parents:
+        selected = scope
+    else:
+        return None
+    relative = selected.relative_to(repo_root)
+    if any(
+        part.startswith(".") or part in {"__pycache__", "migrations"} for part in relative.parts
+    ) or any(path.is_symlink() for path in (selected, *selected.parents)):
+        return None
+    return selected

@@ -199,6 +199,24 @@ def iter_okf_docs() -> list[Path]:
     return sorted(files)
 
 
+def _scanned_docs() -> list[tuple[Path, Path]]:
+    """`(doc, the root its display path is relative to)` for every doc in scope.
+
+    A doc can be in scope twice — an OKF file under a procedural root (the built-in skills) —
+    the caller dedupes by resolved path so each doc is scanned once.
+    """
+    targets: list[tuple[Path, Path]] = []
+    for root in (_DOCS_CONVENTIONS, _DEV_SKILLS, _BUILTIN_SKILLS):
+        if not root.is_dir():
+            continue
+        # Display paths relative to the repo root on the real run; fall back to
+        # the root's parent when a test monkeypatches it to a tmp tree.
+        display_root = _REPO_ROOT if root.is_relative_to(_REPO_ROOT) else root.parent
+        targets.extend((doc, display_root) for doc in iter_doc_files(root))
+    targets.extend((doc, _REPO_ROOT) for doc in iter_okf_docs())
+    return targets
+
+
 def check() -> int:
     """Validate every procedural-doc anchor; return 0 (clean) or 1 (violations)."""
     violations: list[str] = []
@@ -209,20 +227,8 @@ def check() -> int:
     # the reason is carried alongside so the message can say which.
     cache: dict[Path, set[str] | str] = {}
 
-    targets: list[tuple[Path, Path]] = []
-    for root in (_DOCS_CONVENTIONS, _DEV_SKILLS, _BUILTIN_SKILLS):
-        if not root.is_dir():
-            continue
-        # Display paths relative to the repo root on the real run; fall back to
-        # the root's parent when a test monkeypatches it to a tmp tree.
-        display_root = _REPO_ROOT if root.is_relative_to(_REPO_ROOT) else root.parent
-        targets.extend((doc, display_root) for doc in iter_doc_files(root))
-    targets.extend((doc, _REPO_ROOT) for doc in iter_okf_docs())
-
-    # A doc can be in scope twice — an OKF file under a procedural root (the
-    # built-in skills) — so dedupe by resolved path; each doc is scanned once.
     seen_docs: set[Path] = set()
-    for doc, display_root in targets:
+    for doc, display_root in _scanned_docs():
         resolved = doc.resolve()
         if resolved in seen_docs:
             continue

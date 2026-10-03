@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import os
 import re
+from collections.abc import Collection
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -335,6 +336,36 @@ def watcher_runner_env() -> dict[str, str]:
     return {}
 
 
+def _force_declared(keys: Collection[str], file_vals: dict[str, str | None]) -> None:
+    """Set each key the unit's own files declare, overriding an inherited value."""
+    for key in keys:
+        val = file_vals.get(key)
+        if key == "AVA_DB_URL" and _keeps_injected_db_url(val):
+            continue
+        # The placeholder outranks the file: once a process tree carries it
+        # (planted by a lite boot), no `.env` this pass reads may swap a real
+        # database URL in behind it. The drop loop's identical guard keeps it on
+        # the undeclared side; this one keeps it on the declared side.
+        if val is not None and os.environ.get(key) != PLACEHOLDER_DB_URL:
+            os.environ[key] = val
+
+
+def _drop_undeclared(keys: Collection[str], file_vals: dict[str, str | None]) -> None:
+    """Pop each key the unit's own files do not declare (bar the launcher-injected projections)."""
+    for key in keys:
+        if file_vals.get(key) is None and os.environ.get(key) != PLACEHOLDER_DB_URL:
+            if key == "AVA_DB_URL" and _keeps_undeclared_db_url(os.environ.get(key)):
+                # Mirrored force-loop exemption (#4334): the launcher's runner
+                # projection is the agent child's DB source; a pure runner's
+                # launcher delivers its installed unit login to every class.
+                continue
+            if key == "AVA_REDIS_URL" and _is_launcher_redis_url(os.environ.get(key)):
+                # The Redis mirror (#4334): same launcher context, no username
+                # shape to gate on (see `_is_launcher_redis_url`).
+                continue
+            os.environ.pop(key, None)
+
+
 def _enforce_cluster_env_authority(home: Path) -> None:
     """Force this unit's derived env keys from its own `.env`, overriding a polluted parent
     environment.
@@ -440,32 +471,11 @@ def _enforce_cluster_env_authority(home: Path) -> None:
     } | set(health_port_env_aliases().values())
     file_vals = {**dotenv_values(home / ".env"), **dotenv_values(home / "mirror.env")}
     role = "gateway" if _is_gateway_process() else "agent"
-    keep = env_keep_set(role) | _force_also
-    for key in keep:
-        val = file_vals.get(key)
-        if key == "AVA_DB_URL" and _keeps_injected_db_url(val):
-            continue
-        # The placeholder outranks the file: once a process tree carries it
-        # (planted by a lite boot), no `.env` this pass reads may swap a real
-        # database URL in behind it. The drop loop's identical guard keeps it on
-        # the undeclared side; this one keeps it on the declared side.
-        if val is not None and os.environ.get(key) != PLACEHOLDER_DB_URL:
-            os.environ[key] = val
+    _force_declared(env_keep_set(role) | _force_also, file_vals)
     # The drop family minus the never-drop exemptions: cluster-scope aliases the
     # unit's .env does not declare, and machine-identity keys it does not declare
     # (the env-suppliable gateway-URL pair stays exempt).
-    for key in env_authority_drop_set(role) - _force_also - _identity_env_only():
-        if file_vals.get(key) is None and os.environ.get(key) != PLACEHOLDER_DB_URL:
-            if key == "AVA_DB_URL" and _keeps_undeclared_db_url(os.environ.get(key)):
-                # Mirrored force-loop exemption (#4334): the launcher's runner
-                # projection is the agent child's DB source; a pure runner's
-                # launcher delivers its installed unit login to every class.
-                continue
-            if key == "AVA_REDIS_URL" and _is_launcher_redis_url(os.environ.get(key)):
-                # The Redis mirror (#4334): same launcher context, no username
-                # shape to gate on (see `_is_launcher_redis_url`).
-                continue
-            os.environ.pop(key, None)
+    _drop_undeclared(env_authority_drop_set(role) - _force_also - _identity_env_only(), file_vals)
 
     # Gateway profile: drop agent-runner capability keys. They pull agent
     # modules, plugin registrations and API keys into the gateway (+11MB

@@ -51,6 +51,11 @@ def require_no_consumers(conn: psycopg.Connection[Any], agent_id: int) -> None:
         prefix=f"ava-boot-{agent_id}-"
     ):
         raise RuntimeError(f"legacy native consumer still owns agent {agent_id}")
+    _require_no_unsettled_exec(conn, agent_id)
+    _require_no_consumer_process()
+
+
+def _require_no_unsettled_exec(conn: psycopg.Connection[Any], agent_id: int) -> None:
     row = conn.execute(
         "SELECT runtime_generation,runtime_owner,incarnation_resources FROM agents_meta "
         "WHERE id=%s",
@@ -74,6 +79,9 @@ def require_no_consumers(conn: psycopg.Connection[Any], agent_id: int) -> None:
             + ". "
             + exec_request_evidence.disposition_hint(agent_id)
         )
+
+
+def _require_no_consumer_process() -> None:
     home = ava_home().resolve()
     for process in psutil.process_iter(["pid", "cmdline"]):
         argv = cast(list[str], process.info["cmdline"] or [])

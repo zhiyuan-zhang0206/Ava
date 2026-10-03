@@ -237,10 +237,8 @@ def _llm_totals_from_models(rows: list[tuple[str, int, int, int, int, int]]) -> 
     return _LlmTotals(calls, tin, tout, tcached, treason, cost, unpriced)
 
 
-def _sections_from_aggregate(agg: EventAggregate) -> list[MetricSection]:
-    """Rebuild the five unit data dicts from `EventAggregate`, then render
-    them with the shared render functions — the text blocks stay identical to
-    the per-row path because the renders are the same functions."""
+def _data_syntax_fix(agg: EventAggregate) -> dict[str, Any]:
+    """The `syntax_fix` section data."""
     # syntax_fix: per-event kinds (Counter, stream order) + per-block
     # ruff_format position thirds (block index i among the agent's n blocks ->
     # third_of(i, n)).
@@ -262,7 +260,7 @@ def _sections_from_aggregate(agg: EventAggregate) -> list[MetricSection]:
         b: round(hits[b] / blocks_b[b] * 100, 1) if blocks_b[b] else 0.0
         for b in ("early", "mid", "late")
     }
-    data_syntax = {
+    return {
         "code_blocks": agg.code_blocks,
         "trigger_counts": dict(kind_counts),
         "ruff_format_by_position": {
@@ -271,9 +269,11 @@ def _sections_from_aggregate(agg: EventAggregate) -> list[MetricSection]:
         "ruff_format_rate_pct_by_position": rate,
     }
 
-    # exec
+
+def _data_exec(agg: EventAggregate) -> dict[str, Any]:
+    """The `exec` section data."""
     total_exec = agg.exec_ok + agg.exec_failed
-    data_exec = {
+    return {
         "exec_total": total_exec,
         "exec_ok": agg.exec_ok,
         "exec_failed": agg.exec_failed,
@@ -283,7 +283,9 @@ def _sections_from_aggregate(agg: EventAggregate) -> list[MetricSection]:
         "output_len_chars": pctiles(agg.output_len),
     }
 
-    # llm_turns
+
+def _data_llm_turns(agg: EventAggregate) -> dict[str, Any]:
+    """The `llm_turns` section data."""
     totals = _llm_totals_from_models(agg.llm_by_model)
     # position thirds over each agent's llm_usage rows: (cache_read, in_total) sums.
     pos_hit = {
@@ -291,7 +293,7 @@ def _sections_from_aggregate(agg: EventAggregate) -> list[MetricSection]:
         for b, (c, i) in ((b, agg.llm_position.get(b, (0, 0))) for b in ("early", "mid", "late"))
     }
     turns_per_agent = [row.turn_total for row in agg.per_agent.values()]
-    data_llm = {
+    return {
         "llm_calls": totals.calls,
         "tokens_in": totals.tin,
         "tokens_out": totals.tout,
@@ -307,7 +309,9 @@ def _sections_from_aggregate(agg: EventAggregate) -> list[MetricSection]:
         "turns_per_agent": pctiles([float(x) for x in turns_per_agent]),
     }
 
-    # agent_activity
+
+def _data_agent_activity(agg: EventAggregate) -> dict[str, Any]:
+    """The `agent_activity` section data."""
     by_spawner: Counter[str] = Counter()
     subagents = 0
     for sp, count in agg.spawners.items():
@@ -319,7 +323,7 @@ def _sections_from_aggregate(agg: EventAggregate) -> list[MetricSection]:
         for row in agg.per_agent.values()
         if row.events >= 2
     ]
-    data_activity = {
+    return {
         "distinct_agents": agg.distinct_agents,
         "spawns_total": sum(agg.spawners.values()),
         "spawns_by_spawner": dict(by_spawner),
@@ -332,6 +336,9 @@ def _sections_from_aggregate(agg: EventAggregate) -> list[MetricSection]:
         "agent_lifetime_s": pctiles(spans),
     }
 
+
+def _data_plugin_activation(agg: EventAggregate) -> dict[str, Any]:
+    """The `plugin_activation` section data."""
     # plugin_activation — philosophy §6's "removable as a gauge, not a vibe".
     # `by_contribution` is keyed the way `ava plugins inspect` spells a
     # registered contribution, so a row with no counterpart here is a
@@ -344,7 +351,7 @@ def _sections_from_aggregate(agg: EventAggregate) -> list[MetricSection]:
         act_plugin[plugin] += count
         act_contribution[f"{plugin}/{surface}/{identifier}"] += count
         act_plugin_model[f"{plugin}@{model or '?'}"] += count
-    data_plugin = {
+    return {
         "total_activations": sum(agg.plugin_acts.values()),
         "distinct_plugins": len(act_plugin),
         "by_plugin": dict(act_plugin),
@@ -353,6 +360,17 @@ def _sections_from_aggregate(agg: EventAggregate) -> list[MetricSection]:
         ],
         "by_plugin_model": dict(act_plugin_model),
     }
+
+
+def _sections_from_aggregate(agg: EventAggregate) -> list[MetricSection]:
+    """Rebuild the five unit data dicts from `EventAggregate`, then render
+    them with the shared render functions — the text blocks stay identical to
+    the per-row path because the renders are the same functions."""
+    data_syntax = _data_syntax_fix(agg)
+    data_exec = _data_exec(agg)
+    data_llm = _data_llm_turns(agg)
+    data_activity = _data_agent_activity(agg)
+    data_plugin = _data_plugin_activation(agg)
 
     return [
         MetricSection("syntax_fix", _render_syntax_fix(data_syntax), data_syntax),

@@ -393,6 +393,61 @@ def _archive_rates(raw: object, *, context: str) -> FlatRates:
     )
 
 
+def _archive_windows(windows_raw: object, *, tier_context: str) -> tuple[_WindowDeclaration, ...]:
+    if not isinstance(windows_raw, list):
+        raise TypeError(f"{tier_context} utc_daily_overrides must be an array")
+    windows = tuple(
+        _WindowDeclaration(
+            start=_clock(window["start"], context=f"{tier_context} window {index} start"),
+            end=_clock(window["end"], context=f"{tier_context} window {index} end"),
+            rates=_archive_rates(window["rates"], context=f"{tier_context} window {index} rates"),
+        )
+        for index, window in enumerate(windows_raw)
+        if isinstance(window, dict)
+    )
+    if len(windows) != len(windows_raw):
+        raise TypeError(f"{tier_context} windows must be objects")
+    return windows
+
+
+def _archive_tier(
+    model: str, tier_raw: object, *, tier_context: str, expected_min: int
+) -> _TierDeclaration:
+    if not isinstance(tier_raw, dict):
+        raise TypeError(f"{tier_context} must be an object")
+    lower = tier_raw["input_tokens_min"]
+    upper = tier_raw["input_tokens_max"]
+    if isinstance(lower, bool) or not isinstance(lower, int):
+        raise TypeError(f"{tier_context} input_tokens_min must be an integer")
+    if upper is not None and (isinstance(upper, bool) or not isinstance(upper, int)):
+        raise TypeError(f"{tier_context} input_tokens_max must be an integer or null")
+    if lower != expected_min or (upper is not None and upper < lower):
+        raise RuntimeError(f"archive {model!r} has a gap or overlap in tiers")
+    windows = _archive_windows(tier_raw["utc_daily_overrides"], tier_context=tier_context)
+    return _TierDeclaration(
+        input_tokens_min=lower,
+        input_tokens_max=upper,
+        rates=_archive_rates(tier_raw["rates"], context=f"{tier_context} rates"),
+        windows=windows,
+    )
+
+
+def _archive_tiers(model: str, tiers_raw: object, *, context: str) -> tuple[_TierDeclaration, ...]:
+    if not isinstance(tiers_raw, list) or not tiers_raw:
+        raise RuntimeError(f"{context} must contain tiers")
+    tiers: list[_TierDeclaration] = []
+    expected_min = 0
+    for tier_index, tier_raw in enumerate(tiers_raw):
+        tier = _archive_tier(
+            model, tier_raw, tier_context=f"{context} tier {tier_index}", expected_min=expected_min
+        )
+        tiers.append(tier)
+        expected_min = -1 if tier.input_tokens_max is None else tier.input_tokens_max + 1
+    if expected_min != -1:
+        raise RuntimeError(f"archive {model!r} tiers must cover all input sizes")
+    return tuple(tiers)
+
+
 def _archive_periods(model: str, raw: object) -> tuple[_PeriodDeclaration, ...]:
     if not isinstance(raw, list) or not raw:
         raise RuntimeError(f"archive {model!r} must contain periods")
@@ -412,51 +467,8 @@ def _archive_periods(model: str, raw: object) -> tuple[_PeriodDeclaration, ...]:
             raise RuntimeError(f"archive {model!r} has a gap or overlap in periods")
         if start is not None and end is not None and end <= start:
             raise RuntimeError(f"{context} is empty")
-        tiers_raw = period_raw["tiers"]
-        if not isinstance(tiers_raw, list) or not tiers_raw:
-            raise RuntimeError(f"{context} must contain tiers")
-        tiers: list[_TierDeclaration] = []
-        expected_min = 0
-        for tier_index, tier_raw in enumerate(tiers_raw):
-            tier_context = f"{context} tier {tier_index}"
-            if not isinstance(tier_raw, dict):
-                raise TypeError(f"{tier_context} must be an object")
-            lower = tier_raw["input_tokens_min"]
-            upper = tier_raw["input_tokens_max"]
-            if isinstance(lower, bool) or not isinstance(lower, int):
-                raise TypeError(f"{tier_context} input_tokens_min must be an integer")
-            if upper is not None and (isinstance(upper, bool) or not isinstance(upper, int)):
-                raise TypeError(f"{tier_context} input_tokens_max must be an integer or null")
-            if lower != expected_min or (upper is not None and upper < lower):
-                raise RuntimeError(f"archive {model!r} has a gap or overlap in tiers")
-            windows_raw = tier_raw["utc_daily_overrides"]
-            if not isinstance(windows_raw, list):
-                raise TypeError(f"{tier_context} utc_daily_overrides must be an array")
-            windows = tuple(
-                _WindowDeclaration(
-                    start=_clock(window["start"], context=f"{tier_context} window {index} start"),
-                    end=_clock(window["end"], context=f"{tier_context} window {index} end"),
-                    rates=_archive_rates(
-                        window["rates"], context=f"{tier_context} window {index} rates"
-                    ),
-                )
-                for index, window in enumerate(windows_raw)
-                if isinstance(window, dict)
-            )
-            if len(windows) != len(windows_raw):
-                raise TypeError(f"{tier_context} windows must be objects")
-            tiers.append(
-                _TierDeclaration(
-                    input_tokens_min=lower,
-                    input_tokens_max=upper,
-                    rates=_archive_rates(tier_raw["rates"], context=f"{tier_context} rates"),
-                    windows=windows,
-                )
-            )
-            expected_min = -1 if upper is None else upper + 1
-        if expected_min != -1:
-            raise RuntimeError(f"archive {model!r} tiers must cover all input sizes")
-        periods.append(_PeriodDeclaration(effective_from, effective_until, tuple(tiers)))
+        tiers = _archive_tiers(model, period_raw["tiers"], context=context)
+        periods.append(_PeriodDeclaration(effective_from, effective_until, tiers))
         previous_until = effective_until
     if periods[-1].effective_until is not None:
         raise RuntimeError(f"archive {model!r} must cover the present")

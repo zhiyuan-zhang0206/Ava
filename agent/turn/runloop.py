@@ -230,6 +230,142 @@ async def _record_permanent_reject_outcome(
     )
 
 
+def _abort_message(exc: FatalLLMStreamError | FatalProviderError, *, blocked: bool) -> str:
+    if blocked:
+        return (
+            f"{type(exc).__name__}: {exc} The agent is blocked; heartbeat check-ins "
+            "will not re-run this request. Resolve the cause, then send a new message."
+        )
+    return (
+        f"{type(exc).__name__}: {exc} The turn was aborted; the agent "
+        "is still alive and idling. It retries on the next message or "
+        "wake-up once the underlying cause is resolved."
+    )
+
+
+async def _breaker_already_open(
+    circuit_reader: Callable[[], Awaitable[CircuitState | None]] | None, reason: str
+) -> bool:
+    if circuit_reader is None:
+        return False
+    try:
+        current = await circuit_reader()
+    except Exception:
+        current = None
+    return current is not None and current.open and current.reason == reason
+
+
+async def _open_breaker(
+    ctx: AvaContext,
+    agent_id: int,
+    exc: FatalProviderError,
+    reason: str,
+    *,
+    emit_reports: bool,
+) -> CircuitState:
+    """Open the heartbeat circuit breaker for `reason`, with its log line and audit event."""
+    state = CircuitState(
+        open=True,
+        reason=reason,
+        opened_at=datetime.now(UTC).isoformat(),
+    )
+    logger.warning(
+        "heartbeat circuit breaker OPEN — reason={reason} status={status}",
+        event="circuit_breaker_open",
+        agent_id=agent_id,
+        reason=reason,
+        status=exc.status,
+    )
+    # Record the breaker-open event as an audit event. The breaker state is
+    # already set; a failed audit write is reported (`audit_write_failed`),
+    # never allowed to undo or skip the rest of the handling.
+    if emit_reports and ctx.ops_pool is not None:
+        await record_audit_reported_async(
+            ctx.ops_pool,
+            prepare_event_log(
+                event_type="circuit_breaker",
+                agent_id=agent_id,
+                source="system",
+                payload={
+                    "action": "open",
+                    "reason": reason,
+                    "status": exc.status,
+                    "error_class": exc.error_class,
+                },
+            ),
+        )
+    return state
+
+
+async def _report_blocked_failure(
+    ctx: AvaContext,
+    agent_id: int,
+    exc: FatalProviderError,
+    reason: str,
+    occurred_at: datetime | None,
+) -> None:
+    """Send the metadata-only blocked-provider report to the nearest alive ancestor."""
+    from agent.db import enqueue_fatal_provider_report_to_nearest_alive_ancestor
+
+    assert ctx.ops_pool is not None  # noqa: S101
+    assert exc.error_class is not None  # noqa: S101
+    try:
+        await enqueue_fatal_provider_report_to_nearest_alive_ancestor(
+            ctx.ops_pool,
+            agent_id,
+            error_class=exc.error_class,
+            provider=exc.provider,
+            vendor=_model_vendor(ctx),
+            status=exc.status,
+            reason=reason,
+            occurred_at=occurred_at if occurred_at is not None else datetime.now(UTC),
+        )
+    except Exception as exc_report:
+        logger.warning(
+            "failed to enqueue fatal provider report to an ancestor: {exc!r}",
+            agent_id=agent_id,
+            exc=exc_report,
+        )
+
+
+async def _apply_provider_failure(
+    input_update: dict[str, object],
+    ctx: AvaContext,
+    agent_id: int,
+    exc: FatalProviderError,
+    reason: str,
+    circuit_reader: Callable[[], Awaitable[CircuitState | None]] | None,
+    *,
+    occurred_at: datetime | None,
+    emit_reports: bool,
+    blocked: bool,
+) -> None:
+    """Record a permanent rejection and open the heartbeat circuit breaker into `input_update`."""
+    if emit_reports and ctx.ops_pool is not None and exc.error_class == "permanent":
+        # Runs before the already-open dedup below: two consecutive
+        # rejections with the SAME reason are exactly the halt-trip
+        # sequence, and the dedup would otherwise skip the second one.
+        await _record_permanent_reject_outcome(ctx, agent_id, exc, reason, occurred_at)
+    if await _breaker_already_open(circuit_reader, reason):
+        # The breaker is still open for the same reason from an earlier
+        # failed turn — re-opening is idempotent and re-emitting the open
+        # event per failed wake is noise (QA #903 nit). Skip both; the
+        # original opened_at is preserved.
+        logger.info(
+            "heartbeat circuit breaker already open (reason={reason}) — skipping duplicate open",
+            event="circuit_breaker_open",
+            agent_id=agent_id,
+            reason=reason,
+            status=exc.status,
+        )
+        return
+    input_update["circuit"] = await _open_breaker(
+        ctx, agent_id, exc, reason, emit_reports=emit_reports
+    )
+    if emit_reports and ctx.ops_pool is not None and blocked:
+        await _report_blocked_failure(ctx, agent_id, exc, reason, occurred_at)
+
+
 async def _handle_fatal_llm_error(
     exc: FatalLLMStreamError | FatalProviderError,
     ctx: AvaContext,
@@ -280,14 +416,7 @@ async def _handle_fatal_llm_error(
         and exc.error_class == "permanent"
         and reason != CIRCUIT_REASON_CONTEXT_OVERFLOW
     )
-    content = (
-        f"{type(exc).__name__}: {exc} The agent is blocked; heartbeat check-ins "
-        "will not re-run this request. Resolve the cause, then send a new message."
-        if is_blocked_provider_failure
-        else f"{type(exc).__name__}: {exc} The turn was aborted; the agent "
-        "is still alive and idling. It retries on the next message or "
-        "wake-up once the underlying cause is resolved."
-    )
+    content = _abort_message(exc, blocked=is_blocked_provider_failure)
     if emit_reports:
         emit_error_event(
             ctx,
@@ -307,83 +436,17 @@ async def _handle_fatal_llm_error(
     input_update: dict[str, object] = {"halted": True}
     if isinstance(exc, FatalProviderError):
         assert reason is not None  # noqa: S101
-        if emit_reports and ctx.ops_pool is not None and exc.error_class == "permanent":
-            # Runs before the already-open dedup below: two consecutive
-            # rejections with the SAME reason are exactly the halt-trip
-            # sequence, and the dedup would otherwise skip the second one.
-            await _record_permanent_reject_outcome(ctx, agent_id, exc, reason, occurred_at)
-        already_open = False
-        if circuit_reader is not None:
-            try:
-                current = await circuit_reader()
-            except Exception:
-                current = None
-            already_open = current is not None and current.open and current.reason == reason
-        if already_open:
-            # The breaker is still open for the same reason from an earlier
-            # failed turn — re-opening is idempotent and re-emitting the open
-            # event per failed wake is noise (QA #903 nit). Skip both; the
-            # original opened_at is preserved.
-            logger.info(
-                "heartbeat circuit breaker already open (reason={reason}) — "
-                "skipping duplicate open",
-                event="circuit_breaker_open",
-                agent_id=agent_id,
-                reason=reason,
-                status=exc.status,
-            )
-            return input_update
-        input_update["circuit"] = CircuitState(
-            open=True,
-            reason=reason,
-            opened_at=datetime.now(UTC).isoformat(),
+        await _apply_provider_failure(
+            input_update,
+            ctx,
+            agent_id,
+            exc,
+            reason,
+            circuit_reader,
+            occurred_at=occurred_at,
+            emit_reports=emit_reports,
+            blocked=is_blocked_provider_failure,
         )
-        logger.warning(
-            "heartbeat circuit breaker OPEN — reason={reason} status={status}",
-            event="circuit_breaker_open",
-            agent_id=agent_id,
-            reason=reason,
-            status=exc.status,
-        )
-        # Record the breaker-open event as an audit event. The breaker state is
-        # already set; a failed audit write is reported (`audit_write_failed`),
-        # never allowed to undo or skip the rest of the handling.
-        if emit_reports and ctx.ops_pool is not None:
-            await record_audit_reported_async(
-                ctx.ops_pool,
-                prepare_event_log(
-                    event_type="circuit_breaker",
-                    agent_id=agent_id,
-                    source="system",
-                    payload={
-                        "action": "open",
-                        "reason": reason,
-                        "status": exc.status,
-                        "error_class": exc.error_class,
-                    },
-                ),
-            )
-        if emit_reports and ctx.ops_pool is not None and is_blocked_provider_failure:
-            from agent.db import enqueue_fatal_provider_report_to_nearest_alive_ancestor
-
-            assert exc.error_class is not None  # noqa: S101
-            try:
-                await enqueue_fatal_provider_report_to_nearest_alive_ancestor(
-                    ctx.ops_pool,
-                    agent_id,
-                    error_class=exc.error_class,
-                    provider=exc.provider,
-                    vendor=_model_vendor(ctx),
-                    status=exc.status,
-                    reason=reason,
-                    occurred_at=occurred_at if occurred_at is not None else datetime.now(UTC),
-                )
-            except Exception as exc_report:
-                logger.warning(
-                    "failed to enqueue fatal provider report to an ancestor: {exc!r}",
-                    agent_id=agent_id,
-                    exc=exc_report,
-                )
     return input_update
 
 

@@ -245,6 +245,41 @@ async def llm_node(
             )
 
 
+def _enforce_retry_budget(attempt: Attempt, agent_id: int) -> None:
+    if (
+        attempt.elapsed_seconds() >= settings.lm.llm_retry_max_total_seconds
+        # The transient-retry budget is sized for seconds-scale
+        # backoffs; while a delayed stall sequence is active its own
+        # schedule (streak cap) owns the bound — see _retry.
+        and not _stall_pair_streak_active(str(agent_id))
+    ):
+        _log_llm_retry_duration(attempt, outcome="budget_exhausted")
+        _raise_retry_budget_exhausted(attempt.number)
+
+
+def _note_failed_attempt(
+    exc: BaseException, attempt: Attempt, runtime: Runtime[AvaContext], agent_id: int
+) -> None:
+    """Mark the settled attempt as progress and record the retry budget left on `exc`."""
+    mark_turn_progress(agent_id)
+    if isinstance(exc, Exception) and not isinstance(exc, LLMStreamStallPairError):
+        remaining_seconds = settings.lm.llm_retry_max_total_seconds - attempt.elapsed_seconds()
+        if remaining_seconds <= 0.0 and not isinstance(exc, LLMRetryBudgetExceededError):
+            _log_llm_retry_duration(attempt, outcome="budget_exhausted")
+        elif not isinstance(exc, (FatalLLMStreamError, FatalProviderError)):
+            from base.lm.registry import resolve_setting
+
+            max_attempts = resolve_setting(
+                "llm_retry_max_attempts",
+                model=runtime.context.require_agent().brain.llm_model,
+            )
+            if attempt.number >= max_attempts:
+                _log_llm_retry_duration(attempt, outcome="attempts_exhausted")
+        # `_retry.retry_wait` reads this attribute to clip the next wait to the budget.
+        with contextlib.suppress(Exception):
+            setattr(exc, RETRY_REMAINING_ATTR, remaining_seconds)
+
+
 async def llm_attempt(
     state: _state.AgentState,
     runtime: Runtime[AvaContext],
@@ -272,15 +307,7 @@ async def llm_attempt(
         agent_id=agent_id,
     ):
         try:
-            if (
-                attempt.elapsed_seconds() >= settings.lm.llm_retry_max_total_seconds
-                # The transient-retry budget is sized for seconds-scale
-                # backoffs; while a delayed stall sequence is active its own
-                # schedule (streak cap) owns the bound — see _retry.
-                and not _stall_pair_streak_active(str(agent_id))
-            ):
-                _log_llm_retry_duration(attempt, outcome="budget_exhausted")
-                _raise_retry_budget_exhausted(attempt.number)
+            _enforce_retry_budget(attempt, agent_id)
             result = await _llm_node_impl(state, runtime, config)
         except BaseException as exc:
             # A settled (failed) attempt is real activity: mark the turn clock
@@ -290,25 +317,7 @@ async def llm_attempt(
             # 1800s, jittered, under the guard's 2400s) — without this mark
             # the silence would include the whole stalled attempt on top of
             # the sleep and could cross the guard's bound.
-            mark_turn_progress(agent_id)
-            if isinstance(exc, Exception) and not isinstance(exc, LLMStreamStallPairError):
-                remaining_seconds = (
-                    settings.lm.llm_retry_max_total_seconds - attempt.elapsed_seconds()
-                )
-                if remaining_seconds <= 0.0 and not isinstance(exc, LLMRetryBudgetExceededError):
-                    _log_llm_retry_duration(attempt, outcome="budget_exhausted")
-                elif not isinstance(exc, (FatalLLMStreamError, FatalProviderError)):
-                    from base.lm.registry import resolve_setting
-
-                    max_attempts = resolve_setting(
-                        "llm_retry_max_attempts",
-                        model=runtime.context.require_agent().brain.llm_model,
-                    )
-                    if attempt.number >= max_attempts:
-                        _log_llm_retry_duration(attempt, outcome="attempts_exhausted")
-                # `_retry.retry_wait` reads this attribute to clip the next wait to the budget.
-                with contextlib.suppress(Exception):
-                    setattr(exc, RETRY_REMAINING_ATTR, remaining_seconds)
+            _note_failed_attempt(exc, attempt, runtime, agent_id)
             logger.opt(exception=True).warning(
                 "turn ended in {duration_seconds:.2f}s ok=False — _llm_node_impl raised",
                 event="turn_end",

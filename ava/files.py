@@ -79,6 +79,26 @@ def _record_skill_read(path: Path) -> None:
         logger.warning("skill attribution skipped for {}: {}", path, e)
 
 
+def _end_from_limit(start: int | None, end: int | None, limit: int | None) -> int | None:
+    """`end` as given, or derived from `limit` lines from `start`; the two are mutually exclusive."""
+    if limit is None:
+        return end
+    if end is not None:
+        raise ValueError("pass either `end` or `limit`, not both")
+    if limit < 1:
+        raise ValueError(f"limit must be >= 1, got {limit}")
+    return (start or 1) + limit - 1
+
+
+def _check_bounds(start: int | None, end: int | None) -> None:
+    if start is not None and start < 1:
+        raise ValueError(f"start must be >= 1, got {start}")
+    if end is not None and end < 1:
+        raise ValueError(f"end must be >= 1, got {end}")
+    if start is not None and end is not None and start > end:
+        raise ValueError(f"start ({start}) must be <= end ({end})")
+
+
 def read(
     path: str | Path,
     start: int | None = None,
@@ -96,12 +116,7 @@ def read(
     end = coerce_typed(end, "end", int, allow_none=True)
     limit = coerce_typed(limit, "limit", int, allow_none=True)
     with_line_numbers = coerce_typed(with_line_numbers, "with_line_numbers", bool)
-    if limit is not None:
-        if end is not None:
-            raise ValueError("pass either `end` or `limit`, not both")
-        if limit < 1:
-            raise ValueError(f"limit must be >= 1, got {limit}")
-        end = (start or 1) + limit - 1
+    end = _end_from_limit(start, end, limit)
 
     # A read is an ingestion surface: file bytes flow straight into the agent's
     # context, so the returned text is scanned for injection patterns before it
@@ -114,12 +129,7 @@ def read(
     text = p.read_text(encoding="utf-8")
     if start is None and end is None and not with_line_numbers:
         return scan_content(text, source=source)
-    if start is not None and start < 1:
-        raise ValueError(f"start must be >= 1, got {start}")
-    if end is not None and end < 1:
-        raise ValueError(f"end must be >= 1, got {end}")
-    if start is not None and end is not None and start > end:
-        raise ValueError(f"start ({start}) must be <= end ({end})")
+    _check_bounds(start, end)
     lines = text.splitlines(keepends=True)
     lo = (start - 1) if start is not None else 0
     hi = end if end is not None else len(lines)

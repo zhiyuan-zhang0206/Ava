@@ -23,11 +23,8 @@ import httpx
 import pytest
 
 from services.im_bridge.adapters import weixin
-from services.im_bridge.adapters.weixin import (
-    InboundMessage,
-    WeixinAdapter,
-    qr_login,
-)
+from services.im_bridge.adapters.weixin import InboundMessage, WeixinAdapter
+from services.im_bridge.adapters.weixin_login import qr_login
 
 
 class FakeCore:

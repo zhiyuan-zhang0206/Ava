@@ -216,6 +216,54 @@ def publish_inbound_wake(agent_id: int, payload: str) -> bool:
         return False
 
 
+def _reject_reserved_payload(payload: dict[str, object] | None) -> None:
+    if payload is None:
+        return
+    if "lifecycle_result" in payload:
+        raise ValueError("lifecycle_result is reserved for verified command settlement")
+    if "launch_attempts" in payload:
+        raise ValueError("launch_attempts is reserved for controller authorization")
+    if "resurrection_retry" in payload:
+        raise ValueError("resurrection_retry is reserved for the pending resurrection owner")
+    if {"resurrection_launch", "resurrection_launch_attempts"} & payload.keys():
+        raise ValueError("resurrection launch evidence is reserved for the lifecycle owner")
+
+
+def _lineage_event(kind: str, source: str) -> tuple[str | None, int | None]:
+    # Map inbound kind → lifecycle event_type. Only chat messages between
+    # agents produce a 'send_message' event; user→agent chat is not an
+    # inter-agent event. Lifecycle kinds map 1:1 except compact_summary /
+    # compact_request which are handled elsewhere (agent self-insert /
+    # insert_compact_request_inbound).
+    _kind_to_event: dict[str, str | None] = {
+        "chat": "send_message",
+        "system_note": "send_message",
+        "terminate": "terminate",
+        "restart": "restart",
+        "cancel": "cancel",
+        "resurrect": "resurrect",
+        "restart_completed": "restart_completed",
+        "fork": "fork",
+    }
+    event_type = _kind_to_event.get(kind)
+    # Parse the lineage parent from source. For inter-agent chat it is the
+    # sender; for a kind='fork' lifecycle inbound the source is the fork
+    # identity marker "agent:{fork_source}" — and per the fork-lineage ruling
+    # (2026-08-28, task #1879) the fork event's target_agent_id must be the
+    # fork SOURCE (the lineage parent), never the executor.
+    target_agent_id: int | None = None
+    if event_type == "send_message" and source.startswith("agent:"):
+        with contextlib.suppress(ValueError):
+            target_agent_id = int(source.removeprefix("agent:"))
+    elif event_type == "send_message":
+        # user/UI → agent chat is not an inter-agent event; skip event write
+        event_type = None
+    elif event_type == "fork" and source.startswith("agent:"):
+        with contextlib.suppress(ValueError):
+            target_agent_id = int(source.removeprefix("agent:"))
+    return event_type, target_agent_id
+
+
 def insert_inbound_message(
     db: psycopg.Connection,
     agent_id: int,
@@ -249,16 +297,7 @@ def insert_inbound_message(
         publish an `inbound_arrived` event for the web UI to show in
         real time (spec §5).
     """
-    if payload is not None and "lifecycle_result" in payload:
-        raise ValueError("lifecycle_result is reserved for verified command settlement")
-    if payload is not None and "launch_attempts" in payload:
-        raise ValueError("launch_attempts is reserved for controller authorization")
-    if payload is not None and "resurrection_retry" in payload:
-        raise ValueError("resurrection_retry is reserved for the pending resurrection owner")
-    if payload is not None and (
-        {"resurrection_launch", "resurrection_launch_attempts"} & payload.keys()
-    ):
-        raise ValueError("resurrection launch evidence is reserved for the lifecycle owner")
+    _reject_reserved_payload(payload)
     from base.agents.messages.caller_identity import caller_payload
     from base.agents.messages.envelope import reject_unnegotiated_caller
 
@@ -268,37 +307,7 @@ def insert_inbound_message(
     source_transport = provenance.source_transport if provenance is not None else None
     content_hash = content_sha256(content) if provenance is not None else None
     assertion_match = source_assertion_match(source, provenance) if provenance is not None else None
-    # Map inbound kind → lifecycle event_type. Only chat messages between
-    # agents produce a 'send_message' event; user→agent chat is not an
-    # inter-agent event. Lifecycle kinds map 1:1 except compact_summary /
-    # compact_request which are handled elsewhere (agent self-insert /
-    # insert_compact_request_inbound).
-    _kind_to_event: dict[str, str | None] = {
-        "chat": "send_message",
-        "system_note": "send_message",
-        "terminate": "terminate",
-        "restart": "restart",
-        "cancel": "cancel",
-        "resurrect": "resurrect",
-        "restart_completed": "restart_completed",
-        "fork": "fork",
-    }
-    event_type = _kind_to_event.get(kind)
-    # Parse the lineage parent from source. For inter-agent chat it is the
-    # sender; for a kind='fork' lifecycle inbound the source is the fork
-    # identity marker "agent:{fork_source}" — and per the fork-lineage ruling
-    # (2026-08-28, task #1879) the fork event's target_agent_id must be the
-    # fork SOURCE (the lineage parent), never the executor.
-    target_agent_id: int | None = None
-    if event_type == "send_message" and source.startswith("agent:"):
-        with contextlib.suppress(ValueError):
-            target_agent_id = int(source.removeprefix("agent:"))
-    elif event_type == "send_message":
-        # user/UI → agent chat is not an inter-agent event; skip event write
-        event_type = None
-    elif event_type == "fork" and source.startswith("agent:"):
-        with contextlib.suppress(ValueError):
-            target_agent_id = int(source.removeprefix("agent:"))
+    event_type, target_agent_id = _lineage_event(kind, source)
 
     prepared_event = None
     with db.cursor() as cur:

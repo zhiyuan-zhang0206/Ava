@@ -10,11 +10,6 @@
     "services/im_bridge/daemon.py::asyncio-task:run": 3
   },
   "complexity": {
-    "services/im_bridge/adapters/feishu.py::FeishuAdapter._poll_once": 18,
-    "services/im_bridge/adapters/weixin.py::WeixinAdapter._handle_message": 18,
-    "services/im_bridge/adapters/weixin.py::qr_login": 18,
-    "services/im_bridge/notice_bridge.py::NoticeBridge.cmd_notice": 17,
-    "services/im_bridge/spawn_menu.py::SpawnMenuMixin._handle_spawn_menu": 15,
     "services/im_bridge/tests/test_im_bridge_core.py::test_spawn_menu_layers_render_with_summary_button": 22
   },
   "files": {

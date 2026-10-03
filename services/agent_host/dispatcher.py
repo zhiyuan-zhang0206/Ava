@@ -54,12 +54,7 @@ from datetime import UTC, datetime
 from functools import partial
 from typing import Protocol, cast
 
-from agent.turn.progress import (
-    admission_wait_age_s,
-    turn_progress_age_s,
-    turn_progress_snapshot,
-)
-from base.agents.observation.db_wait import database_wait_snapshot
+from agent.turn.progress import turn_progress_age_s
 from base.cluster import redis_channel_prefix
 from base.deploy.maintenance import admission
 from base.deploy.stop_timing import CANCEL_UNWIND_TIMEOUT_S, CLOCK_READ_TIMEOUT_S
@@ -67,6 +62,11 @@ from base.events.live.bus import EventBus
 from base.events.live.redis_client import retry_auth_failures_async
 from base.log import logger
 from services.agent_host.runtime import _active_turn_config_fingerprint
+from services.agent_host.turn_gates import (
+    admission_waiting,
+    database_waiting,
+    raise_if_cancellation_pending,
+)
 
 # The pattern one subscription covers: every agent's inbound channel. Kept
 # derived from `inbound_channel` (via the shared prefix) so the publish side
@@ -122,40 +122,6 @@ def _age_seconds(moment: datetime) -> float:
     if moment.tzinfo is None:
         moment = moment.replace(tzinfo=UTC)
     return (datetime.now(UTC) - moment).total_seconds()
-
-
-def _database_waiting(agent_id: int) -> bool:
-    progress = turn_progress_snapshot(agent_id)
-    last = progress["last_marks"][-1] if progress is not None else None
-    return database_wait_snapshot(agent_id, last_progress=last) is not None
-
-
-def _admission_waiting(agent_id: int) -> bool:
-    """True while the agent's turn queues at the admission gate — not a stall.
-
-    A queued turn shows no progress by design; cancelling it would only send its
-    next attempt to the tail of the queue (a successor is a new ticket),
-    punishing the oldest waiters. Wait length is observability (host stats +
-    host_admission_wait_exceeded), never a cancellation trigger.
-    """
-    return admission_wait_age_s(agent_id) is not None
-
-
-def _raise_if_cancellation_pending() -> None:
-    """Unwind when a cancellation request was swallowed at a library boundary.
-
-    `Task.cancel()` delivers its `CancelledError` exactly once. A delivery that
-    landed in psycopg_pool's async connection check used to be absorbed there —
-    the pool returned the connection and retried without re-raising (upstream
-    psycopg#1345, through psycopg_pool 3.3.1; fixed by upstream #1401 in
-    3.3.2) — leaving the task running with an outstanding cancellation nothing
-    would ever deliver again. The scan and the subscription loop re-assert it,
-    so a cancelled dispatcher still unwinds instead of looping forever while
-    its canceller hangs in `await task`.
-    """
-    task = asyncio.current_task()
-    if task is not None and task.cancelling():
-        raise asyncio.CancelledError
 
 
 class TurnScheduler:
@@ -591,7 +557,7 @@ class InboundWakeDispatcher:
                 next_scan_at = 0.0
                 scan_backoff_s = self._scan_interval_s
                 while True:
-                    _raise_if_cancellation_pending()
+                    raise_if_cancellation_pending()
                     self._raise_if_restart_required()
                     now = time.monotonic()
                     if now >= next_scan_at:
@@ -734,16 +700,9 @@ class InboundWakeDispatcher:
         started: set[int] = set()
         recovery_started = 0
         candidates = await self._pending_scan(self._stale_after_s)
-        _raise_if_cancellation_pending()
+        raise_if_cancellation_pending()
         for candidate in candidates:
-            if (
-                candidate.stale
-                and candidate.agent_id in self._scheduler.active_agents
-                and not _database_waiting(candidate.agent_id)
-                and not _admission_waiting(candidate.agent_id)
-                and (age := turn_progress_age_s(candidate.agent_id)) is not None
-                and age >= self._stale_after_s
-            ):
+            if self._candidate_stalled(candidate):
                 # Only the captured task's done state proves unwind across a pre-start reap.
                 unwound = await self._scheduler.cancel_agent(candidate.agent_id)
                 if not unwound:
@@ -751,16 +710,33 @@ class InboundWakeDispatcher:
                         f"hosted turn for agent {candidate.agent_id} did not unwind"
                     )
             recovery_started = self._wake_scanned_candidate(candidate, started, recovery_started)
+        await self._cancel_stalled_turns(started)
 
+    def _candidate_stalled(self, candidate: PendingInboundWake) -> bool:
+        """A stale pending agent whose running turn shows no progress past `stale_after_s`."""
+        stale_after_s = self._stale_after_s
+        assert stale_after_s is not None  # noqa: S101
+        return (
+            candidate.stale
+            and candidate.agent_id in self._scheduler.active_agents
+            and not database_waiting(candidate.agent_id)
+            and not admission_waiting(candidate.agent_id)
+            and (age := turn_progress_age_s(candidate.agent_id)) is not None
+            and age >= stale_after_s
+        )
+
+    async def _cancel_stalled_turns(self, started: set[int]) -> None:
+        stale_after_s = self._stale_after_s
+        assert stale_after_s is not None  # noqa: S101
         # Turn-level fake-alive: a task can claim its entire inbox, then hang
         # with no pending rows. Its progress clock detects that stalled turn
         # (2026-09-04 incident, agent 2998).
         for agent_id in self._scheduler.active_agents:
             # Do not apply an old clock to a task this scan just started.
-            if agent_id in started or _database_waiting(agent_id) or _admission_waiting(agent_id):
+            if agent_id in started or database_waiting(agent_id) or admission_waiting(agent_id):
                 continue
             age = turn_progress_age_s(agent_id)
-            if age is None or age < self._stale_after_s:
+            if age is None or age < stale_after_s:
                 continue
             # Earlier cancellation may have let this snapshotted task finish;
             # cancel_agent reports a missing task as False, not a straggler.
