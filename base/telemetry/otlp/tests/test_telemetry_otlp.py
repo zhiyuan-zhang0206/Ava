@@ -6,6 +6,7 @@ import json
 import threading
 import time
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
 
 import psycopg
@@ -832,22 +833,21 @@ def test_pipeline_exports_to_otlp(otlp_backend) -> None:
     assert metrics["ava_llm_usage_latency"].data.data_points[0].sum == 1.5
 
 
-def test_pipeline_mirror_survives_otlp_failure(monkeypatch) -> None:
+def test_pipeline_mirror_survives_otlp_failure(monkeypatch, tmp_path: Path) -> None:
     """A broken OTLP backend never blocks the drain — the JSONL mirror still
     holds the batch (the PG copy is gone, task #1197)."""
 
     def boom(endpoint: str) -> tuple[Any, Any]:
         raise RuntimeError("collector unreachable")
 
+    monkeypatch.setattr("base.telemetry.emitter.logs_dir", lambda: tmp_path)
     monkeypatch.setattr(telemetry_otlp, "_build_providers", boom)  # pyright: ignore[reportUnknownMemberType]
     monkeypatch.setattr(telemetry_otlp, "backend", telemetry_otlp._OtlpBackend())  # pyright: ignore[reportUnknownMemberType]
     telemetry.emit("log", "log", agent_id=_AGENT, attributes={"msg": "boom"})
     telemetry.sync()
 
-    from base.paths import logs_dir
-
     day = datetime.now(UTC).strftime("%Y%m%d")
-    path = logs_dir() / f"events-{day}.jsonl"
+    path = tmp_path / f"events-{day}.jsonl"
     assert path.exists()
     assert any(
         '"event_name":"log"' in line and '"msg":"boom"' in line

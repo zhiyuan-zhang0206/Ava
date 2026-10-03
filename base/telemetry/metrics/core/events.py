@@ -15,119 +15,120 @@ own predicate, which the LogQL validator permits for ``logs`` panels.
 
 from __future__ import annotations
 
-from base.telemetry.metrics.core import catalog
 from base.telemetry.metrics.plugin_metrics import MetricSpec
 
-catalog.register_core_metric(
-    MetricSpec(
-        name="core_events_what_happened",
-        title="Events — What happened (T0+T1)",
-        description=(
-            "Business audit facts and anomaly rows (exact tier predicate: warnings+ always, "
-            "audit rows, and declared-anomaly names at info level). JSON parse failures "
-            "excluded."
-        ),
-        event_name="log",
-        category="log",
-        panel="logs",
-        query_type="logql",
-        query=(
-            '{service_name="unknown_service"} | json | __error__="" | '
-            '((level!~"warning|error|critical" and category="audit") or '
-            '(level=~"warning|error|critical" or (level!~"warning|error|critical" and '
-            'category!="audit" and '
-            'event_name=~"checkpoint_write_failed|claim_cas_lost|claim_cas_lost_exit'
-            "|compact_turn_aborted|dangling_tool_pairing_repaired|db_outage_pause"
-            "|db_outage_reconcile_retry|db_outage_wait|db_pool_acquire_slow"
-            "|db_pool_acquire_timeout|db_recovered|delivery_stalled|editable_pth_repaired"
-            "|error_resolved|event_log_drop|exec\\\\(cancelled\\\\)|exec\\\\(failed\\\\)"
-            "|exec\\\\(thread\\\\-stuck\\\\)|exec\\\\(timeout\\\\)|exec_cancelled|exec_failed"
-            "|exec_memory_guard_killed|exec_node_timeout|exec_subprocess_killed|exec_timeout"
-            "|host_dispatcher_bad_channel"
-            "|host_turn_crashed|host_turn_uncancellable|idle_cas_lost|label_generate_failed"
-            "|launch_confirm_failed|launch_confirm_task_crashed|launch_force_terminated"
-            "|llm_cancelled|llm_provider_error|llm_turn_aborted"
-            "|page_restore_failed|page_restore_query_failed|page_serve_dir_missing"
-            "|pgbouncer_repaired|screen_capture_notify_failed|sse_drop|stream_overloaded_retry"
-            '|stream_stall_pair_terminated|stream_stalled_retry|warning_resolved")))'
-        ),
-        target_names=["events"],
-        width=24,
-        height=7,
-        panel_id=2201,
-        section="core",
-        order=20,
+
+def core_metrics() -> list[MetricSpec]:
+    """This module's core metrics, in registration order."""
+    specs: list[MetricSpec] = []
+    specs.append(
+        MetricSpec(
+            name="core_events_what_happened",
+            title="Events — What happened (T0+T1)",
+            description=(
+                "Business audit facts and anomaly rows (exact tier predicate: warnings+ always, "
+                "audit rows, and declared-anomaly names at info level). JSON parse failures "
+                "excluded."
+            ),
+            event_name="log",
+            category="log",
+            panel="logs",
+            query_type="logql",
+            query=(
+                '{service_name="unknown_service"} | json | __error__="" | '
+                '((level!~"warning|error|critical" and category="audit") or '
+                '(level=~"warning|error|critical" or (level!~"warning|error|critical" and '
+                'category!="audit" and '
+                'event_name=~"checkpoint_write_failed|claim_cas_lost|claim_cas_lost_exit'
+                "|compact_turn_aborted|dangling_tool_pairing_repaired|db_outage_pause"
+                "|db_outage_reconcile_retry|db_outage_wait|db_pool_acquire_slow"
+                "|db_pool_acquire_timeout|db_recovered|delivery_stalled|editable_pth_repaired"
+                "|error_resolved|event_log_drop|exec\\\\(cancelled\\\\)|exec\\\\(failed\\\\)"
+                "|exec\\\\(thread\\\\-stuck\\\\)|exec\\\\(timeout\\\\)|exec_cancelled|exec_failed"
+                "|exec_memory_guard_killed|exec_node_timeout|exec_subprocess_killed|exec_timeout"
+                "|host_dispatcher_bad_channel"
+                "|host_turn_crashed|host_turn_uncancellable|idle_cas_lost|label_generate_failed"
+                "|launch_confirm_failed|launch_confirm_task_crashed|launch_force_terminated"
+                "|llm_cancelled|llm_provider_error|llm_turn_aborted"
+                "|page_restore_failed|page_restore_query_failed|page_serve_dir_missing"
+                "|pgbouncer_repaired|screen_capture_notify_failed|sse_drop|stream_overloaded_retry"
+                '|stream_stall_pair_terminated|stream_stalled_retry|warning_resolved")))'
+            ),
+            target_names=["events"],
+            width=24,
+            height=7,
+            panel_id=2201,
+            section="core",
+            order=20,
+        )
     )
-)
 
-
-catalog.register_core_metric(
-    MetricSpec(
-        name="core_events_types",
-        title="Events — types",
-        description=(
-            "Event counts by name, level, and category over the selected dashboard window. Tier "
-            "is derived by the events API and is not a Loki label, so this query groups only "
-            "fields Loki stores."
-        ),
-        event_name="log",
-        category="log",
-        panel="table",
-        query_type="logql",
-        query=(
-            "sum by (event_name, level, category) "
-            '(count_over_time({service_name="unknown_service"} | json | __error__="" '
-            "[$__range]))"
-        ),
-        target_names=["events"],
-        width=24,
-        height=7,
-        panel_id=2202,
-        section="core",
-        order=21,
+    specs.append(
+        MetricSpec(
+            name="core_events_types",
+            title="Events — types",
+            description=(
+                "Event counts by name, level, and category over the selected dashboard window. Tier "
+                "is derived by the events API and is not a Loki label, so this query groups only "
+                "fields Loki stores."
+            ),
+            event_name="log",
+            category="log",
+            panel="table",
+            query_type="logql",
+            query=(
+                "sum by (event_name, level, category) "
+                '(count_over_time({service_name="unknown_service"} | json | __error__="" '
+                "[$__range]))"
+            ),
+            target_names=["events"],
+            width=24,
+            height=7,
+            panel_id=2202,
+            section="core",
+            order=21,
+        )
     )
-)
 
-
-catalog.register_core_metric(
-    MetricSpec(
-        name="core_events_raw_stream",
-        title="Events — raw stream (all, incl. noise)",
-        description=(
-            "Raw stream for debugging; most rows are internal telemetry. JSON parse failures "
-            "are excluded."
-        ),
-        event_name="log",
-        category="log",
-        panel="logs",
-        query_type="logql",
-        query='{service_name="unknown_service"} | json | __error__=""',
-        target_names=["events"],
-        width=24,
-        height=10,
-        panel_id=2203,
-        section="core",
-        order=22,
+    specs.append(
+        MetricSpec(
+            name="core_events_raw_stream",
+            title="Events — raw stream (all, incl. noise)",
+            description=(
+                "Raw stream for debugging; most rows are internal telemetry. JSON parse failures "
+                "are excluded."
+            ),
+            event_name="log",
+            category="log",
+            panel="logs",
+            query_type="logql",
+            query='{service_name="unknown_service"} | json | __error__=""',
+            target_names=["events"],
+            width=24,
+            height=10,
+            panel_id=2203,
+            section="core",
+            order=22,
+        )
     )
-)
 
-
-catalog.register_core_metric(
-    MetricSpec(
-        name="core_gateway_latency_sample_count",
-        title="Gateway latency sample count by route",
-        event_name="gateway_latency",
-        category="telemetry",
-        panel="timeseries",
-        query_type="logql",
-        query=(
-            'max by (attributes_route) (max_over_time({service_name="unknown_service", '
-            'event_name={event_name}} | json | category=~"{category_re}|log" | unwrap '
-            "attributes_count [1m]))"
-        ),
-        target_names=["{{attributes_route}}"],
-        panel_id=21,
-        section="Gateway & execution",
-        order=3,
+    specs.append(
+        MetricSpec(
+            name="core_gateway_latency_sample_count",
+            title="Gateway latency sample count by route",
+            event_name="gateway_latency",
+            category="telemetry",
+            panel="timeseries",
+            query_type="logql",
+            query=(
+                'max by (attributes_route) (max_over_time({service_name="unknown_service", '
+                'event_name={event_name}} | json | category=~"{category_re}|log" | unwrap '
+                "attributes_count [1m]))"
+            ),
+            target_names=["{{attributes_route}}"],
+            panel_id=21,
+            section="Gateway & execution",
+            order=3,
+        )
     )
-)
+    return specs

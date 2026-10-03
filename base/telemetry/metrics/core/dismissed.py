@@ -12,46 +12,50 @@ metrics by tests) stays untouched.
 
 from __future__ import annotations
 
-from base.telemetry.metrics.core import catalog
 from base.telemetry.metrics.plugin_metrics import MetricSpec
 
-catalog.register_core_metric(
-    MetricSpec(
-        name="core_dismissed_warning",
-        title="Dismissed Warning",
-        event_name="resolution_status",
-        category="telemetry",
-        unit="short",
-        panel="stat",
-        query="ava_resolution_status_dismissed_warnings_ratio",
-        query_type="promql",
-        target_names=["dismissed_warning"],
-        field_defaults={"color": {"mode": "fixed", "fixedColor": "orange"}},
-        width=8,
-        height=4,
-        panel_id=48,
-        section="core",
-        order=12,
-    )
-)
 
-catalog.register_core_metric(
-    MetricSpec(
-        name="core_dismissed_error",
-        title="Dismissed Error",
-        event_name="resolution_status",
-        category="telemetry",
-        unit="short",
-        panel="stat",
-        query="ava_resolution_status_dismissed_errors_ratio",
-        query_type="promql",
-        target_names=["dismissed_error"],
-        options={"noValue": "0"},
-        field_defaults={"color": {"mode": "fixed", "fixedColor": "red"}},
-        width=8,
-        height=4,
-        panel_id=49,
-        section="core",
-        order=13,
+def core_metrics() -> list[MetricSpec]:
+    """This module's core metrics, in registration order."""
+    specs: list[MetricSpec] = []
+    specs.append(
+        MetricSpec(
+            name="core_dismissed_warning",
+            title="Dismissed Warning",
+            event_name="resolution_status",
+            category="telemetry",
+            unit="short",
+            panel="stat",
+            query="ava_resolution_status_dismissed_warnings_ratio",
+            query_type="promql",
+            target_names=["dismissed_warning"],
+            field_defaults={"color": {"mode": "fixed", "fixedColor": "orange"}},
+            width=8,
+            height=4,
+            panel_id=48,
+            section="core",
+            order=12,
+        )
     )
-)
+
+    specs.append(
+        MetricSpec(
+            name="core_dismissed_error",
+            title="Dismissed Error",
+            event_name="resolution_status",
+            category="telemetry",
+            unit="short",
+            panel="stat",
+            query="ava_resolution_status_dismissed_errors_ratio",
+            query_type="promql",
+            target_names=["dismissed_error"],
+            options={"noValue": "0"},
+            field_defaults={"color": {"mode": "fixed", "fixedColor": "red"}},
+            width=8,
+            height=4,
+            panel_id=49,
+            section="core",
+            order=13,
+        )
+    )
+    return specs

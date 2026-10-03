@@ -1,6 +1,8 @@
-"""Core metrics registry (Task #882) — registration, validation reuse, and
-in-process collection shared with the plugin registry."""
+"""Core metrics (Task #882) — validation reuse and in-process collection
+shared with the plugin registry."""
 
+import sys
+import types
 from typing import Any
 
 import pytest
@@ -17,10 +19,8 @@ from base.telemetry.metrics.plugin_metrics import (
 
 @pytest.fixture(autouse=True)
 def _clean():
-    catalog.clear_core_registry()
     clear_registry()
     yield
-    catalog.clear_core_registry()
     clear_registry()
 
 
@@ -38,25 +38,27 @@ def _spec(name: str = "core_test", **overrides) -> MetricSpec:
     )
 
 
-def test_register_core_metric_sets_plugin_core() -> None:
-    filled = catalog.register_core_metric(_spec())
+def test_validate_core_metric_sets_plugin_core() -> None:
+    filled = catalog.validate_core_metric(_spec())
     assert filled.plugin == "core"
-    assert [m.name for m in catalog.registered_core_metrics()] == ["core_test"]
 
 
-def test_register_core_metric_rejects_duplicates() -> None:
-    catalog.register_core_metric(_spec())
+def test_collect_core_metrics_rejects_duplicates(monkeypatch: pytest.MonkeyPatch) -> None:
+    module = types.ModuleType("fake_core_metrics")
+    module.core_metrics = lambda: [_spec(), _spec()]  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "fake_core_metrics", module)
+    monkeypatch.setattr(catalog, "_CORE_DEFINITION_MODULES", ("fake_core_metrics",))
     with pytest.raises(DuplicateMetric):
-        catalog.register_core_metric(_spec())
+        catalog.collect_core_metrics()
 
 
-def test_register_core_metric_validates_sql_like_plugins() -> None:
+def test_validate_core_metric_validates_sql_like_plugins() -> None:
     # unknown function -> rejected at register time (same validator as plugins)
     with pytest.raises(InvalidMetricQuery, match="not on the whitelist"):
-        catalog.register_core_metric(_spec(name="core_bad", query="SELECT version() FROM events"))
+        catalog.validate_core_metric(_spec(name="core_bad", query="SELECT version() FROM events"))
     # multi-target specs are validated per target
     with pytest.raises(InvalidMetricQuery, match="not on the whitelist"):
-        catalog.register_core_metric(
+        catalog.validate_core_metric(
             _spec(
                 name="core_bad_target",
                 targets=["SELECT pg_sleep(1)"],
@@ -64,12 +66,12 @@ def test_register_core_metric_validates_sql_like_plugins() -> None:
         )
 
 
-def test_register_core_metric_agent_placeholder_rule() -> None:
+def test_validate_core_metric_agent_placeholder_rule() -> None:
     # The template era is over (task #180 PR C): {{agent_id}} in a SQL query
     # is rejected outright — the per-agent inspector idiom lives in the LogQL
     # dialect (rendered per agent), not in SQL templates.
     with pytest.raises(InvalidMetricQuery, match="template placeholders"):
-        catalog.register_core_metric(
+        catalog.validate_core_metric(
             _spec(
                 name="core_agent",
                 query="SELECT count(*) FROM events WHERE {{agent_id}}",
@@ -80,10 +82,6 @@ def test_register_core_metric_agent_placeholder_rule() -> None:
 
 def test_collect_core_metrics_includes_statistics_coverage() -> None:
     """The core registry includes every statistic surfaced to operators."""
-    import sys
-
-    for module_name in catalog._CORE_DEFINITION_MODULES:
-        sys.modules.pop(module_name, None)
     specs = catalog.collect_core_metrics()
     assert specs
     assert all(s.plugin == "core" for s in specs)
@@ -128,18 +126,18 @@ def _logql_spec(name: str = "core_loki", **overrides: Any) -> MetricSpec:
     )
 
 
-def test_register_core_metric_validates_logql() -> None:
+def test_validate_core_metric_validates_logql() -> None:
     """LogQL templates are validated against the stream-selector / | json /
     placeholder contract, not the SQL whitelist."""
     with pytest.raises(InvalidMetricQuery, match="stream"):
-        catalog.register_core_metric(
+        catalog.validate_core_metric(
             _logql_spec(
                 name="core_loki_bad_selector",
                 query='sum(count_over_time({other="x"} | json | event_name={event_name} [5m]))',
             )
         )
     with pytest.raises(InvalidMetricQuery, match="json"):
-        catalog.register_core_metric(
+        catalog.validate_core_metric(
             _logql_spec(
                 name="core_loki_no_json",
                 query=(
@@ -149,7 +147,7 @@ def test_register_core_metric_validates_logql() -> None:
             )
         )
     with pytest.raises(InvalidMetricQuery, match="placeholders"):
-        catalog.register_core_metric(
+        catalog.validate_core_metric(
             _logql_spec(
                 name="core_loki_hardcoded",
                 query=(
@@ -159,7 +157,7 @@ def test_register_core_metric_validates_logql() -> None:
             )
         )
     # a whole-stream query (no event filter at all) is legitimate
-    spec = catalog.register_core_metric(
+    spec = catalog.validate_core_metric(
         _logql_spec(
             name="core_loki_whole_stream",
             query='sum(rate({service_name="unknown_service"} | json [$__interval]))',
@@ -171,7 +169,7 @@ def test_register_core_metric_validates_logql() -> None:
 def test_logql_rejects_an_untemplated_cross_category_filter() -> None:
     """Class resolution uses Prometheus gauges, not a raw union query."""
     with pytest.raises(InvalidMetricQuery, match="placeholders"):
-        catalog.register_core_metric(
+        catalog.validate_core_metric(
             _logql_spec(
                 name="core_unresolved_events",
                 query=(
@@ -195,7 +193,7 @@ def test_render_logql_quotes_and_agent_placeholder() -> None:
         ),
         output=["inspector"],
     )
-    catalog.register_core_metric(spec)
+    catalog.validate_core_metric(spec)
     rendered = render_query(spec, agent_id=42)
     assert 'category=~"telemetry|log"' in rendered
     assert 'event_name="llm_usage"' in rendered

@@ -4,8 +4,8 @@ Two-tier metric architecture since 2026-08-06 (user ruling):
 
 - **Core metrics** (this module): the repo's own observability — LLM cost /
   errors / turn health / exec outcomes / SDK usage, plus the hand-written
-  ops-dashboard panels migrated into registry form. Registered with
-  ``register_core_metric``, which runs the SAME template safety validation
+  ops-dashboard panels migrated into registry form. Each definition module returns its
+  specs from ``core_metrics()`` and ``collect_core_metrics`` runs the SAME template safety validation
   as plugin metrics but never requires a PluginContext: core metrics are
   repo code, not plugin code.
 - **Plugin metrics** (``base/telemetry/metrics/plugin_metrics.py``): metrics contributed by
@@ -37,7 +37,7 @@ are "core".
 from __future__ import annotations
 
 import importlib
-from contextlib import suppress
+from typing import Any, cast
 
 from base.telemetry.metrics.plugin_metrics import (
     DuplicateMetric,
@@ -64,45 +64,40 @@ _CORE_DEFINITION_MODULES = (
     "base.telemetry.metrics.core.frontend",
 )
 
-_CORE_REGISTRY: dict[str, MetricSpec] = {}
 
+def validate_core_metric(spec: MetricSpec) -> MetricSpec:
+    """One core metric (first-party observability surface) as the registry holds it.
 
-def register_core_metric(spec: MetricSpec) -> MetricSpec:
-    """Register one core metric (first-party observability surface).
-
-    Validation at register time: name uniqueness across core metrics and
-    query safety for every template (``validate_spec_sql`` — the same checks
-    plugin metrics go through).
+    Query safety for every template (``validate_spec_sql`` — the same checks
+    plugin metrics go through); the ``plugin`` field is ``core``.
 
     Raises:
-        DuplicateMetric: ``spec.name`` already registered.
         InvalidMetricQuery: any template failed validation.
     """
-    if spec.name in _CORE_REGISTRY:
-        raise DuplicateMetric(
-            f"core metric {spec.name!r} already registered — names are global across core metrics."
-        )
     validate_spec_sql(spec)
-    filled = spec.model_copy(update={"plugin": "core"})
-    _CORE_REGISTRY[spec.name] = filled
-    return filled
-
-
-def registered_core_metrics() -> list[MetricSpec]:
-    """All registered core metrics, in registration order."""
-    return list(_CORE_REGISTRY.values())
-
-
-def clear_core_registry() -> None:
-    """Drop every registration — test fixtures."""
-    _CORE_REGISTRY.clear()
+    return spec.model_copy(update={"plugin": "core"})
 
 
 def collect_core_metrics() -> list[MetricSpec]:
-    """Import the core definition modules (once) and return their metrics in
-    registration order. A module that cannot be imported (missing dependency
-    or not present) is skipped — same tolerance as the plugin generator."""
+    """The core metrics of every definition module, validated, in registration order.
+
+    A module that cannot be imported (missing dependency or not present) is
+    skipped — same tolerance as the plugin generator.
+
+    Raises:
+        DuplicateMetric: two definitions share a name (names are global across core metrics).
+        InvalidMetricQuery: any template failed validation.
+    """
+    collected: dict[str, MetricSpec] = {}
     for module_name in _CORE_DEFINITION_MODULES:
-        with suppress(ImportError):
-            importlib.import_module(module_name)
-    return registered_core_metrics()
+        try:
+            module = importlib.import_module(module_name)
+        except ImportError:
+            continue
+        for spec in cast("Any", module).core_metrics():
+            if spec.name in collected:
+                raise DuplicateMetric(
+                    f"core metric {spec.name!r} already registered — names are global across core metrics."
+                )
+            collected[spec.name] = validate_core_metric(spec)
+    return list(collected.values())
