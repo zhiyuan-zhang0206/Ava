@@ -16,17 +16,17 @@ from base.host.net.resilience import Policy, retry
 
 # Pinned contrib version — re-validate against the deploy/lgtm backends
 # (Tempo/Loki/Prometheus OTLP intake) when bumping.
-OTELCOL_CONTRIB_VERSION = "0.157.0"
+OTELCOL_CONTRIB_VERSION = "0.162.0"
 
 # SHA256 of each supported platform's release tarball
-# (opentelemetry-collector-releases v0.157.0 checksums). Keyed by the platform
+# (opentelemetry-collector-releases v0.162.0 checksums). Keyed by the platform
 # tag used in the asset name.
 _OTELCOL_CONTRIB_SHA256: dict[str, str] = {
-    "darwin_arm64": "6c03308935573712a795b4229f756bc4288bbbb13850604f3c7287868af84d4b",
-    "darwin_amd64": "e11e7482144c3ac1eb1f612d3d175589435cad968a791d6ef5c73be43e1b8c34",
-    "linux_amd64": "d33177515a244a2393f03ffd66ab3e68a8fc11a56bc145ec4d0ca2644ee95504",
-    "linux_arm64": "34eb82390c462c877dd60ec5ec84de899088916facd07306ec988e4c34bd05b3",
-    "windows_amd64": "7b3938e1522ff04261a694a58e7111c5f7cdd19be617c3a77118cffad7abb815",
+    "darwin_arm64": "d5e11974d2e4adac3cc001a25137aad52f6e77ec3034ba7735cac7c219a5f97a",
+    "darwin_amd64": "91a6e7a0f5e1981986c897db4535de5ba8d7fc45d4205809aecb9ebebf68c71c",
+    "linux_amd64": "fcc063749f730f8c21fe29f2d340ff174f5f1c5885bd3156fb6c985a3036fcc3",
+    "linux_arm64": "ecf6a917e2b53beb1703b19a84bc4e112a2fcaba549639cf6b0ba58446bfd7d2",
+    "windows_amd64": "b371829181e89947a1a6570b8b6c38c20d85e2d215b76bf042f89b365b9e5c3d",
 }
 
 _DOWNLOAD_URL = (

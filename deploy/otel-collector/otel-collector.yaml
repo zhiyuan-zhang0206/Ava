@@ -271,8 +271,8 @@ $OTLP_EXPORTERS
   # ExportTraceServiceRequest. Rotation (timberjack) gives append semantics
   # across collector restarts: the ACTIVE file is never truncated, and
   # max_days / max_backups bound the directory. `spans.jsonl` -> rotated
-  # `spans-<ISO-timestamp>-size.jsonl` on size rotation (timberjack 1.4.5 in
-  # otelcol-contrib 0.157.0 appends the trigger reason to the backup name;
+  # `spans-<ISO-timestamp>-size.jsonl` on size rotation (timberjack 1.4.7 in
+  # otelcol-contrib 0.162.0 appends the trigger reason to the backup name;
   # `base/telemetry/trace_mirror.py` parses both suffixed and unsuffixed shapes).
   #
   # Segment size is the structural bound on the ACTIVE file (the file
