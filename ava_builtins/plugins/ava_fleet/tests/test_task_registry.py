@@ -105,8 +105,8 @@ def test_create_parent_is_required() -> None:
         "priority",
         "token_budget",
         "usd_budget",
-        "brief",
     ]
+    assert params["description"].default is inspect.Parameter.empty
     assert params["parent"].default is inspect.Parameter.empty
     assert params["parent"].kind is inspect.Parameter.KEYWORD_ONLY
 
@@ -626,36 +626,6 @@ def test_log_missing_task_raises(db_conn: psycopg.Connection) -> None:
     try:
         with pytest.raises(ValueError, match="does not exist"):
             task_registry.log(999999, "note")
-    finally:
-        ava.agent_identity._agent_id = original
-
-
-def test_deprecated_aliases_still_work(db_conn: psycopg.Connection, root_task_id: int) -> None:
-    agent_id = _seed_agent(db_conn)
-    original = ava.agent_identity._agent_id
-    ava.agent_identity._agent_id = agent_id
-    try:
-        task = task_registry.create("title", brief="via alias", parent=root_task_id)
-        assert task.description == "via alias"
-        assert task.brief == "via alias"
-        task_registry.update(task.id, content="log via alias")
-        got = task_registry.get(task.id)
-        assert got.results == "log via alias"
-        assert got.content == "log via alias"
-    finally:
-        ava.agent_identity._agent_id = original
-
-
-def test_alias_and_new_name_together_raise(db_conn: psycopg.Connection, root_task_id: int) -> None:
-    agent_id = _seed_agent(db_conn)
-    original = ava.agent_identity._agent_id
-    ava.agent_identity._agent_id = agent_id
-    try:
-        with pytest.raises(TypeError, match="deprecated alias"):
-            task_registry.create("title", "detail", brief="also detail", parent=root_task_id)
-        task = task_registry.create("title", "detail", parent=root_task_id)
-        with pytest.raises(TypeError, match="deprecated alias"):
-            task_registry.update(task.id, results="a", content="b")
     finally:
         ava.agent_identity._agent_id = original
 

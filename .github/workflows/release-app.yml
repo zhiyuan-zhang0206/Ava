@@ -1,9 +1,7 @@
 # Build and publish the Ava App (`ui/app`) for an `app-v*` tag.
 #
-# The tag prefix keeps this workflow off release.yml's trigger: that one fires
-# on dated cluster tags (`v0.1.2-20260816`) and turns them into releases from
-# the app versions independently of the cluster, so it
-# gets its own tag namespace and its own release.
+# App versions move independently of the cluster, so the app has its own tag
+# namespace and its own release.
 #
 # A manual dispatch may omit signing secrets and produces unsigned validation
 # artifacts. A release tag fails closed unless updater, platform signing, and

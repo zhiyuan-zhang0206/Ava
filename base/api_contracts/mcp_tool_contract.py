@@ -1,13 +1,11 @@
-"""Shared MCP message projection and advertised contract for both inbound surfaces."""
+"""Shared MCP message projection and the advertised tool contract of the gateway `/mcp` endpoint."""
 
 from __future__ import annotations
 
-from typing import Any, Literal, cast
-
-Surface = Literal["stdio", "gateway"]
+from typing import Any, cast
 
 # The SDK uses the explicit description verbatim, including indentation and
-# trailing whitespace. The original stdio docstrings are the shared prose.
+# trailing whitespace.
 _TOOL_DESCRIPTIONS: dict[str, str] = {
     "list_agents": """Read one agent directory page, newest IDs first.
 
@@ -20,8 +18,7 @@ _TOOL_DESCRIPTIONS: dict[str, str] = {
     "get_agent": """Read the full state of one agent by id.
 
         Includes lifecycle details, what the agent is doing right now, and any
-        questions it is blocked on waiting for an answer —
-        answer those with `send_message`.
+        questions it is blocked on waiting for an answer — answer those with `send_message`.
         """,
     "spawn_agent": """Start a new Ava agent and give it a goal. Returns its id immediately.
 
@@ -30,179 +27,65 @@ _TOOL_DESCRIPTIONS: dict[str, str] = {
         with whatever context the agent needs, not as a single question. Watch
         its progress with `get_messages`.
 
-        `label` is a short human-readable name shown in the fleet views (one is
-        generated if omitted). `machine` picks which host runs it — omit it for
-        the default host; a name that is not an agent-runner is rejected.
+        `label` is a short human-readable name shown in the fleet views (one
+        is generated if omitted). `machine` picks which host runs it — omit it
+        for the default host; a name that is not an agent-runner is rejected.
         `config_overlay` overrides per-agent settings, currently
         `{"llm_model": "<model id>"}`.
         """,
     "send_message": """Send a message to a running agent — a new instruction, more context,
         or the answer to a question it is blocked on.
 
-        The message is queued and picked up when the agent finishes its current
-        step, so this returns before the agent has read it; it does not return
-        the agent's reply. Read the reply with `get_messages`. Messaging an
-        agent that has already terminated brings it back with its history
-        intact.
+        The message is queued and picked up when the agent finishes its
+        current step, so this returns before the agent has read it; it does
+        not return the agent's reply. Read the reply with `get_messages`.
+        Messaging an agent that has already terminated brings it back with its
+        history intact.
+
+        Explicit caller_protocol='v1' labels the authenticated MCP client as an
+        external caller. It adds no permissions and requires an already-live
+        target with negotiated v1 support; legacy/default and bootstrap behavior
+        are unchanged. Do not supply source or instance: the server owns them.
+
+        An optional idempotency_key identifies a retry of this exact message.
+        The server always scopes it to your authenticated MCP client identity;
+        another token client using the same key cannot retrieve your receipt.
         """,
     "get_messages": """Read an agent's conversation history — what it was told and what it
         has said and done.
 
         Returns the newest `limit` messages, oldest first. Each entry has a
-        `role` (human / ai / system), the message `text`, and — for a turn where
-        the agent acted — the Python `code` it ran, which is how an Ava agent
-        does everything. `total` is the full history length, so a caller can see
-        how much was left out.
+        `role` (human / ai / system), the message `text`, and — for a turn
+        where the agent acted — the Python `code` it ran, which is how an Ava
+        agent does everything. `total` is the full history length, so a caller
+        can see how much was left out.
         """,
     "terminate_agent": """DESTRUCTIVE. End an agent: it stops working and its process exits.
 
-        The agent finishes its current step first, so work in flight is not cut
-        off mid-way. `force=True` requests interruption instead; an `enqueued`
-        result means accepted, not that the agent or its owned work has exited.
-        Use force only when a clean stop cannot progress.
+        The agent finishes its current step first, so work in flight is not
+        cut off mid-way. `force=True` requests interruption instead; an
+        `enqueued` result means accepted, not that the agent or its owned work
+        has exited. Use force only when a clean stop cannot progress.
 
-        The agent's history survives either way, and `send_message` revives it,
-        so this is reversible; it is destructive in that it stops running work.
-        `message` saves a final instruction for that later revival without
-        asking the agent to respond before exiting. The result also reports
-        `open_tasks` — the tasks the agent still owns as it goes down (at most
-        five, most recently updated first; null when it owns none).
+        The agent's history survives either way, and `send_message` revives
+        it, so this is reversible; it is destructive in that it stops running
+        work. `message` saves a final instruction for that later revival
+        without asking the agent to respond before exiting. The result also
+        reports `open_tasks` — the tasks the agent still owns as it goes down
+        (at most five, most recently updated first; null when it owns none).
         """,
     "cluster_status": """Report the health of the Ava cluster itself — which host answered,
         what it is capable of running, and whether it is paused.
 
-        A paused cluster is mid-maintenance: agents are stopped and spawns will
-        not run until it resumes. Check this first when the agent tools start
-        failing.
+        A paused cluster is mid-maintenance: agents are stopped and spawns
+        will not run until it resumes. Check this first when the agent tools
+        start failing.
         """,
 }
 
-# Existing gateway line breaks differ from stdio; keep those wire bytes.
-_GATEWAY_REWRAPS: dict[str, tuple[tuple[str, str], ...]] = {
-    "get_agent": (
-        (
-            (
-                "        questions it is blocked on waiting for an answer —\n"
-                "        answer those with `send_message`.\n"
-            ),
-            (
-                "        questions it is blocked on waiting for an answer — answer those with `send_message`.\n"
-            ),
-        ),
-    ),
-    "spawn_agent": (
-        (
-            (
-                "        `label` is a short human-readable name shown in the fleet views (one is\n"
-                "        generated if omitted). `machine` picks which host runs it — omit it for\n"
-                "        the default host; a name that is not an agent-runner is rejected.\n"
-            ),
-            (
-                "        `label` is a short human-readable name shown in the fleet views (one\n"
-                "        is generated if omitted). `machine` picks which host runs it — omit it\n"
-                "        for the default host; a name that is not an agent-runner is rejected.\n"
-            ),
-        ),
-    ),
-    "send_message": (
-        (
-            (
-                "        The message is queued and picked up when the agent finishes its current\n"
-                "        step, so this returns before the agent has read it; it does not return\n"
-                "        the agent's reply. Read the reply with `get_messages`. Messaging an\n"
-                "        agent that has already terminated brings it back with its history\n"
-                "        intact.\n"
-            ),
-            (
-                "        The message is queued and picked up when the agent finishes its\n"
-                "        current step, so this returns before the agent has read it; it does\n"
-                "        not return the agent's reply. Read the reply with `get_messages`.\n"
-                "        Messaging an agent that has already terminated brings it back with its\n"
-                "        history intact.\n"
-            ),
-        ),
-    ),
-    "get_messages": (
-        (
-            (
-                "        `role` (human / ai / system), the message `text`, and — for a turn where\n"
-                "        the agent acted — the Python `code` it ran, which is how an Ava agent\n"
-                "        does everything. `total` is the full history length, so a caller can see\n"
-                "        how much was left out.\n"
-            ),
-            (
-                "        `role` (human / ai / system), the message `text`, and — for a turn\n"
-                "        where the agent acted — the Python `code` it ran, which is how an Ava\n"
-                "        agent does everything. `total` is the full history length, so a caller\n"
-                "        can see how much was left out.\n"
-            ),
-        ),
-    ),
-    "terminate_agent": (
-        (
-            (
-                "        The agent finishes its current step first, so work in flight is not cut\n"
-                "        off mid-way. `force=True` requests interruption instead; an `enqueued`\n"
-                "        result means accepted, not that the agent or its owned work has exited.\n"
-                "        Use force only when a clean stop cannot progress.\n"
-            ),
-            (
-                "        The agent finishes its current step first, so work in flight is not\n"
-                "        cut off mid-way. `force=True` requests interruption instead; an\n"
-                "        `enqueued` result means accepted, not that the agent or its owned work\n"
-                "        has exited. Use force only when a clean stop cannot progress.\n"
-            ),
-        ),
-        (
-            (
-                "        The agent's history survives either way, and `send_message` revives it,\n"
-                "        so this is reversible; it is destructive in that it stops running work.\n"
-                "        `message` saves a final instruction for that later revival without\n"
-                "        asking the agent to respond before exiting. The result also reports\n"
-                "        `open_tasks` — the tasks the agent still owns as it goes down (at most\n"
-                "        five, most recently updated first; null when it owns none).\n"
-            ),
-            (
-                "        The agent's history survives either way, and `send_message` revives\n"
-                "        it, so this is reversible; it is destructive in that it stops running\n"
-                "        work. `message` saves a final instruction for that later revival\n"
-                "        without asking the agent to respond before exiting. The result also\n"
-                "        reports `open_tasks` — the tasks the agent still owns as it goes down\n"
-                "        (at most five, most recently updated first; null when it owns none).\n"
-            ),
-        ),
-    ),
-    "cluster_status": (
-        (
-            (
-                "        A paused cluster is mid-maintenance: agents are stopped and spawns will\n"
-                "        not run until it resumes. Check this first when the agent tools start\n"
-                "        failing.\n"
-            ),
-            (
-                "        A paused cluster is mid-maintenance: agents are stopped and spawns\n"
-                "        will not run until it resumes. Check this first when the agent tools\n"
-                "        start failing.\n"
-            ),
-        ),
-    ),
-}
 
-_GATEWAY_SEND_MESSAGE_APPENDIX = (
+_SERVER_INSTRUCTIONS = (
     "\n"
-    "\n"
-    "        Explicit caller_protocol='v1' labels the authenticated MCP client as an\n"
-    "        external caller. It adds no permissions and requires an already-live\n"
-    "        target with negotiated v1 support; legacy/default and bootstrap behavior\n"
-    "        are unchanged. Do not supply source or instance: the server owns them.\n"
-    "\n"
-    "        An optional idempotency_key identifies a retry of this exact message.\n"
-    "        The server always scopes it to your authenticated MCP client identity;\n"
-    "        another token client using the same key cannot retrieve your receipt.\n"
-    "        "
-)
-
-_COMMON_INSTRUCTIONS = (
     "Ava runs a fleet of long-lived autonomous agents. An agent is a persistent\n"
     "process with its own conversation history that keeps working after you stop\n"
     "talking to it — not a request/response endpoint.\n"
@@ -213,40 +96,19 @@ _COMMON_INSTRUCTIONS = (
     "agents work asynchronously, a transcript read right after a spawn is usually\n"
     "still empty; poll rather than assume failure.\n"
     "\n"
-    "Every tool here acts on one cluster — the one "
+    "Every tool here acts on one cluster — the one this gateway belongs to.\n"
+    "There is no cluster argument."
 )
 
 
-def server_instructions(surface: Surface) -> str:
-    """The common fleet instructions with this transport's cluster identity."""
-    if surface == "stdio":
-        return (
-            _COMMON_INSTRUCTIONS + "this server was launched from.\nThere is no cluster argument."
-        )
-    if surface == "gateway":
-        return (
-            "\n" + _COMMON_INSTRUCTIONS + "this gateway belongs to.\nThere is no cluster argument."
-        )
-    raise ValueError(f"unknown MCP surface: {surface}")
+def server_instructions() -> str:
+    """The fleet instructions the gateway advertises on MCP initialize."""
+    return _SERVER_INSTRUCTIONS
 
 
-def tool_description(name: str, surface: Surface) -> str:
-    """Return the shared tool prose in the surface's existing wire layout."""
-    description = _TOOL_DESCRIPTIONS[name]
-    if surface == "stdio":
-        return description
-    if surface != "gateway":
-        raise ValueError(f"unknown MCP surface: {surface}")
-    if name in _GATEWAY_REWRAPS:
-        for before, after in _GATEWAY_REWRAPS[name]:
-            if description.count(before) != 1:
-                raise ValueError(f"MCP description rewrap mismatch: {name}")
-            description = description.replace(before, after, 1)
-    if name == "send_message":
-        if not description.endswith("\n        "):
-            raise ValueError("MCP send_message description has an unexpected ending")
-        description = description.removesuffix("\n        ") + _GATEWAY_SEND_MESSAGE_APPENDIX
-    return description
+def tool_description(name: str) -> str:
+    """The advertised prose of one control tool."""
+    return _TOOL_DESCRIPTIONS[name]
 
 
 def message_text(content: Any) -> str:

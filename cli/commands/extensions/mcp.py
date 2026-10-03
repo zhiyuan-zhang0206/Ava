@@ -35,9 +35,9 @@ A third, ad-hoc layer is the **machine** config (`$AVA_HOME/mcp.json`, edited by
 - `disable <name>`                — toggle an already-defined server off for this
                                     machine without removing its definition.
 
-Every verb here points outward — servers Ava's own agents connect to. The one
-verb pointing inward, `ava mcp serve` (this cluster's control plane exposed AS
-an MCP server, for Claude Code / Codex), lives in `cli/mcp_server.py`.
+Every verb here points outward — servers Ava's own agents connect to. The
+cluster control plane is exposed to external MCP clients by the gateway `/mcp`
+endpoint, not by this CLI.
 """
 
 from __future__ import annotations

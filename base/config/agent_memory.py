@@ -32,8 +32,7 @@ class AgentMemorySettings(EnvSettings):
         description=(
             "Inject the agent's own memory index (workspace memory/MEMORY.md) at "
             "cold start and after compaction; entry files beside it are read on "
-            "demand, not injected. A legacy single-file workspace MEMORY.md is "
-            "migrated into the directory on first injection. When absent or empty, "
+            "demand, not injected. When absent or empty, "
             "injects the framing with '(no content)'. Independent of "
             "memory_index_inject_enabled."
         ),
