@@ -108,10 +108,12 @@ summaries cover the same information.
   registries since task #3697: `base/telemetry/metrics/grafana_dashboard.py` renders the
   registries into this file's shape (every panel registry-covered, slice
   S2), `ava lgtm render` previews (diff) or force-writes the host
-  provisioning copy, and converge generates its provisioning copy from the
-  same render (slice S3) — plugin installs/uninstalls and MetricSpec
-  changes move the panels with no hand mirror here; the checked-in copy is
-  the render's reference output.
+  provisioning copy, and converge (every `ava start`) regenerates its
+  provisioning copy from the same render (slice S3) and replaces a differing
+  file unconditionally — derived state, no user-edit guard, so a file written
+  by `ava lgtm render --force` cannot freeze it — plugin installs/uninstalls
+  and MetricSpec changes move the panels with no hand mirror here; the
+  checked-in copy is the render's reference output.
 - Deleted 2026-08-23 (a dashboard file removed from this directory is
   dropped from Grafana on the next provisioning reload — `dashboards.yml`
   has `disableDeletion: false`, verified live on the merge day):

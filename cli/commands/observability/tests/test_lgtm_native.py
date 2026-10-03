@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import subprocess
 from pathlib import Path
@@ -526,6 +527,27 @@ def test_render_provisioning_rewrites_the_dashboard_only_on_change(tmp_path: Pat
     lgtm_native._render_provisioning(repo, native)
 
     assert dest.stat().st_mtime_ns == before
+
+
+def test_render_provisioning_replaces_a_dashboard_written_outside_converge(
+    tmp_path: Path,
+) -> None:
+    """The stale-dashboard shape: `ava lgtm render --force` wrote the file without recording its
+    hash, so the sidecar named older content. The next rollout's render must still land."""
+    repo = tmp_path / "repo"
+    (repo / "deploy/lgtm/config/grafana/provisioning").mkdir(parents=True)
+    native = tmp_path / "native"
+    lgtm_native._render_provisioning(repo, native)
+    dest = native / "config/provisioning/dashboards/ava-ops-main.json"
+    dest.write_text('{"panels": ["rendered by hand on 10-02"]}\n', encoding="utf-8")
+
+    lgtm_native._render_provisioning(repo, native)
+
+    assert dest.read_text(encoding="utf-8") == _STUB_RENDER
+    hashes = json.loads((native / "config/provisioning-hashes.json").read_text(encoding="utf-8"))
+    assert (
+        hashes["dashboards/ava-ops-main.json"] == hashlib.sha256(_STUB_RENDER.encode()).hexdigest()
+    )
 
 
 def test_render_provisioning_dashboard_failure_keeps_the_previous_file(
