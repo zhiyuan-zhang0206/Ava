@@ -15,7 +15,7 @@ interpreter is neither. So it needs an explicit rule — and the rule is stored
 against the path it was added with, while every path here is **version-stamped**:
 
     ~/.local/share/uv/python/cpython-3.12.11-macos-aarch64-none/bin/python3.12
-    ~/.ava/runtime/pg/17.4.0/bin/postgres
+    ~/.ava/runtime/pg/17.11.0/bin/postgres
 
 A `uv python` bump (or a `_PG_VERSION` bump) therefore does not invalidate the
 rule so much as *orphan* it: the rule still names the old path, the process now
@@ -299,7 +299,7 @@ class ManifestEntry:
     ``paths`` are glob patterns (``~`` expanded at resolve time) that point at
     the executables ALF must allow; every one is written as a glob because every
     Ava-managed path is version-stamped (`Cellar/pgbouncer/1.25.1/`,
-    `runtime/pg/17.4.0/`, `uv/python/cpython-3.12.12-.../`). ``machine`` filters
+    `runtime/pg/17.11.0/`, `uv/python/cpython-3.12.12-.../`). ``machine`` filters
     the entry to one machine (``base.cluster.machine.machine_name``, e.g. "my-mac");
     None applies to every macOS host. ``purpose`` is operator-facing context for
     why the binary accepts inbound traffic. The filter exists for user

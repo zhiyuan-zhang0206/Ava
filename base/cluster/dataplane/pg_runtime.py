@@ -66,15 +66,24 @@ def _has_vector_install_script(extension: Path) -> bool:
 
 
 def ensure_pg_runtime() -> None:
-    """Keep an existing vendor tree, or validate the installed PG17 toolchain.
+    """Provision the pinned vendored Postgres + pgvector, or validate an installed
+    PostgreSQL 17 where no vendored artifact exists for the platform.
 
-    Download the pinned distribution only when no installation is selected.
-    An incomplete installed runtime is an error, never a silent replacement.
+    The vendored tree is the version Ava pins, so a platform that has an artifact never
+    falls back to a host install: an absent pinned tree (first start, or a pin bump
+    leaving only an older version directory) is downloaded, whatever else is installed.
+    Host installs stay the source of client tools only (`pg_tool` falls through to them
+    for binaries the vendored tree lacks). An incomplete installed runtime on a
+    platform without an artifact is an error, never a silent replacement.
     """
-    if runtime_binaries.vendored_pg_bin_dir() is None:
+    if not runtime_binaries.vendored_pg_supported():
         server = _installed_server()
-        if server is not None:
-            _verify_installed_runtime(server)
-            return
+        if server is None:
+            raise RuntimeError(
+                "no vendored Postgres artifact for this platform and no installed "
+                "PostgreSQL 17 found"
+            )
+        _verify_installed_runtime(server)
+        return
     runtime_binaries.ensure_pg_binaries()
     runtime_binaries.ensure_pgvector()

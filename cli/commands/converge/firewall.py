@@ -42,7 +42,7 @@ def serving_binaries(roles: frozenset[str]) -> tuple[Path, ...]:
     where the fragility lives: both are version-stamped, so both orphan their ALF
     rule on a version bump. `sys.executable` is the version-stamped uv interpreter
     (`.../cpython-3.12.11-macos-aarch64-none/bin/python3.12`); `pg_tool` prefers
-    the equally version-stamped vendored tree (`~/.ava/runtime/pg/17.4.0/bin`).
+    the equally version-stamped vendored tree (`~/.ava/runtime/pg/17.11.0/bin`).
 
     The interpreter is audited for **either** capability, not just `gateway`. A
     gateway serves the HTTP port every runner dials (issue #949's symptom), and an

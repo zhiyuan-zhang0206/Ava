@@ -1,7 +1,7 @@
 """Grafana navigation contract against the real, native Grafana binary.
 
 The regular test shards skip this module because the repository does not vendor
-Grafana.  CI downloads the checksum-pinned 13.1.3 release and points the two
+Grafana.  CI downloads the checksum-pinned 13.2.3 release and points the two
 ``AVA_TEST_GRAFANA_*`` variables at it.  No Docker daemon is involved.
 """
 

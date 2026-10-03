@@ -41,7 +41,7 @@ __all__ = [
 # Mirror filenames (sidecar file exporter layout since task #1266):
 #   spans.jsonl                          — the ACTIVE file the collector appends to
 #   spans-<ISO-timestamp>-size.jsonl     — collector-rotated backups (timberjack
-#                                          1.4.5, pinned by otelcol-contrib 0.157.0,
+#                                          1.4.7, pinned by otelcol-contrib 0.162.0,
 #                                          appends the trigger reason to the
 #                                          backup name: `-size` / `-time`;
 #                                          `spans-2026-08-27T03-29-10.942-size.jsonl`,
@@ -73,7 +73,7 @@ def mirror_day(path: Path) -> date | None:
 
     Old agent-side files stamp `spans-YYYYMMDD-<pid>.jsonl`; the collector's
     rotated backups stamp `spans-YYYY-MM-DDTHH-MM-SS.<ms>(-size|-time)?.jsonl`
-    (timberjack 1.4.5 appends the trigger reason; optional `.gz` after the
+    (timberjack 1.4.7 appends the trigger reason; optional `.gz` after the
     agent-side gzip pass); manual cuts stamp `spans.cut-YYYYMMDD.jsonl`; the
     ACTIVE `spans.jsonl` carries no stamp at all (never pruned, bounded by
     the collector's own rotation).
@@ -139,7 +139,7 @@ def _gzip_old_mirror(grace_seconds: int = 60) -> int:
     """gzip rotated (non-active) mirror files; return the number compressed.
 
     The collector's file exporter cannot compress its own rotated backups
-    (fileexporter 0.157.0 forces timberjack Compression "none"; its zstd
+    (fileexporter 0.162.0 forces timberjack Compression "none"; its zstd
     option applies to the ACTIVE stream and would break the grep surface),
     so this pass — running on each agent start next to the retention prune —
     compresses every mirror file except the ACTIVE `spans.jsonl`. JSONL
