@@ -19,6 +19,7 @@ import pytest
 from services.im_bridge import copy, push_watchdog
 from services.im_bridge import state as state_mod
 from services.im_bridge.core import IMBridgeCore
+from services.im_bridge.cursor_store import PushWatermark
 from services.im_bridge.tests.slices import gateway_client, im_bridge_config
 from services.im_bridge.types import ChatState, IMAdapter, InboundMessage, Reply
 
@@ -215,7 +216,7 @@ def test_cmd_switch_matches_agent_id() -> None:
     assert state.current_agent_id == 405
     assert copy.SWITCHED_TO.format(agent_id=405, label="Ava \u8d1f\u8d23\u4eba") in text
     assert "hello" in text
-    assert core._last_pushed.get(("telegram", "12345", 405)) == "3.1"
+    assert core._last_pushed.get(("telegram", "12345", 405)) == PushWatermark(None, "3.1")
     assert gateway.directory_calls == []
     assert gateway.detail_calls == [405]
 
@@ -277,7 +278,7 @@ def test_cmd_switch_replays_five_dialog_items_amid_non_dialog() -> None:
     text = _text(out)
     for m in ("m1", "m2", "m3", "m4", "m5"):
         assert m in text
-    assert core._last_pushed.get(("telegram", "12345", 405)) == "5.1"
+    assert core._last_pushed.get(("telegram", "12345", 405)) == PushWatermark(None, "5.1")
 
 
 def test_cmd_switch_replay_caps_at_five() -> None:
@@ -296,7 +297,7 @@ def test_cmd_switch_replay_caps_at_five() -> None:
         assert m not in text
     for m in ("m4", "m5", "m6", "m7", "m8"):
         assert m in text
-    assert core._last_pushed.get(("telegram", "12345", 405)) == "8.1"
+    assert core._last_pushed.get(("telegram", "12345", 405)) == PushWatermark(None, "8.1")
 
 
 def test_cmd_switch_window_and_replay_follow_config() -> None:
@@ -1230,10 +1231,11 @@ def test_restore_subscriptions_skips_disabled_channels(
 
 
 def test_push_snapshot_watermark_compares_numerically() -> None:
-    """Regression #1032: the watermark filter must compare item_ids
-    numerically. The old string compare treated '9.5' > '10.1' as false, so
-    the first message past the 10-message boundary silently stopped all
-    pushes; the reverse direction would also re-push stale items."""
+    """Regression #1032: the watermark filter must compare item_ids numerically
+    (the old string compare treated '9.5' > '10.1' as false and the first
+    message past the magnitude boundary silently stopped all pushes; the
+    reverse direction would also re-push stale items). No created_at on these
+    items: the id-only fallback that unstamped items and legacy rows use."""
     gateway = FakeGateway()
     core = _core(gateway)
     adapter = FakeTypingAdapter()
@@ -1245,11 +1247,11 @@ def test_push_snapshot_watermark_compares_numerically() -> None:
         return {"items": [{"item_id": item_id, "kind": "agent_chat", "payload": payload}]}
 
     async def scenario() -> None:
-        core._last_pushed[("telegram", "12345", 405)] = "9.5"
+        core._last_pushed[("telegram", "12345", 405)] = PushWatermark(None, "9.5")
         # crossing the magnitude boundary: '10.1' is fresh after '9.5'
         await core._push_snapshot(("telegram", "12345"), state, snapshot("10.1", "ten"))
         assert adapter.sent == [("12345", "[Ava #405] ten")]
-        assert core._last_pushed[("telegram", "12345", 405)] == "10.1"
+        assert core._last_pushed[("telegram", "12345", 405)] == PushWatermark(None, "10.1")
         # the reverse: an older item behind a newer watermark is stale
         await core._push_snapshot(("telegram", "12345"), state, snapshot("9.9", "nine"))
         assert adapter.sent == [("12345", "[Ava #405] ten")]  # unchanged
@@ -1400,7 +1402,7 @@ def test_push_snapshot_watermark_is_per_chat() -> None:
         await core._push_snapshot(("weixin", "wx123"), state_b, snapshot("4.1"))
         assert adapter.sent[-1:] == [("12345", "[Ava #405] p3.1")]
         assert plain.sent[-1:] == [("wx123", "[Ava #405] p4.1")]
-        assert core._last_pushed[("telegram", "12345", 405)] == "3.1"
-        assert core._last_pushed[("weixin", "wx123", 405)] == "4.1"
+        assert core._last_pushed[("telegram", "12345", 405)] == PushWatermark(None, "3.1")
+        assert core._last_pushed[("weixin", "wx123", 405)] == PushWatermark(None, "4.1")
 
     asyncio.run(scenario())

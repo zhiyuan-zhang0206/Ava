@@ -13,12 +13,13 @@ import contextlib
 import logging
 import time
 import uuid
+from datetime import UTC, datetime
 from functools import partial
 from typing import Any, Literal
 
 from services.im_bridge import copy, notice_bridge, push_watchdog
 from services.im_bridge.config import ImBridgeConfig
-from services.im_bridge.cursor_store import CursorStore
+from services.im_bridge.cursor_store import CursorStore, PushWatermark
 from services.im_bridge.gateway_client import GatewayClient
 from services.im_bridge.spawn_menu import SpawnMenuMixin
 from services.im_bridge.state import (
@@ -96,10 +97,12 @@ class IMBridgeCore(SpawnMenuMixin):
         self.chats: dict[tuple[str, str], ChatState] = {}
         self._subscriptions: dict[tuple[str, str], asyncio.Task[Any]] = {}
         self._typing_tasks: dict[tuple[str, str], asyncio.Task[Any]] = {}
-        self._last_pushed: dict[tuple[str, str, int], str] = {}
-        # (channel, chat_id, agent_id) -> newest pushed item_id. Per-chat,
-        # not per-agent: two chats switched to the same agent share one
-        # snapshot stream, and a shared watermark let the later chat's
+        self._last_pushed: dict[tuple[str, str, int], PushWatermark] = {}
+        # (channel, chat_id, agent_id) -> newest pushed item (created_at +
+        # item_id; created_at is the primary key, so a compact renumbering a
+        # session's item ids cannot strand the push — `PushWatermark`).
+        # Per-chat, not per-agent: two chats switched to the same agent share
+        # one snapshot stream, and a shared watermark let the later chat's
         # snapshot advance it past what the earlier chat had pushed.
         # Persisted (`_set_watermark`, loaded by `restore_subscriptions`): the
         # SSE feed is a live tail, so what the agent said while this daemon
@@ -410,7 +413,7 @@ class IMBridgeCore(SpawnMenuMixin):
             return replies
         # record push watermark so the subscription only sends what's new
         await self._set_watermark(
-            (state.channel, state.chat_id, target["agent_id"]), msgs[-1]["item_id"]
+            (state.channel, state.chat_id, target["agent_id"]), _watermark_of(msgs[-1])
         )
         # one message per item — never a wall of concatenated text
         for it in reversed(msgs):
@@ -612,13 +615,15 @@ class IMBridgeCore(SpawnMenuMixin):
         items = await self.gateway.get_timeline(agent_id)
         await self._push_items(key, state, items)
 
-    async def _set_watermark(self, watermark_key: tuple[str, str, int], item_id: str) -> None:
+    async def _set_watermark(
+        self, watermark_key: tuple[str, str, int], watermark: PushWatermark
+    ) -> None:
         """Save, then advance: a failed save leaves the memory watermark behind,
         so nothing is delivered past an unsaved position (the subscription
         loop reconnects and retries)."""
 
-        await asyncio.to_thread(self.cursor_store.save_push, *watermark_key, item_id)
-        self._last_pushed[watermark_key] = item_id
+        await asyncio.to_thread(self.cursor_store.save_push, *watermark_key, watermark)
+        self._last_pushed[watermark_key] = watermark
 
     async def _push_items(
         self, key: tuple[str, str], state: ChatState, raw_items: list[Any]
@@ -632,21 +637,69 @@ class IMBridgeCore(SpawnMenuMixin):
         items.sort(key=lambda it: _item_key(str(it.get("item_id", "0.0"))))
         watermark_key = (*key, agent_id)  # (channel, chat_id, agent_id)
         watermark = self._last_pushed.get(watermark_key)
-        # Numeric comparison via _item_key (same key the sort uses): the old
-        # string compare called '9.5' > '10.1' false, so the first message
-        # across a magnitude boundary silently stopped all pushes (Task #1032).
-        fresh = [
-            it
-            for it in items
-            if watermark is None or _item_key(str(it["item_id"])) > _item_key(watermark)
-        ]
+        # _is_after_watermark keeps the numeric item_id comparison (Task #1032:
+        # the old string compare called '9.5' > '10.1' false, so the first
+        # message across a magnitude boundary silently stopped all pushes),
+        # with created_at as the primary key (#4933: immune to the compact
+        # that renumbers a session's item ids).
+        fresh = [it for it in items if watermark is None or _is_after_watermark(it, watermark)]
         if not fresh:
+            await self._reset_watermark_on_rollback(watermark_key, items, watermark)
             return
         if any(it.get("kind") == "agent_chat" for it in fresh):
             self._stop_typing(state)  # the agent's first text output ends the indicator
-        await self._set_watermark(watermark_key, str(fresh[-1]["item_id"]))
+        await self._set_watermark(watermark_key, _watermark_of(fresh[-1]))
         for it in fresh:
             await self._deliver_item(state, it, agent_id)
+
+    async def _reset_watermark_on_rollback(
+        self,
+        watermark_key: tuple[str, str, int],
+        items: list[dict[str, Any]],
+        watermark: PushWatermark | None,
+    ) -> None:
+        """A non-empty batch entirely at or behind the watermark: nothing
+        new, or an item_id renumbering rollback. The check runs ONLY when a
+        stamp cannot decide: when both the watermark and the batch max carry
+        a readable created_at and the max is not after it (a stamped item
+        after the watermark would have been fresh), the batch is simply old
+        content in a compact-renumbered session — a compact wiping the ids is
+        not an incident, so this stays quiet (review 2026-10-03: judging by
+        item_id alone fired one spurious ERROR + reset per compact per chat
+        while snapshots carried only the wiped tail). For a legacy watermark
+        without a stamp — or a batch max without one — the numbering check
+        stands: the observed max lying STRICTLY behind the watermark's
+        item_id is a rollback (2026-10-03: both affected pushes stranded for
+        hours with zero log lines). On a rollback: name it, skip the
+        triggering batch — never replay it, the log line is the evidence —
+        reset the watermark to the observed max, and resume from the next
+        item. One reset per rollback: afterwards the observed max IS the
+        watermark, so the same batch observed again stays quiet."""
+
+        if watermark is None:
+            return
+        observed_max = items[-1]  # sorted by item_id: the batch's maximum
+        observed_stamp = _parse_stamp(observed_max.get("created_at"))
+        watermark_stamp = _parse_stamp(watermark.created_at)
+        if (
+            observed_stamp is not None
+            and watermark_stamp is not None
+            and observed_stamp <= watermark_stamp
+        ):
+            return
+        observed_id = str(observed_max["item_id"])
+        if _item_key(observed_id) >= _item_key(watermark.item_id):
+            return
+        _log.error(
+            "push watermark rolled back: every item sits behind it "
+            "(session compacted?); resetting to the observed max and "
+            "skipping this batch — channel=%s chat=%s agent=%s old=%s "
+            "observed_max=%s",
+            *watermark_key,
+            watermark.item_id,
+            observed_id,
+        )
+        await self._set_watermark(watermark_key, _watermark_of(observed_max))
 
 
 def _truncate(text: str, limit: int) -> str:
@@ -665,6 +718,47 @@ def _spawn_button(draft: SpawnDraft) -> tuple[str, str]:
     preset = draft.preset_label if draft.preset_id is not None else "default"
     summary = f"Spawn: {preset} / {draft.model or 'default'} / {draft.effort or 'default'}"
     return (summary, "spawn:go")
+
+
+def _parse_stamp(raw: object) -> datetime | None:
+    """Parse an ISO-8601 created_at to an aware datetime (naive reads as UTC);
+    None for absent or unparseable values — a legacy item or row, which
+    compares by item_id alone."""
+
+    if not isinstance(raw, str) or not raw:
+        return None
+    try:
+        stamp = datetime.fromisoformat(raw)
+    except ValueError:
+        return None
+    return stamp if stamp.tzinfo is not None else stamp.replace(tzinfo=UTC)
+
+
+def _watermark_of(item: dict[str, Any]) -> PushWatermark:
+    """The push position one timeline item stands for: its created_at when
+    stamped (stored verbatim), its item_id always."""
+
+    raw = item.get("created_at")
+    stamped = raw if isinstance(raw, str) and _parse_stamp(raw) is not None else None
+    return PushWatermark(created_at=stamped, item_id=str(item["item_id"]))
+
+
+def _is_after_watermark(item: dict[str, Any], watermark: PushWatermark) -> bool:
+    """Whether *item* sits past *watermark* on the chat's push position.
+
+    created_at is the primary key: monotone across the session's whole life,
+    while item_id (f"{msg_idx}.{block_idx}") is a POSITION that a compact
+    renumbers — the id-only comparison froze both affected pushes on
+    2026-10-03 (#4932/#4933). Equal stamps (the blocks of one message share
+    one) fall through to the numeric item_id order; a stamp missing or
+    unreadable on either side also falls back to item_id alone — the
+    legacy-row semantics the rollback reset recovers."""
+
+    item_stamp = _parse_stamp(item.get("created_at"))
+    watermark_stamp = _parse_stamp(watermark.created_at)
+    if item_stamp is not None and watermark_stamp is not None and item_stamp != watermark_stamp:
+        return item_stamp > watermark_stamp
+    return _item_key(str(item["item_id"])) > _item_key(watermark.item_id)
 
 
 def _item_key(item_id: str) -> tuple[int, int]:
