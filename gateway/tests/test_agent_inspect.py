@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 from datetime import UTC, datetime, timedelta
-from typing import Any
 
 import psycopg
 import pytest
@@ -13,7 +12,6 @@ from fastapi.testclient import TestClient
 from base.config import settings
 from gateway.app import app
 from gateway.inspect import router as inspect_router
-from gateway.lgtm import loki_events
 from ops import cluster_rpc
 from services.heartbeat import JITTER_SPAN_S, STALE_PENDING_S
 
@@ -736,20 +734,14 @@ def test_inspect_notice_other_agent_not_visible(db_conn: psycopg.Connection) -> 
 # ── Response-cache discipline (the panel refetches in bursts) ─────────────────
 
 
-def test_inspect_live_reads_committed_pause_when_all_log_reads_fail(
+def test_inspect_live_reads_committed_pause(
     db_conn: psycopg.Connection,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Current state and its pause hint remain complete during a Loki outage."""
+    """Current state and its pause hint come from the committed rows."""
     aid = _insert_agent(db_conn, status="idling")
     _pause_row(db_conn, agent_id=aid, duration_s=900, hours_ago=1)
     db_conn.commit()
 
-    def unavailable(*_args: Any, **_kwargs: Any) -> Any:
-        raise AssertionError("live inspector must not query telemetry")
-
-    for name in ("query_events",):
-        monkeypatch.setattr(loki_events, name, unavailable)
     with TestClient(app) as client:
         response = client.get(f"/api/agents/{aid}/inspect/live")
     assert response.status_code == 200

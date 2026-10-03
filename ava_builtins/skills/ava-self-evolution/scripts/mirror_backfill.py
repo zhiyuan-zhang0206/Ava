@@ -9,13 +9,6 @@ falls back to mirror rows through the same collect() pipeline.
 scripts/ dir, so the fallback runs the exact pipeline the daily schedule runs.
 Output mirrors daily_scan.py: daily/<week>.jsonl with the UTC-date week label.
 
-2026-09-17 (no-observability clusters): collect_from_mirror() is the shared
-core — backfill() writes the dataset for the CLI/manual fallback, and
-daily_scan.py imports it as the AUTOMATIC fallback when the gateway refuses
-observability reads (503 ``observability_read_unavailable``: the cluster has
-no observability stack by configuration). Transient Loki failures still fail
-the scan loudly; only the policy refusal falls back.
-
 2026-08-26 (Task #1408): the consumer dedupes mirror rows by the surrogate
 event id (PR #356, base/telemetry.event_id) — the emitter can append the
 same event twice, and on 08-24/25 ~7% of mirror rows were byte-identical
@@ -287,10 +280,7 @@ def collect_from_mirror(
 ) -> tuple[list[dict[str, Any]], dict[str, int], list[str]]:
     """Collect [now - days, now) from the local mirror — no file written.
 
-    The shared core of `backfill()` and of the daily scan's automatic
-    fallback: when the gateway refuses observability reads (this cluster has
-    no observability stack), daily_scan.py imports this function and feeds
-    the records through its normal report/alert path.
+    The core of `backfill()`.
 
     Returns (records, counts, missing_days): `counts` is
     `collect.collect_with_counts`' pre-filter counts (seen / excluded_test /
@@ -360,8 +350,7 @@ def backfill(
     """Collect [now - days, now) from the local mirror, write daily/<week>.jsonl.
 
     The CLI/ops entry point on top of `collect_from_mirror` — the manual
-    fallback for a failed Loki collect (the daily scan's automatic
-    no-observability fallback runs through `collect_from_mirror` directly).
+    fallback for a failed gateway collect.
     Returns (path, missing_days, counts); a missing day must not read as
     success — the CLI exits non-zero (a partial window must not silently
     become a partial dataset).

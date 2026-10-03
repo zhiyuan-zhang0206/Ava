@@ -29,8 +29,8 @@ tags:
 
 - **`installed.json` rewrites are serialized the same way**, on the sibling
   `installed.json.lock` (`base/packages/extensions/install_registry.py:registry_lock`). Its writers are
-  `ava skill install` in an agent's shell, `ava converge` on a restart, the gateway's
-  skills-toggle handler, and `scripts/data_repair/migrate_skill_identity.py --apply`; every one of
+  `ava skill install` in an agent's shell, `ava converge` on a restart, and the gateway's
+  skills-toggle handler; every one of
   them is a load-modify-save, and `save` is a full replace, so the same interleave
   drops a package's row while its directory stays on disk. Saving atomically (temp +
   rename) prevents a torn file and does nothing about a lost update.

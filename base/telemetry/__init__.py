@@ -7,7 +7,7 @@ entry point for every event in every process. The other members are imported
 directly: `otlp/` (the OTLP export backend and its doc nodes), `tracing` and
 `trace_mirror` (span recording and the sidecar mirror's disk guards), `metrics/`
 (metric registries, aggregates, Grafana dashboard supply), `loki_index_labels`
-and `loki_query_budget` (Loki selectors and the read budget), `observability`,
+(Loki selectors), `observability`,
 `lgtm_local` and `station_endpoint` (observability identity and endpoints),
 `alerts` and `alerts_copy` (alert ingest and its IM copy), and `audit_events`
 (the audit side of the event stream).

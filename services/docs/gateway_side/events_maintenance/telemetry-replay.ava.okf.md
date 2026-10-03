@@ -22,6 +22,4 @@ can be repeated. The position is saved with the rows in one transaction, in
 from zero). A partial final line is left for the next pass. The pass has a 120-second budget and a
 failure never blocks the other maintenance slices.
 
-Another machine's mirror is not read here: run
-`scripts/data_repair/backfill_telemetry_events.py --jsonl DIR` for it (dry-run by default). The same
-script folds in the live Loki window and, on request, the archive stream.
+Another machine's mirror is not read here: the daemon on that machine replays it.

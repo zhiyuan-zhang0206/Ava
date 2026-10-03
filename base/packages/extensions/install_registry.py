@@ -290,7 +290,7 @@ def _folding_duplicates(registry: Registry) -> list[tuple[str, str]]:
     """Pairs of row names that fold to the same key, in load order.
 
     Returns [] when every row folds to a distinct key. Used by `load` to
-    fail fast and by the skill-identity migration tool to report / merge."""
+    fail fast."""
     seen: dict[str, str] = {}
     dups: list[tuple[str, str]] = []
     for pkg in registry.packages:
@@ -334,8 +334,7 @@ def load() -> Registry:
         names = ", ".join(f"{a!r} / {b!r}" for a, b in dups)
         raise DuplicatePackageName(
             f"{path} has rows that fold to the same package key: {names} — "
-            "dash and underscore are one name; merge them (see "
-            "scripts/data_repair/migrate_skill_identity.py)"
+            "dash and underscore are one name; merge them"
         )
     return registry
 
@@ -384,21 +383,16 @@ _REGISTRY_LOCK_TIMEOUT_S = 30.0
 
 
 @contextlib.contextmanager
-def registry_lock(registry_path: Path | None = None) -> Generator[None]:
+def registry_lock() -> Generator[None]:
     """Hold the cross-process lock guarding one `installed.json`.
 
     The lock file is a SIBLING, never the registry itself: `save` publishes by
     renaming a temp over the registry, so a lock on that inode would stop
     guarding anything the moment the first writer landed.
 
-    `mutate` is the normal way in and takes this for you. It is exposed
-    separately for the one writer that cannot use `mutate` — the out-of-band
-    `scripts/data_repair/migrate_skill_identity.py --apply`, which rewrites the registry
-    under an arbitrary `--ava-home`, hence the explicit `registry_path`
-    (defaulting to this unit's). Both must name the same lock file and share one
-    bound, so both live here rather than being restated at the call site.
+    `mutate` is the way in and takes this for you.
     """
-    path = registry_path or paths.install_registry_path()
+    path = paths.install_registry_path()
     with file_lock(path.with_name(f"{path.name}.lock"), timeout_s=_REGISTRY_LOCK_TIMEOUT_S):
         yield
 
@@ -410,9 +404,8 @@ def mutate() -> Generator[Registry]:
 
     `save` is a full replace, so every change is a read-modify-write, and the
     writers are separate PROCESSES: `ava skill install` in an agent's shell,
-    `ava converge` on a restart, the gateway's skills-toggle handler, and
-    `scripts/data_repair/migrate_skill_identity.py --apply`. Two of them racing lose one
-    side's rows outright — whoever saves last wins with a registry it read
+    `ava converge` on a restart, and the gateway's skills-toggle handler. Two of
+    them racing lose one side's rows outright — whoever saves last wins with a registry it read
     before the others' rows existed. The package stops being tracked while its
     directory is still on disk, which is the state the skill scanner refuses to
     load.

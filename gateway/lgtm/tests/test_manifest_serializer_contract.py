@@ -1,4 +1,4 @@
-"""Canonical event bytes shared by JSONL, OTLP, and Loki."""
+"""Canonical event bytes shared by JSONL and OTLP."""
 
 from __future__ import annotations
 
@@ -34,12 +34,10 @@ def otlp_backend(monkeypatch: pytest.MonkeyPatch) -> Any:
     backend.shutdown()
 
 
-def test_jsonl_otlp_and_loki_use_one_byte_identity_with_drift_rejected(
+def test_jsonl_and_otlp_use_one_byte_identity(
     otlp_backend: tuple[Any, Any],
 ) -> None:
-    """The producer census and Loki reader must share the exact event bytes."""
-    from gateway.lgtm._loki_event_rows import _parse_line
-
+    """The JSONL mirror line and the OTLP log body are the exact same bytes."""
     backend, log_exporter = otlp_backend
     event = Event(
         ts=datetime(2026, 8, 11, 12, 0, 0, tzinfo=UTC),
@@ -60,14 +58,4 @@ def test_jsonl_otlp_and_loki_use_one_byte_identity_with_drift_rejected(
     backend.flush()
     record = log_exporter.get_finished_logs()[0]
     jsonl = telemetry.event_line(event)
-    timestamp_ns = int(event.ts.timestamp() * 1_000_000_000)
-    loki = _parse_line(jsonl, timestamp_ns)
-    assert loki is not None
     assert record.log_record.body == jsonl
-    assert telemetry.event_row(event)["id"] == loki["id"]
-    assert telemetry.event_line_digest(event) == loki["line_sha256"]
-
-    drifted = _parse_line(jsonl + " ", timestamp_ns)
-    assert drifted is not None
-    with pytest.raises(AssertionError):
-        assert telemetry.event_row(event)["id"] == drifted["id"]

@@ -1302,11 +1302,7 @@ def _stub_result_read_backends(monkeypatch: pytest.MonkeyPatch) -> None:
     """Make non-blocked artifact reads deterministic without external services."""
     import gateway.events.agent_events as agent_events_router
     import gateway.routers.memory as memory_router
-    from gateway.lgtm import loki_events
     from services.memory_indexer.embeddings import factory as _embedding_factory
-
-    def _query(**_kwargs: object) -> tuple[list[dict[str, object]], bool]:
-        return [], False
 
     class _StubProvider:
         dim = 8
@@ -1325,7 +1321,6 @@ def _stub_result_read_backends(monkeypatch: pytest.MonkeyPatch) -> None:
         if False:
             yield ""
 
-    monkeypatch.setattr(loki_events, "query_events", _query)
     monkeypatch.setattr(_embedding_factory, "get_provider", _StubProvider)
     monkeypatch.setattr(memory_router, "_backend_topk", _topk)
     monkeypatch.setattr(agent_events_router, "event_stream", _stream)
