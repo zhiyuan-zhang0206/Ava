@@ -151,9 +151,10 @@ jobs:
         working-directory: ui/web
         run: npm ci
 
-      - name: Cache Playwright chromium
+      # Same restore/save split as the e2e-shard job's browser cache (see ci.yml).
+      - name: Restore Playwright chromium cache
         id: playwright-cache
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/ms-playwright
           key: playwright-${{ runner.os }}-${{ hashFiles('uv.lock') }}
@@ -162,6 +163,12 @@ jobs:
         # Same split + hardened apt pass as the e2e-shard job (see ci.yml).
         timeout-minutes: 10
         run: timeout 300 uv run playwright install chromium
+      - name: Save Playwright chromium cache
+        if: success() && steps.playwright-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('uv.lock') }}
       - name: Install Playwright system deps
         uses: ./.github/actions/install-playwright-deps
         timeout-minutes: 15
