@@ -18,10 +18,11 @@ from base.lm.provider_api import (
     PriceRates,
     PriceTier,
     ProviderBinding,
-    register,
+    ProviderContribution,
     require_key,
 )
 from base.lm.registry import ModelSpec, ModelTuning
+from base.packages.plugins.extensions import PluginContributions
 
 _MIMO_EFFORT_LEVELS = ("none", "high")
 
@@ -93,8 +94,8 @@ def build(ctx: BuildContext) -> BaseChatModel:
     )
 
 
-register(
-    ProviderBinding(
+PROVIDER = ProviderContribution(
+    binding=ProviderBinding(
         prefix="mimo-",
         display_name="Xiaomi",
         key_env="MIMO_API_KEY",
@@ -250,3 +251,8 @@ register(
         ),
     },
 )
+
+
+def contribute() -> PluginContributions:
+    """What this plugin declares: its model provider."""
+    return PluginContributions(providers=(PROVIDER,))

@@ -17,11 +17,12 @@ from base.lm.provider_api import (
     PriceRates,
     PriceTier,
     ProviderBinding,
-    register,
+    ProviderContribution,
     require_key,
 )
 from base.lm.registry import ModelSpec, ModelTuning
 from base.lm.stop import StopCategory, StopSpec
+from base.packages.plugins.extensions import PluginContributions
 
 # Effort vocabulary shared by GPT-5.6 and GPT-6 Sol/Luna; Astra differs.
 _GPT_EFFORT = ("none", "low", "medium", "high", "xhigh", "max")
@@ -73,8 +74,8 @@ def build(ctx: BuildContext) -> BaseChatModel:
     )
 
 
-register(
-    ProviderBinding(
+PROVIDER = ProviderContribution(
+    binding=ProviderBinding(
         prefix="gpt-",
         display_name="OpenAI",
         key_env="OPENAI_API_KEY",
@@ -412,3 +413,8 @@ register(
         ),
     },
 )
+
+
+def contribute() -> PluginContributions:
+    """What this plugin declares: its model provider."""
+    return PluginContributions(providers=(PROVIDER,))

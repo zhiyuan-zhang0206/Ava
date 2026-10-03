@@ -18,10 +18,11 @@ from base.lm.provider_api import (
     PriceRates,
     PriceTier,
     ProviderBinding,
-    register,
+    ProviderContribution,
     require_key,
 )
 from base.lm.registry import ModelSpec, ModelTuning
+from base.packages.plugins.extensions import PluginContributions
 
 _GLM_EFFORT_LEVELS = ("low", "high", "max")
 
@@ -79,8 +80,8 @@ def build(ctx: BuildContext) -> BaseChatModel:
     )
 
 
-register(
-    ProviderBinding(
+PROVIDER = ProviderContribution(
+    binding=ProviderBinding(
         prefix="glm-",
         display_name="Zhipu",
         key_env="GLM_API_KEY",
@@ -325,3 +326,8 @@ register(
         ),
     },
 )
+
+
+def contribute() -> PluginContributions:
+    """What this plugin declares: its model provider."""
+    return PluginContributions(providers=(PROVIDER,))

@@ -19,10 +19,11 @@ from base.lm.provider_api import (
     PriceTier,
     PriceWindow,
     ProviderBinding,
-    register,
+    ProviderContribution,
     require_key,
 )
 from base.lm.registry import MODELS, ModelSpec, ModelTuning
+from base.packages.plugins.extensions import PluginContributions
 
 # DeepSeek's anthropic-compatible endpoint. Also the single source of truth
 # for model name → endpoint resolution; not written twice — to change the
@@ -138,8 +139,8 @@ def build(ctx: BuildContext) -> BaseChatModel:
     )
 
 
-register(
-    ProviderBinding(
+PROVIDER = ProviderContribution(
+    binding=ProviderBinding(
         prefix="deepseek-",
         display_name="DeepSeek",
         key_env="DEEPSEEK_API_KEY",
@@ -245,3 +246,8 @@ register(
         ),
     },
 )
+
+
+def contribute() -> PluginContributions:
+    """What this plugin declares: its model provider."""
+    return PluginContributions(providers=(PROVIDER,))

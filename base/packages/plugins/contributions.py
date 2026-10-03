@@ -33,6 +33,7 @@ SurfaceId = Literal[
     "skillSources",
     "metrics",
     "inspectWidgets",
+    "providers",
 ]
 
 

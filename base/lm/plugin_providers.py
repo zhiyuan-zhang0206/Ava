@@ -57,7 +57,16 @@ _STATE = _LoaderState()
 
 
 def _load_one(name: str, provider_py: Path, *, is_builtin: bool) -> None:
+    """Import one plugin's `provider.py`, take its declaration and install it.
+
+    The module registers nothing: it exports `contribute()` returning a `PluginContributions` whose
+    `providers` are `ProviderContribution`s. The declaration passes the manifest gate (the
+    `providers` key of the plugin's `ava-plugin.json`, when it ships one) before anything is
+    installed. This function is the one writer of the process's model catalog.
+    """
     from base.lm import provider_api
+    from base.packages.plugins.data_registry import declaration_of
+    from base.packages.plugins.gate import check_manifest
 
     pkg = "ava_builtins.plugins" if is_builtin else "plugins"
     spec = importlib.util.spec_from_file_location(f"{pkg}.{name}.provider", provider_py)
@@ -71,23 +80,25 @@ def _load_one(name: str, provider_py: Path, *, is_builtin: bool) -> None:
     # plugin.py loader: pydantic models defined inside the module need their
     # module globals reachable for get_type_hints / ForwardRef resolution.
     sys.modules[spec.name] = module
-    provider_api._CURRENT_PLUGIN = name
     try:
         spec.loader.exec_module(module)
-    except provider_api.ProviderRegistrationError:
-        # Fail-closed by design — the loader lets this class propagate instead
-        # of containing it (a flat prefix/model map cannot pick a winner).
-        # Still drop the half-executed module: a later attempt retries clean.
-        sys.modules.pop(spec.name, None)
-        raise
+        contributions = declaration_of(module)
+        check_manifest(name, provider_py.parent, contributions, ("providers",))
     except Exception as e:
         # A code-load failure: drop the half-executed module and wrap for the
         # loader, which contains it loudly (the same cleanup the plugin.py
         # loader's fail-soft contract performs).
         sys.modules.pop(spec.name, None)
         raise RuntimeError(f"provider plugin {name!r} failed to load ({provider_py})") from e
-    finally:
-        provider_api._CURRENT_PLUGIN = None
+    try:
+        for contribution in contributions.providers:
+            provider_api.install_provider(name, contribution)
+    except provider_api.ProviderRegistrationError:
+        # Fail-closed by design — the loader lets this class propagate instead
+        # of containing it (a flat prefix/model map cannot pick a winner).
+        # Still drop the module: a later attempt retries clean.
+        sys.modules.pop(spec.name, None)
+        raise
 
 
 def ensure_provider_plugins_loaded() -> None:

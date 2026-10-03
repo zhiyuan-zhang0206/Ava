@@ -18,11 +18,12 @@ from base.lm.provider_api import (
     PriceRates,
     PriceTier,
     ProviderBinding,
-    register,
+    ProviderContribution,
     require_key,
 )
 from base.lm.registry import ModelSpec, ModelTuning
 from base.lm.stop import StopSpec
+from base.packages.plugins.extensions import PluginContributions
 
 _GEMINI_EFFORT_LEVELS = ("minimal", "low", "medium", "high")
 
@@ -160,8 +161,8 @@ def build(ctx: BuildContext) -> BaseChatModel:
     return ChatGoogleGenerativeAI(**kwargs)
 
 
-register(
-    ProviderBinding(
+PROVIDER = ProviderContribution(
+    binding=ProviderBinding(
         prefix="gemini-",
         display_name="Google",
         key_env="GEMINI_API_KEY",
@@ -422,3 +423,8 @@ register(
         ),
     },
 )
+
+
+def contribute() -> PluginContributions:
+    """What this plugin declares: its model provider."""
+    return PluginContributions(providers=(PROVIDER,))

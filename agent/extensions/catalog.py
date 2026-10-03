@@ -177,6 +177,18 @@ SURFACES: tuple[Surface, ...] = (
         ),
     ),
     Surface(
+        id="providers",
+        entry_points=("base.lm.provider_api:ProviderContribution",),
+        manifest_key="providers",
+        protocol=None,
+        note=(
+            "`providers` of what the plugin's `provider.py` `contribute()` returns: a dispatch "
+            "binding, the chat-model rows it owns and their live prices, installed into the "
+            "process's model catalog by the provider loader; a prefix that collides with another "
+            "provider is a hard error, not a precedence order"
+        ),
+    ),
+    Surface(
         id="skillSources",
         entry_points=("base.packages.plugins.extensions:PluginContributions",),
         manifest_key=None,
@@ -369,7 +381,7 @@ def build_catalog() -> Catalog:
 
 
 def _data_records() -> dict[str, tuple[Contribution, ...]]:
-    """What each enabled plugin's data faces (`metrics.py`, `inspector.py`) declare, as records.
+    """What each enabled plugin's data faces (`metrics.py`, `inspector.py`, `provider.py`) declare, as records.
 
     Loaded here only to be described — the processes that serve these surfaces (the gateway, the
     Grafana supply) load them on their own, into their own registries.
@@ -381,7 +393,7 @@ def _data_records() -> dict[str, tuple[Contribution, ...]]:
     records: dict[str, tuple[Contribution, ...]] = {}
     for name, directory in _enabled_plugin_dirs():
         found: list[Contribution] = []
-        for face in ("metrics", "inspector"):
+        for face in ("metrics", "inspector", "provider"):
             path = directory / f"{face}.py"
             if not path.is_file():
                 continue
