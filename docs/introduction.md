@@ -32,13 +32,14 @@ screenshots, Windows notes, and FAQ: **[QUICKSTART.md](../QUICKSTART.md)**.
 
 ### 1. Self-Evolving — the cluster upgrades itself
 
-Ava's cluster upgrades itself. New code lands on `main`, and the fleet update script
-(`python -m cli.fleet_update`) rolls the whole cluster onto it — without stopping the work in flight. An
-agent's current code execution finishes at its turn boundary before the new
-version takes over; only a wedged process needs an explicit forced stop. The rollout is
-self-supervised: a canary runs the new code under observation while a holdout
-on the old code watches, and rolls back on regression. No maintenance windows,
-no babysitting — the cluster works by day and updates itself by night.
+Ava's cluster upgrades itself. New code lands on `main`, and the fleet update
+script (`python -m cli.fleet_update down` / `up`) updates every unit: agents
+drain at their turn boundary (a wedged process holds the stop until its
+timeout; only the operator's explicit `--force` cuts it short), the cluster
+stops, each unit's source checkout switches to the released commit, and the
+units start again. An update is an attended, full-cluster outage by design,
+and it never rolls back on its own: a failure stops the half, the operator
+fixes the cause and reruns it — each half is idempotent.
 
 → [Why: self-rolling release](../decisions/2026-05-09-self-rolling-release.md)
 

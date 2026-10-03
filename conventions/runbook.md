@@ -1444,8 +1444,11 @@ through a pinned WAL-G
 ([decision](../decisions/2026-10-02-walg-physical-backup.md),
 [node](../services/gateway_side/walg/docs/walg.ava.okf.md)). It is off until
 `AVA_WALG_CONFIG_FILE` is set; unset, nothing of it runs. It archives WAL and, once a
-day, takes a base backup, verifies the archived chain and applies retention; there is
-no restore yet, so it is not a recovery path.
+day, takes a base backup, verifies the archived chain and applies retention;
+`ava backup walg restore` recovers one into a directory you name — the end of the
+archive, a time or an LSN — and a weekly drill proves that path by restoring the
+newest backup into scratch ("The weekly recovery drill" and "Restoring" below).
+While it is on, it is the cluster's point-in-time recovery path.
 
 **Files the operator places** (0600, owned by the gateway's OS user):
 
