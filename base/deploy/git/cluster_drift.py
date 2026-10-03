@@ -111,7 +111,9 @@ def prod_source_branch_drift() -> str | None:
     The prod source must sit on reviewed `main`. A non-`main` branch means an
     agent developed in the prod tree (a `git checkout -b` there instead of a
     `git worktree`), putting un-reviewed code on the running host. A detached
-    HEAD reports as the literal branch `"HEAD"`.
+    HEAD is the source-mode release state — fleet_update materializes every
+    checkout as `--detach NEW` — so consumers treat it as the designed steady
+    state, not drift, and report it as the literal branch `"HEAD"`.
     """
     branch = _git_ro("rev-parse", "--abbrev-ref", "HEAD")
     return branch if branch and branch != "main" else None
