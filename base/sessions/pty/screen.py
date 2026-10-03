@@ -66,6 +66,26 @@ def _history_line_text(line: dict[int, pyte.screens.Char]) -> str:
     return "".join(line[i].data for i in range(width)).rstrip()
 
 
+def _heal_orphan_stubs(screen: pyte.HistoryScreen) -> None:
+    """Put a space into every empty-data cell of the visible buffer.
+
+    ``Screen.draw`` writes an empty stub cell after a two-cell character.
+    Overwriting only one cell of the pair (a cursor-addressed redraw in a
+    full-screen TUI) leaves the empty stub standing on its own, and
+    ``Screen.display`` then fails on it — ``wcwidth(char[0])`` on the empty
+    string raises ``IndexError: string index out of range`` (pyte 0.8.2), which
+    surfaced as "internal error in capture" for the whole session (2026-10-03,
+    codex sessions on company-mini). A stub slot still preceded by its two-cell
+    character is skipped by ``display`` either way, so a space is invisible
+    there; for an orphaned half it is the blank a real terminal shows.
+    """
+    for y in range(screen.lines):
+        row = screen.buffer[y]
+        for x, cell in list(row.items()):
+            if not cell.data:
+                row[x] = cell._replace(data=" ")
+
+
 class PtyScreen:
     """The per-session terminal model: pyte screen + scrollback, fed bytes.
 
@@ -126,11 +146,16 @@ class PtyScreen:
                     _history_line_text(ln)
                     for ln in list(self._screen.history.top) + list(self._screen.history.bottom)
                 ]
-                rows += [row.rstrip() for row in self._screen.display]
+                rows += [row.rstrip() for row in self._display()]
                 while rows and rows[-1] == "":
                     rows.pop()
                 return "\n".join(rows[-lines:])
-            return "\n".join(row.rstrip() for row in self._screen.display)
+            return "\n".join(row.rstrip() for row in self._display())
+
+    def _display(self) -> list[str]:
+        """``Screen.display`` after healing orphan spare cells (see above)."""
+        _heal_orphan_stubs(self._screen)
+        return self._screen.display
 
     def current_line(self) -> str:
         """The line the cursor is on (the prompt line of an idle shell).
@@ -143,7 +168,7 @@ class PtyScreen:
         prompt on row 0.
         """
         with self._lock:
-            return self._screen.display[self._screen.cursor.y].rstrip()
+            return self._display()[self._screen.cursor.y].rstrip()
 
     def raw_tail(self, lines: int = 200) -> str:
         """Degraded capture from the raw byte ring buffer (no screen model).

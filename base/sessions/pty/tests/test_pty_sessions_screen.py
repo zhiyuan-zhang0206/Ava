@@ -132,3 +132,18 @@ def test_raw_tail_is_line_aware_fallback() -> None:
 
 def test_default_geometry_matches_classic() -> None:
     assert (DEFAULT_COLS, DEFAULT_ROWS) == (120, 40)
+
+
+def test_capture_survives_an_orphaned_wide_char_stub() -> None:
+    # Overwriting only the first half of a two-cell character leaves pyte's
+    # empty stub cell standing alone; display() used to die on it with
+    # "IndexError: string index out of range" (2026-10-03, codex sessions on
+    # company-mini surfaced it as "internal error in capture").
+    s = PtyScreen(cols=20, rows=3)
+    _feed(s, "\u4e2d")
+    _feed(s, "\x1b[H" + "x")  # home; replace the wide glyph's first cell
+
+    out = s.render(lines=3, scrollback=False)
+    assert out.split("\n")[0] == "x"
+    assert s.render(lines=3, scrollback=True) == "x"
+    assert s.current_line() == "x"
