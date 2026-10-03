@@ -32,6 +32,9 @@ from tests.base.poll_until import poll_until_async
 class FakeCore:
     def __init__(self) -> None:
         self.received: list[InboundMessage] = []
+        # The core contract includes the adapter registry (types.IMAdapter), and
+        # the boot owner-seed reads it to alert through telegram.
+        self.adapters: dict[str, Any] = {}
 
     async def handle_inbound(self, message: InboundMessage) -> None:
         self.received.append(message)
