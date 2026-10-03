@@ -82,7 +82,7 @@ _EXPECTED_UIDS = {
     "ava-ops-otelcol-queue-pressure",
     "ava-ops-otelcol-enqueue-failures",
     "ava-ops-otelcol-host-silent",
-    # Prometheus OTLP receiver loss (task #4650; focused test in cli/commands/tests/test_lgtm_native.py)
+    # Prometheus OTLP receiver loss (task #4650; focused test in cli/commands/observability/tests/test_lgtm_native.py)
     "ava-ops-prom-too-old-samples",
     # memory-search growth layer (task #2088/#2090) — OTLP gauge mirror
     "ava-ops-memory-search-rows-warning",

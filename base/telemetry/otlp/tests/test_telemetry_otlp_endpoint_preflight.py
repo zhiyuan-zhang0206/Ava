@@ -21,7 +21,7 @@ from typing import Any
 import pytest
 
 from base.telemetry.otlp import telemetry_otlp, telemetry_otlp_metrics
-from base.telemetry.tests.test_telemetry_otlp import (
+from base.telemetry.otlp.tests.test_telemetry_otlp import (
     _fresh_observability_export_gate,  # noqa: F401 — shared autouse fixture  # pyright: ignore[reportUnusedImport] — pytest fixture import
     _production_process_by_default,  # noqa: F401 — shared autouse fixture  # pyright: ignore[reportUnusedImport] — pytest fixture import
 )
