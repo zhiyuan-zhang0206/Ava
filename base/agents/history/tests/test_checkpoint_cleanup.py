@@ -399,6 +399,23 @@ async def test_enqueue_stays_silent_off_or_for_foreign_threads(
         assert await cur.fetchone() == (0,)
 
 
+async def test_enqueue_follows_the_rollout_allowlist(
+    aops_pool: AsyncConnectionPool, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An unlisted agent's boundary enqueues nothing while a listed one does
+    (`hierarchy_worker_agents`, empty = every agent)."""
+    monkeypatch.setattr(settings.daemon, "hierarchy_worker_enabled", True)
+    monkeypatch.setattr(settings.daemon, "hierarchy_worker_agents", "2, 5")
+    await _put_turns(aops_pool, "1", 4)
+    await mark_compact_boundary(aops_pool, "1")
+    await _put_turns(aops_pool, "2", 4)
+    await mark_compact_boundary(aops_pool, "2")
+
+    async with aops_pool.connection() as conn, conn.cursor() as cur:
+        await cur.execute("SELECT agent_id FROM hierarchy_jobs ORDER BY agent_id")
+        assert await cur.fetchall() == [(2,)]
+
+
 async def test_trim_keeps_compaction_boundary(aops_pool: AsyncConnectionPool) -> None:
     """A boundary outside the newest keep window is exempt from trimming,
     and its blob references survive with it."""

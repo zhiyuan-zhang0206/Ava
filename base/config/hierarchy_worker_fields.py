@@ -23,6 +23,23 @@ from __future__ import annotations
 from pydantic import Field
 
 
+def parse_hierarchy_worker_agents(raw: str) -> frozenset[int]:
+    """The agent ids a `hierarchy_worker_agents` value names; empty = no restriction.
+
+    Raises:
+        ValueError: an entry is not a positive integer (fail fast at config load).
+    """
+    ids: set[int] = set()
+    for part in raw.split(","):
+        entry = part.strip()
+        if not entry:
+            continue
+        if not entry.isascii() or not entry.isdigit() or int(entry) < 1:
+            raise ValueError(f"hierarchy_worker_agents entry {entry!r} is not a positive agent id")
+        ids.add(int(entry))
+    return frozenset(ids)
+
+
 class HierarchyWorkerFields:
     """The hierarchy-worker fields, in their `daemon.py` order."""
 
@@ -243,6 +260,28 @@ class HierarchyWorkerFields:
             "the worker's tick both no-op, so nothing builds until alignment "
             "with the user turns it on (the schedule's enabled flag stays the "
             "operational layer beneath this code gate)."
+        ),
+        json_schema_extra={
+            "capability": "gateway",
+            "restart_required": "all",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
+
+    hierarchy_worker_agents: str = Field(
+        default="",
+        alias="AVA_HIERARCHY_WORKER_AGENTS",
+        description=(
+            "Comma-separated agent ids the worker serves (rollout allowlist). "
+            "Empty (default) = every agent. A listed agent is built and followed "
+            "normally; an unlisted one is neither enqueued, scanned, baselined nor "
+            "claimed, so adding it later starts it as a first-sight agent (silent "
+            "baseline, first build at its next compaction). Narrowing the list "
+            "leaves already-pending jobs of dropped agents parked until they are "
+            "listed again. Meaningful only while the master switch "
+            "(AVA_HIERARCHY_WORKER_ENABLED) is on."
         ),
         json_schema_extra={
             "capability": "gateway",
