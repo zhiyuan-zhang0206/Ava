@@ -42,13 +42,13 @@ class TestTasksEntries:
         from ava_builtins.plugins.ava_fleet import task_registry
 
         with pytest.raises(TypeError, match="title must be a string"):
-            task_registry.create(title=("a", "b"), parent=1)  # pyright: ignore[reportArgumentType]
+            task_registry.create(title=("a", "b"), description="d", parent=1)  # pyright: ignore[reportArgumentType]
 
     def test_create_parent_never_unwraps(self) -> None:
         from ava_builtins.plugins.ava_fleet import task_registry
 
         with pytest.raises(TypeError, match="parent must be int"):
-            task_registry.create(title="t", parent=(1,))  # pyright: ignore[reportArgumentType]
+            task_registry.create(title="t", description="d", parent=(1,))  # pyright: ignore[reportArgumentType]
 
     def test_log_message_unwraps(self, monkeypatch: pytest.MonkeyPatch) -> None:
         from ava_builtins.plugins.ava_fleet import task_registry

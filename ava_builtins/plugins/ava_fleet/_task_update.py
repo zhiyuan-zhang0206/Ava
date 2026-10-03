@@ -94,20 +94,10 @@ def _append_note_to_results(cur, task_id: int, note: str) -> None:  # noqa: ANN0
     )
 
 
-def _resolve_update_args(
-    status: str | None,
-    content: str | None,
-    results: str | None,
-) -> tuple[str | None, str | None]:
-    """Validate the status rung and resolve the deprecated content alias;
-    returns (status, results)."""
+def _validate_status(status: str | None) -> None:
+    """Reject a status that is not one of the rungs."""
     if status is not None and status not in _STATUSES:
         raise ValueError(f"status must be one of {sorted(_STATUSES)}, got {status!r}")
-    if content is not None:
-        if results is not None:
-            raise TypeError("pass results only; content is a deprecated alias")
-        results = content
-    return status, results
 
 
 def _nothing_to_update(sets: builtins.list[str], note: str | None) -> bool:
@@ -126,20 +116,11 @@ def _owner_actually_changed(
 
 
 def _resolve_create_args(
-    brief: str | None,
-    description: str | None,
     remind_interval_seconds: int | None,
     priority: str,
-) -> tuple[str, int, str]:
-    """Resolve the deprecated brief alias, require a description, and apply the
-    reminder / priority validation rules. Returns (description,
-    remind_interval_seconds, priority)."""
-    if brief is not None:
-        if description is not None:
-            raise TypeError("pass description only; brief is a deprecated alias")
-        description = brief
-    if description is None:
-        raise TypeError("create() missing required argument: 'description'")
+) -> tuple[int, str]:
+    """Apply the reminder / priority validation rules. Returns
+    (remind_interval_seconds, priority)."""
     validate_priority(priority)
     # Reminders cannot be turned off: None means "use the priority default",
     # not "off". The interval scales with stakes — a P0 task nags its owner
@@ -147,7 +128,7 @@ def _resolve_create_args(
     if remind_interval_seconds is None:
         remind_interval_seconds = DEFAULT_REMIND_INTERVAL_SECONDS[Priority(priority)]
     _validate_remind_interval_seconds(remind_interval_seconds)
-    return description, remind_interval_seconds, priority
+    return remind_interval_seconds, priority
 
 
 def _validate_budgets(

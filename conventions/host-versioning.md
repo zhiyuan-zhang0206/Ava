@@ -54,9 +54,8 @@ single source of truth for their bundled skills.
 There is deliberately **no** "bump a version on content-facing merges" rule —
 that was the rejected v2 proposal (a number nothing else maintains, enforced
 by CI bookkeeping). The derived date advances by itself, and a first-class
-human version exists only if the dormant dated-release pipeline
-(`scripts/ci/release_cut.py`) is revived — a separate call, not a dependency of
-this policy.
+human version, if one is wanted, is a separate release-process call, not a
+dependency of this policy.
 
 ## CI
 

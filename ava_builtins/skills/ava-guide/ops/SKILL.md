@@ -156,20 +156,6 @@ Related local commands:
   running implementation and follow the approved explicit cutover procedure.
   Respect any explicit CI-only or no-local-cluster constraint.
 
-## Release Cut
-
-Release cut tags `main` at milestone points. Tool: `scripts/ci/release_cut.py`.
-
-```bash
-.venv/bin/python scripts/ci/release_cut.py daily     # daily patch bump
-.venv/bin/python scripts/ci/release_cut.py weekly    # weekly minor bump
-.venv/bin/python scripts/ci/release_cut.py catchup   # backfill missed days
-# add --push to push tags
-```
-
-The full release strategy (versioning scheme, cadence, digest handling) is the
-module docstring of `scripts/ci/release_cut.py`.
-
 ## Resource Oversight (the SRE loop)
 
 Every machine's OTel Collector sidecar scrapes the traditional SRE layer into

@@ -229,7 +229,6 @@ Besides the shared memory pool, each agent has a `memory/` directory under its o
 - Each memory is an independent .md file beside the index, loaded by the agent on demand
 - The agent maintains the entire directory itself (dedup, update, delete erroneous entries)
 - All agents' files are mutually readable
-- The old single-file `<workspace>/MEMORY.md` layout will be automatically migrated into the `memory/` directory upon the agent's next injection
 
 ### Memory Arbiter's Dual-Insurance Responsibility
 

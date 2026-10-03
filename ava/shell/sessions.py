@@ -54,7 +54,7 @@ def _next_session_index_from_db() -> int:
             "does not set an agent identity."
         )
     # base.db.connect(): this runs inside the agent's exec sandbox, so its
-    # connect cap keeps a black-holing database from hanging `ava.shell.new()`
+    # connect cap keeps a black-holing database from hanging `ava.shell.sessions.new()`
     # on the OS TCP-retransmit timeout instead of raising.
     with database().connect() as conn, conn.cursor() as cur:
         cur.execute("SET TRANSACTION READ WRITE")

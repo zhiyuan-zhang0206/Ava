@@ -25,13 +25,9 @@ Constraint: a child is always created after its parent (`created_at` monotonical
 - `title`: Short one-line name shown in `list` results and notifications. Renamable via `update(title=...)`; must be unique among `in_progress` tasks only (same check as `create`), so a title may repeat once the earlier task leaves `in_progress`.
 - `description`: Full description — what and why, the first read for the assignee. Set at `create`, revisable via `update(description=...)`.
 
-Old field name `brief` is a deprecated alias (Task attribute + `create` parameter), to be removed.
-
 ## `results`
 
 Result log. Append progress with `log(task_id, message)` — adds a timestamped line; `update(results=...)` **replaces the entire field**. Initially `NULL`.
-
-Old field name `content` is a deprecated alias (Task attribute + `update` parameter), to be removed.
 
 ## `status`
 

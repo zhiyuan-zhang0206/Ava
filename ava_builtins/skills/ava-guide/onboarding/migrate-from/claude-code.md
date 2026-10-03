@@ -25,9 +25,10 @@ subagents, hooks, slash commands, and MCP servers.
 | `/compact` | `ava.self.compact` — agent-initiated, plus automatic compaction | |
 | Headless `claude -p "<task>"` | `ava.shell.run` / `ava.shell.run_background` for one-shot commands; spawn an agent for anything that needs reasoning | |
 
-The bridge works in both directions: `ava mcp serve` exposes the Ava gateway as
-an MCP server, so Claude Code can keep driving the fleet
-(`claude mcp add ava -- ava mcp serve`).
+The bridge works in both directions: the gateway `/mcp` endpoint exposes the fleet as
+an MCP server, so Claude Code can keep driving it
+(`claude mcp add --transport http ava http://<gateway-host>/mcp --header "Authorization: Bearer <mcp-client-token>"`;
+token setup: `conventions/mcp-client-access.md`).
 
 ## Migration steps
 

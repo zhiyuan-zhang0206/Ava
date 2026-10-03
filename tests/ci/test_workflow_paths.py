@@ -19,7 +19,6 @@ WORKFLOWS = Path(__file__).resolve().parents[2] / ".github/workflows"
 EXEMPTIONS = {
     ("ci.yml", "pull_request"): "Required checks report on every PR; jobs classify paths.",
     ("release-app.yml", "push"): "Version-tag releases; GitHub ignores paths for tags.",
-    ("release.yml", "push"): "Version-tag releases; GitHub ignores paths for tags.",
 }
 
 
@@ -132,8 +131,8 @@ def test_exemptions_are_event_specific(tmp_path: Path) -> None:
 def test_removed_exemption_is_reported(tmp_path: Path) -> None:
     workflows = tmp_path / ".github/workflows"
     shutil.copytree(WORKFLOWS, workflows)
-    (workflows / "release.yml").unlink()
-    with pytest.raises(AssertionError, match=r"stale workflow exemptions.*release.yml"):
+    (workflows / "release-app.yml").unlink()
+    with pytest.raises(AssertionError, match=r"stale workflow exemptions.*release-app.yml"):
         assert_workflow_paths(workflows)
 
 

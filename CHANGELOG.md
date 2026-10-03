@@ -3,7 +3,7 @@
 Notable changes, newest first. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Ava is pre-1.0; the
 per-release PR-level detail lives in the annotated release tags (`git tag -n99`)
-and the matching GitHub Releases, cut by `scripts/ci/release_cut.py`.
+and the matching GitHub Releases.
 
 ## [Unreleased]
 

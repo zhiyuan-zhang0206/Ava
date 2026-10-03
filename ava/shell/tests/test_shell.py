@@ -190,29 +190,29 @@ def test_run_default_cwd_is_home_before_identity() -> None:
 
 
 def test_new_returns_int_session_id(_agent_row: int) -> None:
-    sid = shell.new("test-new", ttl=120)
+    sid = shell.sessions.new("test-new", ttl=120)
     try:
         assert isinstance(sid, int)
         assert sid == 0  # first session of a fresh agent
     finally:
-        shell.kill(sid)
+        shell.sessions.kill(sid)
 
 
 def test_new_increments_session_index(_agent_row: int) -> None:
-    a = shell.new("a", ttl=120)
-    b = shell.new("b", ttl=120)
+    a = shell.sessions.new("a", ttl=120)
+    b = shell.sessions.new("b", ttl=120)
     try:
         assert (a, b) == (0, 1)
     finally:
-        shell.kill(a)
-        shell.kill(b)
+        shell.sessions.kill(a)
+        shell.sessions.kill(b)
 
 
 @pytest.mark.flaky  # real session + time.sleep polling (10s deadline)
 def test_send_capture_roundtrip_by_id(_agent_row: int) -> None:
-    sid = shell.new("test-roundtrip", ttl=120)
+    sid = shell.sessions.new("test-roundtrip", ttl=120)
     try:
-        shell.send(sid, "echo unified-session-ok")
+        shell.sessions.send(sid, "echo unified-session-ok")
         # Poll instead of a fixed sleep: under a CPU-saturated parallel bucket
         # a 0.5s sleep could elapse before the session flushed the echo (audit
         # round-2 cc-docs-tests P2 — the background-session sibling tests
@@ -221,50 +221,50 @@ def test_send_capture_roundtrip_by_id(_agent_row: int) -> None:
         out = ""
         while time.time() < deadline and "unified-session-ok" not in out:
             time.sleep(0.1)
-            out = shell.capture(sid)
+            out = shell.sessions.capture(sid)
         assert "unified-session-ok" in out
     finally:
-        shell.kill(sid)
+        shell.sessions.kill(sid)
 
 
 def test_list_returns_id_and_name(_agent_row: int) -> None:
-    sid = shell.new("alpha", ttl=120)
-    named = shell.new("dev-server", ttl=120)
+    sid = shell.sessions.new("alpha", ttl=120)
+    named = shell.sessions.new("dev-server", ttl=120)
     try:
-        listed = shell.list()
+        listed = shell.sessions.list()
         assert listed[sid] == "alpha"
         assert listed[named] == "dev-server"
     finally:
-        shell.kill(sid)
-        shell.kill(named)
+        shell.sessions.kill(sid)
+        shell.sessions.kill(named)
 
 
 @pytest.mark.flaky  # real session + time.sleep polling (10s deadline)
 def test_named_session_capture_and_kill_by_id(_agent_row: int) -> None:
     # The name is a label only — send/capture/kill address a named session by
     # the same int id as an unnamed one.
-    sid = shell.new(name="scratch", ttl=120)
+    sid = shell.sessions.new(name="scratch", ttl=120)
     try:
-        shell.send(sid, "echo named-session-ok")
+        shell.sessions.send(sid, "echo named-session-ok")
         # Poll — see test_send_capture_roundtrip_by_id (audit round-2 P2).
         deadline = time.time() + 10
         out = ""
         while time.time() < deadline and "named-session-ok" not in out:
             time.sleep(0.1)
-            out = shell.capture(sid)
+            out = shell.sessions.capture(sid)
         assert "named-session-ok" in out
     finally:
-        shell.kill(sid)
-    assert sid not in shell.list()
+        shell.sessions.kill(sid)
+    assert sid not in shell.sessions.list()
 
 
 def test_new_rejects_invalid_name(_agent_row: int) -> None:
     for bad in ("Dev Server", "1abc", "-x", "a_b"):
         with pytest.raises(ValueError, match="lowercase slug"):
-            shell.new(name=bad, ttl=120)
+            shell.sessions.new(name=bad, ttl=120)
     # `page-` names page-server sessions exactly, which a terminate's shell kill spares.
     with pytest.raises(ValueError, match="reserved for pages"):
-        shell.new(name="page-preview", ttl=120)
+        shell.sessions.new(name="page-preview", ttl=120)
 
 
 def test_resolve_does_not_conflate_id_prefixes(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -285,13 +285,13 @@ def test_resolve_does_not_conflate_id_prefixes(monkeypatch: pytest.MonkeyPatch) 
 def test_operations_reject_foreign_id(_agent_row: int) -> None:
     # A session id that does not resolve to one of this agent's sessions raises.
     with pytest.raises(ValueError, match="not this agent's"):
-        shell.send(99999, "echo nope")
+        shell.sessions.send(99999, "echo nope")
 
 
 def test_kill_removes_session(_agent_row: int) -> None:
-    sid = shell.new("test-kill", ttl=120)
-    shell.kill(sid)
-    assert sid not in shell.list()
+    sid = shell.sessions.new("test-kill", ttl=120)
+    shell.sessions.kill(sid)
+    assert sid not in shell.sessions.list()
 
 
 def test_rebuild_uses_new_id_and_old_handle_stays_rejected(_agent_row: int) -> None:
@@ -300,17 +300,17 @@ def test_rebuild_uses_new_id_and_old_handle_stays_rejected(_agent_row: int) -> N
     The per-agent counter is monotonic, so stateless rebuild publishes its new
     id and capture of the pre-flip id remains correctly rejected.
     """
-    old_id = shell.new("before-flip", ttl=120)
-    shell.kill(old_id)
-    new_id = shell.new("after-flip", ttl=120)
+    old_id = shell.sessions.new("before-flip", ttl=120)
+    shell.sessions.kill(old_id)
+    new_id = shell.sessions.new("after-flip", ttl=120)
     try:
         assert (old_id, new_id) == (0, 1)
         with pytest.raises(ValueError, match="not this agent's"):
-            shell.capture(old_id)
-        assert shell.list()[new_id] == "after-flip"
+            shell.sessions.capture(old_id)
+        assert shell.sessions.list()[new_id] == "after-flip"
         assert new_id != old_id
     finally:
-        shell.kill(new_id)
+        shell.sessions.kill(new_id)
 
 
 # ─── send_keys + per-session PTY integration ──────────────────────────────
@@ -340,10 +340,10 @@ def _capture_until(sid: int, needle: str) -> str:
         # terminal width and pyte wraps the line mid-word, splitting any raw
         # substring across two rows (CI observed the wrap; W1b's shared
         # supervisor tests normalize the same way).
-        return needle in "".join(shell.capture(sid).split())
+        return needle in "".join(shell.sessions.capture(sid).split())
 
     assert _wait_for(_seen), f"capture never contained {needle!r}"
-    return shell.capture(sid)
+    return shell.sessions.capture(sid)
 
 
 def _ready(sid: int) -> None:
@@ -357,7 +357,7 @@ def _ready(sid: int) -> None:
     the shared supervisor tests use). The session id makes the marker
     unique per test, so a stale capture can never satisfy it."""
     marker = f"__pty_ready_{sid}__"
-    shell.send(sid, f"echo {marker}")
+    shell.sessions.send(sid, f"echo {marker}")
     _capture_until(sid, marker)
 
 
@@ -365,53 +365,55 @@ def test_send_enter_false_then_send_keys_enter_submits(_agent_row: int) -> None:
     """sessions.send(enter=False) types text without submitting; a later
     send_keys('Enter') submits it — the text/Enter split the SDK contract
     promises (a combined write races TUI programs)."""
-    sid = shell.new("test-noenter", ttl=120)
+    sid = shell.sessions.new("test-noenter", ttl=120)
     try:
         _ready(sid)
-        shell.send(sid, "echo submitted-by-enter", enter=False)
+        shell.sessions.send(sid, "echo submitted-by-enter", enter=False)
         # the typed text must sit on the line editor, NOT have run
         # (whitespace-normalized: the typed line can wrap mid-word on a box
         # whose cwd makes the prompt exceed the terminal width)
-        assert _wait_for(lambda: "echosubmitted-by-enter" in "".join(shell.capture(sid).split()))
-        lines = [ln.strip() for ln in shell.capture(sid).split("\n")]
+        assert _wait_for(
+            lambda: "echosubmitted-by-enter" in "".join(shell.sessions.capture(sid).split())
+        )
+        lines = [ln.strip() for ln in shell.sessions.capture(sid).split("\n")]
         assert "submitted-by-enter" not in lines  # no bare output line yet
-        shell.send_keys(sid, "Enter")
+        shell.sessions.send_keys(sid, "Enter")
         _capture_until(sid, "submitted-by-enter")
     finally:
-        shell.kill(sid)
+        shell.sessions.kill(sid)
 
 
 def test_send_keys_ctrl_c_interrupts_foreground(_agent_row: int) -> None:
     """C-c interrupts a foreground job (here `cat` blocking on stdin) and the
     shell survives to run the next command."""
-    sid = shell.new("test-cc", ttl=120)
+    sid = shell.sessions.new("test-cc", ttl=120)
     try:
         _ready(sid)
-        shell.send(sid, "cat")
+        shell.sessions.send(sid, "cat")
         time.sleep(0.5)
-        shell.send_keys(sid, "C-c")
-        shell.send(sid, "echo after-interrupt")
+        shell.sessions.send_keys(sid, "C-c")
+        shell.sessions.send(sid, "echo after-interrupt")
         _capture_until(sid, "after-interrupt")
-        assert sid in shell.list()  # the shell is still alive
+        assert sid in shell.sessions.list()  # the shell is still alive
     finally:
-        shell.kill(sid)
+        shell.sessions.kill(sid)
 
 
 def test_send_keys_up_arrow_recalls_history(_agent_row: int) -> None:
     """Up recalls the previous command from shell history; Enter re-runs it —
     the raw-key path that drives interactive programs."""
-    sid = shell.new("test-up", ttl=120)
+    sid = shell.sessions.new("test-up", ttl=120)
     try:
         _ready(sid)
-        shell.send(sid, "echo hist-marker-1")
+        shell.sessions.send(sid, "echo hist-marker-1")
         _capture_until(sid, "hist-marker-1")
-        shell.send_keys(sid, "Up", "Enter")
+        shell.sessions.send_keys(sid, "Up", "Enter")
         _capture_until(sid, "hist-marker-1")  # the re-run echoes it again
         # the recalled line must have EXECUTED again: count bare output lines
-        lines = [ln.strip() for ln in shell.capture(sid).split("\n")]
+        lines = [ln.strip() for ln in shell.sessions.capture(sid).split("\n")]
         assert lines.count("hist-marker-1") >= 2
     finally:
-        shell.kill(sid)
+        shell.sessions.kill(sid)
 
 
 def test_new_default_cwd_is_agent_workspace(_agent_row: int) -> None:
@@ -420,13 +422,13 @@ def test_new_default_cwd_is_agent_workspace(_agent_row: int) -> None:
     directory; the workspace is created on demand)."""
     from base.paths import workspace_dir
 
-    sid = shell.new("test-cwd", ttl=120)
+    sid = shell.sessions.new("test-cwd", ttl=120)
     try:
         _ready(sid)
-        shell.send(sid, "pwd")
+        shell.sessions.send(sid, "pwd")
         _capture_until(sid, str(workspace_dir(_agent_row)))  # normalized match
     finally:
-        shell.kill(sid)
+        shell.sessions.kill(sid)
 
 
 def test_new_session_bare_python_resolves_into_venv(
@@ -453,15 +455,15 @@ def test_new_session_bare_python_resolves_into_venv(
     monkeypatch.setenv("HOME", str(fake_home))
 
     expected = str(runtime_venv() / "bin" / "python")
-    sid = shell.new("test-venv-python", ttl=120)
+    sid = shell.sessions.new("test-venv-python", ttl=120)
     try:
         _ready(sid)
-        shell.send(sid, "command -v python")
+        shell.sessions.send(sid, "command -v python")
         out = _capture_until(sid, expected)
         lines = [ln.strip() for ln in out.split("\n")]
         assert expected in lines, out
     finally:
-        shell.kill(sid)
+        shell.sessions.kill(sid)
 
 
 def test_kill_reaps_session_and_foreground_child(_agent_row: int) -> None:
@@ -476,7 +478,7 @@ def test_kill_reaps_session_and_foreground_child(_agent_row: int) -> None:
     from ava.shell import sessions as _sessions
     from base.paths import run_dir
 
-    sid = shell.new("test-tree", ttl=120)
+    sid = shell.sessions.new("test-tree", ttl=120)
     try:
         _ready(sid)
         full = _sessions._resolve(sid)
@@ -485,7 +487,7 @@ def test_kill_reaps_session_and_foreground_child(_agent_row: int) -> None:
         assert psutil.pid_exists(shell_pid)
         # a foreground child blocks the shell; it gets its own pgrp (job
         # control), which the kill must signal alongside the shell's group.
-        shell.send(sid, "sleep 300")
+        shell.sessions.send(sid, "sleep 300")
         kids: list[psutil.Process] = []
         deadline = time.time() + 10.0
         while time.time() < deadline:
@@ -495,14 +497,14 @@ def test_kill_reaps_session_and_foreground_child(_agent_row: int) -> None:
             time.sleep(0.1)
         assert kids, "the foreground sleep never started"
         child_pid = kids[0].pid
-        shell.kill(sid)
+        shell.sessions.kill(sid)
         assert _wait_for(lambda: not psutil.pid_exists(child_pid), timeout=30.0), (
             "the foreground sleep survived the session kill"
         )
         assert _wait_for(lambda: not psutil.pid_exists(shell_pid), timeout=30.0), (
             "the shell survived the session kill"
         )
-        assert sid not in shell.list()
+        assert sid not in shell.sessions.list()
     finally:
         with contextlib.suppress(ValueError, RuntimeError):
-            shell.kill(sid)
+            shell.sessions.kill(sid)

@@ -38,7 +38,7 @@ _TEST_AGENT_BASE = 900_000 + _WORKER_NUM * 10
 
 
 def _ensure_agents_meta_row(agent_id: int | None = None) -> None:
-    """Ensure agents_meta has a row for the current agent (shell.new() reads session_index).
+    """Ensure agents_meta has a row for the current agent (shell.sessions.new() reads session_index).
 
     Resets session_index to 0 so each test starts from a clean slate.
     For non-local agents (e.g. 999) seeds the agents row first (FK constraint).
@@ -121,7 +121,7 @@ def _isolated_agent(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
     monkeypatch also restores when teardown kill_all raises.
     """
     monkeypatch.setattr(ava.agent_identity, "_agent_id", _TEST_AGENT_BASE)
-    shell.kill_all()  # pure sessions, no DB — session tests that need a meta row ensure it themselves
+    shell.sessions.kill_all()  # pure sessions, no DB — session tests that need a meta row ensure it themselves
     # A killed session lingers a beat after kill_all() returns. The fake
     # agent-id is fixed per worker and tests reuse session names (e.g.
     # "test-launch"), so under `-n auto` a not-yet-reaped session collides with
@@ -130,13 +130,13 @@ def _isolated_agent(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
     # session still proceeds).
 
     for _ in range(250):
-        if not shell.list():
+        if not shell.sessions.list():
             break
         time.sleep(0.02)
     try:
         yield
     finally:
-        shell.kill_all()
+        shell.sessions.kill_all()
 
 
 @pytest.fixture
@@ -146,7 +146,7 @@ def _agent_row(_isolated_agent: None) -> int:
     Depends on `_isolated_agent` so `ava.self.AGENT_ID` is already the worker's fake id
     when we seed the row (and so the row is seeded after session cleanup, not before).
 
-    `shell.new()` / `watcher.launch()` read agents_meta.session_index to allocate
+    `shell.sessions.new()` / `watcher.launch()` read agents_meta.session_index to allocate
     the next session id; this fixture guarantees the row exists and starts the
     counter at 0 so each test has a deterministic, independent starting point.
     Returns the agent id in use.

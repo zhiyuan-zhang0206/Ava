@@ -25,7 +25,6 @@ re-run after `clear_plugin_registrations` truncated the plugin tail.
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from pathlib import Path
 
 from langchain_core.messages import HumanMessage
 
@@ -133,53 +132,6 @@ def _per_agent_maintenance_suffix(lines: int) -> str:
     return _OVER_CAP_NOTE.format(lines=lines, cap=cap)
 
 
-def _migrate_legacy_memory_file(legacy: Path, index: Path) -> None:
-    """One-time lazy migration from the pre-directory layout.
-
-    The per-agent memory used to be a single `<workspace>/MEMORY.md` holding
-    all content. Move that file into the memory directory as its starting
-    index — content unchanged; the framing plus the over-cap nudge then drive
-    the agent to split entries out into per-fact files over time.
-
-    Injection is the one chokepoint every agent passes when its window is
-    established, so migrating here (rather than a separate migration pass)
-    converts each agent exactly once, on its first post-rollout wake. No-op when
-    there is no legacy file.
-
-    When both the legacy file and the new index already exist, the legacy
-    file wins if it is newer (the agent kept writing to the old single-file
-    location after the directory was scaffolded) or if the index is empty
-    (an auto-created placeholder with no real content). Otherwise the index
-    is kept — it already has content and is at least as fresh as the legacy
-    file."""
-    if not legacy.is_file():
-        return
-    if index.exists():
-        index_empty = index.stat().st_size == 0
-        legacy_newer = legacy.stat().st_mtime > index.stat().st_mtime
-        if index_empty or legacy_newer:
-            reason = "index is empty" if index_empty else "legacy is newer"
-            # Atomic replace: unlink the stale index first, then rename.
-            index.unlink()
-            legacy.rename(index)
-            logger.info(
-                "[per-agent-memory] replaced index with legacy {} -> {} ({})",
-                legacy,
-                index,
-                reason,
-            )
-            return
-        logger.warning(
-            "[per-agent-memory] both legacy {} and index {} exist — using the index; "
-            "merge or delete the legacy file manually",
-            legacy,
-            index,
-        )
-        return
-    legacy.rename(index)
-    logger.info("[per-agent-memory] migrated legacy {} -> {}", legacy, index)
-
-
 def per_agent_memory_note(_slices: AgentSlices) -> HumanMessage | None:
     """The agent's own memory index (`<workspace>/memory/MEMORY.md`).
 
@@ -187,9 +139,6 @@ def per_agent_memory_note(_slices: AgentSlices) -> HumanMessage | None:
     "(no content)" reminds the agent to maintain its memory. Entry files beside
     the index are NOT injected; the agent reads them on demand
     (`ava.files.read` — relative paths default to the workspace).
-
-    A legacy single-file `<workspace>/MEMORY.md` is migrated into the directory
-    on first injection (see `_migrate_legacy_memory_file`).
 
     When the index exceeds `settings.agent.memory_per_agent_index_max_lines`, a
     short maintenance note is appended (below the index, which is still injected
@@ -211,7 +160,6 @@ def per_agent_memory_note(_slices: AgentSlices) -> HumanMessage | None:
     mem_dir = ws / _PER_AGENT_MEMORY_DIRNAME
     mem_dir.mkdir(parents=True, exist_ok=True)
     path = mem_dir / _MEMORY_INDEX_FILE
-    _migrate_legacy_memory_file(ws / _MEMORY_INDEX_FILE, path)
 
     if not path.is_file():
         # Create an empty index so the agent knows it exists.

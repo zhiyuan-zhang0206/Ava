@@ -185,16 +185,17 @@ ten-product × fifteen-dimension matrix with per-cell evidence:
 
 ## Drive Ava from Claude Code / Codex
 
-`ava mcp serve` exposes the cluster's control plane as an MCP server over stdio,
-so a coding agent can run the fleet: start agents, message them, read what they
-did, stop them. Register it once —
+The gateway `/mcp` endpoint exposes the cluster's control plane as an MCP server over
+Streamable HTTP, so a coding agent can run the fleet: start agents, message them,
+read what they did, stop them. Create a client token and register it once
+(setup: [`conventions/mcp-client-access.md`](../conventions/mcp-client-access.md)) —
 
 ```bash
-claude mcp add ava -- ava mcp serve      # Claude Code
-codex mcp add ava -- ava mcp serve       # Codex
+claude mcp add --transport http ava http://<gateway-host>/mcp \
+  --header "Authorization: Bearer <mcp-client-token>"
 ```
 
-— and then just ask: *"spawn an Ava agent to watch the CI queue and ping me when
+(Codex: `codex mcp add`, same shape) — and then just ask: *"spawn an Ava agent to watch the CI queue and ping me when
 it goes red"*, *"what is agent 42 doing?"*, *"tell it to skip the flaky test"*.
 
 | Tool | Does |
@@ -207,10 +208,9 @@ it goes red"*, *"what is agent 42 doing?"*, *"tell it to skip the flaky test"*.
 | `terminate_agent` | end an agent (destructive: it stops working) |
 | `cluster_status` | is the cluster up, and is it paused for maintenance |
 
-Which cluster it drives is not a flag: the server dials the gateway of the home it
-resolves (`$AVA_HOME`, else `~/.ava`), with that cluster's own secret. Nothing
-new is exposed — every tool is the authenticated gateway route the web UI
-already calls.
+Which cluster it drives is not a flag: the endpoint belongs to the gateway it is
+served from, and every call authenticates with that cluster's own client token.
+The tools are thin handlers over the same functions the web UI's gateway routes call.
 
 > The rest of the `ava mcp` family runs the other direction: `install` / `add` /
 > `list` configure MCP servers Ava's *own* agents call out to.
