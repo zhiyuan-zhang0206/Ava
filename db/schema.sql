@@ -661,19 +661,6 @@ CREATE TABLE agent_metric_days (
     PRIMARY KEY (agent_id, day)
 );
 
--- A scan proves that this particular source/window was traversed, not that
--- upstream telemetry was collected without loss. Different runner mirrors are
--- independent sources, even when their date-stamped filenames are identical.
-CREATE TABLE agent_metric_scans (
-    source TEXT NOT NULL CHECK (source IN ('loki', 'full_jsonl', 'rollup_jsonl', 'archive_loki')),
-    source_key TEXT NOT NULL,
-    window_start TIMESTAMPTZ NOT NULL,
-    window_end TIMESTAMPTZ NOT NULL,
-    scanned_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),
-    PRIMARY KEY (source, source_key, window_start, window_end),
-    CHECK (window_end > window_start)
-);
-
 -- Runner-local source cursors advance in the same transaction as repaired facts.
 CREATE TABLE agent_metric_file_cursors (
     source_key TEXT PRIMARY KEY,
@@ -726,7 +713,7 @@ DO $$ BEGIN
         GRANT SELECT, INSERT ON agent_metric_observations TO ava_runner;
         GRANT SELECT, INSERT, UPDATE ON agent_metric_days, agent_lifecycle_intervals TO ava_runner;
         GRANT SELECT ON agent_metric_collection TO ava_runner;
-        GRANT SELECT, INSERT, UPDATE ON agent_metric_scans, agent_metric_file_cursors TO ava_runner;
+        GRANT SELECT, INSERT, UPDATE ON agent_metric_file_cursors TO ava_runner;
     END IF;
 END $$;
 
@@ -811,18 +798,6 @@ CREATE TABLE IF NOT EXISTS agent_model_tokens_total (
 CREATE TABLE IF NOT EXISTS agent_model_tokens_total_through (
     singleton BOOLEAN PRIMARY KEY DEFAULT true CHECK (singleton),
     day       DATE NOT NULL
-);
-
--- One row per Loki-sourced rollup day. source_count is the event-family count
--- observed at the last successful roll; failed days remain dirty until a later
--- pass can replace the failure marker with a successful watermark.
-CREATE TABLE rollup_day_state (
-    day          DATE PRIMARY KEY,
-    status       TEXT NOT NULL DEFAULT 'rolled'
-                 CHECK (status IN ('rolled', 'failed')),
-    source_count BIGINT NOT NULL,
-    rolled_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
-    error        TEXT
 );
 
 -- ─────────────── alerts (system→human alert store, Task #1224) ───────────────
@@ -1049,31 +1024,6 @@ CREATE TRIGGER agents_meta_born_spawner_append_only
 -- lives in the Loki archive stream (parity-verified import, 365d retention),
 -- and the cold pg_dump archive is the long-term copy. The baseline omits the
 -- table so fresh databases contain only the current read models.
---
--- agent_archive_stats survives the drop: it materializes whole-life inspector
--- values from the pre-cutover archive and is read directly, independent of the
--- events table.
-CREATE TABLE agent_archive_stats (
-    agent_id          BIGINT PRIMARY KEY REFERENCES agents(id),
-    turn_distribution JSONB NOT NULL DEFAULT '[]'::jsonb,
-    active_seconds    DOUBLE PRECISION NOT NULL DEFAULT 0,
-    exec_seconds      DOUBLE PRECISION NOT NULL DEFAULT 0,
-    lifecycle         JSONB NOT NULL DEFAULT '[]'::jsonb,
-    computed_at       TIMESTAMPTZ NOT NULL DEFAULT now()
-);
-
-COMMENT ON TABLE agent_archive_stats IS
-    'Materialized whole-life inspector values from the pre-cutover events archive (task #1281: the raw archive lives in the Loki archive stream).';
-COMMENT ON COLUMN agent_archive_stats.turn_distribution IS
-    'Ascending JSON pairs [duration_seconds, count] for archived turn_end events.';
-COMMENT ON COLUMN agent_archive_stats.active_seconds IS
-    'Archived node_exit duration sum excluding claim nodes.';
-COMMENT ON COLUMN agent_archive_stats.exec_seconds IS
-    'Archived node_exit duration sum for exec nodes.';
-COMMENT ON COLUMN agent_archive_stats.lifecycle IS
-    'Ascending JSON pairs [UTC timestamp, event name] for archived lifecycle replay.';
-COMMENT ON COLUMN agent_archive_stats.computed_at IS
-    'Backfill time; this materialization is valid only while the events archive was frozen.';
 
 -- ─────────────── agent_tasks (the task registry) ───────────────
 -- Persistent, process-decoupled work items agents hand off to each other.
@@ -1522,27 +1472,6 @@ CREATE TABLE IF NOT EXISTS web_sessions (
 );
 
 CREATE INDEX IF NOT EXISTS web_sessions_expires_idx ON web_sessions (expires_at);
-
--- ─────────────── llm_usage_hourly ───────────────
--- The restored historical LLM usage/cost curve. Rows before 2026-08-13 survive
--- only in the frozen 2026-08-28 cold PG events archive (Loki's 7d retention lost
--- that window), so the curve is re-derived from that archive's JSONL extract by
--- `scripts/backfill_llm_usage_hourly.py` and stored here. Derived artifact, not
--- a write path: every column is recomputable by re-running the backfill.
-CREATE TABLE IF NOT EXISTS llm_usage_hourly (
-    ts_hour          TIMESTAMPTZ NOT NULL,
-    model            TEXT NOT NULL,
-    in_total         BIGINT NOT NULL DEFAULT 0,
-    cache_read       BIGINT NOT NULL DEFAULT 0,
-    out_total        BIGINT NOT NULL DEFAULT 0,
-    reasoning        BIGINT NOT NULL DEFAULT 0,
-    cost_peak_usd    DOUBLE PRECISION NOT NULL DEFAULT 0,
-    cost_offpeak_usd DOUBLE PRECISION NOT NULL DEFAULT 0,
-    PRIMARY KEY (ts_hour, model)
-);
-
-COMMENT ON TABLE llm_usage_hourly IS
-    'Hourly model-level LLM usage/cost, restored historical curve from the 2026-08-28 cold archive; recomputable from the source JSONL.';
 
 -- Cooperative, same-machine external execution. PostgreSQL owns the lease;
 -- Redis only announces changes. Existing agents and messages remain untouched.

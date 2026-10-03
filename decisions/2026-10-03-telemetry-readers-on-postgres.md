@@ -45,5 +45,6 @@ untouched.
 - The rollup and the resolution pass depend on the backfill being complete for the days they read;
   the monotone guard keeps an incomplete day from lowering a ledger row.
 - `rollup_day_state` and `agent_metric_scans` hold nothing the readers use; dropping them follows in
-  its own expand-contract step.
+  its own expand-contract step (migration `20261003T043232_drop-dead-tables`, with `agent_archive_stats` and
+  `llm_usage_hourly`, whose last readers and writers went in the same sweep).
 - The fleet graph still reads Prometheus.
