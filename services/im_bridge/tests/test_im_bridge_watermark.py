@@ -248,3 +248,95 @@ def test_created_at_orders_fresh_items_over_item_id(caplog: pytest.LogCaptureFix
         assert [r for r in caplog.records if r.levelno == logging.ERROR] == []
 
     asyncio.run(scenario())
+
+
+def test_stamped_batch_behind_the_watermark_is_not_a_rollback(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A stamped watermark can explain a fresh-empty batch on its own: every
+    item is OLDER IN TIME (readable created_at <= the watermark's), so the
+    item ids are merely small — a compact wiped the session's positions and
+    this chat has not produced anything new yet. The numbering check must not
+    run at all: no ERROR, no reset, nothing pushed. (Review delta vs
+    c672f181f: running it on item_id alone fired one spurious ERROR + reset
+    per compact per chat while snapshots carried only the wiped tail.)"""
+
+    caplog.set_level(logging.ERROR, logger="services.im_bridge.core")
+    core = _core()
+    adapter = _Adapter()
+    core.register(adapter)
+    state = ChatState("telegram", "12345")
+    state.current_agent_id = 405
+    core._last_pushed[("telegram", "12345", 405)] = PushWatermark(
+        created_at="2026-10-03T14:33:00+00:00", item_id="377.1"
+    )
+
+    async def scenario() -> None:
+        await core._push_snapshot(
+            ("telegram", "12345"),
+            state,
+            {
+                "items": [
+                    _agent_chat("1.0", "wiped tail a", "2026-10-03T14:00:00+00:00"),
+                    _agent_chat("2.0", "wiped tail b", "2026-10-03T14:20:00+00:00"),
+                ]
+            },
+        )
+        assert adapter.sent == []
+        assert [r for r in caplog.records if r.levelno == logging.ERROR] == []
+        assert core._last_pushed[("telegram", "12345", 405)] == PushWatermark(
+            created_at="2026-10-03T14:33:00+00:00",
+            item_id="377.1",  # untouched
+        )
+        # a genuinely newer item flows as usual, and the pair advances
+        await core._push_snapshot(
+            ("telegram", "12345"),
+            state,
+            {"items": [_agent_chat("3.0", "post-compact news", "2026-10-03T14:40:00+00:00")]},
+        )
+        assert adapter.sent == [("12345", "[Ava #405] post-compact news")]
+        assert core._last_pushed[("telegram", "12345", 405)] == PushWatermark(
+            created_at="2026-10-03T14:40:00+00:00", item_id="3.0"
+        )
+
+    asyncio.run(scenario())
+
+
+def test_numbering_check_still_runs_for_a_stamp_less_batch_max(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """When the batch max carries no stamp the clock cannot decide, so the
+    numbering check stands even against a stamped watermark: a max strictly
+    behind it is a rollback — loud, reset to the observed max, batch
+    skipped — and the next item resumes."""
+    caplog.set_level(logging.ERROR, logger="services.im_bridge.core")
+    core = _core()
+    adapter = _Adapter()
+    core.register(adapter)
+    state = ChatState("telegram", "12345")
+    state.current_agent_id = 405
+    core._last_pushed[("telegram", "12345", 405)] = PushWatermark(
+        created_at="2026-10-03T14:33:00+00:00", item_id="377.1"
+    )
+
+    async def scenario() -> None:
+        await core._push_snapshot(
+            ("telegram", "12345"),
+            state,
+            {"items": [_agent_chat("100.0", "legacy tail with no stamp")]},
+        )
+        assert adapter.sent == []
+        errors = [r for r in caplog.records if r.levelno == logging.ERROR]
+        assert len(errors) == 1
+        assert "377.1" in errors[0].getMessage()
+        assert core._last_pushed[("telegram", "12345", 405)] == PushWatermark(
+            created_at=None, item_id="100.0"
+        )
+        await core._push_snapshot(
+            ("telegram", "12345"),
+            state,
+            {"items": [_agent_chat("101.0", "resumed after reset", "2026-10-03T14:50:00+00:00")]},
+        )
+        assert adapter.sent == [("12345", "[Ava #405] resumed after reset")]
+
+    asyncio.run(scenario())
