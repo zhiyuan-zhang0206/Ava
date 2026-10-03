@@ -91,6 +91,7 @@ from gateway.cluster import machine_pause as machine_pause_router
 from gateway.cluster import ops_monitor as ops_monitor_router
 from gateway.cluster import router as cluster_router
 from gateway.cluster import status as status_router
+from gateway.cluster.status import StatusCache
 from gateway.events import agent_events as agent_events_router
 from gateway.events import computer_traces as computer_traces_router
 from gateway.events import metrics as metrics_router
@@ -197,6 +198,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     app.state.db = Database.from_settings()
     app.state.bus = EventBus.from_settings()
     app.state.telemetry_staleness = TelemetryStaleness()
+    app.state.status_cache = StatusCache()
     app.state.db_pool = app.state.db.pool(max_size=8)
     # The control plane must never queue behind the saturated data-plane pool.
     # Audit P0-2 follows the 2026-08-23 watchdog misjudgment chain: health and
