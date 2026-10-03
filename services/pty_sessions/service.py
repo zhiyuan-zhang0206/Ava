@@ -48,7 +48,7 @@ from base.sessions.pty.paths import (
     transcript_path,
 )
 from base.sessions.record import SessionRecord
-from services.pty_sessions import ledger, session
+from services.pty_sessions import crash_notices, ledger, session
 
 # Session names ride the transcript filename; keep the conservative slug shape
 # ava/shell/sessions.py enforces for its names.
@@ -148,7 +148,7 @@ class PtyService:
         self._tasks: asyncio.TaskGroup | None = None
         self._stop: asyncio.Event | None = None
         self._finished = False
-        # What the start-time sweep closed: the busy sessions a caller turns into owner notices.
+        # What the start-time sweep closed: the busy sessions `crash_notices` tells their owners about.
         self.swept = closure.Outcome()
         self._methods: dict[str, Callable[[dict[str, Any]], dict[str, Any] | None]] = {
             "ping": self._ping,
@@ -541,7 +541,9 @@ class PtyService:
             self._tasks = tasks
             tasks.create_task(self._watch_exits())
             tasks.create_task(self._snapshot_loop())
+            notices = tasks.create_task(crash_notices.send(self.swept))
             await self._stop.wait()
+            notices.cancel()
             server.close()
             with contextlib.suppress(OSError):
                 # Never unlink a later occupant's socket: only the inode this process bound.

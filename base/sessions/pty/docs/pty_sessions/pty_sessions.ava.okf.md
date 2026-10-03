@@ -85,6 +85,7 @@ next start sweep what a crashed service left running. Both are described in
 [[closure-and-ledger.ava.okf.md|closure and ledger]]. `ava stop` turns the
 closure's answer into owner notices (`ops/pty_close_notices.py`) and fails on a
 process that outlived its SIGKILL; new allocations are refused for its duration.
+A crash's busy sessions are told by a one-shot child at the next start.
 
 ## Namespace
 

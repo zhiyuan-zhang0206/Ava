@@ -8,13 +8,18 @@ the stop.
 
 from __future__ import annotations
 
+import subprocess
 from collections.abc import Sequence
 from pathlib import Path
 
+import psutil
 import psycopg
 import pytest
 
 from base.db import create_agent
+from base.native_process.ownership import OwnedProcess
+from base.sessions.pty import closure
+from base.sessions.pty.paths import ledger_path
 from cli.commands.lifecycle import _temporary_stop as command
 from cli.commands.lifecycle import stop as entry
 from cli.commands.lifecycle.tests.stop_support import (
@@ -28,6 +33,7 @@ from cli.commands.lifecycle.tests.stop_support import home as home
 from cli.commands.lifecycle.tests.stop_support import pty_service as pty_service
 from cli.commands.lifecycle.tests.stop_support import written as written
 from ops import pty_close_notices
+from services.pty_sessions import ledger
 from tests.path_scoped import pty_jobs as jobs
 from tests.path_scoped.pty_reaper import PtyReaper
 from tests.path_scoped.pty_reaper import pty_reaper as pty_reaper
@@ -164,3 +170,29 @@ def test_an_unwritable_notice_is_loud_and_does_not_fail_the_stop(
     assert entry.cmd_stop(require_confirmation=False, keep_infra=True, timeout=15) == 0
     err = capsys.readouterr().err
     assert name in err and "agent 987" in err and "connection refused" in err
+
+
+def test_a_stop_without_the_service_tells_owners_the_service_crashed_not_that_it_stopped(
+    home: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    written: list[pty_close_notices.ClosureNotice],
+) -> None:
+    """No service listens: what its ledger last saw running was lost to the service dying,
+    before this stop, so the owner is told that — even when the crash had already ended
+    every process of the session — and the stop's own hold is not blamed."""
+    dependencies(monkeypatch)
+    stop_env(monkeypatch, home)
+    child = subprocess.Popen(["true"])
+    gone = OwnedProcess.capture(psutil.Process(child.pid))
+    child.wait(timeout=10)
+    name = "ava-agent-987-shell-2044-crashed"
+    ledger.write(
+        ledger_path(), [closure.Target(name, gone, (gone, OwnedProcess(gone.pid, 0.0, None)))]
+    )
+
+    assert entry.cmd_stop(require_confirmation=False, keep_infra=True, timeout=15) == 0
+
+    assert [(notice.name, notice.reason) for notice in written] == [
+        (name, pty_close_notices.CRASH_REASON)
+    ]
+    assert ledger.read(ledger_path()) == []

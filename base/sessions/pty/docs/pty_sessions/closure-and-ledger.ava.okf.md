@@ -30,10 +30,23 @@ shell; a shell or job that ignores the hangup survives. The next service start
 (or a stop that finds no service) closes exactly the identities the ledger
 names that are still the recorded processes, through the same closure; a live
 recorded member keeps the session id proven when the shell is already gone.
-The sweep returns the busy sessions it closed in the closure's shape, so a later
-change can notify their owners; today it logs them. A second service start is
-refused by the instance lock, so it can neither sweep nor take over a live
-service's sessions.
+The sweep returns the busy sessions it closed in the closure's shape, and also
+those the crash ended whole (every process gone, a reboot included) that the
+ledger last saw running a job: their owners lost it all the same. A second
+service start is refused by the instance lock, so it can neither sweep nor take
+over a live service's sessions.
+
+## Crash notices
+
+The service holds no database. After a start-time sweep it gives the busy
+sessions to a one-shot child, `python -m ops.pty_close_notices`
+(`services/pty_sessions/crash_notices.py`), from a task beside the serving loop
+with a thirty-second limit; the child writes one notice per session under
+`CRASH_REASON` and exits. A database it cannot reach is a log line, never a
+failed or delayed start, and nothing retries. A stop that finds no service closes
+from the ledger and writes the same notices itself. Delivery is idempotent on
+machine, agent, session and shell birth, and a terminated owner is dropped.
+Decision: `decisions/2026-10-04-pty-crash-notices.md`.
 
 ## Dependencies
 

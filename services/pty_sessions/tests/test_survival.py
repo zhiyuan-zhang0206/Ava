@@ -9,6 +9,7 @@ reach, which the ledger lets the next start sweep.
 from __future__ import annotations
 
 import json
+import os
 import signal
 import subprocess
 import sys
@@ -16,9 +17,12 @@ import time
 from pathlib import Path
 
 import psutil
+import psycopg
 import pytest
 
+from base.db import create_agent
 from base.native_process.os_platform import IS_WINDOWS
+from base.native_process.ownership import OwnedProcess
 from base.sessions.pty import client, closure
 from base.sessions.pty.paths import ledger_path
 from services.pty_sessions import ledger
@@ -252,9 +256,6 @@ def test_the_sweep_closes_the_members_a_dead_shell_left_and_reports_the_busy_ses
     )
     assert leader.stdout is not None
     job_pid = int(leader.stdout.readline())
-    shell = closure.identity_from_wire({"pid": leader.pid, "birth": 0.0, "starttime": None})
-    from base.native_process.ownership import OwnedProcess
-
     shell = OwnedProcess.capture(psutil.Process(leader.pid))
     job = OwnedProcess.capture(psutil.Process(job_pid))
     ledger.write(path, [closure.Target("ava-agent-1-shell-1-swept", shell, (job,))])
@@ -275,8 +276,6 @@ def test_the_sweep_closes_the_members_a_dead_shell_left_and_reports_the_busy_ses
 def test_the_sweep_never_signals_a_pid_that_is_no_longer_the_recorded_process(
     tmp_path: Path,
 ) -> None:
-    from base.native_process.ownership import OwnedProcess
-
     bystander = subprocess.Popen(["sleep", "300"], start_new_session=True)
     try:
         real = OwnedProcess.capture(psutil.Process(bystander.pid))
@@ -301,3 +300,128 @@ def test_an_unreadable_ledger_sweeps_nothing(tmp_path: Path) -> None:
     assert ledger.sweep(path) == closure.Outcome()
     assert json.loads(path.read_text())["sessions"] == {}
     assert path.stat().st_mode & 0o777 == 0o600
+
+
+def _exited_process() -> OwnedProcess:
+    """The identity of a process that has already exited and been reaped."""
+    child = subprocess.Popen(["true"])
+    identity = OwnedProcess.capture(psutil.Process(child.pid))
+    child.wait(timeout=10)
+    return identity
+
+
+def test_the_sweep_reports_a_busy_session_the_crash_ended_whole(tmp_path: Path) -> None:
+    """The hangup (or a reboot) ended every process of a session the ledger last saw
+    running a job: nothing is left to close, but its owner still lost that job, so the
+    session is reported; a session that was only an idle shell is not."""
+    path = tmp_path / "ledger.json"
+    busy_shell, busy_job, idle_shell = _exited_process(), _exited_process(), _exited_process()
+    ledger.write(
+        path,
+        [
+            closure.Target("ava-agent-1-shell-3-busy", busy_shell, (busy_shell, busy_job)),
+            closure.Target("ava-agent-1-shell-4-idle", idle_shell, (idle_shell,)),
+        ],
+    )
+
+    outcome = ledger.sweep(path)
+
+    assert [closed.name for closed in outcome.closed] == ["ava-agent-1-shell-3-busy"]
+    assert outcome.closed[0].shell == busy_shell
+    assert outcome.survivors == ()
+    assert ledger.read(path) == []
+
+
+def test_the_sweep_never_reports_a_busy_session_whose_shell_is_still_running(
+    tmp_path: Path,
+) -> None:
+    """A recorded shell that is still its recorded process is closed by the closure, not
+    reported twice; a recycled pid under the shell's name is not that process."""
+    path = tmp_path / "ledger.json"
+    bystander = subprocess.Popen(["sleep", "300"], start_new_session=True)
+    try:
+        real = OwnedProcess.capture(psutil.Process(bystander.pid))
+        stale = OwnedProcess(
+            real.pid, real.birth - 1000.0, None if real.starttime is None else real.starttime - 1
+        )
+        ledger.write(path, [closure.Target("ava-agent-1-shell-5-recycled", stale, (stale, real))])
+
+        outcome = ledger.sweep(path)
+
+        assert [closed.name for closed in outcome.closed] == ["ava-agent-1-shell-5-recycled"]
+    finally:
+        bystander.kill()
+        bystander.wait(timeout=10)
+
+
+def test_a_crashed_service_tells_the_owner_of_a_busy_session_at_the_next_start(
+    pty_service: PtyServiceProcess, unit_home: Path, db_conn: psycopg.Connection, db_url: str
+) -> None:
+    """SIGKILL the service while a session runs a job: the hangup ends everything, so the
+    sweep has nothing to close, yet the next start hands the busy session to the one-shot
+    child, which leaves its owner one system inbound."""
+    owner = create_agent(db_conn)
+    with db_conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO agents_meta (id, spawner, status) VALUES (%s, 'user', 'running')",
+            (owner,),
+        )
+    db_conn.commit()
+    # The unit's `.env` declares what the child needs: its name and its database.
+    (unit_home / ".env").write_text(
+        f"AVA_MACHINE_NAME=crash-box\nAVA_DB_URL={db_url}\nAVA_REDIS_URL={os.environ['AVA_REDIS_URL']}\n",
+        encoding="utf-8",
+    )
+    name = f"ava-agent-{owner}-shell-7-crashed"
+    shell = jobs.start(name, unit_home, jobs.TERM_OK)
+
+    def ledger_knows_the_job() -> bool:
+        return bool(json.loads(ledger_path().read_text())["sessions"].get(name, {}).get("members"))
+
+    assert wait_for(ledger_knows_the_job, timeout=ledger.SNAPSHOT_INTERVAL_S * 3)
+    pty_service.signal(signal.SIGKILL)
+    pty_service.wait()
+    assert jobs.wait_exit(shell.pid, timeout=10), "precondition: the hangup ends the shell"
+
+    pty_service.start()
+
+    def inbounds() -> list[tuple[str, str]]:
+        with db_conn.cursor() as cur:
+            cur.execute(
+                "SELECT source, content FROM inbound_messages WHERE agent_id = %s", (owner,)
+            )
+            rows = cur.fetchall()
+        db_conn.commit()
+        return [(str(source), str(content)) for source, content in rows]
+
+    assert wait_for(lambda: bool(inbounds()), timeout=20), pty_service.output()
+    ((source, content),) = inbounds()
+    assert source == "system" and name in content and "ending uncleanly" in content
+
+
+def test_an_unreachable_database_costs_the_start_a_log_line_and_nothing_else(
+    pty_service: PtyServiceProcess, unit_home: Path
+) -> None:
+    """The crash notices are a side channel: with the database refusing connections the
+    service still starts, answers and serves, and the log says the notices were lost."""
+    (unit_home / ".env").write_text(
+        "AVA_MACHINE_NAME=crash-box\nAVA_DB_URL=postgresql://nobody:nothing@127.0.0.1:1/none\n",
+        encoding="utf-8",
+    )
+    name = "ava-agent-987-shell-8-lost"
+    jobs.start(name, unit_home, jobs.TERM_OK)
+    assert wait_for(
+        lambda: bool(
+            json.loads(ledger_path().read_text())["sessions"].get(name, {}).get("members")
+        ),
+        timeout=ledger.SNAPSHOT_INTERVAL_S * 3,
+    )
+    pty_service.signal(signal.SIGKILL)
+    pty_service.wait()
+
+    pty_service.start()
+
+    assert client.request("ping")["pid"] == pty_service.pid
+    assert wait_for(lambda: "were not all written" in pty_service.output(), timeout=20)
+    new("ava-agent-987-shell-9-after", unit_home)
+    assert client.has_session("ava-agent-987-shell-9-after")

@@ -14,6 +14,11 @@ and the matching GitHub Releases.
   and `ava restart` notify the owners of busy ones. A shell's base environment is the service's
   plus the forwarded env, so a variable only the creating process held is not carried over
   ([decision](decisions/2026-10-03-pty-sessions-service.md)).
+- Owners of busy shells are also told when a `pty-sessions` service dies uncleanly (a crash, a
+  SIGKILL, a reboot): the next service start, or an `ava stop` that finds no service, writes a
+  notice for each session the ledger last saw running a job. A database that cannot be reached
+  only logs
+  ([decision](decisions/2026-10-04-pty-crash-notices.md)).
 
 ### Removed
 - `ava maintenance prepare`, `drain`, `stop`, `start`, `resume` and `stop-data-plane`, with

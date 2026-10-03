@@ -1,4 +1,4 @@
-"""Close notices for busy persistent shells a unit closes at `ava stop` (issue #2044).
+"""Close notices for busy persistent shells a unit closes at `ava stop` or loses to a crash (issue #2044).
 
 `ava stop` closes busy persistent-shell sessions in its `terminals` phase,
 after the services are down and before the data plane stops. Each session it
@@ -24,12 +24,22 @@ the closed session's record is gone by any retry.
 Delivery is idempotent per (machine, agent_id, session_id, shell-birth): the
 `api_idempotency` claim row and the inbound insert commit in one transaction,
 so a notice written twice is delivered once.
+
+A pty-sessions service that died uncleanly (a crash, a SIGKILL, a reboot) closes
+its sessions no one, so the next service start sweeps its ledger
+(`services.pty_sessions.ledger.sweep`) and hands the busy sessions it closed to
+a one-shot child, ``python -m ops.pty_close_notices``, which writes their notices
+under `CRASH_REASON` with this module's `main`. The service itself stays
+database-free: the child is profile-less, so it dials as an operator process, and
+a database it cannot reach is logged and nothing else — the service starts and
+serves either way.
 """
 
 from __future__ import annotations
 
 import hashlib
 import json
+import sys
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -37,10 +47,13 @@ from datetime import UTC, datetime
 import psycopg
 
 from base.agents.messages.inbound_provenance import InboundProvenance
+from base.cluster.machine import machine_name
 from base.db import Database, insert_inbound_message
 from base.events.live.bus import EventBus
 from base.log import logger
-from base.native_process.ownership import shown_name
+from base.log.sinks import add_sink
+from base.native_process.ownership import OwnedProcess, shown_name
+from base.sessions.pty import closure
 from ops.cluster_status import AGENT_SHELL_RE
 
 # The reaper's notifiable boundary: only these statuses receive a closure
@@ -50,6 +63,10 @@ _NOTIFIABLE_STATUSES = ("running", "idling")
 # Why a unit closed the session, as the owner's notice names it. A pause
 # retains terminals and records nothing.
 STOP_REASON = "an operator stop (ava stop)"
+
+# The same, for sessions a pty-sessions service that ended uncleanly left behind
+# (a crash, a forced stop of the service, a reboot): the sweep found them busy.
+CRASH_REASON = "the pty-sessions service ending uncleanly (a crash, a forced stop or a reboot)"
 
 
 @dataclass(frozen=True)
@@ -68,11 +85,11 @@ class ClosureNotice:
     name: str
     shell_pid: int
     shell_birth: str
-    operation: str
-    acquired_at: str
     reason: str
     closed_at: str
     survivors: tuple[tuple[int, str], ...] = ()
+    operation: str | None = None
+    acquired_at: str | None = None
 
     def dedup_key(self) -> str:
         raw = f"{self.machine}|{self.agent_id}|{self.session_id}|{self.shell_birth}"
@@ -86,11 +103,13 @@ class ClosureNotice:
             "name": self.name,
             "shell_pid": self.shell_pid,
             "shell_birth": self.shell_birth,
-            "operation": self.operation,
-            "acquired_at": self.acquired_at,
             "reason": self.reason,
             "closed_at": self.closed_at,
         }
+        if self.operation is not None:
+            record["operation"] = self.operation
+        if self.acquired_at is not None:
+            record["acquired_at"] = self.acquired_at
         if self.survivors:
             record["survivors"] = [{"pid": pid, "name": name} for pid, name in self.survivors]
         return record
@@ -102,9 +121,9 @@ def closure_notice(
     name: str,
     shell_pid: int,
     shell_birth: str,
-    operation: str,
-    acquired_at: datetime,
     reason: str,
+    operation: str | None = None,
+    acquired_at: datetime | None = None,
     survivors: Sequence[tuple[int, str]] = (),
 ) -> ClosureNotice | None:
     """The notice for one closed busy session; None when not an agent shell.
@@ -112,6 +131,8 @@ def closure_notice(
     The caller guarantees the session was busy and that it closes it for
     `reason`; `survivors` names, as (pid, command name), the session's
     processes that outlived the SIGKILL once its shell is verified gone.
+    `operation` and `acquired_at` name the stop's maintenance hold; a sweep
+    after a crash has none.
     Returns None when the session name is not an agent-owned shell (the
     canonical ``-agent-<id>-shell-<sid>`` shape).
     """
@@ -126,7 +147,9 @@ def closure_notice(
         shell_pid=shell_pid,
         shell_birth=shell_birth,
         operation=operation,
-        acquired_at=acquired_at.astimezone(UTC).isoformat()
+        acquired_at=None
+        if acquired_at is None
+        else acquired_at.astimezone(UTC).isoformat()
         if acquired_at.tzinfo
         else acquired_at.isoformat(),
         reason=reason,
@@ -135,11 +158,50 @@ def closure_notice(
     )
 
 
+def shell_birth(shell: OwnedProcess) -> str:
+    """The shell's birth as the dedup key spells it: one identity, one spelling, every path."""
+    if shell.starttime is not None:
+        return f"starttime:{shell.starttime}"
+    return f"birth:{shell.birth!r}"
+
+
+def notices_for(
+    closed: Sequence[closure.ClosedSession],
+    *,
+    reason: str,
+    operation: str | None = None,
+    acquired_at: datetime | None = None,
+) -> list[ClosureNotice]:
+    """One notice per closed busy session that is an agent shell, from this machine."""
+    machine = machine_name()
+    built = (
+        closure_notice(
+            machine=machine,
+            name=session.name,
+            shell_pid=session.shell.pid,
+            shell_birth=shell_birth(session.shell),
+            reason=reason,
+            operation=operation,
+            acquired_at=acquired_at,
+            survivors=session.left,
+        )
+        for session in closed
+    )
+    return [notice for notice in built if notice is not None]
+
+
 def _content(notice: ClosureNotice) -> str:
     text = (
         f"Shell session {notice.name!r} (id {notice.session_id}, agent {notice.agent_id}) "
-        f"was closed by {notice.reason} on {notice.machine}, interrupting a running task. "
-        f"Recreate the session if its work is still needed (operation {notice.operation})."
+        f"was closed by {notice.reason} on {notice.machine}, "
+        # A stop saw the job; a sweep only knows the ledger last did, up to a snapshot ago.
+        + (
+            "interrupting a running task. "
+            if notice.operation
+            else "probably interrupting a running task. "
+        )
+        + "Recreate the session if its work is still needed"
+        + (f" (operation {notice.operation})." if notice.operation else ".")
     )
     if notice.survivors:
         left = ", ".join(f"pid {pid} ({shown_name(name)})" for pid, name in notice.survivors)
@@ -232,3 +294,42 @@ def write_notices(
             except Exception as exc:
                 failed.append((notice, exc))
     return failed
+
+
+def main() -> int:
+    """Write the crash notices for the busy sessions a ledger sweep closed.
+
+    The one-shot child of the pty-sessions service: reads a `closure.Outcome`
+    wire object from stdin, writes a notice per closed busy session under
+    `CRASH_REASON` over one pooled connection, and exits. Every failure — an
+    unreadable list, no database settings, an unreachable database — is logged
+    and returned as exit 1; nothing retries, because the sweep already cleared
+    the ledger record of these sessions.
+    """
+    try:
+        outcome = closure.Outcome.from_wire(json.load(sys.stdin))
+        notices = notices_for(outcome.closed, reason=CRASH_REASON)
+        failed = write_notices(
+            Database.from_settings(), EventBus.from_settings(), notices, direct=False
+        )
+    except Exception as exc:
+        logger.error(
+            "[pty-close-notices] crash notices not written: {}: {}", type(exc).__name__, exc
+        )
+        return 1
+    for unwritten, exc in failed:
+        logger.error(
+            "[pty-close-notices] closure notice for session {!r} (agent {}) could not be written: {}: {}",
+            unwritten.name,
+            unwritten.agent_id,
+            type(exc).__name__,
+            exc,
+        )
+    return 1 if failed else 0
+
+
+if __name__ == "__main__":
+    add_sink(
+        sys.stderr, format="{time:HH:mm:ss.SSS} {level: <5} {message}", level="INFO", colorize=False
+    )
+    raise SystemExit(main())
