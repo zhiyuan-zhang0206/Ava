@@ -8,12 +8,16 @@ import os
 import subprocess
 import sys
 import time
+import urllib.error
+import urllib.request
 from datetime import datetime
+from http.client import HTTPMessage
 from pathlib import Path
 from typing import cast
 
 import pytest
-from playwright.sync_api import Browser
+from playwright.sync_api import Browser, Page
+from playwright.sync_api import Error as PlaywrightError
 
 from scripts.post_deploy_visual.check import (
     REPO_ROOT,
@@ -21,6 +25,7 @@ from scripts.post_deploy_visual.check import (
     _assert_gate_origin,
     _cookie_file,
     _expected_capture_names,
+    _session_precheck,
     _validate_demo_target,
 )
 from scripts.post_deploy_visual.policy import (
@@ -425,3 +430,192 @@ def test_kill_descendants_reaps_the_whole_process_tree(tmp_path: Path) -> None:
         time.sleep(0.05)
     else:
         pytest.fail("grandchild survived the hard-exit cleanup")
+
+
+# ── dead-session fast-fail (task #4758) ───────────────────────────────────────
+
+
+class _AuthPayloadResponse:
+    """A minimal urlopen response carrying one JSON auth-check payload."""
+
+    def __init__(self, payload: dict[str, object]) -> None:
+        self._payload = payload
+
+    def __enter__(self) -> _AuthPayloadResponse:
+        return self
+
+    def __exit__(self, *args: object) -> None:
+        return None
+
+    def read(self) -> bytes:
+        return json.dumps(self._payload).encode()
+
+
+def test_session_precheck_probes_the_gateway_with_the_raw_cookie(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The probe hits the gateway's /api/auth/check with the cookie file's
+    full text as the Cookie header — the file already carries name=value, so
+    no prefix may be added."""
+    cookie_file = tmp_path / "cookies.txt"
+    cookie_file.write_text("ava_session=abc123\n")
+    seen: dict[str, str] = {}
+
+    def fake_urlopen(request: urllib.request.Request, timeout: int) -> _AuthPayloadResponse:
+        seen["url"] = request.full_url
+        seen["cookie"] = request.get_header("Cookie") or ""
+        return _AuthPayloadResponse({"authenticated": True})
+
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+    _session_precheck("http://gateway.example:8000/", cookie_file)
+
+    assert seen["url"] == "http://gateway.example:8000/api/auth/check"
+    assert seen["cookie"] == "ava_session=abc123"
+
+
+def test_session_precheck_rejects_a_dead_session(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    cookie_file = tmp_path / "cookies.txt"
+    cookie_file.write_text("ava_session=dead\n")
+    monkeypatch.setattr(
+        "urllib.request.urlopen", lambda *_a, **_k: _AuthPayloadResponse({"authenticated": False})
+    )
+
+    with pytest.raises(RuntimeError, match="session cookie"):
+        _session_precheck("http://gateway.example:8000", cookie_file)
+
+
+def test_session_precheck_rejects_an_unauthorized_probe(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    cookie_file = tmp_path / "cookies.txt"
+    cookie_file.write_text("ava_session=dead\n")
+
+    def unauthorized(request: urllib.request.Request, timeout: int) -> None:
+        raise urllib.error.HTTPError(request.full_url, 401, "Unauthorized", HTTPMessage(), None)
+
+    monkeypatch.setattr("urllib.request.urlopen", unauthorized)
+    with pytest.raises(RuntimeError, match="session cookie"):
+        _session_precheck("http://gateway.example:8000", cookie_file)
+
+
+def test_session_precheck_warns_and_continues_on_network_trouble(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A connection failure is not an auth verdict — the pass proceeds."""
+    cookie_file = tmp_path / "cookies.txt"
+    cookie_file.write_text("ava_session=abc\n")
+
+    def unreachable(request: urllib.request.Request, timeout: int) -> None:
+        raise OSError("connection refused")
+
+    monkeypatch.setattr("urllib.request.urlopen", unreachable)
+    _session_precheck("http://gateway.example:8000", cookie_file)
+
+    assert "warning" in capsys.readouterr().err
+
+
+def test_session_precheck_warns_and_continues_on_a_non_json_answer(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    cookie_file = tmp_path / "cookies.txt"
+    cookie_file.write_text("ava_session=abc\n")
+
+    class HtmlResponse:
+        def __enter__(self) -> HtmlResponse:
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            return None
+
+        def read(self) -> bytes:
+            return b"<html>the SPA wall</html>"
+
+    monkeypatch.setattr("urllib.request.urlopen", lambda *_a, **_k: HtmlResponse())
+    _session_precheck("http://gateway.example:8000", cookie_file)
+
+    assert "warning" in capsys.readouterr().err
+
+
+def test_login_redirect_watch_raises_the_session_detail_immediately() -> None:
+    from scripts.post_deploy_visual import matrix as matrix_module
+
+    class RedirectedPage:
+        url = "http://gate.example:3000/login"
+
+        def is_visible(self, selector: str) -> bool:
+            raise AssertionError("the redirect must fail before any visibility probe")
+
+        def wait_for_timeout(self, timeout: float) -> None:
+            raise AssertionError("the redirect must fail before any wait")
+
+    with pytest.raises(RuntimeError, match="session cookie"):
+        matrix_module._observe_login_redirect(
+            cast(Page, RedirectedPage()), ready_selector="#main-content"
+        )
+
+
+def test_login_redirect_watch_exits_early_when_the_ready_selector_is_visible() -> None:
+    from scripts.post_deploy_visual import matrix as matrix_module
+
+    class ReadyPage:
+        url = "http://gate.example:3000/control"
+
+        def is_visible(self, selector: str) -> bool:
+            return True
+
+        def wait_for_timeout(self, timeout: float) -> None:
+            raise AssertionError("a ready page must not sleep")
+
+    assert (
+        matrix_module._observe_login_redirect(cast(Page, ReadyPage()), ready_selector="#main")
+        is None
+    )
+
+
+def test_login_redirect_watch_is_bounded_and_silent_at_the_deadline(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from scripts.post_deploy_visual import matrix as matrix_module
+
+    monkeypatch.setattr(matrix_module, "LOGIN_REDIRECT_WATCH_MS", 60)
+    monkeypatch.setattr(matrix_module, "LOGIN_REDIRECT_POLL_MS", 20)
+
+    class QuietPage:
+        url = "http://gate.example:3000/home"
+
+        def is_visible(self, selector: str) -> bool:
+            return False
+
+        def wait_for_timeout(self, timeout: float) -> None:
+            return None
+
+    assert (
+        matrix_module._observe_login_redirect(cast(Page, QuietPage()), ready_selector="#main")
+        is None
+    )
+
+
+def test_login_redirect_watch_tolerates_a_page_mid_navigation() -> None:
+    """A navigation in flight makes the probe raise; that is not a verdict."""
+    from scripts.post_deploy_visual import matrix as matrix_module
+
+    class FlakyPage:
+        url = "http://gate.example:3000/home"
+
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def is_visible(self, selector: str) -> bool:
+            self.calls += 1
+            if self.calls == 1:
+                raise PlaywrightError("Execution context was destroyed")
+            return True
+
+        def wait_for_timeout(self, timeout: float) -> None:
+            return None
+
+    page = FlakyPage()
+    assert matrix_module._observe_login_redirect(cast(Page, page), ready_selector="#main") is None
+    assert page.calls == 2

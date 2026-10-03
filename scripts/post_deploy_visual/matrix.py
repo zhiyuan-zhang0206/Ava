@@ -11,6 +11,7 @@ from __future__ import annotations
 import base64
 import json
 import shutil
+import time
 from collections.abc import Mapping
 from dataclasses import asdict
 from pathlib import Path
@@ -18,6 +19,7 @@ from typing import Any, cast
 from urllib.parse import urlparse
 
 from playwright.sync_api import Browser, BrowserContext, Page, Route
+from playwright.sync_api import Error as PlaywrightError
 
 from scripts.post_deploy_visual.browser_js import OVERLAY, PIXEL_DIFF
 from scripts.post_deploy_visual.fixtures import (
@@ -58,6 +60,19 @@ class VisualGateBudgetExceeded(RuntimeError):  # noqa: N818 - reads as the outco
 # Paid only while a declared count is still short — an already-satisfied
 # count costs one observation and no sleep.
 DELAYED_MOUNT_WAIT_MS = 5_000
+
+# Bounded login-redirect watch (ms) for the non-login surfaces: when the
+# session dies mid-run the app redirects the surface to /login, and without
+# this watch the combination stalls out to the settle timeout instead of
+# failing fast (task #4758). The poll interval keeps the watch cheap.
+LOGIN_REDIRECT_WATCH_MS = 5_000
+LOGIN_REDIRECT_POLL_MS = 200
+
+# The one failure text for a dead session, shared by the up-front precheck in
+# check.py and this module's mid-run redirect watch (task #4758).
+SESSION_REJECTED_DETAIL = (
+    "session cookie expired or rejected: renew it with visual-gate-renew.py, then rerun the gate"
+)
 
 
 def load_ignore_registry(path: Path) -> dict[str, object]:
@@ -293,6 +308,29 @@ def _record_delayed_mount_wait(
         )
 
 
+def _observe_login_redirect(page: Page, *, ready_selector: str) -> None:
+    """Fail fast when a non-login surface lands on the login page.
+
+    The up-front session probe cannot see a cookie that dies after it runs;
+    this bounded watch turns the resulting redirect into an immediate error
+    instead of a settle-timeout stall. It exits early once the ready selector
+    is visible and gives up silently at the deadline, so a merely slow mount
+    is never misread as a dead session. A navigation in flight makes an
+    observation raise; that is not a verdict either (task #4758).
+    """
+    deadline = time.monotonic() + LOGIN_REDIRECT_WATCH_MS / 1000
+    while time.monotonic() < deadline:
+        if urlparse(page.url).path.startswith("/login"):
+            raise RuntimeError(SESSION_REJECTED_DETAIL)
+        try:
+            ready = page.is_visible(ready_selector)
+        except PlaywrightError:
+            ready = False
+        if ready:
+            return
+        page.wait_for_timeout(LOGIN_REDIRECT_POLL_MS)
+
+
 def inspect_combination(
     browser: Browser,
     *,
@@ -313,6 +351,8 @@ def inspect_combination(
         page.goto(f"{base_url.rstrip('/')}{route}", wait_until="domcontentloaded")
         spec = STRUCTURAL_SPECS[surface]
         ready_selector = cast(str, spec["ready"])
+        if surface != "login":
+            _observe_login_redirect(page, ready_selector=ready_selector)
         wait_for_layout_settled(page, ready_selector)
         failures = measure_structure(page, surface=surface, viewport=viewport, spec=spec)
         diffs = []
