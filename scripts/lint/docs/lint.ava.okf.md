@@ -27,7 +27,7 @@ guards are a separate group: [[scripts/content_lint/docs/content_lint.ava.okf.md
 - `agent_docstrings.py`, `agents_md_size.py` — agent-visible docstring / `AGENTS.md` size guards (the `_KNOWN_DIRTY_FILES` allowlist lives in the first script's header and the "SDK docstring discipline" section of `AGENTS.md`).
 - `note_tags.py` — bidirectional NoteTag / timeline-marker contract: every backend tag has a frontend dispatch branch and every lifecycle, memory, or note dispatch member is a live backend tag.
 - `no_plugin_wrap.py` — plugins may not bare monkey-patch `ava.*` (must go through `ava.extend.wrap`); wired into pre-commit.
-- `turn_scoped_config.py` — forbids reading `base.config.settings` inside a per-agent execution path; force the per-turn view (`base/config/turn_view.py`).
+- `turn_scoped_config.py` — forbids reading `base.config.settings` inside a per-agent execution path; force the agent's slices (`base/host/env/agent_slices.py`).
 - `fixture_scope.py` — a pytest fixture may not mutate a process global at a scope that outlives its blast radius: (1) `scope="session"` outside `tests/fixtures/provisioning.py` plus any write to `os.environ` / a `settings` field / a module global; (2) `scope="package"` in a directory with no `__init__.py`, where pytest silently falls back to session scope. `tests/fixtures/provisioning.py` is the only exemption.
 - `python_lock.py` — wraps `base/deploy/release/python_lock.py`: `uv.lock` needs PyPI registry and `files.pythonhosted.org` URLs; mirrors stay local. Pre-commit + `repo-language` CI; no project deps.
 - `zombie_pyright_ignores.py` — a `# pyright: ignore[...]` whose named rule pyright no longer reports at that line is dead weight; `--check`/fix modes.

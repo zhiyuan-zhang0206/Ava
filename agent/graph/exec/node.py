@@ -83,10 +83,8 @@ from base.agents.context import AvaContext, agent_id_from_config
 from base.agents.exit_codes import IDLE_EXIT_CODE, SYSTEM_HALT_EXIT_CODE
 from base.agents.lifecycle import AgentImpersonation, AgentRestart, AgentTermination, SystemHalt
 from base.config import settings
-from base.config.turn_view import current_agent_config_pins
 from base.events.live.projection import Cancelled, ExecOutput, ExecStart
 from base.log import logger
-from base.packages.plugins.config_view import current_agent_plugin_pins
 
 from ._alerts import maybe_alert_exec_boot_failure
 from ._result import (
@@ -194,7 +192,7 @@ async def _run_agent_code(
     receives the bound turn's config maps so its SDK calls
     resolve the same settings. Returns
     (result, plugin_state_update, exec_ms, findings, attachments, sdk_calls)."""
-    config_overlay = {**(current_agent_config_pins() or {}), **current_agent_plugin_pins()}
+    config_overlay = ctx.require_agent().overlay()
     exec_started = time.monotonic()
     async with subscribe_interrupt(ctx.ops_pool, agent_id) as cancel_event:
         outcome = await _exec_with_node_shield(

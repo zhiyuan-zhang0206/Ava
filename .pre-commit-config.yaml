@@ -109,9 +109,9 @@ repos:
 
       # per_agent config fields read through the bare settings singleton in
       # turn-scoped code silently ignore the agent's overlay in hosted-runner
-      # mode — force the per-turn view (base/config/turn_view.py).
+      # mode — force the agent's slices (base/host/env/agent_slices.py).
       - id: lint-turn-scoped-config
-        name: lint per-agent config reads (force turn_settings)
+        name: lint per-agent config reads (force the agent's slices)
         entry: .venv/bin/python scripts/lint/turn_scoped_config.py --only
         language: system
         types: [python]

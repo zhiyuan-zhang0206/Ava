@@ -14,8 +14,9 @@ missing, Settings() instantiation throws ValidationError immediately,
 not reaching here.
 """
 
+import sys
 import threading
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from contextlib import suppress
 from typing import Any
 
@@ -102,10 +103,11 @@ class _LazyConnection:
 
 # The SDK's composition root: the handles and the agent configuration every `ava.*` function of
 # this process works with. `ava.*` is a namespace of free functions the agent's code calls inside
-# its exec child (or a script one launched), so nothing can pass them a handle; they ask here. The exec child's settings
-# carry its agent's overlay (applied at boot), so `agent_setting` reads that agent's. Nothing
-# is cached: each call builds from the settings as they are now. All import lazily — `import ava`
-# must not pull the psycopg / redis / live-events stacks into every exec child (task #3816).
+# its exec child (or a script one launched), so nothing can pass them a handle; they ask here. The
+# exec child's settings carry its agent's overlay (applied at boot), so `agent_setting` reads that
+# agent's; a process attached to an agent's native state reads that agent's pins. Nothing is cached: each call builds from the
+# settings as they are now. All import lazily — `import ava` must not pull the psycopg / redis /
+# live-events stacks into every exec child (task #3816).
 
 
 def database() -> "Database":  # noqa: F821  # pyright: ignore[reportUndefinedVariable]
@@ -122,11 +124,20 @@ def bus() -> "EventBus":  # noqa: F821  # pyright: ignore[reportUndefinedVariabl
     return EventBus.from_settings()
 
 
+def _attached() -> tuple[Mapping[str, Any], Any] | None:
+    """The pins and plugin-config view of the agent this process attached to (`ava.external`:
+    one attachment per process), if any."""
+    external = sys.modules.get("ava.external")
+    return external.attached_config() if external is not None else None
+
+
 def agent_setting(name: str) -> Any:
-    """One per-agent setting of this process's agent (the settings carry the overlay)."""
+    """One per-agent setting of this process's agent: the attached agent's pin, else the
+    settings (which carry the exec child's overlay)."""
     from base.host.env.agent_slices import agent_setting
 
-    return agent_setting(name)
+    attached = _attached()
+    return agent_setting(name, attached[0] if attached else None)
 
 
 def _connect_db() -> "psycopg.Connection":  # noqa: F821  # pyright: ignore[reportUndefinedVariable]
@@ -189,7 +200,7 @@ REDIS = _LazyConnection(_connect_redis, "REDIS")
 #
 # `ava._settings.plugins.<plugin_name>` dynamically resolves the frozen Pydantic
 # BaseModel instance for the current turn's agent (bound in by
-# `register_plugin_config` + `bind_from_disk`, agent-scoped by
+# `register_plugin_config` + `bind_from_disk`; an attached agent's overrides by
 # `base/packages/plugins/config_view.py`).
 #
 # Design:
@@ -212,8 +223,10 @@ class _PluginsView:
     def __getattr__(self, name: str) -> Any:
         if name.startswith("_"):
             raise AttributeError(name)
-        from base.packages.plugins.config_registration import registered_plugin_config_names
-        from base.packages.plugins.config_view import turn_plugin_config
+        from base.packages.plugins.config_registration import (
+            process_plugin_config,
+            registered_plugin_config_names,
+        )
 
         known = registered_plugin_config_names()
         if name not in known:
@@ -222,10 +235,10 @@ class _PluginsView:
                 f"register_plugin_config, or framework `bind_from_disk` hasn't run yet. "
                 f"Known plugins: {known or '<empty>'}"
             )
-        # Agent-scoped read: the turn's config_overlay is layered over the disk
-        # image, so in the hosted runner two agents sharing this process see
-        # their own overrides. Unbound service code reads the registry instance.
-        return turn_plugin_config(name)
+        # The attached agent's overrides over the disk image; otherwise this process's own
+        # instance (the exec child's boot applied its agent's overlay to it).
+        attached = _attached()
+        return attached[1].config_for(name) if attached else process_plugin_config(name)
 
 
 plugins = _PluginsView()

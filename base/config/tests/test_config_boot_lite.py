@@ -36,7 +36,6 @@ _LITE_CONFIG_MODULES = {
     "base.config",
     "base.config._lite",
     "base.config.profiles",
-    "base.config.turn_view",
     "base.host.env.config_lite_table",
     "base.host.env.config_registry",
 }

@@ -273,7 +273,7 @@ class _SdkReminderAgentReplyHook(Hook):
     incoming batch holds a message from another agent.
 
     Runs before the reply is produced (a plain text reply runs no code). The
-    firing cadence is `turn_settings.agent.agent_reply_reminder_cadence`:
+    firing cadence is `agent_reply_reminder_cadence`:
     - `once_per_compaction` (default): fire at most once per context window; a
       compaction re-arms it (the shared `reminded` set / bookmark, same as the
       code categories).
