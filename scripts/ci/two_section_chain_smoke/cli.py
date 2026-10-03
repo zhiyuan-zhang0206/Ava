@@ -1,73 +1,59 @@
-#!/usr/bin/env python
-"""Two-section chain smoke: launchd -> permissions-helper -> ava-root -> unit.
-
-The dev-side acceptance run for the macOS "two-section" adapter (task #3209, design #3195).
-A helper compiled from this checkout is registered as a throwaway launchd job under an
-isolated workdir; the helper seeds a dev ava-root from a seed config (the K3 face), and
-this script verifies the whole chain plus the keeper's crash semantics:
-
-  build      compile + ad-hoc sign a dev helper from this checkout
-  launch     bootstrap the throwaway launchd job, wait for the helper
-  chain      launchd -> helper -> root -> unit parentage via ps + root status
-  attribute  a unit's TCCAccessPreflight requests resolve to the helper (F11)
-  conflict   kill -9 the helper: launchd relaunches it; the relaunched helper
-             finds the orphan root and rests in `conflict` (no double-spawn,
-             no signal to the foreign PID); `root_stop` is refused with or
-             without force; native recovery through the orphan's own
-             `shutdown` verb closes its tree, and the keeper seeds a fresh
-             root on the freed run dir as the relaunched helper's child; with
-             --sample-conflict the phase also samples the whole tree chain +
-             TCC attribution across the helper death/replacement window
-             (F12b, task #3380)
-  restart    kill -9 the root: its units keep running (the design's "lose
-             attribution, not service"); the keeper relaunches root, and the
-             replacement refuses cold start while the killed generation's
-             service custody is unresolved, so no duplicate tree is born; with
-             --sample-restart the phase also samples the surviving units'
-             chain + TCC attribution around the crash (F12, task #3377)
-
-The helper binds its home to the seed file's directory, so the seed lives in the root run dir.
-Nothing here touches production: the binary is throwaway-signed, every path lives under the workdir,
-and the launchd job uses its own test label (never the production helper's). The helper's first-run
-registration nudge is disabled via AVA_PERMISSIONS_HELPER_SKIP_REGISTRATION=1 -- an Aqua-session
-helper with a fresh code identity would otherwise raise TCC dialogs on an unattended machine.
-
-Exit 0 = every phase passed. Evidence (ps/logs/status snapshots) is retained
-under the workdir; pass --cleanup to remove it. Run with the repository venv,
-on macOS, from a checkout that contains services/ava_root (dev/CI only).
-"""
+"""Two-section chain smoke: launchd -> permissions-helper -> ava-root -> unit."""
 
 from __future__ import annotations
 
 import argparse
 import contextlib
-import datetime
 import json
 import os
 import plistlib
 import re
 import shutil
 import signal
-import socket
-import subprocess
 import sys
 import time
-from collections.abc import Callable
 from pathlib import Path
-from typing import Any, NoReturn, cast
+from typing import Any, cast
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
+from .f12 import _f12_finish, _f12_point
+from .reconcile import _reconcile_phase
+from .support import (
+    _ROOT_SOCKET,
+    _ROOT_WAIT_S,
+    _UNIT_IDS,
+    _UNIT_PROBE,
+    SmokeError,
+    _bootout,
+    _fail,
+    _job_pid,
+    _kill,
+    _launchctl_domain,
+    _pid_alive,
+    _ping_or_none,
+    _ppid_of,
+    _probe_pids,
+    _ps_line,
+    _refusal,
+    _relaunched_helper,
+    _root_call,
+    _run,
+    _save,
+    _status_if_conflict,
+    _status_if_keeper_running,
+    _status_if_refused,
+    _status_if_running,
+    _tail,
+    _unit_entry,
+    _wait_for,
+)
+
+REPO_ROOT = Path(__file__).resolve().parents[3]
 DEFAULT_LABEL = "com.ava.test.two-section-chain-smoke"
 BUNDLE_ID = "com.ava.permissions-helper"
 
-_ROOT_SOCKET = "ava-root.sock"
 _HELPER_WAIT_S = 30.0
-_ROOT_WAIT_S = 30.0
 _RESTART_WAIT_S = 20.0
-_POLL_S = 0.25
 _F12_STABLE_S = 6.0
-_F12_ROUND_WAIT_S = 10.0
-_UNIT_IDS = ("heartbeat", "heartbeat-b", "heartbeat-c")
 
 _ATTRIBUTION_RE = re.compile(
     r"responsible=\{TCCDProcess: identifier=(?P<responsible_id>[^,]*), pid=(?P<responsible_pid>\d+)"
@@ -75,496 +61,11 @@ _ATTRIBUTION_RE = re.compile(
     r"pid=(?P<requesting_pid>\d+)"
 )
 
-_F12_REQUESTING_RE = re.compile(
-    r"requesting=\{TCCDProcess: identifier=(?P<requesting_id>[^,]*), pid=(?P<requesting_pid>\d+)"
-)
-_F12_RESPONSIBLE_RE = re.compile(
-    r"responsible=\{TCCDProcess: identifier=(?P<responsible_id>[^,]*), pid=(?P<responsible_pid>\d+)"
-)
-_LOG_STAMP_RE = re.compile(r"^(?P<stamp>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3})")
-
-_UNIT_PROBE = '''\
-\
-"""Unit probe: side-effect-free preflight queries + heartbeat; answers sampled rounds.
-
-TCCAccessPreflight never prompts and never touches protected data; tccd still
-records every call with this process's attribution, which the smoke reads back
-to prove the launchd -> helper -> root -> unit chain resolves to the helper.
-"""
-
-import ctypes
-import json
-import os
-import sys
-import time
-
-SERVICES = [
-    "kTCCServiceSystemPolicyDesktopFolder",
-    "kTCCServiceSystemPolicyAllFiles",
-    "kTCCServiceScreenCapture",
-]
-
-_cf = ctypes.CDLL("/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation")
-_cf.CFStringCreateWithCString.restype = ctypes.c_void_p
-_cf.CFStringCreateWithCString.argtypes = [ctypes.c_void_p, ctypes.c_char_p, ctypes.c_uint32]
-_tcc = ctypes.CDLL("/System/Library/PrivateFrameworks/TCC.framework/Versions/A/TCC")
-_tcc.TCCAccessPreflight.restype = ctypes.c_int
-_tcc.TCCAccessPreflight.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
-
-
-def preflight(service):
-    cf_service = _cf.CFStringCreateWithCString(None, service.encode(), 0x08000100)
-    return _tcc.TCCAccessPreflight(ctypes.c_void_p(cf_service), None)
-
-
-def main():
-    results_path, beat_path = sys.argv[1], sys.argv[2]
-    request_path = results_path + ".req"
-    rounds_path = results_path + ".rounds"
-    results = {}
-    for service in SERVICES:
-        results[service] = preflight(service)
-    with open(results_path, "w") as handle:
-        json.dump({"pid": os.getpid(), "ppid": os.getppid(), "services": results}, handle)
-    seen = None
-    while True:
-        with open(beat_path, "a") as handle:
-            handle.write("%.0f\\n" % time.time())
-        try:
-            with open(request_path) as handle:
-                current = handle.read().strip()
-        except OSError:
-            current = None
-        if current and current != seen:
-            seen = current
-            record = {
-                "round": current,
-                "ts": round(time.time(), 3),
-                "pid": os.getpid(),
-                "ppid": os.getppid(),
-                "pgid": os.getpgid(0),
-                "sid": os.getsid(0),
-                "services": {service: preflight(service) for service in SERVICES},
-            }
-            with open(rounds_path, "a") as handle:
-                handle.write(json.dumps(record) + "\\n")
-        time.sleep(1)
-
-
-main()
-'''
-
-
-class SmokeError(RuntimeError):
-    """One smoke phase failed; the message carries the phase and the detail."""
-
-    def __init__(self, phase: str, detail: str) -> None:
-        super().__init__(f"FAIL(phase={phase}): {detail}")
-        self.phase = phase
-        self.detail = detail
-
-
-def _fail(phase: str, detail: str) -> NoReturn:
-    """Raise one phase failure (kept out of the try bodies for TRY301)."""
-    raise SmokeError(phase, detail)
-
-
-def _run(
-    cmd: list[str], *, check: bool = True, timeout: float = 120.0
-) -> subprocess.CompletedProcess[str]:
-    proc = subprocess.run(  # noqa: S603 - fixed argv lists built in this file, no untrusted input
-        cmd, capture_output=True, text=True, timeout=timeout, check=False
-    )
-    if check and proc.returncode != 0:
-        tail = (proc.stdout + proc.stderr).strip()[-800:]
-        _fail("run", f"{cmd[0]} exited {proc.returncode}: {tail}")
-    return proc
-
-
-def _wait_for(what: str, predicate, timeout: float, phase: str):
-    deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
-        result = predicate()
-        if result:
-            return result
-        time.sleep(_POLL_S)
-    _fail(phase, f"timed out after {timeout:.0f}s waiting for {what}")
-
-
-def _pid_alive(pid: int) -> bool:
-    try:
-        os.kill(pid, 0)
-    except ProcessLookupError:
-        return False
-    except PermissionError:
-        return True
-    return True
-
-
-def _ps_line(*pids: int) -> str:
-    proc = _run(["ps", "-o", "pid=,ppid=,lstart=,command=", "-p", ",".join(str(p) for p in pids)])
-    return proc.stdout.strip()
-
-
-def _save(evidence: Path, name: str, text: str) -> None:
-    (evidence / name).write_text(text + "\n")
-
-
-def _launchctl_domain() -> str:
-    return f"gui/{os.getuid()}"
-
-
-def _bootout(label: str) -> None:
-    _run(["launchctl", "bootout", f"{_launchctl_domain()}/{label}"], check=False, timeout=30)
-
-
-def _job_pid(label: str) -> int | None:
-    proc = _run(["launchctl", "list"], check=False, timeout=30)
-    for line in proc.stdout.splitlines():
-        parts = line.split("\t")
-        if len(parts) >= 3 and parts[2].strip() == label:
-            pid_field = parts[0].strip()
-            return int(pid_field) if pid_field.isdigit() else None
-    return None
-
-
-def _kill(pid: int, sig: int = signal.SIGTERM) -> None:
-    with contextlib.suppress(ProcessLookupError):
-        os.kill(pid, sig)
-
-
-def _tail(path: Path, limit: int = 4000) -> str:
-    try:
-        return path.read_text()[-limit:]
-    except OSError:
-        return "<missing>"
-
-
-def _refusal(call: Callable[[], object]) -> str:
-    """The error text of a call that must be refused ("" when it was accepted)."""
-    try:
-        call()
-    except Exception as exc:  # the refusal message is the assertion
-        return str(exc)
-    return ""
-
-
-def _ping_or_none(helper_client, sock: Path):
-    try:
-        return helper_client.ping(sock_path=sock)["pong"]
-    except Exception:
-        return None
-
-
-def _status_if_running(root_status, *, excluding: int | None = None):
-    try:
-        status = root_status()
-    except Exception:
-        return None
-    if status["root"]["running"] and isinstance(status["root"]["pid"], int):
-        pid = int(status["root"]["pid"])
-        if excluding is not None and pid == excluding:
-            return None
-        return status
-    return None
-
-
-def _status_if_keeper_running(helper_root_status):
-    try:
-        status = helper_root_status()
-    except Exception:
-        return None
-    if status.get("state") == "running" and isinstance(status.get("pid"), int):
-        return status
-    return None
-
-
-def _status_if_conflict(helper_root_status):
-    try:
-        status = helper_root_status()
-    except Exception:
-        return None
-    return status if status.get("state") == "conflict" else None
-
-
-def _status_if_refused(helper_root_status, restarts_before: int):
-    """The keeper once a replacement root has exited `refused` after the crash."""
-    try:
-        status = helper_root_status()
-    except Exception:
-        return None
-    refused = status.get("last_exit", {}).get("kind") == "refused"
-    return status if refused and int(status["restarts"]) > restarts_before else None
-
-
-def _probe_pids(probe: Path) -> set[int]:
-    """Every live unit-probe process of this workdir, whoever spawned it."""
-    return {int(pid) for pid in _run(["pgrep", "-f", str(probe)], check=False).stdout.split()}
-
-
-def _relaunched_helper(label: str, old_pid: int):
-    pid = _job_pid(label)
-    if pid is None or pid == old_pid:
-        return None
-    return pid
-
-
-def _unit_entry(status: dict, unit_id: str) -> dict:
-    for entry in status["units"]:
-        if entry["id"] == unit_id and isinstance(entry["pid"], int):
-            return entry
-    _fail("chain", f"unit {unit_id!r} has no live pid in {json.dumps(status)[:400]}")
-
-
-def _ppid_of(pid: int) -> int:
-    proc = _run(["ps", "-o", "ppid=", "-p", str(pid)])
-    return int(proc.stdout.strip())
-
-
-def _root_call(run_dir: Path, verb: str) -> dict[str, Any]:
-    """Send one K1 verb over the raw control socket (stdlib only).
-
-    The smoke drives the root as a black box — process tree, socket, K1
-    verbs — so it never depends on the root package's client API.
-    """
-    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as sock:
-        sock.settimeout(10.0)
-        sock.connect(str(run_dir / _ROOT_SOCKET))
-        sock.sendall(json.dumps({"verb": verb}).encode() + b"\n")
-        line = sock.makefile("rb").readline()
-    response = json.loads(line)
-    if not response.get("ok"):
-        _fail("root", f"{verb} refused: {response}")
-    return cast("dict[str, Any]", response["result"])
-
-
-def _f12_chain_line(pid: int) -> str:
-    proc = _run(["ps", "-o", "pid=,ppid=,pgid=,lstart=,command=", "-p", str(pid)], check=False)
-    return proc.stdout.strip() or f"{pid} <gone>"
-
-
-def _f12_round(workdir: Path, unit_id: str, tag: str, pid: int, timeout: float) -> dict[str, Any]:
-    rounds_path = workdir / f"unit-results-{unit_id}.json.rounds"
-
-    def _found():
-        if not rounds_path.exists():
-            return None
-        for line in reversed(rounds_path.read_text().splitlines()):
-            try:
-                record = json.loads(line)
-            except json.JSONDecodeError:
-                continue
-            if record.get("round") == tag and record.get("pid") == pid:
-                return record
-        return None
-
-    return _wait_for(f"round {tag} from unit {unit_id} pid {pid}", _found, timeout, "f12")
-
-
-def _f12_point(
-    workdir: Path, tag: str, units: list[tuple[str, int]], pids: list[int]
-) -> dict[str, Any]:
-    """Trigger one probe round per unit id; collect per-pid replies; snapshot chains.
-
-    A unit that is already dead gets an `error` marker without waiting; a live
-    unit that never answers times out into `error: no probe response`. The join
-    skips error rows; the summary counts them as missing rounds.
-    """
-    smoke_ts = round(time.time(), 3)
-    for unit_id in sorted({unit_id for unit_id, _ in units}):
-        (workdir / f"unit-results-{unit_id}.json.req").write_text(tag)
-    rows = []
-    for unit_id, pid in units:
-        if not _pid_alive(pid):
-            record: dict[str, Any] = {"round": tag, "pid": pid, "error": "unit dead"}
-        else:
-            try:
-                record = _f12_round(workdir, unit_id, tag, pid, _F12_ROUND_WAIT_S)
-            except SmokeError:
-                record = {"round": tag, "pid": pid, "error": "no probe response"}
-        record["unit"] = unit_id
-        rows.append(record)
-    return {"smoke_ts": smoke_ts, "rows": rows, "chains": [_f12_chain_line(pid) for pid in pids]}
-
-
-def _f12_parse_window(log_text: str) -> dict[int, list[tuple[float, str]]]:
-    """Index AUTHREQ_ATTRIBUTION lines by requesting pid: pid -> [(ts, line)]."""
-    lines: dict[int, list[tuple[float, str]]] = {}
-    for line in log_text.splitlines():
-        stamp = _LOG_STAMP_RE.match(line)
-        requesting = _F12_REQUESTING_RE.search(line)
-        if stamp is None or requesting is None:
-            continue
-        ts = (
-            datetime.datetime.strptime(stamp.group("stamp"), "%Y-%m-%d %H:%M:%S.%f")
-            .astimezone()
-            .timestamp()
-        )
-        lines.setdefault(int(requesting.group("requesting_pid")), []).append((ts, line))
-    return lines
-
-
-def _f12_join(
-    samples: dict[str, Any], lines: dict[int, list[tuple[float, str]]]
-) -> list[dict[str, Any]]:
-    """Join probe rounds against the parsed window: first 3 requests at/after ts - 0.15s."""
-    joined = []
-    for point in samples["points"].values():
-        for record in point["rows"]:
-            if not isinstance(record.get("ts"), (int, float)):
-                continue
-            requests = []
-            for ts, line in lines.get(int(record["pid"]), []):
-                if ts < record["ts"] - 0.15:
-                    continue
-                responsible = _F12_RESPONSIBLE_RE.search(line)
-                requests.append(
-                    {
-                        "line_ts": ts,
-                        "responsible_id": responsible.group("responsible_id")
-                        if responsible
-                        else None,
-                        "responsible_pid": int(responsible.group("responsible_pid"))
-                        if responsible
-                        else None,
-                    }
-                )
-                if len(requests) >= 3:
-                    break
-            joined.append(
-                {
-                    "unit": record["unit"],
-                    "point": record["round"],
-                    "pid": record["pid"],
-                    "requests": requests,
-                }
-            )
-    return joined
-
-
-def _f12_attribution_summary(samples: dict[str, Any]) -> dict[str, Any]:
-    """Aggregate sampled rounds: per-point + total requests/unattributed/missing."""
-    blank = {"requests": 0, "attributed": 0, "unattributed": 0, "missing_rounds": 0}
-    by_point: dict[str, dict[str, int]] = {}
-    for point in samples["points"].values():
-        for record in point["rows"]:
-            counts = by_point.setdefault(record["round"], dict(blank))
-            if not isinstance(record.get("ts"), (int, float)):
-                counts["missing_rounds"] += 1
-    for row in samples["tccd"]:
-        counts = by_point.setdefault(row["point"], dict(blank))
-        for request in row["requests"]:
-            counts["requests"] += 1
-            if request["responsible_pid"] is None:
-                counts["unattributed"] += 1
-            else:
-                counts["attributed"] += 1
-    totals = {key: sum(counts[key] for counts in by_point.values()) for key in blank}
-    return {"totals": totals, "by_point": by_point}
-
-
-def _f12_expect_attribution(
-    samples: dict[str, Any], expectations: list[tuple[str, list[int] | None, int]]
-) -> list[str]:
-    """Check sampled requests resolve to the expected responsible pid.
-
-    Each expectation is (point, pids, want_pid): at `point`, every request of
-    every joined row whose pid is listed (None = all joined rows) must carry a
-    responsible pid equal to `want_pid`, and each listed pid must have a joined
-    row. Points absent from `expectations` are pure observations. Returns one
-    human-readable violation string per failed check.
-    """
-    rows_by_point: dict[str, list[dict[str, Any]]] = {}
-    for row in samples["tccd"]:
-        rows_by_point.setdefault(row["point"], []).append(row)
-    violations: list[str] = []
-    for point, pids, want_pid in expectations:
-        joined = rows_by_point.get(point, [])
-        if pids is None:
-            selected = joined
-            if not selected:
-                violations.append(f"{point}: no sampled rows")
-                continue
-        else:
-            wanted = set(pids)
-            selected = [row for row in joined if row["pid"] in wanted]
-            seen = {row["pid"] for row in selected}
-            for pid in sorted(wanted - seen):
-                violations.append(f"{point}: no sampled row for pid {pid} (dead or no response)")
-        for row in selected:
-            if not row["requests"]:
-                violations.append(f"{point} {row['unit']} pid {row['pid']}: no requests observed")
-                continue
-            for request in row["requests"]:
-                if request["responsible_pid"] is None:
-                    violations.append(
-                        f"{point} {row['unit']} pid {row['pid']}: request has no responsible"
-                    )
-                elif request["responsible_pid"] != want_pid:
-                    violations.append(
-                        f"{point} {row['unit']} pid {row['pid']}: responsible pid "
-                        f"{request['responsible_pid']} != expected {want_pid}"
-                    )
-    return violations
-
-
-def _f12_summary_text(label: str, samples: dict[str, Any]) -> str:
-    """One log line with the aggregate request counts for a sampling phase."""
-    totals = samples["summary"]["totals"]
-    return (
-        f"{label}: {totals['requests']} requests, {totals['unattributed']} unattributed, "
-        f"{totals['missing_rounds']} missing rounds"
-    )
-
-
-def _f12_finish(
-    evidence: Path,
-    samples: dict[str, Any],
-    label: str,
-    expectations: list[tuple[str, list[int] | None, int]],
-) -> None:
-    """Join the tccd window, save the sampling record, fail on attribution violations."""
-    _f12_join_tccd(evidence, samples, name=f"{label}-tccd-window.txt")
-    print(_f12_summary_text(label, samples))
-    violations = _f12_expect_attribution(samples, expectations)
-    if violations:
-        samples["violations"] = violations
-    _save(evidence, f"{label}-sampling.json", json.dumps(samples, indent=2))
-    if violations:
-        _fail(label, f"attribution violations: {'; '.join(violations)}")
-
-
-def _f12_join_tccd(
-    evidence: Path, samples: dict[str, Any], *, name: str = "f12-tccd-window.txt"
-) -> None:
-    """Join sampled probe rounds against the tccd AUTHREQ_ATTRIBUTION log window.
-
-    The only IO on the F12b attribution path: pulls the log window, saves it as
-    `name` under `evidence`, then joins + summarizes (pure helpers above) into
-    `samples`.
-    """
-    first = min(point["smoke_ts"] for point in samples["points"].values())
-    span = max(2, int((time.time() - first) / 60) + 2)
-    log_text = _run(
-        [
-            "/usr/bin/log",
-            "show",
-            "--last",
-            f"{span}m",
-            "--style",
-            "compact",
-            "--predicate",
-            'eventMessage CONTAINS "AUTHREQ_ATTRIBUTION"',
-        ],
-        timeout=120.0,
-    ).stdout
-    _save(evidence, name, log_text)
-    samples["tccd"] = _f12_join(samples, _f12_parse_window(log_text))
-    samples["summary"] = _f12_attribution_summary(samples)
-
 
 def main() -> int:  # noqa: PLR0915 - one bounded smoke lifecycle: every phase, wait, and teardown live together on purpose
-    parser = argparse.ArgumentParser(description=(__doc__ or "").splitlines()[0])
+    parser = argparse.ArgumentParser(
+        prog="two_section_chain_smoke", description=(__doc__ or "").splitlines()[0]
+    )
     parser.add_argument(
         "--workdir",
         default="/tmp/two-section-chain-smoke",  # noqa: S108 - scratch evidence dir, never secret
@@ -581,6 +82,11 @@ def main() -> int:  # noqa: PLR0915 - one bounded smoke lifecycle: every phase, 
         "--sample-conflict",
         action="store_true",
         help="sample chains + TCC attribution across the helper crash conflict phase (F12b)",
+    )
+    parser.add_argument(
+        "--reconcile-case",
+        action="store_true",
+        help="append the cold-start reconcile case (dead generation -> release, no force)",
     )
     parser.add_argument("--cleanup", action="store_true", help="remove the workdir at the end")
     args = parser.parse_args()
@@ -1018,6 +524,24 @@ def main() -> int:  # noqa: PLR0915 - one bounded smoke lifecycle: every phase, 
             + ("; F12 sampling saved" if args.sample_restart else ""),
         )
 
+        # ---- reconcile (cold start over a dead generation) -----------------
+        # Opt-in (--reconcile-case). The gate lives inside the phase so main()
+        # keeps its frozen complexity budget: one call, not a new branch.
+        _reconcile_phase(
+            enabled=args.reconcile_case,
+            workdir=workdir,
+            evidence=evidence,
+            run_dir=run_dir,
+            probe=probe,
+            root_status=root_status,
+            helper_root_status=helper_root_status,
+            phase_pass=phase_pass,
+            recorded_pids=recorded_pids,
+            new_helper_pid=new_helper_pid,
+            reseeded_pid=reseeded_pid,
+            reseeded_units=reseeded_units,
+        )
+
         print("\nSMOKE PASS: " + ", ".join(phases))
         return 0
     except SmokeError as failure:
@@ -1049,7 +573,3 @@ def main() -> int:  # noqa: PLR0915 - one bounded smoke lifecycle: every phase, 
             _kill(pid, signal.SIGKILL)
         if args.cleanup:
             shutil.rmtree(workdir, ignore_errors=True)
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())
