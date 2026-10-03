@@ -215,12 +215,14 @@ EVENTS: dict[str, EventSpec] = {
             "event=PLUGIN_ACTIVATION_EVENT (a module constant, like sdk_call), so "
             "the literal scan cannot see it."
         ),
+        persist=True,
     ),
     "heartbeat_paused": telemetry_event(
         "heartbeat_paused",
         "heartbeat paused",
         payload=HeartbeatPaused,
         site='ava/self.py:258 telemetry.emit("telemetry", ...)',
+        persist=True,
     ),
     "shell_ttl_renewed": telemetry_event(
         "shell_ttl_renewed",
@@ -266,10 +268,18 @@ EVENTS: dict[str, EventSpec] = {
     ),
     "checkpoint_trim": telemetry_event("checkpoint_trim", "checkpoint trimmed", tier="noise"),
     "recall_filter": telemetry_event(
-        "recall_filter", "memory recall filter", payload=RecallFilter, tier="noise"
+        "recall_filter",
+        "memory recall filter",
+        payload=RecallFilter,
+        tier="noise",
+        persist=True,
     ),
     "passive_recall": telemetry_event(
-        "passive_recall", "passive memory recall", payload=PassiveRecall, tier="noise"
+        "passive_recall",
+        "passive memory recall",
+        payload=PassiveRecall,
+        tier="noise",
+        persist=True,
     ),
     "hook_timing": telemetry_event(
         "hook_timing",

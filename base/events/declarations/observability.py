@@ -222,6 +222,7 @@ EVENTS: dict[str, EventSpec] = {
         payload=EventLogDrop,
         tier="anomaly",
         site="base/telemetry/loss.py:loss_event constructs Event directly",
+        persist=True,
     ),
     "telemetry_read_stale": telemetry_event(
         "telemetry_read_stale",
