@@ -120,7 +120,7 @@ gateway's schema owner never logs in, and its Redis-admin credential stays
 gateway-local. `--machine-host` is the runner's own reachable address (how the
 gateway dials back to its ops server) and is **required**. The runner starts no
 gateway process of its own; it needs network reachability to the gateway and
-its capability bundle. A later bundle (after a write-generation rotation) is
+its capability bundle. A later bundle (a fresh expiry, a rotated telemetry token) is
 installed on the stopped runner with `ava cluster db-authority install-unit
 <NAME>.bundle` before `ava start`.
 

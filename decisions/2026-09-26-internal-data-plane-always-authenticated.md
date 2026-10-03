@@ -68,3 +68,7 @@ section "Proposed database authority boundary".
   complete.
 - Operators debugging with `psql` read the generated credentials from the
   home configuration instead of connecting without a password.
+
+Forward: [2026-09-30-remove-release-image-path.md](2026-09-30-remove-release-image-path.md) removes per-rollout rotation,
+and [2026-10-03-retire-write-generation-rotation.md](2026-10-03-retire-write-generation-rotation.md) removes the remaining
+manual rotation: a home keeps its one generation.

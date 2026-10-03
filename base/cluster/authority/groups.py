@@ -35,12 +35,7 @@ from base.cluster.authority.catalog import (
     require_admin,
     role_facts,
 )
-from base.cluster.authority.model import (
-    AuthorityRefusedError,
-    BirthAuthority,
-    CatalogRefusedError,
-    Groups,
-)
+from base.cluster.authority.model import AuthorityRefusedError, CatalogRefusedError, Groups
 
 CHECKPOINT_TABLES = ("checkpoints", "checkpoint_blobs", "checkpoint_writes")
 
@@ -198,8 +193,8 @@ def ensure_groups(conn: Conn, *, owner: str, database: str, groups: Groups) -> N
 
     Never changes LOGIN: a group that can log in, holds elevated attributes,
     owns objects, carries role settings or is a member of another role is an
-    unknown state and refuses. A legacy LOGIN ``ava_runner`` is demoted only by
-    ``retire_legacy_logins`` under birth authority.
+    unknown state and refuses. A LOGIN owner or ``ava_runner`` is demoted only by
+    ``retire_legacy_logins``, at birth.
     """
     require_admin(conn)
     with conn.transaction():
@@ -210,17 +205,13 @@ def ensure_groups(conn: Conn, *, owner: str, database: str, groups: Groups) -> N
         apply_group_grants(conn, owner=owner, database=database, groups=groups)
 
 
-def retire_legacy_logins(
-    conn: Conn, *, owner: str, groups: Groups, authority: BirthAuthority
-) -> tuple[str, ...]:
+def retire_legacy_logins(conn: Conn, *, owner: str, groups: Groups) -> tuple[str, ...]:
     """Demote the schema owner and existing groups to NOLOGIN without a password.
 
     Monotone: only removes LOGIN. Refuses when the owner is the initdb bootstrap
     superuser (it cannot become NOLOGIN safely) or a superuser at all. Returns
-    the roles this call demoted; sessions they already hold are closed by the
-    caller's closure proof.
+    the roles this call demoted.
     """
-    del authority
     require_admin(conn)
     demoted: list[str] = []
     with conn.transaction():

@@ -6,9 +6,8 @@ reported together in one ``CatalogRefusedError``:
 - the owner is NOLOGIN, passwordless, not a superuser, owns the database and
   has no memberships;
 - the groups are NOLOGIN capability holders that own nothing;
-- the groups' members, transitively, are exactly the unrevoked generation's
-  logins, and each is exactly shaped (``roles.verify_generation``);
-- every recorded revoked login that still exists is an inert tombstone;
+- the groups' members, transitively, are exactly the generation's logins, and
+  each is exactly shaped (``roles.verify_generation``);
 - every other login (auxiliary: replication, operator read-only) is not a
   superuser, owns nothing and holds no write privilege on ``public``;
 - the stable monitoring login, when present, is exactly its shape
@@ -70,27 +69,12 @@ def _owner_violations(conn: Conn, ledger: Ledger, database: str) -> list[str]:
 
 
 def _membership_violations(conn: Conn, ledger: Ledger) -> list[str]:
-    expected: set[str] = set(ledger.unrevoked.roles) if ledger.unrevoked is not None else set()
+    expected: set[str] = set(ledger.generation.roles) if ledger.generation is not None else set()
     extra = sorted(set(group_members(conn, ledger.groups)) - expected)
     violations = [f"unexpected group members {extra}"] if extra else []
     owner_members = transitive_members(conn, (ledger.owner,))
     if owner_members:
         violations.append(f"roles hold schema-owner membership: {list(owner_members)}")
-    return violations
-
-
-def _revoked_violations(conn: Conn, ledger: Ledger) -> list[str]:
-    names = [name for entry in ledger.revoked for name in entry.roles]
-    violations = [
-        f"revoked login {name} can log in"
-        for name, fact in role_facts(conn, names).items()
-        if fact.login or fact.password is not None
-    ]
-    violations += [
-        f"revoked login {row.member} is a member of {row.role}"
-        for row in memberships(conn, names)
-        if row.member in names
-    ]
     return violations
 
 
@@ -114,7 +98,7 @@ LIMIT 5
 
 
 def _auxiliary_violations(conn: Conn, ledger: Ledger) -> list[str]:
-    active: set[str] = set(ledger.unrevoked.roles) if ledger.unrevoked is not None else set()
+    active: set[str] = set(ledger.generation.roles) if ledger.generation is not None else set()
     violations: list[str] = []
     for name, fact in sorted(login_roles(conn).items()):
         if fact.oid == BOOTSTRAP_SUPERUSER_OID or name in active:
@@ -205,7 +189,7 @@ def _acl_violations(conn: Conn, ledger: Ledger, readonly: frozenset[str]) -> lis
 def check_invariant(
     conn: Conn, home: Path, *, database: str, readonly_grantees: Iterable[str] = ()
 ) -> VerifiedGeneration | None:
-    """Prove the catalog equals the ledger; return the unrevoked generation's receipt.
+    """Prove the catalog equals the ledger; return the generation's receipt.
 
     Read-only. ``conn`` must be the admin session connected to ``database``.
     ``readonly_grantees`` names operator roles allowed SELECT/USAGE/CONNECT.
@@ -224,12 +208,11 @@ def check_invariant(
         if name not in role_facts(conn, (name,))
     ]
     violations += _membership_violations(conn, ledger)
-    violations += _revoked_violations(conn, ledger)
     violations += _auxiliary_violations(conn, ledger)
     violations += monitor_violations(conn, database=database)
     violations += _acl_violations(conn, ledger, readonly)
     verified: VerifiedGeneration | None = None
-    if ledger.unrevoked is not None:
+    if ledger.generation is not None:
         try:
             verified = verify_generation(conn, home)
         except CatalogRefusedError as refusal:

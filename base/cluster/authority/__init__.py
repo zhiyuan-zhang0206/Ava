@@ -3,13 +3,13 @@
 Application processes never hold schema-owner or administrator credentials.
 Two stable NOLOGIN groups carry every application privilege; each write
 generation is one gateway and one runner login that inherits its group, owns
-nothing and is recorded in the home's private ledger. A rotation revokes the
-previous generation, proves its sessions closed, and mints the next one.
+nothing and is recorded in the home's private ledger. A home has exactly one
+generation, minted by its first start.
 
 Every catalog function takes the caller's admin connection (the OS-user
 superuser over the owner-only socket); this package never opens a connection.
-Ledger mutations take a typed authority token. ``delivery`` hands the active
-generation to the pooler, the launcher and admitted operator processes.
+``delivery`` hands the active generation to the pooler, the launcher and
+admitted operator processes.
 ``monitor`` keeps the one stable read-only login outside the generations: the
 collector's password-less, peer-authenticated statistics reader.
 """
@@ -95,16 +95,7 @@ from base.cluster.authority.model import (
     AuthorityRefusedError as AuthorityRefusedError,
 )
 from base.cluster.authority.model import (
-    BirthAuthority as BirthAuthority,
-)
-from base.cluster.authority.model import (
     CatalogRefusedError as CatalogRefusedError,
-)
-from base.cluster.authority.model import (
-    ClosureEvidence as ClosureEvidence,
-)
-from base.cluster.authority.model import (
-    ClosureRefusedError as ClosureRefusedError,
 )
 from base.cluster.authority.model import (
     Generation as Generation,
@@ -122,9 +113,6 @@ from base.cluster.authority.model import (
     LedgerRefusedError as LedgerRefusedError,
 )
 from base.cluster.authority.model import (
-    OperationAuthority as OperationAuthority,
-)
-from base.cluster.authority.model import (
     VerifiedGeneration as VerifiedGeneration,
 )
 from base.cluster.authority.monitor import (
@@ -137,25 +125,10 @@ from base.cluster.authority.monitor import (
     ensure_monitor as ensure_monitor,
 )
 from base.cluster.authority.roles import (
-    PruneResult as PruneResult,
-)
-from base.cluster.authority.roles import (
-    SweepResult as SweepResult,
-)
-from base.cluster.authority.roles import (
-    fenced_roles as fenced_roles,
-)
-from base.cluster.authority.roles import (
     mint_generation as mint_generation,
 )
 from base.cluster.authority.roles import (
-    prune as prune,
-)
-from base.cluster.authority.roles import (
     scram_verifier as scram_verifier,
-)
-from base.cluster.authority.roles import (
-    sweep as sweep,
 )
 from base.cluster.authority.roles import (
     verify_generation as verify_generation,

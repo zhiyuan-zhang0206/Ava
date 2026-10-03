@@ -180,11 +180,11 @@ def _pg_hba_body(cluster_secret: str) -> str:
 
     The OS user (the initdb bootstrap superuser) reaches Postgres only through
     `peer` on the owner-only socket — the administrator authority provisioning,
-    migrations and the authority fence use. The same OS user reaches the
+    migrations and the authority invariant use. The same OS user reaches the
     password-less monitoring login (the collector's statistics reader) through
     `peer` with the `pg_ident` map `_pg_ident_body` writes. Every other role
     authenticates with SCRAM over the socket and loopback TCP; `NOLOGIN` roles
-    (the schema owner, the capability groups, revoked generations) never log in
+    (the schema owner and the capability groups) never log in
     under any method.
 
     The bearer decides only reach: a secret cluster adds its reachable address
