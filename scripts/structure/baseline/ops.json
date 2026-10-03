@@ -1,5 +1,1 @@
-{
-  "complexity": {
-    "ops/host_config.py::config_write_op": 24
-  }
-}
+{}
