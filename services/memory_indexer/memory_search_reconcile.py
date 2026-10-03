@@ -14,7 +14,7 @@ reconcile is the only normal writer. `--allow-write` is an intentional
 operator escape hatch that requires a second confirmation before connecting.
 
 Usage:
-    .venv/bin/python scripts/data_repair/memory_search_reconcile.py --a milvus --b numpy --limit 50 --k 10
+    .venv/bin/python -m services.memory_indexer.memory_search_reconcile --a milvus --b numpy --limit 50 --k 10
 """
 
 from __future__ import annotations

@@ -460,6 +460,8 @@ check-typed-exception = true
 "ava/sdk_surface/help.py" = ["TID251"]
 "ava/sdk_surface/discovery.py" = ["TID251"]
 "services/agent_host/runtime.py" = ["TID251"]
+# An operator CLI: its report on stdout is the contract.
+"services/memory_indexer/memory_search_reconcile.py" = ["T201"]
 # tests may import contextvars to exercise the propagation contracts
 "ava/tests/test_turn_identity_ava.py" = ["TID251"]
 "agent/graph/tests/test_turn_scoped_retry.py" = ["TID251"]
@@ -1052,11 +1054,6 @@ reportUnknownArgumentType = "error"
 
 [[tool.pyright.executionEnvironments]]
 root = "scripts/data_plane_ops/tests"
-reportUnknownMemberType = "error"
-reportUnknownArgumentType = "error"
-
-[[tool.pyright.executionEnvironments]]
-root = "scripts/data_repair/tests"
 reportUnknownMemberType = "error"
 reportUnknownArgumentType = "error"
 
