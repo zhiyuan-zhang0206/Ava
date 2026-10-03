@@ -114,9 +114,8 @@ def _tool_result(message: dict[str, Any]) -> Any:
     """The tool's return value out of a tools/call response.
 
     MCPServer wraps dict/list return values as `structuredContent.result`
-    (the same wire shape the existing stdio `ava mcp serve` produces for the
-    same tool signatures); an error result carries the message in the first
-    text block.
+    (the wire shape for dict/list tool signatures); an error result carries the
+    message in the first text block.
     """
     if message["result"].get("isError"):
         return message["result"]["content"][0]["text"]

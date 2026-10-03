@@ -26,9 +26,9 @@ one-shot `codex exec` runs, cloud tasks, and a GitHub Action. It reads
 | GitHub Action | No equivalent shipped — Ava's automation path is gateway schedules + watchers; CI stays CI, agents do the agentic work | |
 | `codex login` | Platform auth — no per-agent ChatGPT/API login | |
 
-The bridge works in both directions: `ava mcp serve` exposes the Ava gateway as
-an MCP server, so Codex can keep driving the fleet
-(`codex mcp add ava -- ava mcp serve`).
+The bridge works in both directions: the gateway `/mcp` endpoint exposes the fleet as
+an MCP server, so Codex can keep driving it (`codex mcp add`, same shape as Claude Code;
+token setup: `docs/conventions/mcp-client-access.md`).
 
 ## Migration steps
 

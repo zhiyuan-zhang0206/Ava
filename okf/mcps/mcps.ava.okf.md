@@ -1,7 +1,7 @@
 ---
 type: doc
 title: MCP Integrations
-description: MCP integrations, both directions — outbound, agents call external tool servers via `ava.mcps.<server>.<tool>(...)` (built-in chrome ships with the repo, others install via `ava mcp install`) over newline-delimited JSON + Unix socket to a per-agent daemon; inbound, `ava mcp serve` exposes the cluster's own control plane as an MCP server external agents drive.
+description: MCP integrations — agents call external tool servers via `ava.mcps.<server>.<tool>(...)` (built-in chrome ships with the repo, others install via `ava mcp install`) over newline-delimited JSON + Unix socket to a per-agent daemon.
 tags:
 - extensions
 - tool
@@ -9,9 +9,9 @@ tags:
 
 # MCP Integrations
 
-Ava speaks MCP in both directions. This node is the **outbound** half — Ava's
-agents as MCP clients. The inbound half, `ava mcp serve`, shares only the
-protocol (no daemon, no config layers, no socket): [[cli/docs/mcp_server.ava.okf.md]].
+This node covers Ava's agents as MCP clients. The inbound direction (external
+clients driving the cluster) is the gateway `/mcp` endpoint:
+[[gateway/mcp_server/docs/mcp-endpoint.ava.okf.md]].
 
 ## What It Is
 MCP (Model Context Protocol) integrations let agents call external tool servers. Agents invoke tools as `ava.mcps.<server>.<tool>(...)` — calls serialize into **custom newline-delimited JSON** (`{id,method,params}` → `{id,ok,result|error}`, `ava/mcps/_daemon.py`) over a Unix socket to the **shared per-machine MCP daemon** (ops roster session "mcp-daemon", watchdog-managed) managing connections to each server. **Standard JSON-RPC is only used for the daemon↔MCP server hop** — over stdio for local servers (`command`) or Streamable HTTP for remote ones (`url`).
@@ -39,7 +39,7 @@ The four `.mcp.json` layers, `~/.ava/mcp_enabled.json` enable control, `requires
 Native vs installed (mirroring skills), the relative-path `.mcp.json` startup form, per-layer `server_cwd`, and why not `uv run`: [[okf/mcps/installation-startup.ava.okf.md]].
 
 ## Key Dependencies
-- [[cli/docs/mcp_server.ava.okf.md]] — the inbound direction: this cluster AS an MCP server
+- [[gateway/mcp_server/docs/mcp-endpoint.ava.okf.md]] — the inbound direction: this cluster AS an MCP server (gateway `/mcp`)
 - [[mcp-daemon.ava.okf.md]] — MCP daemon subprocess management
 - [[agent/docs/state.ava.okf.md]] — agent identity for socket path
 

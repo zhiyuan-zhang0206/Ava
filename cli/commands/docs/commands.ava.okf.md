@@ -113,10 +113,6 @@ Gateway data-plane startup (`data_plane/cluster_instance`, `data_plane/bringup`,
 - `cli/init_intent.py` and `cli/start_intent.py` are routed **before** settings-gated
   imports in `main()`: `ava init` records complete home identity (and starts nothing),
   and `ava start` admits that identity, before runtime configuration loads.
-- `cli/mcp_server.py` is the third top-level module a verb routes to
-  (`ava mcp serve`) rather than a `commands/` module: it is a long-running
-  stdio server, not a command that renders and exits, and it pulls in the mcp
-  SDK that no other verb needs. See [[cli/commands/extensions/docs/packages.ava.okf.md]].
 - [[cli/commands/converge/docs/ownership_preflight.ava.okf.md]] names the
   warning-only ownership repair guard that runs before converge writes later
   host state.

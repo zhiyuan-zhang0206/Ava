@@ -129,7 +129,6 @@ _HANDLERS: tuple[tuple[list[str], object, str], ...] = (
     (["agents", "kill", "1"], _agents, "_h_agents_kill"),
     (["agents", "resurrect", "1"], _agents, "_h_agents_resurrect"),
     (["agents", "send", "1", "hi", "--source", "user"], _agents, "_h_agents_send"),
-    (["mcp", "serve"], _mcp, "_h_mcp_serve"),
     (["memory", "search", "context"], _mcp, "_h_memory_search"),
     (["logs", "retention"], _logs, "_h_logs_retention"),
     (["logs", "rotate"], _logs, "_h_logs_rotate"),

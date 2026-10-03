@@ -1,8 +1,7 @@
 """`ava mcp` + `ava memory` — MCP server management and memory-pool operations.
 
 Builders plus their `_h_*` handlers. Handlers lazy-import their `cmd_*`
-implementation from ``cli.commands`` / ``cli.mcp_server`` (which pulls in the
-mcp SDK no other verb needs) so parser building never loads Settings (see
+implementation from ``cli.commands`` so parser building never loads Settings (see
 ``cli.main`` module docstring)."""
 
 from __future__ import annotations
@@ -72,14 +71,6 @@ def _h_mcp_upgrade(args: argparse.Namespace) -> int:
     return cmd_mcp_upgrade(args.name, force=args.force)
 
 
-def _h_mcp_serve(_args: argparse.Namespace) -> int:
-    # Imported here, like every other handler: `cli.mcp_server` pulls in the mcp
-    # SDK, which no other verb needs.
-    from cli.mcp_server import cmd_mcp_serve
-
-    return cmd_mcp_serve()
-
-
 def _h_memory_refresh(_args: argparse.Namespace) -> int:
     from cli.commands.extensions.memory import cmd_memory_refresh
 
@@ -138,17 +129,6 @@ def _add_mcp_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) ->
     # the cross-vendor `mcpServers` shape Claude Code / Codex also consume).
     mcp_p = sub.add_parser("mcp", help="manage MCP servers")
     mcp_sub = mcp_p.add_subparsers(dest="mcp_cmd", required=True)
-
-    # `serve` runs the other direction from the verbs below: those configure
-    # servers Ava's agents call out to, this one exposes Ava itself as a server
-    # an external agent (Claude Code / Codex) calls in to.
-    mcp_serve_p = mcp_sub.add_parser(
-        "serve",
-        help="run this cluster's control plane as an MCP server (stdio; deprecated "
-        "in favor of the gateway /mcp Streamable HTTP endpoint — design task #1212, "
-        "behavior unchanged until retirement)",
-    )
-    mcp_serve_p.set_defaults(func=_h_mcp_serve)
 
     mcp_install_p = mcp_sub.add_parser(
         "install", help="install a standalone MCP package from a git URL or local dir"
