@@ -273,7 +273,9 @@ def activations(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, str, str, st
     the call log."""
     recorded: list[tuple[str, str, str, str]] = []
 
-    def spy(plugin: str | None, surface: str, identifier: str, *, detail: str = "") -> None:
+    def spy(
+        plugin: str | None, surface: str, identifier: str, *, detail: str = "", model: str = ""
+    ) -> None:
         if plugin is not None:
             recorded.append((plugin, surface, identifier, detail))
 
@@ -326,7 +328,9 @@ async def test_activation_key_matches_the_ledger_entry(monkeypatch: pytest.Monke
     identifier space to keep in sync."""
     recorded: list[tuple[str, str, str]] = []
 
-    def spy(plugin: str | None, surface: str, identifier: str, *, detail: str = "") -> None:
+    def spy(
+        plugin: str | None, surface: str, identifier: str, *, detail: str = "", model: str = ""
+    ) -> None:
         if plugin is not None:
             recorded.append((plugin, surface, identifier))
 

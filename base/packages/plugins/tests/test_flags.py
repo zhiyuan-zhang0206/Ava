@@ -3,6 +3,7 @@
 import pytest
 
 from base.config import get_field, set_field
+from base.host.env.agent_slices import AgentSlices
 from base.host.env.config_registry import fields
 from base.lm.registry import DEFAULT_TUNING
 from base.packages.plugins.config_registration import _field_is_sensitive
@@ -61,14 +62,14 @@ def test_declarations_are_idempotent_per_plugin_and_shared_across_plugins() -> N
     assert declared_flags("first") == {key}
     assert declared_flags("second") == {key}
     with PluginContext("first"):
-        first_value = read_flag(key)
+        first_value = read_flag(key, AgentSlices.resolve())
     with PluginContext("second"):
-        assert read_flag(key) is first_value
+        assert read_flag(key, AgentSlices.resolve()) is first_value
 
 
 def test_read_flag_requires_plugin_context() -> None:
     with pytest.raises(NoPluginContext, match="pass plugin=<name> explicitly"):
-        read_flag("agent.prompt_invest_future_enabled")
+        read_flag("agent.prompt_invest_future_enabled", AgentSlices.resolve())
 
 
 def test_read_flag_accepts_explicit_plugin_outside_plugin_context() -> None:
@@ -79,7 +80,7 @@ def test_read_flag_accepts_explicit_plugin_outside_plugin_context() -> None:
         with PluginContext("plugin"):
             declare_flags(key)
 
-        assert read_flag(key, plugin="plugin") is False
+        assert read_flag(key, AgentSlices.resolve(), plugin="plugin") is False
     finally:
         set_field("prompt_invest_future_enabled", previous)
 
@@ -90,12 +91,12 @@ def test_read_flag_explicit_plugin_wins_over_plugin_context() -> None:
         declare_flags(key)
 
     with PluginContext("other-plugin"):
-        assert read_flag(key, plugin="declared-plugin") is True
+        assert read_flag(key, AgentSlices.resolve(), plugin="declared-plugin") is True
 
 
 def test_read_flag_requires_a_declaration() -> None:
     with PluginContext("plugin"), pytest.raises(UndeclaredFlag, match="declaration is contract"):
-        read_flag("agent.prompt_invest_future_enabled")
+        read_flag("agent.prompt_invest_future_enabled", AgentSlices.resolve())
 
 
 def test_read_flag_returns_non_tuning_turn_value() -> None:
@@ -104,7 +105,7 @@ def test_read_flag_returns_non_tuning_turn_value() -> None:
         set_field("exec_timeout_seconds", 123.0)
         with PluginContext("plugin"):
             declare_flags("sandbox.exec_timeout_seconds")
-            assert read_flag("sandbox.exec_timeout_seconds") == 123.0
+            assert read_flag("sandbox.exec_timeout_seconds", AgentSlices.resolve()) == 123.0
     finally:
         set_field("exec_timeout_seconds", previous)
 
@@ -115,9 +116,9 @@ def test_read_flag_resolves_tuning_explicit_value_then_model_default() -> None:
         with PluginContext("plugin"):
             declare_flags("agent.prompt_invest_future_enabled")
             set_field("prompt_invest_future_enabled", False)
-            assert read_flag("agent.prompt_invest_future_enabled") is False
+            assert read_flag("agent.prompt_invest_future_enabled", AgentSlices.resolve()) is False
             set_field("prompt_invest_future_enabled", None)
-            assert read_flag("agent.prompt_invest_future_enabled") is True
+            assert read_flag("agent.prompt_invest_future_enabled", AgentSlices.resolve()) is True
             assert DEFAULT_TUNING.prompt_invest_future_enabled is True
     finally:
         set_field("prompt_invest_future_enabled", previous)
@@ -130,14 +131,14 @@ def test_clear_plugin_flags_removes_declarations() -> None:
     clear_plugin_flags()
 
     with PluginContext("plugin"), pytest.raises(UndeclaredFlag):
-        read_flag(key)
+        read_flag(key, AgentSlices.resolve())
 
 
 def test_hook_shaped_behavior_can_read_declared_flag_outside_plugin_context() -> None:
     previous = get_field("prompt_invest_future_enabled")
 
     def hook_behavior() -> str:
-        if read_flag("agent.prompt_invest_future_enabled", plugin="plugin"):
+        if read_flag("agent.prompt_invest_future_enabled", AgentSlices.resolve(), plugin="plugin"):
             return "include future work"
         return "skip future work"
 

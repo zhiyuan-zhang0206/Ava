@@ -23,6 +23,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass, fields
+from types import MappingProxyType
 from typing import Any, Literal, cast
 
 from base.host.env.config_lite_table import FIELD_DOMAINS
@@ -134,6 +135,8 @@ class AgentSlices:
     llm_policy: LlmCallPolicy
     sandbox: Sandbox
     kernel: AgentKernel
+    # The agent's pins, for the settings no slice names (`read`).
+    pins: Mapping[str, Any]
 
     @classmethod
     def resolve(cls, pins: Mapping[str, Any] | None = None) -> AgentSlices:
@@ -149,4 +152,13 @@ class AgentSlices:
             llm_policy=LlmCallPolicy(**_kwargs(LlmCallPolicy, pins)),
             sandbox=Sandbox(**_kwargs(Sandbox, pins)),
             kernel=AgentKernel(**_kwargs(AgentKernel, pins)),
+            pins=MappingProxyType(dict(pins)),
         )
+
+    def read(self, domain: str, field: str) -> Any:
+        """The raw value of any core setting for this agent: its pin, else the live default."""
+        if field in self.pins:
+            return self.pins[field]
+        from base.config import settings
+
+        return getattr(getattr(settings, domain), field)

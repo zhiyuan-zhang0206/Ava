@@ -765,14 +765,14 @@ tool calls. Before using any `ava.*` function, you must explicitly `import ava` 
         contribution = section_fn(slices)
         if contribution:
             parts.append(contribution)
-            # Activation telemetry (philosophy §6): a plugin section that
-            # rendered text is prompt real estate the plugin is spending. Length
-            # + digest identify *which* variant landed without storing the text;
-            # this runs at spawn/compact only, so there is no per-turn cost.
+            # Activation telemetry (philosophy §6): a plugin section that rendered text is prompt
+            # real estate the plugin is spending. Length + digest identify *which* variant landed
+            # without storing the text; this runs at spawn/compact only, so no per-turn cost.
             activation.record(
                 _SECTION_PLUGIN.get(section_fn),
                 "systemPromptSections",
                 section_fn.__name__,
+                model=slices.brain.llm_model,
                 detail=(
                     f"chars={len(contribution)} "
                     f"sha={hashlib.sha256(contribution.encode()).hexdigest()[:12]}"

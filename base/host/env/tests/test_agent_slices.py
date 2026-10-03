@@ -16,11 +16,12 @@ from base.host.env.config_lite_table import FIELD_DOMAINS
 
 def _slice_fields() -> list[str]:
     resolved = AgentSlices.resolve()
-    return [f.name for group in fields(resolved) for f in fields(getattr(resolved, group.name))]
+    groups = [g for g in fields(resolved) if g.name != "pins"]
+    return [f.name for group in groups for f in fields(getattr(resolved, group.name))]
 
 
 def _read_slice(slices: AgentSlices, name: str) -> Any:
-    for group in fields(slices):
+    for group in (g for g in fields(slices) if g.name != "pins"):
         values = getattr(slices, group.name)
         if name in {f.name for f in fields(values)}:
             return getattr(values, name)
@@ -98,3 +99,11 @@ def test_a_live_default_edit_reaches_the_next_resolution(monkeypatch: pytest.Mon
 def test_list_settings_are_frozen_into_tuples() -> None:
     slices = AgentSlices.resolve({"sdk_disable": ["ava.x", "ava.y"]})
     assert slices.prompt.sdk_disable == ("ava.x", "ava.y")
+
+
+def test_read_serves_a_setting_no_slice_names_from_the_pin_else_the_live_default() -> None:
+    assert AgentSlices.resolve().read("sandbox", "exec_timeout_seconds") == (
+        settings.sandbox.exec_timeout_seconds
+    )
+    pinned = AgentSlices.resolve({"exec_timeout_seconds": 123.5})
+    assert pinned.read("sandbox", "exec_timeout_seconds") == 123.5

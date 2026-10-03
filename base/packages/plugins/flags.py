@@ -14,7 +14,7 @@ flag from the current turn:
 
     from base.packages.plugins.flags import read_flag
 
-    if read_flag("agent.prompt_invest_future_enabled", plugin="ava_fleet"):
+    if read_flag("agent.prompt_invest_future_enabled", runtime.context.require_agent(), plugin="ava_fleet"):
         ...
 
 During ``plugin.py`` import, ``read_flag`` may omit ``plugin`` because the
@@ -25,15 +25,16 @@ not declare. Keys are fully qualified as ``<domain>.<field>``. The namespace is
 every non-sensitive core Settings field; secrets remain in their existing secret
 channels and are never flags.
 
-Reads use the per-turn settings view, so per-agent pins and the agent's model
+Reads take the turn's `AgentSlices`, so per-agent pins and the agent's model
 apply. Model-tuning fields resolve with the same explicit-value, model-default,
-then shared-default layering used by the framework; other fields return their
-turn-view value directly. A cluster config change takes effect on the next
+then shared-default layering used by the framework; other fields return the
+agent's value directly. A cluster config change takes effect on the next
 process or agent start: values are read at start, not live.
 """
 
 from typing import Any
 
+from base.host.env.agent_slices import AgentSlices
 from base.host.env.config_registry import DOMAIN_ATTRS, fields
 from base.packages.plugins.config_registration import _field_is_sensitive
 from base.packages.plugins.context import current_plugin_name
@@ -83,16 +84,18 @@ def declare_flags(*keys: str) -> None:
     _PLUGIN_FLAGS[plugin].update(declared)
 
 
-def read_flag(key: str, *, plugin: str | None = None) -> Any:
-    """Return the effective turn-scoped value of a declared core configuration flag.
+def read_flag(key: str, slices: AgentSlices, *, plugin: str | None = None) -> Any:
+    """Return the effective value of a declared core configuration flag for the agent whose
+    `slices` are given.
 
     Model-tuning fields use the framework's model-default layering. All other
-    fields return their raw value from ``turn_settings``. Behavior-time callers
+    fields return their raw value for that agent (its pin, else the live default). Behavior-time callers
     pass their plugin name explicitly; import-time calls may use the active
     ``PluginContext`` instead.
 
     Args:
         key: Fully qualified ``<domain>.<field>`` core Settings key.
+        slices: The turn's `AgentSlices` (a hook reads `runtime.context.require_agent()`).
         plugin: Explicit plugin identity. Takes precedence over ``PluginContext``.
 
     Raises:
@@ -109,7 +112,6 @@ def read_flag(key: str, *, plugin: str | None = None) -> Any:
 
     domain, field = key.split(".")
     from base.config import settings
-    from base.config.turn_view import turn_settings
 
     if not settings.has_domain(domain):
         raise FlagDomainUnavailable(
@@ -117,13 +119,13 @@ def read_flag(key: str, *, plugin: str | None = None) -> Any:
             f"is unavailable in the {settings.profile!r} process profile."
         )
 
-    explicit = getattr(getattr(turn_settings, domain), field)
+    explicit = slices.read(domain, field)
     from base.lm.registry import explain_setting, tuning_field_names
 
     if field in tuning_field_names():
         return explain_setting(
             field,
-            model=turn_settings.lm.llm_model,
+            model=slices.brain.llm_model,
             explicit=explicit,
         ).value
     return explicit

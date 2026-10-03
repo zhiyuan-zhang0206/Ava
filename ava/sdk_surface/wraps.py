@@ -131,10 +131,13 @@ def _record_activation(target: str, plugin: str, inner_calls: int) -> None:
     import for the same reason `_current_plugin_name` is lazy; the emit path
     itself swallows its own failures."""
     try:
+        from ava import _settings
         from base.packages.plugins import activation
-    except ImportError:
+
+        model = _settings.slices().brain.llm_model
+    except Exception:
         return
-    activation.record(plugin, "sdkWraps", target, detail=f"inner_calls={inner_calls}")
+    activation.record(plugin, "sdkWraps", target, detail=f"inner_calls={inner_calls}", model=model)
 
 
 def _record_contribution(target: str, wrapper: Callable[..., Any]) -> None:
