@@ -255,7 +255,13 @@ def build_diagnostics(requested: set[str]) -> list[Diagnostic]:
     checks: list[Diagnostic] = []
     if IS_MACOS:
         checks.append(Diagnostic("brew-pin", brew_pins))
-    checks.append(Diagnostic("venv", venv))
+    checks.append(
+        Diagnostic(
+            "venv",
+            venv,
+            failure_threshold=settings.services.venv_probe_failure_threshold,
+        )
+    )
     if IS_MACOS:
         from services.healthchecks.permissions_helper import probe
 

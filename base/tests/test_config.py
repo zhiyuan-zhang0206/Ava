@@ -612,6 +612,7 @@ _REMOTE_WRITABLE_ALLOWLIST = frozenset(
         "permissions_helper_spawn",
         "ops_concurrency",
         "task_maintenance_enabled",
+        "venv_probe_failure_threshold",
     }
 )
 
