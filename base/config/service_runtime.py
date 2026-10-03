@@ -97,6 +97,20 @@ class _ServiceRuntimeSettings(EnvSettings):
         },
     )
 
+    venv_probe_failure_threshold: int = Field(
+        default=2,
+        alias="AVA_VENV_PROBE_FAILURE_THRESHOLD",
+        description="Consecutive failing venv diagnostic probes before the single WARNING (single-round deadline-miss suppression under high churn); the episode then stays quiet until a healthy probe re-arms it. 2 probes at the 60s default interval bound detection at ~2 min.",
+        json_schema_extra={
+            "capability": "agent-runner",
+            "restart_required": "",
+            "writable": False,
+            "sensitive": False,
+            "scope": "host",
+            "remote_writable": True,
+        },
+    )
+
     permissions_helper_enabled: bool = Field(
         default=True,
         alias="AVA_PERMISSIONS_HELPER_ENABLED",
