@@ -48,7 +48,7 @@ per-agent `{"checkpoint_interval": 1}`
 config overlay plus an agent restart, or set `AVA_CHECKPOINT_INTERVAL=1` in the
 cluster `.env`, to restore every-super-step persistence. The full recovery
 verification and rollback protocol lives in
-[`docs/conventions/checkpoint-interval-canary.md`](../docs/conventions/checkpoint-interval-canary.md).
+[`checkpoint-interval-canary.md`](checkpoint-interval-canary.md).
 
 An upstream dependency bump that adds checkpoint migration version N must ship
 that DDL as an Ava timestamp migration and advance

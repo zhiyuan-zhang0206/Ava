@@ -3,7 +3,7 @@
 Operational recovery-validation and rollback protocol for the default
 `AVA_CHECKPOINT_INTERVAL=4`, and for evaluating a larger interval one agent
 subset at a time. It formalizes the notes in
-[`conventions/runbook.md`](../../conventions/runbook.md) (checkpoint section)
+[`runbook.md`](runbook.md) (checkpoint section)
 and the task #1551 write-amplification evaluation
 (~39 checkpoints/min, ~169KB/step, ~340MB/h/agent before the throttle;
 `N=4` cuts checkpoint write volume by ~75% before terminal flushes).
