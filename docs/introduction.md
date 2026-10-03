@@ -40,7 +40,7 @@ self-supervised: a canary runs the new code under observation while a holdout
 on the old code watches, and rolls back on regression. No maintenance windows,
 no babysitting — the cluster works by day and updates itself by night.
 
-→ [How self-evolution works](features/self-evolving.md)
+→ [Why: self-rolling release](../decisions/2026-05-09-self-rolling-release.md)
 
 ### 2. CodeAct — one tool, the whole Python namespace
 
@@ -65,7 +65,7 @@ research goal into three waves of 18 workers by itself — wave split,
 checkpoint placement, and model tiering were all its own choices — and the
 orchestrator was woken only six times.
 
-→ [How CodeAct works](features/code-act.md)
+→ [Why a single tool](../decisions/2026-05-04-single-execute-code-tool.md)
 
 ### 3. Fleet — a graph of peers, not a chain
 
@@ -91,7 +91,7 @@ FYIs, decisions that need your call — converge into **one aggregated
 notification queue**, and agents organize across conversations through a
 **shared persistent task graph** (parent/child trees, owners, reminders).
 
-→ [How the fleet works](features/fleet.md)
+→ [How the fleet works](../ava_builtins/plugins/ava_fleet/docs/ava_fleet.ava.okf.md)
 
 ### 4. Anti-RL-Bias — first-class verbs for intent
 
@@ -103,7 +103,7 @@ offers idle agents three honest options (working / waiting / done), and
 mechanisms nudge agents that stall, reach for the wrong SDK idiom, or miss a
 newly installed skill. Ambiguous silence becomes supervisable state.
 
-→ [All anti-RL-bias mechanisms](features/anti-rl-bias.md)
+→ [All anti-RL-bias mechanisms](../okf/anti-rl-bias.ava.okf.md)
 
 ### 5. Observability — every turn is a trace
 
@@ -113,7 +113,7 @@ Prometheus + Grafana stack where traces, logs, and metrics share a single UI.
 Underneath, every signal is one unified event stream carrying a trace_id, so
 logs and traces correlate; alerts reach chat end to end.
 
-→ [How observability works](features/observability.md)
+→ [How observability works](../base/telemetry/otlp/docs/telemetry-otlp/telemetry-otlp.ava.okf.md)
 
 ### 6. Multi-Machine — a single box is the N=1 case
 
@@ -124,7 +124,7 @@ form a cluster**. Authentication is always on and fail-closed. macOS, Linux,
 and Windows are all supported — Windows joins natively as an agent-runner, no
 WSL, no Docker. A single box is just the N=1 case: no flag, no opt-in.
 
-→ [How multi-machine deployment works](features/multi-machine.md)
+→ [How multi-machine deployment works](../decisions/2026-06-11-multihost-deployment.md)
 
 ### 7. Plugins — typed extension points in the runtime
 
@@ -135,7 +135,7 @@ model that becomes a private channel in the agent's state graph — typed
 read/write handles, fail-fast on conflicts, persisted with the framework
 checkpoint. Write a `plugin.py`, drop it in a directory, done.
 
-→ [How plugins work](features/plugins.md)
+→ [How plugins work](../okf/plugins/plugins.ava.okf.md)
 
 ### 8. Skills — the open Agent Skills standard, zero rewrite
 
@@ -145,7 +145,7 @@ folder installs unmodified: from a git URL or straight off disk, no manifest,
 no conversion. A hundred installed skills cost a hundred description lines in
 the prompt, not a hundred bodies — full text loads on demand.
 
-→ [How skills work](features/skills.md)
+→ [How skills work](../okf/skills/skills.ava.okf.md)
 
 ### 9. Memory — a shared pool that outlives any conversation
 
@@ -156,7 +156,7 @@ taking over loses nothing. A steward agent consolidates, health-checks, and
 commits the pool daily; the index is injected at cold start and after each
 compaction, so standing rules stay in front of the agent.
 
-→ [How memory works](features/memory.md)
+→ [How memory works](../ava_builtins/plugins/ava_memory/docs/ava_memory.ava.okf.md)
 
 ---
 
@@ -327,16 +327,15 @@ exports live over OTLP/HTTP to Loki (logs) and Prometheus (metrics). The
 LGTM backend (remote Tempo plus native Loki, Prometheus, and Grafana) serves
 Grafana at http://localhost:3003 — traces, logs, and metrics in one UI — and
 backs the gateway's /ops + inspect endpoints:
-[`deploy/lgtm/README.md`](../deploy/lgtm/README.md). See
-[`features/observability.md`](features/observability.md) for the
-full design.
+[`deploy/lgtm/README.md`](../deploy/lgtm/README.md). See the
+[trace mirror and delivery topology](../base/telemetry/otlp/docs/telemetry-otlp/trace-mirror.ava.okf.md)
+node for the full design.
 
 ## Key docs — read on demand
 
 | When you need to… | Read |
 |---|---|
 | Get started | **[QUICKSTART.md](../QUICKSTART.md)** |
-| Understand a feature | [`features/`](features/) (self-evolving, code-act, fleet, anti-rl-bias, observability, multi-machine, plugins, skills, memory) |
 | Understand architecture | [`okf/index.ava.okf.md`](../okf/index.ava.okf.md) |
 | Install / deploy | [`.agents/skills/deploy-ava-cluster/SKILL.md`](../.agents/skills/deploy-ava-cluster/SKILL.md) |
 | Set up dev environment | [`conventions/dev-setup.md`](../conventions/dev-setup.md) |
