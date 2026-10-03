@@ -213,6 +213,27 @@ def _command_segments(line: str, *, fenced: bool) -> list[str]:
     return re.findall(r"`([^`]+)`", line)
 
 
+def _next_path(
+    word: str, path: tuple[str, ...] | None, commands: dict[tuple[str, ...], set[str]]
+) -> tuple[tuple[str, ...] | None, tuple[str, str] | None]:
+    """One word's effect on the open command path, and the (command, flag) it misuses, if any."""
+    if word == "\\":
+        return path, None  # line-continuation marker, not an argument that ends the command
+    name = word.rsplit("/", 1)[-1]
+    if (name,) in commands:
+        return (name,), None
+    flag = _FLAG.match(word)
+    if flag:
+        if path is not None and flag.group(1) not in commands[path]:
+            return path, (" ".join(path), flag.group(1))
+        return path, None
+    if path is not None and (*path, word) in commands:
+        return (*path, word), None  # a subcommand narrows which flags are legal
+    # Punctuation, a URL, a pipe — the command's reach ends; an argument
+    # value keeps it alive.
+    return (None if not _WORD.match(word) else path), None
+
+
 def check_flags(
     line: str,
     commands: dict[tuple[str, ...], set[str]],
@@ -233,24 +254,9 @@ def check_flags(
         if not fenced:
             path = None  # each inline span is its own invocation
         for word in segment.replace("(", " ").replace(")", " ").split():
-            if word == "\\":
-                continue  # line-continuation marker, not an argument that ends the command
-            name = word.rsplit("/", 1)[-1]
-            if (name,) in commands:
-                path = (name,)
-                continue
-            flag = _FLAG.match(word)
-            if flag:
-                if path is not None and flag.group(1) not in commands[path]:
-                    bad.append((" ".join(path), flag.group(1)))
-                continue
-            if path is not None and (*path, word) in commands:
-                path = (*path, word)  # a subcommand narrows which flags are legal
-                continue
-            # Punctuation, a URL, a pipe — the command's reach ends; an argument
-            # value keeps it alive.
-            if not _WORD.match(word):
-                path = None
+            path, flagged = _next_path(word, path, commands)
+            if flagged is not None:
+                bad.append(flagged)
     open_next = path if (fenced and line.rstrip().endswith("\\")) else None
     return bad, open_next
 
