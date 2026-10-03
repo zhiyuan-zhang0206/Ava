@@ -46,10 +46,11 @@ from base.telemetry.metrics.plugin_metrics import (
     validate_metric_sql,
 )
 from gateway.inspect import _event_metrics
+from gateway.inspect._plugin_faces import enabled_face_files
 from gateway.inspect.schemas import MetricPoint, PluginMetricResult
 
-# The shipped-plugin metrics directory — every plugin dir with a metrics.py is
-# part of the in-process registry (the generator's import set, task #180 PR D).
+# The shipped-plugin metrics directory — every ENABLED plugin dir with a metrics.py is part of the
+# in-process registry (the generator's import set, task #180 PR D).
 _PLUGINS_DIR = Path(__file__).resolve().parents[2] / "ava_builtins" / "plugins"
 
 # The inspector's fixed recent window: the templates' `$__timeFilter(ts)` /
@@ -88,15 +89,13 @@ _MACRO_RANGE_LOKI = f"{_INSPECTOR_WINDOW_HOURS}h"
 
 
 def _plugin_metric_modules() -> list[Path]:
-    """``metrics.py`` of every shipped plugin directory, sorted — the
-    generator's import set, in its import order."""
-    if not _PLUGINS_DIR.is_dir():
-        return []
-    return sorted(p / "metrics.py" for p in _PLUGINS_DIR.iterdir() if (p / "metrics.py").is_file())
+    """``metrics.py`` of every ENABLED shipped plugin, sorted — the import set of one registry
+    build (the same enable rule the widget loader applies)."""
+    return enabled_face_files(_PLUGINS_DIR, "metrics.py")
 
 
 def _load_plugin_metrics() -> list[MetricSpec]:
-    """The in-process metric registry: every shipped plugin ``metrics.py``
+    """The in-process metric registry: every ENABLED shipped plugin's ``metrics.py``
     declaration (``contribute()``) admitted into a data registry, plus the core
     definition modules — plugin metrics first, then core, the order the old
     snapshot's two sections read.

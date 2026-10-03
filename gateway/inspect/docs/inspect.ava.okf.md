@@ -35,7 +35,7 @@ their lifecycle is managed separately. Launch time never synthesizes a deadline.
 
 ## Plugin metric surface (`/inspect/metrics`, W13b)
 
-Builds the metric registry in process — shipped plugin `metrics.py` declarations
+Builds the metric registry in process — ENABLED shipped plugins' `metrics.py` declarations
 (`contribute()`, admitted into a data registry) + core definitions — renders `output`-inspector templates per agent, re-validates
 the rendered query, evaluates LogQL templates on `telemetry_events` / `audit_events` (`gateway/inspect/_event_metrics.py`) and SQL read-only over Postgres —
 see `base/telemetry/metrics/plugin_metrics.py` + the `deploy/lgtm` dashboards README.
