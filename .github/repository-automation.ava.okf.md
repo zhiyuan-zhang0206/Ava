@@ -48,6 +48,18 @@ branch is mounted only as an isolated candidate worktree. Its archive and
 provider sources are parsed as data by the trusted updater, never imported or
 executed. Future effective windows are copied into the PR body for review.
 
+## `workflows/dependency-audit.yml`
+
+A weekly schedule (plus manual dispatch) runs `scripts/ci/dependency_audit.py`:
+`uv audit` over `uv.lock` (severity looked up in OSV, since its JSON carries
+none), `npm audit` over `ui/web`, and the version constants Ava downloads outside
+the lockfiles (zonky Postgres, pgvector, wal-g, otelcol-contrib, uv, Grafana)
+against each upstream's newest release. One issue, found by its marker, is
+opened or updated while any advisory is high, critical or ungradable or any
+pin is behind, and closed on a clean run. The PR-time `dependency audit` job in
+`ci.yml` stays informational and never blocks. The report changes no pin:
+moving one is a dependency upgrade that needs approval.
+
 ## `workflows/audit-branch-protection.yml`
 
 A weekly schedule (plus manual dispatch) runs
