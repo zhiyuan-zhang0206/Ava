@@ -383,7 +383,7 @@ async def _cookie_session(request: Request, secret: str) -> tuple[str, str] | No
     """The request's session cookie and its credential fact, when it authenticates.
 
     Valid only while the credential that minted the session is current (a
-    revoked generation's or a rotated secret's sessions end). Only a request
+    rotated secret's sessions end). Only a request
     carrying a cookie consults the session store: bearer and anonymous
     requests never pay its thread hop.
     """
@@ -483,7 +483,7 @@ async def _cluster_auth_middleware(
         return await call_next(request)
 
     # 2. Check Bearer token: the human secret, or the active write generation's
-    # machine API token (a revoked generation's never authenticates).
+    # machine API token (a pending generation's never authenticates).
     verified_by = cluster_credential(request.headers.get("Authorization"), secret)
     if verified_by is not None:
         request.state.auth_principal = AuthPrincipal("cluster", "administrator")

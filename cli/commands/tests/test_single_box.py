@@ -25,11 +25,9 @@ from typing import Any, cast
 
 import psycopg
 import pytest
-from psycopg import sql
 
 from base import cluster
 from base.cluster import authority, ownership
-from base.cluster.authority import fence
 from base.cluster.authority.api import API_TOKEN_ENV
 from base.cluster.dataplane import pooler as base_pooler
 from base.config import settings
@@ -313,20 +311,17 @@ def test_unchanged_userlist_reloads_without_restart(born: Born) -> None:
     assert before is not None and after is not None and before.pid == after.pid
 
 
-def test_ordinary_start_sweeps_a_stale_login_and_keeps_the_generation(born: Born) -> None:
+def test_ordinary_start_refuses_a_stray_group_member_and_leaves_it_untouched(born: Born) -> None:
     with born.admin() as conn:
         conn.execute(
             "CREATE ROLE ava_g7_runner LOGIN PASSWORD 'stale-password-xyz' IN ROLE ava_runner"
         )
-    bringup.complete_gateway_data_plane()
+    with pytest.raises(authority.CatalogRefusedError, match="ava_g7_runner"):
+        bringup.complete_gateway_data_plane()
     with born.admin() as conn:
         assert conn.execute(
             "SELECT rolcanlogin FROM pg_roles WHERE rolname = 'ava_g7_runner'"
-        ).fetchone() == (False,)
-        assert conn.execute(
-            "SELECT count(*) FROM pg_auth_members m JOIN pg_roles r ON r.oid = m.member"
-            " WHERE r.rolname = 'ava_g7_runner'"
-        ).fetchone() == (0,)
+        ).fetchone() == (True,)
     assert authority.active_generation(born.home).number == 0
 
 
@@ -370,7 +365,6 @@ def test_interrupted_birth_retries_to_the_same_generation(
     bringup.complete_gateway_data_plane()
     ledger = authority.require_ledger(configured.home)
     assert calls == [0] and ledger.active is not None and ledger.active.number == 0
-    assert ledger.counter == 0
 
 
 def test_launched_services_receive_their_class_login_only(
@@ -407,24 +401,6 @@ def test_launched_services_receive_their_class_login_only(
     root = root_child_env()
     assert "AVA_DB_URL" not in root and authority.GENERATION_ENV not in root
     assert API_TOKEN_ENV not in root
-
-
-def test_revoked_generation_login_is_not_resurrected_by_start(born: Born) -> None:
-    """A restored catalog that re-enables an old number is swept, never admitted."""
-    with born.admin() as conn:
-        conn.execute(
-            sql.SQL(
-                "CREATE ROLE {} LOGIN PASSWORD 'restored-old-login' IN ROLE ava_gateway"
-            ).format(sql.Identifier("ava_g5_gateway"))
-        )
-    bringup.complete_gateway_data_plane()
-    _refused(
-        host="127.0.0.1",
-        port=born.pg_port,
-        user="ava_g5_gateway",
-        password="restored-old-login",  # noqa: S106 — the restored login's fixture credential
-        dbname="ava",
-    )
 
 
 _ROLES = frozenset({"gateway", "agent-runner"})
@@ -498,15 +474,12 @@ def _scrape_like_the_receiver(receiver: dict[str, Any]) -> None:
             conn.execute("SELECT pg_relation_size(indexrelid) FROM pg_stat_user_indexes")
 
 
-def test_collector_postgres_receiver_keeps_no_credential_and_survives_rollover(
+def test_collector_postgres_receiver_keeps_no_credential(
     born: Born, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The collector's PostgreSQL receiver logs in as the stable monitoring
     role by `peer` over the owner-only socket: no password at rest in its
-    config, no application data, and a write-generation rollover neither
-    breaks nor closes it."""
-    from uuid import uuid4
-
+    config and no application data."""
     receiver = _collector_postgres_receiver(born, monkeypatch)
     assert receiver["username"] == authority.MONITOR_ROLE
     assert receiver["transport"] == "unix"
@@ -526,27 +499,11 @@ def test_collector_postgres_receiver_keeps_no_credential_and_survives_rollover(
         dbname="ava",
     )
 
-    old_gateway = born.login("gateway")
-    rollout = authority.OperationAuthority(operation=uuid4(), direction="candidate")
-    with _dial_as_receiver(receiver, "ava") as scraping, born.admin() as conn:
-        fence.revoke(conn, born.home, rollout)
-        fence.close_revoked(conn, born.home, rollout)
-        verified = authority.mint_generation(conn, born.home, rollout)
-        authority.activate(born.home, rollout, verified)
-        # The fence closed the old generation, not the monitoring session.
-        assert scraping.execute("SELECT session_user").fetchone() == (authority.MONITOR_ROLE,)
+    with born.admin() as conn:
         authority.check_invariant(
             conn, born.home, database="ava", readonly_grantees=bringup.READONLY_GRANTEES
         )
-    assert authority.active_generation(born.home).number == 1
-    _refused(
-        host="127.0.0.1",
-        port=born.pg_port,
-        user=old_gateway[0],
-        password=old_gateway[1],
-        dbname="ava",
-    )
-    # The unchanged config keeps scraping under the new generation.
+    # The unchanged config keeps scraping.
     assert _collector_postgres_receiver(born, monkeypatch) == receiver
     _scrape_like_the_receiver(receiver)
 

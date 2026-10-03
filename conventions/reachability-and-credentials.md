@@ -88,7 +88,7 @@ The telemetry token is derived from the human secret, so there is
 deliberately no second station secret to distribute, yet a unit holding it
 learns nothing about the secret. It is scoped to the telemetry surface (the
 collector's `bearertokenauth` extension) and carries no API semantics; it
-does not rotate per write generation (telemetry is not a write path) and
+is not part of the write generation (telemetry is not a write path) and
 changes only when the human secret rotates.
 
 ## Verification

@@ -100,7 +100,7 @@ def db_identity() -> str:
     The database and its NOLOGIN owner share the identifier (provisioning
     creates `DATABASE <identity> OWNER <identity>`). The database is read rather
     than the username because a delivered write-generation login
-    (`ava_g<n>_<class>`) replaces the URL's username, never its database.
+    (`ava_g0_<class>`) replaces the URL's username, never its database.
 
     Raises:
         ValueError: db_url names no database."""

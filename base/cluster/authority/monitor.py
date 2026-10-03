@@ -1,8 +1,7 @@
 """The stable monitoring login: the OTel collector's PostgreSQL receiver.
 
-``ava_monitor`` is not a write generation. It holds no application privilege,
-so a rotation neither revokes nor re-delivers it, and the fence never closes
-its sessions. It is created without any password, and ``pg_hba`` admits it
+``ava_monitor`` is not a write generation. It holds no application privilege
+and is delivered no credential. It is created without any password, and ``pg_hba`` admits it
 only by ``peer`` on the home's owner-only socket, mapped from the home's OS
 user (``pg_ident`` map ``ava_monitor``); SCRAM can never authenticate a role
 without a verifier.

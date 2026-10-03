@@ -1,22 +1,20 @@
-"""Machine API admission per write generation.
+"""Machine API admission from the write generation.
 
-The database fence does not stop a stale caller holding an HTTP bearer, so
-machine callers present per-generation tokens instead of the human cluster
-secret (decisions/2026-09-27-write-generation-rollout-choices.md, item 3):
+Machine callers present the generation's class token instead of the human
+cluster secret, so a machine holds no human bearer:
 
-- Every generation's secret file carries one API token per class
+- The generation's secret file carries one API token per class
   (``GenerationSecret.api``). The gateway accepts the ACTIVE generation's
-  tokens (``acceptance``); a revoked generation's token never authenticates
-  again. A runner's ops server accepts the gateway-class token only.
+  tokens (``acceptance``), never a pending one. A runner's ops server accepts
+  the gateway-class token only.
 - The root launcher delivers a service its class token in ``AVA_API_TOKEN``,
   exactly like its database login, and only while the API is authenticated
   (a non-empty human secret on the gateway, an API-bearing unit capability on
   a remote unit). An empty-secret single box keeps its open API.
-- The OTLP relay ingress is telemetry, not a write path: like Redis it does
-  not rotate per generation. Its bearer is derived from the human secret
-  (``telemetry_token``), so remote units receive it in their capability
-  without ever holding the secret itself; it changes only when the human
-  secret rotates.
+- The OTLP relay ingress is telemetry, not a write path. Its bearer is derived
+  from the human secret (``telemetry_token``), so remote units receive it in
+  their capability without ever holding the secret itself; it changes only
+  when the human secret rotates.
 
 Settings-free: the launcher, the boot pass and the gateway read the same
 private store. Comparisons are constant-time over SHA-256 digests, so the
@@ -41,7 +39,7 @@ from base.host.private_storage import write_private_bytes
 _SCHEME = "Bearer "
 _TELEMETRY_LABEL = b"ava-telemetry-ingress/1"
 
-# home -> (ledger file identity, accepted digests); a rotation rewrites the
+# home -> (ledger file identity, accepted digests); activation rewrites the
 # ledger atomically, so its identity changes and the next request reloads.
 _acceptance_cache: dict[Path, tuple[tuple[int, int, int], dict[GenerationClass, str]]] = {}
 
@@ -114,7 +112,7 @@ def bearer_class(
 
 
 def api_token(home: Path, cls: GenerationClass) -> str:
-    """The active generation's `cls` API token (a pending or revoked one never)."""
+    """The active generation's `cls` API token (a pending one never)."""
     return read_secret(home, active_generation(home)).api.of(cls)
 
 
@@ -122,8 +120,8 @@ def acceptance(home: Path) -> dict[GenerationClass, str]:
     """Digests of the tokens the gateway at `home` accepts, by class.
 
     The ACTIVE generation's two tokens; none without a ledger (a remote-managed
-    plane has no generations) or while no generation is active (a rotation's
-    fence). A ledger or secret the store refuses raises.
+    plane has no generations) or while no generation is active (a birth not yet
+    admitted). A ledger or secret the store refuses raises.
     """
     path = ledger_path(home)
     try:

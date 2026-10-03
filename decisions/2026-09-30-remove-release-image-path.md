@@ -75,3 +75,6 @@ workflows.
 - A later need for image updates (several units that must move together, a
   fleet large enough to want rollback) starts from a new design against that
   need rather than from this code.
+
+Forward: [2026-10-03-retire-write-generation-rotation.md](2026-10-03-retire-write-generation-rotation.md) reverses the
+"keep the pieces that look reusable" choice for write-generation rotation.

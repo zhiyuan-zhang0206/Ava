@@ -101,10 +101,9 @@ def test_a_tampered_secret_is_never_delivered(home: Path, seeded: Any) -> None:
 def test_a_pending_generation_is_never_delivered(home: Path) -> None:
     from base.cluster.authority.ledger import begin_mint
 
-    birth = authority.BirthAuthority()
     groups = authority.Groups(gateway=authority.GATEWAY_GROUP, runner=authority.RUNNER_GROUP)
-    authority.create_ledger(home, owner="ava", groups=groups, authority=birth)
-    begin_mint(home, birth, encrypt=_encrypt)
+    authority.create_ledger(home, owner="ava", groups=groups)
+    begin_mint(home, encrypt=_encrypt)
     with pytest.raises(authority.LedgerRefusedError, match="no active generation"):
         authority.write_grant(home, "gateway")
 

@@ -114,7 +114,7 @@ def _add_db_authority_parser(
     install_unit_p = db_authority_sub.add_parser(
         "install-unit",
         help="on an initialized agent-runner unit: install a capability bundle `issue-unit` "
-        "sealed for it (a newer write generation after a rotation); the transport key comes "
+        "sealed for it (a fresh expiry, a rotated telemetry token); the transport key comes "
         "from AVA_DB_CAPABILITY_KEY and the bundle file is deleted once installed. Stop the "
         "unit first and `ava start` it after",
     )

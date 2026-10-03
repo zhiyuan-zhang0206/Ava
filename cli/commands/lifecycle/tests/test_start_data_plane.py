@@ -100,7 +100,7 @@ class _Ledger:
         self.owner = "ava"
         self.groups = "groups"
         self.active = SimpleNamespace(number=0) if active else None
-        self.unrevoked = SimpleNamespace(number=0)
+        self.generation = SimpleNamespace(number=0)
 
 
 class _Plane:
@@ -154,7 +154,6 @@ def plane(monkeypatch: pytest.MonkeyPatch) -> _Plane:
     monkeypatch.setattr(authority, "create_ledger", record("ledger"))
     monkeypatch.setattr(authority, "ensure_pooler_admin", record("pooler-admin"))
     monkeypatch.setattr(authority, "mint_generation", record("mint"))
-    monkeypatch.setattr(authority, "sweep", record("sweep"))
     monkeypatch.setattr(authority, "check_invariant", record("invariant"))
     monkeypatch.setattr(authority, "verify_generation", record("verify"))
 
@@ -176,7 +175,7 @@ def plane(monkeypatch: pytest.MonkeyPatch) -> _Plane:
     return recorded
 
 
-def test_ordinary_start_regrants_sweeps_and_checks_before_the_pooler(plane: _Plane) -> None:
+def test_ordinary_start_regrants_and_checks_before_the_pooler(plane: _Plane) -> None:
     from cli.commands.data_plane.bringup import complete_gateway_data_plane
 
     complete_gateway_data_plane()
@@ -186,7 +185,6 @@ def test_ordinary_start_regrants_sweeps_and_checks_before_the_pooler(plane: _Pla
         "memory-vectors",
         "groups",
         "monitor",
-        "sweep",
         "invariant",
         "pooler",
         "prove-logins",
@@ -227,7 +225,6 @@ def test_release_readiness_performs_no_schema_or_grant_writes(plane: _Plane) -> 
     complete_gateway_data_plane(refresh_schema=False)
     assert plane.calls == [
         "start",
-        "sweep",
         "invariant",
         "pooler",
         "prove-logins",
@@ -249,7 +246,7 @@ def test_invariant_violation_never_starts_pooler_or_marks_provisioned(
     monkeypatch.setattr(authority, "check_invariant", fail)
     with pytest.raises(authority.CatalogRefusedError, match="foreign grant"):
         complete_gateway_data_plane()
-    assert plane.calls == ["start", "extension", "memory-vectors", "groups", "monitor", "sweep"]
+    assert plane.calls == ["start", "extension", "memory-vectors", "groups", "monitor"]
 
 
 class _Authority:

@@ -170,8 +170,8 @@ def dump_source() -> str:
     A locally owned plane dumps as the administrator acting as the schema owner
     over the home's owner-only socket (`base.db.pg_admin`): password-free,
     custody-checked against this home's postmaster, and independent of the
-    write generations a rollout revokes, so a dump never needs, and never dies
-    with, a delivered login. A remote-managed plane's provider URL
+    write generation, so a dump never needs, and never dies with, a delivered
+    login. A remote-managed plane's provider URL
     (`direct_db_url`) is its only authority; `_passwordless_conninfo` keeps its
     password off argv. Both bypass PgBouncer: pg_dump holds one snapshot across
     many statements, which a transaction pooler cannot keep.

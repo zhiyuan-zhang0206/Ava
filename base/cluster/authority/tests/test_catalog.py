@@ -9,7 +9,6 @@ import pytest
 from psycopg import sql
 
 from base.cluster.authority import (
-    BirthAuthority,
     CatalogRefusedError,
     VacuumSkippedError,
     check_invariant,
@@ -186,4 +185,4 @@ def test_gateway_vacuum_requires_maintain_and_a_skip_is_a_failure(
 def test_retire_refuses_a_superuser_owner(authority_unborn: AuthorityCluster) -> None:
     cluster = authority_unborn
     with cluster.admin() as conn, pytest.raises(CatalogRefusedError, match="superuser"):
-        retire_legacy_logins(conn, owner="ava", groups=cluster.groups, authority=BirthAuthority())
+        retire_legacy_logins(conn, owner="ava", groups=cluster.groups)

@@ -71,10 +71,10 @@ requires its generated passwords. Application processes never hold schema-owner 
 the owner is NOLOGIN, and the write generation — one gateway and one runner login
 inheriting the NOLOGIN groups `ava_gateway` / `ava_runner`, plus one machine API token per class,
 recorded in `$AVA_HOME/db-authority/` — is delivered in the launch environment of the admitted runtime
-(`AVA_DB_URL`, `AVA_API_TOKEN`) and, at 0600, in `$AVA_HOME/run/ava-root/manifests.json` until the
-next start rewrites it, inert after the next fence; `.env` holds the credential-free endpoint. Machine
+(`AVA_DB_URL`, `AVA_API_TOKEN`) and, at 0600, in `$AVA_HOME/run/ava-root/manifests.json`, which the
+next start rewrites; `.env` holds the credential-free endpoint. Machine
 callers present their API token (an agent or runner process without it fails, never falling back to the secret):
-the gateway admits the active generation's tokens (never a revoked one), an ops server its generation's two.
+the gateway admits the active generation's tokens (never a pending one), an ops server its generation's two.
 Bootstrap serves configuration only: a remote agent-runner gets its runner login, API and telemetry tokens in a
 sealed bundle its start installs (`ava cluster db-authority issue-unit`), all shared across runner units, and
 never holds the human secret. A home born before this model (no ledger) is refused; no conversion exists.
@@ -100,7 +100,7 @@ checkout refuses every command (a dev CLI names a temporary `AVA_HOME`).
 remote agent-runner joins through it with `--gateway-url` and its
 capability bundle (`--db-capability`, the transport key in `AVA_DB_CAPABILITY_KEY`),
 which also authenticates it; it creates no gateway or local data plane. A later bundle
-(after a write-generation rotation) goes to `ava cluster db-authority install-unit`.
+(a fresh expiry, a rotated telemetry token) goes to `ava cluster db-authority install-unit`.
 A home describes only itself: its ports live in its own start intent, and no host
 file lists clusters; the state a host shares (vendored runtime, initdb template,
 PTY freeze, coding-session owners) lives in the home too. Initial
