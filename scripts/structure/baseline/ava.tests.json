@@ -6,9 +6,6 @@
     "ava/tests/test_web.py": 1046
   },
   "patch_targets": {
-    "ava/tests/test_log_batching.py::base.telemetry.emitter._jsonl_failures": 1,
-    "ava/tests/test_session_venv_projection.py::ava.shell.sessions._next_session_index_from_db": 2,
-    "ava/tests/test_session_venv_projection.py::ava.shell.sessions._record_ttl": 2,
-    "ava/tests/test_session_venv_projection.py::ava.shell.sessions._shell_prefix": 2
+    "ava/tests/test_log_batching.py::base.telemetry.emitter._jsonl_failures": 1
   }
 }
