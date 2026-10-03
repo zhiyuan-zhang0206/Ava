@@ -91,7 +91,6 @@ def _load_world() -> tuple[list[MetricSpec], list[MetricSpec], dict[str, Any]]:
     """Register the shipped plugin + core metrics from fresh modules and
     render — the registry-hygiene pattern the existing sync-lock test uses."""
     clear_registry()
-    catalog.clear_core_registry()
     for name in _PLUGINS:
         module_name = f"ava_builtins.plugins.{name}.metrics"
         module = sys.modules.get(module_name)
@@ -100,8 +99,6 @@ def _load_world() -> tuple[list[MetricSpec], list[MetricSpec], dict[str, Any]]:
                 importlib.import_module(module_name)
             else:
                 importlib.reload(module)
-    for module_name in catalog._CORE_DEFINITION_MODULES:
-        sys.modules.pop(module_name, None)
     core_specs = catalog.collect_core_metrics()
     plugin_specs = registered_metrics()
     return core_specs, plugin_specs, render_dashboard(core_specs, plugin_specs)

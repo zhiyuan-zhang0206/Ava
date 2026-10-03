@@ -2,19 +2,6 @@
   "ambient_state": {
     "base/telemetry/emitter.py::thread:_EventPipeline.__init__": 1,
     "base/telemetry/emitter_sync.py::thread:synchronize": 1,
-    "base/telemetry/metrics/core/catalog.py::ambient-container:_CORE_REGISTRY": 1,
-    "base/telemetry/metrics/core/ci.py::import-time-call:base.telemetry.metrics.core.catalog.register_core_metric": 5,
-    "base/telemetry/metrics/core/cost.py::import-time-call:base.telemetry.metrics.core.catalog.register_core_metric": 6,
-    "base/telemetry/metrics/core/dismissed.py::import-time-call:base.telemetry.metrics.core.catalog.register_core_metric": 2,
-    "base/telemetry/metrics/core/events.py::import-time-call:base.telemetry.metrics.core.catalog.register_core_metric": 4,
-    "base/telemetry/metrics/core/exec_envelope.py::import-time-call:base.telemetry.metrics.core.catalog.register_core_metric": 2,
-    "base/telemetry/metrics/core/fleet.py::import-time-call:base.telemetry.metrics.core.catalog.register_core_metric": 2,
-    "base/telemetry/metrics/core/frontend.py::import-time-call:base.telemetry.metrics.core.catalog.register_core_metric": 4,
-    "base/telemetry/metrics/core/host.py::import-time-call:base.telemetry.metrics.core.catalog.register_core_metric": 14,
-    "base/telemetry/metrics/core/observability.py::import-time-call:base.telemetry.metrics.core.catalog.register_core_metric": 18,
-    "base/telemetry/metrics/core/panels.py::import-time-call:base.telemetry.metrics.core.catalog.register_core_metric": 20,
-    "base/telemetry/metrics/core/panels.py::import-time-call:base.telemetry.metrics.core.panels._tps": 3,
-    "base/telemetry/metrics/core/pr_flow.py::import-time-call:base.telemetry.metrics.core.catalog.register_core_metric": 3,
     "base/telemetry/metrics/plugin_metrics.py::ambient-container:_REGISTRY": 1,
     "base/telemetry/otlp/telemetry_otlp.py::thread:_OtlpBackend._ensure": 1,
     "base/telemetry/tracing.py::thread:_start_arm_thread": 1,
@@ -37,9 +24,5 @@
   },
   "nesting": {
     "base/telemetry/tests/test_telemetry_otlp_exit_delivery.py::_sent_pairs": 6
-  },
-  "patch_targets": {
-    "base/telemetry/otlp/tests/test_telemetry_otlp.py::base.telemetry.otlp.telemetry_otlp._OtlpBackend": 5,
-    "base/telemetry/otlp/tests/test_telemetry_otlp.py::base.telemetry.otlp.telemetry_otlp._build_providers": 3
   }
 }

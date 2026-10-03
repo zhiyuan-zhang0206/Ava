@@ -65,7 +65,6 @@ Per-panel provenance:
 from __future__ import annotations
 
 from base.events.contract import DELIVERY_STALLED_KEYS, GATEWAY_LATENCY_KEYS, LLM_USAGE_KEYS
-from base.telemetry.metrics.core import catalog
 from base.telemetry.metrics.logql import CATEGORY_WITH_LEGACY_LOG, event_count
 from base.telemetry.metrics.plugin_metrics import MetricSpec, ThresholdStep
 
@@ -79,421 +78,6 @@ _GATEWAY_ATTR = {k: f"attributes_{k}" for k in GATEWAY_LATENCY_KEYS}
 
 # ── stat panels (8-wide, three per row) ───────────────────────────────
 
-catalog.register_core_metric(
-    MetricSpec(
-        name="core_llm_calls",
-        title="LLM calls",
-        time_basis="window",
-        event_name="llm_usage",
-        category="telemetry",
-        unit="short",
-        panel="stat",
-        query=event_count("category={category}", "$__range", matchers="event_name={event_name}"),
-        query_type="logql",
-        target_names=["calls"],
-        width=8,
-        height=4,
-        panel_id=1,
-        section="core",
-        order=0,
-    )
-)
-
-catalog.register_core_metric(
-    MetricSpec(
-        name="core_warning",
-        title="Warning",
-        time_basis="window",
-        event_name="warning",
-        category="telemetry",
-        unit="short",
-        panel="stat",
-        query=event_count(f'{CATEGORY_WITH_LEGACY_LOG} | level="warning"', "$__range"),
-        query_type="logql",
-        target_names=["warning"],
-        field_defaults={"color": {"mode": "fixed", "fixedColor": "orange"}},
-        width=8,
-        height=4,
-        panel_id=2,
-        section="core",
-        order=1,
-    )
-)
-
-catalog.register_core_metric(
-    MetricSpec(
-        name="core_error",
-        title="Error",
-        time_basis="window",
-        event_name="error",
-        category="telemetry",
-        unit="short",
-        panel="stat",
-        query=event_count(f'{CATEGORY_WITH_LEGACY_LOG} | level=~"error|critical"', "$__range"),
-        query_type="logql",
-        target_names=["error"],
-        options={"noValue": "0"},
-        field_defaults={"color": {"mode": "fixed", "fixedColor": "red"}},
-        width=8,
-        height=4,
-        panel_id=3,
-        section="core",
-        order=2,
-    )
-)
-
-catalog.register_core_metric(
-    MetricSpec(
-        name="core_unresolved_warning",
-        title="Unresolved Warning",
-        event_name="resolution_status",
-        category="telemetry",
-        unit="short",
-        panel="stat",
-        query="ava_resolution_status_unresolved_warnings_ratio",
-        query_type="promql",
-        target_names=["unresolved_warning"],
-        field_defaults={"color": {"mode": "fixed", "fixedColor": "orange"}},
-        width=8,
-        height=4,
-        panel_id=4,
-        section="core",
-        order=3,
-    )
-)
-
-catalog.register_core_metric(
-    MetricSpec(
-        name="core_unresolved_error",
-        title="Unresolved Error",
-        event_name="resolution_status",
-        category="telemetry",
-        unit="short",
-        panel="stat",
-        query="ava_resolution_status_unresolved_errors_ratio",
-        query_type="promql",
-        target_names=["unresolved_error"],
-        options={"noValue": "0"},
-        field_defaults={"color": {"mode": "fixed", "fixedColor": "red"}},
-        width=8,
-        height=4,
-        panel_id=5,
-        section="core",
-        order=4,
-    )
-)
-
-catalog.register_core_metric(
-    MetricSpec(
-        name="core_live_agents",
-        title="Live agents",
-        event_name="lifecycle",
-        category="telemetry",
-        unit="short",
-        panel="stat",
-        # NOT migratable to Loki: reads the live agents_meta table (agent
-        # lifecycle state), not the event stream — stays on the PG
-        # datasource by design (task #1280 note).
-        query="""SELECT count(*) AS "live agents" FROM agents_meta WHERE status IN ('running','idling')""",
-        width=8,
-        height=4,
-        panel_id=6,
-        section="core",
-        order=5,
-    )
-)
-
-
-catalog.register_core_metric(
-    MetricSpec(
-        name="core_tokens_24h",
-        title="Tokens",
-        time_basis="window",
-        event_name="llm_usage",
-        category="telemetry",
-        unit="short",
-        panel="stat",
-        query=(
-            f'sum(sum_over_time({{service_name="unknown_service", event_name={{event_name}}}} | json | '
-            f"category={{category}} | "
-            f"unwrap {_LLM_ATTR['in_total']} [$__range]))"
-            f' + sum(sum_over_time({{service_name="unknown_service", event_name={{event_name}}}} | json | '
-            f"category={{category}} | "
-            f"unwrap {_LLM_ATTR['out_total']} [$__range]))"
-        ),
-        query_type="logql",
-        target_names=["tokens"],
-        width=8,
-        height=4,
-        panel_id=8,
-        section="core",
-        order=7,
-    )
-)
-
-
-# ── chart panels (12-wide, two per row) ──────────────────────────────
-
-
-catalog.register_core_metric(
-    MetricSpec(
-        name="core_llm_input_tokens_24h",
-        title="LLM input tokens",
-        time_basis="window",
-        event_name="llm_usage",
-        category="telemetry",
-        unit="short",
-        panel="stat",
-        query=(
-            f'sum(sum_over_time({{service_name="unknown_service", event_name={{event_name}}}} | json | '
-            f"category={{category}} | "
-            f"unwrap {_LLM_ATTR['in_total']} [$__range]))"
-        ),
-        query_type="logql",
-        width=8,
-        height=4,
-        panel_id=44,
-        section="core",
-        order=8,
-        target_names=["input"],
-    )
-)
-
-catalog.register_core_metric(
-    MetricSpec(
-        name="core_llm_output_tokens_24h",
-        title="LLM output tokens",
-        time_basis="window",
-        event_name="llm_usage",
-        category="telemetry",
-        unit="short",
-        panel="stat",
-        query=(
-            f'sum(sum_over_time({{service_name="unknown_service", event_name={{event_name}}}} | json | '
-            f"category={{category}} | "
-            f"unwrap {_LLM_ATTR['out_total']} [$__range]))"
-        ),
-        query_type="logql",
-        width=8,
-        height=4,
-        panel_id=45,
-        section="core",
-        order=9,
-        target_names=["output"],
-    )
-)
-
-catalog.register_core_metric(
-    MetricSpec(
-        name="core_cache_hit_rate_24h",
-        title="Cache hit",
-        time_basis="window",
-        event_name="llm_usage",
-        category="telemetry",
-        unit="percent",
-        panel="stat",
-        query=(
-            f'100 * sum(sum_over_time({{service_name="unknown_service", event_name={{event_name}}}} | json | '
-            f"category={{category}} | "
-            f"unwrap {_LLM_ATTR['cache_read']} [$__range]))"
-            f' / sum(sum_over_time({{service_name="unknown_service", event_name={{event_name}}}} | json | '
-            f"category={{category}} | "
-            f"unwrap {_LLM_ATTR['in_total']} [$__range]))"
-        ),
-        query_type="logql",
-        field_defaults={"decimals": 2},
-        width=8,
-        height=4,
-        panel_id=46,
-        section="core",
-        order=10,
-        target_names=["cache hit %"],
-    )
-)
-
-catalog.register_core_metric(
-    MetricSpec(
-        name="core_avg_turn_duration_24h",
-        title="Avg turn duration",
-        time_basis="window",
-        event_name="turn_end",
-        category="telemetry",
-        unit="s",
-        panel="stat",
-        query=(
-            'sum(sum_over_time({service_name="unknown_service", event_name={event_name}} | json | '
-            'category={category} | attributes_ok="true" | '
-            "unwrap attributes_duration_seconds [$__range]))"
-            ' / sum(count_over_time({service_name="unknown_service", event_name={event_name}} | json | '
-            'category={category} | attributes_ok="true" [$__range]))'
-        ),
-        query_type="logql",
-        field_defaults={"decimals": 1},
-        width=8,
-        height=4,
-        panel_id=47,
-        section="core",
-        order=11,
-        target_names=["avg turn s"],
-    )
-)
-
-
-# ── chart panels (12-wide, two per row) ──────────────────────────────
-
-catalog.register_core_metric(
-    MetricSpec(
-        name="core_sse_backlog",
-        title="SSE backlog — delivery_stalled (by stall seconds)",
-        description="Window totals by stall-age bucket — explicit exception to the per-minute basis (categorized counts, not rates).",
-        event_name="delivery_stalled",
-        category="telemetry",
-        unit="short",
-        panel="barchart",
-        query=event_count(
-            f'category=~"{{category_re}}|log" | {_DELIVERY_ATTR["age_s"]} < 60',
-            "$__range",
-            matchers="event_name={event_name}",
-        ),
-        targets=[
-            event_count(
-                f'category=~"{{category_re}}|log" | {_DELIVERY_ATTR["age_s"]} >= 60 | {_DELIVERY_ATTR["age_s"]} < 600',
-                "$__range",
-                matchers="event_name={event_name}",
-            ),
-            event_count(
-                f'category=~"{{category_re}}|log" | {_DELIVERY_ATTR["age_s"]} >= 600',
-                "$__range",
-                matchers="event_name={event_name}",
-            ),
-        ],
-        query_type="logql",
-        target_names=["stalled <60s", "stalled 60-600s", "stalled >600s"],
-        thresholds=[ThresholdStep(color="red", value=80.0)],
-        panel_id=9,
-        section="Fleet",
-        order=4,
-    )
-)
-
-catalog.register_core_metric(
-    MetricSpec(
-        name="core_llm_throughput",
-        title="LLM throughput tokens/s",
-        event_name="llm_usage",
-        category="telemetry",
-        unit="tok/s",
-        panel="timeseries",
-        # tokens/s = rate of (in + out + reasoning) — rate over unwrap is
-        # the per-second sum, the LogQL equivalent of
-        # Σ(in+out+reasoning) ÷ interval_sec.
-        query=(
-            f'sum(rate({{service_name="unknown_service", event_name={{event_name}}}} | json | '
-            f"category={{category}} | "
-            f"unwrap {_LLM_ATTR['in_total']} [1m]))"
-            f' + sum(rate({{service_name="unknown_service", event_name={{event_name}}}} | json | '
-            f"category={{category}} | "
-            f"unwrap {_LLM_ATTR['out_total']} [1m]))"
-            f' + sum(rate({{service_name="unknown_service", event_name={{event_name}}}} | json | '
-            f"category={{category}} | "
-            f"unwrap {_LLM_ATTR['reasoning']} [1m]))"
-        ),
-        query_type="logql",
-        target_names=["tokens/s"],
-        custom={"fillOpacity": 25, "axisLabel": "tokens/s"},
-        thresholds=[ThresholdStep(color="red", value=80.0)],
-        panel_id=10,
-        section="LLM",
-        order=0,
-    )
-)
-
-catalog.register_core_metric(
-    MetricSpec(
-        name="core_token_output_reasoning",
-        title="Token usage — Output + Reasoning",
-        time_basis="per_minute",
-        description="Tokens per minute (5-minute buckets / 5): output and reasoning tokens.",
-        event_name="llm_usage",
-        category="telemetry",
-        unit="short",
-        panel="timeseries",
-        query=(
-            f'sum(sum_over_time({{service_name="unknown_service", event_name={{event_name}}}} | json | '
-            f"category={{category}} | "
-            f"unwrap {_LLM_ATTR['out_total']} [5m]))"
-        ),
-        targets=[
-            f'sum(sum_over_time({{service_name="unknown_service", event_name={{event_name}}}} | json | '
-            f"category={{category}} | "
-            f"unwrap {_LLM_ATTR['reasoning']} [5m]))"
-        ],
-        query_type="logql",
-        target_names=["out", "reasoning"],
-        custom={
-            "fillOpacity": 25,
-            "stacking": {"mode": "normal", "group": "A"},
-            "axisLabel": "tokens/min",
-        },
-        thresholds=[],
-        panel_id=11,
-        section="core",
-        order=17,
-    )
-)
-
-catalog.register_core_metric(
-    MetricSpec(
-        name="core_cache_hit",
-        title="Cache hit (token-weighted / max agent / min agent)",
-        event_name="llm_usage",
-        category="telemetry",
-        unit="percent",
-        panel="timeseries",
-        query=(
-            f'100 * sum(sum_over_time({{service_name="unknown_service", event_name={{event_name}}}} | json | '
-            f"category={{category}} | "
-            f"unwrap {_LLM_ATTR['cache_read']} [5m]))"
-            f' / sum(sum_over_time({{service_name="unknown_service", event_name={{event_name}}}} | json | '
-            f"category={{category}} | "
-            f"unwrap {_LLM_ATTR['in_total']} [5m]))"
-        ),
-        targets=[
-            # max agent: per-agent ratio, then the max across agents per bucket
-            (
-                f'100 * max(sum by (agent_id) (sum_over_time({{service_name="unknown_service", event_name={{event_name}}, agent_id!=""}} '
-                f"| json | category={{category}} | "
-                f"unwrap {_LLM_ATTR['cache_read']} [5m]))"
-                f' / sum by (agent_id) (sum_over_time({{service_name="unknown_service", event_name={{event_name}}, agent_id!=""}} '
-                f"| json | category={{category}} | "
-                f"unwrap {_LLM_ATTR['in_total']} [5m])))"
-            ),
-            (
-                f'100 * min(sum by (agent_id) (sum_over_time({{service_name="unknown_service", event_name={{event_name}}, agent_id!=""}} '
-                f"| json | category={{category}} | "
-                f"unwrap {_LLM_ATTR['cache_read']} [5m]))"
-                f' / sum by (agent_id) (sum_over_time({{service_name="unknown_service", event_name={{event_name}}, agent_id!=""}} '
-                f"| json | category={{category}} | "
-                f"unwrap {_LLM_ATTR['in_total']} [5m])))"
-            ),
-        ],
-        query_type="logql",
-        target_names=["overall", "max agent", "min agent"],
-        custom={"axisLabel": "cache hit %"},
-        thresholds=[ThresholdStep(color="red", value=80.0)],
-        panel_id=12,
-        section="core",
-        order=18,
-    )
-)
-
-
-# The three TPS panels share one shape: avg = Σ(tokens) / Σ(ms) * 1000 over
-# calls that carry the timing attribute; max/min = the fastest/slowest agent
-# per bucket (per-agent ratio, then max/min across agents). The existence
-# filter (SQL `attributes ? 'latency_ms'`) is `attributes_<key>!=""` — the
-# json-extracted label exists only on lines that carry the field.
-
 
 def _tps(
     name: str,
@@ -506,7 +90,7 @@ def _tps(
     panel_id: int,
     order: int,
     legend_label: str | None = None,
-) -> None:
+) -> MetricSpec:
     tok = _LLM_ATTR[attr_key]
     timing = _LLM_ATTR[attr_label]
     legend = legend_label or tps_label
@@ -526,220 +110,641 @@ def _tps(
         f'category={{category}} | {timing}!="" | '
         f"unwrap {timing} [5m])) * 1000"
     )
-    catalog.register_core_metric(
+    return MetricSpec(
+        name=name,
+        title=title,
+        description=description,
+        event_name="llm_usage",
+        category="telemetry",
+        unit="tok/s",
+        panel="timeseries",
+        query_type="logql",
+        query=avg,
+        targets=[f"max({per_agent})", f"min({per_agent})"],
+        target_names=[f"avg {legend}", f"max {legend}", f"min {legend}"],
+        custom={"fillOpacity": 25, "axisLabel": tps_label},
+        thresholds=[],
+        panel_id=panel_id,
+        section="LLM",
+        order=order,
+    )
+
+
+def core_metrics() -> list[MetricSpec]:
+    """This module's core metrics, in registration order."""
+    specs: list[MetricSpec] = []
+    specs.append(
         MetricSpec(
-            name=name,
-            title=title,
-            description=description,
+            name="core_llm_calls",
+            title="LLM calls",
+            time_basis="window",
+            event_name="llm_usage",
+            category="telemetry",
+            unit="short",
+            panel="stat",
+            query=event_count(
+                "category={category}", "$__range", matchers="event_name={event_name}"
+            ),
+            query_type="logql",
+            target_names=["calls"],
+            width=8,
+            height=4,
+            panel_id=1,
+            section="core",
+            order=0,
+        )
+    )
+
+    specs.append(
+        MetricSpec(
+            name="core_warning",
+            title="Warning",
+            time_basis="window",
+            event_name="warning",
+            category="telemetry",
+            unit="short",
+            panel="stat",
+            query=event_count(f'{CATEGORY_WITH_LEGACY_LOG} | level="warning"', "$__range"),
+            query_type="logql",
+            target_names=["warning"],
+            field_defaults={"color": {"mode": "fixed", "fixedColor": "orange"}},
+            width=8,
+            height=4,
+            panel_id=2,
+            section="core",
+            order=1,
+        )
+    )
+
+    specs.append(
+        MetricSpec(
+            name="core_error",
+            title="Error",
+            time_basis="window",
+            event_name="error",
+            category="telemetry",
+            unit="short",
+            panel="stat",
+            query=event_count(f'{CATEGORY_WITH_LEGACY_LOG} | level=~"error|critical"', "$__range"),
+            query_type="logql",
+            target_names=["error"],
+            options={"noValue": "0"},
+            field_defaults={"color": {"mode": "fixed", "fixedColor": "red"}},
+            width=8,
+            height=4,
+            panel_id=3,
+            section="core",
+            order=2,
+        )
+    )
+
+    specs.append(
+        MetricSpec(
+            name="core_unresolved_warning",
+            title="Unresolved Warning",
+            event_name="resolution_status",
+            category="telemetry",
+            unit="short",
+            panel="stat",
+            query="ava_resolution_status_unresolved_warnings_ratio",
+            query_type="promql",
+            target_names=["unresolved_warning"],
+            field_defaults={"color": {"mode": "fixed", "fixedColor": "orange"}},
+            width=8,
+            height=4,
+            panel_id=4,
+            section="core",
+            order=3,
+        )
+    )
+
+    specs.append(
+        MetricSpec(
+            name="core_unresolved_error",
+            title="Unresolved Error",
+            event_name="resolution_status",
+            category="telemetry",
+            unit="short",
+            panel="stat",
+            query="ava_resolution_status_unresolved_errors_ratio",
+            query_type="promql",
+            target_names=["unresolved_error"],
+            options={"noValue": "0"},
+            field_defaults={"color": {"mode": "fixed", "fixedColor": "red"}},
+            width=8,
+            height=4,
+            panel_id=5,
+            section="core",
+            order=4,
+        )
+    )
+
+    specs.append(
+        MetricSpec(
+            name="core_live_agents",
+            title="Live agents",
+            event_name="lifecycle",
+            category="telemetry",
+            unit="short",
+            panel="stat",
+            # NOT migratable to Loki: reads the live agents_meta table (agent
+            # lifecycle state), not the event stream — stays on the PG
+            # datasource by design (task #1280 note).
+            query="""SELECT count(*) AS "live agents" FROM agents_meta WHERE status IN ('running','idling')""",
+            width=8,
+            height=4,
+            panel_id=6,
+            section="core",
+            order=5,
+        )
+    )
+
+    specs.append(
+        MetricSpec(
+            name="core_tokens_24h",
+            title="Tokens",
+            time_basis="window",
+            event_name="llm_usage",
+            category="telemetry",
+            unit="short",
+            panel="stat",
+            query=(
+                f'sum(sum_over_time({{service_name="unknown_service", event_name={{event_name}}}} | json | '
+                f"category={{category}} | "
+                f"unwrap {_LLM_ATTR['in_total']} [$__range]))"
+                f' + sum(sum_over_time({{service_name="unknown_service", event_name={{event_name}}}} | json | '
+                f"category={{category}} | "
+                f"unwrap {_LLM_ATTR['out_total']} [$__range]))"
+            ),
+            query_type="logql",
+            target_names=["tokens"],
+            width=8,
+            height=4,
+            panel_id=8,
+            section="core",
+            order=7,
+        )
+    )
+
+    # ── chart panels (12-wide, two per row) ──────────────────────────────
+
+    specs.append(
+        MetricSpec(
+            name="core_llm_input_tokens_24h",
+            title="LLM input tokens",
+            time_basis="window",
+            event_name="llm_usage",
+            category="telemetry",
+            unit="short",
+            panel="stat",
+            query=(
+                f'sum(sum_over_time({{service_name="unknown_service", event_name={{event_name}}}} | json | '
+                f"category={{category}} | "
+                f"unwrap {_LLM_ATTR['in_total']} [$__range]))"
+            ),
+            query_type="logql",
+            width=8,
+            height=4,
+            panel_id=44,
+            section="core",
+            order=8,
+            target_names=["input"],
+        )
+    )
+
+    specs.append(
+        MetricSpec(
+            name="core_llm_output_tokens_24h",
+            title="LLM output tokens",
+            time_basis="window",
+            event_name="llm_usage",
+            category="telemetry",
+            unit="short",
+            panel="stat",
+            query=(
+                f'sum(sum_over_time({{service_name="unknown_service", event_name={{event_name}}}} | json | '
+                f"category={{category}} | "
+                f"unwrap {_LLM_ATTR['out_total']} [$__range]))"
+            ),
+            query_type="logql",
+            width=8,
+            height=4,
+            panel_id=45,
+            section="core",
+            order=9,
+            target_names=["output"],
+        )
+    )
+
+    specs.append(
+        MetricSpec(
+            name="core_cache_hit_rate_24h",
+            title="Cache hit",
+            time_basis="window",
+            event_name="llm_usage",
+            category="telemetry",
+            unit="percent",
+            panel="stat",
+            query=(
+                f'100 * sum(sum_over_time({{service_name="unknown_service", event_name={{event_name}}}} | json | '
+                f"category={{category}} | "
+                f"unwrap {_LLM_ATTR['cache_read']} [$__range]))"
+                f' / sum(sum_over_time({{service_name="unknown_service", event_name={{event_name}}}} | json | '
+                f"category={{category}} | "
+                f"unwrap {_LLM_ATTR['in_total']} [$__range]))"
+            ),
+            query_type="logql",
+            field_defaults={"decimals": 2},
+            width=8,
+            height=4,
+            panel_id=46,
+            section="core",
+            order=10,
+            target_names=["cache hit %"],
+        )
+    )
+
+    specs.append(
+        MetricSpec(
+            name="core_avg_turn_duration_24h",
+            title="Avg turn duration",
+            time_basis="window",
+            event_name="turn_end",
+            category="telemetry",
+            unit="s",
+            panel="stat",
+            query=(
+                'sum(sum_over_time({service_name="unknown_service", event_name={event_name}} | json | '
+                'category={category} | attributes_ok="true" | '
+                "unwrap attributes_duration_seconds [$__range]))"
+                ' / sum(count_over_time({service_name="unknown_service", event_name={event_name}} | json | '
+                'category={category} | attributes_ok="true" [$__range]))'
+            ),
+            query_type="logql",
+            field_defaults={"decimals": 1},
+            width=8,
+            height=4,
+            panel_id=47,
+            section="core",
+            order=11,
+            target_names=["avg turn s"],
+        )
+    )
+
+    # ── chart panels (12-wide, two per row) ──────────────────────────────
+
+    specs.append(
+        MetricSpec(
+            name="core_sse_backlog",
+            title="SSE backlog — delivery_stalled (by stall seconds)",
+            description="Window totals by stall-age bucket — explicit exception to the per-minute basis (categorized counts, not rates).",
+            event_name="delivery_stalled",
+            category="telemetry",
+            unit="short",
+            panel="barchart",
+            query=event_count(
+                f'category=~"{{category_re}}|log" | {_DELIVERY_ATTR["age_s"]} < 60',
+                "$__range",
+                matchers="event_name={event_name}",
+            ),
+            targets=[
+                event_count(
+                    f'category=~"{{category_re}}|log" | {_DELIVERY_ATTR["age_s"]} >= 60 | {_DELIVERY_ATTR["age_s"]} < 600',
+                    "$__range",
+                    matchers="event_name={event_name}",
+                ),
+                event_count(
+                    f'category=~"{{category_re}}|log" | {_DELIVERY_ATTR["age_s"]} >= 600',
+                    "$__range",
+                    matchers="event_name={event_name}",
+                ),
+            ],
+            query_type="logql",
+            target_names=["stalled <60s", "stalled 60-600s", "stalled >600s"],
+            thresholds=[ThresholdStep(color="red", value=80.0)],
+            panel_id=9,
+            section="Fleet",
+            order=4,
+        )
+    )
+
+    specs.append(
+        MetricSpec(
+            name="core_llm_throughput",
+            title="LLM throughput tokens/s",
             event_name="llm_usage",
             category="telemetry",
             unit="tok/s",
             panel="timeseries",
+            # tokens/s = rate of (in + out + reasoning) — rate over unwrap is
+            # the per-second sum, the LogQL equivalent of
+            # Σ(in+out+reasoning) ÷ interval_sec.
+            query=(
+                f'sum(rate({{service_name="unknown_service", event_name={{event_name}}}} | json | '
+                f"category={{category}} | "
+                f"unwrap {_LLM_ATTR['in_total']} [1m]))"
+                f' + sum(rate({{service_name="unknown_service", event_name={{event_name}}}} | json | '
+                f"category={{category}} | "
+                f"unwrap {_LLM_ATTR['out_total']} [1m]))"
+                f' + sum(rate({{service_name="unknown_service", event_name={{event_name}}}} | json | '
+                f"category={{category}} | "
+                f"unwrap {_LLM_ATTR['reasoning']} [1m]))"
+            ),
             query_type="logql",
-            query=avg,
-            targets=[f"max({per_agent})", f"min({per_agent})"],
-            target_names=[f"avg {legend}", f"max {legend}", f"min {legend}"],
-            custom={"fillOpacity": 25, "axisLabel": tps_label},
-            thresholds=[],
-            panel_id=panel_id,
+            target_names=["tokens/s"],
+            custom={"fillOpacity": 25, "axisLabel": "tokens/s"},
+            thresholds=[ThresholdStep(color="red", value=80.0)],
+            panel_id=10,
             section="LLM",
-            order=order,
+            order=0,
         )
     )
 
-
-_tps(
-    "core_input_tps",
-    "Input TPS (avg / max agent / min agent)",
-    "Input throughput = Σ(in_total) ÷ Σ(latency_sec), tok/s. in_total is the "
-    "log_llm_usage total input tokens (incl. cache_read; ~99.5% cache hits "
-    "over the last 24h, so input TPS ≈ cache/prefill read throughput). "
-    "latency is the llm_usage wall-clock (latency_ms). avg = token-weighted "
-    "over all calls; max/min = the fastest/slowest agent per bucket "
-    "(agent_id IS NOT NULL, only buckets with valid calls count).",
-    "in_total",
-    "latency_ms",
-    "in tokens/s",
-    panel_id=13,
-    order=1,
-)
-
-_tps(
-    "core_output_tps",
-    "Output TPS (avg / max agent / min agent)",
-    "Output throughput = Σ(out_total) ÷ Σ(latency_sec), tok/s. out_total is "
-    "the log_llm_usage total output tokens, incl. reasoning (Anthropic "
-    "thinking / OpenAI reasoning both count into output_tokens; "
-    "base/lm/usage.py does not add them again) — i.e. pure decode "
-    "generation speed (~79 tok/s measured over the last 24h). latency is the "
-    "llm_usage wall-clock (latency_ms). avg = token-weighted over all calls; "
-    "max/min = the fastest/slowest agent per bucket (agent_id IS NOT NULL, "
-    "only buckets with valid calls count).",
-    "out_total",
-    "latency_ms",
-    "out tokens/s",
-    panel_id=14,
-    order=2,
-)
-
-_tps(
-    "core_gen_stage_tps",
-    "Gen-stage output TPS (avg / max agent / min agent)",
-    "Gen-stage output throughput = Σ(out_total) ÷ Σ(decode_sec), tok/s. "
-    "decode_ms is the 2026-08-04 new instrumentation (stream last chunk − "
-    "first chunk arrival, excluding network/queue/prefill); out_total is the "
-    "log_llm_usage total output tokens (incl. reasoning). Only calls after "
-    "the decode_ms instrumentation went live are counted (attributes ? "
-    "'decode_ms'); non-streaming fallback / empty-stream calls with "
-    "decode_ms=NULL do not count. avg = token-weighted over all calls; "
-    "max/min = the fastest/slowest agent per bucket (agent_id IS NOT NULL, "
-    "only buckets with valid calls count).",
-    "out_total",
-    "decode_ms",
-    "out tokens/s",
-    panel_id=15,
-    order=3,
-    legend_label="gen out tokens/s",
-)
-
-catalog.register_core_metric(
-    MetricSpec(
-        name="core_llm_calls_per_bucket",
-        title="LLM calls / minute",
-        description="LLM usage calls in 30-minute buckets, normalized to a per-minute rate (bucket count / 30).",
-        event_name="llm_usage",
-        category="telemetry",
-        unit="short",
-        panel="barchart",
-        query=event_count("category={category}", "30m", matchers="event_name={event_name}")
-        + " / 30",
-        query_type="logql",
-        target_names=["calls"],
-        # The legacy red-80 step was constant-red noise on the 30-minute
-        # bucket (mean 660); no meaningful per-minute red line — same
-        # suppress-the-default call as the TPS panels.
-        thresholds=[],
-        panel_id=16,
-        section="LLM",
-        order=4,
+    specs.append(
+        MetricSpec(
+            name="core_token_output_reasoning",
+            title="Token usage — Output + Reasoning",
+            time_basis="per_minute",
+            description="Tokens per minute (5-minute buckets / 5): output and reasoning tokens.",
+            event_name="llm_usage",
+            category="telemetry",
+            unit="short",
+            panel="timeseries",
+            query=(
+                f'sum(sum_over_time({{service_name="unknown_service", event_name={{event_name}}}} | json | '
+                f"category={{category}} | "
+                f"unwrap {_LLM_ATTR['out_total']} [5m]))"
+            ),
+            targets=[
+                f'sum(sum_over_time({{service_name="unknown_service", event_name={{event_name}}}} | json | '
+                f"category={{category}} | "
+                f"unwrap {_LLM_ATTR['reasoning']} [5m]))"
+            ],
+            query_type="logql",
+            target_names=["out", "reasoning"],
+            custom={
+                "fillOpacity": 25,
+                "stacking": {"mode": "normal", "group": "A"},
+                "axisLabel": "tokens/min",
+            },
+            thresholds=[],
+            panel_id=11,
+            section="core",
+            order=17,
+        )
     )
-)
 
-catalog.register_core_metric(
-    MetricSpec(
-        name="core_event_health",
-        title="Event health — WARNING+ERROR vs total",
-        time_basis="per_minute",
-        description="Per-minute event counts — 5-minute count buckets normalized to per minute (bucket count / 5): warning+error+critical vs all telemetry/log events.",
-        event_name="event",
-        category="telemetry",
-        unit="short",
-        panel="timeseries",
-        query=event_count(f'{CATEGORY_WITH_LEGACY_LOG} | level=~"warning|error|critical"', "5m"),
-        targets=[event_count(CATEGORY_WITH_LEGACY_LOG, "5m")],
-        query_type="logql",
-        target_names=["warn+error", "total"],
-        custom={"axisLabel": "events/min"},
-        # 80 per 5-minute bucket, rescaled to the per-minute basis (80 / 5).
-        thresholds=[ThresholdStep(color="red", value=16.0)],
-        panel_id=17,
-        section="core",
-        order=14,
+    specs.append(
+        MetricSpec(
+            name="core_cache_hit",
+            title="Cache hit (token-weighted / max agent / min agent)",
+            event_name="llm_usage",
+            category="telemetry",
+            unit="percent",
+            panel="timeseries",
+            query=(
+                f'100 * sum(sum_over_time({{service_name="unknown_service", event_name={{event_name}}}} | json | '
+                f"category={{category}} | "
+                f"unwrap {_LLM_ATTR['cache_read']} [5m]))"
+                f' / sum(sum_over_time({{service_name="unknown_service", event_name={{event_name}}}} | json | '
+                f"category={{category}} | "
+                f"unwrap {_LLM_ATTR['in_total']} [5m]))"
+            ),
+            targets=[
+                # max agent: per-agent ratio, then the max across agents per bucket
+                (
+                    f'100 * max(sum by (agent_id) (sum_over_time({{service_name="unknown_service", event_name={{event_name}}, agent_id!=""}} '
+                    f"| json | category={{category}} | "
+                    f"unwrap {_LLM_ATTR['cache_read']} [5m]))"
+                    f' / sum by (agent_id) (sum_over_time({{service_name="unknown_service", event_name={{event_name}}, agent_id!=""}} '
+                    f"| json | category={{category}} | "
+                    f"unwrap {_LLM_ATTR['in_total']} [5m])))"
+                ),
+                (
+                    f'100 * min(sum by (agent_id) (sum_over_time({{service_name="unknown_service", event_name={{event_name}}, agent_id!=""}} '
+                    f"| json | category={{category}} | "
+                    f"unwrap {_LLM_ATTR['cache_read']} [5m]))"
+                    f' / sum by (agent_id) (sum_over_time({{service_name="unknown_service", event_name={{event_name}}, agent_id!=""}} '
+                    f"| json | category={{category}} | "
+                    f"unwrap {_LLM_ATTR['in_total']} [5m])))"
+                ),
+            ],
+            query_type="logql",
+            target_names=["overall", "max agent", "min agent"],
+            custom={"axisLabel": "cache hit %"},
+            thresholds=[ThresholdStep(color="red", value=80.0)],
+            panel_id=12,
+            section="core",
+            order=18,
+        )
     )
-)
 
-catalog.register_core_metric(
-    MetricSpec(
-        name="core_token_input",
-        title="Token usage — Input",
-        time_basis="per_minute",
-        description="Tokens per minute (5-minute buckets / 5): input tokens.",
-        event_name="llm_usage",
-        category="telemetry",
-        unit="short",
-        panel="timeseries",
-        query=(
-            f'sum(sum_over_time({{service_name="unknown_service", event_name={{event_name}}}} | json | '
-            f"category={{category}} | "
-            f"unwrap {_LLM_ATTR['in_total']} [5m]))"
-        ),
-        query_type="logql",
-        target_names=["in"],
-        custom={
-            "fillOpacity": 25,
-            "stacking": {"mode": "normal", "group": "A"},
-            "axisLabel": "tokens/min",
-        },
-        thresholds=[],
-        panel_id=18,
-        section="core",
-        order=16,
+    # The three TPS panels share one shape: avg = Σ(tokens) / Σ(ms) * 1000 over
+    # calls that carry the timing attribute; max/min = the fastest/slowest agent
+    # per bucket (per-agent ratio, then max/min across agents). The existence
+    # filter (SQL `attributes ? 'latency_ms'`) is `attributes_<key>!=""` — the
+    # json-extracted label exists only on lines that carry the field.
+
+    specs.append(
+        _tps(
+            "core_input_tps",
+            "Input TPS (avg / max agent / min agent)",
+            "Input throughput = Σ(in_total) ÷ Σ(latency_sec), tok/s. in_total is the "
+            "log_llm_usage total input tokens (incl. cache_read; ~99.5% cache hits "
+            "over the last 24h, so input TPS ≈ cache/prefill read throughput). "
+            "latency is the llm_usage wall-clock (latency_ms). avg = token-weighted "
+            "over all calls; max/min = the fastest/slowest agent per bucket "
+            "(agent_id IS NOT NULL, only buckets with valid calls count).",
+            "in_total",
+            "latency_ms",
+            "in tokens/s",
+            panel_id=13,
+            order=1,
+        )
     )
-)
 
-
-# ── gateway latency (Task #1091) ─────────────────────────────────────────
-# Producer: gateway/middleware/latency.py — one `gateway_latency` event per (route, 60s
-# bucket) carrying p50/p95/p99/max/count. The panels below read the aggregates;
-# the first is the cluster-wide overview, the second the per-route p95/p99.
-
-catalog.register_core_metric(
-    MetricSpec(
-        name="core_gateway_latency",
-        title="Gateway latency — p50/p95/p99/max",
-        event_name="gateway_latency",
-        category="telemetry",
-        unit="ms",
-        panel="timeseries",
-        query=(
-            f'max(max_over_time({{service_name="unknown_service", event_name={{event_name}}}} | json | '
-            f'category=~"{{category_re}}|log" | '
-            f"unwrap {_GATEWAY_ATTR['p50_ms']} [1m]))"
-        ),
-        targets=[
-            f'max(max_over_time({{service_name="unknown_service", event_name={{event_name}}}} | json | '
-            f'category=~"{{category_re}}|log" | '
-            f"unwrap {_GATEWAY_ATTR['p95_ms']} [1m]))",
-            f'max(max_over_time({{service_name="unknown_service", event_name={{event_name}}}} | json | '
-            f'category=~"{{category_re}}|log" | '
-            f"unwrap {_GATEWAY_ATTR['p99_ms']} [1m]))",
-            f'max(max_over_time({{service_name="unknown_service", event_name={{event_name}}}} | json | '
-            f'category=~"{{category_re}}|log" | '
-            f"unwrap {_GATEWAY_ATTR['max_ms']} [1m]))",
-        ],
-        query_type="logql",
-        target_names=["p50", "p95", "p99", "max"],
-        custom={"axisLabel": "ms"},
-        panel_id=19,
-        section="Gateway & execution",
-        order=0,
+    specs.append(
+        _tps(
+            "core_output_tps",
+            "Output TPS (avg / max agent / min agent)",
+            "Output throughput = Σ(out_total) ÷ Σ(latency_sec), tok/s. out_total is "
+            "the log_llm_usage total output tokens, incl. reasoning (Anthropic "
+            "thinking / OpenAI reasoning both count into output_tokens; "
+            "base/lm/usage.py does not add them again) — i.e. pure decode "
+            "generation speed (~79 tok/s measured over the last 24h). latency is the "
+            "llm_usage wall-clock (latency_ms). avg = token-weighted over all calls; "
+            "max/min = the fastest/slowest agent per bucket (agent_id IS NOT NULL, "
+            "only buckets with valid calls count).",
+            "out_total",
+            "latency_ms",
+            "out tokens/s",
+            panel_id=14,
+            order=2,
+        )
     )
-)
 
-catalog.register_core_metric(
-    MetricSpec(
-        name="core_gateway_latency_by_route",
-        title="Gateway latency p95/p99 by route",
-        event_name="gateway_latency",
-        category="telemetry",
-        unit="ms",
-        panel="timeseries",
-        # One series per route — the attributes_route label carries the name.
-        query_type="logql",
-        query=(
-            f'max by (attributes_route) (max_over_time({{service_name="unknown_service", event_name={{event_name}}}} | json | '
-            f'category=~"{{category_re}}|log" | '
-            f"unwrap {_GATEWAY_ATTR['p95_ms']} [1m]))"
-        ),
-        targets=[
-            f'max by (attributes_route) (max_over_time({{service_name="unknown_service", event_name={{event_name}}}} | json | '
-            f'category=~"{{category_re}}|log" | '
-            f"unwrap {_GATEWAY_ATTR['p99_ms']} [1m]))"
-        ],
-        target_names=["p95 {{attributes_route}}", "p99 {{attributes_route}}"],
-        custom={"axisLabel": "ms"},
-        panel_id=20,
-        section="Gateway & execution",
-        order=1,
+    specs.append(
+        _tps(
+            "core_gen_stage_tps",
+            "Gen-stage output TPS (avg / max agent / min agent)",
+            "Gen-stage output throughput = Σ(out_total) ÷ Σ(decode_sec), tok/s. "
+            "decode_ms is the 2026-08-04 new instrumentation (stream last chunk − "
+            "first chunk arrival, excluding network/queue/prefill); out_total is the "
+            "log_llm_usage total output tokens (incl. reasoning). Only calls after "
+            "the decode_ms instrumentation went live are counted (attributes ? "
+            "'decode_ms'); non-streaming fallback / empty-stream calls with "
+            "decode_ms=NULL do not count. avg = token-weighted over all calls; "
+            "max/min = the fastest/slowest agent per bucket (agent_id IS NOT NULL, "
+            "only buckets with valid calls count).",
+            "out_total",
+            "decode_ms",
+            "out tokens/s",
+            panel_id=15,
+            order=3,
+            legend_label="gen out tokens/s",
+        )
     )
-)
+
+    specs.append(
+        MetricSpec(
+            name="core_llm_calls_per_bucket",
+            title="LLM calls / minute",
+            description="LLM usage calls in 30-minute buckets, normalized to a per-minute rate (bucket count / 30).",
+            event_name="llm_usage",
+            category="telemetry",
+            unit="short",
+            panel="barchart",
+            query=event_count("category={category}", "30m", matchers="event_name={event_name}")
+            + " / 30",
+            query_type="logql",
+            target_names=["calls"],
+            # The legacy red-80 step was constant-red noise on the 30-minute
+            # bucket (mean 660); no meaningful per-minute red line — same
+            # suppress-the-default call as the TPS panels.
+            thresholds=[],
+            panel_id=16,
+            section="LLM",
+            order=4,
+        )
+    )
+
+    specs.append(
+        MetricSpec(
+            name="core_event_health",
+            title="Event health — WARNING+ERROR vs total",
+            time_basis="per_minute",
+            description="Per-minute event counts — 5-minute count buckets normalized to per minute (bucket count / 5): warning+error+critical vs all telemetry/log events.",
+            event_name="event",
+            category="telemetry",
+            unit="short",
+            panel="timeseries",
+            query=event_count(
+                f'{CATEGORY_WITH_LEGACY_LOG} | level=~"warning|error|critical"', "5m"
+            ),
+            targets=[event_count(CATEGORY_WITH_LEGACY_LOG, "5m")],
+            query_type="logql",
+            target_names=["warn+error", "total"],
+            custom={"axisLabel": "events/min"},
+            # 80 per 5-minute bucket, rescaled to the per-minute basis (80 / 5).
+            thresholds=[ThresholdStep(color="red", value=16.0)],
+            panel_id=17,
+            section="core",
+            order=14,
+        )
+    )
+
+    specs.append(
+        MetricSpec(
+            name="core_token_input",
+            title="Token usage — Input",
+            time_basis="per_minute",
+            description="Tokens per minute (5-minute buckets / 5): input tokens.",
+            event_name="llm_usage",
+            category="telemetry",
+            unit="short",
+            panel="timeseries",
+            query=(
+                f'sum(sum_over_time({{service_name="unknown_service", event_name={{event_name}}}} | json | '
+                f"category={{category}} | "
+                f"unwrap {_LLM_ATTR['in_total']} [5m]))"
+            ),
+            query_type="logql",
+            target_names=["in"],
+            custom={
+                "fillOpacity": 25,
+                "stacking": {"mode": "normal", "group": "A"},
+                "axisLabel": "tokens/min",
+            },
+            thresholds=[],
+            panel_id=18,
+            section="core",
+            order=16,
+        )
+    )
+
+    # ── gateway latency (Task #1091) ─────────────────────────────────────────
+    # Producer: gateway/middleware/latency.py — one `gateway_latency` event per (route, 60s
+    # bucket) carrying p50/p95/p99/max/count. The panels below read the aggregates;
+    # the first is the cluster-wide overview, the second the per-route p95/p99.
+
+    specs.append(
+        MetricSpec(
+            name="core_gateway_latency",
+            title="Gateway latency — p50/p95/p99/max",
+            event_name="gateway_latency",
+            category="telemetry",
+            unit="ms",
+            panel="timeseries",
+            query=(
+                f'max(max_over_time({{service_name="unknown_service", event_name={{event_name}}}} | json | '
+                f'category=~"{{category_re}}|log" | '
+                f"unwrap {_GATEWAY_ATTR['p50_ms']} [1m]))"
+            ),
+            targets=[
+                f'max(max_over_time({{service_name="unknown_service", event_name={{event_name}}}} | json | '
+                f'category=~"{{category_re}}|log" | '
+                f"unwrap {_GATEWAY_ATTR['p95_ms']} [1m]))",
+                f'max(max_over_time({{service_name="unknown_service", event_name={{event_name}}}} | json | '
+                f'category=~"{{category_re}}|log" | '
+                f"unwrap {_GATEWAY_ATTR['p99_ms']} [1m]))",
+                f'max(max_over_time({{service_name="unknown_service", event_name={{event_name}}}} | json | '
+                f'category=~"{{category_re}}|log" | '
+                f"unwrap {_GATEWAY_ATTR['max_ms']} [1m]))",
+            ],
+            query_type="logql",
+            target_names=["p50", "p95", "p99", "max"],
+            custom={"axisLabel": "ms"},
+            panel_id=19,
+            section="Gateway & execution",
+            order=0,
+        )
+    )
+
+    specs.append(
+        MetricSpec(
+            name="core_gateway_latency_by_route",
+            title="Gateway latency p95/p99 by route",
+            event_name="gateway_latency",
+            category="telemetry",
+            unit="ms",
+            panel="timeseries",
+            # One series per route — the attributes_route label carries the name.
+            query_type="logql",
+            query=(
+                f'max by (attributes_route) (max_over_time({{service_name="unknown_service", event_name={{event_name}}}} | json | '
+                f'category=~"{{category_re}}|log" | '
+                f"unwrap {_GATEWAY_ATTR['p95_ms']} [1m]))"
+            ),
+            targets=[
+                f'max by (attributes_route) (max_over_time({{service_name="unknown_service", event_name={{event_name}}}} | json | '
+                f'category=~"{{category_re}}|log" | '
+                f"unwrap {_GATEWAY_ATTR['p99_ms']} [1m]))"
+            ],
+            target_names=["p95 {{attributes_route}}", "p99 {{attributes_route}}"],
+            custom={"axisLabel": "ms"},
+            panel_id=20,
+            section="Gateway & execution",
+            order=1,
+        )
+    )
+    return specs

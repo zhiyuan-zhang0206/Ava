@@ -9,7 +9,6 @@ outcomes other bucket (PM ruling 2026-08-31).
 
 from __future__ import annotations
 
-from base.telemetry.metrics.core import catalog
 from base.telemetry.metrics.plugin_metrics import MetricSpec
 
 # The transfer-cost display split from the Exec outcomes other bucket (PM
@@ -18,103 +17,108 @@ from base.telemetry.metrics.plugin_metrics import MetricSpec
 # envelope/op — reads parse and writes dump on different paths, so a one-sided
 # regression must show on its own series.
 
-catalog.register_core_metric(
-    MetricSpec(
-        name="ava_obs_exec_envelope_size",
-        title="Exec envelope size (bytes)",
-        description=(
-            "Exec envelope transfer size — serialized request/result envelope "
-            "bytes moved between the agent and its exec child, unwrapped from "
-            "the exec_envelope event's size_bytes attribute "
-            "(agent/graph/exec/protocol.py::_log_envelope_transfer). p50/p95 "
-            "percentiles plus max, grouped by envelope/op; a rising request "
-            "band is state/payload inflation. The event is excluded from the "
-            "Exec outcomes other bucket (PM ruling 2026-08-31) and displays "
-            "here instead. event_name='exec_envelope', category='telemetry'."
-        ),
-        event_name="exec_envelope",
-        category="telemetry",
-        unit="bytes",
-        panel="timeseries",
-        query_type="logql",
-        query=(
-            'quantile_over_time(0.5, {service_name="unknown_service", '
-            "event_name={event_name}} | json | "
-            "category={category} | unwrap attributes_size_bytes "
-            "[$__interval]) by (attributes_envelope, attributes_op)"
-        ),
-        targets=[
-            (
-                'quantile_over_time(0.95, {service_name="unknown_service", '
-                "event_name={event_name}} | json | "
-                "category={category} | unwrap attributes_size_bytes "
-                "[$__interval]) by (attributes_envelope, attributes_op)"
-            ),
-            (
-                'max_over_time({service_name="unknown_service", '
-                "event_name={event_name}} | json | "
-                "category={category} | unwrap attributes_size_bytes "
-                "[$__interval]) by (attributes_envelope, attributes_op)"
-            ),
-        ],
-        target_names=[
-            "p50 {{attributes_envelope}}/{{attributes_op}}",
-            "p95 {{attributes_envelope}}/{{attributes_op}}",
-            "max {{attributes_envelope}}/{{attributes_op}}",
-        ],
-        output=["grafana"],
-        panel_id=54,
-        section="Gateway & execution",
-        order=12,
-    )
-)
 
-catalog.register_core_metric(
-    MetricSpec(
-        name="ava_obs_exec_envelope_serialize",
-        title="Exec envelope serialize (ms)",
-        description=(
-            "Exec envelope serialization cost — milliseconds spent "
-            "serializing or parsing one envelope, unwrapped from the "
-            "exec_envelope event's serialize_ms attribute (measured around "
-            "the transfer in _log_envelope_transfer). avg/p95/max, grouped "
-            "by envelope/op; a write-side step is a dump-cost regression, a "
-            "read-side one a parse-cost regression. "
-            "event_name='exec_envelope', category='telemetry'."
-        ),
-        event_name="exec_envelope",
-        category="telemetry",
-        unit="ms",
-        panel="timeseries",
-        query_type="logql",
-        query=(
-            'avg_over_time({service_name="unknown_service", '
-            "event_name={event_name}} | json | "
-            "category={category} | unwrap attributes_serialize_ms "
-            "[$__interval]) by (attributes_envelope, attributes_op)"
-        ),
-        targets=[
-            (
-                'quantile_over_time(0.95, {service_name="unknown_service", '
+def core_metrics() -> list[MetricSpec]:
+    """This module's core metrics, in registration order."""
+    specs: list[MetricSpec] = []
+    specs.append(
+        MetricSpec(
+            name="ava_obs_exec_envelope_size",
+            title="Exec envelope size (bytes)",
+            description=(
+                "Exec envelope transfer size — serialized request/result envelope "
+                "bytes moved between the agent and its exec child, unwrapped from "
+                "the exec_envelope event's size_bytes attribute "
+                "(agent/graph/exec/protocol.py::_log_envelope_transfer). p50/p95 "
+                "percentiles plus max, grouped by envelope/op; a rising request "
+                "band is state/payload inflation. The event is excluded from the "
+                "Exec outcomes other bucket (PM ruling 2026-08-31) and displays "
+                "here instead. event_name='exec_envelope', category='telemetry'."
+            ),
+            event_name="exec_envelope",
+            category="telemetry",
+            unit="bytes",
+            panel="timeseries",
+            query_type="logql",
+            query=(
+                'quantile_over_time(0.5, {service_name="unknown_service", '
                 "event_name={event_name}} | json | "
-                "category={category} | unwrap attributes_serialize_ms "
+                "category={category} | unwrap attributes_size_bytes "
                 "[$__interval]) by (attributes_envelope, attributes_op)"
             ),
-            (
-                'max_over_time({service_name="unknown_service", '
-                "event_name={event_name}} | json | "
-                "category={category} | unwrap attributes_serialize_ms "
-                "[$__interval]) by (attributes_envelope, attributes_op)"
-            ),
-        ],
-        target_names=[
-            "avg {{attributes_envelope}}/{{attributes_op}}",
-            "p95 {{attributes_envelope}}/{{attributes_op}}",
-            "max {{attributes_envelope}}/{{attributes_op}}",
-        ],
-        output=["grafana"],
-        panel_id=55,
-        section="Gateway & execution",
-        order=13,
+            targets=[
+                (
+                    'quantile_over_time(0.95, {service_name="unknown_service", '
+                    "event_name={event_name}} | json | "
+                    "category={category} | unwrap attributes_size_bytes "
+                    "[$__interval]) by (attributes_envelope, attributes_op)"
+                ),
+                (
+                    'max_over_time({service_name="unknown_service", '
+                    "event_name={event_name}} | json | "
+                    "category={category} | unwrap attributes_size_bytes "
+                    "[$__interval]) by (attributes_envelope, attributes_op)"
+                ),
+            ],
+            target_names=[
+                "p50 {{attributes_envelope}}/{{attributes_op}}",
+                "p95 {{attributes_envelope}}/{{attributes_op}}",
+                "max {{attributes_envelope}}/{{attributes_op}}",
+            ],
+            output=["grafana"],
+            panel_id=54,
+            section="Gateway & execution",
+            order=12,
+        )
     )
-)
+
+    specs.append(
+        MetricSpec(
+            name="ava_obs_exec_envelope_serialize",
+            title="Exec envelope serialize (ms)",
+            description=(
+                "Exec envelope serialization cost — milliseconds spent "
+                "serializing or parsing one envelope, unwrapped from the "
+                "exec_envelope event's serialize_ms attribute (measured around "
+                "the transfer in _log_envelope_transfer). avg/p95/max, grouped "
+                "by envelope/op; a write-side step is a dump-cost regression, a "
+                "read-side one a parse-cost regression. "
+                "event_name='exec_envelope', category='telemetry'."
+            ),
+            event_name="exec_envelope",
+            category="telemetry",
+            unit="ms",
+            panel="timeseries",
+            query_type="logql",
+            query=(
+                'avg_over_time({service_name="unknown_service", '
+                "event_name={event_name}} | json | "
+                "category={category} | unwrap attributes_serialize_ms "
+                "[$__interval]) by (attributes_envelope, attributes_op)"
+            ),
+            targets=[
+                (
+                    'quantile_over_time(0.95, {service_name="unknown_service", '
+                    "event_name={event_name}} | json | "
+                    "category={category} | unwrap attributes_serialize_ms "
+                    "[$__interval]) by (attributes_envelope, attributes_op)"
+                ),
+                (
+                    'max_over_time({service_name="unknown_service", '
+                    "event_name={event_name}} | json | "
+                    "category={category} | unwrap attributes_serialize_ms "
+                    "[$__interval]) by (attributes_envelope, attributes_op)"
+                ),
+            ],
+            target_names=[
+                "avg {{attributes_envelope}}/{{attributes_op}}",
+                "p95 {{attributes_envelope}}/{{attributes_op}}",
+                "max {{attributes_envelope}}/{{attributes_op}}",
+            ],
+            output=["grafana"],
+            panel_id=55,
+            section="Gateway & execution",
+            order=13,
+        )
+    )
+    return specs

@@ -17,9 +17,14 @@ from __future__ import annotations
 
 import pytest
 
-from base.telemetry.metrics.core import catalog
+from base.telemetry.metrics.core import catalog, exec_envelope, frontend, observability
 from base.telemetry.metrics.logql import validate_logql
-from base.telemetry.metrics.plugin_metrics import InvalidMetricQuery, render_query, render_targets
+from base.telemetry.metrics.plugin_metrics import (
+    InvalidMetricQuery,
+    MetricSpec,
+    render_query,
+    render_targets,
+)
 
 EXPECTED = {
     # name -> (panel, output, event_name, category, n_targets)
@@ -99,39 +104,27 @@ EXPECTED = {
 }
 
 
-def _load_pack() -> None:
-    """Import the core observability definition modules (fresh core registry
-    each call). The pack spans three modules: the task #3697 S1 line-budget
-    split moved the frontend telemetry specs to ``frontend``,
-    and the #2174 split moved the exec-envelope pair to
-    ``exec_envelope``."""
-    import importlib
-    import sys
-
-    catalog.clear_core_registry()
-    for module_name in (
-        "base.telemetry.metrics.core.observability",
-        "base.telemetry.metrics.core.exec_envelope",
-        "base.telemetry.metrics.core.frontend",
-    ):
-        sys.modules.pop(module_name, None)
-        importlib.import_module(module_name)
+def _pack() -> list[MetricSpec]:
+    """The core observability pack, validated. It spans three modules: the task
+    #3697 S1 line-budget split moved the frontend telemetry specs to ``frontend``,
+    and the #2174 split moved the exec-envelope pair to ``exec_envelope``."""
+    return [
+        catalog.validate_core_metric(spec)
+        for module in (observability, exec_envelope, frontend)
+        for spec in module.core_metrics()
+    ]
 
 
 def _all_rendered() -> dict[str, list[str]]:
     """name -> every rendered expr (primary + targets), placeholders filled."""
-    return {
-        spec.name: [render_query(spec), *render_targets(spec)[1:]]
-        for spec in catalog.registered_core_metrics()
-    }
+    return {spec.name: [render_query(spec), *render_targets(spec)[1:]] for spec in _pack()}
 
 
 # ── registration ──────────────────────────────────────────────────────────────
 
 
 def test_pack_registers_all_metrics() -> None:
-    _load_pack()
-    specs = {m.name: m for m in catalog.registered_core_metrics()}
+    specs = {m.name: m for m in _pack()}
     assert set(EXPECTED) == set(specs)
     for name, (panel, output, event_name, category, n_targets) in EXPECTED.items():
         spec = specs[name]
@@ -152,7 +145,6 @@ def test_pack_registers_all_metrics() -> None:
 
 def test_logql_queries_have_event_stream_and_json() -> None:
     """Every LogQL query selects the event stream and pipelines | json."""
-    _load_pack()
     for name, exprs in _all_rendered().items():
         if name == "ava_obs_turn_duration_s":
             continue
@@ -200,8 +192,7 @@ def test_logql_template_validation_rejects_drift() -> None:
 def test_cost_queries_unwrap_cost_usd() -> None:
     """Cost panels unwrap attributes_cost_usd from the payload (producer-side
     catalog pricing, #2626) — the SQL CASE mirroring model rates is gone."""
-    _load_pack()
-    specs = {m.name: m for m in catalog.registered_core_metrics()}
+    specs = {m.name: m for m in _pack()}
     for name in ("ava_obs_llm_cost_usd", "ava_obs_agent_llm_cost_usd"):
         query = specs[name].query
         assert "unwrap attributes_cost_usd" in query, name
@@ -217,7 +208,6 @@ def test_exec_breakdown_covers_legacy_spellings() -> None:
     other — parenthesized legacy spellings counted via RE2 character classes,
     unknown exec* events fall into other (legacy exec_thread_stuck rows now
     land in other — the thread backend stopped emitting them, PR3)."""
-    _load_pack()
     exprs = _all_rendered()["ava_obs_exec_success_rate"]
     # event_name is a promoted stream label (2026-08-23 cutover, task #1467):
     # every matcher sits in the stream selector, before the | json stage.
@@ -242,7 +232,6 @@ def test_exec_breakdown_covers_legacy_spellings() -> None:
 
 
 def test_turn_ok_rate_math_shape() -> None:
-    _load_pack()
     expr = _all_rendered()["ava_obs_turn_ok_rate"][0]
     assert "100 * sum(count_over_time(" in expr
     assert 'attributes_ok="true"' in expr
@@ -251,10 +240,7 @@ def test_turn_ok_rate_math_shape() -> None:
 
 def test_turn_duration_uses_the_alert_histogram_quantiles() -> None:
     """The dashboard follows R18's Prometheus p95 with a p50 companion."""
-    _load_pack()
-    spec = {metric.name: metric for metric in catalog.registered_core_metrics()}[
-        "ava_obs_turn_duration_s"
-    ]
+    spec = {metric.name: metric for metric in _pack()}["ava_obs_turn_duration_s"]
     assert spec.query_type == "promql"
     assert render_targets(spec) == [
         "histogram_quantile(0.95, sum by (le) (rate(ava_turn_end_duration_seconds_bucket[10m])))",
@@ -269,7 +255,6 @@ def test_compaction_panels_measure_applied_ratio_and_frequency() -> None:
     Requests are audit records and agent-authored summaries can still lose a
     claim race; the completed event is emitted at the history replacement.
     """
-    _load_pack()
     rendered = _all_rendered()
     ratio = rendered["ava_obs_compaction_summary_history_ratio"][0]
     rate = rendered["ava_obs_compaction_rate"][0]
@@ -283,7 +268,6 @@ def test_compaction_panels_measure_applied_ratio_and_frequency() -> None:
 
 
 def test_halt_breakdown_buckets() -> None:
-    _load_pack()
     exprs = _all_rendered()["ava_obs_halt_breakdown"]
     assert 'attributes_body="no tool_call (idle)"' in exprs[0]
     assert 'attributes_body=~".*compact.*"' in exprs[1]
@@ -295,7 +279,6 @@ def test_halt_breakdown_buckets() -> None:
 
 
 def test_syntax_fix_kind_buckets() -> None:
-    _load_pack()
     exprs = _all_rendered()["ava_obs_syntax_fix_by_kind"]
     assert 'attributes_fixes=~".*ruff_format.*"' in exprs[0]
     assert 'attributes_fixes=~".*ruff.*" | attributes_fixes!~".*ruff_format.*"' in exprs[1]
@@ -314,7 +297,6 @@ def test_syntax_fix_kind_buckets() -> None:
 
 
 def test_lifecycle_and_spawner_window_aggregates() -> None:
-    _load_pack()
     spawner = _all_rendered()["ava_obs_spawn_by_spawner"]
     # Per-minute normalization: bucketed at $__interval, divided by the
     # bucket width in minutes so every bar is a rate (FleetView bucket
@@ -332,7 +314,6 @@ def test_lifecycle_and_spawner_window_aggregates() -> None:
 
 
 def test_sdk_call_top_table_shape() -> None:
-    _load_pack()
     expr = _all_rendered()["ava_obs_sdk_call_top"][0]
     assert expr.startswith("topk(20, sum by (attributes_fn) (sum_over_time(")
     assert "$__range" in expr  # instant query over the whole window
@@ -341,13 +322,11 @@ def test_sdk_call_top_table_shape() -> None:
 
 
 def test_events_rate_uses_rate() -> None:
-    _load_pack()
     expr = _all_rendered()["ava_obs_events_rate"][0]
     assert expr == 'sum(rate({service_name="unknown_service"} | json | __error__="" [1m]))'
 
 
 def test_frontend_table_shapes() -> None:
-    _load_pack()
     rendered = _all_rendered()
     assert rendered["ava_obs_frontend_top_elements"][0].startswith(
         "topk(15, sum by (attributes_element) (count_over_time("
@@ -365,7 +344,6 @@ def test_frontend_table_shapes() -> None:
 def test_agent_llm_usage_table_columns() -> None:
     """Four instant targets (calls / in / out / cost), all per-agent, all
     over the whole window; the cost column unwraps cost_usd."""
-    _load_pack()
     exprs = _all_rendered()["ava_obs_agent_llm_usage_table"]
     assert len(exprs) == 4
     assert "sum by (agent_id) (count_over_time(" in exprs[0]
@@ -380,9 +358,8 @@ def test_agent_llm_usage_table_columns() -> None:
 def test_inspector_agent_queries_render_agent_id() -> None:
     """{{agent_id}} renders to agent_id="<n>" (LogQL label filter) and the
     rendered query passes the rendered-form validation."""
-    _load_pack()
     for name in ("ava_obs_agent_llm_cost_usd", "ava_obs_agent_delivery_stalled_count"):
-        spec = next(m for m in catalog.registered_core_metrics() if m.name == name)
+        spec = next(m for m in _pack() if m.name == name)
         rendered = render_query(spec, agent_id=1234)
         assert 'agent_id="1234"' in rendered
         assert "{{agent_id}}" not in rendered

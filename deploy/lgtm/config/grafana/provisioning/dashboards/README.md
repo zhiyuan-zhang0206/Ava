@@ -150,8 +150,8 @@ event-stream panels: the Events trio and the gateway sample count) and
 smaller registration modules beside them (`cost` and
 `frontend` — the line budget splits of the first two, task
 #3697 — and `dismissed`, `fleet`,
-`pr_flow`). All register through `register_core_metric()` in
-`base/telemetry/metrics/core/catalog.py`, which runs the **same
+`pr_flow`). Each returns its specs from `core_metrics()`; `collect_core_metrics()` in
+`base/telemetry/metrics/core/catalog.py` runs the **same
 SQL-template safety validation as plugin metrics** (`validate_spec_sql`) and
 fills `plugin = "core"`.
 

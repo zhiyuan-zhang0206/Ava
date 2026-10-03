@@ -468,7 +468,6 @@ def test_in_process_loader_imports_shipped_metrics() -> None:
     context plus the core definition modules — plugin metrics first, then
     core, the old snapshot's two-section order. No file involved."""
     from base.packages.plugins.context import PluginContext
-    from base.telemetry.metrics.core import catalog
     from base.telemetry.metrics.plugin_metrics import clear_registry
 
     # Re-run the registrations fresh — earlier tests in the session may have
@@ -476,7 +475,6 @@ def test_in_process_loader_imports_shipped_metrics() -> None:
     # sys.modules must be reloaded, a fresh one only imported once).
 
     clear_registry()
-    catalog.clear_core_registry()
     for name in ("ava_fleet", "ava_memory", "ava_syntax_fix"):
         mod_name = f"ava_builtins.plugins.{name}.metrics"
         mod = sys.modules.get(mod_name)
@@ -485,13 +483,6 @@ def test_in_process_loader_imports_shipped_metrics() -> None:
                 importlib.import_module(mod_name)
             else:
                 importlib.reload(mod)
-    # Drop every core definition module so the loader's collect_core_metrics()
-    # re-imports and re-registers the whole fresh set — the canonical module
-    # list, so a definition split (e.g. cost / frontend out of panels /
-    # observability, task #3697 S1) cannot silently shrink the registration.
-    for module_name in catalog._CORE_DEFINITION_MODULES:
-        sys.modules.pop(module_name, None)
-
     specs = _plugin_metrics._load_plugin_metrics()
 
     plugin_specs = [s for s in specs if s.plugin != "core"]
