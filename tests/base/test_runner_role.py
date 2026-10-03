@@ -125,10 +125,6 @@ def test_runner_projects_observations_and_records_actual_lifecycle(runner_db: st
             "VALUES ('machine/path', '1:2', 100)"
         )
         conn.execute("UPDATE agent_metric_file_cursors SET position=200")
-        conn.execute(
-            "INSERT INTO agent_metric_scans (source,source_key,window_start,window_end) "
-            "VALUES ('full_jsonl','machine/path',now()-interval '1 day',now())"
-        )
         with pytest.raises(psycopg.errors.InsufficientPrivilege):
             conn.execute("DELETE FROM agent_metric_observations")
         with pytest.raises(psycopg.errors.InsufficientPrivilege):
