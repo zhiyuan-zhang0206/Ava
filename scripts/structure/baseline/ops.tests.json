@@ -1,18 +1,6 @@
 {
-  "files": {
-    "ops/tests/test_operations.py": 1099
-  },
   "patch_targets": {
     "ops/tests/test_agent_skill_view.py::ava.composer_commands._command_dirs": 1,
-    "ops/tests/test_inventory_ops.py::ava.mcp_config._plugin_config_paths": 1,
-    "ops/tests/test_operations.py::ops.lifecycle._cancel_hosted_turn_best_effort": 1,
-    "ops/tests/test_operations.py::ops.lifecycle._clear_wake_suppression": 3,
-    "ops/tests/test_operations.py::ops.lifecycle._force_mark_terminated": 2,
-    "ops/tests/test_operations.py::ops.lifecycle._recovery_halted": 3,
-    "ops/tests/test_operations.py::ops.lifecycle._system_notice_source_of_trigger": 3,
-    "ops/tests/test_operations.py::ops.lifecycle._terminate_force_blocking": 1,
-    "ops/tests/test_operations.py::ops.lifecycle._wake_suppression_active": 3,
-    "ops/tests/test_operations.py::ops.lifecycle.launch._insert_prompt_blocking": 5,
-    "ops/tests/test_recover_crash_marked.py::ops.lifecycle._recovery_halt_reason": 5
+    "ops/tests/test_inventory_ops.py::ava.mcp_config._plugin_config_paths": 1
   }
 }
