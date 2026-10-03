@@ -4,8 +4,7 @@ Sub-packages:
 
 - ``git`` — git provenance of the running checkout and the memory pool's git ops.
 - ``release`` — config-free loaded-runtime identity, the startup-input digest,
-  verified reads, lock and collector acquisition, the editable-install guard and
-  dated release tags.
+  verified reads, lock and collector acquisition and the editable-install guard.
 - ``maintenance`` — explicit maintenance holds: admission, pause ownership,
   restart cohorts.
 - ``lifecycle`` — local unit lifecycle state: serving generations, the desired
