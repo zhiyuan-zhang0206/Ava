@@ -18,7 +18,7 @@
     "scripts/lint/time_bomb.py::_lint_test_file": 16,
     "scripts/lint/time_bomb.py::_tainted": 19,
     "scripts/lint/time_bomb.py::main": 19,
-    "scripts/lint/turn_scoped_config.py::main": 24,
+    "scripts/lint/turn_scoped_config.py::main": 21,
     "scripts/lint/zombie_pyright_ignores.py::strip_file": 18
   }
 }
