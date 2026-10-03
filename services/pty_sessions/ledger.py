@@ -7,7 +7,8 @@ exists for one reader, the next service start (or a stop that finds the service
 gone): a service that died uncleanly closed its masters, which hangs up every
 shell, but a shell that ignores the hangup, or a job that does, can outlive it.
 The sweep closes exactly the identities the ledger names, each verified by
-birth before any signal, through the one terminal closure.
+birth before any signal, through the one terminal closure, and reports the busy
+ones it closed so their owners are told (`ops/pty_close_notices.py`).
 """
 
 from __future__ import annotations
@@ -103,10 +104,13 @@ def sweep(path: Path) -> closure.Outcome:
     A shell that is still its recorded process is closed with its session; when
     it is gone (the master's hangup ended it) the recorded members that outlived
     it (a job that ignored the hangup) are closed. The returned outcome carries
-    the busy sessions that were closed: the shape a caller turns into owner
-    notices.
+    the busy sessions that were closed, in the shape a caller turns into owner
+    notices. A session the crash itself ended entirely (every process gone, a
+    reboot included) is closed too, and counts when the ledger last saw a job in
+    it: its owner lost that job to the crash all the same.
     """
-    targets = [target for target in read(path) if _has_live_process(target)]
+    recorded = read(path)
+    targets = [target for target in recorded if _has_live_process(target)]
     outcome = closure.Outcome()
     if targets:
         logger.warning(
@@ -116,7 +120,23 @@ def sweep(path: Path) -> closure.Outcome:
         )
         outcome = closure.close_sessions(targets, grace_s=SWEEP_HANGUP_WAIT_S, kill_s=SWEEP_KILL_S)
     write(path, [])
-    return outcome
+    return _with_ended_busy(outcome, recorded)
+
+
+def _with_ended_busy(outcome: closure.Outcome, recorded: list[closure.Target]) -> closure.Outcome:
+    """Add the recorded busy sessions whose shell is gone and that the closure did not report."""
+    reported = {closed.name for closed in outcome.closed}
+    ended = tuple(
+        closure.ClosedSession(target.name, target.shell)
+        for target in recorded
+        if target.name not in reported and _was_busy(target) and not _alive(target.shell)
+    )
+    return closure.Outcome(outcome.closed + ended, outcome.survivors)
+
+
+def _was_busy(target: closure.Target) -> bool:
+    """The ledger last saw a process in the session besides its shell."""
+    return any(member != target.shell for member in target.members)
 
 
 def _alive(identity: OwnedProcess) -> bool:
