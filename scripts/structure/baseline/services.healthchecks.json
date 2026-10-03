@@ -1,7 +1,5 @@
 {
   "ambient_state": {
-    "services/healthchecks/browser_reach.py::ambient-instance:_CDP_IDS": 1,
-    "services/healthchecks/frontend.py::ambient-instance:_FRONTEND_URL": 1,
     "services/healthchecks/lgtm.py::ambient-instance:_local_http": 1,
     "services/healthchecks/permissions_helper.py::global-rebind:_reported_unhealthy": 1
   },

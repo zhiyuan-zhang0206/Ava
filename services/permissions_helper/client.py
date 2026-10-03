@@ -17,7 +17,6 @@ from __future__ import annotations
 
 import base64
 import binascii
-import itertools
 import json
 import socket
 import time
@@ -42,7 +41,6 @@ _CALL_TIMEOUT_S = (
 # as a dead helper -- a false alarm is the exact failure this probe replaced.
 _PROBE_SETTLE_S = 5.0
 _PROBE_RETRY_DELAY_S = 0.25  # a ping can also fail instantly, so pace the retry
-_ids = itertools.count(1)
 
 
 class PermissionsHelperError(RuntimeError):
@@ -103,7 +101,7 @@ def _call(
     **args: object,
 ) -> Any:
     """One JSON-line request/response over this cluster's Unix socket."""
-    req = {"id": next(_ids), "method": method, **args}
+    req = {"id": 1, "method": method, **args}  # one request per fresh connection
     path = str(sock_path or permissions_helper_socket())
     return _exchange(connect(path), method, req)
 
