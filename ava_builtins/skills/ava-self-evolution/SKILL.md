@@ -270,9 +270,6 @@ that roughly daily. The batch command collects one day; Monday's summary
 collects seven. Failed/fumbled runs, an unexplained empty window, a missing
 scan, or a hard failure also wake this agent so a broken data source cannot hide.
 
-**Read-failure fallback.** A failed `/api/events` read fails the scan loudly. To build the dataset from the local event mirror
-(`logs/events-<UTC day>.jsonl`) instead, run `scripts/mirror_backfill.py <days> [week]`; a missing mirror day exits non-zero.
-
 ## Cron integration
 
 This skill has two supervisor-driven wakes on the gateway (managed through the

@@ -46,8 +46,7 @@ HIGH_WEEKLY_EVENTS = 200000
 
 
 def count_events(since: datetime) -> int:
-    """Count events since `since` (UTC) via the Loki-backed /api/events count
-    path. PG `events` was frozen at the 2026-08-12 LGTM cutover (Task #1197)
+    """Count events since `since` (UTC) via the /api/events count path. PG `events` was frozen at the 2026-08-12 LGTM cutover (Task #1197)
     and later dropped — the weekly trigger must count the live stream or it silently
     skips every week (2026-08-14 missed-consumer audit)."""
     import os

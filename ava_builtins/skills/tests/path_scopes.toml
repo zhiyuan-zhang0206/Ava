@@ -3,6 +3,5 @@
 "tests.path_scoped.ava_tests" = [
     "test_self_evolution_collect.py",
     "test_self_evolution_daily_scan.py",
-    "test_self_evolution_mirror_backfill.py",
     "test_self_evolution_record.py",
 ]
