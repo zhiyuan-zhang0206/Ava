@@ -60,10 +60,18 @@ def test_normalize_keeps_telemetry_and_log_rows_and_names_why_it_skips_the_rest(
     del from_loki["cluster"]
     assert backfill.normalize(from_loki, source="loki-live", cluster="x")["cluster"] == "x"
 
+    kept = backfill.normalize(
+        _raw("exec_envelope", stream_id=2, machine="m", level="WARNING"),
+        source="jsonl",
+        cluster="x",
+    )
+    assert (kept["event_name"], kept["level"]) == ("exec_envelope", "warning")
+
     for over, reason in (
         ({"category": "audit"}, "not-telemetry-or-log"),
         ({"event_name": ""}, "no-event-name"),
         ({"level": "loud"}, "bad-level"),
+        ({"event_name": "exec_envelope"}, "not-persisted"),
         ({"id": None}, "no-id"),
         ({"ts": "yesterday"}, "bad-ts"),
     ):
@@ -77,7 +85,10 @@ def test_a_row_two_sources_hold_is_kept_once_from_the_first(tmp_path: Path) -> N
     mirror_dir.mkdir()
     _mirror(
         mirror_dir,
-        [_raw(stream_id=11, machine="m"), _raw("log", stream_id=12, machine="m", category="log")],
+        [
+            _raw(stream_id=11, machine="m"),
+            _raw("log", stream_id=12, machine="m", category="log", level="error"),
+        ],
     )
     loki_row = _raw(stream_id=11, machine="m")
     del loki_row["cluster"]

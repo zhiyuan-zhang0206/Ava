@@ -115,7 +115,11 @@ on pre-#1964 traces; on newer traces the root no longer carries it — pass
   message list, system prompt included. `pruned: true` is the expected shape
   for an old run whose checkpoint was trimmed, not an error.
 - `--with-events` fetches the correlated event rows via
-  `GET /api/events?trace_id=<hex>&from=<ISO>`.
+  `GET /api/events?trace_id=<hex>&from=<ISO>` (`events`) and the same trace id from Loki
+  (`events_loki`, `--loki-url`, default `http://127.0.0.1:3100`). Postgres keeps only the
+  events a reader queries by name and everything at warning or above, so `events` is a
+  subset; Loki holds the whole chain within its 84-hour window, and the JSONL event mirror
+  (`$AVA_HOME/logs/events-*.jsonl`, 7 days, per machine) holds it beyond that.
 - Gateway auth: bearer `AVA_API_TOKEN` (a launched process's machine token),
   else `AVA_CLUSTER_SECRET` from the environment or the gateway's
   `$AVA_HOME/.env`. The gateway is port **8000** (8100 is an unrelated service).

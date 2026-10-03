@@ -16,7 +16,9 @@ from services.events_maintenance import telemetry_replay as replay
 _TS = "2026-10-02T12:00:00+00:00"
 
 
-def _line(name: str, category: str, marker: str, *, with_id: bool = True) -> bytes:
+def _line(
+    name: str, category: str, marker: str, *, with_id: bool = True, level: str = "info"
+) -> bytes:
     body: dict[str, Any] = {
         "ts": _TS,
         "trace_id": None,
@@ -27,7 +29,7 @@ def _line(name: str, category: str, marker: str, *, with_id: bool = True) -> byt
         "process": "p",
         "category": category,
         "event_name": name,
-        "level": "info",
+        "level": level,
         "source": "system",
         "target_agent_id": None,
         "attributes": {"n": name},
@@ -56,7 +58,9 @@ def test_a_pass_stores_telemetry_and_log_rows_and_resumes_after_a_partial_line(
     tail = _line("turn_end", "telemetry", marker)
     mirror.write_bytes(
         _line("llm_usage", "telemetry", marker)
-        + _line("log", "log", marker)
+        + _line("log", "log", marker, level="error")
+        + _line("log", "log", marker + "-quiet")  # an info log is not stored
+        + _line("exec_envelope", "telemetry", marker)  # no reader by name: not stored
         + _line("spawn", "audit", marker)
         + tail[:20]
     )
@@ -64,6 +68,7 @@ def test_a_pass_stores_telemetry_and_log_rows_and_resumes_after_a_partial_line(
 
     assert replay.recover_telemetry_events(db_conn) == 2
     assert _stored(db_conn, marker) == ["llm_usage", "log"]
+    assert _stored(db_conn, marker + "-quiet") == []
     assert replay.recover_telemetry_events(db_conn) == 0
 
     with mirror.open("ab") as handle:

@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import json
 import time
 from collections.abc import Iterator
+from dataclasses import replace
 from datetime import UTC, datetime
 from typing import Any
 from uuid import uuid4
@@ -55,13 +57,88 @@ def test_telemetry_and_log_events_land_and_audit_events_do_not(
     db_conn: psycopg.Connection[Any],
 ) -> None:
     marker = uuid4().hex
-    batch = [_event("llm_usage", marker), _event("log", marker), _event("spawn", marker)]
+    batch = [
+        _event("llm_usage", marker),
+        replace(_event("log", marker), level="error"),
+        _event("spawn", marker),
+    ]
     event_store.store_events(batch)
     event_store.store_events(batch)  # a redelivered batch adds nothing
 
     assert [(r[0], r[1], r[2]) for r in _rows(db_conn, marker)] == [
         ("llm_usage", "telemetry", "store-cluster"),
         ("log", "log", "store-cluster"),
+    ]
+
+
+def test_only_events_somebody_reads_land(db_conn: psycopg.Connection[Any]) -> None:
+    marker = uuid4().hex
+    event_store.store_events(
+        [
+            _event("llm_usage", marker),  # persist=True
+            _event("exec_envelope", marker),  # registered, no reader by name
+            _event("log", marker),  # info log
+            _event("never_registered_name", marker),  # unregistered: kept
+            replace(_event("log", marker), level="error"),  # level reads
+            replace(_event("exec_envelope", marker), level="warning"),  # the level reads it
+        ]
+    )
+
+    assert [(r[0], r[1]) for r in _rows(db_conn, marker)] == [
+        ("exec_envelope", "telemetry"),
+        ("llm_usage", "telemetry"),
+        ("log", "log"),
+        ("never_registered_name", "log"),  # the loguru fallback category
+    ]
+    assert [r[0] for r in _rows(db_conn, marker)].count("exec_envelope") == 1
+
+
+@pytest.mark.parametrize(
+    ("name", "level", "kept"),
+    [
+        ("llm_usage", "info", True),
+        ("exec_envelope", "info", False),
+        ("exec_envelope", "warning", True),
+        ("exec_envelope", "WARNING", True),
+        ("hook_timing", "debug", False),
+        ("node_exit", "info", False),
+        ("sdk_call", "info", False),
+        ("log", "info", False),
+        ("log", "critical", True),
+        ("brand_new_unregistered", "info", True),
+    ],
+)
+def test_is_persisted_is_the_one_judgment(name: str, level: str, kept: bool) -> None:
+    assert event_store.is_persisted(name, level) is kept
+
+
+def test_the_mirror_replay_applies_the_same_judgment() -> None:
+    def line(name: str, level: str) -> bytes:
+        row: dict[str, Any] = {
+            "id": 1,
+            "ts": "2026-10-01T00:00:00+00:00",
+            "trace_id": None,
+            "span_id": None,
+            "agent_id": None,
+            "machine": "m",
+            "cluster": "c",
+            "process": "p",
+            "category": category_for_kind(name),
+            "event_name": name,
+            "level": level,
+            "source": "system",
+            "target_agent_id": None,
+            "attributes": {},
+        }
+        return json.dumps(row).encode()
+
+    records = event_store.jsonl_rows(
+        [line("llm_usage", "info"), line("exec_envelope", "info"), line("exec_envelope", "error")]
+    )
+
+    assert [(r["event_name"], r["level"]) for r in records] == [
+        ("llm_usage", "info"),
+        ("exec_envelope", "error"),
     ]
 
 
