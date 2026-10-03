@@ -16,12 +16,12 @@ _AUDIT_HELPERS = frozenset({"prepare_event_log"})
 _DIRECT_AUDIT_EMITTERS = frozenset({"emit", "prepare_event"})
 _INVENTORY: dict[str, str] = {
     "agent/turn/runloop.py::_record_permanent_reject_outcome": "ineligible",
-    "agent/turn/runloop.py::_handle_fatal_llm_error": "ineligible",
+    "agent/turn/runloop.py::_open_breaker": "ineligible",
     "agent/ownership/corpse_reap.py::reap_crash_corpses": "ineligible",
     "agent/ownership/corpse_reap.py::reap_recrashed_corpse": "ineligible",
     "agent/hooks/compact.py::auto_compact_for_llm": "ineligible",
     "agent/ownership/hosted.py::admit_hosted_runtime": "ineligible",
-    "agent/ownership/hosted.py::admit_hosted_runtime#2": "ineligible",
+    "agent/ownership/hosted.py::_record_legacy_adoption": "ineligible",
     "agent/ownership/hosted.py::settle_hosted_runtime": "ineligible",
     "ava/self.py::compact": "local",
     "ava/skills.py::_insert_skill_events": "local",
