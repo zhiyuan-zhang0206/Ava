@@ -7,7 +7,9 @@ publishes serving or a known-good version, including during an update or boot.
 from __future__ import annotations
 
 import sys
+from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 from base.agents.exit_codes import SERVICES_NOT_READY_EXIT_CODE
 from base.cluster import session_name
@@ -16,7 +18,7 @@ from base.deploy.lifecycle import start_serving
 from base.deploy.progress_timeout import SERVICE_READY_TIMEOUT_S
 from base.paths import prod_service_checkout_error
 from cli.commands._repo import _repo_root
-from cli.commands._setup import _missing_setup_message
+from cli.commands._setup import SetupValues, _missing_setup_message
 from cli.commands.lifecycle._pause_resume import StartDelegation, resume_after_start
 from cli.commands.lifecycle._start_bookmarks import record_running_sha as _record_running_sha
 from cli.commands.lifecycle.migrations import cmd_migrations_apply
@@ -156,26 +158,29 @@ def _prepare_cold_start(
     return 0
 
 
-@resume_after_start
-def _cmd_start_body(  # noqa: PLR0915 — cohesive linear start sequence (converge -> infra -> services -> status); splitting hurts readability
-    disabled_services: tuple[str, ...] = (),
-    only_services: tuple[str, ...] = (),
-    *,
-    all_services: bool = False,
-    persist_services: bool = True,
-    runtime: StartRuntime | None = None,
-) -> int | StartDelegation:
-    """Core start logic, shared by cmd_start and cmd_restart.
+@dataclass
+class _StartState:
+    """What the start phases hand to each other."""
 
-    Explicit selection is durable when ``persist_services`` is true; omission
-    retains prior intent. Internal restarts may add transient exclusions only.
-    """
-    # Resolve the defining modules at the lifecycle operation boundary.
-    import cli.commands._probe as _probe_commands
-    import cli.commands._repo as _repo_commands
-    import cli.commands._setup as _setup_commands
-    import cli.commands.lifecycle.root_driver as _root_driver_commands
-    from base.db import Database
+    runtime: StartRuntime
+    repo: Path
+    resolved: SetupValues
+    roles: MachineRoles
+    live: bool
+
+
+@dataclass(frozen=True)
+class _Selection:
+    """The caller's service selection for this start."""
+
+    only_services: tuple[str, ...]
+    disabled_services: tuple[str, ...]
+    all_services: bool
+    persist_services: bool
+
+
+def _guard_start(runtime: StartRuntime | None) -> tuple[StartRuntime, Path] | int:
+    """Refuse a start admission, a destroyed home or a disposable prod checkout."""
     from base.deploy.maintenance import admission
 
     admission.require_start_allowed()
@@ -195,6 +200,13 @@ def _cmd_start_body(  # noqa: PLR0915 — cohesive linear start sequence (conver
     if err:
         print(f"\u2717 {err}", file=sys.stderr)
         return 1
+    return runtime, repo
+
+
+def _resolve_identity() -> tuple[SetupValues, MachineRoles] | int:
+    """Collect the home's recorded setup fields and settle its roles against `ava init`."""
+    import cli.commands._setup as _setup_commands
+    from base.paths import ava_home
 
     # 0b) collect & validate the home's recorded setup fields (capability-aware filter)
     try:
@@ -230,27 +242,43 @@ def _cmd_start_body(  # noqa: PLR0915 — cohesive linear start sequence (conver
     from base.native_process.os_platform import raise_fd_limit
 
     raise_fd_limit(65536)  # every service spawned here inherits the raised ceiling
+    return resolved, roles
 
-    # Resolve desired services without publishing changes before admission.
+
+def _roster_for(
+    roles: MachineRoles, selection: _Selection, *, publish: bool = True
+) -> tuple[ServiceSpec, ...]:
+    """The launch roster of the resolved service selection; `publish=False` only inspects it."""
+    import cli.commands.lifecycle.root_driver as _root_driver_commands
     from base.deploy.lifecycle.service_selection import resolve_selection
     from cli.commands._repo import _services_for_roles_annotated
 
     names = {spec.session for spec, _reason in _services_for_roles_annotated(roles)}
     launch_skip = resolve_selection(
         names,
-        only=only_services,
-        excluded=disabled_services,
-        all_services=all_services,
-        persist=persist_services,
-        publish=False,
+        only=selection.only_services,
+        excluded=selection.disabled_services,
+        all_services=selection.all_services,
+        persist=selection.persist_services,
+        **({} if publish else {"publish": False}),
     )
-    roster = _root_driver_commands.start_roster(roles, launch_skip)
+    return _root_driver_commands.start_roster(roles, launch_skip)
+
+
+def _admit_start(state: _StartState, selection: _Selection) -> int | None:
+    """Admit the start (or prepare a cold one) and check the schema before anything launches."""
+    import cli.commands._repo as _repo_commands
+    import cli.commands.lifecycle.root_driver as _root_driver_commands
+    from base.db import Database
+
+    # Resolve desired services without publishing changes before admission.
+    roster = _roster_for(state.roles, selection, publish=False)
     try:
-        live = _root_driver_commands.admit_live_start(
-            roster, repo, roles, reconcile=persist_services
+        state.live = _root_driver_commands.admit_live_start(
+            roster, state.repo, state.roles, reconcile=selection.persist_services
         )
-        if not live:
-            rc = _prepare_cold_start(repo, roles, roster)
+        if not state.live:
+            rc = _prepare_cold_start(state.repo, state.roles, roster)
             if rc:
                 return rc
     except (RuntimeError, OSError, ValueError) as exc:
@@ -261,10 +289,17 @@ def _cmd_start_body(  # noqa: PLR0915 — cohesive linear start sequence (conver
     rc = _repo_commands._assert_schema_current_or_die()
     if rc:
         return rc
-    if live:
+    if state.live:
         from base import cluster
 
         cluster.assert_checkpoint_schema_current(Database.from_settings().direct_url())
+    return None
+
+
+def _register_and_probe(state: _StartState) -> int | None:
+    """Register this host centrally, and (pure runner) probe the gateway before bring-up."""
+    import cli.commands._repo as _repo_commands
+    from base.db import Database
 
     # 3) UPSERT this host into the machines table. The table is informational
     # for ops (`ava cluster status`) + drives agent-runner self-update orchestration;
@@ -274,7 +309,9 @@ def _cmd_start_body(  # noqa: PLR0915 — cohesive linear start sequence (conver
     # agent-runner will also fail every subsequent `ava cluster status` and
     # The fleet update orchestration.
     print("\n→ register machine in central DB")
-    rc = _repo_commands._register_machine_or_die(Database.from_settings(), resolved, roles)
+    rc = _repo_commands._register_machine_or_die(
+        Database.from_settings(), state.resolved, state.roles
+    )
     if rc != 0:
         return rc
 
@@ -284,22 +321,113 @@ def _cmd_start_body(  # noqa: PLR0915 — cohesive linear start sequence (conver
     # self-heal updates + cluster status; a broken private-network path would only
     # surface later during a self-heal. Catching at start-time means the failure
     # is on this stdout and the host fails non-zero.
-    if "agent-runner" in roles and "gateway" not in roles:
+    if "agent-runner" in state.roles and "gateway" not in state.roles:
         print("\n→ probe gateway")
-        rc = _repo_commands._probe_gateway_or_die(resolved["gateway_url"])
+        rc = _repo_commands._probe_gateway_or_die(state.resolved["gateway_url"])
         if rc != 0:
             return rc
+    return None
+
+
+def _print_gateway_hint() -> None:
+    """Where a remote agent-runner dials this gateway.
+
+    The gateway's own .env holds the loopback URL (a box reaches its own gateway over
+    loopback); this prints the OTHER address, so whoever just brought the gateway up can
+    enroll runners against it without hunting for the host/port.
+    """
+    from base.cluster.machine import reachable_host
+    from base.config import settings as _settings
+    from base.host.net.predicates import is_loopback_host
+
+    port = _settings.gateway.gateway_port
+    host = reachable_host()
+    if is_loopback_host(host):
+        print(
+            f"\n→ gateway reachable at http://{host}:{port} (loopback only — set "
+            "AVA_MACHINE_HOST to this box's private-network address to enroll remote agent-runners)"
+        )
+    else:
+        reachable = f"http://{host}:{port}"
+        print(f"\n→ gateway reachable at {reachable}")
+        print(
+            f"  join an agent-runner: ava init --serve-agent-runner --no-serve-gateway --gateway-url {reachable} "
+            "--machine-name <name> --machine-host <runner-host> --db-capability <bundle>, then ava start "
+            "(bundle from `ava cluster db-authority issue-unit` here; AVA_DB_CAPABILITY_KEY "
+            "set from a non-echoing prompt)"
+        )
+
+
+def _readiness_verdict(launch: Any, wait: Any, started: Any) -> int | None:
+    """Print the readiness verdict; the not-ready exit code, or None when everything is up.
+
+    Launch failures share the verdict: rollout reads `base.deploy.lifecycle.launch_failures`, while the
+    boot loop retries without an unbounded wait on one service (`base/host/system/boot_policy.py`).
+    """
+    import cli.commands._probe as _probe_commands
+
+    if launch.failed:
+        print(
+            f"\n✗ {len(launch.failed)} service(s) could not be launched "
+            f": {', '.join(launch.failed)}",
+            file=sys.stderr,
+        )
+    if wait.unready:
+        _probe_commands._print_unready_services(wait, SERVICE_READY_TIMEOUT_S)
+    # Diagnostic tiers remain visible without weakening the readiness verdict.
+    if wait.non_critical_unready:
+        _probe_commands._print_non_critical_unready_services(wait.non_critical_unready)
+        _probe_commands._notify_non_critical_unready_services(
+            wait.non_critical_unready, im_enabled=True
+        )
+    # The resolved edge: a non-critical service that is up again closes its open
+    # alert instance, so the Inspector never keeps showing a resolved failure
+    # (QA #1196 P1-1).
+    recovered = _probe_commands._recovered_non_critical_specs(started, wait.non_critical_unready)
+    if recovered:
+        _probe_commands._resolve_recovered_non_critical_alerts(recovered, im_enabled=True)
+    if wait.unready or wait.non_critical_unready or launch.failed:
+        return SERVICES_NOT_READY_EXIT_CODE
+    return None
+
+
+@resume_after_start
+def _cmd_start_body(
+    disabled_services: tuple[str, ...] = (),
+    only_services: tuple[str, ...] = (),
+    *,
+    all_services: bool = False,
+    persist_services: bool = True,
+    runtime: StartRuntime | None = None,
+) -> int | StartDelegation:
+    """Core start logic, shared by cmd_start and cmd_restart.
+
+    Explicit selection is durable when ``persist_services`` is true; omission
+    retains prior intent. Internal restarts may add transient exclusions only.
+    """
+    # Resolve the defining modules at the lifecycle operation boundary.
+    import cli.commands.lifecycle.root_driver as _root_driver_commands
+    from base.deploy.maintenance import admission
+
+    guarded = _guard_start(runtime)
+    if isinstance(guarded, int):
+        return guarded
+    runtime, repo = guarded
+    identity = _resolve_identity()
+    if isinstance(identity, int):
+        return identity
+    resolved, roles = identity
+    state = _StartState(runtime, repo, resolved, roles, live=False)
+    selection = _Selection(only_services, disabled_services, all_services, persist_services)
+    rc = _admit_start(state, selection)
+    if rc is not None:
+        return rc
+    rc = _register_and_probe(state)
+    if rc is not None:
+        return rc
 
     # Preparation may materialize plugins on a cold start; publish only now.
-    names = {spec.session for spec, _reason in _services_for_roles_annotated(roles)}
-    launch_skip = resolve_selection(
-        names,
-        only=only_services,
-        excluded=disabled_services,
-        all_services=all_services,
-        persist=persist_services,
-    )
-    roster = _root_driver_commands.start_roster(roles, launch_skip)
+    roster = _roster_for(roles, selection)
 
     # 4a) probe before binding: refuse to launch a daemon onto a health port
     # another unit already answers on — this is the last point at which nothing
@@ -339,58 +467,14 @@ def _cmd_start_body(  # noqa: PLR0915 — cohesive linear start sequence (conver
     print("\n→ status")
     cmd_status()
 
-    # 7) gateway reachability hint. The gateway's own .env holds the loopback URL
-    # (a box reaches its own gateway over loopback); this prints the OTHER address
-    # — what a remote agent-runner dials — so whoever just brought the gateway up
-    # can enroll runners against it without hunting for the host/port.
+    # 7) gateway reachability hint.
     if any(spec.session == "gateway" for spec in started) and not wait.unready:
-        from base.cluster.machine import reachable_host
-        from base.config import settings as _settings
-        from base.host.net.predicates import is_loopback_host
-
-        port = _settings.gateway.gateway_port
-        host = reachable_host()
-        if is_loopback_host(host):
-            print(
-                f"\n→ gateway reachable at http://{host}:{port} (loopback only — set "
-                "AVA_MACHINE_HOST to this box's private-network address to enroll remote agent-runners)"
-            )
-        else:
-            reachable = f"http://{host}:{port}"
-            print(f"\n→ gateway reachable at {reachable}")
-            print(
-                f"  join an agent-runner: ava init --serve-agent-runner --no-serve-gateway --gateway-url {reachable} "
-                "--machine-name <name> --machine-host <runner-host> --db-capability <bundle>, then ava start "
-                "(bundle from `ava cluster db-authority issue-unit` here; AVA_DB_CAPABILITY_KEY "
-                "set from a non-echoing prompt)"
-            )
+        _print_gateway_hint()
 
     # 8) Readiness verdict last: its exit code and printed snapshot describe the same run.
-    #
-    # Launch failures share the verdict: rollout reads `base.deploy.lifecycle.launch_failures`, while the
-    # boot loop retries without an unbounded wait on one service (`base/host/system/boot_policy.py`).
-    if launch.failed:
-        print(
-            f"\n✗ {len(launch.failed)} service(s) could not be launched "
-            f": {', '.join(launch.failed)}",
-            file=sys.stderr,
-        )
-    if wait.unready:
-        _probe_commands._print_unready_services(wait, SERVICE_READY_TIMEOUT_S)
-    # Diagnostic tiers remain visible without weakening the readiness verdict.
-    if wait.non_critical_unready:
-        _probe_commands._print_non_critical_unready_services(wait.non_critical_unready)
-        _probe_commands._notify_non_critical_unready_services(
-            wait.non_critical_unready, im_enabled=True
-        )
-    # The resolved edge: a non-critical service that is up again closes its open
-    # alert instance, so the Inspector never keeps showing a resolved failure
-    # (QA #1196 P1-1).
-    recovered = _probe_commands._recovered_non_critical_specs(started, wait.non_critical_unready)
-    if recovered:
-        _probe_commands._resolve_recovered_non_critical_alerts(recovered, im_enabled=True)
-    if wait.unready or wait.non_critical_unready or launch.failed:
-        return SERVICES_NOT_READY_EXIT_CODE
+    rc = _readiness_verdict(launch, wait, started)
+    if rc is not None:
+        return rc
 
     if not start_serving.mark_serving(serving_generation, runtime=runtime.identity()):
         print("  ✗ this start lost its serving generation", file=sys.stderr)
