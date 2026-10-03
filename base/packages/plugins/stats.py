@@ -28,7 +28,7 @@ from typing import Any
 from psycopg_pool import ConnectionPool
 
 from base.config import settings
-from base.db.transaction import write_transaction
+from base.db import Database
 
 # The status vocabulary. There is deliberately no "empty": a card with no row
 # IS the empty state, and a second spelling of it would be a second fact.
@@ -92,6 +92,7 @@ def _text(value: object, what: str, *, limit: int) -> str:
 
 
 def upsert(
+    db: Database,
     *,
     plugin: str,
     id: str,
@@ -99,7 +100,6 @@ def upsert(
     detail: str | None = None,
     status: str = "ok",
     updated_by: str | None = None,
-    pool: ConnectionPool[Any] | None = None,
 ) -> None:
     """Write (or refresh) one card's value — last write wins.
 
@@ -110,8 +110,7 @@ def upsert(
     `updated_by` is the machine the value was read on — meaningful in a fleet
     where more than one host may write the same card.
 
-    `pool` (optional) borrows from a caller-held pool instead of resolving
-    this process's own connection; agent-process callers omit it.
+    `db` is the handle the caller's composition root holds.
     """
     name = _text(plugin, "plugin", limit=MAX_PLUGIN_CHARS)
     card = _text(id, "id", limit=MAX_ID_CHARS)
@@ -123,7 +122,7 @@ def upsert(
     if updated_by is not None:
         updated_by = _text(updated_by, "updated_by", limit=MAX_UPDATED_BY_CHARS)
 
-    with write_transaction(pool) as conn:
+    with db.write_transaction() as conn:
         conn.execute(_UPSERT, (name, card, shown, detail, status, updated_by))
 
 
