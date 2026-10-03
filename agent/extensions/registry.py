@@ -1,7 +1,7 @@
 """The `ExtensionRegistry` of what every enabled plugin declares, from the faces a process loaded.
 
-A plugin's faces: `plugin.py` is the SDK surface (`sdk_*`, `skill_sources`, `config`, `flags`), loaded by
-every process that runs agent code; `agent_runtime.py` is the agent runtime (hooks, state, system prompt
+A plugin's faces: `plugin.py` is the SDK surface (`sdk_*`, `skill_sources`, `flags`) and `default_config.py`
+its config class (`config`), both loaded by every process that runs agent code; `agent_runtime.py` is the agent runtime (hooks, state, system prompt
 sections, context notes), loaded only by the agent host. Each exports `contribute()` returning the
 `PluginContributions` fields it owns; `declarations(faces)` merges the faces a process has loaded.
 
@@ -26,16 +26,19 @@ from pathlib import Path
 
 from agent.extensions import FACE_MODULE, SURFACE_MODULE, _enabled_plugin_dirs, _pkg_of
 from base.packages.plugins import load_report
+from base.packages.plugins.config_face import CONFIG_FACE
 from base.packages.plugins.extensions import ExtensionRegistry, PluginContributions
 from base.packages.plugins.gate import check_manifest
 
-ALL_FACES: tuple[str, ...] = (SURFACE_MODULE, FACE_MODULE)
+SURFACE_FACES: tuple[str, ...] = (SURFACE_MODULE, CONFIG_FACE)
+ALL_FACES: tuple[str, ...] = (*SURFACE_FACES, FACE_MODULE)
 
 # Manifest contribution keys whose runtime side is a `PluginContributions` field a face owns (the key is
 # also the attribution surface id). Face -> keys. The data faces (`metrics.py`, `inspector.py`) are gated
 # by `base.packages.plugins.data_registry`, the provider face by the provider loader.
 FACE_KEYS: dict[str, tuple[str, ...]] = {
-    SURFACE_MODULE: ("sdkNamespaces", "sdkWraps", "config"),
+    SURFACE_MODULE: ("sdkNamespaces", "sdkWraps"),
+    CONFIG_FACE: ("config",),
     FACE_MODULE: ("hooks", "systemPromptSections"),
 }
 

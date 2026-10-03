@@ -18,8 +18,6 @@ Decentralized-install: enable config lives entirely in the per-machine
 (no write-back). `write_local` is the underlying file writer.
 """
 
-import importlib.util
-import inspect
 import json
 from pathlib import Path
 from typing import Any, Literal, cast
@@ -27,6 +25,7 @@ from typing import Any, Literal, cast
 from pydantic import BaseModel, ValidationError
 
 from base import paths
+from base.packages.plugins.config_face import declared_config_class
 from base.packages.plugins.config_registration import merge_disk_image_schema
 from base.packages.skills import names as skill_naming
 
@@ -389,9 +388,8 @@ def update_all_disk_images() -> PluginUpdateResult:
       - type incompatible -> that entry status='error'; does not
         interrupt other plugins
 
-    Only imports each plugin's `default_config.py` (not plugin.py)
-    — to avoid triggering hook registration / state registration
-    side effects.
+    Takes each plugin's class from the `contribute()` of its `default_config.py` config face
+    (`base.packages.plugins.config_face`); `plugin.py` is never imported.
     """
     entries = [
         _update_one_disk_image(name, plugin_dir)
@@ -400,53 +398,12 @@ def update_all_disk_images() -> PluginUpdateResult:
     return PluginUpdateResult(entries=entries)
 
 
-def _default_config_class(
-    name: str, default_config_py: Path
-) -> type[BaseModel] | PluginUpdateEntry:
-    """The plugin's single `BaseModel` config class, or the error entry saying why not."""
-    spec = importlib.util.spec_from_file_location(
-        f"plugins.{name}.default_config", default_config_py
-    )
-    if spec is None or spec.loader is None:
-        return PluginUpdateEntry(
-            name=name, status="error", detail="spec_from_file_location returned None"
-        )
-    module = importlib.util.module_from_spec(spec)
-    try:
-        spec.loader.exec_module(module)
-    except Exception as e:
-        return PluginUpdateEntry(name=name, status="error", detail=str(e))
-
-    cls_candidates = [
-        obj
-        for _attr, obj in inspect.getmembers(module)
-        if inspect.isclass(obj) and issubclass(obj, BaseModel) and obj is not BaseModel
-    ]
-    if not cls_candidates:
-        return PluginUpdateEntry(
-            name=name, status="error", detail="default_config.py has no BaseModel subclass"
-        )
-    if len(cls_candidates) > 1:
-        return PluginUpdateEntry(
-            name=name,
-            status="error",
-            detail=(
-                f"default_config.py has {len(cls_candidates)} BaseModel subclasses, "
-                f"want exactly 1: {[c.__name__ for c in cls_candidates]}"
-            ),
-        )
-    return cls_candidates[0]
-
-
 def _update_one_disk_image(name: str, plugin_dir: Path) -> PluginUpdateEntry:
-    """Merge one plugin's `default_config.py` schema into its disk image; never raises."""
-    default_config_py = plugin_dir / "default_config.py"
-    if not default_config_py.exists():
-        return PluginUpdateEntry(name=name, status="skipped", detail="no default_config.py")
-    cls = _default_config_class(name, default_config_py)
-    if isinstance(cls, PluginUpdateEntry):
-        return cls
+    """Merge the config class one plugin declares into its disk image; never raises."""
     try:
+        cls = declared_config_class(name, plugin_dir)
+        if cls is None:
+            return PluginUpdateEntry(name=name, status="skipped", detail="no default_config.py")
         added, removed = merge_disk_image_schema(name, cls)
     except Exception as e:
         return PluginUpdateEntry(name=name, status="error", detail=str(e))
