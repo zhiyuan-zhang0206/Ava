@@ -34,7 +34,7 @@ from base.log import logger
 from base.native_process import pid_starttime_ticks
 from base.native_process.os_platform import LockTimeoutError, file_lock
 from base.native_process.ownership import stable_create_time
-from base.sessions.pty._paths import (
+from base.sessions.pty.paths import (
     DEFAULT_COLS,
     DEFAULT_ROWS,
     records_lock_path,

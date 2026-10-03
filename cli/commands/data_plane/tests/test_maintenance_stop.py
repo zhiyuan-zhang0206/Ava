@@ -227,7 +227,7 @@ def test_foreign_redis_directory_refuses_before_local_signals(
 
 
 def test_live_pty_host_with_dead_shell_blocks_stop(home: Path, launch: Launcher) -> None:
-    from base.sessions.pty._paths import write_record
+    from base.sessions.pty.paths import write_record
 
     proc = launch("temporary-host", _IGNORE)
     (home / "run/sessions/temporary-host.json").unlink()

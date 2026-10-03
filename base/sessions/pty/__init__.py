@@ -26,7 +26,7 @@ Four modules:
   buffer, screen-parity capture rendering.
 """
 
-from base.sessions.pty._paths import host_identity, host_starttime
+from base.sessions.pty.paths import host_identity, host_starttime
 
 # The package door for callers outside `base.sessions.pty` that verify a
 # recorded host process (maintenance stop's terminal custody).

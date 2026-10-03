@@ -1212,6 +1212,11 @@ reportUnknownMemberType = "error"
 reportUnknownArgumentType = "error"
 
 [[tool.pyright.executionEnvironments]]
+root = "services/pty_sessions/tests"
+reportUnknownMemberType = "error"
+reportUnknownArgumentType = "error"
+
+[[tool.pyright.executionEnvironments]]
 root = "services/redis_bridge/tests"
 reportUnknownMemberType = "error"
 reportUnknownArgumentType = "error"

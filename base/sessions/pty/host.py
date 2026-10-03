@@ -50,7 +50,7 @@ from base.log.sinks import add_sink
 from base.native_process.ownership import OwnedProcess, stable_create_time
 from base.sessions import log_prefix
 from base.sessions.pty import session_tree
-from base.sessions.pty._paths import (
+from base.sessions.pty.paths import (
     CAPTURE_MAX_LINES,
     RESIZE_MAX,
     err,

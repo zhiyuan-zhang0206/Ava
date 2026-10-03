@@ -39,7 +39,7 @@ import pyte
 
 # Terminal geometry defaults — match the classic default window size, which is
 # what the PTY-hosted shells have been running at.
-from base.sessions.pty._paths import (  # single definition, stdlib-only home
+from base.sessions.pty.paths import (  # single definition, stdlib-only home
     DEFAULT_COLS,
     DEFAULT_ROWS,
 )

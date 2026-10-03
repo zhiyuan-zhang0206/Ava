@@ -25,7 +25,7 @@ import psutil
 from base.log import logger
 from base.native_process import pid_starttime_ticks
 from base.native_process.ownership import stable_create_time
-from base.sessions.pty._paths import (
+from base.sessions.pty.paths import (
     host_identity,
     host_starttime,
     record_path,
