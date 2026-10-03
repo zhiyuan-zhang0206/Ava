@@ -69,8 +69,6 @@ QUARANTINE_MAX_BYTES = 8 * 1024**3
 # Left in controls whose proven-closed quarantine failed; status and retire
 # report it, admission and retirement retry the quarantine.
 QUARANTINE_FAILED = "quarantine-failed.json"
-# Receipts a sanitizer could not read, kept in place for operator review.
-UNCLAIMED_RECEIPTS = "unclaimed-receipts.txt"
 
 
 @dataclass(frozen=True)
@@ -158,56 +156,6 @@ class OperationWorker:
 
     pid: int
     native: NativeProcess | None
-
-
-def claims_receipt(value: object, worker: OperationWorker | None) -> bool:
-    """Whether a business receipt belongs to a closed worker of this operation.
-
-    A receipt from an earlier boot is closed by the reboot. Otherwise it must
-    name the recorded worker: its exact birth, or its PID in this boot when
-    the birth capture itself failed.
-    """
-    recorded = NativeProcess.from_value(value)
-    if recorded.boot_id != native_boot_id():
-        return True
-    if worker is None:
-        return False
-    if worker.native is not None:
-        return worker.native.same_birth(recorded)
-    return recorded.process.pid == worker.pid
-
-
-def owned_receipts(
-    owners: list[Path], work: Path, worker: OperationWorker | None
-) -> list[tuple[Path, dict[str, object]]]:
-    """The closed worker's own receipts among `owners`, parsed.
-
-    A receipt that cannot be read, or names no valid birth, is claimed by
-    nobody: it stays in place for review and is listed in the controls'
-    `unclaimed-receipts.txt`, never failing this worker's quarantine.
-    """
-    owned: list[tuple[Path, dict[str, object]]] = []
-    unreadable: list[str] = []
-    for owner in owners:
-        try:
-            evidence = _receipt(owner)
-            claimed = claims_receipt(evidence["native"], worker)
-        except (OSError, ValueError, TypeError, KeyError, RuntimeError) as exc:
-            unreadable.append(f"{owner}: {exc!r}")
-            continue
-        if claimed:
-            owned.append((owner, evidence))
-    if unreadable:
-        _log.error("[backup-operation] unreadable receipts kept for review: %s", unreadable)
-        write_text_atomic(work / UNCLAIMED_RECEIPTS, "\n".join(unreadable) + "\n", mode=0o600)
-    return owned
-
-
-def _receipt(path: Path) -> dict[str, object]:
-    value: object = json.loads(path.read_text())
-    if not isinstance(value, dict):
-        raise TypeError("receipt is not an object")
-    return cast("dict[str, object]", value)
 
 
 def no_business_staging(_work: Path, _worker: OperationWorker | None) -> None:

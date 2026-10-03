@@ -23,16 +23,6 @@ from base.log import logger
 _ATTACHMENTS: list[dict[str, Any]] = []
 
 
-def attach_available() -> bool:
-    """Whether the current agent's model can receive media attachments.
-
-    The single gate behind the text-only ruling (2026-08-28): `attach()`
-    raises for a model with no attachable modality, and the system-prompt /
-    help surfaces hide the member entirely. See
-    `base.lm.registry.attach_modalities_for_model` for the resolution."""
-    return _attach_unavailable_reason() is None
-
-
 def media_gated_members(model: str) -> frozenset[str]:
     """Dotted ``ava`` member paths unavailable for `model`'s media capability
     — ``ava.self.attach`` on a text-only model (user ruling 2026-08-28). The

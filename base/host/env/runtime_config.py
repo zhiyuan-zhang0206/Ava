@@ -38,8 +38,6 @@ from dotenv import dotenv_values, set_key, unset_key
 
 from base.host.env.dotenv_file import (
     ENV_LOCK_TIMEOUT_S,
-    env_line_export_prefix,
-    env_line_key,
     env_lock_path,
     snapshot_env,
 )
@@ -223,49 +221,3 @@ def write_fields(
     if removals:
         _log.info("write_fields: unset %s in %s", sorted(amap[n] for n in removals), path.name)
     return captured
-
-
-def rename_env_keys(path: Path, renames: dict[str, str]) -> list[str]:
-    """One-shot rename of legacy .env keys, returning a human line per change.
-
-    A renamed config key leaves the OLD name in every .env written before the
-    rename. Settings may keep reading the legacy name as a fallback, but the
-    panel writes and preflights compare only the new name, so the legacy key
-    left in place is a silent second source. Rewrite it here, once; a second
-    run finds no legacy keys and is a no-op. When both names exist the new one
-    is authoritative and the legacy line is dropped. Keys are matched the way
-    Settings parses them, so an `export`-prefixed legacy line is found too, and
-    its rewrite keeps the prefix (#2981). Returns one line per changed/dropped key.
-    """
-    if not path.exists():
-        return []
-    with file_lock(env_lock_path(path), timeout_s=ENV_LOCK_TIMEOUT_S):
-        raw = dotenv_values(path)
-        changed: list[str] = []
-        keys_written: set[str] = set()
-        keys_removed: set[str] = set()
-        lines = path.read_text().splitlines(keepends=True)
-        out: list[str] = []
-        for line in lines:
-            key = env_line_key(line)
-            if key in renames:
-                new_key = renames[key]
-                if new_key in raw and raw[new_key] is not None:
-                    # New key already present and set — the legacy line is stale.
-                    changed.append(f"{key} dropped ({new_key} authoritative)")
-                    keys_removed.add(key)
-                    continue
-                # The verbatim value tail (newline included) and the operator's
-                # export prefix both survive the rename.
-                out.append(f"{env_line_export_prefix(line)}{new_key}={line.split('=', 1)[1]}")
-                changed.append(f"{key} -> {new_key}")
-                keys_removed.add(key)
-                keys_written.add(new_key)
-                continue
-            out.append(line)
-        if changed:
-            path.write_text("".join(out))
-            from base.host.env.audit import record_env_write
-
-            record_env_write(path, keys_written, keys_removed, site="migrate_rename_env_keys")
-    return changed

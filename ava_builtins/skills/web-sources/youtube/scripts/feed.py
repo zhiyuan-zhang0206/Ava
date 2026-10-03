@@ -36,7 +36,7 @@ import subprocess
 import sys
 import tempfile
 from collections.abc import Callable
-from dataclasses import asdict, dataclass, field
+from dataclasses import dataclass, field
 from functools import cache as _cache
 from pathlib import Path
 from typing import Any, Literal
@@ -537,8 +537,3 @@ def _download_video(video_id: str, dest: Path) -> None:
         _video_url(video_id),
     ]
     subprocess.run(cmd, capture_output=True, text=True, check=True)
-
-
-# Re-export the dataclasses as plain dicts for callers that want JSON.
-def item_asdict(it: FeedItem) -> dict[str, Any]:
-    return asdict(it)
