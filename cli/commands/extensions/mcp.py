@@ -43,6 +43,7 @@ endpoint, not by this CLI.
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -370,15 +371,27 @@ def _apply_env_overrides(dest: Path, name: str, overrides: dict[str, str]) -> No
     mcp_json.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
 
 
+# The package's build owns its own lock: these ambient knobs describe the
+# caller's project and must not freeze the foreign package's resolution
+# (cli/python_install.py scrubs the same class for the repo build).
+_UV_LOCK_POLICY_ENV = ("UV_FROZEN", "UV_LOCKED")
+
+
 def _uv_sync(pkg_dir: Path) -> None:
     """Build the package's isolated venv (`<pkg>/.venv`) so its relative
     `.venv/bin/python` command resolves at spawn time. `uv sync` is the only uv
     invocation an installed MCP triggers — never `uv run` (a resident wrapper).
 
+    The child environment drops the caller's lock-policy knobs (`UV_FROZEN` /
+    `UV_LOCKED`): the package has no lockfile of its own yet, and an ambient
+    `UV_FROZEN=1` — e.g. exported by a CI job for its repository — would
+    otherwise refuse the build.
+
     Raises:
         subprocess.CalledProcessError: uv sync failed.
     """
-    subprocess.run(["uv", "sync"], cwd=pkg_dir, check=True, capture_output=True, text=True)
+    env = {key: value for key, value in os.environ.items() if key not in _UV_LOCK_POLICY_ENV}
+    subprocess.run(["uv", "sync"], cwd=pkg_dir, check=True, capture_output=True, text=True, env=env)
 
 
 def _register_mcp(
