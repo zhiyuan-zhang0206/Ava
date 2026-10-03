@@ -4,6 +4,7 @@ same dial built from the live settings at each call."""
 from __future__ import annotations
 
 import dataclasses
+import threading
 from typing import Any
 
 import pytest
@@ -27,13 +28,23 @@ def _config(**overrides: Any) -> DbConfig:
 
 
 class _Dialed:
+    """Records the dials made by the test's own thread.
+
+    The monkeypatch sits on the process-wide ``psycopg.connect``, so a dial from
+    another thread sharing the xdist worker can reach the recorder; recording it
+    would break the assertions that index the list (2026-10-03 shard8: a
+    concurrent dial preceded the handle's own, ``kwargs[0]`` KeyError).
+    """
+
     def __init__(self) -> None:
         self.urls: list[str] = []
         self.kwargs: list[dict[str, Any]] = []
+        self._owner = threading.current_thread()
 
     def connect(self, url: str, **kwargs: Any) -> object:
-        self.urls.append(url)
-        self.kwargs.append(kwargs)
+        if threading.current_thread() is self._owner:
+            self.urls.append(url)
+            self.kwargs.append(kwargs)
         return _FakeConn()
 
 
