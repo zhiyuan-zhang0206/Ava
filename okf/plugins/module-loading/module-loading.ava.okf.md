@@ -86,9 +86,11 @@ reporting through the one reporter: a plugin's `provider.py`
 (`gateway/inspect/_plugin_metrics.py`), the gateway plugin inspector's
 `inspector.py` (`gateway/inspect/_plugin_widgets.py`), and the launched
 child's `import ava` self-load (`ava.ensure_plugins_loaded`, plus a stderr
-line — a child usually has no log sink). One contained site stays off that
-reporter: `default_config.py` images surface as `error`-status entries on the
-plugin-update result (`base/packages/plugins/enable_config.py:update_all_disk_images`).
+line — a child usually has no log sink). The config face `default_config.py` is read by two more processes through
+`base/packages/plugins/config_face.py` (never importing `plugin.py`): `ava plugins update`
+(`enable_config.update_all_disk_images`, a failing face is an `error`-status entry on its result, off the
+reporter) and the gateway/ops overlay validation (`config_registration.overlay_config_classes`, the enabled
+plugins' declared classes, reported fail-soft).
 
 ## Semantics boundary: what stays fail-closed
 Containment covers *code* that fails to load; inventory and contract conflicts

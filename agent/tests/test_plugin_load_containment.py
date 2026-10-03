@@ -166,3 +166,32 @@ def test_host_boot_restart_loop_survives_a_broken_plugin(
         if "codex_usage" in r["message"] and "failed to load" in r["message"]
     ]
     assert len(reports) == 3
+
+
+def test_the_loader_binds_the_class_a_config_face_declares(unit_home: Path) -> None:
+    """`plugin.py` declares nothing about config; `default_config.py` does, and the install binds it."""
+    import ava
+    from agent.extensions import load_extensions
+    from ava.sdk_surface import install
+
+    _write_plugin(
+        paths.plugins_dir(),
+        "faced",
+        "LOADED = True\n",
+        {
+            "default_config.py": (
+                "from pydantic import BaseModel\n"
+                "from base.packages.plugins.extensions import PluginContributions\n"
+                "class Config(BaseModel):\n    knob: int = 7\n"
+                "def contribute():\n    return PluginContributions(config=Config)\n"
+            )
+        },
+    )
+    write_local({"plugins": {"faced": {"enabled": True}}})
+
+    try:
+        loaded = load_extensions()
+        assert [name for name, _ in loaded.registry.plugins] == ["faced"]
+        assert ava._settings.plugins.faced.knob == 7  # pyright: ignore[reportAttributeAccessIssue]
+    finally:
+        install.uninstall()
