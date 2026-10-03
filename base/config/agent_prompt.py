@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from typing import Annotated, Literal
 
-from pydantic import AliasChoices, Field, field_validator
+from pydantic import Field, field_validator
 from pydantic_settings import NoDecode
 
 from base.config.base import EnvSettings
@@ -175,7 +175,6 @@ class AgentPromptSettings(EnvSettings):
     prompt_sdk_overview_enabled: bool = Field(
         default=True,
         alias="AVA_SYSTEM_PROMPT_SDK_OVERVIEW",
-        validation_alias=AliasChoices("AVA_SYSTEM_PROMPT_SDK_OVERVIEW", "AVA_PROMPT_SDK_OVERVIEW"),
         description=(
             "Include the SDK overview (# ava + namespace index) in the system "
             "prompt. When False, only the bare identity paragraph is shown."
@@ -207,7 +206,6 @@ class AgentPromptSettings(EnvSettings):
     prompt_prefer_sdk_enabled: bool | None = Field(
         default=None,
         alias="AVA_SYSTEM_PROMPT_PREFER_SDK",
-        validation_alias=AliasChoices("AVA_SYSTEM_PROMPT_PREFER_SDK", "AVA_PROMPT_PREFER_SDK"),
         description=(
             "Inject a one-line 'Prefer your SDK' section: use an `ava.*` tool over "
             "a plain-Python or raw-shell equivalent when one exists. Unset resolves "
@@ -224,9 +222,6 @@ class AgentPromptSettings(EnvSettings):
     prompt_keep_it_simple_enabled: bool | None = Field(
         default=None,
         alias="AVA_SYSTEM_PROMPT_KEEP_IT_SIMPLE",
-        validation_alias=AliasChoices(
-            "AVA_SYSTEM_PROMPT_KEEP_IT_SIMPLE", "AVA_PROMPT_KEEP_IT_SIMPLE"
-        ),
         description=(
             "Inject a 'Keep It Simple' section — prefer the mechanically correct, "
             "conceptually simple solution over clever shortcuts; relentless: favor "
@@ -264,7 +259,6 @@ class AgentPromptSettings(EnvSettings):
     prompt_memory_behavior_enabled: bool | None = Field(
         default=None,
         alias="AVA_SYSTEM_PROMPT_MEMORY",
-        validation_alias=AliasChoices("AVA_SYSTEM_PROMPT_MEMORY", "AVA_PROMPT_MEMORY"),
         description=(
             "Inject a 'Remembering across sessions' section: when and what to "
             "persist/recall for the long-term memory pool. Auto-suppressed when the "
@@ -282,7 +276,6 @@ class AgentPromptSettings(EnvSettings):
     prompt_output_conciseness_enabled: bool | None = Field(
         default=None,
         alias="AVA_SYSTEM_PROMPT_CONCISENESS",
-        validation_alias=AliasChoices("AVA_SYSTEM_PROMPT_CONCISENESS", "AVA_PROMPT_CONCISENESS"),
         description=(
             "Inject an 'Output shape' section: keep replies matched to the task, "
             "answer-first, and reference paths/lines instead of pasting output "
@@ -299,7 +292,6 @@ class AgentPromptSettings(EnvSettings):
     prompt_ui_delivery_enabled: bool | None = Field(
         default=None,
         alias="AVA_SYSTEM_PROMPT_UI_DELIVERY",
-        validation_alias=AliasChoices("AVA_SYSTEM_PROMPT_UI_DELIVERY", "AVA_PROMPT_UI_DELIVERY"),
         description=(
             "Inject a 'Deliver through the UI' section: content for the user goes "
             "through the UI, not as a bare path to a Markdown file. Files stay "
@@ -317,7 +309,6 @@ class AgentPromptSettings(EnvSettings):
     prompt_user_tone_enabled: bool | None = Field(
         default=None,
         alias="AVA_SYSTEM_PROMPT_USER_TONE",
-        validation_alias=AliasChoices("AVA_SYSTEM_PROMPT_USER_TONE", "AVA_PROMPT_USER_TONE"),
         description=(
             "Inject the 'Communicating with the user' section: per-family tone "
             "guidance (honest judgment over flattery; directness; no condescension); "
@@ -335,7 +326,6 @@ class AgentPromptSettings(EnvSettings):
     prompt_outcome_reporting_enabled: bool | None = Field(
         default=None,
         alias="AVA_SYSTEM_PROMPT_REPORTING",
-        validation_alias=AliasChoices("AVA_SYSTEM_PROMPT_REPORTING", "AVA_PROMPT_REPORTING"),
         description=(
             "Inject a 'Reporting honestly' section: state outcomes as they are, "
             "don't round a partial result up to success. Unset resolves the "
@@ -352,7 +342,6 @@ class AgentPromptSettings(EnvSettings):
     prompt_action_caution_enabled: bool | None = Field(
         default=None,
         alias="AVA_SYSTEM_PROMPT_CAUTION",
-        validation_alias=AliasChoices("AVA_SYSTEM_PROMPT_CAUTION", "AVA_PROMPT_CAUTION"),
         description=(
             "Inject a 'Before irreversible or outward-facing actions' section: "
             "confirm before hard-to-reverse or outward actions, and treat sending "
@@ -370,7 +359,6 @@ class AgentPromptSettings(EnvSettings):
     prompt_align_before_action_enabled: bool | None = Field(
         default=None,
         alias="AVA_SYSTEM_PROMPT_ALIGN",
-        validation_alias=AliasChoices("AVA_SYSTEM_PROMPT_ALIGN", "AVA_PROMPT_ALIGN"),
         description=(
             "Inject an 'Aligning before you commit to a direction' section: before "
             "large/ambiguous/hard-to-redo work, confirm scope + approach with the "
@@ -388,9 +376,6 @@ class AgentPromptSettings(EnvSettings):
     prompt_delegation_check_enabled: bool | None = Field(
         default=None,
         alias="AVA_SYSTEM_PROMPT_DELEGATION_CHECK",
-        validation_alias=AliasChoices(
-            "AVA_SYSTEM_PROMPT_DELEGATION_CHECK", "AVA_PROMPT_DELEGATION_CHECK"
-        ),
         description=(
             "Inject a 'Before you act \u2014 check' section: does a skill already "
             "cover this, is someone else already responsible, do they have better "
@@ -410,9 +395,6 @@ class AgentPromptSettings(EnvSettings):
     prompt_capabilities_match_first_enabled: bool | None = Field(
         default=None,
         alias="AVA_SYSTEM_PROMPT_CAPABILITIES_MATCH_FIRST",
-        validation_alias=AliasChoices(
-            "AVA_SYSTEM_PROMPT_CAPABILITIES_MATCH_FIRST", "AVA_PROMPT_CAPABILITIES_MATCH_FIRST"
-        ),
         description=(
             "Inject a 'match the capabilities index first' instruction into the # Capabilities "
             "section: before starting any task, name the skill(s) you plan to use and why, and "
@@ -430,10 +412,6 @@ class AgentPromptSettings(EnvSettings):
     prompt_cross_machine_delegation_enabled: bool | None = Field(
         default=None,
         alias="AVA_SYSTEM_PROMPT_CROSS_MACHINE_DELEGATION",
-        validation_alias=AliasChoices(
-            "AVA_SYSTEM_PROMPT_CROSS_MACHINE_DELEGATION",
-            "AVA_PROMPT_CROSS_MACHINE_DELEGATION",
-        ),
         description=(
             "Inject a one-sentence cross-machine delegation hint: when working "
             "across different machines, consider spawning an agent on the "
@@ -451,9 +429,6 @@ class AgentPromptSettings(EnvSettings):
     prompt_file_driven_work_enabled: bool | None = Field(
         default=None,
         alias="AVA_SYSTEM_PROMPT_FILE_DRIVEN_WORK",
-        validation_alias=AliasChoices(
-            "AVA_SYSTEM_PROMPT_FILE_DRIVEN_WORK", "AVA_PROMPT_FILE_DRIVEN_WORK"
-        ),
         description=(
             "Inject a 'File-driven workflow for complex tasks' section: write "
             "intermediate results to files instead of holding everything in context; "
@@ -471,7 +446,6 @@ class AgentPromptSettings(EnvSettings):
     prompt_temporal_awareness_enabled: bool | None = Field(
         default=None,
         alias="AVA_SYSTEM_PROMPT_TEMPORAL",
-        validation_alias=AliasChoices("AVA_SYSTEM_PROMPT_TEMPORAL", "AVA_PROMPT_TEMPORAL"),
         description=(
             "Inject a 'Temporal awareness' section: for facts that may have changed "
             "after the training cutoff (product/model/framework versions, recent "
