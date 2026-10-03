@@ -19,6 +19,7 @@ from typing import Any
 from psycopg import Connection
 
 from base.telemetry.loki_index_labels import ARCHIVE_FREEZE_AT
+from base.telemetry.metrics.aggregate_sql import EXEC_FAILURE_EVENTS
 from base.telemetry.metrics.observed_metrics import (
     MetricObservation,
     observe_row,
@@ -28,6 +29,7 @@ from base.telemetry.metrics.observed_metrics import (
 _WINDOW = timedelta(days=7)
 _PAGE_LIMIT = 5000
 _PASS_SECONDS = 120.0
+_EVENT_NAMES = ["llm_usage", "turn_end", "exec", "node_exit", *EXEC_FAILURE_EVENTS]
 
 # Event ids in the observation table are the unsigned stream id; the table stores it signed.
 _UNSIGNED_UID = (
@@ -38,8 +40,7 @@ _MISSING = f"""
     SELECT t.event_uid, t.ts, t.agent_id, t.category, t.event_name, t.attributes, {_UNSIGNED_UID}
     FROM telemetry_events t
     WHERE t.ts >= %s AND t.ts < %s AND t.ts > %s AND t.agent_id IS NOT NULL
-      AND (t.event_name IN ('llm_usage', 'turn_end', 'exec', 'node_exit')
-           OR starts_with(t.event_name, 'exec_') OR starts_with(t.event_name, 'exec('))
+      AND t.event_name = ANY(%s)
       AND EXISTS (SELECT 1 FROM agents a WHERE a.id = t.agent_id)
       AND NOT EXISTS (SELECT 1 FROM agent_metric_observations o WHERE o.event_id = {_UNSIGNED_UID})
       AND (t.ts, t.event_uid) > (%s, %s)
@@ -61,7 +62,15 @@ def recover_observations(conn: Connection[Any], *, now: datetime | None = None) 
     while time.monotonic() < deadline:
         rows = conn.execute(
             _MISSING,  # type: ignore[arg-type]
-            (now - _WINDOW, now, ARCHIVE_FREEZE_AT, cursor_ts, cursor_uid, _PAGE_LIMIT),
+            (
+                now - _WINDOW,
+                now,
+                ARCHIVE_FREEZE_AT,
+                _EVENT_NAMES,
+                cursor_ts,
+                cursor_uid,
+                _PAGE_LIMIT,
+            ),
         ).fetchall()
         conn.commit()
         if not rows:
