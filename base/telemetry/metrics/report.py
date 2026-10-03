@@ -152,19 +152,6 @@ def _render_agent_activity(data: dict[str, Any]) -> str:
     return text
 
 
-def _render_sdk_usage(data: dict[str, Any]) -> str:
-    text = f"sdk calls: {data['total_calls']} in {data['code_blocks']} code blocks  "
-    text += f"({data['distinct_functions']} distinct functions)\n"
-    if data["functions"]:
-        max_c = int(data["functions"][0]["count"])
-        for item in data["functions"][:20]:
-            bar = render_bar(int(item["count"]), max_c)
-            text += f"  ava.{item['function']:<30} {item['count']:>6}  {bar}\n"
-    else:
-        text += "  (none)\n"
-    return text
-
-
 def _render_plugin_activation(data: dict[str, Any]) -> str:
     """Which plugin injection surfaces actually fired in the window.
 

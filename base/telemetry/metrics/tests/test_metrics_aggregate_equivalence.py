@@ -90,11 +90,10 @@ def test_equivalence_full_thread(fake: TelemetryStream) -> None:
     _add(fake, event="turn_end", agent_id=aid, payload={"ok": True, "duration_seconds": 4.0})
     _add(fake, event="agent_spawned", agent_id=aid, payload={"spawner": "agent:1"})
     _add(fake, event="halt", agent_id=aid, payload={"body": "no tool_call (idle)"})
-    _add(fake, event="sdk_call", agent_id=aid, payload={"fn": "files.read", "sample_rate": 10})
 
     text, data, roll = _run_aggregate(fake)
     # ── text digest ──
-    assert "8 events / 1 agents" in _norm(text)
+    assert "7 events / 1 agents" in _norm(text)
     assert "syntax_fix trigger counts (per code block):" in text
     assert "ruff                        1  100%" in text
     assert "exec: 1 ok / 0 failed  (success 100.0%)" in text
@@ -102,7 +101,6 @@ def test_equivalence_full_thread(fake: TelemetryStream) -> None:
     assert "cache hit overall: 80.0%   cost: $0.0003" in text
     assert "turn duration (s):" in text
     assert "agents: 1 distinct  1 spawns (1 subagents)  1 idle halts" in text
-    assert "sdk calls: 10 in 1 code blocks  (1 distinct functions)" in text
     # ── data fragment ──
     sx = data["metrics"]["syntax_fix"]
     assert sx["trigger_counts"] == {"ruff": 1, "ruff_format": 1}
@@ -113,17 +111,16 @@ def test_equivalence_full_thread(fake: TelemetryStream) -> None:
     assert llm["llm_calls"] == 1 and llm["tokens_in"] == 1000 and llm["tokens_out"] == 200
     assert llm["cache_hit_pct"] == 80.0
     assert data["metrics"]["agent_activity"]["spawns_total"] == 1
-    assert data["metrics"]["sdk_usage"]["total_calls"] == 10
     # ── per-agent rollups ──
-    assert roll[aid]["events"] == 8
+    assert roll[aid]["events"] == 7
     assert roll[aid]["llm_calls"] == 1
     assert roll[aid]["turn_total"] == 1
     assert roll[aid]["exec_ok"] == 1
 
     # since-compact window (no compact rows here) — identical counts
     text2, _data2, roll2 = _run_aggregate(fake, since_compact=True)
-    assert "8 events / 1 agents" in _norm(text2)
-    assert roll2[aid]["events"] == 8
+    assert "7 events / 1 agents" in _norm(text2)
+    assert roll2[aid]["events"] == 7
 
 
 def test_plugin_activation_section_is_the_obsolescence_gauge(fake: TelemetryStream) -> None:
@@ -256,21 +253,6 @@ def test_equivalence_since_compact_cutoffs(fake: TelemetryStream) -> None:
     assert roll2[a2]["events"] == 1
 
 
-def test_equivalence_sdk_ties_and_namespaces(fake: TelemetryStream) -> None:
-    """Equal call counts — ties resolve deterministically (count desc, fn asc)."""
-    aid = 1
-    fns = ["files.read", "shell.run", "files.read", "shell.run", "agents.spawn", "files.write"]
-    for i, fn in enumerate(fns):
-        _add(
-            fake,
-            event="sdk_call",
-            agent_id=aid,
-            payload={"fn": fn, "sample_rate": 10},
-            ts_offset_days=i / 100,
-        )
-    _run_aggregate(fake)
-
-
 def test_equivalence_syntax_fix_block_edges(fake: TelemetryStream) -> None:
     """fixes before any code (dropped), none sentinel, (n) suffixes, multi-kind
     events, blocks with no attached fix, two agents with different block counts."""
@@ -321,7 +303,6 @@ _FIXES = [
     "",
     "ruff,ruff_format",
 ]
-_SDK = ["files.read", "files.write", "shell.run", "agents.spawn", "agents.send_message", ""]
 _HALT = ["no tool_call (idle)", "system_halt (compact)", "lifecycle AgentTermination", "other"]
 _SPAWN = ["user", "agent:1", "scheduler", "cron", ""]
 _LIFECYCLE = ["agent_spawned", "agent_terminated", "agent_restarted", "agent_resurrected"]
@@ -354,8 +335,6 @@ def _random_payload(rng: random.Random, event_name: str) -> dict[str, Any]:
             "ok": rng.choice([True, False, None]),
             "duration_seconds": round(rng.uniform(0.1, 30.0), 3),
         }
-    if event_name == "sdk_call":
-        return {"fn": rng.choice(_SDK), "sample_rate": 10}
     if event_name == "halt":
         return {"body": rng.choice(_HALT)}
     if event_name == "agent_spawned":
@@ -377,7 +356,6 @@ def test_equivalence_randomized(fake: TelemetryStream) -> None:
             "exec",
             "llm_usage",
             "turn_end",
-            "sdk_call",
             "halt",
             "agent_spawned",
             "exec_failed",
@@ -404,7 +382,6 @@ def test_equivalence_randomized(fake: TelemetryStream) -> None:
             "exec",
             "llm_turns",
             "agent_activity",
-            "sdk_usage",
             "plugin_activation",
         }
         assert data["meta"]["total_events"] >= 0
@@ -414,10 +391,3 @@ def test_equivalence_randomized(fake: TelemetryStream) -> None:
     assert data["meta"]["agent_filter"] == agents[0]
     # the window header names the single agent
     assert str(agents[0]) in text or "1 agents" in _norm(text)
-
-
-def test_sdk_counts_weight_each_historical_sampling_policy(fake: TelemetryStream) -> None:
-    for rate in (10, 1, 3, 1):
-        _add(fake, event="sdk_call", agent_id=1, payload={"fn": "files.read", "sample_rate": rate})
-    _, data, _ = _run_aggregate(fake)
-    assert data["metrics"]["sdk_usage"]["total_calls"] == 15
