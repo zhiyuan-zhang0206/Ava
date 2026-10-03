@@ -262,7 +262,16 @@ class AlertRouter:
         self._notifier = notifier
 
     def observe(self, views: Iterable[UnitAlertView]) -> None:
-        """One round over every unit view, in order; per-unit isolation."""
+        """One round over every unit view, in order; per-unit isolation.
+
+        The round is serial by design: with N units owing a delivery edge while
+        the gateway is unreachable, its wall time approaches N * `timeout_s` *
+        `attempts` (at most N * 20 s at the defaults) — bounded, and only the
+        observation cadence defers: the next round starts when this one
+        returns. An accepted post stamps its record and stops re-attempting;
+        batching or parallel delivery stays absent until a measured round calls
+        for it (#4884).
+        """
         for view in views:
             try:
                 self._observe_unit(view)
