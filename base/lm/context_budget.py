@@ -54,6 +54,7 @@ from dataclasses import dataclass
 
 from langchain_core.messages import AIMessage, BaseMessage
 
+from base.host.env.agent_slices import ModelOverrides
 from base.lm.plugin_providers import ensure_provider_plugins_loaded
 from base.lm.registry import MODELS, resolve_setting
 
@@ -78,7 +79,7 @@ class ContextBudget:
     hard_compact_tokens: int  # force-compact ceiling
 
 
-def resolve_context_budget(model: str) -> ContextBudget:
+def resolve_context_budget(model: str, overrides: ModelOverrides | None = None) -> ContextBudget:
     """The context budget for ``model``: its window, plus the hard threshold
     ``min(auto_compact_fraction * window, auto_compact_ceiling_tokens)`` and the
     soft threshold scaled by the same factor the ceiling applied.
@@ -86,6 +87,10 @@ def resolve_context_budget(model: str) -> ContextBudget:
     The provider plugins are ensured loaded first, so the lookup below sees the
     registry a model build would see even when this call is the process's first
     registry use.
+
+    ``overrides`` is the agent's explicit values (its slices' ``overrides``): a threshold
+    the agent set wins over the model's default. Without it the thresholds are the
+    cluster's, which suits only a reader not serving one agent.
 
     Raises:
         UnknownModelWindowError: ``model`` has no registry ``context_window``.
@@ -106,9 +111,13 @@ def resolve_context_budget(model: str) -> ContextBudget:
             f"can be derived"
         )
     window = spec.context_window
-    soft_fraction: float = resolve_setting("compact_reminder_fraction", model=model)
-    hard_fraction: float = resolve_setting("auto_compact_fraction", model=model)
-    ceiling: int = resolve_setting("auto_compact_ceiling_tokens", model=model)
+    soft_fraction: float = resolve_setting(
+        "compact_reminder_fraction", model=model, overrides=overrides
+    )
+    hard_fraction: float = resolve_setting(
+        "auto_compact_fraction", model=model, overrides=overrides
+    )
+    ceiling: int = resolve_setting("auto_compact_ceiling_tokens", model=model, overrides=overrides)
     hard_tokens = round(hard_fraction * window)
     soft_tokens = round(soft_fraction * window)
     if 0 < ceiling < hard_tokens:

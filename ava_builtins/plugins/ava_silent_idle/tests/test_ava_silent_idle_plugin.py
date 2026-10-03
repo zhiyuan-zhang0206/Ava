@@ -126,7 +126,7 @@ async def test_defers_when_auto_compact_would_fire(
     budget = ContextBudget(
         max_context_tokens=1_000_000, soft_compact_tokens=600_000, hard_compact_tokens=1
     )
-    monkeypatch.setattr("agent.hooks.compact.resolve_context_budget", lambda _model: budget)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr("agent.hooks.compact.resolve_context_budget", lambda *_: budget)  # pyright: ignore[reportUnknownArgumentType]
     state = _state([HumanMessage(content="a long history " * 20), _reasoning_only_ai()])
     assert await _loaded.silent_idle_continue_before_llm(state, _runtime(), _config()) is None  # pyright: ignore[reportUnknownMemberType]
     assert any(

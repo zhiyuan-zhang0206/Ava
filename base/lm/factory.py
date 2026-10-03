@@ -56,8 +56,8 @@ langchain-anthropic's bundled profile table falls back to a legacy 4096 default
 for unknown ids (#169 truncation incident). max_tokens is the server-side
 output cap, not a budget — setting to cap does not increase generation. The
 OpenAI-style branches leave it unset (those APIs default to the model's own
-cap). The reasoning effort (`resolve_setting("reasoning_effort", ...)`:
-explicit env/overlay value, else the model's registry default, else the
+cap). The reasoning effort (the `reasoning_effort` setting through `resolve_setting`:
+the agent's or the cluster's explicit value, else the model's registry default, else the
 provider default) maps per branch onto what each provider accepts via
 `clamp_effort` — out-of-range values clamp (logged), unknown strings fail
 fast at build time instead of as a provider 400 mid-run.
@@ -85,6 +85,7 @@ if TYPE_CHECKING:
 from loguru import logger
 
 from base.config import field_alias, get_field, settings
+from base.host.env.agent_slices import ModelOverrides
 from base.lm import provider_api
 from base.lm._providers import ThinkingConfig
 
@@ -379,6 +380,7 @@ def build_chat_model(
     media_resolution: str | None = None,
     media_thinking_level: str | None = None,
     base_url: str | None = None,
+    overrides: ModelOverrides | None = None,
 ) -> BaseChatModel:
     """Pick the provider by model name prefix and return the corresponding ChatModel.
 
@@ -441,6 +443,9 @@ def build_chat_model(
             the gemini branch (e.g. a self-hosted relay / provider mirror);
             None = the SDK default official endpoint. Ignored by other
             providers.
+        overrides: the agent's explicit tuning values (its slices' `overrides`): the
+            reasoning effort and the thinking budget the model is built with. None =
+            the cluster's, for a build that does not serve one agent.
 
     Raises:
         ValueError: model prefix did not match — prompts to add a branch.
@@ -479,7 +484,7 @@ def build_chat_model(
 
     # The cross-provider reasoning-effort knob, resolved per model: explicit
     # env/.env/overlay value wins, else the model's registry default, else "".
-    resolved_effort: str = resolve_setting("reasoning_effort", model=model)
+    resolved_effort: str = resolve_setting("reasoning_effort", model=model, overrides=overrides)
 
     # The prefix map is flat (no nesting, collisions rejected at registration),
     # so at most one binding matches. Every builder receives the shared
@@ -498,6 +503,7 @@ def build_chat_model(
                     media_resolution=media_resolution,
                     media_thinking_level=media_thinking_level,
                     base_url=base_url,
+                    overrides=overrides,
                 )
             )
 

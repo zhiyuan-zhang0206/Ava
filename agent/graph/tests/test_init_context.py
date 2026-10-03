@@ -325,7 +325,7 @@ async def test_a_compaction_in_the_same_pass_keeps_its_summary_and_its_head(
     )
     monkeypatch.setattr(
         "agent.hooks.compact.resolve_context_budget",
-        lambda _model: ContextBudget(  # pyright: ignore[reportUnknownArgumentType]
+        lambda *_: ContextBudget(  # pyright: ignore[reportUnknownArgumentType]
             max_context_tokens=1_000_000, soft_compact_tokens=1, hard_compact_tokens=1
         ),
     )
