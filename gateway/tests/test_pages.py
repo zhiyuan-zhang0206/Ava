@@ -21,6 +21,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import Any
 
 import psycopg
 import pytest
@@ -119,6 +120,26 @@ def test_register_page_url_falls_back_to_request_base_without_gateway_url(
     assert resp.json()["url"] == f"http://testserver/pages/{aid}-p/"
 
 
+def _assert_reopen_response_pair(
+    opened: dict[str, Any], reopened: dict[str, Any], aid: int
+) -> None:
+    assert opened["id"] != reopened["id"]
+    assert opened["closed_at"] is None  # r1 was open at the time
+    assert reopened["port"] == 8002
+    assert reopened["title"] == "v2"
+    assert reopened["url"] == f"http://test-gateway.invalid:8000/pages/{aid}-p/"
+
+
+def _assert_two_page_rows(rows: list[tuple]) -> None:
+    # Two total rows: r1 now closed, r2 open.
+    assert len(rows) == 2  # pyright: ignore[reportUnknownArgumentType]
+    closed_row = [r for r in rows if r[5] is not None]
+    open_row = [r for r in rows if r[5] is None]
+    assert len(closed_row) == 1  # pyright: ignore[reportUnknownArgumentType]
+    assert len(open_row) == 1  # pyright: ignore[reportUnknownArgumentType]
+    assert open_row[0] == ("p", 8002, "localhost", "v2", None, None)
+
+
 def test_register_page_same_name_auto_closes_then_creates(db_conn: psycopg.Connection) -> None:
     """Single page per agent: re-registering auto-closes the old page, creates a new row."""
     aid = create_agent(db_conn)
@@ -132,22 +153,11 @@ def test_register_page_same_name_auto_closes_then_creates(db_conn: psycopg.Conne
         )
     assert r1.status_code == 201
     assert r2.status_code == 201
-    # Old page is auto-closed, new row gets a new id.
-    assert r1.json()["id"] != r2.json()["id"]
-    assert r1.json()["closed_at"] is None  # r1 was open at the time
-    assert r2.json()["port"] == 8002
-    assert r2.json()["title"] == "v2"
-    assert r2.json()["url"] == f"http://test-gateway.invalid:8000/pages/{aid}-p/"
+    _assert_reopen_response_pair(r1.json(), r2.json(), aid)
 
     db_conn.rollback()
     rows = _page_rows(db_conn, aid)
-    # Two total rows: r1 now closed, r2 open.
-    assert len(rows) == 2  # pyright: ignore[reportUnknownArgumentType]
-    closed_row = [r for r in rows if r[5] is not None]
-    open_row = [r for r in rows if r[5] is None]
-    assert len(closed_row) == 1  # pyright: ignore[reportUnknownArgumentType]
-    assert len(open_row) == 1  # pyright: ignore[reportUnknownArgumentType]
-    assert open_row[0] == ("p", 8002, "localhost", "v2", None, None)
+    _assert_two_page_rows(rows)
 
 
 def test_register_page_missing_host_422() -> None:

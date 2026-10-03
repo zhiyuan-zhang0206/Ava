@@ -60,20 +60,17 @@ def _now_ts() -> datetime:
     return datetime.now(UTC)
 
 
-def test_ops_monitor_empty_envelope_and_zero_fill(db_conn: psycopg.Connection) -> None:
-    """Empty backends -> all groups present, series fully zero-filled at the
-    window's fixed point count (24h -> 48 buckets), totals zero."""
-    db_conn.commit()
-    with TestClient(app) as client:
-        resp = client.get("/api/ops/monitor")
-    assert resp.status_code == 200
-    body = resp.json()
+def _assert_zero_filled_series(body: dict[str, Any]) -> None:
+    """Every group renders the window's fixed point count of zeroed buckets."""
     assert body["meta"]["window"] == "24h"
     assert body["meta"]["bucket_seconds"] == 1800
     assert len(body["meta"]["bucket_starts"]) == 48
     assert len(body["sse"]["series"]) == 48
     assert len(body["llm"]["series"]) == 48
     assert len(body["restarts"]["series"]) == 48
+
+
+def _assert_zero_totals(body: dict[str, Any]) -> None:
     assert body["sse"]["totals"] == {"queue_full": 0, "publish_error": 0, "event_log_drop": 0}
     assert body["llm"]["totals"]["calls"] == 0
     assert body["llm"]["totals"]["latency_p50_ms"] is None
@@ -92,6 +89,18 @@ def test_ops_monitor_empty_envelope_and_zero_fill(db_conn: psycopg.Connection) -
         "tps": None,
         "errors": 0,
     }
+
+
+def test_ops_monitor_empty_envelope_and_zero_fill(db_conn: psycopg.Connection) -> None:
+    """Empty backends -> all groups present, series fully zero-filled at the
+    window's fixed point count (24h -> 48 buckets), totals zero."""
+    db_conn.commit()
+    with TestClient(app) as client:
+        resp = client.get("/api/ops/monitor")
+    assert resp.status_code == 200
+    body = resp.json()
+    _assert_zero_filled_series(body)
+    _assert_zero_totals(body)
 
 
 def test_ops_monitor_window_param_sets_bucket_count(db_conn: psycopg.Connection) -> None:
