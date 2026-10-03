@@ -42,7 +42,6 @@ from psycopg import sql
 from base.cluster.authority import (
     GATEWAY_GROUP,
     RUNNER_GROUP,
-    BirthAuthority,
     GenerationSecret,
     Groups,
     activate,
@@ -206,12 +205,11 @@ class AuthorityCluster:
 
 def birth(cluster: AuthorityCluster) -> None:
     """First-start birth through the real library: groups, ledger, generation 0."""
-    authority = BirthAuthority()
     with cluster.admin() as conn:
         ensure_groups(conn, owner=cluster.owner, database=cluster.database, groups=cluster.groups)
-        create_ledger(cluster.home, owner=cluster.owner, groups=cluster.groups, authority=authority)
-        verified = mint_generation(conn, cluster.home, authority)
-    activate(cluster.home, authority, verified)
+        create_ledger(cluster.home, owner=cluster.owner, groups=cluster.groups)
+        verified = mint_generation(conn, cluster.home)
+    activate(cluster.home, verified)
 
 
 def _reset(instance: Instance, database: str) -> None:

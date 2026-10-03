@@ -133,12 +133,11 @@ ava cluster db-authority install-unit <bundle>      # a later bundle: stop the u
 The bundle is sealed (AES-256-GCM) under a transport key printed once; it names
 one unit (machine + home), the endpoint bootstrap serves, the active write
 generation and an expiry (`--ttl-hours`, default 24, at most 72). Start refuses
-an altered bundle, the wrong key, another unit's bundle, an expired one, an
-older generation than the installed one, and a login the cluster rejects (a
-revoked generation); it then writes `$AVA_HOME/db-authority/unit.json` (0600)
+an altered bundle, the wrong key, another unit's bundle, an expired one, one
+whose credentials contradict the installed generation's, and a login the cluster
+rejects; it then writes `$AVA_HOME/db-authority/unit.json` (0600)
 and deletes the bundle. A runner without a capability refuses to start and names
-the issue command. Issue is refused on a remote-managed plane. A new generation
-reaches remote units only by a new bundle (join, emergency).
+the issue command. Issue is refused on a remote-managed plane.
 
 **Guard a bundle like the generation it carries.** Nothing in it is the unit's
 own. The runner login and runner API token are the write generation's, shared by
@@ -401,13 +400,12 @@ on `machines` and `host_deploy_state`, INSERT/UPDATE/DELETE on `api_idempotency`
 INSERT/UPDATE on `agent_tasks`, UPDATE on `agent_pages`, the shell
 TTL rows, and full CRUD on the LangGraph checkpoint tables.
 `agents` INSERT, `agents_meta` INSERT, notices writes, the cluster deploy-state tables and
-any DDL fail under it by construction. Each write generation is one `ava_g<n>_gateway` and
-one `ava_g<n>_runner` login inheriting its group (`INHERIT TRUE, SET FALSE, ADMIN
+any DDL fail under it by construction. The write generation is one `ava_g0_gateway` and
+one `ava_g0_runner` login inheriting its group (`INHERIT TRUE, SET FALSE, ADMIN
 FALSE`); generation 0 is minted at birth. The point-in-time `ALL`
 grants are re-run by every gateway `ava start` after migrations (`ensure_groups`), and
 standing `ALTER DEFAULT PRIVILEGES FOR ROLE <owner>` covers objects later migrations
-create; start then sweeps every non-active application login to `NOLOGIN` and holds on
-any catalog/ledger mismatch (`check_invariant`).
+create; start then holds on any catalog/ledger mismatch (`check_invariant`).
 
 The Redis ACL user comes from `AVA_REDIS_URL` independently of the Postgres
 db/role in `AVA_DB_URL` (for example, Redis `ava` and Postgres `ava_main`).
@@ -1745,100 +1743,6 @@ whether a restart is required — see
 
 Not automated: each is a manual console visit, and several (Telegram) have no
 programmatic rotation API at all.
-
-### Manual rotation after a credential leak
-
-No command rotates the database write generation, and none is planned: a leak
-is rare, single-operator and supervised, so it is a procedure run by hand.
-Every step names an existing tool. Cutting a leaked credential off
-means the previous write generation stops being able to log in: its logins lose
-`LOGIN`, their sessions are terminated, and their secret files are deleted.
-
-1. **Stop the whole cluster.** On every runner `ava stop -y`; on the gateway
-   `ava stop -y --keep-infra` (Postgres and Redis must stay up for the steps
-   below). No service may run while the generation changes: the `/ops` server
-   reads its accepted tokens once at boot, and the fence terminates whatever
-   still holds a session of the old logins.
-2. **Human bearer** (only if it leaked; on the gateway checkout, in a gateway
-   context): `rotate_cluster_secret.py --execute`. Do it before step 6: the
-   telemetry token in every unit bundle derives from this secret.
-3. **Redis** (gateway checkout): `rotate_data_plane_secrets.py --execute`
-   (`--scope admin` for `requirepass`, `--scope runner` for the ACL runtime
-   password; the default is both). Both scripts are described above.
-4. **Database write generation** (gateway checkout, home resolved from the
-   checkout, `unset AVA_PROCESS_PROFILE`, Postgres up). The fence and the next
-   admission of `base.cluster.authority` under one operation id. Keep the
-   printed id: a retry after a crash must pass the same one, and the ledger
-   holds instead of minting a second pair.
-
-```bash
-OP=$(uuidgen); echo "operation $OP"
-.venv/bin/python - "$OP" <<'PY'
-import sys
-from uuid import UUID
-
-from base.cluster import db_identity, get_record, ownership
-from base.cluster.authority import (
-    OperationAuthority,
-    activate,
-    mint_generation,
-    prune,
-    require_ledger,
-    verify_generation,
-)
-from base.cluster.authority.fence import close_revoked, revoke
-from base.host.net.url_secret import url_with_port
-from base.paths import ava_home
-from cli.commands.data_plane import pgbouncer as pooler
-from cli.commands.data_plane.bringup import admin_session, db_endpoint, prove_generation_logins
-
-authority = OperationAuthority(operation=UUID(sys.argv[1]), direction="candidate")
-home, database = ava_home().resolve(), db_identity()
-record = get_record(home)
-with admin_session(record, database) as conn:
-    revoke(conn, home, authority)  # ledger `revoking`, then the NOLOGIN sweep
-    pooler.stop_pgbouncer(force=True)  # nothing may still hold the old pair
-    ownership.require_listener(None, record.ports["pgbouncer"], required=False)
-    close_revoked(conn, home, authority)  # terminate and count sessions; ledger `closed`
-    prune(conn, home, authority)  # drop the closed logins
-    mint_generation(conn, home, authority)  # secret, ledger `pending`, the two logins
-    generation = require_ledger(home).unrevoked
-    direct = url_with_port(db_endpoint(), record.ports["postgres"])
-    prove_generation_logins(home, generation, direct)
-    print("active generation", activate(home, authority, verify_generation(conn, home)).number)
-PY
-```
-
-   The fence revokes the active generation (ledger `revoked`), removes `LOGIN`
-   and the password from its two logins, stops the pooler, terminates and counts
-   every session of them until none is left (ledger `closed`, secret deleted),
-   and drops the logins (one with a dependency stays as an inert `NOLOGIN`
-   tombstone). The admission mints `ava_g<n+1>_gateway` and `_runner`, proves
-   each logs in on the home's own Postgres, and marks the generation `active` in
-   `$AVA_HOME/db-authority/ledger.json`.
-5. **Start the gateway**: `ava start`. The ordinary start re-checks the group
-   grants, sweeps any stale login again, births a pooler serving exactly the new
-   pair, and launches every service with the new logins.
-6. **Every runner**: on the gateway `ava cluster db-authority issue-unit
-   --machine <name> --home <unit $AVA_HOME> --out <bundle>`, carry the bundle and
-   its printed transport key separately, then on the runner
-   `AVA_DB_CAPABILITY_KEY=<key> ava cluster db-authority install-unit <bundle>` with the unit
-   stopped, then `ava start` (the flow in
-   [Clusters, units, prod, and dev clone paths](#clusters-units-prod-and-dev-clone-paths)).
-   The runner's old login was revoked in step 4, so its previous bundle cannot
-   start it. A runner also fetches its Redis URL from the gateway at start, so
-   this step is what delivers the rotated Redis password.
-7. **Provider keys**: mint each in its console, then `ava config set KEY=VALUE`
-   (the table above); the command says whether a restart is needed.
-8. **Verify.** `ava status` on every unit; `active.number` in `ledger.json`
-   is the new number and every older one reads `closed`; and, as the
-   administrator (`psql`, above), `SELECT rolname, rolcanlogin FROM pg_roles
-   WHERE rolname LIKE 'ava\_g%'` shows only the two new logins able to log in.
-
-If step 4 fails, read its error: the ledger refuses rather than guess, and the
-cause is named (a session that would not close, a prepared transaction, a
-foreign pending generation). Fix that, then re-run the same block with the same
-operation id.
 
 ## Code version gate
 

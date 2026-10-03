@@ -1,9 +1,9 @@
-"""Machine API tokens per write generation: the token acceptance matrix.
+"""Machine API tokens of the write generation: the token acceptance matrix.
 
-Every generation's secret carries one API token per class. The gateway (API
+The generation's secret carries one API token per class. The gateway (API
 middleware, bootstrap, webhooks, managed-browser login) accepts the human
 cluster secret or the ACTIVE generation's tokens; a runner's ops server
-accepts its generation's two tokens and never the human secret; the launcher
+accepts the generation's two tokens and never the human secret; the launcher
 delivers each service its class token only while the API is authenticated;
 clients present the delivered token first. The ledger side needs no database;
 the gateway checks run the real app against the suite's database.
@@ -18,7 +18,6 @@ import os
 from collections.abc import Callable, Iterator
 from pathlib import Path
 from typing import Any
-from uuid import uuid4
 
 import pytest
 from fastapi.testclient import TestClient
@@ -41,27 +40,15 @@ _HUMAN = "human-" + "h" * 40
 _ENDPOINT = "postgresql://ava@10.0.0.7:6433/ava"
 
 
-def _encrypt(name: str, _password: str) -> str:
-    return f"SCRAM-SHA-256$4096:c2VlZA==${name}"
-
-
 def _tokens(home: Path) -> authority.GenerationSecret:
     return authority.read_secret(home, authority.active_generation(home))
 
 
-def _rotate(home: Path) -> None:
-    """One release rotation of the ledger (the catalog side is proven elsewhere):
-    revoke and close the active generation, mint and activate the next."""
-    operation = authority.OperationAuthority(operation=uuid4(), direction="candidate")
-    revoking = ledger.begin_revoke(home, operation)
-    roles = tuple(name for entry in revoking for name in entry.roles)
-    ledger.mark_closed(home, operation, authority.ClosureEvidence(roles, 0, 1))
-    pending = ledger.begin_mint(home, operation, encrypt=_encrypt)
-    ledger.activate(
-        home,
-        operation,
-        authority.VerifiedGeneration(pending.number, pending.credential_digest, pending.roles),
-    )
+def _unadmit(home: Path) -> None:
+    """The state of a birth that has minted its generation but not admitted it:
+    the generation is pending, nothing is active."""
+    current = ledger.require_ledger(home)
+    ledger._write(home, ledger._replace(current, active=None, pending=current.active))
 
 
 @pytest.fixture
@@ -90,21 +77,16 @@ def _bearer(token: str) -> str:
 # ── the generation's tokens and the gateway's acceptance ────────────────────
 
 
-def test_each_generation_mints_distinct_class_tokens(gateway: Path) -> None:
-    first = _tokens(gateway).api
-    assert len({first.gateway, first.runner}) == 2
+def test_the_generation_mints_distinct_class_tokens(gateway: Path) -> None:
+    tokens = _tokens(gateway).api
+    assert len({tokens.gateway, tokens.runner}) == 2
     assert api.acceptance(gateway) == {
-        "gateway": api.token_digest(first.gateway),
-        "runner": api.token_digest(first.runner),
+        "gateway": api.token_digest(tokens.gateway),
+        "runner": api.token_digest(tokens.runner),
     }
-    _rotate(gateway)
-    second = _tokens(gateway).api
-    assert {second.gateway, second.runner}.isdisjoint({first.gateway, first.runner})
-    # The rotation rewrote the ledger: the cached acceptance follows it.
-    assert set(api.acceptance(gateway).values()) == {
-        api.token_digest(second.gateway),
-        api.token_digest(second.runner),
-    }
+    # Admission rewrites the ledger: the cached acceptance follows it.
+    _unadmit(gateway)
+    assert api.acceptance(gateway) == {}
 
 
 def test_no_ledger_or_no_active_generation_accepts_no_machine_token(
@@ -113,8 +95,7 @@ def test_no_ledger_or_no_active_generation_accepts_no_machine_token(
     bare = (tmp_path / "bare").resolve()
     bare.mkdir(mode=0o700)
     assert api.acceptance(bare) == {}
-    operation = authority.OperationAuthority(operation=uuid4(), direction="candidate")
-    ledger.begin_revoke(gateway, operation)  # the fence: nothing is active
+    _unadmit(gateway)  # a pending generation is never accepted
     assert api.acceptance(gateway) == {}
 
 
@@ -132,7 +113,7 @@ def test_cluster_credential_names_the_verifying_credential(gateway: Path) -> Non
         _bearer(""),
     ):
         assert cluster_credential(refused, _HUMAN) is None
-    _rotate(gateway)
+    _unadmit(gateway)
     assert cluster_credential(_bearer(tokens.gateway), _HUMAN) is None
     assert cluster_credential(_bearer(tokens.runner), _HUMAN) is None
     # A blank human secret never verifies as a bearer.
@@ -149,12 +130,10 @@ def test_gateway_api_admits_the_active_generation_and_the_human_secret(gateway: 
             assert client.get("/api/agents", headers=bearer_header(token)).status_code == 200
         assert client.get("/api/agents").status_code == 401
         assert client.get("/api/agents", headers=bearer_header("x" * 43)).status_code == 401
-        _rotate(gateway)
-        after = _tokens(gateway).api
-        for revoked in (before.gateway, before.runner):
-            assert client.get("/api/agents", headers=bearer_header(revoked)).status_code == 401
-        for token in (after.gateway, after.runner, _HUMAN):
-            assert client.get("/api/agents", headers=bearer_header(token)).status_code == 200
+        _unadmit(gateway)
+        for refused in (before.gateway, before.runner):
+            assert client.get("/api/agents", headers=bearer_header(refused)).status_code == 401
+        assert client.get("/api/agents", headers=bearer_header(_HUMAN)).status_code == 200
 
 
 def test_an_open_api_ignores_bearers(gateway: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -171,7 +150,7 @@ def test_bootstrap_serves_a_runner_token_but_never_the_human_secret(gateway: Pat
         payload = served.json()
         assert "AVA_CLUSTER_SECRET" not in payload
         assert _HUMAN not in json.dumps(payload)
-        _rotate(gateway)
+        _unadmit(gateway)
         assert client.get("/api/bootstrap", headers=bearer_header(runner)).status_code == 401
 
 
@@ -185,9 +164,8 @@ def test_login_admits_the_active_runner_token_for_the_managed_browser(gateway: P
         assert _login(client, tokens.gateway) == 401
         response = client.post("/api/auth/login", json={"password": tokens.runner})
         assert response.status_code == 200 and response.cookies[cookie_name()]
-        _rotate(gateway)
+        _unadmit(gateway)
         assert _login(client, tokens.runner) == 401
-        assert _login(client, _tokens(gateway).api.runner) == 200
 
 
 def _cookie_authenticates(client: TestClient, cookie: str) -> tuple[int, bool]:
@@ -199,32 +177,14 @@ def _cookie_authenticates(client: TestClient, cookie: str) -> tuple[int, bool]:
     return agents, check
 
 
-def test_a_runner_minted_session_dies_with_its_generation(gateway: Path) -> None:
-    """A session is only as current as the credential that minted it: the
-    managed browser's cookie stops authenticating the moment the fence revokes
-    the runner token that logged it in, not at the session's expiry."""
-    runner = _tokens(gateway).api.runner
-    with TestClient(config_app()) as client:
-        cookie = client.post("/api/auth/login", json={"password": runner}).cookies[cookie_name()]
-        assert _cookie_authenticates(client, cookie) == (200, True)
-        _rotate(gateway)
-        assert _cookie_authenticates(client, cookie) == (401, False)
-        # A fresh login with the new generation's token authenticates again.
-        renewed = client.post(
-            "/api/auth/login", json={"password": _tokens(gateway).api.runner}
-        ).cookies[cookie_name()]
-        assert _cookie_authenticates(client, renewed) == (200, True)
-
-
 def test_a_human_minted_session_dies_with_the_rotated_secret(
     gateway: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A browser logged in with the human secret survives a generation rotation
-    (the human bearer is not per-generation) but not a rotation of the secret
-    itself: the restarted gateway admits only sessions its current secret minted."""
+    """A browser logged in with the human secret stays authenticated while the secret
+    holds, but not past a rotation of the secret itself: the restarted gateway admits
+    only sessions its current secret minted."""
     with TestClient(config_app()) as client:
         cookie = client.post("/api/auth/login", json={"password": _HUMAN}).cookies[cookie_name()]
-        _rotate(gateway)
         assert _cookie_authenticates(client, cookie) == (200, True)
         monkeypatch.setattr(settings.data_plane, "cluster_secret", "rotated-" + "r" * 40)
         assert _cookie_authenticates(client, cookie) == (401, False)
@@ -269,9 +229,8 @@ def test_a_session_records_which_credential_minted_it(gateway: Path) -> None:
 
 
 def test_the_sessions_list_shows_only_sessions_that_authenticate(gateway: Path) -> None:
-    """`/api/auth/sessions` lists what the session check would still admit: a
-    runner-minted session leaves the list when the fence revokes its generation,
-    and an id without a mint (the pre-mint format) never appears."""
+    """`/api/auth/sessions` lists what the session check would still admit: an id
+    without a mint (the pre-mint format) never appears."""
     from base.cluster.auth import new_session_id
     from gateway.auth.session_store import create_session
 
@@ -290,8 +249,6 @@ def test_the_sessions_list_shows_only_sessions_that_authenticate(gateway: Path) 
             return {row["id"] for row in response.json()}
 
         assert listed() == {machine[-8:], human[-8:]}
-        _rotate(gateway)
-        assert listed() == {human[-8:]}
 
 
 def test_a_machine_token_cannot_choose_the_human_secret(
@@ -391,7 +348,7 @@ def test_webhooks_admit_the_active_generation_off_loopback(gateway: Path) -> Non
     runner = _tokens(gateway).api.runner
     admitted = authenticate_webhook(_webhook_request(_bearer(runner)), provider="alerts")
     assert admitted == (True, "machine_token:runner")
-    _rotate(gateway)
+    _unadmit(gateway)
     assert not authenticate_webhook(_webhook_request(_bearer(runner)), provider="alerts")[0]
 
 
@@ -444,17 +401,16 @@ def test_gateway_home_ops_accepts_its_generation_never_the_human_secret(gateway:
         (api.token_digest(tokens.gateway), 401),  # the server's digest is not a bearer
     ):
         assert asyncio.run(_ops_status(acceptance, token)) == status
-    _rotate(gateway)
+    _unadmit(gateway)
     assert asyncio.run(_ops_status(ops_boot._ops_acceptance(), tokens.gateway)) == 401
 
 
 def test_gateway_home_ops_fails_closed_while_no_generation_is_active(gateway: Path) -> None:
-    """During a fence no generation is active: a secret gateway home's /ops then
-    accepts no bearer at all, and still binds as an authenticated server. It
-    never falls back to the open, unauthenticated posture (None)."""
+    """Before a birth admits its generation none is active: a secret gateway home's
+    /ops then accepts no bearer at all, and still binds as an authenticated server.
+    It never falls back to the open, unauthenticated posture (None)."""
     tokens = _tokens(gateway).api
-    operation = authority.OperationAuthority(operation=uuid4(), direction="candidate")
-    ledger.begin_revoke(gateway, operation)
+    _unadmit(gateway)
     acceptance = ops_boot._ops_acceptance()
     assert acceptance == frozenset()
     assert ops_boot._ops_bind_host(acceptance) == "0.0.0.0"  # noqa: S104

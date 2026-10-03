@@ -4,9 +4,9 @@ equality with the group, denials, and crash-safe exact-retry minting."""
 from __future__ import annotations
 
 from collections.abc import Callable
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
-from uuid import uuid4
 
 import psycopg
 import pytest
@@ -15,16 +15,16 @@ from psycopg import sql
 from base.cluster.authority import (
     CatalogRefusedError,
     LedgerRefusedError,
-    OperationAuthority,
     activate,
     check_invariant,
+    create_ledger,
+    ensure_groups,
     mint_generation,
     require_ledger,
 )
 from base.cluster.authority import groups as groups_module
 from base.cluster.authority import ledger as ledger_module
 from base.cluster.authority import roles as roles_module
-from base.cluster.authority.fence import close_revoked, revoke
 from tests.path_scoped.db_authority_tests import OWNER, AuthorityCluster
 
 _LOGIN_ATTRIBUTES = (
@@ -43,7 +43,7 @@ def _generation_roles(conn: psycopg.Connection[Any]) -> list[str]:
 def test_birth_creates_exactly_generation_zero(authority_postgres: AuthorityCluster) -> None:
     cluster = authority_postgres
     ledger = require_ledger(cluster.home)
-    assert ledger.counter == 0 and ledger.pending is None and ledger.revoked == ()
+    assert ledger.pending is None
     assert ledger.active is not None and ledger.active.roles == ("ava_g0_gateway", "ava_g0_runner")
     assert ledger.active.origin.kind == "birth"
     with cluster.admin() as conn:
@@ -188,14 +188,6 @@ def test_login_is_denied_ddl_and_identity_changes(
         assert row == (True,)
 
 
-def _fence_generation_zero(cluster: AuthorityCluster) -> OperationAuthority:
-    authority = OperationAuthority(operation=uuid4(), direction="candidate")
-    with cluster.admin() as conn:
-        revoke(conn, cluster.home, authority)
-        close_revoked(conn, cluster.home, authority)
-    return authority
-
-
 class _CrashError(Exception):
     pass
 
@@ -237,143 +229,112 @@ def _inject(monkeypatch: pytest.MonkeyPatch, boundary: str) -> None:
         )
 
 
+def _begin_birth(cluster: AuthorityCluster) -> None:
+    """The birth steps before the generation: groups and the empty ledger."""
+    with cluster.admin() as conn:
+        ensure_groups(conn, owner=cluster.owner, database=cluster.database, groups=cluster.groups)
+    create_ledger(cluster.home, owner=cluster.owner, groups=cluster.groups)
+
+
 @pytest.mark.parametrize("boundary", _BOUNDARIES)
 def test_mint_retry_after_crash_reconciles_the_same_generation(
-    authority_postgres: AuthorityCluster, monkeypatch: pytest.MonkeyPatch, boundary: str
+    authority_unborn: AuthorityCluster, monkeypatch: pytest.MonkeyPatch, boundary: str
 ) -> None:
-    cluster = authority_postgres
-    authority = _fence_generation_zero(cluster)
+    cluster = authority_unborn
+    _begin_birth(cluster)
     with monkeypatch.context() as patched:
         _inject(patched, boundary)
         with cluster.admin() as conn, pytest.raises(_CrashError):
-            mint_generation(conn, cluster.home, authority)
+            mint_generation(conn, cluster.home)
     ledger = require_ledger(cluster.home)
-    assert ledger.counter == (0 if boundary == "secret-published" else 1)
+    assert (ledger.pending is None) == (boundary == "secret-published")
     with cluster.admin() as conn:
-        verified = mint_generation(conn, cluster.home, authority)
-        again = mint_generation(conn, cluster.home, authority)
-        assert again == verified and verified.number == 1
-        activate(cluster.home, authority, verified)
-        assert mint_generation(conn, cluster.home, authority) == verified
-        assert _generation_roles(conn) == [
-            "ava_g0_gateway",
-            "ava_g0_runner",
-            "ava_g1_gateway",
-            "ava_g1_runner",
-        ]
+        verified = mint_generation(conn, cluster.home)
+        again = mint_generation(conn, cluster.home)
+        assert again == verified and verified.number == 0
+        activate(cluster.home, verified)
+        assert mint_generation(conn, cluster.home) == verified
+        assert _generation_roles(conn) == ["ava_g0_gateway", "ava_g0_runner"]
         check_invariant(conn, cluster.home, database=cluster.database)
     ledger = require_ledger(cluster.home)
-    assert ledger.counter == 1 and ledger.active is not None and ledger.active.number == 1
+    assert ledger.active is not None and ledger.pending is None
     assert sorted(p.name for p in (cluster.home / "db-authority" / "generations").iterdir()) == [
-        "1.json"
+        "0.json"
     ]
     with cluster.connect_class("gateway") as conn:
-        assert conn.execute("SELECT current_user").fetchone() == ("ava_g1_gateway",)
+        assert conn.execute("SELECT current_user").fetchone() == ("ava_g0_gateway",)
 
 
 def test_retry_holds_when_the_stored_verifier_differs(
-    authority_postgres: AuthorityCluster, monkeypatch: pytest.MonkeyPatch
+    authority_unborn: AuthorityCluster, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    cluster = authority_postgres
-    authority = _fence_generation_zero(cluster)
+    cluster = authority_unborn
+    _begin_birth(cluster)
     with monkeypatch.context() as patched:
         _inject(patched, "roles-created")
         with cluster.admin() as conn, pytest.raises(_CrashError):
-            mint_generation(conn, cluster.home, authority)
+            mint_generation(conn, cluster.home)
     with cluster.admin() as conn:
-        conn.execute("ALTER ROLE ava_g1_gateway PASSWORD 'foreign-credential-value'")
+        conn.execute("ALTER ROLE ava_g0_gateway PASSWORD 'foreign-credential-value'")
         with pytest.raises(CatalogRefusedError, match="stored verifier differs"):
-            mint_generation(conn, cluster.home, authority)
-        assert _generation_roles(conn) == [
-            "ava_g0_gateway",
-            "ava_g0_runner",
-            "ava_g1_gateway",
-            "ava_g1_runner",
-        ]
+            mint_generation(conn, cluster.home)
+        assert _generation_roles(conn) == ["ava_g0_gateway", "ava_g0_runner"]
     ledger = require_ledger(cluster.home)
-    assert ledger.counter == 1 and ledger.pending is not None and ledger.active is None
+    assert ledger.pending is not None and ledger.active is None
 
 
-def test_mint_holds_when_the_next_names_already_exist(authority_postgres: AuthorityCluster) -> None:
-    cluster = authority_postgres
-    authority = _fence_generation_zero(cluster)
+def test_mint_holds_when_the_names_already_exist(authority_unborn: AuthorityCluster) -> None:
+    cluster = authority_unborn
+    _begin_birth(cluster)
     with cluster.admin() as conn:
-        conn.execute("CREATE ROLE ava_g1_runner NOLOGIN")
+        conn.execute("CREATE ROLE ava_g0_runner NOLOGIN")
         with pytest.raises(CatalogRefusedError, match="already exist before their mint"):
-            mint_generation(conn, cluster.home, authority)
-    ledger = require_ledger(cluster.home)
-    assert ledger.counter == 0 and ledger.pending is None
-    assert not (cluster.home / "db-authority" / "generations" / "1.json").exists()
+            mint_generation(conn, cluster.home)
+    assert require_ledger(cluster.home).pending is None
+    assert not (cluster.home / "db-authority" / "generations" / "0.json").exists()
 
 
 def test_mint_holds_while_another_login_holds_group_membership(
-    authority_postgres: AuthorityCluster,
+    authority_unborn: AuthorityCluster,
 ) -> None:
-    cluster = authority_postgres
-    authority = _fence_generation_zero(cluster)
+    cluster = authority_unborn
+    _begin_birth(cluster)
     with cluster.admin() as conn:
         conn.execute("CREATE ROLE stray_writer LOGIN PASSWORD 'stray-writer-password'")
         conn.execute("GRANT ava_runner TO stray_writer")
         with pytest.raises(CatalogRefusedError, match="stray_writer"):
-            mint_generation(conn, cluster.home, authority)
+            mint_generation(conn, cluster.home)
     assert require_ledger(cluster.home).pending is None
 
 
-def test_another_authority_cannot_adopt_or_activate_a_pending_generation(
-    authority_postgres: AuthorityCluster, monkeypatch: pytest.MonkeyPatch
+def test_activation_names_the_exact_pending_generation(
+    authority_unborn: AuthorityCluster, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    cluster = authority_postgres
-    authority = _fence_generation_zero(cluster)
+    cluster = authority_unborn
+    _begin_birth(cluster)
     with monkeypatch.context() as patched:
         _inject(patched, "verified")
         with cluster.admin() as conn, pytest.raises(_CrashError):
-            mint_generation(conn, cluster.home, authority)
-    other = OperationAuthority(operation=uuid4(), direction="previous")
+            mint_generation(conn, cluster.home)
     with cluster.admin() as conn:
-        with pytest.raises(LedgerRefusedError, match="another authority"):
-            mint_generation(conn, cluster.home, other)
-        verified = mint_generation(conn, cluster.home, authority)
+        verified = mint_generation(conn, cluster.home)
     with pytest.raises(LedgerRefusedError, match="exact pending generation"):
-        activate(cluster.home, other, verified)
+        activate(cluster.home, replace(verified, credential_digest="0" * 64))
+    assert require_ledger(cluster.home).active is None
 
 
 def test_mint_refuses_a_non_admin_session(authority_postgres: AuthorityCluster) -> None:
     cluster = authority_postgres
-    authority = OperationAuthority(operation=uuid4(), direction="candidate")
     with (
         cluster.connect_class("gateway", autocommit=True) as conn,
         pytest.raises(Exception, match="superuser session"),
     ):
-        mint_generation(conn, cluster.home, authority)
+        mint_generation(conn, cluster.home)
     with cluster.admin() as conn:
         conn.execute(sql.SQL("SET ROLE {}").format(sql.Identifier(OWNER)))
         with pytest.raises(Exception, match="superuser session"):
-            mint_generation(conn, cluster.home, authority)
+            mint_generation(conn, cluster.home)
     with cluster.instance.admin(cluster.database) as conn:
         conn.autocommit = False
         with pytest.raises(Exception, match="autocommit"):
-            mint_generation(conn, cluster.home, authority)
-
-
-def test_a_pending_generation_without_roles_is_revoked_and_closed(
-    authority_postgres: AuthorityCluster, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """A mint that crashed before creating roles can be abandoned by the fence;
-    the next mint allocates a new number and never reuses the abandoned one."""
-    cluster = authority_postgres
-    authority = _fence_generation_zero(cluster)
-    with monkeypatch.context() as patched:
-        _inject(patched, "pending-recorded")
-        with cluster.admin() as conn, pytest.raises(_CrashError):
-            mint_generation(conn, cluster.home, authority)
-    recovery = OperationAuthority(operation=uuid4(), direction="previous")
-    with cluster.admin() as conn:
-        assert "ava_g1_gateway" not in _generation_roles(conn)
-        revoke(conn, cluster.home, recovery)
-        close_revoked(conn, cluster.home, recovery)
-        verified = mint_generation(conn, cluster.home, recovery)
-        activate(cluster.home, recovery, verified)
-        assert verified.number == 2
-        check_invariant(conn, cluster.home, database=cluster.database)
-    ledger = require_ledger(cluster.home)
-    assert [(e.number, e.state) for e in ledger.revoked] == [(0, "closed"), (1, "closed")]
+            mint_generation(conn, cluster.home)

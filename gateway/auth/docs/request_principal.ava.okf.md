@@ -23,7 +23,7 @@ secret), `machine_token:<class>` (the active write generation's machine API
 token, `cluster_credential`), `user_session` (a browser session the human secret
 minted) or `machine_session:runner` (one a runner token minted, a unit's managed
 browser). Both bearers authenticate the
-same cluster administrator; a revoked generation's token never matches. Scoped webhook and MCP boundaries establish their own
+same cluster administrator; a pending generation's token never matches. Scoped webhook and MCP boundaries establish their own
 `webhook:<provider>` or `mcp_client:<id>` fact after authenticating outside the
 cluster middleware. The fact is never copied from request JSON, and it grants
 authority in one place only: the MCP client admin routes mint tokens bound to

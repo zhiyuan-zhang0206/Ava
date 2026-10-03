@@ -193,10 +193,8 @@ every other such row keeps refusing.
 ### Database authority boundary
 
 Per-rollout write-generation rotation belonged to the removed path. The ledger
-keeps generation 0; a leaked credential is rotated by hand
-([runbook](../../conventions/runbook.md#manual-rotation-after-a-credential-leak)).
-Direct database fencing does not revoke a stale caller's HTTP bearer, so API
-admission has its own generation boundary (below).
+keeps generation 0 and nothing replaces it
+([decision](../../decisions/2026-10-03-retire-write-generation-rotation.md)).
 
 PostgreSQL and pooler connections always authenticate, even when the
 frontend/control-plane bearer is empty
@@ -208,7 +206,7 @@ always uses SCRAM against the active generation's verifier userlist and
 restarts on a userlist change. The schema owner is `NOLOGIN`, the capability
 groups carry every grant, birth mints write generation 0
 ([authority](../../base/cluster/authority/docs/authority.ava.okf.md)), an ordinary
-start re-grants, sweeps and checks the catalog invariant, the root launcher
+start re-grants and checks the catalog invariant, the root launcher
 delivers each service its class login bound into the launch digest, and an
 admitted operator CLI consumes the gateway login. Bootstrap serves no database
 credential; a remote agent-runner installs a sealed, unit-bound capability the
@@ -216,8 +214,7 @@ gateway operator issues (`ava cluster db-authority issue-unit`,
 `ava init --db-capability`, and `install-unit` for a later bundle), carrying the active generation's runner login,
 and its API admission
 ([unit capability](../../base/cluster/authority/docs/wiring.ava.okf.md#remote-agent-runner-units)).
-API admission is a generation boundary too: every generation carries one
-machine API token per class; the gateway admits the human secret or the ACTIVE
+The generation also carries one machine API token per class; the gateway admits the human secret or the ACTIVE
 generation's tokens, a unit's ops server its generation's two tokens, and the
 launcher delivers each service its class token (`AVA_API_TOKEN`) only while the
 API is authenticated. Remote units never hold the human secret (bootstrap does

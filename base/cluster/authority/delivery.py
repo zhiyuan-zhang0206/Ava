@@ -146,8 +146,7 @@ def active_generation(home: Path) -> Generation:
     ledger = require_ledger(home)
     if ledger.active is None:
         raise LedgerRefusedError(
-            "the database authority has no active generation; a pending or revoked "
-            "generation is never delivered"
+            "the database authority has no active generation; a pending one is never delivered"
         )
     return ledger.active
 
