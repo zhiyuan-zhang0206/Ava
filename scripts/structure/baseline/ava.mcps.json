@@ -16,8 +16,7 @@
     "ava/mcps/_remote.py::global-rebind:_remote_client": 1
   },
   "files": {
-    "ava/mcps/tests/test_daemon.py": 2110,
-    "ava/mcps/tests/test_mcps.py": 1367
+    "ava/mcps/tests/test_daemon.py": 2110
   },
   "nesting": {
     "ava/mcps/_daemon.py::_handle_client": 7
