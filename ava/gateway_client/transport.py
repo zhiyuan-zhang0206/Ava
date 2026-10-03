@@ -310,6 +310,13 @@ def _request_with_retry(
         ) from exc
 
 
+def _post_semantics(path: str, *, idempotent: bool | None) -> Idempotency:
+    """The retry semantics of one POST: the caller's explicit override, else the route's contract."""
+    if idempotent is None:
+        return contracts.idempotency_for("POST", path)
+    return Idempotency.IDEMPOTENT if idempotent else Idempotency.NON_IDEMPOTENT
+
+
 def post(
     path: str,
     json: dict | None = None,
@@ -370,13 +377,7 @@ def post(
 
     # Inherit retry semantics from the route's doorplate unless the caller
     # overrides: server promises (base/api_contracts/contracts.py), clients inherit.
-    semantics = (
-        Idempotency.IDEMPOTENT
-        if idempotent
-        else Idempotency.NON_IDEMPOTENT
-        if idempotent is not None
-        else contracts.idempotency_for("POST", path)
-    )
+    semantics = _post_semantics(path, idempotent=idempotent)
     retryable = semantics is not Idempotency.NON_IDEMPOTENT
     # One key per logical call — every retry of this call shares it, so the
     # server can dedup the retries against the original.
