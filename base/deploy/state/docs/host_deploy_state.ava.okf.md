@@ -46,6 +46,5 @@ The table carries only `machine`, `posture` and `updated_at`: the updater lease,
 - The home lifecycle mutex that serializes local start/stop is in [[home_lifecycle_locks.ava.okf.md|Home Lifecycle Mutex]].
 
 The controller-driven stranded-hold writer, budget, local note queue, heartbeat
-alert, and status projection have been removed. Their five physical columns
-remain unused until the explicit cleanup described in
-[the lifecycle plan](../../../../future/infra/unified-cluster-lifecycle.md).
+alert, and status projection have been removed; their five physical columns
+were dropped by `20261001T055030_drop-retired-deploy-and-watcher-storage`.

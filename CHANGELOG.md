@@ -16,6 +16,30 @@ and the matching GitHub Releases.
   ([decision](decisions/2026-10-03-pty-sessions-service.md)).
 
 ### Removed
+- Zero-effect CLI surfaces: `restart --force-reap` (identical to `--mode force`), the
+  unreachable `boot` lite-verbs entry, the `mcp ls` / `plugins ls` aliases, the no-op
+  `stop --stop-browser`, and `cluster health-probe`'s `--agent-min` /
+  `--crash-loop-max-restarts` / `--crash-loop-window-minutes` plus
+  `health-probe-register --interval` — the defaults are the contract and the config keys
+  stay; the flags now fail at argument parsing
+  ([decision](decisions/2026-10-03-deletion-sweep.md)).
+- Four read endpoints with no consumer: `GET /api/agents/{id}/activity` (its writer went
+  with `ava.self.log` in 2026-08-02; the `agent_activity` table drops separately — the
+  "remain (history)" note in the notice-SDK-slimming decision is overturned),
+  `GET /api/agents/{id}/completion-notice-policy`, and `GET /api/notices/escalations` /
+  `GET /api/notices/resolved` (the unified `GET /api/notices` feed carries the resolved
+  page) ([decision](decisions/2026-10-03-deletion-sweep.md)).
+- The Loki read side in `base/telemetry/loki_index_labels.py` (`event_stream_selector`,
+  `archive_stream_selector`, `split_index_label_window`, `ledger_gap_plan`,
+  `retention_floor`, the read-era/slice/plan types) and `INDEX_LABEL_CUTOVER_AT`: the last
+  Loki event readers went in the telemetry-readers-on-postgres move
+  ([decision](decisions/2026-10-03-deletion-sweep.md)).
+- The mcp-daemon pre-rename compatibility (the `ava._mcps_daemon` argv arm): a
+  four-machine process census shows no pre-rename process left
+  ([decision](decisions/2026-10-03-deletion-sweep.md)).
+- The `AVA_RUNNER_MODE` setting in the visual-baselines workflow and the lazy-import
+  tests' clean-env strips: nothing reads it
+  ([decision](decisions/2026-10-03-deletion-sweep.md)).
 - `ava maintenance prepare`, `drain`, `stop`, `start`, `resume` and `stop-data-plane`, with
   `--keep-terminals` and `--gateway-last`: the same kernel as `ava stop` and `ava start`, taken
   one step at a time, with no caller. `ava maintenance` keeps `status`, `repair` and `cancel`
@@ -55,6 +79,9 @@ and the matching GitHub Releases.
   by hand ([decision](decisions/2026-09-30-remove-deployment-lease.md)).
 
 ### Changed
+- `lint_ava_okf` no longer reports `[[wikilinks]]` quoted inside inline code spans or
+  fenced blocks (the same code-sample exemption `check_doc_references` applies): a sample
+  documents the syntax, it is not a node-graph edge.
 - The venv diagnostic probe reports only after
   `AVA_VENV_PROBE_FAILURE_THRESHOLD` consecutive failing rounds (default 2)
   instead of the first: a single 5s subprocess deadline miss under high churn

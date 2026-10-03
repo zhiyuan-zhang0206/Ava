@@ -826,46 +826,6 @@
         }
       }
     },
-    "/api/agents/{agent_id}/completion-notice-policy": {
-      "get": {
-        "summary": "Get Completion Notice Policy",
-        "description": "Expose the effective policy for canaries and platform diagnostics.",
-        "operationId": "get_completion_notice_policy_api_agents__agent_id__completion_notice_policy_get",
-        "parameters": [
-          {
-            "name": "agent_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "integer",
-              "title": "Agent Id"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/CompletionNoticePolicyView"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
     "/api/agents/{agent_id}/messages": {
       "post": {
         "summary": "Post Agent Message",
@@ -1245,50 +1205,6 @@
                     "$ref": "#/components/schemas/PendingInbound"
                   },
                   "title": "Response Get Pending Messages Api Agents  Agent Id  Pending Get"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/agents/{agent_id}/activity": {
-      "get": {
-        "summary": "Get Activity Trail",
-        "description": "The agent's activity trail, oldest first (historical rows; the SDK write\nverb `ava.self.log` was removed 2026-08-02, so new rows no longer appear).\nThe collapsed current line is already on the agent snapshot\n(GET /api/agents); this endpoint backs the fleet view's replay of how the\nwork progressed.\n\nReturns an empty list for an agent that has never reported or does not\nexist (a plain activity-table read with no agent-existence precondition).",
-        "operationId": "get_activity_trail_api_agents__agent_id__activity_get",
-        "parameters": [
-          {
-            "name": "agent_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "integer",
-              "title": "Agent Id"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/ActivityEntry"
-                  },
-                  "title": "Response Get Activity Trail Api Agents  Agent Id  Activity Get"
                 }
               }
             }
@@ -2422,29 +2338,6 @@
         }
       }
     },
-    "/api/notices/escalations": {
-      "get": {
-        "summary": "Get Escalation Notices",
-        "description": "Open task escalations with their task and current-owner review context.\n\nThis is the operator's read-only queue: only response-required notices that\nname a task are included. Escalations never run the FYI lazy-expiry sweep.",
-        "operationId": "get_escalation_notices_api_notices_escalations_get",
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "items": {
-                    "$ref": "#/components/schemas/EscalationNoticeItem"
-                  },
-                  "type": "array",
-                  "title": "Response Get Escalation Notices Api Notices Escalations Get"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
     "/api/notices/live": {
       "get": {
         "summary": "Get Notices Live",
@@ -2509,112 +2402,10 @@
         }
       }
     },
-    "/api/notices/resolved": {
-      "get": {
-        "summary": "Get Resolved Notices",
-        "description": "One page of resolved notices across the fleet, newest resolution first.\n\nFeeds the greyed history beneath each open queue. `require_response` filters to\none queue's history (the \"needs response\" tab passes true, the FYI tab false);\nomit it for both. Keyset-paginated on (resolved_at, id): pass the last row's\n(before_at, before_id) for the next page strictly older. Supply both or neither.\nOmit `limit` for the configured page size (``display.notices_resolved_default_page``,\n30 out of the box).",
-        "operationId": "get_resolved_notices_api_notices_resolved_get",
-        "parameters": [
-          {
-            "name": "limit",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "integer",
-                  "maximum": 100,
-                  "minimum": 1
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Limit"
-            }
-          },
-          {
-            "name": "require_response",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "boolean"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Require Response"
-            }
-          },
-          {
-            "name": "before_at",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string",
-                  "format": "date-time"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Before At"
-            }
-          },
-          {
-            "name": "before_id",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "integer"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Before Id"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/NoticeItem"
-                  },
-                  "title": "Response Get Resolved Notices Api Notices Resolved Get"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
     "/api/notices": {
       "get": {
         "summary": "Get Notices Feed",
-        "description": "The unified inbox feed (Task #1024, R4 layer 2, decision Q1=A): one\nrequest carries the whole Inbox panel.\n\n- `open` — cross-fleet open FYI notices (require_response false),\n  priority then newest. Same content as GET /api/notices/open.\n- `awaiting` — cross-fleet open require_response notices, same sort.\n  Today these ride the agent snapshot (notices_awaiting_response); the\n  merged endpoint makes them a first-class pipe so the frontend's Inbox\n  no longer merges three sources.\n- `resolved_page` + `next_cursor` — one keyset page of the resolved\n  history (both kinds, newest resolution first), same semantics as\n  GET /api/notices/resolved: pass next_cursor back as before_at /\n  before_id for the next strictly-older page; None means the end.\n\nThe standalone endpoints stay for their other consumers (IM bridge,\nCLI). The open sweep (FYI TTL auto-resolve) runs once per call, so the\nopen list, the awaiting list and the history agree within one request.\nThe open/awaiting cap and the resolved page default to\n``display.notices_open_default_limit`` / ``display.notices_resolved_default_page``\nwhen the caller passes none.",
+        "description": "The unified inbox feed (Task #1024, R4 layer 2, decision Q1=A): one\nrequest carries the whole Inbox panel.\n\n- `open` — cross-fleet open FYI notices (require_response false),\n  priority then newest. Same content as GET /api/notices/open.\n- `awaiting` — cross-fleet open require_response notices, same sort.\n  Today these ride the agent snapshot (notices_awaiting_response); the\n  merged endpoint makes them a first-class pipe so the frontend's Inbox\n  no longer merges three sources.\n- `resolved_page` + `next_cursor` — one keyset page of the resolved\n  history (both kinds, newest resolution first): pass next_cursor back\n  as before_at / before_id for the next strictly-older page; None means\n  the end.\n\nThe standalone endpoints stay for their other consumers (IM bridge,\nCLI). The open sweep (FYI TTL auto-resolve) runs once per call, so the\nopen list, the awaiting list and the history agree within one request.\nThe open/awaiting cap and the resolved page default to\n``display.notices_open_default_limit`` / ``display.notices_resolved_default_page``\nwhen the caller passes none.",
         "operationId": "get_notices_feed_api_notices_get",
         "parameters": [
           {
@@ -6625,26 +6416,6 @@
   },
   "components": {
     "schemas": {
-      "ActivityEntry": {
-        "properties": {
-          "text": {
-            "type": "string",
-            "title": "Text"
-          },
-          "created_at": {
-            "type": "string",
-            "format": "date-time",
-            "title": "Created At"
-          }
-        },
-        "type": "object",
-        "required": [
-          "text",
-          "created_at"
-        ],
-        "title": "ActivityEntry",
-        "description": "One entry of an agent's self-reported activity trail (migration 0042).\n\nHistorical only: the SDK write verb (`ava.self.log`) was removed\n2026-08-02, so no new rows appear; this backs the frozen\nGET /api/agents/{id}/activity endpoint."
-      },
       "AdmissionOutcome": {
         "type": "string",
         "enum": [
@@ -8855,30 +8626,6 @@
         "title": "CompletionNoticeIn",
         "description": "Platform-only completion metadata carried with a shell or watcher chat."
       },
-      "CompletionNoticePolicyView": {
-        "properties": {
-          "agent_id": {
-            "type": "integer",
-            "title": "Agent Id"
-          },
-          "policy": {
-            "type": "string",
-            "enum": [
-              "all",
-              "failures",
-              "hourly"
-            ],
-            "title": "Policy"
-          }
-        },
-        "type": "object",
-        "required": [
-          "agent_id",
-          "policy"
-        ],
-        "title": "CompletionNoticePolicyView",
-        "description": "Effective policy that the gateway applies to platform completions."
-      },
       "ConfigAuditView": {
         "properties": {
           "records": {
@@ -9281,85 +9028,6 @@
         ],
         "title": "DefaultModelWrite",
         "description": "PUT /api/config/default-model body. `model` must be a spawnable id from the\nregistry roster; anything else is rejected rather than stored."
-      },
-      "EscalationNoticeItem": {
-        "properties": {
-          "id": {
-            "type": "integer",
-            "title": "Id"
-          },
-          "title": {
-            "type": "string",
-            "title": "Title"
-          },
-          "priority": {
-            "$ref": "#/components/schemas/Priority"
-          },
-          "created_at": {
-            "type": "string",
-            "format": "date-time",
-            "title": "Created At"
-          },
-          "task_id": {
-            "type": "integer",
-            "title": "Task Id"
-          },
-          "task_title": {
-            "type": "string",
-            "title": "Task Title"
-          },
-          "task_status": {
-            "type": "string",
-            "title": "Task Status"
-          },
-          "owner_id": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Owner Id"
-          },
-          "owner_label": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Owner Label"
-          },
-          "reminder_count": {
-            "type": "integer",
-            "title": "Reminder Count"
-          },
-          "updated_at": {
-            "type": "string",
-            "format": "date-time",
-            "title": "Updated At"
-          }
-        },
-        "type": "object",
-        "required": [
-          "id",
-          "title",
-          "priority",
-          "created_at",
-          "task_id",
-          "task_title",
-          "task_status",
-          "owner_id",
-          "owner_label",
-          "reminder_count",
-          "updated_at"
-        ],
-        "title": "EscalationNoticeItem",
-        "description": "One open task escalation for GET /api/notices/escalations.\n\nThe operator queue joins the escalation notice to its task and current\nowner, so its consumer can decide whether to reassign, cancel, or retain\nthe task without fetching another resource."
       },
       "EventResolutionCreate": {
         "properties": {
@@ -12204,7 +11872,7 @@
           "expire_at"
         ],
         "title": "NoticeItem",
-        "description": "One agent_notices row — element of GET /api/notices/open (the FYI feed:\nrequire_response false, resolved_at None) and GET /api/notices/resolved (the\ncross-fleet resolution history). Joined to the agent label.\n\nServed as an independent feed kept off the agent snapshot — the snapshot\ncarries the open require_response notices inline + an unread FYI count, so a\nlarge FYI backlog never bloats the fleet-wide broadcast.\n\n`resolution` is NULL while open, else one of answered / dismissed / read /\nwithdrawn / superseded; `reply` is the cached user reply text (NULL when none)."
+        "description": "One agent_notices row — element of GET /api/notices/open (the FYI feed:\nrequire_response false, resolved_at None) and the resolved page of\nGET /api/notices (the cross-fleet resolution history). Joined to the agent label.\n\nServed as an independent feed kept off the agent snapshot — the snapshot\ncarries the open require_response notices inline + an unread FYI count, so a\nlarge FYI backlog never bloats the fleet-wide broadcast.\n\n`resolution` is NULL while open, else one of answered / dismissed / read /\nwithdrawn / superseded; `reply` is the cached user reply text (NULL when none)."
       },
       "NoticesCursor": {
         "properties": {
@@ -12224,7 +11892,7 @@
           "before_id"
         ],
         "title": "NoticesCursor",
-        "description": "Keyset cursor for the resolved-history page of GET /api/notices —\nmirror of the (resolved_at, id) cursor the standalone\n/api/notices/resolved endpoint accepts. Supplied together or not at all;\n`before_at` is the last row's resolution time, `before_id` its id."
+        "description": "Keyset cursor for the resolved-history page of GET /api/notices —\na (resolved_at, id) pair. Supplied together or not at all;\n`before_at` is the last row's resolution time, `before_id` its id."
       },
       "NoticesFeed": {
         "properties": {
@@ -12268,7 +11936,7 @@
           "next_cursor"
         ],
         "title": "NoticesFeed",
-        "description": "GET /api/notices — the unified inbox feed (Task #1024, R4 layer 2,\ndecision Q1=A). One request carries the whole Inbox panel: the OPEN\nqueue split by kind (open = FYI notices that need no response, awaiting\n= require_response notices that ride the agent snapshot today) plus one\nkeyset page of the RESOLVED history.\n\nThe contract shape was chosen so a panel = one request = one hook:\nthe client no longer merges three independent pipes (agent snapshot +\n/api/notices/open + /api/notices/resolved). `next_cursor` is None when\n`resolved_page` is the last page (short page or exhausted); pass it back\nas before_at/before_id for the next strictly-older page."
+        "description": "GET /api/notices — the unified inbox feed (Task #1024, R4 layer 2,\ndecision Q1=A). One request carries the whole Inbox panel: the OPEN\nqueue split by kind (open = FYI notices that need no response, awaiting\n= require_response notices that ride the agent snapshot today) plus one\nkeyset page of the RESOLVED history.\n\nThe contract shape was chosen so a panel = one request = one hook:\nthe client no longer merges three independent pipes (agent snapshot +\n/api/notices/open + the resolved history). `next_cursor` is None when\n`resolved_page` is the last page (short page or exhausted); pass it back\nas before_at/before_id for the next strictly-older page."
       },
       "OpenNotice": {
         "properties": {

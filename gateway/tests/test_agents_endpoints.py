@@ -579,7 +579,6 @@ _RESULT_READ_ENDPOINTS = [
     ("GET", "/api/agents/{agent_id}/traces/trace-1/messages"),
     ("GET", "/api/agents/{agent_id}/last-message"),
     ("GET", "/api/agents/{agent_id}/pending"),
-    ("GET", "/api/agents/{agent_id}/activity"),
     ("GET", "/api/agents/{agent_id}/timeline"),
     ("GET", "/api/agents/{agent_id}/events"),
     ("GET", "/api/agents/{agent_id}/events/stream"),

@@ -355,7 +355,7 @@ def _restart_runtime() -> StartRuntime:
     return runtime
 
 
-def _cmd_restart_body(*, mode: str = "smooth", force_reap: bool = False) -> int:
+def _cmd_restart_body(*, mode: str = "smooth") -> int:
     """Stop then start without a stdin confirmation prompt.
 
     Hosted agents drain through the shared stop boundary before service stop.
@@ -479,7 +479,7 @@ def _cmd_restart_body(*, mode: str = "smooth", force_reap: bool = False) -> int:
             keep_infra=True,
             keep_browser=True,
             teardown_extras=False,
-            force=mode == "force" or force_reap,
+            force=mode == "force",
         )
     if rc != 0:
         # The quiesce paused this host; a failed stop means no `ava start` is
@@ -499,6 +499,6 @@ def _cmd_restart_body(*, mode: str = "smooth", force_reap: bool = False) -> int:
     return rc
 
 
-def cmd_restart(*, mode: str = "smooth", force_reap: bool = False) -> int:
+def cmd_restart(*, mode: str = "smooth") -> int:
     """Stop then start without a confirmation prompt."""
-    return _cmd_restart_body(mode=mode, force_reap=force_reap)
+    return _cmd_restart_body(mode=mode)

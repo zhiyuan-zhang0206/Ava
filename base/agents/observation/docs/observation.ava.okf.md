@@ -7,8 +7,9 @@ tags: [base, observability]
 
 # Agent observation evidence
 
-`agent_observation.py` projects existing `machine_probe.last_probe_at` and
-`agents_meta.lease_expires_at` into list and inspector responses. A machine
+`base/agents/observation/` (`snapshot.py`, `roster.py`) projects existing
+`machine_probe.last_probe_at` and `agents_meta.lease_expires_at` into list and
+inspector responses. A machine
 probe only observes machine reachability. Its deadline uses the existing
 heartbeat cadence and consecutive-failure window, shared with the writer.
 The liveness merge preserves the actual probe timestamp; absent probes remain

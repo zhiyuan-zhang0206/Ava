@@ -9,7 +9,7 @@ tags:
 
 # Process-group closure core
 
-`process_group_closure.py` imports only the standard library, so every group
+`group_closure.py` imports only the standard library, so every group
 closure in the repo shares it.
 
 ## Contract
@@ -49,5 +49,5 @@ This is trusted-tool cleanup, not a fence: a member that calls `setsid()` or
 | Backup operation unadmitted launch (`ExecDomainBirthError`, held retries) | `confirm_closure` with the default signal |
 | ava-root unit stop | `group_empty` and `group_members`, after the unit leader is reaped |
 
-Consumers: [[agents/incarnation/incarnation-resources.ava.okf.md|exec incarnation resources]],
+Consumers: [[base/agents/incarnation/docs/incarnation-resources.ava.okf.md|exec incarnation resources]],
 [[services/backup_scheduler/docs/operation-custody.ava.okf.md|backup operation custody]].

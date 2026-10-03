@@ -28,7 +28,6 @@ _REPO_ROOT = Path(__file__).resolve().parents[2]
 _CLEAN_ENV_STRIP = frozenset(
     {
         "AVA_AGENT_ID",
-        "AVA_RUNNER_MODE",
         "AVA_PROCESS_PROFILE",
         "AVA_EXEC_REQUEST_FILE",
         "AVA_EXEC_RESULT_FILE",

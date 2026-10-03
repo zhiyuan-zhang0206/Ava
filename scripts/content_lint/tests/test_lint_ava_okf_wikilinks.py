@@ -154,6 +154,26 @@ def test_url_target_is_not_reported_as_a_doc(tmp_path, monkeypatch, capsys):
     assert "not an OKF node" not in out
 
 
+def test_wikilinks_inside_code_are_not_edges(tmp_path, monkeypatch, capsys):
+    """A `[[wikilink]]` quoted as code — an inline span or a fenced block — is
+    documentation about the syntax, not a node-graph edge (the same code-sample
+    exemption check_doc_references applies): the teaching samples in the
+    content-lint docs (``[[wikilink]]`` / ``[[target|label]]``) must not report."""
+    _node(
+        tmp_path,
+        "base/cluster/machine.ava.okf.md",
+        "Samples: `[[wikilink]]` / `[[target|label]]` are the edge syntax.\n\n"
+        "```\n"
+        "[[no-such-node.ava.okf.md]]\n"
+        "```",
+    )
+
+    code, out = _lint_tmp(tmp_path, monkeypatch, capsys)
+
+    assert code == 0, out
+    assert "0 warning(s)" in out
+
+
 def test_ambiguous_basename_does_not_resolve(tmp_path, monkeypatch, capsys):
     """The basename fallback requires a *unique* match — with the name taken twice,
     a bare-basename link resolves to neither and reports W008."""

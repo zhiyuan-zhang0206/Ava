@@ -28,7 +28,7 @@ One fact, N handwritten copies, held together by tests and comments: 12 env-key 
 
 > **The registry is the single source of truth; collections are derived views; tests are verifiers, not seams.**
 
-"Tests as seams": `test_profile_env_keys.py` / `test_cluster_env.py` / `test_lint_event_kinds.py` exist only to hold handwritten snapshots against drift — tests patching a structural defect. Final state: a new fact is declared once and every view updates automatically; tests verify derivation rules, not snapshots.
+"Tests as seams": `test_cluster_env.py` / `test_lint_event_kinds.py` exist only to hold handwritten snapshots against drift — tests patching a structural defect. Final state: a new fact is declared once and every view updates automatically; tests verify derivation rules, not snapshots.
 
 The pattern is uniform across four convergence points, but **the mechanism is independent per domain** — no generic "Registry framework" (that would be over-abstraction).
 

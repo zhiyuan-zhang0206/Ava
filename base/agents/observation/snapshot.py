@@ -281,28 +281,3 @@ def agent_model_target(db: Database, agent_id: int, *, fallback: str) -> tuple[s
         return fallback, ModelOverrides.from_pins(None)
     pins = resolve_agent_config_pins(row[0] if row else None, row[1] if row else None)
     return _model_of_pins(pins), ModelOverrides.from_pins(pins)
-
-
-class ActivityEntry(BaseModel):
-    """One entry of an agent's self-reported activity trail (migration 0042).
-
-    Historical only: the SDK write verb (`ava.self.log`) was removed
-    2026-08-02, so no new rows appear; this backs the frozen
-    GET /api/agents/{id}/activity endpoint.
-    """
-
-    text: str
-    created_at: datetime
-
-
-def select_activity_trail(conn: psycopg.Connection, agent_id: int) -> list[ActivityEntry]:
-    """The agent's full activity trail, oldest first. Empty for an agent that
-    has never reported (or a nonexistent agent — lenient read, no 404)."""
-    with conn.cursor() as cur:
-        cur.execute(
-            "SELECT text, created_at FROM agent_activity "
-            "WHERE agent_id = %s ORDER BY created_at, id",
-            (agent_id,),
-        )
-        rows = cur.fetchall()
-    return [ActivityEntry(text=r[0], created_at=r[1]) for r in rows]

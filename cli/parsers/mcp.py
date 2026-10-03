@@ -183,7 +183,7 @@ def _add_mcp_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) ->
     )
     mcp_add_p.set_defaults(func=_h_mcp_add)
 
-    mcp_list_p = mcp_sub.add_parser("list", aliases=["ls"], help="list the merged MCP server set")
+    mcp_list_p = mcp_sub.add_parser("list", help="list the merged MCP server set")
     mcp_list_p.set_defaults(func=_h_mcp_list)
 
     mcp_remove_p = mcp_sub.add_parser("remove", help="remove a machine-config MCP server")

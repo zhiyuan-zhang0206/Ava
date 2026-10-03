@@ -293,10 +293,6 @@ ROUTE_CONTRACTS: dict[tuple[str, str], RouteContract] = {
     ),
     ("GET", "/api/notices/live"): RouteContract(),
     ("GET", "/api/notices/open"): RouteContract(),
-    ("GET", "/api/notices/escalations"): RouteContract(
-        note="read-only operator escalation queue — one query, no writes"
-    ),
-    ("GET", "/api/notices/resolved"): RouteContract(),
     ("POST", "/api/agents/{agent_id}/notices/{notice_id}/resolve"): RouteContract(
         note="CAS resolve — repeats are harmless"
     ),
@@ -379,10 +375,8 @@ ROUTE_CONTRACTS: dict[tuple[str, str], RouteContract] = {
     ("GET", "/api/agents/{agent_id}/traces/{trace_id}/messages"): RouteContract(),
     ("GET", "/api/agents/{agent_id}/last-message"): RouteContract(),
     ("GET", "/api/agents/{agent_id}/pending"): RouteContract(),
-    ("GET", "/api/agents/{agent_id}/activity"): RouteContract(),
     ("GET", "/api/agents/{agent_id}/token-usage"): RouteContract(),
     ("GET", "/api/agents/{agent_id}/context-breakdown"): RouteContract(),
-    ("GET", "/api/agents/{agent_id}/completion-notice-policy"): RouteContract(),
     ("GET", "/api/agents/{agent_id}/system"): RouteContract(),
     ("POST", "/api/agents/{agent_id}/messages"): RouteContract(
         Idempotency.AT_LEAST_ONCE_WITH_KEY,

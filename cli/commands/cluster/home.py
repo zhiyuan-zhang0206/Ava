@@ -67,9 +67,9 @@ def _stop_cluster() -> int:
     The child is `ava stop`, run from this checkout with the same home. No
     `--keep-infra`: `--drop-db` then removes the data directories of a genuinely
     stopped instance, never a live one. `-y` because the child has no terminal to
-    confirm on (destroy confirmed already); `--stop-browser` because a teardown
-    takes the headed browser down too."""
-    cmd = [sys.executable, "-m", "cli.main", "stop", "-y", "--stop-browser"]
+    confirm on (destroy confirmed already); a plain stop takes the headed
+    browser down too."""
+    cmd = [sys.executable, "-m", "cli.main", "stop", "-y"]
     return subprocess.run(cmd, cwd=_repo_root(), check=False).returncode
 
 

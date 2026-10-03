@@ -580,26 +580,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/agents/{agent_id}/completion-notice-policy": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Get Completion Notice Policy
-         * @description Expose the effective policy for canaries and platform diagnostics.
-         */
-        get: operations["get_completion_notice_policy_api_agents__agent_id__completion_notice_policy_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/agents/{agent_id}/messages": {
         parameters: {
             query?: never;
@@ -807,33 +787,6 @@ export interface paths {
          *     just has no pending rows).
          */
         get: operations["get_pending_messages_api_agents__agent_id__pending_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/agents/{agent_id}/activity": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Get Activity Trail
-         * @description The agent's activity trail, oldest first (historical rows; the SDK write
-         *     verb `ava.self.log` was removed 2026-08-02, so new rows no longer appear).
-         *     The collapsed current line is already on the agent snapshot
-         *     (GET /api/agents); this endpoint backs the fleet view's replay of how the
-         *     work progressed.
-         *
-         *     Returns an empty list for an agent that has never reported or does not
-         *     exist (a plain activity-table read with no agent-existence precondition).
-         */
-        get: operations["get_activity_trail_api_agents__agent_id__activity_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1465,29 +1418,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/notices/escalations": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Get Escalation Notices
-         * @description Open task escalations with their task and current-owner review context.
-         *
-         *     This is the operator's read-only queue: only response-required notices that
-         *     name a task are included. Escalations never run the FYI lazy-expiry sweep.
-         */
-        get: operations["get_escalation_notices_api_notices_escalations_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/notices/live": {
         parameters: {
             query?: never;
@@ -1515,33 +1445,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/notices/resolved": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Get Resolved Notices
-         * @description One page of resolved notices across the fleet, newest resolution first.
-         *
-         *     Feeds the greyed history beneath each open queue. `require_response` filters to
-         *     one queue's history (the "needs response" tab passes true, the FYI tab false);
-         *     omit it for both. Keyset-paginated on (resolved_at, id): pass the last row's
-         *     (before_at, before_id) for the next page strictly older. Supply both or neither.
-         *     Omit `limit` for the configured page size (``display.notices_resolved_default_page``,
-         *     30 out of the box).
-         */
-        get: operations["get_resolved_notices_api_notices_resolved_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/notices": {
         parameters: {
             query?: never;
@@ -1561,9 +1464,9 @@ export interface paths {
          *       merged endpoint makes them a first-class pipe so the frontend's Inbox
          *       no longer merges three sources.
          *     - `resolved_page` + `next_cursor` — one keyset page of the resolved
-         *       history (both kinds, newest resolution first), same semantics as
-         *       GET /api/notices/resolved: pass next_cursor back as before_at /
-         *       before_id for the next strictly-older page; None means the end.
+         *       history (both kinds, newest resolution first): pass next_cursor back
+         *       as before_at / before_id for the next strictly-older page; None means
+         *       the end.
          *
          *     The standalone endpoints stay for their other consumers (IM bridge,
          *     CLI). The open sweep (FYI TTL auto-resolve) runs once per call, so the
@@ -3583,23 +3486,6 @@ export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
         /**
-         * ActivityEntry
-         * @description One entry of an agent's self-reported activity trail (migration 0042).
-         *
-         *     Historical only: the SDK write verb (`ava.self.log`) was removed
-         *     2026-08-02, so no new rows appear; this backs the frozen
-         *     GET /api/agents/{id}/activity endpoint.
-         */
-        ActivityEntry: {
-            /** Text */
-            text: string;
-            /**
-             * Created At
-             * Format: date-time
-             */
-            created_at: string;
-        };
-        /**
          * AdmissionOutcome
          * @enum {string}
          */
@@ -4619,19 +4505,6 @@ export interface components {
             exit_code?: number | null;
         };
         /**
-         * CompletionNoticePolicyView
-         * @description Effective policy that the gateway applies to platform completions.
-         */
-        CompletionNoticePolicyView: {
-            /** Agent Id */
-            agent_id: number;
-            /**
-             * Policy
-             * @enum {string}
-             */
-            policy: "all" | "failures" | "hourly";
-        };
-        /**
          * ConfigAuditView
          * @description GET /api/config/audit response — merged `.env`-write audit records, newest first.
          *
@@ -4882,43 +4755,6 @@ export interface components {
         DefaultModelWrite: {
             /** Model */
             model: string;
-        };
-        /**
-         * EscalationNoticeItem
-         * @description One open task escalation for GET /api/notices/escalations.
-         *
-         *     The operator queue joins the escalation notice to its task and current
-         *     owner, so its consumer can decide whether to reassign, cancel, or retain
-         *     the task without fetching another resource.
-         */
-        EscalationNoticeItem: {
-            /** Id */
-            id: number;
-            /** Title */
-            title: string;
-            priority: components["schemas"]["Priority"];
-            /**
-             * Created At
-             * Format: date-time
-             */
-            created_at: string;
-            /** Task Id */
-            task_id: number;
-            /** Task Title */
-            task_title: string;
-            /** Task Status */
-            task_status: string;
-            /** Owner Id */
-            owner_id: number | null;
-            /** Owner Label */
-            owner_label: string | null;
-            /** Reminder Count */
-            reminder_count: number;
-            /**
-             * Updated At
-             * Format: date-time
-             */
-            updated_at: string;
         };
         /**
          * EventResolutionCreate
@@ -6215,8 +6051,8 @@ export interface components {
         /**
          * NoticeItem
          * @description One agent_notices row — element of GET /api/notices/open (the FYI feed:
-         *     require_response false, resolved_at None) and GET /api/notices/resolved (the
-         *     cross-fleet resolution history). Joined to the agent label.
+         *     require_response false, resolved_at None) and the resolved page of
+         *     GET /api/notices (the cross-fleet resolution history). Joined to the agent label.
          *
          *     Served as an independent feed kept off the agent snapshot — the snapshot
          *     carries the open require_response notices inline + an unread FYI count, so a
@@ -6265,8 +6101,7 @@ export interface components {
         /**
          * NoticesCursor
          * @description Keyset cursor for the resolved-history page of GET /api/notices —
-         *     mirror of the (resolved_at, id) cursor the standalone
-         *     /api/notices/resolved endpoint accepts. Supplied together or not at all;
+         *     a (resolved_at, id) pair. Supplied together or not at all;
          *     `before_at` is the last row's resolution time, `before_id` its id.
          */
         NoticesCursor: {
@@ -6288,7 +6123,7 @@ export interface components {
          *
          *     The contract shape was chosen so a panel = one request = one hook:
          *     the client no longer merges three independent pipes (agent snapshot +
-         *     /api/notices/open + /api/notices/resolved). `next_cursor` is None when
+         *     /api/notices/open + the resolved history). `next_cursor` is None when
          *     `resolved_page` is the last page (short page or exhausted); pass it back
          *     as before_at/before_id for the next strictly-older page.
          */
@@ -9041,37 +8876,6 @@ export interface operations {
             };
         };
     };
-    get_completion_notice_policy_api_agents__agent_id__completion_notice_policy_get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                agent_id: number;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["CompletionNoticePolicyView"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
     get_agent_messages_api_agents__agent_id__messages_get: {
         parameters: {
             query?: {
@@ -9299,37 +9103,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PendingInbound"][];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    get_activity_trail_api_agents__agent_id__activity_get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                agent_id: number;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ActivityEntry"][];
                 };
             };
             /** @description Validation Error */
@@ -10031,65 +9804,11 @@ export interface operations {
             };
         };
     };
-    get_escalation_notices_api_notices_escalations_get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["EscalationNoticeItem"][];
-                };
-            };
-        };
-    };
     get_notices_live_api_notices_live_get: {
         parameters: {
             query?: {
                 after?: number;
                 limit?: number | null;
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["NoticeItem"][];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    get_resolved_notices_api_notices_resolved_get: {
-        parameters: {
-            query?: {
-                limit?: number | null;
-                require_response?: boolean | null;
-                before_at?: string | null;
-                before_id?: number | null;
             };
             header?: never;
             path?: never;

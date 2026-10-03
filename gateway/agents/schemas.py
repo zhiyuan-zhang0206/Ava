@@ -96,13 +96,6 @@ class AgentMessageEnqueued(BaseModel):
     inbound_id: int | None = None
 
 
-class CompletionNoticePolicyView(BaseModel):
-    """Effective policy that the gateway applies to platform completions."""
-
-    agent_id: int
-    policy: Literal["all", "failures", "hourly"]
-
-
 class SystemNoteIn(BaseModel):
     """POST /api/agents/{id}/system-note request body — a framework system
     notification delivered to the agent as a system note (system_marker in
@@ -195,8 +188,8 @@ class NoticeEditIn(BaseModel):
 
 class NoticeItem(BaseModel):
     """One agent_notices row — element of GET /api/notices/open (the FYI feed:
-    require_response false, resolved_at None) and GET /api/notices/resolved (the
-    cross-fleet resolution history). Joined to the agent label.
+    require_response false, resolved_at None) and the resolved page of
+    GET /api/notices (the cross-fleet resolution history). Joined to the agent label.
 
     Served as an independent feed kept off the agent snapshot — the snapshot
     carries the open require_response notices inline + an unread FYI count, so a
@@ -224,31 +217,9 @@ class NoticeItem(BaseModel):
     expire_at: datetime
 
 
-class EscalationNoticeItem(BaseModel):
-    """One open task escalation for GET /api/notices/escalations.
-
-    The operator queue joins the escalation notice to its task and current
-    owner, so its consumer can decide whether to reassign, cancel, or retain
-    the task without fetching another resource.
-    """
-
-    id: int
-    title: str
-    priority: Priority
-    created_at: datetime
-    task_id: int
-    task_title: str
-    task_status: str
-    owner_id: int | None
-    owner_label: str | None
-    reminder_count: int
-    updated_at: datetime
-
-
 class NoticesCursor(BaseModel):
     """Keyset cursor for the resolved-history page of GET /api/notices —
-    mirror of the (resolved_at, id) cursor the standalone
-    /api/notices/resolved endpoint accepts. Supplied together or not at all;
+    a (resolved_at, id) pair. Supplied together or not at all;
     `before_at` is the last row's resolution time, `before_id` its id."""
 
     before_at: datetime
@@ -264,7 +235,7 @@ class NoticesFeed(BaseModel):
 
     The contract shape was chosen so a panel = one request = one hook:
     the client no longer merges three independent pipes (agent snapshot +
-    /api/notices/open + /api/notices/resolved). `next_cursor` is None when
+    /api/notices/open + the resolved history). `next_cursor` is None when
     `resolved_page` is the last page (short page or exhausted); pass it back
     as before_at/before_id for the next strictly-older page."""
 
