@@ -60,7 +60,7 @@ descended, with the same single exception the OKF graph makes: `.github/`.
 
 **Anchors are repo-relative on every axis.** The OKF axis once wrote 15 anchors
 relative to the citing doc's own directory (`agent/graph/docs/graph.ava.okf.md`
-citing `` `_build.py:_build_llm_retry` `` for `agent/graph/_build.py`). That
+citing `` `_build.py:build_graph` `` for `agent/graph/_build.py`). That
 convention was normalised away rather than resolved two ways (issue #112): one
 shape, one meaning, and the resolver stays the trivial single-root lookup that
 the procedural axis already had.

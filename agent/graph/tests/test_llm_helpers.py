@@ -30,6 +30,8 @@ from langgraph.types import Command
 
 from agent.graph import llm_node
 from agent.graph._base_prompt import _capture_ava_overview, _get_ava_overview
+from agent.graph.llm._retry import Attempt, retry_wait
+from agent.graph.llm.node import llm_attempt
 from agent.state import AgentState
 from agent.tests._fakes import make_fake_ops_pool
 from base.agents.context import AvaContext
@@ -618,7 +620,7 @@ async def test_silent_idle_zero_output_reasoning_content_consumes_minimum_budget
 # The status→ErrorClass mapping itself is covered exhaustively in
 # base/lm/tests/test_provider_errors.py (classify_error). These drive the wiring
 # through llm_node: a PERMANENT class becomes a fail-fast FatalProviderError, a
-# TRANSIENT class re-raises for the RetryPolicy.
+# TRANSIENT class re-raises for the retry loop.
 
 
 class _FakeProviderStatusError(Exception):
@@ -645,7 +647,7 @@ async def test_llm_node_permanent_provider_error_fails_fast_with_structured_fiel
     schema) raised mid-stream becomes a FatalProviderError carrying the
     classifier's structured (error_class, provider, status), and the structured
     `llm_provider_error` log lands error_class=permanent / status=400 / fatal=True.
-    The RetryPolicy excludes FatalProviderError, so the agent idles instead of
+    The retry loop excludes FatalProviderError, so the agent idles instead of
     burning the ~16-min backoff budget and dying."""
     from agent.graph.llm_errors import FatalProviderError, _consecutive_errors
     from base.config import settings
@@ -708,7 +710,7 @@ async def test_llm_node_billing_error_logs_billing_vendor_and_model(
 
 async def test_llm_node_transient_provider_error_propagates_for_retry() -> None:
     """A TRANSIENT provider error (HTTP 500) is re-raised as-is — NOT wrapped in
-    FatalProviderError — so the LangGraph RetryPolicy retries it. Fail-fast is
+    FatalProviderError — so the node's retry loop retries it. Fail-fast is
     reserved for permanent classes; a transient blip must keep retrying."""
     from agent.graph.llm_errors import FatalProviderError, _consecutive_errors
 
@@ -717,9 +719,11 @@ async def test_llm_node_transient_provider_error_propagates_for_retry() -> None:
     fake_llm.astream.return_value = _astream_raising(_FakeProviderStatusError(500))
     state = AgentState(messages=[HumanMessage(content="hi")], halted=False)
 
+    runtime = _make_runtime(llm=fake_llm, event_publisher=MagicMock())
     with pytest.raises(_FakeProviderStatusError) as exc_info:
-        await llm_node(state, _make_runtime(llm=fake_llm, event_publisher=MagicMock()), _CONFIG)
+        await llm_attempt(state, runtime, _CONFIG, Attempt(1, time.time()))
     assert not isinstance(exc_info.value, FatalProviderError)
+    assert retry_wait(exc_info.value, 1, model="deepseek-flash", agent_id=7) is not None
 
 
 async def test_llm_node_configured_fatal_error_type_fails_fast() -> None:
@@ -806,20 +810,13 @@ async def test_retried_llm_node_records_total_retry_duration(loguru_records) -> 
 
     fake_llm = MagicMock()
     fake_llm.astream.return_value = _text_turn()
-    runtime = _make_runtime(
-        llm=fake_llm,
-        event_publisher=MagicMock(),
-        execution_info=ExecutionInfo(
-            checkpoint_id="checkpoint",
-            checkpoint_ns="",
-            task_id="task",
-            node_attempt=2,
-            node_first_attempt_time=time.time() - 3.0,
-        ),
-    )
+    runtime = _make_runtime(llm=fake_llm, event_publisher=MagicMock())
 
-    await llm_node(
-        AgentState(messages=[HumanMessage(content="hi")], halted=False), runtime, _CONFIG
+    await llm_attempt(
+        AgentState(messages=[HumanMessage(content="hi")], halted=False),
+        runtime,
+        _CONFIG,
+        Attempt(2, time.time() - 3.0),
     )
 
     retry_logs = [

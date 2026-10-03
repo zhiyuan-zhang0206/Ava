@@ -56,7 +56,7 @@ class LLMStreamStallPairError(LLMStreamStallTimeoutError):
 
     Raised by ``_consume_llm`` in place of the fallback's bare ``TimeoutError``
     so the pair is a first-class ``LLMStreamError``: it is retried on the
-    delayed stall schedule (``_build._build_llm_retry`` — initial
+    delayed stall schedule (``_retry.retry_wait`` — initial
     ``llm_stall_retry_initial_interval_seconds``, doubling, capped at
     ``llm_stall_retry_max_interval_seconds``, up to
     ``llm_stall_retry_max_consecutive`` consecutive pairs, jittered ±
@@ -198,7 +198,7 @@ def _classify_and_log_provider_error(
 ) -> FatalProviderError | None:
     """Classify a provider exception, emit the structured postmortem log, and
     return a `FatalProviderError` to raise when the turn must fail fast — else None
-    so the caller re-raises the original for the `RetryPolicy` to retry.
+    so the caller re-raises the original for the node's retry loop to retry.
 
     Two fail-fast triggers fold together here (see `FatalProviderError`): the
     `classify_error` `PERMANENT` class (400/401/402/403/404/422 — deterministic
@@ -418,7 +418,7 @@ def _clear_consecutive_errors(thread_id: str) -> None:
 
 
 # Consecutive two-adjacent-stall terminations, per thread_id. Incremented when
-# `_build._build_llm_retry` grants a delayed retry, reset on a successful
+# `_retry.retry_wait` grants a delayed retry, reset on a successful
 # stream, and popped when the streak exhausts (the next inbound-triggered turn
 # must start with a fresh budget rather than instantly re-tripping the fatal
 # cap — the same convention as `_consecutive_errors` above).

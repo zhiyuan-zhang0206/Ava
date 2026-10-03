@@ -80,7 +80,7 @@ def invoke_response(
 
     `retry_attempts` bounds retries of TRANSIENT/UNKNOWN provider failures
     (rate limit, 5xx, connection/timeout — the same classes the agent's LLM
-    node retries via its LangGraph RetryPolicy). PERMANENT failures (400/401/
+    node retries itself in `agent/graph/llm/_retry.py`). PERMANENT failures (400/401/
     402/403/404/422) are deterministic and never retried. A timeout on the
     wall-clock budget is the caller's concern (ava.understand / ava.web.fetch
     bound the whole call at the batch layer); this function retries the
