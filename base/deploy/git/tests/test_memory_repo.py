@@ -18,7 +18,6 @@ import pytest
 
 from base.cluster.machine import reset_identity, set_identity
 from base.config import settings
-from base.config.general import GeneralSettings
 from base.deploy.git import memory_repo
 from base.paths import gateway_memory_dir
 
@@ -457,9 +456,8 @@ def test_status_last_fetch_renders_cluster_zone(
 
     import datetime as dt
 
-    monkeypatch.setattr(
-        settings, "general", GeneralSettings.model_construct(timezone="Asia/Shanghai")
-    )
+    general = type(settings.general).model_construct(timezone="Asia/Shanghai")
+    monkeypatch.setattr(settings, "general", general)
     monkeypatch.setattr(memory_repo, "is_initialized", lambda: True)
     monkeypatch.setattr(memory_repo, "memory_dir", lambda: tmp_path)
 

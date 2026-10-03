@@ -458,7 +458,7 @@ def register_metric(spec: MetricSpec) -> MetricSpec:
 def validate_spec_sql(spec: MetricSpec) -> None:
     """Validate every query template on a spec (``query`` + ``targets``) —
     the static-SQL whitelist, LogQL contract, or PromQL sanity check, by dialect. Shared by
-    ``register_metric`` and ``register_core_metric`` (Task #882) — core
+    ``register_metric`` and ``validate_core_metric`` (Task #882) — core
     metrics go through the same safety checks as plugin metrics. SQL
     templates carry no placeholders anymore (task #180 PR C), so the old
     ``{{agent_id}}`` ↔ grafana rule is subsumed by the placeholder

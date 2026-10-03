@@ -8,9 +8,7 @@ Each helper opens its own connection, so it sees rows committed by the fixture.
 
 from __future__ import annotations
 
-import asyncio
 import json
-import time
 from typing import Any, cast
 
 import psycopg
@@ -20,7 +18,7 @@ from psycopg_pool import AsyncConnectionPool
 from base import db
 from base.config import settings
 from base.db import connections
-from base.events.live.redis_listener import RedisInboundListener
+from base.db.tests.live_agents import seed_agent
 from base.host.env.dotenv_boot import PLACEHOLDER_DB_URL
 from base.native_process import code_version
 from base.telemetry import Event, process_name
@@ -167,28 +165,6 @@ def test_connect_url_refuses_placeholder_url() -> None:
         db.connect_url(PLACEHOLDER_DB_URL)
 
 
-def _seed_agent(db_conn: psycopg.Connection, status: str, *, live_lease: bool = True) -> int:
-    """Create an agent + its agents_meta row in the given status, return id.
-
-    `live_lease` grants the R1 liveness lease (default True — a seeded live
-    agent renews like a real one); pass False to seed a lease-less (pre-lease /
-    zombie) row, which the alive predicate reads as dead."""
-    from datetime import UTC, datetime, timedelta
-
-    agent_id = db.create_agent(db_conn)
-    lease = datetime.now(UTC) + timedelta(seconds=600) if live_lease else None
-    with db_conn.cursor() as cur:
-        cur.execute(
-            "INSERT INTO agents_meta (id, spawner, status, lease_expires_at) "
-            "VALUES (%s, 'test', %s, %s) "
-            "ON CONFLICT (id) DO UPDATE SET status = EXCLUDED.status, "
-            "    lease_expires_at = EXCLUDED.lease_expires_at",
-            (agent_id, status, lease),
-        )
-    db_conn.commit()
-    return agent_id
-
-
 def _inbound_rows(db_conn: psycopg.Connection, agent_id: int) -> list[tuple[str, str, str]]:
     with db_conn.cursor() as cur:
         cur.execute(
@@ -203,7 +179,7 @@ def test_insert_restart_completed_inbound_traces_newest_restart(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The completion marker retains the restart envelope the claim will render."""
-    agent_id = _seed_agent(db_conn, "idling")
+    agent_id = seed_agent(db_conn, "idling")
     payload = {"config_overlay": {"model": "gpt-5"}}
     post_commit_events: list[Event] = []
     emitted: list[Event] = []
@@ -240,7 +216,7 @@ def test_insert_restart_completed_inbound_without_restart_returns_none(
     db_conn: psycopg.Connection,
 ) -> None:
     """Callers decide how to handle a missing restart inbound; the helper does not insert."""
-    agent_id = _seed_agent(db_conn, "idling")
+    agent_id = seed_agent(db_conn, "idling")
     with db_conn.cursor() as cur:
         assert db.insert_restart_completed_inbound(cur, agent_id, post_commit_events=[]) is None
     db_conn.commit()
@@ -251,9 +227,9 @@ def test_insert_restart_completed_inbound_without_restart_returns_none(
 def test_signal_live_agents_restart_only_live(db_conn: psycopg.Connection) -> None:
     """One restart inbound (content='', the given source) per running/idling agent;
     terminated get none. Returns the ids signalled."""
-    running = _seed_agent(db_conn, "running")
-    idling = _seed_agent(db_conn, "idling")
-    terminated = _seed_agent(db_conn, "terminated")
+    running = seed_agent(db_conn, "running")
+    idling = seed_agent(db_conn, "idling")
+    terminated = seed_agent(db_conn, "terminated")
 
     ids = db.signal_live_agents_restart(source="system:update")
 
@@ -269,9 +245,9 @@ def test_signal_live_agents_restart_requires_an_unexpired_lease(
     """R1 (Task #1021): a running/idling row WITHOUT a lease (pre-lease code) or
     with an EXPIRED one (a process that stopped renewing) is not alive — the
     lease is the liveness authority, and the quiesce must not signal a zombie."""
-    running_no_lease = _seed_agent(db_conn, "running", live_lease=False)
-    idling_no_lease = _seed_agent(db_conn, "idling", live_lease=False)
-    running_fresh = _seed_agent(db_conn, "running")
+    running_no_lease = seed_agent(db_conn, "running", live_lease=False)
+    idling_no_lease = seed_agent(db_conn, "idling", live_lease=False)
+    running_fresh = seed_agent(db_conn, "running")
 
     ids = db.signal_live_agents_restart(source="system:update")
 
@@ -298,7 +274,7 @@ def test_agent_is_alive_predicate() -> None:
 
 def test_signal_live_agents_restart_none_live(db_conn: psycopg.Connection) -> None:
     """No live agents → no inbound inserted, returns []."""
-    terminated = _seed_agent(db_conn, "terminated")
+    terminated = seed_agent(db_conn, "terminated")
     assert db.signal_live_agents_restart(source="system:update") == []
     assert _inbound_rows(db_conn, terminated) == []
 
@@ -307,8 +283,8 @@ def test_signal_live_agents_restart_exclude_ids(db_conn: psycopg.Connection) -> 
     """exclude_agent_ids agents are skipped even when live — the quiesce
     convergence loop passes its already-signalled set so a pass only signals
     newly-live agents."""
-    already = _seed_agent(db_conn, "running")
-    late = _seed_agent(db_conn, "running")
+    already = seed_agent(db_conn, "running")
+    late = seed_agent(db_conn, "running")
 
     ids = db.signal_live_agents_restart(source="system:update", exclude_agent_ids={already})
 
@@ -320,32 +296,10 @@ def test_signal_live_agents_restart_exclude_ids(db_conn: psycopg.Connection) -> 
 def test_list_live_agent_ids(db_conn: psycopg.Connection) -> None:
     """list_live_agent_ids lists agents with a LIVE process to act on (quiesce):
     running/idling only."""
-    running = _seed_agent(db_conn, "running")
-    idling = _seed_agent(db_conn, "idling")
-    _seed_agent(db_conn, "terminated")
+    running = seed_agent(db_conn, "running")
+    idling = seed_agent(db_conn, "idling")
+    seed_agent(db_conn, "terminated")
     assert sorted(db.list_live_agent_ids()) == sorted([running, idling])
-
-
-async def test_signal_live_agents_restart_publishes_redis_wake(
-    db_conn: psycopg.Connection,
-) -> None:
-    """The bulk restart wakes each signalled agent over Redis — the same
-    per-agent publish as insert_inbound_message — so an idling agent restarts now
-    instead of stalling to its SELECT recheck (the quiesce step's convergence
-    depends on live agents draining promptly). Park a per-agent listener on the
-    agent's channel, fire the bulk signal, assert the parked wait wakes."""
-    tid = _seed_agent(db_conn, "idling")
-    listener = RedisInboundListener(settings.data_plane.redis_url, tid)
-    try:
-        wait_task = asyncio.create_task(listener.wait_one(timeout=10.0))
-        await asyncio.sleep(0.2)  # let the subscribe take effect before the publish
-        t0 = time.monotonic()
-        ids = await asyncio.to_thread(db.signal_live_agents_restart, source="system:update")
-        assert tid in ids
-        await asyncio.wait_for(wait_task, timeout=5.0)
-        assert time.monotonic() - t0 < 5.0, "bulk restart did not wake the parked listener"
-    finally:
-        await listener.close()
 
 
 def test_pool_check_connections_flag(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -387,7 +341,7 @@ def test_list_chat_inbound_facts_windows_and_filters_kind(
     """The arrow read: chat inbounds only, inside the closed [from_, to], oldest first."""
     from datetime import UTC, datetime, timedelta
 
-    agent_id = _seed_agent(db_conn, "running")
+    agent_id = seed_agent(db_conn, "running")
     base = datetime(2026, 9, 12, 4, tzinfo=UTC)
     with db_conn.cursor() as cur:
         cur.execute(

@@ -16,11 +16,6 @@ from schedules.catchup import catch_up, cluster_timezone, fire_slot_once
 from base.paths import ava_home, repo_root
 from base.daemon.schedules.watcher import next_fire
 
-ensure_agent_status_members(
-    S,
-    {"IDLING", "RUNNING", "TERMINATED"},
-    schedule_name="model-update-tracker",
-)
 
 CRON = "0 6 * * *"
 _REPORT_LABEL = "Ava \u8d1f\u8d23\u4eba"
@@ -161,4 +156,9 @@ def _main_loop() -> None:
 
 
 if __name__ == "__main__":
+    ensure_agent_status_members(
+        S,
+        {"IDLING", "RUNNING", "TERMINATED"},
+        schedule_name="model-update-tracker",
+    )
     _main_loop()

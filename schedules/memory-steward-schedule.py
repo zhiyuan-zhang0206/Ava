@@ -28,11 +28,6 @@ from schedules.agent_status_guard import ensure_agent_status_members
 from schedules.catchup import catch_up, cluster_timezone, fire_slot_once
 from base.daemon.schedules.watcher import next_fire
 
-ensure_agent_status_members(
-    S,
-    {"TERMINATED"},
-    schedule_name="memory-arbiter",
-)
 
 MEMORY_ARBITRATOR_LABEL = "memory-arbiter"
 
@@ -99,4 +94,9 @@ def main():
 
 
 if __name__ == "__main__":
+    ensure_agent_status_members(
+        S,
+        {"TERMINATED"},
+        schedule_name="memory-arbiter",
+    )
     main()

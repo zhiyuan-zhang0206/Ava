@@ -49,7 +49,7 @@ def test_readiness_probes_now_instead_of_believing_cached_health(
 ) -> None:
     snapshot = status()
     snapshot["health"] = {"gateway": {"last_verdict": "alive"}}
-    monkeypatch.setattr(driver, "_root_client", object)
+    monkeypatch.setattr(driver, "root_client", object)
 
     def read_status(_client: object) -> dict[str, Any]:
         return snapshot
@@ -63,7 +63,7 @@ def test_readiness_probes_now_instead_of_believing_cached_health(
 
 def test_fresh_readiness_rejects_generation_change(monkeypatch: pytest.MonkeyPatch) -> None:
     snapshots = iter([status(pid=100), status(pid=101)])
-    monkeypatch.setattr(driver, "_root_client", object)
+    monkeypatch.setattr(driver, "root_client", object)
 
     def read_status(_client: object) -> dict[str, Any]:
         return next(snapshots)
@@ -74,7 +74,7 @@ def test_fresh_readiness_rejects_generation_change(monkeypatch: pytest.MonkeyPat
 
 
 def test_fresh_ready_generation_passes(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(driver, "_root_client", object)
+    monkeypatch.setattr(driver, "root_client", object)
 
     def read_status(_client: object) -> dict[str, Any]:
         return status()
@@ -126,7 +126,7 @@ def test_noncritical_readiness_must_still_hold_when_critical_becomes_ready(
     def sleep(_seconds: float) -> None:
         pass
 
-    monkeypatch.setattr(driver, "_root_client", object)
+    monkeypatch.setattr(driver, "root_client", object)
     monkeypatch.setattr(driver, "_root_status", snapshot)
     monkeypatch.setattr(driver, "_poll_sleep", sleep)
     monkeypatch.setattr(driver.time, "monotonic", lambda: next(times))
@@ -193,14 +193,14 @@ def test_unresponsive_root_with_custody_is_not_an_absent_tree(
     def make_client(**_kwargs: object) -> object:
         return object()
 
-    monkeypatch.setattr(driver, "_root_client", make_client)
+    monkeypatch.setattr(driver, "root_client", make_client)
 
     def read_status(_client: object) -> None:
         return None
 
     monkeypatch.setattr(driver, "_root_status", read_status)
     with pytest.raises(RuntimeError, match="custody"):
-        driver._stop_root_service_tree(preserve=frozenset())
+        driver.stop_root_service_tree(preserve=frozenset())
 
 
 def test_manifest_change_requires_generation_replacement(tmp_path: Path) -> None:
@@ -231,7 +231,7 @@ def test_manifest_change_requires_generation_replacement(tmp_path: Path) -> None
 
 
 def test_missing_root_ipc_is_unknown_not_positive_exit(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(driver, "_root_client", object)
+    monkeypatch.setattr(driver, "root_client", object)
 
     def unavailable(_client: object) -> None:
         return None
@@ -243,7 +243,7 @@ def test_missing_root_ipc_is_unknown_not_positive_exit(monkeypatch: pytest.Monke
 
 def test_service_stopping_during_probe_invalidates_alive(monkeypatch: pytest.MonkeyPatch) -> None:
     snapshots = iter([status(), status(state="stopped")])
-    monkeypatch.setattr(driver, "_root_client", object)
+    monkeypatch.setattr(driver, "root_client", object)
 
     def read_status(_client: object) -> dict[str, Any]:
         return next(snapshots)
@@ -347,8 +347,8 @@ def test_selected_stop_preserves_exact_home_qualified_names(
         assert timeout_s > 0 and force is False
         captured.append(preserve)
 
-    monkeypatch.setattr(driver, "_root_tree_selection", selection)
-    monkeypatch.setattr(driver, "_stop_root_service_tree", stop)
+    monkeypatch.setattr(driver, "root_tree_selection", selection)
+    monkeypatch.setattr(driver, "stop_root_service_tree", stop)
     assert stop_services(1, keep_terminals=True, selected=frozenset({"ava-home-abc-gateway"})) == [
         "ava-home-abc-gateway"
     ]
@@ -396,7 +396,7 @@ def test_generation_change_refuses_without_signal_or_seed_publication(
     monkeypatch.setattr("cli.commands.lifecycle.start_generation.source_digest", source_identity)
     monkeypatch.setattr(driver, "root_child_env", dict)
     monkeypatch.setattr(driver, "tree_manifest", tree)
-    monkeypatch.setattr(driver, "_root_client", object)
+    monkeypatch.setattr(driver, "root_client", object)
     monkeypatch.setattr(driver, "_root_status", snapshot_now)
     monkeypatch.setattr(driver, "_require_root_owner", owned)
     monkeypatch.setattr(driver, "_stop_root_process", no_stop)
@@ -409,7 +409,7 @@ def test_generation_change_refuses_without_signal_or_seed_publication(
 
 def test_mac_boot_tail_does_not_read_or_notify(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(driver.sys, "platform", "darwin")
-    monkeypatch.setattr(driver, "_root_client", lambda: pytest.fail("no root read"))
+    monkeypatch.setattr(driver, "root_client", lambda: pytest.fail("no root read"))
     driver.complete_boot_start()
 
 

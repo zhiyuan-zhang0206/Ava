@@ -19,12 +19,6 @@ from schedules.agent_status_guard import ensure_agent_status_members
 from schedules.catchup import catch_up, cluster_timezone, fire_slot_once
 from base.daemon.schedules.watcher import next_fire
 
-ensure_agent_status_members(
-    S,
-    {"TERMINATED"},
-    schedule_name="self-evolution-daily",
-)
-
 
 # daily_scan.py ships with the ava-self-evolution skill. The load-dir copy is
 # converge-managed but bootstrap-only (R5): converge lands it once, and the
@@ -156,4 +150,9 @@ def main() -> None:
 
 
 if __name__ == "__main__":
+    ensure_agent_status_members(
+        S,
+        {"TERMINATED"},
+        schedule_name="self-evolution-daily",
+    )
     main()

@@ -3,7 +3,6 @@
 "tests.path_scoped.gateway_tests" = [
     "test_cluster_rpc.py",
     "test_inventory_ops.py",
-    "test_operations.py",
 ]
 "tests.path_scoped.integration_tests" = [
     "test_cross_machine_dispatch.py",

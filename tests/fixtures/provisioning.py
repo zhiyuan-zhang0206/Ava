@@ -452,6 +452,12 @@ def cluster_defaults_unset(db_conn: psycopg.Connection) -> Iterator[None]:
 
 
 @pytest.fixture
+def db_url() -> str:
+    """The session's test database URL, for tests that open their own connections."""
+    return settings.data_plane.db_url
+
+
+@pytest.fixture
 def db_conn() -> Iterator[psycopg.Connection]:
     """A sync psycopg.Connection on the session's test DB. Per-test isolation
     is handled by the autouse `_clean_state`, so this fixture only opens and

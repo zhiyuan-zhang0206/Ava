@@ -34,11 +34,6 @@ from schedules.catchup import claimed_slot, cluster_timezone
 from schedules.daily_host import report_agent, run_daily_loop
 from base.log import init_gateway_process
 
-ensure_agent_status_members(
-    S,
-    {"IDLING", "RUNNING", "TERMINATED"},
-    schedule_name="c9-daily-report",
-)
 
 CRON = "0 5 * * *"
 _REPORT_AGENT_ENV = "AVA_CI_USAGE_REPORT_AGENT"
@@ -172,4 +167,9 @@ def _main_loop() -> None:
 
 
 if __name__ == "__main__":
+    ensure_agent_status_members(
+        S,
+        {"IDLING", "RUNNING", "TERMINATED"},
+        schedule_name="c9-daily-report",
+    )
     _main_loop()

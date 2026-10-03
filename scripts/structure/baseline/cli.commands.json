@@ -36,7 +36,7 @@
     "cli/commands/lifecycle/tests/test_gateway_consumer_guard.py::_kind_closure": 18,
     "cli/commands/lifecycle/tests/test_gateway_consumer_guard.py::_repo_internal_import_closure": 15,
     "cli/commands/observability/logs.py::cmd_logs_retention": 23,
-    "cli/commands/tests/test_lgtm_native.py::test_ensure_renders_configs_with_native_paths_and_loopback": 24
+    "cli/commands/observability/tests/test_lgtm_native.py::test_ensure_renders_configs_with_native_paths_and_loopback": 24
   },
   "files": {
     "cli/commands/agents/tests/test_impersonation_bridge.py": 808,
@@ -51,13 +51,6 @@
   "patch_targets": {
     "cli/commands/converge/tests/test_converge_firewall.py::base.host.macos_firewall._VERIFY_RETRY_S": 2,
     "cli/commands/converge/tests/test_converge_firewall.py::base.host.macos_firewall._sudo_mutate": 3,
-    "cli/commands/converge/tests/test_converge_selection.py::cli.commands.observability.lgtm_native._download_and_verify": 1,
-    "cli/commands/converge/tests/test_converge_selection.py::cli.commands.observability.lgtm_native._load_versions": 1,
-    "cli/commands/converge/tests/test_converge_selection.py::cli.commands.observability.lgtm_native._render_configs": 1,
-    "cli/commands/converge/tests/test_converge_selection.py::cli.commands.observability.lgtm_native._render_grafana_admin_password": 1,
-    "cli/commands/converge/tests/test_converge_selection.py::cli.commands.observability.lgtm_native._verify_loki": 1,
-    "cli/commands/data_plane/tests/test_maintenance_stop.py::cli.commands.lifecycle.root_driver._root_tree_selection": 3,
-    "cli/commands/data_plane/tests/test_maintenance_stop.py::cli.commands.lifecycle.root_driver._stop_root_service_tree": 3,
     "cli/commands/data_plane/tests/test_storage_ownership_data_plane.py::base.cluster.postgres._read": 1,
     "cli/commands/data_plane/tests/test_storage_ownership_data_plane.py::base.cluster.postgres._spawn": 2,
     "cli/commands/lifecycle/tests/test_ava_root_custody.py::services.permissions_helper.launchd_job._executable_pids": 2,
@@ -71,27 +64,11 @@
     "cli/commands/lifecycle/tests/test_ava_root_custody.py::services.permissions_helper.lifecycle._run": 3,
     "cli/commands/lifecycle/tests/test_ava_root_custody.py::services.permissions_helper.lifecycle._source_content_hash": 2,
     "cli/commands/lifecycle/tests/test_ava_root_custody.py::services.permissions_helper.lifecycle._verify_dr": 2,
-    "cli/commands/lifecycle/tests/test_commands_status.py::base.deploy.git.cluster_drift._prod_source_dir": 3,
-    "cli/commands/lifecycle/tests/test_maintenance.py::ops.agent_pause._wake": 1,
     "cli/commands/lifecycle/tests/test_remote_data_plane.py::cli.commands.data_plane.bringup._local_listener": 1,
     "cli/commands/lifecycle/tests/test_remote_data_plane.py::cli.commands.data_plane.cluster_instance._pg_running": 1,
     "cli/commands/lifecycle/tests/test_root_driver.py::ops.roster._plugin_services": 1,
     "cli/commands/lifecycle/tests/test_start_data_plane.py::cli.commands.data_plane.bringup._ensure_pooler": 1,
     "cli/commands/lifecycle/tests/test_start_data_plane.py::cli.commands.data_plane.cluster_instance._start_pg": 1,
-    "cli/commands/observability/tests/test_converge_otel_collector.py::base.deploy.release.collector_artifact._stream_download": 1,
-    "cli/commands/observability/tests/test_converge_otel_collector.py::cli.commands.lifecycle.root_driver._root_client": 1,
-    "cli/commands/tests/test_external_skills_adversarial.py::cli.commands.extensions.external_skills._commit_activation": 2,
-    "cli/commands/tests/test_external_skills_adversarial.py::cli.commands.extensions.external_skills._materialize_source_snapshot": 2,
-    "cli/commands/tests/test_external_skills_adversarial.py::cli.commands.extensions.external_skills._rename_no_replace": 9,
-    "cli/commands/tests/test_external_skills_adversarial.py::cli.commands.extensions.external_skills._stage_copy": 3,
-    "cli/commands/tests/test_external_skills_adversarial.py::cli.commands.extensions.external_skills._verify_marker": 1,
-    "cli/commands/tests/test_external_skills_crash_safety.py::cli.commands.extensions._external_skill_cleanup": 3,
-    "cli/commands/tests/test_external_skills_crash_safety.py::cli.commands.extensions._external_skill_fs": 1,
-    "cli/commands/tests/test_external_skills_crash_safety.py::cli.commands.extensions.external_skills._rename_no_replace": 11,
-    "cli/commands/tests/test_lgtm_native.py::cli.commands.observability.lgtm_native._download_and_verify": 3,
-    "cli/commands/tests/test_lgtm_native.py::cli.commands.observability.lgtm_native._download_with_retry": 1,
-    "cli/commands/tests/test_lgtm_native.py::cli.commands.observability.lgtm_native._stream_download": 2,
-    "cli/commands/tests/test_lgtm_native.py::cli.commands.observability.lgtm_native._verify_loki": 2,
-    "cli/commands/tests/test_lgtm_native.py::cli.commands.observability.lgtm_native._write_if_changed": 1
+    "cli/commands/observability/tests/test_converge_otel_collector.py::base.deploy.release.collector_artifact._stream_download": 1
   }
 }

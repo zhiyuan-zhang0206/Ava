@@ -10,62 +10,66 @@ ava_observability registry count remains locked at 21 metrics by tests.
 
 from __future__ import annotations
 
-from base.telemetry.metrics.core import catalog
 from base.telemetry.metrics.plugin_metrics import MetricSpec
 
-catalog.register_core_metric(
-    MetricSpec(
-        name="core_agent_max_id",
-        title="Max Agent ID",
-        description=(
-            "Agents-table high-water mark (max id), sampled by the gateway every "
-            "60s into the ava_agent_registry_max_id_ratio gauge (task #2010); a "
-            "vertical step marks a batch spawn."
-        ),
-        event_name="agent_registry",
-        category="telemetry",
-        unit="short",
-        panel="timeseries",
-        # The absolute registry high-water mark, sampled by the gateway every
-        # 60s (services/events_maintenance/registry_gauge.py, task #2010). Unit-"1" gauges export
-        # with the `_ratio` suffix (same naming as the resolution_status
-        # tiles). The gauge is per gateway process and the process restarts on
-        # every rollout, so a bare read draws one overlapping series per
-        # gateway lifetime; max() collapses them into the single high-water
-        # curve the panel promises.
-        query="max(ava_agent_registry_max_id_ratio)",
-        query_type="promql",
-        target_names=["max_id"],
-        panel_id=2301,
-        section="Fleet",
-        order=5,
-    )
-)
 
-catalog.register_core_metric(
-    MetricSpec(
-        name="core_agent_max_id_growth_rate",
-        title="Max Agent ID growth rate",
-        description=(
-            "Slope of the ava_agent_registry_max_id_ratio gauge over the last hour, "
-            "expressed in agents per day (deriv() * 86400, task #2010); a spike marks "
-            "a batch spawn."
-        ),
-        event_name="agent_registry",
-        category="telemetry",
-        unit="short",
-        panel="timeseries",
-        # The growth curve's slope, extrapolated to agents per day — the
-        # deriv() over the last hour on the max()-collapsed 60s gauge (task
-        # #2010; the [1h:] subquery form — a bare [1h] range on a function
-        # call is a PromQL parse error). Shows batch-spawn intensity at a
-        # glance (e.g. +300/day).
-        query="deriv(max(ava_agent_registry_max_id_ratio)[1h:]) * 86400",
-        query_type="promql",
-        target_names=["agents/day"],
-        panel_id=2302,
-        section="Fleet",
-        order=6,
-        field_defaults={"color": {"mode": "fixed", "fixedColor": "purple"}},
+def core_metrics() -> list[MetricSpec]:
+    """This module's core metrics, in registration order."""
+    specs: list[MetricSpec] = []
+    specs.append(
+        MetricSpec(
+            name="core_agent_max_id",
+            title="Max Agent ID",
+            description=(
+                "Agents-table high-water mark (max id), sampled by the gateway every "
+                "60s into the ava_agent_registry_max_id_ratio gauge (task #2010); a "
+                "vertical step marks a batch spawn."
+            ),
+            event_name="agent_registry",
+            category="telemetry",
+            unit="short",
+            panel="timeseries",
+            # The absolute registry high-water mark, sampled by the gateway every
+            # 60s (services/events_maintenance/registry_gauge.py, task #2010). Unit-"1" gauges export
+            # with the `_ratio` suffix (same naming as the resolution_status
+            # tiles). The gauge is per gateway process and the process restarts on
+            # every rollout, so a bare read draws one overlapping series per
+            # gateway lifetime; max() collapses them into the single high-water
+            # curve the panel promises.
+            query="max(ava_agent_registry_max_id_ratio)",
+            query_type="promql",
+            target_names=["max_id"],
+            panel_id=2301,
+            section="Fleet",
+            order=5,
+        )
     )
-)
+
+    specs.append(
+        MetricSpec(
+            name="core_agent_max_id_growth_rate",
+            title="Max Agent ID growth rate",
+            description=(
+                "Slope of the ava_agent_registry_max_id_ratio gauge over the last hour, "
+                "expressed in agents per day (deriv() * 86400, task #2010); a spike marks "
+                "a batch spawn."
+            ),
+            event_name="agent_registry",
+            category="telemetry",
+            unit="short",
+            panel="timeseries",
+            # The growth curve's slope, extrapolated to agents per day — the
+            # deriv() over the last hour on the max()-collapsed 60s gauge (task
+            # #2010; the [1h:] subquery form — a bare [1h] range on a function
+            # call is a PromQL parse error). Shows batch-spawn intensity at a
+            # glance (e.g. +300/day).
+            query="deriv(max(ava_agent_registry_max_id_ratio)[1h:]) * 86400",
+            query_type="promql",
+            target_names=["agents/day"],
+            panel_id=2302,
+            section="Fleet",
+            order=6,
+            field_defaults={"color": {"mode": "fixed", "fixedColor": "purple"}},
+        )
+    )
+    return specs

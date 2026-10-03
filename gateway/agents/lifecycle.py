@@ -4,7 +4,7 @@ Compact / cancel / terminate / resurrect / restart.
 
 Lifecycle operations that mutate physical host state (session / OS
 process) always run on the agent's home machine via its ops server
-(`_forward_to_home_machine`, `forward.py`) — no local shortcut
+(`forward_to_home_machine`, `forward.py`) — no local shortcut
 even when the target is the co-located box. Operations that are durable
 DB-row + event-publish work (cancel) run on whichever
 gateway receives them. CRUD + spawn live in `router.py`; message +
@@ -26,7 +26,7 @@ from base.agents.impersonation import ImpersonationError
 from base.agents.impersonation.maintenance import force_expire_impersonation
 from base.db import agent_exists, insert_compact_request_inbound
 from base.db.transaction import write_transaction
-from gateway.agents.forward import _forward_to_home_machine
+from gateway.agents.forward import forward_to_home_machine
 from gateway.agents.schemas import CancelRequest, CompactEnqueued
 from ops import lifecycle as _ops
 from ops.rpc_schemas import (
@@ -186,7 +186,7 @@ async def terminate_agent_with_open_tasks(
 
     Advisory by design: a failed hint read is logged and leaves `open_tasks`
     null, so it can never block or alter the termination itself."""
-    forwarded = await _forward_to_home_machine(
+    forwarded = await forward_to_home_machine(
         agent_id, f"/api/agents/{agent_id}/terminate", body.model_dump()
     )
     response = TerminateAgentResponse.model_validate(forwarded)
@@ -281,7 +281,7 @@ async def post_agent_resurrect(
     message to deliver.
 
     Always runs on the agent's home machine via its ops server
-    (`_forward_to_home_machine`) — that host starts the new process; launching
+    (`forward_to_home_machine`) — that host starts the new process; launching
     anywhere else would start it on the wrong host.
 
     404: agent_id does not exist (AgentNotFound -> handler returns 404 + reason).
@@ -289,7 +289,7 @@ async def post_agent_resurrect(
         (running/idling); resurrect does not
         apply — idempotent.
     """
-    forwarded = await _forward_to_home_machine(
+    forwarded = await forward_to_home_machine(
         agent_id,
         f"/api/agents/{agent_id}/resurrect-explicit-v2",
         body.model_dump(),
@@ -332,7 +332,7 @@ async def post_agent_restart(
     The host then applies the exact command and releases the incarnation for
     new admission, retaining agent ID and context. Terminated agents require
     resurrection; restart returns already_terminated for them."""
-    forwarded = await _forward_to_home_machine(
+    forwarded = await forward_to_home_machine(
         agent_id, f"/api/agents/{agent_id}/restart", body.model_dump()
     )
     return RestartAgentResponse.model_validate(forwarded)

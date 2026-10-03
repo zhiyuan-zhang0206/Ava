@@ -16,7 +16,6 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-import ava
 import ava.mcps as mcps_mod
 import ava.mcps._remote as remote_mod
 from base.config import settings
@@ -119,41 +118,6 @@ def test_module_dir_lists_servers(fake_config: Path) -> None:
     assert "servers" in listing
     assert "description" in listing
     assert "help" in listing
-
-
-def test_help_on_mcps_module_is_index_only(
-    fake_config: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
-    """`ava.help(ava.mcps)` is an INDEX: each configured server as a name plus at
-    most its one-liner, never its tool list or a tool's JSON Schema. Pinning it
-    because the `# Capabilities` section is the prompt's single MCP index — a
-    render that reached for tools would connect to every configured server and
-    put every tool schema in front of the agent. Tools stay one
-    `ava.help(ava.mcps.<server>)` away."""
-    import ava
-
-    fake_config.write_text(
-        json.dumps(
-            {
-                "mcpServers": {
-                    "fs": {"command": "x", "description": "Local filesystem"},
-                    "github": {"command": "y"},
-                }
-            }
-        ),
-        encoding="utf-8",
-    )
-    ava.help(ava.mcps)
-    out = capsys.readouterr().out
-    assert "from . import fs" in out
-    assert "from . import github" in out
-    # Positively: each server carries its one-liner. It is the proxy's generic
-    # doc, not the `description` from mcp.json — that one reaches the agent
-    # through the `# Capabilities` index, which is the MCP index of record.
-    assert "Tools of MCP server 'fs'." in out
-    # No tool-schema surface: the render must not have connected to a server.
-    assert "inputSchema" not in out
-    assert "**kwargs" not in out
 
 
 # ─── tools / call / call_raw via ServerProxy ─────────────────────────────
@@ -560,7 +524,7 @@ def test_read_cache_fills_defaults_for_missing_fields(fake_config: Path, tmp_pat
 
 
 def test_daemon_socket_path_none_when_identity_unset(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(ava.agent_identity, "_agent_id", None)
+    monkeypatch.setattr("ava.agent_identity._agent_id", None)
     assert mcps_mod._daemon_socket_path() is None
 
 
@@ -1342,11 +1306,8 @@ def test_unknown_tool_keeps_kwargs_signature(mock_session: MagicMock) -> None:
     assert params["kwargs"].kind is inspect.Parameter.VAR_KEYWORD
 
 
-def test_help_renderer_shows_real_params_for_mcp_tool(mock_session: MagicMock) -> None:
-    """ava.help's signature renderer (_format_signature) displays real parameter names for MCP tools,
-    no longer (**kwargs: Any)."""
-    from ava.sdk_surface.help import _format_signature
-
+def test_tool_signature_shows_real_params_for_mcp_tool(mock_session: MagicMock) -> None:
+    """An MCP tool callable carries its real parameter names, not (**kwargs: Any)."""
     mock_session.list_tools.return_value = MagicMock(
         tools=[
             _make_tool(
@@ -1359,7 +1320,7 @@ def test_help_renderer_shows_real_params_for_mcp_tool(mock_session: MagicMock) -
         ]
     )
     proxy = mcps_mod._ServerProxy("chrome")
-    rendered = _format_signature(proxy.navigate)
+    rendered = str(inspect.signature(proxy.navigate))
     assert "url: str" in rendered
     assert "timeout: int" in rendered
     assert "**kwargs" not in rendered

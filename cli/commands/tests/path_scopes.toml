@@ -2,11 +2,8 @@
 # directory itself, otherwise the test files named here (tests/fixtures/path_scopes.py).
 "tests.path_scoped.cli_tests" = [
     "test_external_skills.py",
-    "test_external_skills_adversarial.py",
-    "test_external_skills_crash_safety.py",
     "test_frontend_deps.py",
     "test_gateway_preflight_budget.py",
-    "test_lgtm_native.py",
     "test_repo_browser_gate.py",
     "test_repo_heartbeat_gate.py",
     "test_service_probe_ports.py",

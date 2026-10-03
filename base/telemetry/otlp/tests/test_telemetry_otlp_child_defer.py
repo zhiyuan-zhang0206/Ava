@@ -246,10 +246,10 @@ def test_flag_off_disables_defer(otlp_backend: Any, monkeypatch: pytest.MonkeyPa
 def test_env_defaults_locked_to_settings_fields() -> None:
     """The env-direct fallback mirrors the declared Settings defaults (one home
     per fact — `base/telemetry/otlp/telemetry_otlp_defer` cannot import the config module)."""
-    from base.config.observability import ObservabilitySettings
+    from base.config import settings
     from base.telemetry.otlp.telemetry_otlp_defer import CHILD_DEFER_MAX_AGE_DEFAULT_S
 
-    fields = ObservabilitySettings.model_fields
+    fields = type(settings.observability).model_fields
     assert fields["telemetry_otlp_child_defer"].default is True
     assert fields["telemetry_otlp_child_defer"].alias == "AVA_TELEMETRY_OTLP_CHILD_DEFER"
     assert fields["telemetry_otlp_child_defer_max_age_s"].default == CHILD_DEFER_MAX_AGE_DEFAULT_S

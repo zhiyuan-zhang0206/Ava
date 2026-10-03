@@ -246,7 +246,7 @@ async def test_admitted_model_finishes_real_exec_and_after_exec_before_drain_rec
         from cli.commands.lifecycle._pause_resume import resume_after_start
 
         monkeypatch.setattr("ops.cluster_pause._unpause_local_cluster", MagicMock())
-        monkeypatch.setattr("ops.agent_pause._wake", MagicMock())
+        monkeypatch.setattr("ops.agent_pause.publish_inbound_wake", MagicMock())
         monkeypatch.setattr(start_serving, "is_serving", lambda: True)
 
         @resume_after_start

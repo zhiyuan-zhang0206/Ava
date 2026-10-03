@@ -103,7 +103,7 @@ def _alerts_auth_and_im(monkeypatch: pytest.MonkeyPatch) -> None:
     def _fake_notify(text: str) -> bool:
         return True
 
-    monkeypatch.setattr(alerts_router, "_notify_im", _fake_notify)
+    monkeypatch.setattr(alerts_router, "notify_im", _fake_notify)
 
 
 # -- ingest ------------------------------------------------------------------
@@ -259,7 +259,7 @@ def test_ingest_every_severity_notifies() -> None:
         return True
 
     with TestClient(app) as client, pytest.MonkeyPatch.context() as mp:
-        mp.setattr(alerts_router, "_notify_im", _capture)
+        mp.setattr(alerts_router, "notify_im", _capture)
         _ingest(client, _webhook(alerts=[_alert(severity="critical", fingerprint="c1")]))
         _ingest(client, _webhook(alerts=[_alert(severity="warning", fingerprint="w1")]))
         _ingest(client, _webhook(alerts=[_alert(severity="error", fingerprint="e1")]))
@@ -290,7 +290,7 @@ def test_ingest_notify_im_false_stores_and_publishes_without_im(
         notified.append(text)
         return True
 
-    monkeypatch.setattr(alerts_router, "_notify_im", _capture)
+    monkeypatch.setattr(alerts_router, "notify_im", _capture)
     record_publishes(monkeypatch, published)
 
     with TestClient(app) as client:
@@ -320,7 +320,7 @@ def test_ingest_notify_im_false_firing_and_resolution_stay_silent(
         notified.append(text)
         return True
 
-    monkeypatch.setattr(alerts_router, "_notify_im", _capture)
+    monkeypatch.setattr(alerts_router, "notify_im", _capture)
 
     with TestClient(app) as client:
         firing = _ingest(client, _webhook(notify_im="false"))
@@ -353,7 +353,7 @@ def test_ingest_notify_im_non_gating_value_still_notifies(
         notified.append(text)
         return True
 
-    monkeypatch.setattr(alerts_router, "_notify_im", _capture)
+    monkeypatch.setattr(alerts_router, "notify_im", _capture)
 
     with TestClient(app) as client:
         resp = _ingest(client, _webhook(notify_im="true"))
@@ -371,7 +371,7 @@ def test_ingest_notify_im_false_resends_and_refire_stay_silent(
         notified.append(text)
         return True
 
-    monkeypatch.setattr(alerts_router, "_notify_im", _capture)
+    monkeypatch.setattr(alerts_router, "notify_im", _capture)
 
     with TestClient(app) as client:
         firing = _ingest(client, _webhook(notify_im="false"))
@@ -426,7 +426,7 @@ def test_ingest_uses_display_language_setting(db_conn: psycopg.Connection) -> No
         return True
 
     with TestClient(app) as client, pytest.MonkeyPatch.context() as mp:
-        mp.setattr(alerts_router, "_notify_im", _capture)
+        mp.setattr(alerts_router, "notify_im", _capture)
         _ingest(client, _webhook())
     assert len(notified) == 1
     assert (
@@ -453,7 +453,7 @@ def test_ingest_im_failure_does_not_fail_ingest(
 ) -> None:
     """im_bridge down -> the ingest still stores the row (notified_at stays
     NULL) and answers 200."""
-    monkeypatch.setattr(alerts_router, "_notify_im", lambda _text: False)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(alerts_router, "notify_im", lambda _text: False)  # pyright: ignore[reportUnknownArgumentType]
     with TestClient(app) as client:
         resp = _ingest(client, _webhook())
         assert resp.status_code == 200
@@ -471,10 +471,10 @@ def test_ingest_firing_retries_notify_after_failed_attempt(
 ) -> None:
     """notified_at NULL keeps the firing gate open — the next re-send retries
     the IM."""
-    monkeypatch.setattr(alerts_router, "_notify_im", lambda _text: False)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(alerts_router, "notify_im", lambda _text: False)  # pyright: ignore[reportUnknownArgumentType]
     with TestClient(app) as client:
         _ingest(client, _webhook())
-    monkeypatch.setattr(alerts_router, "_notify_im", lambda _text: True)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(alerts_router, "notify_im", lambda _text: True)  # pyright: ignore[reportUnknownArgumentType]
     with TestClient(app) as client:
         resp = _ingest(client, _webhook())
         assert resp.json()["notified"] == 1

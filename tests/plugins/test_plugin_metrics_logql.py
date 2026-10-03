@@ -46,10 +46,7 @@ def _load_all() -> None:
 
 
 def _load_core() -> list[MetricSpec]:
-    """Register the complete core metric set from fresh definition modules."""
-    catalog.clear_core_registry()
-    for module_name in catalog._CORE_DEFINITION_MODULES:
-        sys.modules.pop(module_name, None)
+    """The complete core metric set."""
     return catalog.collect_core_metrics()
 
 

@@ -19,7 +19,7 @@ from base.cluster.machine import machine_name
 from base.db import Database
 from base.telemetry import Event
 from ops import cluster_rpc, lifecycle
-from ops.agents.spawn import create_agent_row
+from ops.agents import create_agent_row
 from ops.rpc_schemas import RecoverCrashMarkedResponse
 
 

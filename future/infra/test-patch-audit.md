@@ -121,13 +121,13 @@ patched and the test homes that patch them. This is the injection-seam work list
 | `ava.mcps._remote` | 18 | `_remote` 18 | `ava` 18 |
 | `scripts.lint.async_no_sync_blocking` | 18 | `_REPO_ROOT` 9, `_ROOT` 2, `_DEFINITION_DIRS` 2 | `scripts` 18 |
 | `agent.startup` | 16 | `_page_server_alive` 9, `_last_reconcile_at` 7 | `agent/graph/claim` 16 |
-| `cli.commands.lifecycle.root_driver` | 16 | `_stop_root_service_tree` 8, `_root_tree_selection` 4, `_root_tree_plan` 2 | `cli/commands/data_plane` 10, `cli` 4, `cli/commands/observability` 1, `(top-level)` 1 |
+| `cli.commands.lifecycle.root_driver` | 16 | `stop_root_service_tree` 8, `root_tree_selection` 4, `_root_tree_plan` 2 | `cli/commands/data_plane` 10, `cli` 4, `cli/commands/observability` 1, `(top-level)` 1 |
 | `cli.commands.lifecycle._temporary_stop` | 15 | `_temporary_stop` 15 | `cli` 15 |
 | `base.daemon.health` | 14 | `_probe_daemon` 5, `_probe_home` 3, `_health_payload` 3 | `base` 9, `cli/commands` 2, `services/healthchecks` 2, `services/events_maintenance` 1 |
 | `cli.commands.observability.lgtm_native` | 14 | `_download_and_verify` 4, `_verify_loki` 3, `_stream_download` 2 | `cli/commands` 9, `cli/commands/converge` 5 |
 | `ops.agent_pause` | 14 | `_wake` 7, `_lifecycle_wait_seconds` 4, `_LIFECYCLE_WAIT_POLL_SECONDS` 3 | `agent/ownership` 8, `services/agent_host` 3, `cli/commands/lifecycle` 1, `cli/parsers` 1 |
 | `base.telemetry.otlp.telemetry_otlp` | 11 | `_OtlpBackend` 8, `_build_providers` 3 | `base/telemetry` 8, `agent` 2, `base` 1 |
-| `gateway.alerts.router` | 10 | `_notify_im` 10 | `cli/commands` 10 |
+| `gateway.alerts.router` | 10 | `notify_im` 10 | `cli/commands` 10 |
 | `gateway.cluster.status` | 10 | `_compute_stats_dashboard` 8, `_probe_agent_runner` 1, `_STATUS_CACHE_TTL_S` 1 | `gateway` 10 |
 | `services.permissions_helper.launchd_job` | 10 | `_retirement_command` 4, `_executable_pids` 2, `_retirement_owner` 2 | `cli/commands/lifecycle` 10 |
 | `ava.shell.sessions` | 9 | `_next_session_index_from_db` 3, `_shell_prefix` 3, `_record_ttl` 3 | `ava` 6, `cli/commands/data_plane` 3 |

@@ -18,7 +18,7 @@ from pydantic import ValidationError
 
 from base.db import Database
 from base.deploy.maintenance.tests.test_admission import isolate as isolate
-from ops import cluster, cluster_rpc, lifecycle
+from ops import cluster_rpc, lifecycle
 from ops.lifecycle import launch
 from ops.rpc_schemas import (
     LaunchAgentRequest,
@@ -472,26 +472,6 @@ async def test_explicit_v2_resurrect_dispatches_manual_op(
         "trigger_inbound_id": None,
         "trigger_inbound_kind": None,
     }
-
-
-def test_cluster_status_op_returns_snapshot(monkeypatch: pytest.MonkeyPatch) -> None:
-    from ops.cluster_status import ClusterStatus
-
-    snap = ClusterStatus(
-        machine_name="wsl", serve_gateway=False, serve_agent_runner=True, paused=False
-    )
-    expected_pool = object()
-    seen: list[object] = []
-
-    def _snapshot(pool: object | None = None) -> ClusterStatus:
-        assert pool is expected_pool
-        seen.append(pool)
-        return snap
-
-    monkeypatch.setattr(cluster, "status_snapshot", _snapshot)
-
-    assert cluster.cluster_status_op(expected_pool) is snap
-    assert seen == [expected_pool]
 
 
 class TestResurrectIfTerminatedPlacement:
