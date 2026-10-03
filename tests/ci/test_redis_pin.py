@@ -31,3 +31,17 @@ def test_provision_script_installs_and_holds_the_canonical_redis() -> None:
         in text
     )
     assert "apt-mark hold redis-server redis-tools" in text
+
+
+def test_ci_installs_the_canonical_redis_from_the_redis_io_repo() -> None:
+    text = (_REPO_ROOT / ".github/actions/install-pg-redis/action.yml").read_text(encoding="utf-8")
+    assert re.findall(r'^\s*redis_version="([^"]+)"$', text, re.MULTILINE) == [
+        brew_pin.REDIS_APT_VERSION
+    ]
+    # The pin only means something when the redis.io repo is the source: Ubuntu's own
+    # archive carries a different major line.
+    assert "https://packages.redis.io/deb" in text
+    assert '"redis-server=${redis_version}" "redis-tools=${redis_version}"' in text
+    # The post-install check must hold the installed package to the same series.
+    major_minor = brew_pin.REDIS_APT_VERSION.removesuffix(".*")
+    assert re.search(rf"^\s*{re.escape(major_minor)}\.\*\) ;;$", text, re.MULTILINE)

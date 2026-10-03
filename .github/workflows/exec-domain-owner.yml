@@ -35,6 +35,8 @@ jobs:
           version: 0.10.2
       - uses: ./.github/actions/install-pg-redis
       - run: uv sync --frozen
+      - name: Vendored Postgres runtime (production's server build)
+        uses: ./.github/actions/vendor-pg-runtime
       - name: Exact schema and registration fences
         run: |
           mkdir -p proof

@@ -1,7 +1,10 @@
 name: Install Postgres 17 + Redis + PgBouncer
 description: >
   Server binaries on PATH for the self-provisioned test clusters
-  (tests/_containers.py). Every network phase degrades instead of failing: the
+  (tests/_containers.py). Redis and PgBouncer are the pinned production builds;
+  the Postgres server a test cluster runs is the vendored zonky tree, put in
+  place by scripts/ci/vendor_pg_runtime.py after the Python deps install (this
+  action only supplies the host client tools). Every network phase degrades instead of failing: the
   index refresh narrows to pgdg when an Ubuntu mirror stalls, the .deb download
   is allowed to fail when the archive cache is already warm, and the install
   falls back to dpkg over the cached archives when apt cannot resolve at all.
@@ -22,7 +25,7 @@ runs:
       uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
         path: /tmp/apt-archives
-        key: apt-pg17-redis-pgbouncer-${{ runner.os }}-v6
+        key: apt-pg17-redis82-pgbouncer-${{ runner.os }}-v7
 
     - name: Install (pgdg repo, cached archives, timeout+retry)
       shell: bash
@@ -55,12 +58,13 @@ runs:
         # of eating a whole 120s attempt. Without it the three attempts all land
         # inside a single outage window and sample one moment, not three.
         net=(-o Acquire::http::Timeout=15 -o Acquire::https::Timeout=15 -o Acquire::Retries=3)
-        # Refresh ONLY apt.postgresql.org, leaving the runner image's existing
+        # Refresh ONLY the two repos this action adds (apt.postgresql.org and
+        # packages.redis.io, one list file), leaving the runner image's existing
         # Ubuntu lists in place (List-Cleanup=0 stops apt pruning them, and
-        # sourceparts=/dev/null hides sources.list.d/*). pgdg is the only repo
-        # this action actually adds, so a dead Ubuntu mirror is irrelevant here.
-        pgdg_only=(
-          -o Dir::Etc::sourcelist=/etc/apt/sources.list.d/pgdg.list
+        # sourceparts=/dev/null hides sources.list.d/*). A dead Ubuntu mirror is
+        # irrelevant here.
+        added_repos_only=(
+          -o Dir::Etc::sourcelist=/etc/apt/sources.list.d/ava-data-plane.list
           -o Dir::Etc::sourceparts=/dev/null
           -o APT::Get::List-Cleanup=0
         )
@@ -73,18 +77,33 @@ runs:
         # scripts/provision/database.sh pins the same version (asserted equal by
         # tests/ci/test_pgbouncer_pin.py).
         pgbouncer_version="1.26.0-1.pgdg24.04+1"
-        pkgs=(postgresql-17 redis-server postgresql-17-pgvector "pgbouncer=${pgbouncer_version}")
+        # Redis comes from the same source as production (redis.io apt repo, the
+        # 8.2 series scripts/provision/database.sh installs and holds); Ubuntu's
+        # own archive ships a different major line. Asserted equal to
+        # base.host.brew_pin.REDIS_APT_VERSION by tests/ci/test_redis_pin.py.
+        redis_version="6:8.2.*"
+        # Postgres: the server a test cluster runs is the vendored zonky tree
+        # production vendors (base/cluster/dataplane/runtime_binaries.py), not
+        # an apt build — PGDG keeps only its newest 17.x, so no apt pin can
+        # match. The pgdg package stays for the host-side tools the vendored
+        # tree lacks (client tools, pg_controldata), as on a production Linux
+        # host. pgvector comes from the vendored injection.
+        pkgs=(postgresql-17 "redis-server=${redis_version}" "redis-tools=${redis_version}" "pgbouncer=${pgbouncer_version}")
 
-        sudo sh -c 'echo "deb http://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" > /etc/apt/sources.list.d/pgdg.list'
+        # One list file for both repos so the narrowed index refresh below can
+        # name them together.
+        sudo sh -c 'echo "deb http://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" > /etc/apt/sources.list.d/ava-data-plane.list'
+        sudo sh -c 'echo "deb [signed-by=/usr/share/keyrings/redis-archive-keyring.gpg] https://packages.redis.io/deb $(lsb_release -cs) main" >> /etc/apt/sources.list.d/ava-data-plane.list'
         sudo gpg --yes --dearmor -o /etc/apt/trusted.gpg.d/pgdg.gpg "${{ github.action_path }}/ACCC4CF8.asc"
+        sudo gpg --yes --dearmor -o /usr/share/keyrings/redis-archive-keyring.gpg "${{ github.action_path }}/redis-archive-keyring.asc"
 
         # Index phase. Each tier is weaker than the last; only a total failure
         # is carried forward, and even then as a warning, because the archive
         # cache below may still hold everything we need.
         if retry "apt-get update (all sources)" sudo timeout 120 apt-get update "${net[@]}"; then
           :
-        elif retry "apt-get update (pgdg only)" sudo timeout 120 apt-get update "${net[@]}" "${pgdg_only[@]}"; then
-          echo "::warning::full apt index refresh failed; refreshed pgdg only and continuing on the image's existing Ubuntu lists"
+        elif retry "apt-get update (added repos only)" sudo timeout 120 apt-get update "${net[@]}" "${added_repos_only[@]}"; then
+          echo "::warning::full apt index refresh failed; refreshed the added repos only and continuing on the image's existing Ubuntu lists"
         else
           echo "::warning::apt index refresh failed entirely; continuing on the indexes and cached archives already on disk"
         fi
@@ -124,7 +143,17 @@ runs:
 
         # An archive-only fallback must not silently omit the pooler and turn
         # the real transaction-pooling tests into successful skips, nor install
-        # a version other than the pin.
+        # a version other than the pin. The same holds for redis: a stale cache
+        # or an unpinned dpkg fallback must not slip in another major line.
+        redis_installed="$(dpkg-query -W -f='${Version}' redis-server)"
+        case "$redis_installed" in
+          6:8.2.*) ;;
+          *)
+            echo "::error::redis-server ${redis_installed} installed, pinned ${redis_version}" >&2
+            exit 1
+            ;;
+        esac
+        redis-server --version
         pgbouncer --version
         installed="$(dpkg-query -W -f='${Version}' pgbouncer)"
         if [ "$installed" != "$pgbouncer_version" ]; then
@@ -143,4 +172,4 @@ runs:
       uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
         path: /tmp/apt-archives
-        key: apt-pg17-redis-pgbouncer-${{ runner.os }}-v6
+        key: apt-pg17-redis82-pgbouncer-${{ runner.os }}-v7

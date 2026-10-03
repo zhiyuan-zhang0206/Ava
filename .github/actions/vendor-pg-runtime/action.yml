@@ -1,0 +1,30 @@
+name: Vendored Postgres runtime for the test clusters
+description: >
+  Builds the pinned zonky Postgres + pgvector tree production vendors and exports
+  CI_VENDORED_RUNTIME_ROOT so every pytest session links it (tests/fixtures/env_bootstrap.py).
+  Run after the Python deps install. The tree is cached on the pin file's hash, so a
+  version or checksum change rebuilds it; restore/save are split (as in install-pg-redis)
+  so a failed job never persists a half-built tree.
+runs:
+  using: composite
+  steps:
+    - name: Restore vendored Postgres runtime
+      id: vendored-pg
+      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ${{ runner.temp }}/ava-vendored-pg/runtime
+        key: vendored-pg-${{ runner.os }}-${{ hashFiles('base/cluster/dataplane/runtime_binaries.py') }}
+
+    - name: Build vendored Postgres runtime
+      shell: bash
+      env:
+        AVA_HOME: ${{ runner.temp }}/ava-vendored-pg
+        AVA_CONFIG_FETCH: skip
+      run: uv run python scripts/ci/vendor_pg_runtime.py "$GITHUB_ENV"
+
+    - name: Save vendored Postgres runtime
+      if: success() && steps.vendored-pg.outputs.cache-hit != 'true'
+      uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ${{ runner.temp }}/ava-vendored-pg/runtime
+        key: vendored-pg-${{ runner.os }}-${{ hashFiles('base/cluster/dataplane/runtime_binaries.py') }}

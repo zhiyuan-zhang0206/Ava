@@ -392,6 +392,9 @@ jobs:
       - name: Install Python deps
         uses: ./.github/actions/uv-sync
 
+      - name: Vendored Postgres runtime (production's server build)
+        uses: ./.github/actions/vendor-pg-runtime
+
       - name: Cache native Grafana 13.1.3
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
@@ -713,6 +716,9 @@ jobs:
       - name: Install Python deps
         uses: ./.github/actions/uv-sync
 
+      - name: Vendored Postgres runtime (production's server build)
+        uses: ./.github/actions/vendor-pg-runtime
+
       - name: Run pytest shard
         id: pytest-shard
         shell: bash
@@ -914,6 +920,9 @@ jobs:
       - name: Install Python deps
         uses: ./.github/actions/uv-sync
 
+      - name: Vendored Postgres runtime (production's server build)
+        uses: ./.github/actions/vendor-pg-runtime
+
       - name: Run selected pytest subset
         id: run-subset
         # Same split as a shard: pytest's exit code alone is not the gate —
@@ -1019,6 +1028,9 @@ jobs:
 
       - name: Install Python deps
         uses: ./.github/actions/uv-sync
+
+      - name: Vendored Postgres runtime (production's server build)
+        uses: ./.github/actions/vendor-pg-runtime
 
       - name: Run flaky pytest bucket serially
         id: pytest-serial
@@ -1745,6 +1757,9 @@ jobs:
 
       - name: Install Python deps
         uses: ./.github/actions/uv-sync
+
+      - name: Vendored Postgres runtime (production's server build)
+        uses: ./.github/actions/vendor-pg-runtime
       - name: Install frontend deps
         working-directory: ui/web
         run: npm ci
@@ -1841,6 +1856,9 @@ jobs:
 
       - name: Install Python deps
         uses: ./.github/actions/uv-sync
+
+      - name: Vendored Postgres runtime (production's server build)
+        uses: ./.github/actions/vendor-pg-runtime
       - name: Install frontend deps
         working-directory: ui/web
         run: npm ci
@@ -1942,6 +1960,9 @@ jobs:
 
       - name: Install Python deps
         uses: ./.github/actions/uv-sync
+
+      - name: Vendored Postgres runtime (production's server build)
+        uses: ./.github/actions/vendor-pg-runtime
       - name: Install frontend deps
         working-directory: ui/web
         run: npm ci
