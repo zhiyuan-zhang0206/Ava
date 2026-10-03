@@ -192,6 +192,33 @@ def resolve_wikilink(current_path: str, target: str, all_paths: set[str]) -> str
     return None
 
 
+def _cross_edges(
+    nodes: dict[str, dict[str, Any]], raw_links: list[tuple[str, str, str | None]]
+) -> list[dict[str, Any]]:
+    """Non-tree wikilinks, deduplicated by unordered pair and weighted by multiplicity."""
+    tree_pairs: set[frozenset[str]] = {
+        frozenset((path, n["parent"])) for path, n in nodes.items() if n["parent"]
+    }
+
+    pair_info: dict[tuple[str, str], dict[str, Any]] = {}
+    pair_order: list[tuple[str, str]] = []
+    for s, _raw, r in raw_links:
+        if r is None:
+            continue
+        if s == r:
+            continue
+        if frozenset((s, r)) in tree_pairs:
+            continue
+        a, b = sorted((s, r))
+        key = (a, b)
+        if key not in pair_info:
+            pair_info[key] = {"source": s, "target": r, "weight": 0}
+            pair_order.append(key)
+        pair_info[key]["weight"] += 1
+
+    return [pair_info[k] for k in pair_order]
+
+
 def build_graph_data(
     bundle_dir: str | Path,
     name: str = "OKF",
@@ -246,28 +273,7 @@ def build_graph_data(
         if n["parent"] is not None:
             tree_edges.append({"source": n["parent"], "target": path})
 
-    # Build cross edges (non-tree wikilinks, deduplicated by unordered pair)
-    tree_pairs: set[frozenset[str]] = {
-        frozenset((path, n["parent"])) for path, n in nodes.items() if n["parent"]
-    }
-
-    pair_info: dict[tuple[str, str], dict[str, Any]] = {}
-    pair_order: list[tuple[str, str]] = []
-    for s, _raw, r in raw_links:
-        if r is None:
-            continue
-        if s == r:
-            continue
-        if frozenset((s, r)) in tree_pairs:
-            continue
-        a, b = sorted((s, r))
-        key = (a, b)
-        if key not in pair_info:
-            pair_info[key] = {"source": s, "target": r, "weight": 0}
-            pair_order.append(key)
-        pair_info[key]["weight"] += 1
-
-    cross_edges = [pair_info[k] for k in pair_order]
+    cross_edges = _cross_edges(nodes, raw_links)
 
     # Collect all unique tags
     all_tags: list[str] = sorted({tag for n in nodes.values() for tag in n["tags"]})

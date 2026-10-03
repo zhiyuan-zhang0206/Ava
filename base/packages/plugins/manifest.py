@@ -336,6 +336,35 @@ def _validate_requires_commit(data: dict[str, Any], errors: list[str]) -> str | 
     return raw
 
 
+def _config_contribution(value: object, errors: list[str]) -> dict[str, object] | None:
+    """The validated `contributions.config` object; None when it is not an object."""
+    if not isinstance(value, dict):
+        errors.append("contributions.config must be an object {schema?, perAgentFields?}")
+        return None
+    cfg: dict[str, object] = {}
+    for ckey, cval in cast(dict[str, Any], value).items():
+        if ckey not in ("schema", "perAgentFields"):
+            errors.append(f"contributions.config: unknown field {ckey!r}")
+        elif ckey == "schema" and not isinstance(cval, str):
+            errors.append("contributions.config.schema must be a string path")
+        elif ckey == "perAgentFields":
+            lst = _str_list(cval, "contributions.config.perAgentFields", errors)
+            if lst is not None:
+                cfg[ckey] = lst
+        else:
+            cfg[ckey] = cval
+    return cfg
+
+
+def _check_hook_points(hooks: list[str], errors: list[str]) -> None:
+    for hook in hooks:
+        if hook not in HOOK_POINTS:
+            errors.append(
+                f"contributions.hooks: unknown hook point {hook!r} "
+                f"(one of {', '.join(HOOK_POINTS)})"
+            )
+
+
 def _validate_contributions(data: dict[str, Any], errors: list[str]) -> dict[str, object]:
     """`contributions` — declared surfaces; the declaration is documentation,
     the registration-vs-declaration runtime diff lands with S3."""
@@ -348,23 +377,9 @@ def _validate_contributions(data: dict[str, Any], errors: list[str]) -> dict[str
             errors.append(f"contributions: unknown surface {key!r}")
             continue
         if key == "config":
-            if not isinstance(value, dict):
-                errors.append("contributions.config must be an object {schema?, perAgentFields?}")
-                continue
-            cfg: dict[str, object] = {}
-            value = cast(dict[str, Any], value)
-            for ckey, cval in value.items():
-                if ckey not in ("schema", "perAgentFields"):
-                    errors.append(f"contributions.config: unknown field {ckey!r}")
-                elif ckey == "schema" and not isinstance(cval, str):
-                    errors.append("contributions.config.schema must be a string path")
-                elif ckey == "perAgentFields":
-                    lst = _str_list(cval, "contributions.config.perAgentFields", errors)
-                    if lst is not None:
-                        cfg[ckey] = lst
-                else:
-                    cfg[ckey] = cval
-            parsed[key] = cfg
+            cfg = _config_contribution(value, errors)
+            if cfg is not None:
+                parsed[key] = cfg
             continue
         if key == "ui":
             parsed[key] = validate_ui_contributions(value, errors)
@@ -373,12 +388,7 @@ def _validate_contributions(data: dict[str, Any], errors: list[str]) -> dict[str
         if lst is None:
             continue
         if key == "hooks":
-            for hook in lst:
-                if hook not in HOOK_POINTS:
-                    errors.append(
-                        f"contributions.hooks: unknown hook point {hook!r} "
-                        f"(one of {', '.join(HOOK_POINTS)})"
-                    )
+            _check_hook_points(lst, errors)
         parsed[key] = lst
     return parsed
 
