@@ -481,7 +481,12 @@ def _validate_registry(*, anthropic_protocol_by_model: Mapping[str, bool] | None
                 else anthropic_protocol_by_model[model_id]
             ),
         )
+    _validate_supersession_links()
+    _validate_supersession_chains()
+    _validate_unavailable_fallbacks()
 
+
+def _validate_supersession_links() -> None:
     # The supersession chain must stay coherent — a broken link would hide a
     # model from the picker while its replacement is absent or invisible.
     for model_id, spec in MODELS.items():
@@ -505,6 +510,8 @@ def _validate_registry(*, anthropic_protocol_by_model: Mapping[str, bool] | None
                 f"not spawnable — the replacement would never show in the picker"
             )
 
+
+def _validate_supersession_chains() -> None:
     # After every link is known-good, follow each chain to guarantee it ends
     # at a visible model instead of cycling through hidden models forever.
     for model_id, spec in MODELS.items():
@@ -519,6 +526,8 @@ def _validate_registry(*, anthropic_protocol_by_model: Mapping[str, bool] | None
             seen.add(replacement_id)
             replacement_id = MODELS[replacement_id].superseded_by
 
+
+def _validate_unavailable_fallbacks() -> None:
     # A temporary withdrawal is an explicit routing decision, not a general
     # provider-error fallback. Keep both ends concrete so an existing config
     # can safely resolve to the model the picker offers instead.
