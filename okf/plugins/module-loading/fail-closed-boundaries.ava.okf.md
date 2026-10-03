@@ -15,7 +15,7 @@ continuing would guess at the operator's intent:
 - `DuplicatePlugin` — one plugin name in both the built-in and external roots.
 - A malformed `plugins_config.json` (state loss, never a silent all-enabled
   fallback).
-- Plugin-config schema drift at `bind_from_disk()` (points at
+- Plugin-config schema drift at install (`bind_plugin_config`; points at
   `ava plugins update`).
 - A provider registration-contract violation
   (`provider_api.ProviderRegistrationError` — duplicate/nested prefix,

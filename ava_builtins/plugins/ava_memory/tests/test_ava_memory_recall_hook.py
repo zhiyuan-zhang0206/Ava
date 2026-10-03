@@ -8,7 +8,6 @@ tests drive the real hook with the recall pass stubbed, so they cover the gate
 `agent/graph/tests/test_memory_recall.py` owns.
 """
 
-import sys
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
@@ -20,7 +19,7 @@ from langgraph.runtime import Runtime
 
 from agent.graph.memory_recall import PassiveRecall
 from agent.messages import NoteTag, inbound_message, system_note_message
-from agent.state import build_agent_state, clear_plugin_registrations
+from agent.state import build_agent_state
 from ava import gateway_client
 from base.agents.context import AvaContext
 from base.host.env.agent_slices import AgentSlices
@@ -29,28 +28,11 @@ from base.packages.plugins.extensions import EMPTY
 
 @pytest.fixture
 def _loaded() -> Any:
-    """Load ava_memory through the real plugin-registration path, so the hook
-    instance under test is the one `contribute()` declares (same fixture shape as
-    test_ava_memory_notes.py)."""
-    from base.packages.plugins.config_registration import bind_from_disk
-    from base.packages.plugins.context import PluginContext
+    """The ava_memory agent-runtime face, so the hook instance under test is the
+    one `contribute()` declares (same fixture shape as test_ava_memory_notes.py)."""
+    from ava_builtins.plugins.ava_memory import agent_runtime as _plugin
 
-    clear_plugin_registrations()
-    for name in list(sys.modules):
-        if name.startswith("ava_builtins.plugins.ava_memory"):
-            del sys.modules[name]
-
-    with PluginContext("ava_memory"):
-        # the recall hook lives in the agent_runtime face (the full load imports it after plugin.py — task #3633).
-        from ava_builtins.plugins.ava_memory import agent_runtime as _plugin
-
-    bind_from_disk()
-    yield _plugin
-
-    clear_plugin_registrations()
-    for name in list(sys.modules):
-        if name.startswith("ava_builtins.plugins.ava_memory"):
-            del sys.modules[name]
+    return _plugin
 
 
 @pytest.fixture

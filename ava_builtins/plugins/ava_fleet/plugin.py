@@ -47,6 +47,7 @@ import ava.agent_identity
 import ava.agents
 from ava.sdk_surface.validation import coerce_str, coerce_typed
 from base.agents.tasks.priority import validate_priority
+from base.packages.plugins.extensions import PluginContributions, SdkMember, SdkNamespace, SdkWrap
 
 from . import task_registry
 
@@ -313,19 +314,11 @@ def dismiss_notice() -> None:
     _raise_as_value_error(resp)
 
 
-ava.register_namespace_member("ui", "notify", notify)
-ava.register_namespace_member("ui", "edit_notice", edit_notice)
-ava.register_namespace_member("ui", "dismiss_notice", dismiss_notice)
-ava.register_namespace_member("self", "set_label", set_label)
-
-
 # ── ava.tasks SDK namespace — the task registry (see task_registry.py) ───────
 # A whole-module namespace (like ava_code's ava.cwd), not members hung on an
 # existing group: the registry is a cohesive new surface, and the core top level
-# stays small. register_sdk_expand promotes it into the in-prompt SDK reference
+# stays small. `expand=True` promotes it into the in-prompt SDK reference
 # so agents discover ava.tasks.* without drilling in.
-ava.register_namespace("tasks", task_registry)
-ava.register_sdk_expand("tasks")
 
 
 # ── wrap ava.agents.spawn to add the fleet-only `label` arg ─────────────────
@@ -362,4 +355,15 @@ def _spawn_with_label(
     )
 
 
-ava.extend.wrap("agents.spawn", _spawn_with_label)
+def contribute() -> PluginContributions:
+    """What this plugin declares for the SDK surface."""
+    return PluginContributions(
+        sdk_namespaces=(SdkNamespace("tasks", task_registry, expand=True),),
+        sdk_members=(
+            SdkMember("ui", "notify", notify),
+            SdkMember("ui", "edit_notice", edit_notice),
+            SdkMember("ui", "dismiss_notice", dismiss_notice),
+            SdkMember("self", "set_label", set_label),
+        ),
+        sdk_wraps=(SdkWrap("agents.spawn", _spawn_with_label),),
+    )

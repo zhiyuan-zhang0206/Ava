@@ -152,8 +152,8 @@ def agent_visible_names(container: Any) -> list[str]:
 
 
 def _module_children(mod: Any) -> list[tuple[str, Any]]:
-    """`__all_for_ava__` whitelist preferred — required for `register_namespace`
-    plugin namespaces (SimpleNamespace doesn't satisfy the `dir()` fallback's
+    """`__all_for_ava__` whitelist preferred — required for declared plugin
+    namespaces (`SdkNamespace`) (SimpleNamespace doesn't satisfy the `dir()` fallback's
     module-prefix check). PEP 224 attribute docstrings discovered alongside via
     AST; any non-callable/non-class/non-module attr is wrapped as `_Constant` so
     the renderer can show `## NAME: type` instead of falling back to the

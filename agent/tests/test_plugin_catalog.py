@@ -1,10 +1,10 @@
-"""The `ava plugins inspect` catalog — attribution ledger, per-machine view, diff.
+"""The `ava plugins inspect` catalog — per-machine view of what plugins declare, diff.
 
 The plugins here are written to disk and loaded through the real
 `load_extensions`, so what the catalog reports is what an actual plugin load
-produced: SDK-surface registrations are attributed by the `PluginContext` the loader
-opens, and hooks, state and prompt sections are what the plugin's `agent_runtime.py`
-`contribute()` declares — not anything the test hands the registry. The load gate of
+produced: the SDK surface is what the plugin's `plugin.py` `contribute()` declares, and hooks, state and
+prompt sections are what its `agent_runtime.py` `contribute()` declares — not anything the test hands
+the registry. The load gate of
 `agent.extensions.registry.build_registry` (a plugin whose manifest and `contribute()`
 disagree, or whose state declaration is invalid, is left out and reported) is covered at the
 bottom, on the same harness.
@@ -16,7 +16,7 @@ import pytest
 
 from agent.extensions import catalog as catalog_mod
 from agent.extensions import load_extensions
-from agent.extensions.registry import build_registry, declarations
+from agent.extensions.registry import declarations
 from base import paths
 from base.packages.plugins import load_report
 from base.packages.plugins.enable_config import write_local
@@ -39,16 +39,17 @@ def _isolate_paths(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
 _DEMO_PLUGIN = '''
 """A demo plugin."""
 
-__description__ = "registers one of nearly everything"
+__description__ = "declares one of nearly everything"
 
-import ava
+from base.packages.plugins.extensions import PluginContributions, SdkWrap
 
 
 def _passthrough(inner, *args, **kwargs):
     return inner(*args, **kwargs)
 
 
-ava.extend.wrap("files.read", _passthrough)
+def contribute() -> PluginContributions:
+    return PluginContributions(sdk_wraps=(SdkWrap("files.read", _passthrough),))
 '''
 
 _DEMO_RUNTIME = """
@@ -97,7 +98,7 @@ def _enable(**plugins: bool) -> None:
 
 def test_every_surface_entry_point_resolves():
     """`SURFACES` is hand-written; its entry points are not. Each one must
-    resolve to a live callable — a moved `register_*` breaks the catalog here
+    resolve to a live object — a moved declaration type breaks the catalog here
     rather than in front of an agent reading a signature that no longer exists."""
     for surface in catalog_mod.SURFACES:
         assert surface.entry_points, f"{surface.id} lists no entry point"
@@ -107,8 +108,8 @@ def test_every_surface_entry_point_resolves():
             assert "(" in rendered
 
 
-def test_registrations_are_attributed_to_the_importing_plugin():
-    """Every surface a plugin touched shows up under its name, keyed the way the
+def test_declarations_are_attributed_to_the_declaring_plugin():
+    """Every surface a plugin declared shows up under its name, keyed the way the
     manifest declares it."""
     _write_plugin("demo", _DEMO_PLUGIN, runtime=_DEMO_RUNTIME)
     _enable(demo=True)
@@ -117,7 +118,7 @@ def test_registrations_are_attributed_to_the_importing_plugin():
     view = catalog.plugin("demo")
 
     assert view.enabled is True
-    assert view.description == "registers one of nearly everything"
+    assert view.description == "declares one of nearly everything"
     assert view.surface_counts() == {
         "hooks": 1,
         "state": 1,
@@ -132,7 +133,7 @@ def test_registrations_are_attributed_to_the_importing_plugin():
     assert all(c.plugin == "demo" for c in view.contributions)
 
 
-def test_a_disabled_plugin_reports_no_registrations():
+def test_a_disabled_plugin_reports_no_declarations():
     """A disabled plugin is never imported, so the honest answer is its
     enable-state and nothing else — not a guess read off its source."""
     _write_plugin("demo", _DEMO_PLUGIN, runtime=_DEMO_RUNTIME)
@@ -145,9 +146,8 @@ def test_a_disabled_plugin_reports_no_registrations():
 
 
 def test_a_reload_does_not_accumulate_contributions():
-    """`clear_plugin_registrations` clears the ledger with the registries it
-    shadows and the registry is built anew, so a second load reports one contribution per
-    surface, not two."""
+    """Each load reads the declarations afresh (and reinstalls the SDK surface over the previous
+    install's undo), so a second load reports one contribution per surface, not two."""
     _write_plugin("demo", _DEMO_PLUGIN, runtime=_DEMO_RUNTIME)
     _enable(demo=True)
 
@@ -192,16 +192,17 @@ _MANIFEST = """{
 }"""
 
 _DECLARED_PLUGIN = """
-__description__ = "declares more than it registers"
+__description__ = "declares more than it provides"
 
-import ava
+from base.packages.plugins.extensions import PluginContributions, SdkWrap
 
 
 def _passthrough(inner, *args, **kwargs):
     return inner(*args, **kwargs)
 
 
-ava.extend.wrap("files.write", _passthrough)
+def contribute() -> PluginContributions:
+    return PluginContributions(sdk_wraps=(SdkWrap("files.write", _passthrough),))
 """
 
 _DECLARED_RUNTIME = """
@@ -226,8 +227,8 @@ def contribute() -> PluginContributions:
 
 
 def test_declared_vs_registered_reports_both_directions():
-    """A declared surface nobody registered, and a registration nobody
-    declared — the two halves of the S3 gate, reported rather than enforced. The report reads
+    """A manifest surface the plugin does not provide, and a provided surface the manifest does not
+    declare — the two halves of the S3 gate, reported rather than enforced. The report reads
     `declarations()`, which is ungated, so a plugin the load gate excludes still shows both
     directions here."""
     _write_plugin("declared", _DECLARED_PLUGIN, manifest=_MANIFEST, runtime=_DECLARED_RUNTIME)
@@ -260,7 +261,7 @@ def test_a_plugin_without_a_manifest_has_no_diff():
 def test_install_time_manifest_keys_have_no_runtime_registry():
     """`skills` / `commands` / `mcpServers` / `opsServices` settle on disk at
     install time and `ui` is read straight from the manifest by the console;
-    none of them reach a `register_*` call, so the diff must not be able to
+    none of them is a `PluginContributions` field a face declares, so the diff must not be able to
     call them missing."""
     assert {
         "skills",
@@ -354,9 +355,8 @@ def load_failures(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, BaseExcept
 
 
 def _registered() -> dict[str, tuple[str, ...]]:
-    """What a fresh load plus `build_registry()` admits: plugin -> its declared hook points."""
-    load_extensions()
-    registry = build_registry()
+    """What a fresh load admits (the gate, then the SDK install): plugin -> its declared hook points."""
+    registry = load_extensions().registry
     return {
         name: tuple(point for point in _HOOK_POINTS if contributions.hooks(point))  # pyright: ignore[reportArgumentType]
         for name, contributions in registry.plugins
@@ -502,8 +502,7 @@ def test_a_valid_state_declaration_is_admitted(load_failures: list[tuple[str, Ba
     _write_plugin("gate_state", _GATE_PLUGIN, runtime=_gate_runtime(state=state))
     _enable(gate_state=True)
 
-    load_extensions()
-    registry = build_registry()
+    registry = load_extensions().registry
 
     assert [(plugin, cls.__name__) for plugin, cls in registry.state_classes()] == [
         ("gate_state", "GateState")

@@ -14,16 +14,16 @@ forgets to scrub a doc fails the commit, at the source, in the same PR.
 automatically — add a submodule and it's instantly valid; delete one and its docs
 references go stale here:
   1. `agent_visible_names(ava)` — the agent-facing top-level surface (`agents`, `shell`,
-     `self`, ...), read from `ava.__all_for_ava__` plus any plugin registrations;
+     `self`, ...), read from `ava.__all_for_ava__` plus any plugin declarations;
   2. real submodule names — every `ava/<x>.py` file and `ava/<x>/` package (this also
      covers the private `_settings` module the design docs legitimately cite);
   3. public attributes on the `ava` module object — module-level names like `state`,
-     `state_update`, `register_namespace`, `const`, `help`;
-  4. plugin-registered namespace names — the strings in `ava.register_namespace("X", ...)`
-     calls across `plugins/*/plugin.py` (e.g. `cwd` from `ava_code`). These are real
+     `state_update`, `const`, `help`;
+  4. plugin-declared namespace names — the strings in `SdkNamespace("X", ...)`
+     declarations across `plugins/*/plugin.py` (e.g. `cwd` from `ava_code`). These are real
      `ava.*` surface at agent runtime but invisible to a bare `import ava`, so they are
      discovered by the same AST scan `agent_docstrings.py` uses — the two lints stay
-     coupled to one definition of "what a plugin registers".
+     coupled to one definition of "what a plugin declares".
 
 Only the FIRST segment is validated: `ava.shell.list` -> check `shell`;
 `ava.watcher.cron` -> check `watcher`; `ava.AGENT_ID` -> check `AGENT_ID`. Anything
@@ -120,7 +120,7 @@ _EXEMPT: set[str] = {
 
 
 def _plugin_namespace_names() -> set[str]:
-    """Namespace names registered by `ava.register_namespace("X", ...)` in plugins.
+    """Namespace names declared by `SdkNamespace("X", ...)` in plugins.
 
     These are real `ava.X` surface at agent runtime (e.g. `cwd` from `ava_code`) but
     are not present on a bare `import ava`, so the docs may legitimately cite them.
@@ -133,8 +133,8 @@ def _plugin_namespace_names() -> set[str]:
         for node in ast.walk(tree):
             if (
                 isinstance(node, ast.Call)
-                and isinstance(node.func, ast.Attribute)
-                and node.func.attr == "register_namespace"
+                and isinstance(node.func, ast.Name)
+                and node.func.id == "SdkNamespace"
                 and node.args
                 and isinstance(node.args[0], ast.Constant)
                 and isinstance(node.args[0].value, str)

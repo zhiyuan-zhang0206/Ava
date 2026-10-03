@@ -1,13 +1,12 @@
 """`ava.self.set_label` records its audit fact in the transaction that sets the label.
 
 The label is an agent-facing tool call, so a failed audit write rolls the label back and
-fails the call cleanly. The plugin is loaded through the real PluginContext path, as in
+fails the call cleanly. The plugin is installed through its declared `contribute()`, as in
 test_ava_fleet_plugin.py.
 """
 
 from __future__ import annotations
 
-import sys
 from collections.abc import Iterator
 
 import psycopg
@@ -15,24 +14,13 @@ import pytest
 
 import ava
 import ava.agent_identity
-from agent.state import clear_plugin_registrations
-from base.packages.plugins.context import PluginContext
+from ava_builtins.plugins.ava_fleet.tests.registry_support import installed_fleet_surface
 
 
 @pytest.fixture
 def _load_activity_plugin() -> Iterator[None]:
-    clear_plugin_registrations()
-    ava.clear_registered_namespaces()
-    for name in list(sys.modules):
-        if name.startswith("ava_builtins.plugins.ava_fleet"):
-            del sys.modules[name]
-    with PluginContext("ava_fleet"):
-        from ava_builtins.plugins.ava_fleet import (
-            plugin as plugin,  # registers self.set_label
-        )
-    yield
-    clear_plugin_registrations()
-    ava.clear_registered_namespaces()
+    with installed_fleet_surface():
+        yield
 
 
 @pytest.fixture

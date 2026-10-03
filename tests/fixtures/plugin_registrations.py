@@ -1,82 +1,39 @@
-"""Per-test isolation for plugin registrations on the process-global singletons.
+"""Per-test isolation for the installed SDK surface, the one process-global a plugin load writes.
 
-A full plugin load (`agent.extensions.load_extensions`, reached through
-`agent.extensions.load_extensions()`, the plugin catalog, or a lazy `ava.*` miss) fills
-process-global SDK-surface registries at once: `ava.<namespace>`
-surfaces and members. Nothing used to put them back, so
-one plugin-loading test left the whole set in its xdist worker, and a later test that cleaned
-up only part of it saw a half-registered surface (CI backend shard 14/16 on PR #3513).
+A full plugin load (`agent.extensions.load_extensions`, reached through the plugin catalog, a
+test, or a lazy `ava.*` miss) installs the plugins' SDK surface into the `ava` module
+(`ava.sdk_surface.install`): `ava.<namespace>` surfaces, members, wrap layers, skill sources.
+Nothing used to put it back, so one plugin-loading test left the whole set in its xdist worker, and
+a later test that cleaned up only part of it saw a half-installed surface (CI backend shard 14/16 on
+PR #3513).
 
-The guard below returns the registries to empty after any test that started
-with none and ended with some. It uses the framework's own reset,
-`agent.state.clear_plugin_registrations`, which drops every kind of
-SDK-surface registration together, so namespaces and their wraps can never go
-out of step. Metering is uninstalled first, because it sits outermost over plugin
-wraps. A test that starts with registrations already present (for example from
-a module-level plugin import) is left alone: there is no empty state to return
-to. The registries asked about are the SDK surface's, the one place a plugin load without an
-agent (the schedule runner's in-process script) can register into; the reset itself loads the
-agent layer, but only after a test left registrations behind. Hooks, state, prompt sections
-and notes are declared values (`PluginContributions`), not process-global registrations.
-
-The framework's own reset leaves one mark behind: `register_namespace` stamps `_qualname`
-onto the namespace's module object, and `clear_registered_namespaces` removes the
-`ava.<name>` entry but not that stamp. The module outlives the test, so the stamp would stay in
-its `__dict__` for every later test in the worker (the leak guard names it as a module attribute
-that was added). `drop_plugin_registrations` takes the stamps off the modules it is about to
-unregister.
+The guard below uninstalls it after any test that started with nothing installed and ended with an
+installation. `uninstall` undoes every layer together, newest first, so namespaces and their wraps
+can never go out of step, and it takes the SDK-usage recorder off first because that sits outermost
+over plugin wraps. A test that starts with an installation already present is left alone: there is
+no empty state to return to. Hooks, state, prompt sections and notes are declared values
+(`PluginContributions`), not process-global registrations, so nothing of theirs needs resetting.
 """
 
 from __future__ import annotations
 
-import importlib
 import sys
 from collections.abc import Iterator
-from types import ModuleType
 
 import pytest
 
 
-def _surface_registrations() -> bool:
-    """Whether the SDK surface holds a registered plugin namespace or namespace member."""
-    surface = sys.modules.get("ava.sdk_surface.plugins")
-    return surface is not None and bool(
-        surface._REGISTERED_NAMESPACES or surface._REGISTERED_MEMBERS
-    )
-
-
 def plugin_registrations_present() -> bool:
-    """Whether any plugin SDK namespace/member is registered.
-
-    Hooks, state classes, prompt sections and context notes are not process-global: a plugin
-    declares them through `contribute()` and the registry built from them is a value the caller
-    holds. Only the SDK surface is process-global.
-    """
-    return _surface_registrations()
-
-
-def _unstamp_registered_namespaces() -> None:
-    """Remove the `_qualname` stamp `register_namespace` put on each registered namespace module.
-
-    Read through `vars`, not `getattr`: `ava.__getattr__` lazily loads plugins for a missing name.
-    """
-    surface = sys.modules.get("ava.sdk_surface.plugins")
-    if surface is None:
-        return
-    for name in surface._REGISTERED_NAMESPACES:
-        module = vars(sys.modules["ava"]).get(name)
-        if isinstance(module, ModuleType):
-            module.__dict__.pop("_qualname", None)
+    """Whether a plugin SDK surface is installed in this process."""
+    install = sys.modules.get("ava.sdk_surface.install")
+    return install is not None and install.installed() is not None
 
 
 def drop_plugin_registrations() -> None:
-    """Uninstall metering, then reset every plugin registration together."""
-    if "ava" in sys.modules:
-        from ava.sdk_surface import metering
-
-        metering.uninstall()
-        _unstamp_registered_namespaces()
-    importlib.import_module("agent.state").clear_plugin_registrations()
+    """Uninstall the plugin SDK surface (which takes the SDK-usage recorder off first)."""
+    install = sys.modules.get("ava.sdk_surface.install")
+    if install is not None:
+        install.uninstall()
 
 
 @pytest.fixture(autouse=True)

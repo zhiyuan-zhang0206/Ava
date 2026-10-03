@@ -232,7 +232,7 @@ REDIS = _LazyConnection(_connect_redis, "REDIS")
 #
 # `ava._settings.plugins.<plugin_name>` dynamically resolves the frozen Pydantic
 # BaseModel instance for the current turn's agent (bound in by
-# `register_plugin_config` + `bind_from_disk`; an attached agent's overrides by
+# the SDK install from the plugin's declared config; an attached agent's overrides by
 # `base/packages/plugins/config_view.py`).
 #
 # Design:
@@ -263,8 +263,8 @@ class _PluginsView:
         known = registered_plugin_config_names()
         if name not in known:
             raise AttributeError(
-                f"ava._settings.plugins.{name} does not exist — plugin {name!r} has no "
-                f"register_plugin_config, or framework `bind_from_disk` hasn't run yet. "
+                f"ava._settings.plugins.{name} does not exist — plugin {name!r} declares no "
+                f"config, or the SDK surface is not installed yet. "
                 f"Known plugins: {known or '<empty>'}"
             )
         # The attached agent's overrides over the disk image; otherwise this process's own

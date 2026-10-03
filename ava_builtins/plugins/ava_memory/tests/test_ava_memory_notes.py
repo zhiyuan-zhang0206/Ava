@@ -6,49 +6,26 @@ stores must not be told how to write to them, and `init_context` must lay down a
 window with no memory notes in it.
 """
 
-import sys
 from pathlib import Path
 from typing import Any
 
 import pytest
 
 from agent.graph.context_notes import FRAMEWORK_NOTES, context_notes
-from agent.state import clear_plugin_registrations
 from base.host.env.agent_slices import AgentSlices
 from base.packages.plugins.extensions import ContextNote, ExtensionRegistry
 
 
 @pytest.fixture(autouse=True)
 def memory_plugin() -> Any:
-    """Load ava_memory through the real plugin-registration path.
+    """The ava_memory agent-runtime face; its `contribute()` declares the notes.
 
-    Importing the module is not enough: registrations land in process-global
-    registries that `clear_plugin_registrations` truncates, and a second import
-    hits the sys.modules cache without re-running plugin.py. Dropping the module
-    first is what makes the load — and therefore the registration — actually
-    happen, exactly as the full plugin load (`agent.extensions`) does it.
+    Importing the face registers nothing — the tests build the registry value from
+    `contribute()` exactly as the full plugin load does.
     """
-    from base.packages.plugins.config_registration import bind_from_disk
-    from base.packages.plugins.context import PluginContext
+    from ava_builtins.plugins.ava_memory import agent_runtime as _plugin
 
-    clear_plugin_registrations()
-    for name in list(sys.modules):
-        if name.startswith("ava_builtins.plugins.ava_memory"):
-            del sys.modules[name]
-
-    with PluginContext("ava_memory"):
-        # The context notes, the memory-discipline prompt section, and the recall
-        # hook are agent-side registrations — they live in the agent_runtime face
-        # (task #3633).
-        from ava_builtins.plugins.ava_memory import agent_runtime as _plugin
-
-    bind_from_disk()
-    yield _plugin
-
-    clear_plugin_registrations()
-    for name in list(sys.modules):
-        if name.startswith("ava_builtins.plugins.ava_memory"):
-            del sys.modules[name]
+    return _plugin
 
 
 def _registry(memory_plugin: Any) -> ExtensionRegistry:

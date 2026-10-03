@@ -15,7 +15,7 @@ from langgraph.checkpoint.base import empty_checkpoint
 from langgraph.checkpoint.postgres import PostgresSaver
 from psycopg.types.json import Jsonb
 
-from ava import composer_commands, mcp_config, skills
+from ava import composer_commands, mcp_config
 from base.db import create_agent
 from base.packages.plugins import mcp_enabled
 from base.paths import skills_dir
@@ -29,13 +29,6 @@ def _write_skill(root: Path, name: str, description: str = "project skill") -> N
         f"---\nname: {name}\ndescription: {description}\n---\n\n# {name}\n",
         encoding="utf-8",
     )
-
-
-@pytest.fixture(autouse=True)
-def _clear_skill_sources() -> Generator[None, None, None]:
-    skills.clear_skill_sources()
-    yield
-    skills.clear_skill_sources()
 
 
 @pytest.fixture

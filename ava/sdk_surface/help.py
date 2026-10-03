@@ -138,7 +138,7 @@ def _resolve_fqn(target: Any) -> str:
     """Resolve a target's FQN for the heading: `ava` / `ava.X` / `ava.X.y`.
 
     For container targets (modules / SimpleNamespace plugin namespaces), the
-    name is read from `_qualname` (set by `register_namespace`) or `__name__`.
+    name is read from `_qualname` (set by the SDK install) or `__name__`.
     For element targets (functions), `__module__ + . + __name__` works for
     unwrapped SDK functions; wrapped functions whose `__module__` points back
     to the wrapping plugin are resolved by searching `ava.*` for the binding.

@@ -47,35 +47,27 @@ from typing import Any
 
 __description__ = "Ava Code conventions — maintains cwd and auto-injects project AGENTS.md / CLAUDE.md (walking up from ava.files.read paths)"
 
-import contextlib
 from collections.abc import Callable
 from pathlib import Path
 
 import ava
 import ava.files as _ava_files_mod
-import ava.skills as _ava_skills
 from ava.sdk_surface.validation import coerce_str
 from base.config import settings
 from base.log import logger
+from base.packages.plugins.extensions import PluginContributions, SdkNamespace, SdkWrap
 
 from . import _code_namespace
 from ._walk import find_context_files_along_path, project_skill_roots
 
 _files_resolve = _ava_files_mod.resolve
 
-# ── ava.cwd SDK namespace registration — runs before the agent-runtime face's
-# state declaration (its face loads right after this surface), so a plugin
-# double-load (test fixture / dev hot-reload) hits the namespace conflict first
-# (`PluginNamespaceConflictError`, PR #192's first line of defense) rather than
-# the state-field reducer-function-identity-mismatch annotation conflict
-# (function objects differ after reload).
+# ── ava.cwd SDK namespace — declared in `contribute()` at the bottom of this file.
 # _code_namespace's top level does not depend on state_handle (function
 # bodies lazy-import), so importing here is cycle-free.
-ava.register_namespace("cwd", _code_namespace)
 # Promote cwd into the system prompt's expanded SDK reference, ahead of the
 # configured framework list — it is the top coding surface, and a framework
 # default cannot name a plugin namespace (issue #1011).
-ava.register_sdk_expand("cwd")
 
 
 # ── state handle (surface stand-in) ──────────────────────────────────────
@@ -155,15 +147,8 @@ def _project_skill_source() -> list[Path]:
     return project_skill_roots(cwd)
 
 
-# When ava.skills is disabled via AVA_SDK_DISABLE, project-local skill
-# source registration is unavailable; the core plugin (cwd, file wraps)
-# continues to function normally.
-with contextlib.suppress(AttributeError):
-    _ava_skills.register_skill_source(_project_skill_source)
-
-
 # ── wrap ava.files.read ───────────────────────────────────────────────────
-# Registered through `ava.extend.wrap` at the bottom of this section. The
+# Declared as an `SdkWrap` in `contribute()` at the bottom. The
 # `inner` parameter is the current `ava.files.read` (the original, or another
 # plugin's wrap when several stack); context-file dedup counts injections, not
 # wrap layers, so calling `inner` exactly once per read keeps the count right no
@@ -273,7 +258,7 @@ def _wrapped_read(
     # Audience=agent. Dev-perspective implementation (cwd resolution /
     # context-file walk / dedup / fast-path) is documented in plugin.py's
     # module docstring. This wrapper takes over `ava.files.read`'s namespace
-    # entry; the docstring above (kept by `ava.extend.wrap`) is the read
+    # entry; the docstring above (kept by the wrap install) is the read
     # contract. `inner` is the wrapped `ava.files.read`.
 
     # Normalize before path rewriting: a trailing-comma tuple must become
@@ -335,9 +320,6 @@ def _wrapped_read(
     return inner(str(p), start, end, limit=limit, with_line_numbers=with_line_numbers)
 
 
-ava.extend.wrap("files.read", _wrapped_read)
-
-
 # ── wrap ava.shell.run ────────────────────────────────────────────────────
 # Inject the plugin-tracked cwd so the agent's one-off commands run in the
 # working directory by default, instead of having to `cd <path> && ...` every
@@ -363,9 +345,6 @@ def _wrapped_shell_run(
     return inner(cmd, cwd=str(_code_namespace.get()), timeout=timeout)
 
 
-ava.extend.wrap("shell.run", _wrapped_shell_run)
-
-
 # ── wrap ava.files.edit / write / append / delete / glob ──────────────────
 # The SDK core (ava.files.resolve) resolves relative paths against the
 # agent's workspace; these wraps layer cwd *tracking* on top — after
@@ -385,7 +364,7 @@ def _resolve_for_cwd(path: str | Path) -> Path:
 
 
 # These wraps only change path resolution, so none carries its own docstring —
-# `ava.extend.wrap` keeps the wrapped function's contract when the wrapper has
+# The wrap install keeps the wrapped function's contract when the wrapper has
 # none, so the rendered SDK stub still shows the original `files.*` docstrings.
 # `inner` is the wrapped op.
 
@@ -399,17 +378,11 @@ def _wrapped_edit(
     return inner(str(p), old, new, replace_all=replace_all)
 
 
-ava.extend.wrap("files.edit", _wrapped_edit)
-
-
 # ── write ──
 def _wrapped_write(inner: Callable[..., None], path: str | Path, content: str) -> None:
     path = coerce_str(path, "path", allow_types=(Path,))
     p = _resolve_for_cwd(path)
     return inner(str(p), content)
-
-
-ava.extend.wrap("files.write", _wrapped_write)
 
 
 # ── append ──
@@ -419,17 +392,11 @@ def _wrapped_append(inner: Callable[..., None], path: str | Path, content: str) 
     return inner(str(p), content)
 
 
-ava.extend.wrap("files.append", _wrapped_append)
-
-
 # ── delete ──
 def _wrapped_delete(inner: Callable[..., None], path: str | Path) -> None:
     path = coerce_str(path, "path", allow_types=(Path,))
     p = _resolve_for_cwd(path)
     return inner(str(p))
-
-
-ava.extend.wrap("files.delete", _wrapped_delete)
 
 
 # ── glob ──
@@ -451,9 +418,6 @@ def _wrapped_glob(inner: Callable[..., list[Path]], pattern: str = "*") -> list[
     return inner(full_pattern)
 
 
-ava.extend.wrap("files.glob", _wrapped_glob)
-
-
 # Deliberately no `ava.files.__doc__` override: the SDK core's claim —
 # "Relative paths resolve to your workspace folder" — is the single source of
 # truth for path resolution (user ruling 2026-08-01, memory-leak audit #577).
@@ -468,7 +432,7 @@ ava.extend.wrap("files.glob", _wrapped_glob)
 # (the wrapped understand) as absolute paths. A `text` target has no paths to
 # resolve and passes through untouched. `effort` mirrors the core signature
 # (default "max", forwarded verbatim — the core validates it). `UnderstandError`
-# rides on the function object; `ava.extend.wrap` carries it (and the
+# rides on the function object; the wrap install carries it (and the
 # docstring) forward, so `ava.understand.UnderstandError` survives the wrap.
 def _wrapped_understand(
     inner: Callable[..., list[str]],
@@ -496,9 +460,6 @@ def _wrapped_understand(
     return inner(resolved, effort=effort, max_concurrent=max_concurrent)
 
 
-ava.extend.wrap("understand", _wrapped_understand)
-
-
 # ── wrap ava.ui.serve ────────────────────────────────────────────────────
 # serve(dir) registers the served directory with the platform; a relative
 # dir must resolve against the plugin-tracked cwd like every other SDK path
@@ -519,4 +480,20 @@ def _wrapped_serve(
     return inner(str(p), name, port=port, title=title, ttl=ttl)
 
 
-ava.extend.wrap("ui.serve", _wrapped_serve)
+def contribute() -> PluginContributions:
+    """What this plugin declares for the SDK surface."""
+    return PluginContributions(
+        sdk_namespaces=(SdkNamespace("cwd", _code_namespace, expand=True),),
+        sdk_wraps=(
+            SdkWrap("files.read", _wrapped_read),
+            SdkWrap("shell.run", _wrapped_shell_run),
+            SdkWrap("files.edit", _wrapped_edit),
+            SdkWrap("files.write", _wrapped_write),
+            SdkWrap("files.append", _wrapped_append),
+            SdkWrap("files.delete", _wrapped_delete),
+            SdkWrap("files.glob", _wrapped_glob),
+            SdkWrap("understand", _wrapped_understand),
+            SdkWrap("ui.serve", _wrapped_serve),
+        ),
+        skill_sources=(_project_skill_source,),
+    )

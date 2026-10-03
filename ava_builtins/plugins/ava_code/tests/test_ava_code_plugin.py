@@ -1,12 +1,12 @@
 """`plugins.ava_code` integration tests — ava.cwd namespace, files.read and ui.serve wraps,
-AGENTS.md injection dedup, end to end: surface imported under `PluginContext`, state declared
+AGENTS.md injection dedup, end to end: the surface installed from `plugin.contribute()`, state declared
 through `agent_runtime.contribute()`.
 """
 
 import io
 import os
 import subprocess
-import sys
+from collections.abc import Callable
 from contextlib import redirect_stdout
 from pathlib import Path
 from unittest.mock import patch
@@ -14,44 +14,27 @@ from unittest.mock import patch
 import pytest
 
 import ava
-from agent.state import (
-    BaseAgentState,
-    CompactState,
-    build_agent_state,
-    clear_plugin_registrations,
-)
+from agent.state import BaseAgentState, CompactState, build_agent_state
+from ava.sdk_surface import install
+from ava_builtins.plugins.ava_code.tests.surface_support import code_registry
 from base.host.env.agent_slices import AgentSlices
-from base.packages.plugins.context import PluginContext
-from base.packages.plugins.extensions import ExtensionRegistry
+from base.packages.plugins.extensions import (
+    ExtensionRegistry,
+    PluginContributions,
+    SdkNamespace,
+    SdkWrap,
+)
 
 
 @pytest.fixture(autouse=True)
 def _load_ava_code_plugin():
-    """Reload plugin module before each test — register_namespace / wrap are module-load
-    side effects, must re-run. Clean up after run.
-    """
-
-    clear_plugin_registrations()
-
-    # Unload plugin module (if previous test left sys.modules cache)
-    for name in list(sys.modules):
-        if name.startswith("ava_builtins.plugins.ava_code"):
-            del sys.modules[name]
-
-    with PluginContext("ava_code"):
-        from ava_builtins.plugins.ava_code import (
-            agent_runtime as agent_runtime,  # state handle the surface reads
-        )
-        from ava_builtins.plugins.ava_code import (
-            plugin as plugin,  # surface: cwd namespace, wraps
-        )
+    """Install ava_code's declared SDK surface (cwd namespace, wraps, skill source) for each
+    test and uninstall it after."""
+    install.install(code_registry())
 
     yield
 
-    # clear_plugin_registrations() now also runs ava.sdk_surface.wraps.clear_wraps(), which
-    # restores every wrapped ava.* target (files.*, shell.run, understand) to its
-    # captured original — the old reload dance is no longer needed.
-    clear_plugin_registrations()
+    install.uninstall()
     # The in-memory security-findings buffer is process-global; a test that
     # flags content must not leak findings into the next test's exec.
     import ava.security as _security
@@ -774,41 +757,49 @@ def test_set_cwd_expanduser_supported(tmp_path: Path):
             ava.state_update = None
 
 
-def test_clear_wraps_restores_original(tmp_path: Path):
-    """clear_wraps (the new teardown, run by clear_plugin_registrations) restores
-    the captured original.
+def test_uninstall_restores_original(tmp_path: Path):
+    """uninstall restores every wrapped target to its captured original and removes the
+    plugin's namespace.
 
-    The chained callable now presents as the function it replaced — same
-    `__name__` / `__module__` as the original — so "is it wrapped" is a registry
-    question (`ava.extend.stack`), not a `__module__` sniff. After clear the
-    registry is empty and the namespace holds a different object (the original).
+    The chained callable presents as the function it replaced — same `__name__` /
+    `__module__` as the original — so "is it wrapped" is a registry question
+    (`ava.extend.stack`), not a `__module__` sniff. After uninstall the registry is empty and
+    the namespace holds a different object (the original).
     """
     from ava.sdk_surface import wraps
 
-    # fixture already loaded ava_code -> files.read carries one wrap layer
+    # fixture already installed ava_code -> files.read carries one wrap layer
     assert wraps.stack("files.read")  # non-empty: wrapped
     wrapped = ava.files.read
 
-    wraps.clear_wraps()
+    install.uninstall()
     assert wraps.stack("files.read") == []  # registry emptied
     assert ava.files.read is not wrapped  # restored to the original object
     assert ava.files.read.__module__ == "ava.files"
+    assert not hasattr(ava, "cwd")
 
 
-def test_double_load_protected_by_register_namespace():
-    """Repeated import of plugin → register_namespace("code", ...) first raises
-    PluginNamespaceConflictError (PR #192 register_namespace's first line of defense against same-name registration) — AGENTS.md wrap nesting never reached."""
-    # first load already done in fixture; second import must explode (register_namespace blocks first)
-    for name in list(sys.modules):
-        if name.startswith("ava_builtins.plugins.ava_code"):
-            del sys.modules[name]
-    with (
-        PluginContext("ava_code"),
-        pytest.raises(
-            ava.PluginNamespaceConflictError, match=r"ava\.cwd already registered by plugin"
+def test_duplicate_namespace_refuses_the_second_plugin_whole():
+    """A second plugin declaring `cwd` is refused and rolled back whole: its earlier namespace and
+    its wrap are not installed, and ava_code's own surface is untouched."""
+    from ava_builtins.plugins.ava_code import _code_namespace
+
+    def _other_wrap(inner: Callable[..., object], path: str, *args: object, **kwargs: object):
+        return inner(path, *args, **kwargs)
+
+    install.uninstall()
+    other = PluginContributions(
+        sdk_namespaces=(
+            SdkNamespace("other_ns", _code_namespace),
+            SdkNamespace("cwd", _code_namespace),
         ),
-    ):
-        from ava_builtins.plugins.ava_code import plugin as plugin  # import side effects (raises)
+        sdk_wraps=(SdkWrap("files.read", _other_wrap),),
+    )
+    admitted = install.install(code_registry(("other_plugin", other)))
+
+    assert [name for name, _ in admitted.plugins] == ["ava_code"]
+    assert not hasattr(ava, "other_ns")
+    assert [p for p, _ in ava.extend.stack("files.read")] == ["ava_code"]
 
 
 def test_second_wrap_stacks_instead_of_asserting():
@@ -817,15 +808,22 @@ def test_second_wrap_stacks_instead_of_asserting():
     reject this. `ava.extend.stack` shows both layers; the dedup that used to
     justify the assert now holds because ava_code calls `inner` exactly once
     regardless of how many layers sit below."""
-    # fixture already loaded ava_code -> layer 1 on files.read
+    # fixture already installed ava_code -> layer 1 on files.read
     before = ava.extend.stack("files.read")
     assert [p for p, _ in before] == ["ava_code"]
 
-    def _external_wrap(inner, path, *args, **kwargs):
+    def _external_wrap(inner: Callable[..., object], path: str, *args: object, **kwargs: object):
         return inner(path, *args, **kwargs)
 
-    with PluginContext("other_plugin"):
-        ava.extend.wrap("files.read", _external_wrap)
+    install.uninstall()
+    install.install(
+        code_registry(
+            (
+                "other_plugin",
+                PluginContributions(sdk_wraps=(SdkWrap("files.read", _external_wrap),)),
+            )
+        )
+    )
 
     after = ava.extend.stack("files.read")
     assert [p for p, _ in after] == ["ava_code", "other_plugin"]  # stacked, no assert
@@ -838,10 +836,10 @@ def test_plugin_wraps_all_files_ops_for_cwd():
     read additionally handles AGENTS.md auto-injection; write / append / edit / delete / glob
     only do cwd path resolution (no AGENTS.md injection), ensuring that after agent ava.cwd.set(), all
     file operation paths are consistent. Use introspection via `ava.extend.stack` to verify each target
-    is wrapped by ava_code — the chained wrapper now masquerades __module__ as the original, so the old
+    is wrapped by ava_code — the chained wrapper masquerades __module__ as the original, so a
     `__module__ != "ava.files"` probe fails; wrap fact lives in registry.
     """
-    # fixture already loaded ava_code plugin
+    # fixture already installed ava_code plugin
     for target in (
         "files.read",
         "files.write",
@@ -1004,14 +1002,12 @@ def test_coding_tools_section_skips_framework_expanded_modules(monkeypatch: pyte
     is already rendered (full contract) by the framework section — the plugin
     must not promote it a second time. Exact path match: an expand entry for a
     child (e.g. `shell.sessions`) does not suppress the parent's stub. `cwd`
-    is registered via ava.register_sdk_expand at plugin import, so it is
+    is declared as an expanded namespace by `contribute()`, so it is
     always expanded and never promoted here."""
-    from ava.sdk_surface import plugins
     from ava_builtins.plugins.ava_code.agent_runtime import _coding_tools_section
     from base.config import settings
 
     monkeypatch.setattr(settings.agent, "sdk_expand_in_system_prompt", ["files", "shell.sessions"])
-    monkeypatch.setattr(plugins, "REGISTERED_SDK_EXPANSIONS", ["cwd"])
     text = _coding_tools_section(AgentSlices.resolve())
     assert "## ava.files" not in text  # expanded by the framework -> skipped
     assert "## ava.shell" in text  # only the child is expanded -> parent stays

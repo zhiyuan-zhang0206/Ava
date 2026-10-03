@@ -104,7 +104,7 @@ def test_dunder_attr_not_flagged(lint):
 
 def test_plugin_namespace_is_valid(lint):
     mod, docs = lint
-    # `cwd` is registered by ava_code via register_namespace -> a live ava.* member,
+    # `cwd` is declared by ava_code as an `SdkNamespace` -> a live ava.* member,
     # discovered by the plugin-scan half of valid_ava_names().
     assert "cwd" in mod.valid_ava_names()
     (docs / "a.md").write_text("Set the working dir with `ava.cwd.set(p)`.\n")

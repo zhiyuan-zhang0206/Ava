@@ -48,11 +48,11 @@ diffs those against its `ava-plugin.json` declarations when it ships one.
 
 It answers two questions nothing else could: *what can a plugin extend* (for an
 agent writing one, which otherwise means reading framework source) and *what is
-this machine's agent actually composed of*. Both halves read the attribution
-ledger (`base/packages/plugins/contributions.py`) that every `register_*` entry point
-writes, so nothing here is transcribed. [[okf/plugins/plugins.ava.okf.md|Detail]].
+this machine's agent actually composed of*. Both halves read the plugins' declarations
+(`PluginContributions.as_records`, `base/packages/plugins/extensions.py`), so nothing
+here is transcribed. [[okf/plugins/plugins.ava.okf.md|Detail]].
 Building the catalog means importing the plugins, so it can only report what was
-REGISTERED; how often each row actually FIRED is a `note` line pointing at the
+DECLARED; how often each row actually FIRED is a `note` line pointing at the
 `plugin_activation` events [[okf/plugins/activation-telemetry.ava.okf.md]].
 
 Reading registrations means loading the plugins, which means importing them — so

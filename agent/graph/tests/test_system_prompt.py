@@ -7,7 +7,7 @@ namespace is covered without editing the default. These tests pin: what `"*"`
 discovers (and what it deliberately skips — top-level functions, private names,
 AVA_SDK_DISABLE entries, and the capability surfaces `skills` / `mcps` that the
 `# Capabilities` section indexes), how it merges with explicit and
-plugin-registered entries, that the legacy explicit-list format is untouched,
+plugin-declared entries, that the legacy explicit-list format is untouched,
 that the rendered section reflects the wildcard, and that the field default is
 `["*"]`.
 """
@@ -24,13 +24,14 @@ from agent.graph.system_prompt import (
     _sdk_expand_section,
     effective_sdk_expand,
 )
-from ava.sdk_surface import plugins, sdk_disable
+from ava.sdk_surface import install, sdk_disable
 from base.config import FIELD_INFOS, AgentSettings, settings
 from base.host.env.agent_slices import AgentSlices
+from base.packages.plugins.extensions import ExtensionRegistry, PluginContributions
 from base.telemetry import audit_events
 
 # The framework-owned top-level namespaces the wildcard must always surface.
-# Asserted as a subset (not equality) so a plugin namespace registered into
+# Asserted as a subset (not equality) so a plugin namespace installed into
 # `ava.__all_for_ava__` during the session does not make these tests brittle.
 # `skills` / `mcps` are deliberately absent — they are capability surfaces, not
 # SDK API (see test_wildcard_skips_capability_surfaces).
@@ -46,11 +47,16 @@ FRAMEWORK_NAMESPACES = {
 
 
 @pytest.fixture(autouse=True)
-def _no_plugin_expansions(monkeypatch: pytest.MonkeyPatch) -> None:
-    # Every case here reasons about the framework expand list alone; clear any
-    # plugin-registered promotions so a leak from another test cannot prepend
-    # stray paths. A test that needs a registration sets its own afterwards.
-    monkeypatch.setattr(plugins, "REGISTERED_SDK_EXPANSIONS", [])
+def _no_plugin_expansions() -> Iterator[None]:
+    # Every case here reasons about the framework expand list alone; take any installed
+    # plugin surface out so a leak from another test cannot prepend stray paths, and put it
+    # back after. A test that needs a promotion installs its own.
+    prior = install.installed()
+    install.uninstall()
+    yield
+    install.uninstall()
+    if prior is not None:
+        install.install(prior.registry)
 
 
 @pytest.fixture(autouse=True)
@@ -233,12 +239,12 @@ def test_missing_unregistered_expand_path_warns(
     assert "ava.missing_sdk_namespace does not resolve" in caplog.text
 
 
-def test_plugin_registrations_lead_the_wildcard(
+def test_plugin_expansions_lead_the_wildcard(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Plugin-promoted paths keep their lead position ahead of the discovered
     set even when the configured list is just `["*"]`."""
-    monkeypatch.setattr(plugins, "REGISTERED_SDK_EXPANSIONS", ["cwd"])
+    install.install(ExtensionRegistry((("p", PluginContributions(sdk_expansions=("cwd",))),)))
     monkeypatch.setattr(settings.agent, "sdk_expand_in_system_prompt", ["*"])
     result = effective_sdk_expand(AgentSlices.resolve().prompt.sdk_disable)
     assert result[0] == "cwd"

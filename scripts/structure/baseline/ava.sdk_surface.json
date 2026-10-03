@@ -5,14 +5,10 @@
     "ava/sdk_surface/help.py::contextvar:compact_classes": 1,
     "ava/sdk_surface/metering.py::ambient-container:_RECORDERS": 1,
     "ava/sdk_surface/metering.py::ambient-container:_WRAPPED": 1,
-    "ava/sdk_surface/plugins.py::ambient-container:REGISTERED_SDK_EXPANSIONS": 1,
-    "ava/sdk_surface/plugins.py::ambient-container:_REGISTERED_MEMBERS": 1,
-    "ava/sdk_surface/plugins.py::ambient-container:_REGISTERED_NAMESPACES": 1,
     "ava/sdk_surface/sdk_disable.py::ambient-container:applied_disable_entries": 1,
     "ava/sdk_surface/sdk_disable.py::import-time-read:_sdk_disable_raw": 1,
     "ava/sdk_surface/skill_sources.py::ambient-container:_PROVIDERS": 1,
-    "ava/sdk_surface/wraps.py::ambient-container:_LAYERS": 1,
-    "ava/sdk_surface/wraps.py::ambient-container:_ORIGINALS": 1
+    "ava/sdk_surface/wraps.py::ambient-container:_LAYERS": 1
   },
   "patch_targets": {
     "ava/sdk_surface/tests/test_lazy_plugin_load.py::agent.extensions.__spec__._initializing": 4

@@ -9,15 +9,14 @@ trimmed name-restatement sentences stay out of the rendered help stub
 """
 
 import io
-import sys
 from collections.abc import Iterator
 from contextlib import redirect_stdout
 
 import pytest
 
 import ava
-from agent.state import clear_plugin_registrations
-from base.packages.plugins.context import PluginContext
+from ava.sdk_surface import install
+from base.packages.plugins.extensions import ExtensionRegistry
 
 
 def _render_help(target: object) -> str:
@@ -29,32 +28,24 @@ def _render_help(target: object) -> str:
 
 @pytest.fixture
 def _load_ava_code_plugin() -> Iterator[None]:
-    clear_plugin_registrations()
-    for name in list(sys.modules):
-        if name.startswith("ava_builtins.plugins.ava_code"):
-            del sys.modules[name]
-    with PluginContext("ava_code"):
-        from ava_builtins.plugins.ava_code import plugin as plugin
+    from ava_builtins.plugins.ava_code import plugin
+
+    install.install(ExtensionRegistry((("ava_code", plugin.contribute()),)))
 
     yield
 
-    clear_plugin_registrations()
+    install.uninstall()
 
 
 @pytest.fixture
 def _load_ava_fleet_plugin() -> Iterator[None]:
-    clear_plugin_registrations()
-    ava.clear_registered_namespaces()
-    for name in list(sys.modules):
-        if name.startswith("ava_builtins.plugins.ava_fleet"):
-            del sys.modules[name]
-    with PluginContext("ava_fleet"):
-        from ava_builtins.plugins.ava_fleet import plugin as plugin
+    from ava_builtins.plugins.ava_fleet import plugin
+
+    install.install(ExtensionRegistry((("ava_fleet", plugin.contribute()),)))
 
     yield
 
-    clear_plugin_registrations()
-    ava.clear_registered_namespaces()
+    install.uninstall()
 
 
 def test_shell_run_wrapper_renders_trimmed_docstring(_load_ava_code_plugin: None) -> None:

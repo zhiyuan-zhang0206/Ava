@@ -13,9 +13,9 @@ Specific coverage (**all mandatory**):
 - module / class / public function docstrings in the `ava/` modules on the agent surface — a module
   that declares `__all_for_ava__`, or the module of a namespace listed in `ava/__init__.py`'s
   `__all_for_ava__` (the `_` prefix plays no part: visibility is the whitelist)
-- module / function / class docstrings in namespaces registered by plugins via `register_namespace(name, module)`
+- module / function / class docstrings in namespaces declared by plugins as `SdkNamespace(name, module)`
   (plugin `_*.py` private modules count too — as long as the namespace exports them to the agent, they're covered)
-- docstrings of callables hung on an existing namespace via `register_namespace_member(namespace, name, fn)`
+- docstrings of callables hung on an existing namespace via `SdkMember(namespace, name, fn)`
   (e.g. `ava.self.set_label`) — equally agent-facing, rendered under `help(ava.<namespace>)`
 - strings returned by the section functions a plugin declares in `contribute()` (including stdout captured from
   `ava.help(...)` calls inside `fn` — if upstream docstrings are sloppy, they bring violations into the prompt)
@@ -70,7 +70,7 @@ Writing rules alone doesn't work; rely on mechanism:
 
 - `scripts/lint/agent_docstrings.py` runs in pre-commit — scans
   `ava/*.py` and `plugins/*/*.py` for module / public function /
-  `register_namespace`-bound module / declared-system-prompt-section
+  `SdkNamespace`-bound module / declared-system-prompt-section
   return-string-producer; matching CJK characters (`[\u4e00-\u9fff]`) or known impl-detail
   keywords (`state_handle` / `LangGraph` / `POSIX` / `PR #...` etc.)
   fails immediately. When a new violation pattern is found, **add it to the lint blacklist** so the discipline accumulates.
@@ -92,7 +92,7 @@ the `__all_for_ava__` split (see git log for design rationale).
 depth is computed automatically from the number of dots in the FQN: `ava` → `#`, `ava.shell` → `##`, `ava.shell.run`
 → `###`. Non-`ava.*` targets (test fake modules etc.) fall back to H1. FQN source:
 - Container (module / SimpleNamespace) → `_qualname` (injected into a plugin namespace
-  by `register_namespace`) takes priority, otherwise `__name__`
+  by the SDK install) takes priority, otherwise `__name__`
 - Element (function) → `__module__ + . + __name__`; functions wrapped by a plugin
   (e.g. `ava.files.read` replaced by ava_code) go through `_search_ava_for_function_
   binding` scanning `ava.*` to find the binding, and the heading is restored to `ava.files.read`

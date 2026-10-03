@@ -1,24 +1,21 @@
 """The wrap registration primitive — `ava.extend.wrap` and its introspection.
 
 Agent visibility is governed by the `__all_for_ava__` whitelist in
-`ava/__init__.py`, not by a name's underscore prefix: this module carries a
-public name — reached across the `ava` package boundary by the agent kernel
-(`agent/state.py:clear_plugin_registrations`) — but stays out of the agent's
-`ava.help()` view because it is absent from `__all_for_ava__`. Plugin authors
-reach the wrap primitive through the curated `ava.extend` surface assembled in
-`ava/__init__.py`:
-
-    import ava
+`ava/__init__.py`, not by a name's underscore prefix: this module stays out of
+the agent's `ava.help()` view because it is absent from `__all_for_ava__`. A
+plugin declares a wrap in its `contribute()`:
 
     def audit_writes(inner, path, content):
         log_audit("write", path, len(content))
         return inner(path, content)
 
-    ava.extend.wrap("files.write", audit_writes)
+    def contribute() -> PluginContributions:
+        return PluginContributions(sdk_wraps=(SdkWrap("files.write", audit_writes),))
 
-`ava.extend.wrap(target, wrapper)` installs `wrapper` around the callable at the
-dotted `ava` path `target` (`"files.read"`, `"shell.run"`, `"agents.spawn"`,
-`"understand"`). The wrapper's first parameter receives the current callable
+`ava.sdk_surface.install` applies it through `apply_wrap(target, wrapper, plugin)`, which installs
+`wrapper` around the callable at the dotted `ava` path `target` (`"files.read"`,
+`"shell.run"`, `"agents.spawn"`, `"understand"`) and returns the undo. The curated
+`ava.extend` surface keeps the introspection (`stack`, `wrappers`). The wrapper's first parameter receives the current callable
 (`inner`) — the original, or the previous plugin's wrap when several layers
 stack — and the wrapper decides whether, when, and how many times to call it.
 `inner(*args, **kwargs) -> result`; the wrapper is Turing-complete Python and
@@ -28,11 +25,11 @@ the point: a schema'd hook registry would cap extensions at anticipated shapes.
 **Why this exists instead of bare `setattr`.** A plugin monkey-patching
 `ava.files.read = my_read` leaves no record of who changed it, in what order, or
 how to undo it — the old code compensated with a hand-rolled "I am the sole
-wrapper" assert on every target. The registry here makes the wrap stack
+wrapper" assert on every target. The layer table here makes the wrap stack
 enumerable (`ava.extend.stack(target)` / `ava.extend.wrappers()`), deterministic
-(registration order = plugin load order, and plugins load in sorted name order),
-and reversible (`clear_wraps` restores originals on reload), so the assert is
-gone and layering is allowed.
+(declaration order = plugin load order, and plugins load in sorted name order),
+and reversible (each `apply_wrap` returns its undo, run in reverse by
+`ava.sdk_surface.install.uninstall`), so the assert is gone and layering is allowed.
 
 **Lawfulness contract (enforced at review, not by types).** A wrapper is
 Turing-complete, so nothing mechanically stops it from misbehaving; three rules
@@ -50,7 +47,7 @@ keep a stack composable and are checked in review:
 
 Rule 3's cases are also the ones worth measuring, so a plugin layer that calls
 `inner` anything other than exactly once emits one `plugin_activation` event
-(`base/packages/plugins/activation.py`) — the runtime half of the attribution ledger,
+(`base/packages/plugins/activation.py`) — the runtime half of the plugin attribution,
 and philosophy §6's obsolescence gauge for wrap-shaped shims. A layer that
 passes straight through records nothing: it always runs once installed, so
 counting it would measure the installation rather than the shim.
@@ -86,8 +83,7 @@ class WrapLayer:
     """One installed wrap layer, in registration order.
 
     - target: dotted `ava` path, e.g. `"files.read"`.
-    - plugin: the plugin that registered it (`UNATTRIBUTED` when wrapped outside
-      a `PluginContext`, e.g. a direct test call).
+    - plugin: the plugin that declared it.
     - wrapper: the author's `wrapper(inner, *args, **kwargs)` function — the
       introspectable artifact (`wrapper.__module__` / source say who and what).
     - chained: the closure actually installed on the namespace at this layer.
@@ -99,36 +95,13 @@ class WrapLayer:
     chained: Callable[..., Any]
 
 
-# target -> the base callable captured before any plugin wrapped it (below any
-# SDK-metric recorder layers — see `_base_callable`). Restored by clear_wraps so
-# a reload re-wraps from a pristine core (the job the old exclusivity assert did
-# by refusing to run twice).
-_ORIGINALS: dict[str, Callable[..., Any]] = {}
-
 # target -> layers in registration (= plugin load) order, innermost first.
 _LAYERS: dict[str, list[WrapLayer]] = {}
 
 
-# `WrapLayer.plugin` for a wrap installed outside a plugin import (the framework
-# itself, or a test calling `wrap` directly). Such a layer is real machinery and
-# still shows up in `stack(target)`, but it is nobody's contribution, so it is
-# neither in the attribution ledger nor in activation telemetry.
-UNATTRIBUTED = "<unknown>"
-
-
-def _current_plugin_name() -> str:
-    """The plugin importing right now, or `UNATTRIBUTED`. Lazy import keeps this
-    leaf module free of an `ava -> shared` load-order dependency."""
-    try:
-        from base.packages.plugins.context import current_plugin_name
-    except ImportError:
-        return UNATTRIBUTED
-    return current_plugin_name() or UNATTRIBUTED
-
-
 def _record_activation(target: str, plugin: str, inner_calls: int) -> None:
     """Report one non-transparent firing of this layer — see `chained`. Lazy
-    import for the same reason `_current_plugin_name` is lazy; the emit path
+    import keeps this leaf free of an `ava -> shared` load-order dependency; the emit path
     itself swallows its own failures."""
     try:
         from ava import _settings
@@ -138,22 +111,6 @@ def _record_activation(target: str, plugin: str, inner_calls: int) -> None:
     except Exception:
         return
     activation.record(plugin, "sdkWraps", target, detail=f"inner_calls={inner_calls}", model=model)
-
-
-def _record_contribution(target: str, wrapper: Callable[..., Any]) -> None:
-    """Mirror the layer into the plugin attribution ledger `ava plugins inspect`
-    reads. Lazy import for the same reason `_current_plugin_name` is lazy; a
-    no-op outside a plugin import (a test's direct wrap keeps showing up in
-    `stack(target)`, which is the whole-machine view)."""
-    try:
-        from base.packages.plugins import contributions
-    except ImportError:
-        return
-    contributions.record(
-        "sdkWraps",
-        target,
-        detail=f"{getattr(wrapper, '__module__', '?')}.{getattr(wrapper, '__qualname__', wrapper)}",
-    )
 
 
 def _locate(target: str) -> tuple[Any, str]:
@@ -225,20 +182,20 @@ def _base_callable(current: Callable[..., Any]) -> Callable[..., Any]:
     return current
 
 
-def wrap(target: str, wrapper: Callable[..., Any]) -> Callable[..., Any]:
-    """Install `wrapper` around the `ava` callable at dotted `target`.
+def apply_wrap(target: str, wrapper: Callable[..., Any], plugin: str) -> Callable[[], None]:
+    """Install `wrapper` around the `ava` callable at dotted `target`; returns the undo.
 
     `target` is a path under `ava` — `"files.read"`, `"shell.run"`,
     `"agents.spawn"`, `"understand"`. `wrapper(inner, *args, **kwargs)` is called
     in place of the target; `inner` is the current callable (the original, or the
     previous layer when plugins stack) and the wrapper decides whether / when /
-    how often to call it. Layers compose in registration order — with plugins
-    loaded in sorted name order, later plugins wrap outermost — and the order is
+    how often to call it. Layers compose in declaration order — with plugins
+    installed in sorted name order, later plugins wrap outermost — and the order is
     inspectable via `stack` / `wrappers`.
 
     See this module's docstring for the three-rule lawfulness contract (preserve
     the inner signature, never swallow exceptions, document short-circuits /
-    multi-calls). Returns `wrapper` so the caller keeps a reference.
+    multi-calls).
 
     Raises:
         WrapTargetError: `target` is not a dotted identifier path under `ava` or
@@ -252,13 +209,8 @@ def wrap(target: str, wrapper: Callable[..., Any]) -> Callable[..., Any]:
         )
     current = _base_callable(current)
 
-    plugin = _current_plugin_name()
-
     @contextmanager
     def invocation() -> Generator[Callable[..., Any], None, None]:
-        if plugin == UNATTRIBUTED:
-            yield current
-            return
         calls = [0]
 
         @functools.wraps(current)
@@ -287,12 +239,24 @@ def wrap(target: str, wrapper: Callable[..., Any]) -> Callable[..., Any]:
     _install_metadata(chained, wrapper, current)
     setattr(parent, attr, chained)
 
-    _ORIGINALS.setdefault(target, current)
-    _LAYERS.setdefault(target, []).append(
-        WrapLayer(target=target, plugin=plugin, wrapper=wrapper, chained=chained)
-    )
-    _record_contribution(target, wrapper)
-    return wrapper
+    layer = WrapLayer(target=target, plugin=plugin, wrapper=wrapper, chained=chained)
+    layers = _LAYERS.setdefault(target, [])
+    layers.append(layer)
+
+    def undo() -> None:
+        layers.remove(layer)
+        if not layers:
+            del _LAYERS[target]
+        try:
+            parent_now, attr_now = _locate(target)
+        except AttributeError:
+            # The wrap's parent namespace is already gone — a plugin namespace undone earlier takes
+            # its wraps with it; nothing to restore.
+            return
+        if getattr(parent_now, attr_now, None) is chained:
+            setattr(parent_now, attr_now, current)
+
+    return undo
 
 
 def stack(target: str) -> list[tuple[str, Callable[..., Any]]]:
@@ -309,21 +273,3 @@ def wrappers() -> dict[str, list[tuple[str, Callable[..., Any]]]]:
     the runtime answer to "what did plugins inject" that plugin-injection docs
     are generated from instead of hand-maintained."""
     return {target: stack(target) for target in _LAYERS}
-
-
-def clear_wraps() -> None:
-    """Restore every wrapped target to its captured original and empty the
-    registry. Called from `agent.state.clear_plugin_registrations` at the top of
-    each `load_extensions`, so a reload (test fixture / dev hot-reload) re-wraps
-    from a pristine core instead of stacking onto the previous load's chain."""
-    for target, original in _ORIGINALS.items():
-        try:
-            parent, attr = _locate(target)
-        except AttributeError:
-            # The wrap's parent namespace is already gone — a plugin namespace
-            # cleared by clear_registered_namespaces before clear_wraps runs in
-            # clear_plugin_registrations takes its wraps with it; nothing to restore.
-            continue
-        setattr(parent, attr, original)
-    _ORIGINALS.clear()
-    _LAYERS.clear()

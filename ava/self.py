@@ -83,7 +83,7 @@ def __getattr__(name: str) -> object:
         from base.packages.plugins.config_registration import InvalidConfigOverlay
 
         return InvalidConfigOverlay
-    # Plugin members land on ava.self via register_namespace_member (ava_fleet
+    # Plugin members land on ava.self via a declared `SdkMember` (ava_fleet
     # adds set_label). In an agent-launched persistent-shell
     # child they are absent until plugins load, and this module already exists so
     # ava.__getattr__ never fires — trigger the shared lazy load here, then retry.
