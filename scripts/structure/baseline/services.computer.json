@@ -2,7 +2,9 @@
   "ambient_state": {
     "services/computer/mcp_daemon.py::asyncio-task:_tracked_client": 1
   },
+  "complexity": {},
   "files": {
-    "services/computer/tests/test_computer_mcp_daemon.py": 1185
-  }
+    "services/computer/tests/test_computer_mcp_daemon.py": 1201
+  },
+  "nesting": {}
 }

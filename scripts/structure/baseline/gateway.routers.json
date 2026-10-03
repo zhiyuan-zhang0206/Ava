@@ -9,8 +9,9 @@
     "gateway/routers/tests/test_upload_endpoint.py::TestUploadFile.test_upload_single_file_saves_and_inserts_one_inbound": 15
   },
   "files": {
-    "gateway/routers/tests/test_config_api.py": 995,
+    "gateway/routers/tests/test_config_api.py": 1004,
+    "gateway/routers/tests/test_fleet_graph.py": 841,
     "gateway/routers/tests/test_memory_search.py": 1424,
-    "gateway/routers/tests/test_tasks_router.py": 806
+    "gateway/routers/tests/test_tasks_router.py": 811
   }
 }

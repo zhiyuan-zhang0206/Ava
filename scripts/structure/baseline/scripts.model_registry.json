@@ -1,5 +1,6 @@
 {
+  "complexity": {},
   "files": {
-    "scripts/model_registry/tests/test_check_model_updates.py": 889
+    "scripts/model_registry/tests/test_check_model_updates.py": 899
   }
 }

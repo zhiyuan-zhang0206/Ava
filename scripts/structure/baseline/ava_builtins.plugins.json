@@ -42,14 +42,14 @@
     "ava_builtins/plugins/ava_syntax_fix/tests/test_syntax_fix_helpers.py::_legacy_fix_unterminated_to_triple": 16
   },
   "files": {
-    "ava_builtins/plugins/ava_code/tests/test_ava_code_plugin.py": 1598,
-    "ava_builtins/plugins/ava_fleet/tests/test_ava_fleet_plugin.py": 881,
+    "ava_builtins/plugins/ava_code/tests/test_ava_code_plugin.py": 1599,
+    "ava_builtins/plugins/ava_fleet/tests/test_ava_fleet_plugin.py": 882,
     "ava_builtins/plugins/ava_fleet/tests/test_task_maintenance_daemon.py": 804,
     "ava_builtins/plugins/ava_fleet/tests/test_task_registry.py": 2338,
-    "ava_builtins/plugins/ava_syntax_fix/tests/test_syntax_fix.py": 1672,
+    "ava_builtins/plugins/ava_syntax_fix/tests/test_syntax_fix.py": 1677,
     "ava_builtins/plugins/ava_syntax_fix/tests/test_syntax_fix_helpers.py": 860,
     "ava_builtins/plugins/tests/test_ava_memory_write.py": 1181,
-    "ava_builtins/plugins/tests/test_ava_sdk_reminder_plugin.py": 1087
+    "ava_builtins/plugins/tests/test_ava_sdk_reminder_plugin.py": 1088
   },
   "nesting": {
     "ava_builtins/plugins/ava_syntax_fix/tests/test_syntax_fix_helpers.py::_legacy_fix_string_newlines": 6

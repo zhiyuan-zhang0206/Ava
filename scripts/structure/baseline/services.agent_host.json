@@ -17,9 +17,9 @@
     "services/agent_host/tests/test_maintenance_prior_failure.py::test_prior_tail_flush_outage_defers_receipt_until_reflushed": 16
   },
   "files": {
-    "services/agent_host/tests/test_agent_host.py": 1768,
-    "services/agent_host/tests/test_circuit_breaker.py": 828,
-    "services/agent_host/tests/test_turn_dispatcher.py": 1426
+    "services/agent_host/tests/test_agent_host.py": 1770,
+    "services/agent_host/tests/test_circuit_breaker.py": 864,
+    "services/agent_host/tests/test_turn_dispatcher.py": 1428
   },
   "nesting": {
     "services/agent_host/tests/test_host_pool_capacity.py::test_more_than_twenty_workload_leases_share_bounded_backends": 6
