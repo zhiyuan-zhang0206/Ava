@@ -188,7 +188,7 @@ ten-product × fifteen-dimension matrix with per-cell evidence:
 The gateway `/mcp` endpoint exposes the cluster's control plane as an MCP server over
 Streamable HTTP, so a coding agent can run the fleet: start agents, message them,
 read what they did, stop them. Create a client token and register it once
-(setup: [`docs/conventions/mcp-client-access.md`](conventions/mcp-client-access.md)) —
+(setup: [`conventions/mcp-client-access.md`](../conventions/mcp-client-access.md)) —
 
 ```bash
 claude mcp add --transport http ava http://<gateway-host>/mcp \
