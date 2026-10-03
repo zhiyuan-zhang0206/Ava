@@ -268,7 +268,7 @@ def test_build_registry_holds_what_each_enabled_plugin_declares():
         _make_face(name, _CONTRIBUTING_FACE.format(name=name))
     write_local({"plugins": {"alpha": {"enabled": True}, "beta": {"enabled": True}}})
 
-    from agent.extensions import build_registry
+    from agent.extensions.registry import build_registry
     from agent.graph import _build
 
     _build.load_extensions()
@@ -301,7 +301,7 @@ def test_a_face_whose_contribute_misbehaves_is_skipped_not_fatal(contribute_body
     _make_face("bad", f"def contribute():\n{contribute_body}\n")
     write_local({"plugins": {"good": {"enabled": True}, "bad": {"enabled": True}}})
 
-    from agent.extensions import build_registry
+    from agent.extensions.registry import build_registry
     from agent.graph import _build
 
     _build.load_extensions()

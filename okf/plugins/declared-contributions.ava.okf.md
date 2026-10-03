@@ -16,7 +16,7 @@ frozen declaration.
 - `context_notes` — `ContextNote(build, on_fork, rank)`; `build` returns a `HumanMessage` or `None` when it has
   nothing to say. Lower `rank` sits closer to the SystemMessage; `on_fork` also grafts the note onto a fork.
 
-`agent/extensions:build_registry()` calls `contribute()` on every enabled plugin's loaded face, in plugin name
+`agent/extensions/registry.py:build_registry()` calls `contribute()` on every enabled plugin's loaded face, in plugin name
 order, and returns an `ExtensionRegistry` — plugin name beside its contributions, so attribution is the entry,
 not a ContextVar. A face whose `contribute()` raises or returns something else is reported and skipped like a
 plugin that fails to import. Nothing is registered anywhere: a reload is a new registry.
