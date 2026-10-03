@@ -1,15 +1,14 @@
 {
   "complexity": {
     "agent/tests/test_exec_child.py::test_child_builtin_help_routes_only_ava_targets": 16,
-    "agent/tests/test_external.py::test_failed_context_entry_restores_prior_binding_and_allows_next_attachment": 15,
     "agent/tests/test_impersonation_integration.py::test_aborted_takeover_resumes_the_native_with_the_death_cause": 19,
     "agent/tests/test_impersonation_integration.py::test_automatic_takeover_handoff_precedes_queued_input": 19,
     "agent/tests/test_impersonation_integration.py::test_consent_exec_inbox_release_and_resume": 20
   },
   "files": {
     "agent/tests/test_compact.py": 1142,
-    "agent/tests/test_impersonation.py": 842,
-    "agent/tests/test_state_slot.py": 936
+    "agent/tests/test_impersonation.py": 841,
+    "agent/tests/test_state_slot.py": 896
   },
   "patch_targets": {
     "agent/tests/test_exec_subprocess.py::agent.graph.exec._process": 1,
