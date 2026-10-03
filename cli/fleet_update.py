@@ -307,7 +307,7 @@ def _report_unlisted(s: Session, rows: list[dict[str, Any]], wanted: set[str]) -
 
 
 def _refresh(s: Session, args: argparse.Namespace) -> None:
-    """Skills follow their channel, not the checkout. Conflicts are reported; never --force."""
+    """Skills follow their channel, not the checkout; a differing local copy is replaced."""
     for alias in [args.gateway, *args.runner]:
         out = s.run(alias, f"{_HOME}; {_AVA} packages refresh")
         if out:  # empty on a dry run

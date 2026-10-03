@@ -26,7 +26,7 @@ host (`engines.ava` / `requires_commit`) is listed with its blocking reason.
 ## `ava packages refresh`
 
 ```bash
-ava packages refresh [--check] [--package NAME] [--force] [--json] [--from-job]
+ava packages refresh [--check] [--package NAME] [--json] [--from-job]
 ```
 
 One pass that makes this machine's channel-backed **skill** packages match
@@ -45,10 +45,11 @@ their sources (design §5.3; plugin/MCP applies land in P2):
   tree must carry a `SKILL.md`; `base/packages/skills/scan.py` critical findings refuse
   with no `--accept-risk` on any automatic path; the manifest host contract
   (`engines.ava` vs the derived version, `requires_commit` ancestry) records
-  `blocked_version`; and the local-edit guard never overwrites a hand-edited
-  copy — `--force` is the human-only override.
+  `blocked_version`. A local copy differing from the last applied content is
+  replaced — an info line names the files that differed (the old tree stays at
+  `.<name>.prev`).
 - **Records** (`UpdateState.last_result`): `up_to_date | applied |
-  available: … | blocked_version: … | conflict: … | refused_scan: … | error: …`;
+  available: … | blocked_version: … | refused_scan: … | error: …`;
   consecutive failures back the check interval off (doubled per failure, capped
   at a week, ±10% jitter).
 - **Skips**: a per-home flock (no concurrent passes), a fleet update in

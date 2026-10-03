@@ -182,7 +182,7 @@ class UpdateState(BaseModel):
     last_apply_at: str | None = None
     last_result: str | None = None
     """Last outcome, design §5.3 vocabulary: up_to_date | applied | available |
-    blocked_version: … | conflict: … | refused_scan: … | error: …"""
+    blocked_version: … | refused_scan: … | error: …"""
     failures: int = 0
     """Consecutive non-success outcomes (the refresh pass's backoff counter;
     reset to 0 by up_to_date / applied / available)."""

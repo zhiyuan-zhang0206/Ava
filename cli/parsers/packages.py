@@ -23,7 +23,6 @@ def _h_packages_refresh(args: argparse.Namespace) -> int:
         check_only=args.check,
         only=args.package,
         json_output=args.json_output,
-        force=args.force,
         from_job=args.from_job,
     )
 
@@ -82,11 +81,6 @@ def _add_packages_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser
     refresh_p.add_argument("--check", action="store_true", help="check only — never stage or apply")
     refresh_p.add_argument(
         "--package", metavar="NAME", default=None, help="limit the pass to one package"
-    )
-    refresh_p.add_argument(
-        "--force",
-        action="store_true",
-        help="override the local-edit guard for this run (human-only)",
     )
     refresh_p.add_argument(
         "--from-job",
