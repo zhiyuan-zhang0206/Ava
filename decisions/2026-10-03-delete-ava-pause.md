@@ -53,3 +53,6 @@ posture, the maintenance "pause" journal and `ava.self.pause_heartbeat`, each a 
   and `ava maintenance stop --keep-terminals` leave shells alone. This is accepted until shells are
   a roster service.
 - A script that ran `ava pause` fails at argument parsing. None exists in the repository.
+
+Forward link (2026-10-03): `ava maintenance stop --keep-terminals` no longer exists; see
+[the manual maintenance verbs deletion](2026-10-03-delete-manual-maintenance-verbs.md).

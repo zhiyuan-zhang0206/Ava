@@ -64,7 +64,7 @@ member of a recorded process group that is still occupied, even one that
 appeared after the capture) it records the owning recorded session, whether the
 process is that session's leader, a captured descendant, or a group member, the
 birth pair the stop path itself revalidates, and the best-effort cmdline —
-plus the stop stage (the phase label) that hit the deadline. `stop_services`
+plus the stop stage (the phase label) that hit the deadline. The services stop
 raises it as `StopIncompleteError` (a `TimeoutError`, so every existing catch
 keeps working). The terminal closure reports a process that outlived its
 SIGKILL the same way, at stage `terminals` (`close_terminals`).

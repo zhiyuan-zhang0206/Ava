@@ -50,7 +50,7 @@ def dispatch_sync(
 
     Configuration and inventory writes share a lock because both read and
     replace local state. A blocked filesystem operation must leave health,
-    maintenance resume and unrelated ops reachable.
+    the hold's release and unrelated ops reachable.
     """
     match kind:
         case "status_probe":

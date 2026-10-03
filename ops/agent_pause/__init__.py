@@ -180,7 +180,7 @@ def drain(db: Database, holder: str, at: datetime, timeout: float) -> None:
         hold = _hold(holder, at)
         if hold.phase == "preparing":
             raise RuntimeError(
-                "preparation is incomplete; repeat prepare or explicitly resume --cancel"
+                "preparation is incomplete; re-run `ava stop`, or abandon it with `ava maintenance cancel`"
             )
         if hold.failures:
             raise RuntimeError(
@@ -297,7 +297,7 @@ def _stall_line(
         line += (
             f"\n  fence: runtime owned by {row.runtime_owner}, not the live boot {host_owner} — "
             "a successor host cannot certify its predecessor flushed; resolve explicitly "
-            "(ava maintenance status, then resume --cancel or repair)"
+            "(ava maintenance status, then ava maintenance cancel or repair)"
         )
     return line
 

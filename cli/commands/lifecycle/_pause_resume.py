@@ -39,8 +39,11 @@ def resume_after_start[**P](start: Callable[P, int | StartDelegation]) -> Callab
         if current is None:
             return start(*args, **kwargs)
         if current.maintenance is not None and current.maintenance.failures:
+            assert current.holder is not None and current.acquired_at is not None  # noqa: S101
             raise RuntimeError(
-                "start cannot release failed continuation/flush receipts; hold retained"
+                "start cannot release failed continuation/flush receipts; hold retained — "
+                "fix the root cause, then ava maintenance repair --operation "
+                f"{current.holder} --acquired-at {current.acquired_at.isoformat()}"
             )
         if admission.start_authorized():
             return start(*args, **kwargs)

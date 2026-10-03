@@ -13,7 +13,7 @@ tags:
 
 `cli/commands/lifecycle/` holds the local host lifecycle verbs and the machinery
 they share. The verbs are `start.py` (`ava start`), `stop.py` (`ava stop`,
-`ava restart`), `maintenance.py` (`ava maintenance ...`) and
+`ava restart`), `maintenance.py` (`ava maintenance status|repair|cancel`) and
 `status.py` (`ava status`). Every one of them reaches the single application
 root through `root_driver.py`, and every stopping verb goes through the same
 native drain boundary (`_temporary_stop`, `service_stop`) — which is why they
@@ -52,13 +52,11 @@ outcome (issue #2307).
 job, executable, socket and stopped-root custody are checked before native
 helper exit and removal of its definition. Start recreates that definition.
 Root owns Gate and native LGTM application services. `_pause_resume` releases
-normal startup admission only after readiness, and never releases the fleet
-cutover's hold (`cli/cutover_hold.py`, deleted with the cutover scripts);
-`ava maintenance resume` refuses that hold and names its one exit,
-`scripts/cutover_adopt_home.py --resume`.
+normal startup admission only after readiness.
 
-`cli/parsers/maintenance.py` retains explicit intermediate steps through
-`maintenance.py`, which reads its generation's hold through the maintenance
+`cli/parsers/maintenance.py` exposes only the hold journal's reader and exits
+(`status`, `repair`, `cancel`); the holds themselves are taken by `ava stop` and
+`ava restart` and released by `ava start`. `maintenance.py` reads its generation's hold through the maintenance
 journal's own door (`base.deploy.maintenance.admission.require_operation`) and the agent-host
 probes from `ops.agent_pause.probe`. They reuse the
 [durable maintenance journal](../../../../base/deploy/maintenance/docs/maintenance.ava.okf.md).
