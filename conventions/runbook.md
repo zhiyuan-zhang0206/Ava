@@ -14,7 +14,7 @@ URLs naming a foreign host (another machine or a SaaS provider) make the cluster
 treat it as remote-managed — `ava start` / `ava stop` / `ava status` / the root health loop
 skip local instance management and degrade to reachability probes, and the
 connection-layer knobs (TLS, pool sizing) live in config
-(`docs/history/2026-08-28/connection-layer-swappable.md`).
+(`decisions/2026-08-28-connection-layer-swappable.md`).
 **One DB URL.** Every normal process configures exactly one database URL
 (`AVA_DB_URL`) and dials it as-is — its port is chosen at URL generation
 (install birth / converge, by `AVA_PGBOUNCER_ENABLED`): the cluster's PgBouncer
@@ -48,7 +48,7 @@ per-agent `{"checkpoint_interval": 1}`
 config overlay plus an agent restart, or set `AVA_CHECKPOINT_INTERVAL=1` in the
 cluster `.env`, to restore every-super-step persistence. The full recovery
 verification and rollback protocol lives in
-[`docs/conventions/checkpoint-interval-canary.md`](../docs/conventions/checkpoint-interval-canary.md).
+[`checkpoint-interval-canary.md`](checkpoint-interval-canary.md).
 
 An upstream dependency bump that adds checkpoint migration version N must ship
 that DDL as an Ava timestamp migration and advance

@@ -2,7 +2,7 @@
 
 ## Context
 
-`hibernate_idle_threshold_seconds` (see [`docs/history/2026-07-20-agent-hibernation.md`](2026-07-20-agent-hibernation.md))
+`hibernate_idle_threshold_seconds` (see [`decisions/2026-07-20-agent-hibernation.md`](2026-07-20-agent-hibernation.md))
 already gives hibernation a time-based gate: only an agent idle past `H` is
 swap-out-eligible. That gate is necessary but not sufficient on its own — it
 protects an agent mid-exchange, but says nothing about an agent that is simply

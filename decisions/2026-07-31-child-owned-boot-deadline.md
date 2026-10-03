@@ -138,4 +138,4 @@ launcher still adjudicates, but it adjudicates a fact rather than a guess.
 
 Forward link (2026-08-22): the grace is now named boot_reap_grace_seconds and
 the current status model is recorded in
-[agent status model](../docs/history/2026-08-22/agent-status-model.md).
+[agent status model](2026-08-22-agent-status-model.md).

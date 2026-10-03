@@ -28,6 +28,7 @@ Root node of the Ava project's OKF (Open Knowledge Format) knowledge graph. Each
 | [[okf/plugins/plugins.ava.okf.md]] | Plugin system — extension mechanism that can carry skills / MCP servers |
 | [[okf/skills/skills.ava.okf.md]] | Skills — pure markdown instruction bundles, lazily loaded by agents on demand |
 | [[okf/mcps/mcps.ava.okf.md]] | MCP integration — built-in chrome + external servers installed via `ava mcp install` (e.g., x), invoked via daemon subprocesses |
+| [[okf/anti-rl-bias.ava.okf.md]] | Anti-RL-bias mechanisms — heartbeat, silent-idle nudge, SDK reminder and delivery semantics that turn ambiguous silence into supervisable state |
 | [[../tests/docs/tests.ava.okf.md]] | Test suite — pytest unit / integration / e2e tests covering all modules |
 | [[../scripts/docs/scripts.ava.okf.md]] | Operations scripts — lint / build / install / provision / CI / release toolset |
 | [[okf/design/design.ava.okf.md]] | **Design-phase concept models** (R1–R4 planned final state from the 2026-08-07 audit, awaiting user review; R5 in design) — not yet implemented |

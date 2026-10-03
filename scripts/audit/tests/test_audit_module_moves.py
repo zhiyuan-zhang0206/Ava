@@ -62,7 +62,6 @@ def test_is_excluded_covers_the_frozen_axes_only() -> None:
     assert gate._is_excluded("") is True
     assert gate._is_excluded("decisions/x.md") is True
     assert gate._is_excluded("postmortems/y.md") is True
-    assert gate._is_excluded("docs/history/2026/z.md") is True
     assert gate._is_excluded("db/schema.sql") is False
     assert gate._is_excluded("base/packages/docs/notes.py") is False
 

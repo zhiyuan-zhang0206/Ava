@@ -81,4 +81,4 @@ blind, so feedback is status-branched.
   permissiveness for a stack trace that points straight at the bad caller.
 
 Forward link (2026-08-22): the status model replaced the historical birth state
-with unclaimed idling; see [agent status model](../docs/history/2026-08-22/agent-status-model.md).
+with unclaimed idling; see [agent status model](2026-08-22-agent-status-model.md).

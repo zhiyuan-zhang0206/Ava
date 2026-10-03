@@ -44,7 +44,7 @@ always carries the full count):
   it. A file whose name is unique in the repository matches by that bare name.
 - `STRUCTURE`: the structure baseline shards, `pyproject.toml`, hooks, workflows and
   the lint registries under `scripts/{structure,lint,content_lint}`.
-- `FROZEN HISTORY`: `decisions/`, `postmortems/`, `docs/history/` and `CHANGELOG.md`.
+- `FROZEN HISTORY`: `decisions/`, `postmortems/` and `CHANGELOG.md`.
   Historical references, never rewritten.
 
 References from inside the target (its own file, or a package's own modules) are

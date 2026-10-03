@@ -51,7 +51,7 @@ group that still lacks its grant: a helper-spawned child scans the guarded
 surface directly, and the run waits for the decision and rechecks the
 preflight matrix. The methods are EXPERIMENTAL -- appdata replays the
 surface evidenced on macmini 2026-09-14, media and icloud are first-use
-candidates; the archive in docs/conventions/tcc-helper-onboarding.md is the
+candidates; the archive in conventions/tcc-helper-onboarding.md is the
 authority on evidence levels. Run only with the user at the machine
 (--confirm-user-present is required: a pending dialog blocks synthesized
 input machine-wide). fda and devtools are never attempted, by decision.
@@ -99,7 +99,7 @@ FILL_SPECS: dict[str, tuple[tuple[str, str, str], ...]] = {
     # surface directly (the folder rows' spawn-child pattern, extended to a
     # bounded scan) and the attempt's outcome is rechecked against its
     # service in the preflight matrix. Evidence levels: the trigger-method
-    # archive in docs/conventions/tcc-helper-onboarding.md.
+    # archive in conventions/tcc-helper-onboarding.md.
     "appdata": (("appdata", "kTCCServiceSystemPolicyAppData", "Library/Application Support"),),
     "media": (
         ("media-music", "kTCCServiceMediaLibrary", "Music"),
@@ -478,7 +478,7 @@ def main() -> int:  # noqa: PLR0915 - one bounded onboarding pass: every item an
         help=(
             "experimental: best-effort triggers for appdata/media/icloud groups"
             " still missing their grant (requires --confirm-user-present;"
-            " methods + evidence levels: docs/conventions/tcc-helper-onboarding.md)"
+            " methods + evidence levels: conventions/tcc-helper-onboarding.md)"
         ),
     )
     parser.add_argument(
@@ -567,7 +567,7 @@ def main() -> int:  # noqa: PLR0915 - one bounded onboarding pass: every item an
     if extended:
         print(
             "extended groups (state read via preflight; trigger methods:"
-            " docs/conventions/tcc-helper-onboarding.md):"
+            " conventions/tcc-helper-onboarding.md):"
         )
         for group in extended:
             states = ", ".join(
@@ -718,7 +718,7 @@ def main() -> int:  # noqa: PLR0915 - one bounded onboarding pass: every item an
     if extended:
         print(
             "extended groups (state read; fill: --fill-pending; methods archive:"
-            " docs/conventions/tcc-helper-onboarding.md): " + ", ".join(extended)
+            " conventions/tcc-helper-onboarding.md): " + ", ".join(extended)
         )
     if unresolved:
         print(
