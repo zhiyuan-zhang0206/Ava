@@ -54,13 +54,12 @@ def test_relay_rebuilds_listener_after_accept_failure(
         opened.append(address)
         return next(listeners)
 
-    monkeypatch.setattr(relay, "_sleep", sleeps.append)
-
     with pytest.raises(_StopTestError):
         relay.serve_forever(
             ("10.64.0.7", 6380),
             ("127.0.0.1", 6380),
             open_listener=_open,  # type: ignore[arg-type]
+            sleep=sleeps.append,
         )
 
     assert opened == [("10.64.0.7", 6380), ("10.64.0.7", 6380)]
@@ -82,13 +81,12 @@ def test_listener_bind_failures_back_off_until_interface_returns(
             raise OSError("address not available")
         raise _StopTestError
 
-    monkeypatch.setattr(relay, "_sleep", sleeps.append)
-
     with pytest.raises(_StopTestError):
         relay.serve_forever(
             ("10.64.0.7", 6380),
             ("127.0.0.1", 6380),
             open_listener=_open,  # type: ignore[arg-type]
+            sleep=sleeps.append,
         )
 
     assert sleeps == [1.0, 2.0, 4.0]

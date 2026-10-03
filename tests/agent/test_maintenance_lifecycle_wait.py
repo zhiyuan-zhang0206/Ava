@@ -130,7 +130,7 @@ async def test_prepare_waits_for_resolving_command_then_proceeds(
     command = insert_inbound_message(db_conn, agent, "", "agent:6090", kind="terminate")
     db_conn.commit()
     _as_live_host(monkeypatch, owner)
-    monkeypatch.setattr(agent_pause, "_lifecycle_wait_seconds", lambda: 5.0)
+    monkeypatch.setattr(settings.gateway, "pause_lifecycle_wait_seconds", 5.0)
     monkeypatch.setattr(agent_pause, "_LIFECYCLE_WAIT_POLL_SECONDS", 0.05)
     events = _events(monkeypatch)
 
@@ -173,7 +173,7 @@ async def test_prepare_aborts_when_collision_outlives_the_bound(
     insert_inbound_message(db_conn, agent, "", "agent:6090", kind="terminate")
     db_conn.commit()
     _as_live_host(monkeypatch, owner)
-    monkeypatch.setattr(agent_pause, "_lifecycle_wait_seconds", lambda: 0.3)
+    monkeypatch.setattr(settings.gateway, "pause_lifecycle_wait_seconds", 0.3)
     monkeypatch.setattr(agent_pause, "_LIFECYCLE_WAIT_POLL_SECONDS", 0.05)
     events = _events(monkeypatch)
 
@@ -294,7 +294,7 @@ def test_parked_claimed_work_prepares_without_wait(
     _claim(db_conn, message)
     db_conn.commit()
     _as_live_host(monkeypatch, uuid4())
-    monkeypatch.setattr(agent_pause, "_lifecycle_wait_seconds", lambda: 0.0)
+    monkeypatch.setattr(settings.gateway, "pause_lifecycle_wait_seconds", 0.0)
     events = _events(monkeypatch)
 
     agent_pause.prepare("move", WHEN)
@@ -320,7 +320,7 @@ def test_parked_claimed_lifecycle_outliving_the_bound_aborts(
     _claim(db_conn, message)
     db_conn.commit()
     _as_live_host(monkeypatch, uuid4())
-    monkeypatch.setattr(agent_pause, "_lifecycle_wait_seconds", lambda: 0.3)
+    monkeypatch.setattr(settings.gateway, "pause_lifecycle_wait_seconds", 0.3)
     monkeypatch.setattr(agent_pause, "_LIFECYCLE_WAIT_POLL_SECONDS", 0.05)
     events = _events(monkeypatch)
 

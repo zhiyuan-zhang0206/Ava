@@ -74,8 +74,8 @@ def test_impersonation_wake_reconciles_roster_only_for_status_changes(
 
     monkeypatch.setattr(leases, "publish_inbound_wake", no_wake)
     patch_announcements(monkeypatch, leases, changed=timeline, updated=roster)
-    leases._wake(7)
-    leases._wake(7, roster_changed=True)
+    leases.wake_agent(7)
+    leases.wake_agent(7, roster_changed=True)
     assert timeline == [7, 7]
     assert roster == [7]
 
@@ -96,7 +96,7 @@ def test_controller_read_that_expires_lease_refreshes_roster(
     def record_wake(agent_id: int, *, roster_changed: bool = False) -> None:
         notices.append((agent_id, roster_changed))
 
-    monkeypatch.setattr(leases, "_wake", record_wake)
+    monkeypatch.setattr(leases, "wake_agent", record_wake)
     assert leases.get(lease["id"], attested_caller(lease))["status"] == "expired"
     assert notices == [(owner.agent_id, True)]
     assert leases.get(lease["id"], attested_caller(lease))["status"] == "expired"
@@ -298,7 +298,7 @@ def test_cancel_ack_publishes_committed_completion_once(
         return 1
 
     monkeypatch.setattr(EventBus, "publish_best_effort_sync", publish)
-    monkeypatch.setattr(leases, "_wake", wakes.append)
+    monkeypatch.setattr(leases, "wake_agent", wakes.append)
     with pytest.raises(leases.ImpersonationError, match="not read"):
         leases.ack(lease["id"], attested_caller(lease), [cancel, unread])
     assert published == []
