@@ -110,6 +110,65 @@ def _scan_critical(text: str) -> tuple[str, ...]:
     return tuple(sorted({f.rule_id for f in scan_text_critical(text)}))
 
 
+def _parse_skill_md(
+    skill_md: Path,
+) -> tuple[str | None, str | None, str | None, str | None, tuple[str, ...]]:
+    """`(name, description, content_hash, error, security_rules)` of one SKILL.md."""
+    try:
+        raw = skill_md.read_text(encoding="utf-8")
+    except OSError as e:
+        return None, None, None, f"unreadable: {e}", ()
+    content_hash = hashlib.sha256(raw.encode()).hexdigest()
+    try:
+        fields, _body = parse_skill_frontmatter(raw)
+    except SkillFormatError as e:
+        return None, None, content_hash, f"malformed frontmatter — {e}", ()
+    return fields["name"], fields["description"], content_hash, None, _scan_critical(raw)
+
+
+def _read_index_md(index_md: Path) -> str | None:
+    """The INDEX.md text, or None when unreadable."""
+    try:
+        return index_md.read_text(encoding="utf-8")
+    except OSError:
+        return None
+
+
+def _skill_file(folder: Path, root: Path) -> SkillFile | None:
+    """Parse one folder's SKILL.md / INDEX.md; None when it holds neither."""
+    rel = folder.relative_to(root).parts
+    skill_md = folder / "SKILL.md"
+    index_md = folder / "INDEX.md"
+    s_stat = skill_md.stat() if skill_md.is_file() else None
+    i_stat = index_md.stat() if index_md.is_file() else None
+    if s_stat is None and i_stat is None:
+        return None
+    name = description = content_hash = error = index_text = None
+    security_rules: tuple[str, ...] = ()
+    if s_stat is not None:
+        name, description, content_hash, error, security_rules = _parse_skill_md(skill_md)
+    if i_stat is not None:
+        index_text = _read_index_md(index_md)
+        if index_text is not None:
+            security_rules += _scan_critical(index_text)
+    return SkillFile(
+        folder=folder,
+        rel=rel,
+        skill_md=skill_md if s_stat is not None else None,
+        index_md=index_md if i_stat is not None else None,
+        name=name,
+        description=description,
+        content_hash=content_hash,
+        error=error,
+        index_text=index_text,
+        security_rules=security_rules,
+        skill_mtime_ns=s_stat.st_mtime_ns if s_stat else 0,
+        skill_size=s_stat.st_size if s_stat else 0,
+        index_mtime_ns=i_stat.st_mtime_ns if i_stat else 0,
+        index_size=i_stat.st_size if i_stat else 0,
+    )
+
+
 def _scan_root(root: Path) -> tuple[tuple[SkillFile, ...], tuple[tuple[tuple[str, ...], int], ...]]:
     """Walk one root: parse every SKILL.md/INDEX.md, stat every folder.
 
@@ -121,56 +180,9 @@ def _scan_root(root: Path) -> tuple[tuple[SkillFile, ...], tuple[tuple[tuple[str
         return (), ()
     folders = [root, *(p for p in root.rglob("*") if p.is_dir())]
     folder_stats = tuple((f.relative_to(root).parts, f.stat().st_mtime_ns) for f in sorted(folders))
-    entries: list[SkillFile] = []
-    for folder in sorted(folders):
-        rel = folder.relative_to(root).parts
-        skill_md = folder / "SKILL.md"
-        index_md = folder / "INDEX.md"
-        s_stat = skill_md.stat() if skill_md.is_file() else None
-        i_stat = index_md.stat() if index_md.is_file() else None
-        if s_stat is None and i_stat is None:
-            continue
-        name = description = content_hash = error = index_text = None
-        security_rules: tuple[str, ...] = ()
-        if s_stat is not None:
-            try:
-                raw = skill_md.read_text(encoding="utf-8")
-            except OSError as e:
-                error = f"unreadable: {e}"
-            else:
-                content_hash = hashlib.sha256(raw.encode()).hexdigest()
-                try:
-                    fields, _body = parse_skill_frontmatter(raw)
-                except SkillFormatError as e:
-                    error = f"malformed frontmatter — {e}"
-                else:
-                    name, description = fields["name"], fields["description"]
-                    security_rules = _scan_critical(raw)
-        if i_stat is not None:
-            try:
-                index_text = index_md.read_text(encoding="utf-8")
-            except OSError:
-                index_text = None
-            else:
-                security_rules += _scan_critical(index_text)
-        entries.append(
-            SkillFile(
-                folder=folder,
-                rel=rel,
-                skill_md=skill_md if s_stat is not None else None,
-                index_md=index_md if i_stat is not None else None,
-                name=name,
-                description=description,
-                content_hash=content_hash,
-                error=error,
-                index_text=index_text,
-                security_rules=security_rules,
-                skill_mtime_ns=s_stat.st_mtime_ns if s_stat else 0,
-                skill_size=s_stat.st_size if s_stat else 0,
-                index_mtime_ns=i_stat.st_mtime_ns if i_stat else 0,
-                index_size=i_stat.st_size if i_stat else 0,
-            )
-        )
+    entries = [
+        entry for folder in sorted(folders) if (entry := _skill_file(folder, root)) is not None
+    ]
     return tuple(entries), folder_stats
 
 
