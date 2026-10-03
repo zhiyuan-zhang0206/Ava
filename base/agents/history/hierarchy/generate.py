@@ -114,8 +114,8 @@ class GenParams:
 
     These are engine-calibration constants with written reasons, the same
     shape as `seal.SealParams`; which model a run uses is resolved per target
-    agent (`base.agents.observation.snapshot.agent_effective_model` — overlay preferred,
-    fleet default else), with `settings.lm.hierarchy_model` as the last-resort
+    agent (`base.agents.observation.snapshot.agent_effective_model` — overlay over the
+    birth stamp over the fleet default), with `settings.lm.hierarchy_model` as the last-resort
     fallback.
     """
 
@@ -147,10 +147,11 @@ class GenParams:
     # material-only request: slack for the gap between the engine's o200k
     # count and the provider's own tokenizer, and for the answer.
     prefix_window_fraction: float = 0.8
-    # The demo's effective reasoning level (its "low" clamps onto "high" for
-    # deepseek); the deepseek registry default ("max") is the agent-brain
-    # level and far more than a summarizer needs.
-    reasoning_effort: str = "high"
+    # None = the model's own resolved effort, exactly what the agent's build
+    # (`build_chat_model(model)`) uses — the reasoning parameters are part of the
+    # request the provider matches its prompt cache against, so an override here
+    # would trade cache hits for a cheaper summarizer.
+    reasoning_effort: str | None = None
 
 
 # One batch's parallel fan-out. Mirrors the SDK batch ceiling
@@ -264,14 +265,14 @@ def text_hash(text: str) -> str:
 
 
 def build_generation_llm(model: str, params: GenParams | None = None) -> Any:
-    """Build the generation chat model at the pass's reasoning effort.
+    """Build the generation chat model the way the agent builds its own.
 
     The single source of the generation model's construction: `generate_nodes`
     builds one through here when the caller supplied none, and the hierarchy
     callers (the worker's job child, the manual build script) build their
     one-per-run model through here too — so every path reaches the same
-    provider shape and effort (`GenParams().reasoning_effort`, unless the
-    caller passes params). The caller owns the returned model: close it via
+    provider shape and effort (the model's resolved effort, unless the caller
+    passes `params.reasoning_effort`). The caller owns the returned model: close it via
     `base.lm.factory.close_chat_model` once the pass is done (task #3915).
     """
     from base.lm.factory import build_chat_model

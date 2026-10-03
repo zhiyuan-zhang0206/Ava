@@ -245,14 +245,20 @@ def _install_conn(row: tuple[Any, ...] | None) -> tuple[Database, _FakeConn]:
 
 
 def test_effective_model_overlay_wins() -> None:
-    db, conn = _install_conn(({"llm_model": "deepseek-v4-pro"},))
+    db, conn = _install_conn(({"llm_model": "deepseek-v4-pro"}, {"llm_model": "deepseek-v4-flash"}))
     assert snapshot.agent_effective_model(db, 42, fallback="fallback-x") == "deepseek-v4-pro"
     ((sql, params),) = conn.queries
     assert "agents_meta" in sql and params == (42,)
 
 
+def test_effective_model_is_the_birth_stamp_when_there_is_no_overlay() -> None:
+    """`llm_model` is birth-frozen: an agent born under an older default keeps it."""
+    db, _ = _install_conn(({}, {"llm_model": "deepseek-v4-pro"}))
+    assert snapshot.agent_effective_model(db, 42, fallback="fallback-x") == "deepseek-v4-pro"
+
+
 def test_effective_model_defaults_to_the_fleet_model_without_an_overlay() -> None:
-    db, _ = _install_conn(({},))
+    db, _ = _install_conn(({}, {}))
     assert snapshot.agent_effective_model(db, 42, fallback="fallback-x") == settings.lm.llm_model
 
 
