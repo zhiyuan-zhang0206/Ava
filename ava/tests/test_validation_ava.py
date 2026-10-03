@@ -74,53 +74,56 @@ class TestFilesEntries:
             call()
 
 
+class _FakeHost:
+    """A page host that records what the module functions hand it."""
+
+    def __init__(self) -> None:
+        self.seen: dict[str, Any] = {}
+        self.ready_timeout_s = 1.0
+
+    def register(
+        self, name: str, port: int, title: str | None, serve_dir: str | None, *, ttl: float | None
+    ) -> object:
+        self.seen.update(name=name, title=title, port=port, serve_dir=serve_dir, ttl=ttl)
+        return object()
+
+    def reject_foreign_port_occupant(self, _port: int) -> None:
+        return None
+
+    def wait_until_serving(self, _port: int) -> bool:
+        return True
+
+    def close(self, name: str) -> None:
+        self.seen.update(name=name)
+
+
 class TestUiEntries:
     def test_show_unwraps_name_and_title(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        seen: dict[str, Any] = {}
-        monkeypatch.setattr(
-            _ui,
-            "_register_page",
-            lambda name, port, title, serve_dir, ttl: (  # pyright: ignore[reportUnknownArgumentType]
-                seen.update(name=name, title=title, port=port, serve_dir=serve_dir, ttl=ttl)
-                or object()
-            ),
-        )  # pyright: ignore[reportUnknownArgumentType]
+        host = _FakeHost()
+        monkeypatch.setattr("ava.ui.page_host", lambda: host)
 
         _ui.show(("mypage",), 9999, title=("My Page",))  # pyright: ignore[reportArgumentType]
-        assert seen["name"] == "mypage"
-        assert seen["title"] == "My Page"
-        assert seen["port"] == 9999
+        assert host.seen["name"] == "mypage"
+        assert host.seen["title"] == "My Page"
+        assert host.seen["port"] == 9999
 
     def test_serve_unwraps_dir_and_name(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
-        seen: dict[str, Any] = {}
-        monkeypatch.setattr(_ui, "_reject_foreign_port_occupant", lambda _port: None)  # pyright: ignore[reportUnknownArgumentType]
-        monkeypatch.setattr(_ui, "_wait_until_serving", lambda *_a, **_k: True)  # pyright: ignore[reportUnknownArgumentType]
-        monkeypatch.setattr(
-            _ui,
-            "_register_page",
-            lambda name, port, title, serve_dir, ttl: (  # pyright: ignore[reportUnknownArgumentType]
-                seen.update(name=name, serve_dir=serve_dir, port=port, title=title, ttl=ttl)
-                or object()
-            ),
-        )  # pyright: ignore[reportUnknownArgumentType]
+        host = _FakeHost()
+        monkeypatch.setattr("ava.ui.page_host", lambda: host)
 
         _ui.serve((str(tmp_path),), ("served",), 9998)  # pyright: ignore[reportArgumentType]
-        assert seen["name"] == "served"
-        assert seen["port"] == 9998
-        assert seen["serve_dir"] == str(Path(str(tmp_path)).resolve())
+        assert host.seen["name"] == "served"
+        assert host.seen["port"] == 9998
+        assert host.seen["serve_dir"] == str(Path(str(tmp_path)).resolve())
 
     def test_close_unwraps_name(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        seen: dict[str, Any] = {}
-        monkeypatch.setattr(
-            _ui.gateway_client,
-            "close_page",
-            lambda _aid, name: seen.update(name=name),  # pyright: ignore[reportUnknownArgumentType]
-        )  # pyright: ignore[reportUnknownArgumentType]
+        host = _FakeHost()
+        monkeypatch.setattr("ava.ui.page_host", lambda: host)
 
         _ui.close(("mypage",))  # pyright: ignore[reportArgumentType]
-        assert seen["name"] == "mypage"
+        assert host.seen["name"] == "mypage"
 
     @pytest.mark.parametrize(
         ("call", "match"),

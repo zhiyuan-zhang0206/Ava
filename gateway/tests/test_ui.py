@@ -25,8 +25,9 @@ import pytest
 from fastapi.testclient import TestClient
 
 import ava
+from ava.gateway_client.transport import use_client
 from ava.ui import InvalidPageName, PageClosed
-from base.cluster.machine import reset_identity, set_identity
+from base.cluster.machine import reachable_host, reset_identity, set_identity
 from gateway.app import app
 from tests.fixtures.units import spawn_agent
 
@@ -37,10 +38,20 @@ _HOST = "127.0.0.1"  # loopback — the single-box posture the SDK registers (au
 def _sdk_via_inprocess_gateway(monkeypatch: pytest.MonkeyPatch):
 
     set_identity(host=_HOST)
-    with TestClient(app, base_url="http://test-gateway") as tc:
-        monkeypatch.setattr("ava.gateway_client.transport._client", tc)
+    with TestClient(app, base_url="http://test-gateway") as tc, use_client(tc):
         yield
     reset_identity()
+
+
+def _use_page_host(monkeypatch: pytest.MonkeyPatch, **overrides: Any) -> None:
+    """`ava.ui` calls run against a page host with the given probes / ready timeout."""
+
+    def build() -> ava.ui.PageHost:
+        return ava.ui.PageHost(
+            host=reachable_host(), agent_id=ava.agent_identity.require_agent_id(), **overrides
+        )
+
+    monkeypatch.setattr("ava.ui.page_host", build)
 
 
 def _open_pages(db: psycopg.Connection, agent_id: int) -> list[tuple[Any, ...]]:
@@ -274,8 +285,7 @@ class TestServe:
     def test_serve_passes_ttl(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
         ava.agent_identity._agent_id = spawn_agent()
         captured: dict[str, object] = {}
-        monkeypatch.setattr(ava.ui, "_reject_foreign_port_occupant", lambda _port: None)  # pyright: ignore[reportUnknownArgumentType]
-        monkeypatch.setattr(ava.ui, "_wait_until_serving", lambda *_a, **_kw: True)  # pyright: ignore[reportUnknownArgumentType]
+        _use_page_host(monkeypatch, bindable=lambda *_a: True, health=lambda *_a: "ok:stub")
 
         def _register(_agent_id: int, **kwargs: object) -> dict[str, object]:
             captured.update(kwargs)
@@ -310,7 +320,7 @@ class TestServe:
 
         ava.agent_identity._agent_id = spawn_agent()
         (tmp_path / "index.html").write_text("<h1>x</h1>", encoding="utf-8")
-        monkeypatch.setattr(ui_mod, "_SERVE_READY_TIMEOUT_S", 0.5)
+        _use_page_host(monkeypatch, ready_timeout_s=0.5)
         free = _free_port()
         with pytest.raises(ui_mod.PageError, match="did not come up"):
             ava.ui.serve(str(tmp_path), "nod", port=free)
@@ -412,7 +422,7 @@ class TestServe:
 
         ava.agent_identity._agent_id = spawn_agent()
         (tmp_path / "index.html").write_text("<h1>x</h1>", encoding="utf-8")
-        monkeypatch.setattr(ui_mod, "_SERVE_READY_TIMEOUT_S", 0.5)
+        _use_page_host(monkeypatch, ready_timeout_s=0.5)
         with _SilentServer("127.0.0.1") as silent:
             ava.ui.show("wedged", silent.port)
             with pytest.raises(ui_mod.PageError, match="did not come up"):
