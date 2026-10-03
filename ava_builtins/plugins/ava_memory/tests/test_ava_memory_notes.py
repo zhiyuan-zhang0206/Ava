@@ -12,9 +12,10 @@ from typing import Any
 
 import pytest
 
-from agent.graph.context_notes import _CONTEXT_NOTES, _FRAMEWORK_NOTE_COUNT, context_notes
+from agent.graph.context_notes import FRAMEWORK_NOTES, context_notes
 from agent.state import clear_plugin_registrations
 from base.host.env.agent_slices import AgentSlices
+from base.packages.plugins.extensions import ContextNote, ExtensionRegistry
 
 
 @pytest.fixture(autouse=True)
@@ -50,18 +51,27 @@ def memory_plugin() -> Any:
             del sys.modules[name]
 
 
+def _registry(memory_plugin: Any) -> ExtensionRegistry:
+    """The registry the loader would build with only this plugin enabled."""
+    return ExtensionRegistry((("ava_memory", memory_plugin.contribute()),))
+
+
+def _all_notes(memory_plugin: Any) -> list[ContextNote]:
+    return [*FRAMEWORK_NOTES, *(n for _plugin, n in _registry(memory_plugin).context_notes())]
+
+
 def _framework_only() -> list[str]:
-    return [e.build.__name__ for e in _CONTEXT_NOTES[:_FRAMEWORK_NOTE_COUNT]]
+    return [e.build.__name__ for e in FRAMEWORK_NOTES]
 
 
 def test_plugin_registers_every_memory_note(memory_plugin: Any) -> None:
-    """Importing the plugin appends its three notes past the framework tail."""
-    names = [e.build.__name__ for e in _CONTEXT_NOTES]
+    """The plugin declares its three notes past the framework's."""
+    names = [e.build.__name__ for e in _all_notes(memory_plugin)]
     assert "memory_index_note" in names
     assert "per_agent_memory_note" in names
     assert "inherited_memory_note" in names
-    # ...and they are plugin-contributed, i.e. beyond the framework count, so
-    # `clear_plugin_registrations` drops them on a reload.
+    # ...and they are plugin-contributed, not framework notes, so a reload that drops the plugin
+    # drops them.
     assert "memory_index_note" not in _framework_only()
     assert "per_agent_memory_note" not in _framework_only()
     assert "inherited_memory_note" not in _framework_only()
@@ -80,8 +90,9 @@ def test_notes_render_in_the_documented_rank_order(memory_plugin: Any) -> None:
     while the shared memory index behind them is re-read at every window
     establishment. A note placed after it re-caches on another agent's memory
     write."""
-    names = [e.build.__name__ for e in _CONTEXT_NOTES]
-    ranks = [e.rank for e in _CONTEXT_NOTES]
+    notes = _all_notes(memory_plugin)
+    names = [e.build.__name__ for e in notes]
+    ranks = [e.rank for e in notes]
     by_rank = [n for _, n in sorted(zip(ranks, names, strict=True))]
     assert by_rank == [
         "exec_timeout_note",
@@ -107,7 +118,7 @@ def test_only_the_shared_index_is_grafted_onto_a_fork(memory_plugin: Any) -> Non
     - Per-agent memory names the SOURCE agent's store, so the inherited copy
       renders the new agent wrong: `on_fork` — `_handle_fork` strips the
       inherited note and grafts the new agent's own index."""
-    on_fork = {e.build.__name__ for e in _CONTEXT_NOTES if e.on_fork}
+    on_fork = {e.build.__name__ for e in _all_notes(memory_plugin) if e.on_fork}
     assert "memory_index_note" not in on_fork
     assert "per_agent_memory_note" in on_fork
     # The inherited note carries the SOURCE chain's blocks — also regrafted.
@@ -201,7 +212,10 @@ def test_context_notes_skips_the_stores_that_are_off(
     returning None, which the registry drops."""
     monkeypatch.setattr(memory_plugin.settings.agent, "memory_index_inject_enabled", False)
     monkeypatch.setattr(memory_plugin.settings.agent, "memory_per_agent_inject_enabled", False)
-    tags = [n.additional_kwargs.get("ava_note_tag") for n in context_notes(AgentSlices.resolve())]  # pyright: ignore[reportUnknownMemberType]
+    tags = [
+        n.additional_kwargs.get("ava_note_tag")
+        for n in context_notes(_registry(memory_plugin), AgentSlices.resolve())
+    ]  # pyright: ignore[reportUnknownMemberType]
     assert "memory" not in tags
     assert "agent_memory" not in tags
 

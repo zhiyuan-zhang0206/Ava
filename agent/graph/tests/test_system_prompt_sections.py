@@ -22,6 +22,7 @@ from agent.graph.system_prompt import (
 )
 from base.config import settings
 from base.host.env.agent_slices import AgentSlices
+from base.packages.plugins.extensions import EMPTY, ExtensionRegistry, PluginContributions
 
 
 @pytest.mark.parametrize(
@@ -95,7 +96,7 @@ def test_invest_in_the_future_section_in_full_prompt_when_on(
 ):
     monkeypatch.setattr(settings.agent, "prompt_invest_future_enabled", True)
 
-    prompt = build_system_prompt(AgentSlices.resolve())
+    prompt = build_system_prompt(EMPTY, AgentSlices.resolve())
 
     assert "# Invest in the future" in prompt
     assert "Beyond the task at hand" not in prompt
@@ -107,7 +108,7 @@ def test_invest_in_the_future_section_absent_from_full_prompt_when_off(
 ):
     monkeypatch.setattr(settings.agent, "prompt_invest_future_enabled", False)
 
-    prompt = build_system_prompt(AgentSlices.resolve())
+    prompt = build_system_prompt(EMPTY, AgentSlices.resolve())
 
     assert "# Invest in the future" not in prompt
     assert "Beyond the task at hand" not in prompt
@@ -223,7 +224,7 @@ def test_codeact_section_in_full_prompt_when_on(monkeypatch: pytest.MonkeyPatch)
 
     from agent.graph.system_prompt import build_system_prompt
 
-    prompt = build_system_prompt(AgentSlices.resolve())
+    prompt = build_system_prompt(EMPTY, AgentSlices.resolve())
 
     assert "CodeAct" in prompt
 
@@ -235,7 +236,7 @@ def test_codeact_section_absent_from_full_prompt_when_off(monkeypatch: pytest.Mo
 
     from agent.graph.system_prompt import build_system_prompt
 
-    prompt = build_system_prompt(AgentSlices.resolve())
+    prompt = build_system_prompt(EMPTY, AgentSlices.resolve())
 
     assert "CodeAct" not in prompt
 
@@ -369,7 +370,7 @@ def test_every_narrating_style_renders_a_distinct_section() -> None:
 
 def test_off_style_omits_the_section_entirely(monkeypatch: pytest.MonkeyPatch) -> None:
     """'off' is a gate, not a narration choice: no channel map, no style body,
-    nothing — an empty return, which register_system_prompt_section treats as
+    nothing — an empty return, which `build_system_prompt` treats as
     no contribution to the assembled system prompt."""
     monkeypatch.setattr(settings.agent, "agent_communication_style", "off")
 
@@ -384,7 +385,7 @@ def test_off_style_is_absent_from_the_full_system_prompt(monkeypatch: pytest.Mon
     monkeypatch.setattr(settings.agent, "agent_communication_style", "off")
     from agent.graph.system_prompt import build_system_prompt
 
-    prompt = build_system_prompt(AgentSlices.resolve())
+    prompt = build_system_prompt(EMPTY, AgentSlices.resolve())
 
     assert "# Keeping the user oriented" not in prompt
     assert "# Talking to the user" not in prompt
@@ -507,7 +508,7 @@ def test_user_tone_section_is_present_in_the_full_prompt_when_enabled(
     monkeypatch.setattr(settings.agent, "prompt_user_tone_enabled", enabled)
     monkeypatch.setattr(settings.lm, "llm_model", "deepseek-v4-pro")
 
-    prompt = build_system_prompt(AgentSlices.resolve())
+    prompt = build_system_prompt(EMPTY, AgentSlices.resolve())
 
     assert ("# Communicating with the user" in prompt) is expect_section
 
@@ -521,7 +522,7 @@ def test_knowledge_cutoff_appears_for_known_model(monkeypatch: pytest.MonkeyPatc
     monkeypatch.setattr(settings.lm, "llm_model", "claude-sonnet-5")
     from agent.graph.system_prompt import build_system_prompt
 
-    prompt = build_system_prompt(AgentSlices.resolve())
+    prompt = build_system_prompt(EMPTY, AgentSlices.resolve())
     assert "Knowledge cutoff: 2026-01" in prompt
 
 
@@ -531,7 +532,7 @@ def test_knowledge_cutoff_absent_for_unknown_model(monkeypatch: pytest.MonkeyPat
     monkeypatch.setattr(settings.lm, "llm_model", "unknown-model-v1")
     from agent.graph.system_prompt import build_system_prompt
 
-    prompt = build_system_prompt(AgentSlices.resolve())
+    prompt = build_system_prompt(EMPTY, AgentSlices.resolve())
     assert "Knowledge cutoff:" not in prompt
 
 
@@ -624,7 +625,7 @@ def test_cross_machine_delegation_hint_in_full_prompt_when_on(monkeypatch: pytes
 
     from agent.graph.system_prompt import build_system_prompt
 
-    prompt = build_system_prompt(AgentSlices.resolve())
+    prompt = build_system_prompt(EMPTY, AgentSlices.resolve())
 
     assert _CROSS_MACHINE_DELEGATION_SENTENCE in prompt
     assert prompt.index(_CROSS_MACHINE_DELEGATION_SENTENCE) > prompt.index("# Before you act")
@@ -639,7 +640,7 @@ def test_cross_machine_delegation_hint_absent_from_full_prompt_when_off(
 
     from agent.graph.system_prompt import build_system_prompt
 
-    prompt = build_system_prompt(AgentSlices.resolve())
+    prompt = build_system_prompt(EMPTY, AgentSlices.resolve())
 
     assert _CROSS_MACHINE_DELEGATION_SENTENCE not in prompt
 
@@ -678,7 +679,6 @@ def test_plugin_prompt_section_records_an_activation(monkeypatch: pytest.MonkeyP
     nothing and records nothing."""
     from agent.graph import system_prompt
     from base.packages.plugins import activation
-    from base.packages.plugins.context import PluginContext
 
     recorded: list[tuple[str, str, str, str]] = []
 
@@ -696,20 +696,10 @@ def test_plugin_prompt_section_records_an_activation(monkeypatch: pytest.MonkeyP
     def silent_section(_slices: object) -> str:
         return ""
 
-    saved = list(system_prompt._SYSTEM_PROMPT_SECTIONS)
-    try:
-        # Isolate the build: touching the `ava` namespace earlier in the process
-        # (any test that hits an `ava.*` miss) loads the builtin plugins, whose
-        # sections are registered WITH plugin identity — their records would
-        # land in `recorded` and this exact-list assertion would fail depending
-        # on what ran before. Build with only the two sections under test.
-        system_prompt._SYSTEM_PROMPT_SECTIONS[:] = []
-        with PluginContext("myplugin"):
-            system_prompt.register_system_prompt_section(loud_section)
-            system_prompt.register_system_prompt_section(silent_section)
-        system_prompt.build_system_prompt(AgentSlices.resolve())
-    finally:
-        system_prompt._SYSTEM_PROMPT_SECTIONS[:] = saved
+    registry = ExtensionRegistry(
+        (("myplugin", PluginContributions(system_prompt_sections=(loud_section, silent_section))),)
+    )
+    system_prompt.build_system_prompt(registry, AgentSlices.resolve())
 
     assert [(p, s, i) for p, s, i, _d in recorded] == [
         ("myplugin", "systemPromptSections", "loud_section")

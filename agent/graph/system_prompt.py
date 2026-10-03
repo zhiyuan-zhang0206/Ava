@@ -1,7 +1,8 @@
 """System-prompt extension point for framework and plugin behavior sections.
 
-`build_system_prompt()` combines the base prompt, SDK overview, and sections
-registered through `register_system_prompt_section()` in registration order.
+`build_system_prompt()` combines the base prompt, SDK overview, the framework's own sections
+(`FRAMEWORK_SECTIONS`, in reading order) and the sections plugins declare in `contribute()`
+(`base.packages.plugins.extensions`), which arrive through the `ExtensionRegistry` the caller holds.
 """
 
 import contextlib
@@ -9,16 +10,15 @@ import hashlib
 import inspect
 import io
 import logging
-import weakref
-from collections.abc import Callable, Sequence
+from collections.abc import Sequence
 from types import ModuleType, SimpleNamespace
 from typing import Any
 
 from agent.hooks.history_dump import workspace_section_hint
 from base.config import settings
 from base.host.env.agent_slices import AgentSlices
-from base.packages.plugins import activation, contributions
-from base.packages.plugins.context import current_plugin_name
+from base.packages.plugins import activation
+from base.packages.plugins.extensions import ExtensionRegistry, SectionFn
 from base.paths import workspace_dir
 
 from ._codeact import _codeact_section
@@ -41,30 +41,6 @@ def _resolved(setting: str, slices: AgentSlices) -> Any:
     from base.lm.registry import resolve_setting
 
     return resolve_setting(setting, model=slices.brain.llm_model)
-
-
-SectionFn = Callable[[AgentSlices], str]
-_SYSTEM_PROMPT_SECTIONS: list[SectionFn] = []
-
-# section fn -> the plugin that registered it, read by `build_system_prompt` to
-# attribute a section that actually contributed text. Weak keys so an entry dies
-# with the function object; framework sections are absent (they register outside
-# a `PluginContext`) and therefore stay untelemetered.
-_SECTION_PLUGIN: weakref.WeakKeyDictionary[SectionFn, str] = weakref.WeakKeyDictionary()
-
-
-def register_system_prompt_section(fn: SectionFn) -> SectionFn:
-    """Register a system prompt section contributor — spliced into the system prompt at boot.
-
-    Function signature `(slices: AgentSlices) -> str`, the agent's configuration for the turn; empty
-    return treated as no contribution. `build_system_prompt(slices)` runs them in registration order when called.
-    """
-    _SYSTEM_PROMPT_SECTIONS.append(fn)
-    contributions.record("systemPromptSections", fn.__name__, detail=fn.__module__)
-    plugin = current_plugin_name()
-    if plugin is not None:
-        _SECTION_PLUGIN[fn] = plugin
-    return fn
 
 
 # Framework sections render by bucket: SDK detail -> Conversation -> Conduct -> Capabilities.
@@ -156,7 +132,6 @@ def effective_sdk_expand(sdk_disable: Sequence[str]) -> list[str]:
     return resolved
 
 
-@register_system_prompt_section
 def _sdk_expand_section(slices: AgentSlices) -> str:
     """Render the effective expand list (plugin registrations + env
     AVA_SDK_EXPAND, see `effective_sdk_expand`) as full `ava.help(ava.<path>)`
@@ -234,7 +209,6 @@ def _sdk_expand_section(slices: AgentSlices) -> str:
     return f"# Expanded SDK reference\n\nFull contracts for your most-used namespaces.\n\n{body}"
 
 
-@register_system_prompt_section
 def _prefer_sdk_section(slices: AgentSlices) -> str:
     """Toggle via settings.agent.prompt_prefer_sdk_enabled (env AVA_SYSTEM_PROMPT_PREFER_SDK,
     default on). One line steering the agent to the SDK over plain-Python /
@@ -249,12 +223,10 @@ def _prefer_sdk_section(slices: AgentSlices) -> str:
 
 
 # CodeAct batching lives in `_codeact.py` (this module is at its line ceiling);
-# registered here so the section order stays the reading order this module lays
-# out — right after prefer-SDK, before keep-it-simple.
-register_system_prompt_section(_codeact_section)
+# listed in `FRAMEWORK_SECTIONS` so the section order stays the reading order this module
+# lays out — right after prefer-SDK, before keep-it-simple.
 
 
-@register_system_prompt_section
 def _keep_it_simple_section(slices: AgentSlices) -> str:
     """Toggle via settings.agent.prompt_keep_it_simple_enabled (env
     AVA_SYSTEM_PROMPT_KEEP_IT_SIMPLE, default on). Prefer mechanically correct,
@@ -348,7 +320,6 @@ _COMMUNICATION_STYLE_SECTIONS = {
 }
 
 
-@register_system_prompt_section
 def _communication_style_section(slices: AgentSlices) -> str:
     """Selected by agent_communication_style (env
     AVA_AGENT_COMMUNICATION_STYLE, default 'off'). Three styles carry the
@@ -369,7 +340,6 @@ _VERY_LIGHT_USER_TONE = "Be honest and direct, and keep honesty from turning int
 _USER_TONE_SECTIONS = {"gemini": _STRONG_USER_TONE, "claude": _VERY_LIGHT_USER_TONE}
 
 
-@register_system_prompt_section
 def _user_tone_section(slices: AgentSlices) -> str:
     """Independent from ``agent_communication_style`` (narration volume vs tone), with a per-family strength gradient; every Claude model defaults off unless explicitly enabled."""
     if not _resolved("prompt_user_tone_enabled", slices):
@@ -380,7 +350,6 @@ def _user_tone_section(slices: AgentSlices) -> str:
     return f"# Communicating with the user\n\n{_USER_TONE_SECTIONS.get(spec.provider if spec is not None else '', _LIGHT_USER_TONE)}"
 
 
-@register_system_prompt_section
 def _output_conciseness_section(slices: AgentSlices) -> str:
     """Toggle via settings.agent.prompt_output_conciseness_enabled (env
     AVA_SYSTEM_PROMPT_CONCISENESS, default on). Shape the text content: answer-first,
@@ -400,7 +369,6 @@ def _output_conciseness_section(slices: AgentSlices) -> str:
     )
 
 
-@register_system_prompt_section
 def _ui_delivery_section(slices: AgentSlices) -> str:
     """Toggle via settings.agent.prompt_ui_delivery_enabled (env
     AVA_SYSTEM_PROMPT_UI_DELIVERY, default on). Content for the user goes through
@@ -425,7 +393,6 @@ def _ui_delivery_section(slices: AgentSlices) -> str:
 
 
 # --- Conduct: how you behave and what judgment to apply ---
-@register_system_prompt_section
 def _outcome_reporting_section(slices: AgentSlices) -> str:
     """Toggle via settings.agent.prompt_outcome_reporting_enabled (env
     AVA_SYSTEM_PROMPT_REPORTING, default on). Report results honestly — no rounding a
@@ -441,7 +408,6 @@ def _outcome_reporting_section(slices: AgentSlices) -> str:
     )
 
 
-@register_system_prompt_section
 def _action_caution_section(slices: AgentSlices) -> str:
     """Toggle via settings.agent.prompt_action_caution_enabled (env AVA_SYSTEM_PROMPT_CAUTION,
     default on). Confirm before hard-to-reverse or outward-facing actions; treat
@@ -459,7 +425,6 @@ def _action_caution_section(slices: AgentSlices) -> str:
     )
 
 
-@register_system_prompt_section
 def _align_before_action_section(slices: AgentSlices) -> str:
     """Toggle via settings.agent.prompt_align_before_action_enabled (env AVA_SYSTEM_PROMPT_ALIGN,
     default on). Before large or hard-to-redo work, and right after exploring or
@@ -525,7 +490,6 @@ _STEP_PARALLEL = (
 )
 
 
-@register_system_prompt_section
 def _delegation_check_section(slices: AgentSlices) -> str:
     """Toggle via settings.agent.prompt_delegation_check_enabled (env
     AVA_SYSTEM_PROMPT_DELEGATION_CHECK, default on). Before taking on any work, run a
@@ -568,7 +532,6 @@ _CROSS_MACHINE_DELEGATION_HINT = (
 )
 
 
-@register_system_prompt_section
 def _cross_machine_delegation_section(slices: AgentSlices) -> str:
     """Toggle via settings.agent.prompt_cross_machine_delegation_enabled (env
     AVA_SYSTEM_PROMPT_CROSS_MACHINE_DELEGATION, default on). One sentence,
@@ -580,7 +543,6 @@ def _cross_machine_delegation_section(slices: AgentSlices) -> str:
     return _CROSS_MACHINE_DELEGATION_HINT
 
 
-@register_system_prompt_section
 def _file_driven_work_section(slices: AgentSlices) -> str:
     """Toggle via settings.agent.prompt_file_driven_work_enabled (env
     AVA_SYSTEM_PROMPT_FILE_DRIVEN_WORK, default on). When working on complex multi-step
@@ -610,7 +572,6 @@ def _file_driven_work_section(slices: AgentSlices) -> str:
     )
 
 
-@register_system_prompt_section
 def _temporal_awareness_section(slices: AgentSlices) -> str:
     """Toggle via settings.agent.prompt_temporal_awareness_enabled (env
     AVA_SYSTEM_PROMPT_TEMPORAL, default on). For events and releases after the training
@@ -662,7 +623,6 @@ _INVEST_IN_THE_FUTURE_SECTION = (
 )
 
 
-@register_system_prompt_section
 def _invest_in_the_future_section(slices: AgentSlices) -> str:
     """Toggle via settings.agent.prompt_invest_future_enabled (env
     AVA_SYSTEM_PROMPT_INVEST_FUTURE, default on through the per-model floor).
@@ -674,7 +634,6 @@ def _invest_in_the_future_section(slices: AgentSlices) -> str:
     return _INVEST_IN_THE_FUTURE_SECTION
 
 
-@register_system_prompt_section
 def _workspace_section(slices: AgentSlices) -> str:
     """One-paragraph pointer to the per-agent workspace dir. Empty before a
     process identity is established (snapshot test / dev REPL renders) — the
@@ -712,29 +671,34 @@ def _workspace_section(slices: AgentSlices) -> str:
     )
 
 
-# Capabilities lives in `capabilities.py` (line budget) and is registered here so
+# Capabilities lives in `capabilities.py` (line budget) and is listed here so
 # the section order stays the reading order this module lays out.
-register_system_prompt_section(capabilities_section)
 
 
-# Sections registered above this line are framework-owned (registered at module
-# import). Everything appended later comes from a plugin via load_extensions;
-# clear_plugin_system_prompt_sections() truncates back to this count so a reload
-# drops only the plugin tail — framework sections are never re-registered.
-_FRAMEWORK_SECTION_COUNT = len(_SYSTEM_PROMPT_SECTIONS)
+# The framework-owned sections, in reading order. Plugin sections follow them.
+FRAMEWORK_SECTIONS: tuple[SectionFn, ...] = (
+    _sdk_expand_section,
+    _prefer_sdk_section,
+    _codeact_section,
+    _keep_it_simple_section,
+    _communication_style_section,
+    _user_tone_section,
+    _output_conciseness_section,
+    _ui_delivery_section,
+    _outcome_reporting_section,
+    _action_caution_section,
+    _align_before_action_section,
+    _delegation_check_section,
+    _cross_machine_delegation_section,
+    _file_driven_work_section,
+    _temporal_awareness_section,
+    _invest_in_the_future_section,
+    _workspace_section,
+    capabilities_section,
+)
 
 
-def clear_plugin_system_prompt_sections() -> None:
-    """Drop plugin-contributed system prompt sections, keeping the framework-owned ones."""
-    del _SYSTEM_PROMPT_SECTIONS[_FRAMEWORK_SECTION_COUNT:]
-
-
-def plugin_system_prompt_sections() -> tuple[SectionFn, ...]:
-    """Return the plugin-contributed system prompt sections (the tail past the framework-owned ones)."""
-    return tuple(_SYSTEM_PROMPT_SECTIONS[_FRAMEWORK_SECTION_COUNT:])
-
-
-def build_system_prompt(slices: AgentSlices) -> str:
+def build_system_prompt(extensions: ExtensionRegistry, slices: AgentSlices) -> str:
     """Build the full system prompt: base + SDK overview + plugin contributions.
 
     `_claim` node calls once when `state.messages` is empty; afterward
@@ -761,15 +725,17 @@ You are Ava, an agent that acts by writing Python code — call the
 tool calls. Before using any `ava.*` function, you must explicitly `import ava` in your code.
 """
         ]
-    for section_fn in _SYSTEM_PROMPT_SECTIONS:
+    plugin_sections = tuple(extensions.system_prompt_sections())
+    for plugin, section_fn in (*((None, fn) for fn in FRAMEWORK_SECTIONS), *plugin_sections):
         contribution = section_fn(slices)
         if contribution:
             parts.append(contribution)
             # Activation telemetry (philosophy §6): a plugin section that rendered text is prompt
             # real estate the plugin is spending. Length + digest identify *which* variant landed
             # without storing the text; this runs at spawn/compact only, so no per-turn cost.
+            # Framework sections carry no plugin and stay untelemetered.
             activation.record(
-                _SECTION_PLUGIN.get(section_fn),
+                plugin,
                 "systemPromptSections",
                 section_fn.__name__,
                 model=slices.brain.llm_model,

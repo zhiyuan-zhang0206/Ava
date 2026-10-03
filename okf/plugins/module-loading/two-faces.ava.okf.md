@@ -15,7 +15,8 @@ run agent-authored code — its imports must stay off the agent runtime (no
 `agent.state`, `agent.hooks`, `agent.graph.*`, or LangChain chain;
 `agent/tests/test_lazy_child_imports.py` locks this in clean subprocesses).
 `agent_runtime.py` is the optional **face** carrying the agent-side
-registrations (state fields, graph hooks, system-prompt sections).
+registrations (state fields, graph hooks) and its `contribute()` declaration
+(system-prompt sections, context notes — `build_registry()` reads it; no import side effect).
 
 Which faces load is the caller's choice:
 - `load_extensions(surface=True)` — surfaces only, no reset. The child's

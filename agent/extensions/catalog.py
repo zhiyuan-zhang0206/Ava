@@ -5,7 +5,7 @@ Two halves, deliberately different in kind:
 
 - **Surfaces** — the framework's extension points. The list of surfaces and the
   one-line note on each are the only hand-written facts here; every signature is
-  rendered from the live `register_*` object at call time, so a changed
+  rendered from the live `register_*` / `contribute()` object at call time, so a changed
   parameter list shows up in the catalog without anyone editing it.
 - **Contributions** — what the plugins on THIS machine registered, read off the
   attribution ledger (`base.packages.plugins.contributions`) that every `register_*`
@@ -137,22 +137,23 @@ SURFACES: tuple[Surface, ...] = (
     ),
     Surface(
         id="systemPromptSections",
-        entry_points=("agent.graph.system_prompt:register_system_prompt_section",),
+        entry_points=("base.packages.plugins.extensions:PluginContributions",),
         manifest_key="systemPromptSections",
-        protocol="section() -> str",
+        protocol="section(slices: AgentSlices) -> str",
         note=(
-            "appends a section to the system prompt, after the framework's own; an empty "
-            "return contributes nothing"
+            "`system_prompt_sections` of what `contribute()` returns: appended to the system "
+            "prompt after the framework's own; an empty return contributes nothing"
         ),
     ),
     Surface(
         id="contextNotes",
-        entry_points=("agent.graph.context_notes:register_context_note",),
+        entry_points=("base.packages.plugins.extensions:ContextNote",),
         manifest_key=None,
-        protocol="note() -> HumanMessage | None",
+        protocol="note(slices: AgentSlices) -> HumanMessage | None",
         note=(
-            "a standing note laid down whenever a context window is established; rank orders "
-            "the head, on_fork also grafts it onto a forked agent"
+            "`context_notes` of what `contribute()` returns: a standing note laid down whenever "
+            "a context window is established; rank orders the head, on_fork also grafts it onto "
+            "a forked agent"
         ),
     ),
     Surface(
@@ -315,8 +316,10 @@ def build_catalog() -> Catalog:
     from one that must keep a pristine `ava`.
     """
     from agent.extensions import load_extensions
+    from agent.extensions.registry import build_registry
 
     config = load_extensions()
+    registry = build_registry()
     discovered = enable_config.installed_plugin_dirs()
     repo_plugins = _repo_plugins_dir()
 
@@ -334,7 +337,10 @@ def build_catalog() -> Catalog:
                 builtin=directory.is_relative_to(repo_plugins),
                 directory=directory,
                 description=enable_config.parse_description(directory / "plugin.py"),
-                contributions=contribution_ledger.contributions_of(name),
+                contributions=(
+                    *contribution_ledger.contributions_of(name),
+                    *registry.records(name),
+                ),
                 manifest=load_manifest(directory),
             )
         )

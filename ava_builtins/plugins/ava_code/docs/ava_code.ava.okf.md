@@ -19,21 +19,20 @@ tags:
 ### System prompt injection (×2)
 
 ```python
-@register_system_prompt_section
+# declared in `contribute()` (agent_runtime.py), not registered
 def _coding_tools_section(slices: AgentSlices) -> str:
     # cwd / ava.files / ava.shell stub descriptions + coding convention preamble
     # (fail fast, don't reinvent, worktree + PR workflow, AGENTS.md/CLAUDE.md role)
 ```
 
 ```python
-@register_system_prompt_section
 def _engineering_workflow_section(slices: AgentSlices) -> str:
     # Loose debug / bug-fix workflow advice (reproduce → root cause → fix)
     # Gated by "ava_code_workflow" ∈ settings.agent.system_prompt_extra
     # (env AVA_SYSTEM_PROMPT_EXTRA), **default empty = not injected by default**
 ```
 
-These two are registered via `agent/graph/system_prompt.py`'s `register_system_prompt_section`,
+These two are declared in `contribute()`'s `PluginContributions.system_prompt_sections`,
 and appended at runtime to the agent's system prompt (the `_engineering_workflow_section` is off by default, not injected).
 
 ### Context file auto-injection (in-memory, inside the exec turn)

@@ -6,19 +6,18 @@ set down at the two moments a window is established — an agent's first wake, a
 the turn after any compaction — so a note is written once here rather than at
 each of those call sites.
 
-Registration mirrors `_SYSTEM_PROMPT_SECTIONS`: framework notes register at
-import of this module, plugins append theirs when `load_extensions` imports
-them, and `clear_plugin_registrations` truncates back to
-`_FRAMEWORK_NOTE_COUNT` so a plugin reload drops only the plugin tail.
+The framework's own notes are the constant `FRAMEWORK_NOTES` below; a plugin declares its notes
+in `contribute()` (`base.packages.plugins.extensions`), and the notes it contributes arrive here
+through the `ExtensionRegistry` the caller holds — nothing registers at import.
 
-Rendering order is by `rank`, not registration order: the reading order the
+Rendering order is by `rank`, not declaration order: the reading order the
 head is supposed to have — exec timeout, then the shared memory index, then the
 agent id, then the per-agent memory index, then preloaded skills — spans the
 framework/plugin boundary, so "framework notes first, then plugin notes in load
 order" cannot express it. Lower ranks sit closer to the SystemMessage; equal
-ranks keep registration order (the sort is stable). Notes registered without an
-explicit rank default to `DEFAULT_RANK` and land after every ranked note, still
-in registration order among themselves.
+ranks keep declaration order (the sort is stable). Notes declared without an
+explicit rank default to `DEFAULT_NOTE_RANK` and land after every ranked note, still
+in declaration order among themselves.
 
 `on_fork` marks the notes a forked agent also needs. A fork inherits the source
 agent's whole conversation, so its window is never established from empty and
@@ -28,8 +27,7 @@ the inherited history gets *wrong* — see `fork_notes`.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Sequence
-from dataclasses import dataclass
+from collections.abc import Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -41,10 +39,8 @@ from base.clock import Clock
 from base.config import settings
 from base.host.env.agent_slices import AgentSlices
 from base.log import logger
-from base.packages.plugins import contributions
+from base.packages.plugins.extensions import ContextNote, ExtensionRegistry
 from base.paths import workspace_dir
-
-NoteBuilder = Callable[[AgentSlices], HumanMessage | None]
 
 # The rank scale for the standing head — the reading order, lowest first:
 # the operational constants (exec timeout, then the cluster clock), then the
@@ -70,77 +66,34 @@ RANK_AGENT_ID = 30
 RANK_PER_AGENT_MEMORY = 40
 RANK_INHERITED_MEMORY = 45
 RANK_PRELOADED_SKILLS = 50
-DEFAULT_RANK = 100
 
 
-@dataclass(frozen=True)
-class ContextNote:
-    """One registered note: how to build it, where it sits in the head, and
-    whether a fork needs it too.
-
-    `build` returns `None` when the note has nothing to say this time — its
-    layer is disabled, its source file is absent, its list is empty. That is the
-    normal way a note opts out; the registry never asks why.
-
-    `rank` orders the rendered head: lower ranks sit closer to the
-    SystemMessage; equal ranks keep registration order (stable sort).
-    """
-
-    build: NoteBuilder
-    on_fork: bool
-    rank: int
+def _ordered(extensions: ExtensionRegistry, *, fork_only: bool) -> list[ContextNote]:
+    """The framework's notes then every plugin's, in declaration order."""
+    plugin_notes = [note for _plugin, note in extensions.context_notes()]
+    return [n for n in (*FRAMEWORK_NOTES, *plugin_notes) if n.on_fork or not fork_only]
 
 
-_CONTEXT_NOTES: list[ContextNote] = []
-
-
-def register_context_note(
-    *, on_fork: bool = False, rank: int = DEFAULT_RANK
-) -> Callable[[NoteBuilder], NoteBuilder]:
-    """Register a standing context note — laid down by `init_context` whenever a
-    context window is established.
-
-    `on_fork=True` also grafts it onto a forked agent's inherited history; use it
-    only for notes that inherited history renders wrong (a stale snapshot, an
-    identity naming the source agent), not for everything a fresh agent would get.
-
-    `rank` sets where the note lands in the head — lower is closer to the
-    SystemMessage, ties keep registration order. Framework and ava_memory notes
-    pin explicit ranks (see the scale above); a plugin that does not care leaves
-    the default and renders after every ranked note.
-    """
-
-    def decorate(fn: NoteBuilder) -> NoteBuilder:
-        _CONTEXT_NOTES.append(ContextNote(build=fn, on_fork=on_fork, rank=rank))
-        contributions.record("contextNotes", fn.__name__, detail=f"rank={rank} on_fork={on_fork}")
-        return fn
-
-    return decorate
-
-
-def context_notes(slices: AgentSlices) -> list[HumanMessage]:
-    """Every registered note in rank order (ties: registration order), skipping
+def context_notes(extensions: ExtensionRegistry, slices: AgentSlices) -> list[HumanMessage]:
+    """Every note in rank order (ties: declaration order), skipping
     the ones with nothing to say.
 
     Built fresh at each call: notes that read state off disk (the memory
     indexes) then pick up whatever was written during the window just compacted
     away.
     """
-    built = [
-        (entry.rank, note) for entry in _CONTEXT_NOTES if (note := entry.build(slices)) is not None
-    ]
-    return [note for _, note in sorted(built, key=lambda pair: pair[0])]
+    return _rendered(_ordered(extensions, fork_only=False), slices)
 
 
-def fork_notes(slices: AgentSlices) -> list[HumanMessage]:
+def fork_notes(extensions: ExtensionRegistry, slices: AgentSlices) -> list[HumanMessage]:
     """The `on_fork` subset, in the same rank order as `context_notes` — what a
     freshly forked agent needs grafted onto the history it inherited from the
     agent it was forked from."""
-    built = [
-        (entry.rank, note)
-        for entry in _CONTEXT_NOTES
-        if entry.on_fork and (note := entry.build(slices)) is not None
-    ]
+    return _rendered(_ordered(extensions, fork_only=True), slices)
+
+
+def _rendered(entries: list[ContextNote], slices: AgentSlices) -> list[HumanMessage]:
+    built = [(entry.rank, note) for entry in entries if (note := entry.build(slices)) is not None]
     return [note for _, note in sorted(built, key=lambda pair: pair[0])]
 
 
@@ -183,7 +136,6 @@ def _format_timeout_display(timeout_s: float) -> str:
     return f"{timeout_s:.0f} seconds"
 
 
-@register_context_note(rank=RANK_EXEC_TIMEOUT)
 def exec_timeout_note(_slices: AgentSlices) -> HumanMessage | None:
     """A context note stating the execute_code hard timeout.
 
@@ -215,7 +167,6 @@ def _utc_offset(moment: datetime) -> str:
     return f"{raw[:3]}:{raw[3:]}"
 
 
-@register_context_note(rank=RANK_TIMEZONE)
 def timezone_note(_slices: AgentSlices) -> HumanMessage | None:
     """A context note declaring the cluster's timezone once, so the timestamps
     themselves don't have to carry it.
@@ -303,7 +254,6 @@ def _workspace_path(agent_id: int) -> str | None:
         return str(ws)
 
 
-@register_context_note(on_fork=True, rank=RANK_AGENT_ID)
 def agent_id_note(_slices: AgentSlices) -> HumanMessage | None:
     """A context note stating the agent's own identity: id, label, machine,
     workspace path — each clause fail-soft.
@@ -350,7 +300,6 @@ _PRELOADED_SKILLS_FRAMING = (
 )
 
 
-@register_context_note(on_fork=True, rank=RANK_PRELOADED_SKILLS)
 def preloaded_skills_note(slices: AgentSlices) -> HumanMessage | None:
     """The full SKILL.md body of every skill named in
     `Prompt.skills_to_expand_at_start`, concatenated into one note.
@@ -452,19 +401,11 @@ def fork_tail_skills_note(names: list[str], sdk_disable: Sequence[str]) -> Human
     )
 
 
-# Count of framework-owned notes, snapshotted after the registrations above (all
-# at module import). Everything appended later comes from a plugin via
-# `load_extensions`; `clear_plugin_context_notes` truncates back to this count
-# so a plugin reload drops only the plugin tail — the framework notes are never
-# re-registered in-process, so clearing them would lose them for the rest of the run.
-_FRAMEWORK_NOTE_COUNT = len(_CONTEXT_NOTES)
-
-
-def clear_plugin_context_notes() -> None:
-    """Drop plugin-contributed context notes, keeping the framework-owned ones."""
-    del _CONTEXT_NOTES[_FRAMEWORK_NOTE_COUNT:]
-
-
-def plugin_context_notes() -> tuple[ContextNote, ...]:
-    """Return the plugin-contributed context notes (the tail past the framework-owned ones)."""
-    return tuple(_CONTEXT_NOTES[_FRAMEWORK_NOTE_COUNT:])
+# The framework-owned standing notes. Plugins declare theirs in `contribute()`; both kinds meet in
+# `context_notes` / `fork_notes`, which order them by rank.
+FRAMEWORK_NOTES: tuple[ContextNote, ...] = (
+    ContextNote(build=exec_timeout_note, rank=RANK_EXEC_TIMEOUT),
+    ContextNote(build=timezone_note, rank=RANK_TIMEZONE),
+    ContextNote(build=agent_id_note, on_fork=True, rank=RANK_AGENT_ID),
+    ContextNote(build=preloaded_skills_note, on_fork=True, rank=RANK_PRELOADED_SKILLS),
+)

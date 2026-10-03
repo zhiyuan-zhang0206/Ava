@@ -10,12 +10,11 @@ in `plugin.py` and loads in agent-launched children too (task #3633).
 
 from __future__ import annotations
 
-from agent.graph.system_prompt import register_system_prompt_section
 from base.config import settings
 from base.host.env.agent_slices import AgentSlices
+from base.packages.plugins.extensions import PluginContributions
 
 
-@register_system_prompt_section
 def _fleet_self_section(_slices: AgentSlices) -> str:
     return (
         "## Fleet\n\n"
@@ -150,7 +149,6 @@ def _fleet_self_section(_slices: AgentSlices) -> str:
     )
 
 
-@register_system_prompt_section
 def _reduce_context_switch_section(_slices: AgentSlices) -> str:
     """Toggle via settings.agent.reduce_context_switch (env
     AVA_REDUCE_CONTEXT_SWITCH, default on): the platform default for how work
@@ -186,4 +184,11 @@ def _reduce_context_switch_section(_slices: AgentSlices) -> str:
         "permission first. Progress and conclusions go to your manager, who "
         "digests and aggregates before anything reaches the human's queue. "
         "With no manager, deliver directly."
+    )
+
+
+def contribute() -> PluginContributions:
+    """What this plugin declares for the agent runtime."""
+    return PluginContributions(
+        system_prompt_sections=(_fleet_self_section, _reduce_context_switch_section)
     )

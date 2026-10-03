@@ -13,7 +13,8 @@ Every plugin loads in up to two faces:
   Its imports must stay off the agent runtime (no `agent.state`,
   `agent.hooks`, `agent.graph.*`, or LangChain chain).
 - ``agent_runtime.py`` — optional sibling file: the plugin's **agent-runtime
-  registrations** (state fields, graph hooks, system-prompt sections).
+  registrations** (state fields, graph hooks) and its `contribute()` declaration
+  (system-prompt sections, context notes).
   Imported on the full path only (the agent process: `load_agent_faces()`
   after the host boot's `scan_and_load`, and `load_extensions()` per graph
   build). An exec / watcher / schedule child never imports it — its boot
@@ -28,7 +29,11 @@ Entry points:
   loaded the surfaces (host boot after `scan_and_load`; a child upgrading to
   the full load because its request carries a state snapshot).
 
-The package's one submodule, `catalog.py`, reads back what the loaded plugins
+`registry.py` builds the `ExtensionRegistry` of what the loaded faces declare through
+`contribute()` (the host builds it after the graph and hands it to its turns); it lives apart because
+the declaration types import LangChain, which a child's surface load must not pull.
+
+`catalog.py` reads back what the loaded plugins
 registered (`ava plugins inspect`); it runs this loader in the calling process.
 This module stays the loader itself so `importlib.import_module("agent.extensions")`
 (the `ava` layer's runtime-string reach) keeps resolving to it.

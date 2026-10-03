@@ -23,6 +23,7 @@ from base.agents import GatewayUnavailable
 from base.cluster.machine import machine_name
 from base.config import settings
 from base.host.env.agent_slices import AgentSlices
+from base.packages.plugins.extensions import ExtensionRegistry
 from base.paths import ava_home
 
 OPEN = inherit.INHERITABLE_OPEN
@@ -354,7 +355,8 @@ def test_fork_notes_graft_the_new_agent_s_own_chain(chain: _FakeChain, memory_pl
     chain.rows = [_local_row(600401, label="Fork parent")]
     from agent.graph.context_notes import fork_notes
 
-    notes = fork_notes(AgentSlices.resolve())
+    registry = ExtensionRegistry((("ava_memory", memory_plugin.contribute()),))
+    notes = fork_notes(registry, AgentSlices.resolve())
     inherited = [n for n in notes if _note_tag(n) == "inherited_memory"]
     assert len(inherited) == 1
     assert "fork chain block" in _note_text(inherited[0])

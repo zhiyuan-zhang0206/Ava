@@ -2,14 +2,10 @@
 
 A full plugin load (`agent.extensions.load_extensions`, reached through
 `_build.load_extensions()`, the plugin catalog, or a lazy `ava.*` miss) fills
-process-global registries at once: prompt sections, `ava.<namespace>`
+process-global registries at once: `ava.<namespace>`
 surfaces and members, hooks, state fields. Nothing used to put them back, so
-one plugin-loading test left the whole set in its xdist worker. A later test
-that cleaned up with `ava.clear_registered_namespaces()` then dropped the
-namespaces but not the sections, and the next `build_system_prompt()` called
-the ava_code section, which needs `ava.cwd`: `module 'ava' has no attribute
-'cwd'`. The failure hit only the tests that happened to share that worker
-(CI backend shard 14/16 on PR #3513).
+one plugin-loading test left the whole set in its xdist worker, and a later test that cleaned
+up only part of it saw a half-registered surface (CI backend shard 14/16 on PR #3513).
 
 The guard below returns the registries to empty after any test that started
 with none and ended with some. It uses the framework's own reset,
@@ -51,27 +47,19 @@ def _surface_registrations() -> bool:
 
 
 def plugin_registrations_present() -> bool:
-    """Whether any plugin prompt section, context note, SDK namespace/member or state field is
-    registered.
+    """Whether any plugin SDK namespace/member or state field is registered.
 
-    The prompt-section and context-note checks use a real `importlib.import_module` (not
-    `sys.modules.get`) once the agent layer is known to be loaded, so a future rename of
-    `agent.graph.system_prompt` / `agent.graph.context_notes` fails this check loudly
-    (ImportError) instead of the string lookup silently returning None and this guard going
-    permanently green.
+    Prompt sections and context notes are not process-global any more: a plugin declares them
+    through `contribute()` and the registry built from them is a value the caller holds.
+    The state-field check uses a real `importlib.import_module` once the agent layer is known to be
+    loaded, so a rename of `agent.state` fails this check loudly (ImportError) instead of a string
+    lookup silently returning None and this guard going permanently green.
     """
     if "agent.state" not in sys.modules:
-        # No agent layer, so no prompt sections or state fields: only the SDK surface can hold any.
+        # No agent layer, so no state fields: only the SDK surface can hold any.
         return _surface_registrations()
     state = importlib.import_module("agent.state")
-    system_prompt = importlib.import_module("agent.graph.system_prompt")
-    context_notes = importlib.import_module("agent.graph.context_notes")
-    return bool(
-        system_prompt.plugin_system_prompt_sections()
-        or context_notes.plugin_context_notes()
-        or _surface_registrations()
-        or state._EXTRA_FIELDS
-    )
+    return bool(_surface_registrations() or state._EXTRA_FIELDS)
 
 
 def _unstamp_registered_namespaces() -> None:
