@@ -510,17 +510,17 @@ def stop_services(
     timeout: float, *, keep_terminals: bool = False, selected: frozenset[str] | None = None
 ) -> list[str]:
     """Ask the sole root owner to stop drained services without force escalation."""
-    from cli.commands.lifecycle.root_driver import _root_tree_selection, _stop_root_service_tree
+    from cli.commands.lifecycle.root_driver import root_tree_selection, stop_root_service_tree
 
     deadline = deadline_after(timeout)
     if not keep_terminals:
         require_no_terminals()
-    names = _root_tree_selection()
+    names = root_tree_selection()
     selected_names = sorted(names if selected is None else names.keys() & selected)
     if selected is not None and not selected_names:
         return []
     preserve = frozenset(unit for name, unit in names.items() if name not in selected_names)
-    _stop_root_service_tree(
+    stop_root_service_tree(
         preserve=preserve,
         timeout_s=remaining(deadline),
         force=False,

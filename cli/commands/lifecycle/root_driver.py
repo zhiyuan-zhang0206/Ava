@@ -49,7 +49,7 @@ def complete_boot_start() -> None:
     home = ava_home()
     if not in_boot_unit():
         return
-    snapshot = _root_status(_root_client())
+    snapshot = _root_status(root_client())
     if snapshot is None:
         raise _RootDriverError("cannot hand systemd an unobservable root")
     _require_root_owner(snapshot)
@@ -93,7 +93,7 @@ def _root_tree_roster(roles: MachineRoles, launch_skip: set[str]) -> tuple[Servi
     )
 
 
-def _root_client(*, timeout: float = 5.0) -> Any:
+def root_client(*, timeout: float = 5.0) -> Any:
     """A blocking client bound to this cluster's root control socket."""
     from base.native_process.root_control.client import RootClient
     from base.paths import root_run_dir
@@ -479,7 +479,7 @@ def admit_live_start(
     """Observe before any converge/schema write; reuse only identical inputs."""
     from cli.commands.lifecycle.start_generation import launch_digest
 
-    status = _root_status(_root_client())
+    status = _root_status(root_client())
     if status is None:
         require_root_absent()
         return False
@@ -513,7 +513,7 @@ def _ensure_root_service_tree(
 
     manifest["launch_digest"] = launch_digest(repo, env, home=ava_home())
     manifests = root_manifests_path()
-    client = _root_client()
+    client = root_client()
     try:
         status = _root_status(client)
         if status is not None:
@@ -661,7 +661,7 @@ def _wait_for_root_services_ready(
     from base.deploy.progress_timeout import NON_CRITICAL_SERVICE_READY_TIMEOUT_S
     from cli.commands._probe import CRITICAL_SERVICE_SESSIONS
 
-    client = _root_client()
+    client = root_client()
     started_at = time.monotonic()
     deadline = started_at + timeout_s
     non_critical_deadline = started_at + NON_CRITICAL_SERVICE_READY_TIMEOUT_S
@@ -703,12 +703,12 @@ def require_root_absent() -> None:
 
 def _root_tree_plan(preserve: frozenset[str] = frozenset()) -> list[str]:
     """Display names for the selected exact root units."""
-    return sorted(name for name, unit in _root_tree_selection().items() if unit not in preserve)
+    return sorted(name for name, unit in root_tree_selection().items() if unit not in preserve)
 
 
-def _root_tree_selection() -> dict[str, str]:
+def root_tree_selection() -> dict[str, str]:
     """Map the home's qualified display names to the root's exact unit IDs."""
-    status = _root_status(_root_client())
+    status = _root_status(root_client())
     if status is None:
         require_root_absent()
         return {}
@@ -744,7 +744,7 @@ def _stop_dormant_helper_root(deadline: float) -> None:
     require_root_absent()
 
 
-def _stop_root_service_tree(
+def stop_root_service_tree(
     *,
     preserve: frozenset[str],
     timeout_s: float = _ROOT_STOP_TIMEOUT_S,
@@ -761,7 +761,7 @@ def _stop_root_service_tree(
     from base.paths import root_run_dir
 
     deadline = time.monotonic() + timeout_s
-    client = _root_client(timeout=timeout_s)
+    client = root_client(timeout=timeout_s)
     status = _root_status(client)
     if status is None:
         require_root_absent()
@@ -785,7 +785,7 @@ def _stop_root_service_tree(
         remaining_s = deadline - time.monotonic()
         if remaining_s <= 0:
             raise _RootDriverError("service stop deadline expired; custody retained")
-        client = _root_client(timeout=remaining_s)
+        client = root_client(timeout=remaining_s)
         response = client.force_down(unit_id) if force else client.down(unit_id)
         _call_ok(response, f"down {unit_id}")
         print(f"  ✓ ava-root unit {session_name(unit_id)} stopped")

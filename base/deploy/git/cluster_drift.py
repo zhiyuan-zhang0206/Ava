@@ -42,10 +42,6 @@ def prod_source_dir() -> Path | None:
     return ava_home() / "source"
 
 
-# Legacy private spelling — kept so existing monkeypatches keep resolving.
-_prod_source_dir = prod_source_dir
-
-
 def _git_ro(*args: str, repo: Path | None = None) -> str | None:
     """Run a read-only git command in the prod source checkout, returning trimmed
     stdout.
@@ -56,7 +52,7 @@ def _git_ro(*args: str, repo: Path | None = None) -> str | None:
     absent / not a git repo / git is unavailable / the command fails — every
     caller treats "cannot read" as "nothing to report" rather than an error.
     """
-    source = repo if repo is not None else _prod_source_dir()
+    source = repo if repo is not None else prod_source_dir()
     if source is None or not (source / ".git").exists():
         return None
     try:
@@ -85,7 +81,7 @@ def running_from_prod_source() -> bool:
     Returns False when the prod source cannot be resolved — unknown layout, so no
     comparison is licensed.
     """
-    source = _prod_source_dir()
+    source = prod_source_dir()
     if source is None:
         return False
     try:

@@ -196,7 +196,7 @@ def _force_stop(
     # Explicit force interrupts the host process. Agent metadata/checkpoints
     # remain untouched; the next host uses its existing owner recovery. This
     # path does not fabricate drain receipts and remains usable offline.
-    _root_driver_commands._stop_root_service_tree(preserve=root_preserve, force=True)
+    _root_driver_commands.stop_root_service_tree(preserve=root_preserve, force=True)
 
     # 1.4) a teardown that asked for the browser down finishes the job: kill any
     # Chrome still running on THIS cluster's profile. The session kill above

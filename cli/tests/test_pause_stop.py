@@ -73,7 +73,7 @@ def test_root_stop_refusal_keeps_hold_without_force(
         assert kwargs.get("force", False) is False
         raise RuntimeError("root service did not stop")
 
-    monkeypatch.setattr(_root_driver_commands, "_stop_root_service_tree", refuse)
+    monkeypatch.setattr(_root_driver_commands, "stop_root_service_tree", refuse)
     assert entry.cmd_pause(timeout=0.2) == 1
     assert service.poll() is None
     assert psutil.Process(service.pid).create_time() == before
@@ -107,7 +107,7 @@ def test_normal_start_releases_hold_only_after_successful_readiness(
 ) -> None:
     drained()
     monkeypatch.setattr("ops.cluster_pause._unpause_local_cluster", lambda: None)
-    monkeypatch.setattr(agent_pause, "_wake", lambda _hold: None)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(agent_pause, "publish_inbound_wake", lambda *_a: None)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(start_serving, "is_serving", lambda: True)
 
     @resume_after_start
@@ -295,7 +295,7 @@ def test_explicit_force_stops_host_and_preserves_only_pause_terminals(
     root_calls: list[dict[str, object]] = []
     monkeypatch.setattr(
         _root_driver_commands,
-        "_stop_root_service_tree",
+        "stop_root_service_tree",
         lambda **kw: root_calls.append(kw),  # pyright: ignore[reportUnknownArgumentType] — untyped test double
     )
     terminal = PtySessionBackend()

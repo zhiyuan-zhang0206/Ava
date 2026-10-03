@@ -690,7 +690,7 @@ def test_collector_preparation_never_controls_a_running_service_tree(
         pytest.fail("Preparation cannot independently reconcile a live root")
 
     monkeypatch.setattr(oc, "ensure_otel_collector", _fail_ensure_otel_collector)
-    monkeypatch.setattr("cli.commands.lifecycle.root_driver._root_client", no_root_control)
+    monkeypatch.setattr("cli.commands.lifecycle.root_driver.root_client", no_root_control)
     oc.ensure_otel_collector_step(ctx)
 
 

@@ -275,7 +275,7 @@ def _services_phase_action(*, preserved: frozenset[str], deadline: float) -> Cal
     """Stop services through their root owner, preserving explicitly retained units."""
     import cli.commands.lifecycle.root_driver as _root_driver_commands
 
-    return lambda: _root_driver_commands._stop_root_service_tree(
+    return lambda: _root_driver_commands.stop_root_service_tree(
         preserve=preserved, timeout_s=remaining(deadline)
     )
 

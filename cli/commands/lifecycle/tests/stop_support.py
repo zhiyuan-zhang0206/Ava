@@ -32,9 +32,9 @@ Launcher = Callable[[str, str], subprocess.Popen[str]]
 def home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     monkeypatch.setenv("AVA_HOME", str(tmp_path))
     monkeypatch.setattr(stop, "get_shell_backend", lambda: SimpleNamespace(list_sessions=list))
-    monkeypatch.setattr(root_driver, "_root_tree_selection", dict)
-    monkeypatch.setattr(root_driver, "_stop_root_service_tree", Mock(return_value=0))
-    monkeypatch.setattr(_root_driver_commands, "_stop_root_service_tree", Mock(return_value=0))
+    monkeypatch.setattr(root_driver, "root_tree_selection", dict)
+    monkeypatch.setattr(root_driver, "stop_root_service_tree", Mock(return_value=0))
+    monkeypatch.setattr(_root_driver_commands, "stop_root_service_tree", Mock(return_value=0))
     monkeypatch.setattr(_root_driver_commands, "_root_tree_plan", Mock(return_value=[]))
 
     # Stop intentionally consumes the ambient override. Every independent test
@@ -88,7 +88,7 @@ def drained() -> None:
 
 
 def dependencies(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(_root_driver_commands, "_stop_root_service_tree", lambda **_kwargs: 0)  # pyright: ignore[reportUnknownArgumentType] — untyped test double
+    monkeypatch.setattr(_root_driver_commands, "stop_root_service_tree", lambda **_kwargs: 0)  # pyright: ignore[reportUnknownArgumentType] — untyped test double
     monkeypatch.setattr(_root_driver_commands, "_root_tree_plan", lambda _preserve: [])  # pyright: ignore[reportUnknownArgumentType] — untyped test double
     monkeypatch.setattr(command, "pause_agents", lambda _timeout, **_kw: drained())  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(command, "machine_role", lambda: frozenset({"agent-runner"}))

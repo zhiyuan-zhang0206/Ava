@@ -351,9 +351,7 @@ def _init_prod_source(source: Path, *, branch: str = "main") -> None:
 def test_detect_prod_source_drift_absent(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """No source repo → None (nothing to check)."""
 
-    monkeypatch.setattr(
-        "base.deploy.git.cluster_drift._prod_source_dir", lambda: tmp_path / "source"
-    )
+    monkeypatch.setenv("AVA_HOME", str(tmp_path))
     assert _cluster_drift.prod_source_branch_drift() is None
 
 
@@ -361,9 +359,7 @@ def test_detect_prod_source_drift_on_main(monkeypatch: pytest.MonkeyPatch, tmp_p
     """Prod source on `main` → None (no drift)."""
 
     _init_prod_source(tmp_path / "source")
-    monkeypatch.setattr(
-        "base.deploy.git.cluster_drift._prod_source_dir", lambda: tmp_path / "source"
-    )
+    monkeypatch.setenv("AVA_HOME", str(tmp_path))
     assert _cluster_drift.prod_source_branch_drift() is None
 
 
@@ -374,9 +370,7 @@ def test_detect_prod_source_drift_feature_branch(
     incident: an agent developing in the prod tree instead of a worktree)."""
 
     _init_prod_source(tmp_path / "source", branch="ava-7/fix")
-    monkeypatch.setattr(
-        "base.deploy.git.cluster_drift._prod_source_dir", lambda: tmp_path / "source"
-    )
+    monkeypatch.setenv("AVA_HOME", str(tmp_path))
     assert _cluster_drift.prod_source_branch_drift() == "ava-7/fix"
 
 

@@ -93,9 +93,9 @@ def test_explicit_keep_preserves_real_idle_terminal_during_service_stop(
             calls.append(kwargs)
 
         monkeypatch.setattr(
-            root_driver, "_root_tree_selection", lambda: {"ava-agent-host": "agent-host"}
+            root_driver, "root_tree_selection", lambda: {"ava-agent-host": "agent-host"}
         )
-        monkeypatch.setattr(root_driver, "_stop_root_service_tree", record_stop)
+        monkeypatch.setattr(root_driver, "stop_root_service_tree", record_stop)
         with pytest.raises(RuntimeError, match="will not kill or replay"):
             stop.stop_services(3)
         assert not calls
@@ -634,10 +634,10 @@ def test_selected_service_stop_delegates_exact_units_to_root(
 
     monkeypatch.setattr(
         root_driver,
-        "_root_tree_selection",
+        "root_tree_selection",
         lambda: {"ava-gateway": "gateway", "ava-agent-host": "agent-host"},
     )
-    monkeypatch.setattr(root_driver, "_stop_root_service_tree", record_stop)
+    monkeypatch.setattr(root_driver, "stop_root_service_tree", record_stop)
     assert stop.stop_services(3, selected=frozenset({"ava-agent-host"})) == ["ava-agent-host"]
     assert len(calls) == 1
     assert calls[0]["preserve"] == frozenset({"gateway"})
@@ -650,11 +650,11 @@ def test_selected_service_stop_delegates_exact_units_to_root(
 def test_root_stop_failure_is_not_reported_as_success(
     home: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr(root_driver, "_root_tree_selection", lambda: {"ava-gateway": "gateway"})
+    monkeypatch.setattr(root_driver, "root_tree_selection", lambda: {"ava-gateway": "gateway"})
 
     def refuse(**_kwargs: object) -> None:
         raise RuntimeError("root custody unavailable")
 
-    monkeypatch.setattr(root_driver, "_stop_root_service_tree", refuse)
+    monkeypatch.setattr(root_driver, "stop_root_service_tree", refuse)
     with pytest.raises(RuntimeError, match="root custody unavailable"):
         stop.stop_services(3)

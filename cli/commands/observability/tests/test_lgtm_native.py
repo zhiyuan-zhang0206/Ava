@@ -12,7 +12,6 @@ import yaml
 from base.config import settings
 from base.telemetry.lgtm_local import BACKENDS, backend_urls, service_argv
 from base.telemetry.loki_index_labels import validate_loki_deploy_config
-from cli.commands.converge.spec import ConvergeCtx
 from cli.commands.observability import lgtm_native
 
 _REAL_VERIFY_LOKI = lgtm_native._verify_loki
@@ -31,7 +30,7 @@ def _darwin_lifecycle(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def _repo() -> Path:
-    return Path(__file__).resolve().parents[3]
+    return Path(__file__).resolve().parents[4]
 
 
 def _native_dir(home: Path) -> Path:
@@ -450,7 +449,7 @@ def test_render_configs_validates_loki_before_writing(
 def test_native_step_does_not_touch_an_unmarked_home(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    ctx = ConvergeCtx(
+    ctx = lgtm_native.ConvergeCtx(
         repo=_repo(),
         ava_home=tmp_path / "home",
         roles=frozenset({"gateway"}),
@@ -581,7 +580,7 @@ def test_native_listener_ports_are_independent_of_external_query_urls(
     ):
         monkeypatch.setattr(settings.observability, f"lgtm_{name}_port", port)
     monkeypatch.setattr(settings.observability, "telemetry_loki_url", "https://query.example/loki")
-    repo = Path(__file__).resolve().parents[3]
+    repo = Path(__file__).resolve().parents[4]
     lgtm_native._render_configs(repo, native, home)
     loki = yaml.safe_load((native / "config/loki.yaml").read_text())
     assert loki["server"]["http_listen_port"] == 53100
@@ -604,7 +603,7 @@ def test_matching_versions_from_another_platform_are_downloaded_again(
     native = home / "lgtm/native"
     native.mkdir(parents=True)
     monkeypatch.setattr(lgtm_native, "platform_tag", lambda: "linux_amd64")
-    repo = Path(__file__).resolve().parents[3]
+    repo = Path(__file__).resolve().parents[4]
     assets = lgtm_native._load_versions(repo)
     for name, asset in assets.items():
         (native / f"version-{name}").write_text(asset["version"])
@@ -641,3 +640,30 @@ def test_pinned_loki_parser_rejection_blocks_preparation(
             "-verify-config",
         ]
     ]
+
+
+def test_native_preparation_downloads_only_selected_backend(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    downloads: list[str] = []
+
+    def assets(_repo: Path) -> dict[str, dict[str, str]]:
+        return {name: {"version": "test"} for name in lgtm_native.BACKENDS}
+
+    def download(name: str, _version: str, _asset: dict[str, str], _native: Path) -> None:
+        downloads.append(name)
+
+    def render(_repo: Path, _native: Path, _home: Path) -> None:
+        pass
+
+    def no_loki(_home: Path) -> None:
+        pytest.fail("Unselected Loki must not require its executable or validator")
+
+    monkeypatch.setattr(lgtm_native, "platform_tag", lambda: "darwin_arm64")
+    monkeypatch.setattr(lgtm_native, "_load_versions", assets)
+    monkeypatch.setattr(lgtm_native, "_download_and_verify", download)
+    monkeypatch.setattr(lgtm_native, "_render_configs", render)
+    monkeypatch.setattr(lgtm_native, "_verify_loki", no_loki)
+    monkeypatch.setattr(lgtm_native, "_render_grafana_admin_password", no_loki)
+    lgtm_native.ensure_lgtm_native(tmp_path, tmp_path / "home", services=frozenset({"prometheus"}))
+    assert downloads == ["prometheus"]
