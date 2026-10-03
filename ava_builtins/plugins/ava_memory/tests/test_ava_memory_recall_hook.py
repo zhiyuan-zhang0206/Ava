@@ -24,12 +24,13 @@ from agent.state import build_agent_state, clear_plugin_registrations
 from ava import gateway_client
 from base.agents.context import AvaContext
 from base.host.env.agent_slices import AgentSlices
+from base.packages.plugins.extensions import EMPTY
 
 
 @pytest.fixture
 def _loaded() -> Any:
     """Load ava_memory through the real plugin-registration path, so the hook
-    instance under test is the registered one (same fixture shape as
+    instance under test is the one `contribute()` declares (same fixture shape as
     test_ava_memory_notes.py)."""
     from base.packages.plugins.config_registration import bind_from_disk
     from base.packages.plugins.context import PluginContext
@@ -70,7 +71,7 @@ def _hook_env(_loaded: Any, monkeypatch: pytest.MonkeyPatch) -> Any:
 
 
 def _state(messages: list[AnyMessage], **fields: Any):
-    return build_agent_state()(messages=messages, **fields)
+    return build_agent_state(EMPTY)(messages=messages, **fields)
 
 
 def _runtime() -> Runtime[AvaContext]:

@@ -10,8 +10,8 @@ now passes `allowed_msgpack_modules=checkpoint_msgpack_allowlist()`.
 Guards:
 - the five nested sub-states round-trip silently under the allowlist serde
   (and warn under the default permissive serde — the regression this fixes);
-- plugin classes registered via `register_plugin_state` enter the allowlist
-  automatically (a plugin field holding a BaseModel instance crosses the
+- plugin classes a caller passes in (the classes a registry declares) enter the
+  allowlist (a plugin field holding a BaseModel instance crosses the
   checkpointer as that class);
 - unknown types degrade to their raw dict under the allowlist (documented
   behavior — the permissive default is a future break, the allowlist is not);
@@ -33,19 +33,9 @@ from agent.state import (
     ContextReset,
     MemoryState,
     checkpoint_msgpack_allowlist,
-    clear_plugin_registrations,
-    register_plugin_state,
 )
-from base.packages.plugins.context import PluginContext
 
 _SERDE_LOGGER = "langgraph.checkpoint.serde.jsonplus"
-
-
-@pytest.fixture(autouse=True)
-def _reset_plugin_registrations():
-    clear_plugin_registrations()
-    yield
-    clear_plugin_registrations()
 
 
 def _allowlist_serde() -> JsonPlusSerializer:
@@ -172,15 +162,20 @@ def test_default_permissive_serde_warns_for_same_types(
 # ── plugin classes enter the allowlist automatically ──────────────────────
 
 
-def test_allowlist_covers_registered_plugin_state_classes() -> None:
+def test_allowlist_covers_declared_plugin_state_classes() -> None:
     class MyPluginState(BaseModel):
         counter: int = 0
 
-    with PluginContext("my_plugin"):
-        register_plugin_state(MyPluginState)
+    allow = checkpoint_msgpack_allowlist((MyPluginState,))
+    assert (MyPluginState.__module__, MyPluginState.__name__) in allow
+
+
+def test_allowlist_omits_plugin_state_classes_not_passed() -> None:
+    class MyPluginState(BaseModel):
+        counter: int = 0
 
     allow = checkpoint_msgpack_allowlist()
-    assert (MyPluginState.__module__, MyPluginState.__name__) in allow
+    assert (MyPluginState.__module__, MyPluginState.__name__) not in allow
 
 
 def test_allowlist_static_entries_always_present() -> None:

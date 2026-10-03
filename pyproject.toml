@@ -213,6 +213,7 @@ ignore_imports = [
     "services.agent_host.* -> agent.graph",
     # The daemon is the composition root that builds the plugin `ExtensionRegistry` once the graph
     # (and with it every agent_runtime face) is loaded, and hands it to `AgentHost`.
+    "services.agent_host.daemon -> agent.extensions",
     "services.agent_host.daemon -> agent.extensions.registry",
     # The host catches native fatal errors to persist the halted/circuit state
     # and flush its checkpoint before settling the turn. Import only the taxonomy leaf.

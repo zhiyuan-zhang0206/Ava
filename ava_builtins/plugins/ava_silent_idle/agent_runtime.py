@@ -14,12 +14,13 @@ from langchain_core.messages import AIMessage
 from langchain_core.runnables import RunnableConfig
 from langgraph.runtime import Runtime
 
-from agent.hooks import Hook, register_before_llm
+from agent.hooks import Hook
 from agent.hooks.compact import auto_compact_will_fire
 from agent.messages import NoteTag, system_note_message
 from agent.state import AgentState
 from base.agents.context import AvaContext
 from base.log import logger
+from base.packages.plugins.extensions import PluginContributions
 
 _NUDGE = "The previous turn produced reasoning but no output. You must now produce either text or a tool call. If your task is complete, state so in text — do not end a turn with reasoning alone."
 
@@ -73,4 +74,8 @@ class _SilentIdleContinueHook(Hook):
 
 
 silent_idle_continue_before_llm = _SilentIdleContinueHook()
-register_before_llm(silent_idle_continue_before_llm)
+
+
+def contribute() -> PluginContributions:
+    """What this plugin declares for the agent runtime."""
+    return PluginContributions(before_llm=(silent_idle_continue_before_llm,))

@@ -5,14 +5,12 @@ boundary reports the failure, preserves history, and durably halts until new
 inbound work arrives. A consumed user compaction request is not replayed.
 
 Compaction is a core capability (Issue #1284) — this module is always active,
-not gated behind a plugin. The before_llm hook is registered by
-`register_compact_hooks()`, called from `build_graph()`.
+not gated behind a plugin. Its before_llm hook is one of
+`agent.hooks.framework.framework_hooks()`.
 
 Exports:
 - `generate_summary(messages, llm) -> summary`: pure function that runs the
   Compaction LLM over the whole conversation and returns the summary text.
-- `register_compact_hooks()`: registers the model-free before_llm reminder
-  hook. Called once at graph build time.
 - The compaction live-run events (`emit_compact_started` / `emit_compact_finished`)
   live in `agent/hooks/compact_events.py` (file line budget).
 
@@ -49,7 +47,7 @@ from langgraph.runtime import Runtime
 from psycopg_pool import AsyncConnectionPool
 
 from agent.graph.interrupt import ModelInterruptedError, interruptible_model, subscribe_interrupt
-from agent.hooks import Hook, register_before_llm
+from agent.hooks import Hook
 from agent.hooks.compact_events import emit_compact_finished, emit_compact_started
 from agent.hooks.history_dump import dump_history, history_dump_note
 from agent.llm.cache import ainvoke_with_cache_retry
@@ -785,13 +783,3 @@ class _CompactReminderHook(Hook):
 
 
 _compact_reminder = _CompactReminderHook()
-
-
-def register_compact_hooks() -> None:
-    """Register the built-in compact before_llm hook.
-
-    Called once at graph build time (from `build_graph`). Because compact is
-    now a core capability (Issue #1284), this registration is unconditional
-    and does not depend on any plugin enable/disable config.
-    """
-    register_before_llm(_compact_reminder)

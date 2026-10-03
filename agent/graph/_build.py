@@ -5,23 +5,21 @@ build_graph does not take them; the caller passes them via
 `graph.ainvoke(..., context=AvaContext(...))`. Node functions access them via
 `runtime.context.X`.
 
-At startup, `load_extensions()` reads `$AVA_HOME/plugins_config.json` and
-imports the `plugin.py` of every enabled plugin, by path — builtin and external
-alike, one loop — followed by each plugin's `agent_runtime.py` face (state
-fields, hooks, prompt sections). The loader lives in `agent.extensions` (task
-#3633 moved it off this module so surface-only processes never need the graph
-kernel); this module calls it directly for the graph build. The
+Plugins reach the graph as a value: the caller loads them (`agent.extensions.load_extensions()`),
+builds the `ExtensionRegistry` of what they declare (`agent.extensions.registry.build_registry()`)
+and passes it in. The graph is a function of that registry: its hooks run in the hook container
+nodes, its state classes shape the dynamic `AgentState`. The loader lives in `agent.extensions`
+(task #3633 moved it off this module so surface-only processes never need the graph kernel); the
 import mechanics and the fail-soft contract live in `ava.sdk_surface.plugin_loader`
 (`load_plugin_module` / `safe_load_plugin_module`), the same primitives
-`ava.sdk_surface.plugin_loader.scan_and_load` uses at host boot, so both
-production load paths agree on module name, package context, `sys.modules`
-identity, and containment.
-A repeat call re-executes the module already in `sys.modules` rather than
+`ava.sdk_surface.plugin_loader.scan_and_load` uses at host boot, so both production load paths
+agree on module name, package context, `sys.modules` identity, and containment.
+A repeat load re-executes the module already in `sys.modules` rather than
 binding a new one, so a plugin module's identity is stable for the life of the
 process. Layer A wrap monkey-patches the process's ava module; the exec child
 re-runs the plugin surface load at its own boot, so agent code there sees the
 wrapped version too. Config decides what is imported; not imported = not
-registered.
+declared.
 """
 
 from langgraph.checkpoint.base import BaseCheckpointSaver
@@ -29,8 +27,8 @@ from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
 
-from agent.extensions import load_extensions
 from agent.hooks import make_hook_runner
+from agent.hooks.framework import framework_hooks
 from agent.impersonation import protect_native_hooks
 from agent.nodes import (
     AFTER_EXEC,
@@ -45,6 +43,7 @@ from agent.nodes import (
 )
 from agent.state import BaseAgentState, build_agent_state
 from base.agents.context import AvaContext
+from base.packages.plugins.extensions import ExtensionRegistry, GraphHook, HookPoint
 
 from ._init_context import init_context_node
 from .claim.node import claim_node
@@ -71,11 +70,22 @@ def _after_exec_default_next(_state: BaseAgentState) -> NodeName:
     return CLAIM
 
 
+def _hooks_at(
+    point: HookPoint, extensions: ExtensionRegistry
+) -> list[tuple[str | None, GraphHook]]:
+    """The hooks one edge runs: every plugin's, then the framework's own."""
+    framework: list[tuple[str | None, GraphHook]] = [
+        (None, hook) for hook in framework_hooks()[point]
+    ]
+    return [*extensions.hooks(point), *framework]
+
+
 def build_graph(
-    checkpointer: BaseCheckpointSaver | None = None,
+    checkpointer: BaseCheckpointSaver | None,
+    extensions: ExtensionRegistry,
 ) -> CompiledStateGraph[BaseAgentState, AvaContext, BaseAgentState, BaseAgentState]:
     """Build 8-Node self-cycling graph — deps injected via ainvoke(context=AvaContext);
-    this function only takes checkpointer.
+    this function takes the checkpointer and the plugin registry.
 
     8-Node topology:
         START → after_init → init_context → claim → before_llm → llm → before_exec → exec → after_exec
@@ -111,40 +121,44 @@ def build_graph(
     single-arg StateNode protocol, but runtime accepts the (state, runtime,
     config) multi-arg signature. Functionally correct, just stub doesn't narrow.
     """
-    load_extensions()
-
-    # Register built-in hooks. Must run after load_extensions() because
-    # clear_plugin_registrations() (called at the top of load_extensions)
-    # clears all hooks including built-in ones. Repair registers first:
-    # it guards the message history every hook after it (compact's
-    # force-compact summarization) may feed to an LLM.
-    from agent.hooks.capabilities import register_capabilities_hooks
-    from agent.hooks.compact import register_compact_hooks
-    from agent.hooks.repair import register_repair_hooks
-
-    register_repair_hooks()
-    register_compact_hooks()
-    # Last: the capability-index drift check appends a note to whatever history
-    # survives repair's guard and compact's possible full replacement.
-    register_capabilities_hooks()
-
-    g = StateGraph(build_agent_state(), context_schema=AvaContext)
+    g = StateGraph(build_agent_state(extensions), context_schema=AvaContext)
     g.add_node(  # type: ignore[arg-type]
-        AFTER_INIT, protect_native_hooks(make_hook_runner("after_init", default_next=INIT_CONTEXT))
+        AFTER_INIT,
+        protect_native_hooks(
+            make_hook_runner(
+                "after_init", default_next=INIT_CONTEXT, hooks=_hooks_at("after_init", extensions)
+            )
+        ),
     )
     g.add_node(INIT_CONTEXT, protect_native_hooks(init_context_node))  # type: ignore[arg-type]
     g.add_node(CLAIM, claim_node)  # type: ignore[arg-type]
     g.add_node(  # type: ignore[arg-type]
-        BEFORE_LLM, protect_native_hooks(make_hook_runner("before_llm", default_next=LLM))
+        BEFORE_LLM,
+        protect_native_hooks(
+            make_hook_runner(
+                "before_llm", default_next=LLM, hooks=_hooks_at("before_llm", extensions)
+            )
+        ),
     )
     g.add_node(LLM, llm_node)  # type: ignore[arg-type]
     g.add_node(  # type: ignore[arg-type]
-        BEFORE_EXEC, protect_native_hooks(make_hook_runner("before_exec", default_next=EXEC))
+        BEFORE_EXEC,
+        protect_native_hooks(
+            make_hook_runner(
+                "before_exec", default_next=EXEC, hooks=_hooks_at("before_exec", extensions)
+            )
+        ),
     )
     g.add_node(EXEC, protect_native_hooks(exec_node))  # type: ignore[arg-type]
     g.add_node(  # type: ignore[arg-type]
         AFTER_EXEC,
-        protect_native_hooks(make_hook_runner("after_exec", default_next=_after_exec_default_next)),
+        protect_native_hooks(
+            make_hook_runner(
+                "after_exec",
+                default_next=_after_exec_default_next,
+                hooks=_hooks_at("after_exec", extensions),
+            )
+        ),
     )
     g.add_edge(START, AFTER_INIT)
     if checkpointer is None:

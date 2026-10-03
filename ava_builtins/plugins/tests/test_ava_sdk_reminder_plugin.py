@@ -28,6 +28,7 @@ from ava_builtins.plugins.ava_sdk_reminder._state import (
     mentions_watcher,
 )
 from base.agents.context import AvaContext
+from base.packages.plugins.extensions import ExtensionRegistry
 
 
 def _pin_compact_budget(
@@ -49,12 +50,11 @@ def _pin_compact_budget(
 
 @pytest.fixture
 def _loaded() -> Iterator[Any]:
-    """Load plugins.ava_sdk_reminder via the real plugin-registration path.
+    """Import the ava_sdk_reminder agent-runtime face fresh.
     Compact is now a core capability (Issue #1284) — its state fields live
     directly on BaseAgentState (nested compact/memory, etc.) and its config comes
     from base.config.settings. No separate plugin module to load.
-    Teardown clears registrations + unloads the module so the hooks do not
-    leak into other tests.
+    Teardown unloads the module so it does not leak into other tests.
     """
     from base.packages.plugins.config_registration import bind_from_disk
     from base.packages.plugins.context import PluginContext
@@ -64,13 +64,8 @@ def _loaded() -> Iterator[Any]:
         if name.startswith("ava_builtins.plugins.ava_sdk_reminder"):
             del sys.modules[name]
 
-    # Register built-in compact hooks (mirrors build_graph).
-    from agent.hooks.compact import register_compact_hooks
-
-    register_compact_hooks()
-
     with PluginContext("ava_sdk_reminder"):
-        # The state field + hooks live in the agent-runtime face (task #3633).
+        # The state class + hooks live in the agent-runtime face (task #3633).
         from ava_builtins.plugins.ava_sdk_reminder import agent_runtime as _plugin
 
     bind_from_disk()
@@ -84,7 +79,11 @@ def _loaded() -> Iterator[Any]:
 
 
 def _state(messages: list[AnyMessage], **fields: Any):
-    return build_agent_state()(messages=messages, **fields)
+    """AgentState carrying the loaded face's declared state (`_loaded` has run)."""
+    from ava_builtins.plugins.ava_sdk_reminder import agent_runtime
+
+    extensions = ExtensionRegistry((("ava_sdk_reminder", agent_runtime.contribute()),))
+    return build_agent_state(extensions)(messages=messages, **fields)
 
 
 def _runtime() -> Runtime[AvaContext]:
@@ -925,8 +924,8 @@ async def test_real_runner_compaction_wins_no_note(
     """
     from langgraph.graph.message import add_messages
 
-    from agent.hooks import HOOKS, make_hook_runner
     from agent.hooks import compact as compact_mod
+    from agent.hooks import make_hook_runner
 
     # Force auto-compact to fire on any history.
     _pin_compact_budget(monkeypatch, hard_tokens=1)
@@ -945,22 +944,18 @@ async def test_real_runner_compaction_wins_no_note(
     compact_hook = _compact_reminder
     reminder_hook = _loaded.sdk_reminder_agent_reply_before_llm
 
-    saved = list(HOOKS["before_llm"])
-    HOOKS["before_llm"][:] = (
-        [reminder_hook, compact_hook] if reminder_first else [compact_hook, reminder_hook]
-    )
-    try:
-        runner = make_hook_runner("before_llm", default_next="llm")
-        sys_msg = SystemMessage(content="<sys>")
-        msgs: list[AnyMessage] = [
-            sys_msg,
-            *(HumanMessage(content="x" * 1000, id=f"h{i}") for i in range(5)),
-            _agent_inbound(source="agent:9"),
-        ]
-        state = _state(msgs, compact=CompactState(version=0))
-        cmd = await runner(state, _runtime_for_runner(), _config())
-    finally:
-        HOOKS["before_llm"][:] = saved
+    reminder_entry = ("ava_sdk_reminder", reminder_hook)
+    compact_entry = (None, compact_hook)
+    hooks = [reminder_entry, compact_entry] if reminder_first else [compact_entry, reminder_entry]
+    runner = make_hook_runner("before_llm", default_next="llm", hooks=hooks)
+    sys_msg = SystemMessage(content="<sys>")
+    msgs: list[AnyMessage] = [
+        sys_msg,
+        *(HumanMessage(content="x" * 1000, id=f"h{i}") for i in range(5)),
+        _agent_inbound(source="agent:9"),
+    ]
+    state = _state(msgs, compact=CompactState(version=0))
+    cmd = await runner(state, _runtime_for_runner(), _config())
 
     assert cmd.goto == "llm"
     hook_update = cast("dict[str, object]", cmd.update)

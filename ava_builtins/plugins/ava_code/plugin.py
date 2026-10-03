@@ -64,7 +64,7 @@ from ._walk import find_context_files_along_path, project_skill_roots
 _files_resolve = _ava_files_mod.resolve
 
 # ── ava.cwd SDK namespace registration — runs before the agent-runtime face's
-# register_plugin_state (loaded right after this surface), so a plugin
+# state declaration (its face loads right after this surface), so a plugin
 # double-load (test fixture / dev hot-reload) hits the namespace conflict first
 # (`PluginNamespaceConflictError`, PR #192's first line of defense) rather than
 # the state-field reducer-function-identity-mismatch annotation conflict

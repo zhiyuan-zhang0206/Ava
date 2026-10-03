@@ -1,6 +1,6 @@
 """Real PostgreSQL consent, checkpoint hydration and the external SDK effects of an attachment: native checkpoint reads, borrowed sender and lease-log recording."""
 
-from typing import Annotated, Any
+from typing import Annotated
 from uuid import uuid4
 
 import psycopg
@@ -21,7 +21,7 @@ from base.cluster.machine import machine_name
 from base.config import settings
 from base.db import create_agent
 from base.native_process.runtime_incarnation import RuntimeIncarnation
-from base.packages.plugins.context import PluginContext
+from base.packages.plugins.extensions import ExtensionRegistry, PluginContributions
 from tests.impersonation_support import attested_caller, recorded_tree
 
 
@@ -37,15 +37,13 @@ class IntegrationPlugin(BaseModel):
 def native_checkpoint(
     db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
 ) -> tuple[RuntimeIncarnation, state_module.PluginStateHandle[IntegrationPlugin]]:
-    registrations: tuple[tuple[str, Any], ...] = (
-        ("_EXTRA_FIELDS", {}),
-        ("_PLUGIN_NAMESPACE_FIELDS", {}),
-        ("_PLUGIN_STATE_CLASSES", set[type[BaseModel]]()),
-        ("_BASE_FIELD_DECLARED", set[str]()),
+    registry = ExtensionRegistry(
+        (("integration", PluginContributions(state=(IntegrationPlugin,))),)
     )
-    for name, value in registrations:
-        monkeypatch.setattr(state_module, name, value)
+    # `build_agent_state` rebinds `agent.state.AgentState`; the monkeypatch restores it after the test.
     monkeypatch.setattr(state_module, "AgentState", state_module.AgentState)
+    # The attachment builds its state class from the registry of the plugins loaded into the process.
+    monkeypatch.setattr("agent.extensions.registry.build_registry", lambda: registry)
     monkeypatch.setattr(agent_identity, "_external_identity", None)
     monkeypatch.setattr(agent_identity, "_agent_id", None)
     monkeypatch.setattr(ava, "state", None)
@@ -55,9 +53,8 @@ def native_checkpoint(
         """Accept the `surface` kwarg attach passes (ignored)."""
 
     monkeypatch.setattr(ava, "ensure_plugins_loaded", loader_stub)
-    with PluginContext("integration"):
-        handle = state_module.register_plugin_state(IntegrationPlugin)
-    state_module.build_agent_state()
+    handle = state_module.PluginStateHandle(IntegrationPlugin, "integration")
+    state_module.build_agent_state(registry)
 
     agent_id = create_agent(db_conn)
     owner = RuntimeIncarnation(agent_id, uuid4(), uuid4())

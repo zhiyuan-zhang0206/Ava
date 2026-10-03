@@ -44,7 +44,7 @@ class _InjectCwdNotesAfterExecHook(Hook):
     ) -> dict | None: ...
 
 inject_cwd_notes_after_exec = _InjectCwdNotesAfterExecHook()
-register_after_exec(inject_cwd_notes_after_exec)
+# declared in contribute(): after_exec=(inject_cwd_notes_after_exec,)
 ```
 
 - Wraps `ava.files.read`: when the agent reads a file, traverses from the resolved path upward to git root or `$HOME` (whichever is farther), collecting `AGENTS.md` / `CLAUDE.md` along the way
@@ -55,10 +55,11 @@ register_after_exec(inject_cwd_notes_after_exec)
 - Primary path priority: system prompt directs agent to first `ava.files.read("AGENTS.md")`; when going via that primary path, content is already in the return value, just marked, not re-injected
 - The after_exec hook keeps only the cwd-change note and the project-skills note (summaries of plugin state, not content discovered during exec)
 
-### Plugin state registration
+### Plugin state declaration
 
 ```python
-state_handle = register_plugin_state(AvaCodeState)
+state_handle = PluginStateHandle(AvaCodeState, "ava_code")
+# declared in contribute(): state=(AvaCodeState,)
 ```
 
 - `AvaCodeState` besides `cwd: str` (default = agent workspace or `$HOME`) declares the base `messages` channel (exact `BaseAgentState` annotation — the in-memory delivery channel for context notes) and holds context injection dedup state (`injected_paths` / `injected_hashes` / `last_seen_compact`) and note injection state (`cwd_note` / `project_skills_note` / `project_skills_seen_compact`)

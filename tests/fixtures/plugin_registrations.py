@@ -1,24 +1,23 @@
 """Per-test isolation for plugin registrations on the process-global singletons.
 
 A full plugin load (`agent.extensions.load_extensions`, reached through
-`_build.load_extensions()`, the plugin catalog, or a lazy `ava.*` miss) fills
-process-global registries at once: `ava.<namespace>`
-surfaces and members, hooks, state fields. Nothing used to put them back, so
+`agent.extensions.load_extensions()`, the plugin catalog, or a lazy `ava.*` miss) fills
+process-global SDK-surface registries at once: `ava.<namespace>`
+surfaces and members. Nothing used to put them back, so
 one plugin-loading test left the whole set in its xdist worker, and a later test that cleaned
 up only part of it saw a half-registered surface (CI backend shard 14/16 on PR #3513).
 
 The guard below returns the registries to empty after any test that started
 with none and ended with some. It uses the framework's own reset,
 `agent.state.clear_plugin_registrations`, which drops every kind of
-registration together, so sections and their namespaces can never go out of
-step. Metering is uninstalled first, because it sits outermost over plugin
+SDK-surface registration together, so namespaces and their wraps can never go
+out of step. Metering is uninstalled first, because it sits outermost over plugin
 wraps. A test that starts with registrations already present (for example from
 a module-level plugin import) is left alone: there is no empty state to return
-to. Past the agent-layer gate (`agent.state` already in `sys.modules`) the registries
-are imported for real, so a rename fails loudly. A test process that never loaded the
-agent layer is only asked about the SDK surface, the one place a plugin load without an
-agent (the schedule runner's in-process script) can register into; the reset itself then
-loads the agent layer, but only after a test left registrations behind.
+to. The registries asked about are the SDK surface's, the one place a plugin load without an
+agent (the schedule runner's in-process script) can register into; the reset itself loads the
+agent layer, but only after a test left registrations behind. Hooks, state, prompt sections
+and notes are declared values (`PluginContributions`), not process-global registrations.
 
 The framework's own reset leaves one mark behind: `register_namespace` stamps `_qualname`
 onto the namespace's module object, and `clear_registered_namespaces` removes the
@@ -47,19 +46,13 @@ def _surface_registrations() -> bool:
 
 
 def plugin_registrations_present() -> bool:
-    """Whether any plugin SDK namespace/member or state field is registered.
+    """Whether any plugin SDK namespace/member is registered.
 
-    Prompt sections and context notes are not process-global any more: a plugin declares them
-    through `contribute()` and the registry built from them is a value the caller holds.
-    The state-field check uses a real `importlib.import_module` once the agent layer is known to be
-    loaded, so a rename of `agent.state` fails this check loudly (ImportError) instead of a string
-    lookup silently returning None and this guard going permanently green.
+    Hooks, state classes, prompt sections and context notes are not process-global: a plugin
+    declares them through `contribute()` and the registry built from them is a value the caller
+    holds. Only the SDK surface is process-global.
     """
-    if "agent.state" not in sys.modules:
-        # No agent layer, so no state fields: only the SDK surface can hold any.
-        return _surface_registrations()
-    state = importlib.import_module("agent.state")
-    return bool(_surface_registrations() or state._EXTRA_FIELDS)
+    return _surface_registrations()
 
 
 def _unstamp_registered_namespaces() -> None:

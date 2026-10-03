@@ -28,11 +28,11 @@ For multiple tool calls, `exec` loops to itself until each original ID has a res
 
 - **init_context** (`_init_context.py`): Sole owner of the standing message head (SystemMessage + the ordered context notes). Lays it down whenever `messages` is empty — an agent's first wake, and the turn after any compaction, which routes back here with the post-compact tail parked in `state.context_reset`. A pass-through otherwise.
 - **claim** (`claim/node.py` + `_attach_drain.py` / `claim/_batch.py` / `claim/_routing.py` / `claim/_dispatch.py` / `claim/_decide.py`): At an idle turn boundary, drains pending attachments into one tail HumanMessage before taking the existing end-turn or wait route; otherwise long-waits on Redis pub/sub and dispatches inbound messages (new message / resume / terminate / restart). A non-overflow circuit-breaker heartbeat parks only a heartbeat-only batch; a co-batched chat still routes to `before_llm`. A flagged chat / system-note inbound gets a SECURITY note in claim's own delta ([[inbound-findings.ava.okf.md]]).
-- **before_llm** (hook container): Runs all registered `register_before_llm` hooks—plugins can modify state or inject extra context
+- **before_llm** (hook container): Runs the plugins' declared `before_llm` hooks, then the framework's—plugins can modify state or inject extra context
 - **llm** (`llm/node.py`): Owns automatic compaction and normal streaming inference. Both model operations race the durable interrupt. Interrupted compaction discards its result without replacing history or advancing the compact version; completed compaction routes `init_context → claim`. A tagged summary with no later AIMessage gets one ordinary generation before the threshold re-arms; this survives cancellation, new input, and checkpoint recovery. Actual provider overflow still uses circuit-breaker rescue. Normal streaming cancellation discards the partial generation. Streaming-first with one non-streaming fallback; fatal provider errors fail-fast to idle.
-- **before_exec** (hook container): Runs `register_before_exec` hooks—final checkpoint before tool invocation
+- **before_exec** (hook container): Runs the declared `before_exec` hooks—final checkpoint before tool invocation
 - **exec** (`exec/node.py`): Executes one pending tool call per graph step in one disposable fault-isolation subprocess. Its state delta commits through LangGraph before `exec -> exec` runs the next call; the final result routes to `after_exec`. Progress comes from existing tool-call/result IDs, with no separate execution cursor or state accumulator; cancel/timeout crosses an owned-tree stop → direct-child reap → bounded output-reader join barrier
-- **after_exec** (hook container): Runs `register_after_exec` hooks—cleanup/recording after execution
+- **after_exec** (hook container): Runs the declared `after_exec` hooks—cleanup/recording after execution
 
 ## Interrupting a turn: cancel and terminate
 

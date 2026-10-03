@@ -10,11 +10,7 @@
     "agent/impersonation.py::ambient-container:_anchor_obscured": 1,
     "agent/impersonation.py::ambient-container:_relay_children": 1,
     "agent/impersonation.py::import-time-read:_PROCESS_STARTED_MONOTONIC": 1,
-    "agent/impersonation.py::import-time-read:_PROCESS_STARTED_WALL": 1,
-    "agent/state.py::ambient-container:_BASE_FIELD_DECLARED": 1,
-    "agent/state.py::ambient-container:_EXTRA_FIELDS": 1,
-    "agent/state.py::ambient-container:_PLUGIN_NAMESPACE_FIELDS": 1,
-    "agent/state.py::ambient-container:_PLUGIN_STATE_CLASSES": 1
+    "agent/impersonation.py::import-time-read:_PROCESS_STARTED_WALL": 1
   },
   "complexity": {
     "agent/exec_domain_owner.py::run": 28,

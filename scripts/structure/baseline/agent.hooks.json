@@ -1,8 +1,4 @@
 {
-  "ambient_state": {
-    "agent/hooks/_registry.py::ambient-container:HOOKS": 1,
-    "agent/hooks/_registry.py::ambient-container:_HOOK_PLUGIN": 1
-  },
   "complexity": {
     "agent/hooks/_registry.py::make_hook_runner.<locals>.run": 17
   },
