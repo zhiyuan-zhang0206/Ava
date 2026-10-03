@@ -17,10 +17,5 @@
     "gateway/routers/tests/test_fleet_graph.py": 841,
     "gateway/routers/tests/test_memory_search.py": 1424,
     "gateway/routers/tests/test_tasks_router.py": 811
-  },
-  "patch_targets": {
-    "gateway/routers/tests/test_fleet_graph.py::gateway.lgtm.telemetry_staleness._source_states": 1,
-    "gateway/routers/tests/test_fleet_graph_resilience.py::gateway.lgtm.telemetry_staleness._source_states": 1,
-    "gateway/routers/tests/test_fleet_graph_stale_events.py::gateway.lgtm.telemetry_staleness._source_states": 1
   }
 }
