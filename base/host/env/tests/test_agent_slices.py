@@ -1,4 +1,5 @@
-"""`AgentSlices.resolve` reads every field exactly as the context-bound `turn_settings` view does."""
+"""`AgentSlices.resolve`: an agent's pin wins for the fields it holds, every other field is the live
+cluster default."""
 
 from __future__ import annotations
 
@@ -7,29 +8,33 @@ from typing import Any, cast
 
 import pytest
 
-from base.config import settings, turn_settings
-from base.config.turn_view import bind_agent_config, resolve_agent_config_pins
+from base.config import settings
+from base.config.agent_pins import resolve_agent_config_pins
 from base.host.env import config_registry
 from base.host.env.agent_slices import AgentSlices
 from base.host.env.config_lite_table import FIELD_DOMAINS
 
+# The agent's pins and the plugin-config view ride the dataclass beside the slices.
+_NOT_SLICES = {"pins", "plugin_pins", "_plugin_view"}
+
 
 def _slice_fields() -> list[str]:
     resolved = AgentSlices.resolve()
-    groups = [g for g in fields(resolved) if g.name != "pins"]
+    groups = [g for g in fields(resolved) if g.name not in _NOT_SLICES]
     return [f.name for group in groups for f in fields(getattr(resolved, group.name))]
 
 
 def _read_slice(slices: AgentSlices, name: str) -> Any:
-    for group in (g for g in fields(slices) if g.name != "pins"):
+    for group in (g for g in fields(slices) if g.name not in _NOT_SLICES):
         values = getattr(slices, group.name)
         if name in {f.name for f in fields(values)}:
             return getattr(values, name)
     raise AssertionError(name)
 
 
-def _view(name: str) -> Any:
-    value = getattr(getattr(turn_settings, FIELD_DOMAINS[name]), name)
+def _expected(name: str, pins: dict[str, Any]) -> Any:
+    """What the agent holding `pins` reads for `name`: its pin, else the live default."""
+    value = pins[name] if name in pins else getattr(getattr(settings, FIELD_DOMAINS[name]), name)
     return tuple(cast("list[Any]", value)) if isinstance(value, list) else value
 
 
@@ -55,15 +60,14 @@ def test_every_slice_field_is_a_per_agent_setting() -> None:
 def test_unpinned_fields_read_the_live_cluster_defaults() -> None:
     slices = AgentSlices.resolve()
     for name in _slice_fields():
-        assert _read_slice(slices, name) == _view(name), name
+        assert _read_slice(slices, name) == _expected(name, {}), name
 
 
 def test_every_pinned_field_reads_its_pin() -> None:
     pins = {name: _pinned_value(name) for name in _slice_fields()}
     slices = AgentSlices.resolve(pins)
-    with bind_agent_config(pins):
-        for name in _slice_fields():
-            assert _read_slice(slices, name) == _view(name), name
+    for name in _slice_fields():
+        assert _read_slice(slices, name) == _expected(name, pins), name
 
 
 @pytest.mark.parametrize("parity", [0, 1])
@@ -71,9 +75,8 @@ def test_a_partial_pin_map_pins_some_fields_and_leaves_the_rest_live(parity: int
     names = _slice_fields()
     pins = {name: _pinned_value(name) for i, name in enumerate(names) if i % 2 == parity}
     slices = AgentSlices.resolve(pins)
-    with bind_agent_config(pins):
-        for name in names:
-            assert _read_slice(slices, name) == _view(name), name
+    for name in names:
+        assert _read_slice(slices, name) == _expected(name, pins), name
 
 
 def test_the_overlay_wins_over_the_birth_config() -> None:

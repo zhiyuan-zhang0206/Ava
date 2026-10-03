@@ -50,6 +50,7 @@ from pydantic import BaseModel, ValidationError
 from pydantic.fields import FieldInfo
 
 from base import paths
+from base.host.env.agent_slices import AgentSlices
 from base.packages.plugins import contributions
 from base.packages.plugins.context import current_plugin_name
 
@@ -291,37 +292,40 @@ def merge_disk_image_schema(plugin: str, cls: type[BaseModel]) -> tuple[set[str]
 
 
 @overload
-def get_plugin_config(plugin: str) -> BaseModel: ...
+def get_plugin_config(plugin: str, slices: AgentSlices) -> BaseModel: ...
 @overload
-def get_plugin_config[T: BaseModel](plugin: str, cls: type[T]) -> T: ...
+def get_plugin_config[T: BaseModel](plugin: str, slices: AgentSlices, cls: type[T]) -> T: ...
 
 
-def get_plugin_config(plugin: str, cls: type[BaseModel] | None = None) -> BaseModel:
-    """Read plugin config instance — already bind_from_disk.
+def get_plugin_config(
+    plugin: str, slices: AgentSlices, cls: type[BaseModel] | None = None
+) -> BaseModel:
+    """Read plugin config instance — already bind_from_disk — for the agent whose `slices` are given.
 
     Pass `cls` to let pyright narrow the return type (e.g. `get_plugin_config("ava_compact",
-    CompactConfig).auto_compact_tokens`). Runtime does not validate cls matches
+    slices, CompactConfig).auto_compact_tokens`). Runtime does not validate cls matches
     actual instance — caller's responsibility.
 
-    Agent-scoped: the read goes through `base/packages/plugins/config_view.py`, which
-    layers the current turn's `config_overlay` over the bound disk image. With
-    nothing bound (outside a turn) that is `_PLUGIN_CONFIGS[plugin]` verbatim.
+    Agent-scoped: the agent's `config_overlay` is layered over the bound disk image
+    (`base/packages/plugins/config_view.py`); a hook reads `runtime.context.require_agent()`.
 
     Raises:
         KeyError: plugin has no register_plugin_config or bind hasn't run — typo / wrong ordering.
     """
-    from base.packages.plugins.config_view import turn_plugin_config
-
     _ = cls
-    return turn_plugin_config(plugin)
+    return slices.plugin_config(plugin)
 
 
-def all_plugin_configs() -> dict[str, BaseModel]:
-    """All bound plugin config instances, agent-scoped — used to build the
-    `ava._settings.plugins` namespace. See `get_plugin_config` on scoping."""
-    from base.packages.plugins.config_view import turn_plugin_configs
+def all_plugin_configs(slices: AgentSlices) -> dict[str, BaseModel]:
+    """All bound plugin config instances for the agent whose `slices` are given. See
+    `get_plugin_config` on scoping."""
+    return slices.plugin_configs()
 
-    return turn_plugin_configs()
+
+def process_plugin_config(plugin: str) -> BaseModel:
+    """This process's own instance of `plugin`'s config — what boot's `apply_config_overlay`
+    rebuilt with the process's agent overlay merged in (the exec child, a script)."""
+    return _PLUGIN_CONFIGS[plugin]
 
 
 def all_plugin_config_classes() -> dict[str, type[BaseModel]]:

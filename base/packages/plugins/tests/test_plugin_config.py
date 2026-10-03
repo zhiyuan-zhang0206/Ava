@@ -17,6 +17,7 @@ from pathlib import Path
 import pytest
 from pydantic import BaseModel, ConfigDict, Field
 
+from base.host.env.agent_slices import AgentSlices
 from base.packages.plugins.config_registration import (
     _PLUGIN_CONFIG_CLASSES,
     _PLUGIN_CONFIGS,
@@ -90,7 +91,7 @@ def test_bind_from_disk_auto_writes_default_when_missing(isolated_registry, unit
         register_plugin_config(_FixtureConfig)
     bind_from_disk()
 
-    cfg = get_plugin_config("test_plugin", _FixtureConfig)
+    cfg = get_plugin_config("test_plugin", AgentSlices.resolve(), _FixtureConfig)
     assert cfg.flag is True
     assert cfg.marker == ".git"
     # Disk image should have been written
@@ -110,7 +111,7 @@ def test_bind_from_disk_reads_existing_image(isolated_registry, unit_home):
         register_plugin_config(_FixtureConfig)
     bind_from_disk()
 
-    cfg = get_plugin_config("test_plugin", _FixtureConfig)
+    cfg = get_plugin_config("test_plugin", AgentSlices.resolve(), _FixtureConfig)
     assert cfg.flag is False
     assert cfg.marker == ".hg"
 
@@ -180,7 +181,7 @@ def test_merge_then_bind_resolves_removed_field_drift(isolated_registry, unit_ho
         register_plugin_config(_FixtureConfig)
     bind_from_disk()  # before fix, would raise SchemaDriftError here
 
-    cfg = get_plugin_config("test_plugin", _FixtureConfig)
+    cfg = get_plugin_config("test_plugin", AgentSlices.resolve(), _FixtureConfig)
     assert cfg.flag is True
     assert cfg.marker == ".git"
 
@@ -456,9 +457,9 @@ def test_validate_config_overlay_boundary_values_accepted(
 def test_apply_config_overlay_mutates_plugin_config(isolated_registry, unit_home):
     """After apply, get_plugin_config returns a new instance with marker overlaid."""
     _setup_overlayable_plugin()
-    assert get_plugin_config("overlay_test", _FixtureConfig).marker == ".git"
+    assert get_plugin_config("overlay_test", AgentSlices.resolve(), _FixtureConfig).marker == ".git"
     apply_config_overlay({"marker": ".hg"})
-    assert get_plugin_config("overlay_test", _FixtureConfig).marker == ".hg"
+    assert get_plugin_config("overlay_test", AgentSlices.resolve(), _FixtureConfig).marker == ".hg"
 
 
 def test_apply_config_overlay_framework_scope_only_mutates_settings(
@@ -469,12 +470,14 @@ def test_apply_config_overlay_framework_scope_only_mutates_settings(
 
     _setup_overlayable_plugin()
     monkeypatch.setattr(settings.lm, "llm_model", settings.lm.llm_model)  # snapshot for teardown
-    assert get_plugin_config("overlay_test", _FixtureConfig).marker == ".git"
+    assert get_plugin_config("overlay_test", AgentSlices.resolve(), _FixtureConfig).marker == ".git"
 
     apply_config_overlay({"llm_model": "claude-opus-5", "marker": ".hg"}, scope="framework")
 
     assert settings.lm.llm_model == "claude-opus-5"
-    assert get_plugin_config("overlay_test", _FixtureConfig).marker == ".git"  # plugin untouched
+    assert (
+        get_plugin_config("overlay_test", AgentSlices.resolve(), _FixtureConfig).marker == ".git"
+    )  # plugin untouched
 
 
 def test_apply_config_overlay_plugin_scope_only_mutates_plugin_configs(
@@ -489,7 +492,7 @@ def test_apply_config_overlay_plugin_scope_only_mutates_plugin_configs(
     apply_config_overlay({"llm_model": "claude-opus-5", "marker": ".hg"}, scope="plugin")
 
     assert settings.lm.llm_model == original_model  # framework untouched
-    assert get_plugin_config("overlay_test", _FixtureConfig).marker == ".hg"
+    assert get_plugin_config("overlay_test", AgentSlices.resolve(), _FixtureConfig).marker == ".hg"
 
 
 def test_skills_to_inject_is_per_agent_overlayable(isolated_registry, unit_home) -> None:

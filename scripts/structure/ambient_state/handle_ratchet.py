@@ -1,5 +1,4 @@
-"""Ratchet on the library layer's self-built database and event-bus handles, and on the
-reads of the per-turn configuration view.
+"""Ratchet on the library layer's self-built database and event-bus handles.
 
 Run: `.venv/bin/python scripts/structure/ambient_state/handle_ratchet.py [--write]`. Whole-repo; also runs via pre-commit.
 
@@ -8,10 +7,7 @@ policed site by site (structure Rule 9, `ambient-db`). The library packages are 
 governed yet: they still dial through the process-default shim (`connect` / `pool` /
 `async_pool` / `direct_db_url` / a pool-less `write_transaction`) or build their own
 `Database.from_settings()`; the same holds for an `EventBus.from_settings()` built outside
-`BUS_PACKAGES`. The per-agent settings a turn reads come from the `AgentSlices` on
-`AvaContext` (`base/host/env/agent_slices.py`), not from the context-bound `turn_settings`
-proxy; the sites that still read the proxy are counted the same way. This lint counts those
-sites per package, freezes the counts in
+`BUS_PACKAGES`. This lint counts those sites per package, freezes the counts in
 `handle_ratchet_baseline.json`, and lets them only fall:
 
 - a package above its frozen count fails, listing the sites — new code takes a handle;
@@ -44,9 +40,7 @@ BASELINE = "scripts/structure/ambient_state/handle_ratchet_baseline.json"
 SHIM = "shim"
 SELF_BUILT = "self-built"
 BUS_BUILT = "bus-built"
-TURN_READ = "turn-settings-read"
-KINDS = (SHIM, SELF_BUILT, BUS_BUILT, TURN_READ)
-TURN_VIEW = "base/config/turn_view.py"
+KINDS = (SHIM, SELF_BUILT, BUS_BUILT)
 Counts = dict[str, dict[str, int]]
 Sites = dict[tuple[str, str], list[str]]
 
@@ -59,17 +53,6 @@ def package_of(rel: str) -> str:
 
 def kind_of(name: str) -> str:
     return SELF_BUILT if name.endswith(".from_settings") else SHIM
-
-
-def turn_reads(tree: ast.Module) -> list[int]:
-    """The lines using the `turn_settings` proxy (imports and the proxy's own definition excluded)."""
-    return [
-        node.lineno
-        for node in ast.walk(tree)
-        if isinstance(node, ast.Name)
-        and node.id == "turn_settings"
-        and isinstance(node.ctx, ast.Load)
-    ]
 
 
 def scan(repo_root: Path) -> Sites:
@@ -88,9 +71,6 @@ def scan(repo_root: Path) -> Sites:
         ]
         for kind, hit in library:
             found.setdefault((package_of(rel), kind), []).append(f"{rel}:{hit.line}")
-        if rel != TURN_VIEW:
-            for line in turn_reads(tree):
-                found.setdefault((package_of(rel), TURN_READ), []).append(f"{rel}:{line}")
     return found
 
 
@@ -120,14 +100,7 @@ FIX = {
     SHIM: "take a `Database` from the composition root instead",
     SELF_BUILT: "take a `Database` from the composition root instead",
     BUS_BUILT: "take an `EventBus` from the composition root instead",
-    TURN_READ: "read the setting from the `AgentSlices` on the context (`require_agent()`)",
 }
-
-
-def introduced(base: Counts, kind: str) -> bool:
-    """Whether the base revision's baseline already counts `kind`. The revision that introduces
-    a kind freezes its first counts; later ones may only lower them."""
-    return any(kind in kinds for kinds in base.values())
 
 
 def errors(sites: Sites, frozen: Counts, base: Counts | None) -> list[str]:
@@ -147,11 +120,7 @@ def errors(sites: Sites, frozen: Counts, base: Counts | None) -> list[str]:
                     f"{BASELINE}:1: `{package}` is down to {have} {kind} site(s) from {cap} frozen "
                     "— lower the baseline (`handle_ratchet.py --write`)"
                 )
-            if (
-                base is not None
-                and introduced(base, kind)
-                and cap > base.get(package, {}).get(kind, 0)
-            ):
+            if base is not None and cap > base.get(package, {}).get(kind, 0):
                 out.append(
                     f"{BASELINE}:1: `{package}` {kind} count {cap} is above the base revision's "
                     f"{base.get(package, {}).get(kind, 0)} — the baseline only shrinks"

@@ -33,7 +33,6 @@ def _governed(monkeypatch: pytest.MonkeyPatch) -> None:
     [
         ("from base.config import settings\n", {"settings-read:settings": 1}),
         ("from base.config import settings as cfg\n", {"settings-read:settings": 1}),
-        ("from base.config import turn_settings\n", {"settings-read:turn_settings": 1}),
         ("from base.config import get_field\n", {"settings-read:get_field": 1}),
         ("from base.config._lite import get_field\n", {"settings-read:get_field": 1}),
         ("import base.config\n", {"settings-read:base.config": 1}),

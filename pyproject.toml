@@ -375,7 +375,7 @@ check-typed-exception = true
 # telemetry / retry-policy readers sit outside node signatures, so a blanket
 # ban is not possible. New uses need a written justification in the PR
 # description before joining the per-file-ignores allowlist below.
-"contextvars" = { msg = "contextvars is allowlisted only — owners: base/native_process/turn_identity.py, base/config/turn_view.py, base/packages/plugins/config_view.py, base/packages/plugins/context.py, base/events/live/redis_client.py, gateway/mcp_server/endpoint.py, ava/sdk_surface/help.py, ava/sdk_surface/discovery.py, services/agent_host/runtime.py (audit 2026-08-27). New use needs a written justification in the PR description." }
+"contextvars" = { msg = "contextvars is allowlisted only — owners: base/native_process/turn_identity.py, base/packages/plugins/context.py, base/events/live/redis_client.py, gateway/mcp_server/endpoint.py, ava/sdk_surface/help.py, ava/sdk_surface/discovery.py, services/agent_host/runtime.py (audit 2026-08-27). New use needs a written justification in the PR description." }
 
 [tool.ruff.lint.per-file-ignores]
 # `tests/*` is the top-level tests directory; `**/tests/*` every package's own
@@ -454,8 +454,6 @@ check-typed-exception = true
 "base/native_process/turn_identity.py" = ["TID251"]
 # SDK async tasks must not share active call frames or borrowed identity.
 "base/agents/sdk/telemetry.py" = ["TID251"]
-"base/config/turn_view.py" = ["TID251"]
-"base/packages/plugins/config_view.py" = ["TID251"]
 "base/packages/plugins/context.py" = ["TID251"]
 "base/events/live/redis_client.py" = ["TID251"]
 "gateway/mcp_server/endpoint.py" = ["TID251"]
