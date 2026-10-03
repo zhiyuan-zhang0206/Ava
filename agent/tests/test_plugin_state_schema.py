@@ -5,6 +5,8 @@ The core-key rejection (every BaseAgentState field other than `messages`) is cov
 exec-node tests in `test_state_slot.py`.
 """
 
+import sys
+import types
 from typing import Annotated, Any, cast
 
 import pytest
@@ -22,12 +24,6 @@ from agent.state import (
     plugin_state_schema,
 )
 from base.packages.plugins.extensions import ExtensionRegistry, PluginContributions
-
-
-@pytest.fixture(autouse=True)
-def _restore_agent_state(monkeypatch: pytest.MonkeyPatch) -> None:
-    """`build_agent_state` rebinds `agent.state.AgentState`; put it back after each test."""
-    monkeypatch.setattr(agent_state, "AgentState", BaseAgentState)
 
 
 def _declared(state_cls: type[BaseAgentState], name: str) -> Any:
@@ -140,7 +136,22 @@ def test_the_allowlist_includes_a_plugin_class_only_when_passed_it() -> None:
 
     assert entry not in checkpoint_msgpack_allowlist()
     assert entry in checkpoint_msgpack_allowlist((_Private,))
-    # The classes a built AgentState carries are what a serializer in another process gets.
+    # The classes a built AgentState carries are what a serializer holding that class gets.
     state_cls = build_agent_state(_registry(("demo", _Private)))
     assert entry in checkpoint_msgpack_allowlist(_declared(state_cls, "__plugin_state_classes__"))
-    assert agent_state.process_state_classes() == frozenset({_Private})
+
+
+def test_building_the_state_class_binds_nothing_into_the_module() -> None:
+    assert build_agent_state(_registry(("demo", _Private))) is not agent_state.AgentState
+    assert agent_state.AgentState is BaseAgentState
+
+
+def test_a_registryless_process_allows_the_state_classes_of_its_loaded_faces(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    assert _Private not in agent_state.process_state_classes()
+    face = types.ModuleType("plugins.demo.agent_runtime")
+    face.contribute = lambda: PluginContributions(state=(_Private,))  # pyright: ignore[reportAttributeAccessIssue]
+    monkeypatch.setitem(sys.modules, "plugins.demo.agent_runtime", face)
+
+    assert _Private in agent_state.process_state_classes()

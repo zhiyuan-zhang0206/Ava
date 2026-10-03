@@ -93,6 +93,8 @@ class Attachment:
         # The attached agent's pins and plugin-config view (`attached_config`), once loaded.
         self.config: tuple[Mapping[str, Any], PluginConfigView] | None = None
         self._event_participant: Any = None
+        # The agent state class the snapshot loaded into (set before the constructor returns).
+        self._state_cls: type[Any]
         if not _attachment_lock.acquire(blocking=False):
             raise RuntimeError("this process already has an external attachment")
         self._prior_state = ava.state
@@ -111,6 +113,7 @@ class Attachment:
             # drop them (review finding, #2616).
             ava.ensure_plugins_loaded(surface=False)
             state, overlay, birth = load_snapshot(self.agent_id)
+            self._state_cls = type(state)
             self.config = (
                 resolve_agent_config_pins(overlay, birth),
                 PluginConfigView(resolve_agent_plugin_pins(overlay)),
@@ -121,7 +124,7 @@ class Attachment:
             checkpoint_version = receipt["version"] if receipt.get("lease_id") == lease_id else 0
             applied = max(lease["applied_version"], checkpoint_version)
             for encoded in lease["plugin_delta"][applied:]:
-                apply_plugin_delta(state, decode_plugin_delta(encoded))
+                apply_plugin_delta(state, decode_plugin_delta(encoded, self._state_cls))
             self._validate()
             self._open_event_participant()
             ava.state, ava.state_update = state, {}
@@ -162,7 +165,7 @@ class Attachment:
         if not isinstance(ava.state_update, dict):
             raise TypeError("external plugin state update must be a dict")
         if ava.state_update:
-            encoded = encode_plugin_delta(ava.state_update)
+            encoded = encode_plugin_delta(ava.state_update, self._state_cls)
             control.merge_plugin_delta(
                 database(),
                 self.lease_id,

@@ -151,7 +151,8 @@ async def test_checkpoint_receipt_prevents_reapplying_non_idempotent_delta(
     session = _session("released", plugin_delta=[{"counter": 3}], delta_version=1)
     monkeypatch.setattr(impersonation, "native_status", AsyncMock(return_value=session))
 
-    def decode(delta: dict[str, Any]) -> dict[str, Any]:
+    def decode(delta: dict[str, Any], state_cls: type[Any]) -> dict[str, Any]:
+        assert state_cls is State  # the class the graph runs on
         return delta
 
     monkeypatch.setattr("ava.external.state.decode_plugin_delta", decode)
