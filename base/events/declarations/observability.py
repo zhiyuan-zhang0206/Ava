@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Literal, NotRequired, TypedDict
+from typing import NotRequired, TypedDict
 
 from base.events.vocabulary import EventSpec, telemetry_event
 
@@ -132,39 +132,6 @@ class OtlpBackendRecovered(TypedDict):
     disabled_s: float | None
 
 
-class LokiQueryFailed(TypedDict):
-    """`loki_query_failed` payload — gateway/lgtm/loki_events.py transport failure.
-
-    One row per failed Loki HTTP call (timeout / disconnect / non-2xx) with
-    the request shape, so a stalled query is attributable after Loki's own
-    logs have rotated away (task #1289: the 2026-08-20 incident window).
-    """
-
-    endpoint: str
-    duration_s: float
-    error: str
-    window_from: str | None
-    window_to: str | None
-    query: str
-
-
-class LokiQueryBudget(TypedDict):
-    """One local Loki-admission transition and its post-transition state.
-
-    Float state/wait fields become OTLP histograms; integer outcome fields are
-    0/1 deltas and become counters. `outcome` is the bounded reason dimension.
-    """
-
-    outcome: Literal["queued", "acquired", "released", "queue_full", "wait_timeout", "cancelled"]
-    active: float
-    queued: float
-    high_water: float
-    wait_ms: float
-    acquired: int
-    queue_full: int
-    wait_timeout: int
-
-
 class AuditWriteFailed(TypedDict):
     """`audit_write_failed` payload — base/telemetry/audit_events.py.
 
@@ -250,13 +217,6 @@ EVENTS: dict[str, EventSpec] = {
         payload=OtlpBackendRecovered,
         site="base/telemetry/otlp/telemetry_otlp.py:_emit_backend_event",
     ),
-    "loki_query_budget": telemetry_event(
-        "loki_query_budget",
-        "local Loki query-admission transition and capacity metrics",
-        payload=LokiQueryBudget,
-        tier="noise",
-        site="gateway/lgtm/loki_query_budget.py:_emit_observation",
-    ),
     # Immutable Loki lines cannot be updated with a `resolved_by` attribute.
     # These markers record class-state transitions while `event_dismissals`
     # remains the active-resolution source of truth (task #1468).
@@ -339,12 +299,5 @@ EVENTS: dict[str, EventSpec] = {
     ),
     "log": EventSpec(
         name="log", category="log", tier="noise", payload=LogPayload, doc="bare log line"
-    ),
-    "loki_query_failed": EventSpec(
-        name="loki_query_failed",
-        category="log",
-        tier="anomaly",
-        payload=LokiQueryFailed,
-        doc="a Loki HTTP query failed (timeout / disconnect / non-2xx) — carries the request shape",
     ),
 }

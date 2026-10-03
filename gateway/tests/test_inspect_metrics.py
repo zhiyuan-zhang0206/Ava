@@ -268,7 +268,6 @@ def test_statistics_http_does_not_read_logs_or_current_state(
     db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from gateway.inspect import router as inspect_router
-    from gateway.lgtm import loki_events
 
     now = datetime.now(UTC)
     aid = _agent(db_conn, now)
@@ -277,8 +276,6 @@ def test_statistics_http_does_not_read_logs_or_current_state(
     def forbidden(*_args: object, **_kwargs: object) -> None:
         raise AssertionError("Statistics must use the persisted SQL read model")
 
-    for name in ("query_events",):
-        monkeypatch.setattr(loki_events, name, forbidden)
     monkeypatch.setattr(inspect_router, "db_rows_blocking", forbidden)
     with TestClient(app) as client:
         response = client.get(f"/api/agents/{aid}/inspect/statistics")

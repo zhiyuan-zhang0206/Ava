@@ -12,7 +12,6 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from base.agents import AgentLaunchFailed, AvaAgentError
 from gateway.auth.cors import cors_allowed_origins
-from gateway.lgtm import loki_events, loki_query_budget
 from gateway.middleware.error_envelope import error_response
 
 _log = logging.getLogger(__name__)
@@ -60,35 +59,6 @@ def cors_headers(request: Request) -> dict[str, str]:
         "Vary": "Origin",
         "Access-Control-Allow-Credentials": "true",
     }
-
-
-async def loki_query_budget_error_handler(
-    request: Request,
-    exc: loki_query_budget.LokiQueryBudgetError,
-) -> JSONResponse:
-    """Map local Loki admission saturation to one retriable wire contract."""
-    return error_response(
-        request,
-        code="loki_query_budget_unavailable",
-        status=503,
-        detail=f"Loki query budget unavailable ({exc.reason}); retry",
-        retryable=True,
-        headers={"Retry-After": "1"},
-    )
-
-
-async def observability_read_unavailable_handler(
-    request: Request,
-    exc: loki_events.ObservabilityReadUnavailable,
-) -> JSONResponse:
-    """Expose a non-LGTM gateway's deliberate read isolation as a clean 503."""
-    return error_response(
-        request,
-        code="observability_read_unavailable",
-        status=503,
-        detail=str(exc),
-        retryable=True,
-    )
 
 
 async def request_validation_error_handler(

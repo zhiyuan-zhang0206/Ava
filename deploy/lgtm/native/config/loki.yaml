@@ -129,17 +129,15 @@ limits_config:
   # max_query_length (30d1h) would reject any whole-span parity/read query.
   max_query_length: 2160h
   # Kill a query that runs longer than this server-side. Deliberately just
-  # under the gateway's 60s httpx timeout (gateway/lgtm/loki_events.py): a hung
-  # query then dies here with a clean error the gateway maps to a 503
-  # (plus a loki_query_failed event with the query shape) instead of
-  # holding a querier slot until the client abandons it — the failure mode
-  # behind the task #1289 dense-window /api/events 500s. Loki's default is
+  # under a client's 60s httpx timeout: a hung
+  # query then dies here with a clean error instead of holding a querier
+  # slot until the client abandons it. Loki's default is
   # 1m, which raced the client timeout and left cancelled-query noise in
   # the logs with no record of what stalled.
   query_timeout: 50s
   # Output series cap per query. The default (500) forced the gateway's
   # aggregations to defensively topk(500) their results (see the
-  # _bucketed_distribution_logql note in gateway/lgtm/loki_events.py) — the
+  # former gateway Loki reader's _bucketed_distribution_logql note) — the
   # events stream's aggregation shapes legitimately exceed 500 series.
   # 20000 is sized for the events-maintenance rollup's merged daily
   # turn-duration histogram (`sum by (agent_id, bucket)`: 3061 series on the
@@ -150,7 +148,7 @@ limits_config:
   # Line cap per query. The default (5000) truncates the raw-line range
   # queries the 100MiB gRPC cap (server.grpc_server_max_recv_msg_size) was
   # raised for; 20k lines is a few MB, well inside it. fleet_graph needs
-  # more: it asks for 50000 edge rows, and gateway/loki_events.query_events
+  # more: it asks for 50000 edge rows, and the former gateway Loki reader
   # adds a one-row has_more lookahead, so the request arrives as 50001 --
   # below this the query is rejected with HTTP 400 and the fleet graph
   # degrades to stale-empty (Task #1344, 2026-08-22).
@@ -160,7 +158,7 @@ limits_config:
   # horizontally scaled querier fleet; here they turned one 30d instant
   # aggregation into ~128 hourly subqueries, 2026-08-18 incident). BOTH split
   # keys matter: Grafana's aggregations are INSTANT queries governed only by the
-  # instant key; range queries (the backfill's query_events, dashboard panels)
+  # instant key; range queries (dashboard panels)
   # follow the other.
   split_queries_by_interval: 24h
   split_instant_metric_queries_by_interval: 24h
