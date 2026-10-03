@@ -24,8 +24,7 @@
     "shim": 2
   },
   "base/packages": {
-    "shim": 1,
-    "turn-settings-read": 3
+    "shim": 1
   },
   "base/telemetry": {
     "shim": 6

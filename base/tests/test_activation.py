@@ -20,7 +20,7 @@ def _spy_emit(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, str, str, str]
     """Capture (plugin, surface, identifier, detail) per emitted event."""
     emitted: list[tuple[str, str, str, str]] = []
 
-    def spy(plugin: str, surface: str, identifier: str, detail: str) -> None:
+    def spy(plugin: str, surface: str, identifier: str, detail: str, _model: str) -> None:
         emitted.append((plugin, surface, identifier, detail))
 
     monkeypatch.setattr(activation, "emit", spy)
@@ -30,7 +30,7 @@ def _spy_emit(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, str, str, str]
 def test_records_an_attributed_firing(monkeypatch: pytest.MonkeyPatch) -> None:
     emitted = _spy_emit(monkeypatch)
 
-    activation.record("ava_syntax_fix", "hooks", "before_exec", detail="wrote messages")
+    activation.record("ava_syntax_fix", "hooks", "before_exec", detail="wrote messages", model="m")
 
     assert emitted == [("ava_syntax_fix", "hooks", "before_exec", "wrote messages")]
 
@@ -41,7 +41,7 @@ def test_unattributed_firing_records_nothing(monkeypatch: pytest.MonkeyPatch) ->
     stay parallel and the framework never shows up as a plugin."""
     emitted = _spy_emit(monkeypatch)
 
-    activation.record(None, "hooks", "before_llm", detail="wrote messages")
+    activation.record(None, "hooks", "before_llm", detail="wrote messages", model="m")
 
     assert emitted == []
 
@@ -60,7 +60,7 @@ def test_event_carries_the_model_in_force(monkeypatch: pytest.MonkeyPatch) -> No
 
     monkeypatch.setattr(activation, "logger", _Logger())
 
-    activation.emit("ava_code", "sdkWraps", "files.read", "inner_calls=0")
+    activation.emit("ava_code", "sdkWraps", "files.read", "inner_calls=0", "deepseek-flash")
 
     assert len(bound) == 1
     payload = bound[0]
@@ -69,7 +69,7 @@ def test_event_carries_the_model_in_force(monkeypatch: pytest.MonkeyPatch) -> No
     assert payload["surface"] == "sdkWraps"
     assert payload["identifier"] == "files.read"
     assert payload["detail"] == "inner_calls=0"
-    assert payload["model"]  # whatever the cluster is configured with, never blank
+    assert payload["model"] == "deepseek-flash"
 
 
 def test_emit_failure_is_swallowed(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -82,7 +82,7 @@ def test_emit_failure_is_swallowed(monkeypatch: pytest.MonkeyPatch) -> None:
 
     monkeypatch.setattr(activation, "logger", _Broken())
 
-    activation.record("ava_memory", "hooks", "after_exec", detail="wrote messages")
+    activation.record("ava_memory", "hooks", "after_exec", detail="wrote messages", model="m")
 
 
 def test_registered_event_name_is_on_contract() -> None:
