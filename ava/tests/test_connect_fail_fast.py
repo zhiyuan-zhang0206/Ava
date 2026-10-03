@@ -178,7 +178,7 @@ def _record_connect_kwargs(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
 def test_shell_session_index_passes_the_resilience_kwargs(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Configuration pin, not a behavioural assertion: `ava.shell.new()`'s
+    """Configuration pin, not a behavioural assertion: `ava.shell.sessions.new()`'s
     session-index allocation hands libpq `PG_KEEPALIVE_KWARGS` and never
     prepares (`prepare_threshold=None`)."""
     import ava.agent_identity

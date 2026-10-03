@@ -35,7 +35,7 @@ pytestmark = [
 
 
 def _is_live_watcher(wid: int, name: str = "test-watcher") -> bool:
-    return ava.shell.list().get(wid) == name
+    return ava.shell.sessions.list().get(wid) == name
 
 
 def _boot_text(wid: int) -> str:
@@ -150,7 +150,7 @@ def test_launch_creates_watcher_session(_agent_row: int) -> None:
         assert isinstance(wid, int)
         assert _is_live_watcher(wid, "test-launch")
     finally:
-        ava.shell.kill(wid)
+        ava.shell.sessions.kill(wid)
 
 
 def _ttl_deadline(
@@ -182,7 +182,7 @@ def test_launch_registers_ttl_row_from_timeout(
             <= datetime.datetime.now(datetime.UTC) + datetime.timedelta(minutes=31)
         )
     finally:
-        ava.shell.kill(wid)
+        ava.shell.sessions.kill(wid)
 
 
 def test_cron_registers_ttl_folded_to_end_time(
@@ -203,7 +203,7 @@ def test_cron_registers_ttl_folded_to_end_time(
         # The system-side true value is exempt from the 24h sessions.new cap.
         assert deadline > datetime.datetime.now(datetime.UTC) + datetime.timedelta(days=6)
     finally:
-        ava.shell.kill(wid)
+        ava.shell.sessions.kill(wid)
 
 
 def test_cron_registers_ttl_from_explicit_end(db_conn: psycopg.Connection, _agent_row: int) -> None:
@@ -216,7 +216,7 @@ def test_cron_registers_ttl_from_explicit_end(db_conn: psycopg.Connection, _agen
         assert deadline is not None
         assert abs((deadline - end).total_seconds()) < 10
     finally:
-        ava.shell.kill(wid)
+        ava.shell.sessions.kill(wid)
 
 
 def test_launch_timeout_beyond_24h_is_not_capped(
@@ -233,7 +233,7 @@ def test_launch_timeout_beyond_24h_is_not_capped(
             hours=47, minutes=59
         )
     finally:
-        ava.shell.kill(wid)
+        ava.shell.sessions.kill(wid)
 
 
 def test_at_registers_ttl_row_from_fires_at_plus_grace(
@@ -253,7 +253,7 @@ def test_at_registers_ttl_row_from_fires_at_plus_grace(
         expected = when + datetime.timedelta(seconds=AT_SESSION_TTL_GRACE_SECONDS)
         assert abs((deadline - expected).total_seconds()) < 10
     finally:
-        ava.shell.kill(wid)
+        ava.shell.sessions.kill(wid)
 
 
 def test_watcher_child_dies_when_pty_host_dies(_agent_row: int, tmp_path: pathlib.Path) -> None:
@@ -445,7 +445,7 @@ def test_shell_kill_stops_watcher(_agent_row: int) -> None:
     # A watcher is an ordinary session — the generic session kill stops it.
     code = "import time\ntime.sleep(60)\n"
     wid = watcher.launch(code, timeout="1h", name="test-launch")
-    ava.shell.kill(wid)
+    ava.shell.sessions.kill(wid)
     # Poll instead of a fixed sleep: session teardown latency varies under CPU
     # contention (audit round-2 cc-docs-tests P2).
     deadline = time.time() + 5
@@ -473,7 +473,7 @@ def test_spawn_kills_session_when_send_fails(
     with pytest.raises(RuntimeError, match="session send failed"):
         watcher.launch("import ava\n", timeout="1h", name="test-send-fail")
 
-    assert captured["session_id"] not in ava.shell.list()
+    assert captured["session_id"] not in ava.shell.sessions.list()
 
 
 def test_at_builds_and_spawns_without_watchdog(
@@ -738,9 +738,9 @@ def test_watcher_completion_notice_e2e(
 
     # The session closes itself after the notice is delivered.
     deadline = time.time() + 10
-    while time.time() < deadline and wid in ava.shell.list():
+    while time.time() < deadline and wid in ava.shell.sessions.list():
         time.sleep(0.3)
-    assert wid not in ava.shell.list()
+    assert wid not in ava.shell.sessions.list()
 
 
 def test_cron_invalid_timezone_raises(_agent_row: int) -> None:
@@ -1044,9 +1044,9 @@ def test_cron_registered_twice_yields_two_independent_sessions(_agent_row: int) 
     second = watcher.cron("0 4 * * *", "wake", timezone="UTC", name="test-cron-dup-2")
     try:
         assert first != second
-        alive = ava.shell.list()
+        alive = ava.shell.sessions.list()
         assert first in alive
         assert second in alive
     finally:
-        ava.shell.kill(first)
-        ava.shell.kill(second)
+        ava.shell.sessions.kill(first)
+        ava.shell.sessions.kill(second)

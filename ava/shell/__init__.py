@@ -17,34 +17,6 @@ from base.paths import workspace_dir
 from . import background
 from . import sessions as sessions
 
-# Back-compat re-exports for `ava.shell.kill_all` / `ava.shell.send` style
-# callers (tests, incl. the loop test's monkeypatch target). Not in `__all_for_ava__`
-# so `help(ava.shell)` only advertises `run` and the `sessions` submodule.
-from .sessions import (
-    capture as capture,
-)
-from .sessions import (
-    kill as kill,
-)
-from .sessions import (
-    kill_all as kill_all,
-)
-from .sessions import (
-    list as list,
-)
-from .sessions import (
-    new as new,
-)
-from .sessions import (
-    renew as renew,
-)
-from .sessions import (
-    send as send,
-)
-from .sessions import (
-    send_keys as send_keys,
-)
-
 
 class ShellResult(str):
     """Stdout of a finished shell command with its exit status attached.
