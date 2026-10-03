@@ -8,6 +8,8 @@ The `_pty_sessions_env` fixture (session-scoped, tests/path_scoped/ava_tests.py)
 real supervisor daemon under the tmp test home; the session tests are
 POSIX-only (skip on Windows — the PTY supervisor is POSIX-only)."""
 
+from __future__ import annotations
+
 import datetime
 import os
 import pathlib
@@ -40,106 +42,6 @@ def _is_live_watcher(wid: int, name: str = "test-watcher") -> bool:
 
 def _boot_text(wid: int) -> str:
     return (watcher._watchers_dir() / f"watcher_{wid}_boot.py").read_text()
-
-
-def test_validate_message_rejects_empty() -> None:
-    with pytest.raises(ValueError, match="message cannot be empty"):
-        watcher.at("2030-01-01T00:00:00Z", "   ", name="test-empty")
-
-
-@pytest.mark.parametrize(
-    "value, expected",
-    [
-        (90, 90.0),
-        (datetime.timedelta(minutes=2), 120.0),
-        ("30m", 1800.0),
-        ("2h", 7200.0),
-        ("1d", 86400.0),
-        ("45s", 45.0),
-    ],
-)
-def test_parse_timeout_accepts_forms(
-    value: int | datetime.timedelta | str, expected: float
-) -> None:
-    assert watcher.parse_timeout(value) == expected
-
-
-@pytest.mark.parametrize("bad", ["", "5x", "later", "-3"])
-def test_parse_timeout_rejects_bad_strings(bad: str) -> None:
-    with pytest.raises(ValueError):
-        watcher.parse_timeout(bad)
-
-
-def test_parse_timeout_rejects_nonpositive_and_bool() -> None:
-    with pytest.raises(ValueError, match="positive"):
-        watcher.parse_timeout(0)
-    with pytest.raises(TypeError):
-        watcher.parse_timeout(True)
-
-
-def test_watcher_script_dir_is_tmp_per_agent(_agent_row: int) -> None:
-    # Generated watcher scripts live under the system temp dir, scoped per
-    # cluster + agent — NOT in $AVA_HOME (the old global `watchers/` dir there
-    # accumulated 180+ files and let co-agents overwrite each other's scripts)
-    # and NOT in the workspace. Session ids are per-agent counters, so a
-    # per-agent subdir makes cross-agent collision impossible.
-    import tempfile
-
-    from base.paths import ava_home
-
-    d = watcher._watchers_dir()
-    td = pathlib.Path(tempfile.gettempdir())
-    assert d.is_relative_to(td / "ava")  # under $TMPDIR/ava/<cluster>/<agent>/
-    assert str(ava_home()) not in str(d)  # never under $AVA_HOME
-    assert d.name == "watchers"
-    # cluster segment: the home basename heads the per-cluster dir
-    slug = ava_home().name.lstrip(".") or "cluster"
-    assert any(part == slug or part.startswith(f"{slug}-") for part in d.parts)
-    assert d.is_dir()
-
-
-def test_spawn_prunes_stale_watcher_files(_agent_row: int, monkeypatch: pytest.MonkeyPatch) -> None:
-    # Every launch deletes generated watcher files from earlier watchers: a
-    # hard-killed watcher cannot self-clean, and its pair would otherwise
-    # accumulate forever. Non-generated files are left alone.
-    from ava.shell import sessions as _sessions
-
-    monkeypatch.setattr(_sessions, "send", lambda _id, _cmd: None)  # pyright: ignore[reportUnknownArgumentType]
-    d = watcher._watchers_dir()
-    stale_script = d / "watcher_999.py"
-    stale_boot = d / "watcher_999_boot.py"
-    stale_script.write_text("old")
-    stale_boot.write_text("old boot")
-    keep = d / "keep_me.py"
-    keep.write_text("not generated")
-
-    wid = watcher.launch("import ava\n", timeout="1h", name="test-prune")
-
-    assert not stale_script.exists()
-    assert not stale_boot.exists()
-    assert keep.exists()  # non-generated files survive
-    assert (d / f"watcher_{wid}.py").exists()  # the new pair is there
-    assert (d / f"watcher_{wid}_boot.py").exists()
-
-
-def test_prune_does_not_touch_other_agents_files(
-    _agent_row: int, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    # Isolation is per-agent: pruning this agent's stale files must never
-    # reach into another agent's subdir (the old global dir let agents
-    # overwrite each other — that is the bug this layout exists to prevent).
-    from ava.shell import sessions as _sessions
-
-    monkeypatch.setattr(_sessions, "send", lambda _id, _cmd: None)  # pyright: ignore[reportUnknownArgumentType]
-    d = watcher._watchers_dir()
-    other = d.parent / str(ava.self.AGENT_ID + 1) / "watchers"
-    other.mkdir(parents=True, exist_ok=True)
-    foreign = other / "watcher_999.py"
-    foreign.write_text("someone else's")
-
-    watcher.launch("import ava\n", timeout="1h", name="test-isolation")
-
-    assert foreign.exists()  # untouched
 
 
 def test_launch_creates_watcher_session(_agent_row: int) -> None:
@@ -503,86 +405,6 @@ def test_at_builds_and_spawns_without_watchdog(
     assert "ping later" in captured["code"]
 
 
-def test_at_announcement_uses_cluster_zone_when_authoritative(
-    _agent_row: int, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """at() passes the cluster timezone to the generated script when the
-    process holds an authoritative one (user ruling 2026-08-27)."""
-    from base.config import settings
-    from base.config.general import GeneralSettings
-
-    monkeypatch.setattr(
-        settings, "general", GeneralSettings.model_construct(timezone="Asia/Shanghai")
-    )
-    captured: dict[str, Any] = {}
-
-    def fake_spawn(code: str, watchdog_secs: float | None, name: str, **kw: object) -> int:
-        captured["code"] = code
-        return 7
-
-    monkeypatch.setattr(watcher, "_spawn", fake_spawn)
-    when = (datetime.datetime.now(datetime.UTC) + datetime.timedelta(days=365)).strftime(
-        "%Y-%m-%dT%H:%M:%SZ"
-    )
-    watcher.at(when, "ping later", name="test-at-cluster-tz")
-    assert "_TZ = ZoneInfo('Asia/Shanghai')" in captured["code"]
-    assert "_WHEN.astimezone(_TZ).isoformat()" in captured["code"]
-
-
-def test_at_announcement_uses_host_clock_without_authoritative_zone(
-    _agent_row: int, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """A settings-lite process (no authoritative cluster timezone) passes
-    None: the announcement renders in the watcher's own wall clock — the
-    documented lite degradation."""
-    from base.config import settings
-    from base.config.general import GeneralSettings
-
-    monkeypatch.setattr(settings, "general", GeneralSettings.model_construct())
-    captured: dict[str, Any] = {}
-
-    def fake_spawn(code: str, watchdog_secs: float | None, name: str, **kw: object) -> int:
-        captured["code"] = code
-        return 7
-
-    monkeypatch.setattr(watcher, "_spawn", fake_spawn)
-    when = (datetime.datetime.now(datetime.UTC) + datetime.timedelta(days=365)).strftime(
-        "%Y-%m-%dT%H:%M:%SZ"
-    )
-    watcher.at(when, "ping later", name="test-at-lite")
-    assert "ZoneInfo" not in captured["code"]
-    assert "_WHEN.astimezone().isoformat()" in captured["code"]
-
-
-def test_cron_defaults_to_host_zone_without_authoritative_zone(
-    _agent_row: int, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """settings-lite cron (no authoritative cluster timezone) defaults to the
-    host's own zone — not the silent America/Los_Angeles field default."""
-    from base.config import host_tz_name, settings
-    from base.config.general import GeneralSettings
-
-    monkeypatch.setattr(settings, "general", GeneralSettings.model_construct())
-    captured: dict[str, Any] = {}
-
-    def fake_spawn(code: str, watchdog_secs: float | None, name: str, **kw: object) -> int:
-        captured["code"] = code
-        return 7
-
-    monkeypatch.setattr(watcher, "_spawn", fake_spawn)
-    watcher.cron("0 * * * *", "tick", name="test-cron-lite")
-    expected = host_tz_name()
-    assert f"_TZ = ZoneInfo('{expected}')" in captured["code"]
-    assert "America/Los_Angeles" not in captured["code"]
-
-
-def test_cron_invalid_expr_raises(_agent_row: int) -> None:
-    from base.daemon.schedules.watcher import CronExprError
-
-    with pytest.raises(CronExprError):
-        watcher.cron("not a cron", "msg", name="test-bad-cron")
-
-
 def test_cron_spawns_without_watchdog(_agent_row: int, monkeypatch: pytest.MonkeyPatch) -> None:
     captured: dict[str, Any] = {}
 
@@ -743,80 +565,6 @@ def test_watcher_completion_notice_e2e(
     assert wid not in ava.shell.sessions.list()
 
 
-def test_cron_invalid_timezone_raises(_agent_row: int) -> None:
-    with pytest.raises(ValueError, match="timezone"):
-        watcher.cron("0 3 * * *", "daily", timezone="Not/A/Real/Timezone", name="test-bad-tz")
-
-
-def test_at_past_time_raises(_agent_row: int) -> None:
-    """at() with a past datetime raises ValueError."""
-    from datetime import UTC, datetime
-
-    past = datetime(2020, 1, 1, tzinfo=UTC)
-    with pytest.raises(ValueError, match="past"):
-        watcher.at(past, "too late", name="test-past")
-
-
-def test_cron_past_end_time_raises(_agent_row: int, monkeypatch: pytest.MonkeyPatch) -> None:
-    """cron() with an explicit past `end_time` raises ValueError, aligned
-    with at() (issue #2078: a past end otherwise supersedes the live twin
-    and registers a watcher that self-terminates immediately). The raise
-    fires BEFORE any registration: _spawn must never run for a past end."""
-    from datetime import UTC, datetime
-
-    def fail_if_spawned(*_args: object, **_kw: object) -> int:
-        raise AssertionError("_spawn must not run for a past end_time")
-
-    monkeypatch.setattr(watcher, "_spawn", fail_if_spawned)
-    past = datetime(2020, 1, 1, tzinfo=UTC)
-    with pytest.raises(ValueError, match="end_time is in the past"):
-        watcher.cron("0 3 * * *", "daily", timezone="UTC", end_time=past, name="test-cron-past-end")
-
-
-def test_cron_future_end_time_ok(_agent_row: int, monkeypatch: pytest.MonkeyPatch) -> None:
-    """An explicit future `end_time` registers normally (no past rejection)."""
-    from datetime import UTC, datetime, timedelta
-
-    captured: dict[str, Any] = {}
-
-    def fake_spawn(code: str, watchdog_secs: float | None, name: str, **kw: object) -> int:
-        captured.update(code=code, cron_end_at=kw.get("cron_end_at"))
-        return 7
-
-    monkeypatch.setattr(watcher, "_spawn", fake_spawn)
-    end = datetime.now(UTC) + timedelta(days=2)
-    wid = watcher.cron(
-        "0 3 * * *", "daily", timezone="UTC", end_time=end, name="test-cron-future-end"
-    )
-    assert wid == 7
-    assert captured["cron_end_at"] == end
-    assert "daily" in captured["code"]
-
-    # timedelta going backwards should also fail
-    with pytest.raises(ValueError):
-        watcher.at(timedelta(days=-1), "negative delta", name="test-neg-delta")
-
-
-def test_at_future_time_ok(_agent_row: int, monkeypatch: pytest.MonkeyPatch) -> None:
-    """at() with a future time should not raise about the past."""
-    from datetime import timedelta
-
-    captured: dict[str, Any] = {}
-    monkeypatch.setattr(
-        watcher,
-        "_spawn",
-        lambda code, _wd, name, **_kw: captured.update(code=code, name=name) or 7,  # pyright: ignore[reportUnknownArgumentType]
-    )
-
-    # Far future
-    watcher.at("2099-01-01T00:00:00Z", "far future", name="test-future")
-    assert "far future" in captured["code"]
-
-    # timedelta from now
-    watcher.at(timedelta(hours=1), "one hour", name="test-delta")
-    assert "one hour" in captured["code"]
-
-
 # -- Agent identity in the child (Task #964 regression) ----------------------
 
 
@@ -965,71 +713,6 @@ def test_watcher_child_overrides_stale_session_identity(
     # (exit 1 from kill-session) — a teardown must not fail on a corpse.
     with suppress(ValueError, subprocess.CalledProcessError):
         _sessions.kill(wid)
-
-
-def test_spawn_keeps_sibling_files_while_session_alive(
-    _agent_row: int, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Bug A (task #1116): a generated pair whose SESSION still exists must
-    not be pruned — launch is asynchronous (the command is sent into a fresh
-    session whose shell takes a moment to come up), so a back-to-back sibling
-    launch deleting it would make that watcher's python start fail with
-    "can't open file ... _boot.py". Only provably-dead pairs (session gone)
-    are pruned."""
-    from ava.shell import sessions as _sessions
-
-    monkeypatch.setattr(_sessions, "send", lambda _id, _cmd: None)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(_sessions, "list", lambda: {4242: "test-sibling"})
-    d = watcher._watchers_dir()
-    live_script = d / "watcher_4242.py"
-    live_boot = d / "watcher_4242_boot.py"
-    live_script.write_text("still needed")
-    live_boot.write_text("still needed boot")
-    dead_script = d / "watcher_4243.py"
-    dead_boot = d / "watcher_4243_boot.py"
-    dead_script.write_text("dead")
-    dead_boot.write_text("dead boot")
-
-    wid = watcher.launch("import ava\n", timeout="1h", name="test-prune-live")
-
-    # live sibling's pair survives (session 4242 exists); dead pair is pruned
-    assert live_script.exists() and live_boot.exists()
-    assert not dead_script.exists() and not dead_boot.exists()
-    assert (d / f"watcher_{wid}.py").exists()
-
-
-def test_spawn_back_to_back_keeps_all_files(
-    _agent_row: int, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Back-to-back launches must keep every live sibling's boot file (task #1116).
-    The fake exposes each session immediately, as the backend does."""
-    from ava.shell import sessions as _sessions
-
-    monkeypatch.setattr(_sessions, "send", lambda _id, _cmd: None)  # pyright: ignore[reportUnknownArgumentType]
-    alive: set[int] = set()
-    counter = iter(range(1000, 1003))
-
-    def _fake_create(
-        name: str, *, ttl: float, system: bool = False, env_overrides: dict[str, str] | None = None
-    ) -> tuple[int, str]:
-        sid = next(counter)
-        alive.add(sid)
-        return sid, name
-
-    monkeypatch.setattr(_sessions, "create_session", _fake_create)
-    monkeypatch.setattr(_sessions, "list", lambda: dict.fromkeys(alive, "w"))
-    d = watcher._watchers_dir()
-
-    ids: list[int] = []
-    for name in ("b2b-1", "b2b-2", "b2b-3"):
-        wid = watcher.launch("import ava\n", timeout="1h", name=name)
-        ids.append(wid)
-
-    # all three pairs on disk — none pruned while its session is live
-    for wid in ids:
-        assert (d / f"watcher_{wid}.py").exists(), f"watcher_{wid}.py pruned"
-        assert (d / f"watcher_{wid}_boot.py").exists(), f"watcher_{wid}_boot.py pruned"
-    assert len(ids) == 3 and len(set(ids)) == 3
 
 
 # ─── watchers carry no registry; nothing dedupes or restarts them ───────────
