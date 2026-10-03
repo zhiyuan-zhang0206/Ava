@@ -20,11 +20,12 @@ from base.lm.provider_api import (
     PriceRates,
     PriceTier,
     ProviderBinding,
-    register,
+    ProviderContribution,
     require_key,
 )
 from base.lm.registry import MODELS, ModelSpec, ModelTuning, resolve_setting
 from base.lm.stop import StopSpec
+from base.packages.plugins.extensions import PluginContributions
 
 # Budget used when AVA_REASONING_EFFORT clamps an extended-thinking-only claude
 # model to its "on" tier and no explicit AVA_CLAUDE_THINKING_BUDGET_TOKENS is
@@ -175,8 +176,8 @@ def build(ctx: BuildContext) -> BaseChatModel:
     )
 
 
-register(
-    ProviderBinding(
+PROVIDER = ProviderContribution(
+    binding=ProviderBinding(
         prefix="claude-",
         display_name="Anthropic",
         key_env="ANTHROPIC_API_KEY",
@@ -517,3 +518,8 @@ register(
         ),
     },
 )
+
+
+def contribute() -> PluginContributions:
+    """What this plugin declares: its model provider."""
+    return PluginContributions(providers=(PROVIDER,))

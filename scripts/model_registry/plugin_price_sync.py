@@ -3,7 +3,7 @@
 Candidate provider files are parsed, never imported: the pricing workflow may
 resume an existing bot branch, so executing code from that branch would cross
 the workflow's trusted-main boundary. The parser accepts only the repository's
-literal ``register(models=..., pricing=...)`` shape and fails closed otherwise.
+literal ``PROVIDER = ProviderContribution(models=..., pricing=...)`` shape and fails closed otherwise.
 
 Synchronization preserves the complete pricing lattice: effective periods,
 input-token tiers, and recurring UTC windows. The flat ``PriceRates`` fields
@@ -303,7 +303,9 @@ def _price_declaration(call: ast.expr, *, context: str) -> tuple[_PriceDeclarati
 def _mapping_keyword(call: ast.Call, name: str, *, path: Path) -> ast.Dict:
     values = [keyword.value for keyword in call.keywords if keyword.arg == name]
     if len(values) != 1 or not isinstance(values[0], ast.Dict):
-        raise RuntimeError(f"{path}: register() must have one literal {name}= mapping")
+        raise RuntimeError(
+            f"{path}: ProviderContribution(...) must have one literal {name}= mapping"
+        )
     return values[0]
 
 
@@ -324,13 +326,18 @@ def _provider_manifest(source: str, path: Path) -> _ProviderManifest:
     registrations = [
         statement.value
         for statement in tree.body
-        if isinstance(statement, ast.Expr)
+        if isinstance(statement, ast.Assign)
+        and len(statement.targets) == 1
+        and isinstance(statement.targets[0], ast.Name)
+        and statement.targets[0].id == "PROVIDER"
         and isinstance(statement.value, ast.Call)
         and isinstance(statement.value.func, ast.Name)
-        and statement.value.func.id == "register"
+        and statement.value.func.id == "ProviderContribution"
     ]
     if len(registrations) != 1:
-        raise RuntimeError(f"{path}: expected exactly one top-level register() call")
+        raise RuntimeError(
+            f"{path}: expected exactly one top-level PROVIDER = ProviderContribution(...)"
+        )
     models_node = _mapping_keyword(registrations[0], "models", path=path)
     pricing_node = _mapping_keyword(registrations[0], "pricing", path=path)
     models = frozenset(_mapping_keys(models_node, context=f"{path}: models"))

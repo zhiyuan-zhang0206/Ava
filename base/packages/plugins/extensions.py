@@ -24,6 +24,7 @@ from typing import Any, Literal, Protocol
 from pydantic import BaseModel
 
 from base.host.env.agent_slices import AgentSlices
+from base.lm.provider_api import ProviderContribution
 from base.packages.plugins.contributions import Contribution
 from base.packages.plugins.inspector import InspectWidgetSpec
 from base.telemetry.metrics.plugin_metrics import MetricSpec
@@ -131,6 +132,10 @@ class PluginContributions:
     # validates them and fills each spec's `plugin`.
     metrics: tuple[MetricSpec, ...] = ()
     inspect_widgets: tuple[InspectWidgetSpec, ...] = ()
+    # Model providers, declared by a plugin's `provider.py`: loaded by every process that builds or
+    # validates a chat model, installed into the process's model catalog by
+    # `base/lm/plugin_providers.py` (the one writer).
+    providers: tuple[ProviderContribution, ...] = ()
     # The SDK surface (`ava.*`): namespaces (optionally promoted into the prompt's expanded SDK
     # reference), members hung on an existing namespace, wrap layers, and skill-root providers.
     sdk_namespaces: tuple[SdkNamespace, ...] = ()
@@ -202,7 +207,11 @@ class PluginContributions:
             Contribution("inspectWidgets", spec.id, plugin, spec.kind)
             for spec in self.inspect_widgets
         )
-        return (*metrics, *widgets)
+        providers = (
+            Contribution("providers", p.binding.prefix, plugin, p.binding.display_name)
+            for p in self.providers
+        )
+        return (*metrics, *widgets, *providers)
 
     def _sdk_records(self, plugin: str) -> tuple[Contribution, ...]:
         namespaces = (

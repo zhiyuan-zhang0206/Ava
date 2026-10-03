@@ -88,7 +88,7 @@ same registration.
 
 ## Provider contract
 
-A `provider.py` calls `register(binding, models=..., pricing=...)` once:
+A `provider.py` declares one `ProviderContribution(binding, models, pricing)` (returned from `contribute()`) and the loader installs it once:
 
 - `ProviderBinding` declares the dispatch prefix, display name, `.env` key,
   builder, provider-wide effort ladder, vision fallback, optional attachment
@@ -100,7 +100,7 @@ A `provider.py` calls `register(binding, models=..., pricing=...)` once:
 - Each `PriceRates` owns the complete effective-period, input-tier, and daily-
   window pricing lattice plus official-source provenance and vendor vocabulary.
   Its flat fields remain the current base-tier shortcut for older plugins.
-- Registration validates prefix ownership, model-prefix/provider agreement,
+- Installation validates prefix ownership, model-prefix/provider agreement,
   spawnable facts, current prices, effort defaults, and Anthropic-protocol
   output caps before the binding becomes available.
 

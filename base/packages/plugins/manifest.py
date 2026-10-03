@@ -192,6 +192,7 @@ CONTRIBUTION_KEYS = {
     "systemPromptSections",
     "metrics",
     "inspectWidgets",
+    "providers",
     "opsServices",
     "config",
     "skills",

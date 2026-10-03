@@ -21,9 +21,13 @@ plugins are enabled by default, and gateway startup calls the loader eagerly;
 an empty binding registry raises before the once flag is set so recovery is
 retryable after the enable configuration is fixed.
 
-## Registration
+## Declaration and installation
 
-- A plugin's `provider.py` calls `register(binding, models=..., pricing=...)`.
+- A plugin's `provider.py` registers nothing: it exports `contribute()` returning
+  `PluginContributions(providers=(ProviderContribution(binding, models, pricing),))`.
+  The loader (`base/lm/plugin_providers.py`) is the one writer of the model catalog: it checks
+  the plugin's manifest `providers` key against the declaration (a mismatch is a fail-soft load
+  failure of that plugin), then installs it with `install_provider`.
   The prefix map is flat: duplicate or nested prefixes fail at load time, and a
   model id must begin with its binding prefix. Prices must name a registered
   model; they must be finite, non-negative, HTTPS-provenanced, and carry a
