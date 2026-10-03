@@ -83,7 +83,7 @@ otherwise. Each entry: symptom → how it reads in a diff → evidence anchor.
   retention diverge.
 - **D4 Idempotency keys permanently bricked.** Rows with `status NULL`
   never pruned (prune condition only matches completed rows) — the key
-  ​​blocks every retry forever.
+  blocks every retry forever.
 - **D5 Negative jitter.** `delay - span < 0` → `time.sleep(negative)` raises
   ValueError, masking the original error.
 

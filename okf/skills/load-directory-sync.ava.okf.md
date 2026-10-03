@@ -1,7 +1,7 @@
 ---
 type: doc
 title: Skill sources — load-directory sync
-description: One load directory ~/.ava/skills/; converge syncs repo built-ins (ava_builtins/skills/) and plugin-carried skills into it, and user installs land directly (untouched). The 11 real .agents/skills project skills are NOT converged — they reach agents through the project-local mount.
+description: One load directory ~/.ava/skills/; converge syncs repo built-ins (ava_builtins/skills/) and plugin-carried skills into it, and user installs land directly (untouched). The 12 real .agents/skills project skills are NOT converged — they reach agents through the project-local mount.
 tags:
 - extensions
 - agent-instruction
@@ -47,7 +47,7 @@ channels]]):
   `engines.ava` / `requires_commit` excludes the running host is dropped from
   the catalog/index, with the reason visible in `ava packages status`.
 
-**Not converged — the 11 real `.agents/skills/` project skills.** The
+**Not converged — the 12 real `.agents/skills/` project skills.** The
 repo-development workflow and Ava-cluster-operations family (ship-a-change,
 write-a-pr-description, ava-self-development, …) stopped being
 fleet-distributed (issue #146;
