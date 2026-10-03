@@ -2427,6 +2427,7 @@ CREATE TABLE im_bridge_cursors (
     chat_id         TEXT        NOT NULL,
     push_agent_id   BIGINT,
     push_item_id    TEXT,
+    push_created_at TEXT,
     poll_message_id TEXT,
     poll_create_ms  BIGINT,
     updated_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -2437,6 +2438,9 @@ CREATE TABLE im_bridge_cursors (
 
 COMMENT ON TABLE im_bridge_cursors IS
     'Durable im-bridge positions: push_* = newest agent item pushed to the chat (for push_agent_id), poll_* = newest handled platform message of a polled conversation (message id, create time in ms; id NULL = time-only position). A restart resumes from here instead of losing what happened while the bridge was down.';
+
+COMMENT ON COLUMN im_bridge_cursors.push_created_at IS
+    'created_at of the newest pushed item (ISO-8601, wire format); primary push watermark, immune to post-compact item_id renumbering. NULL = row written before the column, compared by push_item_id alone.';
 
 -- ─────────────── schema_migrations ───────────────
 -- Applied-migration registry — maintained by `base.deploy.schema.migrations`. Keyed by
