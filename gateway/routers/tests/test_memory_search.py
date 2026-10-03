@@ -17,6 +17,12 @@ from gateway.app import app
 from services.memory_indexer.embeddings.base import EmbeddingAPIError
 
 
+@pytest.fixture(autouse=True)
+def _app_db(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Only the app lifespan sets app.state.db; ASGITransport tests never run it.
+    monkeypatch.setattr(app.state, "db", object(), raising=False)
+
+
 class _StubProvider:
     """Embedding provider stand-in — the handler reads dim/fingerprint and
     calls embed_query_async; a class (not an instance) works because the
@@ -1022,10 +1028,8 @@ class TestWedgedBackendReleasesPermits:
     parked in `acquire` with no deadline, and `curl` on the route returned
     neither a response nor an error. Seven agents were stuck in passive recall
     without producing a single LLM turn, and force-killing them only restarted
-    the same wait.
-
-    A single stalled backend call outlives the request that made it. These stub
-    that away and assert the property the handler owes regardless.
+    the same wait. These stub a stalled backend and assert the property the
+    handler owes regardless.
     """
 
     async def test_wedged_backend_answers_503_instead_of_hanging(
@@ -1059,10 +1063,9 @@ class TestWedgedBackendReleasesPermits:
     ) -> None:
         """The deadline spans both phases, not just the backend one.
 
-        The backend is the phase that stalled in the incident, but the embed
-        runs under the same permit — a deadline covering only the backend that
-        happened to stall this time would leave the other phase able to pin the
-        endpoint exactly the same way.
+        The backend stalled in the incident, but the embed runs under the same
+        permit — a deadline covering only one phase would leave the other able to
+        pin the endpoint the same way.
         """
         import services.memory_indexer.embeddings.factory as _embedding_factory
 
