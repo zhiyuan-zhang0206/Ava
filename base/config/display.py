@@ -150,8 +150,8 @@ class DisplaySettings(EnvSettings):
         le=100,
         alias="AVA_NOTICES_RESOLVED_DEFAULT_PAGE",
         description=(
-            "One resolved-notices history page (GET /api/notices/resolved and the unified "
-            "feed's resolved_limit) when the caller passes none. 30 is a screenful of greyed "
+            "One resolved-notices history page (the unified feed's resolved_limit) "
+            "when the caller passes none. 30 is a screenful of greyed "
             "history per keyset page (deepening is a cursor fetch, not a bigger page); the "
             "protective ceiling (100) stays a constant."
         ),

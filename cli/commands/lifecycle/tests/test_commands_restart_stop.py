@@ -491,7 +491,7 @@ def test_cmd_stop_stop_browser_flag_threads_through(
     _stop_mod.cmd_stop(require_confirmation=False)
     assert seen["keep_browser"] is False, "default cmd_stop closes the browser"
     _stop_mod.cmd_stop(require_confirmation=False, stop_browser=True)
-    assert seen["keep_browser"] is False, "--stop-browser takes the browser down"
+    assert seen["keep_browser"] is False, "stop_browser=True takes the browser down"
 
 
 # ─── gateway-backed CLI paths (stop announce) ──────────────────────────────

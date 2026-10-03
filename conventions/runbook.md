@@ -939,18 +939,17 @@ sides derive the CDP port + socket path from `settings.browser_cdp_port`
   the same display the operator's shell does. Without this a headed Linux / WSLg
   host would strip the display and wrongly skip (and never revive) a browser it
   can actually run.
-- **Capability-gated at two layers, observably**: (1) `_services_for_roles`, the
-  watchdog's `_checks_for_capability`, and `agent/warmup.py` all gate on
+- **Capability-gated at two layers, observably**: (1) the browser service spec's
+  gate (`ops/spec.py`, read through the roster helper `_services_for_roles` — the
+  `cli/commands/_repo.py` alias of `_spec.services_for_capabilities`) calls
   `browser_incapability()` (`base/host/system/probes.py`) — the single source of
   the display + Chrome-binary + npx check, returning the reason a prong is missing
   (or None when capable). A host missing any of the three never starts the browser
-  session or its healthcheck, and warmup never polls a CDP port that will not
-  exist. The reason is surfaced, not swallowed: `ava status` shows the browser row
-  tagged `skipped: <reason>` (via `_services_for_roles_annotated`) instead of
-  hiding it, and `ava start` prints it on the console — these two are the
-  operator's pull-surfaces. The watchdog (debug, every 60s round) and warmup
-  additionally log it into their own logs as a secondary breadcrumb, not a peer
-  surface. (2) The daemon's `main()` still calls `assert_browser_capable()`
+  session or its healthcheck. The reason is surfaced, not swallowed: `ava status`
+  shows the browser row tagged `skipped: <reason>` (via
+  `_services_for_roles_annotated`) instead of hiding it, and `ava start` prints it
+  on the console — these two are the operator's pull-surfaces. (2) The daemon's
+  `main()` still calls `assert_browser_capable()`
   (which raises the same `browser_incapability()` reason) as a safety net for
   direct invocation.
 - **Service-owned — don't start Chrome by hand**: the `ava-browser`
@@ -1449,10 +1448,11 @@ and needs nothing. The step is idempotent (it pops a key only when present).
    staged.replace(path)
    EOF
    ```
-2. **Nothing else is required.** A home's `.env` keeps `AVA_MILVUS_PORT` / `AVA_MILVUS_URI`;
-   every settings model ignores a key it does not declare, so they are inert. A
-   `~/.ava/milvus-data/` directory, if the home ever ran milvus, is dead data and may be
-   deleted.
+2. **Nothing else is required.** `AVA_MILVUS_PORT` / `AVA_MILVUS_URI` are retired settings
+   ([decision](../decisions/2026-10-03-memory-search-drop-milvus.md)): their `.env` lines are
+   removed by the 2026-10-03 env sweep, and a leftover `.env` line is ignored — every
+   settings model ignores a key it does not declare. A `~/.ava/milvus-data/` directory, if
+   the home ever ran milvus, is dead data and may be deleted.
 
 ### WAL-G archiving
 

@@ -8,11 +8,11 @@ exit 1) rather than a silent no-op). Also run automatically via pre-commit.
 
 ## Why
 
-A fixed-instant constant (`INDEX_LABEL_CUTOVER_AT = datetime(2026, 8, 23, 11, 0,
+A fixed-instant constant (`CUTOVER_AT = datetime(2026, 8, 23, 11, 0,
 tzinfo=UTC)`) that production folds against the *real* clock makes every
 window-boundary result a function of the wall clock. A test that asserts that
 result with exact equality (`assert lifecycle_call["from_"] ==
-INDEX_LABEL_CUTOVER_AT`) is correct only while `now` keeps a particular
+CUTOVER_AT`) is correct only while `now` keeps a particular
 relation to the constant — and that relation expires the moment the wall clock
 passes the constant's cutoff (2026-08-30: two fixed-instant tests went
 deterministically red within seven days of each other, each red run ejecting
@@ -47,7 +47,7 @@ lints):
    whose compared expression references a repo fixed-instant constant (or a
    local derived from one) is a time bomb when the same function's value
    derivation can reach the real clock — via `datetime.now`/`time.time`, an
-   in-repo call whose clock is not pinned (`retention_floor()` without
+   in-repo call whose clock is not pinned (a retention floor without
    `now=`), or an opaque HTTP call (`client.get(...)`) whose internals the
    linter cannot audit. Pinning is recognized when the callee's clock
    parameter is passed a fixed-instant-derived expression *and* the

@@ -53,7 +53,7 @@ A package's own tests sit beside the code they prove (`base/packages/plugins/tes
 - `tests/scripts/` — release/docs/secret-rotation and repository tooling;
   lint script tests also live at `tests/` root `test_lint_*.py`
 - `tests/ui/` — deterministic tests for applying the shell's Kotlin/XML/signing overlay to Tauri's generated Android project
-- `tests/plugins/` — plugin tests (`test_ava_memory_lint.py` / `test_ava_memory_notes.py` for the ava_memory plugin, `ava_fleet/` subtree)
+- `tests/plugins/` — cross-plugin tests (`test_grafana_dashboard_render.py`, `test_plugin_metrics_logql.py`); a plugin's own tests live in its package
 - `tests/fixtures/` — the suite's global fixture plugins (see "Global fixtures" below) plus event fixture data; `tests/factories/` — data factories
 
 - `scripts/tests/test_test_selector.py` — synthetic-checkout contracts for

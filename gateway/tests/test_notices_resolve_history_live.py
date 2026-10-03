@@ -1,4 +1,4 @@
-"""The resolve/read action endpoints and their surfaces: read/resolve/answer routing, resolved history, live polling, supersede and expire_at TTL defaults; split from gateway/tests/test_notices_endpoint.py (task #4922)."""
+"""The resolve/read action endpoints and their surfaces: read/resolve/answer routing, live polling, supersede and expire_at TTL defaults; split from gateway/tests/test_notices_endpoint.py (task #4922)."""
 
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
@@ -177,144 +177,6 @@ def test_resolve_cross_agent_path_409(db_conn: psycopg.Connection) -> None:
     assert [n.id for n in snap.notices_awaiting_response] == [nid]
 
 
-# --- GET /api/notices/resolved (history) ------------------------------------
-
-
-def test_resolved_lists_fleet_wide_newest_first(db_conn: psycopg.Connection) -> None:
-    a = _seed_agent(db_conn)
-    b = _seed_agent(db_conn)
-    with db_conn.cursor() as cur:
-        cur.execute("UPDATE agents SET label = 'agent-a' WHERE id = %s", (a,))
-        cur.execute("UPDATE agents SET label = 'agent-b' WHERE id = %s", (b,))
-    db_conn.commit()
-    _insert_notice(
-        db_conn,
-        a,
-        "older",
-        require_response=True,
-        resolved_at="2026-06-14T01:00:00Z",
-        resolution="answered",
-        reply="ans-a",
-    )
-    nnew = _insert_notice(
-        db_conn,
-        b,
-        "newer",
-        require_response=True,
-        resolved_at="2026-06-14T09:00:00Z",
-        resolution="answered",
-        reply="ans-b",
-    )
-    _insert_notice(db_conn, a, "still open", require_response=True)  # excluded
-
-    with TestClient(app) as client:
-        resp = client.get("/api/notices/resolved")
-    assert resp.status_code == 200
-    data = resp.json()
-    # newest resolution first; the still-open notice is not present
-    assert [r["title"] for r in data] == ["newer", "older"]
-    top = data[0]
-    assert top["id"] == nnew
-    assert top["agent_id"] == b
-    assert top["agent_label"] == "agent-b"
-    assert top["reply"] == "ans-b"
-    assert top["resolution"] == "answered"
-    assert top["resolved_at"] is not None
-
-
-def test_resolved_empty_when_none(db_conn: psycopg.Connection) -> None:
-    a = _seed_agent(db_conn)
-    _insert_notice(db_conn, a, "open only", require_response=True)
-    with TestClient(app) as client:
-        resp = client.get("/api/notices/resolved")
-    assert resp.status_code == 200
-    assert resp.json() == []
-
-
-def test_resolved_require_response_filter(db_conn: psycopg.Connection) -> None:
-    """The history filters to one queue's tab: require_response=true is the
-    needs-response history, false the FYI history; omit for both."""
-    a = _seed_agent(db_conn)
-    _insert_notice(
-        db_conn,
-        a,
-        "answered q",
-        require_response=True,
-        resolved_at="2026-06-14T01:00:00Z",
-        resolution="answered",
-        reply="ans",
-    )
-    _insert_notice(
-        db_conn,
-        a,
-        "read fyi",
-        resolved_at="2026-06-14T02:00:00Z",
-        resolution="read",
-    )
-    with TestClient(app) as client:
-        both = client.get("/api/notices/resolved").json()
-        only_q = client.get("/api/notices/resolved?require_response=true").json()
-        only_fyi = client.get("/api/notices/resolved?require_response=false").json()
-    assert {r["title"] for r in both} == {"answered q", "read fyi"}
-    assert [r["title"] for r in only_q] == ["answered q"]
-    assert [r["title"] for r in only_fyi] == ["read fyi"]
-
-
-def test_resolved_respects_limit(db_conn: psycopg.Connection) -> None:
-    a = _seed_agent(db_conn)
-    for i in range(3):
-        _insert_notice(
-            db_conn,
-            a,
-            f"n{i}",
-            require_response=True,
-            resolved_at=f"2026-06-14T0{i + 1}:00:00Z",
-            resolution="answered",
-            reply="x",
-        )
-    with TestClient(app) as client:
-        data = client.get("/api/notices/resolved?limit=2").json()
-    assert len(data) == 2
-    # the two most recent (n2 @ 03:00, n1 @ 02:00)
-    assert [r["title"] for r in data] == ["n2", "n1"]
-
-
-def test_resolved_keyset_pages_back(db_conn: psycopg.Connection) -> None:
-    a = _seed_agent(db_conn)
-    for i in range(4):
-        _insert_notice(
-            db_conn,
-            a,
-            f"n{i}",
-            require_response=True,
-            resolved_at=f"2026-06-15T0{i + 1}:00:00Z",
-            resolution="answered",
-            reply="x",
-        )
-    with TestClient(app) as client:
-        page1 = client.get("/api/notices/resolved?limit=2").json()
-        assert [r["title"] for r in page1] == ["n3", "n2"]
-        # page two: strictly older than page one's last row
-        cursor = page1[-1]
-        page2 = client.get(
-            "/api/notices/resolved",
-            params={
-                "limit": 2,
-                "before_at": cursor["resolved_at"],
-                "before_id": cursor["id"],
-            },
-        ).json()
-    assert [r["title"] for r in page2] == ["n1", "n0"]
-
-
-def test_resolved_partial_cursor_422(db_conn: psycopg.Connection) -> None:
-    with TestClient(app) as client:
-        only_at = client.get("/api/notices/resolved?before_at=2026-06-15T01:00:00Z")
-        only_id = client.get("/api/notices/resolved?before_id=5")
-    assert only_at.status_code == 422
-    assert only_id.status_code == 422
-
-
 def test_open_default_limit_comes_from_display_config(
     monkeypatch: pytest.MonkeyPatch, db_conn: psycopg.Connection
 ) -> None:
@@ -334,37 +196,11 @@ def test_open_default_limit_comes_from_display_config(
     assert [r["title"] for r in data] == ["newest", "newer"]
 
 
-def test_resolved_default_page_comes_from_display_config(
-    monkeypatch: pytest.MonkeyPatch, db_conn: psycopg.Connection
-) -> None:
-    """The implicit resolved-history page is
-    ``settings.display.notices_resolved_default_page``
-    (``AVA_NOTICES_RESOLVED_DEFAULT_PAGE``); 30 is only that field's default."""
-    from base.config import settings
-
-    monkeypatch.setattr(settings.display, "notices_resolved_default_page", 2)
-    a = _seed_agent(db_conn)
-    for i in range(3):
-        _insert_notice(
-            db_conn,
-            a,
-            f"n{i}",
-            require_response=True,
-            resolved_at=f"2026-06-14T0{i + 1}:00:00Z",
-            resolution="answered",
-            reply="x",
-        )
-
-    with TestClient(app) as client:
-        data = client.get("/api/notices/resolved").json()
-    assert [r["title"] for r in data] == ["n2", "n1"]
-
-
 def test_feed_defaults_come_from_display_config(
     monkeypatch: pytest.MonkeyPatch, db_conn: psycopg.Connection
 ) -> None:
-    """The unified feed's implicit open cap and resolved page follow the same
-    display fields as the standalone endpoints."""
+    """The unified feed's implicit open cap and resolved page follow the
+    display-config fields."""
     from base.config import settings
 
     monkeypatch.setattr(settings.display, "notices_open_default_limit", 1)

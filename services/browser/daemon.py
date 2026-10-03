@@ -103,7 +103,7 @@ def main() -> None:
         # squatter is reported (ERROR) rather than churned at.
         #
         # The message names its own remedy, because this refusal is what an
-        # operator actually meets: `--stop-browser` now sweeps any Chrome on this
+        # operator actually meets: `ava stop` now sweeps any Chrome on this
         # cluster's profile (services/browser/orphan.py), which clears the
         # post-handoff case without a manual pid hunt. A Chrome on some *other*
         # profile is deliberately not swept — it cannot be positively identified
@@ -111,7 +111,7 @@ def main() -> None:
         print(  # noqa: T201 — pre-redirect, surfaces in the session log
             f"ava-browser: CDP port {cdp_port} already served by another Chrome; "
             f"refusing to start a second instance on {_profile_dir()}. "
-            "To clear it: `ava stop --stop-browser` then `ava start` — that sweeps any "
+            "To clear it: `ava stop` then `ava start` — that sweeps any "
             "Chrome running on this cluster's profile, including one left behind by a "
             "SingletonLock handoff. If instead you started a Chrome of your own on this "
             "port, quit that one — the browser service owns this port.",

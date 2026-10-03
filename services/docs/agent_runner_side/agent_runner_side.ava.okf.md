@@ -18,13 +18,13 @@ Source of truth = services in `ops/spec.py` `build_services()` whose `ServiceSpe
 | Service | Responsibility | File |
 |------|------|------|
 | agent-ops | agent-runner inbound HTTP ops (authenticated) | [[agent_ops.ava.okf.md]] |
-| browser | headed Chrome reuse + shared MCP upstream | [[browser/browser.ava.okf.md]] |
+| browser | headed Chrome reuse + shared MCP upstream | [[services/docs/agent_runner_side/browser/browser/browser.ava.okf.md]] |
 | permissions-helper | macOS permission ancestor and desktop automation | [[permissions-helper/permissions-helper.ava.okf.md]] |
 | computer-mcp | computer-use executor: desktop actions through the signed permissions helper, screen-coordinated (lease + FIFO) + audited (task #1101) | [[computer-mcp.ava.okf.md]] |
 | agent-host | Executes local agents as isolated asyncio turns in one daemon | `services/agent_host/` |
 
 ## Also Under agent-runner Capability
-- **browser-mcp** — shared chrome-devtools-mcp upstream. Gate = browser's PLUS AF_UNIX (its wrapper→daemon transport is a Unix socket), so it is **POSIX-only** where `browser` is not; see [[browser/browser.ava.okf.md]]
+- **browser-mcp** — shared chrome-devtools-mcp upstream. Gate = browser's PLUS AF_UNIX (its wrapper→daemon transport is a Unix socket), so it is **POSIX-only** where `browser` is not; see [[services/docs/agent_runner_side/browser/browser/browser.ava.okf.md]]
 - **computer-mcp** — computer-use executor. Capability = permissions-helper + AF_UNIX; no code gate (governance removed 2026-08-10, peer trust model); see [[computer-mcp.ava.okf.md]]
 
 ## Notes

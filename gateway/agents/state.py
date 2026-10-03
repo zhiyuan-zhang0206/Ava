@@ -24,15 +24,12 @@ from base.agents.history.checkpoint import (
 from base.agents.messages.chat_delivery import ClientMessageConflictError
 from base.agents.messages.inbound import InboundKind
 from base.agents.messages.inbound_images import inbound_image_urls
-from base.agents.observation import snapshot
 from base.agents.uploads import image_mime_for, parse_upload_url, resolve_upload_path
 from base.config import settings
 from base.daemon.schedules.completion_notices import (
     CompletionNotice,
-    CompletionNoticePolicy,
     current_default_completion_notice_policy,
     delivery_required_for_agent,
-    policy_for_agent,
 )
 from base.db import agent_exists, list_pending_inbounds
 from gateway.agents.delivery import deliver_chat_inbound, reconcile_chat_delivery
@@ -42,7 +39,6 @@ from gateway.agents.model_overrides import agent_overrides, read_agent_overrides
 from gateway.agents.schemas import (
     AgentMessageEnqueued,
     AgentMessagesResponse,
-    CompletionNoticePolicyView,
     ContextBreakdownResponse,
     ContextCategory,
     ContextSection,
@@ -195,21 +191,6 @@ def _completion_delivery_required(
         )
         conn.commit()
     return required
-
-
-def _completion_policy(agent_id: int, pool: ConnectionPool) -> CompletionNoticePolicy:
-    """Read the policy through the same path used for delivery decisions."""
-    with pool.connection() as conn:
-        return policy_for_agent(conn, agent_id, current_default_completion_notice_policy())
-
-
-@router.get("/api/agents/{agent_id}/completion-notice-policy")
-async def get_completion_notice_policy(
-    agent_id: int, request: Request
-) -> CompletionNoticePolicyView:
-    """Expose the effective policy for canaries and platform diagnostics."""
-    policy = await asyncio.to_thread(_completion_policy, agent_id, request.app.state.db_pool)
-    return CompletionNoticePolicyView(agent_id=agent_id, policy=policy)
 
 
 @router.post("/api/agents/{agent_id}/messages", status_code=201)
@@ -581,21 +562,6 @@ def get_pending_messages(agent_id: int, request: Request) -> list[PendingInbound
         )
         for r in rows
     ]
-
-
-@router.get("/api/agents/{agent_id}/activity", dependencies=[Depends(deny_isolated_result_read)])
-def get_activity_trail(agent_id: int, request: Request) -> list[snapshot.ActivityEntry]:
-    """The agent's activity trail, oldest first (historical rows; the SDK write
-    verb `ava.self.log` was removed 2026-08-02, so new rows no longer appear).
-    The collapsed current line is already on the agent snapshot
-    (GET /api/agents); this endpoint backs the fleet view's replay of how the
-    work progressed.
-
-    Returns an empty list for an agent that has never reported or does not
-    exist (a plain activity-table read with no agent-existence precondition).
-    """
-    with request.app.state.db_pool.connection() as conn:
-        return snapshot.select_activity_trail(conn, agent_id)
 
 
 @router.get("/api/agents/{agent_id}/token-usage")

@@ -30,7 +30,6 @@ def _h_stop(args: argparse.Namespace) -> int:
     return cmd_stop(
         keep_infra=args.keep_infra,
         require_confirmation=not args.yes,
-        stop_browser=args.stop_browser,
         preserve_sessions=frozenset(args.keep_service),
         force=args.force,
         timeout=args.timeout,
@@ -40,10 +39,7 @@ def _h_stop(args: argparse.Namespace) -> int:
 def _h_restart(args: argparse.Namespace) -> int:
     from cli.commands.lifecycle.stop import cmd_restart
 
-    return cmd_restart(
-        mode=args.mode,
-        force_reap=args.force_reap,
-    )
+    return cmd_restart(mode=args.mode)
 
 
 def _h_status(_args: argparse.Namespace) -> int:
@@ -211,12 +207,6 @@ def _add_stop_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -
         help="skip the stdin y/N confirmation (non-interactive / scripted use).",
     )
     stop_p.add_argument(
-        "--stop-browser",
-        action="store_true",
-        default=True,
-        help=argparse.SUPPRESS,
-    )
-    stop_p.add_argument(
         "--keep-service",
         action="append",
         default=[],
@@ -251,11 +241,6 @@ def _add_restart_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]
         choices=("smooth", "force"),
         default="smooth",
         help="'smooth' preserves completed work; 'force' explicitly permits forced resource shutdown",
-    )
-    restart_p.add_argument(
-        "--force-reap",
-        action="store_true",
-        help="explicitly permit forced resource shutdown",
     )
     restart_p.set_defaults(func=_h_restart)
 

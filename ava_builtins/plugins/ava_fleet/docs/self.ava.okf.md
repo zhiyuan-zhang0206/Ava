@@ -40,7 +40,7 @@ agents (table)
 └── label_user_set — whether explicitly set by agent (when TRUE, won't be auto-replaced)
 ```
 
-(`agent_activity` remains for historical activity display but has no SDK writer since `ava.self.log` was removed 2026-08-02.)
+(`agent_activity` is retired — no SDK writer since `ava.self.log` was removed 2026-08-02, no read surface since 2026-10-03; the table's own removal is a separate migration.)
 
 ## Dependencies
 

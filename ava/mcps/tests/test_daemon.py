@@ -933,11 +933,10 @@ def test_reap_stale_daemons_kills_only_this_unit(
 def _is_daemon_cmdline_cases() -> list[tuple[list[str], bool]]:
     """(cmdline, expected) pairs for `_is_daemon_cmdline`."""
     return [
-        # The daemon's own launch shapes, and a pre-rename release's (`_LEGACY_DAEMON_MODULE`).
+        # The daemon's own launch shapes.
         ([".venv/bin/python", "-m", "ava.mcps._daemon"], True),
         ([".venv/bin/python", "-m", "ava.mcps._daemon", "/tmp/x.sock"], True),  # noqa: S108
-        ([".venv/bin/python", "-m", "ava._mcps_daemon"], True),
-        (["bash", "-lc", "cd /root && .venv/bin/python -m ava._mcps_daemon"], False),
+        (["bash", "-lc", "cd /root && .venv/bin/python -m ava.mcps._daemon"], False),
         # A `bash -lc` wrapper: the whole launch command is ONE argv element
         # that contains the module name — no element equals it, never matched.
         (
@@ -999,25 +998,6 @@ def test_reap_stale_daemons_skips_bash_lc_session_wrapper(
 
     assert not procs[0].killed and not procs[2].killed  # wrappers survive
     assert procs[1].killed  # the actual daemon is reaped
-
-
-def test_reap_stale_daemons_reaps_a_pre_rename_ghost(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A ghost a pre-rename release left behind (`-m ava._mcps_daemon`, dead socket)
-    is still this unit's daemon: reaped when it shares the unit's AVA_HOME, never
-    when it belongs to another unit, and its `bash -lc` wrapper is spared."""
-    monkeypatch.setattr(daemon_mod, "_reap_stale_daemons", _ORIG_REAP)
-    home = str(resolve_ava_home())
-    root = str(Path(daemon_mod.__file__).resolve().parents[2])
-    legacy = [".venv/bin/python", "-m", daemon_mod._LEGACY_DAEMON_MODULE]
-    procs = [
-        _FakeProc(3001, legacy, "/old/release/root", {"AVA_HOME": home}),  # same unit
-        _FakeProc(3002, legacy, "/other/root", {"AVA_HOME": "/other/home"}),  # other unit
-        _FakeProc(3003, ["bash", "-lc", ".venv/bin/python -m ava._mcps_daemon"], root, {}),
-    ]
-    with patch("psutil.process_iter", return_value=procs):
-        daemon_mod._reap_stale_daemons(Path(root))
-    assert procs[0].killed
-    assert not procs[1].killed and not procs[2].killed
 
 
 def test_main_refuses_live_socket(monkeypatch: pytest.MonkeyPatch) -> None:

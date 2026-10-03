@@ -16,7 +16,9 @@ Rules (source of truth):
      nothing else — a target that names a real file on one of the other three
      doc axes (decisions/, future/, conventions/) is reported
      with that as the reason, because the remedy is a normal markdown link
-     rather than a new node.
+     rather than a new node. Inline code spans and fenced blocks are not links
+     (the code-sample exemption from check_doc_references): a target quoted as
+     code documents the syntax and is not scanned.
   9. Overview position: a directory's overview node has exactly one
      position — <dir>/<dir>.ava.okf.md, inside the directory it describes
      (user ruling: "put it inside the folder"), judged on the logical path,
@@ -625,8 +627,11 @@ def lint_file(filepath: Path, all_paths: set[str], repo_root: Path) -> list[Lint
     errors.extend(_tags_errors(path_str, fm))
     errors.extend(_forbidden_key_errors(path_str, fm))
 
-    # Rules 8 + 11: wikilink targets (warn level) — same resolution as the graph builder
-    for m in WIKILINK_RE.finditer(body):
+    # Rules 8 + 11: wikilink targets (warn level) — same resolution as the graph builder.
+    # Code samples are not links (check_doc_references' exemption, applied here with
+    # the same line-preserving mask rule 12 uses): a `[[wikilink]]` quoted in an
+    # inline span or a fenced block documents the syntax; it is not an edge.
+    for m in WIKILINK_RE.finditer(_mask_code(body)):
         err = _wikilink_error(path_str, rel_path, m.group(1).strip(), all_paths, repo_root)
         if err is not None:
             errors.append(err)
