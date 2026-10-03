@@ -41,13 +41,11 @@ from agent.ownership.corpse_reap import ReapedCorpse
 from agent.ownership.hosted import TurnFatalStamp, TurnSettlement
 from base.agents.context import AvaContext
 from base.config import settings
-from base.config.turn_view import turn_settings
 from base.db import Database
 from base.events.live.bus import EventBus
 from base.events.live.tests.fakes import patch_async_redis
 from base.lm.factory import validate_model_config
 from base.packages.plugins.config_registration import _PLUGIN_CONFIG_CLASSES, _PLUGIN_CONFIGS
-from base.packages.plugins.config_view import turn_plugin_config
 from services.agent_host import dispatcher, settlement
 from services.agent_host.dispatcher import TurnScheduler
 from services.agent_host.host import AgentHost
@@ -247,10 +245,11 @@ class _FakeGraph:
         return self.arrived.setdefault(agent_id, asyncio.Event())
 
     async def _observe(self, _agent_id: int, context: AvaContext) -> _Observation:
-        plugin_cfg = cast(_HostPluginConfig, turn_plugin_config("hostplug"))
+        agent = context.require_agent()
+        plugin_cfg = cast(_HostPluginConfig, agent.plugin_config("hostplug"))
         return _Observation(
             agent_id=ava.agent_identity.agent_id(),
-            model=turn_settings.lm.llm_model,
+            model=agent.brain.llm_model,
             plugin_marker=plugin_cfg.marker,
             llm=cast(_Model, context.llm),
             publisher=cast(_Publisher, context.event_publisher),

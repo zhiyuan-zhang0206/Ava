@@ -13,9 +13,9 @@ opens separate workload and control pools, builds the shared graph/checkpointer,
 and reconciles stale local running rows before serving wakes.
 
 A scheduled turn reads the agent's stored configuration and admits its exact
-incarnation through `agent/ownership/hosted.py`. Per-agent identity, framework
-config and plugin config are context-bound before `boot_agent_scope()` builds
-the model and restores state. The effective order is explicit overlay, then
+incarnation through `agent/ownership/hosted.py`. Per-agent identity is context-bound and the framework and plugin config travel
+as the agent's slices, resolved before `boot_agent_scope()` builds the model and
+restores state. The effective order is explicit overlay, then
 birth config, then current cluster config.
 
 `agent/startup/__init__.py` provides the shared recovery and saver operations:

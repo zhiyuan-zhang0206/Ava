@@ -22,10 +22,10 @@ aside rather than mistaking it for the code cell's stdout:
   runs no code, so after_exec would never see it).
 
 The four code categories' shared cadence is config-driven
-(`turn_settings.agent.sdk_code_reminder_cadence`): `once_per_compaction` (at
+(`sdk_code_reminder_cadence`): `once_per_compaction` (at
 most once per category per context window, re-armed on compaction, default) or
 `every_time` (every matching code cell). The agent_reply category has its own
-cadence (`turn_settings.agent.agent_reply_reminder_cadence`) with the same two
+cadence (`agent_reply_reminder_cadence`) with the same two
 values.
 
 Mechanics:

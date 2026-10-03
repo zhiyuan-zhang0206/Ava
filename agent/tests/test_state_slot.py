@@ -53,7 +53,6 @@ from agent.state import (
     register_plugin_state,
 )
 from base.agents.context import AvaContext
-from base.config.turn_view import bind_agent_config
 from base.host.env.agent_slices import AgentSlices
 from base.packages.plugins.context import PluginContext
 
@@ -466,12 +465,14 @@ def test_deepcopy_isolates_nested_pydantic_model():
 # ── Integration: exec_node full path ────────────────────────────────────────
 
 
-def _make_runtime_and_config(redis_client: AsyncMock) -> tuple[Runtime[AvaContext], RunnableConfig]:
+def _make_runtime_and_config(
+    redis_client: AsyncMock, pins: dict[str, Any] | None = None
+) -> tuple[Runtime[AvaContext], RunnableConfig]:
     ctx = AvaContext(
         ops_pool=None,
         llm=MagicMock(),
         event_publisher=MagicMock(),
-        agent=AgentSlices.resolve(),
+        agent=AgentSlices.resolve(pins),
     )
     runtime = Runtime(context=ctx)
     config: RunnableConfig = {"configurable": {"thread_id": "42"}}
@@ -834,10 +835,9 @@ async def test_exec_node_checkpoints_child_attachment(fake_cancel_event, tmp_pat
     image.write_bytes(b"png")
     code = f"import ava\nava.self.attach({str(image)!r}, label='render result')"
     state = BaseAgentState(messages=[_ai_message_with_code(code)], halted=False)
-    runtime, config = _make_runtime_and_config(AsyncMock())
+    runtime, config = _make_runtime_and_config(AsyncMock(), {"llm_model": "claude-sonnet-5"})
 
-    with bind_agent_config({"llm_model": "claude-sonnet-5"}):
-        cmd = await _exec_node_impl(state, runtime, config)
+    cmd = await _exec_node_impl(state, runtime, config)
 
     update = cast(dict[str, Any], cmd.update)
     # Pending is drained (cleared) in the same update — nothing parked.
@@ -884,10 +884,9 @@ async def test_exec_node_compact_path_drops_notes_and_findings(fake_cancel_event
         halted=False,
         attach=AttachState(pending=[AttachEntry(path="/previous.png", label=None)]),
     )
-    runtime, config = _make_runtime_and_config(AsyncMock())
+    runtime, config = _make_runtime_and_config(AsyncMock(), {"llm_model": "claude-sonnet-5"})
 
-    with bind_agent_config({"llm_model": "claude-sonnet-5"}):
-        cmd = await _exec_node_impl(state, runtime, config)
+    cmd = await _exec_node_impl(state, runtime, config)
 
     update = cast(dict, cmd.update)
     assert update.get("messages") == [], (  # pyright: ignore[reportUnknownMemberType]

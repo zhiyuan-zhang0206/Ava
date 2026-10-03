@@ -4,7 +4,7 @@ A package that owns configuration slices (`services/im_bridge/config.py`) receiv
 them through constructors; only its composition root reads `settings` and builds
 them. Governed packages and their roots are the closed `SLICED_PACKAGES` list in
 `allowlist.py`. In any other non-test module of a governed package, importing
-`settings`, `turn_settings`, `get_field`, `set_field` or `ensure_eager` from
+`settings`, `get_field`, `set_field` or `ensure_eager` from
 `base.config` (at module level or inside a function), or importing `base.config`
 itself, is a site frozen like any other ambient-state site as
 `path::settings-read:<name>`. A package whose slicing lands in several steps may
@@ -23,7 +23,7 @@ FIX = (
     "this package receives its configuration as constructor arguments (its slices in "
     "`config.py`); only the composition root named in SLICED_PACKAGES reads `settings` and builds them"
 )
-_READERS = frozenset({"settings", "turn_settings", "get_field", "set_field", "ensure_eager"})
+_READERS = frozenset({"settings", "get_field", "set_field", "ensure_eager"})
 _CONFIG = "base.config"
 
 

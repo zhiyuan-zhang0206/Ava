@@ -17,7 +17,7 @@ from typing import Any, cast
 
 from base.agents.history.checkpoint_serde import STATIC_CHECKPOINT_MSGPACK_TYPES
 from base.cluster.machines import mark_stopping
-from base.config.turn_view import resolve_agent_config_pins
+from base.config.agent_pins import resolve_agent_config_pins
 from base.db import Database
 from base.log import logger
 from ops.cluster_status import (

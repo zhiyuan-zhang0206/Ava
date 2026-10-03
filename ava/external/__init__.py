@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import sys
+from collections.abc import Mapping
 from contextlib import ExitStack, suppress
 from threading import Lock, local
 from types import TracebackType
@@ -16,9 +17,9 @@ from uuid import uuid4
 from ava import agent_identity
 from base.agents import impersonation as control
 from base.cluster.machine import machine_name
-from base.config.turn_view import bind_agent_config, resolve_agent_config_pins
+from base.config.agent_pins import resolve_agent_config_pins
 from base.native_process.ownership import process_metadata
-from base.packages.plugins.config_view import bind_agent_plugin_config, resolve_agent_plugin_pins
+from base.packages.plugins.config_view import PluginConfigView, resolve_agent_plugin_pins
 
 from .state import (
     apply_plugin_delta,
@@ -32,6 +33,12 @@ __all_for_ava__ = ["attach", "Attachment"]
 _attachment_lock = Lock()
 _active_attachment: Attachment | None = None
 _close_flush_permission = local()
+
+
+def attached_config() -> tuple[Mapping[str, Any], PluginConfigView] | None:
+    """The pins and plugin-config view of the agent this process is attached to, if any."""
+    attachment = _active_attachment
+    return None if attachment is None else attachment.config
 
 
 def _close_flush_permitted() -> bool:
@@ -82,6 +89,8 @@ class Attachment:
         self._closed = False
         self._closing = False
         self._stack = ExitStack()
+        # The attached agent's pins and plugin-config view (`attached_config`), once loaded.
+        self.config: tuple[Mapping[str, Any], PluginConfigView] | None = None
         self._event_participant: Any = None
         if not _attachment_lock.acquire(blocking=False):
             raise RuntimeError("this process already has an external attachment")
@@ -101,8 +110,10 @@ class Attachment:
             # drop them (review finding, #2616).
             ava.ensure_plugins_loaded(surface=False)
             state, overlay, birth = load_snapshot(self.agent_id)
-            self._stack.enter_context(bind_agent_config(resolve_agent_config_pins(overlay, birth)))
-            self._stack.enter_context(bind_agent_plugin_config(resolve_agent_plugin_pins(overlay)))
+            self.config = (
+                resolve_agent_config_pins(overlay, birth),
+                PluginConfigView(resolve_agent_plugin_pins(overlay)),
+            )
             # Native applies journal entries only after the controller releases
             # the lease. Already applied entries belong to the checkpoint.
             receipt = state.impersonation_applied

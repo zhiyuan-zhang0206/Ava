@@ -4,12 +4,12 @@ Many agents' turns share one host process, so an agent-scoped (`per_agent`) sett
 in the process-global `settings`. The host resolves the agent's slices at the start of each turn
 and hands them to the graph through `AvaContext.agent`; nodes and hooks read
 `runtime.context.agent.<slice>.<field>` and pass the slice they need to the functions they call,
-instead of reading a context-bound view (`base.config.turn_view`).
+instead of reading a context-bound view.
 
 Each slice is a frozen dataclass whose field names are the flat setting names, grouped by the
 package that reads them. `AgentSlices.resolve(pins)` fills every field with the agent's pin
 (`config_overlay > birth_config`, merged by `resolve_agent_config_pins`) and falls through to the
-live cluster default for an unpinned field, exactly as `turn_settings` does: a configuration
+live cluster default for an unpinned field: a configuration
 change reaches the agent's next turn, and a turn sees one value of each field throughout.
 
 List-valued settings are frozen into tuples.
@@ -22,7 +22,7 @@ build the slices too.
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import dataclass, fields
+from dataclasses import dataclass, field, fields
 from types import MappingProxyType
 from typing import Any, Literal, cast
 
@@ -144,14 +144,24 @@ class AgentSlices:
     llm_policy: LlmCallPolicy
     sandbox: Sandbox
     kernel: AgentKernel
-    # The agent's pins, for the settings no slice names (`read`).
+    # The agent's framework pins, for the settings no slice names (`read`), and its plugin pins
+    # (`plugin -> {field: value}`), for `plugin_config`.
     pins: Mapping[str, Any]
+    plugin_pins: Mapping[str, Mapping[str, Any]]
+    _plugin_view: Any = field(repr=False, compare=False)
 
     @classmethod
-    def resolve(cls, pins: Mapping[str, Any] | None = None) -> AgentSlices:
-        """The slices of an agent holding `pins` (`resolve_agent_config_pins`); no pins reads the
-        cluster defaults as they are now."""
+    def resolve(
+        cls,
+        pins: Mapping[str, Any] | None = None,
+        plugin_pins: Mapping[str, Mapping[str, Any]] | None = None,
+    ) -> AgentSlices:
+        """The slices of an agent holding `pins` (`resolve_agent_config_pins`) and `plugin_pins`
+        (`resolve_agent_plugin_pins`); no pins reads the cluster defaults as they are now."""
+        from base.packages.plugins.config_view import PluginConfigView
+
         pins = pins or {}
+        plugin_pins = plugin_pins or {}
         return cls(
             brain=AgentBrain(**_kwargs(AgentBrain, pins)),
             prompt=Prompt(**_kwargs(Prompt, pins)),
@@ -162,6 +172,8 @@ class AgentSlices:
             sandbox=Sandbox(**_kwargs(Sandbox, pins)),
             kernel=AgentKernel(**_kwargs(AgentKernel, pins)),
             pins=MappingProxyType(dict(pins)),
+            plugin_pins=MappingProxyType({p: dict(f) for p, f in plugin_pins.items()}),
+            _plugin_view=PluginConfigView(plugin_pins),
         )
 
     def read(self, domain: str, field: str) -> Any:
@@ -171,3 +183,18 @@ class AgentSlices:
         from base.config import settings
 
         return getattr(getattr(settings, domain), field)
+
+    def plugin_config(self, plugin: str) -> Any:
+        """This agent's config instance of `plugin`: the process-global one with the agent's plugin
+        pins over it."""
+        return self._plugin_view.config_for(plugin)
+
+    def plugin_configs(self) -> dict[str, Any]:
+        """`plugin_config` of every registered plugin."""
+        from base.packages.plugins.config_registration import registered_plugin_config_names
+
+        return {name: self.plugin_config(name) for name in registered_plugin_config_names()}
+
+    def overlay(self) -> dict[str, Any]:
+        """The agent's pins as the flat overlay an exec child boots with (framework and plugin)."""
+        return {**self.pins, **self._plugin_view.flat()}

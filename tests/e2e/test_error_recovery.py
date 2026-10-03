@@ -1,7 +1,7 @@
 """Panoramic Case 3 — LLM error path + recovery (#1018).
 
 The scripted fake raises FatalProviderError on the first LLM call — a class
-excluded from the llm node's retry policy (agent/graph/_build.py
+excluded from the llm node's retry policy (agent/graph/llm/_retry.py
 `_should_retry`). The agent loop aborts the turn, emits one SSE `error` event
 and halts idling; the frontend renders it as the ephemeral `[error] ...`
 marker. The next user message gets a normal reply — recovery without a

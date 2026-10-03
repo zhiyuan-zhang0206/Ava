@@ -20,6 +20,7 @@ Covers anthropic (`stop_reason`), openai (`finish_reason`), and google_genai (`f
 from __future__ import annotations
 
 import asyncio
+import time
 from collections.abc import AsyncIterator
 
 import pytest
@@ -275,7 +276,8 @@ async def test_llm_node_validator_wired(
     from langchain_core.runnables import RunnableConfig
     from langgraph.runtime import Runtime
 
-    from agent.graph import llm_node
+    from agent.graph.llm._retry import Attempt
+    from agent.graph.llm.node import llm_attempt
     from agent.state import AgentState
     from agent.tests._fakes import make_fake_ops_pool
     from base.agents.context import AvaContext
@@ -300,7 +302,7 @@ async def test_llm_node_validator_wired(
     state = AgentState(messages=[HumanMessage(content="hi")], halted=False)
 
     with pytest.raises(LLMStreamTruncatedError):
-        await llm_node(state, runtime, config)
+        await llm_attempt(state, runtime, config, Attempt(1, time.time()))
 
     # llm_node does NOT emit Error event — locks the "moved to outer wrapper" design
     # point, preventing someone from re-adding emit inside llm_node because "frontend

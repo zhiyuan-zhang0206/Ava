@@ -21,14 +21,14 @@ supplies the package doors and the shrink-only baseline practice the enforcement
   first read outside it. `AVA_HOME` is read at each call by the path helpers.
 - **Per-agent config** resolves as `config_overlay > birth_config > cluster
   default` ([per-agent config lifecycle](../../decisions/2026-07-31-per-agent-config-lifecycle.md)).
-  The host turns the two stored maps into pins and binds them in a ContextVar
-  around each turn (`base/config/turn_view.py`); plugin config and the turn
-  identity are bound the same way.
+  The host turns the two stored maps into pins (`base/config/agent_pins.py`) and
+  resolves them, with the plugin pins, into the agent's `AgentSlices` each turn; only
+  the turn identity is still bound in a ContextVar.
 - **`AvaContext`** (`base/agents/context/__init__.py`) is LangGraph's per-run context. The
   host builds one per turn in `services/agent_host/host.py` with the handles (model,
   event publisher, database pool, `Database`, `EventBus`) and the agent's resolved
-  `AgentSlices` (`base/host/env/agent_slices.py`); graph code is moving from the
-  `turn_settings` view to reading `runtime.context.agent`.
+  `AgentSlices` (`base/host/env/agent_slices.py`); graph code reads
+  `runtime.context.agent`.
 - **One compiled graph** is shared by every agent in a host
   ([agent runtime](../../agent/docs/agent-runtime.ava.okf.md)).
 
@@ -190,7 +190,7 @@ is locked by a second rule of the same family, `settings-read`
 (`scripts/structure/ambient_state/sliced.py`): a package that declares itself sliced
 (`settings = [...]` in its own `ambient_roots.toml`, collected into `SLICED_PACKAGES`)
 names its composition-root modules, and any other non-test module in it that imports
-`settings`, `turn_settings`, `get_field`, `set_field`, `ensure_eager` or `base.config`
+`settings`, `get_field`, `set_field`, `ensure_eager` or `base.config`
 is a site. Sites are frozen in the same shrink-only baseline, so a package that cannot
 finish in one change freezes what is left; a finished one has none.
 

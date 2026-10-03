@@ -67,23 +67,3 @@ def test_a_baseline_may_not_rise_above_the_base_revision() -> None:
     problems = ratchet.errors(sites, frozen, {"base/agents": {"shim": 1}})
     assert len(problems) == 1
     assert "only shrinks" in problems[0]
-
-
-def test_a_turn_settings_read_is_counted_but_not_its_import() -> None:
-    tree = ast.parse(
-        "from base.config.turn_view import turn_settings\n\nmodel = turn_settings.lm.llm_model\n"
-    )
-    assert ratchet.turn_reads(tree) == [3]
-
-
-def test_a_turn_settings_read_above_its_frozen_count_fails_with_the_slice_hint() -> None:
-    sites = _sites(**{"agent/graph__turn-settings-read": ["agent/graph/a.py:3"]})
-    (problem,) = ratchet.errors(sites, {}, None)
-    assert problem.startswith("agent/graph/a.py:3:") and "AgentSlices" in problem
-
-
-def test_the_revision_introducing_a_kind_may_freeze_its_first_counts() -> None:
-    frozen = {"agent/graph": {"turn-settings-read": 2}}
-    sites = _sites(**{"agent/graph__turn-settings-read": ["a.py:1", "a.py:2"]})
-    assert ratchet.errors(sites, frozen, {"base/agents": {"shim": 1}}) == []
-    assert ratchet.errors(sites, frozen, {"agent/graph": {"turn-settings-read": 1}}) != []

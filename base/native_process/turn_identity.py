@@ -96,9 +96,8 @@ def bind_turn_identity(
 ) -> Generator[None, None, None]:
     """Bind `agent_id` as the current context's turn identity.
 
-    The hosted dispatcher wraps turn-task creation in this (together with
-    `base.config.bind_agent_config`): bind -> create the task (which copies
-    the context) -> reset. Nesting rebinds cleanly.
+    The hosted dispatcher wraps turn-task creation in this: bind -> create the task
+    (which copies the context) -> reset. Nesting rebinds cleanly.
     """
     token = _TURN_AGENT_ID.set(agent_id)
     runtime_token = _TURN_INCARNATION.set(incarnation)
