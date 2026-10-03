@@ -10,7 +10,7 @@
     "test_machine_surface.py",
     "test_mcp_config.py",
     "test_mcp_config_enable_filter.py",
-    "test_mcps.py",
+    "test_mcps_help.py",
     "test_sdk_disable.py",
     "test_sdk_redis_resilience.py",
     "test_security.py",
