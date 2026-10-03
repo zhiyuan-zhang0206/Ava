@@ -248,7 +248,7 @@ def pause_heartbeat(duration: float) -> None:
 
     if not duration > 0:
         raise ValueError(f"duration must be greater than 0 seconds, got {duration!r}")
-    limit = _settings.slices().kernel.heartbeat_pause_max_seconds
+    limit = _settings.agent_setting("heartbeat_pause_max_seconds")
     if duration > limit:
         raise ValueError(
             f"duration must be at most {limit:.0f} seconds (heartbeat pause limit; "

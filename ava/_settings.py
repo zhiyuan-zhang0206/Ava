@@ -103,7 +103,7 @@ class _LazyConnection:
 # The SDK's composition root: the handles and the agent configuration every `ava.*` function of
 # this process works with. `ava.*` is a namespace of free functions the agent's code calls inside
 # its exec child (or a script one launched), so nothing can pass them a handle; they ask here. The exec child's settings
-# carry its agent's overlay (applied at boot), so `slices()` is that agent's `AgentSlices`. Nothing
+# carry its agent's overlay (applied at boot), so `agent_setting` reads that agent's. Nothing
 # is cached: each call builds from the settings as they are now. All import lazily — `import ava`
 # must not pull the psycopg / redis / live-events stacks into every exec child (task #3816).
 
@@ -122,11 +122,11 @@ def bus() -> "EventBus":  # noqa: F821  # pyright: ignore[reportUndefinedVariabl
     return EventBus.from_settings()
 
 
-def slices() -> "AgentSlices":  # noqa: F821  # pyright: ignore[reportUndefinedVariable]
-    """This process's agent configuration."""
-    from base.host.env.agent_slices import AgentSlices
+def agent_setting(name: str) -> Any:
+    """One per-agent setting of this process's agent (the settings carry the overlay)."""
+    from base.host.env.agent_slices import agent_setting
 
-    return AgentSlices.resolve()
+    return agent_setting(name)
 
 
 def _connect_db() -> "psycopg.Connection":  # noqa: F821  # pyright: ignore[reportUndefinedVariable]

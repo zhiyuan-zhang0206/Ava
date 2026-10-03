@@ -61,7 +61,7 @@ def _current_model() -> str:
     from ava import _settings
     from base.lm.registry import resolve_available_model
 
-    return resolve_available_model(_settings.slices().brain.llm_model)
+    return resolve_available_model(_settings.agent_setting("llm_model"))
 
 
 def _attach_unavailable_reason(model: str | None = None) -> str | None:

@@ -119,6 +119,15 @@ def _value(pins: Mapping[str, Any], name: str) -> Any:
     return tuple(cast("list[Any]", value)) if isinstance(value, list) else value
 
 
+def agent_setting(name: str, pins: Mapping[str, Any] | None = None) -> Any:
+    """One per-agent setting: the pin when `pins` holds one, else the live default.
+
+    For a process that needs a handful of fields and must not read the rest (the exec child boots
+    on the lite config index, and reading a field outside it upgrades the whole config).
+    """
+    return _value(pins or {}, name)
+
+
 def _kwargs(slice_type: type, pins: Mapping[str, Any]) -> dict[str, Any]:
     return {f.name: _value(pins, f.name) for f in fields(slice_type)}
 
