@@ -25,6 +25,7 @@ from typing import Any, Literal, cast
 from pydantic import BaseModel, ValidationError
 
 from base import paths
+from base.packages.plugins import load_report
 from base.packages.plugins.config_face import declared_config_class
 from base.packages.plugins.config_registration import merge_disk_image_schema
 from base.packages.skills import names as skill_naming
@@ -271,7 +272,7 @@ def load(known_plugins: set[str], *, allow_dangling: bool = False) -> PluginsCon
 _dangling_reported: set[str] = set()
 
 
-def report_dangling(exc: DanglingPlugin) -> None:
+def report_dangling(exc: DanglingPlugin, report: load_report.Reporter | None = None) -> None:
     """Report dangling config entries through the one canonical fail-soft reporter.
 
     Both dangling-handling load sites — the runtime wrapper below and the
@@ -285,12 +286,10 @@ def report_dangling(exc: DanglingPlugin) -> None:
     reports once per process (see `_dangling_reported`); the caller keeps the
     fail-soft contract — dropping the entry must never block a start.
     """
-    from base.packages.plugins import load_report
-
     fresh = sorted(set(exc.names) - _dangling_reported)
     _dangling_reported.update(fresh)
     for name in fresh:
-        load_report.report_plugin_load_failure(name, exc)
+        load_report.reporter(report)(name, exc)
 
 
 def load_for_runtime(known_plugins: set[str]) -> PluginsConfig:

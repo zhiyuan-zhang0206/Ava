@@ -108,10 +108,10 @@ def test_a_disabled_broken_plugin_is_never_imported(capsys: pytest.CaptureFixtur
     assert "RESULT enabled=0 failed=0 rc=0" in capsys.readouterr().out
 
 
-def test_nothing_is_emitted_while_verifying_and_the_reporter_is_live_again_after(
+def test_nothing_is_emitted_while_verifying_and_the_canonical_reporter_is_unchanged(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Read-only: no `plugin_load_failed` telemetry from a verify; the diversion ends with it."""
+    """Read-only: no `plugin_load_failed` telemetry from a verify; a later canonical report still emits."""
     emitted: list[tuple[object, ...]] = []
 
     def record(*args: object, **_kwargs: object) -> None:

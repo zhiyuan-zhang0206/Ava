@@ -15,7 +15,7 @@ plugin broken by a framework change (2026-10-03: the declarative rework deleted 
 and its siblings, and out-of-repo plugins under `~/.ava/plugins` that still called them failed to load)
 starts an update looking healthy. Read-only: it imports the enabled plugins' faces (`plugin.py`,
 `default_config.py`, `agent_runtime.py`) and builds the registry as an agent boot does, but starts no
-agent, runs no hook and writes nothing; the failure telemetry is diverted (`load_report.collecting`).
+agent, runs no hook and writes nothing; the failures come back through `load_extensions(report=...)`, so no log or telemetry is emitted.
 Module-level code a plugin runs on import still runs. Scope: the agent-boot load path; a plugin's
 `services.py` / `provider.py` / `metrics.py` load on other paths and are not covered. Line contract:
 `RESULT enabled=N failed=M rc=R`, then `RED plugin=<name> <error> (at <file>:<line>)` per failure; exit
@@ -241,15 +241,15 @@ def _where(exc: BaseException) -> str:
 def cmd_plugins_verify() -> int:
     """`ava plugins verify` — load every enabled plugin; exit 1 when any is skipped."""
     from agent.extensions import load_extensions
-    from base.packages.plugins import load_report
 
+    failures: list[tuple[str, BaseException]] = []
     try:
-        with load_report.collecting() as failures:
-            enabled = sum(1 for entry in load_extensions().config.plugins.values() if entry.enabled)
+        loaded = load_extensions(report=lambda name, exc: failures.append((name, exc)))
     except Exception as exc:  # the loader itself broke — not a contained plugin failure
         print("RESULT enabled=0 failed=0 rc=2")
         print(f"TOOL-ERROR {type(exc).__name__}: {str(exc)[:200]}")
         return 2
+    enabled = sum(1 for entry in loaded.config.plugins.values() if entry.enabled)
     rc = 1 if failures else 0
     print(f"RESULT enabled={enabled} failed={len(failures)} rc={rc}")
     for name, exc in failures:
