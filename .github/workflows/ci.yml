@@ -327,6 +327,9 @@ jobs:
   dependency-audit:
     # Informational first: dependency findings are visible in every CI run but
     # do not block delivery until the remediation policy is ready to enforce.
+    # Nobody reads a green-by-construction job, so the weekly
+    # dependency-audit.yml run is what turns high/critical findings (and
+    # behind binary pins) into a tracked issue.
     name: dependency audit (informational)
     runs-on: ubuntu-24.04
     timeout-minutes: 10
