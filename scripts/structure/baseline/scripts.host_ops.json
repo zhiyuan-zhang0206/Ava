@@ -1,7 +1,0 @@
-{
-  "complexity": {
-    "scripts/host_ops/f5_lwcr_smappservice.py::_classify_inject": 19,
-    "scripts/host_ops/f5_lwcr_smappservice.py::main": 23,
-    "scripts/host_ops/lwcr_fault_injection.py::main": 33
-  }
-}
