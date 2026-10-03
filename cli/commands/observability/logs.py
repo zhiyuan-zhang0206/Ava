@@ -205,81 +205,48 @@ def _retention_scan(
     return sorted(candidates, key=lambda candidate: str(candidate.path)), failures
 
 
-def cmd_logs_retention(
-    *,
-    older_than_days: int | None,
-    family_days: Mapping[str, int] | None = None,
-    dry_run: bool,
-    logs_path: Path | None = None,
-    now: datetime | None = None,
-) -> int:
-    """Apply local log retention and return a CLI exit code."""
-    if older_than_days is not None and family_days is not None:
-        raise ValueError("--older-than and --family-days are mutually exclusive")
-
-    target = logs_dir() if logs_path is None else logs_path
-    current = datetime.now(UTC) if now is None else now
-    if family_days is None:
-        retention_days = (
-            settings.observability.log_retention_days
-            if older_than_days is None
-            else older_than_days
-        )
-        resolved_family_days = dict.fromkeys(_FAMILY_DEFAULT_DAYS, retention_days)
-    else:
-        overrides = dict(family_days)
-        if "default" in overrides:
-            if "other" in overrides:
-                raise ValueError("--family-days cannot specify both default and other")
-            overrides["other"] = overrides.pop("default")
-        resolved_family_days = _FAMILY_DEFAULT_DAYS | overrides
-
-    candidates, scan_failures = _retention_scan(
-        target,
-        current,
-        resolved_family_days,
-    )
+def _print_dry_run(
+    candidates: list[RetentionCandidate],
+    scan_failures: list[RetentionFailure],
+    family_days: Mapping[str, int] | None,
+    resolved_family_days: Mapping[str, int],
+) -> None:
     total_bytes = sum(candidate.size_bytes for candidate in candidates)
-    for failure in scan_failures:
-        print(
-            f"retention_error\tpath={failure.path}\terror={failure.error}",
-            file=sys.stderr,
-        )
-
-    if dry_run:
-        for candidate in candidates:
-            family_fields = ""
-            if family_days is not None:
-                family_fields = f"\tfamily={candidate.family}\tdays={candidate.retention_days}"
-            print(
-                "retention_candidate"
-                f"{family_fields}"
-                f"\tmtime={_utc_mtime(candidate.mtime)}"
-                f"\tsize_bytes={candidate.size_bytes}"
-                f"\tpath={candidate.path}"
-            )
+    for candidate in candidates:
+        family_fields = ""
         if family_days is not None:
-            for family in sorted(resolved_family_days):
-                family_candidates = [
-                    candidate for candidate in candidates if candidate.family == family
-                ]
-                print(
-                    "retention_family"
-                    f"\tfamily={family}"
-                    f"\tdays={resolved_family_days[family]}"
-                    f"\tfiles={len(family_candidates)}"
-                    f"\tbytes={sum(candidate.size_bytes for candidate in family_candidates)}"
-                )
+            family_fields = f"\tfamily={candidate.family}\tdays={candidate.retention_days}"
         print(
-            "retention_summary"
-            f"\tmode=dry-run\tfiles={len(candidates)}\tbytes={total_bytes}"
-            f"\tfailed={len(scan_failures)}"
+            "retention_candidate"
+            f"{family_fields}"
+            f"\tmtime={_utc_mtime(candidate.mtime)}"
+            f"\tsize_bytes={candidate.size_bytes}"
+            f"\tpath={candidate.path}"
         )
-        return 1 if scan_failures else 0
+    if family_days is not None:
+        for family in sorted(resolved_family_days):
+            family_candidates = [
+                candidate for candidate in candidates if candidate.family == family
+            ]
+            print(
+                "retention_family"
+                f"\tfamily={family}"
+                f"\tdays={resolved_family_days[family]}"
+                f"\tfiles={len(family_candidates)}"
+                f"\tbytes={sum(candidate.size_bytes for candidate in family_candidates)}"
+            )
+    print(
+        "retention_summary"
+        f"\tmode=dry-run\tfiles={len(candidates)}\tbytes={total_bytes}"
+        f"\tfailed={len(scan_failures)}"
+    )
 
+
+def _delete_candidates(candidates: list[RetentionCandidate], scan_failed: int) -> int:
+    """Unlink every candidate and print the summary; the failure count (scan failures included)."""
     deleted = 0
     reclaimed_bytes = 0
-    failed = len(scan_failures)
+    failed = scan_failed
     for candidate in candidates:
         try:
             candidate.path.unlink()
@@ -296,6 +263,60 @@ def cmd_logs_retention(
         "retention_summary"
         f"\tmode=delete\tdeleted={deleted}\tbytes={reclaimed_bytes}\tfailed={failed}"
     )
+    return failed
+
+
+def _resolve_family_days(
+    older_than_days: int | None, family_days: Mapping[str, int] | None
+) -> dict[str, int]:
+    """Per-family retention days: the flat setting, or the defaults with the caller's overrides."""
+    if family_days is None:
+        retention_days = (
+            settings.observability.log_retention_days
+            if older_than_days is None
+            else older_than_days
+        )
+        return dict.fromkeys(_FAMILY_DEFAULT_DAYS, retention_days)
+    overrides = dict(family_days)
+    if "default" in overrides:
+        if "other" in overrides:
+            raise ValueError("--family-days cannot specify both default and other")
+        overrides["other"] = overrides.pop("default")
+    return _FAMILY_DEFAULT_DAYS | overrides
+
+
+def cmd_logs_retention(
+    *,
+    older_than_days: int | None,
+    family_days: Mapping[str, int] | None = None,
+    dry_run: bool,
+    logs_path: Path | None = None,
+    now: datetime | None = None,
+) -> int:
+    """Apply local log retention and return a CLI exit code."""
+    if older_than_days is not None and family_days is not None:
+        raise ValueError("--older-than and --family-days are mutually exclusive")
+
+    target = logs_dir() if logs_path is None else logs_path
+    current = datetime.now(UTC) if now is None else now
+    resolved_family_days = _resolve_family_days(older_than_days, family_days)
+
+    candidates, scan_failures = _retention_scan(
+        target,
+        current,
+        resolved_family_days,
+    )
+    for failure in scan_failures:
+        print(
+            f"retention_error\tpath={failure.path}\terror={failure.error}",
+            file=sys.stderr,
+        )
+
+    if dry_run:
+        _print_dry_run(candidates, scan_failures, family_days, resolved_family_days)
+        return 1 if scan_failures else 0
+
+    failed = _delete_candidates(candidates, len(scan_failures))
     return 1 if failed else 0
 
 

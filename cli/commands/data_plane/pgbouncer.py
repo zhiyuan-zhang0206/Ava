@@ -511,6 +511,33 @@ def stop_pgbouncer(*, force: bool = False) -> PoolerStop:
     raise RuntimeError("PgBouncer stop incomplete; custody retained")
 
 
+def _normalized_db_url(
+    current: str, *, pg_port: int, pooler_port: int, pooler_enabled: bool
+) -> str | None:
+    """`current` rewritten onto the toggle-matched port, or None when it needs no change.
+
+    Only a URL carrying the OTHER port of this cluster is rewritten; a placeholder, an empty
+    value or an operator stand-in naming neither port is left alone.
+    """
+    from urllib.parse import urlsplit
+
+    from base.host.env.dotenv_boot import PLACEHOLDER_DB_URL
+    from base.host.net.url_secret import url_with_port
+
+    if not current or current == PLACEHOLDER_DB_URL:
+        return None
+    try:
+        port = urlsplit(current).port
+    except ValueError:
+        return None
+    if port is None:
+        return None
+    want = pooler_port if pooler_enabled else pg_port
+    if port != want and port in (pg_port, pooler_port):
+        return url_with_port(current, want)
+    return None
+
+
 def ensure_pgbouncer_step(ctx: ConvergeCtx) -> None:
     """Converge step: reconcile the one DB URL with the pooler toggle, and
     preflight the binary. Gateway-only.
@@ -534,15 +561,11 @@ def ensure_pgbouncer_step(ctx: ConvergeCtx) -> None:
        direct. The install itself lives in the provision scripts
        (`brew install pgbouncer` / apt), not here, so `ava start` never triggers
        a heavyweight package install."""
-    from urllib.parse import urlsplit
-
     from dotenv import dotenv_values
 
     from base.cluster import get_record
     from base.config import settings
-    from base.host.env.dotenv_boot import PLACEHOLDER_DB_URL
     from base.host.env.dotenv_file import remove_env, upsert_env
-    from base.host.net.url_secret import url_with_port
 
     if settings.data_plane.is_remote:
         # The pooler is a local-instance component; a remote/SaaS plane's URL
@@ -554,18 +577,12 @@ def ensure_pgbouncer_step(ctx: ConvergeCtx) -> None:
         return
     env_path = ctx.ava_home / ".env"
     current = (dotenv_values(env_path).get("AVA_DB_URL") or "").strip()
-    normalized: str | None = None
-    if current and current != PLACEHOLDER_DB_URL:
-        try:
-            port = urlsplit(current).port
-        except ValueError:
-            port = None
-        if port is not None:
-            pg = rec.ports["postgres"]
-            pooler = rec.ports["pgbouncer"]
-            want = pooler if settings.data_plane.pgbouncer_enabled else pg
-            if port != want and port in (pg, pooler):
-                normalized = url_with_port(current, want)
+    normalized = _normalized_db_url(
+        current,
+        pg_port=rec.ports["postgres"],
+        pooler_port=rec.ports["pgbouncer"],
+        pooler_enabled=settings.data_plane.pgbouncer_enabled,
+    )
     if normalized:
         upsert_env(env_path, {"AVA_DB_URL": normalized}, audit_site="converge_pgbouncer")
     remove_env(env_path, {"AVA_PGBOUNCER_PORT"}, audit_site="converge_pgbouncer")

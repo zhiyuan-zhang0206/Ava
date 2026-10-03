@@ -270,6 +270,55 @@ def sweep_plugin_residue(root: Path) -> None:
             shutil.rmtree(d, ignore_errors=True)
 
 
+def _markdown_files(directory: Path) -> list[Path]:
+    return sorted(directory.glob("*.md")) if directory.is_dir() else []
+
+
+def _write_orchestrator(
+    staging: Path, name: str, description: str, agent_files: list[Path]
+) -> list[str]:
+    """Generate the orchestrator skill + one reference per bundled agent; the agent names."""
+    agents: list[str] = []
+    if not agent_files:
+        return agents
+    skill_dir = staging / "skills" / name
+    refs_dir = skill_dir / "references"
+    refs_dir.mkdir(parents=True)
+    dimensions: list[tuple[str, str]] = []
+    for agent_md in agent_files:
+        stem = agent_md.stem
+        a_name, a_desc, ref_text = _reference_text(agent_md.read_text(encoding="utf-8"))
+        (refs_dir / f"{stem}.md").write_text(ref_text, encoding="utf-8")
+        dimensions.append((a_name or stem, _first_sentence(a_desc) or "review dimension"))
+        agents.append(a_name or stem)
+    (skill_dir / "SKILL.md").write_text(
+        _orchestrator_skill(name, description, dimensions), encoding="utf-8"
+    )
+    return agents
+
+
+def _stage(
+    staging: Path,
+    name: str,
+    description: str,
+    shipped: list[tuple[Path, str]],
+    agent_files: list[Path],
+    commands_dir: Path,
+    command_files: list[Path],
+) -> tuple[list[str], list[str], list[str]]:
+    """Write the plugin's skills, generated orchestrator and commands into `staging`."""
+    shipped_skills: list[str] = []
+    for skill_src, skill_name in shipped:
+        shutil.copytree(skill_src, staging / "skills" / skill_src.name)
+        shipped_skills.append(skill_name)
+    agents = _write_orchestrator(staging, name, description, agent_files)
+    commands: list[str] = []
+    if command_files:
+        shutil.copytree(commands_dir, staging / "commands")
+        commands = [f.stem for f in command_files]
+    return shipped_skills, agents, commands
+
+
 def materialize(pkg_dir: Path, dest_root: Path) -> Materialized:
     """Materialize a Claude Code plugin at `pkg_dir` into `dest_root/<name>/`.
 
@@ -289,13 +338,12 @@ def materialize(pkg_dir: Path, dest_root: Path) -> Materialized:
     name, description = _read_manifest(pkg_dir)
     skills_dir = pkg_dir / "skills"
     shipped = _shipped_skills(skills_dir) if skills_dir.is_dir() else []
-    agents_dir = pkg_dir / "agents"
-    agent_files = sorted(agents_dir.glob("*.md")) if agents_dir.is_dir() else []
+    agent_files = _markdown_files(pkg_dir / "agents")
     commands_dir = pkg_dir / "commands"
-    command_files = sorted(commands_dir.glob("*.md")) if commands_dir.is_dir() else []
+    command_files = _markdown_files(commands_dir)
     mcp_src = pkg_dir / ".mcp.json"
     mcp_servers = _mcp_server_names(mcp_src) if mcp_src.is_file() else []
-    if not shipped and not agent_files and not command_files and not mcp_servers:
+    if not (shipped or agent_files or command_files or mcp_servers):
         raise ClaudeCodePluginError(
             f"plugin '{name}' bundles no skills/, agents/, commands/, nor .mcp.json — "
             "nothing to install (hooks-only bundles are not wired yet)."
@@ -318,32 +366,9 @@ def materialize(pkg_dir: Path, dest_root: Path) -> Materialized:
         shutil.rmtree(staging)
     staging.mkdir(parents=True)
     try:
-        shipped_skills: list[str] = []
-        for skill_src, skill_name in shipped:
-            shutil.copytree(skill_src, staging / "skills" / skill_src.name)
-            shipped_skills.append(skill_name)
-
-        agents: list[str] = []
-        if agent_files:
-            skill_dir = staging / "skills" / name
-            refs_dir = skill_dir / "references"
-            refs_dir.mkdir(parents=True)
-            dimensions: list[tuple[str, str]] = []
-            for agent_md in agent_files:
-                stem = agent_md.stem
-                a_name, a_desc, ref_text = _reference_text(agent_md.read_text(encoding="utf-8"))
-                (refs_dir / f"{stem}.md").write_text(ref_text, encoding="utf-8")
-                dimensions.append((a_name or stem, _first_sentence(a_desc) or "review dimension"))
-                agents.append(a_name or stem)
-            (skill_dir / "SKILL.md").write_text(
-                _orchestrator_skill(name, description, dimensions), encoding="utf-8"
-            )
-
-        commands: list[str] = []
-        if command_files:
-            shutil.copytree(commands_dir, staging / "commands")
-            commands = [f.stem for f in command_files]
-
+        shipped_skills, agents, commands = _stage(
+            staging, name, description, shipped, agent_files, commands_dir, command_files
+        )
         if mcp_servers:
             shutil.copy(mcp_src, staging / ".mcp.json")
     except BaseException:

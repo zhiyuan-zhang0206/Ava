@@ -7,6 +7,7 @@ import subprocess
 import sys
 import time
 from collections.abc import Callable
+from dataclasses import dataclass
 from datetime import datetime
 
 import psutil
@@ -325,25 +326,9 @@ def _stop_initialization(
         )
 
 
-def stop(
-    *,
-    require_confirmation: bool,
-    keep_infra: bool,
-    preserve_sessions: frozenset[str],
-    keep_browser: bool,
-    keep_terminals: bool,
-    announce: bool,
-    teardown_extras: bool,
-    timeout: float = PAUSE_TIMEOUT_SECONDS,
-) -> int:
-    """Drain via normal restart, then stop selected resources.
-
-    Services and the data plane are never forced. Closing terminals (stop, not
-    pause) SIGKILLs what outlives its bounded grace
-    (`service_stop.close_terminals`).
-    """
+def _refuse_hosted_stop(*, keep_terminals: bool) -> None:
+    """A pause/stop run from inside the work it drains strands itself mid-drain."""
     from base.host.proc import hosting_exec_domain, hosting_supervised_session
-    from cli.commands.lifecycle.stop import _announce_stopping, _confirm_stop
 
     # An exec-domain leg is SIGKILLed with the call's process group as the tool
     # call returns, mid-drain (the 2026-09-12 stranding shape). Name the one
@@ -364,6 +349,97 @@ def stop(
         )
     if hosting_supervised_session() is not None:
         raise RuntimeError("pause/stop must run outside the work it drains; use a login shell")
+
+
+@dataclass
+class _StopProgress:
+    """What a failed stop must know about how far it got."""
+
+    data_plane_stopped: bool = False
+
+
+def _drain_and_stop(
+    phases: list[tuple[str, float]],
+    deadline: float,
+    progress: _StopProgress,
+    *,
+    roles: MachineRoles,
+    preserved: frozenset[str],
+    keep_infra: bool,
+    keep_browser: bool,
+    keep_terminals: bool,
+    announce: bool,
+    teardown_extras: bool,
+    notes: list[str],
+    clients: list[str],
+) -> None:
+    """Drain the agents, then stop the selected resources; each phase is timed into `phases`."""
+    # Task #3270: an operator's own stop/pause binds the hold to this
+    # command's shepherding process; daemon-driven pauses stay unbound.
+    from base.deploy.maintenance.hold_driver import mint_driver
+    from cli.commands.lifecycle.stop import _announce_stopping
+
+    _timed_phase(phases, "drain", lambda: pause_agents(remaining(deadline), driver=mint_driver()))
+    start_serving.clear_serving()
+    if announce:
+        _announce_stopping()
+    current = admission.snapshot()
+    assert current is not None and current.maintenance is not None  # noqa: S101
+    assert current.holder is not None and current.acquired_at is not None  # noqa: S101
+    holder, acquired_at = current.holder, current.acquired_at
+    if current.maintenance.phase == "drained":
+        from base.deploy.state.host_deploy_state import set_posture
+
+        # A failed posture write leaves the drained phase retryable. The
+        # stopped phase never dials a data plane that is already offline.
+        set_posture("paused")
+        admission.set_phase(current.holder, current.acquired_at, "stopping")
+    _timed_phase(phases, "quiesce", lambda: ops_quiescent(remaining(deadline)))
+    _timed_phase(
+        phases,
+        "services",
+        _services_phase_action(preserved=preserved, deadline=deadline),
+    )
+    if not keep_browser and "browser" not in preserved:
+        _timed_phase(phases, "browser", lambda: _stop_browser(deadline))
+    if not keep_terminals:
+        _timed_phase(
+            phases,
+            "terminals",
+            lambda: close_terminals(deadline, holder, acquired_at, direct_db="gateway" in roles),
+        )
+    if teardown_extras:
+        _timed_phase(phases, "extras", lambda: _stop_extras(deadline))
+    if "gateway" in roles and not keep_infra:
+        _timed_phase(
+            phases,
+            "data-plane",
+            lambda: stop_data_plane(remaining(deadline), save=True, notes=notes, clients=clients),
+        )
+        progress.data_plane_stopped = True
+    _mark_stopped(current.holder, current.acquired_at)
+
+
+def stop(
+    *,
+    require_confirmation: bool,
+    keep_infra: bool,
+    preserve_sessions: frozenset[str],
+    keep_browser: bool,
+    keep_terminals: bool,
+    announce: bool,
+    teardown_extras: bool,
+    timeout: float = PAUSE_TIMEOUT_SECONDS,
+) -> int:
+    """Drain via normal restart, then stop selected resources.
+
+    Services and the data plane are never forced. Closing terminals (stop, not
+    pause) SIGKILLs what outlives its bounded grace
+    (`service_stop.close_terminals`).
+    """
+    from cli.commands.lifecycle.stop import _confirm_stop
+
+    _refuse_hosted_stop(keep_terminals=keep_terminals)
     roles, _selected, preserved = _stop_plan(
         preserve_sessions=preserve_sessions, keep_browser=keep_browser, keep_infra=keep_infra
     )
@@ -383,7 +459,7 @@ def stop(
     # shared budget it consumed, so the operator sees WHERE the budget went
     # (agent drain vs services vs terminals) — never a bare timeout (#2045).
     phases: list[tuple[str, float]] = []
-    data_plane_stopped = False
+    progress = _StopProgress()
     unstarted = False
     notes: list[str] = []  # what the report must say: a Postgres shutdown that was escalated
     clients: list[str] = []  # the pooler's clients still connected at its stop (reported only)
@@ -401,55 +477,20 @@ def stop(
                 clients=clients,
             )
             return _finish_stop(owns_journal=owns_journal, notes=notes, clients=clients)
-        # Task #3270: an operator's own stop/pause binds the hold to this
-        # command's shepherding process; daemon-driven pauses stay unbound.
-        from base.deploy.maintenance.hold_driver import mint_driver
-
-        _timed_phase(
-            phases, "drain", lambda: pause_agents(remaining(deadline), driver=mint_driver())
-        )
-        start_serving.clear_serving()
-        if announce:
-            _announce_stopping()
-        current = admission.snapshot()
-        assert current is not None and current.maintenance is not None  # noqa: S101
-        assert current.holder is not None and current.acquired_at is not None  # noqa: S101
-        holder, acquired_at = current.holder, current.acquired_at
-        if current.maintenance.phase == "drained":
-            from base.deploy.state.host_deploy_state import set_posture
-
-            # A failed posture write leaves the drained phase retryable. The
-            # stopped phase never dials a data plane that is already offline.
-            set_posture("paused")
-            admission.set_phase(current.holder, current.acquired_at, "stopping")
-        _timed_phase(phases, "quiesce", lambda: ops_quiescent(remaining(deadline)))
-        _timed_phase(
+        _drain_and_stop(
             phases,
-            "services",
-            _services_phase_action(preserved=preserved, deadline=deadline),
+            deadline,
+            progress,
+            roles=roles,
+            preserved=preserved,
+            keep_infra=keep_infra,
+            keep_browser=keep_browser,
+            keep_terminals=keep_terminals,
+            announce=announce,
+            teardown_extras=teardown_extras,
+            notes=notes,
+            clients=clients,
         )
-        if not keep_browser and "browser" not in preserved:
-            _timed_phase(phases, "browser", lambda: _stop_browser(deadline))
-        if not keep_terminals:
-            _timed_phase(
-                phases,
-                "terminals",
-                lambda: close_terminals(
-                    deadline, holder, acquired_at, direct_db="gateway" in roles
-                ),
-            )
-        if teardown_extras:
-            _timed_phase(phases, "extras", lambda: _stop_extras(deadline))
-        if "gateway" in roles and not keep_infra:
-            _timed_phase(
-                phases,
-                "data-plane",
-                lambda: stop_data_plane(
-                    remaining(deadline), save=True, notes=notes, clients=clients
-                ),
-            )
-            data_plane_stopped = True
-        _mark_stopped(current.holder, current.acquired_at)
     except (RuntimeError, TimeoutError, OSError, subprocess.TimeoutExpired) as exc:
         _report_incomplete(
             exc,
@@ -457,7 +498,7 @@ def stop(
             owns_journal=owns_journal,
             compensated=_compensate_data_plane_failure(
                 phases,
-                data_plane_stopped=data_plane_stopped,
+                data_plane_stopped=progress.data_plane_stopped,
                 preserved=preserved,
                 unstarted=unstarted,
             ),
