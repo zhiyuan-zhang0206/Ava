@@ -195,6 +195,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     # gateway process and serves every request, so a connection idle across a host
     # sleep or a network change comes back on a dead TCP flow and, unbounded, parks
     # the request handler on the OS TCP-retransmit timeout.
+    app.state.started_at = time.time()
     app.state.db = Database.from_settings()
     app.state.bus = EventBus.from_settings()
     app.state.telemetry_staleness = TelemetryStaleness()
