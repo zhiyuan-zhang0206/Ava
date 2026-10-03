@@ -1,7 +1,7 @@
 ---
 type: doc
 title: Install Registry Write Path
-description: The single write path — mutate() under registry_lock, the register/deregister wrappers, the three bulk-edit cycles, and why migrate_skill_identity takes the lock explicitly.
+description: The single write path — mutate() under registry_lock, the register/deregister wrappers, the three bulk-edit cycles.
 tags:
 - base
 - install-registry
@@ -19,9 +19,7 @@ bulk — the gateway's skills-toggle handler, `ava skill update`, skills
 converge, and `ava packages refresh` — open it directly. (The refresh pass
 stages its per-package deltas during the pass and lands them in ONE cycle at
 the end, applied per name against the freshly-read registry — never a stale
-full save.) `scripts/data_repair/migrate_skill_identity.py --apply` cannot
-use `mutate` (it rewrites a registry under an arbitrary `--ava-home`), so it
-takes `registry_lock` explicitly; that is the only writer outside this module.
+full save.) No writer outside this module takes `registry_lock` directly.
 
 The lock is what the file needs that atomic saving does not give it: `save` is a
 full replace, so two writers in different processes (an agent running
