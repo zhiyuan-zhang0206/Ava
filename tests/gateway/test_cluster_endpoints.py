@@ -20,7 +20,7 @@ from base.deploy.lifecycle.start_serving import RootBirth
 from base.deploy.maintenance import admission, pause_owner
 from gateway.app import app
 from gateway.auth.cors import cors_allowed_origins
-from gateway.lgtm import loki_events
+from gateway.events import telemetry_rows
 from ops import agent_pause, cluster_pause, cluster_status
 
 
@@ -437,7 +437,7 @@ class TestClusterEndpoints:
         monkeypatch.setattr(
             ops_mod,
             "mark_stopping",
-            lambda name, home: marked.append((name, home)),  # pyright: ignore[reportUnknownArgumentType]
+            lambda _db, name, home: marked.append((name, home)),  # pyright: ignore[reportUnknownArgumentType]
         )
         with TestClient(app) as client:
             r = client.post("/api/cluster/stopping", params={"machine": "wsl", "home": "~/.ava"})
@@ -451,17 +451,17 @@ class TestClusterEndpoints:
 
 @pytest.fixture
 def fake_admin_events(monkeypatch: pytest.MonkeyPatch) -> dict[str, list[dict[str, Any]]]:
-    """Patch loki_events.query_events for the admin-events route; record the
+    """Patch telemetry_rows.query_events for the admin-events route; record the
     kwargs and return canned rows."""
 
     calls: list[dict[str, Any]] = []
     rows: list[dict[str, Any]] = []
 
-    def _query(**kwargs: Any) -> tuple[list[dict[str, Any]], bool]:
+    def _query(_conn: object, **kwargs: Any) -> tuple[list[dict[str, Any]], bool]:
         calls.append(kwargs)
         return rows, False
 
-    monkeypatch.setattr(loki_events, "query_events", _query)
+    monkeypatch.setattr(telemetry_rows, "query_events", _query)
     return {"calls": calls, "rows": rows}
 
 
@@ -485,8 +485,8 @@ def _row(
 
 
 class TestAdminEvents:
-    """`GET /api/cluster/admin/events` slices the unified event stream from
-    Loki for ops debugging without SSH (task #1197)."""
+    """`GET /api/cluster/admin/events` slices the unified event stream
+    (`telemetry_events`) for ops debugging without SSH."""
 
     def test_returns_newest_first(self, fake_admin_events: dict[str, list[dict[str, Any]]]) -> None:  # type: ignore[no-untyped-def]
         fake_admin_events["rows"].extend([_row(msg="oldest"), _row(msg="newest", agent_id=1)])
@@ -503,7 +503,7 @@ class TestAdminEvents:
     ) -> None:  # type: ignore[no-untyped-def]
         """Old PG contract: category IN (telemetry, log) — audit rows (spawn /
         send_message / ...) stay out of the ops log slice. The route passes the
-        category set to Loki."""
+        category set to the reader."""
         with TestClient(app) as client:
             client.get("/api/cluster/admin/events")
         assert fake_admin_events["calls"][0]["categories"] == ["telemetry", "log"]
@@ -614,10 +614,13 @@ class TestAdminEvents:
     def test_no_since_uses_default_window(
         self, fake_admin_events: dict[str, list[dict[str, Any]]]
     ) -> None:  # type: ignore[no-untyped-def]
-        # no since -> from_ None -> query_events' 24h lower bound applies
+        # no since -> the route's 24h lower bound applies
+        before = datetime.now(UTC)
         with TestClient(app) as client:
             client.get("/api/cluster/admin/events")
-        assert fake_admin_events["calls"][0]["from_"] is None
+        from_ = fake_admin_events["calls"][0]["from_"]
+        assert from_ is not None
+        assert before - timedelta(hours=24, seconds=5) <= from_ <= before - timedelta(hours=23)
 
 
 # ─── admin: DELETE /api/cluster/machines/{name} ──────────────────────────────
@@ -699,7 +702,7 @@ class TestAgentMachineList:
                 "paused": False,
             }
 
-        monkeypatch.setattr(cluster_rpc, "dispatch_to_machine", _fake_dispatch)  # pyright: ignore[reportUnknownArgumentType]
+        monkeypatch.setattr(cluster_rpc, "dispatch_to_url", _fake_dispatch)  # pyright: ignore[reportUnknownArgumentType]
         with db_conn.cursor() as cur:  # pyright: ignore[reportUnknownMemberType]
             cur.execute("TRUNCATE machines")  # pyright: ignore[reportUnknownMemberType]
             cur.execute(  # pyright: ignore[reportUnknownMemberType]
@@ -799,7 +802,7 @@ class TestAgentMachineList:
 
         now = datetime.now(UTC)
 
-        async def _fake_gather(rows, local_name):  # type: ignore[no-untyped-def]
+        async def _fake_gather(rows, local_name, **_kw):  # type: ignore[no-untyped-def]
             return [
                 MachineStatus(
                     name="control-test",
@@ -1055,7 +1058,7 @@ class TestMachinePauseResume:
 
         old_chat_id = insert_inbound_message(db_conn, aid, "queued before pause", source="user")
 
-        async def _unreachable(target: str, path: str, json_body: dict) -> dict:
+        async def _unreachable(_db: object, target: str, path: str, json_body: dict) -> dict:
             raise RuntimeError("ops server unreachable")
 
         monkeypatch.setattr(_fwd, "enqueue_lifecycle", _unreachable)  # pyright: ignore[reportUnknownArgumentType]

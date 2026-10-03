@@ -1,0 +1,25 @@
+# Fixture modules (tests/path_scoped/) that govern this directory's tests: "." is the
+# directory itself, otherwise the test files named here (tests/fixtures/path_scopes.py).
+"tests.path_scoped.cli_tests" = [
+    "test_boot_retry.py",
+    "test_cli_groups.py",
+    "test_cluster_health_window.py",
+    "test_commands_register.py",
+    "test_lite_verbs.py",
+    "test_logs_rotate.py",
+    "test_main_dispatch.py",
+    "test_main_log_init.py",
+    "test_mcp_install.py",
+    "test_mcp_serve.py",
+    "test_memory_cmd.py",
+    "test_pause_stop.py",
+    "test_plugin_scaffold.py",
+    "test_presets_cmd.py",
+    "test_pty_commands.py",
+    "test_python_install.py",
+    "test_redis_binary_selection.py",
+    "test_settings_failure.py",
+    "test_skill_install.py",
+    "test_start_identity.py",
+    "test_start_runtime.py",
+]

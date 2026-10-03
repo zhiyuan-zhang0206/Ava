@@ -34,7 +34,7 @@ from langchain_core.messages import HumanMessage
 
 from agent.messages import NoteTag, system_note_message
 from base.config import settings
-from base.config.turn_view import turn_settings
+from base.host.env.agent_slices import AgentSlices
 from base.log import logger
 from base.paths import workspace_dir_readonly
 
@@ -214,7 +214,7 @@ def _section(block: _InheritedBlock, text: str) -> str:
     return f"## ancestor #{block.ancestor_id}{label} — memory/{block.entry_path.name}\n\n{text}"
 
 
-def inherited_memory_note() -> HumanMessage | None:
+def inherited_memory_note(slices: AgentSlices) -> HumanMessage | None:
     """The `inheritable` blocks read from the agent's birth chain.
 
     Returns None when the layer is off (`memory_inherit_depth` 0 or eval
@@ -226,9 +226,9 @@ def inherited_memory_note() -> HumanMessage | None:
     timestamps — so unchanged state renders byte-identical across
     establishments and forks keep their inherited prefix stable.
     """
-    if turn_settings.agent.eval_isolation:
+    if slices.sandbox.eval_isolation:
         return None
-    depth = turn_settings.agent.memory_inherit_depth
+    depth = slices.memory.memory_inherit_depth
     if depth <= 0:
         logger.debug("[inherited-memory] disabled by settings (depth={})", depth)
         return None

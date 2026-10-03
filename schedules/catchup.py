@@ -17,6 +17,7 @@ from datetime import UTC, datetime
 from typing import Generic, TypeVar
 
 import base.db
+from base.clock import Clock
 from base.db.transaction import write_transaction
 from base.daemon.schedules.watcher import previous_fire
 
@@ -38,6 +39,15 @@ _Payload = TypeVar("_Payload")
 class _MissedSlot(Generic[_Payload]):
     fire_at: datetime
     payload: _Payload
+
+
+def cluster_timezone() -> str:
+    """The cluster wall-clock timezone (`AVA_TIMEZONE`, cluster-pinned), never the host's OS
+    timezone: the whole fleet fires at one instant regardless of where each machine sits. A
+    weekly cron is the case where a host-local reading lands the run on the wrong CALENDAR
+    DAY, not merely at the wrong hour. The schedule script reads it when it runs; a changed
+    value reaches a schedule at its next restart (`ava schedules restart <id>`)."""
+    return Clock.from_settings().timezone
 
 
 def _schedule_id(explicit: int | None) -> int:

@@ -9,6 +9,7 @@ from psycopg_pool import ConnectionPool
 from base import telemetry
 from base.config import settings
 from base.db.transaction import write_transaction
+from services.delivery_watchdog import attempts
 
 _log = logging.getLogger("services.delivery_watchdog.resurrect_guard")
 
@@ -67,15 +68,21 @@ def _alert_wake_suppressed(
         _log.exception("[delivery] delivery_wake_suppressed emit failed for agent %s", agent_id)
 
 
-def record_resurrect_failure(
-    pool: ConnectionPool,
-    agent_id: int,
-    failures_by_agent: dict[int, int],
-    suppressions_by_agent: dict[int, int],
-) -> None:
-    """Count one failure and durably suppress the agent at the threshold."""
-    failures = failures_by_agent.get(agent_id, 0) + 1
-    failures_by_agent[agent_id] = failures
+def record_resurrect_failure(pool: ConnectionPool, agent_id: int) -> None:
+    """Count one failure and durably suppress the agent at the threshold.
+
+    The counters live in `delivery_watchdog_attempts` (the loop's claim created
+    the row), so the escalation ladder survives a watchdog restart."""
+    with write_transaction(pool) as conn, conn.cursor() as cur:
+        cur.execute(
+            "UPDATE delivery_watchdog_attempts SET consecutive_failures = consecutive_failures + 1 "
+            "WHERE kind = %s AND agent_id = %s RETURNING consecutive_failures, suppress_count",
+            (attempts.RESURRECT, agent_id),
+        )
+        row = cur.fetchone()
+    if row is None:
+        raise RuntimeError(f"resurrect failure recorded for agent {agent_id} without a claim")
+    failures, previous_suppressions = row
     threshold = settings.daemon.delivery_watchdog_resurrect_fail_before_suppress
     if failures < threshold:
         _log.debug(
@@ -86,7 +93,7 @@ def record_resurrect_failure(
         )
         return
 
-    suppress_count = suppressions_by_agent.get(agent_id, 0) + 1
+    suppress_count = previous_suppressions + 1
     duration_s = _suppression_duration(suppress_count)
     try:
         written = _write_wake_suppression(pool, agent_id, duration_s)
@@ -96,6 +103,21 @@ def record_resurrect_failure(
     if not written:
         _log.info("[delivery] agent %s disappeared before wake suppression", agent_id)
         return
-    failures_by_agent.pop(agent_id, None)
-    suppressions_by_agent[agent_id] = suppress_count
+    with write_transaction(pool) as conn:
+        conn.execute(
+            "UPDATE delivery_watchdog_attempts SET consecutive_failures = 0, suppress_count = %s "
+            "WHERE kind = %s AND agent_id = %s",
+            (suppress_count, attempts.RESURRECT, agent_id),
+        )
     _alert_wake_suppressed(agent_id, failures, duration_s, suppress_count)
+
+
+def record_resurrect_success(pool: ConnectionPool, agent_id: int) -> None:
+    """A resurrect that left the owner terminated no more: both escalation
+    counters start over."""
+    with write_transaction(pool) as conn:
+        conn.execute(
+            "UPDATE delivery_watchdog_attempts SET consecutive_failures = 0, suppress_count = 0 "
+            "WHERE kind = %s AND agent_id = %s",
+            (attempts.RESURRECT, agent_id),
+        )

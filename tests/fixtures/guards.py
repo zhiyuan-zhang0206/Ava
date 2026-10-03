@@ -41,7 +41,7 @@ def suite_is_not_inside_an_exec_domain(monkeypatch: pytest.MonkeyPatch) -> None:
     pause/stop) would refuse — red on an agent box, green
     in CI. A pty-session or login-shell run (the fleet's test convention) never
     sees this. The predicate's own membership behaviour is exercised in spawned
-    child processes (`tests/base/test_proc.py`), whose sessions are built for
+    child processes (`base/host/tests/test_proc.py`), whose sessions are built for
     the case; a lifecycle test that wants the refusal patches this back.
     """
     monkeypatch.setattr("base.host.proc.hosting_exec_domain", lambda: None)
@@ -52,10 +52,22 @@ def _otlp_export_off(monkeypatch: pytest.MonkeyPatch) -> None:
     """Keep the test session hermetic: the OTLP dual-write (base.telemetry ->
     base.telemetry.otlp.telemetry_otlp, default ON since the 2026-08-11 stack decision) would
     otherwise fire real OTLP/HTTP requests at 127.0.0.1:4318 from every
-    event-emitting test. tests/base/test_telemetry_otlp.py re-enables the
+    event-emitting test. base/telemetry/tests/test_telemetry_otlp.py re-enables the
     flag and installs in-memory providers where the OTLP path is under test.
     """
     monkeypatch.setattr("base.config.settings.observability.telemetry_otlp_enabled", False)
+
+
+@pytest.fixture(autouse=True)
+def _telemetry_event_store_off() -> None:
+    """Keep the emitter's telemetry_events sink off for the whole test session: the drain
+    thread would otherwise write the shared test database from every event-emitting test,
+    and a late batch could land in the next test's rows. Tests of the sink and of its
+    readers call `event_store.set_enabled(enabled=True)` themselves and switch it off again.
+    """
+    from base.telemetry import event_store
+
+    event_store.set_enabled(enabled=False)
 
 
 @pytest.fixture(autouse=True)
@@ -185,28 +197,23 @@ def _guard_permissions_helper_native_io(
 
 
 @pytest.fixture(autouse=True)
-def _guard_schedule_manager(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Autouse safety net: the gateway lifespan's ScheduleManager touches the real
-    session backend (reconcile `list_sessions`/`new_session`; the API
-    `sync`/`capture` control paths). Under `TestClient(app)` that would hit the
-    real backend and pollute tests recording `subprocess.run`. Neutralize the
-    session-touching methods (`start` background task, plus `sync`/`capture`
-    invoked by the routes); tests that exercise the real reconcile/sync logic
-    call the manager's blocking methods on an instance directly with a faked
-    backend."""
+def _guard_schedule_session_control(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Autouse safety net: the schedule API's control paths reach the real session
+    backend (`capture`) and wait for a schedule-manager service that no test
+    runs (`request_sync` waits for its queued row to be consumed). Under
+    `TestClient(app)` that would hit the real backend and stall every start /
+    stop / restart for the wait. Neutralize both; the request row itself is still
+    written, so API tests can assert it. Tests of the real consume / sync logic
+    call the service's functions directly with a faked backend."""
 
-    async def _noop_start(self: object) -> None:
+    async def _noop_wait(pool: object, schedule_id: int) -> None:
         return None
 
-    async def _noop_sync(self: object, schedule_id: int) -> None:
+    async def _noop_capture(schedule_id: int, lines: int) -> None:
         return None
 
-    async def _noop_capture(self: object, schedule_id: int, lines: int) -> None:
-        return None
-
-    monkeypatch.setattr("gateway.schedules.manager.ScheduleManager.start", _noop_start)
-    monkeypatch.setattr("gateway.schedules.manager.ScheduleManager.sync", _noop_sync)
-    monkeypatch.setattr("gateway.schedules.manager.ScheduleManager.capture", _noop_capture)
+    monkeypatch.setattr("gateway.schedules.session_control.wait_consumed", _noop_wait)
+    monkeypatch.setattr("gateway.schedules.session_control.capture", _noop_capture)
 
 
 @pytest.fixture(autouse=True)
@@ -301,7 +308,7 @@ def _test_homes_get_their_own_ports(
 # refresh_runner_env_or_die` ran from `cli.main.main()` before dispatch on
 # `ava start`, and on an enrolled runner it fetched /api/bootstrap, rewrote the
 # real ~/.ava/.env, and re-exec'd — replacing the pytest process mid-run.
-# `tests/cli/test_main_dispatch.py` stubbed it, and the exec guard here is the
+# `cli/tests/test_main_dispatch.py` stubbed it, and the exec guard here is the
 # backstop that turns a forgotten stub into a plain test failure instead of a
 # vanished run. (The refresh is gone; `ava start`'s Settings build fetches in-
 # process, which is what `_guard_bootstrap_fetch` below blocks.)
@@ -334,7 +341,7 @@ def _guard_process_exec(monkeypatch: pytest.MonkeyPatch) -> None:
             raise AssertionError(
                 f"os.{name}() would replace the pytest process image — the run would end "
                 f"here with no summary and no failure report. Stub the code path that "
-                f"execs (see tests/cli/test_main_dispatch.py), or patch os.{name} in the "
+                f"execs (see cli/tests/test_main_dispatch.py), or patch os.{name} in the "
                 f"test body if the exec is the subject under test."
             )
 
@@ -370,7 +377,7 @@ def _guard_bootstrap_fetch(monkeypatch: pytest.MonkeyPatch) -> None:
     so only the bootstrap egress is touched — the ~30 other `base.host.net.http_dial`
     call sites are untouched. Every test that legitimately drives the fetch
     already substitutes its own transport at exactly this seam
-    (`tests/base/test_bootstrap_fetch.py` routes it through an in-process
+    (`base/host/env/tests/test_bootstrap_fetch.py` routes it through an in-process
     TestClient; the retry tests hand it a fake), and those patches win by LIFO.
     """
     import base.host.env.bootstrap
@@ -380,7 +387,7 @@ def _guard_bootstrap_fetch(monkeypatch: pytest.MonkeyPatch) -> None:
             f"a real GET {url} would leave the test process — this is the call that "
             "reaches a live gateway and, on an enrolled runner, rewrites the operator's "
             "~/.ava/.env. Stub the caller, or patch base.host.env.bootstrap.dial_get in the test "
-            "body with a fake transport (see tests/base/test_bootstrap_fetch.py)."
+            "body with a fake transport (see base/host/env/tests/test_bootstrap_fetch.py)."
         )
 
     monkeypatch.setattr(base.host.env.bootstrap, "dial_get", _boom)

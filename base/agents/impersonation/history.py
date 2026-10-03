@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import json
 from collections import Counter
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 from uuid import UUID
@@ -134,6 +134,7 @@ def append(
     *,
     event_key: str | None = None,
     created_at: datetime | None = None,
+    source_key: str | None = None,
 ) -> int:
     """Append under the lease lock; repeat event identities return the original row."""
     if event_key is not None:
@@ -143,7 +144,8 @@ def append(
         ).fetchone()
         if existing is not None:
             same_content = (
-                _event_content(existing[1]) == _event_content(payload)
+                _event_content(_resolve_payload(conn, existing[1]))
+                == _event_content(_resolve_payload(conn, payload))
                 if kind in _CONSUMED_EVENT_KINDS
                 else existing[1] == payload
             )
@@ -159,9 +161,9 @@ def append(
         raise ValueError("Impersonation session does not exist")
     seq = int(row[0])
     conn.execute(
-        "INSERT INTO agent_impersonation_entries(lease_id,seq,kind,event_key,created_at,payload) "
-        "VALUES(%s,%s,%s,%s,COALESCE(%s,clock_timestamp()),%s)",
-        (lease_id, seq, kind, event_key, created_at, Jsonb(payload)),
+        "INSERT INTO agent_impersonation_entries(lease_id,seq,kind,event_key,created_at,payload,"
+        "source_key) VALUES(%s,%s,%s,%s,COALESCE(%s,clock_timestamp()),%s,%s)",
+        (lease_id, seq, kind, event_key, created_at, Jsonb(payload), source_key),
     )
     return seq
 
@@ -204,9 +206,8 @@ def say(
 ) -> int:
     """Commit a user-visible reply before publishing its refresh notification."""
     from base.agents.impersonation._store import lock_lease, require_active_locked
-    from base.config import settings
+    from base.events.live.bus import EventBus
     from base.events.live.projection import ImpersonationChanged
-    from base.events.live.redis_client import publish_best_effort_sync
 
     if not content.strip() or phase not in ("commentary", "final") or not message_key.strip():
         raise ValueError("A message needs nonempty content/key and commentary or final phase")
@@ -231,8 +232,7 @@ def say(
                 "UPDATE agents_meta SET last_message_text=%s,last_active_at=clock_timestamp() WHERE id=%s",
                 (content, lease["agent_id"]),
             )
-    publish_best_effort_sync(
-        settings.data_plane.events_channel,
+    EventBus.from_settings().publish_best_effort_sync(
         ImpersonationChanged(agent_id=lease["agent_id"]).model_dump_json(),
         context="impersonation_message",
     )
@@ -240,13 +240,71 @@ def say(
 
 
 def entries(lease_id: str, conn: psycopg.Connection) -> list[dict[str, Any]]:
+    """The lease's log in order, central event references resolved to their bodies."""
     with conn.cursor(row_factory=dict_row) as cur:
         cur.execute(
             "SELECT seq,kind,created_at,payload FROM agent_impersonation_entries "
             "WHERE lease_id=%s ORDER BY seq",
             (lease_id,),
         )
-        return cur.fetchall()
+        rows = cur.fetchall()
+    _resolve_event_references(rows, conn)
+    return rows
+
+
+def _audit_bodies(conn: psycopg.Connection, uids: list[int]) -> dict[int, dict[str, Any]]:
+    with conn.cursor(row_factory=dict_row) as cur:
+        cur.execute(
+            "SELECT event_uid,ts,trace_id,span_id,agent_id,machine,process,event_name,level,"
+            "source,target_agent_id,attributes FROM audit_events WHERE event_uid = ANY(%s)",
+            (uids,),
+        )
+        return {body["event_uid"]: body for body in cur.fetchall()}
+
+
+def _resolved_payload(reference: dict[str, Any], body: dict[str, Any] | None) -> dict[str, Any]:
+    """The event payload a central reference names; a missing row is a broken invariant.
+
+    The record is written in the same transaction as the reference, so it is
+    never legitimately absent.
+    """
+    if body is None:
+        raise RuntimeError(f"audit_events has no row for event_uid {reference['event_uid']}")
+    return {
+        "ts": body["ts"].astimezone(UTC).isoformat(),
+        "trace_id": body["trace_id"],
+        "span_id": body["span_id"],
+        "agent_id": body["agent_id"],
+        "machine": body["machine"],
+        "process": body["process"],
+        "category": "audit",
+        "event_name": body["event_name"],
+        "level": body["level"],
+        "source": body["source"],
+        "target_agent_id": body["target_agent_id"],
+        "attributes": body["attributes"],
+        "id": reference["id"],
+        "line_sha256": reference["line_sha256"],
+        "event_uid": reference["event_uid"],
+    }
+
+
+def _resolve_event_references(rows: list[dict[str, Any]], conn: psycopg.Connection) -> None:
+    """Replace each central reference payload with the `audit_events` body it names."""
+    refs = [row for row in rows if "event_uid" in row["payload"]]
+    if not refs:
+        return
+    bodies = _audit_bodies(conn, [row["payload"]["event_uid"] for row in refs])
+    for row in refs:
+        row["payload"] = _resolved_payload(row["payload"], bodies.get(row["payload"]["event_uid"]))
+
+
+def _resolve_payload(conn: psycopg.Connection, payload: dict[str, Any]) -> dict[str, Any]:
+    if "event_uid" not in payload:
+        return payload
+    return _resolved_payload(
+        payload, _audit_bodies(conn, [payload["event_uid"]]).get(payload["event_uid"])
+    )
 
 
 def _json_default(value: object) -> str:
@@ -320,10 +378,10 @@ def _sdk_statistics(sdk: list[dict[str, Any]]) -> dict[str, Any]:
 def _event_delivery_statistics(
     lease: dict[str, Any], sdk: list[dict[str, Any]], api: list[dict[str, Any]]
 ) -> dict[str, Any]:
-    """Describe whether observed handoff events have a complete emitted-event manifest.
+    """Describe whether the handoff's event log is complete for the emitted events.
 
-    The runner-only certification procedure accepts the frozen upstream
-    manifest. SDK sampling policy is not certified per session, so zero
+    The database completes a log-native lease once it has ended and every source has
+    sealed. SDK sampling policy is not certified per session, so zero
     consumed SDK events is never evidence of zero SDK calls.
     """
     complete = lease["events_completed_at"] is not None
@@ -331,7 +389,7 @@ def _event_delivery_statistics(
     return {
         "state": "complete" if complete else "pending",
         "pending_reason": None if complete else _pending_delivery_reason(lease),
-        "completion_basis": "upstream_manifest" if complete else None,
+        "completion_basis": "source_log" if complete else None,
         "sdk_calls": {
             "coverage": coverage,
             "sampling_policy": "unknown",

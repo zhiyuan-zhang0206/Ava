@@ -1,26 +1,8 @@
 {
   "complexity": {
-    "tests/services/test_ava_root_daemon.py::test_daemon_end_to_end": 15,
-    "tests/services/test_backup.py::test_run_backup_keeps_checkpoints_and_hides_db_password_from_argv": 17,
     "tests/services/test_hosted_db_wait_liveness.py::test_real_db_wait_survives_both_stale_paths_and_clears_afterward": 16
   },
-  "files": {
-    "tests/services/test_agent_host.py": 1770,
-    "tests/services/test_backup.py": 902
-  },
   "patch_targets": {
-    "tests/services/test_ava_root_custody.py::services.permissions_helper.launchd_job._executable_pids": 2,
-    "tests/services/test_ava_root_custody.py::services.permissions_helper.launchd_job._retirement_command": 4,
-    "tests/services/test_ava_root_custody.py::services.permissions_helper.launchd_job._retirement_owner": 2,
-    "tests/services/test_ava_root_custody.py::services.permissions_helper.launchd_job._wait_retirement_owner": 2,
-    "tests/services/test_ava_root_custody.py::services.permissions_helper.lifecycle._expected_dr": 2,
-    "tests/services/test_ava_root_custody.py::services.permissions_helper.lifecycle._interactive_signing_reason": 3,
-    "tests/services/test_ava_root_custody.py::services.permissions_helper.lifecycle._is_valid_stable_app": 1,
-    "tests/services/test_ava_root_custody.py::services.permissions_helper.lifecycle._keychain_lock_reason": 3,
-    "tests/services/test_ava_root_custody.py::services.permissions_helper.lifecycle._run": 3,
-    "tests/services/test_ava_root_custody.py::services.permissions_helper.lifecycle._source_content_hash": 2,
-    "tests/services/test_ava_root_custody.py::services.permissions_helper.lifecycle._verify_dr": 2,
-    "tests/services/test_ava_root_ipc.py::base.deploy.lifecycle.start_serving._lock_path": 1,
     "tests/services/test_backup_scheduler_shutdown.py::services.backup._db_size_breakdown": 1,
     "tests/services/test_backup_scheduler_shutdown.py::services.backup._key_file": 1,
     "tests/services/test_backup_scheduler_shutdown.py::services.backup._run_with_progress": 1,
@@ -29,21 +11,5 @@
     "tests/services/test_backup_scheduler_shutdown.py::services.backup_scheduler.daemon._remove_pidfile": 1,
     "tests/services/test_backup_scheduler_shutdown.py::services.backup_scheduler.daemon._write_pidfile": 1,
     "tests/services/test_maintenance_readiness.py::gateway.app._cluster_is_paused": 1
-  },
-  "tests_location": {
-    "tests/services/test_agent_host.py::top-level": 1,
-    "tests/services/test_ava_root_custody.py::top-level": 1,
-    "tests/services/test_ava_root_daemon.py::top-level": 1,
-    "tests/services/test_ava_root_glue_manifests.py::top-level": 1,
-    "tests/services/test_ava_root_ipc.py::top-level": 1,
-    "tests/services/test_ava_root_manifest.py::top-level": 1,
-    "tests/services/test_ava_root_supervisor.py::top-level": 1,
-    "tests/services/test_backup.py::top-level": 1,
-    "tests/services/test_backup_recovery_contract.py::top-level": 1,
-    "tests/services/test_backup_scheduler_daemon.py::top-level": 1,
-    "tests/services/test_backup_scheduler_shutdown.py::top-level": 1,
-    "tests/services/test_gate_root.py::top-level": 1,
-    "tests/services/test_hosted_db_wait_liveness.py::top-level": 1,
-    "tests/services/test_maintenance_readiness.py::top-level": 1
   }
 }

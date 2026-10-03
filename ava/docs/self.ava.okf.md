@@ -35,7 +35,7 @@ The following members are mounted onto the `ava.self` namespace by the `ava_flee
 - `set_label(text)` — Set role label (stable role name, not task summary); peers discover you via this label using `get_neighbors`, and your responsibility chain via `get_ancestors`. The label is also stated in your own agent-ID context note at every window establishment.
 
 ## Key Dependencies
-- [[lifecycle.ava.okf.md]] — underlying implementation of restart/terminate
+- [[agent/docs/lifecycle.ava.okf.md]] — underlying implementation of restart/terminate
 - [[env-vars.ava.okf.md]] — AGENT_ID environment variable passing
 
 ## Notes

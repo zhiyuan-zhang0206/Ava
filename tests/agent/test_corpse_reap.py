@@ -33,6 +33,7 @@ from base.agents.incarnation.lifecycle_acceptance import HOSTED_TURN_RECOVERY_MA
 from base.config import settings
 from base.db import create_agent
 from base.native_process.runtime_incarnation import RuntimeIncarnation
+from base.telemetry import Event
 from ops.agents import wake
 
 
@@ -87,19 +88,48 @@ def reap_spies(monkeypatch: pytest.MonkeyPatch) -> tuple[list[dict[str, object]]
     events: list[dict[str, object]] = []
     published: list[int] = []
 
-    async def _event(
-        event_type: str, agent_id: int, *, payload: dict[str, object] | None = None, **_kw: object
-    ) -> None:
-        del event_type
-        if payload is not None and payload.get("reason") == "corpse_reaper":
-            events.append(payload)
+    async def _event(_conn: object, event: Event) -> Event:
+        if event.attributes.get("reason") == "corpse_reaper":
+            events.append(event.attributes)
+        return event
 
-    async def _publish(agent_id: int) -> None:
+    async def _publish(_bus: object, agent_id: int) -> None:
         published.append(agent_id)
 
-    monkeypatch.setattr("agent.ownership.corpse_reap.insert_event_log_async", _event)
+    monkeypatch.setattr("agent.ownership.corpse_reap.record_audit_async", _event)
     monkeypatch.setattr("agent.ownership.corpse_reap.publish_agent_updated", _publish)
     return events, published
+
+
+async def test_the_reap_records_its_audit_fact_in_the_reaping_transaction(
+    db_conn: psycopg.Connection[Any],
+    aops_pool: AsyncConnectionPool[Any],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def _publish(_bus: object, _agent_id: int) -> None:
+        return None
+
+    monkeypatch.setattr("agent.ownership.corpse_reap.publish_agent_updated", _publish)
+    agent_id, incarnation = await _recrashed_row(db_conn, aops_pool)
+
+    await reap_recrashed_corpse(aops_pool, incarnation)
+
+    rows = db_conn.execute(
+        "SELECT source, attributes FROM audit_events "
+        "WHERE agent_id = %s AND event_name = 'status_change' AND attributes->>'to' = 'terminated'",
+        (agent_id,),
+    ).fetchall()
+    assert rows == [
+        (
+            "system",
+            {
+                "from": "idling",
+                "to": "terminated",
+                "reason": "corpse_reaper",
+                "crash_count": RECRASH_CONFIRMED_CRASHES,
+            },
+        )
+    ]
 
 
 async def test_prompt_reap_terminates_the_incarnations_marked_idling_row(

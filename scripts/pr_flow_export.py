@@ -165,9 +165,9 @@ class RunStats:
 
 def cluster_tz() -> ZoneInfo:
     """The cluster's wall clock — the day boundary every aggregate uses."""
-    from base.config import settings
+    from base.clock import Clock
 
-    return ZoneInfo(settings.general.timezone)
+    return Clock.from_settings().explicit_zone()
 
 
 def window_days(now: datetime, days: int, tz: ZoneInfo) -> list[date]:

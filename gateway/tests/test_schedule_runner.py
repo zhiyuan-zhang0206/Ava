@@ -20,6 +20,8 @@ import psycopg
 import pytest
 
 from ava import agent_identity
+from base.config import settings
+from base.db import Database
 from gateway.schedule_runner import _script_filename, run
 
 
@@ -251,9 +253,8 @@ def test_run_records_py_sys_exit_bool(
 def test_run_records_stall_timeout(
     db_conn: psycopg.Connection, unit_home: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    import gateway.schedule_runner as sr
 
-    monkeypatch.setattr(sr, "_STALL_TIMEOUT_S", 2.0)
+    monkeypatch.setattr(settings.gateway, "schedule_stall_timeout_seconds", 2.0)
     sid = _insert_schedule(db_conn, script="sleep 60\n", command="bash run.sh")
 
     assert run(sid) == 1
@@ -337,7 +338,7 @@ def test_run_record_failure_does_not_break_the_run(
     # schedules-row writes (status/last_error) keep working.
     import gateway.schedule_runner as sr
 
-    real_connect = sr.base.db.connect
+    real_connect = sr.Database.connect
 
     class _FlakyCursor:
         """Cursor proxy that fails every schedule_runs statement."""
@@ -389,10 +390,10 @@ def test_run_record_failure_does_not_break_the_run(
         def execute(self, query: Any, params: Any = None) -> Any:
             return self._inner.execute(query, params)
 
-    def _flaky_connect(*args: object, **kwargs: object) -> _Flaky:
-        return _Flaky(real_connect(*args, **kwargs))
+    def _flaky_connect(self: Database, *args: object, **kwargs: object) -> _Flaky:
+        return _Flaky(real_connect(self, *args, **kwargs))
 
-    monkeypatch.setattr(sr.base.db, "connect", _flaky_connect)
+    monkeypatch.setattr(sr.Database, "connect", _flaky_connect)
     sid = _insert_schedule(db_conn, script="x = 1\n")
 
     assert run(sid) == 0
@@ -410,7 +411,7 @@ def test_run_completed_marker_failure_keeps_run_row_honest(
     # same safe side as before, just without a false crash record.
     import gateway.schedule_runner as sr
 
-    real_connect = sr.base.db.connect
+    real_connect = sr.Database.connect
 
     class _FlakyCursor:
         """Cursor proxy that fails only the completed-marker statement."""
@@ -462,10 +463,10 @@ def test_run_completed_marker_failure_keeps_run_row_honest(
         def execute(self, query: Any, params: Any = None) -> Any:
             return self._inner.execute(query, params)
 
-    def _flaky_connect(*args: object, **kwargs: object) -> _Flaky:
-        return _Flaky(real_connect(*args, **kwargs))
+    def _flaky_connect(self: Database, *args: object, **kwargs: object) -> _Flaky:
+        return _Flaky(real_connect(self, *args, **kwargs))
 
-    monkeypatch.setattr(sr.base.db, "connect", _flaky_connect)
+    monkeypatch.setattr(sr.Database, "connect", _flaky_connect)
     sid = _insert_schedule(db_conn, script="x = 1\n")
 
     assert run(sid) == 0
@@ -505,17 +506,17 @@ def _watch_stalls(
     """Record real guard verdicts without exiting the test process."""
     import gateway.schedule_runner as sr
 
-    monkeypatch.setattr(sr, "_STALL_CHECK_INTERVAL_S", 0.02)
-    monkeypatch.setattr(sr, "_STALL_TIMEOUT_S", 0.1)
+    monkeypatch.setattr(settings.gateway, "schedule_stall_check_interval_seconds", 0.02)
+    monkeypatch.setattr(settings.gateway, "schedule_stall_timeout_seconds", 0.1)
     fired: list[str] = []
 
-    def record_stall(_sid: int, msg: str, _rid: int | None) -> None:
+    def record_stall(_db: object, _sid: int, msg: str, _rid: int | None) -> None:
         fired.append(msg)
 
     monkeypatch.setattr(sr, "_stall_action", record_stall)
     if patch_sleep:
         sr._patch_park_detection()
-    stop = sr._start_stall_guard(1, None)
+    stop = sr._start_stall_guard(Database.from_settings(), 1, None)
     try:
         yield fired
     finally:
@@ -550,13 +551,13 @@ def test_stall_guard_ignores_a_legitimately_sleeping_main_thread(
 
     import gateway.schedule_runner as sr
 
-    monkeypatch.setattr(sr, "_STALL_CHECK_INTERVAL_S", 0.02)
-    monkeypatch.setattr(sr, "_STALL_TIMEOUT_S", 0.05)
+    monkeypatch.setattr(settings.gateway, "schedule_stall_check_interval_seconds", 0.02)
+    monkeypatch.setattr(settings.gateway, "schedule_stall_timeout_seconds", 0.05)
     fired: list[str] = []
     monkeypatch.setattr(
         sr,
         "_stall_action",
-        lambda _sid, msg, _rid: fired.append(msg),  # pyright: ignore[reportUnknownArgumentType]
+        lambda _db, _sid, msg, _rid: fired.append(msg),  # pyright: ignore[reportUnknownArgumentType]
     )
 
     # The runner wraps time.sleep before running a script; without the wrapper
@@ -564,7 +565,7 @@ def test_stall_guard_ignores_a_legitimately_sleeping_main_thread(
     # which is indistinguishable from a stall.
     _real_sleep = time.sleep
     sr._patch_park_detection()
-    stop = sr._start_stall_guard(1, None)
+    stop = sr._start_stall_guard(Database.from_settings(), 1, None)
     try:
         time.sleep(0.4)  # main thread parked in time.sleep the whole time
         assert fired == []
@@ -754,9 +755,8 @@ def test_run_hung_subprocess_times_out_and_records_error(
     last_error and returns non-zero so the ScheduleManager's crash path
     (backoff + breaker) relaunches instead of the schedule silently eating
     every future fire window (2026-08-08 audit P2-2)."""
-    import gateway.schedule_runner as sr
 
-    monkeypatch.setattr(sr, "_STALL_TIMEOUT_S", 2.0)
+    monkeypatch.setattr(settings.gateway, "schedule_stall_timeout_seconds", 2.0)
     sid = _insert_schedule(db_conn, script="sleep 60\n", command="bash run.sh")
 
     rc = run(sid)
@@ -774,15 +774,15 @@ def test_stall_verdict_closes_run_row(
     import gateway.schedule_runner as sr
 
     sid = _insert_schedule(db_conn, script="x = 1\n")
-    run_id = sr._record_run_start(sid)
+    run_id = sr._record_run_start(Database.from_settings(), sid)
     exited: list[int] = []
     monkeypatch.setattr(sr.os, "_exit", exited.append)
     monkeypatch.setattr(sr.base.host.proc, "kill_process_tree", Mock())
 
-    sr._stall_action(sid, "stalled in foo", run_id)
+    sr._stall_action(Database.from_settings(), sid, "stalled in foo", run_id)
 
     assert exited == [1]
-    assert _runs(db_conn, sid) == [(False, f"stalled ({sr._STALL_TIMEOUT_S:.0f}s)")]
+    assert _runs(db_conn, sid) == [(False, f"stalled ({sr._stall_timeout_s():.0f}s)")]
 
 
 def test_main_refuses_on_foreign_checkout(monkeypatch: pytest.MonkeyPatch) -> None:

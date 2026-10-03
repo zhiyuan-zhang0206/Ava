@@ -39,7 +39,7 @@
 --     mutate gateway-owned tables.
 --
 -- LangGraph PostgresSaver creates only at fresh install; later versions are
--- mirrored by paired Ava migrations so cluster rollback can reverse them:
+-- mirrored by Ava timestamp migrations:
 --   checkpoints / checkpoint_blobs / checkpoint_writes / checkpoint_migrations
 -- Here we only manage our own tables:
 --   agents            — agent identity + label (id also doubles as the LangGraph thread_id,
@@ -442,6 +442,26 @@ CREATE TABLE delivery_watchdog_alerted (
 COMMENT ON TABLE delivery_watchdog_alerted IS
     'Delivery watchdog stall-alert dedup: inbound ids already WARNINGed while pending. Persists the daemon''s in-memory alerted set across restarts so a restart does not re-report every still-stalled inbound (Task #945).';
 
+CREATE TABLE delivery_watchdog_attempts (
+    kind                 TEXT NOT NULL CHECK (kind IN ('resurrect', 'harvest', 'hosted_turn')),
+    agent_id             BIGINT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+    last_attempt_at      TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),
+    consecutive_failures INT NOT NULL DEFAULT 0,
+    suppress_count       INT NOT NULL DEFAULT 0,
+    PRIMARY KEY (kind, agent_id)
+);
+
+COMMENT ON TABLE delivery_watchdog_attempts IS
+    'Delivery watchdog recovery-loop state, one row per (loop kind, agent): last_attempt_at is the cooldown clock; consecutive_failures and suppress_count (resurrect only) are the wake-suppression escalation counters. Survives watchdog restarts.';
+
+CREATE TABLE maintenance_state (
+    kind        TEXT PRIMARY KEY,
+    last_run_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp()
+);
+
+COMMENT ON TABLE maintenance_state IS
+    'ttl-reaper cadence clocks, one row per slow maintenance phase (kind): last_run_at is when the phase was last claimed. Survives service restarts.';
+
 -- Full (non-partial) (agent_id, created_at DESC): select_all's LATERAL
 -- MAX(created_at) per agent is an index-only scan on it (the partial
 -- pending index below cannot serve MAX over all kinds; audit P1-1).
@@ -535,7 +555,7 @@ COMMENT ON COLUMN inbound_messages.source_assertion_match IS
 -- pointer in the same transaction. The TTL reaper's hourly torn-pointer scan
 -- (gateway/ttl_reaper.py, telemetry lifecycle_pointer_done_torn) is the detector
 -- for a bypass (a pointer later set onto an already-done row). Ships to existing
--- clusters via the paired migration.
+-- clusters via a migration.
 CREATE OR REPLACE FUNCTION reject_inbound_done_with_lifecycle_pointer() RETURNS trigger AS $$
 BEGIN
     IF EXISTS (
@@ -755,8 +775,8 @@ COMMENT ON COLUMN api_idempotency.op_status IS
 -- instead of an event snapshot. model '' = an llm_usage row that carried no
 -- model field. The per-agent daily token total = SUM over that day's model
 -- rows (not re-stored in agent_metrics_daily). Whole days land here from the
--- events-maintenance Loki rollup pass; the cost read path is these rows + a
--- live Loki tail for today.
+-- events-maintenance rollup pass over telemetry_events; the cost read path is these rows + the
+-- newest raw rows.
 CREATE TABLE agent_model_tokens_daily (
     agent_id         BIGINT NOT NULL REFERENCES agents(id),
     day              DATE   NOT NULL,
@@ -771,6 +791,29 @@ CREATE TABLE agent_model_tokens_daily (
     unpriced_calls   BIGINT NOT NULL DEFAULT 0,
     estimated_calls  BIGINT NOT NULL DEFAULT 0,
     PRIMARY KEY (agent_id, day, model)
+);
+
+-- The whole-life sums per agent and model, folded from agent_model_tokens_daily once its days can
+-- no longer change (migration 20261003T020000_agent-model-tokens-total). A reader of "all time"
+-- adds this to the days after the fold and to the newest raw rows.
+-- `agent_model_tokens_total_through` holds the single watermark: the last UTC day folded in.
+CREATE TABLE IF NOT EXISTS agent_model_tokens_total (
+    agent_id         BIGINT NOT NULL REFERENCES agents(id),
+    model            TEXT   NOT NULL,
+    llm_calls        BIGINT NOT NULL DEFAULT 0,
+    tokens_in        BIGINT NOT NULL DEFAULT 0,
+    tokens_out       BIGINT NOT NULL DEFAULT 0,
+    tokens_cached    BIGINT NOT NULL DEFAULT 0,
+    tokens_reasoning BIGINT NOT NULL DEFAULT 0,
+    cost_usd         DOUBLE PRECISION NOT NULL DEFAULT 0,
+    costed_calls     BIGINT NOT NULL DEFAULT 0,
+    unpriced_calls   BIGINT NOT NULL DEFAULT 0,
+    PRIMARY KEY (agent_id, model)
+);
+
+CREATE TABLE IF NOT EXISTS agent_model_tokens_total_through (
+    singleton BOOLEAN PRIMARY KEY DEFAULT true CHECK (singleton),
+    day       DATE NOT NULL
 );
 
 -- One row per Loki-sourced rollup day. source_count is the event-family count
@@ -1180,6 +1223,23 @@ CREATE TABLE machine_probe (
     transition_since     TIMESTAMPTZ
 );
 
+-- machine_status_snapshot — the roster's read model: the last status_probe of every
+-- roster-visible agent-runner (rollout targets, staging and intentionally stopped
+-- hosts), written by the heartbeat liveness pass. `status` is the last ClusterStatus
+-- payload (kept across one failed attempt), `status_at` when it was probed; NULL
+-- status with reachable = the host answered with a body that is not a ClusterStatus.
+CREATE TABLE machine_status_snapshot (
+    machine_name         TEXT PRIMARY KEY,
+    observed_at          TIMESTAMPTZ NOT NULL,
+    reachable            BOOLEAN NOT NULL,
+    consecutive_failures INTEGER NOT NULL DEFAULT 0,
+    status               JSONB,
+    status_at            TIMESTAMPTZ
+);
+
+COMMENT ON TABLE machine_status_snapshot IS
+    'Roster read model: the last status_probe per roster-visible agent-runner, written by the heartbeat liveness pass. status holds the last ClusterStatus payload and status_at when it was probed.';
+
 -- machine_units: per-unit capability contributions that COMPOSE the machines row
 -- above. One row per (machine_name, home) — `home` is the unit's $AVA_HOME. Two
 -- co-located units (e.g. a gateway-only unit under ~/.ava_gateway + an
@@ -1280,9 +1340,21 @@ CREATE TABLE schedules (
                 CHECK (status IN ('running', 'stopped', 'error', 'completed')),  -- completed = clean exit (rc=0), a terminal state
     last_error  TEXT,
     created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
-    updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+    updated_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    launch_count     INT NOT NULL DEFAULT 0,  -- crash-backoff launch counter (schedule-manager)
+    next_launch_at   TIMESTAMPTZ,             -- no relaunch before this
+    not_live_since   TIMESTAMPTZ,             -- first sessionless observation of the current outage
+    stall_alerted_at TIMESTAMPTZ              -- the two-hour no-session alert fired for this outage
 );
 CREATE INDEX ON schedules (enabled);
+
+CREATE TABLE schedule_sync_requests (
+    schedule_id  BIGINT PRIMARY KEY,
+    requested_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp()
+);
+
+COMMENT ON TABLE schedule_sync_requests IS
+    'Pending API requests for the schedule-manager service to converge one schedule''s session now (kill, relaunch if enabled). The consumer deletes a row after the sync ran, only if requested_at is unchanged.';
 
 CREATE TABLE schedule_versions (
     id          BIGSERIAL PRIMARY KEY,
@@ -1489,21 +1561,12 @@ CREATE TABLE IF NOT EXISTS agent_impersonations (
     handoff_document JSONB,
     handoff_path TEXT,
     handoff_applied_at TIMESTAMPTZ,
-    events_cursor JSONB,
-    events_next_read_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     events_completed_at TIMESTAMPTZ,
-    event_delivery_protocol_version SMALLINT CHECK (event_delivery_protocol_version = 1),
-    manifest_admission_closed_at TIMESTAMPTZ,
-    manifest_frozen_at TIMESTAMPTZ,
-    manifest_digest TEXT,
-    manifest_item_count BIGINT,
-    manifest_envelope_floor_at TIMESTAMPTZ,
+    event_delivery_protocol_version SMALLINT CHECK (event_delivery_protocol_version = 2),
+    event_admission_closed_at TIMESTAMPTZ,
     event_delivery_pending_reason TEXT CHECK (event_delivery_pending_reason IN (
-        'awaiting_session_end', 'awaiting_participant_seal', 'capture_failed',
-        'awaiting_indexed_ids', 'manifest_mismatch', 'retention_loss'
+        'awaiting_session_end', 'awaiting_participant_seal', 'capture_failed'
     )),
-    event_delivery_retention_horizon_at TIMESTAMPTZ,
-    event_delivery_integrity_alerted_at TIMESTAMPTZ,
     next_entry BIGINT NOT NULL DEFAULT 0,
     PRIMARY KEY (agent_id,session_id),
     source TEXT NOT NULL,
@@ -1541,14 +1604,8 @@ CREATE TABLE IF NOT EXISTS agent_impersonations (
     CHECK (applied_version >= 0 AND applied_version <= delta_version),
     CHECK (jsonb_array_length(plugin_delta) = delta_version),
     CHECK ((accepted_generation IS NULL) = (accepted_owner IS NULL)),
-    CHECK (manifest_frozen_at IS NULL OR (
-        automatic AND event_delivery_protocol_version = 1
-        AND manifest_admission_closed_at IS NOT NULL
-        AND manifest_digest IS NOT NULL
-        AND manifest_item_count IS NOT NULL
-        AND manifest_envelope_floor_at IS NOT NULL
-    )),
-    CHECK ((relay_minted_generation IS NULL) = (relay_minted_owner IS NULL)),
+    CONSTRAINT agent_impersonations_relay_minted_pair CHECK (
+        (relay_minted_generation IS NULL) = (relay_minted_owner IS NULL)),
     CONSTRAINT agent_impersonations_relay_spec CHECK (
         (relay_provider IS NULL
             AND relay_thread_id IS NULL
@@ -1588,7 +1645,7 @@ CREATE INDEX agent_impersonation_messages_unacknowledged_delivery
 
 -- Every termination writer (including force/reaper) revokes in its own atomic
 -- status transaction. Restart keeps the status and preserves the active lease.
--- Protocol-v1 manifest admission closes with the lease, like every other end.
+-- Event admission closes with the lease, like every other end.
 CREATE OR REPLACE FUNCTION revoke_terminated_impersonation() RETURNS trigger AS $$
 DECLARE
     ended_lease RECORD;
@@ -1600,7 +1657,7 @@ BEGIN
         WHERE agent_id=NEW.id AND status IN ('requested','accepted','active')
         RETURNING id, session_id
     LOOP
-        PERFORM close_impersonation_event_manifest_admission(ended_lease.id);
+        PERFORM close_impersonation_event_admission(ended_lease.id);
         -- The native graph may be drained. Persist completed facts for its next
         -- resurrection, distinct from the graph's earlier acceptance marker.
         INSERT INTO inbound_messages(agent_id,content,kind,source,payload,created_at)
@@ -1661,12 +1718,13 @@ CREATE TABLE agent_impersonation_entries (
     event_key TEXT,
     created_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),
     payload JSONB NOT NULL,
+    source_key TEXT,
     PRIMARY KEY(lease_id,seq),
     UNIQUE(lease_id,event_key)
 );
-CREATE INDEX agent_impersonations_events_pending ON agent_impersonations(machine,events_next_read_at)
-WHERE automatic AND activated_at IS NOT NULL AND ended_at IS NOT NULL AND events_completed_at IS NULL;
 CREATE INDEX agent_impersonation_entries_created ON agent_impersonation_entries(lease_id,created_at,seq);
+CREATE INDEX agent_impersonation_entries_source
+    ON agent_impersonation_entries(lease_id, source_key) WHERE source_key IS NOT NULL;
 
 -- ava_runner surface for the session trail (task #3549): the lifecycle and
 -- inbound triggers, plus the handoff writer, INSERT rows; readers SELECT them
@@ -1706,9 +1764,8 @@ CREATE TRIGGER agent_impersonation_entries_preserve_history
     BEFORE UPDATE OR DELETE ON agent_impersonation_entries
     FOR EACH ROW EXECUTE FUNCTION preserve_impersonation_history();
 
--- Protocol-v1 receipts freeze every source event before the bounded telemetry
--- queue. Local receipts may make exactly one open -> sealed/failed transition;
--- all receipt items and central transactional expectations are append-only.
+-- Event-source receipts: a local source may make exactly one open ->
+-- sealed/failed transition; a sealed count is checked against the log's rows.
 CREATE TABLE agent_impersonation_event_participants (
     lease_id UUID NOT NULL REFERENCES agent_impersonations(id) ON DELETE RESTRICT,
     source_key TEXT NOT NULL,
@@ -1717,7 +1774,6 @@ CREATE TABLE agent_impersonation_event_participants (
     sealed_at TIMESTAMPTZ,
     failure_reason TEXT,
     item_count BIGINT,
-    manifest_digest TEXT,
     PRIMARY KEY (lease_id, source_key),
     CHECK (
         (state = 'open' AND sealed_at IS NULL AND failure_reason IS NULL)
@@ -1725,72 +1781,6 @@ CREATE TABLE agent_impersonation_event_participants (
         OR (state = 'failed' AND failure_reason IS NOT NULL)
     )
 );
-CREATE TABLE agent_impersonation_event_participant_items (
-    lease_id UUID NOT NULL,
-    source_key TEXT NOT NULL,
-    event_key TEXT NOT NULL,
-    event_kind TEXT NOT NULL CHECK (event_kind IN ('sdk_call', 'api_event')),
-    event_at TIMESTAMPTZ NOT NULL,
-    line_sha256 TEXT NOT NULL CHECK (line_sha256 ~ '^[0-9a-f]{64}$'),
-    PRIMARY KEY (lease_id, source_key, event_key),
-    FOREIGN KEY (lease_id, source_key)
-        REFERENCES agent_impersonation_event_participants(lease_id, source_key)
-        ON DELETE RESTRICT
-);
-CREATE TABLE agent_impersonation_event_expected_receipts (
-    lease_id UUID NOT NULL REFERENCES agent_impersonations(id) ON DELETE RESTRICT,
-    origin_kind TEXT NOT NULL,
-    origin_id BIGINT NOT NULL,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),
-    PRIMARY KEY (lease_id, origin_kind, origin_id)
-);
-CREATE TABLE agent_impersonation_event_expected_items (
-    lease_id UUID NOT NULL REFERENCES agent_impersonations(id) ON DELETE RESTRICT,
-    event_key TEXT NOT NULL,
-    event_kind TEXT NOT NULL CHECK (event_kind IN ('sdk_call', 'api_event')),
-    event_at TIMESTAMPTZ NOT NULL,
-    line_sha256 TEXT NOT NULL CHECK (line_sha256 ~ '^[0-9a-f]{64}$'),
-    origin_kind TEXT NOT NULL,
-    origin_id BIGINT NOT NULL,
-    PRIMARY KEY (lease_id, event_key),
-    FOREIGN KEY (lease_id, origin_kind, origin_id)
-        REFERENCES agent_impersonation_event_expected_receipts(lease_id, origin_kind, origin_id)
-        ON DELETE RESTRICT
-);
-CREATE TABLE agent_impersonation_event_certifiers (
-    lease_id UUID PRIMARY KEY REFERENCES agent_impersonations(id) ON DELETE RESTRICT,
-    machine TEXT NOT NULL,
-    certification_secret TEXT NOT NULL CHECK (length(certification_secret) >= 32),
-    admitted_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp()
-);
-CREATE INDEX agent_impersonation_event_participant_items_envelope
-    ON agent_impersonation_event_participant_items(lease_id, event_at);
-CREATE INDEX agent_impersonation_event_expected_items_envelope
-    ON agent_impersonation_event_expected_items(lease_id, event_at);
-CREATE INDEX agent_impersonations_manifest_pending ON agent_impersonations(machine, events_next_read_at)
-    WHERE automatic AND event_delivery_protocol_version = 1 AND events_completed_at IS NULL;
-
-CREATE FUNCTION public.admit_impersonation_event_certifier(
-    p_lease_id UUID,p_certification_secret TEXT
-) RETURNS VOID LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, public
-AS $function$
-DECLARE lease public.agent_impersonations%ROWTYPE;
-BEGIN
-    SELECT * INTO lease FROM public.agent_impersonations WHERE id=p_lease_id FOR UPDATE;
-    IF NOT FOUND OR NOT lease.automatic OR lease.event_delivery_protocol_version <> 1
-       OR lease.status <> 'accepted' THEN
-        RAISE EXCEPTION 'Certification proof requires an accepted automatic protocol-v1 lease';
-    END IF;
-    IF length(p_certification_secret) < 32 THEN RAISE EXCEPTION 'Certification proof is too short'; END IF;
-    INSERT INTO public.agent_impersonation_event_certifiers(lease_id,machine,certification_secret)
-    VALUES(p_lease_id,lease.machine,p_certification_secret) ON CONFLICT (lease_id) DO NOTHING;
-    IF NOT EXISTS (SELECT 1 FROM public.agent_impersonation_event_certifiers
-                   WHERE lease_id=p_lease_id AND machine=lease.machine
-                     AND certification_secret=p_certification_secret) THEN
-        RAISE EXCEPTION 'Certification proof does not belong to this lease owner';
-    END IF;
-END;
-$function$;
 
 CREATE FUNCTION preserve_impersonation_event_protocol_version() RETURNS trigger AS $$
 BEGIN
@@ -1819,29 +1809,26 @@ $$ LANGUAGE plpgsql;
 CREATE TRIGGER agent_impersonation_event_participants_preserve_history
     BEFORE UPDATE OR DELETE ON agent_impersonation_event_participants
     FOR EACH ROW EXECUTE FUNCTION preserve_impersonation_event_participant();
-CREATE TRIGGER agent_impersonation_event_participant_items_preserve_history
-    BEFORE UPDATE OR DELETE ON agent_impersonation_event_participant_items
-    FOR EACH ROW EXECUTE FUNCTION preserve_impersonation_history();
-CREATE TRIGGER agent_impersonation_event_expected_receipts_preserve_history
-    BEFORE UPDATE OR DELETE ON agent_impersonation_event_expected_receipts
-    FOR EACH ROW EXECUTE FUNCTION preserve_impersonation_history();
-CREATE TRIGGER agent_impersonation_event_expected_items_preserve_history
-    BEFORE UPDATE OR DELETE ON agent_impersonation_event_expected_items
-    FOR EACH ROW EXECUTE FUNCTION preserve_impersonation_history();
 
-CREATE FUNCTION public.close_impersonation_event_manifest_admission(p_lease_id UUID)
+CREATE FUNCTION public.close_impersonation_event_admission(p_lease_id UUID)
 RETURNS BOOLEAN LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, public
 AS $function$
 BEGIN
-    UPDATE public.agent_impersonations SET manifest_admission_closed_at=clock_timestamp()
-    WHERE id=p_lease_id AND automatic AND event_delivery_protocol_version=1
-      AND manifest_admission_closed_at IS NULL;
-    RETURN FOUND;
+    UPDATE public.agent_impersonations SET event_admission_closed_at=clock_timestamp()
+    WHERE id=p_lease_id AND automatic AND event_delivery_protocol_version = 2
+      AND event_admission_closed_at IS NULL;
+    IF NOT FOUND THEN
+        RETURN FALSE;
+    END IF;
+    -- A lease that already ended (termination closes admission after ending it)
+    -- completes here when every source is sealed; otherwise this is a no-op.
+    PERFORM public.finalize_impersonation_event_log(p_lease_id);
+    RETURN TRUE;
 END;
 $function$;
 
 CREATE FUNCTION public.seal_impersonation_event_participant(
-    p_lease_id UUID,p_source_key TEXT,p_state TEXT,p_failure_reason TEXT,p_item_count BIGINT,p_digest TEXT
+    p_lease_id UUID,p_source_key TEXT,p_state TEXT,p_failure_reason TEXT,p_item_count BIGINT
 ) RETURNS VOID LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, public AS $function$
 DECLARE actual_count BIGINT;
 BEGIN
@@ -1855,14 +1842,15 @@ BEGIN
         WHERE lease_id=p_lease_id AND source_key=p_source_key;
         RETURN;
     END IF;
-    SELECT count(*) INTO actual_count FROM public.agent_impersonation_event_participant_items
+    SELECT count(*) INTO actual_count FROM public.agent_impersonation_entries
     WHERE lease_id=p_lease_id AND source_key=p_source_key;
-    IF actual_count<>p_item_count OR p_digest !~ '^[0-9a-f]{64}$' THEN
-        RAISE EXCEPTION 'Receipt aggregate does not match its append-only items';
+    IF actual_count<>p_item_count THEN
+        RAISE EXCEPTION 'Receipt count does not match its recorded rows';
     END IF;
     UPDATE public.agent_impersonation_event_participants
-    SET state='sealed',sealed_at=clock_timestamp(),item_count=p_item_count,manifest_digest=p_digest
+    SET state='sealed',sealed_at=clock_timestamp(),item_count=p_item_count
     WHERE lease_id=p_lease_id AND source_key=p_source_key;
+    PERFORM public.finalize_impersonation_event_log(p_lease_id);
 END;
 $function$;
 
@@ -1877,146 +1865,9 @@ BEGIN
 END;
 $function$;
 
-CREATE FUNCTION public.freeze_impersonation_event_manifest(
-    p_lease_id UUID, p_digest TEXT, p_count BIGINT, p_floor TIMESTAMPTZ
-) RETURNS void LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, public
-AS $function$
-DECLARE actual_count BIGINT;
-BEGIN
-    PERFORM 1 FROM public.agent_impersonations
-    WHERE id=p_lease_id AND automatic AND event_delivery_protocol_version=1
-      AND manifest_admission_closed_at IS NOT NULL FOR UPDATE;
-    IF NOT FOUND THEN RAISE EXCEPTION 'Manifest freeze requires a closed protocol-v1 lease'; END IF;
-    IF EXISTS (SELECT 1 FROM public.agent_impersonation_event_participants
-               WHERE lease_id=p_lease_id AND state <> 'sealed') THEN
-        RAISE EXCEPTION 'Manifest freeze requires every local receipt to seal';
-    END IF;
-    SELECT count(DISTINCT event_key) INTO actual_count FROM (
-        SELECT event_key FROM public.agent_impersonation_event_participant_items WHERE lease_id=p_lease_id
-        UNION ALL
-        SELECT event_key FROM public.agent_impersonation_event_expected_items WHERE lease_id=p_lease_id
-    ) expected;
-    IF actual_count <> p_count OR p_digest !~ '^[0-9a-f]{64}$' THEN
-        RAISE EXCEPTION 'Manifest freeze aggregate does not match the ledger';
-    END IF;
-    UPDATE public.agent_impersonations SET manifest_frozen_at=clock_timestamp(),
-        manifest_digest=p_digest,manifest_item_count=p_count,manifest_envelope_floor_at=p_floor,
-        event_delivery_pending_reason='awaiting_indexed_ids' WHERE id=p_lease_id;
-END;
-$function$;
-
-CREATE FUNCTION public.record_impersonation_event_retention_loss(
-    p_lease_id UUID,p_retention_horizon TIMESTAMPTZ
-) RETURNS BOOLEAN LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, public
-AS $function$
-BEGIN
-    UPDATE public.agent_impersonations SET event_delivery_pending_reason='retention_loss',
-        event_delivery_retention_horizon_at=p_retention_horizon
-    WHERE id=p_lease_id AND automatic AND event_delivery_protocol_version=1
-      AND events_completed_at IS NULL AND manifest_frozen_at IS NOT NULL
-      AND manifest_envelope_floor_at < p_retention_horizon;
-    RETURN FOUND;
-END;
-$function$;
-
-CREATE FUNCTION public.record_impersonation_event_integrity_alert(p_lease_id UUID)
-RETURNS BOOLEAN LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, public
-AS $function$
-BEGIN
-    UPDATE public.agent_impersonations SET event_delivery_integrity_alerted_at=clock_timestamp()
-    WHERE id=p_lease_id AND events_completed_at IS NOT NULL
-      AND event_delivery_integrity_alerted_at IS NULL;
-    RETURN FOUND;
-END;
-$function$;
-
-CREATE FUNCTION public.certify_impersonation_event_delivery(
-    p_lease_id UUID,p_certification_secret TEXT
-)
-RETURNS BOOLEAN LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, public
-AS $function$
-DECLARE lease public.agent_impersonations%ROWTYPE;
-DECLARE entry_no BIGINT;
-DECLARE participants BIGINT;
-DECLARE sdk_count BIGINT;
-DECLARE api_count BIGINT;
-BEGIN
-    SELECT * INTO lease FROM public.agent_impersonations WHERE id=p_lease_id FOR UPDATE;
-    IF NOT FOUND THEN RAISE EXCEPTION 'Impersonation lease does not exist'; END IF;
-    IF lease.events_completed_at IS NOT NULL THEN RETURN TRUE; END IF;
-    IF NOT EXISTS (SELECT 1 FROM public.agent_impersonation_event_certifiers
-                   WHERE lease_id=p_lease_id AND machine=lease.machine
-                     AND certification_secret=p_certification_secret) THEN
-        RAISE EXCEPTION 'Certification proof does not match the admitted lease proof';
-    END IF;
-    IF NOT lease.automatic OR lease.event_delivery_protocol_version <> 1
-       OR lease.ended_at IS NULL OR lease.manifest_admission_closed_at IS NULL
-       OR lease.manifest_frozen_at IS NULL THEN
-        RAISE EXCEPTION 'Event delivery certification requires a frozen protocol-v1 lease';
-    END IF;
-    IF lease.event_delivery_pending_reason='retention_loss'
-       OR (lease.event_delivery_retention_horizon_at IS NOT NULL
-           AND lease.manifest_envelope_floor_at < lease.event_delivery_retention_horizon_at) THEN
-        RAISE EXCEPTION 'Event delivery certification is vetoed by retention loss';
-    END IF;
-    IF EXISTS (SELECT 1 FROM public.agent_impersonation_event_participants
-               WHERE lease_id=p_lease_id AND state <> 'sealed') THEN
-        RAISE EXCEPTION 'Event delivery certification requires sealed local receipts';
-    END IF;
-    IF EXISTS (
-        SELECT event_key FROM (
-            SELECT event_key,line_sha256,event_kind FROM public.agent_impersonation_event_participant_items
-            WHERE lease_id=p_lease_id
-            UNION ALL
-            SELECT event_key,line_sha256,event_kind FROM public.agent_impersonation_event_expected_items
-            WHERE lease_id=p_lease_id
-        ) expected GROUP BY event_key HAVING count(DISTINCT line_sha256 || ':' || event_kind) <> 1
-    ) THEN RAISE EXCEPTION 'Manifest contains conflicting duplicate event identities'; END IF;
-    IF EXISTS (
-        WITH expected AS (
-            SELECT event_key,min(event_kind) AS event_kind,min(line_sha256) AS line_sha256 FROM (
-                SELECT event_key,event_kind,line_sha256 FROM public.agent_impersonation_event_participant_items WHERE lease_id=p_lease_id
-                UNION ALL
-                SELECT event_key,event_kind,line_sha256 FROM public.agent_impersonation_event_expected_items WHERE lease_id=p_lease_id
-            ) all_expected GROUP BY event_key
-        ), actual AS (
-            SELECT event_key,kind AS event_kind,payload->>'line_sha256' AS line_sha256 FROM public.agent_impersonation_entries
-            WHERE lease_id=p_lease_id AND kind IN ('sdk_call','api_event')
-        )
-        (SELECT event_key,event_kind,line_sha256 FROM expected EXCEPT SELECT event_key,event_kind,line_sha256 FROM actual)
-        UNION ALL
-        (SELECT event_key,event_kind,line_sha256 FROM actual EXCEPT SELECT event_key,event_kind,line_sha256 FROM expected)
-    ) THEN RAISE EXCEPTION 'Manifest differs from durable consumed events'; END IF;
-    UPDATE public.agent_impersonations SET events_completed_at=clock_timestamp(),events_cursor=NULL,
-        handoff_document=NULL,event_delivery_pending_reason=NULL WHERE id=p_lease_id;
-    UPDATE public.agent_impersonations SET next_entry=next_entry+1 WHERE id=p_lease_id
-        RETURNING next_entry-1 INTO entry_no;
-    SELECT count(*) INTO participants FROM public.agent_impersonation_event_participants WHERE lease_id=p_lease_id;
-    SELECT count(*) FILTER (WHERE event_kind='sdk_call'),count(*) FILTER (WHERE event_kind='api_event')
-    INTO sdk_count,api_count FROM (
-        SELECT event_key,min(event_kind) AS event_kind FROM (
-            SELECT event_key,event_kind FROM public.agent_impersonation_event_participant_items WHERE lease_id=p_lease_id
-            UNION ALL
-            SELECT event_key,event_kind FROM public.agent_impersonation_event_expected_items WHERE lease_id=p_lease_id
-        ) all_expected GROUP BY event_key
-    ) expected;
-    INSERT INTO public.agent_impersonation_entries(lease_id,seq,kind,payload)
-    VALUES(p_lease_id,entry_no,'lifecycle',jsonb_build_object(
-        'event','event_delivery_complete','manifest_digest',lease.manifest_digest,
-        'event_count',lease.manifest_item_count,'participant_count',participants,
-        'sdk_call_count',sdk_count,'api_event_count',api_count));
-    RETURN TRUE;
-END;
-$function$;
-
-REVOKE ALL ON FUNCTION public.close_impersonation_event_manifest_admission(UUID) FROM PUBLIC;
-REVOKE ALL ON FUNCTION public.admit_impersonation_event_certifier(UUID,TEXT) FROM PUBLIC;
-REVOKE ALL ON FUNCTION public.seal_impersonation_event_participant(UUID,TEXT,TEXT,TEXT,BIGINT,TEXT) FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.close_impersonation_event_admission(UUID) FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.seal_impersonation_event_participant(UUID,TEXT,TEXT,TEXT,BIGINT) FROM PUBLIC;
 REVOKE ALL ON FUNCTION public.lock_impersonation_event_participant(UUID,TEXT) FROM PUBLIC;
-REVOKE ALL ON FUNCTION public.freeze_impersonation_event_manifest(UUID,TEXT,BIGINT,TIMESTAMPTZ) FROM PUBLIC;
-REVOKE ALL ON FUNCTION public.record_impersonation_event_retention_loss(UUID,TIMESTAMPTZ) FROM PUBLIC;
-REVOKE ALL ON FUNCTION public.record_impersonation_event_integrity_alert(UUID) FROM PUBLIC;
-REVOKE ALL ON FUNCTION public.certify_impersonation_event_delivery(UUID,TEXT) FROM PUBLIC;
 DO $$
 BEGIN
     IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname='ava_runner') THEN
@@ -2033,24 +1884,126 @@ BEGIN
             accepted_generation,accepted_owner,consent_version,activated_at,ended_at,
             plugin_delta,delta_version,applied_version,relay_token_hash,relay_heartbeat_at,
             relay_last_failure_at,relay_minted_at,relay_minted_generation,relay_minted_owner,
-            events_cursor,events_next_read_at,handoff_document,handoff_path,handoff_applied_at,
+            handoff_document,handoff_path,handoff_applied_at,
             next_entry,event_delivery_pending_reason,start_message
         ) ON agent_impersonations TO ava_runner;
         GRANT SELECT,INSERT ON agent_impersonation_event_participants TO ava_runner;
-        GRANT SELECT,INSERT ON agent_impersonation_event_participant_items TO ava_runner;
-        GRANT SELECT ON agent_impersonation_event_expected_receipts TO ava_runner;
-        GRANT SELECT ON agent_impersonation_event_expected_items TO ava_runner;
-        REVOKE ALL ON agent_impersonation_event_certifiers FROM ava_runner;
-        GRANT EXECUTE ON FUNCTION public.close_impersonation_event_manifest_admission(UUID) TO ava_runner;
-        GRANT EXECUTE ON FUNCTION public.admit_impersonation_event_certifier(UUID,TEXT) TO ava_runner;
-        GRANT EXECUTE ON FUNCTION public.seal_impersonation_event_participant(UUID,TEXT,TEXT,TEXT,BIGINT,TEXT) TO ava_runner;
+        GRANT EXECUTE ON FUNCTION public.close_impersonation_event_admission(UUID) TO ava_runner;
+        GRANT EXECUTE ON FUNCTION public.seal_impersonation_event_participant(UUID,TEXT,TEXT,TEXT,BIGINT) TO ava_runner;
         GRANT EXECUTE ON FUNCTION public.lock_impersonation_event_participant(UUID,TEXT) TO ava_runner;
-        GRANT EXECUTE ON FUNCTION public.freeze_impersonation_event_manifest(UUID,TEXT,BIGINT,TIMESTAMPTZ) TO ava_runner;
-        GRANT EXECUTE ON FUNCTION public.record_impersonation_event_retention_loss(UUID,TIMESTAMPTZ) TO ava_runner;
-        GRANT EXECUTE ON FUNCTION public.record_impersonation_event_integrity_alert(UUID) TO ava_runner;
-        GRANT EXECUTE ON FUNCTION public.certify_impersonation_event_delivery(UUID,TEXT) TO ava_runner;
     END IF;
 END $$;
+
+-- A log-native lease is complete once it has ended, admission is closed and every
+-- source has sealed with a count equal to its rows. The predicate reads only this
+-- database, so no external certifier is involved. Returns whether the lease is
+-- complete after the call; not-yet-ready is not an error.
+CREATE FUNCTION public.finalize_impersonation_event_log(p_lease_id UUID)
+RETURNS BOOLEAN LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, public
+AS $function$
+DECLARE
+    lease public.agent_impersonations%ROWTYPE;
+    entry_no BIGINT;
+    participants BIGINT;
+    sdk_count BIGINT;
+    api_count BIGINT;
+BEGIN
+    SELECT * INTO lease FROM public.agent_impersonations WHERE id=p_lease_id FOR UPDATE;
+    IF NOT FOUND OR NOT lease.automatic OR lease.event_delivery_protocol_version IS DISTINCT FROM 2 THEN
+        RETURN FALSE;
+    END IF;
+    IF lease.events_completed_at IS NOT NULL THEN
+        RETURN TRUE;
+    END IF;
+    IF lease.ended_at IS NULL OR lease.event_admission_closed_at IS NULL THEN
+        RETURN FALSE;
+    END IF;
+    IF EXISTS (
+        SELECT 1 FROM public.agent_impersonation_event_participants
+        WHERE lease_id=p_lease_id AND state <> 'sealed'
+    ) THEN
+        RETURN FALSE;
+    END IF;
+    IF EXISTS (
+        SELECT 1 FROM public.agent_impersonation_event_participants p
+        WHERE p.lease_id=p_lease_id AND p.item_count IS DISTINCT FROM (
+            SELECT count(*) FROM public.agent_impersonation_entries e
+            WHERE e.lease_id=p.lease_id AND e.source_key=p.source_key
+        )
+    ) THEN
+        RAISE EXCEPTION 'Sealed source count differs from its recorded rows';
+    END IF;
+    UPDATE public.agent_impersonations
+    SET events_completed_at=clock_timestamp(), handoff_document=NULL,
+        event_delivery_pending_reason=NULL
+    WHERE id=p_lease_id;
+    UPDATE public.agent_impersonations SET next_entry=next_entry+1
+    WHERE id=p_lease_id RETURNING next_entry-1 INTO entry_no;
+    SELECT count(*) INTO participants FROM public.agent_impersonation_event_participants
+    WHERE lease_id=p_lease_id;
+    SELECT count(*) FILTER (WHERE kind='sdk_call'), count(*) FILTER (WHERE kind='api_event')
+      INTO sdk_count, api_count
+    FROM public.agent_impersonation_entries
+    WHERE lease_id=p_lease_id AND source_key IS NOT NULL;
+    INSERT INTO public.agent_impersonation_entries(lease_id,seq,kind,payload)
+    VALUES(p_lease_id,entry_no,'lifecycle',jsonb_build_object(
+        'event','event_delivery_complete',
+        'event_count',sdk_count+api_count,
+        'participant_count',participants,
+        'sdk_call_count',sdk_count,
+        'api_event_count',api_count
+    ));
+    RETURN TRUE;
+END;
+$function$;
+
+-- Every end path (release, expiry, abort, termination) sets ended_at; the lease
+-- becomes complete in that same transaction when all sources are already sealed.
+CREATE FUNCTION finalize_impersonation_event_log_on_end() RETURNS trigger
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, public AS $$
+BEGIN
+    PERFORM public.finalize_impersonation_event_log(NEW.id);
+    RETURN NULL;
+END;
+$$;
+CREATE TRIGGER agent_impersonations_finalize_event_log
+    AFTER UPDATE OF ended_at ON agent_impersonations
+    FOR EACH ROW
+    WHEN (OLD.ended_at IS NULL AND NEW.ended_at IS NOT NULL
+          AND NEW.event_delivery_protocol_version = 2)
+    EXECUTE FUNCTION finalize_impersonation_event_log_on_end();
+
+-- A source row is appended only while its source can still add events: a local
+-- participant while its receipt is open, the central source while admission is open.
+CREATE FUNCTION guard_impersonation_event_source() RETURNS trigger
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, public AS $$
+BEGIN
+    IF NEW.source_key IS NULL THEN
+        RETURN NEW;
+    END IF;
+    IF NEW.kind NOT IN ('sdk_call','api_event') THEN
+        RAISE EXCEPTION 'Only SDK and API events carry an event source';
+    END IF;
+    IF NEW.source_key = 'central' THEN
+        IF NOT EXISTS (
+            SELECT 1 FROM public.agent_impersonations
+            WHERE id=NEW.lease_id AND event_delivery_protocol_version=2
+              AND event_admission_closed_at IS NULL
+        ) THEN
+            RAISE EXCEPTION 'Central event admission is closed';
+        END IF;
+    ELSIF NOT EXISTS (
+        SELECT 1 FROM public.agent_impersonation_event_participants
+        WHERE lease_id=NEW.lease_id AND source_key=NEW.source_key AND state='open'
+    ) THEN
+        RAISE EXCEPTION 'Event source receipt is not open';
+    END IF;
+    RETURN NEW;
+END;
+$$;
+CREATE TRIGGER agent_impersonation_entries_guard_source
+    BEFORE INSERT ON agent_impersonation_entries
+    FOR EACH ROW EXECUTE FUNCTION guard_impersonation_event_source();
 
 CREATE FUNCTION record_impersonation_lifecycle() RETURNS trigger AS $$
 DECLARE entry_no BIGINT;
@@ -2284,6 +2237,210 @@ CREATE TABLE hierarchy_worker_breaker (
 COMMENT ON TABLE hierarchy_worker_breaker IS
     'Regeneration circuit breaker (task #4674): singleton row; active trip = reset_at IS NULL; operators reset with reset_at + reset_note; re-arms (rearmed_at) only after a reset and a cooled window.';
 
+-- ─────────────── audit_events ───────────────
+-- The system of record for category=audit events: who did what to whom, kept
+-- permanently. Rows are written by the producer, in the business transaction
+-- that made the fact (or in its own short transaction when the producer owns
+-- none); Loki receives the same event afterwards as an observation copy.
+--
+-- Columns follow the unified event model (decisions/2026-08-04-event-system-design.md).
+-- event_uid is the surrogate id the event stream already carries for the same
+-- event (base.telemetry.emitter.event_id, a 64-bit blake2b) reinterpreted as a
+-- signed 64-bit integer, so a redelivered event is idempotent. id only orders
+-- ties; identity order is not commit order, so nothing may tail by it.
+-- imported_from is set on rows backfilled from the pre-cutover stores and is
+-- NULL on every live row.
+CREATE TABLE audit_events (
+    id              BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    event_uid       BIGINT NOT NULL UNIQUE,
+    ts              TIMESTAMPTZ NOT NULL,
+    recorded_at     TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),
+    trace_id        TEXT,
+    span_id         TEXT,
+    agent_id        BIGINT,
+    machine         TEXT NOT NULL,
+    process         TEXT NOT NULL,
+    event_name      TEXT NOT NULL,
+    level           TEXT NOT NULL CHECK (level IN ('debug', 'info', 'warning', 'error', 'critical')),
+    source          TEXT NOT NULL,
+    target_agent_id BIGINT,
+    attributes      JSONB NOT NULL DEFAULT '{}'::jsonb,
+    imported_from   TEXT
+);
+
+CREATE INDEX audit_events_ts ON audit_events (ts);
+CREATE INDEX audit_events_agent_ts ON audit_events (agent_id, ts);
+CREATE INDEX audit_events_name_ts ON audit_events (event_name, ts);
+CREATE INDEX audit_events_target_ts ON audit_events (target_agent_id, ts)
+    WHERE target_agent_id IS NOT NULL;
+
+COMMENT ON TABLE audit_events IS
+    'Append-only record of category=audit events; Loki holds only a projection. Permanent: no UPDATE, DELETE or TRUNCATE.';
+
+CREATE FUNCTION reject_audit_events_rewrite() RETURNS trigger AS $$
+BEGIN
+    RAISE EXCEPTION 'audit_events is append-only; % is forbidden', TG_OP;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER audit_events_append_only
+    BEFORE UPDATE OR DELETE ON audit_events
+    FOR EACH ROW EXECUTE FUNCTION reject_audit_events_rewrite();
+CREATE TRIGGER audit_events_no_truncate
+    BEFORE TRUNCATE ON audit_events
+    FOR EACH STATEMENT EXECUTE FUNCTION reject_audit_events_rewrite();
+
+-- Application surface: both groups read and append. The gateway group's blanket
+-- DML grant (and the default privileges for new tables) would also give it
+-- UPDATE and DELETE, so those are revoked here and again wherever
+-- base/cluster/authority/groups.py converges the grants; the triggers above
+-- stay the guarantee for every other role. Gated on the roles' existence: fresh
+-- bootstrap applies this before install birth creates them.
+DO $$
+BEGIN
+    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'ava_runner') THEN
+        GRANT SELECT, INSERT ON audit_events TO ava_runner;
+    END IF;
+    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'ava_gateway') THEN
+        REVOKE UPDATE, DELETE ON audit_events FROM ava_gateway;
+    END IF;
+END $$;
+
+-- ─────────────── telemetry_events ───────────────
+-- Durable record of category=telemetry and category=log events. Loki keeps an
+-- observation copy for Grafana and short windows; its 84-hour retention is not
+-- a record. Rows are appended by the emitter's drain thread in batches.
+--
+-- Same columns as audit_events plus the two the audit table does not need:
+-- category and cluster. event_uid is the surrogate id the stream already
+-- carries for the event (base.telemetry.emitter.event_id) as a signed 64-bit
+-- integer. The table is partitioned by month on ts so old months can be
+-- dropped one partition at a time later; there is no retention policy and no
+-- delete path today. A partitioned table's unique key must contain the
+-- partition key, so identity is (event_uid, ts); ts is part of the id's input,
+-- so a redelivered event always repeats both.
+-- imported_from is set on rows backfilled from the pre-cutover stores and is
+-- NULL on every live row.
+CREATE TABLE telemetry_events (
+    id              BIGINT GENERATED ALWAYS AS IDENTITY,
+    event_uid       BIGINT NOT NULL,
+    ts              TIMESTAMPTZ NOT NULL,
+    recorded_at     TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),
+    trace_id        TEXT,
+    span_id         TEXT,
+    agent_id        BIGINT,
+    machine         TEXT NOT NULL,
+    cluster         TEXT NOT NULL,
+    process         TEXT NOT NULL,
+    category        TEXT NOT NULL CHECK (category IN ('telemetry', 'log')),
+    event_name      TEXT NOT NULL,
+    level           TEXT NOT NULL CHECK (level IN ('debug', 'info', 'warning', 'error', 'critical')),
+    source          TEXT NOT NULL,
+    target_agent_id BIGINT,
+    attributes      JSONB NOT NULL DEFAULT '{}'::jsonb,
+    imported_from   TEXT,
+    PRIMARY KEY (event_uid, ts)
+) PARTITION BY RANGE (ts);
+
+CREATE INDEX telemetry_events_agent_ts ON telemetry_events (agent_id, ts);
+CREATE INDEX telemetry_events_name_ts ON telemetry_events (event_name, ts);
+CREATE INDEX telemetry_events_trace ON telemetry_events (trace_id) WHERE trace_id IS NOT NULL;
+
+-- Warning, error and critical rows are a small share of telemetry_events, and the stats
+-- dashboard and the event-class resolution pass count exactly those over windows of minutes
+-- to a week (migration 20261003T000100_telemetry-events-anomaly-index).
+CREATE INDEX IF NOT EXISTS telemetry_events_anomaly_ts
+    ON telemetry_events (ts)
+    INCLUDE (cluster, category, level, event_name, source, process)
+    WHERE level IN ('warning', 'error', 'critical');
+
+-- A window's rows counted per agent and per event name come from the index alone (migration
+-- 20261003T010000_telemetry-events-metrics-index); it also serves every plain ts range scan.
+CREATE INDEX IF NOT EXISTS telemetry_events_ts_agent_name
+    ON telemetry_events (ts)
+    INCLUDE (agent_id, event_name);
+
+COMMENT ON TABLE telemetry_events IS
+    'Append-only record of category=telemetry and category=log events, partitioned by month on ts; Loki holds only an observation copy. No UPDATE, DELETE or TRUNCATE; old months leave by dropping a partition.';
+
+CREATE FUNCTION reject_telemetry_events_rewrite() RETURNS trigger AS $$
+BEGIN
+    RAISE EXCEPTION 'telemetry_events is append-only; % is forbidden', TG_OP;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER telemetry_events_append_only
+    BEFORE UPDATE OR DELETE ON telemetry_events
+    FOR EACH ROW EXECUTE FUNCTION reject_telemetry_events_rewrite();
+CREATE TRIGGER telemetry_events_no_truncate
+    BEFORE TRUNCATE ON telemetry_events
+    FOR EACH STATEMENT EXECUTE FUNCTION reject_telemetry_events_rewrite();
+
+-- Monthly partitions (UTC boundaries) from p_months_back months before the current
+-- month through p_months_ahead months ahead, created idempotently. The application logins
+-- have no DDL, so the writer calls this SECURITY DEFINER function when the
+-- month changes. A DEFAULT partition catches an event outside every month so a
+-- write never fails; rows left there block creating the month that covers them,
+-- so the function's failure is loud, not silent.
+CREATE FUNCTION public.ensure_telemetry_event_partitions(
+    p_months_ahead INT DEFAULT 3, p_months_back INT DEFAULT 1)
+RETURNS VOID LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, public
+AS $function$
+DECLARE
+    month_start TIMESTAMPTZ;
+    offset_months INT;
+BEGIN
+    EXECUTE 'create table if not exists public.telemetry_events_default '
+            'partition of public.telemetry_events default';
+    FOR offset_months IN -p_months_back..p_months_ahead LOOP
+        month_start := (date_trunc('month', now() AT TIME ZONE 'UTC')
+                        + make_interval(months => offset_months)) AT TIME ZONE 'UTC';
+        EXECUTE format(
+            'create table if not exists %s partition of public.telemetry_events '
+            'for values from (%L) to (%L)',
+            'public.telemetry_events_' || to_char(month_start AT TIME ZONE 'UTC', 'YYYYMM'),
+            month_start,
+            month_start + interval '1 month'
+        );
+    END LOOP;
+END;
+$function$;
+
+REVOKE ALL ON FUNCTION public.ensure_telemetry_event_partitions(INT, INT) FROM PUBLIC;
+SELECT public.ensure_telemetry_event_partitions(3);
+
+-- Application surface: both groups read and append, as for audit_events (see
+-- there for why the gateway group's UPDATE and DELETE are revoked and the
+-- role-existence gate).
+DO $$
+BEGIN
+    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'ava_runner') THEN
+        GRANT SELECT, INSERT ON telemetry_events TO ava_runner;
+        GRANT EXECUTE ON FUNCTION public.ensure_telemetry_event_partitions(INT, INT) TO ava_runner;
+    END IF;
+    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'ava_gateway') THEN
+        REVOKE UPDATE, DELETE ON telemetry_events FROM ava_gateway;
+    END IF;
+END $$;
+
+-- ─────────────── im_bridge_cursors ───────────────
+-- im-bridge durable positions (migration 20261002T051710_im-bridge-cursors).
+CREATE TABLE im_bridge_cursors (
+    channel         TEXT        NOT NULL,
+    chat_id         TEXT        NOT NULL,
+    push_agent_id   BIGINT,
+    push_item_id    TEXT,
+    poll_message_id TEXT,
+    poll_create_ms  BIGINT,
+    updated_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (channel, chat_id),
+    CONSTRAINT im_bridge_cursors_push_pair
+        CHECK ((push_agent_id IS NULL) = (push_item_id IS NULL))
+);
+
+COMMENT ON TABLE im_bridge_cursors IS
+    'Durable im-bridge positions: push_* = newest agent item pushed to the chat (for push_agent_id), poll_* = newest handled platform message of a polled conversation (message id, create time in ms; id NULL = time-only position). A restart resumes from here instead of losing what happened while the bridge was down.';
+
 -- ─────────────── schema_migrations ───────────────
 -- Applied-migration registry — maintained by `base.deploy.schema.migrations`. Keyed by
 -- migration NAME (an applied SET, not a high-water integer). This whole file is
@@ -2316,3 +2473,5 @@ INSERT INTO schema_migrations (name) VALUES ('20260924T070003_hierarchy-worker-b
 INSERT INTO schema_migrations (name) VALUES ('20260924T150840_impersonation-receipt-lock-door');
 INSERT INTO schema_migrations (name) VALUES ('20260924T193804_task-escalation-marker');
 INSERT INTO schema_migrations (name) VALUES ('20260926T135638_impersonation-dsh-relay');
+INSERT INTO schema_migrations (name) VALUES ('20261002T044224_audit-events');
+INSERT INTO schema_migrations (name) VALUES ('20261002T153217_telemetry-events');

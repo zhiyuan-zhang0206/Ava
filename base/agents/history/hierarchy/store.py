@@ -38,8 +38,7 @@ from psycopg import Connection
 
 from base.agents.history.hierarchy import ENGINE_VERSION, PROMPT_VERSION
 from base.agents.history.hierarchy.nodes import MaterializedNode
-from base.db import pool
-from base.db.transaction import write_transaction
+from base.db import Database
 
 # The stored row shape's version; bump with a migration when columns change.
 SCHEMA_VERSION = 1
@@ -62,9 +61,9 @@ class StoredNode:
 
 
 @contextmanager
-def _read_connection() -> Generator[Connection[Any]]:
+def _read_connection(db: Database) -> Generator[Connection[Any]]:
     """Borrow one short-lived autocommit read connection (checkpoint.py pattern)."""
-    db_pool = pool(autocommit=True)
+    db_pool = db.pool(autocommit=True)
     try:
         with db_pool.connection() as conn:
             yield conn
@@ -79,7 +78,9 @@ def _parse_ts(value: str) -> datetime | None:
     return datetime.fromisoformat(value)
 
 
-def write_tree(agent_id: int, nodes: Sequence[MaterializedNode], *, model: str) -> int:
+def write_tree(
+    db: Database, agent_id: int, nodes: Sequence[MaterializedNode], *, model: str
+) -> int:
     """Upsert every node of one run; returns the number of rows written.
 
     Alias rows carry no model (no generation happened at the node itself) —
@@ -88,7 +89,7 @@ def write_tree(agent_id: int, nodes: Sequence[MaterializedNode], *, model: str) 
     """
     if not nodes:
         return 0
-    with write_transaction() as conn:
+    with db.write_transaction() as conn:
         ids: dict[tuple[int, int, int], int] = {}
         for node in nodes:
             cursor = conn.execute(
@@ -184,9 +185,9 @@ def write_tree(agent_id: int, nodes: Sequence[MaterializedNode], *, model: str) 
     return len(nodes)
 
 
-def load_known_texts(agent_id: int) -> dict[str, str]:
+def load_known_texts(db: Database, agent_id: int) -> dict[str, str]:
     """The generation reuse cache: `input_hash -> text` for one agent."""
-    with _read_connection() as conn:
+    with _read_connection(db) as conn:
         rows = conn.execute(
             "SELECT input_hash, text FROM understanding_nodes WHERE agent_id = %s",
             (agent_id,),
@@ -194,14 +195,14 @@ def load_known_texts(agent_id: int) -> dict[str, str]:
     return {str(input_hash): str(text) for input_hash, text in rows}
 
 
-def load_coverage_extent(agent_id: int) -> tuple[datetime, datetime] | None:
+def load_coverage_extent(db: Database, agent_id: int) -> tuple[datetime, datetime] | None:
     """The agent's global sealed coverage -- `(min start, max end)` of timed nodes.
 
     The pending-placeholder computation cuts activity at this extent's start
     (display never promises generation for never-sealed history), so the read
     is agent-wide, not window-limited. `None` when no node carries timestamps.
     """
-    with _read_connection() as conn:
+    with _read_connection(db) as conn:
         row = conn.execute(
             "SELECT min(start_ts), max(end_ts) FROM understanding_nodes WHERE agent_id = %s",
             (agent_id,),
@@ -211,7 +212,9 @@ def load_coverage_extent(agent_id: int) -> tuple[datetime, datetime] | None:
     return row[0], row[1]
 
 
-def load_window_nodes(agent_id: int, start: datetime, end: datetime) -> list[StoredNode]:
+def load_window_nodes(
+    db: Database, agent_id: int, start: datetime, end: datetime
+) -> list[StoredNode]:
     """Nodes intersecting `[start, end]` (inclusive), ordered by depth then start.
 
     An inclusive intersection: a node counts when any part of it falls in the
@@ -219,7 +222,7 @@ def load_window_nodes(agent_id: int, start: datetime, end: datetime) -> list[Sto
     set. Timestamps must be timezone-aware; rows whose times are unknown
     (legacy messages) never match.
     """
-    with _read_connection() as conn:
+    with _read_connection(db) as conn:
         rows = conn.execute(
             """
             SELECT id, depth, span_start, span_end, start_ts, end_ts, text, parent_id,

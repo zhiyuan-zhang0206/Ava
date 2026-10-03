@@ -1,8 +1,9 @@
 """Schedule CRUD + control — /api/schedules.
 
-A schedule is a persistent, gateway-supervised session (a `script` + a `command`
-to run it); the gateway's ScheduleManager keeps one session per enabled row
-(gateway/schedules/manager.py). This router is the management surface: list /
+A schedule is a persistent, supervised session (a `script` + a `command`
+to run it); the schedule-manager service keeps one session per enabled row
+(services/schedule_manager/manager.py) and this router reaches it through
+`session_control` (queued sync requests). This router is the management surface: list /
 create / get / update / delete, start / stop / restart, logs, run history, and a
 `draft` endpoint that hands a natural-language request to an ava-schedule-writer agent.
 
@@ -29,6 +30,7 @@ from base.config import settings
 from base.db.transaction import write_transaction
 from base.paths import ava_home
 from gateway.agents.router import create_and_launch_agent
+from gateway.schedules import session_control
 from ops.rpc_schemas import SpawnAgentRequest
 
 router = APIRouter()
@@ -247,7 +249,7 @@ async def update_schedule(request: Request, schedule_id: int, body: ScheduleUpda
     # row[4] = enabled. Reload changed code for a running schedule, and
     # converge only an enabled value change so a no-op PUT cannot restart it.
     if (code_changed and row[4]) or enabled_changed:
-        await request.app.state.schedule_manager.sync(schedule_id)
+        await session_control.request_sync(request.app.state.db_pool, schedule_id)
     return _view(row)
 
 
@@ -270,7 +272,9 @@ async def delete_schedule(request: Request, schedule_id: int) -> dict[str, str]:
     orphaned) session; its work dir is removed."""
     pool = request.app.state.db_pool
     await asyncio.to_thread(_delete_blocking, pool, schedule_id)
-    await request.app.state.schedule_manager.sync(schedule_id)  # kill the orphan session now
+    await session_control.request_sync(
+        request.app.state.db_pool, schedule_id
+    )  # kill the orphan session now
     await asyncio.to_thread(_remove_schedule_dir, schedule_id)
     return {"status": "deleted"}
 
@@ -297,7 +301,7 @@ async def restart_schedule(request: Request, schedule_id: int) -> ScheduleView:
         raise HTTPException(
             status_code=409, detail="schedule is disabled; start it instead of restarting"
         )
-    await request.app.state.schedule_manager.sync(schedule_id)
+    await session_control.request_sync(request.app.state.db_pool, schedule_id)
     return _view(await asyncio.to_thread(_fetch_full_blocking, pool, schedule_id))
 
 
@@ -349,7 +353,7 @@ async def get_schedule_logs(
     # can be all blank rows even with the runner's output above it. Fetch a
     # wider tail, strip the blank padding, then trim to the requested count.
     window = max(lines, 200)
-    captured = await request.app.state.schedule_manager.capture(schedule_id, window)
+    captured = await session_control.capture(schedule_id, window)
     if captured is not None:
         tail = _strip_trailing_blank(captured.splitlines())
         return ScheduleLogsView(source="live", lines=tail[-lines:] if lines else tail)
@@ -409,7 +413,13 @@ async def draft_schedule(body: ScheduleDraftRequest, request: Request) -> Schedu
         prompt_source="user",
         label="ava-schedule-writer",
     )
-    spawned = await create_and_launch_agent(body_obj, machine_name(), request.app.state.db_pool)
+    spawned = await create_and_launch_agent(
+        body_obj,
+        machine_name(),
+        request.app.state.db_pool,
+        request.app.state.db,
+        request.app.state.bus,
+    )
     return ScheduleDraftResponse(agent_id=spawned.id)
 
 
@@ -442,5 +452,5 @@ async def _set_enabled_and_sync(
 ) -> ScheduleView:
     pool = request.app.state.db_pool
     await asyncio.to_thread(_set_enabled_blocking, pool, schedule_id, enabled=enabled)
-    await request.app.state.schedule_manager.sync(schedule_id)
+    await session_control.request_sync(request.app.state.db_pool, schedule_id)
     return _view(await asyncio.to_thread(_fetch_full_blocking, pool, schedule_id))

@@ -35,16 +35,12 @@ from pydantic import ValidationError
 from redis.exceptions import AuthenticationError, NoPermissionError
 
 from base.config import settings
+from base.events.live.bus import EventBus
 from base.events.live.projection import EVENT_ADAPTER, Error
-from base.events.live.redis_client import open_async_redis, retry_auth_failures_async
+from base.events.live.redis_client import retry_auth_failures_async
 from gateway.middleware import runtime_metrics, stopping
 
 _log = logging.getLogger(__name__)
-
-# Client disconnect-detection polling window; deltas shorter than this
-# are negligible compared to network RTT. env override:
-# `AVA_SSE_DISCONNECT_POLL_SECONDS`.
-_DISCONNECT_POLL_SECONDS = settings.gateway.sse_disconnect_poll_seconds
 
 # Exceptions Redis IO may raise — pubsub connection raises
 # ConnectionError / TimeoutError on Redis restart / network jitter;
@@ -119,7 +115,7 @@ async def _subscribe_error_frame(
 
 
 async def event_stream(
-    redis_url: str,
+    bus: EventBus,
     agent_id: int,  # ignored in broadcast mode
     request: Request,
     *,
@@ -147,15 +143,14 @@ async def event_stream(
       so one failure does not swallow another.
 
     Args:
-        redis_url: Redis connection string (`settings.data_plane.redis_url`). Each
-            connection gets its own pubsub socket — FastAPI concurrent
+        bus: the cluster event bus. Each connection gets its own pubsub socket — FastAPI concurrent
             requests are naturally isolated.
         agent_id: only forward events where `event.agent_id == agent_id`
             (ignored in broadcast mode).
         request: Starlette `Request`; use `is_disconnected()` for quick
             exit (otherwise pubsub blocking holds until Redis heartbeat
             timeout).
-        channel: Redis channel to subscribe to (default `settings.data_plane.events_channel`).
+        channel: Redis channel to subscribe to (default the bus's events channel).
         role_filter: only forward events whose role is in this set; None
             or empty -> no filter.
         broadcast: True -> do not filter by agent_id, forward all.
@@ -167,8 +162,8 @@ async def event_stream(
     Yields:
         bytes: SSE frame (`data: ...\n\n`).
     """
-    _channel = channel if channel is not None else settings.data_plane.events_channel
-    client = open_async_redis(redis_url)
+    _channel = channel if channel is not None else bus.channel
+    client = bus.open_async_redis()
     pubsub = client.pubsub()  # pyright: ignore[reportUnknownMemberType]
     # Attach/detach bracket: a reconnect storm (client watchdog cycling) or a
     # subscriber that never detaches is invisible without the pair; the detach
@@ -202,7 +197,10 @@ async def event_stream(
                 msg = await retry_auth_failures_async(
                     lambda: pubsub.get_message(
                         ignore_subscribe_messages=True,
-                        timeout=_DISCONNECT_POLL_SECONDS,
+                        # Client disconnect-detection polling window; deltas shorter
+                        # than this are negligible compared to network RTT. env
+                        # override: `AVA_SSE_DISCONNECT_POLL_SECONDS`.
+                        timeout=settings.gateway.sse_disconnect_poll_seconds,
                     )
                 )
             except _REDIS_IO_ERRORS + _REDIS_ACL_ERRORS as exc:
@@ -309,7 +307,7 @@ async def _drain_redis_messages(
 
 
 async def throttled_event_stream(
-    redis_url: str,
+    bus: EventBus,
     request: Request,
     *,
     channel: str | None = None,
@@ -331,9 +329,9 @@ async def throttled_event_stream(
     Redis-IO recovery, and client disconnect detection also apply.
 
     Args:
-        redis_url: Redis connection string.
+        bus: the cluster event bus.
         request: Starlette ``Request`` for disconnect detection.
-        channel: Redis channel (default ``settings.data_plane.events_channel``).
+        channel: Redis channel (default the bus's events channel).
         throttle_rate: SSE pushes per second — required (the sole caller passes
             ``settings.gateway.sse_throttle_rate``).
         agent_filter: agent ids to forward. None forwards every agent; system-level
@@ -342,8 +340,8 @@ async def throttled_event_stream(
     Yields:
         bytes: SSE frame (``data: [...]\n\n``).
     """
-    _channel = channel if channel is not None else settings.data_plane.events_channel
-    client = open_async_redis(redis_url)
+    _channel = channel if channel is not None else bus.channel
+    client = bus.open_async_redis()
     pubsub = client.pubsub()  # pyright: ignore[reportUnknownMemberType]
     opened = time.monotonic()
     data_frames = 0

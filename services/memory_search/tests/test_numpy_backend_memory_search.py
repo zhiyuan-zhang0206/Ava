@@ -17,6 +17,7 @@ import numpy as np
 import pytest
 import uvicorn
 
+from base.db import Database
 from services.memory_indexer.backends import probe
 from services.memory_indexer.backends.numpy import NumPyBackend
 from services.memory_search.app import build_app
@@ -47,7 +48,7 @@ def memory_search_uri(tmp_path_factory: pytest.TempPathFactory) -> Iterator[str]
     data_file = tmp_path_factory.mktemp("memory-search") / "vectors.npz"
     server = uvicorn.Server(
         uvicorn.Config(
-            build_app(MemoryStore(data_file, dim=_DIM, fingerprint=_FP)),
+            build_app(MemoryStore(data_file, dim=_DIM, fingerprint=_FP), 500),
             host="127.0.0.1",
             port=port,
             log_level=None,
@@ -178,4 +179,4 @@ def test_probe_numpy_healthy(memory_search_uri: str, monkeypatch: pytest.MonkeyP
     from base.config import settings
 
     monkeypatch.setattr(settings.services, "memory_search_uri", memory_search_uri)
-    assert probe.probe_backend("numpy").message is None
+    assert probe.probe_backend("numpy", Database.from_settings()).message is None

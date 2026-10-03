@@ -72,6 +72,68 @@ END $$;
 SQL
 echo "  ok"
 
+echo "-> audit_events is append-only: INSERT lands, UPDATE / DELETE / TRUNCATE are rejected"
+psql -d "$TEST_DB" -v ON_ERROR_STOP=1 <<'SQL'
+INSERT INTO audit_events (event_uid, ts, machine, process, event_name, level, source)
+    VALUES (1, now(), 'smoke-machine', 'smoke', 'spawn', 'info', 'user');
+DO $$
+DECLARE
+    statement TEXT;
+BEGIN
+    FOREACH statement IN ARRAY ARRAY[
+        'UPDATE audit_events SET level = ''error''',
+        'DELETE FROM audit_events',
+        'TRUNCATE audit_events'
+    ] LOOP
+        BEGIN
+            EXECUTE statement;
+            RAISE EXCEPTION 'audit_events accepted: %', statement;
+        EXCEPTION WHEN raise_exception THEN
+            IF SQLERRM NOT LIKE 'audit_events is append-only%' THEN
+                RAISE;
+            END IF;
+        END;
+    END LOOP;
+    IF (SELECT count(*) FROM audit_events) <> 1 THEN
+        RAISE EXCEPTION 'audit_events lost its row';
+    END IF;
+END $$;
+SQL
+echo "  ok"
+
+echo "-> telemetry_events is append-only and partitioned: INSERT lands in its month, UPDATE / DELETE / TRUNCATE are rejected"
+psql -d "$TEST_DB" -v ON_ERROR_STOP=1 <<'SQL'
+SELECT ensure_telemetry_event_partitions(3);
+INSERT INTO telemetry_events (event_uid, ts, machine, cluster, process, category, event_name, level, source)
+    VALUES (1, now(), 'smoke-machine', 'smoke', 'smoke', 'telemetry', 'llm_usage', 'info', 'system');
+DO $$
+DECLARE
+    statement TEXT;
+BEGIN
+    IF (SELECT tableoid::regclass::text FROM telemetry_events WHERE event_uid = 1) = 'telemetry_events_default' THEN
+        RAISE EXCEPTION 'the current month has no partition';
+    END IF;
+    FOREACH statement IN ARRAY ARRAY[
+        'UPDATE telemetry_events SET level = ''error''',
+        'DELETE FROM telemetry_events',
+        'TRUNCATE telemetry_events'
+    ] LOOP
+        BEGIN
+            EXECUTE statement;
+            RAISE EXCEPTION 'telemetry_events accepted: %', statement;
+        EXCEPTION WHEN raise_exception THEN
+            IF SQLERRM NOT LIKE 'telemetry_events is append-only%' THEN
+                RAISE;
+            END IF;
+        END;
+    END LOOP;
+    IF (SELECT count(*) FROM telemetry_events) <> 1 THEN
+        RAISE EXCEPTION 'telemetry_events lost its row';
+    END IF;
+END $$;
+SQL
+echo "  ok"
+
 echo "-> trigger smoke: exercise agents_meta termination triggers"
 psql -d "$TEST_DB" -v ON_ERROR_STOP=1 <<'SQL'
 INSERT INTO agents (label) VALUES ('smoke-agent');
@@ -130,7 +192,7 @@ INSERT INTO agents_meta (id, status, machine, runtime_generation, runtime_owner)
     VALUES (991005, 'idling', 'smoke-machine',
             '00000000-0000-0000-0000-000000000003',
             '00000000-0000-0000-0000-000000000004');
-INSERT INTO agents (id, label) VALUES (991006, 'manifest-owner-smoke');
+INSERT INTO agents (id, label) VALUES (991006, 'event-owner-smoke');
 INSERT INTO agents_meta (id, status, machine, runtime_generation, runtime_owner)
     VALUES (991006, 'idling', 'smoke-machine',
             '00000000-0000-0000-0000-000000000003',
@@ -174,49 +236,24 @@ BEGIN
     END IF;
 END $$;
 
--- Exercise the manifest's narrow certification writer and immutable admission
--- version on the fresh squashed baseline. Empty is legitimate only when the
--- v1 lease explicitly freezes an empty producer census.
+-- Exercise the narrow receipt lock and the immutable event-protocol version on
+-- the fresh squashed baseline.
 INSERT INTO agent_impersonations (
     id, agent_id, source, machine, token_hash, status, ttl_seconds, expires_at,
     accepted_generation, accepted_owner, automatic, event_delivery_protocol_version, activated_at
 ) VALUES (
-    '00000000-0000-0000-0000-000000000006', 991006, 'external_agent:manifest-smoke',
-    'smoke-machine', 'manifest-smoke-token', 'accepted', 300, clock_timestamp() + interval '5 minutes',
-    '00000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-000000000002', TRUE, 1,
+    '00000000-0000-0000-0000-000000000006', 991006, 'external_agent:event-log-smoke',
+    'smoke-machine', 'event-log-smoke-token', 'accepted', 300, clock_timestamp() + interval '5 minutes',
+    '00000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-000000000002', TRUE, 2,
     NULL
 );
-SELECT close_impersonation_event_manifest_admission('00000000-0000-0000-0000-000000000006');
+SELECT close_impersonation_event_admission('00000000-0000-0000-0000-000000000006');
 DO $$
 BEGIN
     IF lock_impersonation_event_participant(
         '00000000-0000-0000-0000-000000000006', 'missing-smoke-receipt'
     ) IS NOT NULL THEN
-        RAISE EXCEPTION 'missing manifest receipt unexpectedly acquired a lock';
-    END IF;
-END $$;
-SELECT admit_impersonation_event_certifier(
-    '00000000-0000-0000-0000-000000000006',
-    'manifest-smoke-certification-secret-000001'
-);
-UPDATE agent_impersonations SET status='active', activated_at=clock_timestamp()
-WHERE id='00000000-0000-0000-0000-000000000006';
-SELECT freeze_impersonation_event_manifest(
-    '00000000-0000-0000-0000-000000000006',
-    'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855', 0, clock_timestamp()
-);
-UPDATE agent_impersonations SET status='released', ended_at=clock_timestamp()
-WHERE id='00000000-0000-0000-0000-000000000006';
-SELECT certify_impersonation_event_delivery(
-    '00000000-0000-0000-0000-000000000006',
-    'manifest-smoke-certification-secret-000001'
-);
-DO $$
-BEGIN
-    IF NOT EXISTS (SELECT 1 FROM agent_impersonations
-                   WHERE id='00000000-0000-0000-0000-000000000006'
-                     AND events_completed_at IS NOT NULL) THEN
-        RAISE EXCEPTION 'manifest certification did not own the completion stamp';
+        RAISE EXCEPTION 'missing event receipt unexpectedly acquired a lock';
     END IF;
     BEGIN
         UPDATE agent_impersonations SET event_delivery_protocol_version=NULL
@@ -224,11 +261,11 @@ BEGIN
     EXCEPTION WHEN raise_exception THEN
         RETURN;
     END;
-    RAISE EXCEPTION 'manifest protocol version was mutable after admission';
+    RAISE EXCEPTION 'event protocol version was mutable after admission';
 END $$;
--- Agent termination ends an open protocol-v1 lease and closes its manifest
--- admission through the SECURITY DEFINER door, like every other lease end.
-INSERT INTO agents (id, label) VALUES (991007, 'terminated-manifest-owner-smoke');
+-- Agent termination ends an open log-native lease and closes its event admission
+-- through the SECURITY DEFINER door, like every other lease end.
+INSERT INTO agents (id, label) VALUES (991007, 'terminated-event-owner-smoke');
 INSERT INTO agents_meta (id, status, machine, runtime_generation, runtime_owner)
     VALUES (991007, 'idling', 'smoke-machine',
             '00000000-0000-0000-0000-000000000003',
@@ -239,7 +276,7 @@ INSERT INTO agent_impersonations (
 ) VALUES (
     '00000000-0000-0000-0000-000000000007', 991007, 'external_agent:terminate-smoke',
     'smoke-machine', 'terminate-smoke-token', 'active', 300, clock_timestamp() + interval '5 minutes',
-    '00000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-000000000002', TRUE, 1,
+    '00000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-000000000002', TRUE, 2,
     clock_timestamp()
 );
 UPDATE agents_meta SET status = 'terminated' WHERE id = 991007;
@@ -248,8 +285,8 @@ BEGIN
     IF NOT EXISTS (SELECT 1 FROM agent_impersonations
                    WHERE id='00000000-0000-0000-0000-000000000007'
                      AND status='expired' AND ended_at IS NOT NULL
-                     AND manifest_admission_closed_at IS NOT NULL) THEN
-        RAISE EXCEPTION 'agent termination did not close the lease manifest admission';
+                     AND event_admission_closed_at IS NOT NULL) THEN
+        RAISE EXCEPTION 'agent termination did not close the lease event admission';
     END IF;
     IF (SELECT rejection_reason FROM agent_impersonations
         WHERE id='00000000-0000-0000-0000-000000000007')
@@ -258,6 +295,59 @@ BEGIN
            FROM inbound_messages WHERE agent_id=991007 AND kind='system_note')
            IS DISTINCT FROM ARRAY['impersonation','lifecycle_terminate']::text[] THEN
         RAISE EXCEPTION 'termination interruption notices missing or out of order';
+    END IF;
+END $$;
+
+-- Log-native lease (protocol v2): sources append event rows while open, the guard
+-- refuses rows for a closed source, and the lease completes by predicate when its
+-- end finds every source sealed (agent termination ends it in SQL).
+INSERT INTO agents (id, label) VALUES (991008, 'log-native-owner-smoke');
+INSERT INTO agents_meta (id, status, machine, runtime_generation, runtime_owner)
+    VALUES (991008, 'idling', 'smoke-machine',
+            '00000000-0000-0000-0000-000000000003',
+            '00000000-0000-0000-0000-000000000004');
+INSERT INTO agent_impersonations (
+    id, agent_id, source, machine, token_hash, status, ttl_seconds, expires_at,
+    accepted_generation, accepted_owner, automatic, event_delivery_protocol_version, activated_at
+) VALUES (
+    '00000000-0000-0000-0000-000000000008', 991008, 'external_agent:log-native-smoke',
+    'smoke-machine', 'log-native-smoke-token', 'active', 300, clock_timestamp() + interval '5 minutes',
+    '00000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-000000000002', TRUE, 2,
+    clock_timestamp()
+);
+INSERT INTO agent_impersonation_event_participants(lease_id, source_key, state)
+VALUES ('00000000-0000-0000-0000-000000000008', 'smoke-source', 'open');
+UPDATE agent_impersonations SET next_entry = next_entry + 1
+WHERE id='00000000-0000-0000-0000-000000000008';
+INSERT INTO agent_impersonation_entries(lease_id, seq, kind, event_key, payload, source_key)
+SELECT id, next_entry - 1, 'sdk_call', 'event:smoke-1', '{}'::jsonb, 'smoke-source'
+FROM agent_impersonations WHERE id='00000000-0000-0000-0000-000000000008';
+SELECT seal_impersonation_event_participant(
+    '00000000-0000-0000-0000-000000000008', 'smoke-source', 'sealed', NULL, 1
+);
+DO $$
+DECLARE refused BOOLEAN := FALSE;
+BEGIN
+    IF EXISTS (SELECT 1 FROM agent_impersonations
+               WHERE id='00000000-0000-0000-0000-000000000008'
+                 AND events_completed_at IS NOT NULL) THEN
+        RAISE EXCEPTION 'log-native lease completed before it ended';
+    END IF;
+    BEGIN
+        INSERT INTO agent_impersonation_entries(lease_id, seq, kind, event_key, payload, source_key)
+        VALUES ('00000000-0000-0000-0000-000000000008', 9999, 'sdk_call', 'event:smoke-2',
+                '{}'::jsonb, 'smoke-source');
+    EXCEPTION WHEN raise_exception THEN refused := TRUE;
+    END;
+    IF NOT refused THEN RAISE EXCEPTION 'a sealed source accepted another event row'; END IF;
+END $$;
+UPDATE agents_meta SET status = 'terminated' WHERE id = 991008;
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM agent_impersonations
+                   WHERE id='00000000-0000-0000-0000-000000000008'
+                     AND status='expired' AND events_completed_at IS NOT NULL) THEN
+        RAISE EXCEPTION 'ending a fully sealed log-native lease did not complete its event log';
     END IF;
 END $$;
 

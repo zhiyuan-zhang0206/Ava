@@ -113,6 +113,16 @@ def gateway_unit(db_conn: psycopg.Connection) -> Iterator[TestClient]:
 
 
 @pytest.fixture
+def sdk_via_gateway(gateway_unit: TestClient) -> Iterator[TestClient]:
+    """The gateway unit with the SDK's gateway client pointed at it: `ava.agents.*` calls land
+    in the in-process app. Undone at teardown."""
+    from ava.gateway_client.transport import use_client
+
+    with use_client(gateway_unit):
+        yield gateway_unit
+
+
+@pytest.fixture
 def runner_unit(db_conn: psycopg.Connection) -> Iterator[None]:
     """The agent-runner unit (agent-runner): role='agent-runner', holds a
     gateway_url pointing at the gateway, no local gateway/docker.
@@ -280,7 +290,6 @@ def seed_write_generation() -> Callable[[Path], Any]:
     from base.cluster.authority import (
         GATEWAY_GROUP,
         RUNNER_GROUP,
-        BirthAuthority,
         Groups,
         VerifiedGeneration,
         activate,
@@ -291,17 +300,10 @@ def seed_write_generation() -> Callable[[Path], Any]:
 
     def seed(home: Path) -> Any:
         home = home.resolve()
-        birth = BirthAuthority()
         groups = Groups(gateway=GATEWAY_GROUP, runner=RUNNER_GROUP)
-        create_ledger(home, owner="ava", groups=groups, authority=birth)
-        pending = begin_mint(
-            home, birth, encrypt=lambda name, _pw: f"SCRAM-SHA-256$4096:c2VlZA==${name}"
-        )
-        activate(
-            home,
-            birth,
-            VerifiedGeneration(pending.number, pending.credential_digest, pending.roles),
-        )
+        create_ledger(home, owner="ava", groups=groups)
+        pending = begin_mint(home, encrypt=lambda name, _pw: f"SCRAM-SHA-256$4096:c2VlZA==${name}")
+        activate(home, VerifiedGeneration(pending.number, pending.credential_digest, pending.roles))
         return read_secret(home, pending)
 
     return seed

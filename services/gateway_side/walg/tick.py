@@ -36,7 +36,7 @@ from datetime import UTC, datetime
 import psycopg
 
 from base.cluster.dataplane import walg_binary
-from base.db import pg_admin
+from base.db import Database, pg_admin
 from base.host.private_storage import ensure_private_dir
 from base.log import logger
 from base.native_process.os_platform import LockTimeoutError, file_lock
@@ -97,11 +97,11 @@ def postgres_accepts_connections(target: PgTarget) -> bool:
         return False
 
 
-def deploy_window_reason() -> str | None:
+def deploy_window_reason(db: Database) -> str | None:
     """The sentence naming the open deploy window, or None."""
     from ops.deploy_window import deploy_in_flight
 
-    window = deploy_in_flight()
+    window = deploy_in_flight(db)
     return window.detail if window.active else None
 
 
@@ -178,8 +178,8 @@ def _weekly_drill(
         _drill(target, backups, report, now)
 
 
-def _verify(report: Report, now: Callable[[], datetime]) -> str:
-    verdict = verify_chain()
+def _verify(target: PgTarget, report: Report, now: Callable[[], datetime]) -> str:
+    verdict = verify_chain(target.admin_url)
     state.update_state(
         verify=VerifyRecord(at=now(), integrity=verdict.integrity, timeline=verdict.timeline)
     )
@@ -208,7 +208,7 @@ def _run_steps(target: PgTarget, report: Report, now: Callable[[], datetime]) ->
         current = STEP_BACKUP
         after = _backup(target, before, report, now)
         current = STEP_VERIFY
-        chain = _verify(report, now)
+        chain = _verify(target, report, now)
         current = STEP_RETENTION
         deleted = _retention(after, report, now)
     except StepFailedError:
@@ -237,8 +237,8 @@ def _record_failure(
     return 1
 
 
-def _skip_reason(target: PgTarget) -> str | None:
-    window = deploy_window_reason()
+def _skip_reason(db: Database, target: PgTarget) -> str | None:
+    window = deploy_window_reason(db)
     if window is not None:
         return f"a deploy window is open ({window})"
     if not postgres_accepts_connections(target):
@@ -246,7 +246,7 @@ def _skip_reason(target: PgTarget) -> str | None:
     return None
 
 
-def _locked_tick(report: Report, now: Callable[[], datetime]) -> int:
+def _locked_tick(db: Database, report: Report, now: Callable[[], datetime]) -> int:
     started = now()
     try:
         state.read_state()
@@ -259,7 +259,7 @@ def _locked_tick(report: Report, now: Callable[[], datetime]) -> int:
     except RuntimeError as exc:  # no locally owned Postgres to back up: a setup error
         return _record_failure(started, StepFailedError(STEP_PREFLIGHT, str(exc)), report, now)
     try:
-        reason = _skip_reason(target)
+        reason = _skip_reason(db, target)
     except RuntimeError as exc:  # the socket answers, but not as this home's Postgres
         return _record_failure(started, StepFailedError(STEP_PREFLIGHT, str(exc)), report, now)
     if reason is not None:
@@ -279,7 +279,7 @@ def _locked_tick(report: Report, now: Callable[[], datetime]) -> int:
     return 0
 
 
-def run_tick(report: Report, *, now: Callable[[], datetime] = _now) -> int:
+def run_tick(db: Database, report: Report, *, now: Callable[[], datetime] = _now) -> int:
     """Run one tick; the exit code is non-zero only when a step failed."""
     if not walg_config.enabled():
         report("WAL-G is off (AVA_WALG_CONFIG_FILE is not set); nothing to do")
@@ -287,7 +287,7 @@ def run_tick(report: Report, *, now: Callable[[], datetime] = _now) -> int:
     ensure_private_dir(state.walg_dir())
     try:
         with file_lock(state.lock_path(), timeout_s=0):
-            return _locked_tick(report, now)
+            return _locked_tick(db, report, now)
     except LockTimeoutError:
         report("another WAL-G tick is still running; nothing to do")
         return 0

@@ -7,6 +7,9 @@
     "cli/tests/test_cluster_health_window.py::cli.commands.cluster.health._gateway_liveness_with_retry": 2,
     "cli/tests/test_cluster_health_window.py::cli.commands.cluster.health._service_probes": 1,
     "cli/tests/test_commands_register.py::cli.commands._probe": 2,
+    "cli/tests/test_main_dispatch.py::base.native_process.code_version._db_gate_exempt": 1,
+    "cli/tests/test_main_dispatch.py::cli.parsers.host._h_start": 1,
+    "cli/tests/test_main_dispatch.py::cli.parsers.host._h_status": 2,
     "cli/tests/test_mcp_install.py::cli.commands.extensions.mcp._uv_sync": 1,
     "cli/tests/test_pause_stop.py::cli.commands._repo": 1,
     "cli/tests/test_pause_stop.py::cli.commands.lifecycle._temporary_stop": 12,
@@ -14,6 +17,7 @@
     "cli/tests/test_pause_stop.py::cli.commands.lifecycle.stop._announce_stopping": 2,
     "cli/tests/test_pause_stop.py::cli.commands.lifecycle.stop._force_stop": 1,
     "cli/tests/test_pause_stop.py::ops.agent_pause._wake": 1,
-    "cli/tests/test_pause_stop.py::ops.cluster_pause._unpause_local_cluster": 2
+    "cli/tests/test_pause_stop.py::ops.cluster_pause._unpause_local_cluster": 2,
+    "cli/tests/test_plugin_scaffold.py::cli.commands.extensions._plugin_scaffold": 2
   }
 }

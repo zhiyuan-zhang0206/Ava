@@ -51,6 +51,8 @@ FIXED_PORTS: dict[str, int] = {
     "page_server": 8112,
     "agent_host": 8114,
     "pg_backup": 8116,
+    "ttl_reaper": 8121,
+    "schedule_manager": 8122,
     # The memory search service's TCP port (like milvus's 19530, not a health
     # port — its healthcheck probes the real /search endpoint).
     "memory_search": 19531,

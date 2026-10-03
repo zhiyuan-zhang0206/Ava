@@ -277,7 +277,7 @@ def test_statistics_http_does_not_read_logs_or_current_state(
     def forbidden(*_args: object, **_kwargs: object) -> None:
         raise AssertionError("Statistics must use the persisted SQL read model")
 
-    for name in ("query_events", "query_projected_lines", "attribute_aggregate"):
+    for name in ("query_events",):
         monkeypatch.setattr(loki_events, name, forbidden)
     monkeypatch.setattr(inspect_router, "db_rows_blocking", forbidden)
     with TestClient(app) as client:
@@ -296,7 +296,7 @@ def test_statistics_read_invokes_the_coverage_note(
     db_conn.commit()
     seen: list[int] = []
 
-    def _record(pool: Any, agent_id: int, metadata: Any, *, spawned_at: Any) -> None:
+    def _record(pool: Any, bus: Any, agent_id: int, metadata: Any, *, spawned_at: Any) -> None:
         assert metadata.collection == "observed"
         assert spawned_at is not None
         seen.append(agent_id)

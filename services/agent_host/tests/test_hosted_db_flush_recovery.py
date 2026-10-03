@@ -9,14 +9,17 @@ from psycopg_pool import AsyncConnectionPool
 
 from agent.ownership.hosted import apply_hosted_lifecycle
 from agent.ownership.inbound import RuntimeOwnershipLostError
+from agent.ownership.tests.test_lifecycle_intent import _command
+from agent.tests.test_inbound_ownership import _admit, _agent
 from base.agents.context import AvaContext
 from base.config import settings
+from base.db import Database
+from base.events.live.bus import EventBus
+from base.host.env.agent_slices import AgentSlices
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from base.native_process.turn_identity import bind_turn_identity
 from services.agent_host import host as host_module
 from services.agent_host.tests.test_hosted_compact_failure import _prepare_graph
-from tests.agent.test_inbound_ownership import _admit, _agent
-from tests.agent.test_lifecycle_intent import _command
 
 
 @pytest.mark.parametrize("failure_site", ["flush", "before_lifecycle", "after_lifecycle"])
@@ -31,8 +34,14 @@ async def test_database_failure_after_graph_return_preserves_completed_work(
     replies: list[str] = []
     graph, saver, config, _history = await _prepare_graph(aops_pool, agent, 100, replies)
     command = None if failure_site == "flush" else _command(db_conn, agent, "restart")
-    host = host_module.AgentHost(pool=aops_pool, checkpointer=saver, graph=graph)
-    ctx = AvaContext(ops_pool=aops_pool, event_publisher=MagicMock())
+    host = host_module.AgentHost(
+        pool=aops_pool,
+        checkpointer=saver,
+        graph=graph,
+        bus=EventBus.from_settings(),
+        db=Database.from_settings(),
+    )
+    ctx = AvaContext(ops_pool=aops_pool, event_publisher=MagicMock(), agent=AgentSlices.resolve())
     # A real closed PostgreSQL connection supplies the I/O failure. Injection
     # selects only the boundary; checkpoint, graph and lifecycle transactions run.
     broken = await psycopg.AsyncConnection.connect(settings.data_plane.db_url)

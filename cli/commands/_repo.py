@@ -26,6 +26,7 @@ from typing import NamedTuple
 from base.cluster import session_name as session_name
 from base.cluster.machine import MachineRoles
 from base.config import settings
+from base.db import Database
 from base.deploy.progress_timeout import GATEWAY_PREFLIGHT_BUDGET_S
 from base.host.system.backend import get_backend
 from base.sessions.env_forwarding import frontend_toolchain_env
@@ -300,7 +301,7 @@ def _probe_gateway_or_die(gateway_url: str, *, budget_s: float = GATEWAY_PREFLIG
         time.sleep(wait_s)
 
 
-def _register_machine_or_die(resolved: SetupValues, roles: MachineRoles) -> int:
+def _register_machine_or_die(db: Database, resolved: SetupValues, roles: MachineRoles) -> int:
     """UPSERT this host into the machines table with typed error handling.
 
     The dial URL comes from `base.cluster.machines.unit_dial_url(roles)` — the one
@@ -318,7 +319,7 @@ def _register_machine_or_die(resolved: SetupValues, roles: MachineRoles) -> int:
 
     url = unit_dial_url(roles)
     try:
-        register_self(url=url)
+        register_self(db, url=url)
     except LoopbackDialUrlRefused as e:
         print(
             f"  ✗ {e}",
@@ -347,7 +348,7 @@ def _register_machine_or_die(resolved: SetupValues, roles: MachineRoles) -> int:
     return 0
 
 
-def _preflight_probes() -> int:
+def _preflight_probes(db: Database) -> int:
     """Run gateway and DB reachability checks BEFORE stopping services.
 
     Designed for `ava restart` and the fleet update (self-update leg): validate
@@ -375,7 +376,7 @@ def _preflight_probes() -> int:
     roles: MachineRoles = frozenset(roles_raw.split(",")) if roles_raw else frozenset()
 
     print("\n→ preflight: register machine in central DB")
-    rc = _register_machine_or_die(resolved, roles)
+    rc = _register_machine_or_die(db, resolved, roles)
     if rc != 0:
         print("  ✗ preflight failed: cannot register machine — host still serving", file=sys.stderr)
         return rc

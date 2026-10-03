@@ -54,23 +54,31 @@ from . import task_registry
 def set_label(text: str) -> None:
     text = coerce_str(text, "text", allow_none=True)
     agent_id = ava.agent_identity.require_agent_id()
-    with ava.DB.cursor() as cur:
+    # Deferred imports: plugin autoload stays off the telemetry / psycopg stacks (task #3816).
+    from base import telemetry
+    from base.telemetry.audit_events import prepare_event_log, record_audit
+
+    # The label and its audit fact commit together.
+    with ava.DB.transaction(), ava.DB.cursor() as cur:
         cur.execute(
             "UPDATE agents SET label=%s, label_user_set=TRUE WHERE id=%s",
             (text or None, agent_id),
         )
-        from base.telemetry.audit_events import insert_event_log
-
-        insert_event_log(
-            event_type="label_change",
-            agent_id=agent_id,
-            source="self",
-            payload={"new_label": text or None},
+        label_event = record_audit(
+            cur.connection,
+            prepare_event_log(
+                event_type="label_change",
+                agent_id=agent_id,
+                source="self",
+                payload={"new_label": text or None},
+            ),
         )
+    telemetry.emit_prepared(label_event)
     # Per-call import: plugin autoload stays off the redis/live-events stack (task #3816).
     from base.events.live.announce import publish_agent_updated_sync
+    from base.events.live.bus import EventBus
 
-    publish_agent_updated_sync(agent_id)
+    publish_agent_updated_sync(EventBus.from_settings(), agent_id)
 
 
 # Sentinel for edit_notice: distinguishes "argument not passed" from an explicit

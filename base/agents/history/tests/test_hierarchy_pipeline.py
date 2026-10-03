@@ -45,6 +45,12 @@ from base.agents.history.hierarchy.seal import (
 )
 from base.agents.history.hierarchy.tokens import count_tokens
 from base.agents.history.timeline import build_timeline_items
+from base.db import Database
+
+
+def _db() -> Database:
+    return Database.from_settings()
+
 
 MODEL = "deepseek-v4-flash"
 T0 = "2026-09-12T12:00:00+08:00"
@@ -277,14 +283,14 @@ def test_rebuilt_prefix_is_byte_identical_to_the_agent_head(
     serde = JsonPlusSerializer(allowed_msgpack_modules=STATIC_CHECKPOINT_MSGPACK_TYPES)
     restored = serde.loads_typed(serde.dumps_typed(live))
 
-    def fake_loader(agent_id: int) -> list[BaseMessage]:
+    def fake_loader(_database: Database, agent_id: int) -> list[BaseMessage]:
         return list(restored)
 
     monkeypatch.setattr(pipeline_module, "load_checkpoint_messages_full", fake_loader)
 
     tool = object()
     fake = FakeLLM(_fitting_responder)
-    tree = build_agent_tree(7, llm=fake, model=MODEL, tools=[tool])
+    tree = build_agent_tree(_db(), 7, llm=fake, model=MODEL, tools=[tool])
 
     assert tree.errors == ()
     assert fake.bound_tools and all(bound == [tool] for bound in fake.bound_tools)
@@ -433,13 +439,13 @@ def test_build_agent_tree_same_input_same_tree(monkeypatch: pytest.MonkeyPatch) 
     """
     msgs: list[BaseMessage] = [inbound(f"step {i}") for i in range(100)]
 
-    def fake_loader(agent_id: int) -> list[BaseMessage]:
+    def fake_loader(_database: Database, agent_id: int) -> list[BaseMessage]:
         return list(msgs)
 
     monkeypatch.setattr(pipeline_module, "load_checkpoint_messages_full", fake_loader)
 
-    first = build_agent_tree(7, llm=FakeLLM(_fitting_responder), model=MODEL)
-    second = build_agent_tree(7, llm=FakeLLM(_fitting_responder), model=MODEL)
+    first = build_agent_tree(_db(), 7, llm=FakeLLM(_fitting_responder), model=MODEL)
+    second = build_agent_tree(_db(), 7, llm=FakeLLM(_fitting_responder), model=MODEL)
 
     def shape(tree: MaterializedTree) -> list[tuple[int, tuple[int, int], tuple[str, ...], str]]:
         return [(n.level, n.span, n.children, n.kind) for n in tree.nodes]
@@ -459,14 +465,14 @@ def test_growth_replays_sealed_batches_and_recuts_only_the_tail(
     msgs.append(compact())
     msgs.extend(inbound(f"tail {i}") for i in range(10))
 
-    def fake_loader(agent_id: int) -> list[BaseMessage]:
+    def fake_loader(_database: Database, agent_id: int) -> list[BaseMessage]:
         return list(msgs)
 
     monkeypatch.setattr(pipeline_module, "load_checkpoint_messages_full", fake_loader)
 
-    first = build_agent_tree(7, llm=FakeLLM(_fitting_responder), model=MODEL)
+    first = build_agent_tree(_db(), 7, llm=FakeLLM(_fitting_responder), model=MODEL)
     msgs.extend(inbound(f"tail {i}") for i in range(10, 17))
-    second = build_agent_tree(7, llm=FakeLLM(_fitting_responder), model=MODEL)
+    second = build_agent_tree(_db(), 7, llm=FakeLLM(_fitting_responder), model=MODEL)
 
     assert first.errors == () and second.errors == ()
     spans1 = {node.span for node in first.nodes if node.level == 1}
@@ -486,18 +492,18 @@ def test_tail_seal_swap_converges_and_a_second_seal_generates_nothing(
     msgs.append(compact())
     msgs.extend(inbound(f"tail {i}") for i in range(10))
 
-    def fake_loader(agent_id: int) -> list[BaseMessage]:
+    def fake_loader(_database: Database, agent_id: int) -> list[BaseMessage]:
         return list(msgs)
 
     monkeypatch.setattr(pipeline_module, "load_checkpoint_messages_full", fake_loader)
 
     # Path 1: the compact-driven pass (tail pending), then the tail pass.
     compact_pass = build_agent_tree(
-        7, llm=FakeLLM(_fitting_responder), model=MODEL, include_tail=False
+        _db(), 7, llm=FakeLLM(_fitting_responder), model=MODEL, include_tail=False
     )
-    tail_pass = build_agent_tree(7, llm=FakeLLM(_fitting_responder), model=MODEL)
+    tail_pass = build_agent_tree(_db(), 7, llm=FakeLLM(_fitting_responder), model=MODEL)
     # Path 2: one tail-sealing pass over the same history.
-    direct = build_agent_tree(7, llm=FakeLLM(_fitting_responder), model=MODEL)
+    direct = build_agent_tree(_db(), 7, llm=FakeLLM(_fitting_responder), model=MODEL)
 
     def shape(tree: MaterializedTree) -> list[tuple[int, tuple[int, int], tuple[str, ...], str]]:
         # Structural comparison: the all-reuse path emits the same cells in a
@@ -509,7 +515,7 @@ def test_tail_seal_swap_converges_and_a_second_seal_generates_nothing(
 
     known = {node.input_hash: node.text for node in tail_pass.nodes}
     fake2 = FakeLLM(lambda _m: "should not be called")
-    again = build_agent_tree(7, llm=fake2, model=MODEL, known_texts=known)
+    again = build_agent_tree(_db(), 7, llm=fake2, model=MODEL, known_texts=known)
     assert fake2.calls == []
     assert again.generated == 0 and again.reused == len(tail_pass.nodes)
     assert shape(again) == shape(tail_pass)
@@ -525,18 +531,18 @@ def test_growth_after_a_tail_seal_replays_compacts_and_recuts_the_tail(
     msgs.append(compact())
     msgs.extend(inbound(f"tail {i}") for i in range(10))
 
-    def fake_loader(agent_id: int) -> list[BaseMessage]:
+    def fake_loader(_database: Database, agent_id: int) -> list[BaseMessage]:
         return list(msgs)
 
     monkeypatch.setattr(pipeline_module, "load_checkpoint_messages_full", fake_loader)
 
-    first = build_agent_tree(7, llm=FakeLLM(_fitting_responder), model=MODEL)
+    first = build_agent_tree(_db(), 7, llm=FakeLLM(_fitting_responder), model=MODEL)
     msgs.extend(inbound(f"tail {i}") for i in range(10, 17))
 
     compact_only = build_agent_tree(
-        7, llm=FakeLLM(_fitting_responder), model=MODEL, include_tail=False
+        _db(), 7, llm=FakeLLM(_fitting_responder), model=MODEL, include_tail=False
     )
-    second = build_agent_tree(7, llm=FakeLLM(_fitting_responder), model=MODEL)
+    second = build_agent_tree(_db(), 7, llm=FakeLLM(_fitting_responder), model=MODEL)
 
     assert first.errors == () and compact_only.errors == () and second.errors == ()
     spans1 = {node.span for node in first.nodes if node.level == 1}
@@ -668,13 +674,13 @@ def test_regen_cap_halts_between_chunks_and_marks_the_stop(
     with the stop attributed to the cap, not the deadline (`halted`)."""
     msgs: list[BaseMessage] = [inbound(f"step {i}") for i in range(100)]
 
-    def fake_loader(agent_id: int) -> list[BaseMessage]:
+    def fake_loader(_database: Database, agent_id: int) -> list[BaseMessage]:
         return list(msgs)
 
     monkeypatch.setattr(pipeline_module, "load_checkpoint_messages_full", fake_loader)
 
     fake = FakeLLM(_fitting_responder)
-    tree = build_agent_tree(7, llm=fake, model=MODEL, max_concurrent=1, max_generated=2)
+    tree = build_agent_tree(_db(), 7, llm=fake, model=MODEL, max_concurrent=1, max_generated=2)
 
     assert len(fake.calls) == 4  # one full chunk, then the boundary stop
     assert tree.halted is True
@@ -690,13 +696,13 @@ def test_regen_cap_boundary_equality_stops_at_the_chunk(
     chunk never starts."""
     msgs: list[BaseMessage] = [inbound(f"step {i}") for i in range(100)]
 
-    def fake_loader(agent_id: int) -> list[BaseMessage]:
+    def fake_loader(_database: Database, agent_id: int) -> list[BaseMessage]:
         return list(msgs)
 
     monkeypatch.setattr(pipeline_module, "load_checkpoint_messages_full", fake_loader)
 
     fake = FakeLLM(_fitting_responder)
-    tree = build_agent_tree(7, llm=fake, model=MODEL, max_concurrent=1, max_generated=4)
+    tree = build_agent_tree(_db(), 7, llm=fake, model=MODEL, max_concurrent=1, max_generated=4)
 
     assert len(fake.calls) == 4  # exactly one chunk; 4 >= 4 stops the second
     assert tree.halted is True

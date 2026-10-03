@@ -1,0 +1,9 @@
+# Fixture modules (tests/path_scoped/) that govern this directory's tests: "." is the
+# directory itself, otherwise the test files named here (tests/fixtures/path_scopes.py).
+"tests.path_scoped.agent_tests" = [
+    "test_maintenance_cold.py",
+]
+"tests.path_scoped.ava_tests" = [
+    "test_migration_reset.py",
+    "test_migrations.py",
+]

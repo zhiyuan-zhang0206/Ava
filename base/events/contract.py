@@ -8,119 +8,28 @@ producers emit through ``base.telemetry.emit`` (fail-fast on unregistered
 names); readers consume payload keys through the derived SQL fragment
 constants (a hand-written ``attributes->>'...'`` literal elsewhere fails the
 SQL-key lint); base/events/registry.md is generated from this module.
-Payload schemas and registry declarations live in focused shard modules;
-this facade preserves the stable import surface.
+Payload schemas and event declarations live in the domain modules of
+``base/events/declarations/``; ``load_events`` merges them and this module derives the views.
 
 Derived views live here and nowhere else: ``category_for_kind``,
-``telemetry_events``, ``lineage_event_names``, ``family_events``,
+``telemetry_events``, ``family_events``,
 ``payload_keys``, event tiers, plus the folded ``_LLM_ERROR_EVENTS`` family
 and the ops grid constants.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass as dataclass
-from datetime import UTC as UTC
-from datetime import datetime as datetime
-from typing import Any as Any
-from typing import Literal as Literal
-from typing import LiteralString as LiteralString
-from typing import NotRequired as NotRequired
-from typing import TypedDict as TypedDict
-from typing import get_type_hints as get_type_hints
+from typing import LiteralString, get_type_hints
 
-from base.events.payloads import LLM_ERROR_FAMILY as LLM_ERROR_FAMILY
-from base.events.payloads import OPS_BUCKET_S as OPS_BUCKET_S
-from base.events.payloads import OPS_GRID_ORIGIN as OPS_GRID_ORIGIN
-from base.events.payloads import AgentSpawned as AgentSpawned
-from base.events.payloads import Category as Category
-from base.events.payloads import CompactionCompleted as CompactionCompleted
-from base.events.payloads import ComputerAction as ComputerAction
-from base.events.payloads import ComputerSessionEnd as ComputerSessionEnd
-from base.events.payloads import ComputerSessionStart as ComputerSessionStart
-from base.events.payloads import DeliveryPoisoned as DeliveryPoisoned
-from base.events.payloads import DeliveryRecoveryDecision as DeliveryRecoveryDecision
-from base.events.payloads import DeliveryStalled as DeliveryStalled
-from base.events.payloads import DeliveryWakeSuppressed as DeliveryWakeSuppressed
-from base.events.payloads import EventLogDrop as EventLogDrop
-from base.events.payloads import EventTier as EventTier
-from base.events.payloads import ExecChildBoot as ExecChildBoot
-from base.events.payloads import ExecEnvelope as ExecEnvelope
-from base.events.payloads import ExecFailed as ExecFailed
-from base.events.payloads import ExecPayload as ExecPayload
-from base.events.payloads import ExecSubprocessKilled as ExecSubprocessKilled
-from base.events.payloads import FrontendInteraction as FrontendInteraction
-from base.events.payloads import Halt as Halt
-from base.events.payloads import HeartbeatNudged as HeartbeatNudged
-from base.events.payloads import HeartbeatPaused as HeartbeatPaused
-from base.events.payloads import IdleWake as IdleWake
-from base.events.payloads import LlmProviderError as LlmProviderError
-from base.events.payloads import LlmRetry as LlmRetry
-from base.events.payloads import LlmUsage as LlmUsage
-from base.events.payloads import NodeExit as NodeExit
-from base.events.payloads import NodeExitEntry as NodeExitEntry
-from base.events.payloads import PluginActivation as PluginActivation
-from base.events.payloads import RetentionClass as RetentionClass
-from base.events.payloads import SdkCall as SdkCall
-from base.events.payloads import ServiceStarted as ServiceStarted
-from base.events.payloads import SilentIdle as SilentIdle
-from base.events.payloads import Spawn as Spawn
-from base.events.payloads import SseDrop as SseDrop
-from base.events.payloads import StatusChange as StatusChange
-from base.events.payloads import SyntaxFix as SyntaxFix
-from base.events.payloads import TaskEscalation as TaskEscalation
-from base.events.payloads import TaskReminderDigest as TaskReminderDigest
-from base.events.payloads import TaskUpdate as TaskUpdate
-from base.events.payloads import TurnEnd as TurnEnd
-from base.events.registry import _EVENTS_RUNTIME
-from base.events.registry import _audit as _audit
-from base.events.registry import _telemetry as _telemetry
-from base.events.registry import _telemetry_audit as _telemetry_audit
-from base.events.registry_lifecycle import _EVENTS_LIFECYCLE
-from base.events.registry_ops import _EVENTS_OPS
-from base.events.system import AgentBootFailed as AgentBootFailed
-from base.events.system import AgentRegistry as AgentRegistry
-from base.events.system import ArchiveFetchDegraded as ArchiveFetchDegraded
-from base.events.system import Auth401Rejected as Auth401Rejected
-from base.events.system import BackupOperationCustody as BackupOperationCustody
-from base.events.system import CheckpointTableSizes as CheckpointTableSizes
-from base.events.system import ConvergeFilePreserved as ConvergeFilePreserved
-from base.events.system import EventClassReopened as EventClassReopened
-from base.events.system import EventSpec as EventSpec
-from base.events.system import FleetGraphStale as FleetGraphStale
-from base.events.system import FleetGraphStaleReason as FleetGraphStaleReason
-from base.events.system import GateAuthProbeFailed as GateAuthProbeFailed
-from base.events.system import GatewayEventLoop as GatewayEventLoop
-from base.events.system import GatewayLatency as GatewayLatency
-from base.events.system import GatewayProcess as GatewayProcess
-from base.events.system import HookTiming as HookTiming
-from base.events.system import HostDispatcherScanFailed as HostDispatcherScanFailed
-from base.events.system import LogPayload as LogPayload
-from base.events.system import LokiQueryBudget as LokiQueryBudget
-from base.events.system import LokiQueryFailed as LokiQueryFailed
-from base.events.system import MemorySearchStats as MemorySearchStats
-from base.events.system import OtlpBackendDisabled as OtlpBackendDisabled
-from base.events.system import OtlpBackendRecovered as OtlpBackendRecovered
-from base.events.system import PageServeDirMissing as PageServeDirMissing
-from base.events.system import PassiveRecall as PassiveRecall
-from base.events.system import PluginLoadFailed as PluginLoadFailed
-from base.events.system import ProcessExit as ProcessExit
-from base.events.system import PromQueryBudget as PromQueryBudget
-from base.events.system import PromQueryFailed as PromQueryFailed
-from base.events.system import RecallFilter as RecallFilter
-from base.events.system import RecoveryDrillFailed as RecoveryDrillFailed
-from base.events.system import ResolutionStatus as ResolutionStatus
-from base.events.system import ResolvedMarker as ResolvedMarker
-from base.events.system import RootHealthExpected as RootHealthExpected
-from base.events.system import RootHealthTick as RootHealthTick
-from base.events.system import ScheduleStalled as ScheduleStalled
-from base.events.system import SseLifecycle as SseLifecycle
-from base.events.system import StatsDashboardStale as StatsDashboardStale
-from base.events.system import StatsDashboardStaleReason as StatsDashboardStaleReason
-from base.events.system import TelemetryReadRecovered as TelemetryReadRecovered
-from base.events.system import TelemetryReadStale as TelemetryReadStale
+from base.events.loader import load_events
+from base.events.vocabulary import LLM_ERROR_FAMILY as LLM_ERROR_FAMILY
+from base.events.vocabulary import OPS_BUCKET_S as OPS_BUCKET_S
+from base.events.vocabulary import OPS_GRID_ORIGIN as OPS_GRID_ORIGIN
+from base.events.vocabulary import Category as Category
+from base.events.vocabulary import EventSpec as EventSpec
+from base.events.vocabulary import EventTier as EventTier
 
-EVENTS: dict[str, EventSpec] = {**_EVENTS_RUNTIME, **_EVENTS_LIFECYCLE, **_EVENTS_OPS}
+EVENTS: dict[str, EventSpec] = load_events()
 
 
 # ── derived views — the only spellings consumers may use ───────────────────
@@ -155,15 +64,6 @@ def category_for_kind(event_name: str) -> Category:
 def telemetry_events() -> frozenset[str]:
     """Every telemetry-category event name — replaces ``_TELEMETRY_KINDS``."""
     return frozenset(name for name, spec in EVENTS.items() if spec.category == "telemetry")
-
-
-def lineage_event_names() -> frozenset[str]:
-    """Every event name declared ``retention_class="lineage"``.
-
-    The single source for both permanent copies: the Loki ``retention_stream``
-    selector (validated by ``base.telemetry.loki_index_labels``) and the lineage JSONL
-    mirror (``base.telemetry``). A name added here reaches both."""
-    return frozenset(name for name, spec in EVENTS.items() if spec.retention_class == "lineage")
 
 
 def family_events(family: str) -> tuple[str, ...]:
@@ -217,6 +117,7 @@ RECALL_FILTER_KEYS = _sql_keys("recall_filter")
 PASSIVE_RECALL_KEYS = _sql_keys("passive_recall")
 GATEWAY_LATENCY_KEYS = _sql_keys("gateway_latency")
 LOG_KEYS = _sql_keys("log")
+PLUGIN_ACTIVATION_KEYS = _sql_keys("plugin_activation")
 
 
 def registered_payload_keys() -> frozenset[str]:

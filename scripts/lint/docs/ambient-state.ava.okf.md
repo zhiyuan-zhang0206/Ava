@@ -34,6 +34,10 @@ Only the closed lists in `ambient_state/allowlist.py`, each entry with a reason,
 
 Governed: the framework packages plus `schedules/`. Out of scope: tests, `__main__.py`, an `if __name__ == "__main__":` block, and skill scripts (`ava_builtins/skills/**`, `ava_builtins/plugins/*/**/skills/**`), which run as programs. Today's sites are frozen in the `ambient_state` section of the baseline shards as `path::rule:name -> site count`, matched exactly in both directions. Against the base revision the section is shrink-only with no pairing, so a renamed or moved site is fixed, not carried (a `git -M` rename carries keys once migrated). `locality.introduced` compares the section with itself in the change that adds the `ambient_state` package.
 
+## Library-layer ratchet
+
+Packages outside `DB_HANDLE_PACKAGES` are not policed per site, but `scripts/structure/ambient_state/handle_ratchet.py` counts their shim dials, self-built `Database.from_settings()` calls and self-built `EventBus.from_settings()` calls (outside `BUS_PACKAGES`) per package and freezes the counts in `scripts/structure/ambient_state/handle_ratchet_baseline.json`. A count above its frozen value fails (new code takes a handle); one below it fails until `--write` lowers the baseline; against the base revision a frozen count only falls. Threading a handle into a package lowers its count; a package at zero can join `DB_HANDLE_PACKAGES`.
+
 ## Known gaps
 
 A per-file AST pass does not see a non-empty container mutated only from another module, a `Thread` subclass instantiated elsewhere, `run_coroutine_threadsafe` or executor submits, or whether a `<expr>.create_task` receiver is really a `TaskGroup` (any receiver not named like a loop passes). A value class is resolved from its defining file, so changing a class there can move a verdict in a file that did not change; the full gate run sees it.

@@ -10,10 +10,10 @@ The filename carries two UTC stamps: ``start`` is the earliest message timestamp
 the dumped conversation (where the round began), ``end`` the compaction moment —
 microsecond precision, so two dumps can never collide. The dump is the agent-side
 retrieval aid behind "the compaction summary dropped a detail I need": grep it.
-Enabled by default via ``turn_settings.agent.history_dump_enabled``; disable per
+Enabled by default via ``history_dump_enabled``; disable per
 cluster or per agent to save disk. Each dump is
 bounded by the context window itself and rotation keeps only the newest
-``turn_settings.agent.history_dump_keep``, so the workspace cost is bounded by
+``history_dump_keep``, so the workspace cost is bounded by
 ``keep x context``.
 
 Wire format: one LangChain BaseMessage ``model_dump(mode="json")`` per line —
@@ -42,7 +42,7 @@ from langchain_core.messages import AnyMessage, HumanMessage
 
 from agent.messages import NoteTag, system_note_message
 from base.agents.messages.kwargs import read_ava_kwargs
-from base.config.turn_view import turn_settings
+from base.host.env.agent_slices import HistoryDump
 from base.log import logger
 from base.paths import workspace_dir
 
@@ -83,7 +83,7 @@ def _earliest_message_ts(messages: list[AnyMessage]) -> datetime | None:
     return earliest
 
 
-def dump_history(messages: list[AnyMessage], agent_id: int) -> Path | None:
+def dump_history(messages: list[AnyMessage], agent_id: int, config: HistoryDump) -> Path | None:
     """Write the full pre-compact conversation to a JSONL file; return its path.
 
     Returns ``None`` when the dump is disabled (``history_dump_enabled`` off —
@@ -102,7 +102,7 @@ def dump_history(messages: list[AnyMessage], agent_id: int) -> Path | None:
     fields, same shape as GET /api/agents/{id}/messages); the replay recipe is
     in the module docstring.
     """
-    if not turn_settings.agent.history_dump_enabled:
+    if not config.history_dump_enabled:
         return None
     try:
         d = history_dump_dir(agent_id)
@@ -112,7 +112,7 @@ def dump_history(messages: list[AnyMessage], agent_id: int) -> Path | None:
         with path.open("w", encoding="utf-8") as f:
             for msg in messages:
                 f.write(json.dumps(msg.model_dump(mode="json")) + "\n")
-        _rotate(d, max(1, turn_settings.agent.history_dump_keep))
+        _rotate(d, max(1, config.history_dump_keep))
         logger.info(
             "[{label}] {body}",
             label="history-dump",
@@ -168,7 +168,7 @@ def history_dump_note(path: Path) -> HumanMessage:
     )
 
 
-def workspace_section_hint() -> str:
+def workspace_section_hint(config: HistoryDump) -> str:
     """The ``# Workspace`` system-prompt sentence: where the dumps live and the
     grep recipe for recovering details the compact summary dropped. Empty while
     the feature is off, so the section never points at a folder that stays
@@ -179,7 +179,7 @@ def workspace_section_hint() -> str:
     settings read as the dump itself; that module also sits at its line-budget
     ceiling, so the call site is one line.
     """
-    if not turn_settings.agent.history_dump_enabled:
+    if not config.history_dump_enabled:
         return ""
     return (
         f" Pre-compact message history is dumped under `{_DUMP_DIRNAME}/` "

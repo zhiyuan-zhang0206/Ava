@@ -104,11 +104,12 @@ def _target_capabilities(target: str) -> list[MachineRole]:
 
         return cast("list[MachineRole]", sorted(machine_role()))
     from base.cluster.machines import MachineNotRegistered, lookup_role
+    from gateway.app import app
 
     try:
         # machines.role is written from the capability tokens, so it is a
         # gateway/agent-runner list; the DB read is typed str.
-        return cast("list[MachineRole]", lookup_role(target))
+        return cast("list[MachineRole]", lookup_role(app.state.db, target))
     except MachineNotRegistered:
         return []
 
@@ -125,14 +126,16 @@ async def _dispatch_config_read(target: str) -> ConfigReadResult:
     already verified the machine is known.
     """
     from base.cluster.machines import MachineNotRegistered, lookup_role
+    from gateway.app import app
 
     try:
-        role = await asyncio.to_thread(lookup_role, target)
+        role = await asyncio.to_thread(lookup_role, app.state.db, target)
     except MachineNotRegistered:
         role = []
     if "agent-runner" in role:
         try:
             wire = await _cluster_rpc.dispatch_to_machine(
+                app.state.db,
                 target_machine=target,
                 kind="config_read",
                 payload={},
@@ -171,14 +174,16 @@ async def _dispatch_config_audit_read(target: str, last: int) -> ConfigAuditRead
     unreachable by construction. Caller has already verified the machine is known.
     """
     from base.cluster.machines import MachineNotRegistered, lookup_role
+    from gateway.app import app
 
     try:
-        role = await asyncio.to_thread(lookup_role, target)
+        role = await asyncio.to_thread(lookup_role, app.state.db, target)
     except MachineNotRegistered:
         role = []
     if "agent-runner" in role:
         try:
             wire = await _cluster_rpc.dispatch_to_machine(
+                app.state.db,
                 target_machine=target,
                 kind="config_audit_read",
                 payload={"last": last},
@@ -228,14 +233,16 @@ async def _dispatch_config_write(
     remote_writable). Caller has already verified the machine is known.
     """
     from base.cluster.machines import MachineNotRegistered, lookup_role
+    from gateway.app import app
 
     try:
-        role = await asyncio.to_thread(lookup_role, target)
+        role = await asyncio.to_thread(lookup_role, app.state.db, target)
     except MachineNotRegistered:
         role = []
     if "agent-runner" in role:
         try:
             wire = await _cluster_rpc.dispatch_to_machine(
+                app.state.db,
                 target_machine=target,
                 kind="config_write",
                 payload={
@@ -403,8 +410,9 @@ async def get_config_audit(
     effective_last = last if last is not None else settings.display.config_audit_default_last
     if machine == "all":
         from base.cluster.machines import list_agent_runners
+        from gateway.app import app
 
-        runners = await asyncio.to_thread(list_agent_runners)
+        runners = await asyncio.to_thread(list_agent_runners, app.state.db)
         names = [name for name, _url in runners]
         if machine_name() not in names:
             names.append(machine_name())
@@ -541,8 +549,8 @@ async def put_config(
         candidate_writes = dict(plan.cluster_writes)
         candidate_removals = set(plan.cluster_removals)
         # A local host field shares the gateway's `.env`. Include only host edits
-        # from a cluster-touched domain: this catches a cross-scope PITR transition
-        # before its host write, without changing the existing host capability-result
+        # from a cluster-touched domain: this catches a transition spanning the cluster
+        # and host scopes of one domain before its host write, without changing the existing host capability-result
         # contract for unrelated fields.
         cluster_domains = {
             field_domain(name) for name in set(candidate_writes) | candidate_removals

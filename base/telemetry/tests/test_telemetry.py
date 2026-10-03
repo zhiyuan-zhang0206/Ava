@@ -30,8 +30,6 @@ from opentelemetry import trace as otel_trace
 from opentelemetry.trace import NonRecordingSpan, SpanContext
 
 from base import telemetry
-from base.config import settings
-from base.events.contract import lineage_event_names
 from base.telemetry import emitter, observability
 
 _AGENT = 8901
@@ -213,7 +211,7 @@ def test_jsonl_mirror_holds_every_event() -> None:
     assert any('"event_name":"fork"' in line and '"category":"audit"' in line for line in lines)
 
 
-def test_jsonl_rollup_mirror_holds_only_rollup_source_events(
+def test_the_mirror_holds_every_event_in_one_file_and_no_filtered_copy(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     monkeypatch.setattr(emitter, "logs_dir", lambda: tmp_path)
@@ -243,98 +241,22 @@ def test_jsonl_rollup_mirror_holds_only_rollup_source_events(
     full_rows = [
         json.loads(line) for line in (tmp_path / f"events-{day}.jsonl").read_text().splitlines()
     ]
-    rollup_rows = [
-        json.loads(line)
-        for line in (tmp_path / f"events-{day}.rollup.jsonl").read_text().splitlines()
-    ]
     assert [row["event_name"] for row in full_rows] == event_names
-    assert [row["event_name"] for row in rollup_rows] == event_names[:-1]
+    assert sorted(path.name for path in tmp_path.iterdir()) == [f"events-{day}.jsonl"]
 
 
-def test_jsonl_lineage_mirror_holds_only_the_permanent_lineage_class(
+def test_jsonl_mirror_prunes_by_the_full_retention_and_sweeps_retired_rollup_leftovers(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """The lineage mirror carries the registry's lineage class and nothing else.
-
-    It is the copy whose failure domain is this box's disk rather than Loki's
-    config, so its filter is derived from `retention_class="lineage"` instead of
-    a second hand-kept list — a name added to the registry lands in both
-    permanent copies with no further wiring.
-    """
-    monkeypatch.setattr(emitter, "logs_dir", lambda: tmp_path)
-    now = datetime.now(UTC)
-    day = now.strftime("%Y%m%d")
-    lineage_path = tmp_path / f"events-{day}.lineage.jsonl"
-
-    def batch(event_names: list[str]) -> list[telemetry.Event]:
-        return [
-            telemetry.Event(
-                ts=now,
-                trace_id=None,
-                span_id=None,
-                agent_id=_AGENT,
-                machine="test-machine",
-                cluster="test-cluster",
-                process="test-proc",
-                category=telemetry.category_for_kind(event_name),
-                event_name=event_name,
-                level="info",
-                source="system",
-                target_agent_id=None,
-            )
-            for event_name in event_names
-        ]
-
-    # A batch with no lineage row must not even create the file.
-    telemetry._append_jsonl(batch(["llm_usage", "send_message", "terminate", "log"]))
-    assert (tmp_path / f"events-{day}.jsonl").exists()
-    assert not lineage_path.exists()
-
-    lineage = sorted(lineage_event_names())
-    assert lineage == ["agent_resurrected", "agent_spawned", "fork", "resurrect", "spawn"]
-    telemetry._append_jsonl(batch([*lineage, "llm_usage", "terminate"]))
-
-    rows = [json.loads(line) for line in lineage_path.read_text().splitlines()]
-    assert [row["event_name"] for row in rows] == lineage
-    # The lineage copy is the full line, not a projection: a reader recovering
-    # from this file must see the same row the full mirror and Loki carry.
-    full_rows = [
-        json.loads(line) for line in (tmp_path / f"events-{day}.jsonl").read_text().splitlines()
-    ]
-    by_id = {row["id"]: row for row in full_rows}
-    assert all(by_id[row["id"]] == row for row in rows)
-
-
-def test_jsonl_mirror_prunes_full_rollup_and_lineage_retention_independently(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    """Each tier expires on its own clock — the filtered copies are the point.
-
-    The full mirror's 7 days is what the filtered tiers exist to outlive, so a
-    glob that swept a `.rollup`/`.lineage` file into the full tier's cutoff
-    would silently collapse all three into the shortest one.
-    """
     monkeypatch.setattr(emitter, "logs_dir", lambda: tmp_path)
     monkeypatch.setattr(emitter, "_JSONL_RETENTION_DAYS", 2)
-    monkeypatch.setattr(settings.daemon, "events_jsonl_rollup_retention_days", 4)
-    monkeypatch.setattr(emitter, "_JSONL_LINEAGE_RETENTION_DAYS", 6)
     today = datetime.now(UTC)
     full_old = tmp_path / f"events-{today - timedelta(days=3):%Y%m%d}.jsonl"
     full_kept = tmp_path / f"events-{today - timedelta(days=2):%Y%m%d}.jsonl"
     rollup_old = tmp_path / f"events-{today - timedelta(days=5):%Y%m%d}.rollup.jsonl"
-    rollup_kept = tmp_path / f"events-{today - timedelta(days=4):%Y%m%d}.rollup.jsonl"
-    lineage_old = tmp_path / f"events-{today - timedelta(days=7):%Y%m%d}.lineage.jsonl"
-    lineage_kept = tmp_path / f"events-{today - timedelta(days=6):%Y%m%d}.lineage.jsonl"
+    rollup_kept = tmp_path / f"events-{today - timedelta(days=1):%Y%m%d}.rollup.jsonl"
     malformed = tmp_path / "events-0000000x.jsonl"
-    for path in (
-        full_old,
-        full_kept,
-        rollup_old,
-        rollup_kept,
-        lineage_old,
-        lineage_kept,
-        malformed,
-    ):
+    for path in (full_old, full_kept, rollup_old, rollup_kept, malformed):
         path.write_text("{}\n", encoding="utf-8")
 
     telemetry._prune_jsonl_mirror()
@@ -343,8 +265,6 @@ def test_jsonl_mirror_prunes_full_rollup_and_lineage_retention_independently(
     assert full_kept.exists()
     assert not rollup_old.exists()
     assert rollup_kept.exists()
-    assert not lineage_old.exists()
-    assert lineage_kept.exists()
     assert malformed.exists()
 
 
@@ -517,8 +437,7 @@ def _mk_event(category: str, event_name: str) -> telemetry.Event:
 
 
 def test_regular_events_shed_immediately_when_full() -> None:
-    """A telemetry event on a full queue is shed at once (put_nowait) — the
-    pre-existing drop semantics, pinned so the audit lane is the only change."""
+    """A telemetry event on a full queue is shed at once (put_nowait)."""
     pipe = telemetry._EventPipeline.__new__(telemetry._EventPipeline)
     pipe._dropped_lock = threading.Lock()
     pipe.dropped = 0
@@ -535,49 +454,22 @@ def test_regular_events_shed_immediately_when_full() -> None:
     assert pipe.dropped == 1
 
 
-def test_audit_events_block_with_cap_before_shedding() -> None:
-    """An audit event on a full queue blocks (bounded backpressure, up to
-    _AUDIT_BLOCK_S) before it sheds — the durable lane. Only past the cap
-    does it drop, counted like any other shed."""
+def test_audit_events_are_shed_like_any_other_event_on_a_full_queue() -> None:
+    """Their record is `audit_events`, so the projection takes no blocking lane."""
     pipe = telemetry._EventPipeline.__new__(telemetry._EventPipeline)
     pipe._dropped_lock = threading.Lock()
     pipe.dropped = 0
 
     class _FullQueue:
-        def __init__(self) -> None:
-            self.put_timeouts: list[float | None] = []
-
         def put_nowait(self, event: object) -> None:
             raise queue.Full
 
         def put(self, event: object, timeout: float | None = None) -> None:
-            self.put_timeouts.append(timeout)
-            raise queue.Full
+            raise AssertionError("no event may block its producer")
 
-    fq = _FullQueue()
-    pipe._queue = fq  # type: ignore[attr-defined]
+    pipe._queue = _FullQueue()  # type: ignore[attr-defined]
     telemetry._EventPipeline.enqueue(pipe, _mk_event("audit", "send_message"))
     assert pipe.dropped == 1
-    assert fq.put_timeouts == [telemetry._AUDIT_BLOCK_S]
-
-
-def test_audit_events_land_once_a_slot_frees() -> None:
-    """The audit put succeeds (and nothing is dropped) when the drain thread
-    frees a slot within the cap — the healthy-path behavior of the lane."""
-    pipe = telemetry._EventPipeline.__new__(telemetry._EventPipeline)
-    pipe._dropped_lock = threading.Lock()
-    pipe.dropped = 0
-
-    class _FreesQueue:
-        def put_nowait(self, event: object) -> None:
-            raise queue.Full
-
-        def put(self, event: object, timeout: float | None = None) -> None:
-            assert timeout == telemetry._AUDIT_BLOCK_S
-
-    pipe._queue = _FreesQueue()  # type: ignore[attr-defined]
-    telemetry._EventPipeline.enqueue(pipe, _mk_event("audit", "spawn"))
-    assert pipe.dropped == 0
 
 
 def test_sync_bounds_a_stalled_caller_flush(monkeypatch: pytest.MonkeyPatch) -> None:

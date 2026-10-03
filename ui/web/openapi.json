@@ -1389,7 +1389,7 @@
     "/api/agents/{agent_id}/events/stream": {
       "get": {
         "summary": "Get Events Stream",
-        "description": "SSE endpoint — subscribe to Redis `ava:events`, filter by `agent_id`,\nforward.\n\nClient `EventSource` receives `data: {json}\\n\\n` frames, one JSON\n`events.Event` per frame. code_delta chunks pass through immediately,\nnative streaming. This is the live tail; `GET /api/agents/{id}/events`\n(no `/stream`) is the historical REST query over the persisted unified\nevent stream (Loki).\n\nDoes **not** check agent_exists as a precondition: subscribing to a\nnon-existent agent is allowed, you just receive no messages. Otherwise\nagents that were just switched / newly created but with slight DB\nvisibility lag would 404.",
+        "description": "SSE endpoint — subscribe to Redis `ava:events`, filter by `agent_id`,\nforward.\n\nClient `EventSource` receives `data: {json}\\n\\n` frames, one JSON\n`events.Event` per frame. code_delta chunks pass through immediately,\nnative streaming. This is the live tail; `GET /api/agents/{id}/events`\n(no `/stream`) is the historical REST query over the persisted unified\nevent stream (`telemetry_events`).\n\nDoes **not** check agent_exists as a precondition: subscribing to a\nnon-existent agent is allowed, you just receive no messages. Otherwise\nagents that were just switched / newly created but with slight DB\nvisibility lag would 404.",
         "operationId": "get_events_stream_api_agents__agent_id__events_stream_get",
         "parameters": [
           {
@@ -1427,7 +1427,7 @@
     "/api/agents/{agent_id}/events": {
       "get": {
         "summary": "Get Agent Events",
-        "description": "Historical slice of this agent's `events` rows — the REST\ncounterpart to the live `…/events/stream` SSE tail (which only carries\nevents from the moment you subscribe). Backs ops / SDK / eval consumers\nthat need to query the past.\n\nFilters compose (AND):\n  - `from=<ISO-8601>` / `to=<ISO-8601>`: inclusive time window\n    (`ts >= from AND ts <= to`); `from` omitted defaults to the last\n    24h (same lower-bound contract as /api/events). Bad timestamps 422\n    (FastAPI datetime parse).\n  - `event=<name>`: exact event type, e.g. `llm_usage` / `turn_end` /\n    `exec` / `exec_failed`.\n  - `level=<INFO|WARNING|ERROR|…>`: exact level (case-insensitive, any\n    case accepted; the stored/returned values are LOWERCASE since the W9\n    events-table switch — `agent_events`' uppercase `INFO`/`WARNING`/\n    `ERROR` no longer appears on the wire). This is an *exact* match,\n    unlike `/api/cluster/admin/events` where `level`\n    is a minimum threshold — a per-agent history query reads more\n    predictably as \"give me exactly this level\".\n\nReturns newest-first (`ts DESC`; `id` is a stable surrogate derived\nfrom the log line, so `limit`/`offset` paging stays deterministic).\n`limit` returns the configured default window (``display.events_default_limit``\n— 100 out of the box), capped at 1000 (over-limit 422s); `offset`\npages further back and is capped at 10,000. Loki has no native offset,\nso the cap bounds the in-memory parse of `limit + offset + 1` rows.\n\nNo agent-existence precondition (same as `…/activity` and `…/pending`):\nan unknown agent or an empty window just returns `[]`.",
+        "description": "Historical slice of this agent's `events` rows — the REST\ncounterpart to the live `…/events/stream` SSE tail (which only carries\nevents from the moment you subscribe). Backs ops / SDK / eval consumers\nthat need to query the past.\n\nFilters compose (AND):\n  - `from=<ISO-8601>` / `to=<ISO-8601>`: inclusive time window\n    (`ts >= from AND ts <= to`); `from` omitted defaults to the last\n    24h (same lower-bound contract as /api/events). Bad timestamps 422\n    (FastAPI datetime parse).\n  - `event=<name>`: exact event type, e.g. `llm_usage` / `turn_end` /\n    `exec` / `exec_failed`.\n  - `level=<INFO|WARNING|ERROR|…>`: exact level (case-insensitive, any\n    case accepted; the stored/returned values are LOWERCASE since the W9\n    events-table switch — `agent_events`' uppercase `INFO`/`WARNING`/\n    `ERROR` no longer appears on the wire). This is an *exact* match,\n    unlike `/api/cluster/admin/events` where `level`\n    is a minimum threshold — a per-agent history query reads more\n    predictably as \"give me exactly this level\".\n\nReturns newest-first (`ts DESC`; `id` is a stable surrogate derived\nfrom the log line, so `limit`/`offset` paging stays deterministic).\n`limit` returns the configured default window (``display.events_default_limit``\n— 100 out of the box), capped at 1000 (over-limit 422s); `offset`\npages further back and is capped at 10,000.\n\nNo agent-existence precondition (same as `…/activity` and `…/pending`):\nan unknown agent or an empty window just returns `[]`.",
         "operationId": "get_agent_events_api_agents__agent_id__events_get",
         "parameters": [
           {
@@ -1708,7 +1708,7 @@
     "/api/agents/{agent_id}/neighbors": {
       "get": {
         "summary": "Get Agent Neighbors",
-        "description": "The agents most strongly tied to `agent_id`, ranked by recency-weighted\ninteraction strength (spawn / fork / resurrect / message, all equal weight),\nplus `ancestors` — the immutable birth chain above `agent_id`, nearest ancestor first.\n\nOmitted ``depth``/``limit`` return the configured defaults\n(``display.neighbors_default_depth`` / ``display.neighbors_default_limit``\n- 1 / 20 out of the box). `depth=1` returns direct ties only; a higher\n`depth` follows ties outward,\ndiscounting each extra hop. `ancestors` ignores `depth`/`limit`: it walks\nthe immutable born_spawner chain to the top (message ties never form\nancestors), each row's `depth` = hops up (1 = the direct birth parent).\nTerminated agents are included (each row carries `status`); `limit` caps\nthe neighbor count, strongest first. The tie graph reads the unified event\nstream (task #180 LGTM cutover): audit edge events stitch the frozen PG\n`events` archive with the Loki live tail and the walks run in Python\n(gateway/inspect/neighbors.py) — the retired `agent_neighbors` SQL function died\nwith the frozen table it read.\n\n404: agent_id does not exist (AgentNotFound -> handler returns 404 + reason).",
+        "description": "The agents most strongly tied to `agent_id`, ranked by recency-weighted\ninteraction strength (spawn / fork / resurrect / message, all equal weight),\nplus `ancestors` — the immutable birth chain above `agent_id`, nearest ancestor first.\n\nOmitted ``depth``/``limit`` return the configured defaults\n(``display.neighbors_default_depth`` / ``display.neighbors_default_limit``\n- 1 / 20 out of the box). `depth=1` returns direct ties only; a higher\n`depth` follows ties outward,\ndiscounting each extra hop. `ancestors` ignores `depth`/`limit`: it walks\nthe immutable born_spawner chain to the top (message ties never form\nancestors), each row's `depth` = hops up (1 = the direct birth parent).\nTerminated agents are included (each row carries `status`); `limit` caps\nthe neighbor count, strongest first. The tie graph reads the audit\nrecord: edge events are aggregated from `audit_events` and the walks run in\nPython (gateway/inspect/neighbors.py).\n\n404: agent_id does not exist (AgentNotFound -> handler returns 404 + reason).",
         "operationId": "get_agent_neighbors_api_agents__agent_id__neighbors_get",
         "parameters": [
           {
@@ -1784,7 +1784,7 @@
     "/api/agents/{agent_id}/inspect/metrics": {
       "get": {
         "summary": "Get Agent Plugin Metrics",
-        "description": "The agent's plugin metrics for the inspector panel — the W13b inspector\nsurface of the plugin metric system (see `base/telemetry/metrics/plugin_metrics.py`).\n\nBuilds the metric registry in process (task #180 PR D — shipped\nplugin `metrics.py` modules + core definitions), keeps the metrics whose\n`output` includes \"inspector\", renders each template for this agent\n({{agent_id}} -> ``agent_id = <n>``), re-validates the rendered query,\nsubstitutes the Grafana time macros with a fixed recent window (24h in 1h\nbuckets), and executes each query — LogQL against Loki, SQL read-only\nagainst the cluster's Postgres.\n\nResponse: one `PluginMetricResult` per registered inspector metric, in\nregistration order. `timeseries` / `barchart` metrics carry `series`\n(bucket ts + value, chronological); `stat` metrics carry `value`. A\nmetric whose query fails at runtime carries `error` (the others still\nrender); registry-level problems are HTTP errors instead — a template\nfailing the safety re-validation -> 500 with the reason, {{agent_id}}\ntemplate without an agent id -> 400 (unreachable here — the id is a path\nparam). 404 when the agent does not exist. The frontend panel polls this\nevery 5s like the parent /inspect. Implementation in\n``gateway/inspect/_plugin_metrics.py``.",
+        "description": "The agent's plugin metrics for the inspector panel — the W13b inspector\nsurface of the plugin metric system (see `base/telemetry/metrics/plugin_metrics.py`).\n\nBuilds the metric registry in process (task #180 PR D — shipped\nplugin `metrics.py` modules + core definitions), keeps the metrics whose\n`output` includes \"inspector\", renders each template for this agent\n({{agent_id}} -> ``agent_id = <n>``), re-validates the rendered query,\nsubstitutes the Grafana time macros with a fixed recent window (24h in 1h\nbuckets), and executes each query on the cluster's Postgres — LogQL\ntemplates evaluated over `telemetry_events` / `audit_events`, SQL read-only.\n\nResponse: one `PluginMetricResult` per registered inspector metric, in\nregistration order. `timeseries` / `barchart` metrics carry `series`\n(bucket ts + value, chronological); `stat` metrics carry `value`. A\nmetric whose query fails at runtime carries `error` (the others still\nrender); registry-level problems are HTTP errors instead — a template\nfailing the safety re-validation -> 500 with the reason, {{agent_id}}\ntemplate without an agent id -> 400 (unreachable here — the id is a path\nparam). 404 when the agent does not exist. The frontend panel polls this\nevery 5s like the parent /inspect. Implementation in\n``gateway/inspect/_plugin_metrics.py``.",
         "operationId": "get_agent_plugin_metrics_api_agents__agent_id__inspect_metrics_get",
         "parameters": [
           {
@@ -2973,19 +2973,43 @@
     "/api/cluster/roster": {
       "get": {
         "summary": "Get Cluster Roster",
-        "description": "The full multi-machine roster — every registered machine + live status.\n\nBacks the thin-client `ava cluster status`: the gateway's own row is\nresolved locally; each agent-runner is probed in parallel via the\nstatus_probe op (total wall ≈ the probe timeout regardless\nof N). Same fan-out the `/api/status` cluster panel uses. Bypasses 503 mode\nso the roster stays visible during pause.",
+        "description": "The full multi-machine roster — every registered machine + status.\n\nBacks the thin-client `ava cluster status`: the gateway's own row is\nresolved locally; each agent-runner renders from the heartbeat liveness\npass's last status_probe (`MachineStatus.observed_at` says how old), so the\nread dials nothing and a down host cannot slow it. `fresh=true` probes every\nrunner in parallel via the status_probe op instead (total wall ≈ the probe\ntimeout regardless of N) — for a caller that must see a restart land, such as\nthe fleet update. Same fan-out the `/api/status` cluster panel uses. Bypasses\n503 mode so the roster stays visible during pause.",
         "operationId": "get_cluster_roster_api_cluster_roster_get",
+        "parameters": [
+          {
+            "name": "fresh",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "description": "Dial every runner now instead of reading the last probe.",
+              "default": false,
+              "title": "Fresh"
+            },
+            "description": "Dial every runner now instead of reading the last probe."
+          }
+        ],
         "responses": {
           "200": {
             "description": "Successful Response",
             "content": {
               "application/json": {
                 "schema": {
+                  "type": "array",
                   "items": {
                     "$ref": "#/components/schemas/MachineStatus"
                   },
-                  "type": "array",
                   "title": "Response Get Cluster Roster Api Cluster Roster Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
                 }
               }
             }
@@ -2996,7 +3020,7 @@
     "/api/cluster/admin/events": {
       "get": {
         "summary": "Get Cluster Admin Events",
-        "description": "Slice the unified event stream from Loki (category=telemetry/log) for\nops debugging without SSH — the LGTM replacement for the PG `events` read\n(task #1197).\n\nFilters compose (AND):\n  - `agent_id=N`: only this agent's events (gateway / daemon rows excluded).\n  - `service_only=true`: only events with no agent_id (gateway / daemons).\n  - `level=ERROR`: minimum level (DEBUG/INFO/WARNING/ERROR/CRITICAL).\n  - `since=2h` / `since=2026-05-25T00:00Z`: relative window or absolute\n    timestamp. Relative format `<int><unit>` with unit `s/m/h/d`.\n  - `event=spawn,terminate`: comma-separated event names.\n  - `grep=<substring>`: substring match on the raw log line (the JSON\n    body includes the `msg` payload).\n  - `limit`: max rows to return, capped at 1000 (protective constant).\n    Omitted returns the configured default\n    (``display.cluster_events_default_limit`` - 200 out of the box).\n\nReturns newest-first; the client paginates by passing\n`since=<oldest_ts_seen>` on the next call.",
+        "description": "Slice the unified event stream (category=telemetry/log, read from\n`telemetry_events`) for ops debugging without SSH.\n\nFilters compose (AND):\n  - `agent_id=N`: only this agent's events (gateway / daemon rows excluded).\n  - `service_only=true`: only events with no agent_id (gateway / daemons).\n  - `level=ERROR`: minimum level (DEBUG/INFO/WARNING/ERROR/CRITICAL).\n  - `since=2h` / `since=2026-05-25T00:00Z`: relative window or absolute\n    timestamp. Relative format `<int><unit>` with unit `s/m/h/d`.\n  - `event=spawn,terminate`: comma-separated event names.\n  - `grep=<substring>`: case-insensitive substring match on the event\n    name, source and payload (which includes the `msg` text).\n  - `limit`: max rows to return, capped at 1000 (protective constant).\n    Omitted returns the configured default\n    (``display.cluster_events_default_limit`` - 200 out of the box).\n\nReturns newest-first; the client paginates by passing\n`since=<oldest_ts_seen>` on the next call.",
         "operationId": "get_cluster_admin_events_api_cluster_admin_events_get",
         "parameters": [
           {
@@ -3133,19 +3157,43 @@
     "/api/cluster/machines": {
       "get": {
         "summary": "Get Cluster Machines",
-        "description": "List every registered machine with its description + live status.\n\nBacks ava.agents.list_machines(). Live status comes from the same\nstatus_probe op round-trip the status panel uses\n(gateway is live from its own perspective); total wall time is\nbounded by the probe timeout regardless of machine count. role /\ngateway_url are intentionally omitted — agents reason over the free-text\ndescription, not ops topology.",
+        "description": "List every registered machine with its description + live status.\n\nBacks ava.agents.list_machines(). Live status comes from the same source the\nroster uses: the heartbeat liveness pass's last status_probe, or with\n`fresh=true` a probe of every runner now (gateway is live from its own\nperspective). role / gateway_url are intentionally omitted — agents reason\nover the free-text description, not ops topology.",
         "operationId": "get_cluster_machines_api_cluster_machines_get",
+        "parameters": [
+          {
+            "name": "fresh",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "description": "Dial every runner now instead of reading the last probe.",
+              "default": false,
+              "title": "Fresh"
+            },
+            "description": "Dial every runner now instead of reading the last probe."
+          }
+        ],
         "responses": {
           "200": {
             "description": "Successful Response",
             "content": {
               "application/json": {
                 "schema": {
+                  "type": "array",
                   "items": {
                     "$ref": "#/components/schemas/AgentMachineRow"
                   },
-                  "type": "array",
                   "title": "Response Get Cluster Machines Api Cluster Machines Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
                 }
               }
             }
@@ -4795,7 +4843,7 @@
     "/api/events": {
       "get": {
         "summary": "Get Events",
-        "description": "Slice of the unified event stream — every event (audit / telemetry /\nlog) through one query surface, the programmatic read side of the\nunified emitter. Newest-first (`ts DESC`, `id DESC` tiebreak).\n\nFilters compose (AND):\n  - `category=<audit|telemetry|log>`: retention/alerting class (unknown\n    value 422s).\n  - `event_name=<name>`: exact event name, e.g. `llm_usage` /\n    `turn_end` / `spawn` / `send_message`.\n  - `agent_id=<n>`: events belonging to that agent; service-level events\n    (NULL) are excluded when set.\n  - `trace_id=<hex>`: one turn's whole call chain — every event that\n    shares the id.\n  - `machine=<name>`: the host dimension.\n  - `level=<debug|info|warning|error|critical>`: exact match,\n    case-insensitive (unknown value 422s).\n  - `tier=<business|anomaly|observation|noise>[,...]`: comma-separated\n    display tiers, ORed within the list and ANDed with every other filter.\n    The Loki predicate is derived before pagination so `meta.total` and\n    page boundaries stay exact.\n  - `from=<ISO-8601>` / `to=<ISO-8601>`: inclusive time window\n    (`ts >= from AND ts <= to`); either side may be omitted. Values\n    MUST carry a timezone offset (`Z` or `+hh:mm`) — a naive timestamp\n    is interpreted in the server's local timezone, so it 422s instead\n    of silently shifting the window.\n  - `hours=<n>`: alternative window — the last N hours\n    (`from = now - hours`). Mutually exclusive with `from`.\n  - Default window: when neither `from` nor `hours` is given, the last\n    24 hours are assumed (`from = now - 24h`) — an unbounded query\n    would scan the whole retention history (6M+ rows across every\n    month partition), so the API never runs one. `meta.window_from`\n    always echoes the effective lower bound.\n  - `limit` (configured default window — ``display.events_default_limit``,\n    100 out of the box — cap 1000) / `offset` (cap 10,000): offset\n    paging with stable ordering across same-`ts` rows. The cap bounds the\n    in-memory Loki JSON parse (`limit + offset + 1` rows).\n  - `with_total=1`: also compute the exact filtered row count\n    (`meta.total`) via the Loki count path — one extra full-window\n    aggregation, so it is opt-in; without it `meta.total` is null.\n\nResponse: `meta` (opt-in exact filtered `total`, effective\n`window_from`/`window_to`, `limit`/`offset`, `has_more` from the list\nfetch's +1 lookahead) + `items` (the unified `EventRow` shape).\n`window_from` is always set — the default 24h lower bound when the\nrequest named none. An empty window returns `items: []`.",
+        "description": "Slice of the unified event stream — every event (audit / telemetry /\nlog) through one query surface, the programmatic read side of the\nunified emitter. Newest-first (`ts DESC`, `id DESC` tiebreak).\n\nFilters compose (AND):\n  - `category=<audit|telemetry|log>`: retention/alerting class (unknown\n    value 422s).\n  - `event_name=<name>`: exact event name, e.g. `llm_usage` /\n    `turn_end` / `spawn` / `send_message`.\n  - `agent_id=<n>`: events belonging to that agent; service-level events\n    (NULL) are excluded when set.\n  - `trace_id=<hex>`: one turn's whole call chain — every event that\n    shares the id.\n  - `machine=<name>`: the host dimension.\n  - `level=<debug|info|warning|error|critical>`: exact match,\n    case-insensitive (unknown value 422s).\n  - `tier=<business|anomaly|observation|noise>[,...]`: comma-separated\n    display tiers, ORed within the list and ANDed with every other filter.\n    The tier predicate is applied before pagination so `meta.total` and\n    page boundaries stay exact.\n  - `from=<ISO-8601>` / `to=<ISO-8601>`: inclusive time window\n    (`ts >= from AND ts <= to`); either side may be omitted. Values\n    MUST carry a timezone offset (`Z` or `+hh:mm`) — a naive timestamp\n    is interpreted in the server's local timezone, so it 422s instead\n    of silently shifting the window.\n  - `hours=<n>`: alternative window — the last N hours\n    (`from = now - hours`). Mutually exclusive with `from`.\n  - Default window: when neither `from` nor `hours` is given, the last\n    24 hours are assumed (`from = now - 24h`) — an unbounded query\n    would scan the whole record, so the API never runs one. `meta.window_from`\n    always echoes the effective lower bound.\n  - `limit` (configured default window — ``display.events_default_limit``,\n    100 out of the box — cap 1000) / `offset` (cap 10,000): offset\n    paging with stable ordering across same-`ts` rows. The cap bounds the\n    rows one read materializes (`limit + offset + 1`).\n  - `with_total=1`: also compute the exact filtered row count\n    (`meta.total`) — one extra full-window count, so it is opt-in; without it `meta.total` is null.\n\nResponse: `meta` (opt-in exact filtered `total`, effective\n`window_from`/`window_to`, `limit`/`offset`, `has_more` from the list\nfetch's +1 lookahead) + `items` (the unified `EventRow` shape).\n`window_from` is always set — the default 24h lower bound when the\nrequest named none. An empty window returns `items: []`.",
         "operationId": "get_events_api_events_get",
         "parameters": [
           {
@@ -5567,52 +5615,6 @@
         }
       }
     },
-    "/api/alerts/impersonation-event-retention": {
-      "get": {
-        "summary": "List Impersonation Event Retention",
-        "description": "Operator panel rows for frozen manifests that crossed Loki retention.\n\nThe query is machine-scoped because the runner that owns the manifest\ndetects its retention floor. The normal alerts list already exposes the\naccompanying alert; this endpoint supplies the lease/floor/missing-count\nevidence needed to investigate it without permitting a local mirror to\nclear the condition.",
-        "operationId": "list_impersonation_event_retention_api_alerts_impersonation_event_retention_get",
-        "parameters": [
-          {
-            "name": "machine",
-            "in": "query",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "minLength": 1,
-              "maxLength": 255,
-              "title": "Machine"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/ImpersonationRetentionLossRow"
-                  },
-                  "title": "Response List Impersonation Event Retention Api Alerts Impersonation Event Retention Get"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
     "/api/health": {
       "get": {
         "summary": "Get Health",
@@ -5633,7 +5635,7 @@
     "/api/stats/dashboard": {
       "get": {
         "summary": "Get Stats Dashboard",
-        "description": "Pull all data for the sidebar-top stats card in one shot.\n\nData sources:\n- `live_count`: agents_meta table — all non-terminated agents (running/idling)\n- `tokens` / `cost_usd`: full UTC days from the fleet ledger plus a Loki tail\n- average turn duration: Loki's unified event stream in 12-hour shards\n- warning/error counts: per-class counts via the resolution daemon's\n  grouped query (12h shards), split into total / dismissed / net with\n  the daemon's class arithmetic over the SELECTED window (task #1935)\n- `total_events`: archived event row count — frozen historical constant\n  (task #1281 parity run; PG events dropped; not a live gauge)\n\n`?hours=` selects the aggregation window (0 = last 5m; 1/6/24/72/168 =\nhours), whitelisted by `StatsWindowHours` (anything else 422s); the served horizon is\n`applied_window_hours`. Zero-data scenario: tokens all 0, cost_usd 0.0, avg_turn_seconds\nNone (frontend shows \"—\"). The ledger-first split avoids the fixed-cost\nfull-window token scans; the indexed Loki tail rereads the newest retained\nledger day to absorb late writes without double counting.\n\nA failed recompute (Loki transport error or refused query admission) serves\nthe window's last-good response marked `stale` (its `as_of` keeps the\noriginal read time) while it is within `display.stats_dashboard_stale_max_s`;\npast the cap — or with no last-good payload — the route keeps its retriable\n503, so a real outage surfaces within the cap. Each degradation episode\nemits one `stats_dashboard_stale` event, rate-capped per reason by the\n`stats_dashboard_stale_emit_interval_s` display setting.",
+        "description": "Pull all data for the sidebar-top stats card in one shot.\n\nData sources:\n- `live_count`: agents_meta table — all non-terminated agents (running/idling)\n- `tokens` / `cost_usd` / average turn duration: the window's `llm_usage` and\n  `turn_end` rows in `telemetry_events` (cost is each row's usage-time snapshot)\n- warning/error counts: per-class counts of `telemetry_events` rows, split into\n  total / dismissed / net with the resolution daemon's class arithmetic over the\n  SELECTED window (task #1935)\n- `total_events`: archived event row count — frozen historical constant\n  (task #1281 parity run; PG events dropped; not a live gauge)\n\n`?hours=` selects the aggregation window (0 = last 5m; 1/6/24/72/168 =\nhours), whitelisted by `StatsWindowHours` (anything else 422s); the served horizon is\n`applied_window_hours`, which is the requested window. Zero-data scenario: tokens all 0,\ncost_usd 0.0, avg_turn_seconds None (frontend shows \"—\"). The window is computed on\nevery request, in one connection, with an 8-second statement timeout.",
         "operationId": "get_stats_dashboard_api_stats_dashboard_get",
         "parameters": [
           {
@@ -5921,7 +5923,7 @@
     "/api/fleet/graph": {
       "get": {
         "summary": "Get Fleet Graph",
-        "description": "Fleet-wide weighted agent graph — nodes (agents) + edges (lineage + messages).\n\nNodes carry status, label, a windowed recent-work `node_score`, and\nrestart-proof `total_tokens` consumed in the retained window (7d). Edges\nsplit into two families: lineage\n(spawn/fork/resurrect) is structural and permanent; messages (send_message)\ndecay with recency. Terminated agents — and edges touching a terminated\nagent — are excluded by default (user ruling 2026-08-09 #1104: terminated\nagents never appear in the graph, mirroring the sidebar's agent tree). The\nfilter ORDER is liveness first: the node set is live-only (`status !=\n'terminated'`), and edges only ever\nconnect two live endpoints — a live node whose lineage partner has since\nterminated simply renders without that edge. Raw source rows are filtered\nduring the merge; pass `?include_terminated=true` for the full graph.\n\n`?hours=` (0 = last 5m; 1/6/24/72/168 = hours; omitted = all-time) windows\nboth the node score and the edge events. `?decay_lambda=` (range [0, 10];\nomitted = the configured default ``display.fleet_graph_decay_lambda`` -\n0.5 out of the box) is the per-day decay constant for the message edge weight,\nquantized to 2dp before both computation and cache-key construction. Its\n1001 values, two terminated states, and the bounded hour-window choices\ncap the cache-key space at approximately 16k entries. Per-caller rate\nlimiting was considered and deferred: this endpoint is auth-gated, and the\nbounded key space leaves no present threat that warrants that infrastructure.\n\nNode score (windowed, drives node size):\n    node_score = SUM(in_total) * 0.1 + SUM(out_total) * 1.0\nover the agent's `llm_usage` counters in the window — read from\nPrometheus (`ava_llm_usage_in_total` / `ava_llm_usage_out_total`,\nwindowed via `increase(...)`). `total_tokens` is the sum of the same two\ncounters over the retained 7d window, also using `increase(...)` so\nexporter process restarts do not reset it.\n\nEdge weight:\n    lineage (spawn/fork/resurrect): weight = event_count * 2.0 (no time decay,\n        always shown — the structural skeleton never fades)\n    message (send_message): weight = SUM(EXP(-decay_lambda * days_ago)) * 1.0\n        (recency-decayed; dropped below 0.01)",
+        "description": "Fleet-wide weighted agent graph — nodes (agents) + edges (lineage + messages).\n\nNodes carry status, label, a windowed recent-work `node_score`, and\n`total_tokens` consumed in the retained window (7d). Edges\nsplit into two families: lineage\n(spawn/fork/resurrect) is structural and permanent; messages (send_message)\ndecay with recency. Terminated agents — and edges touching a terminated\nagent — are excluded by default (user ruling 2026-08-09 #1104: terminated\nagents never appear in the graph, mirroring the sidebar's agent tree). The\nfilter ORDER is liveness first: the node set is live-only (`status !=\n'terminated'`), and edges only ever\nconnect two live endpoints — a live node whose lineage partner has since\nterminated simply renders without that edge. Raw source rows are filtered\nduring the merge; pass `?include_terminated=true` for the full graph.\n\n`?hours=` (0 = last 5m; 1/6/24/72/168 = hours; omitted = all-time) windows\nboth the node score and the edge events. `?decay_lambda=` (range [0, 10];\nomitted = the configured default ``display.fleet_graph_decay_lambda`` -\n0.5 out of the box) is the per-day decay constant for the message edge weight,\nquantized to 2dp before both computation and cache-key construction. Its\n1001 values, two terminated states, and the bounded hour-window choices\ncap the cache-key space at approximately 16k entries. Per-caller rate\nlimiting was considered and deferred: this endpoint is auth-gated, and the\nbounded key space leaves no present threat that warrants that infrastructure.\n\nNode score (windowed, drives node size):\n    node_score = SUM(in_total) * 0.1 + SUM(out_total) * 1.0\nover the agent's `llm_usage` rows in the window. `total_tokens` is the sum of\nthe same two fields over the retained 7d window. Both are read in parts\n(`gateway/routers/_fleet_tokens.py`): raw rows of the newest two days, the\nday-grain ledger before them, and for the all-time score the folded\n`agent_model_tokens_total`, so the read does not scan history.\n\nEdge weight:\n    lineage (spawn/fork/resurrect): weight = event_count * 2.0 (no time decay,\n        always shown — the structural skeleton never fades)\n    message (send_message): weight = SUM(EXP(-decay_lambda * days_ago)) * 1.0\n        (recency-decayed; dropped below 0.01)",
         "operationId": "get_fleet_graph_api_fleet_graph_get",
         "parameters": [
           {
@@ -9899,11 +9901,6 @@
             "title": "Stale",
             "default": false
           },
-          "truncated": {
-            "type": "boolean",
-            "title": "Truncated",
-            "default": false
-          },
           "telemetry_stale": {
             "type": "boolean",
             "title": "Telemetry Stale",
@@ -9928,7 +9925,7 @@
           "edges"
         ],
         "title": "FleetGraphResponse",
-        "description": "GET /api/fleet/graph response.\n\n`stale` identifies data-level degradation: a fallback snapshot, truncated\nedge stream, or failed source response. `telemetry_stale` separately says\nthe heartbeat guard was old or missing while this otherwise fresh graph was\nread. `snapshot_at` records when a successful graph snapshot was produced;\na fallback retains that timestamp so clients can show its age."
+        "description": "GET /api/fleet/graph response.\n\n`stale` identifies data-level degradation: a fallback snapshot or a failed\nsource response. `telemetry_stale` separately says\nthe heartbeat guard was old or missing while this otherwise fresh graph was\nread. `snapshot_at` records when a successful graph snapshot was produced;\na fallback retains that timestamp so clients can show its age."
       },
       "ForceExpireImpersonationRequest": {
         "properties": {
@@ -10179,60 +10176,6 @@
         ],
         "title": "ImpersonationMetadata",
         "description": "Declared identity on a rendered message.\n\nThe observed process facts are captured once at request time and live on\nthe session record (``process_metadata``), not on every message."
-      },
-      "ImpersonationRetentionLossRow": {
-        "properties": {
-          "lease_id": {
-            "type": "string",
-            "title": "Lease Id"
-          },
-          "agent_id": {
-            "type": "integer",
-            "title": "Agent Id"
-          },
-          "session_id": {
-            "type": "integer",
-            "title": "Session Id"
-          },
-          "envelope_floor_at": {
-            "type": "string",
-            "format": "date-time",
-            "title": "Envelope Floor At"
-          },
-          "retention_horizon_at": {
-            "anyOf": [
-              {
-                "type": "string",
-                "format": "date-time"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Retention Horizon At"
-          },
-          "created_at": {
-            "type": "string",
-            "format": "date-time",
-            "title": "Created At"
-          },
-          "missing_item_count": {
-            "type": "integer",
-            "title": "Missing Item Count"
-          }
-        },
-        "type": "object",
-        "required": [
-          "lease_id",
-          "agent_id",
-          "session_id",
-          "envelope_floor_at",
-          "retention_horizon_at",
-          "created_at",
-          "missing_item_count"
-        ],
-        "title": "ImpersonationRetentionLossRow",
-        "description": "One incomplete manifest whose required Loki envelope has expired."
       },
       "InspectMetricsMetadata": {
         "properties": {
@@ -11140,6 +11083,18 @@
             "title": "Identity Mismatch",
             "default": false
           },
+          "observed_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Observed At"
+          },
           "shell_count": {
             "type": "integer",
             "title": "Shell Count",
@@ -11208,7 +11163,7 @@
           "paused"
         ],
         "title": "MachineStatus",
-        "description": "A machines-table row state — augmented with live probe results.\n\n`online` / `paused` come from each machine's ops `status_probe` within\nthe configured roster deadline:\n- online=True + paused has a value: probe succeeded\n- online=False + paused=None: probe failed (network unreachable /\n  gateway down)\n- online=True + paused=None: ops server responded, but the operation failed\n  or its response did not match ClusterStatus (abnormal)"
+        "description": "A machines-table row state — augmented with live probe results.\n\n`online` / `paused` come from each machine's ops `status_probe`: the last one\nthe heartbeat liveness pass made (the default read, see `observed_at`), or a\ndial within the configured roster deadline (a fresh read):\n- online=True + paused has a value: probe succeeded\n- online=False + paused=None: probe failed (network unreachable /\n  gateway down)\n- online=True + paused=None: ops server responded, but the operation failed\n  or its response did not match ClusterStatus (abnormal)"
       },
       "McpClientCreate": {
         "properties": {
@@ -11989,11 +11944,6 @@
             },
             "type": "array",
             "title": "Ancestors"
-          },
-          "degraded": {
-            "type": "boolean",
-            "title": "Degraded",
-            "default": false
           }
         },
         "type": "object",
@@ -14232,7 +14182,7 @@
           "to"
         ],
         "title": "RunTimelineWindow",
-        "description": "The inclusive Loki window used to derive one timeline."
+        "description": "The inclusive window used to derive one timeline."
       },
       "ScheduleCreate": {
         "properties": {
@@ -15302,11 +15252,6 @@
             "type": "array",
             "title": "Plugin Stats"
           },
-          "stale": {
-            "type": "boolean",
-            "title": "Stale",
-            "default": false
-          },
           "as_of": {
             "anyOf": [
               {
@@ -15337,7 +15282,7 @@
           "plugin_stats"
         ],
         "title": "StatsDashboard",
-        "description": "GET /api/stats/dashboard response — sidebar-top stats card data pulled in one shot.\n\nAll windowed fields (`tokens` / `cost_usd` / `avg_turn_seconds` /\n`warnings` / `errors`) aggregate over the `applied_window_hours` horizon.\n`window_hours` echoes the selected value — `0` means five minutes; all\nother values are hours.\n`applied_window_hours` is the actually served window in hours, no greater\nthan `window_hours` and clamped to the Loki retention horizon.\n\n- `live_count`: current non-terminated count (from agents_meta, not\n  events; not windowed)\n- `tokens`: windowed telemetry LLM token usage (fresh-cache TTL:\n  `display.stats_dashboard_cache_ttl_s`, default 60s)\n- `cost_usd`: windowed LLM spend in USD, summed from the usage-time\n  `cost_usd` snapshots carried by telemetry Loki `llm_usage` events;\n  events that pre-date the snapshot field contribute 0 (shares the\n  configured fresh-cache TTL with `tokens`, default 60s)\n- `avg_turn_seconds`: windowed avg LLM call wall time\n  (event=turn_end + ok=true)\n- `warnings` / `errors`: raw level totals over the window (critical\n  folds into error). Agent trial-and-error (exec_failed) logs at INFO\n  and is deliberately NOT counted — these numbers are operator-facing\n  alerts, not agent activity.\n- `warnings_dismissed` / `warnings_net` / `errors_dismissed` /\n  `errors_net`: the three-way resolution split (task #1935). The\n  arithmetic is the events-maintenance daemon's class subtraction\n  (`services.events_maintenance.resolution.level_splits`) applied to the\n  SELECTED window instead of the daemon's fixed six hours: events whose\n  (category, level, event_name, source, process) class has an active\n  dismissal in `event_dismissals` — exact, or matching a wildcard row\n  with an empty `process` — count as dismissed, the rest as net, and\n  dismissed + net == the raw total by construction.\n- `total_events`: archived event row count (frozen — the PG events copy\n  stopped growing at the LGTM cutover; not a live gauge)\n\n`avg_turn_seconds` None = zero turns in the window (new DB / no\nactivity); frontend renders \"—\".\n\n`plugin_stats` is not windowed (see `PluginStat`): the runtime values\nbehind cards that plugins declare under `contributions.ui.stats`, joined\nby the console on `(plugin, id)`.\n\n`stale` is true when this payload is the route's last-good response,\nserved because a live recompute failed while the payload was within the\nstale cap (`display.stats_dashboard_stale_max_s`); `as_of` is the UTC\ntime the served payload's reads were assembled — a stale fallback keeps\nits original timestamp so a client can show the data's age."
+        "description": "GET /api/stats/dashboard response — sidebar-top stats card data pulled in one shot.\n\nAll windowed fields (`tokens` / `cost_usd` / `avg_turn_seconds` /\n`warnings` / `errors`) aggregate over the `applied_window_hours` horizon.\n`window_hours` echoes the selected value — `0` means five minutes; all\nother values are hours.\n`applied_window_hours` is the served window in hours: the requested one.\n\n- `live_count`: current non-terminated count (from agents_meta, not\n  events; not windowed)\n- `tokens`: windowed telemetry LLM token usage\n- `cost_usd`: windowed LLM spend in USD, summed from the usage-time\n  `cost_usd` snapshots carried by `llm_usage` events in `telemetry_events`;\n  events that pre-date the snapshot field contribute 0\n- `avg_turn_seconds`: windowed avg LLM call wall time\n  (event=turn_end + ok=true)\n- `warnings` / `errors`: raw level totals over the window (critical\n  folds into error). Agent trial-and-error (exec_failed) logs at INFO\n  and is deliberately NOT counted — these numbers are operator-facing\n  alerts, not agent activity.\n- `warnings_dismissed` / `warnings_net` / `errors_dismissed` /\n  `errors_net`: the three-way resolution split (task #1935). The\n  arithmetic is the events-maintenance daemon's class subtraction\n  (`services.events_maintenance.resolution.level_splits`) applied to the\n  SELECTED window instead of the daemon's fixed six hours: events whose\n  (category, level, event_name, source, process) class has an active\n  dismissal in `event_dismissals` — exact, or matching a wildcard row\n  with an empty `process` — count as dismissed, the rest as net, and\n  dismissed + net == the raw total by construction.\n- `total_events`: archived event row count (frozen — the PG events copy\n  stopped growing at the LGTM cutover; not a live gauge)\n\n`avg_turn_seconds` None = zero turns in the window (new DB / no\nactivity); frontend renders \"—\".\n\n`plugin_stats` is not windowed (see `PluginStat`): the runtime values\nbehind cards that plugins declare under `contributions.ui.stats`, joined\nby the console on `(plugin, id)`.\n\n`as_of` is the UTC time the payload's reads were assembled."
       },
       "StatsTokens": {
         "properties": {

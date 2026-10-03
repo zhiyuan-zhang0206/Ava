@@ -161,6 +161,11 @@ CASES = [
         patches={"_stale_repo_helpers": list},
     ),
     Case("scripts.lint.time_bomb", "tests/test_a.py", "def test_x():\n    f(since='2026-09-06')\n"),
+    Case(
+        "scripts.content_lint.lint_quiesced_loops",
+        "services/x.py",
+        "import asyncio\n\n\nasync def f():\n    while True:\n        await asyncio.sleep(1)\n",
+    ),
     Case("scripts.content_lint.lint_no_cjk", "docs/a.md", f"{_CJK}\n"),
     Case("scripts.content_lint.lint_no_tailnet", "docs/a.md", f"see {_TAILNET_IP}\n"),
 ]

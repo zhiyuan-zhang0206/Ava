@@ -919,7 +919,7 @@ export interface paths {
          *     `events.Event` per frame. code_delta chunks pass through immediately,
          *     native streaming. This is the live tail; `GET /api/agents/{id}/events`
          *     (no `/stream`) is the historical REST query over the persisted unified
-         *     event stream (Loki).
+         *     event stream (`telemetry_events`).
          *
          *     Does **not** check agent_exists as a precondition: subscribing to a
          *     non-existent agent is allowed, you just receive no messages. Otherwise
@@ -968,8 +968,7 @@ export interface paths {
          *     from the log line, so `limit`/`offset` paging stays deterministic).
          *     `limit` returns the configured default window (``display.events_default_limit``
          *     — 100 out of the box), capped at 1000 (over-limit 422s); `offset`
-         *     pages further back and is capped at 10,000. Loki has no native offset,
-         *     so the cap bounds the in-memory parse of `limit + offset + 1` rows.
+         *     pages further back and is capped at 10,000.
          *
          *     No agent-existence precondition (same as `…/activity` and `…/pending`):
          *     an unknown agent or an empty window just returns `[]`.
@@ -1081,11 +1080,9 @@ export interface paths {
          *     the immutable born_spawner chain to the top (message ties never form
          *     ancestors), each row's `depth` = hops up (1 = the direct birth parent).
          *     Terminated agents are included (each row carries `status`); `limit` caps
-         *     the neighbor count, strongest first. The tie graph reads the unified event
-         *     stream (task #180 LGTM cutover): audit edge events stitch the frozen PG
-         *     `events` archive with the Loki live tail and the walks run in Python
-         *     (gateway/inspect/neighbors.py) — the retired `agent_neighbors` SQL function died
-         *     with the frozen table it read.
+         *     the neighbor count, strongest first. The tie graph reads the audit
+         *     record: edge events are aggregated from `audit_events` and the walks run in
+         *     Python (gateway/inspect/neighbors.py).
          *
          *     404: agent_id does not exist (AgentNotFound -> handler returns 404 + reason).
          */
@@ -1115,8 +1112,8 @@ export interface paths {
          *     `output` includes "inspector", renders each template for this agent
          *     ({{agent_id}} -> ``agent_id = <n>``), re-validates the rendered query,
          *     substitutes the Grafana time macros with a fixed recent window (24h in 1h
-         *     buckets), and executes each query — LogQL against Loki, SQL read-only
-         *     against the cluster's Postgres.
+         *     buckets), and executes each query on the cluster's Postgres — LogQL
+         *     templates evaluated over `telemetry_events` / `audit_events`, SQL read-only.
          *
          *     Response: one `PluginMetricResult` per registered inspector metric, in
          *     registration order. `timeseries` / `barchart` metrics carry `series`
@@ -1777,13 +1774,16 @@ export interface paths {
         };
         /**
          * Get Cluster Roster
-         * @description The full multi-machine roster — every registered machine + live status.
+         * @description The full multi-machine roster — every registered machine + status.
          *
          *     Backs the thin-client `ava cluster status`: the gateway's own row is
-         *     resolved locally; each agent-runner is probed in parallel via the
-         *     status_probe op (total wall ≈ the probe timeout regardless
-         *     of N). Same fan-out the `/api/status` cluster panel uses. Bypasses 503 mode
-         *     so the roster stays visible during pause.
+         *     resolved locally; each agent-runner renders from the heartbeat liveness
+         *     pass's last status_probe (`MachineStatus.observed_at` says how old), so the
+         *     read dials nothing and a down host cannot slow it. `fresh=true` probes every
+         *     runner in parallel via the status_probe op instead (total wall ≈ the probe
+         *     timeout regardless of N) — for a caller that must see a restart land, such as
+         *     the fleet update. Same fan-out the `/api/status` cluster panel uses. Bypasses
+         *     503 mode so the roster stays visible during pause.
          */
         get: operations["get_cluster_roster_api_cluster_roster_get"];
         put?: never;
@@ -1803,9 +1803,8 @@ export interface paths {
         };
         /**
          * Get Cluster Admin Events
-         * @description Slice the unified event stream from Loki (category=telemetry/log) for
-         *     ops debugging without SSH — the LGTM replacement for the PG `events` read
-         *     (task #1197).
+         * @description Slice the unified event stream (category=telemetry/log, read from
+         *     `telemetry_events`) for ops debugging without SSH.
          *
          *     Filters compose (AND):
          *       - `agent_id=N`: only this agent's events (gateway / daemon rows excluded).
@@ -1814,8 +1813,8 @@ export interface paths {
          *       - `since=2h` / `since=2026-05-25T00:00Z`: relative window or absolute
          *         timestamp. Relative format `<int><unit>` with unit `s/m/h/d`.
          *       - `event=spawn,terminate`: comma-separated event names.
-         *       - `grep=<substring>`: substring match on the raw log line (the JSON
-         *         body includes the `msg` payload).
+         *       - `grep=<substring>`: case-insensitive substring match on the event
+         *         name, source and payload (which includes the `msg` text).
          *       - `limit`: max rows to return, capped at 1000 (protective constant).
          *         Omitted returns the configured default
          *         (``display.cluster_events_default_limit`` - 200 out of the box).
@@ -1843,12 +1842,11 @@ export interface paths {
          * Get Cluster Machines
          * @description List every registered machine with its description + live status.
          *
-         *     Backs ava.agents.list_machines(). Live status comes from the same
-         *     status_probe op round-trip the status panel uses
-         *     (gateway is live from its own perspective); total wall time is
-         *     bounded by the probe timeout regardless of machine count. role /
-         *     gateway_url are intentionally omitted — agents reason over the free-text
-         *     description, not ops topology.
+         *     Backs ava.agents.list_machines(). Live status comes from the same source the
+         *     roster uses: the heartbeat liveness pass's last status_probe, or with
+         *     `fresh=true` a probe of every runner now (gateway is live from its own
+         *     perspective). role / gateway_url are intentionally omitted — agents reason
+         *     over the free-text description, not ops topology.
          */
         get: operations["get_cluster_machines_api_cluster_machines_get"];
         put?: never;
@@ -2695,7 +2693,7 @@ export interface paths {
          *         case-insensitive (unknown value 422s).
          *       - `tier=<business|anomaly|observation|noise>[,...]`: comma-separated
          *         display tiers, ORed within the list and ANDed with every other filter.
-         *         The Loki predicate is derived before pagination so `meta.total` and
+         *         The tier predicate is applied before pagination so `meta.total` and
          *         page boundaries stay exact.
          *       - `from=<ISO-8601>` / `to=<ISO-8601>`: inclusive time window
          *         (`ts >= from AND ts <= to`); either side may be omitted. Values
@@ -2706,16 +2704,14 @@ export interface paths {
          *         (`from = now - hours`). Mutually exclusive with `from`.
          *       - Default window: when neither `from` nor `hours` is given, the last
          *         24 hours are assumed (`from = now - 24h`) — an unbounded query
-         *         would scan the whole retention history (6M+ rows across every
-         *         month partition), so the API never runs one. `meta.window_from`
+         *         would scan the whole record, so the API never runs one. `meta.window_from`
          *         always echoes the effective lower bound.
          *       - `limit` (configured default window — ``display.events_default_limit``,
          *         100 out of the box — cap 1000) / `offset` (cap 10,000): offset
          *         paging with stable ordering across same-`ts` rows. The cap bounds the
-         *         in-memory Loki JSON parse (`limit + offset + 1` rows).
+         *         rows one read materializes (`limit + offset + 1`).
          *       - `with_total=1`: also compute the exact filtered row count
-         *         (`meta.total`) via the Loki count path — one extra full-window
-         *         aggregation, so it is opt-in; without it `meta.total` is null.
+         *         (`meta.total`) — one extra full-window count, so it is opt-in; without it `meta.total` is null.
          *
          *     Response: `meta` (opt-in exact filtered `total`, effective
          *     `window_from`/`window_to`, `limit`/`offset`, `has_more` from the list
@@ -2911,32 +2907,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/alerts/impersonation-event-retention": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * List Impersonation Event Retention
-         * @description Operator panel rows for frozen manifests that crossed Loki retention.
-         *
-         *     The query is machine-scoped because the runner that owns the manifest
-         *     detects its retention floor. The normal alerts list already exposes the
-         *     accompanying alert; this endpoint supplies the lease/floor/missing-count
-         *     evidence needed to investigate it without permitting a local mirror to
-         *     clear the condition.
-         */
-        get: operations["list_impersonation_event_retention_api_alerts_impersonation_event_retention_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/health": {
         parameters: {
             query?: never;
@@ -2992,28 +2962,19 @@ export interface paths {
          *
          *     Data sources:
          *     - `live_count`: agents_meta table — all non-terminated agents (running/idling)
-         *     - `tokens` / `cost_usd`: full UTC days from the fleet ledger plus a Loki tail
-         *     - average turn duration: Loki's unified event stream in 12-hour shards
-         *     - warning/error counts: per-class counts via the resolution daemon's
-         *       grouped query (12h shards), split into total / dismissed / net with
-         *       the daemon's class arithmetic over the SELECTED window (task #1935)
+         *     - `tokens` / `cost_usd` / average turn duration: the window's `llm_usage` and
+         *       `turn_end` rows in `telemetry_events` (cost is each row's usage-time snapshot)
+         *     - warning/error counts: per-class counts of `telemetry_events` rows, split into
+         *       total / dismissed / net with the resolution daemon's class arithmetic over the
+         *       SELECTED window (task #1935)
          *     - `total_events`: archived event row count — frozen historical constant
          *       (task #1281 parity run; PG events dropped; not a live gauge)
          *
          *     `?hours=` selects the aggregation window (0 = last 5m; 1/6/24/72/168 =
          *     hours), whitelisted by `StatsWindowHours` (anything else 422s); the served horizon is
-         *     `applied_window_hours`. Zero-data scenario: tokens all 0, cost_usd 0.0, avg_turn_seconds
-         *     None (frontend shows "—"). The ledger-first split avoids the fixed-cost
-         *     full-window token scans; the indexed Loki tail rereads the newest retained
-         *     ledger day to absorb late writes without double counting.
-         *
-         *     A failed recompute (Loki transport error or refused query admission) serves
-         *     the window's last-good response marked `stale` (its `as_of` keeps the
-         *     original read time) while it is within `display.stats_dashboard_stale_max_s`;
-         *     past the cap — or with no last-good payload — the route keeps its retriable
-         *     503, so a real outage surfaces within the cap. Each degradation episode
-         *     emits one `stats_dashboard_stale` event, rate-capped per reason by the
-         *     `stats_dashboard_stale_emit_interval_s` display setting.
+         *     `applied_window_hours`, which is the requested window. Zero-data scenario: tokens all 0,
+         *     cost_usd 0.0, avg_turn_seconds None (frontend shows "—"). The window is computed on
+         *     every request, in one connection, with an 8-second statement timeout.
          */
         get: operations["get_stats_dashboard_api_stats_dashboard_get"];
         put?: never;
@@ -3256,7 +3217,7 @@ export interface paths {
          * @description Fleet-wide weighted agent graph — nodes (agents) + edges (lineage + messages).
          *
          *     Nodes carry status, label, a windowed recent-work `node_score`, and
-         *     restart-proof `total_tokens` consumed in the retained window (7d). Edges
+         *     `total_tokens` consumed in the retained window (7d). Edges
          *     split into two families: lineage
          *     (spawn/fork/resurrect) is structural and permanent; messages (send_message)
          *     decay with recency. Terminated agents — and edges touching a terminated
@@ -3280,11 +3241,11 @@ export interface paths {
          *
          *     Node score (windowed, drives node size):
          *         node_score = SUM(in_total) * 0.1 + SUM(out_total) * 1.0
-         *     over the agent's `llm_usage` counters in the window — read from
-         *     Prometheus (`ava_llm_usage_in_total` / `ava_llm_usage_out_total`,
-         *     windowed via `increase(...)`). `total_tokens` is the sum of the same two
-         *     counters over the retained 7d window, also using `increase(...)` so
-         *     exporter process restarts do not reset it.
+         *     over the agent's `llm_usage` rows in the window. `total_tokens` is the sum of
+         *     the same two fields over the retained 7d window. Both are read in parts
+         *     (`gateway/routers/_fleet_tokens.py`): raw rows of the newest two days, the
+         *     day-grain ledger before them, and for the all-time score the folded
+         *     `agent_model_tokens_total`, so the read does not scan history.
          *
          *     Edge weight:
          *         lineage (spawn/fork/resurrect): weight = event_count * 2.0 (no time decay,
@@ -5194,8 +5155,8 @@ export interface components {
          * FleetGraphResponse
          * @description GET /api/fleet/graph response.
          *
-         *     `stale` identifies data-level degradation: a fallback snapshot, truncated
-         *     edge stream, or failed source response. `telemetry_stale` separately says
+         *     `stale` identifies data-level degradation: a fallback snapshot or a failed
+         *     source response. `telemetry_stale` separately says
          *     the heartbeat guard was old or missing while this otherwise fresh graph was
          *     read. `snapshot_at` records when a successful graph snapshot was produced;
          *     a fallback retains that timestamp so clients can show its age.
@@ -5210,11 +5171,6 @@ export interface components {
              * @default false
              */
             stale: boolean;
-            /**
-             * Truncated
-             * @default false
-             */
-            truncated: boolean;
             /**
              * Telemetry Stale
              * @default false
@@ -5367,32 +5323,6 @@ export interface components {
             anchor_item_id?: string | null;
             /** Seq */
             seq?: number | null;
-        };
-        /**
-         * ImpersonationRetentionLossRow
-         * @description One incomplete manifest whose required Loki envelope has expired.
-         */
-        ImpersonationRetentionLossRow: {
-            /** Lease Id */
-            lease_id: string;
-            /** Agent Id */
-            agent_id: number;
-            /** Session Id */
-            session_id: number;
-            /**
-             * Envelope Floor At
-             * Format: date-time
-             */
-            envelope_floor_at: string;
-            /** Retention Horizon At */
-            retention_horizon_at: string | null;
-            /**
-             * Created At
-             * Format: date-time
-             */
-            created_at: string;
-            /** Missing Item Count */
-            missing_item_count: number;
         };
         /**
          * InspectMetricsMetadata
@@ -5782,8 +5712,9 @@ export interface components {
          * MachineStatus
          * @description A machines-table row state — augmented with live probe results.
          *
-         *     `online` / `paused` come from each machine's ops `status_probe` within
-         *     the configured roster deadline:
+         *     `online` / `paused` come from each machine's ops `status_probe`: the last one
+         *     the heartbeat liveness pass made (the default read, see `observed_at`), or a
+         *     dial within the configured roster deadline (a fresh read):
          *     - online=True + paused has a value: probe succeeded
          *     - online=False + paused=None: probe failed (network unreachable /
          *       gateway down)
@@ -5834,6 +5765,8 @@ export interface components {
              * @default false
              */
             identity_mismatch: boolean;
+            /** Observed At */
+            observed_at?: string | null;
             /**
              * Shell Count
              * @default 0
@@ -6219,11 +6152,6 @@ export interface components {
             neighbors: components["schemas"]["NeighborRow"][];
             /** Ancestors */
             ancestors: components["schemas"]["NeighborRow"][];
-            /**
-             * Degraded
-             * @default false
-             */
-            degraded: boolean;
         };
         /**
          * NoticeCreateIn
@@ -7274,7 +7202,7 @@ export interface components {
         };
         /**
          * RunTimelineWindow
-         * @description The inclusive Loki window used to derive one timeline.
+         * @description The inclusive window used to derive one timeline.
          */
         RunTimelineWindow: {
             /**
@@ -7731,17 +7659,14 @@ export interface components {
          *     `warnings` / `errors`) aggregate over the `applied_window_hours` horizon.
          *     `window_hours` echoes the selected value — `0` means five minutes; all
          *     other values are hours.
-         *     `applied_window_hours` is the actually served window in hours, no greater
-         *     than `window_hours` and clamped to the Loki retention horizon.
+         *     `applied_window_hours` is the served window in hours: the requested one.
          *
          *     - `live_count`: current non-terminated count (from agents_meta, not
          *       events; not windowed)
-         *     - `tokens`: windowed telemetry LLM token usage (fresh-cache TTL:
-         *       `display.stats_dashboard_cache_ttl_s`, default 60s)
+         *     - `tokens`: windowed telemetry LLM token usage
          *     - `cost_usd`: windowed LLM spend in USD, summed from the usage-time
-         *       `cost_usd` snapshots carried by telemetry Loki `llm_usage` events;
-         *       events that pre-date the snapshot field contribute 0 (shares the
-         *       configured fresh-cache TTL with `tokens`, default 60s)
+         *       `cost_usd` snapshots carried by `llm_usage` events in `telemetry_events`;
+         *       events that pre-date the snapshot field contribute 0
          *     - `avg_turn_seconds`: windowed avg LLM call wall time
          *       (event=turn_end + ok=true)
          *     - `warnings` / `errors`: raw level totals over the window (critical
@@ -7767,11 +7692,7 @@ export interface components {
          *     behind cards that plugins declare under `contributions.ui.stats`, joined
          *     by the console on `(plugin, id)`.
          *
-         *     `stale` is true when this payload is the route's last-good response,
-         *     served because a live recompute failed while the payload was within the
-         *     stale cap (`display.stats_dashboard_stale_max_s`); `as_of` is the UTC
-         *     time the served payload's reads were assembled — a stale fallback keeps
-         *     its original timestamp so a client can show the data's age.
+         *     `as_of` is the UTC time the payload's reads were assembled.
          */
         StatsDashboard: {
             /** Live Count */
@@ -7800,11 +7721,6 @@ export interface components {
             total_events: number;
             /** Plugin Stats */
             plugin_stats: components["schemas"]["PluginStat"][];
-            /**
-             * Stale
-             * @default false
-             */
-            stale: boolean;
             /** As Of */
             as_of?: string | null;
         };
@@ -10415,7 +10331,10 @@ export interface operations {
     };
     get_cluster_roster_api_cluster_roster_get: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Dial every runner now instead of reading the last probe. */
+                fresh?: boolean;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -10429,6 +10348,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["MachineStatus"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
@@ -10472,7 +10400,10 @@ export interface operations {
     };
     get_cluster_machines_api_cluster_machines_get: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Dial every runner now instead of reading the last probe. */
+                fresh?: boolean;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -10486,6 +10417,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AgentMachineRow"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
@@ -11994,37 +11934,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
-                };
-            };
-        };
-    };
-    list_impersonation_event_retention_api_alerts_impersonation_event_retention_get: {
-        parameters: {
-            query: {
-                machine: string;
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ImpersonationRetentionLossRow"][];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

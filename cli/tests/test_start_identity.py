@@ -21,7 +21,7 @@ from base import cluster
 from base.native_process.os_platform import file_lock
 from cli import init_intent, start_intent
 from cli import start_identity as identity
-from tests.lifecycle._init_identity import prepare_init_identity
+from cli.tests._init_identity import prepare_init_identity
 
 
 @pytest.fixture(autouse=True)

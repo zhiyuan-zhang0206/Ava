@@ -52,31 +52,36 @@ from psycopg_pool import ConnectionPool
 import base.db
 from base import telemetry
 from base.config import settings
+from base.daemon.endpoints import ServiceEndpoint, ServiceEndpoints
 from base.daemon.health import (
     Liveness,
-    health_port,
     start_health_server,
     stop_health_server,
 )
 from base.daemon.shutdown import install_graceful_shutdown
+from base.db import Database
 from base.db.transaction import write_transaction
 from base.events.live.announce import publish_agent_updated_sync
+from base.events.live.bus import EventBus
 from base.log import init_gateway_process
-from base.paths import pid_path
 from services.pidfile import acquire_pidfile, pidfile_holds_daemon, remove_pidfile
 
 _log = logging.getLogger("ava_builtins.plugins.ava_fleet.task_maintenance.daemon")
 
 
+def _endpoint() -> ServiceEndpoint:
+    return ServiceEndpoints.from_settings().of("task_maintenance")
+
+
 def _pidfile() -> Path:
-    return pid_path("task_maintenance")
+    return _endpoint().pidfile
 
 
 _LIVENESS_TIMEOUT_S = 60.0
 _LIVENESS_BEAT_STEP_S = 30.0
 
 
-def _deliver_message(
+def deliver_message(
     pool: ConnectionPool,
     agent_id: int,
     message: str,
@@ -110,7 +115,7 @@ def _deliver_message(
                 "UPDATE agent_tasks SET escalated_at = now() WHERE id = ANY(%s)",
                 (escalate_task_ids,),
             )
-    publish_agent_updated_sync(agent_id)
+    publish_agent_updated_sync(EventBus.from_settings(), agent_id)
     # The connection context commits before the best-effort wake. A missing
     # subscriber is expected for a terminated agent and does not resurrect it.
     base.db.publish_inbound_wake(agent_id, str(inbound_id))
@@ -234,7 +239,7 @@ def _run_reminders(pool: ConnectionPool, backoff_seconds: float) -> int:
         task_ids = [task_id for task_id, *_ in tasks]
         try:
             # Deliver before counters, so a failed digest leaves every task eligible.
-            _deliver_message(pool, owner, _reminder_digest_message(tasks))
+            deliver_message(pool, owner, _reminder_digest_message(tasks))
         except Exception as exc:
             _log.error(
                 "[task-maintenance] reminder digest for owner %s (tasks %s) failed: %r",
@@ -341,7 +346,7 @@ def _escalate_to_user_queue(
             ),
         )
     # Reconcile the notice queue only after the escalation has committed.
-    publish_agent_updated_sync(owner)
+    publish_agent_updated_sync(EventBus.from_settings(), owner)
     return True
 
 
@@ -373,7 +378,7 @@ def _run_escalate(pool: ConnectionPool, escalate_n: int) -> int:
                 # Delegated subtask -> tell the delegator once per overdue
                 # window. >= (not ==): a sweep whose escalation failed or was
                 # missed must still fire later, never losing the window.
-                # `escalated_at`, stamped by _deliver_message in the digest's
+                # `escalated_at`, stamped by deliver_message in the digest's
                 # own transaction, is what makes it at-most-once; any update()
                 # clears it with the reminder counters, re-arming the task's
                 # next window.
@@ -420,7 +425,7 @@ def _run_escalate(pool: ConnectionPool, escalate_n: int) -> int:
     for delegator, tasks in stalled_by_delegator.items():
         task_ids = [task_id for task_id, _, _, _ in tasks]
         try:
-            _deliver_message(
+            deliver_message(
                 pool,
                 delegator,
                 _delegator_digest_message(tasks),
@@ -533,10 +538,11 @@ async def run() -> None:
     _log.info("[task-maintenance] pidfile written: %s", _pidfile())
 
     liveness = Liveness(_LIVENESS_TIMEOUT_S)
-    health = await start_health_server("task_maintenance", liveness=liveness)
-    _log.info("[task-maintenance] healthz listening on :%s", health_port("task_maintenance"))
+    endpoint = _endpoint()
+    health = await start_health_server("task_maintenance", endpoint.health_port, liveness=liveness)
+    _log.info("[task-maintenance] healthz listening on :%s", endpoint.health_port)
 
-    pool = base.db.pool()
+    pool = Database.from_settings().pool()
     try:
         await _dispatch_loop(pool, liveness)
     finally:

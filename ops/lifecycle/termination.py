@@ -16,7 +16,7 @@ from base.agents.messages.envelope import validate_writable_source
 from base.db import publish_inbound_wake
 from base.db.transaction import write_transaction
 from base.log import logger
-from base.telemetry.audit_events import prepare_event_log
+from base.telemetry.audit_events import prepare_event_log, record_audit
 from ops.lifecycle.events import publish_page_closed as publish_page_closed
 from ops.pages import list_open_page_names
 
@@ -181,11 +181,9 @@ def _stage_termination_event(
     event = prepare_event_log(
         event_type="terminate", agent_id=agent_id, source=source, payload=payload
     )
-    from base.agents.impersonation_manifest import stage_central_expected_event
+    from base.agents.impersonation_manifest import record_central_event
 
-    return stage_central_expected_event(
-        conn, event, origin_kind="ops_terminate", origin_id=inbound_id
-    )
+    return record_audit(conn, record_central_event(conn, event))
 
 
 def _enqueue_termination_inbounds(

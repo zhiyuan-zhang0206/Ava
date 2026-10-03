@@ -16,7 +16,7 @@ on:
       - 'cli/commands/lifecycle/service_stop.py'
       - 'cli/commands/lifecycle/stop.py'
       - 'tests/lifecycle/native_root/**'
-      - 'tests/services/test_ava_root_daemon.py'
+      - 'services/ava_root/tests/test_ava_root_daemon.py'
       - 'conftest.py'
       - 'tests/fixtures/*.py'
       - 'tests/_*.py'
@@ -45,7 +45,7 @@ jobs:
           sudo -n true
           systemctl --version
       - name: Root lifetime and independent data sibling
-        run: uv run pytest --noconftest tests/services/test_ava_root_daemon.py::test_native_systemd_root_lifetime -q --junitxml=root-lifetime.xml
+        run: uv run pytest --noconftest services/ava_root/tests/test_ava_root_daemon.py::test_native_systemd_root_lifetime -q --junitxml=root-lifetime.xml
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
         with:

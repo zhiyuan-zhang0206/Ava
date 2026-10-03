@@ -4,119 +4,70 @@ Locks the query contract of the sidebar stats card — pyright/tsc cannot catch
 drift between hard-coded `payload->>'X'` keys in SQL and emit site field names,
 these tests are the only defense.
 
-Runs on ava_test DB (real SQL) for the Postgres metadata read. The Loki-backed
-event aggregates use `FakeLoki`; the `agents` table's live_count is similarly
-populated via INSERT of real rows.
+Runs on ava_test DB (real SQL): the window's telemetry rows are INSERTed into
+`telemetry_events` (audit rows into `audit_events`), and the `agents` table's
+live_count is populated via INSERT of real rows.
 """
 
 from __future__ import annotations
 
-from collections import Counter
-from collections.abc import Iterator
-from concurrent.futures import ThreadPoolExecutor
+import json
+import uuid
 from datetime import UTC, datetime, timedelta
-from itertools import pairwise
-from types import SimpleNamespace
-from typing import Any, Literal
+from typing import Any
 
-import httpx
 import psycopg
 import pytest
 from fastapi.testclient import TestClient
 
-from base import telemetry
-from base.cluster import home_label
-from base.config import settings
 from base.packages.plugins import stats
-from base.paths import ava_home
-from base.telemetry.loki_index_labels import EVENT_STREAM_RETENTION, retention_floor
+from base.telemetry.observability import cluster_label
 from gateway.app import app
-from gateway.cluster import _stats_dashboard, status
-from gateway.cluster.schemas import StatsDashboard
-from gateway.lgtm import loki_events, loki_query_budget
+from gateway.cluster import status
 from gateway.schemas.stats import StatsWindowHours, window_delta
-from tests.gateway.loki_fake import FakeLoki
 
 
-@pytest.fixture(autouse=True)
-def fake_loki(monkeypatch: pytest.MonkeyPatch) -> FakeLoki:
-    """Route all loki_events calls through an in-memory fake; each test gets
-    an empty store and adds its own rows."""
-    fake = FakeLoki()
-    monkeypatch.setattr(loki_events, "query_events", fake.query_events)
-    monkeypatch.setattr(loki_events, "count_events", fake.count_events)
-    monkeypatch.setattr(loki_events, "count_grouped", fake.count_grouped)
-    monkeypatch.setattr(loki_events, "count_event_classes", fake.count_event_classes)
-    monkeypatch.setattr(loki_events, "attribute_aggregate", fake.attribute_aggregate)
-    return fake
+class _EventRows:
+    """Writes the events a test names into the tables the dashboard reads."""
 
+    def __init__(self, db: psycopg.Connection) -> None:
+        self._db = db
 
-@pytest.fixture(autouse=True)
-def clear_llm_usage_sums_cache() -> None:
-    """Keep every FakeLoki test isolated from the route's configurable cache."""
-    _stats_dashboard.cache_clear()
-
-
-# ── stale serving (task #3973) ─────────────────────────────────────────────
-
-_STALE_EVENT = "stats_dashboard_stale"
-
-
-class _CacheClock:
-    """Zero-origin clock: integer TTL advances stay exact across test runs."""
-
-    def __init__(self) -> None:
-        self._t = 0.0
-
-    def __call__(self) -> float:
-        return self._t
-
-    def advance(self, seconds: float) -> None:
-        self._t += seconds
+    def add(
+        self,
+        *,
+        event: str,
+        agent_id: int | None = None,
+        level: str = "info",
+        payload: dict[str, Any] | None = None,
+        ts_offset_hours: float = 0,
+        ts: datetime | None = None,
+        category: str = "telemetry",
+        cluster: str | None = None,
+    ) -> None:
+        when = ts if ts is not None else datetime.now(UTC) - timedelta(hours=ts_offset_hours)
+        uid = uuid.uuid4().int % (1 << 62)
+        attributes = json.dumps(payload or {})
+        if category == "audit":
+            self._db.execute(
+                "INSERT INTO audit_events (event_uid, ts, agent_id, machine, process, event_name, "
+                "level, source, attributes) VALUES (%s, %s, %s, 'test', 'test', %s, %s, 'test', "
+                "%s::jsonb)",
+                (uid, when, agent_id, event, level, attributes),
+            )
+            return
+        self._db.execute(
+            "INSERT INTO telemetry_events (event_uid, ts, agent_id, machine, cluster, process, "
+            "category, event_name, level, source, attributes) VALUES (%s, %s, %s, 'test', %s, "
+            "'test', %s, %s, %s, 'test', %s::jsonb)",
+            (uid, when, agent_id, cluster or cluster_label(), category, event, level, attributes),
+        )
 
 
 @pytest.fixture
-def cache_clock(monkeypatch: pytest.MonkeyPatch) -> _CacheClock:
-    clock = _CacheClock()
-    monkeypatch.setattr(settings.display, "stats_dashboard_swr_max_s", 0.0)
-    monkeypatch.setattr(_stats_dashboard, "_monotonic", clock)
-    return clock
-
-
-@pytest.fixture(autouse=True)
-def _reset_stale_emitter() -> Iterator[None]:
-    """The stale emitter's per-reason rate cap is process-global state."""
-    _stats_dashboard._stale_emit_at.clear()
-    yield
-    _stats_dashboard._stale_emit_at.clear()
-
-
-@pytest.fixture(autouse=True)
-def emitted(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]:
-    """Capture the attributes of every `stats_dashboard_stale` emission."""
-    captured: list[dict[str, Any]] = []
-
-    def capture_emit(
-        _category: str,
-        event_name: str,
-        *,
-        attributes: dict[str, Any] | None = None,
-        **_kwargs: object,
-    ) -> None:
-        if event_name == _STALE_EVENT:
-            assert attributes is not None  # the emitter always names route+reason
-            captured.append(dict(attributes))
-
-    monkeypatch.setattr(telemetry, "emit", capture_emit)
-    return captured
-
-
-def _raise_loki_timeout(*_args: Any, **_kwargs: Any) -> float:
-    raise httpx.ReadTimeout("Loki timed out")
-
-
-def _raise_loki_budget(*_args: Any, **_kwargs: Any) -> float:
-    raise loki_query_budget.LokiQueryBudgetError("queue_full")
+def event_rows(db_conn: psycopg.Connection) -> _EventRows:
+    """The window's event rows: each test adds its own."""
+    return _EventRows(db_conn)
 
 
 def _insert_agent_row(db: psycopg.Connection, label: str = "t") -> int:
@@ -135,432 +86,6 @@ def _insert_agent(db: psycopg.Connection, *, status: str = "running", spawner: s
             (tid, spawner, status),
         )
     return tid
-
-
-def _insert_token_ledger_row(
-    db: psycopg.Connection,
-    *,
-    agent_id: int,
-    days_ago: int,
-    model: str,
-    tokens_in: int,
-    tokens_out: int,
-    tokens_cached: int,
-    cost_usd: float,
-) -> None:
-    """Add one per-agent, per-model daily token rollup row."""
-    with db.cursor() as cur:
-        cur.execute(
-            "INSERT INTO agent_model_tokens_daily "
-            "(agent_id, day, model, tokens_in, tokens_out, tokens_cached, cost_usd) "
-            "VALUES (%s, (now() AT TIME ZONE 'UTC')::date - %s, %s, %s, %s, %s, %s)",
-            (agent_id, days_ago, model, tokens_in, tokens_out, tokens_cached, cost_usd),
-        )
-
-
-def test_dashboard_does_not_hold_db_connection_during_loki_queries(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Waiting/running under the global Loki budget must not consume a DB slot."""
-
-    class FakeCursor:
-        def __init__(self) -> None:
-            self.rows = [(2,), (10,)]
-
-        def __enter__(self) -> FakeCursor:
-            return self
-
-        def __exit__(self, *args: object) -> None:
-            return None
-
-        def execute(self, query: str, params: object | None = None) -> None:
-            return None
-
-        def fetchone(self) -> tuple[int]:
-            return self.rows.pop(0)
-
-        def fetchall(self) -> list[tuple[int]]:
-            # active dismissals read: no dismissal rows in the fake DB.
-            return []
-
-    class FakeConnection:
-        def __init__(self) -> None:
-            self.cursor_value = FakeCursor()
-
-        def __enter__(self) -> FakeConnection:
-            pool.active = True
-            return self
-
-        def __exit__(self, *args: object) -> None:
-            pool.active = False
-
-        def cursor(self, *args: object, **kwargs: object) -> FakeCursor:
-            return self.cursor_value
-
-    class FakePool:
-        active = False
-
-        def connection(self) -> FakeConnection:
-            return FakeConnection()
-
-    pool = FakePool()
-
-    clusters: list[str | None] = []
-
-    def assert_db_released(*args: Any, **kwargs: Any) -> int:
-        assert pool.active is False
-        clusters.append(kwargs.get("cluster"))
-        return 0
-
-    def assert_db_released_grouped(*args: Any, **kwargs: Any) -> dict[str, int]:
-        assert pool.active is False
-        clusters.append(kwargs.get("cluster"))
-        return {}
-
-    def assert_db_released_classes(*args: Any, **kwargs: Any) -> dict[object, int]:
-        assert pool.active is False
-        return {}
-
-    monkeypatch.setattr(loki_events, "attribute_aggregate", assert_db_released)
-    monkeypatch.setattr(loki_events, "count_events", assert_db_released)
-    monkeypatch.setattr(loki_events, "count_grouped", assert_db_released_grouped)
-    monkeypatch.setattr(loki_events, "count_event_classes", assert_db_released_classes)
-    request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(db_pool=pool)))
-    result = status.get_stats_dashboard(request, StatsWindowHours.H24)  # type: ignore[arg-type]
-    assert result.live_count == 2
-    assert result.total_events == status.ARCHIVE_TOTAL_ROWS
-    assert result.warnings == 0
-    assert result.warnings_dismissed == 0
-    assert clusters
-    assert set(clusters) == {home_label(ava_home())}
-
-
-@pytest.mark.parametrize("reason", ["queue_full", "acquire_timeout"])
-def test_dashboard_local_loki_budget_rejection_is_503(
-    db_conn: psycopg.Connection,
-    monkeypatch: pytest.MonkeyPatch,
-    reason: Literal["queue_full", "acquire_timeout"],
-) -> None:
-    """Dashboard saturation uses the same retriable 503 wire contract (no
-    last-good payload exists here, so the stale fallback cannot apply)."""
-
-    def reject(*args: Any, **kwargs: Any) -> float:
-        raise loki_query_budget.LokiQueryBudgetError(reason)
-
-    monkeypatch.setattr(loki_events, "attribute_aggregate", reject)
-    db_conn.commit()
-    with TestClient(app) as client:
-        response = client.get("/api/stats/dashboard")
-    assert response.status_code == 503
-    assert response.json()["detail"] == f"Loki query budget unavailable ({reason}); retry"
-    assert response.headers["retry-after"] == "1"
-
-
-@pytest.mark.parametrize(
-    ("loki_method", "error"),
-    [
-        ("attribute_aggregate", httpx.ConnectError("Loki disconnected")),
-        ("count_events", httpx.ReadTimeout("Loki timed out")),
-    ],
-)
-def test_dashboard_loki_transport_error_is_retriable_503(
-    db_conn: psycopg.Connection,
-    monkeypatch: pytest.MonkeyPatch,
-    loki_method: Literal["attribute_aggregate", "count_events"],
-    error: httpx.HTTPError,
-) -> None:
-    """Loki transport failures become the dashboard's typed retry response (no
-    last-good payload exists here, so the stale fallback cannot apply)."""
-
-    def unavailable(*args: Any, **kwargs: Any) -> float:
-        raise error
-
-    monkeypatch.setattr(loki_events, loki_method, unavailable)
-    db_conn.commit()
-    with TestClient(app) as client:
-        response = client.get("/api/stats/dashboard")
-    assert response.status_code == 503
-    assert response.headers["retry-after"] == "1"
-    assert type(error).__name__ in response.json()["detail"]
-
-
-def test_observability_read_unavailable_is_clean_503(
-    db_conn: psycopg.Connection,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    message = (
-        "observability reads unavailable for this cluster; set "
-        "AVA_TELEMETRY_LOKI_URL and provide its stack, or accept that this "
-        "cluster has no observability"
-    )
-
-    def unavailable(*_args: Any, **_kwargs: Any) -> float:
-        raise loki_events.ObservabilityReadUnavailable(message)
-
-    monkeypatch.setattr(loki_events, "attribute_aggregate", unavailable)
-    db_conn.commit()
-    with TestClient(app) as client:
-        response = client.get("/api/stats/dashboard")
-
-    assert response.status_code == 503
-    body = response.json()
-    assert body["code"] == "observability_read_unavailable"
-    assert body["detail"] == message
-    assert body["retryable"] is True
-
-
-def test_dashboard_shards_long_loki_windows_and_merges_aggregates(
-    db_conn: psycopg.Connection,
-    fake_loki: FakeLoki,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Turn reads use 12h shards; each W/E shard has one grouped query."""
-    aid = _insert_agent(db_conn, status="running")
-    fake_loki.add(
-        event="turn_end",
-        agent_id=aid,
-        payload={"duration_seconds": 10.0, "ok": True},
-        ts_offset_hours=5,
-    )
-    fake_loki.add(
-        event="turn_end",
-        agent_id=aid,
-        payload={"duration_seconds": 2.0, "ok": True},
-        ts_offset_hours=0.5,
-    )
-    fake_loki.add(event="log_warning", level="warning", ts_offset_hours=5)
-    fake_loki.add(event="log_error", level="error", ts_offset_hours=0.5)
-    fake_loki.add(
-        event="llm_usage",
-        payload={"in_total": 100, "out_total": 20, "cache_read": 50, "cost_usd": 1.5},
-        ts_offset_hours=5,
-    )
-    fake_loki.add(
-        event="llm_usage",
-        payload={"in_total": 10, "out_total": 2, "cache_read": 5, "cost_usd": 0.5},
-        ts_offset_hours=0.5,
-    )
-
-    llm_usage_windows: list[tuple[datetime, datetime]] = []
-    sharded_aggregate_spans: list[tuple[datetime, datetime]] = []
-    count_spans: list[tuple[datetime, datetime]] = []
-    class_spans: list[tuple[datetime, datetime]] = []
-    real_aggregate = fake_loki.attribute_aggregate
-    real_count = fake_loki.count_events
-    real_classes = fake_loki.count_event_classes
-
-    def spy_aggregate(**kwargs: Any) -> float | list[tuple[str, float]]:
-        spans = (
-            llm_usage_windows
-            if kwargs.get("event_names") == ["llm_usage"]
-            else sharded_aggregate_spans
-        )
-        spans.append((kwargs["from_"], kwargs["to"]))
-        return real_aggregate(**kwargs)
-
-    def spy_count(**kwargs: Any) -> int:
-        count_spans.append((kwargs["from_"], kwargs["to"]))
-        return real_count(**kwargs)
-
-    def spy_classes(**kwargs: Any) -> dict[object, int]:
-        class_spans.append((kwargs["from_"], kwargs["to"]))
-        return real_classes(**kwargs)
-
-    monkeypatch.setattr(loki_events, "attribute_aggregate", spy_aggregate)
-    monkeypatch.setattr(loki_events, "count_events", spy_count)
-    monkeypatch.setattr(loki_events, "count_event_classes", spy_classes)
-    db_conn.commit()
-    with TestClient(app) as client:
-        body = client.get("/api/stats/dashboard", params={"hours": 24}).json()
-
-    assert body["avg_turn_seconds"] == 6.0
-    assert body["warnings"] == 1
-    assert body["warnings_dismissed"] == 0
-    assert body["warnings_net"] == 1
-    assert body["errors"] == 1
-    assert body["errors_dismissed"] == 0
-    assert body["errors_net"] == 1
-    assert body["tokens"] == {"input": 110, "output": 22, "cache_read": 55, "cache_hit_pct": 50}
-    assert body["cost_usd"] == 2.0
-    assert len(llm_usage_windows) == 4
-    assert len(set(llm_usage_windows)) == 1
-    assert llm_usage_windows[0][1] - llm_usage_windows[0][0] == timedelta(hours=24)
-    aggregate_counts = Counter(sharded_aggregate_spans)
-    spans = sorted(aggregate_counts)
-    assert len(spans) > 1
-    assert sum((end - start for start, end in spans), timedelta()) == timedelta(hours=24)
-    assert all(end - start <= timedelta(hours=12) for start, end in spans)
-    assert all(end == next_start for (_, end), (next_start, _) in pairwise(spans))
-    assert set(aggregate_counts.values()) == {1}
-    assert Counter(count_spans) == aggregate_counts
-    # The W/E class read shares the same 12-hour shard grid as turn/exec.
-    assert Counter(class_spans) == aggregate_counts
-
-
-def test_dashboard_168h_reads_tokens_from_ledger(
-    db_conn: psycopg.Connection,
-    fake_loki: FakeLoki,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """A 168h request reports and serves the shorter Loki retention horizon."""
-    first_agent = _insert_agent(db_conn)
-    second_agent = _insert_agent(db_conn)
-    for days_ago, model, agent_id, tokens_in, tokens_out, tokens_cached, cost_usd in (
-        (2, "model-a", first_agent, 100, 10, 50, 1.0),
-        (2, "model-b", second_agent, 200, 20, 25, 2.0),
-        (2, "model-c", first_agent, 300, 30, 100, 3.0),
-    ):
-        _insert_token_ledger_row(
-            db_conn,
-            agent_id=agent_id,
-            days_ago=days_ago,
-            model=model,
-            tokens_in=tokens_in,
-            tokens_out=tokens_out,
-            tokens_cached=tokens_cached,
-            cost_usd=cost_usd,
-        )
-    # Zero newest-day row establishes the retained live reread seam.
-    _insert_token_ledger_row(
-        db_conn,
-        agent_id=first_agent,
-        days_ago=1,
-        model="model-a",
-        tokens_in=0,
-        tokens_out=0,
-        tokens_cached=0,
-        cost_usd=0.0,
-    )
-    fake_loki.add(
-        event="llm_usage",
-        payload={"in_total": 20, "out_total": 2, "cache_read": 5, "cost_usd": 0.5},
-        ts_offset_hours=1,
-    )
-    fake_loki.add(
-        event="turn_end",
-        payload={"duration_seconds": 100.0, "ok": True},
-        ts_offset_hours=100,
-    )
-    fake_loki.add(event="old_warning", level="warning", ts_offset_hours=100)
-    llm_usage_spans: list[tuple[datetime, datetime]] = []
-    loki_froms: list[datetime] = []
-    real_aggregate = fake_loki.attribute_aggregate
-    real_count = fake_loki.count_events
-    real_classes = fake_loki.count_event_classes
-
-    def spy_aggregate(**kwargs: Any) -> float | list[tuple[str, float]]:
-        loki_froms.append(kwargs["from_"])
-        if kwargs.get("event_names") == ["llm_usage"]:
-            llm_usage_spans.append((kwargs["from_"], kwargs["to"]))
-        return real_aggregate(**kwargs)
-
-    def spy_count(**kwargs: Any) -> int:
-        loki_froms.append(kwargs["from_"])
-        return real_count(**kwargs)
-
-    def spy_classes(**kwargs: Any) -> dict[object, int]:
-        loki_froms.append(kwargs["from_"])
-        return real_classes(**kwargs)
-
-    monkeypatch.setattr(loki_events, "attribute_aggregate", spy_aggregate)
-    monkeypatch.setattr(loki_events, "count_events", spy_count)
-    monkeypatch.setattr(loki_events, "count_event_classes", spy_classes)
-    db_conn.commit()
-    floor_before = retention_floor()
-    with TestClient(app) as client:
-        body = client.get("/api/stats/dashboard", params={"hours": 168}).json()
-    floor_after = retention_floor()
-    expected_hours = int(EVENT_STREAM_RETENTION.total_seconds() // 3600)
-    assert body["window_hours"] == 168
-    assert body["applied_window_hours"] == expected_hours
-    assert body["tokens"] == {"input": 620, "output": 62, "cache_read": 180, "cache_hit_pct": 29.03}
-    assert body["cost_usd"] == pytest.approx(6.5)  # pyright: ignore[reportUnknownMemberType]
-    assert body["avg_turn_seconds"] is None
-    assert body["warnings"] == 0
-    assert floor_before <= min(loki_froms) <= floor_after
-    assert len(llm_usage_spans) == 8
-    assert len(set(llm_usage_spans)) == 2
-    assert all(end - start < EVENT_STREAM_RETENTION for start, end in llm_usage_spans)
-
-
-def test_dashboard_72h_uses_ledger_and_tail_seam(
-    db_conn: psycopg.Connection, fake_loki: FakeLoki
-) -> None:
-    """The newest retained ledger day is reread live, not double counted."""
-    aid = _insert_agent(db_conn)
-    _insert_token_ledger_row(
-        db_conn,
-        agent_id=aid,
-        days_ago=2,
-        model="model-a",
-        tokens_in=100,
-        tokens_out=10,
-        tokens_cached=40,
-        cost_usd=1.0,
-    )
-    _insert_token_ledger_row(
-        db_conn,
-        agent_id=aid,
-        days_ago=1,
-        model="model-a",
-        tokens_in=500,
-        tokens_out=50,
-        tokens_cached=200,
-        cost_usd=5.0,
-    )
-    # A live event inside the newest retained ledger day's tail span
-    # ([yesterday 00:00Z, now]). Any offset in (0, 24h] stays inside that
-    # span at every wall-clock time; 30h crossed the UTC-day boundary
-    # during 00:00-06:00Z and the event fell out of the tail (time-flaky).
-    fake_loki.add(
-        event="llm_usage",
-        payload={"in_total": 150, "out_total": 15, "cache_read": 60, "cost_usd": 1.5},
-        ts_offset_hours=12,
-    )
-    db_conn.commit()
-
-    with TestClient(app) as client:
-        body = client.get("/api/stats/dashboard", params={"hours": 72}).json()
-
-    assert body["applied_window_hours"] == 72
-    assert body["tokens"] == {"input": 250, "output": 25, "cache_read": 100, "cache_hit_pct": 40}
-    assert body["cost_usd"] == pytest.approx(2.5)  # pyright: ignore[reportUnknownMemberType]
-
-
-def test_dashboard_24h_stays_pure_loki(
-    db_conn: psycopg.Connection,
-    fake_loki: FakeLoki,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """A one-day window has no complete UTC day and performs no ledger sum."""
-    fake_loki.add(
-        event="llm_usage",
-        payload={"in_total": 10, "out_total": 5, "cache_read": 4, "cost_usd": 0.25},
-        ts_offset_hours=1,
-    )
-
-    def unexpected_ledger_read(*args: Any, **kwargs: Any) -> None:
-        pytest.fail("24h dashboard windows must not read the token ledger")
-
-    monkeypatch.setattr(_stats_dashboard, "ledger_token_sums", unexpected_ledger_read)
-    db_conn.commit()
-    with TestClient(app) as client:
-        body = client.get("/api/stats/dashboard", params={"hours": 24}).json()
-
-    assert body["applied_window_hours"] == 24
-    assert body["tokens"] == {"input": 10, "output": 5, "cache_read": 4, "cache_hit_pct": 40}
-    assert body["cost_usd"] == pytest.approx(0.25)  # pyright: ignore[reportUnknownMemberType]
-
-
-def test_token_window_plan_24h_at_midnight_stays_pure_loki() -> None:
-    """A UTC-aligned 24-hour window has no ledger-safe settled day."""
-    now = datetime(2026, 8, 25, tzinfo=UTC)
-
-    assert _stats_dashboard.token_window_plan(now - timedelta(hours=24), now) == (
-        None,
-        None,
-        [(now - timedelta(hours=24), now)],
-    )
 
 
 def test_dashboard_empty_db_returns_zeros(db_conn: psycopg.Connection) -> None:
@@ -584,16 +109,16 @@ def test_dashboard_empty_db_returns_zeros(db_conn: psycopg.Connection) -> None:
 
 
 def test_dashboard_warn_error_folds_critical(
-    db_conn: psycopg.Connection, fake_loki: FakeLoki
+    db_conn: psycopg.Connection, event_rows: _EventRows
 ) -> None:
     """critical-level events count in the sidebar's error gauge — they used to
     be an observability blind spot (audit 2026-08-08: daemon schema-drift
     exits, restarter failures etc. never appeared in any warning/error
     count)."""
-    fake_loki.add(event="turn_end", level="warning")
-    fake_loki.add(event="turn_end", level="error")
-    fake_loki.add(event="turn_end", level="critical")
-    fake_loki.add(event="turn_end", level="info")
+    event_rows.add(event="turn_end", level="warning")
+    event_rows.add(event="turn_end", level="error")
+    event_rows.add(event="turn_end", level="critical")
+    event_rows.add(event="turn_end", level="info")
     db_conn.commit()
     with TestClient(app) as client:
         body = client.get("/api/stats/dashboard").json()
@@ -621,18 +146,18 @@ def _insert_dismissal(
 
 
 def test_dashboard_three_way_resolution_split(
-    db_conn: psycopg.Connection, fake_loki: FakeLoki
+    db_conn: psycopg.Connection, event_rows: _EventRows
 ) -> None:
     """The dashboard carries total / dismissed / net per level; dismissed
     classes are cancelled from net exactly like the resolution daemon's
     gauges (task #1935)."""
     _insert_dismissal(db_conn, level="warning", event_name="dismissed_warning")
     _insert_dismissal(db_conn, level="error", event_name="dismissed_error")
-    fake_loki.add(event="dismissed_warning", level="warning")
-    fake_loki.add(event="dismissed_warning", level="warning")
-    fake_loki.add(event="remaining_warning", level="warning")
-    fake_loki.add(event="dismissed_error", level="error")
-    fake_loki.add(event="remaining_critical", level="critical")
+    event_rows.add(event="dismissed_warning", level="warning")
+    event_rows.add(event="dismissed_warning", level="warning")
+    event_rows.add(event="remaining_warning", level="warning")
+    event_rows.add(event="dismissed_error", level="error")
+    event_rows.add(event="remaining_critical", level="critical")
     db_conn.commit()
     with TestClient(app) as client:
         body = client.get("/api/stats/dashboard").json()
@@ -649,14 +174,14 @@ def test_dashboard_three_way_resolution_split(
 
 
 def test_dashboard_all_dismissed_level_reports_zero_net(
-    db_conn: psycopg.Connection, fake_loki: FakeLoki
+    db_conn: psycopg.Connection, event_rows: _EventRows
 ) -> None:
     """Every in-window warning class dismissed -> warnings_net 0 (the
     frontend's all-clear state); error side stays untouched."""
     _insert_dismissal(db_conn, level="warning", event_name="only_warning")
-    fake_loki.add(event="only_warning", level="warning")
-    fake_loki.add(event="only_warning", level="warning")
-    fake_loki.add(event="only_error", level="error")
+    event_rows.add(event="only_warning", level="warning")
+    event_rows.add(event="only_warning", level="warning")
+    event_rows.add(event="only_error", level="error")
     db_conn.commit()
     with TestClient(app) as client:
         body = client.get("/api/stats/dashboard").json()
@@ -669,7 +194,7 @@ def test_dashboard_all_dismissed_level_reports_zero_net(
 
 
 def test_dashboard_reopened_dismissal_counts_as_net(
-    db_conn: psycopg.Connection, fake_loki: FakeLoki
+    db_conn: psycopg.Connection, event_rows: _EventRows
 ) -> None:
     """A dismissal flipped to reopened (burst safety valve) no longer
     cancels its class — same active-set semantics as the daemon."""
@@ -680,7 +205,7 @@ def test_dashboard_reopened_dismissal_counts_as_net(
             "WHERE event_name = 'burst_warning'"
         )
     db_conn.commit()
-    fake_loki.add(event="burst_warning", level="warning")
+    event_rows.add(event="burst_warning", level="warning")
     db_conn.commit()
     with TestClient(app) as client:
         body = client.get("/api/stats/dashboard").json()
@@ -690,7 +215,7 @@ def test_dashboard_reopened_dismissal_counts_as_net(
 
 
 def test_dashboard_per_agent_dismissal_has_no_arithmetic_effect(
-    db_conn: psycopg.Connection, fake_loki: FakeLoki
+    db_conn: psycopg.Connection, event_rows: _EventRows
 ) -> None:
     """v1 rejects per-agent dismissals; a manually inserted agent-scoped row
     must not subtract from the class-wide aggregate (resolution daemon
@@ -702,7 +227,7 @@ def test_dashboard_per_agent_dismissal_has_no_arithmetic_effect(
             "VALUES ('telemetry', 'warning', 'agent_warning', 'test', 7, 0)"
         )
     db_conn.commit()
-    fake_loki.add(event="agent_warning", level="warning")
+    event_rows.add(event="agent_warning", level="warning")
     db_conn.commit()
     with TestClient(app) as client:
         body = client.get("/api/stats/dashboard").json()
@@ -724,10 +249,10 @@ def test_dashboard_live_count_excludes_terminated(db_conn: psycopg.Connection) -
 
 
 def test_dashboard_aggregates_llm_usage_payload(
-    db_conn: psycopg.Connection, fake_loki: FakeLoki
+    db_conn: psycopg.Connection, event_rows: _EventRows
 ) -> None:
     """Windowed LLM token fields sum the corresponding Loki payload values."""
-    fake_loki.add(
+    event_rows.add(
         event="llm_usage",
         payload={"in_total": 1500, "out_total": 300, "cache_read": 1200, "cost_usd": 1.2},
     )
@@ -742,11 +267,11 @@ def test_dashboard_aggregates_llm_usage_payload(
 
 
 def test_dashboard_cache_hit_pct_two_decimals(
-    db_conn: psycopg.Connection, fake_loki: FakeLoki
+    db_conn: psycopg.Connection, event_rows: _EventRows
 ) -> None:
     """cache_hit_pct = cache_read / input * 100 with two decimal places (no longer integer truncation).
     1000 / 3000 = 33.333... → 33.33."""
-    fake_loki.add(
+    event_rows.add(
         event="llm_usage",
         payload={"in_total": 3000, "out_total": 100, "cache_read": 1000, "cost_usd": 1.2},
     )
@@ -757,10 +282,10 @@ def test_dashboard_cache_hit_pct_two_decimals(
 
 
 def test_dashboard_cost_uses_usage_time_snapshots(
-    db_conn: psycopg.Connection, fake_loki: FakeLoki
+    db_conn: psycopg.Connection, event_rows: _EventRows
 ) -> None:
     """Cost sums telemetry snapshots, regardless of model registry state."""
-    fake_loki.add(
+    event_rows.add(
         event="llm_usage",
         payload={
             "model": "claude-opus-4-8",
@@ -770,7 +295,7 @@ def test_dashboard_cost_uses_usage_time_snapshots(
             "cost_usd": 30.0,
         },
     )
-    fake_loki.add(
+    event_rows.add(
         event="llm_usage",
         payload={
             "model": "retired-model",
@@ -780,7 +305,7 @@ def test_dashboard_cost_uses_usage_time_snapshots(
             "cost_usd": 7.25,
         },
     )
-    fake_loki.add(
+    event_rows.add(
         event="llm_usage",
         category="log",
         payload={
@@ -799,53 +324,16 @@ def test_dashboard_cost_uses_usage_time_snapshots(
     assert body["cost_usd"] == pytest.approx(37.25)  # pyright: ignore[reportUnknownMemberType]
 
 
-def test_dashboard_caches_llm_usage_sums_per_window(
-    db_conn: psycopg.Connection, fake_loki: FakeLoki, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """The 30s sidebar poll reuses only its matching window's four Loki sums."""
-    assert settings.display.stats_dashboard_cache_ttl_s == 60.0
-    fake_loki.add(
-        event="llm_usage",
-        payload={"in_total": 10, "out_total": 5, "cache_read": 0, "cost_usd": 1.0},
-    )
-    aggregate_calls = 0
-    real_aggregate = fake_loki.attribute_aggregate
-
-    def spy_aggregate(**kwargs: Any) -> float | list[tuple[str, float]]:
-        nonlocal aggregate_calls
-        if kwargs.get("event_names") == ["llm_usage"]:
-            aggregate_calls += 1
-        return real_aggregate(**kwargs)
-
-    monkeypatch.setattr(loki_events, "attribute_aggregate", spy_aggregate)
-    db_conn.commit()
-    with TestClient(app) as client:
-        assert client.get("/api/stats/dashboard").json()["cost_usd"] == 1.0
-        initial_calls = aggregate_calls
-        fake_loki.add(
-            event="llm_usage",
-            payload={"in_total": 20, "out_total": 10, "cache_read": 0, "cost_usd": 2.0},
-        )
-        assert client.get("/api/stats/dashboard").json()["cost_usd"] == 1.0
-        assert aggregate_calls == initial_calls
-        assert client.get("/api/stats/dashboard", params={"hours": 6}).json()["cost_usd"] == 3.0
-        window_calls = aggregate_calls
-        assert window_calls > initial_calls
-        _stats_dashboard.cache_clear()
-        assert client.get("/api/stats/dashboard").json()["cost_usd"] == 3.0
-    assert aggregate_calls > window_calls
-
-
 def test_dashboard_aggregates_turn_end_filters_ok(
-    db_conn: psycopg.Connection, fake_loki: FakeLoki
+    db_conn: psycopg.Connection, event_rows: _EventRows
 ) -> None:
     """`event='turn_end'` AVG only includes ok=true (exclude cancelled / abnormal turns).
     Locks the ok field contract from _llm.py:llm_node finally."""
     aid = _insert_agent(db_conn, status="running")
-    fake_loki.add(event="turn_end", agent_id=aid, payload={"duration_seconds": 2.0, "ok": True})
-    fake_loki.add(event="turn_end", agent_id=aid, payload={"duration_seconds": 4.0, "ok": True})
+    event_rows.add(event="turn_end", agent_id=aid, payload={"duration_seconds": 2.0, "ok": True})
+    event_rows.add(event="turn_end", agent_id=aid, payload={"duration_seconds": 4.0, "ok": True})
     # ok=False abnormal turn of 100s must not enter AVG
-    fake_loki.add(event="turn_end", agent_id=aid, payload={"duration_seconds": 100.0, "ok": False})
+    event_rows.add(event="turn_end", agent_id=aid, payload={"duration_seconds": 100.0, "ok": False})
     db_conn.commit()
     with TestClient(app) as client:
         body = client.get("/api/stats/dashboard").json()
@@ -854,18 +342,18 @@ def test_dashboard_aggregates_turn_end_filters_ok(
 
 
 def test_dashboard_default_24h_window_filters_old_rows(
-    db_conn: psycopg.Connection, fake_loki: FakeLoki
+    db_conn: psycopg.Connection, event_rows: _EventRows
 ) -> None:
     """Loki aggregates include only recent usage (the PG events table is gone
     since the #1823 cleanup — the stream lives in Loki)."""
     aid = _insert_agent(db_conn, status="running")
-    fake_loki.add(
+    event_rows.add(
         event="llm_usage",
         agent_id=aid,
         payload={"in_total": 999, "out_total": 999, "cache_read": 0, "cost_usd": 99.9},
         ts_offset_hours=25,
     )
-    fake_loki.add(
+    event_rows.add(
         event="llm_usage",
         agent_id=aid,
         payload={"in_total": 10, "out_total": 5, "cache_read": 0, "cost_usd": 0.2},
@@ -881,16 +369,16 @@ def test_dashboard_default_24h_window_filters_old_rows(
 
 
 def test_dashboard_warn_err_counts_by_level(
-    db_conn: psycopg.Connection, fake_loki: FakeLoki
+    db_conn: psycopg.Connection, event_rows: _EventRows
 ) -> None:
     """Warning/error gauges count telemetry+log rows by level over the 24h
     window, read from Loki (task #1280 — the PG events read flatlines post-freeze)."""
     aid = _insert_agent(db_conn, status="running")
-    fake_loki.add(event="some_warning", level="warning", agent_id=aid)
-    fake_loki.add(event="some_warning", level="warning", agent_id=aid)
-    fake_loki.add(event="some_error", level="error", agent_id=aid)
+    event_rows.add(event="some_warning", level="warning", agent_id=aid)
+    event_rows.add(event="some_warning", level="warning", agent_id=aid)
+    event_rows.add(event="some_error", level="error", agent_id=aid)
     # exec_failed logs at INFO (agent trial-and-error) — must not count
-    fake_loki.add(event="exec_failed", level="info", agent_id=aid)
+    event_rows.add(event="exec_failed", level="info", agent_id=aid)
     db_conn.commit()
     with TestClient(app) as client:
         body = client.get("/api/stats/dashboard").json()
@@ -899,15 +387,15 @@ def test_dashboard_warn_err_counts_by_level(
 
 
 def test_dashboard_audit_warning_not_counted(
-    db_conn: psycopg.Connection, fake_loki: FakeLoki
+    db_conn: psycopg.Connection, event_rows: _EventRows
 ) -> None:
     """An audit-category WARNING row (an agent operation with a warning level —
     e.g. a mislabeled write) must NOT count toward the sidebar warning/error
     gauge: the query filters category IN (telemetry, log) (appendix scenario 4)."""
     aid = _insert_agent(db_conn, status="running")
-    fake_loki.add(event="some_warning", level="warning", agent_id=aid)
-    fake_loki.add(event="spawn", level="warning", agent_id=aid, category="audit")
-    fake_loki.add(event="spawn", level="error", agent_id=aid, category="audit")
+    event_rows.add(event="some_warning", level="warning", agent_id=aid)
+    event_rows.add(event="spawn", level="warning", agent_id=aid, category="audit")
+    event_rows.add(event="spawn", level="error", agent_id=aid, category="audit")
     db_conn.commit()
     with TestClient(app) as client:
         body = client.get("/api/stats/dashboard").json()
@@ -916,30 +404,30 @@ def test_dashboard_audit_warning_not_counted(
 
 
 def test_dashboard_hours_param_selects_window(
-    db_conn: psycopg.Connection, fake_loki: FakeLoki
+    db_conn: psycopg.Connection, event_rows: _EventRows
 ) -> None:
     """?hours= applies the same Loki window to every event aggregate."""
     aid = _insert_agent(db_conn, status="running")
-    fake_loki.add(event="some_warning", level="warning", agent_id=aid, ts_offset_hours=3)
-    fake_loki.add(
+    event_rows.add(event="some_warning", level="warning", agent_id=aid, ts_offset_hours=3)
+    event_rows.add(
         event="turn_end",
         agent_id=aid,
         payload={"duration_seconds": 10.0, "ok": True},
         ts_offset_hours=3,
     )
-    fake_loki.add(
+    event_rows.add(
         event="turn_end",
         agent_id=aid,
         payload={"duration_seconds": 2.0, "ok": True},
         ts_offset_hours=0.5,
     )
-    fake_loki.add(
+    event_rows.add(
         event="llm_usage",
         agent_id=aid,
         payload={"in_total": 100, "out_total": 50, "cache_read": 0, "cost_usd": 1.0},
         ts_offset_hours=3,
     )
-    fake_loki.add(
+    event_rows.add(
         event="llm_usage",
         agent_id=aid,
         payload={"in_total": 10, "out_total": 5, "cache_read": 0, "cost_usd": 0.1},
@@ -1030,191 +518,45 @@ def test_dashboard_plugin_stats_is_empty_without_writers() -> None:
     assert body["plugin_stats"] == []
 
 
-def test_dashboard_fresh_response_carries_freshness_fields(
-    db_conn: psycopg.Connection, fake_loki: FakeLoki, emitted: list[dict[str, Any]]
+def test_dashboard_week_window_reads_the_whole_week_without_a_retention_clamp(
+    db_conn: psycopg.Connection, event_rows: _EventRows
 ) -> None:
-    """A healthy recompute reports stale=false and its as_of read time."""
-    db_conn.commit()
-    with TestClient(app) as client:
-        response = client.get("/api/stats/dashboard")
-
-    body = response.json()
-    assert response.status_code == 200
-    assert body["stale"] is False
-    as_of = datetime.fromisoformat(body["as_of"])
-    assert as_of.tzinfo is not None
-    assert abs((datetime.now(UTC) - as_of).total_seconds()) < 60
-    assert emitted == []
-
-
-def test_dashboard_serves_stale_last_good_on_loki_failure(
-    db_conn: psycopg.Connection,
-    fake_loki: FakeLoki,
-    emitted: list[dict[str, Any]],
-    cache_clock: _CacheClock,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """A failed recompute inside the stale cap serves the last-good payload,
-    marked stale, keeping its original as_of — not a 503."""
-    fake_loki.add(
-        event="llm_usage",
-        payload={"in_total": 10, "out_total": 5, "cache_read": 0, "cost_usd": 1.0},
+    event_rows.add(
+        event="llm_usage", payload={"in_total": 10, "out_total": 5}, ts_offset_hours=24 * 6
+    )
+    event_rows.add(
+        event="llm_usage", payload={"in_total": 100, "out_total": 50}, ts_offset_hours=24 * 8
     )
     db_conn.commit()
     with TestClient(app) as client:
-        fresh = client.get("/api/stats/dashboard").json()
-        assert fresh["stale"] is False
-        assert fresh["as_of"] is not None
-        assert emitted == []
-
-        monkeypatch.setattr(loki_events, "attribute_aggregate", _raise_loki_timeout)
-        cache_clock.advance(61.0)  # fresh TTL expired, inside the stale cap
-        response = client.get("/api/stats/dashboard")
-
-    assert response.status_code == 200
-    body = response.json()
-    assert body["stale"] is True
-    assert body["as_of"] == fresh["as_of"]
-    assert body["cost_usd"] == fresh["cost_usd"]
-    assert emitted == [{"route": "/api/stats/dashboard", "reason": "loki_failed"}]
+        body = client.get("/api/stats/dashboard", params={"hours": 168}).json()
+    assert body["applied_window_hours"] == 168
+    assert body["tokens"]["input"] == 10
+    assert body["tokens"]["output"] == 5
 
 
-def test_dashboard_serves_stale_last_good_on_budget_rejection(
-    db_conn: psycopg.Connection,
-    fake_loki: FakeLoki,
-    emitted: list[dict[str, Any]],
-    cache_clock: _CacheClock,
-    monkeypatch: pytest.MonkeyPatch,
+def test_dashboard_counts_the_home_cluster_and_unlabelled_rows_only(
+    db_conn: psycopg.Connection, event_rows: _EventRows
 ) -> None:
-    """A refused Loki admission also falls back to the last-good payload."""
-    fake_loki.add(
-        event="llm_usage",
-        payload={"in_total": 10, "out_total": 5, "cache_read": 0, "cost_usd": 1.0},
-    )
+    event_rows.add(event="boom", level="error")
+    event_rows.add(event="boom", level="error", cluster="")
+    event_rows.add(event="boom", level="error", cluster="some-other-cluster")
+    event_rows.add(event="llm_usage", payload={"in_total": 7}, cluster="some-other-cluster")
     db_conn.commit()
     with TestClient(app) as client:
-        fresh = client.get("/api/stats/dashboard").json()
-        monkeypatch.setattr(loki_events, "attribute_aggregate", _raise_loki_budget)
-        cache_clock.advance(61.0)
-        response = client.get("/api/stats/dashboard")
-
-    assert response.status_code == 200
-    body = response.json()
-    assert body["stale"] is True
-    assert body["as_of"] == fresh["as_of"]
-    assert emitted == [{"route": "/api/stats/dashboard", "reason": "loki_budget"}]
+        body = client.get("/api/stats/dashboard").json()
+    assert body["errors"] == 2
+    assert body["tokens"]["input"] == 0
 
 
-def test_dashboard_stale_past_cap_is_retriable_503(
-    db_conn: psycopg.Connection,
-    fake_loki: FakeLoki,
-    emitted: list[dict[str, Any]],
-    cache_clock: _CacheClock,
-    monkeypatch: pytest.MonkeyPatch,
+def test_dashboard_leaves_out_values_that_are_not_numbers(
+    db_conn: psycopg.Connection, event_rows: _EventRows
 ) -> None:
-    """Past the cap the last-good payload is no longer served — the route
-    keeps its retriable 503 and emits no stale event."""
-    fake_loki.add(
-        event="llm_usage",
-        payload={"in_total": 10, "out_total": 5, "cache_read": 0, "cost_usd": 1.0},
-    )
+    event_rows.add(event="llm_usage", payload={"in_total": 10, "cost_usd": 0.5})
+    event_rows.add(event="llm_usage", payload={"in_total": "n/a", "cost_usd": None})
+    event_rows.add(event="llm_usage", payload={})
     db_conn.commit()
     with TestClient(app) as client:
-        client.get("/api/stats/dashboard")
-        monkeypatch.setattr(loki_events, "attribute_aggregate", _raise_loki_timeout)
-        cache_clock.advance(settings.display.stats_dashboard_stale_max_s + 1.0)
-        response = client.get("/api/stats/dashboard")
-
-    assert response.status_code == 503
-    assert emitted == []
-
-
-def test_dashboard_stale_cap_reads_the_setting(
-    db_conn: psycopg.Connection,
-    fake_loki: FakeLoki,
-    cache_clock: _CacheClock,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """The stale window is the configured cap (task #3973): a smaller cap
-    expires the fallback sooner."""
-    monkeypatch.setattr(settings.display, "stats_dashboard_stale_max_s", 120.0)
-    fake_loki.add(
-        event="llm_usage",
-        payload={"in_total": 10, "out_total": 5, "cache_read": 0, "cost_usd": 1.0},
-    )
-    db_conn.commit()
-    with TestClient(app) as client:
-        client.get("/api/stats/dashboard")
-        monkeypatch.setattr(loki_events, "attribute_aggregate", _raise_loki_timeout)
-        cache_clock.advance(61.0)
-        inside = client.get("/api/stats/dashboard")
-        cache_clock.advance(61.0)  # total age 122s > the 120s cap
-        outside = client.get("/api/stats/dashboard")
-
-    assert inside.status_code == 200
-    assert inside.json()["stale"] is True
-    assert outside.status_code == 503
-
-
-def test_dashboard_stale_events_are_rate_capped_per_reason(
-    db_conn: psycopg.Connection,
-    fake_loki: FakeLoki,
-    emitted: list[dict[str, Any]],
-    cache_clock: _CacheClock,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Repeated stale serves within the emit interval collapse into one event
-    (the event counts episodes, not polls); interval 0 disables the cap."""
-    fake_loki.add(
-        event="llm_usage",
-        payload={"in_total": 10, "out_total": 5, "cache_read": 0, "cost_usd": 1.0},
-    )
-    db_conn.commit()
-    with TestClient(app) as client:
-        client.get("/api/stats/dashboard")
-        monkeypatch.setattr(loki_events, "attribute_aggregate", _raise_loki_timeout)
-        cache_clock.advance(61.0)
-        assert client.get("/api/stats/dashboard").status_code == 200
-        assert client.get("/api/stats/dashboard").status_code == 200
-        assert len(emitted) == 1
-
-        def _no_cap() -> float:
-            return 0.0
-
-        monkeypatch.setattr(_stats_dashboard, "_stale_emit_interval_s", _no_cap)
-        assert client.get("/api/stats/dashboard").status_code == 200
-
-    assert len(emitted) == 2
-
-
-def test_dashboard_stale_serving_concurrent_smoke(
-    db_conn: psycopg.Connection,
-    fake_loki: FakeLoki,
-    emitted: list[dict[str, Any]],
-    cache_clock: _CacheClock,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Concurrent fallbacks all serve the same stale payload and one event."""
-    fake_loki.add(
-        event="llm_usage",
-        payload={"in_total": 10, "out_total": 5, "cache_read": 0, "cost_usd": 1.0},
-    )
-    db_conn.commit()
-    with TestClient(app):
-        fresh = status.get_stats_dashboard(
-            SimpleNamespace(app=app),  # type: ignore[arg-type]
-            StatsWindowHours.H24,
-        )
-        monkeypatch.setattr(loki_events, "attribute_aggregate", _raise_loki_timeout)
-        cache_clock.advance(61.0)
-        request = SimpleNamespace(app=app)
-
-        def call(_: int) -> StatsDashboard:
-            return status.get_stats_dashboard(request, StatsWindowHours.H24)  # type: ignore[arg-type]
-
-        with ThreadPoolExecutor(max_workers=4) as executor:
-            results = list(executor.map(call, range(4)))
-
-    assert all(result.stale for result in results)
-    assert {result.as_of for result in results} == {fresh.as_of}
-    assert len(emitted) == 1
+        body = client.get("/api/stats/dashboard").json()
+    assert body["tokens"]["input"] == 10
+    assert body["cost_usd"] == pytest.approx(0.5)

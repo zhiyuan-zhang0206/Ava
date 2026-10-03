@@ -24,8 +24,8 @@ from typing import cast
 import pytest
 
 from base.cluster.machine import MachineRole
+from base.daemon.endpoints import ServiceEndpoints
 from base.daemon.health import DaemonProbe, probe_daemon
-from base.paths import pid_path
 from ops import roster
 from ops.roster import _bind_owned_probe
 from ops.roster.healthz import healthz_url
@@ -74,6 +74,8 @@ _LEGACY = (
         True,
     ),
     _Legacy("pg-backup", "services.backup_scheduler.daemon", _GATEWAY, True),
+    _Legacy("ttl-reaper", "services.ttl_reaper.daemon", _GATEWAY, True),
+    _Legacy("schedule-manager", "services.schedule_manager.daemon", _GATEWAY, True),
     _Legacy("page-server", "services.page_server.daemon", _RUNNER, True),
     _Legacy(
         "agent-host",
@@ -110,7 +112,12 @@ def _legacy_spec(row: _Legacy) -> ServiceSpec:
         capabilities=row.capabilities,
         requires_db=row.requires_db,
         curl_url=healthz_url(name),
-        identity_probe=partial(probe_daemon, name, healthz_url(name), pidfile=pid_path(name)),
+        identity_probe=partial(
+            probe_daemon,
+            name,
+            healthz_url(name),
+            pidfile=ServiceEndpoints.from_settings().of(name).pidfile,
+        ),
         profile=row.profile,
         no_profile_marker=row.no_profile_marker,
         db_access=cast("DbAccess | None", row.db_access),

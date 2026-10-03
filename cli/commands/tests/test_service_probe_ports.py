@@ -1,6 +1,6 @@
 """Tests that build_services() derives probe URLs/ports from settings.
 
-Verifies that watchdog probe URLs follow health_port() and that milvus
+Verifies that watchdog probe URLs follow the endpoint table and that milvus
 tcp_port + frontend curl_url derive from settings rather than being
 hardcoded literals.
 """
@@ -11,7 +11,7 @@ import pytest
 
 import base.daemon.health as dh
 import cli.commands._repo as repo
-import ops.roster.healthz as healthz_mod  # the /healthz URL of a standard daemon is built here
+from base.daemon.tests.fakes import pin_endpoints
 
 
 def _spec_by_session(specs, session: str):
@@ -19,13 +19,12 @@ def _spec_by_session(specs, session: str):
 
 
 def test_daemon_probe_url_follows_health_port(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Patching health_port() for 'labeler' must be reflected in build_services()."""
+    """Pinning the 'labeler' port must be reflected in build_services()."""
 
     def _fake_health_port(name: str) -> int:
         return 18003 if name == "labeler" else dh.DEFAULT_PORTS.get(name, 8000)
 
-    # healthz_daemon reads health_port from ops.roster.healthz's namespace.
-    monkeypatch.setattr(healthz_mod, "health_port", _fake_health_port)
+    pin_endpoints(monkeypatch, port=_fake_health_port)
     specs = repo.build_services()
     spec = _spec_by_session(specs, "labeler")
     assert spec.curl_url is not None
@@ -120,6 +119,8 @@ def test_all_services_present(monkeypatch: pytest.MonkeyPatch) -> None:
         "computer-mcp",
         "page-server",
         "pg-backup",
+        "ttl-reaper",
+        "schedule-manager",
         "otel-collector",
         "agent-host",
         # The native LGTM backends are root units of an observability station.
@@ -131,12 +132,12 @@ def test_all_services_present(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_ops_probe_follows_health_port(monkeypatch: pytest.MonkeyPatch) -> None:
-    """ops curl_url must derive from health_port('ops')."""
+    """ops curl_url must derive from the 'ops' endpoint."""
 
     def _fake_health_port(name: str) -> int:
         return 18106 if name == "ops" else dh.DEFAULT_PORTS.get(name, 8000)
 
-    monkeypatch.setattr(healthz_mod, "health_port", _fake_health_port)
+    pin_endpoints(monkeypatch, port=_fake_health_port)
     spec = _spec_by_session(repo.build_services(), "ops")
     assert spec.curl_url is not None
     assert "18106" in spec.curl_url

@@ -26,8 +26,6 @@ import pytest
 from services.ava_root import selfcheck as selfcheck_mod
 from services.ava_root.manifest import RestartPolicy, UnitManifest, UnitRegistry
 from services.ava_root.selfcheck import (
-    ATTRIBUTION_COVERAGE,
-    RESEEDING_LATENCY_S,
     SelfCheckConfig,
     TreeSelfCheck,
 )
@@ -190,34 +188,6 @@ def test_unverifiable_is_separated_from_broken(
     check.run_once()
     assert _chain(check)["unverifiable_units"] == []
     assert "verifiable again" in caplog.text
-
-
-def test_metric_slots_are_safe_and_honest() -> None:
-    host = _StubHost([])
-    check = TreeSelfCheck(host)
-    snapshot = check.metrics_snapshot()
-    assert snapshot[ATTRIBUTION_COVERAGE] == {"value": None, "state": "unavailable"}
-    assert snapshot[RESEEDING_LATENCY_S] == {"value": None, "state": "unavailable"}
-
-    def raising() -> float | None:
-        raise RuntimeError("adapter exploded")
-
-    check2 = TreeSelfCheck(
-        host,
-        metrics_providers={ATTRIBUTION_COVERAGE: lambda: 0.75, RESEEDING_LATENCY_S: raising},
-    )
-    snapshot = check2.metrics_snapshot()
-    assert snapshot[ATTRIBUTION_COVERAGE] == {"value": 0.75, "state": "ok"}
-    assert snapshot[RESEEDING_LATENCY_S] == {"value": None, "state": "error"}
-
-    check3 = TreeSelfCheck(host, metrics_providers={ATTRIBUTION_COVERAGE: lambda: None})
-    assert check3.metrics_snapshot()[ATTRIBUTION_COVERAGE] == {
-        "value": None,
-        "state": "unavailable",
-    }
-
-    with pytest.raises(ValueError, match="unknown metric slot"):
-        TreeSelfCheck(host, metrics_providers={"nope": lambda: 1.0})
 
 
 def test_config_validation() -> None:

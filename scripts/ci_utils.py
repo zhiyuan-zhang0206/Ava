@@ -57,10 +57,8 @@ Usage as CLI:
     priority is fixed at submit time and queue order follows it — so mid-queue reshuffles cannot be
     scripted (verified against Trunk's API spec, 2026-09-06). Submission waits at least five
     minutes after a head update. The all-green predicate excludes the "Trunk Merge Queue"
-    queue-state check and the retired `qa-approved-gate` / `evaluate-qa-evidence` checks that
-    older PR heads still carry. This is the canonical CI watcher: launch it with
-    ava.shell.run_background, and the completion notice delivers the exit code + verdict to the
-    agent automatically.
+    queue-state check. This is the canonical CI watcher: launch it with ava.shell.run_background,
+    and the completion notice delivers the exit code + verdict to the agent automatically.
 """
 
 from __future__ import annotations
@@ -237,10 +235,6 @@ class CIResult:
     # Trunk's queue-state check is likewise not a CI result and must not turn
     # an otherwise green PR into a perpetual PENDING verdict.
     trunk_checks: list[dict] = field(default_factory=list)
-    # The retired QA gate and evidence evaluator checks, still reported on heads pushed before the
-    # gate was removed, are not CI conclusions. Keep them separate so they cannot enter the
-    # verdict buckets.
-    gate_checks: list[dict] = field(default_factory=list)
     # Runs stuck in GitHub limbo (task #3275): `queued`, zero jobs, aged past
     # `_LIMBO_AGE_SECONDS`. Detail on a PENDING verdict — never a basis for
     # green except through an explicit --force (`_only_limbo_blocks`).
@@ -297,11 +291,6 @@ def _repo_has_workflows() -> bool:
 
 
 TRUNK_MERGE_QUEUE_CHECK_NAME = "Trunk Merge Queue"
-QA_APPROVED_GATE_CHECK_NAME = "qa-approved-gate"
-QA_EVIDENCE_CHECK_NAME = "evaluate-qa-evidence"
-# Retired merge-gate checks that heads pushed before the gate was removed still carry — never CI
-# conclusions, so they never enter the verdict buckets.
-QA_GATE_CHECK_NAMES = frozenset({QA_APPROVED_GATE_CHECK_NAME, QA_EVIDENCE_CHECK_NAME})
 
 # The repo's main CI workflow (`.github/workflows/ci.yml`, `name: CI`) — the suite a green verdict
 # must be able to say was seen for the head. A check-set made only of second-scale checks is not
@@ -347,8 +336,8 @@ def _latest_completed_per_name(checks: list[dict]) -> list[dict]:
     GitHub lists every check run on a commit, but branch protection and the required-status UI
     treat same-named runs as ONE logical check whose state is the newest COMPLETED run's. A stale
     CANCELLED run on the same SHA must not poison the verdict when a later run of the same name
-    succeeded — the QA evaluator's cancel-in-progress concurrency produces exactly this shape
-    (2026-09-04: two CANCELLED evaluate-qa-evidence runs froze #1636).
+    succeeded — a workflow with cancel-in-progress concurrency produces exactly this shape
+    (2026-09-04: two CANCELLED runs of one check froze #1636).
 
     Commit statuses are exempt: GitHub already deduplicates StatusContext by
     context, and they carry `state`, not `status`/`conclusion`."""
@@ -385,21 +374,17 @@ def _partition_checks(checks: list[dict], result: CIResult) -> None:
     Only COMPLETED checks are judged: a QUEUED / IN_PROGRESS one is pending, and so is a COMPLETED
     one whose conclusion is unrecognized — guessing there is how a false "all green" gets reported.
 
-    Trunk checks report queue state rather than CI results, and the retired `qa-approved-gate` and
-    `evaluate-qa-evidence` checks are not CI conclusions. All are routed to dedicated buckets so
-    they never enter the verdict fields.
+    Trunk checks report queue state rather than CI results, so they are routed to a dedicated
+    bucket and never enter the verdict fields.
     """
     for c in checks:
         if c.get("__typename") == "StatusContext":
-            # Commit statuses (the retired qa-approved-gate was published this way) have `context` +
-            # `state`, not `name` + `status` + `conclusion`. Without this branch they read as a
-            # nameless "?" entry with a null status — an eternal PENDING that froze every --wait
-            # watcher (2026-09-04: five PRs stalled with all real checks green).
+            # Commit statuses have `context` + `state`, not `name` + `status` + `conclusion`.
+            # Without this branch they read as a nameless "?" entry with a null status — an
+            # eternal PENDING that froze every --wait watcher (2026-09-04: five PRs stalled with
+            # all real checks green).
             context = c.get("context", "?")
             state = c.get("state", "")
-            if context in QA_GATE_CHECK_NAMES:
-                result.gate_checks.append(c)
-                continue
             if state == "SUCCESS":
                 result.completed.append(context)
                 result.passed.append(context)
@@ -416,10 +401,6 @@ def _partition_checks(checks: list[dict], result: CIResult) -> None:
         if name.startswith(TRUNK_MERGE_QUEUE_CHECK_NAME):
             result.trunk_checks.append(c)
             continue
-        if name in QA_GATE_CHECK_NAMES:
-            result.gate_checks.append(c)
-            continue
-
         # A check produced by a workflow run carries the workflow's name; checks posted by a GitHub
         # App (GitGuardian, coverage bots) leave it empty. This is what tells "the suite ran and
         # passed" apart from "the suite never started and an app happened to report".
@@ -638,9 +619,6 @@ def _merge_conflict_result(data: dict, result: CIResult) -> CIResult:
     result.checks = checks
     for c in checks:
         name = c.get("name", "?")
-        if name in QA_GATE_CHECK_NAMES:
-            result.gate_checks.append(c)
-            continue
         status = c.get("status", "")
         if status == "COMPLETED":
             result.completed.append(name)
@@ -832,7 +810,6 @@ def _query_once(pr: str, repo: str, *, as_json: bool) -> int:
                     "failed": result.failed,
                     "workflow_checks": result.workflow_checks,
                     "trunk_checks": result.trunk_checks,
-                    "gate_checks": result.gate_checks,
                     "is_draft": result.is_draft,
                     "core_skipped": result.core_skipped,
                     "error_detail": result.error_detail,

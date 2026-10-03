@@ -127,17 +127,7 @@ def _get_json(
     return payload
 
 
-def _result_value(series: dict[str, Any]) -> float | None:
-    """The instant-query value of one result vector (None when absent)."""
-    value = series.get("value") or series.get("values", [None])[-1]
-    return float(value[1]) if value else None
-
-
-# One long-lived HTTP client for every Loki query — connection reuse across
-# the gateway's fan-out reads (an inspect poll or ops-monitor call issues
-# dozens of queries; a per-call client opened a fresh TCP connection for each).
-# The pool ceiling stays above the ops-series peak fan-out (~18 concurrent
-# queries) so pool-acquire never times out under normal load.
+# One long-lived HTTP client for every Loki query — connection reuse across the backfill's pages.
 _shared_client: httpx.Client | None = None
 
 

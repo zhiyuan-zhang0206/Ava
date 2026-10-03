@@ -18,6 +18,7 @@ from psycopg import Connection
 from psycopg.rows import dict_row
 from psycopg_pool import ConnectionPool
 
+from base.events.live.bus import EventBus
 from gateway.inspect._metrics_health import note_inspect_metrics_coverage
 from gateway.inspect.schemas import (
     AgentActivity,
@@ -205,6 +206,7 @@ def _alive_seconds(
 
 def inspect_snapshot(
     pool: ConnectionPool[Any],
+    bus: EventBus,
     agent_id: int,
     hours: StatsWindowHours | None,
     *,
@@ -228,7 +230,7 @@ def inspect_snapshot(
     # Outside the read transaction: the coverage note is a diagnostic side
     # channel (background log + alert episodes; task #3869) and never joins
     # the snapshot itself.
-    note_inspect_metrics_coverage(pool, agent_id, snapshot.metadata, spawned_at=spawned_at)
+    note_inspect_metrics_coverage(pool, bus, agent_id, snapshot.metadata, spawned_at=spawned_at)
     return snapshot
 
 

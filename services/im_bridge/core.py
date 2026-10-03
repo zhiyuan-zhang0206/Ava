@@ -16,8 +16,9 @@ import uuid
 from functools import partial
 from typing import Any, Literal
 
-from base.config import settings
 from services.im_bridge import copy, notice_bridge, push_watchdog
+from services.im_bridge.config import ImBridgeConfig
+from services.im_bridge.cursor_store import CursorStore
 from services.im_bridge.gateway_client import GatewayClient
 from services.im_bridge.spawn_menu import SpawnMenuMixin
 from services.im_bridge.state import (
@@ -86,9 +87,11 @@ _TYPING_MAX_S = 300.0
 class IMBridgeCore(SpawnMenuMixin):
     """Owns per-channel chat state, command routing, and subscription pushes."""
 
-    def __init__(self, db_pool: Any = None) -> None:
-        self.gateway = GatewayClient()
-        self.notice_bridge = notice_bridge.NoticeBridge(self, db_pool=db_pool)
+    def __init__(self, config: ImBridgeConfig, gateway: GatewayClient, db_pool: Any = None) -> None:
+        self.config = config
+        self.gateway = gateway
+        self.cursor_store = CursorStore(db_pool)
+        self.notice_bridge = notice_bridge.NoticeBridge(self, config, db_pool=db_pool)
         self.adapters: dict[str, IMAdapter] = {}
         self.chats: dict[tuple[str, str], ChatState] = {}
         self._subscriptions: dict[tuple[str, str], asyncio.Task[Any]] = {}
@@ -98,9 +101,13 @@ class IMBridgeCore(SpawnMenuMixin):
         # not per-agent: two chats switched to the same agent share one
         # snapshot stream, and a shared watermark let the later chat's
         # snapshot advance it past what the earlier chat had pushed.
+        # Persisted (`_set_watermark`, loaded by `restore_subscriptions`): the
+        # SSE feed is a live tail, so what the agent said while this daemon
+        # was down is recovered from the timeline past the saved watermark
+        # (`_catch_up`), not from the feed.
 
         self._switch_state = _load_switch_state()
-        self._disabled_channels: set[str] = set(settings.services.im_disabled_adapters)
+        self._disabled_channels: set[str] = set(config.im_disabled_adapters)
         self._outbox_replay_task: asyncio.Task[Any] | None = None
 
     def register(self, adapter: IMAdapter) -> None:
@@ -131,7 +138,7 @@ class IMBridgeCore(SpawnMenuMixin):
                     # partial, not a lambda: this iteration's adapter is bound
                     # now, so the retry call can never read a loop variable late.
                     await push_watchdog.retry_once_after_backoff(
-                        partial(adapter.send_to_owner, text)
+                        partial(adapter.send_to_owner, text), self.config
                     )
                     results[channel] = "ok"
                 except Exception as retry_exc:
@@ -187,10 +194,10 @@ class IMBridgeCore(SpawnMenuMixin):
                 # callbacks carry this prefix; typed text never does)
                 reply = await self._handle_spawn_menu(state, text)
             elif text.startswith("/"):
-                reply = await self._handle_command(state, text)
+                reply = await self._handle_command(state, text, msg.idempotency_key)
             else:
                 try:
-                    reply = await self._handle_chat(state, text)
+                    reply = await self._handle_chat(state, text, msg.idempotency_key)
                 except Exception:
                     # Gateway enqueue failed after every retry — the platform
                     # offset has moved, so only the outbox can save this
@@ -201,7 +208,7 @@ class IMBridgeCore(SpawnMenuMixin):
                         msg.chat_id,
                     )
                     self._stop_typing(state)
-                    await self._enqueue_outbox(state, text)
+                    await self._enqueue_outbox(state, text, msg.idempotency_key)
                     await self._send(msg.channel, msg.chat_id, Reply(copy.QUEUED_NOTICE))
                     return
             if reply:
@@ -214,12 +221,15 @@ class IMBridgeCore(SpawnMenuMixin):
 
     # -- inbound outbox (Task #1032) -----------------------------------------
 
-    async def _enqueue_outbox(self, state: ChatState, text: str) -> None:
+    async def _enqueue_outbox(
+        self, state: ChatState, text: str, idempotency_key: str | None = None
+    ) -> None:
         """Persist one undeliverable user message and start the replay loop.
 
         AtLeastOnce: the message stays on disk until the gateway accepts it.
-        The Idempotency-Key is minted here and replayed unchanged, so the
-        gateway dedups even when a response was lost on the wire."""
+        The Idempotency-Key is the platform's own (when the adapter supplies
+        one) or minted here, and replayed unchanged, so the gateway dedups
+        even when a response was lost on the wire."""
 
         entry = _OutboxEntry(
             id=uuid.uuid4().hex,
@@ -227,7 +237,7 @@ class IMBridgeCore(SpawnMenuMixin):
             chat_id=state.chat_id,
             agent_id=state.current_agent_id or 0,
             text=text,
-            idempotency_key=uuid.uuid4().hex,
+            idempotency_key=idempotency_key or uuid.uuid4().hex,
             enqueued_at=time.time(),
         )
         entries = _load_outbox()
@@ -250,9 +260,10 @@ class IMBridgeCore(SpawnMenuMixin):
         again before touching the gateway. Idle rounds sleep and do nothing
         (created on first enqueue and at daemon start)."""
 
+        # quiesce-exempt: replays a local file outbox through the gateway API; no database
         while True:
             await self._replay_outbox_once()
-            await asyncio.sleep(sum(settings.services.im_send_retry_delays) + 5)
+            await asyncio.sleep(sum(self.config.im_send_retry_delays) + 5)
 
     async def _replay_outbox_once(self) -> None:
         """Try every pending entry once, serially; delivered entries are
@@ -285,7 +296,9 @@ class IMBridgeCore(SpawnMenuMixin):
 
     # -- commands ------------------------------------------------------------
 
-    async def _handle_command(self, state: ChatState, text: str) -> Reply | list[Reply] | None:
+    async def _handle_command(
+        self, state: ChatState, text: str, idempotency_key: str | None = None
+    ) -> Reply | list[Reply] | None:
         cmd, _, arg = text.partition(" ")
         cmd = cmd.lower()
         if cmd == "/list":
@@ -304,7 +317,7 @@ class IMBridgeCore(SpawnMenuMixin):
         # Unknown "/..." commands pass through to the current agent — the
         # gateway's claim node expands registered ones (skill-as-command,
         # prompt templates) exactly like the web composer does.
-        return await self._handle_chat(state, text)
+        return await self._handle_chat(state, text, idempotency_key)
 
     async def _cmd_list(self, channel: str) -> Reply:
         """Live agents to switch to. On button-capable platforms the text is
@@ -379,8 +392,8 @@ class IMBridgeCore(SpawnMenuMixin):
         # Raw timeline mixes dialog items with non-dialog ones (agent_updated,
         # task events...), so fetch a wider window and keep the most recent
         # `replay` dialog messages (user feedback: replay showed only 2).
-        window = settings.services.im_bridge_timeline_window
-        replay = settings.services.im_bridge_replay_messages
+        window = self.config.im_bridge_timeline_window
+        replay = self.config.im_bridge_replay_messages
         items = await self.gateway.get_timeline(target["agent_id"], limit=window)
         msgs = [it for it in items if _is_dialog_item(it)][-replay:]
         replies: list[Reply] = [
@@ -396,7 +409,9 @@ class IMBridgeCore(SpawnMenuMixin):
             replies.append(Reply(copy.NO_MESSAGES_YET))
             return replies
         # record push watermark so the subscription only sends what's new
-        self._last_pushed[(state.channel, state.chat_id, target["agent_id"])] = msgs[-1]["item_id"]
+        await self._set_watermark(
+            (state.channel, state.chat_id, target["agent_id"]), msgs[-1]["item_id"]
+        )
         # one message per item — never a wall of concatenated text
         for it in reversed(msgs):
             replies.append(Reply(_render_item(it, target["agent_id"]), markdown=True))
@@ -452,7 +467,9 @@ class IMBridgeCore(SpawnMenuMixin):
             return Reply(text, buttons=buttons)
         return Reply(text)
 
-    async def _handle_chat(self, state: ChatState, text: str) -> Reply | None:
+    async def _handle_chat(
+        self, state: ChatState, text: str, idempotency_key: str | None = None
+    ) -> Reply | None:
         if state.current_agent_id is None:
             return Reply(copy.NO_AGENT_SWITCHED)
         # Replies arrive via SSE push — make sure the subscription exists even
@@ -461,7 +478,9 @@ class IMBridgeCore(SpawnMenuMixin):
         # receives them, Task #804).
         self._ensure_subscription(state)
         self._start_typing(state)
-        await self.gateway.send_message(state.current_agent_id, text)
+        await self.gateway.send_message(
+            state.current_agent_id, text, idempotency_key=idempotency_key
+        )
         return None  # the reply arrives via subscription push
 
     # -- typing indicator ------------------------------------------------------
@@ -503,11 +522,8 @@ class IMBridgeCore(SpawnMenuMixin):
             task.cancel()
 
     async def _deliver_item(self, state: ChatState, it: dict[str, Any], agent_id: int) -> None:
-        """Push one fresh dialog item: the agent's first text output stops
-        the typing indicator, then lands as a message like everything else."""
+        """Push one fresh dialog item as a message."""
 
-        if it.get("kind") == "agent_chat":
-            self._stop_typing(state)
         await self._send(
             state.channel, state.chat_id, Reply(_render_item(it, agent_id), markdown=True)
         )
@@ -517,7 +533,9 @@ class IMBridgeCore(SpawnMenuMixin):
     async def restore_subscriptions(self) -> None:
         """Rebuild SSE subscriptions from switch_state (Task #804); channels
         disabled via AVA_IM_DISABLED_ADAPTERS get none (in-memory subs die
-        with the daemon)."""
+        with the daemon). Loads the saved push watermarks first: each
+        restored subscription then catches up from its own."""
+        self._last_pushed.update(await asyncio.to_thread(self.cursor_store.load_push))
         for key, agent_id in self._switch_state.items():
             channel, sep, chat_id = key.partition(":")
             if not sep or not channel or not chat_id:
@@ -525,10 +543,12 @@ class IMBridgeCore(SpawnMenuMixin):
             state = self._get_or_create_state(channel, chat_id)
             if state.current_agent_id != agent_id:
                 state.current_agent_id = agent_id
-            self._ensure_subscription(state)
+            self._ensure_subscription(state, catch_up=True)
             await asyncio.sleep(0)  # let the subscription task spin up
 
-    def _ensure_subscription(self, state: ChatState, prev_agent: int | None = None) -> None:
+    def _ensure_subscription(
+        self, state: ChatState, prev_agent: int | None = None, *, catch_up: bool = False
+    ) -> None:
         if state.channel in self._disabled_channels:
             return  # channel disabled (AVA_IM_DISABLED_ADAPTERS): no pushes
         key = (state.channel, state.chat_id)
@@ -537,19 +557,25 @@ class IMBridgeCore(SpawnMenuMixin):
             if state.current_agent_id == prev_agent:
                 return  # unchanged — nothing to do
             existing.cancel()  # switched to another agent: restart the stream
-        task = asyncio.create_task(self._subscription_loop(key, state))
+        task = asyncio.create_task(self._subscription_loop(key, state, catch_up=catch_up))
         self._subscriptions[key] = task
 
-    async def _subscription_loop(self, key: tuple[str, str], state: ChatState) -> None:
+    async def _subscription_loop(
+        self, key: tuple[str, str], state: ChatState, *, catch_up: bool = False
+    ) -> None:
         # Escalate INFO->WARNING after 12 consecutive reconnect failures
         # (~1 min at the 5s retry): one drop per gateway restart is expected.
         _sse_reconnect_warn_after = 12
         failures = 0
+        # quiesce-exempt: an SSE reconnect loop against the gateway; a cursor is written only when an event arrives
         while True:
             agent_id = state.current_agent_id
             if agent_id is None:
                 return
             try:
+                if catch_up:
+                    await self._catch_up(key, state, agent_id)
+                catch_up = True  # every reconnect missed whatever the gap carried
                 async for event in self.gateway.stream_events(agent_id):
                     if event.get("role") == "timeline_snapshot":
                         await self._push_snapshot(key, state, event)
@@ -569,17 +595,42 @@ class IMBridgeCore(SpawnMenuMixin):
                 await asyncio.sleep(5)
 
     async def _push_snapshot(
-        self, _key: tuple[str, str], state: ChatState, event: dict[str, Any]
+        self, key: tuple[str, str], state: ChatState, event: dict[str, Any]
+    ) -> None:
+        await self._push_items(key, state, event.get("items", []))
+
+    async def _catch_up(self, key: tuple[str, str], state: ChatState, agent_id: int) -> None:
+        """Push what the agent said past the saved watermark while no
+        subscription was listening (daemon down, SSE reconnecting): the feed
+        is a live tail, so the timeline is the only place those items still
+        are. Without a saved watermark nothing is pushed — a chat never
+        pushed to has no position to resume from. Bounded by the /switch
+        timeline window."""
+
+        if (*key, agent_id) not in self._last_pushed:
+            return
+        items = await self.gateway.get_timeline(agent_id)
+        await self._push_items(key, state, items)
+
+    async def _set_watermark(self, watermark_key: tuple[str, str, int], item_id: str) -> None:
+        """Save, then advance: a failed save leaves the memory watermark behind,
+        so nothing is delivered past an unsaved position (the subscription
+        loop reconnects and retries)."""
+
+        await asyncio.to_thread(self.cursor_store.save_push, *watermark_key, item_id)
+        self._last_pushed[watermark_key] = item_id
+
+    async def _push_items(
+        self, key: tuple[str, str], state: ChatState, raw_items: list[Any]
     ) -> None:
         if state.current_agent_id is None:
             return
         agent_id = state.current_agent_id
-        raw_items: list[Any] = event.get("items", [])
         items: list[dict[str, Any]] = [it for it in raw_items if _is_dialog_item(it)]
         if not items:
             return
         items.sort(key=lambda it: _item_key(str(it.get("item_id", "0.0"))))
-        watermark_key = (*_key, agent_id)  # (channel, chat_id, agent_id)
+        watermark_key = (*key, agent_id)  # (channel, chat_id, agent_id)
         watermark = self._last_pushed.get(watermark_key)
         # Numeric comparison via _item_key (same key the sort uses): the old
         # string compare called '9.5' > '10.1' false, so the first message
@@ -591,7 +642,9 @@ class IMBridgeCore(SpawnMenuMixin):
         ]
         if not fresh:
             return
-        self._last_pushed[watermark_key] = str(fresh[-1]["item_id"])
+        if any(it.get("kind") == "agent_chat" for it in fresh):
+            self._stop_typing(state)  # the agent's first text output ends the indicator
+        await self._set_watermark(watermark_key, str(fresh[-1]["item_id"]))
         for it in fresh:
             await self._deliver_item(state, it, agent_id)
 

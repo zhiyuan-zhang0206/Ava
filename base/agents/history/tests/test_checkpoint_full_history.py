@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+from types import SimpleNamespace
 from typing import Any, cast
 
 import psycopg
-import pytest
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
 from langgraph.checkpoint.base import CheckpointMetadata, empty_checkpoint
 from langgraph.checkpoint.postgres import PostgresSaver
@@ -19,12 +19,15 @@ from base.agents.history.checkpoint import (
     load_checkpoint_messages_segment,
 )
 from base.config import settings
+from base.db import Database
 
 
-def test_compact_boundary_lookup_uses_a_closed_autocommit_pool(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Checkpoint cold reads borrow an autocommit connection from base.db.pool."""
+def _db() -> Database:
+    return Database.from_settings()
+
+
+def test_compact_boundary_lookup_uses_a_closed_autocommit_pool() -> None:
+    """Checkpoint cold reads borrow an autocommit connection from a pool of the handle."""
     from base.agents.history import checkpoint
 
     class _Result:
@@ -60,9 +63,9 @@ def test_compact_boundary_lookup_uses_a_closed_autocommit_pool(
         pool_kwargs.update(kwargs)
         return db_pool
 
-    monkeypatch.setattr(checkpoint, "pool", _pool, raising=False)
+    database = cast(Database, SimpleNamespace(pool=_pool))
 
-    assert checkpoint.list_compact_boundary_checkpoint_ids(7) == ["boundary-1"]
+    assert checkpoint.list_compact_boundary_checkpoint_ids(database, 7) == ["boundary-1"]
     assert pool_kwargs == {"autocommit": True, "row_factory": None}
     assert db_pool.closed is True
 
@@ -98,7 +101,7 @@ def _contents(messages: Sequence[BaseMessage]) -> list[str]:
 
 
 def test_load_full_history_returns_empty_without_checkpoint() -> None:
-    assert load_checkpoint_messages_full(1) == []
+    assert load_checkpoint_messages_full(_db(), 1) == []
 
 
 def test_load_full_history_matches_latest_without_compaction(db_conn: psycopg.Connection) -> None:
@@ -109,7 +112,9 @@ def test_load_full_history_matches_latest_without_compaction(db_conn: psycopg.Co
     ]
     _put_checkpoint("2", messages, version="1")
 
-    assert _contents(load_checkpoint_messages_full(2)) == _contents(load_checkpoint_messages(2))
+    assert _contents(load_checkpoint_messages_full(_db(), 2)) == _contents(
+        load_checkpoint_messages(_db(), 2)
+    )
 
 
 def test_load_full_history_stitches_compaction_segments(db_conn: psycopg.Connection) -> None:
@@ -132,7 +137,7 @@ def test_load_full_history_stitches_compaction_segments(db_conn: psycopg.Connect
     ]
     _put_checkpoint("3", latest, version="2")
 
-    assert _contents(load_checkpoint_messages_full(3)) == [
+    assert _contents(load_checkpoint_messages_full(_db(), 3)) == [
         "system",
         "original task",
         "original answer",
@@ -169,7 +174,7 @@ def test_load_full_history_stitches_multiple_compactions(db_conn: psycopg.Connec
         version="3",
     )
 
-    assert _contents(load_checkpoint_messages_full(5)) == [
+    assert _contents(load_checkpoint_messages_full(_db(), 5)) == [
         "system",
         "first task",
         "first summary",
@@ -192,7 +197,7 @@ def test_load_full_history_does_not_repeat_latest_boundary(db_conn: psycopg.Conn
         version="1",
     )
 
-    assert _contents(load_checkpoint_messages_full(6)) == _contents(messages)
+    assert _contents(load_checkpoint_messages_full(_db(), 6)) == _contents(messages)
 
 
 def test_load_full_history_keeps_session_notes_and_summary(db_conn: psycopg.Connection) -> None:
@@ -218,7 +223,7 @@ def test_load_full_history_keeps_session_notes_and_summary(db_conn: psycopg.Conn
         version="2",
     )
 
-    assert _contents(load_checkpoint_messages_full(4)) == [
+    assert _contents(load_checkpoint_messages_full(_db(), 4)) == [
         "system",
         "original task",
         "original answer",
@@ -254,16 +259,16 @@ def test_load_checkpoint_messages_segment_resolves_exact_boundary_id(
         version="3",
     )
 
-    assert list_compact_boundary_checkpoint_ids(7) == [newer_id, older_id]
-    assert list_compact_boundary_checkpoint_ids(7, limit=1) == [newer_id]
-    assert _contents(load_checkpoint_messages_segment(7, newer_id)) == [
+    assert list_compact_boundary_checkpoint_ids(_db(), 7) == [newer_id, older_id]
+    assert list_compact_boundary_checkpoint_ids(_db(), 7, limit=1) == [newer_id]
+    assert _contents(load_checkpoint_messages_segment(_db(), 7, newer_id)) == [
         "newer summary",
         "newer segment",
     ]
-    assert _contents(load_checkpoint_messages_segment(7, older_id)) == ["older segment"]
-    assert load_checkpoint_messages_segment(7, current_id) == []
-    assert load_checkpoint_messages_segment(7, "00000000-0000-0000-0000-000000000000") == []
-    assert load_checkpoint_message_count(7) == 2
+    assert _contents(load_checkpoint_messages_segment(_db(), 7, older_id)) == ["older segment"]
+    assert load_checkpoint_messages_segment(_db(), 7, current_id) == []
+    assert load_checkpoint_messages_segment(_db(), 7, "00000000-0000-0000-0000-000000000000") == []
+    assert load_checkpoint_message_count(_db(), 7) == 2
 
 
 def test_load_checkpoint_messages_segment_returns_empty_without_boundaries(
@@ -275,7 +280,7 @@ def test_load_checkpoint_messages_segment_returns_empty_without_boundaries(
         version="1",
     )
 
-    assert list_compact_boundary_checkpoint_ids(8) == []
-    assert load_checkpoint_messages_segment(8, latest_id) == []
-    assert load_checkpoint_message_count(8) == 2
-    assert load_checkpoint_message_count(9) == 0
+    assert list_compact_boundary_checkpoint_ids(_db(), 8) == []
+    assert load_checkpoint_messages_segment(_db(), 8, latest_id) == []
+    assert load_checkpoint_message_count(_db(), 8) == 2
+    assert load_checkpoint_message_count(_db(), 9) == 0

@@ -48,6 +48,7 @@ from agent.state import AgentState
 from base.agents.context import AvaContext
 from base.config import settings
 from base.config.agent_compaction import AgentCompactionSettings
+from base.host.env.agent_slices import AgentSlices
 from base.lm.context_budget import ContextBudget
 from tests.fixtures.units import spawn_agent
 
@@ -72,6 +73,11 @@ def _patch_dump_enabled(
 
     monkeypatch.setattr("agent.hooks.history_dump.workspace_dir", _fake_workspace_dir)
     return ws
+
+
+def _dump(messages: list[AnyMessage]) -> Any:
+    """`dump_history` with the slice the patched settings resolve to."""
+    return history_dump.dump_history(messages, 1, AgentSlices.resolve().history_dump)
 
 
 class _FakeClock(datetime):
@@ -135,7 +141,7 @@ def _sample_messages() -> list[AnyMessage]:
 
 
 def _compact_tail(update: Any) -> list[AnyMessage]:
-    """Same transport assertion as tests/agent/test_compact.py: the window is
+    """Same transport assertion as agent/tests/test_compact.py: the window is
     cleared (REMOVE_ALL sentinel alone) and what follows the head is parked in
     `context_reset.tail`. Returns the tail."""
     msgs = update["messages"]
@@ -168,7 +174,11 @@ _LONG_SUMMARY = "## Requests\nfollow the template. " * 60
 
 
 def _runtime_with_llm(llm: Any) -> Runtime[AvaContext]:
-    return Runtime(context=AvaContext(ops_pool=None, llm=llm, event_publisher=MagicMock()))
+    return Runtime(
+        context=AvaContext(
+            ops_pool=None, llm=llm, event_publisher=MagicMock(), agent=AgentSlices.resolve()
+        )
+    )
 
 
 def _fake_config() -> RunnableConfig:
@@ -194,6 +204,7 @@ def _make_runtime(
         ops_pool=ops_pool,
         llm=llm if llm is not None else _fake_llm("synthetic summary"),
         event_publisher=MagicMock(),
+        agent=AgentSlices.resolve(),
     )
     return Runtime(context=ctx)
 
@@ -229,7 +240,7 @@ def test_dump_enabled_by_default() -> None:
 def test_dump_disabled_returns_none(monkeypatch: pytest.MonkeyPatch, tmp_path: Any):
     """Config off → dump_history returns None and creates nothing."""
     ws = _patch_dump_enabled(monkeypatch, tmp_path, enabled=False)
-    assert history_dump.dump_history(_sample_messages(), 1) is None
+    assert _dump(_sample_messages()) is None
     assert not (ws / "message-history").exists()
 
 
@@ -237,7 +248,7 @@ def test_dump_enabled_writes_file(monkeypatch: pytest.MonkeyPatch, tmp_path: Any
     """Config on → the dump is written under <workspace>/message-history/ and
     the path is returned."""
     ws = _patch_dump_enabled(monkeypatch, tmp_path)
-    path = history_dump.dump_history(_sample_messages(), 1)
+    path = _dump(_sample_messages())
     assert path is not None
     assert path.parent == ws / "message-history"
     assert path.name.endswith(".jsonl")
@@ -264,7 +275,7 @@ def test_dump_filename_is_start_and_end(monkeypatch: pytest.MonkeyPatch, tmp_pat
             additional_kwargs={"ava_created_at": "2026-08-13T08:15:00+00:00"},
         ),
     ]
-    path = history_dump.dump_history(messages, 1)
+    path = _dump(messages)
     assert path is not None
     start, end = _parse_dump_name(path)
     assert start == datetime(2026, 8, 13, 8, 15, tzinfo=UTC)
@@ -281,7 +292,7 @@ def test_dump_filename_falls_back_to_write_moment(monkeypatch: pytest.MonkeyPatc
         HumanMessage(content="no stamp", additional_kwargs={"ava_created_at": "not-a-date"}),
         SystemMessage(content="<sys>"),
     ]
-    path = history_dump.dump_history(messages, 1)
+    path = _dump(messages)
     assert path is not None
     start, end = _parse_dump_name(path)
     assert start == end.replace(microsecond=0)
@@ -296,7 +307,7 @@ def test_dump_is_replayable_jsonl(monkeypatch: pytest.MonkeyPatch, tmp_path: Any
     survive, SystemMessage and ToolMessages included (full-history snapshot)."""
     _patch_dump_enabled(monkeypatch, tmp_path)
     messages = _sample_messages()
-    path = history_dump.dump_history(messages, 1)
+    path = _dump(messages)
     assert path is not None
 
     lines = path.read_text(encoding="utf-8").splitlines()
@@ -337,7 +348,7 @@ def test_dump_rotates_to_newest_keep(monkeypatch: pytest.MonkeyPatch, tmp_path: 
     _patch_dump_enabled(monkeypatch, tmp_path, keep=2)
     messages: list[AnyMessage] = [HumanMessage(content="old")]  # no stamps → start == end tick
     for _ in range(4):
-        history_dump.dump_history(messages, 1)
+        _dump(messages)
     dump_dir = tmp_path / "workspace" / "message-history"
     dumps = sorted(p.name for p in dump_dir.glob("*.jsonl"))
     assert len(dumps) == 2
@@ -354,7 +365,7 @@ def test_dump_failure_is_best_effort(monkeypatch: pytest.MonkeyPatch, tmp_path: 
         raise OSError("disk full")
 
     monkeypatch.setattr("agent.hooks.history_dump.workspace_dir", _boom)
-    assert history_dump.dump_history(_sample_messages(), 1) is None
+    assert _dump(_sample_messages()) is None
 
 
 # ── auto-compact path: note injection position ──

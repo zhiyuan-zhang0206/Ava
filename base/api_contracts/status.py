@@ -50,8 +50,9 @@ class SchemaMismatchStatus(BaseModel):
 class MachineStatus(BaseModel):
     """A machines-table row state — augmented with live probe results.
 
-    `online` / `paused` come from each machine's ops `status_probe` within
-    the configured roster deadline:
+    `online` / `paused` come from each machine's ops `status_probe`: the last one
+    the heartbeat liveness pass made (the default read, see `observed_at`), or a
+    dial within the configured roster deadline (a fresh read):
     - online=True + paused has a value: probe succeeded
     - online=False + paused=None: probe failed (network unreachable /
       gateway down)
@@ -113,6 +114,10 @@ class MachineStatus(BaseModel):
     # the wrong identity. A loud third state, neither online nor a plain offline:
     # when True, `online` is False and the roster marks the row "identity-mismatch".
     identity_mismatch: bool = False
+    # When the status shown here was probed. Set when the row renders the heartbeat
+    # liveness pass's snapshot (the default read: its age is at most a few
+    # minutes), None on a fresh read, which dials the host now.
+    observed_at: datetime | None = None
     # Per-host runtime, mirrored from this node's ClusterStatus probe. shell_count
     # is the live agent shell-session count; agent-host/watchdog are pidfile
     # liveness. All default to the "unknown" value used when a probe times out.

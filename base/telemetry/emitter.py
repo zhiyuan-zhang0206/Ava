@@ -4,16 +4,20 @@ One event stream serves audit, telemetry, and log records under one schema and
 one correlation key (`trace_id`). This module is its only writer.
 
 Pipeline (Layer 1): a bounded queue and drain thread batch every event into
-local JSONL mirrors, best-effort compact metrics, and OTLP logs/metrics. Live
-event reads use Loki/Prometheus; the retired Postgres archive is never revived.
+local JSONL mirrors, the `telemetry_events` table (telemetry and log events), best-effort
+compact metrics, and OTLP logs/metrics. The record of an event is a Postgres table: audit
+events in `audit_events` (written before the event is emitted), telemetry and log events in
+`telemetry_events` (written here, from the drain thread, with the mirror as the fallback).
+Loki and Prometheus hold the observation copy for Grafana and short windows.
 
-Backpressure sheds non-audit records under overload. Trace ids are captured at
-enqueue, and machine and cluster dimensions are always populated.
+Backpressure sheds records under overload, audit events included: their record
+is `audit_events`, written before the event is emitted, so shedding the
+projection loses nothing. Trace ids are captured at enqueue, and machine and
+cluster dimensions are always populated.
 
 Emit is best-effort and never raises: a broken sink must not crash the caller
 (JSONL mirror + loguru file sinks are the durable backfill for everything
-that reaches the drain thread; audit events additionally block briefly at
-enqueue so they are not shed while the queue is overloaded).
+that reaches the drain thread; the mirror is replayed into `telemetry_events`).
 Startup init (`init_telemetry`) is the one place that fails loud — a process
 whose event pipeline cannot come up should not start silently blind.
 
@@ -38,7 +42,7 @@ from datetime import UTC, datetime, timedelta
 from hashlib import blake2b
 from typing import Any, Literal
 
-from base.events.contract import EVENTS, lineage_event_names
+from base.events.contract import EVENTS
 from base.events.contract import category_for_kind as registry_category
 from base.paths import logs_dir
 from base.telemetry.emitter_sync import synchronize
@@ -70,65 +74,14 @@ Level = Literal["debug", "info", "warning", "error", "critical"]
 _BATCH_SIZE = 100
 _FLUSH_INTERVAL_S = 0.5
 # Queue bound: what stops a producer that outruns the drain thread from growing
-# process memory without limit. Past this point non-audit records are shed (see
+# process memory without limit. Past this point records are shed (see
 # `_EventPipeline.enqueue`) and `dropped` says how much. A shed record is gone
 # from EVERY sink — the JSONL mirror only ever holds what reached the drain
-# thread — so audit-category events get a durable lane instead (below).
+# thread.
 _QUEUE_MAXSIZE = 10_000
-
-# How long an audit event's producer blocks on a full queue before the event is
-# shed (bounded backpressure). Audit events are the compliance evidence — the
-# one class that must not vanish under load, which is exactly when the queue
-# fills — so they wait for the drain thread to free a slot instead of dropping
-# immediately. 5s is far above the drain thread's flush cadence (100/batch,
-# 0.5s interval), so a healthy pipeline frees the slot in well under a second
-# and the cap only binds when the drain thread itself is gone.
-_AUDIT_BLOCK_S = 5.0
 
 # JSONL mirror retention (day-stamped files, like the trace mirror).
 _JSONL_RETENTION_DAYS = 7
-_JSONL_ROLLUP_RETENTION_DAYS = 90
-# Lineage mirror retention (design 2026-09-02 §3C). The lineage class is
-# permanent in Loki (a 100-year per-stream override, see
-# `base/loki_index_labels.LINEAGE_RETENTION_PERIOD`); this mirror exists
-# because that is ONE copy in ONE failure domain, and 2026-08-20 is what a
-# single copy is worth — a global-retention bucket deleted the pre-cutover
-# archive and nothing else held those rows. Its failure domain is this box's
-# disk, independent of Loki's config and data volume. At ~412 rows/day
-# cluster-wide (<1MB/day) a year of it costs ~100MB, so the retention is long
-# rather than tuned; unlike the rollup tier nothing replays it on a schedule,
-# so it stays a constant instead of a settings knob until an operator needs it.
-_JSONL_LINEAGE_RETENTION_DAYS = 365
-
-# MUST match the event selectors aggregated by
-# services/events_maintenance/rollup.py:_tokens_queries/_metrics_queries
-# (shared cannot import services without reversing the layer boundary).
-# Loki additionally restricts llm_usage/turn_end to telemetry|log; those
-# families are emitted only in those categories today, so this name-only filter
-# is equivalent. A category change must update both selectors together.
-_JSONL_ROLLUP_SOURCE_EVENTS = frozenset({"llm_usage", "turn_end"})
-
-
-def is_rollup_source(event_name: str) -> bool:
-    """Whether an event feeds the durable token/metrics ledger rollup."""
-    return (
-        event_name in _JSONL_ROLLUP_SOURCE_EVENTS
-        or event_name == "exec"
-        or event_name.startswith(("exec_", "exec("))
-    )
-
-
-# Derived from the registry's `retention_class="lineage"` declarations — the
-# same source the deployed Loki per-stream selector is validated against
-# (`base/loki_index_labels.validate_loki_deploy_config`), so the two
-# permanent copies cannot come to disagree about what lineage is. Snapshotted
-# at import: the drain thread tests it once per event.
-_JSONL_LINEAGE_SOURCE_EVENTS = lineage_event_names()
-
-
-def _is_lineage_source(event_name: str) -> bool:
-    """Whether an event belongs to the permanently retained lineage class."""
-    return event_name in _JSONL_LINEAGE_SOURCE_EVENTS
 
 
 def event_id(line: str, ts_ns: int) -> int:
@@ -248,26 +201,14 @@ def _prune_jsonl_mirror() -> None:
     durable fallback for audit events; log-stream lines are also held by the
     loguru file sinks, so the mirror's own retention is what bounds its disk
     footprint."""
-    from base.config import settings
-
-    now = datetime.now(UTC)
-    full_cutoff = (now - timedelta(days=_JSONL_RETENTION_DAYS)).strftime("%Y%m%d")
-    for path in logs_dir().glob("events-????????.jsonl"):
-        day = path.name.removeprefix("events-").removesuffix(".jsonl")
-        if day.isdigit() and day < full_cutoff:
-            with contextlib.suppress(OSError):
-                path.unlink()
-    rollup_retention_days = settings.daemon.events_jsonl_rollup_retention_days
-    rollup_cutoff = (now - timedelta(days=rollup_retention_days)).strftime("%Y%m%d")
-    for path in logs_dir().glob("events-????????.rollup.jsonl"):
-        day = path.name.removeprefix("events-").removesuffix(".rollup.jsonl")
-        if day.isdigit() and day < rollup_cutoff:
-            with contextlib.suppress(OSError):
-                path.unlink()
-    lineage_cutoff = (now - timedelta(days=_JSONL_LINEAGE_RETENTION_DAYS)).strftime("%Y%m%d")
-    for path in logs_dir().glob("events-????????.lineage.jsonl"):
-        day = path.name.removeprefix("events-").removesuffix(".lineage.jsonl")
-        if day.isdigit() and day < lineage_cutoff:
+    cutoff = (datetime.now(UTC) - timedelta(days=_JSONL_RETENTION_DAYS)).strftime("%Y%m%d")
+    # `.rollup.jsonl` is the retired filtered tier; leftovers age out with the full mirror.
+    for path in (
+        *logs_dir().glob("events-????????.jsonl"),
+        *logs_dir().glob("events-????????.rollup.jsonl"),
+    ):
+        day = path.name.removeprefix("events-").split(".", 1)[0]
+        if day.isdigit() and day < cutoff:
             with contextlib.suppress(OSError):
                 path.unlink()
 
@@ -277,10 +218,6 @@ def _append_jsonl(events: list[Event]) -> None:
 
     Each row carries the stable surrogate ``id`` derived from its id-free body
     and timestamp, matching the id Loki's read path returns for the same event.
-
-    Three tiers, one pass over the batch: the full mirror, the filtered
-    rollup source, and the filtered lineage copy — all written under the same
-    try, so one failure reports once for the batch rather than three times.
 
     Best-effort — the mirror is a fallback, not a critical path; a write
     failure must never break the batch. But it must not be SILENT either:
@@ -295,31 +232,14 @@ def _append_jsonl(events: list[Event]) -> None:
         with contextlib.suppress(Exception):
             _prune_jsonl_mirror()
     try:
-        lines: list[str] = []
-        rollup_lines: list[str] = []
-        lineage_lines: list[str] = []
-        for e in events:
-            line = (
-                json.dumps(event_row(e), default=str, separators=(",", ":"), ensure_ascii=False)
-                + "\n"
-            )
-            lines.append(line)
-            if is_rollup_source(e.event_name):
-                rollup_lines.append(line)
-            if _is_lineage_source(e.event_name):
-                lineage_lines.append(line)
+        lines = [
+            json.dumps(event_row(e), default=str, separators=(",", ":"), ensure_ascii=False) + "\n"
+            for e in events
+        ]
         path = logs_dir() / f"events-{day}.jsonl"
         path.parent.mkdir(parents=True, exist_ok=True)
         with path.open("a", encoding="utf-8") as f:
             f.write("".join(lines))
-        if rollup_lines:
-            rollup_path = logs_dir() / f"events-{day}.rollup.jsonl"
-            with rollup_path.open("a", encoding="utf-8") as f:
-                f.write("".join(rollup_lines))
-        if lineage_lines:
-            lineage_path = logs_dir() / f"events-{day}.lineage.jsonl"
-            with lineage_path.open("a", encoding="utf-8") as f:
-                f.write("".join(lineage_lines))
     except Exception as exc:  # report, never raise
         global _jsonl_failures  # noqa: PLW0603 — module-level counter
         _jsonl_failures += 1
@@ -364,7 +284,7 @@ _jsonl_failures = 0
 _NO_EMITTER = "_no_emitter"
 
 
-def report_no_pipeline(message: str, **extra: Any) -> None:
+def report_no_pipeline(message: str, *, level: str = "warning", **extra: Any) -> None:
     """Log a drain-thread diagnostic through loguru, marked `_NO_EMITTER` so
     the emitter adapter skips it. Best-effort: never raises, never blocks."""
     with contextlib.suppress(Exception):
@@ -372,18 +292,23 @@ def report_no_pipeline(message: str, **extra: Any) -> None:
 
         # **{_NO_EMITTER: True} — bind() takes literal kwargs, so the marker
         # key must be the constant's VALUE, not its name.
-        logger.bind(**{_NO_EMITTER: True}).warning(message, **extra)
+        logger.bind(**{_NO_EMITTER: True}).log(level.upper(), message, **extra)
 
 
 def _write_batch(events: list[Event]) -> None:
-    """Mirror first, then compact metric projection and OTLP export.
+    """Mirror first, then the telemetry_events record, the compact metric projection
+    and OTLP export.
 
-    Every sink is failure-isolated. The projection never restores the retired
-    Postgres event archive and cannot turn an observation into a billing proof.
+    Every sink is failure-isolated. The projection cannot turn an observation into a
+    billing proof; the telemetry_events sink reports its own failures.
     """
     if not events:
         return
     _append_jsonl(events)
+    with contextlib.suppress(Exception):
+        from base.telemetry.event_store import store_events
+
+        store_events(events)
     try:
         from base.telemetry.metrics.observed_metrics import project_events
 
@@ -399,8 +324,7 @@ class _EventPipeline:
     Same shape as the former loguru Postgres sink (which this replaces): the
     queue bound is the backpressure, the drain thread batches, and shed records
     are counted and reported as one `event_log_drop` event per flush so the ops
-    monitor panel keeps its backlog metric. Audit events enqueue through a
-    bounded-blocking lane (see `enqueue`) so overload sheds telemetry/log first."""
+    monitor panel keeps its backlog metric."""
 
     def __init__(
         self,
@@ -428,22 +352,7 @@ class _EventPipeline:
         self._thread.start()
 
     def enqueue(self, event: Event) -> None:
-        """Producer path — non-blocking for regular events, bounded-blocking
-        for audit events.
-
-        Regular events shed (counted) when the queue is full. Audit events
-        instead block up to `_AUDIT_BLOCK_S` for a slot — bounded backpressure
-        — so an overloaded queue sheds telemetry/log before it ever sheds audit
-        evidence; only a sustained overflow past the cap drops an audit event
-        (counted, and reported by the next flush). The drain thread frees slots
-        on its 0.5s cadence, so a healthy pipeline never actually spends the
-        cap."""
-        if event.category == "audit":
-            try:
-                self._queue.put(event, timeout=_AUDIT_BLOCK_S)
-            except queue.Full:
-                self._record_drop(event)
-            return
+        """Producer path — never blocks: the event is shed (counted) when the queue is full."""
         try:
             self._queue.put_nowait(event)
         except queue.Full:
@@ -558,9 +467,9 @@ class _EventPipeline:
 
 
 def _open_pipeline() -> _EventPipeline:
-    """Build the process pipeline: queue + drain thread. The Postgres events
-    copy is retired (task #1197), so startup no longer depends on the DB —
-    the pipeline writes the JSONL mirror and the OTLP backend only."""
+    """Build the process pipeline: queue + drain thread. Startup does not depend on the
+    DB: the `telemetry_events` sink connects lazily on the drain thread and backs off
+    when the database does not answer, and the JSONL mirror is written first."""
     return _EventPipeline()
 
 
@@ -580,8 +489,8 @@ def init_telemetry(*, process: str = "unknown", agent_id: int | None = None) -> 
     process shares): `init_gateway_process(name)` → process=name; the exec
     child's `add_postgres_sink` → process="agent-exec" plus its agent id. The
     first call opens the drain thread; later calls only refresh the identity
-    binding. The DB is no longer part of the pipeline (task #1197), so startup
-    never depends on it."""
+    binding. Startup never depends on the DB (the `telemetry_events` sink connects
+    lazily on the drain thread)."""
     _state["process"] = process
     _state["agent_id"] = agent_id
     if _state["machine"] is None:
@@ -649,7 +558,7 @@ def emit(
 ) -> None:
     """Enqueue one event into the unified stream. Never raises — except for a
     contract violation (R2-C): an `event_name` with no `EventSpec` in
-    `base/events/contract.py`, or a category that contradicts the
+    `base/events/declarations`, or a category that contradicts the
     declaration, raises `ValueError` (AGENTS.md "explode on unknown enums").
     The loguru adapter wraps its call with `catch=True`, so a logging line
     that drifts off-contract stays visible (JSONL mirror) without crashing
@@ -705,7 +614,7 @@ def prepare_event(
     if spec is None:
         raise ValueError(
             f"emit() got unregistered event_name={event_name!r} — declare an "
-            "EventSpec in base/events/contract.py EVENTS first (base/events/"
+            "EventSpec in a base/events/declarations module first (base/events/"
             "registry.md is generated from it)"
         )
     if category != spec.category and category not in spec.extra_categories:
@@ -790,6 +699,10 @@ def _drain_on_exit() -> None:
         from base.telemetry.metrics.observed_metrics import close_projection
 
         close_projection()
+    with contextlib.suppress(Exception):
+        from base.telemetry.event_store import close_store
+
+        close_store()
     with contextlib.suppress(Exception):
         from base.telemetry.otlp import telemetry_otlp  # deferred — heavy OTel imports
 

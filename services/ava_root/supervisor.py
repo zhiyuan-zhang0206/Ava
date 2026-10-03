@@ -18,11 +18,6 @@ from typing import Protocol
 import psutil
 
 from base.deploy.release.runtime_interpreter import LoadedRuntimeIdentity
-from base.host.env.registry import (
-    MANIFEST_CERTIFICATION_FINALIZER_ENV,
-    MANIFEST_CERTIFICATION_SECRET_ENV,
-    manifest_certification_secret_env,
-)
 from base.native_process.child_env import inherited_process_env
 from base.native_process.ownership import OwnedProcess
 from base.native_process.root_control.ipc import (
@@ -57,19 +52,6 @@ from services.ava_root.unit_records import _Generation, _UnitRuntime
 
 _log = logging.getLogger(__name__)
 
-_MANIFEST_FINALIZER_UNIT = "agent-host"
-
-
-def _unit_env(unit_id: str) -> dict[str, str]:
-    """Return one root child env with the proof limited to the finalizer."""
-    env = inherited_process_env()
-    if unit_id == _MANIFEST_FINALIZER_UNIT:
-        env.update(manifest_certification_secret_env())
-    else:
-        env.pop(MANIFEST_CERTIFICATION_SECRET_ENV, None)
-        env.pop(MANIFEST_CERTIFICATION_FINALIZER_ENV, None)
-    return env
-
 
 class HealthSource(Protocol):
     """The health runner slice `status()` embeds (W1.2a's `HealthMonitor`)."""
@@ -83,7 +65,7 @@ class MetricsSource(Protocol):
     """The self-check slice `status()` embeds (W1.2b's `TreeSelfCheck`)."""
 
     def metrics_snapshot(self) -> dict[str, object]:
-        """The B7 metrics block (chain gauges + injectable slots)."""
+        """The B7 metrics block (the chain gauges)."""
         ...
 
 
@@ -556,7 +538,7 @@ class Supervisor(StoppingMixin, ReconcilingMixin):
         log_fd = os.open(log_path, os.O_CREAT | os.O_WRONLY | os.O_APPEND, 0o644)
         try:
             custody = self._new_custody(manifest.id)
-            env = _unit_env(manifest.id) | dict(manifest.env)
+            env = inherited_process_env() | dict(manifest.env)
             proc = await asyncio.create_subprocess_exec(
                 *manifest.exec,
                 stdin=asyncio.subprocess.DEVNULL,

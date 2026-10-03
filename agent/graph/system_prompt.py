@@ -10,13 +10,13 @@ import inspect
 import io
 import logging
 import weakref
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from types import ModuleType, SimpleNamespace
 from typing import Any
 
 from agent.hooks.history_dump import workspace_section_hint
 from base.config import settings
-from base.config.turn_view import turn_settings
+from base.host.env.agent_slices import AgentSlices
 from base.packages.plugins import activation, contributions
 from base.packages.plugins.context import current_plugin_name
 from base.paths import workspace_dir
@@ -31,7 +31,7 @@ from .capabilities import (
 )
 
 
-def _resolved(setting: str) -> Any:
+def _resolved(setting: str, slices: AgentSlices) -> Any:
     """The per-model-resolved value of a prompt-behavior settings field for the
     agent's model: an explicit env/.env/overlay value wins, else the model's
     registry default, else the shared floor — see
@@ -40,23 +40,24 @@ def _resolved(setting: str) -> Any:
     guidance profile without any per-cluster config."""
     from base.lm.registry import resolve_setting
 
-    return resolve_setting(setting, model=turn_settings.lm.llm_model)
+    return resolve_setting(setting, model=slices.brain.llm_model)
 
 
-_SYSTEM_PROMPT_SECTIONS: list[Callable[[], str]] = []
+SectionFn = Callable[[AgentSlices], str]
+_SYSTEM_PROMPT_SECTIONS: list[SectionFn] = []
 
 # section fn -> the plugin that registered it, read by `build_system_prompt` to
 # attribute a section that actually contributed text. Weak keys so an entry dies
 # with the function object; framework sections are absent (they register outside
 # a `PluginContext`) and therefore stay untelemetered.
-_SECTION_PLUGIN: weakref.WeakKeyDictionary[Callable[[], str], str] = weakref.WeakKeyDictionary()
+_SECTION_PLUGIN: weakref.WeakKeyDictionary[SectionFn, str] = weakref.WeakKeyDictionary()
 
 
-def register_system_prompt_section(fn: Callable[[], str]) -> Callable[[], str]:
+def register_system_prompt_section(fn: SectionFn) -> SectionFn:
     """Register a system prompt section contributor — spliced into the system prompt at boot.
 
-    Function signature `() -> str`; empty return treated as no contribution.
-    `build_system_prompt()` runs them in registration order when called.
+    Function signature `(slices: AgentSlices) -> str`, the agent's configuration for the turn; empty
+    return treated as no contribution. `build_system_prompt(slices)` runs them in registration order when called.
     """
     _SYSTEM_PROMPT_SECTIONS.append(fn)
     contributions.record("systemPromptSections", fn.__name__, detail=fn.__module__)
@@ -70,7 +71,7 @@ def register_system_prompt_section(fn: Callable[[], str]) -> Callable[[], str]:
 
 
 # --- SDK detail: expanded contracts for the highest-frequency namespaces ---
-def _discover_all_namespaces() -> list[str]:
+def _discover_all_namespaces(sdk_disable: Sequence[str]) -> list[str]:
     """Public ava namespaces the `"*"` expand entry stands for: every name in `help(ava)` that is
     itself a namespace (a module / namespace object), plus public nested submodules reachable
     through parent `__all_for_ava__` lists. Top-level functions (`help`, `understand`) are
@@ -91,7 +92,7 @@ def _discover_all_namespaces() -> list[str]:
         # agent_visible_names already drops underscore-prefixed names.
         for name in ava.agent_visible_names(parent):
             full = f"{prefix}.{name}" if prefix else name
-            if full in _CAPABILITY_SURFACES or _disabled_by_sdk_config(full):
+            if full in _CAPABILITY_SURFACES or _disabled_by_sdk_config(full, sdk_disable):
                 continue
             attr = getattr(parent, name, None)
             if inspect.ismodule(attr) or isinstance(attr, SimpleNamespace):
@@ -104,7 +105,7 @@ def _discover_all_namespaces() -> list[str]:
     return sorted(discovered)
 
 
-def effective_sdk_expand() -> list[str]:
+def effective_sdk_expand(sdk_disable: Sequence[str]) -> list[str]:
     """The merged expand list: plugin-registered paths (`ava.register_sdk_expand`)
     first, then the configured framework list, deduped keep-first. Plugins lead
     because a plugin promotes its own highest-frequency surface (ava_code's cwd
@@ -130,7 +131,7 @@ def effective_sdk_expand() -> list[str]:
     configured: list[str] = []
     for entry in settings.agent.sdk_expand_in_system_prompt:
         if entry == "*":
-            configured.extend(_discover_all_namespaces())
+            configured.extend(_discover_all_namespaces(sdk_disable))
         else:
             configured.append(entry)
 
@@ -156,7 +157,7 @@ def effective_sdk_expand() -> list[str]:
 
 
 @register_system_prompt_section
-def _sdk_expand_section() -> str:
+def _sdk_expand_section(slices: AgentSlices) -> str:
     """Render the effective expand list (plugin registrations + env
     AVA_SDK_EXPAND, see `effective_sdk_expand`) as full `ava.help(ava.<path>)`
     stubs, directly after the SDK overview. Selection is frequency-driven
@@ -175,7 +176,7 @@ def _sdk_expand_section() -> str:
     or a polluted expand list) is an anomaly — render it once (a repeated
     contract is pure prompt bloat) but WARN, so the upstream cause stays visible
     instead of being silently absorbed."""
-    wanted = effective_sdk_expand()
+    wanted = effective_sdk_expand(slices.prompt.sdk_disable)
     if not wanted:
         return ""
     import ava
@@ -185,7 +186,7 @@ def _sdk_expand_section() -> str:
     pieces: list[str] = []
     seen_targets: set[int] = set()
     # Text-only models drop media-gated members (`ava.self.attach`; ruling 2026-08-28).
-    hidden: frozenset[str] = ava.attachment_transport.media_gated_members()
+    hidden: frozenset[str] = ava.attachment_transport.media_gated_members(slices.brain.llm_model)
     _hidden_token = discovery.hidden_surface_members.set(hidden)
     # Render classes compactly in the system prompt: show name + docstring +
     # field annotations + enum values, skip methods and nested classes. Fields
@@ -194,7 +195,7 @@ def _sdk_expand_section() -> str:
     _compact_token = help_render.compact_classes.set(True)
     try:
         for path in wanted:
-            if _disabled_by_sdk_config(path):
+            if _disabled_by_sdk_config(path, slices.prompt.sdk_disable):
                 continue
             target: object = ava
             try:
@@ -234,11 +235,11 @@ def _sdk_expand_section() -> str:
 
 
 @register_system_prompt_section
-def _prefer_sdk_section() -> str:
+def _prefer_sdk_section(slices: AgentSlices) -> str:
     """Toggle via settings.agent.prompt_prefer_sdk_enabled (env AVA_SYSTEM_PROMPT_PREFER_SDK,
     default on). One line steering the agent to the SDK over plain-Python /
     raw-shell equivalents; deliberately example-free."""
-    if not _resolved("prompt_prefer_sdk_enabled"):
+    if not _resolved("prompt_prefer_sdk_enabled", slices):
         return ""
     return (
         "# Prefer your SDK\n\n"
@@ -254,12 +255,12 @@ register_system_prompt_section(_codeact_section)
 
 
 @register_system_prompt_section
-def _keep_it_simple_section() -> str:
+def _keep_it_simple_section(slices: AgentSlices) -> str:
     """Toggle via settings.agent.prompt_keep_it_simple_enabled (env
     AVA_SYSTEM_PROMPT_KEEP_IT_SIMPLE, default on). Prefer mechanically correct,
     conceptually simple solutions over clever shortcuts, relentlessly even when
     the principled path is tedious."""
-    if not _resolved("prompt_keep_it_simple_enabled"):
+    if not _resolved("prompt_keep_it_simple_enabled", slices):
         return ""
     return (
         "# Keep It Simple\n\n"
@@ -348,15 +349,15 @@ _COMMUNICATION_STYLE_SECTIONS = {
 
 
 @register_system_prompt_section
-def _communication_style_section() -> str:
-    """Selected by turn_settings.agent.agent_communication_style (env
+def _communication_style_section(slices: AgentSlices) -> str:
+    """Selected by agent_communication_style (env
     AVA_AGENT_COMMUNICATION_STYLE, default 'off'). Three styles carry the
     same output-channel map and differ only in how much the agent says while it
     works: 'oriented' interleaves brief updates, 'concise' speaks at milestones
     only, 'silent' stays quiet and reports once at the end. 'off' is the one
     gate in this set — no channel map, no narration guidance, the section is
     omitted from the system prompt entirely."""
-    style = _resolved("agent_communication_style")
+    style = _resolved("agent_communication_style", slices)
     if style == "off":
         return ""
     return _COMMUNICATION_STYLE_SECTIONS[style]
@@ -369,22 +370,22 @@ _USER_TONE_SECTIONS = {"gemini": _STRONG_USER_TONE, "claude": _VERY_LIGHT_USER_T
 
 
 @register_system_prompt_section
-def _user_tone_section() -> str:
+def _user_tone_section(slices: AgentSlices) -> str:
     """Independent from ``agent_communication_style`` (narration volume vs tone), with a per-family strength gradient; every Claude model defaults off unless explicitly enabled."""
-    if not _resolved("prompt_user_tone_enabled"):
+    if not _resolved("prompt_user_tone_enabled", slices):
         return ""
     from base.lm.registry import MODELS
 
-    spec = MODELS.get(turn_settings.lm.llm_model)
+    spec = MODELS.get(slices.brain.llm_model)
     return f"# Communicating with the user\n\n{_USER_TONE_SECTIONS.get(spec.provider if spec is not None else '', _LIGHT_USER_TONE)}"
 
 
 @register_system_prompt_section
-def _output_conciseness_section() -> str:
+def _output_conciseness_section(slices: AgentSlices) -> str:
     """Toggle via settings.agent.prompt_output_conciseness_enabled (env
     AVA_SYSTEM_PROMPT_CONCISENESS, default on). Shape the text content: answer-first,
     matched to the task, reference rather than dump."""
-    if not _resolved("prompt_output_conciseness_enabled"):
+    if not _resolved("prompt_output_conciseness_enabled", slices):
         return ""
     return (
         "# Output shape\n\n"
@@ -400,7 +401,7 @@ def _output_conciseness_section() -> str:
 
 
 @register_system_prompt_section
-def _ui_delivery_section() -> str:
+def _ui_delivery_section(slices: AgentSlices) -> str:
     """Toggle via settings.agent.prompt_ui_delivery_enabled (env
     AVA_SYSTEM_PROMPT_UI_DELIVERY, default on). Content for the user goes through
     the UI — never as a bare path to a Markdown file the user would have to open
@@ -409,7 +410,7 @@ def _ui_delivery_section() -> str:
     often than the rule) live in the SDK overview / expanded reference. Files
     remain fine as persistence and as handoff artifacts for other agents; the
     user-facing presentation is the UI's job."""
-    if not _resolved("prompt_ui_delivery_enabled"):
+    if not _resolved("prompt_ui_delivery_enabled", slices):
         return ""
     return (
         "# Deliver through the UI\n\n"
@@ -425,11 +426,11 @@ def _ui_delivery_section() -> str:
 
 # --- Conduct: how you behave and what judgment to apply ---
 @register_system_prompt_section
-def _outcome_reporting_section() -> str:
+def _outcome_reporting_section(slices: AgentSlices) -> str:
     """Toggle via settings.agent.prompt_outcome_reporting_enabled (env
     AVA_SYSTEM_PROMPT_REPORTING, default on). Report results honestly — no rounding a
     partial result up to success."""
-    if not _resolved("prompt_outcome_reporting_enabled"):
+    if not _resolved("prompt_outcome_reporting_enabled", slices):
         return ""
     return (
         "# Reporting honestly\n\n"
@@ -441,11 +442,11 @@ def _outcome_reporting_section() -> str:
 
 
 @register_system_prompt_section
-def _action_caution_section() -> str:
+def _action_caution_section(slices: AgentSlices) -> str:
     """Toggle via settings.agent.prompt_action_caution_enabled (env AVA_SYSTEM_PROMPT_CAUTION,
     default on). Confirm before hard-to-reverse or outward-facing actions; treat
     sending to an outside service as publishing."""
-    if not _resolved("prompt_action_caution_enabled"):
+    if not _resolved("prompt_action_caution_enabled", slices):
         return ""
     return (
         "# Before irreversible or outward-facing actions\n\n"
@@ -459,11 +460,11 @@ def _action_caution_section() -> str:
 
 
 @register_system_prompt_section
-def _align_before_action_section() -> str:
+def _align_before_action_section(slices: AgentSlices) -> str:
     """Toggle via settings.agent.prompt_align_before_action_enabled (env AVA_SYSTEM_PROMPT_ALIGN,
     default on). Before large or hard-to-redo work, and right after exploring or
     planning, confirm direction with the user instead of running on assumptions."""
-    if not _resolved("prompt_align_before_action_enabled"):
+    if not _resolved("prompt_align_before_action_enabled", slices):
         return ""
     return (
         "# Aligning before you commit to a direction\n\n"
@@ -525,7 +526,7 @@ _STEP_PARALLEL = (
 
 
 @register_system_prompt_section
-def _delegation_check_section() -> str:
+def _delegation_check_section(slices: AgentSlices) -> str:
     """Toggle via settings.agent.prompt_delegation_check_enabled (env
     AVA_SYSTEM_PROMPT_DELEGATION_CHECK, default on). Before taking on any work, run a
     30-second check — the most common fleet failure modes are skipping it and
@@ -536,10 +537,10 @@ def _delegation_check_section() -> str:
     to live in the one process the prompt marks as mandatory rather than in the
     index itself. It is dropped (and the rest renumbered) when this agent has no
     Capabilities section at all — see `capability_index_is_empty`."""
-    if not _resolved("prompt_delegation_check_enabled"):
+    if not _resolved("prompt_delegation_check_enabled", slices):
         return ""
     steps: list[str] = []
-    if not capability_index_is_empty():
+    if not capability_index_is_empty(slices.prompt):
         steps.append(_STEP_SKILL_INDEX)
     first_delegation_step = len(steps) + 1
     steps.append(_STEP_NEIGHBORS)
@@ -568,25 +569,25 @@ _CROSS_MACHINE_DELEGATION_HINT = (
 
 
 @register_system_prompt_section
-def _cross_machine_delegation_section() -> str:
+def _cross_machine_delegation_section(slices: AgentSlices) -> str:
     """Toggle via settings.agent.prompt_cross_machine_delegation_enabled (env
     AVA_SYSTEM_PROMPT_CROSS_MACHINE_DELEGATION, default on). One sentence,
     user-finalized wording verbatim: when work spans machines, let an agent on
     the target machine do it rather than reaching across. Semantic steer only —
     no API detail (no spawn parameters, no SSH), so it cannot go stale."""
-    if not _resolved("prompt_cross_machine_delegation_enabled"):
+    if not _resolved("prompt_cross_machine_delegation_enabled", slices):
         return ""
     return _CROSS_MACHINE_DELEGATION_HINT
 
 
 @register_system_prompt_section
-def _file_driven_work_section() -> str:
+def _file_driven_work_section(slices: AgentSlices) -> str:
     """Toggle via settings.agent.prompt_file_driven_work_enabled (env
     AVA_SYSTEM_PROMPT_FILE_DRIVEN_WORK, default on). When working on complex multi-step
     tasks, use files as working memory: write intermediate results to files,
     use worktrees for isolation, and hand off work to peer agents via handoff
     files rather than trying to fit everything into a message."""
-    if not _resolved("prompt_file_driven_work_enabled"):
+    if not _resolved("prompt_file_driven_work_enabled", slices):
         return ""
     return (
         "# File-driven workflow for complex tasks\n\n"
@@ -610,13 +611,13 @@ def _file_driven_work_section() -> str:
 
 
 @register_system_prompt_section
-def _temporal_awareness_section() -> str:
+def _temporal_awareness_section(slices: AgentSlices) -> str:
     """Toggle via settings.agent.prompt_temporal_awareness_enabled (env
     AVA_SYSTEM_PROMPT_TEMPORAL, default on). For events and releases after the training
     cutoff, assume you don't know — search before answering; don't guess from
     stale training data. At AI-capability scheduling, estimation, and feasibility
     moments, invoke the ai-capability-timescale skill for current cognition."""
-    if not _resolved("prompt_temporal_awareness_enabled"):
+    if not _resolved("prompt_temporal_awareness_enabled", slices):
         return ""
     return (
         "# Temporal awareness\n\n"
@@ -662,19 +663,19 @@ _INVEST_IN_THE_FUTURE_SECTION = (
 
 
 @register_system_prompt_section
-def _invest_in_the_future_section() -> str:
+def _invest_in_the_future_section(slices: AgentSlices) -> str:
     """Toggle via settings.agent.prompt_invest_future_enabled (env
     AVA_SYSTEM_PROMPT_INVEST_FUTURE, default on through the per-model floor).
     The framework's ONE cross-domain future-signal rule, merged from the former
     # Beyond the task at hand; its closing-presentation duty now lives in the
     final paragraph."""
-    if not _resolved("prompt_invest_future_enabled"):
+    if not _resolved("prompt_invest_future_enabled", slices):
         return ""
     return _INVEST_IN_THE_FUTURE_SECTION
 
 
 @register_system_prompt_section
-def _workspace_section() -> str:
+def _workspace_section(slices: AgentSlices) -> str:
     """One-paragraph pointer to the per-agent workspace dir. Empty before a
     process identity is established (snapshot test / dev REPL renders) — the
     note that carries the concrete path is injected beside this prompt, so
@@ -707,7 +708,7 @@ def _workspace_section() -> str:
         "by default. Using it is optional: work that has a natural home — a "
         "repo checkout, a location the user names — belongs there, not in the "
         "workspace. Other agents have their own; share a file by sending its "
-        "absolute path." + workspace_section_hint()
+        "absolute path." + workspace_section_hint(slices.history_dump)
     )
 
 
@@ -728,12 +729,12 @@ def clear_plugin_system_prompt_sections() -> None:
     del _SYSTEM_PROMPT_SECTIONS[_FRAMEWORK_SECTION_COUNT:]
 
 
-def plugin_system_prompt_sections() -> tuple[Callable[[], str], ...]:
+def plugin_system_prompt_sections() -> tuple[SectionFn, ...]:
     """Return the plugin-contributed system prompt sections (the tail past the framework-owned ones)."""
     return tuple(_SYSTEM_PROMPT_SECTIONS[_FRAMEWORK_SECTION_COUNT:])
 
 
-def build_system_prompt() -> str:
+def build_system_prompt(slices: AgentSlices) -> str:
     """Build the full system prompt: base + SDK overview + plugin contributions.
 
     `_claim` node calls once when `state.messages` is empty; afterward
@@ -761,17 +762,17 @@ tool calls. Before using any `ava.*` function, you must explicitly `import ava` 
 """
         ]
     for section_fn in _SYSTEM_PROMPT_SECTIONS:
-        contribution = section_fn()
+        contribution = section_fn(slices)
         if contribution:
             parts.append(contribution)
-            # Activation telemetry (philosophy §6): a plugin section that
-            # rendered text is prompt real estate the plugin is spending. Length
-            # + digest identify *which* variant landed without storing the text;
-            # this runs at spawn/compact only, so there is no per-turn cost.
+            # Activation telemetry (philosophy §6): a plugin section that rendered text is prompt
+            # real estate the plugin is spending. Length + digest identify *which* variant landed
+            # without storing the text; this runs at spawn/compact only, so no per-turn cost.
             activation.record(
                 _SECTION_PLUGIN.get(section_fn),
                 "systemPromptSections",
                 section_fn.__name__,
+                model=slices.brain.llm_model,
                 detail=(
                     f"chars={len(contribution)} "
                     f"sha={hashlib.sha256(contribution.encode()).hexdigest()[:12]}"
@@ -780,7 +781,7 @@ tool calls. Before using any `ava.*` function, you must explicitly `import ava` 
     # Model identity — per-model note telling the model what it runs on.
     from base.lm.factory import MODEL_IDENTITY
 
-    identity = MODEL_IDENTITY.get(turn_settings.lm.llm_model)
+    identity = MODEL_IDENTITY.get(slices.brain.llm_model)
     if identity:
         parts.append(identity)
     # Knowledge cutoff — tail line so the agent knows its training-data
@@ -791,7 +792,7 @@ tool calls. Before using any `ava.*` function, you must explicitly `import ava` 
     if settings.agent.prompt_knowledge_cutoff_enabled:
         from base.lm.factory import MODEL_KNOWLEDGE_CUTOFF
 
-        cutoff = MODEL_KNOWLEDGE_CUTOFF.get(turn_settings.lm.llm_model)
+        cutoff = MODEL_KNOWLEDGE_CUTOFF.get(slices.brain.llm_model)
         if cutoff:
             parts.append(f"Knowledge cutoff: {cutoff}")
     # Exactly one trailing newline regardless of which section lands last, so

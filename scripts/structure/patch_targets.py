@@ -333,8 +333,23 @@ def analyze(rel_path: str, text: str, classifier: Classifier) -> FileResult:
     if not points:
         return FileResult(None, fallback=False, sites=())
     placement: Placement = place(rel_path, tree, classifier.index, nodes)
+    support_home = _support_home(rel_path)
+    if support_home is not None:
+        placement = Placement(support_home, placement.unit)
     sites = tuple(classifier.classify(point, placement.home) for point in points)
     return FileResult(placement.home, placement.fallback, sites)
+
+
+def _support_home(rel_path: str) -> str | None:
+    """The package a support module (not `test_*`) of a `<pkg>/tests/` directory serves.
+
+    A helper has no subject of its own, so its references say nothing about where it
+    belongs; it is filed in the package whose tests directory holds it.
+    """
+    parts = rel_path.split("/")
+    if parts[-1].startswith("test_") or "tests" not in parts[1:]:
+        return None
+    return "/".join(parts[: parts.index("tests", 1)])
 
 
 def violations(rel_path: str, result: FileResult) -> Sites:

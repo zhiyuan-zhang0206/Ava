@@ -95,7 +95,13 @@ def test_partial_stop_uses_native_cleanup_without_database_drain(
     def _fake_stop_extras(_deadline: float) -> None:
         steps.append("extras")
 
-    def _fake_stop_data_plane(timeout: float, *, save: bool = True) -> list[str]:
+    def _fake_stop_data_plane(
+        timeout: float,
+        *,
+        save: bool = True,
+        notes: list[str] | None = None,
+        clients: list[str] | None = None,
+    ) -> list[str]:
         steps.append("native")
         return []
 

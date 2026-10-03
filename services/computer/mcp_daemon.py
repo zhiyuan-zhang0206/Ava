@@ -77,7 +77,9 @@ from base.telemetry import audit_events
 
 # Re-export of the shared OCR module object (test compat: the suite patches
 # mcp_daemon.ocr_mod attributes, and every OCR caller sees the same object).
-from services.computer.execute import _TOOLS, _execute, _mcp_result, _priority
+from services.computer.ax_ids import AxSession
+from services.computer.config import ComputerUseConfig
+from services.computer.execute import _TOOLS, _execute_tool, _mcp_result, _priority
 from services.computer.execute import ocr_mod as ocr_mod
 from services.computer.protocol import Request, Response
 from services.computer.session import ScreenSession
@@ -90,10 +92,37 @@ from services.permissions_helper.client import PermissionsHelperError
 _LINE_LIMIT = 64 * 1024 * 1024
 
 
+def _audit_coords(tool: str, args: dict[str, Any], result: dict[str, Any] | None) -> str | None:
+    """The compact "where / what" string of a computer_action audit row."""
+    if tool == "click" and "x" in args:
+        return f"{args['x']},{args['y']}"
+    if tool == "click_text" and result is not None:
+        # click_text resolves its own target via OCR: audit the center it
+        # clicked (physical pixels), not an argument coordinate.
+        return f"{result.get('x')},{result.get('y')}"
+    if tool == "ax_act" and result is not None:
+        # The element's center and the action — never the value written.
+        return f"{result.get('x')},{result.get('y')},{result.get('action')}"
+    if tool == "scroll":
+        return f"{args.get('x')},{args.get('y')},{args.get('dy')}"
+    if tool == "key":
+        return str(args.get("key") or args.get("keycode") or "")
+    return None
+
+
+def computer_use_config() -> ComputerUseConfig:
+    """The composition root: the one place this package reads `settings`."""
+    return ComputerUseConfig(
+        computer_use_lease_s=settings.daemon.computer_use_lease_s,
+        computer_use_queue_timeout_s=settings.daemon.computer_use_queue_timeout_s,
+        computer_use_session_idle_s=settings.daemon.computer_use_session_idle_s,
+    )
+
+
 class ComputerMcpDaemon:
     """Unix-socket server for the computer-mcp line protocol."""
 
-    def __init__(self, sock: str | None = None) -> None:
+    def __init__(self, config: ComputerUseConfig, sock: str | None = None) -> None:
         self._sock = sock or str(computer_mcp_socket())
         # Last pointer position in PHYSICAL pixels (set by click / explicit
         # scroll); the scroll fallback when the caller gives no x/y.
@@ -106,17 +135,19 @@ class ComputerMcpDaemon:
         # find_text with snapshot_fresh=false searches the screen the caller
         # last saw instead of capturing again.
         self._ocr_cache: dict[str, Any] = {"items": []}
+        # Stable accessibility element ids (ax_tree / ax_act), one app at a time.
+        self._ax_session = AxSession()
         # One lock around execute: a single desktop op at a time machine-wide,
         # and a snapshot's multi-step capture never interleaves with another
         # agent's click (same serial choice as browser-mcp).
         self._action_lock = asyncio.Lock()
         # Phase 2 session coordination: who owns the screen + FIFO waiters.
         self._screen = ScreenSession(
-            lease_s=settings.daemon.computer_use_lease_s,
-            queue_timeout_s=settings.daemon.computer_use_queue_timeout_s,
+            lease_s=config.computer_use_lease_s,
+            queue_timeout_s=config.computer_use_queue_timeout_s,
         )
         # Phase 2 audit envelope: task_id -> computer_session_start/end.
-        self._task_sessions = TaskSessionTracker(idle_s=settings.daemon.computer_use_session_idle_s)
+        self._task_sessions = TaskSessionTracker(idle_s=config.computer_use_session_idle_s)
         # Active client handler tasks, so shutdown can close them instead of
         # hanging in server.wait_closed() behind a client that never disconnects
         # (the pre-fix orphan: SIGTERM left the process alive holding the socket).
@@ -184,13 +215,14 @@ class ComputerMcpDaemon:
             outcome = "ok"
             error: str | None = None
             try:
-                result = _execute(
+                result = _execute_tool(
                     tool,
                     args,
                     agent_id or 0,
                     pointer=self._pointer,
                     scale=self._scale,
                     ocr_cache=self._ocr_cache,
+                    ax_session=self._ax_session,
                 )
                 if tool == "snapshot":
                     # click/scroll convert with the scale the caller saw.
@@ -230,7 +262,7 @@ class ComputerMcpDaemon:
                             # silent either — a contract mismatch (unregistered
                             # event name, FK hiccup) must be audible.
                             logger.warning(f"[computer-mcp] task-session event failed: {e}")
-            self._emit_action(agent_id, tool, args, outcome, error, result=result, origin_id=req_id)
+            self._emit_action(agent_id, tool, args, outcome, error, result=result)
             if error is not None:
                 return {"id": req_id, "ok": False, "error": error}
             assert result is not None  # noqa: S101 — no error ⇒ execution succeeded
@@ -249,7 +281,7 @@ class ComputerMcpDaemon:
             if args.get("force") and released is not None:
                 # Operator kick: no agent identity, so no audit row — log it.
                 logger.info(f"[computer-mcp] operator forced release of agent {released}")
-            self._emit_action(agent_id, "release_control", args, outcome, error, origin_id=req_id)
+            self._emit_action(agent_id, "release_control", args, outcome, error)
             if released is None:
                 return {"id": req_id, "ok": False, "error": "not the screen holder"}
             return {
@@ -265,21 +297,10 @@ class ComputerMcpDaemon:
         args: dict[str, Any],
         outcome: str,
         error: str | None,
-        origin_id: int,
         result: dict[str, Any] | None = None,
     ) -> None:
         """One computer_action audit event per call — facts for later review."""
-        coords: str | None = None
-        if tool == "click" and "x" in args:
-            coords = f"{args['x']},{args['y']}"
-        elif tool == "click_text" and result is not None:
-            # click_text resolves its own target via OCR: audit the center it
-            # clicked (physical pixels), not an argument coordinate.
-            coords = f"{result.get('x')},{result.get('y')}"
-        elif tool == "scroll":
-            coords = f"{args.get('x')},{args.get('y')},{args.get('dy')}"
-        elif tool == "key":
-            coords = str(args.get("key") or args.get("keycode") or "")
+        coords = _audit_coords(tool, args, result)
         if agent_id is None:
             # No identity, no audit row: events.agent_id references agents(id).
             return
@@ -300,13 +321,9 @@ class ComputerMcpDaemon:
                 "task_id": args.get("task_id"),
             },
         )
-        from base.agents.impersonation_manifest import emit_staged_central_event
+        from base.agents.impersonation_manifest import emit_recorded_central_event
 
-        emit_staged_central_event(
-            event,
-            origin_kind="computer_action",
-            origin_id=origin_id,
-        )
+        emit_recorded_central_event(event)
 
     @staticmethod
     def _emit_session_event(event_type: str, agent_id: int, payload: dict[str, Any]) -> None:
@@ -318,12 +335,9 @@ class ComputerMcpDaemon:
             source=f"agent:{agent_id}",
             payload=payload,
         )
-        task_id = payload["task_id"]
-        if not isinstance(task_id, int) or isinstance(task_id, bool):
-            raise TypeError("computer task-session audit requires an integer task id")
-        from base.agents.impersonation_manifest import emit_staged_central_event
+        from base.agents.impersonation_manifest import emit_recorded_central_event
 
-        emit_staged_central_event(event, origin_kind=f"computer_{event_type}", origin_id=task_id)
+        emit_recorded_central_event(event)
 
 
 async def _socket_in_use(path: Path) -> bool:
@@ -367,7 +381,7 @@ def _tracked_client(
 
 
 async def run(sock: str | None = None) -> None:
-    daemon = ComputerMcpDaemon(sock)
+    daemon = ComputerMcpDaemon(computer_use_config(), sock)
     path = Path(daemon._sock)
     if await _socket_in_use(path):
         logger.error(

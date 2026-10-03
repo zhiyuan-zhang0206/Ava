@@ -17,7 +17,7 @@ from typing import cast
 import pytest
 
 from base.cluster.machine import MachineRole
-from base.daemon.health import health_port
+from base.daemon.endpoints import ServiceEndpoints
 from ops import roster, spec
 from ops.roster import service_spec
 
@@ -39,6 +39,8 @@ _GATEWAY_SESSIONS = {
     "frontend",
     "otel-collector",
     "pg-backup",
+    "ttl-reaper",
+    "schedule-manager",
 }
 _AGENT_RUNNER_SESSIONS = {
     "loki",
@@ -414,7 +416,7 @@ def test_daemon_identity_binds_the_probe_to_one_daemons_facts(
     assert roster.daemon_identity("ops", pidfile)().alive is True
     assert seen["name"] == "ops"
     assert seen["pidfile"] == pidfile
-    assert str(health_port("ops")) in str(seen["url"])
+    assert str(ServiceEndpoints.from_settings().of("ops").health_port) in str(seen["url"])
 
 
 def test_im_bridge_gated_when_disabled(monkeypatch: pytest.MonkeyPatch) -> None:

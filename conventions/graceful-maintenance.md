@@ -20,11 +20,17 @@ start the gateway and verify its dependencies before starting runners.
 an invocation's preservation choice, not a permanent disabled-service setting.
 `stop` asks for confirmation unless `-y` is passed; `pause` does not. Both use
 `--timeout 300` by default. A deadline is a failed stop, not permission to kill
-surviving services. Terminals are the exception: `stop` hangs up each shell's
+surviving services. Terminals and Postgres are the exceptions: Postgres' fast
+shutdown that has not finished by the end of its share of the budget (a hung
+archive command) is ended by an immediate shutdown and the leftover descendants
+are SIGKILLed, loudly and without failing the stop
+([decision](../decisions/2026-10-02-pg-stop-escalates-to-immediate.md)); for terminals, `stop` hangs up each shell's
 whole session (its descendants and double-forked orphans included), and
 SIGKILLs what is still alive after a grace of at most 10 seconds; a busy
-session still leaves its owner the closure notice
-([decision](../decisions/2026-09-28-stop-escalates-to-sigkill.md)). `--force`
+session still leaves its owner the closure notice, written to the database
+in the `terminals` phase, before the data plane stops
+([decision](../decisions/2026-09-28-stop-escalates-to-sigkill.md),
+[notice write](../decisions/2026-10-02-close-notices-written-at-terminals.md)). `--force`
 explicitly selects force behavior when normal exit cannot complete. Force stops
 the selected service processes without fabricating a restart receipt. Later
 start uses agent-host crash recovery from persisted checkpoints.
@@ -68,10 +74,10 @@ not spend that budget: the gateway's server marks its shutdown as it begins and
 each stream ends itself within one poll tick, so its client reconnects at once.
 ava-root waits for the gateway's stop longer than that budget plus the lifespan
 cleanup (`ServiceSpec.stop_ceiling_s`, derived from the same setting), so a
-gateway still draining is never reported as a failed stop. The TTL reaper's
-serial remote-dispatch batches stop starting new dispatches once shutdown
-begins, so that cleanup waits for an in-flight dispatch, never the remaining
-batch — deferred rows are re-selected by the next boot's pass.
+gateway still draining is never reported as a failed stop. No remote
+dispatch holds that cleanup: the TTL reaper runs as its own service, whose stop
+cancels its in-flight dispatches, and rows left expired are re-selected by its
+next start.
 
 The existing home-local journal survives a CLI crash, host reboot and an
 offline database. An incomplete drain or stop retains the hold and reports

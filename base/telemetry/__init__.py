@@ -22,7 +22,6 @@ attribute here is not seen by the emitter's own global reads.
 
 from base.telemetry import otlp as otlp
 from base.telemetry.emitter import (
-    _AUDIT_BLOCK_S,
     _NO_EMITTER,
     _TELEMETRY_KINDS,
     Category,
@@ -46,7 +45,6 @@ from base.telemetry.emitter import (
     event_row,
     flush,
     init_telemetry,
-    is_rollup_source,
     prepare_event,
     process_name,
     report_no_pipeline,
@@ -55,7 +53,6 @@ from base.telemetry.emitter import (
 )
 
 __all__ = [
-    "_AUDIT_BLOCK_S",
     "_NO_EMITTER",
     "_TELEMETRY_KINDS",
     "Category",
@@ -79,7 +76,6 @@ __all__ = [
     "event_row",
     "flush",
     "init_telemetry",
-    "is_rollup_source",
     "otlp",
     "prepare_event",
     "process_name",

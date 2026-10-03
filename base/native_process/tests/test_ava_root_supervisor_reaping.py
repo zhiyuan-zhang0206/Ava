@@ -1,6 +1,6 @@
 """A killed member of a unit's group is a zombie until its parent reaps it, and a zombie fills its group.
 
-`tests/services/test_ava_root_supervisor.py` kills a stray member and then asks root for a final
+`services/ava_root/tests/test_ava_root_supervisor.py` kills a stray member and then asks root for a final
 stop that must find the group empty. `gone()` counts a zombie as ended (the test is not its
 reaper), but `group_empty` counts a zombie as a member by design (`base/native_process/
 group_closure.py`), so the stop refuses until the parent reaps. An orphan's parent is init, which
@@ -20,7 +20,7 @@ import psutil
 import pytest
 
 from base.native_process.group_closure import group_empty, group_members
-from tests.services.test_ava_root_supervisor import (
+from services.ava_root.tests.test_ava_root_supervisor import (
     ended,
     exited,
     exits_on,

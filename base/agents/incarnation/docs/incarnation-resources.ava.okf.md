@@ -18,7 +18,7 @@ incarnation, no additional resource may be admitted. Exact request/domain
 evidence, not a caller-selected list, controls discharge. Execution and force
 deadlines are distinct, fixed authorities and cannot renew one another.
 
-The paired down migration takes ACCESS EXCLUSIVE before checking evidence and
+A retirement migration takes ACCESS EXCLUSIVE before checking evidence and
 retains that lock through DROP. Only entirely NULL, never-enabled storage can
 be removed. Every non-NULL value, including an empty map or malformed version,
 refuses retirement. An empty map alone cannot prove that a live producer will

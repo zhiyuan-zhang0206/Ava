@@ -3,11 +3,16 @@
     "base/tests/test_impersonation.py::test_operator_force_expire_closes_only_observed_session": 23
   },
   "files": {
+    "base/tests/test_config.py": 1705,
     "base/tests/test_health.py": 923,
     "base/tests/test_impersonation.py": 1205,
     "base/tests/test_memory_repo.py": 846
   },
   "patch_targets": {
+    "base/tests/test_connect_helpers.py::base.db.code_version_gate._has_log_sink": 1,
+    "base/tests/test_connect_helpers.py::base.db.code_version_gate._last_read_at": 2,
+    "base/tests/test_connect_helpers.py::base.native_process.code_version._db_gate_exempt": 1,
+    "base/tests/test_connect_helpers.py::base.native_process.code_version._version": 3,
     "base/tests/test_db.py::base.db.connections._restore_pooled_session": 1,
     "base/tests/test_health.py::base.daemon.health._probe_daemon": 3,
     "base/tests/test_health.py::base.daemon.health._probe_home": 1,

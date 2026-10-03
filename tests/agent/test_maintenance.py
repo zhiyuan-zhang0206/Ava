@@ -25,8 +25,10 @@ from agent.startup import wrap_saver_writes_with_nstep_interval
 from base.agents.context import AvaContext
 from base.agents.history.delta_read_compat import wrap_saver_reads_with_delta_reconstruction
 from base.cluster.machine import machine_name
-from base.db import create_agent, insert_inbound_message
+from base.db import Database, create_agent, insert_inbound_message
 from base.deploy.maintenance import admission, cohort, pause_owner
+from base.events.live.bus import EventBus
+from base.host.env.agent_slices import AgentSlices
 from services.agent_host.host import AgentHost
 from services.agent_host.runtime import TurnOutcome
 
@@ -189,12 +191,24 @@ async def test_admitted_model_finishes_real_exec_and_after_exec_before_drain_rec
     await graph.aupdate_state(
         config, {"messages": [HumanMessage(content="Do the action")], "halted": False}
     )
-    ctx = AvaContext(ops_pool=aops_pool, event_publisher=MagicMock(), llm=MagicMock())
-    host = AgentHost(pool=aops_pool, checkpointer=saver, graph=graph, machine=machine_name())
+    ctx = AvaContext(
+        ops_pool=aops_pool,
+        event_publisher=MagicMock(),
+        llm=MagicMock(),
+        agent=AgentSlices.resolve(),
+    )
+    host = AgentHost(
+        pool=aops_pool,
+        checkpointer=saver,
+        graph=graph,
+        machine=machine_name(),
+        bus=EventBus.from_settings(),
+        db=Database.from_settings(),
+    )
     monkeypatch.setattr(host, "_runtime_for", AsyncMock(return_value=object()))
     monkeypatch.setattr("services.agent_host.runtime.validate_model_config", MagicMock())
 
-    async def drive(_agent: int, _runtime: Any) -> TurnOutcome:
+    async def drive(_agent: int, _runtime: Any, _slices: object) -> TurnOutcome:
         return await host._invoke_until_done(_agent, ctx)
 
     monkeypatch.setattr(host, "_drive_turns", drive)
@@ -247,10 +261,12 @@ async def test_admitted_model_finishes_real_exec_and_after_exec_before_drain_rec
             checkpointer=AsyncPostgresSaver(aops_pool),
             graph=builder.compile(checkpointer=AsyncPostgresSaver(aops_pool)),
             machine=machine_name(),
+            bus=EventBus.from_settings(),
+            db=Database.from_settings(),
         )
         monkeypatch.setattr(successor, "_runtime_for", AsyncMock(return_value=object()))
 
-        async def resume_drive(_agent: int, _runtime: Any) -> TurnOutcome:
+        async def resume_drive(_agent: int, _runtime: Any, _slices: object) -> TurnOutcome:
             return await successor._invoke_until_done(_agent, ctx)
 
         monkeypatch.setattr(successor, "_drive_turns", resume_drive)

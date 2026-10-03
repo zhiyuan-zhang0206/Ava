@@ -21,7 +21,7 @@ restart/terminate still reach the native dispatcher; termination revokes control
 Legacy live requests retain their original consent flow during an upgrade.
 
 Every status transition to `terminated` atomically expires open sessions and
-closes manifest admission. The trigger queues a native impersonation interruption
+closes event admission. The trigger queues a native impersonation interruption
 note followed by a completed-termination note, including when native execution
 is drained. Both precede the next resurrection marker; the graph's acceptance
 acknowledgement describes the earlier intent separately. Termination dismisses

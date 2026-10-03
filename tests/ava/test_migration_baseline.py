@@ -16,12 +16,12 @@ from base.deploy.schema.migrations import (
     apply_pending_migrations,
     required_migration_set,
 )
-from tests.ava.migration_support import (
+from base.deploy.tests.migration_support import (
     _SCHEMA_SQL,
     _schema_sql_stamped_migration_names,
     _throwaway_database,
 )
-from tests.ava.migration_support import (
+from base.deploy.tests.migration_support import (
     _reset_schema_migrations_state as _reset_schema_migrations_state,
 )
 
@@ -252,7 +252,10 @@ def test_restarting_row_refuses_the_retirement_and_leaves_the_schema_alone() -> 
         with psycopg.connect(url, autocommit=True) as conn:
             conn.execute("UPDATE agents_meta SET status = 'idling' WHERE id = 7")
         with psycopg.connect(url) as conn:
-            assert apply_pending_migrations(conn) == [_RETIRE]
+            # Migrations newer than the retirement apply after it; only the
+            # retirement was held back by the refusal.
+            applied = apply_pending_migrations(conn)
+            assert [name for name in applied if name <= _RETIRE] == [_RETIRE]
         with (
             psycopg.connect(url, autocommit=True) as conn,
             pytest.raises(psycopg.errors.CheckViolation),

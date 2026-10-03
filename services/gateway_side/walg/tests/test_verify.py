@@ -17,6 +17,8 @@ from services.gateway_side.walg.runner import WalgCommandError
 from services.gateway_side.walg.tests.support import Sandbox, fixture_text, make_sandbox
 from services.gateway_side.walg.verify import VerifyOutputError, parse_verdict
 
+ADMIN_URL = "postgresql://tester@/postgres?host=/sockets/ava-pg-home&port=5433"
+
 
 @pytest.fixture
 def sandbox(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Sandbox:
@@ -53,7 +55,7 @@ def test_an_exit_code_of_zero_with_a_failure_status_is_a_failed_chain(sandbox: S
     sandbox.put("wal-verify.json", _report(integrity="FAILURE"))
     sandbox.put("wal-verify.rc", "0")
 
-    verdict = verify.verify_chain()
+    verdict = verify.verify_chain(ADMIN_URL)
 
     assert verdict.failed is True
     assert sandbox.calls() == ["wal-verify integrity timeline --json"]
@@ -64,7 +66,7 @@ def test_a_non_zero_exit_is_an_error_even_with_an_ok_report(sandbox: Sandbox) ->
     sandbox.put("wal-verify.rc", "1")
 
     with pytest.raises(WalgCommandError):
-        verify.verify_chain()
+        verify.verify_chain(ADMIN_URL)
 
 
 @pytest.mark.parametrize("status", ["PASSED", "ok", "", None])
@@ -80,3 +82,13 @@ def test_an_unknown_status_is_an_error_never_a_pass(status: str | None) -> None:
 def test_output_without_both_checks_is_an_error(text: str) -> None:
     with pytest.raises(VerifyOutputError):
         parse_verdict(text)
+
+
+def test_wal_verify_is_handed_the_owner_only_socket(sandbox: Sandbox) -> None:
+    """It asks Postgres for the current segment: without PGHOST/PGPORT WAL-G dials libpq's
+    default socket, which is not where this home's Postgres listens."""
+    sandbox.put("wal-verify.json", _report(integrity="OK"))
+
+    verify.verify_chain(ADMIN_URL)
+
+    assert sandbox.verify_env_log() == ["PGHOST=/sockets/ava-pg-home PGPORT=5433 PGUSER=tester"]

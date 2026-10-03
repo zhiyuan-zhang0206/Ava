@@ -30,8 +30,8 @@ from base.config import settings
 from base.paths import logs_dir
 from services.hierarchy_worker import execute as execute_module
 from services.hierarchy_worker import job as job_module
-from services.hierarchy_worker import runner
-from services.hierarchy_worker.scan import scan
+from services.hierarchy_worker import roots, runner
+from services.hierarchy_worker.tests.slices import execute_job, run_child, scan
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 
@@ -294,7 +294,7 @@ def test_execute_records_scope_and_advances_only_when_complete(
     monkeypatch.setattr(execute_module, "build_agent_tree", fake_tree)
     monkeypatch.setattr(execute_module, "write_tree", fake_write)
 
-    assert execute_module.execute_job(job_id) == 0
+    assert execute_job(job_id) == 0
     row = db_conn.execute(
         "SELECT status, stretches, nodes, generated, reused, failed, skipped, src_tokens,"
         " out_tokens FROM hierarchy_jobs WHERE id = %s",
@@ -335,7 +335,7 @@ def test_execute_does_not_advance_the_cursor_on_a_truncated_run(
     monkeypatch.setattr(execute_module, "build_agent_tree", fake_tree)
     monkeypatch.setattr(execute_module, "write_tree", fake_write)
 
-    assert execute_module.execute_job(job_id) == 0
+    assert execute_job(job_id) == 0
     status, failed, skipped = _job_row(db_conn, job_id)
     assert (status, failed, skipped) == ("done", 0, 9)
     state = db_conn.execute(
@@ -356,7 +356,7 @@ def test_execute_records_failures_on_the_row(
         raise RuntimeError("kaput")
 
     monkeypatch.setattr(execute_module, "build_agent_tree", boom)
-    assert execute_module.execute_job(job_id) == 1
+    assert execute_job(job_id) == 1
     row = db_conn.execute(
         "SELECT status, error FROM hierarchy_jobs WHERE id = %s", (job_id,)
     ).fetchone()
@@ -388,7 +388,7 @@ def test_execute_needs_no_provider_key_in_process(
     monkeypatch.setattr(execute_module, "build_agent_tree", fake_tree)
     monkeypatch.setattr(execute_module, "write_tree", fake_write)
 
-    assert execute_module.execute_job(job_id) == 0
+    assert execute_job(job_id) == 0
 
 
 def test_execute_builds_one_model_and_closes_it(
@@ -428,7 +428,7 @@ def test_execute_builds_one_model_and_closes_it(
     monkeypatch.setattr(execute_module, "build_agent_tree", fake_tree)
     monkeypatch.setattr(execute_module, "write_tree", fake_write)
 
-    assert execute_module.execute_job(job_id) == 0
+    assert execute_job(job_id) == 0
     assert built == [settings.lm.llm_model]
     assert seen_llm == [(sentinel, [execute_module.execute_code])]  # model + tool schema ride in
     assert closed == [sentinel]
@@ -462,7 +462,7 @@ def test_execute_closes_the_model_even_when_generation_fails(
     monkeypatch.setattr(execute_module, "close_chat_model", fake_close)
     monkeypatch.setattr(execute_module, "build_agent_tree", fake_tree)
 
-    assert execute_module.execute_job(job_id) == 1
+    assert execute_job(job_id) == 1
     assert closed == [sentinel]
 
 
@@ -494,7 +494,7 @@ def test_child_round_trip_on_empty_history(
     # popped key the test home's .env fallback is what silently supplies it
     # (task #4120).
     monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-test")
-    runner.run_child(claimed)
+    run_child(claimed)
 
     row = db_conn.execute(
         "SELECT status, coalesce(failed, 0), coalesce(skipped, 0) FROM hierarchy_jobs"
@@ -522,7 +522,7 @@ def test_job_main_inits_the_child_process_sinks(
     def fake_init(*, name: str) -> None:
         order.append(f"init:{name}")
 
-    def fake_execute(job_id: int) -> int:
+    def fake_execute(job_id: int, _config: object, _db: object) -> int:
         order.append(f"execute:{job_id}")
         return 7
 
@@ -578,10 +578,10 @@ def test_prepare_inits_the_host_process_sinks(
     def fake_schema(db_url: str) -> None:
         order.append("schema")
 
-    monkeypatch.setattr(runner, "init_gateway_process", fake_init)
+    monkeypatch.setattr(roots, "init_gateway_process", fake_init)
     monkeypatch.setattr("base.deploy.schema.migrations.assert_schema_current", fake_schema)
 
-    runner.prepare()
+    roots.prepare()
     assert order == ["init:schedule-hierarchy-worker", "schema"]
 
 
@@ -843,7 +843,7 @@ def test_execute_tail_records_the_delta_column_and_leaves_the_cursor(
     monkeypatch.setattr(execute_module, "build_agent_tree", fake_tree)
     monkeypatch.setattr(execute_module, "write_tree", fake_write)
 
-    assert execute_module.execute_job(job_id) == 0
+    assert execute_job(job_id) == 0
     state = db_conn.execute(
         "SELECT last_processed_boundary, last_tail_seal_cp_id FROM hierarchy_worker_state"
         " WHERE agent_id = %s",
@@ -885,7 +885,7 @@ def test_execute_tail_leaves_the_delta_column_unset_when_truncated(
     monkeypatch.setattr(execute_module, "build_agent_tree", fake_tree)
     monkeypatch.setattr(execute_module, "write_tree", fake_write)
 
-    assert execute_module.execute_job(job_id) == 0
+    assert execute_job(job_id) == 0
     row_out = db_conn.execute(
         "SELECT status, skipped FROM hierarchy_jobs WHERE id = %s", (job_id,)
     ).fetchone()

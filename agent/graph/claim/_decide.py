@@ -167,7 +167,7 @@ async def decide(
         )
         compact_run_id = emit_compact_started(ctx.event_publisher, agent_id, mode="auto")
         try:
-            summary = await emergency_compact_summary(state.messages, ctx.llm)
+            summary = await emergency_compact_summary(state.messages, ctx.llm, ctx.require_agent())
         except CompactionFailedError:
             # Transient failures exhausted — the fallback rescue did not
             # happen either; close the live block before the turn aborts.
@@ -214,7 +214,7 @@ async def decide(
         # never the pre-compact messages channel — a note between an AIMessage
         # and its ToolMessage is rejected by the DeepSeek anthropic endpoint,
         # and this whole window is about to be REMOVE_ALL'd anyway.
-        dump_path = dump_history(state.messages, agent_id)
+        dump_path = dump_history(state.messages, agent_id, ctx.require_agent().history_dump)
         if dump_path is not None:
             # The note is a system note like the lifecycle markers already in
             # st.new_msgs — it survives the chat-deferral filter above (which

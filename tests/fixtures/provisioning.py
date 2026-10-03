@@ -188,10 +188,12 @@ _PER_TEST_TRUNCATE_TABLES = (
     "inbound_messages",
     "agents_meta",
     # "events" was dropped with the task #1281/#1823 cleanup (migration
-    # 20260829T030000_drop-events-archive) — the unified event stream lives in
-    # Loki, and tests read it through the FakeLoki / live-stream fakes.
+    # 20260829T030000_drop-events-archive) — the event stream lives in the append-only
+    # audit_events / telemetry_events tables, which tests read in time windows of their own.
     "event_dismissals",
     "rollup_day_state",
+    "agent_model_tokens_total",
+    "agent_model_tokens_total_through",
     "llm_usage_hourly",
     "agent_metric_scans",
     "agent_metric_file_cursors",
@@ -199,6 +201,7 @@ _PER_TEST_TRUNCATE_TABLES = (
     "alerts",
     "machines",
     "machine_probe",
+    "machine_status_snapshot",
     "machine_units",
     "host_deploy_state",
     "schedules",
@@ -233,6 +236,20 @@ _PER_TEST_TRUNCATE_TABLES = (
     # Plugin stat values (task #2911): no FKs, but a leaked row would render in
     # the next test's dashboard response.
     "plugin_stats",
+    # The append-only audit record: a leaked row would show in the next test's
+    # whole-table reads (the fleet graph, the neighbors walk).
+    "audit_events",
+    # The append-only telemetry/log record, same reason as audit_events.
+    "telemetry_events",
+    # im-bridge durable cursors: no FK path; a leaked row would make the next
+    # test's bridge resume (or replay) from a stale position.
+    "im_bridge_cursors",
+    # ttl-reaper cadence clocks: no FK path; a leaked stamp would make the next
+    # test's slow phase read as not due.
+    "maintenance_state",
+    # Queued schedule-manager sync requests: no FK (a delete queues one for a
+    # row that is gone); a leaked row would be consumed by the next test.
+    "schedule_sync_requests",
 )
 
 
@@ -287,6 +304,10 @@ def _clean_state(
                     # of the next test's reused id (the CI-only lifecycle-state collision
                     # flake class). Monotonic ids make a straggler write land on a dead id
                     # instead. Tests that need a stable self-identity take `self_agent`.
+                    # audit_events and telemetry_events refuse TRUNCATE through their append-only triggers by
+                    # design; the harness resets it with triggers off for this
+                    # transaction only (a test database owner, never production).
+                    cur.execute("SET LOCAL session_replication_role = replica")
                     cur.execute("TRUNCATE " + ", ".join(_PER_TEST_TRUNCATE_TABLES) + " CASCADE")
                 conn.commit()
                 break

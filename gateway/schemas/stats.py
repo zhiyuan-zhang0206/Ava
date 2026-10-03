@@ -5,8 +5,6 @@ reads: the whitelisted `?hours=` values and their resolution to a duration.
 from datetime import timedelta
 from enum import IntEnum
 
-from base.telemetry.loki_index_labels import retention_hours
-
 
 class StatsWindowHours(IntEnum):
     """Whitelisted `?hours=` windows for stats, inspect, and fleet — 0 = last
@@ -26,13 +24,3 @@ class StatsWindowHours(IntEnum):
 def window_delta(hours: StatsWindowHours) -> timedelta:
     """Resolve the `?hours=` wire value to its actual aggregation duration."""
     return timedelta(minutes=5) if hours == StatsWindowHours.M5 else timedelta(hours=int(hours))
-
-
-def applied_window(hours: StatsWindowHours) -> tuple[int, timedelta]:
-    """(served hours, duration) — the requested window clamped to the Loki
-    retention horizon: rows older than retention are already gone, so the
-    window is narrowed instead of silently returning partial data."""
-    applied = min(int(hours), retention_hours())
-    if applied < int(hours):
-        return applied, timedelta(hours=applied)
-    return int(hours), window_delta(hours)

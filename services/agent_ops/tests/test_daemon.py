@@ -23,8 +23,13 @@ from pathlib import Path
 import psycopg
 import pytest
 
+from base.daemon.tests.fakes import pin_endpoints
+from base.db import Database
 from base.deploy.progress_timeout import NO_PROGRESS_TIMEOUT_S
 from services.agent_ops import daemon, health
+
+_db = Database.from_settings
+
 
 _REPO = Path(__file__).resolve().parents[3]
 
@@ -771,12 +776,12 @@ def test_register_boot_announces_this_unit_up(monkeypatch: pytest.MonkeyPatch) -
     from base.cluster.machine import reset_identity, set_identity
 
     calls: list[str | None] = []
-    monkeypatch.setattr("base.cluster.machines.register_self", lambda *, url: calls.append(url))  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr("base.cluster.machine.reachable_host", lambda: "10.0.0.2")
     monkeypatch.setattr(
-        "base.daemon.health.health_port",
-        lambda name: 8600 if name == "ops" else 0,  # pyright: ignore[reportUnknownArgumentType]
+        "base.cluster.machines.register_self",
+        lambda _db, *, url: calls.append(url),  # pyright: ignore[reportUnknownArgumentType]
     )
+    monkeypatch.setattr("base.cluster.machine.reachable_host", lambda: "10.0.0.2")
+    pin_endpoints(monkeypatch, port=lambda name: 8600 if name == "ops" else 0)
     set_identity(name="wsl", role="agent-runner")
     try:
         daemon._register_boot()
@@ -795,15 +800,12 @@ def test_register_boot_failure_does_not_stop_the_daemon(
     """
     from base.cluster.machine import reset_identity, set_identity
 
-    def _boom(*, url: str | None = None) -> None:
+    def _boom(_db: object, *, url: str | None = None) -> None:
         raise RuntimeError("central postgres unreachable")
 
     monkeypatch.setattr("base.cluster.machines.register_self", _boom)
     monkeypatch.setattr("base.cluster.machine.reachable_host", lambda: "10.0.0.2")
-    monkeypatch.setattr(
-        "base.daemon.health.health_port",
-        lambda name: 8600 if name == "ops" else 0,  # pyright: ignore[reportUnknownArgumentType]
-    )
+    pin_endpoints(monkeypatch, port=lambda name: 8600 if name == "ops" else 0)
     logged: list[str] = []
     monkeypatch.setattr(daemon._log, "exception", lambda msg, *_a, **_k: logged.append(msg))  # pyright: ignore[reportUnknownArgumentType]
 
@@ -834,10 +836,7 @@ def test_register_boot_unstops_a_host_that_came_back(monkeypatch: pytest.MonkeyP
 
     monkeypatch.setattr("base.cluster.machines.ava_home", lambda: "~/.ava")
     monkeypatch.setattr("base.cluster.machine.reachable_host", lambda: "10.0.0.9")
-    monkeypatch.setattr(
-        "base.daemon.health.health_port",
-        lambda name: 8600 if name == "ops" else 0,  # pyright: ignore[reportUnknownArgumentType]
-    )
+    pin_endpoints(monkeypatch, port=lambda name: 8600 if name == "ops" else 0)
     with psycopg.connect(settings.data_plane.db_url) as conn, conn.cursor() as cur:
         cur.execute("TRUNCATE machines")
         cur.execute("TRUNCATE machine_units")
@@ -845,15 +844,15 @@ def test_register_boot_unstops_a_host_that_came_back(monkeypatch: pytest.MonkeyP
 
     set_identity(name="came-back", role="agent-runner")
     try:
-        machines.register_self(url="http://10.0.0.9:8600")
-        machines.mark_stopping("came-back", "~/.ava")
-        assert machines.list_agent_runners() == []  # dropped from the fan-out
-        assert machines.list_stopped_agent_runners() == [("came-back", "http://10.0.0.9:8600")]
+        machines.register_self(_db(), url="http://10.0.0.9:8600")
+        machines.mark_stopping(_db(), "came-back", "~/.ava")
+        assert machines.list_agent_runners(_db()) == []  # dropped from the fan-out
+        assert machines.list_stopped_agent_runners(_db()) == [("came-back", "http://10.0.0.9:8600")]
 
         daemon._register_boot()  # the daemon comes up on its own
 
-        assert machines.list_agent_runners() == [("came-back", "http://10.0.0.9:8600")]
-        assert machines.list_stopped_agent_runners() == []
+        assert machines.list_agent_runners(_db()) == [("came-back", "http://10.0.0.9:8600")]
+        assert machines.list_stopped_agent_runners(_db()) == []
     finally:
         reset_identity()
 

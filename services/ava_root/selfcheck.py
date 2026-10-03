@@ -13,15 +13,14 @@ Two expressions stay separate (a B7 discipline):
 - **unverifiable** — the read itself failed; a single warning per episode, a
   gauge in the status metrics, never escalated to a break event.
 
-Metrics are the B7 status surface: the chain block plus two injected slots
-(attribution coverage / reseeding latency) whose providers arrive with the
-platform adapter at wiring — with no provider they read ``unavailable``,
-never a fabricated number. Honest non-running states (`stopped` / `backoff` —
+The chain gauges are the B7 status surface. Chain integrity is checked at
+runtime; attribution transfer (TCC) is not measured at runtime — only the CI
+two-section chain smoke proves it. Honest non-running states (`stopped` / `backoff` —
 the supervisor remediating or policy holding) are NOT broken: revival is the
 health runner's domain, the chain check verifies running claims only.
 
-The monitor is mechanism only: nothing builds one yet, and it is
-platform-neutral — no concrete platform is ever named here.
+The monitor is mechanism only and platform-neutral — no concrete platform is
+ever named here.
 """
 
 from __future__ import annotations
@@ -29,7 +28,6 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
-from collections.abc import Callable, Mapping
 from contextlib import suppress
 from dataclasses import dataclass
 from typing import Protocol, cast
@@ -37,12 +35,6 @@ from typing import Protocol, cast
 from base.host.proc import child_state
 
 _log = logging.getLogger(__name__)
-
-# The two B7 metric slots; providers for exactly these names may be injected
-# (an unknown name is a wiring bug, not a silently dropped metric).
-ATTRIBUTION_COVERAGE = "attribution_coverage"
-RESEEDING_LATENCY_S = "reseeding_latency_s"
-_SLOT_NAMES = (ATTRIBUTION_COVERAGE, RESEEDING_LATENCY_S)
 
 
 def _monotonic() -> float:
@@ -96,17 +88,9 @@ class TreeSelfCheck:
         host: TreeHost,
         *,
         config: SelfCheckConfig | None = None,
-        metrics_providers: Mapping[str, Callable[[], float | None]] | None = None,
     ) -> None:
-        providers = dict(metrics_providers or {})
-        unknown = set(providers) - set(_SLOT_NAMES)
-        if unknown:
-            raise ValueError(
-                f"unknown metric slot(s) {sorted(unknown)}; the slots are {list(_SLOT_NAMES)}"
-            )
         self._host = host
         self._config = config if config is not None else SelfCheckConfig()
-        self._providers = providers
         self._state = _ChainState()
         self._task: asyncio.Task[None] | None = None
 
@@ -210,8 +194,6 @@ class TreeSelfCheck:
                 "unverifiable_for_s": self._age(self._state.unverifiable_since, now),
                 "rounds": self._state.rounds,
             },
-            ATTRIBUTION_COVERAGE: self._slot(ATTRIBUTION_COVERAGE),
-            RESEEDING_LATENCY_S: self._slot(RESEEDING_LATENCY_S),
         }
 
     async def start(self) -> None:
@@ -231,6 +213,7 @@ class TreeSelfCheck:
             await task
 
     async def _loop(self) -> None:
+        # quiesce-exempt: probes the root's own state; no database
         while True:
             await asyncio.sleep(self._config.interval_s)
             try:
@@ -253,19 +236,6 @@ class TreeSelfCheck:
             reasons=reasons,
             root_pid=root_pid,
         )
-
-    def _slot(self, name: str) -> dict[str, object]:
-        provider = self._providers.get(name)
-        if provider is None:
-            return {"value": None, "state": "unavailable"}
-        try:
-            value = provider()
-        except Exception:
-            _log.exception("[selfcheck] metric slot %s: provider raised", name)
-            return {"value": None, "state": "error"}
-        if value is None:
-            return {"value": None, "state": "unavailable"}
-        return {"value": value, "state": "ok"}
 
     @staticmethod
     def _age(since: float | None, now: float) -> float | None:

@@ -25,6 +25,12 @@ on a separate redesign.
 
 from __future__ import annotations
 
+from pathlib import Path
+
+from scripts.structure.ambient_state.roots import package_roots
+
+_REPO_ROOT = Path(__file__).resolve().parents[3]
+
 # ── 1. write-only facades ──────────────────────────────────────────────────
 
 # A handle to a logger / meter / tracer: written through, never read to decide.
@@ -62,6 +68,10 @@ SINK_FACADES: dict[str, str] = {
     "base/telemetry/otlp/telemetry_otlp.py": (
         "the OTLP export backend: the meter facade over the global meter provider, the backend "
         "handle and the once-per-process export gate; write-only for callers"
+    ),
+    "base/telemetry/event_store.py": (
+        "the telemetry_events writer: its pool handle, backoff clock and failure counter are "
+        "written by the emitter's drain thread and read only by the writer itself"
     ),
     "base/telemetry/metrics/observed_metrics.py": (
         "the observed-metrics writer: its pool handle and failure counter are written by "
@@ -142,7 +152,7 @@ PURE_CHAIN_CALLEES = frozenset({"hashlib.sha256", "hashlib.sha1", "hashlib.md5"}
 PURE_REPO_CALLEES: dict[str, str] = {
     "base.events.contract._sql_keys": "derives a tuple of key names from the static event registry",
     "base.events.contract.family_events": "a tuple over the static event registry",
-    "base.events.contract.lineage_event_names": "a tuple over the static event registry",
+    "base.events.loader.load_events": "merges the static per-domain event declarations",
     "base.packages.skills.scan._rx": "compiles a regex from a literal pattern",
     "services.gateway_side.backup.passphrase.derive": "a key derivation of a literal: a fixed value",
 }
@@ -174,6 +184,49 @@ ALLOWED: dict[str, str] = {
     "ava/__init__.py::ambient-instance:extend": "a namespace of functions built once and never rebound or filled afterwards",
 }
 
+# ── 4. slice-governed packages ─────────────────────────────────────────────
+
+# Packages whose configuration arrives as constructor-injected slices: package dir ->
+# its composition-root modules, the only modules there that may read `settings`
+# (scripts/structure/ambient_state/sliced.py). A package declares itself in its own
+# `ambient_roots.toml` (`settings = [...]`, see roots.py) when it is sliced; leaving needs
+# a decision record. A declared root that no longer exists fails as stale.
+SLICED_PACKAGES: dict[str, frozenset[str]] = package_roots(_REPO_ROOT, "settings")
+
+# ── 5. database-handle packages ────────────────────────────────────────────
+
+# Packages that take a `Database` from their composition root and dial nothing ambiently:
+# package dir -> the modules that may call `Database.from_settings()` (scripts/structure/
+# ambient_state/dbhandle.py). A package declares `db = [...]` in its own `ambient_roots.toml`
+# (see roots.py) in the change that migrates its last ambient dial; the declaration is the lock.
+# A declared root that no longer exists fails as stale.
+DB_HANDLE_PACKAGES: dict[str, frozenset[str]] = package_roots(_REPO_ROOT, "db")
+
+# ── 6. endpoint-table packages ─────────────────────────────────────────────
+
+# Packages that take their daemon's `ServiceEndpoint` (or the `ServiceEndpoints` table) from
+# their composition root: package dir -> the modules that may call
+# `ServiceEndpoints.from_settings()` (scripts/structure/ambient_state/endpointrule.py). A package
+# declares `endpoints = [...]` in its own `ambient_roots.toml` (see roots.py); a declared root
+# that no longer exists fails as stale.
+ENDPOINT_PACKAGES: dict[str, frozenset[str]] = package_roots(_REPO_ROOT, "endpoints")
+
+# ── 7. event-bus packages ───────────────────────────────────────────────────
+
+# Packages that take an `EventBus` handle from their composition root: package dir -> the
+# modules that may call `EventBus.from_settings()` (scripts/structure/ambient_state/busrule.py).
+# A package declares `bus = [...]` in its own `ambient_roots.toml` (see roots.py); a declared
+# root that no longer exists fails as stale.
+BUS_PACKAGES: dict[str, frozenset[str]] = package_roots(_REPO_ROOT, "bus")
+
+# ── 8. clock packages ────────────────────────────────────────────────────────
+
+# Packages that take a `Clock` from their composition root: package dir -> the modules that may
+# call `Clock.from_settings()` (scripts/structure/ambient_state/clockrule.py). A package declares
+# `clock = [...]` in its own `ambient_roots.toml` (see roots.py); a declared root that no longer
+# exists fails as stale.
+CLOCK_PACKAGES: dict[str, frozenset[str]] = package_roots(_REPO_ROOT, "clock")
+
 # ── deferred: frozen in the baseline, fix waits on another redesign ────────
 
 DEFERRED_WARNING_REDESIGN = "deferred: warning/alert redesign"
@@ -192,10 +245,8 @@ DEFERRED: dict[str, str] = {
         "gateway/auth/rejection_log.py::global-rebind:_auth401_total",
         "gateway/auth/rejection_log.py::ambient-container:_auth401_last_warn",
         "gateway/auth/rejection_log.py::ambient-container:_auth401_suppressed",
-        "gateway/cluster/_stats_dashboard.py::ambient-container:_stale_emit_at",
         "gateway/inspect/_metrics_health.py::ambient-container:_last_logged",
         "gateway/routers/fleet_graph.py::ambient-container:_stale_emit_at",
-        "services/delivery_watchdog/daemon.py::ambient-container:_resurrect_suppressions",
         "services/healthchecks/permissions_helper.py::global-rebind:_reported_unhealthy",
     )
 }

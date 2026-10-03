@@ -26,11 +26,11 @@ from base.sessions.record import SessionRecord
 from cli.commands.lifecycle import _maintenance_stop_report as report
 from cli.commands.lifecycle import _temporary_stop as command
 from cli.commands.lifecycle import service_stop as stop
+from cli.commands.lifecycle.tests.stop_support import Launcher
+from cli.commands.lifecycle.tests.stop_support import home as home
+from cli.commands.lifecycle.tests.stop_support import launch as launch
 from cli.commands.lifecycle.tests.test_stop_terminals import _unkillable
 from tests.agent.test_maintenance import WHEN
-from tests.cli._commands_helpers import Launcher
-from tests.cli._commands_helpers import home as home
-from tests.cli._commands_helpers import launch as launch
 
 pytestmark = pytest.mark.skipif(sys.platform == "win32", reason="real POSIX signal contract")
 
@@ -65,7 +65,7 @@ def test_terminal_survivor_names_itself_and_persists_exact_inventory(
     _unkillable(monkeypatch)
     assert status_journal.begin("stop")
     with pytest.raises(report.StopIncompleteError) as caught:
-        stop.close_terminals(time.monotonic() + 0.25, "private-stop", WHEN)
+        stop.close_terminals(time.monotonic() + 0.25, "private-stop", WHEN, direct_db=False)
     failure = caught.value
     assert identity.live(), "the survivor outlived its SIGKILL"
     assert failure.stage == "terminals"
@@ -110,7 +110,7 @@ def test_report_keeps_owned_job_after_shell_exits(
     child = OwnedProcess.capture(children[0])
     try:
         with pytest.raises(report.StopIncompleteError) as caught:
-            stop.close_terminals(time.monotonic() + 0.35, "private-stop", WHEN)
+            stop.close_terminals(time.monotonic() + 0.35, "private-stop", WHEN, direct_db=False)
         assert parent.wait(timeout=5) == -signal.SIGHUP
         assert child.live()
         assert len(caught.value.survivors) == 1
@@ -148,7 +148,7 @@ def test_closure_sigkills_a_pty_host_its_closed_session_left_running(
     monkeypatch.setattr(stop, "get_shell_backend", lambda: listed)
     monkeypatch.setattr(stop, "_TERMINAL_KILL_WAIT_S", 0.3)
 
-    stop.close_terminals(time.monotonic() + 5, "private-stop", WHEN)
+    stop.close_terminals(time.monotonic() + 5, "private-stop", WHEN, direct_db=False)
     assert shell.wait(timeout=5) == -signal.SIGHUP
     assert wedged.wait(timeout=5) == -signal.SIGKILL
 

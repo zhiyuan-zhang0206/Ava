@@ -18,12 +18,12 @@ from __future__ import annotations
 
 from datetime import datetime
 
-import base.db
+from base.db import Database
 
 __all__ = ["list_excluded_machines"]
 
 
-def list_excluded_machines() -> list[tuple[str, str, datetime | None]]:
+def list_excluded_machines(db: Database) -> list[tuple[str, str, datetime | None]]:
     """`(name, reason, since)` for every machine an operator latch keeps out of
     the rollout cohort — the three exclusions `list_agent_runners()` applies,
     with each one's date.
@@ -42,7 +42,7 @@ def list_excluded_machines() -> list[tuple[str, str, datetime | None]]:
     by the deploy window to tell an excluded machine's stale posture from a
     competing deployment.
     """
-    with base.db.connect() as conn, conn.cursor() as cur:
+    with db.connect() as conn, conn.cursor() as cur:
         cur.execute(
             "SELECT name, "
             "  CASE WHEN paused_at IS NOT NULL THEN 'paused' "

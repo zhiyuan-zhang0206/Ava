@@ -17,8 +17,9 @@ import httpx
 import pytest
 
 import services.im_bridge.adapters.telegram as telegram_module
-from base.config import settings
 from services.im_bridge.adapters.telegram import InboundMessage, TelegramAdapter
+from services.im_bridge.config import TelegramCredentialsConfig
+from services.im_bridge.tests.slices import telegram_config
 
 
 class FakeCore:
@@ -77,10 +78,17 @@ def _transport(
 
 @pytest.fixture
 def env(monkeypatch: pytest.MonkeyPatch, tmp_path: Any) -> None:
-    """Point the adapter's settings at a test token/owner and a tmp AVA_HOME."""
-    monkeypatch.setattr(settings.telegram, "telegram_bot_token", "123456:TEST-TOKEN")
-    monkeypatch.setattr(settings.telegram, "telegram_owner_id", 42)
+    """A tmp AVA_HOME for the adapter's offset file."""
     monkeypatch.setenv("AVA_HOME", str(tmp_path))
+
+
+def _config(**overrides: Any) -> TelegramCredentialsConfig:
+    """The adapter's slice with a test token and owner."""
+    return telegram_config(
+        telegram_bot_token="123456:TEST-TOKEN",  # noqa: S106 - test fixture, never a real secret
+        telegram_owner_id=42,
+        **overrides,
+    )
 
 
 async def _wait_until(predicate: Callable[[], bool], timeout: float = 2.0) -> None:
@@ -118,7 +126,7 @@ async def test_poll_loop_forwards_owner_text(env: None, tmp_path: Any) -> None:
         ]
     )
     async with httpx.AsyncClient(transport=transport) as client:
-        adapter = TelegramAdapter(core, client=client)
+        adapter = TelegramAdapter(core, _config(), client=client)
         try:
             await adapter.start()
             await asyncio.wait_for(core.received.wait(), timeout=2)
@@ -147,7 +155,7 @@ async def test_non_owner_ignored_but_offset_advances(env: None, tmp_path: Any) -
         ]
     )
     async with httpx.AsyncClient(transport=transport) as client:
-        adapter = TelegramAdapter(core, client=client)
+        adapter = TelegramAdapter(core, _config(), client=client)
         try:
             await adapter.start()
             # poll loop consumes the update; the ack lands after handling
@@ -173,7 +181,7 @@ async def test_offset_persisted_and_reused(env: None, tmp_path: Any) -> None:
         ]
     )
     async with httpx.AsyncClient(transport=transport) as client:
-        adapter = TelegramAdapter(core, client=client)
+        adapter = TelegramAdapter(core, _config(), client=client)
         try:
             await adapter.start()
             await asyncio.wait_for(core.received.wait(), timeout=2)
@@ -196,7 +204,7 @@ async def test_send_splits_long_text(env: None) -> None:
         ]
     )
     async with httpx.AsyncClient(transport=transport) as client:
-        adapter = TelegramAdapter(FakeCore(), client=client)
+        adapter = TelegramAdapter(FakeCore(), _config(), client=client)
         await adapter.send("42", "x" * 9000)
 
     bodies = [json.loads(r.content) for r in captured]
@@ -219,7 +227,7 @@ async def test_send_logs_one_delivery_line_per_chunk(
     recorder = _LogRecorder()
     monkeypatch.setattr(telegram_module, "logger", recorder)
     async with httpx.AsyncClient(transport=transport) as client:
-        adapter = TelegramAdapter(FakeCore(), client=client)
+        adapter = TelegramAdapter(FakeCore(), _config(), client=client)
         await adapter.send("42", "x" * 5000)
 
     assert recorder.messages == [
@@ -242,7 +250,7 @@ async def test_failed_chunk_logs_no_delivery_line(
     recorder = _LogRecorder()
     monkeypatch.setattr(telegram_module, "logger", recorder)
     async with httpx.AsyncClient(transport=transport) as client:
-        adapter = TelegramAdapter(FakeCore(), client=client)
+        adapter = TelegramAdapter(FakeCore(), _config(), client=client)
         with pytest.raises(RuntimeError, match="HTTP 500"):
             await adapter.send("42", "x" * 5000)
 
@@ -258,7 +266,7 @@ async def test_delivery_line_survives_malformed_response_body(
     recorder = _LogRecorder()
     monkeypatch.setattr(telegram_module, "logger", recorder)
     async with httpx.AsyncClient(transport=transport) as client:
-        adapter = TelegramAdapter(FakeCore(), client=client)
+        adapter = TelegramAdapter(FakeCore(), _config(), client=client)
         await adapter.send("42", "hi")
 
     assert recorder.messages == ["telegram send ok chat_id=42 message_id="]
@@ -270,7 +278,7 @@ async def test_send_sanitizes_http_error(env: None) -> None:
         [httpx.Response(401, json={"ok": False, "description": "Unauthorized"})]
     )
     async with httpx.AsyncClient(transport=transport) as client:
-        adapter = TelegramAdapter(FakeCore(), client=client)
+        adapter = TelegramAdapter(FakeCore(), _config(), client=client)
         with pytest.raises(RuntimeError, match="HTTP 401") as exc_info:
             await adapter.send("42", "hello")
 
@@ -283,7 +291,7 @@ async def test_getupdates_non_200_sanitized(env: None) -> None:
     """A non-200 getUpdates raises a sanitized RuntimeError (no token)."""
     transport, _captured = _transport([httpx.Response(401, json={"ok": False})])
     async with httpx.AsyncClient(transport=transport) as client:
-        adapter = TelegramAdapter(FakeCore(), client=client)
+        adapter = TelegramAdapter(FakeCore(), _config(), client=client)
         with pytest.raises(RuntimeError, match="HTTP 401"):
             await adapter._get_updates()
 
@@ -295,7 +303,7 @@ async def test_getupdates_transport_error_sanitized(env: None) -> None:
         raise httpx.ConnectError("https://api.telegram.org/bot123456:TEST-TOKEN/getUpdates")
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(boom)) as client:
-        adapter = TelegramAdapter(FakeCore(), client=client)
+        adapter = TelegramAdapter(FakeCore(), _config(), client=client)
         with pytest.raises(RuntimeError, match="ConnectError") as exc_info:
             await adapter._get_updates()
     assert "TEST-TOKEN" not in str(exc_info.value)
@@ -307,7 +315,7 @@ async def test_media_caption_forwarded_textless_ignored(env: None) -> None:
     core = FakeCore()
     transport, _captured = _transport([])
     async with httpx.AsyncClient(transport=transport) as client:
-        adapter = TelegramAdapter(core, client=client)
+        adapter = TelegramAdapter(core, _config(), client=client)
         await adapter._handle_update(_update(1, 42, caption="see this"))
         await adapter._handle_update(_update(2, 42, message_id=3))  # photo, no caption
         await adapter._handle_update({"update_id": 3, "edited_message": {"chat": {"id": 42}}})
@@ -317,13 +325,13 @@ async def test_media_caption_forwarded_textless_ignored(env: None) -> None:
     ]
 
 
-async def test_start_skips_when_not_configured(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_start_skips_when_not_configured() -> None:
     """No token / no owner id -> start() logs and returns (the daemon stays
     up either way, like the weixin/feishu adapters) — a fresh install with no
     bot token must not kill the im-bridge session."""
-    monkeypatch.setattr(settings.telegram, "telegram_bot_token", "")
-    monkeypatch.setattr(settings.telegram, "telegram_owner_id", 0)
-    adapter = TelegramAdapter(FakeCore())
+    adapter = TelegramAdapter(
+        FakeCore(), telegram_config(telegram_bot_token="", telegram_owner_id=0)
+    )
     await adapter.start()
     assert adapter._poll_task is None
 
@@ -340,7 +348,7 @@ async def test_send_escapes_html_and_marks_up_agent_content(env: Any) -> None:
     text is HTML-escaped first so user data cannot inject tags."""
     transport, captured = _transport([_send_response()])
     async with httpx.AsyncClient(transport=transport) as client:
-        adapter = TelegramAdapter(FakeCore(), client=client)
+        adapter = TelegramAdapter(FakeCore(), _config(), client=client)
         await adapter.send(
             "42",
             "hello <b>world</b> & **bold** `code` [link](https://x.com/a)",
@@ -360,7 +368,7 @@ async def test_send_plain_text_is_escaped(env: Any) -> None:
     """Command replies (markdown=False) are escaped so stray < > & are safe."""
     transport, captured = _transport([_send_response()])
     async with httpx.AsyncClient(transport=transport) as client:
-        adapter = TelegramAdapter(FakeCore(), client=client)
+        adapter = TelegramAdapter(FakeCore(), _config(), client=client)
         await adapter.send("42", "a < b & c > d")
     (request,) = captured
     assert json.loads(request.content)["text"] == "a &lt; b &amp; c &gt; d"
@@ -371,7 +379,7 @@ async def test_send_attaches_inline_keyboard_buttons(env: Any) -> None:
     command — one button per row."""
     transport, captured = _transport([_send_response()])
     async with httpx.AsyncClient(transport=transport) as client:
-        adapter = TelegramAdapter(FakeCore(), client=client)
+        adapter = TelegramAdapter(FakeCore(), _config(), client=client)
         await adapter.send(
             "42",
             "\u9009\u62e9 agent",
@@ -397,7 +405,7 @@ async def test_send_falls_back_to_plain_text_when_html_rejected(env: Any) -> Non
         ]
     )
     async with httpx.AsyncClient(transport=transport) as client:
-        adapter = TelegramAdapter(FakeCore(), client=client)
+        adapter = TelegramAdapter(FakeCore(), _config(), client=client)
         await adapter.send("42", "**bold**", markdown=True)
     assert len(captured) == 2
     first, second = (json.loads(r.content) for r in captured)
@@ -430,7 +438,7 @@ async def test_callback_tap_runs_command_and_answers(env: Any) -> None:
     core = FakeCore()
     transport, captured = _transport([httpx.Response(200, json={"ok": True, "result": []})])
     async with httpx.AsyncClient(transport=transport) as client:
-        adapter = TelegramAdapter(core, client=client)
+        adapter = TelegramAdapter(core, _config(), client=client)
         await adapter._handle_callback(
             _callback_update(1, "cb-1", 42, "/switch 405")["callback_query"]
         )
@@ -447,7 +455,7 @@ async def test_start_installs_command_menu(env: Any) -> None:
     tolerated (the poll loop still runs)."""
     transport, captured = _transport([httpx.Response(200, json={"ok": True, "result": True})])
     async with httpx.AsyncClient(transport=transport) as client:
-        adapter = TelegramAdapter(FakeCore(), client=client)
+        adapter = TelegramAdapter(FakeCore(), _config(), client=client)
         await adapter.start()
         try:
             (request,) = captured
@@ -497,7 +505,7 @@ async def test_unacked_update_is_refetched_after_failure(env: Any, tmp_path: Any
         ]
     )
     async with httpx.AsyncClient(transport=transport) as client:
-        adapter = TelegramAdapter(core, client=client)
+        adapter = TelegramAdapter(core, _config(), client=client)
         try:
             await adapter.start()
             await _wait_until(lambda: len(core.inbound) == 1, timeout=3)
@@ -526,7 +534,7 @@ async def test_refetched_update_not_delivered_twice(env: Any, tmp_path: Any) -> 
         ]
     )
     async with httpx.AsyncClient(transport=transport) as client:
-        adapter = TelegramAdapter(core, client=client)
+        adapter = TelegramAdapter(core, _config(), client=client)
         try:
             await adapter.start()
             await asyncio.wait_for(core.received.wait(), timeout=2)

@@ -14,8 +14,8 @@ from typing import Any
 import httpx
 import pytest
 
-from base.config import settings
 from services.im_bridge.adapters.telegram import TelegramAdapter
+from services.im_bridge.tests.slices import telegram_config
 
 FAKE_BOT_TOKEN = "123456:TEST-TOKEN"  # noqa: S105 - test fixture, never a real secret
 OWNER = 123456789
@@ -31,13 +31,14 @@ class _FakeCore:
         self.inbound.append((msg.channel, msg.chat_id, msg.text))
 
 
-def _adapter(core: _FakeCore, handler: Any) -> TelegramAdapter:
-    return TelegramAdapter(core, client=httpx.AsyncClient(transport=httpx.MockTransport(handler)))
+def _adapter(core: _FakeCore, handler: Any, **config: Any) -> TelegramAdapter:
+    slice_ = telegram_config(telegram_bot_token=FAKE_BOT_TOKEN, telegram_owner_id=OWNER, **config)
+    return TelegramAdapter(
+        core, slice_, client=httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    )
 
 
 def _settings(monkeypatch: pytest.MonkeyPatch, tmp_path: Any) -> None:
-    monkeypatch.setattr(settings.telegram, "telegram_bot_token", FAKE_BOT_TOKEN)
-    monkeypatch.setattr(settings.telegram, "telegram_owner_id", OWNER)
     monkeypatch.setenv("AVA_HOME", str(tmp_path))
 
 
@@ -69,7 +70,6 @@ def test_get_updates_uses_configured_poll_timeout(
     """The long-poll window rides AVA_TELEGRAM_POLL_TIMEOUT_SECONDS (task
     #698 G8), and the HTTP read timeout stays 10s above it."""
     _settings(monkeypatch, tmp_path)
-    monkeypatch.setattr(settings.telegram, "telegram_poll_timeout_seconds", 33)
     seen: dict[str, Any] = {}
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -77,7 +77,7 @@ def test_get_updates_uses_configured_poll_timeout(
         return httpx.Response(200, json={"ok": True, "result": []})
 
     async def scenario() -> None:
-        adapter = _adapter(_FakeCore(), handler)
+        adapter = _adapter(_FakeCore(), handler, telegram_poll_timeout_seconds=33)
         await adapter._get_updates()
         await adapter._http.aclose()
 

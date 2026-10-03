@@ -1,5 +1,0 @@
-{
-  "ambient_state": {
-    "gateway/alerts/reconciliation.py::asyncio-task:start_grafana_alert_reconciler": 1
-  }
-}

@@ -341,6 +341,7 @@ class HealthMonitor:
         )
 
     async def _loop(self) -> None:
+        # quiesce-exempt: probes service health endpoints and process state; no database
         while True:
             await asyncio.sleep(self._config.interval_s)
             try:

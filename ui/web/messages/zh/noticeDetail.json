@@ -1,0 +1,17 @@
+{
+  "blocking": "阻塞中",
+  "dismiss": "忽略",
+  "sendAnswer": "发送回复",
+  "replyTo": "回复通知：{title}",
+  "failed": "{verb} 失败：{msg}",
+  "alreadyAnswered": "此通知已回复。",
+  "send": "发送",
+  "alreadyDismissed": "此通知已被忽略。",
+  "alreadyRead": "此通知已读。",
+  "markRead": "标记已读",
+  "sendNote": "发送备注",
+  "marking": "标记中…",
+  "answerPlaceholder": "你的回复…（回车发送）",
+  "notePlaceholder": "可选备注…（回车标记已读）",
+  "expires": "{time}过期"
+}

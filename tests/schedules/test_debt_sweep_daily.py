@@ -165,7 +165,7 @@ def test_scan_failure_is_passed_to_worker_and_registered(
     emitted: list[dict[str, Any]] = []
 
     monkeypatch.setattr(module, "claimed_slot", lambda: datetime(2026, 9, 21, 22, 30, tzinfo=UTC))
-    monkeypatch.setattr(module, "TZ", "Asia/Shanghai")
+    monkeypatch.setattr(settings.general, "timezone", "Asia/Shanghai")
     monkeypatch.setattr(module, "_run_mechanical_scan", lambda *_args: scan)
     monkeypatch.setattr(
         module,
@@ -208,7 +208,7 @@ def test_event_payload_and_cluster_clock_constants() -> None:
     module = _load_schedule_module()
 
     assert module.CRON == "30 6 * * *"
-    assert settings.general.timezone == module.TZ
+    assert settings.general.timezone == module.cluster_timezone()
     assert module.event_payload(
         day="2026-09-21",  # time-bomb-ok: passthrough payload assertion, no clock-derived window
         scan=module.ScanReport(

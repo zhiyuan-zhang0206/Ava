@@ -1,4 +1,4 @@
-"""Lease expiration without deleting permanent history on the existing gateway TTL reaper."""
+"""Lease expiration without deleting permanent history on the existing TTL reaper."""
 
 import shlex
 from typing import Literal
@@ -13,6 +13,7 @@ from base.events.live.announce import (
     publish_agent_updated_sync,
     publish_impersonation_changed_sync,
 )
+from base.events.live.bus import EventBus
 
 # One reaper pass handles at most this many leases per list — expired-lease
 # reconciliation and the approaching-expiry reminder scan each take one page.
@@ -40,9 +41,27 @@ def reap_impersonations(pool: ConnectionPool, *, limit: int = _PASS_BATCH) -> in
                 expired_agents.append(lease["agent_id"])
     for agent_id in expired_agents:
         publish_inbound_wake(agent_id, "impersonation-expired")
-        publish_impersonation_changed_sync(agent_id)
-        publish_agent_updated_sync(agent_id)
+        publish_impersonation_changed_sync(EventBus.from_settings(), agent_id)
+        publish_agent_updated_sync(EventBus.from_settings(), agent_id)
     return len(expired_agents)
+
+
+def alert_stuck_event_logs(pool: ConnectionPool) -> int:
+    """Alert on ended leases still waiting for an open event source; resolve cleared ones.
+
+    A state alert, not a threshold: the lease cannot complete until its source
+    seals, and nothing else will say so.
+    """
+    from base.agents.impersonation_event_alerts import reconcile_seal_stuck_alerts
+    from base.log import logger
+
+    try:
+        with write_transaction(pool) as conn:
+            return reconcile_seal_stuck_alerts(conn)
+    except Exception:
+        # A failing alert pass must not stop the reclamation that runs after it.
+        logger.exception("impersonation event-log alert pass failed")
+        return 0
 
 
 def force_expire_impersonation(
@@ -61,8 +80,9 @@ def force_expire_impersonation(
         insert_handoff,
         lock_agent,
     )
+    from base.agents.impersonation.event_log import is_log_native
     from base.agents.impersonation.history import set_actor
-    from base.agents.impersonation_manifest import close_manifest_admission, is_protocol_v1
+    from base.agents.impersonation_manifest import close_event_admission
     from base.log import logger
 
     with write_transaction(pool) as conn:
@@ -77,8 +97,8 @@ def force_expire_impersonation(
         if lease is None or lease["session_id"] != session_id:
             return "not_open"
         set_actor(conn, actor)
-        if is_protocol_v1(lease):
-            close_manifest_admission(conn, str(lease["id"]))
+        if is_log_native(lease):
+            close_event_admission(conn, str(lease["id"]))
         inbound_id = None
         if lease["status"] == "active" and not lease["automatic"]:
             inbound_id = insert_handoff(
@@ -102,8 +122,8 @@ def force_expire_impersonation(
         actor=actor,
     )
     publish_inbound_wake(agent_id, "impersonation-expired")
-    publish_impersonation_changed_sync(agent_id)
-    publish_agent_updated_sync(agent_id)
+    publish_impersonation_changed_sync(EventBus.from_settings(), agent_id)
+    publish_agent_updated_sync(EventBus.from_settings(), agent_id)
     return "expired"
 
 
@@ -119,7 +139,7 @@ def remind_expiring_impersonations(
 ) -> int:
     """Insert one pending renewal reminder per approaching expiry deadline.
 
-    Runs in the gateway TTL reaper cycle (default 60s), ahead of expiry
+    Runs in the TTL reaper cycle (default 60s), ahead of expiry
     reconciliation, so a lease gets its reminder within the 300s window with
     several scan chances. The reminder is an ordinary durable inbox row of
     kind='reminder' tagged with the lease id in its payload; the bound relay

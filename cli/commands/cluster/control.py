@@ -164,7 +164,9 @@ def cmd_cluster_status() -> int:
     from base.host.net.http_dial import get as dial_get
 
     try:
-        url = f"{gateway_api_base()}/api/cluster/roster"
+        # An operator command: dial every runner now rather than render the heartbeat
+        # pass's last probe, which can be a minute old.
+        url = f"{gateway_api_base()}/api/cluster/roster?fresh=true"
     except GatewayApiBaseMissing as exc:
         # Same diagnostic posture as `ava status`'s gateway supplement: a host
         # that cannot resolve the gateway URL must still say why.

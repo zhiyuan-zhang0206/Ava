@@ -34,8 +34,10 @@ from ava.security import SecurityFindingEntry, scan_inbound_content
 from base.agents.context import AvaContext
 from base.agents.messages.inbound import InboundKind
 from base.agents.messages.kwargs import AvaMsgType, read_ava_kwargs
-from base.config import now_timestamp, settings
+from base.clock import Clock
+from base.config import settings
 from base.events.live.projection import Cancelled
+from base.host.env.agent_slices import AgentSlices
 from base.log import logger
 
 from ._routing import _ROUTING_KINDS, ClaimGoto, _Routing
@@ -103,7 +105,9 @@ def _by_who(source: str) -> str:
 def _ts_prefix() -> str:
     """Leading `[ts] ` for lifecycle markers, or `` when agent-facing message
     timestamps are off (`settings.general.message_timestamps`)."""
-    return f"{now_timestamp()} " if settings.general.message_timestamps else ""
+    return (
+        f"{Clock.from_settings().now_timestamp()} " if settings.general.message_timestamps else ""
+    )
 
 
 # Overlay keys that may carry credentials — their values are never rendered
@@ -285,7 +289,7 @@ async def _handle_compact_request(
     summary = ""
     for attempt in range(1, COMPACT_MAX_ATTEMPTS + 1):
         try:
-            summary = await generate_summary(state.messages, ctx.llm)
+            summary = await generate_summary(state.messages, ctx.llm, ctx.require_agent())
             break
         except Exception as e:
             last_error = e
@@ -334,8 +338,8 @@ async def _handle_heartbeat(
     shell sessions, which are outside rollout service teardown. Probing on
     each heartbeat (default 5 min) remains the catch-all for server death:
     dead serve_dir pages are re-served and dead no-dir pages are closed.
-    The periodic page_reconcile_loop (agent/startup/__init__.py) covers busy agents
-    whose heartbeats never arrive; this pass keeps the idle-agent cadence.
+    The page-server service's dead-show-page scan covers busy agents whose
+    heartbeats never arrive; this pass keeps the idle-agent cadence.
     Best-effort; reconcile never raises.
 
     With the heartbeat circuit breaker open (a permanent provider rejection
@@ -521,6 +525,7 @@ async def _handle_fork(
     item: ClaimedInbound,
     st: _BatchState,
     state: _state.AgentState,
+    slices: AgentSlices,
 ) -> None:
     """FORK: rebuild the head (drop source-identity notes), append marker, graft own notes.
 
@@ -546,7 +551,7 @@ async def _handle_fork(
             created_at=datetime.now(UTC),
         )
     )
-    st.new_msgs.extend(fork_notes())
+    st.new_msgs.extend(fork_notes(slices))
     # Tail-graft skill additions (decisions/2026-09-10-preset-in-config-overlay-
     # fork-cache): skills the fork's config added to
     # skills_to_inject_into_system_prompt (minus what the expand list already
@@ -557,7 +562,9 @@ async def _handle_fork(
     if isinstance(tail_skills, list):
         from agent.graph.context_notes import fork_tail_skills_note
 
-        note = fork_tail_skills_note([s for s in tail_skills if isinstance(s, str)])
+        note = fork_tail_skills_note(
+            [s for s in tail_skills if isinstance(s, str)], slices.prompt.sdk_disable
+        )
         if note is not None:
             st.new_msgs.append(note)
 
@@ -612,7 +619,7 @@ async def dispatch_batch(
             if item.id == latest_resurrect_id:
                 await _handle_resurrect(item, st)
         elif kind == InboundKind.FORK:
-            await _handle_fork(agent_id, item, st, state)
+            await _handle_fork(agent_id, item, st, state, ctx.require_agent())
         elif kind == InboundKind.REMINDER:
             # Lease-expiry reminders are dismissed in the lease's release/expiry
             # transaction, so one reaching the claim node means that invariant

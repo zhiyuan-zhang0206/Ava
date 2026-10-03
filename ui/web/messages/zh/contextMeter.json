@@ -1,0 +1,6 @@
+{
+  "context": "上下文：{used} / {max} tokens",
+  "contextWindDown": "上下文：{used} / {max} tokens；软阈值 {soft}，自动压缩 {hard}",
+  "contextUsed": "上下文：{used} tokens",
+  "soft": " · 软 {soft} · 硬 {hard}"
+}

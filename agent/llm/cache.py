@@ -29,6 +29,7 @@ from langchain_core.runnables import Runnable
 from loguru import logger
 
 from agent.llm import execute_code
+from base.host.env.agent_slices import LlmCallPolicy
 
 
 class CacheRef(Protocol):
@@ -53,6 +54,7 @@ class LlmInvocation:
 async def prepare_invocation(
     llm: BaseChatModel,
     messages: list[AnyMessage],
+    policy: LlmCallPolicy,
 ) -> LlmInvocation:
     """Bind `llm` for one request — via the explicit Gemini cache when possible.
 
@@ -69,7 +71,7 @@ async def prepare_invocation(
     ):
         from ava_builtins.plugins.lm_google.gemini_cache import get_or_create_cache
 
-        cache_ref = await get_or_create_cache(llm, messages[0].content, [execute_code])  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
+        cache_ref = await get_or_create_cache(llm, messages[0].content, [execute_code], policy)  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
         if cache_ref is not None:
             return LlmInvocation(
                 runnable=llm.bind(cached_content=cache_ref.name),  # pyright: ignore[reportUnknownMemberType]
@@ -84,7 +86,7 @@ async def prepare_invocation(
 
 
 async def ainvoke_with_cache_retry(
-    llm: BaseChatModel, messages: list[AnyMessage]
+    llm: BaseChatModel, messages: list[AnyMessage], policy: LlmCallPolicy
 ) -> tuple[AIMessage, bool]:
     """Single-shot invoke through `prepare_invocation`, with one stale-cache retry.
 
@@ -110,7 +112,7 @@ async def ainvoke_with_cache_retry(
     from base.config import settings
 
     async def _invoke() -> tuple[AIMessage, bool]:
-        invocation = await prepare_invocation(llm, messages)
+        invocation = await prepare_invocation(llm, messages, policy)
         used_explicit_cache = invocation.cache_ref is not None
         try:
             response = await invocation.runnable.ainvoke(invocation.messages)  # pyright: ignore[reportUnknownMemberType]
@@ -133,7 +135,7 @@ async def ainvoke_with_cache_retry(
                 name=cache_ref.name,
             )
             invalidate(cache_ref)
-            plain = await prepare_invocation(llm, messages)
+            plain = await prepare_invocation(llm, messages, policy)
             used_explicit_cache = plain.cache_ref is not None  # plain path: always False
             response = await plain.runnable.ainvoke(plain.messages)  # pyright: ignore[reportUnknownMemberType]
         assert isinstance(response, AIMessage)  # noqa: S101 — chat models return AIMessage

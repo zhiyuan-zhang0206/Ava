@@ -15,19 +15,25 @@ from redis.exceptions import ConnectionError as RedisConnectionError
 
 from base.config import settings
 from base.events.live import redis_client as mod
+from base.events.live.bus import EventBus
 from base.events.live.redis_client import _TransportAwareAsyncConnection
+from base.events.live.tests.fakes import patch_async_redis, patch_sync_redis
+
+_bus = EventBus.from_settings()
 
 
 @pytest.fixture(autouse=True)
-def _clear_loop_clients() -> None:
-    """Each test starts with an empty per-loop registry; otherwise a cached
-    client from a previous test would survive into the next loop."""
-    mod._clients.clear()
+def _fresh_bus() -> None:
+    """Each test gets a bus built from the settings the session has by then, with an empty
+    per-loop registry; otherwise a cached client from a previous test would survive into the
+    next loop."""
+    global _bus  # noqa: PLW0603 — the module's tests share one handle per test
+    _bus = EventBus.from_settings()
 
 
 async def test_same_loop_returns_same_instance() -> None:
-    a = mod.get_async_redis()
-    b = mod.get_async_redis()
+    a = _bus.async_redis()
+    b = _bus.async_redis()
     assert a is b, "two calls in the same event loop must return the same client"
 
 
@@ -45,7 +51,7 @@ async def test_open_async_redis_pins_socket_timeout_none() -> None:
 
 
 async def test_uses_settings_redis_url() -> None:
-    client = mod.get_async_redis()
+    client = _bus.async_redis()
     pool = client.connection_pool
     parsed_host = pool.connection_kwargs.get("host")  # pyright: ignore[reportUnknownMemberType]
     parsed_port = pool.connection_kwargs.get("port")  # pyright: ignore[reportUnknownMemberType]
@@ -54,10 +60,10 @@ async def test_uses_settings_redis_url() -> None:
     assert str(parsed_port) in settings.data_plane.redis_url  # pyright: ignore[reportUnknownArgumentType]
 
 
-def test_get_async_redis_requires_running_loop() -> None:
+def test_the_shared_async_client_requires_a_running_loop() -> None:
     """Calling outside an async context fails fast (asyncio.get_running_loop raises)."""
     with pytest.raises(RuntimeError):
-        mod.get_async_redis()
+        _bus.async_redis()
 
 
 class _EventuallyAsyncPublisher:
@@ -124,11 +130,11 @@ async def test_publish_retries_auth_failures_with_bounded_exponential_delays(
     async def _record_sleep(delay: float) -> None:
         delays.append(delay)
 
-    monkeypatch.setattr(mod, "get_async_redis", lambda: publisher)
+    patch_async_redis(monkeypatch, lambda: publisher)
     monkeypatch.setattr(mod, "_sleep_async", _record_sleep, raising=False)
     monkeypatch.setattr(mod, "_auth_retry_jitter", _max_jitter, raising=False)
 
-    assert await mod.publish_best_effort("ava:events", "payload") == 3
+    assert await _bus.publish_best_effort("payload", channel="ava:events") == 3
     assert publisher.attempts == 3
     assert delays == [0.5, 1.0]
 
@@ -142,11 +148,11 @@ async def test_publish_auth_retry_stops_within_its_total_wait_budget(
     async def _record_sleep(delay: float) -> None:
         delays.append(delay)
 
-    monkeypatch.setattr(mod, "get_async_redis", lambda: publisher)
+    patch_async_redis(monkeypatch, lambda: publisher)
     monkeypatch.setattr(mod, "_sleep_async", _record_sleep, raising=False)
     monkeypatch.setattr(mod, "_auth_retry_jitter", _max_jitter, raising=False)
 
-    assert await mod.publish_best_effort("ava:events", "payload") is None
+    assert await _bus.publish_best_effort("payload", channel="ava:events") is None
     assert publisher.attempts > 1
     assert sum(delays) <= 60.0
     assert max(delays) <= 10.0
@@ -161,10 +167,10 @@ async def test_publish_does_not_retry_connection_errors(
     async def _record_sleep(delay: float) -> None:
         delays.append(delay)
 
-    monkeypatch.setattr(mod, "get_async_redis", lambda: publisher)
+    patch_async_redis(monkeypatch, lambda: publisher)
     monkeypatch.setattr(mod, "_sleep_async", _record_sleep, raising=False)
 
-    assert await mod.publish_best_effort("ava:events", "payload") is None
+    assert await _bus.publish_best_effort("payload", channel="ava:events") is None
     assert publisher.attempts == 1
     assert delays == []
 
@@ -181,10 +187,10 @@ async def test_best_effort_publish_bounds_a_half_open_health_check_read(
     instead of hanging alongside the bug.
     """
     publisher = _HalfOpenHealthCheckPublisher()
-    monkeypatch.setattr(mod, "get_async_redis", lambda: publisher)
+    patch_async_redis(monkeypatch, lambda: publisher)
     monkeypatch.setattr(mod, "_BEST_EFFORT_PUBLISH_ATTEMPT_TIMEOUT_S", 0.01, raising=False)
 
-    task = asyncio.create_task(mod.publish_best_effort("ava:events", "payload"))
+    task = asyncio.create_task(_bus.publish_best_effort("payload", channel="ava:events"))
     await asyncio.wait_for(publisher.read_started.wait(), timeout=1.0)
     done, _ = await asyncio.wait({task}, timeout=0.5)
     finished_within_bound = bool(done)
@@ -206,14 +212,11 @@ def test_sync_publish_retries_auth_failures_with_bounded_exponential_delays(
     def _record_sleep(delay: float) -> None:
         delays.append(delay)
 
-    def _fake_sync_redis(*, decode_responses: bool = False) -> _EventuallySyncPublisher:
-        return publisher
-
-    monkeypatch.setattr(mod, "sync_redis", _fake_sync_redis)
+    patch_sync_redis(monkeypatch, lambda: publisher)
     monkeypatch.setattr(mod, "_sleep_sync", _record_sleep, raising=False)
     monkeypatch.setattr(mod, "_auth_retry_jitter", _max_jitter, raising=False)
 
-    assert mod.publish_best_effort_sync("ava:events", "payload") == 3
+    assert _bus.publish_best_effort_sync("payload", channel="ava:events") == 3
     assert publisher.attempts == 3
     assert delays == [0.5, 1.0]
 
@@ -221,13 +224,13 @@ def test_sync_publish_retries_auth_failures_with_bounded_exponential_delays(
 async def test_different_loops_get_different_clients() -> None:
     """Inside this loop we hold one client; a separately-run nested loop binds
     its own client and does not collide with ours."""
-    here = mod.get_async_redis()
+    here = _bus.async_redis()
 
     captured: dict[str, object] = {}
 
     def _inside_other_loop() -> None:
         async def _go() -> None:
-            captured["other"] = mod.get_async_redis()
+            captured["other"] = _bus.async_redis()
 
         asyncio.run(_go())
 
@@ -263,12 +266,12 @@ def _assert_resilient_kwargs(kwargs: dict) -> None:
 
 
 async def test_async_client_weak_network_resilient() -> None:
-    client = mod.get_async_redis()
+    client = _bus.async_redis()
     _assert_resilient_kwargs(client.connection_pool.connection_kwargs)  # pyright: ignore[reportUnknownMemberType]
 
 
 def test_sync_client_weak_network_resilient() -> None:
-    client = mod.sync_redis()
+    client = _bus.sync_redis()
     try:
         _assert_resilient_kwargs(client.connection_pool.connection_kwargs)
     finally:
@@ -284,7 +287,7 @@ def test_sync_client_weak_network_resilient() -> None:
 
 
 def test_sync_redis_uses_pinned_connection_class() -> None:
-    client = mod.sync_redis()
+    client = _bus.sync_redis()
     try:
         assert client.connection_pool.connection_class is mod._PinnedIPv4Connection
     finally:

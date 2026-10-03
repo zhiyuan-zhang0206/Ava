@@ -1,0 +1,19 @@
+{
+  "title": "记忆图谱",
+  "backToConversation": "返回对话",
+  "refresh": "刷新记忆图谱",
+  "loadFailed": "无法加载记忆图谱。",
+  "empty": "没有可绘制的记忆笔记。",
+  "selectNode": "点击节点以查看内容。",
+  "folderNotes": "此文件夹中的笔记",
+  "folderEmpty": "这里没有笔记。",
+  "noteLoadFailed": "无法加载此笔记。",
+  "loading": "加载中…",
+  "ariaLabel": "记忆笔记图谱",
+  "noteCount": "{count} 条笔记",
+  "folderCount": "{count} 个文件夹",
+  "edgeCount": "{count} 条边",
+  "folder": "文件夹",
+  "reference": "引用",
+  "resetZoom": "重置缩放"
+}

@@ -27,16 +27,16 @@ import base.cluster
 import base.db
 import base.deploy.state.host_deploy_state
 from base.api_contracts.status import PausedReason, SchemaMismatchStatus
+from base.clock import Clock
 from base.cluster.machine import (
     is_agent_runner,
     is_gateway,
     is_observability_station,
     machine_name,
 )
-from base.config import cluster_tz
+from base.daemon.endpoints import ServiceEndpoints
 from base.host.proc import process_alive
 from base.host.resource_sample import ResourceSample
-from base.paths import pid_path
 from base.sessions.page_session import is_page_label
 from ops import cluster_pause
 from ops.cluster_status.schema_mismatch import status as schema_mismatch_status
@@ -375,7 +375,8 @@ def _collect_sessions() -> tuple[list[SessionInfo], int, int]:
     from base.sessions.backend import get_backend, get_shell_backend
 
     rows: dict[str, SessionInfo] = {}
-    now = datetime.now().astimezone(cluster_tz())
+    zone = Clock.from_settings().zone()
+    now = datetime.now().astimezone(zone)
     for backend in (get_backend(), get_shell_backend()):
         try:
             names = backend.list_sessions(_CLUSTER_SESSION_PREFIX)
@@ -396,7 +397,7 @@ def _collect_sessions() -> tuple[list[SessionInfo], int, int]:
             epoch = epochs.get(name)
             if epoch is not None:
                 try:
-                    created = datetime.fromtimestamp(epoch).astimezone(cluster_tz())
+                    created = datetime.fromtimestamp(epoch).astimezone(zone)
                 except (OSError, OverflowError, ValueError):
                     created = None
             uptime = int((now - created).total_seconds()) if created else 0
@@ -498,7 +499,11 @@ def status_snapshot(pool: Any | None = None) -> ClusterStatus:
     from base.deploy.git.cluster_drift import prod_source_head_sha
     from base.native_process import loaded_commit as _process_sha
 
-    agent_host_alive = _check_pidfile(str(pid_path("agent_host")))[0] if is_agent_runner() else None
+    agent_host_alive = (
+        _check_pidfile(str(ServiceEndpoints.from_settings().of("agent_host").pidfile))[0]
+        if is_agent_runner()
+        else None
+    )
     supervisor_alive = _supervisor_online()
     sessions, shell_count, session_total = _collect_sessions()
     # The producer is typed (AgentSessionGroup); ClusterStatus.agent_groups stays

@@ -11,12 +11,11 @@ Routers mounted in `gateway/app.py`: `router`, `machine_pause`, `bootstrap`,
   - `bootstrap.py`       — `GET /api/bootstrap` runner registration handshake
   - `status.py`          — `/api/health`, `/api/status`, `/api/stats/dashboard`
   - `ops_monitor.py`     — `GET /api/ops/monitor`
-  - `ops_series_lgtm.py` — the LGTM query core behind the ops monitor
+  - `ops_series.py`     — the query core behind the ops monitor (over `telemetry_events`)
   - `roster_probe.py`    — bounded transport policy for runner status probes
                             (also used by the extensions inventory fan-out)
   - `_roster_rows.py`    — roster row shapers + stamping
-  - `_loki_shards.py`    — bounded Loki sharding for the status surface
   - `_health.py`         — the health endpoint body
-  - `_stats_dashboard.py` — dashboard whole-response cache + last-good serving
+  - `_stats_events.py`   — the stats dashboard's window totals over `telemetry_events`
   - `schemas.py`         — the surface's wire models
 """

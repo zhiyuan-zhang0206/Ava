@@ -41,10 +41,8 @@ from fastapi.responses import StreamingResponse
 from psycopg.rows import dict_row
 from pydantic import TypeAdapter
 
-from base.agents.impersonation_manifest import retention_loss_panel
 from base.config import settings
 from base.db.transaction import write_transaction
-from base.events.live.redis_client import sync_redis
 from base.telemetry.alerts import (
     AlertKey,
     display_language,
@@ -53,6 +51,7 @@ from base.telemetry.alerts import (
     stamp_notified,
     upsert_alert,
 )
+from gateway.alerts.publish import ALERTS_CHANNEL, publish_alert_rows
 from gateway.alerts.schemas import (
     AlertIngestResult,
     AlertRow,
@@ -61,17 +60,12 @@ from gateway.alerts.schemas import (
     AlertsListResponse,
     AlertStatus,
     AlertWebhookPayload,
-    ImpersonationRetentionLossRow,
 )
 from gateway.auth.webhook import authenticate_webhook
 from gateway.events.sse import event_stream
 
 router = APIRouter()
 _log = logging.getLogger(__name__)
-
-# The Redis pub/sub channel every ingest publishes to and the SSE stream
-# subscribes to.
-ALERTS_CHANNEL = "ava:alerts"
 
 _WINDOWS = {
     "1h": timedelta(hours=1),
@@ -145,7 +139,7 @@ def ingest_alerts(body: AlertWebhookPayload, request: Request) -> AlertIngestRes
                 pending.append((key, _notify_text(alert, lang)))
         conn.commit()
 
-    publish_alert_rows(rows)
+    publish_alert_rows(request.app.state.bus, rows)
 
     if pending:
         with write_transaction(request.app.state.db_pool) as conn:
@@ -158,23 +152,6 @@ def ingest_alerts(body: AlertWebhookPayload, request: Request) -> AlertIngestRes
     return AlertIngestResult(
         processed=len(body.alerts), inserted=inserted, updated=updated, notified=notified
     )
-
-
-def publish_alert_rows(rows: list[dict[str, Any]]) -> None:
-    """Publish each upserted row to the SSE channel (best-effort).
-
-    A Redis outage must not fail the ingest — the SSE stream is a live tail
-    and the UI's initial fetch carries the same rows."""
-
-    if not rows:
-        return
-    try:
-        with sync_redis() as client:
-            for row in rows:
-                frame = AlertRow(**row).model_dump_json()
-                client.publish(ALERTS_CHANNEL, frame)  # pyright: ignore[reportUnknownMemberType] — redis-py from_url kwargs typed Unknown (same pattern as base/events/live/redis_client.py)
-    except Exception:
-        _log.warning("alerts: SSE publish failed (Redis unreachable?)", exc_info=True)
 
 
 # -- SSE stream ---------------------------------------------------------------
@@ -193,7 +170,7 @@ async def get_alerts_stream(request: Request) -> StreamingResponse:
 
     return StreamingResponse(
         event_stream(
-            settings.data_plane.redis_url,
+            request.app.state.bus,
             0,
             request,
             channel=ALERTS_CHANNEL,
@@ -211,21 +188,6 @@ async def get_alerts_stream(request: Request) -> StreamingResponse:
 
 
 # -- list ---------------------------------------------------------------------
-
-
-@router.get("/api/alerts/impersonation-event-retention")
-def list_impersonation_event_retention(
-    machine: str = Query(min_length=1, max_length=255),
-) -> list[ImpersonationRetentionLossRow]:
-    """Operator panel rows for frozen manifests that crossed Loki retention.
-
-    The query is machine-scoped because the runner that owns the manifest
-    detects its retention floor. The normal alerts list already exposes the
-    accompanying alert; this endpoint supplies the lease/floor/missing-count
-    evidence needed to investigate it without permitting a local mirror to
-    clear the condition.
-    """
-    return [ImpersonationRetentionLossRow(**row) for row in retention_loss_panel(machine=machine)]
 
 
 @router.get("/api/alerts")

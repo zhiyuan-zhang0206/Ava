@@ -22,7 +22,7 @@ from base.agents.incarnation.resources import (
 )
 from base.cluster.machine import machine_name
 from base.config import settings
-from base.db import PG_KEEPALIVE_KWARGS, insert_inbound_message
+from base.db import PG_KEEPALIVE_KWARGS, Database, insert_inbound_message
 from base.deploy.maintenance import cohort, pause_owner
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from base.native_process.turn_identity import bind_turn_identity
@@ -32,7 +32,7 @@ from ops.agents.resurrection_retry import ResurrectSettlementDeferredError
 from ops.agents.spawn import create_agent_row
 from ops.cluster_rpc import ClusterOpFailed, ClusterOpUnreachable
 from ops.lifecycle import termination
-from tests.base.test_predecessor_closure import _closed_form, _retired
+from services.agent_host.tests.test_predecessor_closure import _closed_form, _retired
 
 
 @pytest.fixture(autouse=True)
@@ -221,7 +221,7 @@ async def test_auto_resurrect_refusal_is_a_warning_naming_the_reason(
 ) -> None:
     aid, trigger = arrange(monkeypatch, db_conn)
     status = await lifecycle.resurrect_if_terminated(
-        aid, trigger_inbound_id=trigger, trigger_inbound_kind="chat"
+        Database.from_settings(), aid, trigger_inbound_id=trigger, trigger_inbound_kind="chat"
     )
     assert status is AgentStatus.TERMINATED
     refused = [r for r in loguru_records if r["extra"].get("event") == "auto_resurrect_refused"]
@@ -249,7 +249,7 @@ async def test_other_auto_resurrect_failures_stay_informational(
 
     monkeypatch.setattr(cluster_rpc, "dispatch_to_machine", _failed)
     await lifecycle.resurrect_if_terminated(
-        aid, trigger_inbound_id=trigger, trigger_inbound_kind="chat"
+        Database.from_settings(), aid, trigger_inbound_id=trigger, trigger_inbound_kind="chat"
     )
     events = [r["extra"].get("event") for r in loguru_records if r["level"].name == "WARNING"]
     assert "auto_resurrect_refused" not in events

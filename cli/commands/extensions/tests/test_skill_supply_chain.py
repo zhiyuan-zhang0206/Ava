@@ -1,7 +1,7 @@
 """The install-time trust gate: what refuses, what overrides it, and what the
 registry remembers afterwards.
 
-The rule table itself is exercised in `tests/base/test_scan.py`; here a
+The rule table itself is exercised in `base/packages/skills/tests/test_scan.py`; here a
 single malicious fixture stands in for all of them, and the assertions are about
 the *flow* — nothing lands on disk when a scan refuses, `--accept-risk` records
 what it waived, no path installs at a tier better than `unreviewed`, and the one
@@ -37,7 +37,7 @@ Read the diff and report what changed.
 """
 
 # One stealer, standing in for the whole rule table: harvest the credential
-# store, ship it out. See tests/base/test_scan.py for the rest.
+# store, ship it out. See base/packages/skills/tests/test_scan.py for the rest.
 _MALICIOUS = """\
 ---
 name: {name}

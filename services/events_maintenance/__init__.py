@@ -1,13 +1,12 @@
 """Events-maintenance daemon — gateway-owned event-stream upkeep.
 
-The hourly pass upserts the Since-Birth rollups (agent_metrics_daily /
-agent_model_tokens_daily — the durable token+cost ledger, aggregated from Loki
-since the LGTM cutover; `services.events_maintenance.rollup`), repairs
-pre-retention gaps from the 90-day filtered JSONL replay source
-(`services.events_maintenance.jsonl_replay`), runs the blob vacuum, and samples
+The hourly pass recovers the observations the live projection missed, replays this machine's
+JSONL mirror into `telemetry_events`, recomputes the day-grain rollups of the last closed days
+(agent_metrics_daily / agent_model_tokens_daily — the durable token+cost ledger;
+`services.events_maintenance.rollup`), runs the blob vacuum, and samples
 checkpoint table sizes. The checkpoint trim opt-in was retired on 2026-09-30
 under the never-delete ruling; the retained reaper implementation is not
-scheduled. A five-minute resolution slice reads immutable Loki event classes,
+scheduled. A five-minute resolution slice reads the event classes in `telemetry_events`,
 combines them with `event_dismissals`, and publishes unresolved + dismissed
 warning/error gauges (`services.events_maintenance.resolution`); the gateway
 stats dashboard reuses the same class arithmetic for its selected window. The PG `events` archive

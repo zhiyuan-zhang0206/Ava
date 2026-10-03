@@ -121,7 +121,7 @@ def test_bootstrap_serves_no_daemon_health_port() -> None:
     MACHINE's localhost namespace; serving these made two agent-runners of the
     same cluster on one machine take the same ports by construction (issue #977).
     Nothing here is cluster-constrained — a runner computes its own ops URL from
-    its own `health_port('ops')` and registers it, and the gateway reads that URL
+    its own `ops` endpoint row and registers it, and the gateway reads that URL
     back off the machines row.
 
     Asserted against the live service->env-var map, and on BOTH the served

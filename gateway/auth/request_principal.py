@@ -42,7 +42,7 @@ def cluster_credential(authorization: str | None, secret: str) -> str | None:
     """The credential fact of a cluster bearer, or None when it presents none.
 
     `cluster_bearer` for the human cluster secret; `machine_token:<class>` for
-    the ACTIVE write generation's machine API token of that class (a revoked
+    the ACTIVE write generation's machine API token of that class (a pending
     generation's token never matches: `base.cluster.authority.api`). Both
     authenticate the one cluster administrator; the fact only records which
     credential did. A blank `secret` never verifies as the human bearer.
@@ -65,9 +65,9 @@ def cluster_credential(authorization: str | None, secret: str) -> str | None:
 # presents). `<mac>` is HMAC-SHA256 under this gateway's private session key
 # over the credential's SHA-256 digest, so a cookie carries no form of the
 # credential that can be brute-forced offline. A session authenticates only
-# while its mint is one of the CURRENT credentials' mints: the fence revoking a
-# generation, or a rotated human secret, ends every session that credential
-# minted at once, with no revocation step at any rotation point.
+# while its mint is one of the CURRENT credentials' mints: a rotated human
+# secret ends every session that credential minted at once, with no revocation
+# step.
 
 SESSION_KEY_NAME = "web-session.key"
 _SESSION_KEY = re.compile(r"^[0-9a-f]{64}$")

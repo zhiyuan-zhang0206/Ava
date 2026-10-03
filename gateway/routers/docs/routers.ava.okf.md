@@ -22,7 +22,7 @@ Every route module is a FastAPI `APIRouter` `include_router`-mounted to `/api/*`
 ### Agent core (lifecycle + observability)
 - **agents** (`/api/agents/*`) — [[gateway/agents/docs/agents-router.ava.okf.md|lifecycle and projection contract]].
 - **agent_events** (`/api/agents/{id}/events` + `/events/stream`) — historical REST query over the unified event stream (Loki) + real-time SSE tail (filtered by agent_id)
-- **events** (`/api/events`) — unified event stream query (Wave 2): every category (audit / telemetry / log) through one surface over the event stream (Loki), filters category/event_name/agent_id/trace_id/machine/level + time window (`from`/`to` or `hours`) + offset paging, `meta` (total/window/has_more) envelope
+- **events** (`/api/events`) — unified event stream query (Wave 2): every category (audit / telemetry / log) through one surface: audit rows from Postgres `audit_events`, telemetry/log from Postgres `telemetry_events`, merged newest-first; filters category/event_name/agent_id/trace_id/machine/level + time window (`from`/`to` or `hours`) + offset paging, `meta` (total/window/has_more) envelope
 - **run_timeline** (`/api/agents/{id}/run-timeline`) — see [[run_timeline.ava.okf.md|event aggregation and read ownership]].
 - **run_timeline_strip** (`/api/agents/{id}/run-timeline/message` + run-timeline's `messages` field) — see [[run-timeline-strip.ava.okf.md]].
 - **inspect** (`/api/agents/{id}/inspect/*` + `/neighbors`) — per-agent LLM cost/token/TPS + neighbor graph; plugin metric and inspector-widget surfaces — [[gateway/inspect/docs/inspect.ava.okf.md]]
@@ -51,7 +51,7 @@ Every route module is a FastAPI `APIRouter` `include_router`-mounted to `/api/*`
 
 ### Ops & system
 - **status** (`/api/health`, `/api/status`, `/api/stats/dashboard`) — liveness + status panel + dashboard; public health exposes process `started_at` and boot-frozen `sha` for rollout observers ([[gateway/cluster/docs/ops-surfaces.ava.okf.md|dashboard contract]])
-- **metrics** (`/api/metrics`, `/api/metrics/agents`) — aggregated metrics over the unified `events` stream
+- **metrics** (`/api/metrics`, `/api/metrics/agents`) — aggregated metrics over `telemetry_events`
 - **schedules** (`/api/schedules/*`) — scheduled task CRUD + start/stop/restart
 - **shell** (`/api/agents/{id}/shell/{sid}`) — terminal session monitor (session backend proxy)
 - **tasks** (`/api/tasks` GET + `/api/tasks/{id}` PATCH) — task registry read + partial update (no create; an owner reassignment notifies the new and, when live, previous owner); GET defaults to a full compatibility row or serves a metadata-only SQL projection with `fields=summary`; rows carry `priority` (`P0`..`P3`, validated, illegal 422)

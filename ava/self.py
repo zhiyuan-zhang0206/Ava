@@ -4,11 +4,10 @@ import json as _json
 from typing import NoReturn
 
 import ava
+from ava import _settings
 from ava.attachment_transport import attach as attach
 from ava.sdk_surface.validation import coerce_str, coerce_typed
 from base.agents.lifecycle import AgentRestart, AgentTermination, SystemHalt
-from base.config import settings
-from base.config.turn_view import turn_settings
 
 # Deliberately NOT in __all_for_ava__ (importable, but out of the rendered SDK
 # docs): AgentRestart / AgentTermination are framework control-flow exceptions
@@ -249,7 +248,7 @@ def pause_heartbeat(duration: float) -> None:
 
     if not duration > 0:
         raise ValueError(f"duration must be greater than 0 seconds, got {duration!r}")
-    limit = turn_settings.agent.heartbeat_pause_max_seconds
+    limit = _settings.agent_setting("heartbeat_pause_max_seconds")
     if duration > limit:
         raise ValueError(
             f"duration must be at most {limit:.0f} seconds (heartbeat pause limit; "
@@ -297,20 +296,26 @@ def compact(summary: str) -> NoReturn:
     from ava import agent_identity
 
     agent_identity.assert_self_action("compact")
-    with ava.DB.cursor() as cur:
+    from base import telemetry
+    from base.telemetry.audit_events import prepare_event_log, record_audit
+
+    # The inbound and its audit fact commit together.
+    with ava.DB.transaction(), ava.DB.cursor() as cur:
         cur.execute(
             "INSERT INTO inbound_messages (agent_id, content, kind) "
             "VALUES (%s, %s, 'compact_summary')",
             (agent_identity.agent_id(), summary),
         )
-        from base.telemetry.audit_events import insert_event_log
-
-        insert_event_log(
-            event_type="compact",
-            agent_id=agent_identity.agent_id(),
-            source="self",
-            payload={"compact_kind": "summary", "length": len(summary)},
+        compact_event = record_audit(
+            cur.connection,
+            prepare_event_log(
+                event_type="compact",
+                agent_id=agent_identity.agent_id(),
+                source="self",
+                payload={"compact_kind": "summary", "length": len(summary)},
+            ),
         )
+    telemetry.emit_prepared(compact_event)
     # Best-effort: a publish failure must not stop the wake + SystemHalt below.
     # The durable compact_summary inbound is already committed; if this live-UI
     # event is lost the frontend recovers on its next fetch. Routed through the
@@ -318,10 +323,8 @@ def compact(summary: str) -> NoReturn:
     # Imported here, not at module scope: `import ava` must not pull the redis /
     # live-events stacks into every exec child (startup-path laziness, task #3816).
     from base.events.live.projection import CompactRequest
-    from base.events.live.redis_client import publish_best_effort_sync
 
-    publish_best_effort_sync(
-        settings.data_plane.events_channel,
+    _settings.bus().publish_best_effort_sync(
         CompactRequest(
             agent_id=agent_identity.require_agent_id(),
             content=f"[compact requested, {len(summary)} chars]",

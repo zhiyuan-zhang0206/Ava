@@ -121,7 +121,7 @@ def test_invalid_image_layout_is_not_a_set_divergence(monkeypatch: pytest.Monkey
         return {"base"}
 
     def invalid() -> set[str]:
-        raise MigrationLayoutError("required down migration is absent")
+        raise MigrationLayoutError("required migration file is absent")
 
     monkeypatch.setattr(schema_mismatch, "applied_migration_names", applied)
     monkeypatch.setattr(schema_mismatch, "required_migration_set", invalid)
@@ -159,15 +159,13 @@ def test_gateway_probe_preserves_degraded_schema_status(
         schema_mismatch=diagnosis,
     )
 
-    async def probe(_name: str, _url: str, *, timeout_s: float) -> dict[str, object]:
+    async def probe(_name: str, _url: str) -> dict[str, object]:
         return response.model_dump(mode="json")
 
     def reachable(_name: str) -> None:
         pass
 
-    monkeypatch.setattr(roster_probe, "_probe_failures", {})
     monkeypatch.setattr(roster_probe, "dispatch_status_probe", probe)
-    monkeypatch.setattr(roster_probe, "note_probe_reachable", reachable)
     monkeypatch.setattr(roster_probe, "note_identity_match", reachable)
     row = asyncio.run(
         status_route._probe_agent_runner(

@@ -316,3 +316,22 @@ def test_resolved_policy_explicit_values_win(unit_home: Path) -> None:
     pkg.update.channel = "git"  # a deliberately odd pin: explicit wins over provenance
     pol = reg.resolved_policy(pkg)
     assert (pol.channel, pol.mode, pol.interval_seconds) == ("git", "notify", 3600)
+
+
+def test_differing_paths_names_changed_added_removed_and_skips_noise(tmp_path: Path) -> None:
+    a, b = tmp_path / "a", tmp_path / "b"
+    for root in (a, b):
+        (root / "keep").mkdir(parents=True)
+        (root / "keep" / "x.md").write_text("same")
+        (root / "__pycache__").mkdir()
+    (a / "changed.md").write_text("old")
+    (b / "changed.md").write_text("new")
+    (a / "only_a.md").write_text("a")
+    (b / "only_b.md").write_text("b")
+    (a / "__pycache__" / "junk.pyc").write_text("a")
+    (b / "__pycache__" / "junk.pyc").write_text("b")
+    assert reg.differing_paths(a, b) == ["changed.md", "only_a.md", "only_b.md"]
+    assert reg.differing_paths(a, b, skip_subtrees=frozenset({("changed.md",)})) == [
+        "only_a.md",
+        "only_b.md",
+    ]

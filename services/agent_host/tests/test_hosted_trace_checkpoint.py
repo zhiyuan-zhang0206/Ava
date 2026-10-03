@@ -16,11 +16,14 @@ from psycopg_pool import AsyncConnectionPool
 from agent.impersonation import flush_checkpoint
 from agent.startup import wrap_saver_writes_with_nstep_interval
 from agent.state import BaseAgentState
+from agent.tests.test_inbound_ownership import _agent
 from base.agents.context import AvaContext
 from base.agents.history.checkpoint import load_checkpoint_messages_by_trace
 from base.config import settings
+from base.db import Database
+from base.events.live.bus import EventBus
+from base.host.env.agent_slices import AgentSlices
 from services.agent_host import host as host_module
-from tests.agent.test_inbound_ownership import _agent
 
 
 async def test_host_trace_reads_final_messages_after_nstep_flush(
@@ -62,14 +65,23 @@ async def test_host_trace_reads_final_messages_after_nstep_flush(
         )
         await flush_checkpoint(saver, agent_id)
         host = host_module.AgentHost(
-            pool=aops_pool, checkpointer=saver, graph=graph, machine="test"
+            pool=aops_pool,
+            checkpointer=saver,
+            graph=graph,
+            machine="test",
+            bus=EventBus.from_settings(),
+            db=Database.from_settings(),
         )
-        assert not (await host._invoke_until_done(agent_id, AvaContext(ops_pool=aops_pool))).exited
+        assert not (
+            await host._invoke_until_done(
+                agent_id, AvaContext(ops_pool=aops_pool, agent=AgentSlices.resolve())
+            )
+        ).exited
 
     assert len(traces) == 1
     # This is the actual gateway trace-content reader, using fresh connections.
     checkpoint_id, messages = await asyncio.to_thread(
-        load_checkpoint_messages_by_trace, agent_id, traces[0]
+        load_checkpoint_messages_by_trace, Database.from_settings(), agent_id, traces[0]
     )
     assert checkpoint_id is not None
     assert [message.text for message in messages] == ["prior question", "final response"]

@@ -30,16 +30,16 @@ import psycopg
 
 import base.db
 from base import telemetry
-from base.agents import ForkCheckpointNotFound
 from base.agents.birth_config import resolve_birth_config
-from base.agents.impersonation_manifest import stage_central_expected_event
+from base.agents.history.checkpoint_copy import copy_checkpoint_chain
+from base.agents.impersonation_manifest import record_central_event
 from base.agents.labels import spawn_prompt_with_label
 from base.db import announce_spawn_prompt, fetch_one, insert_spawn_prompt_in_transaction
-from base.db.transaction import write_transaction
 from base.events.live.announce import publish_agent_spawned_sync
+from base.events.live.bus import EventBus
 from base.lm.registry import normalize_overlay_llm_model
 from base.log import logger
-from base.telemetry.audit_events import prepare_event_log
+from base.telemetry.audit_events import prepare_event_log, record_audit
 
 
 def latest_checkpoint_id(cur: psycopg.Cursor, agent_id: int) -> str | None:
@@ -86,161 +86,6 @@ def latest_checkpoint_id(cur: psycopg.Cursor, agent_id: int) -> str | None:
     return row[0] if row else None
 
 
-def _copy_checkpoint_chain(
-    cur: psycopg.Cursor,
-    source_agent_id: int,
-    source_checkpoint_id: str,
-    new_agent_id: int,
-) -> None:
-    """Copy the source agent's LangGraph state at source_checkpoint_id as the
-    new_agent's first checkpoints.
-
-    The copy is one segment window: the ancestor walk stops at (and includes)
-    the nearest compaction boundary strictly below the fork point, so its size
-    is bounded by at most two compacted segments instead of the thread's whole
-    history. The fork checkpoint itself never terminates the walk — when it is
-    itself a boundary the walk continues down to the next boundary below —
-    because a boundary is NOT a self-contained snapshot on a delta-written
-    thread: it is an ordinary checkpoint stamped `compact_boundary` by
-    `mark_compact_boundary`, and its content is rebuilt by folding the write
-    chain. Cutting the window AT a boundary could contain neither a
-    materialized snapshot nor the compaction reset (REMOVE_ALL) that opened
-    the fork point's segment, and the replica read back empty (task #3979). A
-    thread that never compacted has no boundary and is copied back to its root
-    — which is that thread's whole history, still one context window's worth.
-    Chains are retained in full by design (delta-written threads are exempt
-    from checkpoint trimming — the never-delete ruling, tasks #3180/#3181),
-    so chain length tracks a thread's whole life. Bounding the copy is what keeps repeated forks O(N) in rows
-    written rather than O(N^2); an unbounded copy also eventually exceeds
-    `statement_timeout`.
-
-    Rows copied:
-    - **checkpoints**: target ckpt_id and its ancestors, recursively following
-      parent_checkpoint_id, stopping at (and including) the first
-      `compact_boundary` checkpoint strictly below the target (the target
-      itself always walks past)
-    - **checkpoint_blobs**: only the (ns, channel, version) triples the copied
-      checkpoints actually reference through their `channel_versions` — the
-      same join PostgresSaver's SELECT_SQL uses to read them, so nothing a
-      reader can reach is left behind
-    - **checkpoint_writes**: every write row attached to a copied checkpoint,
-      so the replica is complete for delta-written threads — their message
-      content lives in the writes, not blobs (tasks #3180/#3181). For
-      full-snapshot threads the copy is invisible to readers (values still
-      come from blobs) and keeps the same resume semantics: writes attach
-      to their producing checkpoint, and a clean tip has none attached.
-
-    LangGraph checkpoints / blobs tables have `thread_id` as TEXT (framework
-    schema unchanged) — agents_meta.id is BIGINT, this function explicitly
-    str()-casts when writing into thread_id.
-
-    Raises:
-        ForkCheckpointNotFound: source_checkpoint_id does not exist on the
-            source agent (recursive CTE INSERT 0 rows).
-    """
-    # LangGraph schema preserved: checkpoints.thread_id / checkpoint_blobs.thread_id
-    # are framework column names (hardcoded in PostgresSaver); we cast Ava agent_id to str() here.
-    cur.execute(
-        """
-        WITH RECURSIVE chain AS (
-            SELECT * FROM checkpoints
-             WHERE thread_id = %(src)s AND checkpoint_id = %(ckpt)s
-            UNION ALL
-            SELECT c.*
-              FROM checkpoints c
-              JOIN chain ON c.thread_id = %(src)s
-                       AND c.checkpoint_id = chain.parent_checkpoint_id
-             -- Walk past a row only when it is not a boundary — except the
-             -- fork row itself, which never terminates its own walk: when the
-             -- fork checkpoint IS a boundary, the walk continues down to the
-             -- next boundary below it, so the copied window contains the reset
-             -- that opened the fork point's segment (a boundary is metadata on
-             -- an ordinary checkpoint, not a self-contained snapshot).
-             WHERE chain.checkpoint_id = %(ckpt)s
-                OR NOT COALESCE(
-                 (chain.metadata ->> 'compact_boundary')::boolean, false
-             )
-        )
-        INSERT INTO checkpoints (
-            thread_id, checkpoint_ns, checkpoint_id, parent_checkpoint_id,
-            type, checkpoint, metadata
-        )
-        SELECT %(new)s, checkpoint_ns, checkpoint_id, parent_checkpoint_id,
-               type, checkpoint, metadata
-          FROM chain
-        """,
-        {"src": str(source_agent_id), "ckpt": source_checkpoint_id, "new": str(new_agent_id)},
-    )
-    if cur.rowcount == 0:
-        raise ForkCheckpointNotFound(
-            f"checkpoint {source_checkpoint_id!r} does not exist in thread {source_agent_id}"
-        )
-    cur.execute(
-        """
-        WITH RECURSIVE chain AS (
-            SELECT checkpoint_id, parent_checkpoint_id, metadata FROM checkpoints
-             WHERE thread_id = %(src)s AND checkpoint_id = %(ckpt)s
-            UNION ALL
-            SELECT c.checkpoint_id, c.parent_checkpoint_id, c.metadata
-              FROM checkpoints c
-              JOIN chain ON c.thread_id = %(src)s
-                       AND c.checkpoint_id = chain.parent_checkpoint_id
-             WHERE chain.checkpoint_id = %(ckpt)s
-                OR NOT COALESCE(
-                 (chain.metadata ->> 'compact_boundary')::boolean, false
-             )
-        )
-        INSERT INTO checkpoint_writes (
-            thread_id, checkpoint_ns, checkpoint_id, task_id, idx, channel, type, blob
-        )
-        SELECT %(new)s, w.checkpoint_ns, w.checkpoint_id, w.task_id, w.idx,
-               w.channel, w.type, w.blob
-          FROM checkpoint_writes w
-          JOIN chain ON chain.checkpoint_id = w.checkpoint_id
-         WHERE w.thread_id = %(src)s
-        """,
-        {"src": str(source_agent_id), "ckpt": source_checkpoint_id, "new": str(new_agent_id)},
-    )
-    cur.execute(
-        """
-        WITH RECURSIVE chain AS (
-            SELECT checkpoint_ns, checkpoint_id, parent_checkpoint_id,
-                   checkpoint, metadata
-              FROM checkpoints
-             WHERE thread_id = %(src)s AND checkpoint_id = %(ckpt)s
-            UNION ALL
-            SELECT c.checkpoint_ns, c.checkpoint_id, c.parent_checkpoint_id,
-                   c.checkpoint, c.metadata
-              FROM checkpoints c
-              JOIN chain ON c.thread_id = %(src)s
-                       AND c.checkpoint_id = chain.parent_checkpoint_id
-             WHERE chain.checkpoint_id = %(ckpt)s
-                OR NOT COALESCE(
-                 (chain.metadata ->> 'compact_boundary')::boolean, false
-             )
-        ),
-        referenced AS (
-            -- The triples a reader can reach: PostgresSaver's SELECT_SQL joins
-            -- blobs through exactly this `channel_versions` mapping.
-            SELECT DISTINCT chain.checkpoint_ns AS checkpoint_ns,
-                   cv.key AS channel, cv.value AS version
-              FROM chain
-              CROSS JOIN LATERAL jsonb_each_text(
-                  chain.checkpoint -> 'channel_versions'
-              ) AS cv
-        )
-        INSERT INTO checkpoint_blobs (thread_id, checkpoint_ns, channel, version, type, blob)
-        SELECT %(new)s, b.checkpoint_ns, b.channel, b.version, b.type, b.blob
-          FROM checkpoint_blobs b
-          JOIN referenced r ON r.checkpoint_ns = b.checkpoint_ns
-                           AND r.channel = b.channel
-                           AND r.version = b.version
-         WHERE b.thread_id = %(src)s
-        """,
-        {"src": str(source_agent_id), "ckpt": source_checkpoint_id, "new": str(new_agent_id)},
-    )
-
-
 _SPAWNER_AGENT_RE = re.compile(r"^agent:(\d+)$")
 
 
@@ -258,55 +103,52 @@ def _spawner_agent_id_malformed(spawner: str) -> bool:
     return int(m.group(1)) <= 0
 
 
-def _announce_created_agent(
+def _record_birth_event(
+    conn: psycopg.Connection,
     agent_id: int,
     spawner: str,
     fork_from: int | None,
     fork_checkpoint: str | None,
     target_machine: str,
-    prompt_inbound_id: int | None,
-    prompt_content: str | None,
-    prompt_source: str | None,
-) -> None:
-    """Publish advisory audit/live hints after the birth transaction commits."""
+) -> telemetry.Event:
+    """Record the spawn or fork audit fact in the birth transaction.
+
+    Who spawned whom cannot be derived from any later state, so the row commits
+    with the agent row or not at all. A fork's audit parent is the source agent,
+    even when a third agent executed it.
+    """
     spawner_target: int | None = None
     if spawner.startswith("agent:"):
         spawner_target = int(spawner.removeprefix("agent:"))
-    try:
-        prepared_event = prepare_event_log(
-            event_type="fork" if fork_from is not None else "spawn",
-            agent_id=agent_id,
-            source=spawner,
-            target_agent_id=fork_from if fork_from is not None else spawner_target,
-            payload={
-                "machine": target_machine,
-                "fork_from": fork_from,
-                "fork_checkpoint": fork_checkpoint,
-            },
-        )
-        # The agent row is already durable. Its audit event gets its own
-        # durable staging transaction, so a telemetry loss remains visible to
-        # the finalizer instead of silently completing the delivery set.
-        with write_transaction() as conn:
-            prepared_event = stage_central_expected_event(
-                conn,
-                prepared_event,
-                origin_kind="agent_spawn",
-                origin_id=agent_id,
-            )
-        telemetry.emit_prepared(prepared_event)
-    except Exception:
-        # The committed row and prompt are authoritative; the pending scan and
-        # roster reads recover from a lost Redis/telemetry hint.
-        logger.exception("agent {} spawn audit announcement failed", agent_id)
-    if prompt_inbound_id is not None and prompt_content is not None:
-        assert prompt_source is not None  # noqa: S101 — paired at entry
+    event = prepare_event_log(
+        event_type="fork" if fork_from is not None else "spawn",
+        agent_id=agent_id,
+        source=spawner,
+        target_agent_id=fork_from if fork_from is not None else spawner_target,
+        payload={
+            "machine": target_machine,
+            "fork_from": fork_from,
+            "fork_checkpoint": fork_checkpoint,
+        },
+    )
+    return record_audit(conn, record_central_event(conn, event))
+
+
+def _announce_created_agent(
+    agent_id: int,
+    birth_event: telemetry.Event,
+    prompt_inbound_id: int | None,
+    prompt_event: telemetry.Event | None,
+) -> None:
+    """Emit the recorded audit events and live hints after the birth transaction commits."""
+    telemetry.emit_prepared(birth_event)
+    if prompt_inbound_id is not None:
         try:
-            announce_spawn_prompt(agent_id, prompt_inbound_id, prompt_content, prompt_source)
+            announce_spawn_prompt(agent_id, prompt_inbound_id, prompt_event)
         except Exception:
             logger.exception("agent {} prompt announcement failed", agent_id)
     try:
-        publish_agent_spawned_sync(agent_id)
+        publish_agent_spawned_sync(EventBus.from_settings(), agent_id)
     except Exception:
         logger.exception("agent {} roster announcement failed", agent_id)
 
@@ -413,7 +255,7 @@ def create_agent_row(
 
     launch_attempt_id = uuid4()
     prompt_inbound_id: int | None = None
-    prompt_content: str | None = None
+    prompt_event: telemetry.Event | None = None
     with base.db.connect() as conn, conn.cursor() as cur:
         conn.execute("SET TRANSACTION READ WRITE")
         # label: when the spawner assigns one, store it sticky (label_user_set=TRUE)
@@ -486,7 +328,7 @@ def create_agent_row(
         )
         if fork_from is not None and fork_checkpoint is not None:
             # ForkCheckpointNotFound causes the whole transaction to roll back (the with block does not commit)
-            _copy_checkpoint_chain(cur, fork_from, fork_checkpoint, new_id)
+            copy_checkpoint_chain(cur, fork_from, fork_checkpoint, new_id)
             # The copied history reads as the source agent's identity to the new
             # process. INSERT a kind='fork' lifecycle inbound in THIS transaction
             # (committed before launch) so the new agent's first claim appends an
@@ -511,22 +353,16 @@ def create_agent_row(
         if prompt is not None:
             assert prompt_source is not None, "prompt requires prompt_source (validated above)"  # noqa: S101
             prompt_content = spawn_prompt_with_label(prompt, label)
-            prompt_inbound_id = insert_spawn_prompt_in_transaction(
+            prompt_inbound_id, prompt_event = insert_spawn_prompt_in_transaction(
                 cur, new_id, prompt_content, prompt_source
             )
-        conn.commit()
-        # Lineage/audit and live hints are emitted only after commit. A fork's
-        # audit parent is the source agent, even when a third agent executed it.
-        _announce_created_agent(
-            new_id,
-            spawner,
-            fork_from,
-            fork_checkpoint,
-            target_machine,
-            prompt_inbound_id,
-            prompt_content,
-            prompt_source,
+        birth_event = _record_birth_event(
+            conn, new_id, spawner, fork_from, fork_checkpoint, target_machine
         )
+        conn.commit()
+        # The recorded events reach the observation sink and the live hints go
+        # out only after commit.
+        _announce_created_agent(new_id, birth_event, prompt_inbound_id, prompt_event)
     # Launch is the runner's job now (the launch op) — the row is created and
     # the caller forwards it. The `agent_spawned` telemetry event keeps its
     # registered name (contract.py) — the row INSERT is still the spawn

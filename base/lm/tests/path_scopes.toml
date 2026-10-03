@@ -1,0 +1,8 @@
+# Fixture modules (tests/path_scoped/) that govern this directory's tests: "." is the
+# directory itself, otherwise the test files named here (tests/fixtures/path_scopes.py).
+"tests.path_scoped.agent_tests" = [
+    "test_llm_factory.py",
+    "test_llm_factory_new_models.py",
+    "test_provider_errors.py",
+    "test_provider_stop.py",
+]

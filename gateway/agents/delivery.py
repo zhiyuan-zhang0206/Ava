@@ -25,8 +25,9 @@ from base.agents.messages.chat_delivery import (
     reconcile_chat_inbound,
 )
 from base.agents.messages.inbound_provenance import InboundProvenance
-from base.db import publish_inbound_wake
+from base.db import Database, publish_inbound_wake
 from base.events.live.announce import publish_agent_updated_sync
+from base.events.live.bus import EventBus
 from base.log import logger
 from ops import lifecycle as _ops
 from ops.agents import get_agent_status
@@ -55,6 +56,8 @@ def _spawn_background(coro: Coroutine[Any, Any, object]) -> None:
 
 async def deliver_chat_inbound(
     pool: ConnectionPool,
+    db: Database,
+    bus: EventBus,
     agent_id: int,
     *,
     prepare: Callable[[psycopg.Connection], str | None],
@@ -103,7 +106,7 @@ async def deliver_chat_inbound(
     # neither roll back the inbound nor skip its arrival/resurrection tail.
     if refresh_badge:
         try:
-            await asyncio.to_thread(publish_agent_updated_sync, agent_id)
+            await asyncio.to_thread(publish_agent_updated_sync, bus, agent_id)
         except Exception as exc:
             logger.warning(
                 "deliver_chat_inbound: badge refresh for agent {aid} failed after "
@@ -133,13 +136,14 @@ async def deliver_chat_inbound(
         await asyncio.to_thread(publish_inbound_wake, agent_id, str(inbound_id))
     if pending:
         _spawn_background(
-            _ops.publish_inbound_arrived(agent_id, inbound_id, "chat", source, content)
+            _ops.publish_inbound_arrived(bus, agent_id, inbound_id, "chat", source, content)
         )
         # Auto-resurrect: a chat delivered to a terminated agent should wake it so
         # the sender's message gets a response — the user's reply (or any peer /
         # watcher message) implies they want the agent alive to handle it. Shared
         # with the compact path via `resurrect_if_terminated`.
         status = await _ops.resurrect_if_terminated(
+            db,
             agent_id,
             trigger_inbound_id=inbound_id,
             trigger_inbound_kind="chat",
@@ -153,6 +157,8 @@ async def deliver_chat_inbound(
 
 async def reconcile_chat_delivery(
     pool: ConnectionPool,
+    db: Database,
+    bus: EventBus,
     agent_id: int,
     *,
     client_message_id: str,
@@ -183,9 +189,10 @@ async def reconcile_chat_delivery(
         return ChatDelivery(status, receipt.inbound_id)
     await asyncio.to_thread(publish_inbound_wake, agent_id, str(receipt.inbound_id))
     _spawn_background(
-        _ops.publish_inbound_arrived(agent_id, receipt.inbound_id, "chat", source, content)
+        _ops.publish_inbound_arrived(bus, agent_id, receipt.inbound_id, "chat", source, content)
     )
     status = await _ops.resurrect_if_terminated(
+        db,
         agent_id,
         trigger_inbound_id=receipt.inbound_id,
         trigger_inbound_kind="chat",

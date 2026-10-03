@@ -26,6 +26,7 @@ from agent.graph.system_prompt import (
 )
 from ava.sdk_surface import plugins, sdk_disable
 from base.config import FIELD_INFOS, AgentSettings, settings
+from base.host.env.agent_slices import AgentSlices
 from base.telemetry import audit_events
 
 # The framework-owned top-level namespaces the wildcard must always surface.
@@ -70,10 +71,10 @@ def skill_writes(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]:
     attribution row takes — for the "records nothing" assertions."""
     writes: list[dict[str, Any]] = []
 
-    def _record(**kwargs: Any) -> None:
-        writes.append(kwargs)
+    def _record(events: list[Any]) -> None:
+        writes.append({"events": events})
 
-    monkeypatch.setattr(audit_events, "insert_event_log_many", _record)
+    monkeypatch.setattr(audit_events, "record_audit_standalone_many", _record)
     return writes
 
 
@@ -82,10 +83,10 @@ def test_wildcard_expands_all_public_namespaces(monkeypatch: pytest.MonkeyPatch)
     framework namespace, in deterministic sorted order, and nothing the
     discovery would not surface."""
     monkeypatch.setattr(settings.agent, "sdk_expand_in_system_prompt", ["*"])
-    result = effective_sdk_expand()
+    result = effective_sdk_expand(AgentSlices.resolve().prompt.sdk_disable)
     assert set(result) >= FRAMEWORK_NAMESPACES
     assert "shell.sessions" in result  # nested namespace discovered recursively
-    assert result == _discover_all_namespaces()
+    assert result == _discover_all_namespaces(AgentSlices.resolve().prompt.sdk_disable)
     assert result == sorted(result)  # deterministic order
 
 
@@ -96,7 +97,7 @@ def test_wildcard_excludes_functions_and_private_names(
     namespaces — the SDK overview already prints functions in full, so the
     wildcard skips them rather than duplicating their contract."""
     monkeypatch.setattr(settings.agent, "sdk_expand_in_system_prompt", ["*"])
-    result = effective_sdk_expand()
+    result = effective_sdk_expand(AgentSlices.resolve().prompt.sdk_disable)
     assert "help" not in result
     assert "understand" not in result
     assert not any(name.startswith("_") for name in result)
@@ -108,10 +109,10 @@ def test_wildcard_skips_capability_surfaces(monkeypatch: pytest.MonkeyPatch) -> 
     is exactly what `# Capabilities` already indexes. `"*"` skips both so the
     prompt carries one index, not two."""
     monkeypatch.setattr(settings.agent, "sdk_expand_in_system_prompt", ["*"])
-    result = effective_sdk_expand()
+    result = effective_sdk_expand(AgentSlices.resolve().prompt.sdk_disable)
     assert {"skills", "mcps"} == _CAPABILITY_SURFACES
     assert not (_CAPABILITY_SURFACES & set(result))
-    text = _sdk_expand_section()
+    text = _sdk_expand_section(AgentSlices.resolve())
     assert "## ava.skills" not in text
     assert "## ava.mcps" not in text
 
@@ -125,8 +126,8 @@ def test_capability_surface_expands_when_named_explicitly(
     body reaches the prompt and no attribution is recorded."""
     monkeypatch.setattr(settings.agent, "sdk_expand_in_system_prompt", ["*", "skills"])
 
-    assert "skills" in effective_sdk_expand()
-    text = _sdk_expand_section()
+    assert "skills" in effective_sdk_expand(AgentSlices.resolve().prompt.sdk_disable)
+    text = _sdk_expand_section(AgentSlices.resolve())
     assert "## ava.skills" in text
     assert skill_writes == []
     # An index render carries descriptions, never bodies. Every SKILL.md in this
@@ -154,9 +155,9 @@ def test_member_of_a_capability_surface_is_refused(
         settings.agent, "sdk_expand_in_system_prompt", ["*", "skills.gmail", "mcps.chrome"]
     )
 
-    assert "skills.gmail" not in effective_sdk_expand()
-    assert "mcps.chrome" not in effective_sdk_expand()
-    text = _sdk_expand_section()
+    assert "skills.gmail" not in effective_sdk_expand(AgentSlices.resolve().prompt.sdk_disable)
+    assert "mcps.chrome" not in effective_sdk_expand(AgentSlices.resolve().prompt.sdk_disable)
+    text = _sdk_expand_section(AgentSlices.resolve())
     assert "## ava.skills.gmail" not in text
     assert "## ava.mcps.chrome" not in text
     assert skill_writes == []
@@ -167,7 +168,7 @@ def test_wildcard_respects_sdk_disable(monkeypatch: pytest.MonkeyPatch) -> None:
     a disabled namespace must never be expanded back into the prompt."""
     monkeypatch.setattr(settings.agent, "sdk_expand_in_system_prompt", ["*"])
     monkeypatch.setattr(settings.agent, "sdk_disable", ["watcher"])
-    result = effective_sdk_expand()
+    result = effective_sdk_expand(AgentSlices.resolve().prompt.sdk_disable)
     assert "watcher" not in result
     assert "files" in result and "self" in result
 
@@ -179,7 +180,7 @@ def test_wildcard_disable_of_member_keeps_namespace(
     parent namespace still expands under the wildcard."""
     monkeypatch.setattr(settings.agent, "sdk_expand_in_system_prompt", ["*"])
     monkeypatch.setattr(settings.agent, "sdk_disable", ["self.terminate"])
-    assert "self" in effective_sdk_expand()
+    assert "self" in effective_sdk_expand(AgentSlices.resolve().prompt.sdk_disable)
 
 
 def test_wildcard_merges_with_explicit_nested_path(
@@ -189,7 +190,7 @@ def test_wildcard_merges_with_explicit_nested_path(
     top-level and nested namespace; the explicit `shell.sessions` is deduped
     (keep-first from the wildcard block), so `shell` sorts before `shell.sessions`."""
     monkeypatch.setattr(settings.agent, "sdk_expand_in_system_prompt", ["*", "shell.sessions"])
-    result = effective_sdk_expand()
+    result = effective_sdk_expand(AgentSlices.resolve().prompt.sdk_disable)
     assert "shell.sessions" in result
     assert set(result) >= FRAMEWORK_NAMESPACES
     assert result.index("shell") < result.index("shell.sessions")
@@ -201,7 +202,7 @@ def test_wildcard_dedups_overlapping_explicit_entry(
     """A namespace named explicitly AND discovered by `*` appears once, keeping
     its first (explicit) position."""
     monkeypatch.setattr(settings.agent, "sdk_expand_in_system_prompt", ["files", "*"])
-    result = effective_sdk_expand()
+    result = effective_sdk_expand(AgentSlices.resolve().prompt.sdk_disable)
     assert result.count("files") == 1
     assert result[0] == "files"
 
@@ -210,7 +211,11 @@ def test_legacy_explicit_list_is_unchanged(monkeypatch: pytest.MonkeyPatch) -> N
     """A list with no `"*"` is the old behavior: returned verbatim, deduped
     keep-first, no discovery."""
     monkeypatch.setattr(settings.agent, "sdk_expand_in_system_prompt", ["files", "shell", "self"])
-    assert effective_sdk_expand() == ["files", "shell", "self"]
+    assert effective_sdk_expand(AgentSlices.resolve().prompt.sdk_disable) == [
+        "files",
+        "shell",
+        "self",
+    ]
 
 
 def test_missing_unregistered_expand_path_warns(
@@ -222,7 +227,7 @@ def test_missing_unregistered_expand_path_warns(
     monkeypatch.setattr(sdk_disable, "applied_disable_entries", set[str]())
 
     with caplog.at_level("WARNING", logger="agent.graph.system_prompt"):
-        text = _sdk_expand_section()
+        text = _sdk_expand_section(AgentSlices.resolve())
 
     assert text == ""
     assert "ava.missing_sdk_namespace does not resolve" in caplog.text
@@ -235,7 +240,7 @@ def test_plugin_registrations_lead_the_wildcard(
     set even when the configured list is just `["*"]`."""
     monkeypatch.setattr(plugins, "REGISTERED_SDK_EXPANSIONS", ["cwd"])
     monkeypatch.setattr(settings.agent, "sdk_expand_in_system_prompt", ["*"])
-    result = effective_sdk_expand()
+    result = effective_sdk_expand(AgentSlices.resolve().prompt.sdk_disable)
     assert result[0] == "cwd"
     assert set(result) >= FRAMEWORK_NAMESPACES
 
@@ -246,7 +251,7 @@ def test_section_renders_all_wildcard_namespaces(
     """The rendered section carries one `## ava.<name>` contract per discovered
     namespace and no heading for the skipped top-level functions."""
     monkeypatch.setattr(settings.agent, "sdk_expand_in_system_prompt", ["*"])
-    text = _sdk_expand_section()
+    text = _sdk_expand_section(AgentSlices.resolve())
     assert text.startswith("# Expanded SDK reference")
     for ns in FRAMEWORK_NAMESPACES:
         assert f"## ava.{ns}" in text
@@ -276,7 +281,7 @@ def test_section_hides_attach_for_text_only_model(
     the member is unavailable to it (user ruling 2026-08-28)."""
     monkeypatch.setattr(settings.agent, "sdk_expand_in_system_prompt", ["*"])
     monkeypatch.setattr(settings.lm, "llm_model", "deepseek-v4-pro")
-    text = _sdk_expand_section()
+    text = _sdk_expand_section(AgentSlices.resolve())
     assert "## ava.self" in text
     assert "def attach(" not in text
 
@@ -288,6 +293,6 @@ def test_section_keeps_attach_for_media_capable_model(
     contract unchanged (user ruling 2026-08-28)."""
     monkeypatch.setattr(settings.agent, "sdk_expand_in_system_prompt", ["*"])
     monkeypatch.setattr(settings.lm, "llm_model", "claude-sonnet-5")
-    text = _sdk_expand_section()
+    text = _sdk_expand_section(AgentSlices.resolve())
     assert "## ava.self" in text
     assert "def attach(" in text

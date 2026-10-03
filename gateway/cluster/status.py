@@ -15,15 +15,17 @@ import asyncio
 import logging
 import threading
 import time
-from datetime import UTC, datetime, timedelta
-from typing import Annotated, Any
+from collections.abc import Mapping
+from datetime import UTC, datetime
+from typing import Annotated, Any, cast
 
-import httpx
-from fastapi import APIRouter, Query, Request
+import psycopg
+from fastapi import APIRouter, HTTPException, Query, Request
 from psycopg import Cursor
 from psycopg_pool import ConnectionPool
 from pydantic import ValidationError
 
+from base.agents.observation.evidence import MACHINE_OFFLINE_AFTER_FAILURES
 from base.api_contracts.status import MachineStatus
 from base.cluster.machine import (
     is_agent_runner,
@@ -31,27 +33,30 @@ from base.cluster.machine import (
     is_observability_station,
     machine_name,
 )
+from base.daemon.endpoints import ServiceEndpoints
 from base.deploy.git.cluster_drift import prod_source_head_sha
 from base.host.resource_sample import ResourceSample
-from base.paths import pid_path
+from base.packages.plugins import stats
 from base.telemetry.observability import cluster_label
-from gateway.cluster import _loki_shards, _roster_rows, _stats_dashboard, roster_probe
+from gateway.cluster import _roster_rows, _stats_events, roster_probe
 from gateway.cluster._health import get_health
 from gateway.cluster.schemas import (
     ClusterPanel,
+    PluginStat,
+    PluginStatStatus,
     ServiceItem,
     ServicesStatus,
     StatsDashboard,
     StatsTokens,
     SystemStatus,
 )
-from gateway.lgtm import loki_events, loki_query_budget
-from gateway.lgtm.backend_failure import raise_backend_unavailable
-from gateway.schemas.stats import StatsWindowHours, applied_window
+from gateway.cluster.snapshots import Snapshot, read_all
+from gateway.schemas.stats import StatsWindowHours, window_delta
 from ops import cluster_rpc as _cluster_rpc
 from ops.cluster_pause import is_paused as cluster_is_paused
 from ops.cluster_status import ClusterStatus, _check_pidfile
 from ops.cluster_status.schema_mismatch import status as schema_mismatch_status
+from services.events_maintenance import resolution as _resolution
 
 router = APIRouter()
 ARCHIVE_TOTAL_ROWS = 4_813_148  # frozen archive rows at the #1823 drop (pg_dump-verified)
@@ -78,148 +83,49 @@ def get_stats_dashboard(
 
     Data sources:
     - `live_count`: agents_meta table — all non-terminated agents (running/idling)
-    - `tokens` / `cost_usd`: full UTC days from the fleet ledger plus a Loki tail
-    - average turn duration: Loki's unified event stream in 12-hour shards
-    - warning/error counts: per-class counts via the resolution daemon's
-      grouped query (12h shards), split into total / dismissed / net with
-      the daemon's class arithmetic over the SELECTED window (task #1935)
+    - `tokens` / `cost_usd` / average turn duration: the window's `llm_usage` and
+      `turn_end` rows in `telemetry_events` (cost is each row's usage-time snapshot)
+    - warning/error counts: per-class counts of `telemetry_events` rows, split into
+      total / dismissed / net with the resolution daemon's class arithmetic over the
+      SELECTED window (task #1935)
     - `total_events`: archived event row count — frozen historical constant
       (task #1281 parity run; PG events dropped; not a live gauge)
 
     `?hours=` selects the aggregation window (0 = last 5m; 1/6/24/72/168 =
     hours), whitelisted by `StatsWindowHours` (anything else 422s); the served horizon is
-    `applied_window_hours`. Zero-data scenario: tokens all 0, cost_usd 0.0, avg_turn_seconds
-    None (frontend shows "—"). The ledger-first split avoids the fixed-cost
-    full-window token scans; the indexed Loki tail rereads the newest retained
-    ledger day to absorb late writes without double counting.
-
-    A failed recompute (Loki transport error or refused query admission) serves
-    the window's last-good response marked `stale` (its `as_of` keeps the
-    original read time) while it is within `display.stats_dashboard_stale_max_s`;
-    past the cap — or with no last-good payload — the route keeps its retriable
-    503, so a real outage surfaces within the cap. Each degradation episode
-    emits one `stats_dashboard_stale` event, rate-capped per reason by the
-    `stats_dashboard_stale_emit_interval_s` display setting.
+    `applied_window_hours`, which is the requested window. Zero-data scenario: tokens all 0,
+    cost_usd 0.0, avg_turn_seconds None (frontend shows "—"). The window is computed on
+    every request, in one connection, with an 8-second statement timeout.
     """
-    cached = _stats_dashboard.cache_get(hours)
-    if cached is not None:
-        return cached
-    pool = request.app.state.db_pool
     try:
-        return _stats_dashboard.refresh_or_serve(
-            hours, lambda: _compute_stats_dashboard(pool, hours)
-        )
-    except loki_query_budget.LokiQueryBudgetError:
-        # Preserve the admission handler's machine-readable reason.
-        raise
-    except httpx.HTTPError as exc:
-        raise_backend_unavailable(exc)
+        return _compute_stats_dashboard(request.app.state.db_pool, hours)
+    except psycopg.errors.QueryCanceled as exc:
+        raise HTTPException(status_code=503, detail="stats read timed out; retry") from exc
 
 
 def _compute_stats_dashboard(pool: ConnectionPool[Any], hours: StatsWindowHours) -> StatsDashboard:
-    """Assemble a successful payload through the shared Loki query budget."""
+    """Assemble the payload from one pooled connection."""
     cluster = cluster_label()
-
-    # The turn / W/E stats read Loki (task #1197): the PG `events` table was
-    # dropped with the archive cleanup, so a live window cannot be read there.
-    # Do not hold a pooled DB connection while these network queries wait.
     now = datetime.now(UTC)
-    window_start = now - applied_window(hours)[1]
-    # Settled UTC days avoid full-window Loki scans. The global newest
-    # ledger day is reread live while retained, so a late write into that
-    # closed day is neither missed nor double counted. Both small DB reads
-    # finish before any query waits for the shared Loki budget.
-    ledger, tail_spans = _stats_dashboard.ledger_token_plan(
-        pool, window_start=window_start, now=now
-    )
-
-    # Cost snapshots are usage-time values; do not apply today's model
-    # registry prices to historical token counts at read time.
-    tail_sums = {
-        field: sum(
-            loki_events.attribute_aggregate(
-                field=field,
-                agg="sum",
-                event_names=["llm_usage"],
-                categories=["telemetry"],
-                cluster=cluster,
-                from_=tail_start,
-                to=tail_end,
-                timeout_s=8.0,
-            )
-            for tail_start, tail_end in tail_spans
-        )
-        for field in ("in_total", "out_total", "cache_read", "cost_usd")
-    }
-    in_total = ledger.tokens_in + round(tail_sums["in_total"])
-    out_total = ledger.tokens_out + round(tail_sums["out_total"])
-    cache_read = ledger.tokens_cached + round(tail_sums["cache_read"])
-    window_cost_usd = ledger.cost_usd + tail_sums["cost_usd"]
-    cache_hit_pct = round(cache_read / in_total * 100, 2) if in_total else 0.0
-
-    # Twelve-hour shards halve fan-out; every interactive query has an 8-second timeout.
-    turn_end_sum = sum(
-        _loki_shards.query_loki_shards(
-            window_start,
-            now,
-            lambda shard_start, shard_end: loki_events.attribute_aggregate(
-                field="duration_seconds",
-                agg="sum",
-                event_names=["turn_end"],
-                attribute_filters={"ok": "true"},
-                cluster=cluster,
-                from_=shard_start,
-                to=shard_end,
-                timeout_s=8.0,
-            ),
-            shard_width=timedelta(hours=12),
-        )
-    )
-    turn_end_count = sum(
-        _loki_shards.query_loki_shards(
-            window_start,
-            now,
-            lambda shard_start, shard_end: loki_events.count_events(
-                event_names=["turn_end"],
-                attribute_filters={"ok": "true"},
-                cluster=cluster,
-                from_=shard_start,
-                to=shard_end,
-                timeout_s=8.0,
-            ),
-            shard_width=timedelta(hours=12),
-        )
-    )
-    avg_turn_seconds: float | None = turn_end_sum / turn_end_count if turn_end_count else None
-
-    # Per-class counts over the selected window (12h shards), split by
-    # the daemon's class arithmetic (resolution.level_splits) (task #1935).
-    from services.events_maintenance import resolution as _resolution
-
-    class_counts: dict[Any, int] = {}
-    for shard_counts in _loki_shards.query_loki_shards(
-        window_start,
-        now,
-        lambda shard_start, shard_end: loki_events.count_event_classes(
-            from_=shard_start,
-            to=shard_end,
-            cluster=cluster,
-            timeout_s=8.0,
-        ),
-        shard_width=timedelta(hours=12),
-    ):
-        for event_class, count in shard_counts.items():
-            class_counts[event_class] = class_counts.get(event_class, 0) + count
+    window_start = now - window_delta(hours)
     with pool.connection() as conn:
-        with conn.cursor() as cur:
-            cur.execute("SELECT COUNT(*) FROM agents_meta WHERE status != 'terminated'")
-            live_count = int(cur.fetchone()[0])
-
-            # total_events is a historical constant — the frozen pre-cutover
-            # archive's parity row count (task #1281), not a live gauge: the PG
-            # events table was dropped with the #1823 cleanup; the dashboard's
-            # "total events" card shows the archive's size. See ARCHIVE_TOTAL_ROWS.
-            total_events = ARCHIVE_TOTAL_ROWS
+        conn.execute("SET LOCAL statement_timeout = '8s'")
+        totals = _stats_events.window_totals(conn, cluster=cluster, start=window_start, end=now)
+        class_counts = _stats_events.window_class_counts(
+            conn, cluster=cluster, start=window_start, end=now
+        )
+        live_count = int(
+            conn.execute(
+                "SELECT COUNT(*) FROM agents_meta WHERE status != 'terminated'"
+            ).fetchone()[  # type: ignore[index]
+                0
+            ]
+        )
+        # total_events is a historical constant — the frozen pre-cutover
+        # archive's parity row count (task #1281), not a live gauge: the PG
+        # events table was dropped with the #1823 cleanup; the dashboard's
+        # "total events" card shows the archive's size. See ARCHIVE_TOTAL_ROWS.
+        total_events = ARCHIVE_TOTAL_ROWS
 
         # Active class-wide dismissals, read like the daemon reads them.
         splits = _resolution.level_splits(
@@ -228,19 +134,19 @@ def _compute_stats_dashboard(pool: ConnectionPool[Any], hours: StatsWindowHours)
         )
     warning = splits.get("warning", _resolution.LevelSplit(0, 0, 0))
     error = splits.get("error", _resolution.LevelSplit(0, 0, 0))
-
+    cache_hit_pct = round(totals.cache_read / totals.in_total * 100, 2) if totals.in_total else 0.0
     return StatsDashboard(
         live_count=live_count,
         window_hours=hours,
-        applied_window_hours=applied_window(hours)[0],
+        applied_window_hours=int(hours),
         tokens=StatsTokens(
-            input=int(in_total),
-            output=int(out_total),
-            cache_read=int(cache_read),
+            input=totals.in_total,
+            output=totals.out_total,
+            cache_read=totals.cache_read,
             cache_hit_pct=cache_hit_pct,
         ),
-        cost_usd=window_cost_usd,
-        avg_turn_seconds=avg_turn_seconds,
+        cost_usd=totals.cost_usd,
+        avg_turn_seconds=totals.turn_seconds / totals.turn_count if totals.turn_count else None,
         warnings=warning.total,
         errors=error.total,
         warnings_dismissed=warning.dismissed,
@@ -248,9 +154,31 @@ def _compute_stats_dashboard(pool: ConnectionPool[Any], hours: StatsWindowHours)
         errors_dismissed=error.dismissed,
         errors_net=error.net,
         total_events=total_events,
-        plugin_stats=_stats_dashboard.plugin_stat_rows(pool),
+        plugin_stats=_plugin_stat_rows(pool),
         as_of=datetime.now(UTC),
     )
+
+
+def _plugin_stat_rows(pool: ConnectionPool[Any]) -> list[PluginStat]:
+    """The runtime values behind plugin-declared statistics cards, for the response.
+
+    Not windowed: a plugin value is a point in time (`PluginStat`), and the
+    console joins these rows against the `contributions.ui.stats`
+    declarations by `(plugin, id)` — a declared card with no row here renders
+    as an explicit empty state.
+    """
+    return [
+        PluginStat(
+            plugin=row.plugin,
+            id=row.id,
+            value=row.value,
+            detail=row.detail,
+            status=cast(PluginStatStatus, row.status),
+            updated_at=row.updated_at,
+            updated_by=row.updated_by,
+        )
+        for row in stats.read_all(pool)
+    ]
 
 
 def _get_services_status() -> ServicesStatus:
@@ -261,8 +189,12 @@ def _get_services_status() -> ServicesStatus:
     daemons that only run on the gateway."""
     items: list[ServiceItem] = []
     for name, label, pidfile in (
-        ("labeler", "Labeler Daemon", pid_path("labeler")),
-        ("memory_indexer", "Memory Indexer", pid_path("memory_indexer")),
+        ("labeler", "Labeler Daemon", ServiceEndpoints.from_settings().of("labeler").pidfile),
+        (
+            "memory_indexer",
+            "Memory Indexer",
+            ServiceEndpoints.from_settings().of("memory_indexer").pidfile,
+        ),
     ):
         alive, pid = _check_pidfile(str(pidfile))
         items.append(
@@ -282,25 +214,16 @@ def _get_services_status() -> ServicesStatus:
 # Per-machine status_probe timeout — `settings.gateway.status_probe_timeout_seconds`
 # (default 8s). Raised from a 3.0s hardcode (task #1200): a slow-but-healthy WSL
 # runner's status_snapshot measured 3.07-3.27s on 2026-08-12, and a budget
-# shorter than the handler's own wall time flipped it offline (probe timeout ->
-# 2 consecutive failures -> machine_probe offline) while /healthz answered in
-# ~15ms. This is the budget of FIRST contact — the anti-jitter margin a
-# slow-but-healthy host needs. A machine that already carries reachability
-# failures is not dialed on this path at all: its row serves from the cached
-# offline state and its recovery check runs detached under the fast-fail
-# budget (`roster_probe._maybe_kick_recovery_dial`, task #3507), so no re-dial
-# can drag the whole-table read past the CLI/UI read budget. The heartbeat
-# liveness pass reads this setting
-# (services/heartbeat/liveness.py), so its probes stay aligned with the
-# roster's first-contact ones.
-
-# The per-machine probe backoff (failure state, window schedule), the detached
-# recovery dial and the per-machine probe budget all live in `roster_probe`,
-# beside the dispatch they bound — split out under the file-line budget
-# (task #3507).
+# shorter than the handler's own wall time flipped it offline while /healthz
+# answered in ~15ms. The budget of a dial the gateway makes itself (a fresh read,
+# or a machine the snapshot does not cover). The default read dials nothing: it
+# renders the heartbeat liveness pass's snapshot (`gateway/cluster/snapshots.py`),
+# which reads this same setting (services/heartbeat/liveness.py), so the pass's
+# probes stay aligned with a fresh read's.
 
 
-async def _probe_agent_runner(
+def _machine_status_from_cluster_status(
+    status: ClusterStatus,
     name: str,
     role: list[str],
     gateway_url: str | None,
@@ -308,93 +231,19 @@ async def _probe_agent_runner(
     description: str | None,
     stopped_at: datetime | None,
     *,
-    is_staging: bool = False,
+    is_staging: bool,
+    observed_at: datetime | None,
 ) -> MachineStatus:
-    """Probe an agent-runner by POSTing a `status_probe` op to its ops server.
+    """Render one machine's validated ClusterStatus as a roster row.
 
-    The machine is reached at its ava-ops server (services/agent_ops), which
-    dispatches `status_probe` via `ops.cluster.cluster_status_op`
-    in-process and returns the snapshot. Same path the CLI `ava cluster status`
-    uses. The local machine is no special case — its ops server is dialed at
-    its registered localhost URL, keeping one uniform probe path.
-
-    Online == the ops server responded within the timeout. Paused comes from
-    the host's local `cluster_is_paused()` snapshot. A host that already carries
-    a failure record is not dialed here: it serves the cached offline row while
-    the detached recovery dial runs (task #3507).
+    Identity echo check: the ops server self-reports its machine_name in every
+    status_probe response. If the responder is NOT the host we targeted, the
+    gateway_url pointed at the wrong box (a loopback/misregistered row makes the
+    gateway dial itself and answer under its own name). Refuse to render that as
+    the target online — a loud identity-mismatch row instead. The log line
+    itself is episode-deduped and degrades to INFO for a stopped row (a stale
+    URL answering for someone else is that row's expected face — task #4143).
     """
-    if name in roster_probe._probe_failures:
-        # Known-down host: serve the cached offline row and hand the recovery
-        # check to the detached dial. This read never carries the host's dial
-        # budget — the blackholed re-dial that used to drag the whole-table
-        # read past the CLI/UI budget runs off the read path now, single-flight
-        # and paced by the failure backoff (task #3507).
-        roster_probe._maybe_kick_recovery_dial(name, gateway_url)
-        return _roster_rows.offline_status(
-            name, role, gateway_url, up_since_at, description, stopped_at, is_staging=is_staging
-        )
-    if gateway_url is None:
-        # The roster row is the address authority for this fan-out. Do not let
-        # cluster_rpc synchronously re-read Postgres outside the async timeout.
-        roster_probe.note_probe_unreachable(name)
-        return _roster_rows.offline_status(
-            name, role, gateway_url, up_since_at, description, stopped_at, is_staging=is_staging
-        )
-    # First contact -> the full budget (the anti-jitter margin, task #1200). A
-    # record that races in mid-read (another observer failed the host) still
-    # buys the fast-fail budget via `probe_budget_s`.
-    try:
-        result = await roster_probe.dispatch_status_probe(
-            name, gateway_url, timeout_s=roster_probe.probe_budget_s(name)
-        )
-    except _cluster_rpc.ClusterOpUnreachable:
-        # Expected when a host is genuinely offline / mid-restart — quiet. Widen
-        # this host's backoff so a persistently-down peer stops being dialed every poll.
-        roster_probe.note_probe_unreachable(name)
-        return _roster_rows.offline_status(
-            name, role, gateway_url, up_since_at, description, stopped_at, is_staging=is_staging
-        )
-    except _cluster_rpc.ClusterOpFailed as exc:
-        # Reached the ops server, but its status_probe op itself raised (DB error,
-        # schema drift inside the op). That is NOT "offline" — surface it so the
-        # real error is not invisible behind a misleading offline marker. The host
-        # is reachable, so clear backoff (this is not the down-host case).
-        _log.warning("status_probe op failed on reachable host %s: %s", name, exc.result)
-        roster_probe.note_probe_reachable(name)
-        return _roster_rows.reachable_unknown_status(
-            name, role, gateway_url, up_since_at, description, stopped_at, is_staging=is_staging
-        )
-    roster_probe.note_probe_reachable(name)
-    # The ops server responded 200; validate its body as the status_probe result
-    # contract (ClusterStatus) — same posture as cluster.py:get_cluster_status.
-    # A body that does not validate (a version-skewed / wrong server) must NOT be
-    # coerced into a determinate paused verdict: it lands in the documented
-    # online=True + paused=None abnormal state instead of a false green.
-    try:
-        status = ClusterStatus.model_validate(result)
-    except ValidationError:
-        _log.warning(
-            "status_probe on reachable host %r returned a body that does not match "
-            "ClusterStatus; reporting online+unknown",
-            name,
-            exc_info=True,
-        )
-        return _roster_rows.reachable_unknown_status(
-            name,
-            role,
-            gateway_url,
-            up_since_at,
-            description,
-            stopped_at,
-            is_staging=is_staging,
-        )
-    # Identity echo check: the ops server self-reports its machine_name in every
-    # status_probe response. If the responder is NOT the host we targeted, the
-    # gateway_url pointed at the wrong box (a loopback/misregistered row makes the
-    # gateway dial itself and answer under its own name). Refuse to render that as
-    # the target online — a loud identity-mismatch row instead. The log line
-    # itself is episode-deduped and degrades to INFO for a stopped row (a stale
-    # URL answering for someone else is that row's expected face — task #4143).
     if status.machine_name != name:
         roster_probe.log_identity_mismatch(
             name, gateway_url, status.machine_name, stopped=stopped_at is not None
@@ -432,6 +281,109 @@ async def _probe_agent_runner(
         session_count=status.session_count,
         agent_groups=status.agent_groups,
         resource=status.resource,
+        observed_at=observed_at,
+    )
+
+
+def _status_from_snapshot(
+    snapshot: Snapshot,
+    name: str,
+    role: list[str],
+    gateway_url: str | None,
+    up_since_at: datetime,
+    description: str | None,
+    stopped_at: datetime | None,
+    *,
+    is_staging: bool,
+) -> MachineStatus:
+    """Render a roster row from the heartbeat pass's last probe of the machine.
+
+    Two consecutive failed passes (or a failed pass with no earlier answer to
+    show) read offline; one dropped probe keeps the last status on screen, and its
+    age says so. A reachable answer that is not a ClusterStatus is the documented
+    online + paused=None abnormal state.
+    """
+    row_args = (name, role, gateway_url, up_since_at, description, stopped_at)
+    if not snapshot.reachable and (
+        snapshot.status is None or snapshot.consecutive_failures >= MACHINE_OFFLINE_AFTER_FAILURES
+    ):
+        return _roster_rows.offline_status(*row_args, is_staging=is_staging)
+    if snapshot.status is None:
+        return _roster_rows.reachable_unknown_status(*row_args, is_staging=is_staging)
+    try:
+        status = ClusterStatus.model_validate(snapshot.status)
+    except ValidationError:
+        _log.warning(
+            "machine_status_snapshot for %r holds a body that does not match ClusterStatus; "
+            "reporting online+unknown",
+            name,
+            exc_info=True,
+        )
+        return _roster_rows.reachable_unknown_status(*row_args, is_staging=is_staging)
+    return _machine_status_from_cluster_status(
+        status,
+        *row_args,
+        is_staging=is_staging,
+        observed_at=snapshot.status_at or snapshot.observed_at,
+    )
+
+
+async def _probe_agent_runner(
+    name: str,
+    role: list[str],
+    gateway_url: str | None,
+    up_since_at: datetime,
+    description: str | None,
+    stopped_at: datetime | None,
+    *,
+    is_staging: bool = False,
+) -> MachineStatus:
+    """Probe an agent-runner now, by POSTing a `status_probe` op to its ops server.
+
+    The machine is reached at its ava-ops server (services/agent_ops), which
+    dispatches `status_probe` via `ops.cluster.cluster_status_op` in-process and
+    returns the snapshot. Same path the heartbeat liveness pass uses. The local
+    machine is no special case — its ops server is dialed at its registered
+    localhost URL, keeping one uniform probe path.
+
+    Online == the ops server responded within the timeout. Paused comes from the
+    host's local `cluster_is_paused()` snapshot. Nothing is remembered: a down host
+    costs this dial its full budget every time, which is why the default read does
+    not come here.
+    """
+    row_args = (name, role, gateway_url, up_since_at, description, stopped_at)
+    if gateway_url is None:
+        # The roster row is the address authority for this fan-out. Do not let
+        # cluster_rpc synchronously re-read Postgres outside the async timeout.
+        return _roster_rows.offline_status(*row_args, is_staging=is_staging)
+    try:
+        result = await roster_probe.dispatch_status_probe(name, gateway_url)
+    except _cluster_rpc.ClusterOpUnreachable:
+        # Expected when a host is genuinely offline / mid-restart — quiet.
+        return _roster_rows.offline_status(*row_args, is_staging=is_staging)
+    except _cluster_rpc.ClusterOpFailed as exc:
+        # Reached the ops server, but its status_probe op itself raised (DB error,
+        # schema drift inside the op). That is NOT "offline" — surface it so the
+        # real error is not invisible behind a misleading offline marker.
+        _log.warning("status_probe op failed on reachable host %s: %s", name, exc.result)
+        return _roster_rows.reachable_unknown_status(*row_args, is_staging=is_staging)
+    # The ops server responded 200; validate its body as the status_probe result
+    # contract (ClusterStatus) — same posture as cluster.py:get_cluster_status.
+    # A body that does not validate (a version-skewed / wrong server) must NOT be
+    # coerced into a determinate paused verdict: it lands in the documented
+    # online=True + paused=None abnormal state instead of a false green.
+    try:
+        status = ClusterStatus.model_validate(result)
+    except ValidationError:
+        _log.warning(
+            "status_probe on reachable host %r returned a body that does not match "
+            "ClusterStatus; reporting online+unknown",
+            name,
+            exc_info=True,
+        )
+        return _roster_rows.reachable_unknown_status(*row_args, is_staging=is_staging)
+    return _machine_status_from_cluster_status(
+        status, *row_args, is_staging=is_staging, observed_at=None
     )
 
 
@@ -487,14 +439,19 @@ def _local_machine_status_blocking(
 async def gather_cluster_status(
     rows: list[tuple[str, str | None, list[str], datetime, str | None, datetime | None, bool]],
     local_name: str,
+    *,
+    snapshots: Mapping[str, Snapshot] | None = None,
 ) -> list[MachineStatus]:
-    """Async fan-out: every machine probed in parallel via a status_probe op
-    to its ops server (the local machine included — its ops server is dialed
-    at its registered localhost URL). Total wall ≈ the largest per-probe budget
-    in play — `settings.gateway.status_probe_timeout_seconds` on first contact;
-    a machine already in the failure backoff is not dialed here (it serves the
-    cached offline row, its recovery check runs detached — task #3507), so no
-    down host can drag the read.
+    """The roster of the given machines.
+
+    With `snapshots` (the default read) each machine renders from the heartbeat
+    liveness pass's last probe (`gateway/cluster/snapshots.py`) and nothing is dialed,
+    so no down host can drag the read (task #3507); a machine with no fresh snapshot
+    is dialed here, as a degraded fallback for a heartbeat service that is down. With
+    `snapshots=None` (an explicit fresh read) every machine is probed in parallel via
+    a status_probe op to its ops server (the local machine included — its ops server
+    is dialed at its registered localhost URL); total wall ≈
+    `settings.gateway.status_probe_timeout_seconds`.
 
     The one exception is a local machine without the agent-runner capability
     (a pure gateway in a split deployment): it runs no ops server, so its row
@@ -528,6 +485,21 @@ async def gather_cluster_status(
                 )
             )
         else:
+            snapshot = None if snapshots is None else snapshots.get(name)
+            if snapshot is not None and snapshot.fresh():
+                machines.append(
+                    _status_from_snapshot(
+                        snapshot,
+                        name,
+                        role,
+                        url,
+                        up_since,
+                        description,
+                        stopped_at,
+                        is_staging=is_staging,
+                    )
+                )
+                continue
             probe_coros.append(
                 _probe_agent_runner(
                     name,
@@ -547,15 +519,11 @@ async def gather_cluster_status(
 
 
 def _get_cluster_status(cur: Cursor) -> ClusterPanel:
-    """Assemble the cluster sub-section: each machine's `status_probe` op
-    round-trip (the local machine's ops server is dialed at localhost).
-
-    SELECT machines table (paused rows excluded — the cluster panel shows
-    only active members; `ava cluster resume` brings a row back) + dispatch
-    parallel probes (agent-runner via a `status_probe` op; the host responds
-    with its local paused state). Total wall ≈ the largest per-probe budget in
-    play on first contact regardless of N machines; a known-failed machine is
-    not dialed here — cached offline row + detached recovery dial (task #3507).
+    """Assemble the cluster sub-section: SELECT the machines table (paused rows
+    excluded — the cluster panel shows only active members; `ava cluster resume`
+    brings a row back) and render each machine from the heartbeat liveness
+    pass's last `status_probe` (`gateway/cluster/snapshots.py`), so the panel
+    dials no runner (task #3507).
 
     Wrapped sync via asyncio.run because `/api/status` is a sync FastAPI
     handler (runs in threadpool); creating a fresh event loop here is safe.
@@ -574,7 +542,10 @@ def _get_cluster_status(cur: Cursor) -> ClusterPanel:
     )
 
     local_name = machine_name()
-    machines = asyncio.run(gather_cluster_status(rows, local_name)) if rows else []
+    snapshots = read_all(cur)
+    machines = (
+        asyncio.run(gather_cluster_status(rows, local_name, snapshots=snapshots)) if rows else []
+    )
 
     return ClusterPanel(
         current_machine=local_name,

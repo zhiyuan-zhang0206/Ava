@@ -157,6 +157,8 @@ class PingResult(TypedDict):
     root_seed_report_v1: NotRequired[bool]  # `root_status.seed` is reported
     preflight_screen: bool  # Screen Recording grant held
     ax_trusted: bool  # Accessibility grant held
+    ax_tree_v1: NotRequired[bool]  # the helper serves `ax_tree`
+    ax_act_v1: NotRequired[bool]  # the helper serves `ax_act`
 
 
 class ScreencaptureResult(TypedDict):
@@ -200,6 +202,64 @@ class AxWindowInfo(WindowGeometry):
 
 class WindowInfo(WindowGeometry):
     owner: str
+
+
+class AxNode(TypedDict):
+    """One raw accessibility element; geometry is logical points. Absent keys
+    mean the app did not expose that attribute."""
+
+    id: int  # raw id: valid for `ax_act` / `scope` until a later walk replaces the table
+    fp: str  # path fingerprint: the same element keeps it across walks
+    depth: int
+    n: int  # children the app listed (visible ones for list-like roles)
+    parent: NotRequired[int]
+    role: NotRequired[str]
+    subrole: NotRequired[str]
+    title: NotRequired[str]
+    desc: NotRequired[str]
+    value: NotRequired[str]
+    ident: NotRequired[str]
+    x: NotRequired[float]
+    y: NotRequired[float]
+    w: NotRequired[float]
+    h: NotRequired[float]
+    enabled: NotRequired[bool]
+    focused: NotRequired[bool]
+    selected: NotRequired[bool]
+    actions: NotRequired[list[str]]
+
+
+class AxActResult(TypedDict):
+    """Outcome of one `ax_act`. `stale` means the raw id is gone or its element
+    changed (nothing was done); `unanswered` means the app did not answer in time
+    (the action may still have run). Geometry is logical points."""
+
+    completed: bool
+    stale: NotRequired[bool]
+    unanswered: NotRequired[bool]
+    action: NotRequired[str]
+    role: NotRequired[str]
+    label: NotRequired[str]
+    x: NotRequired[float]
+    y: NotRequired[float]
+    w: NotRequired[float]
+    h: NotRequired[float]
+
+
+class AxTreeResult(TypedDict):
+    app: str
+    pid: int
+    windows: int
+    framework: str  # "electron" / "cef" / "chromium" when the bundle ships one, else ""
+    ax_enable: NotRequired[
+        str
+    ]  # Chromium switch: n/a | off | set | already | failed (older helpers omit it)
+    nodes: list[AxNode]
+    visited: int
+    truncated: bool  # the node or depth cap cut the walk
+    timed_out: bool  # the time budget cut the walk
+    unreadable: int  # elements whose attributes could not be read
+    elapsed_ms: int
 
 
 class SessionInfo(TypedDict):
@@ -384,6 +444,51 @@ def ax_window_info(app: str, *, sock_path: str | Path | None = None) -> AxWindow
     return _call("ax_window_info", app=app, sock_path=sock_path)
 
 
+def ax_tree(
+    app: str,
+    *,
+    scope: int | None = None,
+    scope_fp: str | None = None,
+    max_nodes: int = 600,
+    max_depth: int = 14,
+    budget_ms: int = 1500,
+    timeout_ms: int = 400,
+    enable_ax: bool = True,
+    sock_path: str | Path | None = None,
+) -> AxTreeResult:
+    """Read `app`'s focused-window accessibility tree (or the subtree under the
+    raw id `scope`, whose fingerprint is `scope_fp`), bounded by node, depth and
+    time limits."""
+    req: dict[str, object] = {
+        "max_nodes": max_nodes,
+        "max_depth": max_depth,
+        "budget_ms": budget_ms,
+        "timeout_ms": timeout_ms,
+        "enable_ax": enable_ax,
+    }
+    if scope is not None:
+        req["scope"] = scope
+        req["scope_fp"] = scope_fp
+    return _call("ax_tree", app=app, sock_path=sock_path, **req)
+
+
+def ax_act(
+    app: str,
+    raw_id: int,
+    action: str,
+    *,
+    value: str | None = None,
+    timeout_ms: int = 2000,
+    sock_path: str | Path | None = None,
+) -> AxActResult:
+    """Perform `action` (press / show_menu / focus / set_value) on the element
+    the latest walk numbered `raw_id`. `value` is written, never echoed."""
+    req: dict[str, object] = {"timeout_ms": timeout_ms}
+    if value is not None:
+        req["value"] = value
+    return _call("ax_act", app=app, id=raw_id, action=action, sock_path=sock_path, **req)
+
+
 def window_info(owner: str, *, sock_path: str | Path | None = None) -> WindowInfo:
     """Report the geometry of `owner`'s normal on-screen window via the window list."""
     return _call("window_info", owner=owner, sock_path=sock_path)
@@ -524,6 +629,7 @@ def check_screen_capture(
     a guess, and the fix is a launchd one, not a System Settings one.
     """
     deadline = time.monotonic() + settle_s
+    # quiesce-exempt: a bounded permission-grant wait; no database
     while True:
         try:
             result = ping(sock_path=sock_path)
@@ -561,6 +667,7 @@ def check_accessibility(
     repair is its launchd job, not System Settings.
     """
     deadline = time.monotonic() + settle_s
+    # quiesce-exempt: a bounded permission-grant wait; no database
     while True:
         try:
             result = ping(sock_path=sock_path)

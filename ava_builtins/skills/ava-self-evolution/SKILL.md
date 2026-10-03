@@ -248,9 +248,9 @@ verified mean — invalid replays are reported separately.
 
 ## Data source
 
-Events come from **Loki** via the gateway `/api/events` endpoint — PG `events`
-was frozen at the 2026-08-12 LGTM cutover (Task #1197) and later dropped; `collect.py`
-is the Loki read path, and a 0-run dataset is an ALERT (exit 2), never
+Events come from the gateway `/api/events` endpoint — telemetry and log rows from
+`telemetry_events` and audit rows from `audit_events`, both in Postgres and permanent;
+`collect.py` is the read path, and a 0-run dataset is an ALERT (exit 2), never
 "nothing to act on" — except a TEST- only window (QA review of PR #698), which exits 0.
 
 **Transcript completeness.** Each record's `transcript` is the checkpoint's

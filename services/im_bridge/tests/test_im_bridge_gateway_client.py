@@ -10,7 +10,7 @@ from typing import Any
 import httpx
 import pytest
 
-from services.im_bridge.gateway_client import GatewayClient
+from services.im_bridge.tests.slices import gateway_client
 
 
 def test_directory_page_passes_scope_search_and_cursor() -> None:
@@ -27,16 +27,15 @@ def test_directory_page_passes_scope_search_and_cursor() -> None:
             "before_id": "500",
             "limit": "100",
         }
-        assert request.headers["cookie"] == "session=test"
+        assert request.headers["authorization"] == "Bearer machine-token"
         return httpx.Response(200, json=page)
 
     async def scenario() -> None:
         async with httpx.AsyncClient(
             base_url="http://gateway", transport=httpx.MockTransport(handler)
         ) as http:
-            client = GatewayClient()
+            client = gateway_client(auth_headers={"Authorization": "Bearer machine-token"})
             client._client = http
-            client._cookie = "session=test"
             assert await client.list_agents(scope="live", query="Target", before_id=500) == page
 
     asyncio.run(scenario())
@@ -55,7 +54,7 @@ def test_detail_lookup_distinguishes_missing_agent_and_gateway_failure(status_co
         async with httpx.AsyncClient(
             base_url="http://gateway", transport=httpx.MockTransport(handler)
         ) as http:
-            client = GatewayClient()
+            client = gateway_client()
             client._client = http
             if status_code == 503:
                 with pytest.raises(RuntimeError, match="get agent 405 failed: HTTP 503"):
@@ -91,7 +90,7 @@ def test_stream_events_keeps_unicode_line_separators(ch: str) -> None:
         async with httpx.AsyncClient(
             base_url="http://gateway", transport=httpx.MockTransport(handler)
         ) as http:
-            client = GatewayClient()
+            client = gateway_client()
             client._client = http
             return [event async for event in client.stream_events(7)]
 
@@ -133,7 +132,7 @@ def test_stream_events_decodes_char_split_across_chunks(ch: str) -> None:
         async with httpx.AsyncClient(
             base_url="http://gateway", transport=httpx.MockTransport(handler)
         ) as http:
-            client = GatewayClient()
+            client = gateway_client()
             client._client = http
             return [event async for event in client.stream_events(7)]
 

@@ -4,7 +4,7 @@ Run: `.venv/bin/python scripts/structure/tests_location.py [path ...] [--only FI
 argument checks every tracked `tests/**/test_*.py`; explicit paths judge exactly those tests; an
 explicit path that does not exist is an error (stderr + exit 1)). `--only FILE ...` is the commit
 hook's changed-files mode (`scripts/lint/docs/changed-files-mode.ava.okf.md`): it judges the
-changed top-level tests, and a changed lint tool, registry or baseline shard (everything under
+changed top-level tests, and a changed lint tool or registry (everything under
 `scripts/structure/`) widens it to every tracked test. `--suggest PATH ...` prints where a test
 belongs and exits 0: the one mode that reads the production code
 (`scripts/structure/tests_location_suggest.py`); the checks never do. Also run via pre-commit and
@@ -31,71 +31,62 @@ holds, all decided from its path alone:
    test's subject is a repository artifact (workflows, `pyproject.toml`, the schema, migrations,
    `ui/`, `schedules/`, skill scripts) or the test harness itself, which no package owns; a scan
    over the whole tree counts) or `integration` (it spans units that may not import each other,
-   so no package may hold it);
-3. its `path::top-level` key is frozen in the `tests_location` section of the structure baseline
-   shards (`scripts/structure/baseline/`): the debt of tests still to move. The section is
-   shrink-only against the base revision and a renamed file carries its key
-   (`scripts/lint/code_structure.py`).
+   so no package may hold it).
 
-Any other top-level test is a violation. The verdict never looks at what the test imports, so it
-cannot move with an unrelated production commit, and the check is a set lookup per file. A
-registered file that no longer exists, a baseline key or `ALLOWED` entry that a registered file
-does not need (it sits under `BY_DESIGN`, or is listed twice), a malformed entry: all fail, so
-the registry cannot rot into a permit wall.
+Any other top-level test is a violation: a new one is refused at the door, there is no list of
+debt to add it to. The verdict never looks at what the test imports, so it cannot move with an
+unrelated production commit, and the check is a set lookup per file. A registered file that no
+longer exists, an `ALLOWED` entry that a registered file does not need (it sits under
+`BY_DESIGN`), a malformed entry: all fail, so the registry cannot rot into a permit wall.
 
 ## Fixing a violation
 
 Move the test into the `tests/` directory of the package it tests
 (`.venv/bin/python scripts/structure/tests_location.py --suggest <file>` names the lowest package
-that may legally hold it, or says why none can), with `git mv`. A test moved into a directory that
-`tests/fixtures/path_scopes.py` does not list silently loses the autouse isolation fixtures its
-old directory had: list the new directory there (`tests/ci/test_path_scopes.py` fails when it is
-missing). A test that cannot live in a package is registered in `ALLOWED`, `contract` or
-`integration`, with a reason a reviewer can check.
+that may legally hold it, or says why none can), with `git mv`. A test moved into a directory whose
+`path_scopes.toml` does not name it silently loses the autouse isolation fixtures its old
+directory had: name it in the new directory's `path_scopes.toml`
+(`tests/ci/test_path_scopes.py` fails when it is missing). A test that cannot live in a package is
+registered in `ALLOWED`, `contract` or `integration`, with a reason a reviewer can check.
 
 ## Scope and cost
 
 Only paths, and only relative ones: every judgment is on the repo-relative POSIX path of a tracked
 file, never on where the checkout sits (a repository under `/tmp/...` or inside a `tests/` or
-`e2e/` directory gets the same verdicts). The checked files, the registry and the baseline shards
-are read; no module index, no import graph, no `place()`. A commit hook (`--only`) costs a process
-start plus reading the shards, in proportion to the changed test files; the registry's entries are
-checked for existence on every run (a stat each). The pre-push hook and CI's `backend-structure`
-(`pre-commit run --all-files`) check every tracked top-level test, which is also where a deleted
-or renamed test's stale entry is found when no commit hook saw it. Whether a registered test still
-has a package home (a test frozen as "to move" may by now sit at its home's legal top) is
+`e2e/` directory gets the same verdicts). The checked files and the registry are read; no module
+index, no import graph, no `place()`. A commit hook (`--only`) costs a process start in
+proportion to the changed test files; the registry's entries are checked for existence on every
+run (a stat each). The pre-push hook and CI's `backend-structure` (`pre-commit run --all-files`)
+check every tracked top-level test, which is also where a deleted or renamed test's stale entry is
+found when no commit hook saw it. Whether a registered test still has a package home is
 deliberately not checked here: it needs the placement rule, which is not sub-second.
 """
 
 from __future__ import annotations
 
-import json
 import subprocess
 import sys
 from collections.abc import Mapping
 from pathlib import Path
-from typing import cast
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(_REPO_ROOT))
 
 from scripts.structure import (  # noqa: E402 — standalone script
-    baseline_shards,
     lint_common,
     tests_location_allowed,
 )
 
-SECTION = "tests_location"
-FROZEN_TARGET = "top-level"
 _CATEGORIES = ("contract", "integration")
 
 _SUGGEST = "--suggest"
 _GUIDE = (
     "A top-level test must move into the tests/ directory of the package it tests (`git mv`), "
     "unless it is registered:\n"
-    "  - tests/fixtures/path_scopes.py: if it lists the test's old directory, list the new "
-    "directory there too, or the autouse isolation fixtures silently stop applying to the "
-    "moved test (tests/ci/test_path_scopes.py fails).\n"
+    "  - path_scopes.toml: if the test's old directory has one that names the test, name it in the "
+    "new directory's path_scopes.toml too, or the autouse isolation fixtures silently stop "
+    "applying to the moved test (tests/ci/test_path_scopes.py fails; see "
+    "tests/fixtures/path_scopes.py).\n"
     "  - scripts/structure/tests_location_allowed.py: a test that cannot live in a package is "
     "registered as `contract` (its subject is a repository artifact or the test harness itself, "
     "which no package owns) or `integration` (it spans units that may not import each other), "
@@ -123,32 +114,6 @@ def stays_by_design(rel: str) -> str | None:
     return None
 
 
-def frozen_key(rel: str) -> str:
-    return f"{rel}::{FROZEN_TARGET}"
-
-
-def read_baseline(repo_root: Path) -> dict[str, int]:
-    """The frozen `tests_location` entries of every baseline shard, validated like `merge`.
-
-    Raises ValueError on a malformed entry: a key is `<top-level test path>::top-level` and its
-    value is 1.
-    """
-    texts: dict[str, str] = {}
-    for name, text in baseline_shards.read_worktree(repo_root).items():
-        shard = cast("object", json.loads(text))
-        if isinstance(shard, dict) and (section := cast("dict[str, object]", shard).get(SECTION)):
-            texts[name] = json.dumps({SECTION: section})
-    merged = baseline_shards.merge(texts, [SECTION])[SECTION]
-    for key, count in merged.items():
-        path, separator, target = key.partition("::")
-        if not (is_top_level_test(path) and separator and target == FROZEN_TARGET and count == 1):
-            raise ValueError(
-                f"invalid {SECTION} entry {key!r}: expected `tests/.../test_x.py::{FROZEN_TARGET}` "
-                "with the value 1"
-            )
-    return merged
-
-
 def _entry_errors(where: str, rel: str, repo_root: Path) -> list[str]:
     """What is wrong with one registered path, whichever registry holds it."""
     if not is_top_level_test(rel):
@@ -160,12 +125,9 @@ def _entry_errors(where: str, rel: str, repo_root: Path) -> list[str]:
     return []
 
 
-def registry_errors(
-    allowed: Mapping[str, tuple[str, str]], baseline: dict[str, int], repo_root: Path
-) -> list[str]:
-    """Stale, needless, duplicate and malformed entries of `ALLOWED` and the frozen baseline."""
+def registry_errors(allowed: Mapping[str, tuple[str, str]], repo_root: Path) -> list[str]:
+    """Stale, needless and malformed entries of `ALLOWED`."""
     errors: list[str] = []
-    frozen = {key.partition("::")[0] for key in baseline}
     source = "scripts/structure/tests_location_allowed.py"
     for rel, (category, reason) in sorted(allowed.items()):
         if category not in _CATEGORIES:
@@ -173,27 +135,16 @@ def registry_errors(
         if not reason.strip():
             errors.append(f"{source}: `{rel}` has no reason")
         errors.extend(_entry_errors(source, rel, repo_root))
-        if rel in frozen:
-            errors.append(f"{source}: `{rel}` is also frozen in the {SECTION} baseline — keep one")
-    for rel in sorted(frozen - allowed.keys()):
-        errors.extend(
-            _entry_errors(baseline_shards.shard_path(SECTION, frozen_key(rel)), rel, repo_root)
-        )
     return errors
 
 
-def unregistered_errors(
-    files: list[str], allowed: Mapping[str, tuple[str, str]], baseline: dict[str, int]
-) -> list[str]:
-    """One message per top-level test that is neither by design, allowed nor frozen."""
+def unregistered_errors(files: list[str], allowed: Mapping[str, tuple[str, str]]) -> list[str]:
+    """One message per top-level test that is neither by design nor allowed."""
     return [
         f"{rel}:1: a top-level test that is not registered: move it into the tests/ directory of "
         f"the package it tests (`.venv/bin/python scripts/structure/tests_location.py --suggest {rel}`)"
         for rel in files
-        if is_top_level_test(rel)
-        and stays_by_design(rel) is None
-        and rel not in allowed
-        and frozen_key(rel) not in baseline
+        if is_top_level_test(rel) and stays_by_design(rel) is None and rel not in allowed
     ]
 
 
@@ -259,15 +210,7 @@ def main(
     files = _files_to_check(argv, only, repo_root)
     if files is None:
         return 1
-    try:
-        baseline = read_baseline(repo_root)
-    except (OSError, ValueError) as exc:
-        print(f"scripts/structure/baseline: invalid {SECTION} baseline: {exc}", file=sys.stderr)
-        return 1
-    errors = [
-        *unregistered_errors(files, allowed, baseline),
-        *registry_errors(allowed, baseline, repo_root),
-    ]
+    errors = [*unregistered_errors(files, allowed), *registry_errors(allowed, repo_root)]
     for error in errors:
         print(error)
     if errors:

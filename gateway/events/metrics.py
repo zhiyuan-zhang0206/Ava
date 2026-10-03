@@ -1,15 +1,12 @@
 """Aggregate metrics report over events (category=telemetry/log) for the settings Metrics tab.
 
 `/api/metrics` mirrors `scripts/metrics.py`: both run the same `base.telemetry.metrics`
-aggregates over the Loki windowed fetch, so the CLI digest and the API never
-drift. The fetch is Loki-side aggregated (`base.telemetry.metrics.aggregate.fetch_aggregate`
-over `gateway.lgtm.loki_events`; task #1197 A3) — the SQL path it replaces
-materialized 430K+ rows/day into gateway memory (+47MB RSS per call, finding
-F-s1-4) and the metric units reduce that stream to a few hundred aggregate
-rows anyway. `/api/metrics/agents` is the per-agent breakdown of the same
-fetch (one headline-counter row per agent). Both are window-selected +
-manual-refresh, so no caching — each call re-aggregates from the append-only
-event stream.
+aggregates over the `telemetry_events` table, so the CLI digest and the API never drift. The
+fetch reduces the window in SQL (`base.telemetry.metrics.aggregate.fetch_aggregate`; a few
+statements in one connection, nothing materialized per row). `/api/metrics/agents` is the
+per-agent breakdown of the same window (one headline-counter row per agent). Both are
+window-selected + manual-refresh, so no caching — each call re-aggregates from the append-only
+table, under a statement timeout (503 on timeout).
 """
 
 from __future__ import annotations
@@ -17,22 +14,25 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import Annotated
 
-from fastapi import APIRouter, Query, Request
+import psycopg
+from fastapi import APIRouter, HTTPException, Query, Request
 
 from base.config import settings
 from base.telemetry.metrics.aggregate import (
-    agent_rollups_from_aggregate,
     build_report_from_aggregate,
+    fetch_agent_rollups,
     fetch_aggregate,
 )
 from gateway.events.schemas import AgentMetricsItem, AgentMetricsReport, MetricsMeta, MetricsReport
-from gateway.lgtm import loki_events
 
 router = APIRouter()
+
+_READ_TIMEOUT = "SET LOCAL statement_timeout = '20s'"
 
 
 @router.get("/api/metrics")
 def get_metrics(
+    request: Request,
     # `days`'s range stays a protective constant (import-time Query bound;
     # task #3696 exception inventory); the default *window* is
     # display.metrics_default_window_days.
@@ -52,7 +52,12 @@ def get_metrics(
     before); audit events are excluded."""
     if days is None:
         days = settings.display.metrics_default_window_days
-    agg = fetch_aggregate(days, agent, since_compact=since_compact, loki=loki_events)
+    try:
+        with request.app.state.db_pool.connection() as conn:
+            conn.execute(_READ_TIMEOUT)
+            agg = fetch_aggregate(conn, days, agent, since_compact=since_compact)
+    except psycopg.errors.QueryCanceled as exc:
+        raise HTTPException(status_code=503, detail="metrics read timed out; retry") from exc
     _, data = build_report_from_aggregate(agg, days, agent, since_compact=since_compact)
     return MetricsReport(**data)
 
@@ -75,16 +80,21 @@ def get_metrics_agents(
     processes), the W9-widened scope documented on `get_metrics`."""
     if days is None:
         days = settings.display.metrics_default_window_days
-    agg = fetch_aggregate(days, None, since_compact=since_compact, loki=loki_events)
-    rollups = agent_rollups_from_aggregate(agg)
-    labels: dict[int, str | None] = {}
-    if rollups:
-        with request.app.state.db_pool.connection() as conn, conn.cursor() as cur:
-            cur.execute("SELECT id, label FROM agents WHERE id = ANY(%s)", (list(rollups),))
-            labels = dict(cur.fetchall())
+    try:
+        with request.app.state.db_pool.connection() as conn:
+            conn.execute(_READ_TIMEOUT)
+            total_events, rollups = fetch_agent_rollups(conn, days, since_compact=since_compact)
+            labels: dict[int, str | None] = {}
+            if rollups:
+                rows = conn.execute(
+                    "SELECT id, label FROM agents WHERE id = ANY(%s)", (list(rollups),)
+                ).fetchall()
+                labels = dict(rows)
+    except psycopg.errors.QueryCanceled as exc:
+        raise HTTPException(status_code=503, detail="metrics read timed out; retry") from exc
     items = [
-        # events.agent_id is a FK onto agents, so labels[aid] always exists.
-        AgentMetricsItem(agent_id=aid, label=labels[aid], **rollup)
+        # telemetry_events.agent_id has no FK: a deleted agent's rows keep their id, label None.
+        AgentMetricsItem(agent_id=aid, label=labels.get(aid), **rollup)
         for aid, rollup in rollups.items()
     ]
     items.sort(key=lambda item: (-item.cost_usd, item.agent_id))
@@ -92,7 +102,7 @@ def get_metrics_agents(
         window_days=days,
         agent_filter=None,
         generated_at=datetime.now(UTC).isoformat(),
-        total_events=agg.total_events,
+        total_events=total_events,
         distinct_agents=len(rollups),
         since_compact=since_compact,
     )

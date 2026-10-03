@@ -36,18 +36,18 @@ from base.agents.impersonation._store import (
 from base.agents.impersonation._store import (
     require_native as require_native,
 )
+from base.agents.impersonation.event_log import LOG_PROTOCOL_VERSION
 from base.agents.impersonation.history import append, capture_pending, set_actor
 from base.agents.messages.caller_identity import CallerIdentity
 from base.cluster.machine import machine_name
-from base.config import settings
 from base.config.service_read import current_field_values
 from base.db import connect, publish_inbound_wake
 from base.db.transaction import write_transaction
-from base.events.live import redis_client
 from base.events.live.announce import (
     publish_agent_updated_sync,
     publish_impersonation_changed_sync,
 )
+from base.events.live.bus import EventBus
 from base.events.live.projection import Cancelled
 from base.log import logger
 from base.native_process.runtime_incarnation import RuntimeIncarnation
@@ -61,9 +61,9 @@ def _ttl(value: int) -> int:
 
 def _wake(agent_id: int, *, roster_changed: bool = False) -> None:
     publish_inbound_wake(agent_id, "impersonation")
-    publish_impersonation_changed_sync(agent_id)
+    publish_impersonation_changed_sync(EventBus.from_settings(), agent_id)
     if roster_changed:
-        publish_agent_updated_sync(agent_id)
+        publish_agent_updated_sync(EventBus.from_settings(), agent_id)
 
 
 def _validate_invoked_python(process_metadata: dict[str, Any] | None) -> None:
@@ -108,7 +108,7 @@ def request(
     relay_token = secrets.token_urlsafe(32) if relay_provider in SESSION_RELAY_PROVIDERS else None
     lease_id = uuid4()
     delivery_config = current_field_values()
-    event_delivery_protocol_version = _manifest_protocol_version(automatic=automatic)
+    event_delivery_protocol_version = event_protocol_for_new_lease(automatic=automatic)
     with write_transaction() as conn:
         meta = lock_agent(conn, agent_id)
         if meta["machine"] != machine_name():
@@ -168,9 +168,9 @@ def request(
     return result
 
 
-def _manifest_protocol_version(*, automatic: bool) -> int | None:
-    """Admit v1 only for new automatic leases while the cluster gate is on."""
-    return 1 if automatic and settings.general.impersonation_event_manifest_enabled else None
+def event_protocol_for_new_lease(*, automatic: bool) -> int | None:
+    """New automatic leases log their events at the source; manual leases keep no event log."""
+    return LOG_PROTOCOL_VERSION if automatic else None
 
 
 def get(lease_id: str, caller: object) -> dict[str, Any]:
@@ -243,10 +243,6 @@ def accept(
             "accepted_owner=%s,start_message=%s WHERE id=%s",
             (incarnation.generation, incarnation.owner, start_message, lease_id),
         )
-        if lease["event_delivery_protocol_version"] == 1:
-            from base.agents.impersonation_manifest import admit_certifier
-
-            admit_certifier(conn, lease_id)
         result = public(lock_lease(conn, lease_id))
     _wake(agent_id)
     return result
@@ -416,7 +412,8 @@ def renew(lease_id: str, caller: object, *, ttl_seconds: int | None = None) -> d
 def release(lease_id: str, caller: object, summary: str) -> dict[str, Any]:
     if not summary.strip():
         raise ValueError("A nonempty handoff summary is required")
-    from base.agents import impersonation_manifest as manifest
+    from base.agents import impersonation_manifest as capture
+    from base.agents.impersonation.event_log import is_log_native
 
     # Keep the admission fence durable when a live participant delays release.
     with write_transaction() as conn:
@@ -426,8 +423,8 @@ def release(lease_id: str, caller: object, summary: str) -> dict[str, Any]:
             return public(lease)
         require_active_locked(conn, lease, caller)
         set_actor(conn, lease["source"])
-        if manifest.is_protocol_v1(lease):
-            manifest.close_manifest_admission(conn, lease_id)
+        if is_log_native(lease):
+            capture.close_event_admission(conn, lease_id)
 
     with write_transaction() as conn:
         lease = lock_lease(conn, lease_id)
@@ -436,9 +433,9 @@ def release(lease_id: str, caller: object, summary: str) -> dict[str, Any]:
             return public(lease)
         require_active_locked(conn, lease, caller)
         set_actor(conn, lease["source"])
-        if manifest.is_protocol_v1(lease):
+        if is_log_native(lease):
             try:
-                manifest.freeze_manifest(conn, lease)
+                capture.require_participants_sealed(conn, lease)
             except RuntimeError as exc:
                 raise ImpersonationError(
                     "Cannot release until every impersonation event participant seals"
@@ -522,8 +519,7 @@ def ack(lease_id: str, caller: object, message_ids: list[int]) -> None:
                 event_key="ack:" + ",".join(map(str, sorted(set(message_ids)))),
             )
     if any(row[0] == "cancel" for row in acknowledged):
-        redis_client.publish_best_effort_sync(
-            settings.data_plane.events_channel,
+        EventBus.from_settings().publish_best_effort_sync(
             Cancelled(agent_id=lease["agent_id"]).model_dump_json(),
             context="impersonation_cancel_ack",
         )

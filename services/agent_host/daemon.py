@@ -47,7 +47,7 @@ import logging
 import os
 import signal
 import sys
-from collections.abc import Collection
+from collections.abc import Collection, Coroutine
 from pathlib import Path
 from typing import cast
 
@@ -56,7 +56,6 @@ from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from psycopg.rows import DictRow
 from psycopg_pool import AsyncConnectionPool
 
-import base.events.live.redis_client
 from agent.ownership.hosted import settle_stale_running_rows
 from agent.turn.progress import turn_progress_age_s, turn_progress_snapshot
 from base import paths
@@ -64,21 +63,20 @@ from base.agents.incarnation.exec_request_evidence import disposition_hint
 from base.agents.incarnation.hosted_force import recover_orphaned_hosted_forces
 from base.cluster.machine import machine_name
 from base.config import settings
+from base.daemon.endpoints import ServiceEndpoint, ServiceEndpoints
 from base.daemon.health import (
     Liveness,
-    RouteHandler,
-    health_port,
     start_health_server,
     stop_health_server,
 )
 from base.daemon.shutdown import cancel_and_drain, install_graceful_shutdown
 from base.daemon.shutdown import hard_exit as _hard_exit
-from base.db import pool_release
+from base.db import Database
 from base.deploy.maintenance import admission
 from base.deploy.progress_timeout import AGENT_LEASE_RENEW_INTERVAL_S
 from base.deploy.timing import assert_clock_lattice
+from base.events.live.bus import EventBus
 from base.log import init_gateway_process, logger
-from base.paths import pid_path
 from base.sessions.helper_chain_guard import parent_chain_intact
 from services.agent_host import boot_defer
 from services.agent_host.dispatcher import InboundWakeDispatcher, TurnScheduler
@@ -93,8 +91,12 @@ _log = logging.getLogger("services.agent_host.daemon")
 _MODULE = "services.agent_host.daemon"
 
 
+def _endpoint() -> ServiceEndpoint:
+    return ServiceEndpoints.from_settings().of("agent_host")
+
+
 def _pidfile() -> Path:
-    return pid_path("agent_host")
+    return _endpoint().pidfile
 
 
 # A fixed timer proves liveness even when no agent has work. The same beat
@@ -152,6 +154,7 @@ async def _watch_plugins_for_restart() -> None:
     the drains run, then the supervisor restarts the host fresh.
     """
     baseline = _plugins_fingerprint()
+    # quiesce-exempt: watches plugin file fingerprints; no database
     while True:
         await asyncio.sleep(_PLUGINS_POLL_INTERVAL_S)
         now = _plugins_fingerprint()
@@ -166,6 +169,7 @@ async def _watch_plugins_for_restart() -> None:
 
 
 async def _publish_turn_progress_heartbeat(
+    bus: EventBus,
     machine: str,
     active_agents: Collection[int],
 ) -> None:
@@ -183,7 +187,7 @@ async def _publish_turn_progress_heartbeat(
             }
     try:
         async with asyncio.timeout(_TURN_PROGRESS_PUBLISH_TIMEOUT_S):
-            await base.events.live.redis_client.get_async_redis().set(
+            await bus.async_redis().set(
                 f"host_turn_progress:{machine}",
                 json.dumps(snapshots, separators=(",", ":")),
                 ex=_TURN_PROGRESS_HEARTBEAT_TTL_S,
@@ -226,6 +230,7 @@ async def _beat_forever(
     host: AgentHost,
     scheduler: TurnScheduler,
     machine: str,
+    bus: EventBus,
 ) -> None:
     """Liveness and ownership renewal, independent of the idle dispatcher.
     beat() precedes DB renewal — process health must not depend on the DB."""
@@ -244,7 +249,7 @@ async def _beat_forever(
                 _log.warning("[agent-host] ownership renewal timed out")
             except Exception:
                 _log.exception("[agent-host] ownership renewal failed — retrying next beat")
-        await _publish_turn_progress_heartbeat(machine, scheduler.active_agents)
+        await _publish_turn_progress_heartbeat(bus, machine, scheduler.active_agents)
         _report_long_admission_waits(host)
         await asyncio.sleep(_LIVENESS_BEAT_STEP_S)
 
@@ -256,104 +261,53 @@ async def _stop_ownership_beat(beat: asyncio.Task[None] | None) -> None:
             await beat
 
 
-async def _join_background_task(task: asyncio.Task[object]) -> None:
-    """Join a cancelled task while retaining any failure that preceded cancel."""
-    with contextlib.suppress(asyncio.CancelledError):
-        await task
-
-
 async def _close_host_runtime(
     host: AgentHost,
     scheduler: TurnScheduler,
     beat: asyncio.Task[None] | None,
-    background: dict[str, asyncio.Task[object]],
 ) -> None:
-    """Drain turns and release settled ownership even if background joins fail."""
-    for task in background.values():
-        if not task.cancelling():
-            task.cancel()
-    # A failed task can retain even KeyboardInterrupt. Every cleanup stage must
-    # run before that failure propagates; closing the pools first strands
-    # ownership and active turns. Callbacks unwind in reverse.
+    """Drain turns and release settled ownership even if a stage fails.
+
+    The background loops are already joined: their `TaskGroup` in `run` exits
+    before this runs. Every cleanup stage must run before a failure propagates;
+    closing the pools first strands ownership and active turns. Callbacks unwind
+    in reverse.
+    """
     async with contextlib.AsyncExitStack() as cleanup:
         cleanup.push_async_callback(host.aclose)
         cleanup.push_async_callback(_stop_ownership_beat, beat)
         cleanup.push_async_callback(scheduler.aclose)
-        for task in background.values():
-            cleanup.push_async_callback(_join_background_task, task)
 
 
-class _PageEventPublisher:
-    """Best-effort page events on the shared Redis channel — the daemon's
-    stand-in for a per-agent SSE publisher (turns build their own; none
-    exists outside a turn). Mirrors the gateway ttl_reaper's pattern so the
-    frontend drops closed rows the daemon's scan closes; pages still heal
-    without it, the events only keep the open-pages popover accurate.
+async def _exec_memory_guard_forever() -> None:
+    """Relieve critical memory pressure by killing the largest exec domain.
+
+    Where the OS reports no pressure state (Linux), the guard does not run.
     """
+    from base.host.memory_pressure import host_memory_source
+    from services.agent_host.exec_memory_guard import ExecMemoryGuard, find_exec_domains
 
-    def __init__(self) -> None:
-        self._tasks: set[asyncio.Task[object]] = set()
-
-    def emit(self, payload: str) -> None:
-        from base.config import settings
-        from base.events.live.redis_client import publish_best_effort
-
-        # Fire-and-forget: publish_best_effort never raises; the task set
-        # keeps a strong ref so the publish cannot be GC'd mid-flight.
-        task = asyncio.create_task(
-            publish_best_effort(
-                settings.data_plane.events_channel, payload, context="agent_host_page"
-            )
-        )
-        self._tasks.add(task)
-        task.add_done_callback(self._tasks.discard)
+    source = host_memory_source()
+    if source is None:
+        _log.info("[agent-host] exec memory guard idle — this OS reports no memory pressure state")
+        return
+    host_pid = os.getpid()
+    await ExecMemoryGuard(source, domains=lambda: find_exec_domains(host_pid, source)).run_forever()
 
 
-async def _page_reconcile_forever(pool: AsyncConnectionPool) -> None:
-    """Periodically probe + restore every hosted agent's open pages.
-
-    Heartbeat check-ins only reach idle agents. The host therefore restores
-    pages for busy agents too: once at startup and then every heartbeat
-    interval, skipping pages already reconciled within that interval. A failed
-    pass logs and retries on the next interval without blocking other turns.
-    """
-    from agent.startup import reconcile_all_open_pages
-    from base.config import settings
-
-    interval_s = float(settings.daemon.heartbeat_interval_seconds)
-    publisher = _PageEventPublisher()
-    while True:
-        # A quiesced unit (stop window) skips its pass, silently, until
-        # resume: page probing would borrow the pools the stop released.
-        if not admission.quiesced():
-            try:
-                await reconcile_all_open_pages(
-                    pool, interval_s=interval_s, event_publisher=publisher
-                )
-            except Exception:
-                _log.exception(
-                    "[agent-host] periodic page reconcile pass failed — retrying next interval"
-                )
-        await asyncio.sleep(interval_s)
-
-
-def _spawn_background_tasks(pool: AsyncConnectionPool) -> dict[str, asyncio.Task[object]]:
-    """Create the daemon's background tasks for plugins, pages, event replay and logs.
+def _background_loops() -> dict[str, Coroutine[object, object, None]]:
+    """The daemon's background loops for plugins, logs and exec memory.
 
     Split out of `run()` so the wiring is testable without booting the
-    dispatcher: the reconciler's existence is what closes the
-    busy-hosted-agent dead-page gap (task #2260), the rotator's is what keeps a
-    traceback storm from filling the disk through the uncapped raw transcript
-    (task #2356), and a regression that dropped either creation must turn a
-    test red rather than silently reopen the gap.
+    dispatcher: the rotator's existence is what keeps a traceback storm from
+    filling the disk through the uncapped raw transcript (task #2356), and a
+    regression that dropped it must turn a test red rather than silently reopen
+    the gap. `run` starts them in one `TaskGroup`.
     """
-    from services.agent_host.impersonation_events import reconcile_forever
-
     return {
-        "impersonation_events": asyncio.create_task(reconcile_forever()),
-        "plugins_watch": asyncio.create_task(_watch_plugins_for_restart()),
-        "page_reconciler": asyncio.create_task(_page_reconcile_forever(pool)),
-        "stdout_log_rotate": asyncio.create_task(_rotate_stdout_log_forever()),
+        "plugins_watch": _watch_plugins_for_restart(),
+        "stdout_log_rotate": _rotate_stdout_log_forever(),
+        "exec_memory_guard": _exec_memory_guard_forever(),
     }
 
 
@@ -374,15 +328,11 @@ async def _build_checkpointer(
     )
     from agent.state import build_checkpoint_serde
     from base.agents.history.delta_read_compat import wrap_saver_reads_with_delta_reconstruction
-    from base.config.turn_view import turn_settings
 
     saver_pool = cast(AsyncConnectionPool[psycopg.AsyncConnection[DictRow]], pool)
     checkpointer = PooledPostgresSaver(conn=saver_pool, serde=build_checkpoint_serde())
     wrap_saver_writes_with_loud_failure(checkpointer)
-    wrap_saver_writes_with_nstep_interval(
-        checkpointer,
-        lambda: turn_settings.agent.checkpoint_interval,
-    )
+    wrap_saver_writes_with_nstep_interval(checkpointer, lambda: settings.agent.checkpoint_interval)
     # Transition layer (tasks #3180/#3181): vanilla-era readers must see
     # delta-written threads' messages. Inert on vanilla-written data.
     wrap_saver_reads_with_delta_reconstruction(checkpointer)
@@ -451,6 +401,17 @@ def _is_running() -> bool:
     return pidfile_holds_daemon(_pidfile(), _MODULE)
 
 
+def _boot_handles() -> tuple[
+    AsyncConnectionPool[psycopg.AsyncConnection],
+    AsyncConnectionPool[psycopg.AsyncConnection],
+    EventBus,
+    Database,
+]:
+    """The turn/checkpoint pool, the reserved control pool, the event bus and the database of one host."""
+    db = Database.from_settings()
+    return build_shared_pool(db), build_control_pool(db), EventBus.from_settings(), db
+
+
 async def run() -> None:
     """Boot the host and serve wakes until cancelled. See the module docstring
     for why the order is what it is."""
@@ -476,7 +437,7 @@ async def run() -> None:
     land_cluster_extensions()
     load_process_extensions()
 
-    workload_pool, control_pool = build_shared_pool(), build_control_pool()
+    workload_pool, control_pool, bus, db = _boot_handles()
     liveness = Liveness(_LIVENESS_TIMEOUT_S)
     beat: asyncio.Task[None] | None = None
     health = None
@@ -494,51 +455,62 @@ async def run() -> None:
             checkpointer=checkpointer,
             graph=graph,
             machine=local_machine,
+            bus=bus,
+            db=db,
         )
         # The clock reader is injected, not imported by the scheduler: it owns no
         # pool, and this keeps the uncancellable-turn report able to say how long
         # a stuck agent has really been silent.
         scheduler = TurnScheduler(host.run_turn, activity_clock=host.last_active_at)
-        beat = asyncio.create_task(_beat_forever(liveness, host, scheduler, local_machine))
+        beat = asyncio.create_task(_beat_forever(liveness, host, scheduler, local_machine, bus))
         settled = await settle_stale_running_rows(control_pool, local_machine)
         logger.info("hosted boot settle: settled {n} stale running row(s)", n=len(settled))
 
+        endpoint = _endpoint()
         health = await start_health_server(
             "agent_host",
+            endpoint.health_port,
             liveness=liveness,
             extra_routes={
                 ("GET", "/stats"): _stats_route(host, scheduler),
                 ("POST", "/cancel-turn"): _cancel_turn_route(scheduler, host),
-                ("POST", "/release-db-pools"): _release_pools_route(workload_pool, control_pool),
             },
         )
         logger.info(
             "hosted agent-runner started on :{port} "
             "(max concurrent turns {bound}, database pools {workload}/{control})",
             event="host_started",
-            port=health_port("agent_host"),
+            port=endpoint.health_port,
             bound=settings.daemon.host_max_concurrent_turns or "unlimited",
             workload=workload_pool.max_size,
             control=control_pool.max_size,
         )
-        # Task #2260: heartbeat-independent page-liveness scan for hosted
-        # agents — busy agents get no heartbeats, and the hosted daemon runs
-        # no per-agent page_reconcile_loop (loop.py:main() is process-only).
-        background = _spawn_background_tasks(workload_pool)
+        # One TaskGroup owns the loops beside the dispatcher: a loop that
+        # raises cancels the dispatcher and its siblings, and the exception
+        # leaves `run` so the process exits for `ava-root` to restart it. The
+        # group exits, every loop joined, before the runtime drains turns.
         try:
-            await InboundWakeDispatcher(
-                settings.data_plane.redis_url,
-                scheduler,
-                pending_scan=host.pending_inbound_wakes,
-                stale_after_s=float(settings.daemon.wedged_agent_inbound_age_seconds),
-                recovery_wake_batch=settings.daemon.host_recovery_wake_batch,
-                recovery_wake_inflight=settings.daemon.host_recovery_wake_inflight,
-                scan_interval_s=float(settings.agent.db_notify_wait_timeout_seconds),
-                subscription_read_timeout_s=float(settings.agent.db_notify_wait_timeout_seconds),
-            ).run()
+            async with asyncio.TaskGroup() as background:
+                for name, loop in _background_loops().items():
+                    background.create_task(loop, name=name)
+                await InboundWakeDispatcher(
+                    bus,
+                    scheduler,
+                    pending_scan=host.pending_inbound_wakes,
+                    stale_after_s=float(settings.daemon.wedged_agent_inbound_age_seconds),
+                    recovery_wake_batch=settings.daemon.host_recovery_wake_batch,
+                    recovery_wake_inflight=settings.daemon.host_recovery_wake_inflight,
+                    scan_interval_s=float(settings.agent.db_notify_wait_timeout_seconds),
+                    subscription_read_timeout_s=float(
+                        settings.agent.db_notify_wait_timeout_seconds
+                    ),
+                ).run()
+                # The dispatcher runs until cancelled; a return would leave the
+                # group waiting on loops that never end, hanging the stop.
+                raise RuntimeError("wake dispatcher exited without cancellation")
         finally:
             try:
-                await _close_host_runtime(host, scheduler, beat, background)
+                await _close_host_runtime(host, scheduler, beat)
             finally:
                 beat = None  # Runtime cleanup attempted its join even when another stage failed.
     finally:
@@ -596,35 +568,6 @@ def _cancel_turn_route(scheduler: TurnScheduler, host: AgentHost):  # noqa: ANN2
             return 400, b'{"error":"positive integer identifiers required"}', "application/json"
         cancelled = await scheduler.cancel_exact_force(agent_id, command_id, host.accepts_force)
         return 200, json.dumps({"cancelled": cancelled}).encode(), "application/json"
-
-    return handler
-
-
-def _release_pools_route(
-    workload_pool: AsyncConnectionPool[psycopg.AsyncConnection],
-    control_pool: AsyncConnectionPool[psycopg.AsyncConnection],
-) -> RouteHandler:
-    """A `POST /release-db-pools` handler — the pre-stop pool release.
-
-    Called by the ops stop path once this unit's agents are drained: closes
-    every idle connection in both pools and answers `{"released": {"workload":
-    n, "control": m}}`. Nothing reconnects during the quiesced window (the
-    beat and page loops are gated; the turn scan only through the stop leg)
-    and the first borrow after resume opens a fresh connection lazily.
-    Loopback-only and unauthenticated, like `/cancel-turn`.
-    """
-    import json
-
-    async def handler(_body: bytes) -> tuple[int, bytes, str]:
-        released = {
-            "workload": await pool_release.release_idle_async(workload_pool),
-            "control": await pool_release.release_idle_async(control_pool),
-        }
-        logger.info(
-            "[agent-host] released idle db-pool connections on request: {released}",
-            released=released,
-        )
-        return 200, json.dumps({"released": released}).encode(), "application/json"
 
     return handler
 

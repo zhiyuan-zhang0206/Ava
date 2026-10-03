@@ -19,16 +19,21 @@ from typing import Any
 
 import pytest
 
+from base.db import Database
 from base.deploy.state.host_deploy_state import HostDeployState
 from ops import deploy_window as dw
+
+
+def _db() -> Database:
+    return Database.from_settings()
 
 
 @pytest.fixture(autouse=True)
 def _quiet_cluster(monkeypatch: pytest.MonkeyPatch) -> None:
     """An idle cluster. Each test re-arms exactly the signal it is about."""
-    monkeypatch.setattr("base.cluster.machines.list_all", list)
-    monkeypatch.setattr("base.cluster.machine_exclusions.list_excluded_machines", list)
-    monkeypatch.setattr(dw, "_read_deploy_states", dict)
+    monkeypatch.setattr("base.cluster.machines.list_all", lambda _db: [])  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr("base.cluster.machine_exclusions.list_excluded_machines", lambda _db: [])  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(dw, "_read_deploy_states", lambda _db: {})  # pyright: ignore[reportUnknownArgumentType]
 
 
 def _posture(machine: str, posture: str, *, age_s: float) -> HostDeployState:
@@ -50,7 +55,8 @@ def _paused_since_0909() -> datetime:
 
 def _machines(monkeypatch: pytest.MonkeyPatch, *names: str) -> None:
     monkeypatch.setattr(
-        "base.cluster.machines.list_all", lambda: [(n, f"http://{n}:8600") for n in names]
+        "base.cluster.machines.list_all",
+        lambda _db: [(n, f"http://{n}:8600") for n in names],  # pyright: ignore[reportUnknownArgumentType]
     )
 
 
@@ -58,7 +64,7 @@ def _machines(monkeypatch: pytest.MonkeyPatch, *names: str) -> None:
 
 
 def test_idle_cluster_is_not_a_deploy_window() -> None:
-    assert dw.deploy_in_flight().active is False
+    assert dw.deploy_in_flight(_db()).active is False
 
 
 def test_a_paused_posture_is_a_deploy_window(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -66,10 +72,12 @@ def test_a_paused_posture_is_a_deploy_window(monkeypatch: pytest.MonkeyPatch) ->
     #1021): maintenance and stop write it outside the services they restart."""
     _machines(monkeypatch, "win")
     monkeypatch.setattr(
-        dw, "_read_deploy_states", lambda: {"win": _posture("win", "paused", age_s=30)}
+        dw,
+        "_read_deploy_states",
+        lambda _db: {"win": _posture("win", "paused", age_s=30)},  # pyright: ignore[reportUnknownArgumentType]
     )
 
-    window = dw.deploy_in_flight()
+    window = dw.deploy_in_flight(_db())
     assert window.active is True
     assert "machine 'win' is mid-deploy" in window.detail
     assert "host_deploy_state.posture=paused" in window.detail
@@ -78,9 +86,11 @@ def test_a_paused_posture_is_a_deploy_window(monkeypatch: pytest.MonkeyPatch) ->
 def test_an_idle_posture_is_not_a_deploy_window(monkeypatch: pytest.MonkeyPatch) -> None:
     _machines(monkeypatch, "win")
     monkeypatch.setattr(
-        dw, "_read_deploy_states", lambda: {"win": _posture("win", "idle", age_s=30)}
+        dw,
+        "_read_deploy_states",
+        lambda _db: {"win": _posture("win", "idle", age_s=30)},  # pyright: ignore[reportUnknownArgumentType]
     )
-    assert dw.deploy_in_flight().active is False
+    assert dw.deploy_in_flight(_db()).active is False
 
 
 def test_unreachable_machine_does_not_block_a_deploy_forever(
@@ -89,7 +99,7 @@ def test_unreachable_machine_does_not_block_a_deploy_forever(
     """With no posture row, an absent host is not a deploying host — otherwise
     one dead machine would read as a deploy forever."""
     _machines(monkeypatch, "gone")
-    assert dw.deploy_in_flight().active is False
+    assert dw.deploy_in_flight(_db()).active is False
 
 
 def test_a_legacy_converging_row_still_blocks_a_cohort_machine(
@@ -103,10 +113,10 @@ def test_a_legacy_converging_row_still_blocks_a_cohort_machine(
     monkeypatch.setattr(
         dw,
         "_read_deploy_states",
-        lambda: {"macmini": _posture("macmini", "converging", age_s=2 * 86400)},
+        lambda _db: {"macmini": _posture("macmini", "converging", age_s=2 * 86400)},  # pyright: ignore[reportUnknownArgumentType]
     )
 
-    window = dw.deploy_in_flight()
+    window = dw.deploy_in_flight(_db())
     assert window.active is True
     assert "converging" in window.detail
     assert "2d ago" in window.detail
@@ -127,15 +137,15 @@ def test_excluded_machines_stale_posture_does_not_block(
     _machines(monkeypatch, "win")
     monkeypatch.setattr(
         "base.cluster.machine_exclusions.list_excluded_machines",
-        lambda: [("win", "paused", _paused_since_0909())],
+        lambda _db: [("win", "paused", _paused_since_0909())],  # pyright: ignore[reportUnknownArgumentType]
     )
     monkeypatch.setattr(
         dw,
         "_read_deploy_states",
-        lambda: {"win": _posture("win", "paused", age_s=31 * 3600)},
+        lambda _db: {"win": _posture("win", "paused", age_s=31 * 3600)},  # pyright: ignore[reportUnknownArgumentType]
     )
 
-    assert dw.deploy_in_flight().active is False
+    assert dw.deploy_in_flight(_db()).active is False
 
 
 def test_an_excluded_machines_row_is_ignored_whatever_its_posture(
@@ -146,15 +156,15 @@ def test_an_excluded_machines_row_is_ignored_whatever_its_posture(
     _machines(monkeypatch, "win")
     monkeypatch.setattr(
         "base.cluster.machine_exclusions.list_excluded_machines",
-        lambda: [("win", "paused", _paused_since_0909())],
+        lambda _db: [("win", "paused", _paused_since_0909())],  # pyright: ignore[reportUnknownArgumentType]
     )
     monkeypatch.setattr(
         dw,
         "_read_deploy_states",
-        lambda: {"win": _posture("win", "converging", age_s=30)},
+        lambda _db: {"win": _posture("win", "converging", age_s=30)},  # pyright: ignore[reportUnknownArgumentType]
     )
 
-    assert dw.deploy_in_flight().active is False
+    assert dw.deploy_in_flight(_db()).active is False
 
 
 def test_an_excluded_machine_does_not_hide_a_cohort_machine(
@@ -164,18 +174,18 @@ def test_an_excluded_machine_does_not_hide_a_cohort_machine(
     _machines(monkeypatch, "win", "macmini")
     monkeypatch.setattr(
         "base.cluster.machine_exclusions.list_excluded_machines",
-        lambda: [("win", "paused", _paused_since_0909())],
+        lambda _db: [("win", "paused", _paused_since_0909())],  # pyright: ignore[reportUnknownArgumentType]
     )
     monkeypatch.setattr(
         dw,
         "_read_deploy_states",
-        lambda: {
+        lambda _db: {  # pyright: ignore[reportUnknownArgumentType]
             "win": _posture("win", "paused", age_s=31 * 3600),
             "macmini": _posture("macmini", "paused", age_s=60),
         },
     )
 
-    window = dw.deploy_in_flight()
+    window = dw.deploy_in_flight(_db())
     assert window.active is True
     assert "machine 'macmini'" in window.detail
 
@@ -189,15 +199,15 @@ def test_a_staging_machine_with_a_stale_posture_does_not_block(
     _machines(monkeypatch, "stage")
     monkeypatch.setattr(
         "base.cluster.machine_exclusions.list_excluded_machines",
-        lambda: [("stage", "staging", None)],
+        lambda _db: [("stage", "staging", None)],  # pyright: ignore[reportUnknownArgumentType]
     )
     monkeypatch.setattr(
         dw,
         "_read_deploy_states",
-        lambda: {"stage": _posture("stage", "paused", age_s=86400)},
+        lambda _db: {"stage": _posture("stage", "paused", age_s=86400)},  # pyright: ignore[reportUnknownArgumentType]
     )
 
-    assert dw.deploy_in_flight().active is False
+    assert dw.deploy_in_flight(_db()).active is False
 
 
 def test_the_skip_line_names_exclusion_and_freshness(
@@ -210,15 +220,15 @@ def test_the_skip_line_names_exclusion_and_freshness(
     _machines(monkeypatch, "win")
     monkeypatch.setattr(
         "base.cluster.machine_exclusions.list_excluded_machines",
-        lambda: [("win", "paused", _paused_since_0909())],
+        lambda _db: [("win", "paused", _paused_since_0909())],  # pyright: ignore[reportUnknownArgumentType]
     )
     monkeypatch.setattr(
         dw,
         "_read_deploy_states",
-        lambda: {"win": _posture("win", "paused", age_s=3600)},
+        lambda _db: {"win": _posture("win", "paused", age_s=3600)},  # pyright: ignore[reportUnknownArgumentType]
     )
 
-    assert dw.deploy_in_flight().active is False
+    assert dw.deploy_in_flight(_db()).active is False
     lines = [r["message"] for r in loguru_records if "[deploy-window]" in r["message"]]
     assert len(lines) == 1
     assert "machine 'win'" in lines[0]
@@ -233,7 +243,7 @@ def test_an_unreadable_exclusion_read_still_refuses(monkeypatch: pytest.MonkeyPa
     hiccup degrades to the pre-#2160 reading (every non-idle posture blocks),
     never to a pardoned stale deploy."""
 
-    def _fail() -> object:
+    def _fail(_db: object) -> object:
         raise RuntimeError("db down")
 
     monkeypatch.setattr("base.cluster.machine_exclusions.list_excluded_machines", _fail)
@@ -241,10 +251,10 @@ def test_an_unreadable_exclusion_read_still_refuses(monkeypatch: pytest.MonkeyPa
     monkeypatch.setattr(
         dw,
         "_read_deploy_states",
-        lambda: {"win": _posture("win", "paused", age_s=31 * 3600)},
+        lambda _db: {"win": _posture("win", "paused", age_s=31 * 3600)},  # pyright: ignore[reportUnknownArgumentType]
     )
 
-    assert dw.deploy_in_flight().active is True
+    assert dw.deploy_in_flight(_db()).active is True
 
 
 # ─── never raises ────────────────────────────────────────────────────────────
@@ -262,8 +272,8 @@ def test_never_raises_when_a_signal_is_broken(broken: str, monkeypatch: pytest.M
     """Every caller is a refusal/suppression path: a traceback would block every
     deploy or break the alerting that reads the window."""
 
-    def _raise() -> object:
+    def _raise(_db: object) -> object:
         raise RuntimeError("db gone")
 
     monkeypatch.setattr(broken, _raise)
-    assert dw.deploy_in_flight().active is False
+    assert dw.deploy_in_flight(_db()).active is False

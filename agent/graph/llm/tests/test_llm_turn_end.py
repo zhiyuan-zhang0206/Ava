@@ -14,13 +14,15 @@ immediately raise / return a mock.
 
 from __future__ import annotations
 
+import time
 from unittest.mock import MagicMock
 
 import pytest
 from langchain_core.runnables import RunnableConfig
 
-from agent.graph.llm.node import llm_node
-from tests.agent._fakes import make_fake_ops_pool
+from agent.graph.llm._retry import Attempt
+from agent.graph.llm.node import llm_attempt, llm_node
+from agent.tests._fakes import make_fake_ops_pool
 
 
 def _runtime_with_redis():
@@ -49,10 +51,11 @@ async def test_turn_end_ok_false_record_carries_exception(
     monkeypatch.setattr("agent.graph.llm.node._llm_node_impl", _boom)  # pyright: ignore[reportUnknownArgumentType]
 
     with pytest.raises(RuntimeError, match="simulated LLM timeout"):
-        await llm_node(
+        await llm_attempt(
             state=MagicMock(messages=[]),
             runtime=_runtime_with_redis(),
             config=_config_with_thread(),
+            attempt=Attempt(1, time.time()),
         )
 
     turn_end_records = [r for r in loguru_records if r["extra"].get("event") == "turn_end"]  # pyright: ignore[reportUnknownMemberType]

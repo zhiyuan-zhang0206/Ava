@@ -11,7 +11,7 @@ from redis.exceptions import ConnectionError as RedisConnectionError
 
 import ava
 from base.agents.lifecycle import SystemHalt
-from base.events.live import redis_client
+from base.events.live.tests.fakes import patch_sync_redis
 from tests.fixtures.units import spawn_agent
 
 
@@ -33,14 +33,10 @@ def test_compact_survives_publish_failure(
     committing its compact_summary inbound and raising SystemHalt."""
     ava.agent_identity._agent_id = spawn_agent()  # self identity
 
-    # Only the CompactRequest publish (publish_best_effort_sync → sync_redis) is
+    # Only the CompactRequest publish (EventBus.publish_best_effort_sync → sync_redis) is
     # broken; the self-inbound wake uses ava.REDIS directly and is already
     # never-raise, so leave the session redis real for it.
-    monkeypatch.setattr(
-        redis_client,
-        "sync_redis",
-        lambda **_: _BoomSyncClient(RedisConnectionError("down")),  # pyright: ignore[reportUnknownArgumentType]
-    )
+    patch_sync_redis(monkeypatch, lambda: _BoomSyncClient(RedisConnectionError("down")))
 
     with pytest.raises(SystemHalt):
         ava.self.compact("Requests: (none)\nProgress: done\n")
@@ -52,3 +48,41 @@ def test_compact_survives_publish_failure(
         )
         row = cur.fetchone()
     assert row is not None and row[0] == "compact_summary"
+
+
+def test_compact_records_its_audit_fact_with_the_summary_inbound(
+    db_conn: psycopg.Connection,
+) -> None:
+    agent_id = spawn_agent()
+    ava.agent_identity._agent_id = agent_id
+
+    with pytest.raises(SystemHalt):
+        ava.self.compact("Requests: (none)\nProgress: done\n")
+
+    rows = db_conn.execute(
+        "SELECT source, attributes->>'compact_kind' FROM audit_events "
+        "WHERE agent_id = %s AND event_name = 'compact'",
+        (agent_id,),
+    ).fetchall()
+    assert rows == [("self", "summary")]
+
+
+def test_compact_whose_audit_fact_cannot_be_recorded_commits_no_summary(
+    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    agent_id = spawn_agent()
+    ava.agent_identity._agent_id = agent_id
+
+    def refuse(_conn: object, _event: object) -> None:
+        raise RuntimeError("audit write failed")
+
+    monkeypatch.setattr("base.telemetry.audit_events.record_audit", refuse)
+
+    with pytest.raises(RuntimeError, match="audit write failed"):
+        ava.self.compact("Requests: (none)\nProgress: done\n")
+
+    count = db_conn.execute(
+        "SELECT count(*) FROM inbound_messages WHERE agent_id = %s AND kind = 'compact_summary'",
+        (agent_id,),
+    ).fetchone()
+    assert count == (0,)

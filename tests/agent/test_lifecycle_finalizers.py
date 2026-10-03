@@ -4,12 +4,12 @@ import psycopg
 from psycopg_pool import AsyncConnectionPool, ConnectionPool
 
 from agent.db import claim_inbound_batch
+from agent.ownership.tests.test_lifecycle_intent import _command
+from agent.tests.test_inbound_ownership import _admit, _agent
 from base.config import settings
 from base.db import insert_inbound_message
 from base.native_process.turn_identity import bind_turn_identity
 from services.delivery_watchdog.daemon import dead_letter_stale_claimed
-from tests.agent.test_inbound_ownership import _admit, _agent
-from tests.agent.test_lifecycle_intent import _command
 
 
 async def test_generic_dead_letter_leaves_fixed_command_claimed(

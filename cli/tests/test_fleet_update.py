@@ -3,12 +3,14 @@ production's order: no gateway stop/start while a runner runs, no runner start w
 
 from __future__ import annotations
 
+import argparse
 import ast
 import json
 import plistlib
 import re
 import shlex
 import subprocess
+import sys
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -40,6 +42,11 @@ class Cluster:
             a: {**_IDLE, "os": o, "head": old}
             for a, o in (("gw", "Linux"), ("mac", "Darwin"), ("lin", "Linux"))
         }
+        self.names = {alias: alias for alias in self.hosts}  # alias -> name the host reports
+        self.silent: set[str] = set()  # aliases whose heartbeat never reaches the roster
+        self.hidden: set[str] = set()  # aliases the roster has no row for
+        self.smoked: list[str] = []  # machine names the gateway smoke-tested
+        self.laptop: dict[str, Any] | None = None  # a roster-only machine no alias reaches
         self.effects: list[tuple[str, str]] = []
         self.fail: dict[tuple[str, str], int] = {}
         self.stop_failures: dict[str, str] = {}
@@ -73,9 +80,30 @@ class Cluster:
             assert (kind == "oneshot") == (host["os"] == "Darwin")
             assert self.hosts["gw"]["up"] if alias != "gw" else not self._runners_up()
             host["up"], host["hold"] = True, ("resumed", None, {})
+        elif kind == "smoke":
+            self.smoked.append(command.partition(" - smoke ")[2].split()[0].strip("'"))
         elif kind == "refresh":
             assert "--force" not in command  # human-only
         return 0
+
+    def _roster_json(self) -> str:
+        online = self.roster_lag <= 0
+        self.roster_reads, self.roster_lag = self.roster_reads + 1, self.roster_lag - 1
+        values = [
+            (
+                self.names[a],
+                h["up"] and online and a not in self.silent,
+                False,
+                h["head"],
+                h["head"],
+                True,
+            )
+            for a, h in self.hosts.items()
+            if a not in self.hidden
+        ]
+        if self.laptop:
+            values.append(("laptop", *self.laptop["row"]))
+        return json.dumps([dict(zip(_ROW, row, strict=True)) for row in values])
 
     def ssh(self, alias: str, command: str, stdin: str | None, emit: Callable[[str], None]) -> int:
         host = self.hosts[alias]
@@ -87,7 +115,7 @@ class Cluster:
         hold = json.dumps(
             {"status": status, "maintenance": phase and {"phase": phase, "failures": failures}}
         )
-        if 'echo "head=' in command:
+        if '"head=$(git rev-parse HEAD)"' in command:
             for key in ("head", "dirty", "hook", "active"):
                 emit(f"{key}={host[key]}")
             emit(f"hold={hold}")
@@ -95,15 +123,12 @@ class Cluster:
         if command.endswith("maintenance status'"):
             emit(hold)
             return 0
+        if "machine_name()" in command:
+            emit(self.names[alias])
+            return 0
         if " - roster" in command:
             assert stdin == fleet_update._GATEWAY_PROGRAM
-            online = self.roster_lag <= 0
-            self.roster_reads, self.roster_lag = self.roster_reads + 1, self.roster_lag - 1
-            values = [
-                (a, h["up"] and online, False, h["head"], h["head"], True)
-                for a, h in self.hosts.items()
-            ]
-            emit(json.dumps([dict(zip(_ROW, row, strict=True)) for row in values]))
+            emit(self._roster_json())
             return 0
         kinds = {
             "git fetch": "fetch",
@@ -255,6 +280,56 @@ def test_a_roster_that_never_agrees_fails_with_its_last_state(
     assert {k for k, _ in cluster.effects} & {"smoke", "refresh"} == set()
 
 
+_LAPTOP_OFF = {"row": (False, False, None, None, True)}  # online, mismatch, head, running, runner
+
+
+def test_an_unlisted_offline_machine_is_reported_not_required(
+    env: tuple[Cluster, Callable[..., int]], capsys: pytest.CaptureFixture[str]
+) -> None:
+    cluster, run = env
+    assert run("down") == 0
+    cluster.laptop = _LAPTOP_OFF
+    assert run("up") == 0
+    out = capsys.readouterr().out
+    assert "roster: laptop is not listed, not checked: online=False head=None running=None" in out
+    assert cluster.smoked == ["gw", "mac", "lin"]
+    assert [a for k, a in cluster.effects if k == "refresh"] == ["gw", "mac", "lin"]
+    assert "up complete: every listed machine runs" in out
+
+
+def test_a_listed_machine_that_is_offline_fails(
+    env: tuple[Cluster, Callable[..., int]], capsys: pytest.CaptureFixture[str]
+) -> None:
+    cluster, run = env
+    assert run("down") == 0
+    cluster.laptop = _LAPTOP_OFF
+    cluster.silent.add("lin")
+    assert run("up", "--roster-timeout", "10") == 1
+    assert "roster after 10s: offline ['lin']" in capsys.readouterr().out
+    assert {k for k, _ in cluster.effects} & {"smoke", "refresh"} == set()
+
+
+def test_the_roster_name_comes_from_the_host_not_its_ssh_alias(
+    env: tuple[Cluster, Callable[..., int]],
+) -> None:
+    cluster, run = env
+    assert run("down") == 0
+    cluster.names["mac"] = "mac-mini"
+    assert run("up") == 0
+    assert cluster.smoked == ["gw", "mac-mini", "lin"]
+
+
+def test_a_listed_host_with_no_roster_row_is_an_error(
+    env: tuple[Cluster, Callable[..., int]], capsys: pytest.CaptureFixture[str]
+) -> None:
+    cluster, run = env
+    assert run("down") == 0
+    cluster.hidden.add("lin")
+    assert run("up") == 1
+    assert "no roster row for ['lin']" in capsys.readouterr().out
+    assert {k for k, _ in cluster.effects} & {"smoke", "refresh"} == set()
+
+
 def test_packages_refresh_reports_and_never_forces(
     env: tuple[Cluster, Callable[..., int]], capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -335,3 +410,86 @@ def test_the_log_carries_no_secret(
     assert "<redacted>" in written
     assert not [secret for secret in ("s3cret-a", "tok-b", "pw-c") if secret in written]
     assert all(path.stat().st_mode & 0o077 == 0 for path in logs)
+
+
+_HOLD_WITH_BACKSLASHES = (
+    '{"status": "paused", "maintenance": {"phase": "stopped", '
+    '"failures": {"argv": "[\\"sh\\", \\"-c\\", \\"\\\\$HOME\\\\n\\"]"}}}'
+)
+
+
+@pytest.mark.parametrize("shell", ["/bin/zsh", "/bin/sh"])
+def test_the_probe_carries_backslashes_in_the_hold_record_unchanged(
+    shell: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """zsh's and dash's `echo` interpret backslashes: a hold record whose argv holds `\\$HOME`
+    reached `_hold` as an invalid escape. The probe runs in each host's real shell."""
+    if not Path(shell).exists():
+        pytest.skip(f"{shell} is not installed")
+    source = tmp_path / ".ava" / "source"
+    (source / ".venv" / "bin").mkdir(parents=True)
+    _git(source, "init", "-q", "--initial-branch=main")
+    _git(source, "commit", "-q", "--allow-empty", "-m", "base")
+    (source / ".git" / "info" / "exclude").write_text(".venv/\n")
+    fake = source / ".venv" / "bin" / "ava"
+    fake.write_text(f"#!/bin/sh\ncat <<'EOF'\nnoise line\n{_HOLD_WITH_BACKSLASHES}\nEOF\n")
+    fake.chmod(0o755)
+    monkeypatch.setenv("HOME", str(tmp_path))
+
+    result = subprocess.run(  # noqa: S603
+        [shell, "-c", fleet_update._PROBE], capture_output=True, text=True, check=True
+    )
+
+    facts = {
+        key: value for key, _, value in (line.partition("=") for line in result.stdout.splitlines())
+    }
+    assert facts["head"] == _git(source, "rev-parse", "HEAD")
+    assert facts["dirty"] == "0"
+    assert fleet_update._hold(facts["hold"]) == (
+        "paused",
+        "stopped",
+        {"argv": '["sh", "-c", "\\$HOME\\n"]'},
+    )
+
+
+@pytest.mark.parametrize("shell", ["/bin/zsh", "/bin/sh"])
+def test_the_machine_name_is_asked_through_the_hosts_real_shell(
+    shell: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The roster program ends in `python -` (the script arrives on stdin); a `-c` question
+    appended to it ran `python - -c ...`, which read an empty stdin and printed nothing, so
+    `up` died on an empty answer. The command string runs here in a real shell, against a
+    `python` that behaves as the host's does."""
+    if not Path(shell).exists():
+        pytest.skip(f"{shell} is not installed")
+    source = tmp_path / ".ava" / "source"
+    (source / "base" / "cluster").mkdir(parents=True)
+    for package in (source / "base", source / "base" / "cluster"):
+        (package / "__init__.py").write_text("")
+    (source / "base" / "cluster" / "machine.py").write_text(
+        'def machine_name() -> str:\n    return "mac-mini"\n'
+    )
+    python = source / ".venv" / "bin" / "python"
+    python.parent.mkdir(parents=True)
+    python.write_text(f'#!/bin/sh\nexec "{sys.executable}" "$@"\n')
+    python.chmod(0o755)
+    monkeypatch.setenv("HOME", str(tmp_path))
+
+    def ssh(_alias: str, command: str, stdin: str | None, emit: Callable[[str], None]) -> int:
+        return _run_locally(shell, command, stdin, emit)
+
+    monkeypatch.setattr(fleet_update, "ssh", ssh)
+    args = argparse.Namespace(dry_run=False, log_dir=tmp_path / "logs", half="up")
+
+    names = fleet_update._machine_names(fleet_update.Session(args), ["mac"])
+
+    assert names == {"mac": "mac-mini"}
+
+
+def _run_locally(shell: str, command: str, stdin: str | None, emit: Callable[[str], None]) -> int:
+    done = subprocess.run(  # noqa: S603
+        [shell, "-c", command], input=stdin or "", capture_output=True, text=True, check=False
+    )
+    for line in done.stdout.splitlines():
+        emit(line)
+    return done.returncode

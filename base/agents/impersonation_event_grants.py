@@ -1,0 +1,44 @@
+"""Least-privilege runner grants for the impersonation event log."""
+
+from __future__ import annotations
+
+import psycopg
+from psycopg import sql
+
+
+def grant_event_log_runner_access(conn: psycopg.Connection, runner_role: str) -> None:
+    """Converge the narrow event-log authority surface for one runner role."""
+    role = sql.Identifier(runner_role)
+    conn.execute(sql.SQL("REVOKE INSERT, UPDATE ON agent_impersonations FROM {}").format(role))
+    conn.execute(
+        sql.SQL(
+            "GRANT INSERT (id,agent_id,source,machine,reason,status,ttl_seconds,expires_at,"
+            "relay_provider,relay_thread_id,relay_codex_remote,relay_token_hash,"
+            "relay_batch_window_seconds,name,executor_name,process_metadata,automatic,"
+            "ack_window_seconds,max_delivery_attempts,event_delivery_protocol_version) "
+            "ON agent_impersonations TO {}"
+        ).format(role)
+    )
+    conn.execute(
+        sql.SQL(
+            "GRANT UPDATE (status,ttl_seconds,expires_at,rejection_reason,summary_inbound_id,summary,"
+            "accepted_generation,accepted_owner,consent_version,activated_at,ended_at,"
+            "plugin_delta,delta_version,applied_version,relay_token_hash,relay_heartbeat_at,"
+            "relay_last_failure_at,relay_minted_at,relay_minted_generation,relay_minted_owner,"
+            "handoff_document,handoff_path,handoff_applied_at,"
+            "next_entry,event_delivery_pending_reason,start_message) ON agent_impersonations TO {}"
+        ).format(role)
+    )
+    for table in ("agent_impersonation_entries", "agent_impersonation_event_participants"):
+        conn.execute(
+            sql.SQL("GRANT SELECT, INSERT ON {} TO {}").format(sql.Identifier(table), role)
+        )
+    conn.execute(
+        sql.SQL("REVOKE UPDATE ON agent_impersonation_event_participants FROM {}").format(role)
+    )
+    for signature in (
+        "public.close_impersonation_event_admission(uuid)",
+        "public.seal_impersonation_event_participant(uuid,text,text,text,bigint)",
+        "public.lock_impersonation_event_participant(uuid,text)",
+    ):
+        conn.execute(sql.SQL("GRANT EXECUTE ON FUNCTION {} TO {}").format(sql.SQL(signature), role))

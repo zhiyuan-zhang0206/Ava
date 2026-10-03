@@ -1,0 +1,287 @@
+"""`reconcile_open_pages` — probe every open page's server and restore it.
+
+Runs at agent boot and on each heartbeat, as the catch-all for page-server
+death after daemon supervision inside persistent page sessions. Per open row:
+server alive -> keep; dead + serve_dir -> re-serve; dead + no serve_dir ->
+close the row so the dead link stops showing as open (PageClosed event).
+
+These tests stub the DB pool and the probe to pin the orchestration, plus
+the probe itself against a real local HTTP server.
+"""
+
+from __future__ import annotations
+
+import pytest
+
+from agent.startup import _page_server_alive, reconcile_open_pages
+
+
+class _FakeCursor:
+    def __init__(self, rows: list[tuple], fetchone_row: tuple[object, ...] | None = None) -> None:
+        self._rows = rows  # pyright: ignore[reportUnknownMemberType]
+        self._fetchone_row = fetchone_row
+        self.executed: list[tuple[str, tuple[object, ...] | None]] = []
+
+    async def execute(self, sql: str, params: tuple[object, ...] | None = None) -> None:
+        self.executed.append((sql, params))  # pyright: ignore[reportUnknownMemberType]
+
+    async def fetchall(self) -> list[tuple]:
+        return self._rows  # pyright: ignore[reportUnknownMemberType]
+
+    async def fetchone(self) -> tuple[object, ...] | None:
+        # The page-recovery notice dedupe check ("already told within 6h?").
+        return self._fetchone_row
+
+    async def __aenter__(self) -> _FakeCursor:
+        return self
+
+    async def __aexit__(self, *exc: object) -> None:
+        return None
+
+
+class _FakeConn:
+    def __init__(self, rows: list[tuple], fetchone_row: tuple[object, ...] | None = None) -> None:
+        self._cursor = _FakeCursor(rows, fetchone_row)
+
+    def cursor(self) -> _FakeCursor:
+        return self._cursor
+
+    def transaction(self) -> _FakeConn:
+        return self
+
+    async def execute(self, sql: str, params: tuple[object, ...] | None = None) -> None:
+        await self._cursor.execute(sql, params)
+
+    async def __aenter__(self) -> _FakeConn:
+        return self
+
+    async def __aexit__(self, *exc: object) -> None:
+        return None
+
+
+class _FakePool:
+    def __init__(self, rows: list[tuple], fetchone_row: tuple[object, ...] | None = None) -> None:
+        self._conn = _FakeConn(rows, fetchone_row)
+
+    def connection(self, *, timeout: float | None = None) -> _FakeConn:
+        # Mirrors AsyncConnectionPool.connection(): returns a (sync) context
+        # object whose __aenter__ is awaited by `async with`.
+        return self._conn
+
+    @property
+    def executed(self) -> list[tuple[str, tuple[object, ...] | None]]:
+        return self._conn._cursor.executed  # pyright: ignore[reportUnknownMemberType]
+
+
+def _notice_inserts(pool: _FakePool) -> list[tuple[object, ...]]:
+    """(agent_id, content) params of the re-serve-notice INSERTs recorded by
+    the fake pool — typed so the assertions below stay pyright-clean."""
+    rows = [p for sql, p in pool.executed if "INSERT INTO inbound_messages" in sql]  # pyright: ignore[reportUnknownMemberType]
+    return [r for r in rows if r is not None]
+
+
+def _row(
+    name: str,
+    port: int,
+    host: str = "127.0.0.1",
+    title: str | None = None,
+    serve_dir: str | None = "/data/x",
+) -> tuple:
+    return (name, port, host, title, serve_dir)
+
+
+def _fake_serve(served: list[tuple]) -> object:
+    def _f(*args, **kwargs) -> object:
+        served.append((args, kwargs))  # pyright: ignore[reportUnknownMemberType]
+        return object()
+
+    return _f
+
+
+async def test_reserves_dead_server(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Server probe fails + serve_dir set → re-serve the recorded dir/name/port/title."""
+    served: list[tuple] = []
+    monkeypatch.setattr("agent.startup._page_server_alive", lambda _h, _p: False)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr("ava.ui.serve", _fake_serve(served))
+
+    pool = _FakePool([_row("report", 18001, title="Report", serve_dir="/data/report")])
+    await reconcile_open_pages(pool, 7)  # type: ignore[arg-type]
+
+    assert served == [((("/data/report", "report", 18001, "Report"), {}))]
+    # no UPDATE closed (serve_dir exists -> re-serve instead of closing)
+    assert not any("UPDATE agent_pages" in sql for sql, _ in pool.executed)  # pyright: ignore[reportUnknownMemberType]
+
+
+async def test_keeps_alive_server(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Server probe succeeds → no re-serve (the row stays as-is)."""
+    served: list[tuple] = []
+    monkeypatch.setattr("agent.startup._page_server_alive", lambda _h, _p: True)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr("ava.ui.serve", _fake_serve(served))
+
+    pool = _FakePool([_row("report", 18001, serve_dir="/data/report")])
+    await reconcile_open_pages(pool, 7)  # type: ignore[arg-type]
+
+    assert served == []
+
+
+async def test_closes_dead_page_without_serve_dir(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Dead server + no serve_dir (show() pages / pre-serve_dir rows) → the row
+    is closed (CAS UPDATE) so the dead link stops showing as open, and a
+    PageClosed event is emitted."""
+    served: list[tuple] = []
+    events: list[str] = []
+
+    class _Pub:
+        def emit(self, payload: str) -> None:
+            events.append(payload)
+
+    monkeypatch.setattr("agent.startup._page_server_alive", lambda _h, _p: False)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr("ava.ui.serve", _fake_serve(served))
+
+    pool = _FakePool(
+        [
+            _row("report", 18001, serve_dir="/data/report"),
+            _row("plain", 18002, serve_dir=None),
+        ]
+    )
+    await reconcile_open_pages(pool, 7, event_publisher=_Pub())  # type: ignore[arg-type]
+
+    # report re-served; plain closed + PageClosed + one re-serve notice
+    assert served == [((("/data/report", "report", 18001, None), {}))]
+    updates = [p for sql, p in pool.executed if "UPDATE agent_pages" in sql]  # pyright: ignore[reportUnknownMemberType]
+    assert updates == [(7, "plain")]
+    inserts = _notice_inserts(pool)
+    assert len(inserts) == 1
+    agent_id_param, content = inserts[0]
+    assert agent_id_param == 7
+    assert isinstance(content, str)
+    assert content.startswith("Page recovery:")
+    assert "'plain'" in content
+    assert "show()" in content
+    assert len(events) == 1
+    assert "page_closed" in events[0]
+    assert '"name":"plain"' in events[0]
+
+
+async def test_keeps_alive_page_without_serve_dir(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Alive server + no serve_dir → kept as-is, no close, no event."""
+    events: list[str] = []
+
+    class _Pub:
+        def emit(self, payload: str) -> None:
+            events.append(payload)
+
+    monkeypatch.setattr("agent.startup._page_server_alive", lambda _h, _p: True)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr("ava.ui.serve", lambda *a, **k: pytest.fail("must not serve"))  # noqa: ARG005  # pyright: ignore[reportUnknownArgumentType]
+
+    pool = _FakePool([_row("plain", 18002, serve_dir=None)])
+    await reconcile_open_pages(pool, 7, event_publisher=_Pub())  # type: ignore[arg-type]
+
+    assert not any("UPDATE agent_pages" in sql for sql, _ in pool.executed)  # pyright: ignore[reportUnknownMemberType]
+    assert events == []
+
+
+async def test_closes_multiple_dead_show_pages_with_one_notice(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Several dead show() rows of one agent merge into ONE notice listing
+    them all — the heartbeat must not nag once per page."""
+    served: list[tuple] = []
+    monkeypatch.setattr("agent.startup._page_server_alive", lambda _h, _p: False)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr("ava.ui.serve", _fake_serve(served))
+
+    pool = _FakePool(
+        [
+            _row("a", 18001, serve_dir=None),
+            _row("b", 18002, serve_dir=None),
+        ]
+    )
+    await reconcile_open_pages(pool, 7)  # type: ignore[arg-type]
+
+    updates = [p for sql, p in pool.executed if "UPDATE agent_pages" in sql]  # pyright: ignore[reportUnknownMemberType]
+    assert updates == [(7, "a"), (7, "b")]
+    inserts = _notice_inserts(pool)
+    assert len(inserts) == 1
+    _agent_id_param, content = inserts[0]
+    assert isinstance(content, str)
+    assert "'a'" in content and "'b'" in content
+
+
+async def test_dead_show_page_recent_notice_skips_notify(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An agent already told within the 6h window is not told again (the
+    heartbeat runs every 5 min — without the window a persistent failure
+    would nag on every pass). The row still closes."""
+    served: list[tuple] = []
+    monkeypatch.setattr("agent.startup._page_server_alive", lambda _h, _p: False)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr("ava.ui.serve", _fake_serve(served))
+
+    pool = _FakePool([_row("plain", 18002, serve_dir=None)], fetchone_row=((1,),))
+    await reconcile_open_pages(pool, 7)  # type: ignore[arg-type]
+
+    updates = [p for sql, p in pool.executed if "UPDATE agent_pages" in sql]  # pyright: ignore[reportUnknownMemberType]
+    assert updates == [(7, "plain")]
+    assert not any("INSERT INTO inbound_messages" in sql for sql, _p in pool.executed)  # pyright: ignore[reportUnknownMemberType]
+
+
+async def test_swallows_query_failure(monkeypatch: pytest.MonkeyPatch) -> None:
+    """DB down must not block the agent — query failure is logged and skipped."""
+
+    class _BoomPool:
+        async def connection(self) -> None:
+            raise RuntimeError("pg down")
+
+    monkeypatch.setattr("ava.ui.serve", lambda *a, **k: pytest.fail("must not serve"))  # noqa: ARG005  # pyright: ignore[reportUnknownArgumentType]
+    await reconcile_open_pages(_BoomPool(), 7)  # type: ignore[arg-type]  # must not raise
+
+
+def test_page_server_alive_ok() -> None:
+    """A live server answering /health 200 reads as alive."""
+    import http.server
+    import threading
+
+    class H(http.server.BaseHTTPRequestHandler):
+        def do_GET(self) -> None:
+            self.send_response(200)
+            self.end_headers()
+            self.wfile.write(b"ok")
+
+        def log_message(self, format: str, *args: object) -> None:
+            pass
+
+    srv = http.server.ThreadingHTTPServer(("127.0.0.1", 0), H)
+    thread = threading.Thread(target=srv.serve_forever, daemon=True)
+    thread.start()
+    try:
+        assert _page_server_alive("127.0.0.1", srv.server_port) is True
+    finally:
+        srv.shutdown()
+        srv.server_close()
+
+
+def test_page_server_alive_refused() -> None:
+    """A dead server (connection refused) reads as dead — no exception escapes."""
+    assert _page_server_alive("127.0.0.1", 1) is False
+
+
+async def test_open_pages_query_filters_closed_and_expired(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The reconcile pass queries ONLY open rows — a closed/expired page can
+    never appear in a scan. Regression pin for the 2026-09-01 investigation:
+    the two page_restore_alive events for merge-orchestration-research were
+    logged while that row was still OPEN (closed_at set hours later) — the
+    fresh-rowset filter is what keeps closed rows out of every pass."""
+    served: list[tuple] = []
+    monkeypatch.setattr("agent.startup._page_server_alive", lambda _h, _p: True)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr("ava.ui.serve", _fake_serve(served))
+
+    pool = _FakePool([_row("report", 18001, serve_dir="/data/report")])
+    await reconcile_open_pages(pool, 7)  # type: ignore[arg-type]
+
+    selects = [sql for sql, _p in pool.executed if sql.startswith("SELECT")]  # pyright: ignore[reportUnknownMemberType]
+    assert len(selects) == 1
+    assert "closed_at IS NULL" in selects[0]
+    assert "expired_at IS NULL" in selects[0]
+    assert served == []

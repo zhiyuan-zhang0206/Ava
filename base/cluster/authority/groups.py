@@ -3,7 +3,8 @@
 Every application privilege is granted to one of two groups, never to a login:
 
 - ``ava_gateway``: the owner's DML surface without DDL or ownership. SELECT,
-  INSERT, UPDATE, DELETE on every table; USAGE, SELECT, UPDATE on every
+  INSERT, UPDATE, DELETE on every table (SELECT and INSERT only on the
+  append-only ``audit_events`` and ``telemetry_events``); USAGE, SELECT, UPDATE on every
   sequence; EXECUTE on every routine, including those revoked from PUBLIC;
   PostgreSQL 17 ``MAINTAIN`` on the checkpoint tables the blob vacuum
   maintains. No TRUNCATE, REFERENCES or TRIGGER.
@@ -26,7 +27,7 @@ from typing import LiteralString
 from psycopg import sql
 from psycopg.errors import Diagnostic
 
-from base.agents.impersonation_manifest_grants import grant_manifest_runner_access
+from base.agents.impersonation_event_grants import grant_event_log_runner_access
 from base.cluster.authority.catalog import (
     BOOTSTRAP_SUPERUSER_OID,
     Conn,
@@ -34,14 +35,13 @@ from base.cluster.authority.catalog import (
     require_admin,
     role_facts,
 )
-from base.cluster.authority.model import (
-    AuthorityRefusedError,
-    BirthAuthority,
-    CatalogRefusedError,
-    Groups,
-)
+from base.cluster.authority.model import AuthorityRefusedError, CatalogRefusedError, Groups
 
 CHECKPOINT_TABLES = ("checkpoints", "checkpoint_blobs", "checkpoint_writes")
+
+# Tables the gateway group may read and append but never rewrite. The blanket
+# DML grant below includes UPDATE and DELETE, so they are revoked per table.
+_GATEWAY_APPEND_ONLY_TABLES = ("audit_events", "telemetry_events")
 
 # The runner matrix: (privileges, tables). Privilege strings are module
 # constants spliced as SQL; table names are quoted identifiers. Each entry is a
@@ -71,6 +71,11 @@ _RUNNER_TABLE_GRANTS: tuple[tuple[LiteralString, tuple[str, ...]], ...] = (
     ("SELECT, INSERT", ("agent_shell_ttl_renewals",)),
     # ava.self.pause_heartbeat append-only trail (task #1932).
     ("SELECT, INSERT", ("heartbeat_pause_log",)),
+    # Audit events are appended by the producing runner process; the table's
+    # triggers reject every rewrite.
+    ("SELECT, INSERT", ("audit_events",)),
+    # Telemetry and log events are appended by every emitter's drain thread.
+    ("SELECT, INSERT", ("telemetry_events",)),
     # Plugin statistics cards; stale rows age in place, never deleted.
     ("SELECT, INSERT, UPDATE", ("plugin_stats",)),
     ("SELECT, INSERT", ("agent_metric_observations",)),
@@ -138,6 +143,8 @@ def _grant_gateway(conn: Conn, owner: str, gateway: str) -> None:
     _grant(conn, "GRANT EXECUTE ON ALL ROUTINES IN SCHEMA public TO {}", gateway)
     for table in CHECKPOINT_TABLES:
         _grant(conn, "GRANT MAINTAIN ON {} TO {}", table, gateway)
+    for table in _GATEWAY_APPEND_ONLY_TABLES:
+        _grant(conn, "REVOKE UPDATE, DELETE ON {} FROM {}", table, gateway)
     default = "ALTER DEFAULT PRIVILEGES FOR ROLE {} IN SCHEMA public GRANT "
     _grant(conn, default + "SELECT, INSERT, UPDATE, DELETE ON TABLES TO {}", owner, gateway)
     _grant(conn, default + "USAGE, SELECT, UPDATE ON SEQUENCES TO {}", owner, gateway)
@@ -155,7 +162,13 @@ def _grant_runner(conn: Conn, owner: str, runner: str) -> None:
         for table in tables:
             _grant(conn, f"GRANT {privileges} ON {{}} TO {{}}", table, runner)
     _grant(conn, "GRANT USAGE, SELECT ON SEQUENCE agent_shell_ttl_renewals_id_seq TO {}", runner)
-    grant_manifest_runner_access(conn, runner)
+    # The writer creates the next month's partition itself (SECURITY DEFINER).
+    _grant(
+        conn,
+        "GRANT EXECUTE ON FUNCTION public.ensure_telemetry_event_partitions(integer, integer) TO {}",
+        runner,
+    )
+    grant_event_log_runner_access(conn, runner)
 
 
 def apply_group_grants(conn: Conn, *, owner: str, database: str, groups: Groups) -> None:
@@ -180,8 +193,8 @@ def ensure_groups(conn: Conn, *, owner: str, database: str, groups: Groups) -> N
 
     Never changes LOGIN: a group that can log in, holds elevated attributes,
     owns objects, carries role settings or is a member of another role is an
-    unknown state and refuses. A legacy LOGIN ``ava_runner`` is demoted only by
-    ``retire_legacy_logins`` under birth authority.
+    unknown state and refuses. A LOGIN owner or ``ava_runner`` is demoted only by
+    ``retire_legacy_logins``, at birth.
     """
     require_admin(conn)
     with conn.transaction():
@@ -192,17 +205,13 @@ def ensure_groups(conn: Conn, *, owner: str, database: str, groups: Groups) -> N
         apply_group_grants(conn, owner=owner, database=database, groups=groups)
 
 
-def retire_legacy_logins(
-    conn: Conn, *, owner: str, groups: Groups, authority: BirthAuthority
-) -> tuple[str, ...]:
+def retire_legacy_logins(conn: Conn, *, owner: str, groups: Groups) -> tuple[str, ...]:
     """Demote the schema owner and existing groups to NOLOGIN without a password.
 
     Monotone: only removes LOGIN. Refuses when the owner is the initdb bootstrap
     superuser (it cannot become NOLOGIN safely) or a superuser at all. Returns
-    the roles this call demoted; sessions they already hold are closed by the
-    caller's closure proof.
+    the roles this call demoted.
     """
-    del authority
     require_admin(conn)
     demoted: list[str] = []
     with conn.transaction():

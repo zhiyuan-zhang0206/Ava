@@ -1,6 +1,7 @@
 """Event-driven run timeline — ``GET /api/agents/{agent_id}/run-timeline``.
 
-The timeline deliberately consumes only the unified Loki event stream.  It
+The timeline deliberately consumes only the unified event stream (`telemetry_events` and
+`audit_events` in Postgres, both permanent).  It
 therefore works for both per-turn and session-root tracing shapes: a
 ``turn_end`` row is the turn skeleton and its matching ``llm_usage.span_id``
 supplies the token/cost measurement.  Tempo remains an optional call-level
@@ -17,13 +18,12 @@ from datetime import UTC, datetime, timedelta
 from itertools import pairwise
 from typing import Annotated, Literal, cast
 
-import httpx
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
 from base.config import settings
+from base.db import Database
 from base.log import logger
 from gateway.agents.eval_guard import deny_isolated_result_read
-from gateway.lgtm.backend_failure import raise_backend_unavailable
 from gateway.run_timeline import _events
 from gateway.run_timeline.schemas import (
     RunTimelineBoundaries,
@@ -47,7 +47,9 @@ router = APIRouter()
 # and the route family stays self-contained under the run-timeline path.
 router.include_router(strip_router)
 
-_RETENTION = timedelta(days=7)
+# How far back the default window looks for the latest session start or compact. It bounds
+# one scan; the record itself has no retention.
+_LIFECYCLE_LOOKBACK = timedelta(days=365)
 _FALLBACK_WINDOW = timedelta(hours=24)
 _ASSOCIATION_TOLERANCE = timedelta(seconds=2)
 _BUCKET_PATTERN = re.compile(r"^(?P<count>[1-9][0-9]*)(?P<unit>[smhd])$")
@@ -155,7 +157,7 @@ class _TurnWindow:
 
 
 def _number(value: object) -> float:
-    """Read a Loki JSON number without letting malformed historical rows break a run."""
+    """Read a JSON number without letting malformed historical rows break a run."""
     if isinstance(value, bool) or value is None:
         return 0.0
     if isinstance(value, int | float):
@@ -180,14 +182,14 @@ def _attrs(event: dict[str, object]) -> dict[str, object]:
 def _event_ts(event: dict[str, object]) -> datetime:
     ts = event["ts"]
     if not isinstance(ts, datetime):
-        raise TypeError(f"Loki event ts must be datetime, got {type(ts)!r}")
+        raise TypeError(f"Event ts must be datetime, got {type(ts)!r}")
     return ts
 
 
 def _event_name(event: dict[str, object]) -> str:
     name = event["event_name"]
     if not isinstance(name, str):
-        raise TypeError(f"Loki event_name must be str, got {type(name)!r}")
+        raise TypeError(f"Event event_name must be str, got {type(name)!r}")
     return name
 
 
@@ -502,32 +504,28 @@ def aggregate_turn_timeline(
 
 
 def _query_all_events(
+    database: Database,
     agent_id: int,
     from_: datetime,
     to: datetime,
     *,
     event_names: tuple[str, ...] = _TURN_EVENTS,
 ) -> list[dict[str, object]]:
-    return _events.query_all_events(agent_id, from_, to, event_names=event_names)
+    return _events.query_all_events(database, agent_id, from_, to, event_names=event_names)
 
 
 def _default_window(
-    agent_id: int, now: datetime, *, session: Literal["compact", "current"]
+    database: Database, agent_id: int, now: datetime, *, session: Literal["compact", "current"]
 ) -> tuple[datetime, datetime]:
     """Choose the latest compact-ended or current observable session.
 
-    Loki retains seven days. ``compact`` ends at the latest compact, while
-    ``current`` runs from the latest lifecycle start to ``now``. Agents whose
-    lifecycle predates retention use a bounded last-24-hours view instead of an
-    unbounded scan.
+    ``compact`` ends at the latest compact, while ``current`` runs from the latest
+    lifecycle start to ``now``. An agent with no lifecycle start inside the
+    lookback gets a bounded last-24-hours view instead of an unbounded scan.
     """
-    retention_start = now - _RETENTION
-    lifecycle_events = _query_all_events(
-        agent_id,
-        retention_start,
-        now,
-        event_names=tuple(_SESSION_START_EVENTS | _COMPACT_EVENTS),
-    )
+    lookback_start = now - _LIFECYCLE_LOOKBACK
+    names = tuple(_SESSION_START_EVENTS | _COMPACT_EVENTS)
+    lifecycle_events = _query_all_events(database, agent_id, lookback_start, now, event_names=names)
     ordered = sorted(lifecycle_events, key=_event_ts)
     starts = [_event_ts(event) for event in ordered if _event_name(event) in _SESSION_START_EVENTS]
     if session == "current":
@@ -541,7 +539,7 @@ def _default_window(
             for event in ordered
             if _event_name(event) in _SESSION_START_EVENTS and _event_ts(event) <= end
         ]
-        return (starts[-1] if starts else max(retention_start, end - _FALLBACK_WINDOW), end)
+        return (starts[-1] if starts else max(lookback_start, end - _FALLBACK_WINDOW), end)
 
     if starts:
         return starts[-1], now
@@ -561,6 +559,7 @@ def _parse_bucket_seconds(bucket: str | None) -> int:
 
 
 def _effective_window(
+    database: Database,
     agent_id: int,
     from_: datetime | None,
     to: datetime | None,
@@ -572,7 +571,7 @@ def _effective_window(
         if value is not None and value.tzinfo is None:
             raise HTTPException(status_code=422, detail=f"{name} must include a timezone offset")
     if from_ is None and to is None:
-        return _default_window(agent_id, now, session=session)
+        return _default_window(database, agent_id, now, session=session)
     end = to or now
     start = from_ or end - _FALLBACK_WINDOW
     if start >= end:
@@ -585,6 +584,7 @@ def _effective_window(
     dependencies=[Depends(deny_isolated_result_read)],
 )
 def get_run_timeline(
+    request: Request,
     agent_id: int,
     from_: Annotated[datetime | None, Query(alias="from")] = None,
     to: Annotated[datetime | None, Query()] = None,
@@ -595,7 +595,8 @@ def get_run_timeline(
 ) -> RunTimelineResponse:
     """Return an event-driven session waterfall with turn or bucket rows."""
     now = datetime.now(UTC)
-    window_start, window_end = _effective_window(agent_id, from_, to, now, session=session)
+    db: Database = request.app.state.db
+    window_start, window_end = _effective_window(db, agent_id, from_, to, now, session=session)
     # Two independent read branches: the request thread owns events/narrative,
     # one worker owns checkpoint strip reads. Join before returning or raising;
     # request context follows the worker, and no executor survives the request.
@@ -603,25 +604,24 @@ def get_run_timeline(
         strip_read = executor.submit(
             copy_context().run,
             strip_for_window_or_none,
+            db,
             agent_id,
             window_start,
             window_end,
             messages_max,
         )
-        try:
-            events = _query_all_events(agent_id, window_start, window_end)
-            post_window_events = (
-                _query_all_events(
-                    agent_id,
-                    window_end,
-                    now,
-                    event_names=tuple(_SESSION_START_EVENTS | {"turn_end"}),
-                )
-                if session == "compact" and from_ is None and to is None and window_end < now
-                else []
+        events = _query_all_events(db, agent_id, window_start, window_end)
+        post_window_events = (
+            _query_all_events(
+                db,
+                agent_id,
+                window_end,
+                now,
+                event_names=tuple(_SESSION_START_EVENTS | {"turn_end"}),
             )
-        except httpx.HTTPError as exc:
-            raise_backend_unavailable(exc)
+            if session == "compact" and from_ is None and to is None and window_end < now
+            else []
+        )
 
         aggregate = aggregate_turn_timeline(
             events,
@@ -639,6 +639,7 @@ def get_run_timeline(
             for event in post_window_events
         )
         layers, summary, pending = _narrative_for_window(
+            db,
             agent_id,
             window_start,
             window_end,
@@ -670,6 +671,7 @@ def get_run_timeline(
 
 
 def _narrative_for_window(
+    db: Database,
     agent_id: int,
     window_start: datetime,
     window_end: datetime,
@@ -695,8 +697,8 @@ def _narrative_for_window(
     from base.agents.history.hierarchy.store import load_coverage_extent, load_window_nodes
 
     try:
-        nodes = load_window_nodes(agent_id, window_start, window_end)
-        extent = load_coverage_extent(agent_id)
+        nodes = load_window_nodes(db, agent_id, window_start, window_end)
+        extent = load_coverage_extent(db, agent_id)
         selection = select_layers(
             nodes,
             window_start=window_start,
@@ -723,7 +725,7 @@ def _narrative_for_window(
     )
     summary = None
     if selection.coverage != "full":
-        text = _latest_compact_summary(agent_id)
+        text = _latest_compact_summary(db, agent_id)
         if text:
             summary = RunTimelineSummary(text=text)
     pending: list[RunTimelinePendingSpan] | None = None
@@ -771,7 +773,7 @@ def _inbounds_for_window(
     ]
 
 
-def _latest_compact_summary(agent_id: int) -> str | None:
+def _latest_compact_summary(db: Database, agent_id: int) -> str | None:
     """The agent's most recent compact summary — the raw-context fallback text.
 
     One latest-snapshot checkpoint read (the same read the context panel does);
@@ -781,7 +783,7 @@ def _latest_compact_summary(agent_id: int) -> str | None:
     from base.agents.messages.kwargs import AvaMsgType, message_content, read_ava_kwargs
 
     try:
-        messages = load_checkpoint_messages(agent_id)
+        messages = load_checkpoint_messages(db, agent_id)
     except Exception:
         logger.exception("compact summary read failed for agent {}", agent_id)
         return None

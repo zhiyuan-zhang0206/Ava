@@ -94,27 +94,14 @@ otherwise empty queue, and delivery ends by publishing a wake. Captured pending
 inputs become processed only after the note is durable; unacknowledged incoming
 content remains in the file for the resumed agent to handle.
 
-SDK collection, sampling and instrumentation belong to the upstream collector.
-The consumption boundary is `base/agents/impersonation/events.py`: explicit scoped
-session binding, stable event IDs, skew-guarded time validation, deduplication
-and export refresh when late facts arrive. Protocol-v1 controller receipts
-capture event identities before telemetry enqueue, central transactional audit
-producers stage their expected identities before commit, and the owning
-agent-host alone invokes the database certification procedure after the frozen
-union exactly matches tagged central rows and durable entries. Until then,
-accounting remains pending even after the native receipt. Manual and legacy
-leases never infer an empty receipt. Version-2 handoff statistics expose
-`event_delivery.state`, its manifest-only `completion_basis`, and separate
-SDK/API `coverage` plus `consumed_event_count`, with an additive
-`pending_reason`. Pending coverage is `unknown`:
-a zero consumed count is not evidence of zero calls. `complete_emitted_events`
-means the manifest covers emitted events only; the SDK sampling policy is
-explicitly `unknown`, so a zero SDK count is never a zero-call fact. Statistics
-never extrapolate samples.
-See the consumer module for delivery-completion semantics.
-
-Manifest authority, alert surfaces, and the post-completion integrity window
-are specified in [[manifest-certification.ava.okf.md]].
+The events the borrowed identity caused (SDK calls and audit facts) are written
+into the same log by their producers and complete in the database; see
+[[event-log.ava.okf.md]]. Hand-off statistics expose `event_delivery.state`, its
+`completion_basis`, and separate SDK/API `coverage` plus `consumed_event_count`,
+with a `pending_reason`. Pending coverage is `unknown`: a zero count is not
+evidence of zero calls. `complete_emitted_events` covers emitted events only; the
+SDK sampling policy is explicitly `unknown`, so a zero SDK count is never a
+zero-call fact. Statistics never extrapolate samples.
 
 ## CLI parameters: explicit, with four named exceptions
 

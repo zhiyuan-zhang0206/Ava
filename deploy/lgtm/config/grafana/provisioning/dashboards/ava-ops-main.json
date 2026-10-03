@@ -1356,7 +1356,7 @@
    },
    "targets": [
     {
-     "expr": "{service_name=\"unknown_service\"} | json | __error__=\"\" | ((level!~\"warning|error|critical\" and category=\"audit\") or (level=~\"warning|error|critical\" or (level!~\"warning|error|critical\" and category!=\"audit\" and event_name=~\"checkpoint_write_failed|claim_cas_lost|claim_cas_lost_exit|compact_turn_aborted|dangling_tool_pairing_repaired|db_outage_pause|db_outage_reconcile_retry|db_outage_wait|db_pool_acquire_slow|db_pool_acquire_timeout|db_recovered|delivery_stalled|editable_pth_repaired|error_resolved|event_log_drop|exec\\\\(cancelled\\\\)|exec\\\\(failed\\\\)|exec\\\\(thread\\\\-stuck\\\\)|exec\\\\(timeout\\\\)|exec_cancelled|exec_failed|exec_node_timeout|exec_subprocess_killed|exec_timeout|host_dispatcher_bad_channel|host_turn_crashed|host_turn_uncancellable|idle_cas_lost|label_generate_failed|launch_confirm_failed|launch_confirm_task_crashed|launch_force_terminated|llm_cancelled|llm_provider_error|llm_turn_aborted|loki_query_failed|page_restore_failed|page_restore_query_failed|page_serve_dir_missing|pgbouncer_repaired|screen_capture_notify_failed|sse_drop|stream_overloaded_retry|stream_stall_pair_terminated|stream_stalled_retry|warning_resolved\")))",
+     "expr": "{service_name=\"unknown_service\"} | json | __error__=\"\" | ((level!~\"warning|error|critical\" and category=\"audit\") or (level=~\"warning|error|critical\" or (level!~\"warning|error|critical\" and category!=\"audit\" and event_name=~\"checkpoint_write_failed|claim_cas_lost|claim_cas_lost_exit|compact_turn_aborted|dangling_tool_pairing_repaired|db_outage_pause|db_outage_reconcile_retry|db_outage_wait|db_pool_acquire_slow|db_pool_acquire_timeout|db_recovered|delivery_stalled|editable_pth_repaired|error_resolved|event_log_drop|exec\\\\(cancelled\\\\)|exec\\\\(failed\\\\)|exec\\\\(thread\\\\-stuck\\\\)|exec\\\\(timeout\\\\)|exec_cancelled|exec_failed|exec_memory_guard_killed|exec_node_timeout|exec_subprocess_killed|exec_timeout|host_dispatcher_bad_channel|host_turn_crashed|host_turn_uncancellable|idle_cas_lost|label_generate_failed|launch_confirm_failed|launch_confirm_task_crashed|launch_force_terminated|llm_cancelled|llm_provider_error|llm_turn_aborted|loki_query_failed|page_restore_failed|page_restore_query_failed|page_serve_dir_missing|pgbouncer_repaired|screen_capture_notify_failed|sse_drop|stream_overloaded_retry|stream_stall_pair_terminated|stream_stalled_retry|warning_resolved\")))",
      "refId": "A",
      "legendFormat": "events",
      "datasource": {
@@ -3976,150 +3976,6 @@
    },
    "id": 1001,
    "panels": [],
-   "title": "ava_code",
-   "type": "row"
-  },
-  {
-   "datasource": {
-    "type": "loki",
-    "uid": "loki"
-   },
-   "fieldConfig": {
-    "defaults": {
-     "color": {
-      "mode": "palette-classic"
-     },
-     "thresholds": {
-      "mode": "absolute",
-      "steps": [
-       {
-        "color": "green",
-        "value": null
-       }
-      ]
-     },
-     "unit": "short",
-     "custom": {
-      "lineInterpolation": "smooth",
-      "showPoints": "never",
-      "fillOpacity": 12,
-      "drawStyle": "line",
-      "lineWidth": 1,
-      "spanNulls": true
-     }
-    }
-   },
-   "gridPos": {
-    "h": 7,
-    "w": 12,
-    "x": 0,
-    "y": 185
-   },
-   "id": 1002,
-   "options": {
-    "legend": {
-     "calcs": [
-      "mean",
-      "max",
-      "last"
-     ],
-     "displayMode": "table",
-     "placement": "bottom",
-     "showLegend": true
-    },
-    "tooltip": {
-     "mode": "multi",
-     "sort": "desc"
-    }
-   },
-   "title": "Syntax fix count (per minute)",
-   "type": "timeseries",
-   "description": "Syntax_fix events per minute (5-minute buckets / 5) \u2014 how often the repair pipeline fixes syntax errors in LLM-produced code (event_name='syntax_fix', category='telemetry', 90d retention).",
-   "targets": [
-    {
-     "datasource": {
-      "type": "loki",
-      "uid": "loki"
-     },
-     "editorMode": "code",
-     "expr": "sum(count_over_time({service_name=\"unknown_service\", event_name=\"syntax_fix\"} | json | category=~\"telemetry|log\" [5m])) / 5",
-     "refId": "A",
-     "queryType": "range",
-     "legendFormat": "fixes"
-    }
-   ]
-  },
-  {
-   "datasource": {
-    "type": "loki",
-    "uid": "loki"
-   },
-   "fieldConfig": {
-    "defaults": {
-     "color": {
-      "mode": "fixed",
-      "fixedColor": "blue"
-     },
-     "thresholds": {
-      "mode": "absolute",
-      "steps": [
-       {
-        "color": "green",
-        "value": null
-       }
-      ]
-     },
-     "unit": "short"
-    }
-   },
-   "gridPos": {
-    "h": 4,
-    "w": 8,
-    "x": 12,
-    "y": 185
-   },
-   "id": 1003,
-   "options": {
-    "colorMode": "value",
-    "graphMode": "area",
-    "justifyMode": "auto",
-    "orientation": "auto",
-    "reduceOptions": {
-     "calcs": [
-      "last"
-     ],
-     "fields": "",
-     "values": false
-    },
-    "textMode": "auto"
-   },
-   "title": "Syntax fixes (window)",
-   "type": "stat",
-   "description": "Total syntax_fix events in the current window (event_name='syntax_fix', category='telemetry').",
-   "targets": [
-    {
-     "datasource": {
-      "type": "loki",
-      "uid": "loki"
-     },
-     "editorMode": "code",
-     "expr": "sum(count_over_time({service_name=\"unknown_service\", event_name=\"syntax_fix\"} | json | category=~\"telemetry|log\" [$__range]))",
-     "refId": "A",
-     "queryType": "instant",
-     "legendFormat": "fixes"
-    }
-   ]
-  },
-  {
-   "collapsed": false,
-   "gridPos": {
-    "h": 1,
-    "w": 24,
-    "x": 0,
-    "y": 192
-   },
-   "id": 1004,
-   "panels": [],
    "title": "ava_fleet",
    "type": "row"
   },
@@ -4157,9 +4013,9 @@
     "h": 7,
     "w": 12,
     "x": 0,
-    "y": 193
+    "y": 185
    },
-   "id": 1005,
+   "id": 1002,
    "options": {
     "legend": {
      "calcs": [
@@ -4199,9 +4055,9 @@
     "h": 1,
     "w": 24,
     "x": 0,
-    "y": 200
+    "y": 192
    },
-   "id": 1007,
+   "id": 1003,
    "panels": [],
    "title": "ava_memory",
    "type": "row"
@@ -4240,9 +4096,9 @@
     "h": 7,
     "w": 12,
     "x": 0,
-    "y": 201
+    "y": 193
    },
-   "id": 1008,
+   "id": 1004,
    "options": {
     "legend": {
      "calcs": [
@@ -4310,9 +4166,9 @@
     "h": 7,
     "w": 12,
     "x": 12,
-    "y": 201
+    "y": 193
    },
-   "id": 1009,
+   "id": 1005,
    "options": {
     "legend": {
      "calcs": [
@@ -4388,9 +4244,9 @@
     "h": 7,
     "w": 12,
     "x": 0,
-    "y": 208
+    "y": 200
    },
-   "id": 1010,
+   "id": 1006,
    "options": {
     "legend": {
      "calcs": [
@@ -4451,9 +4307,9 @@
     "h": 4,
     "w": 8,
     "x": 12,
-    "y": 208
+    "y": 200
    },
-   "id": 1011,
+   "id": 1007,
    "options": {
     "colorMode": "value",
     "graphMode": "area",
@@ -4519,9 +4375,9 @@
     "h": 7,
     "w": 12,
     "x": 0,
-    "y": 215
+    "y": 207
    },
-   "id": 1012,
+   "id": 1008,
    "options": {
     "legend": {
      "calcs": [
@@ -4589,9 +4445,9 @@
     "h": 7,
     "w": 12,
     "x": 12,
-    "y": 215
+    "y": 207
    },
-   "id": 1013,
+   "id": 1009,
    "options": {
     "legend": {
      "calcs": [
@@ -4622,6 +4478,150 @@
      "refId": "A",
      "queryType": "range",
      "legendFormat": "avg filter ms"
+    }
+   ]
+  },
+  {
+   "collapsed": false,
+   "gridPos": {
+    "h": 1,
+    "w": 24,
+    "x": 0,
+    "y": 214
+   },
+   "id": 1010,
+   "panels": [],
+   "title": "ava_syntax_fix",
+   "type": "row"
+  },
+  {
+   "datasource": {
+    "type": "loki",
+    "uid": "loki"
+   },
+   "fieldConfig": {
+    "defaults": {
+     "color": {
+      "mode": "palette-classic"
+     },
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "color": "green",
+        "value": null
+       }
+      ]
+     },
+     "unit": "short",
+     "custom": {
+      "lineInterpolation": "smooth",
+      "showPoints": "never",
+      "fillOpacity": 12,
+      "drawStyle": "line",
+      "lineWidth": 1,
+      "spanNulls": true
+     }
+    }
+   },
+   "gridPos": {
+    "h": 7,
+    "w": 12,
+    "x": 0,
+    "y": 215
+   },
+   "id": 1011,
+   "options": {
+    "legend": {
+     "calcs": [
+      "mean",
+      "max",
+      "last"
+     ],
+     "displayMode": "table",
+     "placement": "bottom",
+     "showLegend": true
+    },
+    "tooltip": {
+     "mode": "multi",
+     "sort": "desc"
+    }
+   },
+   "title": "Syntax fix count (per minute)",
+   "type": "timeseries",
+   "description": "Syntax_fix events per minute (5-minute buckets / 5) \u2014 how often the repair pipeline fixes syntax errors in LLM-produced code (event_name='syntax_fix', category='telemetry', 90d retention).",
+   "targets": [
+    {
+     "datasource": {
+      "type": "loki",
+      "uid": "loki"
+     },
+     "editorMode": "code",
+     "expr": "sum(count_over_time({service_name=\"unknown_service\", event_name=\"syntax_fix\"} | json | category=~\"telemetry|log\" [5m])) / 5",
+     "refId": "A",
+     "queryType": "range",
+     "legendFormat": "fixes"
+    }
+   ]
+  },
+  {
+   "datasource": {
+    "type": "loki",
+    "uid": "loki"
+   },
+   "fieldConfig": {
+    "defaults": {
+     "color": {
+      "mode": "fixed",
+      "fixedColor": "blue"
+     },
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "color": "green",
+        "value": null
+       }
+      ]
+     },
+     "unit": "short"
+    }
+   },
+   "gridPos": {
+    "h": 4,
+    "w": 8,
+    "x": 12,
+    "y": 215
+   },
+   "id": 1012,
+   "options": {
+    "colorMode": "value",
+    "graphMode": "area",
+    "justifyMode": "auto",
+    "orientation": "auto",
+    "reduceOptions": {
+     "calcs": [
+      "last"
+     ],
+     "fields": "",
+     "values": false
+    },
+    "textMode": "auto"
+   },
+   "title": "Syntax fixes (window)",
+   "type": "stat",
+   "description": "Total syntax_fix events in the current window (event_name='syntax_fix', category='telemetry').",
+   "targets": [
+    {
+     "datasource": {
+      "type": "loki",
+      "uid": "loki"
+     },
+     "editorMode": "code",
+     "expr": "sum(count_over_time({service_name=\"unknown_service\", event_name=\"syntax_fix\"} | json | category=~\"telemetry|log\" [$__range]))",
+     "refId": "A",
+     "queryType": "instant",
+     "legendFormat": "fixes"
     }
    ]
   },
@@ -6077,92 +6077,6 @@
     "type": "prometheus",
     "uid": "prometheus"
    },
-   "description": "QA traffic per merged PR by complete cluster-tz day \u2014 mean ava-qa receipt count and the share of merges whose head moved after the receipt (re-review), from the daily PR-flow export job (ava_pr_flow_daily_qa_rounds_mean_ratio / ava_pr_flow_daily_qa_rereview_share_ratio gauges).",
-   "fieldConfig": {
-    "defaults": {
-     "thresholds": {
-      "mode": "absolute",
-      "steps": []
-     },
-     "unit": "short"
-    }
-   },
-   "gridPos": {
-    "h": 7,
-    "w": 12,
-    "x": 0,
-    "y": 312
-   },
-   "id": 2403,
-   "options": {
-    "cellHeight": "sm",
-    "footer": {
-     "countRows": false,
-     "enablePagination": true,
-     "show": false
-    },
-    "showHeader": true,
-    "showTypeIcons": false,
-    "sortBy": []
-   },
-   "title": "QA rounds \u2014 mean / re-review share (by day)",
-   "type": "table",
-   "targets": [
-    {
-     "datasource": {
-      "type": "prometheus",
-      "uid": "prometheus"
-     },
-     "editorMode": "code",
-     "expr": "max by (day) (last_over_time(ava_pr_flow_daily_qa_rounds_mean_ratio[26h]))",
-     "format": "table",
-     "instant": true,
-     "range": false,
-     "refId": "A",
-     "legendFormat": "mean rounds"
-    },
-    {
-     "datasource": {
-      "type": "prometheus",
-      "uid": "prometheus"
-     },
-     "editorMode": "code",
-     "expr": "max by (day) (last_over_time(ava_pr_flow_daily_qa_rereview_share_ratio[26h]))",
-     "format": "table",
-     "instant": true,
-     "range": false,
-     "refId": "B",
-     "legendFormat": "re-review share"
-    }
-   ],
-   "transformations": [
-    {
-     "id": "joinByField",
-     "options": {
-      "byField": "day",
-      "mode": "outer"
-     }
-    },
-    {
-     "id": "organize",
-     "options": {
-      "excludeByName": {
-       "Time 1": true,
-       "Time 2": true
-      },
-      "renameByName": {
-       "Value #A": "mean rounds",
-       "Value #B": "re-review share"
-      }
-     }
-    }
-   ]
-  },
-  {
-   "datasource": {
-    "type": "prometheus",
-    "uid": "prometheus"
-   },
    "description": "Tests newly quarantined by Trunk\u2019s flaky detector per complete cluster-tz day (ava_pr_flow_daily_flake_new_quarantines_ratio gauge, daily PR-flow export job). A day whose flaky source was unreachable is omitted rather than shown as zero.",
    "fieldConfig": {
     "defaults": {
@@ -6176,7 +6090,7 @@
    "gridPos": {
     "h": 7,
     "w": 12,
-    "x": 12,
+    "x": 0,
     "y": 312
    },
    "id": 2404,
@@ -6257,7 +6171,7 @@
   },
   {
    "datasource": {"type": "prometheus", "uid": "prometheus"},
-   "description": "Attributed CI trigger count per completed PR by complete cluster-time day. The executed median filters instant-skip, watchdog, QA-gate, and proof workflows.",
+   "description": "Attributed CI trigger count per completed PR by complete cluster-time day. The executed median filters instant-skip, watchdog, and proof workflows.",
    "fieldConfig": {"defaults": {"thresholds": {"mode": "absolute", "steps": []}, "unit": "short"}},
    "gridPos": {"h": 7, "w": 12, "x": 12, "y": 320},
    "id": 2502,
@@ -6276,7 +6190,7 @@
   },
   {
    "datasource": {"type": "prometheus", "uid": "prometheus"},
-   "description": "CI-red, rerun-to-green, failed retry, and v1 first-pass PR share by complete cluster-time day. First pass excludes watchdog, QA-gate, proof, instant-skip, and zombie runs.",
+   "description": "CI-red, rerun-to-green, failed retry, and v1 first-pass PR share by complete cluster-time day. First pass excludes watchdog, proof, instant-skip, and zombie runs.",
    "fieldConfig": {"defaults": {"thresholds": {"mode": "absolute", "steps": []}, "unit": "short"}},
    "gridPos": {"h": 7, "w": 12, "x": 0, "y": 327},
    "id": 2503,

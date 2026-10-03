@@ -28,7 +28,6 @@ from fastapi import FastAPI
 from pydantic import BaseModel, Field
 
 from base import telemetry
-from base.config import settings
 from services.memory_indexer.embeddings.factory import get_provider
 from services.memory_search.store import MemoryStore
 
@@ -43,10 +42,6 @@ _log = logging.getLogger("services.memory_search.app")
 # allocates. The store keeps its own exact-dim check as the last gate.
 _EMBED_DIM = get_provider().dim
 _MAX_K = 1000
-# Batch-size bound on the wire models — cluster config
-# (services.memory_search_max_batch_rows), resolved at import; a change takes
-# effect when this service restarts.
-_MAX_BATCH_ROWS = settings.services.memory_search_max_batch_rows
 
 # One stats sample per minute — bounded row rate, same cadence as the
 # gateway's gauge flushers (agent_registry / auth401 / latency). A 60s
@@ -64,7 +59,7 @@ class UpsertBody(BaseModel):
 
 
 class UpsertBatchBody(BaseModel):
-    rows: list[UpsertBody] = Field(min_length=1, max_length=_MAX_BATCH_ROWS)
+    rows: list[UpsertBody] = Field(min_length=1)
 
 
 class DeleteBody(BaseModel):
@@ -77,7 +72,7 @@ class DeleteStaleRow(BaseModel):
 
 
 class DeleteStaleBatchBody(BaseModel):
-    entries: list[DeleteStaleRow] = Field(min_length=1, max_length=_MAX_BATCH_ROWS)
+    entries: list[DeleteStaleRow] = Field(min_length=1)
 
 
 class SearchBody(BaseModel):
@@ -98,7 +93,7 @@ def emit_memory_search_stats(rows: int, last_save_seconds: float | None) -> None
     metric is not zero).
 
     Exposed separately from the flusher so tests can drive it directly
-    (mirrors `gateway/agents/max_id_gauge.py:emit_max_agent_id`).
+    (mirrors `services/events_maintenance/registry_gauge.py:emit_max_agent_id`).
     """
     attributes: dict[str, int | float] = {"rows": rows}
     if last_save_seconds is not None:
@@ -114,6 +109,7 @@ async def _stats_flusher(store: MemoryStore, lock: asyncio.Lock) -> None:
     snapshot (save runs in a worker thread under that same lock); a failed
     emit never kills the loop — a dropped sample is only a monitoring gap.
     """
+    # quiesce-exempt: samples an in-memory store; no database
     while True:
         await asyncio.sleep(_STATS_FLUSH_INTERVAL_S)
         try:
@@ -129,11 +125,19 @@ async def _stats_flusher(store: MemoryStore, lock: asyncio.Lock) -> None:
             _log.warning("[memory_search] stats emit failed", exc_info=True)
 
 
-def _mount_mutations(app: FastAPI, store: MemoryStore, lock: asyncio.Lock) -> None:
+def _mount_mutations(
+    app: FastAPI, store: MemoryStore, lock: asyncio.Lock, max_batch_rows: int
+) -> None:
     """The four protocol write endpoints (upsert / upsert_batch / delete /
     delete_stale_batch) — extracted so build_app stays a router, not a wall
     of handlers. Each mutation persists the npz before responding."""
     from fastapi import HTTPException
+
+    def check_batch(size: int) -> None:
+        if size > max_batch_rows:
+            raise HTTPException(
+                status_code=422, detail=f"batch of {size} rows exceeds the limit {max_batch_rows}"
+            )
 
     @app.post("/upsert")
     async def upsert(body: UpsertBody) -> dict[str, str]:
@@ -155,6 +159,7 @@ def _mount_mutations(app: FastAPI, store: MemoryStore, lock: asyncio.Lock) -> No
 
     @app.post("/upsert_batch")
     async def upsert_batch(body: UpsertBatchBody) -> dict[str, str]:
+        check_batch(len(body.rows))
         rows = [
             (
                 row.path,
@@ -185,18 +190,20 @@ def _mount_mutations(app: FastAPI, store: MemoryStore, lock: asyncio.Lock) -> No
     async def delete_stale_batch(body: DeleteStaleBatchBody) -> dict[str, str]:
         """Tail-cleanup companion to /upsert_batch (issue #1946): one lock +
         one npz save for every path the current files no longer fully cover."""
+        check_batch(len(body.entries))
         async with lock:
             store.delete_stale_rows([(row.path, row.kind_limits) for row in body.entries])
             await asyncio.to_thread(store.save)
         return {"status": "ok"}
 
 
-def build_app(store: MemoryStore) -> FastAPI:
+def build_app(store: MemoryStore, max_batch_rows: int) -> FastAPI:
     """Wire the store into a FastAPI app. One mutation lock serializes every
     operation (search included) — the store is pure in-memory state and a
     full exact scan is microseconds, so the lock is the whole concurrency
     story at this scale. The stats flusher runs as a lifespan task so the
-    metrics stream lives and dies with the serving process."""
+    metrics stream lives and dies with the serving process. `max_batch_rows` is
+    the cluster's batch-size bound (`services.memory_search_max_batch_rows`)."""
     lock = asyncio.Lock()
 
     @asynccontextmanager
@@ -220,7 +227,7 @@ def build_app(store: MemoryStore) -> FastAPI:
         async with lock:
             return {"rows": len(store), "last_save_seconds": store.last_save_seconds}
 
-    _mount_mutations(app, store, lock)
+    _mount_mutations(app, store, lock, max_batch_rows)
 
     @app.get("/meta")
     async def meta() -> dict[str, tuple[float, str, str]]:

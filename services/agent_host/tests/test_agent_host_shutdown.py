@@ -1,4 +1,8 @@
-"""A failed background task cannot skip turn drain or ownership release.
+"""A failed background loop exits the host, and cannot skip turn drain or ownership release.
+
+The loops share one `TaskGroup` with the wake dispatcher: a loop that raises
+cancels the dispatcher and its siblings, and `run` raises so `ava-root` restarts
+the process after the turns drain.
 
 The sweep's bounded-exit regression (task #4224) rides the shared child-process
 harness: production ``main()`` must exit within a small bound of SIGTERM even
@@ -20,12 +24,25 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from base.db import Database
+from base.events.live.bus import EventBus
 from ops.agent_pause import PAUSE_TIMEOUT_SECONDS
 from tests.services.daemon_shutdown_test_support import (
     EXIT_BOUND_S,
     KILL_SLACK_S,
     spawn_child,
 )
+
+
+def _note_pidfile_removed(events: list[str], _path: object) -> None:
+    events.append("pidfile_removed")
+
+
+def _describe(exc: BaseException) -> str:
+    if isinstance(exc, BaseExceptionGroup):
+        members = cast("BaseExceptionGroup[BaseException]", exc).exceptions
+        return f"ExceptionGroup[{','.join(type(e).__name__ for e in members)}]"
+    return type(exc).__name__
 
 
 def _exercise_shutdown(failure: str) -> None:
@@ -58,21 +75,22 @@ def _exercise_shutdown(failure: str) -> None:
         raise ValueError("background failed")
 
     async def dispatch() -> None:
-        if failure == "exception":
-            # Let the failed task finish before entering the cleanup path.
-            await asyncio.sleep(0.01)
+        if failure == "dispatcher_returns":
+            await asyncio.sleep(0.01)  # let the sibling loop start before the return
             return
-        await asyncio.Event().wait()
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            events.append("dispatcher_cancelled")
+            raise
 
-    original_spawn = daemon._spawn_background_tasks
+    original_loops = daemon._background_loops
 
-    def spawn(pool: object) -> dict[str, asyncio.Task[object]]:
+    def loops() -> dict[str, Any]:
         if failure == "plugin":
-            return original_spawn(pool)  # type: ignore[arg-type] -- pools are test doubles
-        return {
-            "failed": asyncio.create_task(fail()),
-            "sibling": asyncio.create_task(background()),
-        }
+            return original_loops()
+        failing = {} if failure == "dispatcher_returns" else {"failed": fail()}
+        return {**failing, "sibling": background()}
 
     host = MagicMock(aclose=partial(record, "owner_released"))
     scheduler = MagicMock(aclose=partial(record, "turns_drained"))
@@ -84,9 +102,6 @@ def _exercise_shutdown(failure: str) -> None:
     async def close_health(*_args: object) -> None:
         await record("health_closed")
 
-    def remove_pidfile(*_args: object) -> None:
-        events.append("pidfile_removed")
-
     with (
         patch.multiple(
             process_boot,
@@ -95,12 +110,11 @@ def _exercise_shutdown(failure: str) -> None:
             load_process_extensions=MagicMock(),
         ),
         patch.object(graph, "build_graph", return_value=MagicMock()),
-        patch("services.agent_host.impersonation_events.reconcile_forever", background),
         patch.multiple(
             daemon,
             _is_running=MagicMock(return_value=False),
             acquire_pidfile=MagicMock(return_value=True),
-            remove_pidfile=remove_pidfile,
+            remove_pidfile=MagicMock(side_effect=partial(_note_pidfile_removed, events)),
             build_shared_pool=MagicMock(return_value=workload),
             build_control_pool=MagicMock(return_value=control),
             _open_host_pools=AsyncMock(),
@@ -112,10 +126,9 @@ def _exercise_shutdown(failure: str) -> None:
             settle_stale_running_rows=AsyncMock(return_value=[]),
             start_health_server=AsyncMock(return_value=object()),
             stop_health_server=close_health,
-            _spawn_background_tasks=spawn,
+            _background_loops=loops,
             _plugins_fingerprint=MagicMock(side_effect=["before", "after"]),
             _PLUGINS_POLL_INTERVAL_S=0.01,
-            _page_reconcile_forever=background,
             _rotate_stdout_log_forever=background,
             InboundWakeDispatcher=MagicMock(return_value=MagicMock(run=dispatch)),
         ),
@@ -123,14 +136,19 @@ def _exercise_shutdown(failure: str) -> None:
         daemon.install_graceful_shutdown("agent_host_test")
         try:
             asyncio.run(daemon.run())
-        except (KeyboardInterrupt, ValueError, asyncio.CancelledError) as exc:
-            events.append(type(exc).__name__)
+        except (KeyboardInterrupt, asyncio.CancelledError, ExceptionGroup) as exc:
+            events.append(_describe(exc))
     print(json.dumps(events))  # noqa: T201 -- child result protocol
 
 
 @pytest.mark.parametrize(
     "failure,exception",
-    [("plugin", "KeyboardInterrupt"), ("signal", "KeyboardInterrupt"), ("exception", "ValueError")],
+    [
+        ("plugin", "KeyboardInterrupt"),
+        ("signal", "KeyboardInterrupt"),
+        ("exception", "ExceptionGroup[ValueError]"),
+        ("dispatcher_returns", "ExceptionGroup[RuntimeError]"),
+    ],
 )
 def test_failed_background_still_drains_and_releases(failure: str, exception: str) -> None:
     result = subprocess.run(  # noqa: S603 -- fixed test helper in this checkout
@@ -147,7 +165,7 @@ def test_failed_background_still_drains_and_releases(failure: str, exception: st
     )
     assert result.returncode == 0, result.stdout + result.stderr
     events = json.loads(result.stdout.splitlines()[-1])
-    assert events.count("background_joined") == (3 if failure == "plugin" else 1)
+    assert events.count("background_joined") == 1
     # A process interrupt lets asyncio cancel the heartbeat immediately. Both
     # restart and background-failure paths must still drain turns and release
     # ownership before closing their DB pools.
@@ -160,11 +178,15 @@ def test_failed_background_still_drains_and_releases(failure: str, exception: st
         exception,
     ]
     assert [
-        event for event in events if event not in {"background_joined", "beat_stopped"}
+        event
+        for event in events
+        if event not in {"background_joined", "beat_stopped", "dispatcher_cancelled"}
     ] == ordered
     assert events.index("background_joined") < events.index("turns_drained")
     assert events.index("beat_stopped") < events.index("owner_released")
     if failure == "exception":
+        # The crashed loop took the dispatcher down with it, before any drain.
+        assert events.index("dispatcher_cancelled") < events.index("turns_drained")
         assert events.index("turns_drained") < events.index("beat_stopped")
 
 
@@ -213,6 +235,8 @@ async def test_stop_releases_ownership_within_a_bound_when_postgres_is_unreachab
         checkpointer=cast(Any, object()),
         graph=cast(Any, object()),
         machine="this-box",
+        bus=EventBus.from_settings(),
+        db=Database.from_settings(),
     )
     started = time.monotonic()
     with pytest.raises(TimeoutError, match="ownership release"):

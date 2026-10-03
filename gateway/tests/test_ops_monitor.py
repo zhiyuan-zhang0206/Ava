@@ -1,56 +1,25 @@
-"""GET /api/ops/monitor HTTP integration tests — the LGTM read path.
+"""GET /api/ops/monitor HTTP integration tests — the Postgres read path.
 
-Same posture as test_metrics_router.py: the Loki backend is the in-memory
-`FakeLoki`, the Prometheus backend a small `FakePrometheus` (both
-monkeypatched onto `gateway.lgtm.loki_events` / `gateway.lgtm.prom_metrics`); the
-`agents` table stays real SQL for the restarts-breakdown labels. Locks the
-endpoint contract: envelope shape, window → bucket sizing, zero-filling,
-payload field-name wiring from the emit sites (kind / latency_ms / name),
-and the fixed-grid alignment against meta.bucket_starts.
-
-LLM p50/p95 are the Prometheus histogram_quantile values (the fake hands
-them back verbatim); latency max is the Loki unwrap max; counts are
-zero-filled per bucket.
+The window's events are real `telemetry_events` rows and the `agents` table is real SQL for the
+restarts-breakdown labels. Locks the endpoint contract: envelope shape, window → bucket sizing,
+zero-filling, payload field-name wiring from the emit sites (kind / latency_ms / name), exact
+percentiles, and the fixed-grid alignment against meta.bucket_starts.
 """
 
 from __future__ import annotations
 
+import json
+import uuid
 from datetime import UTC, datetime, timedelta
-from types import SimpleNamespace
+from typing import Any
 
-import httpx
 import psycopg
 import pytest
 from fastapi.testclient import TestClient
 
 from gateway.app import app
 from gateway.cluster import ops_monitor
-from gateway.cluster.ops_series_lgtm import _GRID_ORIGIN, _bucket_starts
-from gateway.lgtm import prom_metrics
-from gateway.tests.prom_fake import FakePrometheus
-from tests.gateway.loki_fake import FakeLoki
-
-
-@pytest.fixture
-def loki_fake(monkeypatch: pytest.MonkeyPatch) -> FakeLoki:
-    fake = FakeLoki()
-    monkeypatch.setattr("gateway.lgtm.loki_events.count_events", fake.count_events)
-    monkeypatch.setattr("gateway.lgtm.loki_events.count_grouped", fake.count_grouped)
-    monkeypatch.setattr("gateway.lgtm.loki_events.count_events_series", fake.count_events_series)
-    monkeypatch.setattr("gateway.lgtm.loki_events.attribute_max_series", fake.attribute_max_series)
-    monkeypatch.setattr("gateway.lgtm.loki_events.query_events", fake.query_events)
-    monkeypatch.setattr(
-        "gateway.lgtm.loki_events.query_projected_lines", fake.query_projected_lines
-    )
-    return fake
-
-
-@pytest.fixture
-def prom_fake(monkeypatch: pytest.MonkeyPatch) -> FakePrometheus:
-    fake = FakePrometheus()
-    monkeypatch.setattr("gateway.lgtm.prom_metrics.query", fake.query)
-    monkeypatch.setattr("gateway.lgtm.prom_metrics.query_range", fake.query_range)
-    return fake
+from gateway.cluster.ops_series import _GRID_ORIGIN, _bucket_starts
 
 
 def _insert_agent(db: psycopg.Connection, *, label: str) -> int:
@@ -62,18 +31,20 @@ def _insert_agent(db: psycopg.Connection, *, label: str) -> int:
 
 
 def _add(
-    fake: FakeLoki,
+    db: psycopg.Connection,
     *,
     event: str,
     agent_id: int | None = None,
     payload: dict[str, object] | None = None,
     ts_offset_hours: float = 0,
+    ts: datetime | None = None,
 ) -> None:
-    fake.add(
-        event=event,
-        agent_id=agent_id,
-        payload=payload or {},
-        ts_offset_hours=ts_offset_hours,
+    when = ts if ts is not None else datetime.now(UTC) - timedelta(hours=ts_offset_hours)
+    db.execute(
+        "INSERT INTO telemetry_events (event_uid, ts, agent_id, machine, cluster, process, "
+        "category, event_name, level, source, attributes) VALUES (%s, %s, %s, 'test', 'c', 'test', "
+        "'telemetry', %s, 'info', 'test', %s::jsonb)",
+        (uuid.uuid4().int % (1 << 62), when, agent_id, event, json.dumps(payload or {})),
     )
 
 
@@ -89,9 +60,7 @@ def _now_ts() -> datetime:
     return datetime.now(UTC)
 
 
-def test_ops_monitor_empty_envelope_and_zero_fill(
-    db_conn: psycopg.Connection, loki_fake: FakeLoki, prom_fake: FakePrometheus
-) -> None:
+def test_ops_monitor_empty_envelope_and_zero_fill(db_conn: psycopg.Connection) -> None:
     """Empty backends -> all groups present, series fully zero-filled at the
     window's fixed point count (24h -> 48 buckets), totals zero."""
     db_conn.commit()
@@ -125,9 +94,7 @@ def test_ops_monitor_empty_envelope_and_zero_fill(
     }
 
 
-def test_ops_monitor_window_param_sets_bucket_count(
-    db_conn: psycopg.Connection, loki_fake: FakeLoki, prom_fake: FakePrometheus
-) -> None:
+def test_ops_monitor_window_param_sets_bucket_count(db_conn: psycopg.Connection) -> None:
     """1h -> 60 buckets of 60s; 7d -> 168 buckets of 1h."""
     db_conn.commit()
     with TestClient(app) as client:
@@ -142,17 +109,15 @@ def test_ops_monitor_window_param_sets_bucket_count(
             assert len(body["restarts"]["series"]) == n
 
 
-def test_ops_monitor_sse_wires_kind_and_event_log_drop(
-    db_conn: psycopg.Connection, loki_fake: FakeLoki, prom_fake: FakePrometheus
-) -> None:
+def test_ops_monitor_sse_wires_kind_and_event_log_drop(db_conn: psycopg.Connection) -> None:
     """sse_drop payload kind maps to queue_full / publish_error (a row
     without kind counts toward neither); event_log_drop is its own series."""
     now = _now_ts()
-    _add(loki_fake, event="sse_drop", payload={"kind": "queue_full", "n": 1}, ts_offset_hours=2)
-    _add(loki_fake, event="sse_drop", payload={"kind": "publish_error", "n": 1}, ts_offset_hours=2)
-    _add(loki_fake, event="sse_drop", payload={"kind": "publish_error", "n": 1}, ts_offset_hours=5)
-    _add(loki_fake, event="sse_drop", payload={"n": 1}, ts_offset_hours=3)  # no kind
-    _add(loki_fake, event="event_log_drop", payload={"n": 3}, ts_offset_hours=1)
+    _add(db_conn, event="sse_drop", payload={"kind": "queue_full", "n": 1}, ts_offset_hours=2)
+    _add(db_conn, event="sse_drop", payload={"kind": "publish_error", "n": 1}, ts_offset_hours=2)
+    _add(db_conn, event="sse_drop", payload={"kind": "publish_error", "n": 1}, ts_offset_hours=5)
+    _add(db_conn, event="sse_drop", payload={"n": 1}, ts_offset_hours=3)  # no kind
+    _add(db_conn, event="event_log_drop", payload={"n": 3}, ts_offset_hours=1)
     db_conn.commit()
     with TestClient(app) as client:
         body = client.get("/api/ops/monitor").json()
@@ -167,60 +132,67 @@ def test_ops_monitor_sse_wires_kind_and_event_log_drop(
     assert sse["series"][i_el]["event_log_drop"] == 1
 
 
-def test_ops_monitor_llm_wires_prometheus_and_loki(
-    db_conn: psycopg.Connection, loki_fake: FakeLoki, prom_fake: FakePrometheus
-) -> None:
-    """calls/tokens/latency p50/p95 come from Prometheus, max latency from
-    the Loki unwrap, errors from the LLM error family — one bucket wired."""
-    now = _now_ts()
-    anchor = now
-    bucket_s = 1800
+def _seed_llm_bucket(db: psycopg.Connection) -> int:
+    """Four llm_usage rows with known latency and a row with none, plus two LLM errors, all in
+    one bucket; returns that bucket's index."""
     i = 40
-    starts = _bucket_starts(anchor, 86400, bucket_s)
-    eval_ts = int(starts[i].timestamp()) + bucket_s  # the range query's eval point
+    inside = _bucket_starts(_now_ts(), 86400, 1800)[i] + timedelta(seconds=60)
+    for latency, tokens_in in ((100.0, 600), (300.0, 300), (900.0, 100), (2000.0, 0)):
+        payload: dict[str, object] = {
+            "latency_ms": latency,
+            "in_total": tokens_in,
+            "out_total": 50,
+            "reasoning": 0,
+        }
+        _add(db, event="llm_usage", payload=payload, ts=inside)
+    # a row with no numeric latency counts as a call but not toward the latency figures
+    _add(db, event="llm_usage", payload={"in_total": 1}, ts=inside)
+    _add(db, event="llm_provider_error", ts=inside)
+    _add(db, event="stream_stalled_retry", ts=inside)
+    db.commit()
+    return i
 
-    prom_fake.add_llm_bucket(
-        calls=10,
-        tokens_in=1000,
-        tokens_out=200,
-        tokens_reasoning=50,
-        lat_sum=1250.0,  # 1.25s of LLM latency
-        p50=300.0,
-        p95=900.0,
-        point=(eval_ts, 1.0),
-    )
-    _add(loki_fake, event="llm_usage", payload={"latency_ms": 4000.0}, ts_offset_hours=0)
-    _add(loki_fake, event="llm_provider_error", payload={}, ts_offset_hours=0)
-    _add(loki_fake, event="stream_stalled_retry", payload={}, ts_offset_hours=0)
-    db_conn.commit()
+
+def _llm_report(db: psycopg.Connection) -> tuple[dict[str, Any], int]:
+    i = _seed_llm_bucket(db)
     with TestClient(app) as client:
-        body = client.get("/api/ops/monitor").json()
-    llm = body["llm"]
+        return client.get("/api/ops/monitor").json()["llm"], i
+
+
+def test_ops_monitor_llm_counts_tokens_and_errors_from_the_rows(
+    db_conn: psycopg.Connection,
+) -> None:
+    llm, i = _llm_report(db_conn)
     b = llm["series"][i]
-    assert b["calls"] == 10
-    assert b["tokens_in"] == 1000
-    assert b["tokens_out"] == 200
-    assert b["latency_p50_ms"] == 300.0
-    assert b["latency_p95_ms"] == 900.0
-    # max latency: the Loki unwrap value (the fake places it in the last bucket)
-    last = llm["series"][-1]
-    assert last["latency_max_ms"] == 4000.0
-    # errors: the two LLM-error-family rows land in the last bucket
-    assert llm["series"][-1]["errors"] == 2
-    # tps = (1000+200+50) / (1250/1000) = 1000.0
-    assert b["tps"] == 1000.0
-    # totals derive from the series; p50/p95 totals are the instant queries
-    assert llm["totals"]["calls"] == 10
-    assert llm["totals"]["tokens_in"] == 1000
-    assert llm["totals"]["latency_max_ms"] == 4000.0
-    assert llm["totals"]["latency_p50_ms"] == 300.0
-    assert llm["totals"]["latency_p95_ms"] == 900.0
+    assert (b["calls"], b["tokens_in"], b["tokens_out"], b["errors"]) == (5, 1001, 200, 2)
+    assert llm["totals"]["calls"] == 5
+    assert llm["totals"]["tokens_in"] == 1001
     assert llm["totals"]["errors"] == 2
-    assert llm["totals"]["tps"] == 1000.0
+    assert llm["series"][0]["calls"] == 0
+
+
+def test_ops_monitor_llm_percentiles_are_exact_over_the_bucket_rows(
+    db_conn: psycopg.Connection,
+) -> None:
+    llm, i = _llm_report(db_conn)
+    b = llm["series"][i]
+    assert b["latency_p50_ms"] == 600.0  # between 300 and 900
+    assert b["latency_p95_ms"] == pytest.approx(1835.0, abs=0.1)
+    assert b["latency_max_ms"] == 2000.0
+    assert llm["totals"]["latency_p50_ms"] == 600.0
+    assert llm["totals"]["latency_max_ms"] == 2000.0
+    assert llm["series"][0]["latency_p50_ms"] is None
+
+
+def test_ops_monitor_llm_tps_is_tokens_over_latency_seconds(db_conn: psycopg.Connection) -> None:
+    llm, i = _llm_report(db_conn)
+    # 1201 tokens over 3.3 seconds of latency
+    assert llm["series"][i]["tps"] == pytest.approx(363.9, abs=0.1)
+    assert llm["totals"]["tps"] == pytest.approx(363.9, abs=0.1)
 
 
 def test_ops_monitor_restarts_wires_agent_and_service_breakdown(
-    db_conn: psycopg.Connection, loki_fake: FakeLoki, prom_fake: FakePrometheus
+    db_conn: psycopg.Connection,
 ) -> None:
     """agent_restarted / service_started series plus the whole-window
     breakdowns: services by attributes.name (with last_start), agents by the
@@ -228,13 +200,14 @@ def test_ops_monitor_restarts_wires_agent_and_service_breakdown(
     a100 = _insert_agent(db_conn, label="worker-a")
     a101 = _insert_agent(db_conn, label="worker-b")
     db_conn.commit()
-    _add(loki_fake, event="agent_restarted", agent_id=a100, ts_offset_hours=2)
-    _add(loki_fake, event="agent_restarted", agent_id=a100, ts_offset_hours=2)
-    _add(loki_fake, event="agent_restarted", agent_id=a101, ts_offset_hours=4)
-    _add(loki_fake, event="agent_restarted", ts_offset_hours=6)  # no agent id: series only
-    _add(loki_fake, event="service_started", payload={"name": "gateway"}, ts_offset_hours=3)
-    _add(loki_fake, event="service_started", payload={"name": "gateway"}, ts_offset_hours=1)
-    _add(loki_fake, event="service_started", payload={"name": "restarter"}, ts_offset_hours=2)
+    _add(db_conn, event="agent_restarted", agent_id=a100, ts_offset_hours=2)
+    _add(db_conn, event="agent_restarted", agent_id=a100, ts_offset_hours=2)
+    _add(db_conn, event="agent_restarted", agent_id=a101, ts_offset_hours=4)
+    _add(db_conn, event="agent_restarted", ts_offset_hours=6)  # no agent id: series only
+    _add(db_conn, event="service_started", payload={"name": "gateway"}, ts_offset_hours=3)
+    _add(db_conn, event="service_started", payload={"name": "gateway"}, ts_offset_hours=1)
+    _add(db_conn, event="service_started", payload={"name": "restarter"}, ts_offset_hours=2)
+    db_conn.commit()
     with TestClient(app) as client:
         body = client.get("/api/ops/monitor").json()
     restarts = body["restarts"]
@@ -255,13 +228,11 @@ def test_ops_monitor_restarts_wires_agent_and_service_breakdown(
     ]
 
 
-def test_ops_monitor_grid_alignment(
-    db_conn: psycopg.Connection, loki_fake: FakeLoki, prom_fake: FakePrometheus
-) -> None:
+def test_ops_monitor_grid_alignment(db_conn: psycopg.Connection) -> None:
     """An event at an exact minute offset lands in the bucket whose start is
     in meta.bucket_starts (positional alignment of the series arrays)."""
     now = _now_ts()
-    _add(loki_fake, event="sse_drop", payload={"kind": "queue_full"}, ts_offset_hours=0.5)
+    _add(db_conn, event="sse_drop", payload={"kind": "queue_full"}, ts_offset_hours=0.5)
     db_conn.commit()
     with TestClient(app) as client:
         body = client.get("/api/ops/monitor").json()
@@ -273,80 +244,14 @@ def test_ops_monitor_grid_alignment(
     assert start.minute % 30 == 0 and start.second == 0
 
 
-def test_ops_monitor_borrows_db_only_after_lgtm_fanout(
+def test_ops_monitor_read_that_exceeds_its_statement_timeout_is_a_retriable_503(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The label projection cannot occupy a DB slot while network futures run."""
-    events: list[str] = []
+    def cancelled(*_args: object, **_kwargs: object) -> dict[str, Any]:
+        raise psycopg.errors.QueryCanceled("statement timeout")
 
-    class Cursor:
-        def __enter__(self) -> Cursor:
-            return self
-
-        def __exit__(self, *_args: object) -> None:
-            return None
-
-        def execute(self, _query: str, _params: tuple[list[int]]) -> None:
-            events.append("label_query")
-
-        def fetchall(self) -> list[tuple[int, str]]:
-            return [(7, "worker")]
-
-    class Connection:
-        def __enter__(self) -> Connection:
-            events.append("db_borrow")
-            return self
-
-        def __exit__(self, *_args: object) -> None:
-            return None
-
-        def cursor(self) -> Cursor:
-            return Cursor()
-
-    class Pool:
-        def connection(self) -> Connection:
-            return Connection()
-
-    def fetch(
-        _window: str,
-        *,
-        label_lookup: object,
-    ) -> dict[str, object]:
-        events.append("fanout_done")
-        assert callable(label_lookup)
-        assert label_lookup([7]) == {7: "worker"}
-        return {"ok": True}
-
-    def report(**data: object) -> dict[str, object]:
-        return data
-
-    monkeypatch.setattr(ops_monitor, "fetch_ops_series", fetch)
-    monkeypatch.setattr(ops_monitor, "OpsMonitorReport", report)
-    request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(db_pool=Pool())))
-
-    assert ops_monitor.get_ops_monitor(request) == {"ok": True}  # type: ignore[arg-type]
-    assert events == ["fanout_done", "db_borrow", "label_query"]
-
-
-def test_ops_monitor_backend_failure_is_retriable_503(monkeypatch: pytest.MonkeyPatch) -> None:
-    def unavailable(*_args: object, **_kwargs: object) -> dict[str, object]:
-        raise httpx.ReadTimeout("observability unavailable")
-
-    monkeypatch.setattr(ops_monitor, "fetch_ops_series", unavailable)
+    monkeypatch.setattr(ops_monitor, "fetch_ops_series", cancelled)
     with TestClient(app) as client:
         response = client.get("/api/ops/monitor")
     assert response.status_code == 503
-    assert response.headers["retry-after"] == "1"
-    assert "ReadTimeout" in response.json()["detail"]
-
-
-def test_ops_monitor_prom_budget_failure_uses_global_503(monkeypatch: pytest.MonkeyPatch) -> None:
-    def saturated(*_args: object, **_kwargs: object) -> dict[str, object]:
-        raise prom_metrics.PromQueryBudgetError("queue_full")
-
-    monkeypatch.setattr(ops_monitor, "fetch_ops_series", saturated)
-    with TestClient(app) as client:
-        response = client.get("/api/ops/monitor")
-    assert response.status_code == 503
-    assert response.headers["retry-after"] == "1"
-    assert response.json()["detail"] == "Prometheus query budget unavailable (queue_full); retry"
+    assert "retry" in response.json()["detail"]

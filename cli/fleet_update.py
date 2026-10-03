@@ -3,8 +3,8 @@
 `down --new SHA`: preflight; stop each runner, then the gateway; switch every
 checkout to NEW. `up`: start the gateway, then each runner (macOS as a one-time
 GUI-session LaunchAgent: helper signing needs the login keychain); check holds
-and the roster; smoke-test each agent-runner; refresh skills. After a failure, fix the cause and
-rerun the whole half. See conventions/runbook.md#updating-a-networked-cluster-in-source-mode.
+and the listed machines' roster rows; smoke-test each listed agent-runner; refresh skills.
+After a failure, fix the cause and rerun the whole half. See conventions/runbook.md#updating-a-networked-cluster-in-source-mode.
 """
 
 from __future__ import annotations
@@ -26,6 +26,7 @@ from typing import Any
 _REPO = Path(__file__).resolve().parents[1]
 _HOME = 'H="$HOME/.ava"; S="$H/source"; cd "$S" || exit 1'
 _AVA = 'AVA_HOME="$H" "$S/.venv/bin/ava"'
+_PYTHON = f'{_HOME}; AVA_HOME="$H" AVA_CONFIG_FETCH=skip "$S/.venv/bin/python"'
 _STATUS = f"{_HOME}; {_AVA} maintenance status"
 _FREE = ("inactive", "resumed")  # maintenance statuses with no hold
 _POLL_S = 5  # roster re-read interval
@@ -39,12 +40,14 @@ _CLEAN = (
     "are not caused by this update (a changed .gitignore can reveal them): check them, then "
     'move them away (do not delete) and rerun down."; exit 1; }'
 )
+# `printf '%s\n'`, not `echo`: zsh's (and dash's) echo interprets backslashes, which corrupts the
+# hold JSON when an argv in the record holds one (`\\$HOME` becomes `\$HOME`: an invalid escape).
 _PROBE = f"""{_HOME}
-echo "head=$(git rev-parse HEAD)"
-echo "dirty=$(git status --porcelain 2>&1 | wc -l | tr -d ' ')"
+printf '%s\\n' "head=$(git rev-parse HEAD)"
+printf '%s\\n' "dirty=$(git status --porcelain 2>&1 | wc -l | tr -d ' ')"
 test -e "$(git rev-parse --git-path hooks/post-checkout)" && echo hook=yes || echo hook=no
 test -e "$H/updates/active" && echo active=yes || echo active=no
-echo "hold=$({_AVA} maintenance status 2>/dev/null | grep '^{{' | tail -n 1)\""""
+printf '%s\\n' "hold=$({_AVA} maintenance status 2>/dev/null | grep '^{{' | tail -n 1)\""""
 # Early converge passes left these 0555; `uv sync` cannot write through them.
 _VENV_DIRS = (
     "find .venv/bin .venv/lib -maxdepth 3 -type d \\( -path .venv/bin "
@@ -65,7 +68,7 @@ from base.cluster.machine import gateway_api_base, gateway_auth_headers
 from base.host.net.http_dial import get, post
 base, headers = gateway_api_base(), gateway_auth_headers()
 if sys.argv[1] == "roster":
-    rows = get(f"{base}/api/cluster/roster", headers=headers, timeout=90); rows.raise_for_status()
+    rows = get(f"{base}/api/cluster/roster?fresh=true", headers=headers, timeout=90); rows.raise_for_status()
     keep = ("name", "online", "identity_mismatch", "head_sha", "running_sha", "serve_agent_runner")
     print(json.dumps([{key: row[key] for key in keep} for row in rows.json()])); sys.exit(0)
 spawned = post(f"{base}/api/agents", headers=headers, json={"machine": sys.argv[2]}, timeout=60)
@@ -248,24 +251,59 @@ launchctl bootout "gui/$(id -u)/{label}" || echo "bootout of {label} failed"
 rm -rf "$D"; exit "$rc\""""
 
 
-def _roster(s: Session, args: argparse.Namespace, program: str) -> tuple[list[dict[str, Any]], str]:
-    """The roster and the one commit every machine runs, online, from a checkout at it.
+def _machine_names(s: Session, aliases: list[str]) -> dict[str, str]:
+    """Each listed host's own machine name (what the roster calls it), asked of the host.
 
+    Asked with `-c`, so it takes `_PYTHON`, not the `python -` program that reads stdin."""
+    ask = f'{_PYTHON} -c "from base.cluster.machine import machine_name; print(machine_name())"'
+    names: dict[str, str] = {}
+    for alias in aliases:
+        reported = s.run(alias, ask, effect=False).split()
+        if not reported:
+            raise FailedError(f"{alias}: the host printed no machine name")
+        names[alias] = reported[-1]
+    if len(set(names.values())) != len(names):
+        raise FailedError(f"two listed hosts report one machine name: {names}")
+    return names
+
+
+def _roster(s: Session, args: argparse.Namespace, program: str) -> tuple[list[dict[str, Any]], str]:
+    """The listed machines' roster rows and the one commit they all run, online, at that checkout.
+
+    Only the `--gateway`/`--runner` machines are required; the rest of the roster (a laptop
+    that is off) is reported and left alone. A listed host is matched to its row by the
+    machine name it reports, not by its SSH alias; no row for it is an error.
     `online` follows the heartbeat: a machine just started is re-read until --roster-timeout."""
+    names = _machine_names(s, [args.gateway, *args.runner])
+    wanted = set(names.values())
     deadline = time.monotonic() + args.roster_timeout
     while True:
         out = s.run(args.gateway, f"{program} roster", effect=False, stdin=_GATEWAY_PROGRAM)
         rows = json.loads(out.splitlines()[-1])
-        offline = [row["name"] for row in rows if not row["online"] or row["identity_mismatch"]]
-        commits = {(row["head_sha"], row["running_sha"]) for row in rows}
-        commit = rows[0]["head_sha"]
+        if missing := sorted(wanted - {row["name"] for row in rows}):
+            raise FailedError(f"no roster row for {missing} (host aliases to names: {names})")
+        listed = [row for row in rows if row["name"] in wanted]
+        offline = [row["name"] for row in listed if not row["online"] or row["identity_mismatch"]]
+        commits = {(row["head_sha"], row["running_sha"]) for row in listed}
+        commit = listed[0]["head_sha"]
         if not offline and commit is not None and commits == {(commit, commit)}:
-            return rows, commit
+            _report_unlisted(s, rows, wanted)
+            return listed, commit
         if time.monotonic() >= deadline:
+            _report_unlisted(s, rows, wanted)
             raise FailedError(
                 f"roster after {args.roster_timeout}s: offline {offline}; commits {commits}"
             )
         time.sleep(_POLL_S)
+
+
+def _report_unlisted(s: Session, rows: list[dict[str, Any]], wanted: set[str]) -> None:
+    for row in rows:
+        if row["name"] not in wanted:
+            s.say(
+                f"roster: {row['name']} is not listed, not checked: online={row['online']} "
+                f"head={row['head_sha']} running={row['running_sha']}"
+            )
 
 
 def _refresh(s: Session, args: argparse.Namespace) -> None:
@@ -282,7 +320,7 @@ def up(s: Session, args: argparse.Namespace) -> None:
         s.run(alias, gui_oneshot(alias, args.start_timeout) if macos else f"{_HOME}; {_AVA} start")
         if not s.dry_run and (hold := _hold(s.run(alias, _STATUS, effect=False)))[0] not in _FREE:
             raise FailedError(f"{alias}: start left maintenance {hold}")
-    program = f'{_HOME}; AVA_HOME="$H" AVA_CONFIG_FETCH=skip "$S/.venv/bin/python" -'
+    program = f"{_PYTHON} -"
     if s.dry_run:
         s.run(args.gateway, f"{program} smoke MACHINE {args.smoke_timeout}  # each agent-runner")
         _refresh(s, args)
@@ -292,7 +330,7 @@ def up(s: Session, args: argparse.Namespace) -> None:
         smoke = f"{program} smoke {shlex.quote(name)} {args.smoke_timeout}"
         s.run(args.gateway, smoke, stdin=_GATEWAY_PROGRAM)
     _refresh(s, args)
-    s.say(f"up complete: every machine runs {commit[:12]}")
+    s.say(f"up complete: every listed machine runs {commit[:12]}")
 
 
 def main(argv: list[str] | None = None) -> int:

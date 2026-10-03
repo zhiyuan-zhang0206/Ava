@@ -16,7 +16,7 @@ tags:
 
 `agent_id` is the one field bound **deferred** rather than frozen: the module default and `init_gateway_process` bind `base/native_process/turn_identity.py:TURN_SCOPED_AGENT_ID`, which resolves per record — turn contextvar, else the `-` sentinel (an explicit `logger.bind(agent_id=N)` still wins outright). It is what lets the agent host, one process serving many agents, attribute each record to the turn that wrote it. `base/telemetry/emitter.py:emit` applies the same order, then falls back to the process-level agent id of an exec subprocess.
 
-Every log line is also an **event** in the unified event stream (event-system design §1): the loguru side derives `(ts, agent_id, level, event, payload, source)` and enqueues into `base/telemetry` — the unified emitter — which writes the JSONL mirror and OTLP export (the legacy `agent_events` mirror was removed with the migration window). Business (audit) events flow through the same emitter via `base/telemetry/audit_events.py`.
+Every log line is also an **event** in the unified event stream (event-system design §1): the loguru side derives `(ts, agent_id, level, event, payload, source)` and enqueues into `base/telemetry` — the unified emitter — which writes the JSONL mirror, the `telemetry_events` table and the OTLP export (the legacy `agent_events` mirror was removed with the migration window). Business (audit) events are recorded in Postgres (`audit_events`, append-only) by `base/telemetry/audit_events.py` first and flow through the same emitter afterwards as a projection. Telemetry and log events are appended to `telemetry_events` (append-only, partitioned by month) by the emitter's drain thread (`base/telemetry/event_store.py`); a batch that does not land stays in the mirror, which `services/events_maintenance/telemetry_replay.py` replays.
 
 ## Core Responsibilities
 
@@ -27,10 +27,10 @@ Every log line is also an **event** in the unified event stream (event-system de
 - All are **idempotent** (`_init_done` process-level guard) — `logger.add` is not idempotent; repeated calls accumulate sinks until fd exhaustion (errno 24); watchdog reusing healthcheck every 60s would hit this, the guard blocks it.
 
 ### Three sink types
-stderr, a rotated JSONL file and the unified event pipeline, and how every sink is registered: [[log_sinks.ava.okf.md|log sinks]].
+stderr, a rotated JSONL file and the unified event pipeline, and how every sink is registered: [[sinks.ava.okf.md|log sinks]].
 
 ### Two key mechanisms
-- The seven-day full, 90-day rollup-source and 365-day lineage JSONL mirrors preserve Loki-stable IDs; [[services/docs/gateway_side/events_maintenance/events_maintenance.ava.okf.md|events maintenance]] replays the rollup tier.
+- The seven-day full and 90-day rollup-source JSONL mirrors preserve Loki-stable IDs; [[services/docs/gateway_side/events_maintenance/events_maintenance.ava.okf.md|events maintenance]] replays the rollup tier.
 - The emitter's bounded queue + daemon drain thread (`base/telemetry._EventPipeline`) replaces loguru's `enqueue=True`, which uses `multiprocessing.SimpleQueue` allocating POSIX named semaphores; when an agent is SIGKILLed (routine operation) they leak permanently, eventually hitting `kern.posix.sem.max`, after which new agent startups fail with errno 28. The thread queue uses no kernel resources. A sink failure is contained on the drain thread (`catch=True`); the JSONL file sinks and the emitter's own day-stamped JSONL mirror (`$AVA_HOME/logs/events-YYYYMMDD.jsonl`) serve as durable fallback. Queue loss is an error: local diagnostics and loss summaries bypass the saturated queue, and an independent metric drives the cluster alert. See [[telemetry/otlp/telemetry-otlp/export-backpressure.ava.okf.md|Queue loss]].
 
 ## Two surfaces, and where they diverge
@@ -56,7 +56,7 @@ events-maintenance daemon kept the current and next month ahead of the write
 frontier so nothing stranded in the DEFAULT catch-all. Retention DROP was
 never enabled: the archive cleanup dropped the table whole (task
 #1281/#1823). Live retention is the JSONL mirror tiers (7d full / 90d
-rollup-source / 365d lineage) plus Loki's own. The day-grain rollups
+rollup-source) plus Loki's own. The day-grain rollups
 (`agent_metrics_daily` / `agent_model_tokens_daily`) keep since-birth
 aggregates alive across the retirement.
 

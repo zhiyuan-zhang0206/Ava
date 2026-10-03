@@ -20,13 +20,10 @@ from typing import cast
 
 from scripts.structure import ambient_state, baseline_shards, path_imports
 
-SECTIONS = ("private_imports", "owner_bypasses", "patch_targets", "tests_location")
+SECTIONS = ("private_imports", "owner_bypasses", "patch_targets")
 # section -> the lint that measures it. Frozen and guarded like the others, but measured over
 # the test files by its own script; the structure gate only parses and guards them.
-EXTERNAL_SECTIONS = {
-    "patch_targets": "scripts/lint/patch_targets.py",
-    "tests_location": "scripts/structure/tests_location.py",
-}
+EXTERNAL_SECTIONS = {"patch_targets": "scripts/lint/patch_targets.py"}
 # section -> the lint script whose absence at the base revision means the section is being
 # introduced by this change (no earlier baseline to shrink from).
 INTRODUCED_WITH = {**EXTERNAL_SECTIONS, ambient_state.SECTION: ambient_state.LINT}

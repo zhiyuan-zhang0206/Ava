@@ -25,6 +25,7 @@ async def launch_agent_op(body: LaunchAgentRequest, db_pool: ConnectionPool) -> 
     """
     # Lazy import: the package door re-exports this module, so a module-level
     # import of the door would be circular.
+    from base.events.live.bus import EventBus
     from base.lm.factory import validate_model_config
     from ops.lifecycle import publish_inbound_arrived
 
@@ -38,7 +39,9 @@ async def launch_agent_op(body: LaunchAgentRequest, db_pool: ConnectionPool) -> 
         iid = await asyncio.to_thread(
             _insert_prompt_blocking, db_pool, body.agent_id, prompt, body.prompt_source
         )
-        await publish_inbound_arrived(body.agent_id, iid, "chat", body.prompt_source, prompt)
+        await publish_inbound_arrived(
+            EventBus.from_settings(), body.agent_id, iid, "chat", body.prompt_source, prompt
+        )
     publish_inbound_wake(body.agent_id, "0")
     return SpawnedAgent(id=body.agent_id)
 

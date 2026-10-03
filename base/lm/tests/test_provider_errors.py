@@ -306,7 +306,7 @@ def test_rate_limit_429_mentioning_tokens_is_not_overflow() -> None:
 def test_429_with_context_length_exceeded_type_stays_transient() -> None:
     """The `context_length_exceeded` type exception to the status gate is
     informational only: a 429 carrying that type is still TRANSIENT (the
-    RetryPolicy retries it — it never opens the breaker, which only fires on
+    retry loop retries it — it never opens the breaker, which only fires on
     PERMANENT-class rejections)."""
     exc = _FakeStatusError(429, {"error": {"type": "context_length_exceeded"}})
     result = classify_error(exc)
@@ -315,7 +315,7 @@ def test_429_with_context_length_exceeded_type_stays_transient() -> None:
 
 
 def test_billing_is_independent_of_error_class() -> None:
-    """OpenAI's out-of-credit arrives as a 429 (TRANSIENT — the RetryPolicy
+    """OpenAI's out-of-credit arrives as a 429 (TRANSIENT — the retry loop
     still retries it, deliberately unchanged), yet it is still a billing
     failure the operator has to clear. The two axes must not be conflated."""
     exc = _FakeStatusError(429, {"error": {"type": "insufficient_quota", "message": "x"}})

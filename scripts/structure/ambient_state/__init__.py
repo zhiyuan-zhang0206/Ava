@@ -15,6 +15,18 @@ scripts/structure/baseline/ shards as `path::rule:name -> site count`. The rule 
 - state: `ambient-instance`, `ambient-container`, `contextvar`, `global-rebind`,
   `foreign-rebind`, `class-level-container`, `hidden-singleton`, `hidden-cache`;
 - import-time effects: `import-time-call`, `import-time-read`, `host-fact`;
+- configuration reads: `settings-read` — a module of a slice-governed package
+  (`allowlist.SLICED_PACKAGES`, see `sliced.py`) other than its composition root imports the
+  process-global `settings`;
+- database and bundle wiring: `ambient-db` (a package in `allowlist.DB_HANDLE_PACKAGES` dials
+  from the live settings instead of taking a `Database`, see `dbhandle.py`) and `bundle-leak` (a
+  `@root_bundle` class named outside its defining module, see `bundle.py`);
+- `ambient-clock`: a package in `allowlist.CLOCK_PACKAGES` builds the cluster clock
+  (`Clock.from_settings()`) outside the roots named for it;
+- `ambient-bus`: a package in `allowlist.BUS_PACKAGES` builds the event bus
+  (`EventBus.from_settings()`) outside the roots named for it;
+- `ambient-endpoint`: a package in `allowlist.ENDPOINT_PACKAGES` builds the endpoint table
+  (`ServiceEndpoints.from_settings()`) outside the roots named for it;
 - free-floating background work: `asyncio-task`, `thread` (keyed by the enclosing
   function). Background work must be durable or re-derivable from durable state and
   run as its own service loop; use a per-iteration `async with asyncio.TaskGroup()`
@@ -40,7 +52,15 @@ from pathlib import Path
 
 from scripts.structure import lint_common
 from scripts.structure.ambient_state import allowlist as allow
-from scripts.structure.ambient_state import scan
+from scripts.structure.ambient_state import (
+    bundle,
+    busrule,
+    clockrule,
+    dbhandle,
+    endpointrule,
+    scan,
+    sliced,
+)
 
 SECTION = "ambient_state"
 # The file whose absence at the base revision means this section is being introduced.
@@ -73,6 +93,12 @@ _FIXES: dict[str, str] = {
     scan.SINGLETON: f"a zero-argument cache is a hidden singleton — {_STATE_FIX}; a memoized pure derivation goes in ALLOWED with a reason",
     scan.CACHE: "a memoized function is state unless it is pure — a pure derivation goes in ALLOWED in scripts/structure/ambient_state/allowlist.py with a reason",
     scan.CALL: "a call that runs at import (a registry fill or side effect) — register from a composition root, not at import",
+    dbhandle.AMBIENT_DB: f"an ambient database dial in a package that holds a Database handle — {dbhandle.FIX}",
+    clockrule.AMBIENT_CLOCK: f"the cluster clock built outside a root — {clockrule.FIX}",
+    busrule.AMBIENT_BUS: f"the event bus built outside a root — {busrule.FIX}",
+    endpointrule.AMBIENT_ENDPOINT: f"the endpoint table built outside a root — {endpointrule.FIX}",
+    bundle.BUNDLE_LEAK: f"a root bundle named outside its composition root — {bundle.FIX}",
+    sliced.SETTINGS_READ: f"reads the global configuration in a sliced package — {sliced.FIX}",
     scan.READ: "reads settings, the environment, the clock or the filesystem at import — read it where it is used, or inject it",
     scan.HOST: "a platform constant computed at import — inject a `Platform` instead of recomputing the fact per module",
     scan.TASK: f"a free-floating task — {_BACKGROUND_FIX}",
@@ -103,7 +129,17 @@ def site_key(rel: str, hit: scan.Hit) -> str:
 
 
 def _hits(tree: ast.Module, rel: str, repo_root: Path) -> list[scan.Hit]:
-    return scan.scan(tree, rel, repo_root) if in_scope(rel) else []
+    if not in_scope(rel):
+        return []
+    return [
+        *scan.scan(tree, rel, repo_root),
+        *sliced.hits(tree, rel),
+        *dbhandle.hits(tree, rel),
+        *endpointrule.hits(tree, rel),
+        *busrule.hits(tree, rel),
+        *clockrule.hits(tree, rel),
+        *bundle.hits(tree, repo_root),
+    ]
 
 
 def measure(tree: ast.Module, rel: str, repo_root: Path) -> Sites:
@@ -151,6 +187,15 @@ def allowlist_errors(tree: ast.Module, rel: str, repo_root: Path) -> list[tuple[
 _LIST_FILE = "scripts/structure/ambient_state/allowlist.py"
 
 
+def _missing_roots(repo_root: Path, table: str, registry: dict[str, frozenset[str]]) -> list[str]:
+    return [
+        f"{_LIST_FILE}:1: stale {table} entry {package} — {path} does not exist; fix or remove it"
+        for package, roots in sorted(registry.items())
+        for path in sorted(roots)
+        if not (repo_root / path).is_file()
+    ]
+
+
 def missing_allowlist_errors(repo_root: Path) -> list[str]:
     """A listed file or function that no longer exists is stale too."""
     listed_paths = {
@@ -162,6 +207,19 @@ def missing_allowlist_errors(repo_root: Path) -> list[str]:
         for path in sorted(listed_paths)
         if not (repo_root / path).is_file()
     ]
+    for package, roots in sorted(allow.SLICED_PACKAGES.items()):
+        for path in (f"{package}/config.py", *sorted(roots)):
+            if not (repo_root / path).is_file():
+                errors.append(
+                    f"{_LIST_FILE}:1: stale SLICED_PACKAGES entry {package} — {path} does not exist; fix or remove it"
+                )
+    for table, registry in (
+        ("DB_HANDLE_PACKAGES", allow.DB_HANDLE_PACKAGES),
+        ("ENDPOINT_PACKAGES", allow.ENDPOINT_PACKAGES),
+        ("BUS_PACKAGES", allow.BUS_PACKAGES),
+        ("CLOCK_PACKAGES", allow.CLOCK_PACKAGES),
+    ):
+        errors += _missing_roots(repo_root, table, registry)
     for callee in sorted(allow.PURE_REPO_CALLEES):
         owner, _, name = callee.rpartition(".")
         path = repo_root.joinpath(*owner.split(".")).with_suffix(".py")

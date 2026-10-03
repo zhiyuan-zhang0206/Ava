@@ -17,8 +17,10 @@ from base.agents.observation import db_wait
 from base.agents.observation.db_wait import database_wait_snapshot
 from base.cluster.machine import machine_name
 from base.config import settings
-from base.db import insert_inbound_message
+from base.db import Database, insert_inbound_message
 from base.deploy.maintenance import cohort, pause_owner
+from base.events.live.bus import EventBus
+from base.events.live.tests.fakes import patch_async_redis
 from base.native_process.turn_identity import bind_turn_identity
 from services.agent_host import daemon, db_recovery
 from services.agent_host.dispatcher import InboundWakeDispatcher, PendingInboundWake, TurnScheduler
@@ -52,7 +54,14 @@ async def test_real_db_wait_survives_both_stale_paths_and_clears_afterward(  # n
         raise AssertionError("a recovery wait does not invoke the graph")
 
     graph, saver = await _graph(aops_pool, agent, never)
-    host = AgentHost(pool=aops_pool, checkpointer=saver, graph=graph, machine=machine_name())
+    host = AgentHost(
+        pool=aops_pool,
+        checkpointer=saver,
+        graph=graph,
+        machine=machine_name(),
+        bus=EventBus.from_settings(),
+        db=Database.from_settings(),
+    )
     host._owner = incarnation.owner
     if held:
         acquired = datetime.now(UTC)
@@ -93,7 +102,7 @@ async def test_real_db_wait_survives_both_stale_paths_and_clears_afterward(  # n
         scheduler = TurnScheduler(run)
         dispatcher = InboundWakeDispatcher(
             scheduler=scheduler,
-            redis_url="redis://127.0.0.1:1",
+            bus=EventBus.from_settings(),
             pending_scan=host.pending_inbound_wakes,
             stale_after_s=1.0,
         )
@@ -214,18 +223,24 @@ async def test_heartbeat_preserves_progress_and_cannot_extend_wait_proof(
         async def set(self, _key: str, value: str, *, ex: int) -> None:
             writes.append(json.loads(value))
 
-    monkeypatch.setattr(daemon.base.events.live.redis_client, "get_async_redis", CaptureRedis)
+    patch_async_redis(monkeypatch, CaptureRedis)
     try:
         with db_wait.database_wait(incarnation) as waiting:
             waiting.renew()
-            await daemon._publish_turn_progress_heartbeat(machine_name(), {agent})
-            await daemon._publish_turn_progress_heartbeat(machine_name(), {agent})
+            await daemon._publish_turn_progress_heartbeat(
+                EventBus.from_settings(), machine_name(), {agent}
+            )
+            await daemon._publish_turn_progress_heartbeat(
+                EventBus.from_settings(), machine_name(), {agent}
+            )
             assert writes[0][str(agent)]["db_wait"] == writes[1][str(agent)]["db_wait"]
             assert writes[0][str(agent)]["age_s"] >= 100
             assert writes[0][str(agent)]["last_marks"] == progress._PROGRESS[agent]
             waiting.deadline = time.monotonic() - 1
             assert database_wait_snapshot(agent) is None
-            await daemon._publish_turn_progress_heartbeat(machine_name(), {agent})
+            await daemon._publish_turn_progress_heartbeat(
+                EventBus.from_settings(), machine_name(), {agent}
+            )
             assert "db_wait" not in writes[-1][str(agent)]
         assert database_wait_snapshot(agent) is None
     finally:
@@ -244,15 +259,19 @@ async def test_success_handoff_clears_on_actual_node_progress(
         async def set(self, _key: str, value: str, *, ex: int) -> None:
             writes.append(json.loads(value))
 
-    monkeypatch.setattr(daemon.base.events.live.redis_client, "get_async_redis", CaptureRedis)
+    patch_async_redis(monkeypatch, CaptureRedis)
     try:
         with db_wait.database_wait(incarnation) as waiting:
             waiting.renew()
             waiting.complete()
-        await daemon._publish_turn_progress_heartbeat(machine_name(), {agent})
+        await daemon._publish_turn_progress_heartbeat(
+            EventBus.from_settings(), machine_name(), {agent}
+        )
         assert "db_wait" in writes[-1][str(agent)]
         progress.mark_turn_progress(agent)
-        await daemon._publish_turn_progress_heartbeat(machine_name(), {agent})
+        await daemon._publish_turn_progress_heartbeat(
+            EventBus.from_settings(), machine_name(), {agent}
+        )
         assert "db_wait" not in writes[-1][str(agent)]
         assert database_wait_snapshot(agent) is None
     finally:
@@ -285,7 +304,7 @@ async def test_pending_scan_gives_inactive_agent_a_turn_before_using_its_old_clo
 
     scheduler = TurnScheduler(run)
     dispatcher = InboundWakeDispatcher(
-        redis_url="redis://127.0.0.1:1",
+        bus=EventBus.from_settings(),
         scheduler=scheduler,
         pending_scan=pending,
         stale_after_s=1.0,

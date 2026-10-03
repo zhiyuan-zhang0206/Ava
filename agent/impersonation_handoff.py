@@ -119,16 +119,15 @@ async def deliver_handoff(
     even when nothing else is queued (claim also resumes on the trailing note, so
     an empty queue is not an idle verdict).
 
-    Event accounting is handled only by the runner's background reconcile loop.
-    The handoff keeps its documented pending semantics until that loop finishes;
-    replay never delays the native checkpoint or its receipt.
+    Event accounting never delays the native checkpoint or its receipt: a log-native
+    lease is complete in the database or keeps its documented pending semantics until
+    its last open source seals.
 
     ``reason`` is the death cause of a supervisor-aborted session (task #3998);
     when present, the note names it right after the session-end sentence.
     """
     from agent.impersonation import flush_checkpoint
 
-    # Replay is owned by services.agent_host.impersonation_events.reconcile_forever.
     # Keep the truthful pending record while the durable native handoff proceeds.
     summary, path = await asyncio.to_thread(_save_document, session, incarnation)
     config = {"configurable": {"thread_id": str(incarnation.agent_id)}}
@@ -145,7 +144,7 @@ async def deliver_handoff(
             "Read event_delivery before interpreting counts: while its state is pending, "
             "consumed_event_count is not final and zero means no events have been consumed yet, "
             "not that no SDK calls occurred. event_delivery.state=complete certifies only "
-            "the upstream manifest of emitted SDK/API events; SDK sampling policy is unknown, "
+            "the record of emitted SDK/API events; SDK sampling policy is unknown, "
             "so an SDK consumed_event_count of zero never proves no SDK calls. "
             "Incoming messages marked unacknowledged still need your attention. "
             "Your execution resumes with this note.",

@@ -26,12 +26,14 @@ from psycopg import sql
 from psycopg_pool import ConnectionPool
 
 from base.config import settings
+from base.db.tests.fakes import fake_database
 from services.events_maintenance import blob_vacuum
 from services.events_maintenance.blob_vacuum import (
     in_low_traffic_window,
     run_blob_vacuum,
     vacuum_checkpoint_tables,
 )
+from services.events_maintenance.tests.slices import events_maintenance_db
 
 _SCHEMA = """
 CREATE TABLE checkpoints (
@@ -109,9 +111,8 @@ def pool(db_conn: psycopg.Connection) -> Iterator[ConnectionPool[Any]]:
 
 
 @pytest.fixture
-def cluster_tz(monkeypatch: pytest.MonkeyPatch) -> str:
-    """Pin the cluster timezone so the window is not read off the CI host."""
-    monkeypatch.setattr(settings.general, "timezone", "America/Los_Angeles")
+def cluster_tz() -> str:
+    """The cluster timezone the window is evaluated in (not read off the CI host)."""
     return "America/Los_Angeles"
 
 
@@ -123,15 +124,15 @@ def _pdt(hour: int, minute: int = 0, second: int = 0) -> datetime:
 def test_window_boundaries(cluster_tz: str) -> None:
     """05:00-08:00 cluster time, inclusive start, exclusive end."""
     _ = cluster_tz
-    assert in_low_traffic_window(_pdt(5, 0))
-    assert in_low_traffic_window(_pdt(7, 59, 59))
-    assert not in_low_traffic_window(_pdt(4, 59, 59))
-    assert not in_low_traffic_window(_pdt(8, 0))
-    assert not in_low_traffic_window(_pdt(11, 0))  # measured peak
-    assert not in_low_traffic_window(_pdt(23, 0))
+    assert in_low_traffic_window(cluster_tz, _pdt(5, 0))
+    assert in_low_traffic_window(cluster_tz, _pdt(7, 59, 59))
+    assert not in_low_traffic_window(cluster_tz, _pdt(4, 59, 59))
+    assert not in_low_traffic_window(cluster_tz, _pdt(8, 0))
+    assert not in_low_traffic_window(cluster_tz, _pdt(11, 0))  # measured peak
+    assert not in_low_traffic_window(cluster_tz, _pdt(23, 0))
 
 
-def test_window_follows_cluster_timezone(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_window_follows_cluster_timezone() -> None:
     """The window is cluster wall clock, not a hard-coded fleet's timezone.
 
     Same instant, two cluster timezones: 13:00 UTC is 06:00 in Los Angeles
@@ -141,13 +142,10 @@ def test_window_follows_cluster_timezone(monkeypatch: pytest.MonkeyPatch) -> Non
     """
     instant = datetime(2026, 8, 10, 13, 0, tzinfo=UTC)
 
-    monkeypatch.setattr(settings.general, "timezone", "America/Los_Angeles")
-    assert in_low_traffic_window(instant)
-
-    monkeypatch.setattr(settings.general, "timezone", "Asia/Shanghai")
-    assert not in_low_traffic_window(instant)
-    # ...and Shanghai's own 06:00 (22:00 UTC the day before) is now inside.
-    assert in_low_traffic_window(datetime(2026, 8, 9, 22, 0, tzinfo=UTC))
+    assert in_low_traffic_window("America/Los_Angeles", instant)
+    assert not in_low_traffic_window("Asia/Shanghai", instant)
+    # ...and Shanghai's own 06:00 (22:00 UTC the day before) is inside.
+    assert in_low_traffic_window("Asia/Shanghai", datetime(2026, 8, 9, 22, 0, tzinfo=UTC))
 
 
 def test_run_skips_outside_window(monkeypatch: pytest.MonkeyPatch, cluster_tz: str) -> None:
@@ -168,7 +166,7 @@ def test_run_skips_outside_window(monkeypatch: pytest.MonkeyPatch, cluster_tz: s
             return datetime(2026, 8, 10, 10, 0, tzinfo=UTC)  # 03:00 PDT — outside window
 
     monkeypatch.setattr("services.events_maintenance.blob_vacuum.datetime", _Frozen)
-    result = run_blob_vacuum()
+    result = run_blob_vacuum(events_maintenance_db(), timezone=cluster_tz)
     assert result.ran is False
     assert result.total_bytes == 0
 
@@ -311,17 +309,14 @@ def test_run_skips_missing_tables_fresh_cluster(
     so an unguarded UndefinedTable would crash-loop the daily window
     (adversarial review of #2226)."""
 
-    def _fake_connect(*_a, **_k):
+    def _fake_connect(*_a: object, **_k: object) -> object:
         return pool.connection()  # PoolConnection — usable as a `with` target
 
-    import base.db
-
-    monkeypatch.setattr(base.db, "connect", _fake_connect)  # pyright: ignore[reportUnknownArgumentType]
     # Drop the tables the fixture created, simulating a greenfield cluster.
     with pool.connection() as conn, conn.cursor() as cur:
         cur.execute("DROP TABLE checkpoint_blobs, checkpoints, checkpoint_writes")
 
-    result = run_blob_vacuum(force=True)
+    result = run_blob_vacuum(fake_database(_fake_connect), timezone="UTC", force=True)
     assert result.ran is False
     assert result.total_bytes == 0
 

@@ -15,7 +15,7 @@ from datetime import UTC, datetime
 
 from base.agents.exit_codes import SERVICES_NOT_READY_EXIT_CODE
 from base.cluster.machine import machine_name, machine_role
-from base.db import connect
+from base.db import Database
 from base.deploy.lifecycle import start_serving
 from base.deploy.maintenance import admission, cohort, hold_driver, pause_owner
 from base.deploy.maintenance.state import MaintenanceHold
@@ -55,7 +55,7 @@ def stop(
     hold = _hold(holder, at)
     if hold.phase not in ("drained", "stopping", "stopped"):
         raise RuntimeError("stop requires a completed drain for this operation")
-    with connect() as conn:
+    with Database.from_settings().connect() as conn:
         cohort.verify_drained(conn, hold)
     if "agent-runner" in machine_role() and hold.phase == "drained":
         identity = host_identity_or_none()
@@ -110,7 +110,7 @@ def resume(holder: str, at: datetime, *, cancel: bool) -> None:
             "would not qualify)",
             file=sys.stderr,
         )
-    with connect() as conn:
+    with Database.from_settings().connect() as conn:
         conn.execute("SELECT 1")
     # Preserve the hold if dependency/posture restoration fails. A crash after
     # its release is recovered by existing durable restart-pointer scanning.
@@ -150,7 +150,7 @@ def _repair(holder: str, at: datetime, *, operator: str | None) -> None:
                 "agent-host still has active continuations; wait for quiescence "
                 "before repairing failed receipts"
             )
-    with connect() as conn:
+    with Database.from_settings().connect() as conn:
         conn.execute("SELECT 1")
     record = _repair_record(operator)
     admission.repair(holder, at, record)

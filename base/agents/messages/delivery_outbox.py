@@ -59,6 +59,7 @@ import os
 import threading
 import time
 import uuid
+from collections.abc import Callable, Iterator
 from contextlib import AbstractContextManager, suppress
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
@@ -275,8 +276,7 @@ def _entry_path_name(agent_id: int, message_fingerprint: str, stamp: datetime) -
 
 
 def _write_atomic(path: Path, entry: OutboxEntry) -> None:
-    """Write one entry durably (tmp + fsync + replace), mirroring the
-    pty-close-notices journal discipline."""
+    """Write one entry durably (tmp + fsync + replace)."""
     path.parent.mkdir(parents=True, exist_ok=True)
     write_text_atomic(
         path,
@@ -674,7 +674,20 @@ def _record_failed_flush(path: Path, entry: OutboxEntry, moment: datetime) -> Ou
     return updated
 
 
-def flush(pool: FlushPool, *, now: datetime | None = None) -> FlushReport:
+def _paced(paths: list[Path], on_record: Callable[[], None] | None) -> Iterator[Path]:
+    """The pass's directory entries, announcing each one as it starts."""
+    for path in paths:
+        if on_record is not None:
+            on_record()
+        yield path
+
+
+def flush(
+    pool: FlushPool,
+    *,
+    now: datetime | None = None,
+    on_record: Callable[[], None] | None = None,
+) -> FlushReport:
     """One redelivery pass over this machine's records.
 
     A record is delivered through `insert_chat_inbound_once` (idempotent by its
@@ -689,7 +702,8 @@ def flush(pool: FlushPool, *, now: datetime | None = None) -> FlushReport:
     A file that fails to parse (bad JSON, drifted schema, unparseable
     timestamps) is counted unreadable and kept for inspection; it never stops
     the pass. While the outbox is disabled, nothing is touched and records
-    stay for a re-enable or the operator.
+    stay for a re-enable or the operator. `on_record` is called before each
+    directory entry, for a caller that tracks the pass's progress.
     """
     snapshot = limits()
     moment = now or datetime.now(UTC)
@@ -697,7 +711,7 @@ def flush(pool: FlushPool, *, now: datetime | None = None) -> FlushReport:
     if not directory.is_dir():
         return FlushReport()
     delivered = buffered = abandoned = deferred = unreadable = expired = 0
-    for path in sorted(directory.iterdir()):
+    for path in _paced(sorted(directory.iterdir()), on_record):
         if path.suffix != _ENTRY_SUFFIX or not path.is_file():
             continue
         entry = _read(path)

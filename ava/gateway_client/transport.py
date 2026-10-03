@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import json as _json
 import uuid as _uuid
-from collections.abc import Callable
+from collections.abc import Callable, Generator
+from contextlib import contextmanager
+from typing import Any
 
 import ava
 from base.agents import EXCEPTION_BY_REASON, ErrorReason, GatewayUnavailable
@@ -29,17 +31,26 @@ from base.host.net.resilience import Policy, http_classifier, retry
 _client: httpx.Client | None = None  # noqa: F821  # pyright: ignore[reportUndefinedVariable]
 
 
+def _swap_client(client: httpx.Client | None) -> httpx.Client | None:  # noqa: F821  # pyright: ignore[reportUndefinedVariable]
+    """Install *client* as the process-wide client and return the one it replaced.
+
+    The only place the module singleton is rebound: the lazy build and
+    `use_client` both go through it."""
+    global _client
+    previous, _client = _client, client
+    return previous
+
+
 def _client_singleton() -> httpx.Client:  # noqa: F821  # pyright: ignore[reportUndefinedVariable]
     """Process-wide httpx client, built on first use so importing the SDK in a
     no-config context does not require the gateway URL to be resolvable until an
-    actual call is made. Tests may inject a client by setting the module global
-    `_client` directly (e.g. a FastAPI TestClient)."""
+    actual call is made. `use_client` installs a different one."""
     import httpx
 
     from base.host.net.http_dial import transport_for_url
 
-    global _client  # noqa: PLW0603 — lazy module singleton
-    if _client is None:
+    client = _client
+    if client is None:
         # The gateway requires auth on every API route of an authenticated
         # cluster. The SDK is a script/agent caller, so it presents a bearer
         # (the cookie path is the browser's): the machine API token its launch
@@ -50,7 +61,7 @@ def _client_singleton() -> httpx.Client:  # noqa: F821  # pyright: ignore[report
         # header — matches the gateway's fail-open when its own secret is unset.
         bearer = gateway_bearer()
         headers = bearer_header(bearer) if bearer else {}
-        _client = httpx.Client(
+        client = httpx.Client(
             base_url=ava.GATEWAY_URL,
             timeout=httpx.Timeout(settings.gateway.gateway_client_http_timeout_seconds),
             headers=headers,
@@ -59,15 +70,35 @@ def _client_singleton() -> httpx.Client:  # noqa: F821  # pyright: ignore[report
             # target) is httpx's own default transport, unchanged.
             transport=transport_for_url(ava.GATEWAY_URL),
         )
-    return _client
+        _swap_client(client)
+    return client
+
+
+@contextmanager
+def use_client(client: Any) -> Generator[Any]:
+    """Route every SDK call in the block through *client* — a FastAPI `TestClient` for an
+    in-process gateway, or any `httpx.Client` — then put back whichever client was installed
+    before (none: the next call builds the default one)."""
+    previous = _swap_client(client)
+    try:
+        yield client
+    finally:
+        _swap_client(previous)
 
 
 # Gateway cold start ~0.6s (measured). Default 3 retries, base interval 1s —
 # bounded exponential backoff 1s → 2s → 4s → 8s cap (see `_retry_delay_seconds`),
 # a much larger window than the restart time and well within the 10s timeout.
 # env override: `AVA_GATEWAY_MAX_RETRIES` / `AVA_GATEWAY_RETRY_DELAY_SECONDS`.
-_MAX_RETRIES = settings.gateway.gateway_client_max_retries
-_RETRY_DELAY_S = settings.gateway.gateway_client_retry_delay_seconds
+
+
+def _max_retries() -> int:
+    return settings.gateway.gateway_client_max_retries
+
+
+def _base_retry_delay_s() -> float:
+    return settings.gateway.gateway_client_retry_delay_seconds
+
 
 # ── Transient-failure retry policy ──
 # The status set (429/500/502/503/504) lives with the deferred-delivery outbox
@@ -136,7 +167,7 @@ def _agent_jitter_seconds() -> float:
 def _retry_delay_seconds(attempt: int) -> float:
     """Sleep before retry `attempt` (0-based): bounded exponential backoff
     plus the deterministic per-agent jitter offset."""
-    base = min(_RETRY_DELAY_S * _RETRY_BACKOFF_FACTOR**attempt, _RETRY_MAX_DELAY_S)
+    base = min(_base_retry_delay_s() * _RETRY_BACKOFF_FACTOR**attempt, _RETRY_MAX_DELAY_S)
     return base + _agent_jitter_seconds()
 
 
@@ -320,7 +351,7 @@ def post(
     client's configured timeout" — there is deliberately no way to ask for an
     unbounded request.
 
-    `max_retries` overrides the module-wide attempt count (`_MAX_RETRIES`) for
+    `max_retries` overrides the module-wide attempt count (`_max_retries()`) for
     this one call. The default fits routes the gateway works on directly, but
     a call whose failure mode is a *modelled, already-spent* response (e.g.
     memory search, where the gateway answers 503 only after consuming its own
@@ -352,7 +383,7 @@ def post(
     key = idempotency_key or _uuid.uuid4().hex
     headers = {"Idempotency-Key": key} if semantics is Idempotency.AT_LEAST_ONCE_WITH_KEY else None
 
-    retries = _MAX_RETRIES if max_retries is None else max_retries
+    retries = _max_retries() if max_retries is None else max_retries
     return _request_with_retry(
         lambda: _client_singleton().post(
             path, json=json or {}, params=params, timeout=per_call, headers=headers
@@ -384,7 +415,7 @@ def get(
     import httpx
 
     per_call = httpx.USE_CLIENT_DEFAULT if timeout is None else timeout
-    retries = _MAX_RETRIES if max_retries is None else max_retries
+    retries = _max_retries() if max_retries is None else max_retries
     return _request_with_retry(
         lambda: _client_singleton().get(path, params=params, timeout=per_call), retries
     )
@@ -398,10 +429,10 @@ def patch(path: str, json: dict | None = None) -> httpx.Response:  # noqa: F821 
     outcome beyond the first application.
     """
     return _request_with_retry(
-        lambda: _client_singleton().patch(path, json=json or {}), _MAX_RETRIES
+        lambda: _client_singleton().patch(path, json=json or {}), _max_retries()
     )
 
 
 def _delete(path: str) -> httpx.Response:  # noqa: F821  # pyright: ignore[reportUndefinedVariable]
     """Unified DELETE wrapper + transient-failure retry + failure → GatewayUnavailable. Same policy as `post`; DELETE is idempotent by semantics."""
-    return _request_with_retry(lambda: _client_singleton().delete(path), _MAX_RETRIES)
+    return _request_with_retry(lambda: _client_singleton().delete(path), _max_retries())

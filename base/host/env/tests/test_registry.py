@@ -19,8 +19,6 @@ from pathlib import Path
 
 import pytest
 
-from tests.fixtures.units import skip_authority_pass, use_env_files
-
 # Ensure settings-lite so we can import config without a real .env
 os.environ["AVA_CONFIG_FETCH"] = (
     "skip"  # assignment, not setdefault: a setdefault would silently keep an inherited value (the login-shell .env leak class) instead of pinning settings-lite
@@ -69,71 +67,13 @@ class TestScopeDerivationRules:
         assert len(expected) > 150  # the six-gap class lives in this set
 
     def test_session_forward_is_host_scope(self) -> None:
-        from base.host.env.registry import (
-            AVA_HOME_ENV,
-            MANIFEST_CERTIFICATION_SECRET_ENV,
-            session_forward_keys,
-        )
+        from base.host.env.registry import AVA_HOME_ENV, session_forward_keys
 
         # The home is no Settings field; it rides every child as a declared key.
-        expected = (_aliases_with(scope=("host",)) | {AVA_HOME_ENV}) - {
-            MANIFEST_CERTIFICATION_SECRET_ENV
-        }
+        expected = _aliases_with(scope=("host",)) | {AVA_HOME_ENV}
         assert session_forward_keys() == expected
         # The F-s3-4 headline: per-agent identity never rides a daemon session.
         assert "AVA_AGENT_ID" not in session_forward_keys()
-
-    def test_manifest_certification_proof_is_not_forwarded_to_model_children(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """The host finalizer receives its proof only through a dedicated projection."""
-        from base.host.env import dotenv_boot
-        from base.host.env.registry import (
-            MANIFEST_CERTIFICATION_FINALIZER_ENV,
-            MANIFEST_CERTIFICATION_SECRET_ENV,
-            child_env,
-            manifest_certification_secret_env,
-        )
-
-        monkeypatch.setattr(
-            dotenv_boot,
-            "manifest_certification_secret_from_env_file",
-            lambda: "host-finalizer-proof",
-        )
-        assert manifest_certification_secret_env() == {
-            MANIFEST_CERTIFICATION_SECRET_ENV: "host-finalizer-proof",
-            MANIFEST_CERTIFICATION_FINALIZER_ENV: "1",
-        }
-        for role in ("gateway", "runner"):
-            assert MANIFEST_CERTIFICATION_SECRET_ENV not in child_env(role)
-            assert MANIFEST_CERTIFICATION_FINALIZER_ENV not in child_env(role)
-
-    def test_finalizer_boot_ticket_retains_proof_from_its_unit_file(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-    ) -> None:
-        """The ticket is consumed before the finalizer loads its unit `.env`."""
-        from base.host.env import dotenv_boot
-        from base.host.env.registry import (
-            MANIFEST_CERTIFICATION_FINALIZER_ENV,
-            MANIFEST_CERTIFICATION_SECRET_ENV,
-        )
-
-        proof = "host-finalizer-proof"
-        env_file = tmp_path / ".env"
-        env_file.write_text(f"{MANIFEST_CERTIFICATION_SECRET_ENV}={proof}\n")
-        use_env_files(monkeypatch, env_file, tmp_path / "mirror.env")
-        monkeypatch.setattr(dotenv_boot, "_enforce_cluster_env_authority", skip_authority_pass)
-        monkeypatch.setattr(dotenv_boot, "_manifest_finalizer_boot_authorized", False)
-        # setenv first: delenv alone records nothing for an absent key, so the secret the boot
-        # below loads would outlive the test
-        monkeypatch.setenv(MANIFEST_CERTIFICATION_SECRET_ENV, "")
-        monkeypatch.delenv(MANIFEST_CERTIFICATION_SECRET_ENV)
-        monkeypatch.setenv(MANIFEST_CERTIFICATION_FINALIZER_ENV, "1")
-
-        dotenv_boot.load_ava_env()
-
-        assert os.environ[MANIFEST_CERTIFICATION_SECRET_ENV] == proof
-        assert MANIFEST_CERTIFICATION_FINALIZER_ENV not in os.environ
 
     def test_session_forward_carries_the_ambient_passthroughs(self) -> None:
         from base.host.env.registry import HOST_PASSTHROUGH_KEYS
@@ -292,6 +232,8 @@ class TestConsumptionMatrixDeclarations:
             "task_maintenance",
             "events_maintenance",
             "pg_backup",
+            "ttl_reaper",
+            "schedule_manager",
             "memory_indexer",
             "ops",
             "delivery_watchdog",

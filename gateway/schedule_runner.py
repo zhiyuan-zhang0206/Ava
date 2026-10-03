@@ -46,11 +46,11 @@ from types import FrameType
 
 from loguru import logger
 
-import base.db
 import base.host.proc
 from base.config import settings
-from base.db.transaction import write_transaction
+from base.db import Database
 from base.paths import ava_home, prod_service_checkout_error
+
 
 # A .py schedule script is run in-process, so a single call that hangs (a
 # wedged gateway, a black-holed DB connection, a stuck import) parks the whole
@@ -60,8 +60,13 @@ from base.paths import ava_home, prod_service_checkout_error
 # thread's stack and hard-exits after a frame has not advanced for this long,
 # so the ScheduleManager's crash path (backoff + breaker + last_error) gets a
 # chance instead of a zombie.
-_STALL_TIMEOUT_S = settings.gateway.schedule_stall_timeout_seconds
-_STALL_CHECK_INTERVAL_S = settings.gateway.schedule_stall_check_interval_seconds
+def _stall_timeout_s() -> float:
+    return settings.gateway.schedule_stall_timeout_seconds
+
+
+def _stall_check_interval_s() -> float:
+    return settings.gateway.schedule_stall_check_interval_seconds
+
 
 # Frames that legitimately park the main thread for unbounded time — a
 # resident schedule's whole reason for existing is a long sleep between fire
@@ -101,10 +106,10 @@ def _script_filename(command: str) -> str:
     return "schedule.py"
 
 
-def _load(schedule_id: int) -> tuple[str, str] | None:
+def _load(database: Database, schedule_id: int) -> tuple[str, str] | None:
     """Return (script, command) for an enabled schedule, or None if it is gone /
     disabled (a benign race: the manager launched it, then it was deleted)."""
-    with base.db.connect(autocommit=True) as conn, conn.cursor() as cur:
+    with database.connect(autocommit=True) as conn, conn.cursor() as cur:
         cur.execute(
             "SELECT script, command FROM schedules WHERE id = %s AND enabled = true",
             (schedule_id,),
@@ -113,29 +118,29 @@ def _load(schedule_id: int) -> tuple[str, str] | None:
     return (row[0], row[1]) if row is not None else None
 
 
-def _record_error(schedule_id: int, message: str) -> None:
-    with write_transaction() as conn, conn.cursor() as cur:
+def _record_error(database: Database, schedule_id: int, message: str) -> None:
+    with database.write_transaction() as conn, conn.cursor() as cur:
         cur.execute(
             "UPDATE schedules SET last_error = %s, updated_at = now() WHERE id = %s",
             (message, schedule_id),
         )
 
 
-def _mark_completed(schedule_id: int) -> None:
+def _mark_completed(database: Database, schedule_id: int) -> None:
     """Record a clean exit (rc=0) as the terminal `completed` status. A schedule
     is a supervised resident process, so an exit-0 is a deliberate finish, not a
     crash — this is the durable signal the ScheduleManager reads to leave the
     schedule alone instead of relaunching / counting it toward the crash breaker.
     The manager reads liveness before status, so a session that is gone is
-    guaranteed to have this write already committed (see gateway/schedules/manager.py)."""
-    with write_transaction() as conn, conn.cursor() as cur:
+    guaranteed to have this write already committed (see services/schedule_manager/manager.py)."""
+    with database.write_transaction() as conn, conn.cursor() as cur:
         cur.execute(
             "UPDATE schedules SET status = 'completed', updated_at = now() WHERE id = %s",
             (schedule_id,),
         )
 
 
-def _finish_completed(schedule_id: int, run_id: int | None) -> None:
+def _finish_completed(database: Database, schedule_id: int, run_id: int | None) -> None:
     """Record a clean finish: mark the schedule completed and close the run
     row ok=true. The completed-marker write is best-effort — if it fails, the
     manager's liveness-before-status rule makes it relaunch the schedule (the
@@ -143,22 +148,22 @@ def _finish_completed(schedule_id: int, run_id: int | None) -> None:
     finished, only the bookkeeping lost a write (QA P3-5 — it must not be
     recorded as 'crashed: OperationalError')."""
     try:
-        _mark_completed(schedule_id)
+        _mark_completed(database, schedule_id)
     except Exception:
         logger.exception("schedule {} completed-marker write failed", schedule_id)
-        _record_run_end(run_id, ok=True, note="completed-marker write failed")
+        _record_run_end(database, run_id, ok=True, note="completed-marker write failed")
     else:
-        _record_run_end(run_id, ok=True, note=None)
+        _record_run_end(database, run_id, ok=True, note=None)
 
 
-def _record_run_start(schedule_id: int) -> int | None:
+def _record_run_start(database: Database, schedule_id: int) -> int | None:
     """Open a run-history row for this process execution (ok = NULL, in-progress).
 
     Returns the run id, or None when the write fails — run history is severable
     observability, so a DB hiccup must never break the schedule itself (the
     caller then skips the closing write)."""
     try:
-        with write_transaction() as conn, conn.cursor() as cur:
+        with database.write_transaction() as conn, conn.cursor() as cur:
             cur.execute(
                 "INSERT INTO schedule_runs (schedule_id) VALUES (%s) RETURNING id",
                 (schedule_id,),
@@ -170,13 +175,13 @@ def _record_run_start(schedule_id: int) -> int | None:
         return None
 
 
-def _record_run_end(run_id: int | None, *, ok: bool, note: str | None) -> None:
+def _record_run_end(database: Database, run_id: int | None, *, ok: bool, note: str | None) -> None:
     """Close a run-history row with its outcome. No-op when the start write
     failed (run_id is None); a failure here is likewise never fatal."""
     if run_id is None:
         return
     try:
-        with write_transaction() as conn, conn.cursor() as cur:
+        with database.write_transaction() as conn, conn.cursor() as cur:
             cur.execute(
                 "UPDATE schedule_runs SET ok = %s, note = %s WHERE id = %s",
                 (ok, note, run_id),
@@ -218,13 +223,13 @@ def _restore_park_detection() -> None:
     time.sleep = _ORIGINAL_SLEEP
 
 
-def _stall_action(schedule_id: int, message: str, run_id: int | None) -> None:
+def _stall_action(database: Database, schedule_id: int, message: str, run_id: int | None) -> None:
     """Reap descendants, bound failure recording, then hard-exit for manager recovery."""
 
     def record_failure() -> None:
         with suppress(Exception):
-            _record_error(schedule_id, message)
-        _record_run_end(run_id, ok=False, note=f"stalled ({_STALL_TIMEOUT_S:.0f}s)")
+            _record_error(database, schedule_id, message)
+        _record_run_end(database, run_id, ok=False, note=f"stalled ({_stall_timeout_s():.0f}s)")
 
     try:
         # Snapshot descendants while ancestry still proves ownership. Retain
@@ -261,15 +266,15 @@ def _is_parked_frame(frame: FrameType) -> bool:
     ) == (_SUBPROCESS_FILENAME, "_communicate")
 
 
-def _start_stall_guard(schedule_id: int, run_id: int | None) -> threading.Event:
+def _start_stall_guard(database: Database, schedule_id: int, run_id: int | None) -> threading.Event:
     """Watch the main thread for a stall and hard-exit when one is found.
 
     Returns a stop event; the caller sets it once the script returns so the
     guard cannot kill the process between a clean return and the completed
     marker write.
 
-    Every ``_STALL_CHECK_INTERVAL_S`` the guard captures the main thread's
-    deepest frame. A frame that has not changed for ``_STALL_TIMEOUT_S`` is a
+    Every ``_stall_check_interval_s()`` the guard captures the main thread's
+    deepest frame. A frame that has not changed for ``_stall_timeout_s()`` is a
     stall (a single call — HTTP, DB, import — that never returned): the guard
     records ``last_error`` and ``os._exit(1)`` so the ScheduleManager's crash
     path (backoff + breaker) relaunches the schedule instead of leaving a
@@ -295,8 +300,9 @@ def _start_stall_guard(schedule_id: int, run_id: int | None) -> threading.Event:
     def _guard() -> None:
         last_sig: tuple[str, int, str] | None = None
         stalled_since: float | None = None
+        # quiesce-exempt: a watchdog thread inside one schedule runner process; it reads frames, not the database
         while not stop.is_set():
-            time.sleep(_STALL_CHECK_INTERVAL_S)
+            time.sleep(_stall_check_interval_s())
             try:
                 frame = sys._current_frames().get(main_thread_id)
                 if frame is None:
@@ -313,13 +319,13 @@ def _start_stall_guard(schedule_id: int, run_id: int | None) -> threading.Event:
                 continue
             now = time.monotonic()
             if sig == last_sig and stalled_since is not None:
-                if now - stalled_since >= _STALL_TIMEOUT_S:
+                if now - stalled_since >= _stall_timeout_s():
                     message = (
                         f"schedule runner stalled {now - stalled_since:.0f}s in "
                         f"{sig[2]} ({sig[0]}:{sig[1]}) — hard-exiting; check the "
                         "gateway / DB / network the script calls into"
                     )
-                    _stall_action(schedule_id, message, run_id)
+                    _stall_action(database, schedule_id, message, run_id)
             elif sig != last_sig:
                 last_sig = sig
                 stalled_since = now
@@ -328,7 +334,9 @@ def _start_stall_guard(schedule_id: int, run_id: int | None) -> threading.Event:
     return stop
 
 
-def _record_script_exit(schedule_id: int, run_id: int | None, exc: SystemExit) -> int:
+def _record_script_exit(
+    database: Database, schedule_id: int, run_id: int | None, exc: SystemExit
+) -> int:
     """Record a .py script's deliberate sys.exit() like a command's exit code
     (QA P3-3 — it must not leave the run row in-progress forever). A None code
     is 0; a non-int code (a message string) is 1. int() normalizes bools (the
@@ -337,17 +345,21 @@ def _record_script_exit(schedule_id: int, run_id: int | None, exc: SystemExit) -
     note instead of being swallowed (QA N1)."""
     code = int(exc.code) if isinstance(exc.code, int) else (0 if exc.code is None else 1)
     if code == 0:
-        _finish_completed(schedule_id, run_id)
+        _finish_completed(database, schedule_id, run_id)
     else:
         message = "" if isinstance(exc.code, int) else f": {exc.code}"
-        _record_error(schedule_id, f"script exited {code}{message}")
-        _record_run_end(run_id, ok=False, note=f"script exited {code}{message}")
+        _record_error(database, schedule_id, f"script exited {code}{message}")
+        _record_run_end(database, run_id, ok=False, note=f"script exited {code}{message}")
     return code
 
 
 def run(schedule_id: int) -> int:
     """Materialize + run the schedule. Returns a process exit code."""
-    loaded = _load(schedule_id)
+    return _run(Database.from_settings(), schedule_id)
+
+
+def _run(database: Database, schedule_id: int) -> int:
+    loaded = _load(database, schedule_id)
     if loaded is None:
         logger.warning("Schedule {} is gone or disabled; nothing to run", schedule_id)
         return 0
@@ -372,7 +384,7 @@ def run(schedule_id: int) -> int:
     # the write. Both an abandoned write and a kill that leaves no code path to
     # close (SIGTERM/SIGHUP/SIGKILL) leave the row in-progress; the manager's
     # reconcile sweep closes it as 'interrupted' once the process is gone.
-    run_id = _record_run_start(schedule_id)
+    run_id = _record_run_start(database, schedule_id)
 
     try:
         if script_name.endswith(".py"):
@@ -392,7 +404,7 @@ def run(schedule_id: int) -> int:
             # so an import hang is covered too. Stopped before _mark_completed
             # so a clean return cannot be overtaken by a spurious kill.
             _patch_park_detection()
-            stop_guard = _start_stall_guard(schedule_id, run_id)
+            stop_guard = _start_stall_guard(database, schedule_id, run_id)
             # The gateway launches this runner as `python -m gateway.schedule_runner
             # <id>`, so sys.argv carries the schedule id. The script must not
             # inherit that runner-only argv: hand it the argv `python <script>`
@@ -412,7 +424,9 @@ def run(schedule_id: int) -> int:
                 # is over, so restore the stdlib sleep — it must not leak into
                 # the rest of this process.
                 _restore_park_detection()
-            _finish_completed(schedule_id, run_id)  # clean return => finished, not crashed
+            _finish_completed(
+                database, schedule_id, run_id
+            )  # clean return => finished, not crashed
             return 0
         # A non-.py command runs as a child process — the stall guard's main-
         # thread frame watch cannot see inside it, and the runner parked in
@@ -425,35 +439,37 @@ def run(schedule_id: int) -> int:
         # after the 2026-08-03 self-evolution miss; the command branch was
         # still open). subprocess.run kills the child on expiry and raises
         # TimeoutExpired; the crash path (backoff + breaker) relaunches.
+        stall_timeout_s = _stall_timeout_s()
         try:
             result = subprocess.run(  # noqa: S603 — command is the operator-authored schedule command
                 shlex.split(command),
                 cwd=str(work_dir),
                 check=False,
-                timeout=_STALL_TIMEOUT_S,
+                timeout=stall_timeout_s,
             )
         except subprocess.TimeoutExpired:
             message = (
-                f"command did not finish within {_STALL_TIMEOUT_S:.0f}s "
-                f"(stall timeout): {command!r}"
+                f"command did not finish within {stall_timeout_s:.0f}s (stall timeout): {command!r}"
             )
-            _record_error(schedule_id, message)
+            _record_error(database, schedule_id, message)
             logger.error("Schedule {} {}", schedule_id, message)
-            _record_run_end(run_id, ok=False, note=f"stall timeout ({_STALL_TIMEOUT_S:.0f}s)")
+            _record_run_end(
+                database, run_id, ok=False, note=f"stall timeout ({stall_timeout_s:.0f}s)"
+            )
             return 1
         if result.returncode != 0:
-            _record_error(schedule_id, f"command exited {result.returncode}: {command!r}")
-            _record_run_end(run_id, ok=False, note=f"command exited {result.returncode}")
+            _record_error(database, schedule_id, f"command exited {result.returncode}: {command!r}")
+            _record_run_end(database, run_id, ok=False, note=f"command exited {result.returncode}")
         else:
-            _finish_completed(schedule_id, run_id)
+            _finish_completed(database, schedule_id, run_id)
         return result.returncode
     except SystemExit as exc:
-        return _record_script_exit(schedule_id, run_id, exc)
+        return _record_script_exit(database, schedule_id, run_id, exc)
     except Exception as exc:
         tb = traceback.format_exc()
-        _record_error(schedule_id, tb)
+        _record_error(database, schedule_id, tb)
         logger.error("Schedule runner execution failed: {}", tb)
-        _record_run_end(run_id, ok=False, note=f"crashed: {type(exc).__name__}")
+        _record_run_end(database, run_id, ok=False, note=f"crashed: {type(exc).__name__}")
         return 1
 
 

@@ -315,7 +315,7 @@ class DaemonSettings(
     ttl_reaper_poll_interval_seconds: float = Field(
         default=60.0,
         alias="AVA_TTL_REAPER_POLL_INTERVAL_SECONDS",
-        description="Gateway TTL reaper poll interval in seconds for expired pages and explicitly time-limited persistent shell sessions.",
+        description="TTL reaper service poll interval in seconds for expired pages, browser sessions, notices, impersonation leases and explicitly time-limited persistent shell sessions.",
         json_schema_extra={
             "capability": "gateway",
             "restart_required": "all",
@@ -328,7 +328,7 @@ class DaemonSettings(
     schedule_fire_log_retention_days: int = Field(
         default=30,
         alias="AVA_SCHEDULE_FIRE_LOG_RETENTION_DAYS",
-        description="Days of schedule_fire_log claims kept by the gateway reaper's retention prune. schedule_fire_log is the at-most-once claim ledger for schedule catch-up; the prune deletes rows whose slot is older than this window but always keeps the newest claim per schedule so the catch-up baseline never regresses (a regressed baseline would refire a sparse-cron schedule's already-claimed slot).",
+        description="Days of schedule_fire_log claims kept by the TTL reaper's retention prune. schedule_fire_log is the at-most-once claim ledger for schedule catch-up; the prune deletes rows whose slot is older than this window but always keeps the newest claim per schedule so the catch-up baseline never regresses (a regressed baseline would refire a sparse-cron schedule's already-claimed slot).",
         json_schema_extra={
             "capability": "gateway",
             "restart_required": "all",
@@ -341,7 +341,7 @@ class DaemonSettings(
     schedule_fire_log_cleanup_interval_seconds: float = Field(
         default=86400.0,
         alias="AVA_SCHEDULE_FIRE_LOG_CLEANUP_INTERVAL_SECONDS",
-        description="How often the gateway reaper runs the schedule_fire_log retention prune. One bounded DELETE per pass; the default keeps a single daily pass.",
+        description="How often the TTL reaper runs the schedule_fire_log retention prune (the clock is kept in maintenance_state, so a restart does not reset it). One bounded DELETE per pass; the default keeps a single daily pass.",
         json_schema_extra={
             "capability": "gateway",
             "restart_required": "all",
@@ -531,7 +531,7 @@ class DaemonSettings(
     events_maintenance_interval_seconds: float = Field(
         default=3600.0,
         alias="AVA_EVENTS_MAINTENANCE_INTERVAL_SECONDS",
-        description="Events-maintenance daemon poll interval (seconds): how often it probes the retained rollup watermark and re-aggregates dirty days. Hourly keeps the durable ledger fresh and recovers a downtime gap within the hour.",
+        description="Events-maintenance daemon poll interval (seconds): how often it recovers observations, replays the mirror and re-aggregates the last closed days. Hourly keeps the durable ledger fresh and recovers a downtime gap within the hour.",
         json_schema_extra={
             "restart_required": "all",
             "writable": True,
@@ -543,21 +543,8 @@ class DaemonSettings(
     events_maintenance_pass_deadline_s: float = Field(
         default=1500.0,
         alias="AVA_EVENTS_MAINTENANCE_PASS_DEADLINE_S",
-        description="Hard deadline in seconds for one hourly events-maintenance pass. Its longest slice, the Loki rollup, is bounded by its own pass deadline; exceeding this bound wedges the loop for watchdog respawn.",
+        description="Hard deadline in seconds for one hourly events-maintenance pass. Exceeding this bound wedges the loop for watchdog respawn.",
         json_schema_extra={
-            "restart_required": "all",
-            "writable": True,
-            "sensitive": False,
-            "scope": "cluster-pinned",
-        },
-    )
-
-    events_rollup_pass_deadline_s: float = Field(
-        default=1200.0,
-        alias="AVA_EVENTS_ROLLUP_PASS_DEADLINE_S",
-        description="Wall-clock budget in seconds for one Loki-to-Postgres rollup pass. The daemon stops between day probes or full recomputes when the budget is exhausted, leaving untouched days dirty for the next pass.",
-        json_schema_extra={
-            "capability": "gateway",
             "restart_required": "all",
             "writable": True,
             "sensitive": False,
@@ -569,33 +556,6 @@ class DaemonSettings(
         default=600.0,
         alias="AVA_EVENTS_MAINTENANCE_RESOLUTION_DEADLINE_S",
         description="Hard deadline in seconds for one events-maintenance class-resolution pass; exceeding it wedges the loop for watchdog respawn.",
-        json_schema_extra={
-            "restart_required": "all",
-            "writable": True,
-            "sensitive": False,
-            "scope": "cluster-pinned",
-        },
-    )
-
-    events_rollup_late_write_lookback_days: int = Field(
-        default=1,
-        ge=1,
-        alias="AVA_EVENTS_ROLLUP_LATE_WRITE_LOOKBACK_DAYS",
-        description="Number of most-recent closed UTC days that the Loki rollup always recomputes, even when their source-count watermark is unchanged. Older candidate days are recomputed only when their count changes or a prior roll failed.",
-        json_schema_extra={
-            "capability": "gateway",
-            "restart_required": "all",
-            "writable": True,
-            "sensitive": False,
-            "scope": "cluster-pinned",
-        },
-    )
-
-    events_jsonl_rollup_retention_days: int = Field(
-        default=90,
-        ge=1,
-        alias="AVA_EVENTS_JSONL_ROLLUP_RETENTION_DAYS",
-        description="Retention in days for the filtered local JSONL replay source (llm_usage, turn_end, and exec-family events). This must remain longer than Loki retention so the events-maintenance daemon can repair ledger gaps after an extended outage.",
         json_schema_extra={
             "restart_required": "all",
             "writable": True,

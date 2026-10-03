@@ -17,8 +17,9 @@ from langgraph.runtime import Runtime
 
 from agent.graph.exec.node import _exec_node_impl
 from agent.state import AgentState
+from agent.tests._fakes import make_fake_ops_pool
 from base.agents.context import AvaContext
-from tests.agent._fakes import make_fake_ops_pool
+from base.host.env.agent_slices import AgentSlices
 
 _CONFIG: RunnableConfig = {"configurable": {"thread_id": "7"}}
 
@@ -39,6 +40,7 @@ def _make_runtime() -> Runtime[AvaContext]:
         ops_pool=make_fake_ops_pool(),
         llm=None,
         event_publisher=MagicMock(),
+        agent=AgentSlices.resolve(),
     )
     return Runtime(context=ctx)
 

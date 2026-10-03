@@ -8,6 +8,7 @@ the scan itself.
 
 from collections.abc import Iterator
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -1388,15 +1389,14 @@ def test_a_swallowed_db_error_reports_failure(
 ) -> None:
     """`_insert_skill_events` keeps swallowing (attribution must never take an
     agent down) but the caller has to be able to tell — otherwise the dedup gate
-    above is gated on nothing. The write path is now the unified emitter's
-    enqueue (never raises on DB trouble); a raise inside the emit call itself
-    (a framework bug) must still surface as False."""
+    above is gated on nothing. A failed `audit_events` write must surface as
+    False so the dedup retries it."""
     _write_skill(fake_skills_dir, "alpha", "name: alpha\ndescription: a")
 
     def _boom(*_a: object, **_k: object) -> None:
-        raise RuntimeError("emitter broken")
+        raise RuntimeError("database down")
 
-    monkeypatch.setattr("base.telemetry.audit_events.insert_event_log_many", _boom)
+    monkeypatch.setattr("base.telemetry.audit_events.record_audit_standalone_many", _boom)
     (skill,) = skills_mod.names()
     assert skills_mod._insert_skill_events(1, [skill]) is False
 
@@ -1412,10 +1412,10 @@ def test_insert_skill_events_writes_only_the_loaded_depth(
 
     captured: list[dict[str, str]] = []
 
-    def _capture(*, payloads: list[dict[str, str]], **_: object) -> None:
-        captured.extend(payloads)
+    def _capture(events: list[Any]) -> None:
+        captured.extend(event.attributes for event in events)
 
-    monkeypatch.setattr("base.telemetry.audit_events.insert_event_log_many", _capture)
+    monkeypatch.setattr("base.telemetry.audit_events.record_audit_standalone_many", _capture)
     (skill,) = skills_mod.names()
     assert skills_mod._insert_skill_events(1, [skill]) is True
     assert captured == [{"skill": "alpha", "identifier": "alpha", "invocation_depth": "loaded"}]

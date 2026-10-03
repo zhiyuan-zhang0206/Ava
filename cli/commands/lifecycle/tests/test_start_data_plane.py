@@ -15,6 +15,7 @@ import pytest
 
 from base import cluster
 from base.config import settings
+from base.db.tests.fakes import patch_database
 from cli.commands.data_plane import cluster_instance as _ci
 from cli.commands.lifecycle import start as _start
 
@@ -46,6 +47,11 @@ def test_gateway_data_plane_brings_up_own_instance(monkeypatch: pytest.MonkeyPat
     monkeypatch.setattr(_ci, "ensure_cluster_storage", lambda **kw: own_calls.append(kw) or 0)  # pyright: ignore[reportUnknownArgumentType]
 
     assert _start._ensure_gateway_data_plane() == 0
+    # The root that holds the secret published the telemetry token the station probe reads.
+    from base.cluster.authority.api import read_telemetry_token, telemetry_token
+    from base.paths import ava_home
+
+    assert read_telemetry_token(ava_home().resolve()) == telemetry_token("bearer")
     # The identity comes from the db_url username, not any name derivation.
     assert own_calls == [
         {
@@ -94,7 +100,7 @@ class _Ledger:
         self.owner = "ava"
         self.groups = "groups"
         self.active = SimpleNamespace(number=0) if active else None
-        self.unrevoked = SimpleNamespace(number=0)
+        self.generation = SimpleNamespace(number=0)
 
 
 class _Plane:
@@ -148,7 +154,6 @@ def plane(monkeypatch: pytest.MonkeyPatch) -> _Plane:
     monkeypatch.setattr(authority, "create_ledger", record("ledger"))
     monkeypatch.setattr(authority, "ensure_pooler_admin", record("pooler-admin"))
     monkeypatch.setattr(authority, "mint_generation", record("mint"))
-    monkeypatch.setattr(authority, "sweep", record("sweep"))
     monkeypatch.setattr(authority, "check_invariant", record("invariant"))
     monkeypatch.setattr(authority, "verify_generation", record("verify"))
 
@@ -170,7 +175,7 @@ def plane(monkeypatch: pytest.MonkeyPatch) -> _Plane:
     return recorded
 
 
-def test_ordinary_start_regrants_sweeps_and_checks_before_the_pooler(plane: _Plane) -> None:
+def test_ordinary_start_regrants_and_checks_before_the_pooler(plane: _Plane) -> None:
     from cli.commands.data_plane.bringup import complete_gateway_data_plane
 
     complete_gateway_data_plane()
@@ -180,7 +185,6 @@ def test_ordinary_start_regrants_sweeps_and_checks_before_the_pooler(plane: _Pla
         "memory-vectors",
         "groups",
         "monitor",
-        "sweep",
         "invariant",
         "pooler",
         "prove-logins",
@@ -221,7 +225,6 @@ def test_release_readiness_performs_no_schema_or_grant_writes(plane: _Plane) -> 
     complete_gateway_data_plane(refresh_schema=False)
     assert plane.calls == [
         "start",
-        "sweep",
         "invariant",
         "pooler",
         "prove-logins",
@@ -243,7 +246,7 @@ def test_invariant_violation_never_starts_pooler_or_marks_provisioned(
     monkeypatch.setattr(authority, "check_invariant", fail)
     with pytest.raises(authority.CatalogRefusedError, match="foreign grant"):
         complete_gateway_data_plane()
-    assert plane.calls == ["start", "extension", "memory-vectors", "groups", "monitor", "sweep"]
+    assert plane.calls == ["start", "extension", "memory-vectors", "groups", "monitor"]
 
 
 class _Authority:
@@ -291,7 +294,6 @@ def test_remote_plane_prepares_memory_vectors_through_its_provider_url(
 ) -> None:
     """A remote-managed plane has no local owner authority; its provider URL
     carries the table DDL, exactly as it carries the plane's migrations."""
-    import base.db
     from base.db import pg_admin
     from cli.commands.data_plane.bringup import prepare_memory_vectors
     from services.memory_indexer.backends import pgvector
@@ -309,7 +311,7 @@ def test_remote_plane_prepares_memory_vectors_through_its_provider_url(
 
     monkeypatch.setattr(settings.data_plane, "db_url", "postgresql://owner@db.example/ava")
     monkeypatch.setattr(settings.services, "memory_search_backend", "pgvector")
-    monkeypatch.setattr(base.db, "connect", provider)
+    patch_database(monkeypatch, connect=provider)
     monkeypatch.setattr(pg_admin, "local_owner_authority", lambda: pytest.fail("no local admin"))
     monkeypatch.setattr(pgvector, "prepare_table", prepare)
     monkeypatch.setattr(factory, "get_provider", lambda: SimpleNamespace(dim=768))

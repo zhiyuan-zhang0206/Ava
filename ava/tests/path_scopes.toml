@@ -1,0 +1,28 @@
+# Fixture modules (tests/path_scoped/) that govern this directory's tests: "." is the
+# directory itself, otherwise the test files named here (tests/fixtures/path_scopes.py).
+"tests.path_scoped.ava_tests" = [
+    "test_agent_identity.py",
+    "test_attachment_transport.py",
+    "test_files.py",
+    "test_lazy_boot_import.py",
+    "test_lazy_connection.py",
+    "test_lazy_lm_import.py",
+    "test_machine_surface.py",
+    "test_mcp_config.py",
+    "test_mcp_config_enable_filter.py",
+    "test_mcps.py",
+    "test_sdk_disable.py",
+    "test_sdk_redis_resilience.py",
+    "test_security.py",
+    "test_self_compact_publish.py",
+    "test_self_machine_spec.py",
+    "test_session_venv_projection.py",
+    "test_skills.py",
+    "test_understand.py",
+    "test_watcher.py",
+    "test_watcher_plugin_load.py",
+    "test_web.py",
+]
+"tests.path_scoped.integration_tests" = [
+    "test_core.py",
+]

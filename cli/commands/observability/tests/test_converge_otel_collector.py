@@ -400,8 +400,7 @@ def test_gateway_config_scrapes_this_clusters_own_data_plane(
     """A gateway-capable unit owns Postgres+Redis, so its sidecar carries the
     postgresql + redis receivers. Postgres is dialed DIRECT (never the pooler)
     over the home's owner-only socket as the password-less monitoring role,
-    never as the write-generation login the start process adopted (revoked by
-    the next rollout); Redis with its admin password."""
+    never as the write-generation login the start process adopted; Redis with its admin password."""
     from base.cluster.authority import MONITOR_ROLE
     from base.db.pg_admin import pg_socket_path
 

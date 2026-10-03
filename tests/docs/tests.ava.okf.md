@@ -20,7 +20,7 @@ tags:
 
 | Layer | Location | Description |
 |---|---|---|
-| **Unit tests** | `<pkg>/**/tests/test_{file}.py` | one test file per source file, in the `tests/` directory of the package it tests (the top-level `tests/{module}/` holds those still to move; `scripts/structure/tests_location.py` refuses new ones) |
+| **Unit tests** | `<pkg>/**/tests/test_{file}.py` | one test file per source file, in the `tests/` directory of the package it tests (the top-level `tests/{module}/` holds only registered contract and integration tests; `scripts/structure/tests_location.py` refuses any other) |
 | **Integration tests** | `tests/integration/` | cross-module tests; `TestClient` mounts `gateway.app` in-process + custom `_TestClientTransport` forwarding httpx, **no separate Gateway process** |
 | **E2E tests** | `tests/e2e/` | full-stack end-to-end tests |
 | **Data factories** | `tests/factories/` | test data construction tools |
@@ -56,7 +56,7 @@ A package's own tests sit beside the code they prove (`base/packages/plugins/tes
 - `tests/plugins/` — plugin tests (`test_ava_memory_lint.py` / `test_ava_memory_notes.py` for the ava_memory plugin, `ava_fleet/` subtree)
 - `tests/fixtures/` — the suite's global fixture plugins (see "Global fixtures" below) plus event fixture data; `tests/factories/` — data factories
 
-- `tests/scripts/test_test_selector.py` — synthetic-checkout contracts for
+- `scripts/tests/test_test_selector.py` — synthetic-checkout contracts for
   the static PR test selector, including queue, blind-file, duration, and
   process-determinism escapes
 - `tests/scripts/test_ci_test_selection.py` — workflow contracts for the
@@ -65,7 +65,7 @@ A package's own tests sit beside the code they prove (`base/packages/plugins/tes
 
 ### Global fixtures (repo-root `conftest.py` → `tests/fixtures/` plugins)
 - The repo-root `conftest.py` holds only `pytest_plugins`; the suite's global fixtures, host guards and session hooks are plugin modules in `tests/fixtures/`, so they apply to every test file in the repository rather than only the `tests/` tree. Plugin roster, load order and the isolation invariants: [[test-fixtures.ava.okf.md]]
-- Directory-level fixtures (the former `conftest.py` files of `agent` / `ava` / `cli` / `gateway` / `integration` / `services` / `scripts/structure` / `lifecycle/db_authority`) are modules in `tests/path_scoped/`, registered for the paths listed in `PATH_SCOPES` (`tests/fixtures/path_scopes.py`) so they follow a test into a package's `tests/` directory. A `conftest.py` remains only in `e2e` (package-scoped real processes), `lifecycle/native_root` (it must run without the repo-root conftest) and `services` (the win32 `collect_ignore`); details: [[test-fixtures.ava.okf.md]]
+- Directory-level fixtures (the former `conftest.py` files of `agent` / `ava` / `cli` / `gateway` / `integration` / `services` / `scripts/structure` / `lifecycle/db_authority`) are modules in `tests/path_scoped/`, registered for the paths named by the `path_scopes.toml` files next to the tests (`PATH_SCOPES`, read by `tests/fixtures/path_scopes.py`) so they follow a test into a package's `tests/` directory. A `conftest.py` remains only in `e2e` (package-scoped real processes), `lifecycle/native_root` (it must run without the repo-root conftest) and `services` (the win32 `collect_ignore`); details: [[test-fixtures.ava.okf.md]]
 
 ### CI integration
 - `.github/workflows/` — GitHub Actions runs the full suite automatically

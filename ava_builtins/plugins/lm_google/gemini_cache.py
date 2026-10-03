@@ -67,7 +67,7 @@ from typing import Any
 from langchain_core.language_models.chat_models import BaseChatModel
 from loguru import logger
 
-from base.config.turn_view import turn_settings
+from base.host.env.agent_slices import LlmCallPolicy
 
 # Cache lifetime. 3600s is also the API default; stated explicitly so the
 # refresh arithmetic has one source. Storage bills per token-hour, so a
@@ -146,7 +146,7 @@ def invalidate(ref: CacheRef) -> None:
     _MEMO.pop(ref.key, None)
 
 
-async def _maybe_refresh(client: Any, ref: CacheRef, now: datetime) -> None:
+async def _maybe_refresh(client: Any, ref: CacheRef, now: datetime, timeout_s: float) -> None:
     """Extend the TTL when the entry is close to expiring. Best-effort: a
     failed refresh leaves the entry in place — if the cache really died, the
     next request 403s and the caller's stale-retry recovers."""
@@ -160,7 +160,7 @@ async def _maybe_refresh(client: Any, ref: CacheRef, now: datetime) -> None:
                 name=ref.name,
                 config=types.UpdateCachedContentConfig(ttl=f"{_CACHE_TTL_SECONDS}s"),
             ),
-            timeout=turn_settings.lm.gemini_cache_timeout_seconds,
+            timeout=timeout_s,
         )
         ref.expire_time = updated.expire_time or (now + timedelta(seconds=_CACHE_TTL_SECONDS))
     except Exception as exc:
@@ -169,7 +169,9 @@ async def _maybe_refresh(client: Any, ref: CacheRef, now: datetime) -> None:
         )
 
 
-async def _adopt_existing(client: Any, model: str, key: str, now: datetime) -> CacheRef | None:
+async def _adopt_existing(
+    client: Any, model: str, key: str, now: datetime, timeout_s: float
+) -> CacheRef | None:
     """Adopt a cache created by another process of this build, matched on the
     display_name convention. Returns None when the list call fails or nothing
     live matches — the caller then creates a fresh cache."""
@@ -194,9 +196,7 @@ async def _adopt_existing(client: Any, model: str, key: str, now: datetime) -> C
         return None
 
     try:
-        return await asyncio.wait_for(
-            _scan(), timeout=turn_settings.lm.gemini_cache_timeout_seconds
-        )
+        return await asyncio.wait_for(_scan(), timeout=timeout_s)
     except Exception as exc:
         logger.debug("[gemini-cache] list failed (will create instead): {exc!r}", exc=exc)
     return None
@@ -206,6 +206,7 @@ async def get_or_create_cache(
     llm: BaseChatModel,
     system_text: str,
     tools: list[Any],
+    policy: LlmCallPolicy,
 ) -> CacheRef | None:
     """Return a live explicit cache for (llm.model, system_text, tools), or None.
 
@@ -216,7 +217,7 @@ async def get_or_create_cache(
     `tools` are LangChain tools (``[execute_code]``); their converted schema
     is baked into the cache, so cache-bound requests must NOT bind tools.
     """
-    if not turn_settings.lm.gemini_explicit_cache_enabled:
+    if not policy.gemini_explicit_cache_enabled:
         return None
     # Cheap pre-check before the ~66MB google-genai import: this function runs
     # on EVERY LLM call, and for non-Gemini providers the import was pure waste
@@ -248,7 +249,7 @@ async def get_or_create_cache(
     memo = _MEMO.get(key)
     if memo is not None:
         if _remaining_seconds(memo, now) > 60:
-            await _maybe_refresh(llm.client, memo, now)
+            await _maybe_refresh(llm.client, memo, now, policy.gemini_cache_timeout_seconds)
             return memo
         _MEMO.pop(key, None)
 
@@ -258,10 +259,12 @@ async def get_or_create_cache(
             return None
         _NEGATIVE.pop(key, None)
 
-    adopted = await _adopt_existing(llm.client, llm.model, key, now)
+    adopted = await _adopt_existing(
+        llm.client, llm.model, key, now, policy.gemini_cache_timeout_seconds
+    )
     if adopted is not None:
         _MEMO[key] = adopted
-        await _maybe_refresh(llm.client, adopted, now)
+        await _maybe_refresh(llm.client, adopted, now, policy.gemini_cache_timeout_seconds)
         return adopted
 
     from google.genai import types
@@ -279,7 +282,7 @@ async def get_or_create_cache(
                     ttl=f"{_CACHE_TTL_SECONDS}s",
                 ),
             ),
-            timeout=turn_settings.lm.gemini_cache_timeout_seconds,
+            timeout=policy.gemini_cache_timeout_seconds,
         )
     except Exception as exc:
         _NEGATIVE[key] = time.monotonic() + _NEGATIVE_RETRY_SECONDS

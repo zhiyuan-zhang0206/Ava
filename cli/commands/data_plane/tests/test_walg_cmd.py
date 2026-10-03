@@ -51,12 +51,15 @@ def test_the_parser_reaches_every_verb() -> None:
     assert drill.func.__name__ == "_h_backup_walg_drill"
 
     assert restore.func.__name__ == "_h_backup_walg_restore"
-    assert (restore.dir, restore.backup, restore.time, restore.lsn) == (
+    assert (restore.dir, restore.backup, restore.time, restore.lsn, restore.user) == (
         "/srv/restored",
         "LATEST",
         None,
         None,
+        None,
     )
+    named = parser.parse_args(["backup", "walg", "restore", "--dir", "/d", "--user", "zyonzhang"])
+    assert named.user == "zyonzhang"
     assert check.func.__name__ == "_h_backup_walg_check"
     assert run.func.__name__ == "_h_backup_walg_run"
     assert status.func.__name__ == "_h_backup_walg_status"
@@ -65,7 +68,7 @@ def test_the_parser_reaches_every_verb() -> None:
 def test_run_hands_the_tick_a_timestamping_reporter_and_returns_its_exit_code(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    def fake_tick(report: Any) -> int:
+    def fake_tick(_db: object, report: Any) -> int:
         report("skipped: postgres is not accepting connections")
         return 1
 
@@ -271,7 +274,11 @@ def test_restore_passes_the_target_and_keeps_the_data_directory(
     monkeypatch.setattr(walg_cmd, "restored_instance", fake)
 
     code = walg_cmd.cmd_walg_restore(
-        directory=str(tmp_path / "out"), backup="base_0001", time=None, lsn="0/3000060"
+        directory=str(tmp_path / "out"),
+        backup="base_0001",
+        time=None,
+        lsn="0/3000060",
+        user="zyonzhang",
     )
 
     assert code == 0
@@ -280,6 +287,7 @@ def test_restore_passes_the_target_and_keeps_the_data_directory(
     assert call["backup"] == "base_0001"
     assert call["target"].lsn == "0/3000060"
     assert call["keep_data"] is True
+    assert call["user"] == "zyonzhang"
     assert "Postgres is not running on it" in capsys.readouterr().out
 
 

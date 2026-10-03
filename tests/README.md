@@ -39,12 +39,12 @@ A test lives in a `tests/` directory: the top-level `tests/`, or a package's own
 A new test in the top-level `tests/` is refused unless it is e2e or UI, or is registered in
 `scripts/structure/tests_location_allowed.py` as `contract` or `integration` with a reason
 (`scripts/structure/tests_location.py`, run by the pre-commit hook; `--suggest <file>` names the
-package a test belongs in). The tests still to move are frozen in the `tests_location` baseline
-section and only come out.
+package a test belongs in). There is no list of debt to add to: a new test is registered or
+refused.
 
 Package `tests/` directories have no `__init__.py` (`--import-mode=importlib`), and
 the repo-root `conftest.py` plugins apply to them exactly as to the top-level tree.
-The top-level `tests/{module}/` directories are the tests still to move into their packages.
+The top-level `tests/{module}/` directories hold only the registered contract and integration tests.
 
 ```
 tests/
@@ -57,14 +57,15 @@ tests/
 │   ├── messages.py
 │   └── state.py
 ├── fixtures/              # Global fixture plugins (DB/Redis isolation, guards), loaded by the repo-root conftest.py
-└── path_scoped/           # Per-directory fixtures (the former conftests), registered by path in tests/fixtures/path_scopes.py
+└── path_scoped/           # Per-directory fixtures (the former conftests), registered by the `path_scopes.toml` files next to the tests they govern
 ```
 
 Fixtures that only some directories' tests take (autouse isolation stand-ins, `short_tmp`,
 `as_machine`, ...) are not in a `conftest.py`, because a conftest does not follow a test into a
-package's `tests/` directory. They live in `tests/path_scoped/` and `PATH_SCOPES` in
-`tests/fixtures/path_scopes.py` lists the paths each applies to; a test moved elsewhere gets its
-new path added there (the file's docstring says how).
+package's `tests/` directory. They live in `tests/path_scoped/`; a `path_scopes.toml` in a test
+directory names the fixture modules that apply there (`tests/fixtures/path_scopes.py` reads them
+all); a test moved elsewhere gets its file named in the destination directory's `path_scopes.toml`
+(that file's docstring says how).
 
 ### Directory Mapping
 

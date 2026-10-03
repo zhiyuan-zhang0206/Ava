@@ -41,7 +41,7 @@ from dataclasses import dataclass
 
 from langchain_core.messages import HumanMessage
 
-from base.config.turn_view import turn_settings
+from base.host.env.agent_slices import MemoryRecall
 from base.log import logger
 
 _LABEL = "recall-filter"
@@ -165,7 +165,9 @@ def _log_filter_decision(query: str, candidates: list[Candidate], picked: list[s
     )
 
 
-async def filter_candidates(query: str, candidates: list[Candidate]) -> list[str]:
+async def filter_candidates(
+    query: str, candidates: list[Candidate], memory: MemoryRecall
+) -> list[str]:
     """The paths worth injecting, in the model's order, at most `inject_k`.
 
     Falls back to the first `inject_k` candidates — retrieval order, the
@@ -174,8 +176,8 @@ async def filter_candidates(query: str, candidates: list[Candidate]) -> list[str
     a filter that cannot judge must not smuggle in the unfiltered top-k it
     exists to reject.
     """
-    inject_k = turn_settings.agent.memory_recall_inject_k
-    if not turn_settings.agent.memory_recall_filter_enabled or not candidates:
+    inject_k = memory.memory_recall_inject_k
+    if not memory.memory_recall_filter_enabled or not candidates:
         return [c.path for c in candidates[:inject_k]]
 
     import asyncio
@@ -191,10 +193,10 @@ async def filter_candidates(query: str, candidates: list[Candidate]) -> list[str
     # is worth a warning — a single flake is routine, three in a row is not
     # (user ruling 2026-08-05: retry x3, warn only when all attempts fail).
     model = build_chat_model(
-        turn_settings.agent.memory_recall_filter_model, reasoning_effort=ReasoningEffort.NONE
+        memory.memory_recall_filter_model, reasoning_effort=ReasoningEffort.NONE
     )
     last_failure: str | None = None
-    for _attempt in range(1, turn_settings.agent.memory_recall_filter_max_retries + 1):
+    for _attempt in range(1, memory.memory_recall_filter_max_retries + 1):
         try:
             # The filter is a latency-critical background path judging names
             # and one-line descriptions only, so its model is built with
@@ -207,11 +209,11 @@ async def filter_candidates(query: str, candidates: list[Candidate]) -> list[str
             # top-3 the filter exists to reject.
             reply = await asyncio.wait_for(
                 model.ainvoke([HumanMessage(content=prompt)]),
-                timeout=turn_settings.agent.memory_recall_filter_timeout_seconds,
+                timeout=memory.memory_recall_filter_timeout_seconds,
             )
             log_usage_from_message(
                 reply,
-                model=turn_settings.agent.memory_recall_filter_model,
+                model=memory.memory_recall_filter_model,
                 usage_kind="chat",
             )
             # `.text` is a property on current langchain messages (a str
@@ -229,7 +231,7 @@ async def filter_candidates(query: str, candidates: list[Candidate]) -> list[str
     logger.warning(
         "[{label}] {body}",
         label=_LABEL,
-        body=f"all {turn_settings.agent.memory_recall_filter_max_retries} attempts failed ({last_failure}), injecting nothing",
+        body=f"all {memory.memory_recall_filter_max_retries} attempts failed ({last_failure}), injecting nothing",
         event="recall_filter",
     )
     return []

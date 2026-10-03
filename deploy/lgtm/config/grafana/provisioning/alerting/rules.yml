@@ -658,7 +658,7 @@ groups:
       # GET /api/fleet/graph serves the stale/last-good graph whenever an
       # upstream read fails or a phase crosses the route budget; every such
       # episode emits one `fleet_graph_stale` event, reason in the attributes
-      # (lock_wait / fetch_failed / pg_* / prom_* / loki_*). Threshold = two
+      # (pg_* / prom_*). Threshold = two
       # episodes in ten minutes (405 ruling 2026-09-18: event-type signals
       # report clusters, not first occurrences — a single blip must not
       # alert). The 10m window is the whole debounce, so `for` stays 0m.
@@ -681,7 +681,7 @@ groups:
             GET /api/fleet/graph fell back to the stale/last-good graph
             {{ $values.C }} times in the last 10 minutes. Each occurrence is
             one degradation episode on an upstream read (Postgres /
-            Prometheus / Loki / the frozen archive); the reason rides the
+            Prometheus); the reason rides the
             fleet_graph_stale event's attributes. A single blip does not
             alert, so a firing instance means the degradation repeated or is
             sustained — check the named upstream, then the fleet view.

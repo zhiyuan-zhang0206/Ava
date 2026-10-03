@@ -26,7 +26,7 @@ Framework registrations record nothing — they happen outside a `PluginContext`
 the same gate the ledger applies. Recording is a pure side channel: failures are
 swallowed and never perturb hook or wrap semantics.
 
-Two consumers read the stream. In the aggregate fetch path (`base/telemetry/metrics/aggregate.py` + `base/telemetry/metrics/aggregate_loki.py`'s `_aggregate_tasks`), the
+Two consumers read the stream. In the aggregate fetch path (`base/telemetry/metrics/aggregate.py` + `base/telemetry/metrics/aggregate_sql.py`), the
 `plugin_activation` section counts activations by contribution and by
 plugin × model — a contribution that registers but never fires is the removal
 evidence [`philosophy.md` §6](../../conventions/philosophy.md) asks for. The

@@ -268,7 +268,7 @@ def station_otel_ingress_endpoint() -> str:
 def telemetry_bearer() -> str | None:
     """The OTLP relay ingress token this unit presents and accepts, or None.
 
-    Stable per cluster (it does not rotate with the write generation): the
+    Stable per cluster (it is not part of the write generation): the
     gateway derives it from its human secret; a remote unit reads it from its
     installed capability and never holds the secret. None = an open cluster.
     """

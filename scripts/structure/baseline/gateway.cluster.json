@@ -1,15 +1,7 @@
 {
   "ambient_state": {
     "gateway/cluster/_health.py::import-time-read:_STARTED_AT": 1,
-    "gateway/cluster/_stats_dashboard.py::ambient-container:_cache": 1,
-    "gateway/cluster/_stats_dashboard.py::ambient-container:_refresh_failed_at": 1,
-    "gateway/cluster/_stats_dashboard.py::ambient-container:_stale_emit_at": 1,
-    "gateway/cluster/_stats_dashboard.py::thread:refresh_or_serve": 1,
-    "gateway/cluster/ops_series_lgtm.py::ambient-instance:_POOL": 1,
     "gateway/cluster/roster_probe.py::ambient-container:_identity_mismatch_active": 1,
-    "gateway/cluster/roster_probe.py::ambient-container:_probe_failures": 1,
-    "gateway/cluster/roster_probe.py::ambient-container:_recovery_inflight": 1,
-    "gateway/cluster/roster_probe.py::thread:_start_recovery_thread": 1,
     "gateway/cluster/status.py::global-rebind:_status_cache": 2
   },
   "private_imports": {

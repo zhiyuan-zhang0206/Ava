@@ -23,6 +23,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import psycopg
 import pytest
 
+from base.db import Database
 from ops.cluster_rpc import ClusterOpFailed, dispatch_to_machine
 
 
@@ -114,7 +115,9 @@ async def test_dispatch_resolves_registered_url_and_round_trips(
     returning the runner's result."""
     _register(db_conn, "runner-x", ops_stub.url)
 
-    result = await dispatch_to_machine("runner-x", "status_probe", {"foo": "bar"})
+    result = await dispatch_to_machine(
+        Database.from_settings(), "runner-x", "status_probe", {"foo": "bar"}
+    )
 
     assert ops_stub.received == [{"kind": "status_probe", "payload": {"foo": "bar"}}]
     assert result == {"echo": {"kind": "status_probe", "payload": {"foo": "bar"}}, "ran": True}
@@ -128,7 +131,7 @@ async def test_dispatch_failed_status_raises_cluster_op_failed(
     with _OpsStub(status="failed") as stub:
         _register(db_conn, "runner-y", stub.url)
         with pytest.raises(ClusterOpFailed):
-            await dispatch_to_machine("runner-y", "status_probe", {})
+            await dispatch_to_machine(Database.from_settings(), "runner-y", "status_probe", {})
 
 
 async def test_dispatch_retries_transient_503_over_real_wire(
@@ -139,7 +142,9 @@ async def test_dispatch_retries_transient_503_over_real_wire(
     retry — a transient failure no longer drops the op."""
     with _OpsStub(fail_first=1) as stub:
         _register(db_conn, "runner-z", stub.url)
-        result = await dispatch_to_machine("runner-z", "status_probe", {"ping": 1}, retries=2)
+        result = await dispatch_to_machine(
+            Database.from_settings(), "runner-z", "status_probe", {"ping": 1}, retries=2
+        )
 
     assert result == {
         "echo": {"kind": "status_probe", "payload": {"ping": 1}},

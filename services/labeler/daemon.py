@@ -27,13 +27,15 @@ import psycopg
 from loguru import logger
 from psycopg_pool import ConnectionPool
 
-import base.db
 from base.config import settings
-from base.daemon.health import Liveness, health_port, start_health_server, stop_health_server
+from base.daemon.endpoints import ServiceEndpoint, ServiceEndpoints
+from base.daemon.health import Liveness, start_health_server, stop_health_server
 from base.daemon.shutdown import cancel_and_drain, install_graceful_shutdown
 from base.daemon.shutdown import hard_exit as _hard_exit
+from base.db import Database
+from base.deploy.maintenance import admission
 from base.log import init_gateway_process
-from base.paths import pid_path
+from services.labeler.config import LabelerConfig
 from services.labeler.labeler import generate_label_async
 from services.pidfile import acquire_pidfile, pidfile_holds_daemon, remove_pidfile
 
@@ -46,8 +48,20 @@ _POLL_INTERVAL_S = 1.0
 _LIVENESS_TIMEOUT_S = 120.0
 
 
+def labeler_config() -> LabelerConfig:
+    """The composition root: the one place this package reads `settings`."""
+    return LabelerConfig(
+        labeler_model=settings.lm.labeler_model,
+        labeler_max_chars=settings.services.labeler_max_chars,
+    )
+
+
+def _endpoint() -> ServiceEndpoint:
+    return ServiceEndpoints.from_settings().of("labeler")
+
+
 def _pidfile() -> Path:
-    return pid_path("labeler")
+    return _endpoint().pidfile
 
 
 # Per-agent failure backoff. A label that persistently fails (bad key, rate
@@ -213,7 +227,9 @@ def _is_running() -> bool:
     return pidfile_holds_daemon(_pidfile(), "services.labeler.daemon")
 
 
-async def _dispatch_loop(pool: ConnectionPool, liveness: Liveness) -> None:
+async def _dispatch_loop(
+    pool: ConnectionPool, db: Database, liveness: Liveness, config: LabelerConfig
+) -> None:
     """Main loop: every second, poll the newest unlabeled agents
     (`_select_unlabeled`, minus those in failure-backoff) -> grab first prompt ->
     generate label. A label that fails enters per-agent exponential backoff so a
@@ -228,6 +244,8 @@ async def _dispatch_loop(pool: ConnectionPool, liveness: Liveness) -> None:
         liveness.beat()
         try:
             await asyncio.sleep(_POLL_INTERVAL_S)
+            if admission.quiesced():
+                continue
             now = time.monotonic()
             cooling = _cooling_ids(now)
             with pool.connection() as conn, conn.cursor() as cur:
@@ -237,7 +255,7 @@ async def _dispatch_loop(pool: ConnectionPool, liveness: Liveness) -> None:
                 if not prompt:
                     continue
                 try:
-                    result = await generate_label_async(tid, prompt, settings.lm.labeler_model)
+                    result = await generate_label_async(tid, prompt, config, db)
                 except Exception as exc:
                     # Defensive: generate_label_async returns False on LLM
                     # failures instead of raising; an escaping exception is
@@ -286,12 +304,14 @@ async def run() -> None:
     _log.info("[labeler] pidfile written: %s", _pidfile())
 
     liveness = Liveness(_LIVENESS_TIMEOUT_S)
-    health = await start_health_server("labeler", liveness=liveness)
-    _log.info("[labeler] healthz listening on :%s", health_port("labeler"))
+    endpoint = _endpoint()
+    health = await start_health_server("labeler", endpoint.health_port, liveness=liveness)
+    _log.info("[labeler] healthz listening on :%s", endpoint.health_port)
 
-    pool = base.db.pool()
+    db = Database.from_settings()
+    pool = db.pool()
     try:
-        await _dispatch_loop(pool, liveness)
+        await _dispatch_loop(pool, db, liveness, labeler_config())
     finally:
         pool.close()
         await stop_health_server(health)

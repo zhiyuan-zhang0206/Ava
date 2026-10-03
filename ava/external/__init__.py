@@ -7,8 +7,9 @@
 from __future__ import annotations
 
 import sys
+from collections.abc import Mapping
 from contextlib import ExitStack, suppress
-from threading import Lock, Timer, local
+from threading import Lock, local
 from types import TracebackType
 from typing import Any, Self
 from uuid import uuid4
@@ -16,9 +17,9 @@ from uuid import uuid4
 from ava import agent_identity
 from base.agents import impersonation as control
 from base.cluster.machine import machine_name
-from base.config.turn_view import bind_agent_config, resolve_agent_config_pins
+from base.config.agent_pins import resolve_agent_config_pins
 from base.native_process.ownership import process_metadata
-from base.packages.plugins.config_view import bind_agent_plugin_config, resolve_agent_plugin_pins
+from base.packages.plugins.config_view import PluginConfigView, resolve_agent_plugin_pins
 
 from .state import (
     apply_plugin_delta,
@@ -32,6 +33,12 @@ __all_for_ava__ = ["attach", "Attachment"]
 _attachment_lock = Lock()
 _active_attachment: Attachment | None = None
 _close_flush_permission = local()
+
+
+def attached_config() -> tuple[Mapping[str, Any], PluginConfigView] | None:
+    """The pins and plugin-config view of the agent this process is attached to, if any."""
+    attachment = _active_attachment
+    return None if attachment is None else attachment.config
 
 
 def _close_flush_permitted() -> bool:
@@ -82,7 +89,9 @@ class Attachment:
         self._closed = False
         self._closing = False
         self._stack = ExitStack()
-        self._manifest_participant: Any = None
+        # The attached agent's pins and plugin-config view (`attached_config`), once loaded.
+        self.config: tuple[Mapping[str, Any], PluginConfigView] | None = None
+        self._event_participant: Any = None
         if not _attachment_lock.acquire(blocking=False):
             raise RuntimeError("this process already has an external attachment")
         self._prior_state = ava.state
@@ -101,8 +110,10 @@ class Attachment:
             # drop them (review finding, #2616).
             ava.ensure_plugins_loaded(surface=False)
             state, overlay, birth = load_snapshot(self.agent_id)
-            self._stack.enter_context(bind_agent_config(resolve_agent_config_pins(overlay, birth)))
-            self._stack.enter_context(bind_agent_plugin_config(resolve_agent_plugin_pins(overlay)))
+            self.config = (
+                resolve_agent_config_pins(overlay, birth),
+                PluginConfigView(resolve_agent_plugin_pins(overlay)),
+            )
             # Native applies journal entries only after the controller releases
             # the lease. Already applied entries belong to the checkpoint.
             receipt = state.impersonation_applied
@@ -111,7 +122,7 @@ class Attachment:
             for encoded in lease["plugin_delta"][applied:]:
                 apply_plugin_delta(state, decode_plugin_delta(encoded))
             self._validate()
-            self._open_manifest_participant()
+            self._open_event_participant()
             ava.state, ava.state_update = state, {}
         except BaseException:
             self._detach()
@@ -162,7 +173,7 @@ class Attachment:
         if self._closed or self._closing:
             return
         try:
-            self._begin_manifest_participant_close()
+            self._begin_event_participant_close()
             was_permitted = _close_flush_permitted()
             _close_flush_permission.allowed = True
             try:
@@ -171,26 +182,25 @@ class Attachment:
                 _close_flush_permission.allowed = was_permitted
         finally:
             try:
-                # Receipt closure precedes the best-effort delivery flush: the
-                # receipt is the emitted-event census, while sync only reduces
-                # ordinary observation latency and cannot certify arrival.
-                self._seal_manifest_participant()
+                # Receipt closure precedes the best-effort observation flush: the
+                # receipt seals the event log, which no longer depends on delivery.
+                self._seal_event_participant()
             finally:
                 try:
                     _deliver_telemetry_before_detach()
                 finally:
                     self._detach()
 
-    def _open_manifest_participant(self) -> None:
+    def _open_event_participant(self) -> None:
         """Register this controller before it can emit a protocol-v1 event."""
         from base.agents.impersonation_manifest import (
             LocalParticipant,
             bind_local_participant,
-            is_protocol_v1,
+            is_log_native,
             open_local_participant,
         )
 
-        if not is_protocol_v1(self._lease()):
+        if not is_log_native(self._lease()):
             return
         source_key = f"attachment:{process_metadata()['pid']}:{uuid4().hex}"
         if open_local_participant(self.lease_id, agent_id=self.agent_id, source_key=source_key):
@@ -201,47 +211,31 @@ class Attachment:
                 source_key=source_key,
             )
             bind_local_participant(participant)
-            self._manifest_participant = participant
+            self._event_participant = participant
 
-    def _seal_manifest_participant(self) -> None:
+    def _seal_event_participant(self) -> None:
         """Close admission, drain local SDK work, then seal the durable receipt."""
-        if self._manifest_participant is None:
+        if self._event_participant is None:
             return
         from base.agents.impersonation_manifest import (
-            alert_if_participant_still_open,
             close_local_participant_admission,
             seal_local_participant,
         )
         from base.config import settings
 
-        # This timer is deliberately diagnostic-only. A live SDK finally may
-        # outlast the detach wait and seal later; only a real capture failure
-        # can mark its receipt failed.
-        timer = Timer(
-            settings.general.impersonation_event_manifest_seal_wait_seconds,
-            alert_if_participant_still_open,
-            args=(self._manifest_participant,),
+        drained = close_local_participant_admission(
+            self._event_participant,
+            timeout=settings.general.impersonation_event_seal_wait_seconds,
         )
-        timer.daemon = True
-        timer.start()
-        try:
-            drained = close_local_participant_admission(
-                self._manifest_participant,
-                timeout=settings.general.impersonation_event_manifest_seal_wait_seconds,
-            )
-            if drained:
-                seal_local_participant(self._manifest_participant)
-            else:
-                # The final admitted SDK finally seals when it drains. The
-                # timer remains a diagnostic only; a live call never becomes
-                # a synthetic failed or empty receipt at this deadline.
-                alert_if_participant_still_open(self._manifest_participant)
-        finally:
-            timer.cancel()
+        # A call still running after the wait seals its own source when it drains; the
+        # wait never turns a live source into an empty or failed receipt. An ended lease
+        # that keeps an open source is alerted by state (ImpersonationEventSealStuck).
+        if drained:
+            seal_local_participant(self._event_participant)
 
-    def _begin_manifest_participant_close(self) -> None:
+    def _begin_event_participant_close(self) -> None:
         """Atomically start close and fence new SDK admission."""
-        if self._manifest_participant is None:
+        if self._event_participant is None:
             self._closing = True
             return
         from base.agents.impersonation_manifest import begin_local_participant_close
@@ -250,7 +244,7 @@ class Attachment:
         # linearization point. A call admitted before it may drain; one that
         # starts after it has no admission and `_validate` rejects it.
         begin_local_participant_close(
-            self._manifest_participant,
+            self._event_participant,
             lambda: setattr(self, "_closing", True),
         )
 
@@ -264,11 +258,11 @@ class Attachment:
         _active_attachment = None
         self._closed = True
         try:
-            if self._manifest_participant is not None:
+            if self._event_participant is not None:
                 from base.agents.impersonation_manifest import unbind_local_participant
 
-                unbind_local_participant(self._manifest_participant)
-                self._manifest_participant = None
+                unbind_local_participant(self._event_participant)
+                self._event_participant = None
             agent_identity._external_identity = None
             agent_identity._external_agent_id = None
             ava.state, ava.state_update = self._prior_state, self._prior_update

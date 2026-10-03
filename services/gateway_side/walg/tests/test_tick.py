@@ -17,7 +17,7 @@ from typing import Any
 import psycopg
 import pytest
 
-from base.db import pg_admin
+from base.db import Database, pg_admin
 from base.native_process.os_platform import file_lock
 from services.gateway_side.walg import state, tick
 from services.gateway_side.walg.state import RunRecord
@@ -76,7 +76,7 @@ def sandbox(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Sandbox:
     box.put("delete-confirm.log", _confirm_log())
     monkeypatch.setattr(tick, "pg_target", lambda: tick.PgTarget(ADMIN_URL, PG_DATA, DATABASE))
     monkeypatch.setattr(tick, "postgres_accepts_connections", _accepts)
-    monkeypatch.setattr(tick, "deploy_window_reason", lambda: None)
+    monkeypatch.setattr(tick, "deploy_window_reason", lambda _db: None)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(tick.drill, "drill_due", _never_due)  # the drill has its own tests below
     return box
 
@@ -89,7 +89,7 @@ def _confirm_log() -> str:
 
 def _run(clock: Clock | None = None) -> tuple[int, list[str]]:
     lines: list[str] = []
-    code = tick.run_tick(lines.append, now=clock or Clock())
+    code = tick.run_tick(Database.from_settings(), lines.append, now=clock or Clock())
     return code, lines
 
 
@@ -133,6 +133,13 @@ def test_backup_push_gets_the_chain_limit_and_the_owner_only_socket(sandbox: San
     assert sandbox.env_log() == [
         "PGHOST=/sockets/ava-pg-home PGPORT=5433 PGUSER=tester WALG_DELTA_MAX_STEPS=6"
     ]
+
+
+def test_wal_verify_gets_the_owner_only_socket_like_backup_push(sandbox: Sandbox) -> None:
+    """Without the connection variables WAL-G dials libpq's default socket and fails."""
+    _run()
+
+    assert sandbox.verify_env_log() == ["PGHOST=/sockets/ava-pg-home PGPORT=5433 PGUSER=tester"]
 
 
 def test_every_step_leaves_its_record_in_the_state_file(sandbox: Sandbox) -> None:
@@ -308,7 +315,7 @@ def test_a_retention_invariant_violation_never_confirms(sandbox: Sandbox) -> Non
 def test_an_unexpected_error_is_still_recorded_against_its_step(
     sandbox: Sandbox, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    def explode() -> Any:
+    def explode(pg_admin_url: str) -> Any:
         raise ValueError("surprise")
 
     monkeypatch.setattr(tick, "verify_chain", explode)
@@ -349,7 +356,7 @@ def test_off_does_nothing_and_writes_nothing(
 def test_an_open_deploy_window_skips_without_calling_wal_g(
     sandbox: Sandbox, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr(tick, "deploy_window_reason", lambda: "machine 'a' is mid-deploy")
+    monkeypatch.setattr(tick, "deploy_window_reason", lambda _db: "machine 'a' is mid-deploy")  # pyright: ignore[reportUnknownArgumentType]
 
     code, lines = _run()
 
@@ -381,7 +388,7 @@ def test_a_skip_leaves_the_last_real_runs_failure_visible(
     sandbox.fail("backup-push")
     _run()
     failed = state.read_state().run
-    monkeypatch.setattr(tick, "deploy_window_reason", lambda: "a window")
+    monkeypatch.setattr(tick, "deploy_window_reason", lambda _db: "a window")  # pyright: ignore[reportUnknownArgumentType]
 
     code, _ = _run()
 

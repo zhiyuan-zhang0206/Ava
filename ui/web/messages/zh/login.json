@@ -1,0 +1,12 @@
+{
+  "username": "用户名",
+  "password": "密码",
+  "clusterSecret": "集群密钥",
+  "signIn": "登录",
+  "signingIn": "登录中…",
+  "invalidPassword": "密码错误",
+  "tooManyAttempts": "失败次数过多——请几分钟后再试",
+  "connectionFailed": "连接失败——gateway 是否在运行？",
+  "checkingSession": "检查会话中…",
+  "enterPassword": "输入集群密码以继续"
+}

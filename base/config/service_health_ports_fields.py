@@ -20,7 +20,7 @@ from base.host.env.port_table import FIXED_PORTS
 # `host`, not `cluster-pinned`: a health port is a fact of the machine's
 # localhost namespace, and the default is the fixed port table
 # (`base.host.env.port_table`). The runner computes its own ops URL from its own
-# `health_port('ops')` and registers it (`base/cluster/machines.py`), and the
+# the `ops` row of `ServiceEndpoints` and registers it (`base/cluster/machines.py`), and the
 # gateway reads that URL back off the machines row. So the gateway does not serve
 # these to runners over /api/bootstrap, and a runner's .env never caches a
 # gateway-served value. `ava start` refuses to launch onto a port another home's
@@ -63,6 +63,8 @@ class ServiceHealthPortFields:
     task_maintenance_health_port: int | None = health_port_field("task_maintenance")
     events_maintenance_health_port: int | None = health_port_field("events_maintenance")
     pg_backup_health_port: int | None = health_port_field("pg_backup")
+    ttl_reaper_health_port: int | None = health_port_field("ttl_reaper")
+    schedule_manager_health_port: int | None = health_port_field("schedule_manager")
     memory_indexer_health_port: int | None = health_port_field("memory_indexer")
     # The ops daemon is the agent-runner's inbound port the gateway dials to run
     # cluster ops; the runner registers the resulting URL itself.

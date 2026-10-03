@@ -1,13 +1,12 @@
-"""GET /api/events — unified event stream query (LGTM read side, task #1197).
+"""GET /api/events — unified event stream query.
 
-The route is an adapter over `loki_events.query_events` / `count_events`
-(the PG `events` read was replaced by Loki). This file locks the endpoint
-contract: filter composition (category / event_name / agent_id /
-trace_id / machine / level), the time window
-(`from`/`to` and `hours`), offset paging with the `meta` envelope (opt-in
-exact `total` from the Loki count path / window / lookahead has_more), the
-unified row shape, and the 422s for illegal parameters. The Loki queries are mocked;
-`gateway/lgtm/tests/test_loki_events.py` covers the query building.
+The route is an adapter over `telemetry_rows.query_events` / `count_events` (and
+`audit_rows` for audit). This file locks the endpoint contract: filter composition
+(category / event_name / agent_id / trace_id / machine / level), the time window
+(`from`/`to` and `hours`), offset paging with the `meta` envelope (opt-in exact `total`
+from the count path / window / lookahead has_more), the unified row shape, and the 422s
+for illegal parameters. The telemetry reader is mocked;
+`gateway/events/tests/test_telemetry_rows.py` covers the SQL.
 """
 
 from __future__ import annotations
@@ -15,12 +14,12 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-import httpx
+import psycopg
 import pytest
 from fastapi.testclient import TestClient
 
 from gateway.app import app
-from gateway.lgtm import loki_events
+from gateway.events import telemetry_rows
 
 _EVENT_KEYS = {
     "id",
@@ -63,7 +62,7 @@ def _row(**over: Any) -> dict[str, Any]:
 
 
 class _FakeEvents:
-    """Recorded loki_events calls + canned rows/total/has_more."""
+    """Recorded telemetry_rows calls + canned rows/total/has_more."""
 
     def __init__(self) -> None:
         self.calls: list[dict[str, Any]] = []
@@ -74,20 +73,20 @@ class _FakeEvents:
 
 @pytest.fixture
 def fake_events(monkeypatch: pytest.MonkeyPatch) -> _FakeEvents:
-    """Patch loki_events.query_events + count_events; record kwargs."""
+    """Patch telemetry_rows.query_events + count_events; record kwargs."""
 
     fake = _FakeEvents()
 
-    def _query(**kwargs: Any) -> tuple[list[dict[str, Any]], bool]:
+    def _query(_conn: object, **kwargs: Any) -> tuple[list[dict[str, Any]], bool]:
         fake.calls.append(kwargs)
         return fake.rows, fake.has_more
 
-    def _count(**kwargs: Any) -> int:
+    def _count(_conn: object, **kwargs: Any) -> int:
         fake.calls.append(kwargs)
         return fake.totals[-1] if fake.totals else len(fake.rows)
 
-    monkeypatch.setattr(loki_events, "query_events", _query)
-    monkeypatch.setattr(loki_events, "count_events", _count)
+    monkeypatch.setattr(telemetry_rows, "query_events", _query)
+    monkeypatch.setattr(telemetry_rows, "count_events", _count)
     return fake
 
 
@@ -104,31 +103,17 @@ class TestEventsApi:
         assert body["meta"]["offset"] == 0
         assert body["meta"]["window_from"] is not None  # 24h default echoes
 
-    def test_loki_timeout_returns_503(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """A backend timeout is a retriable 503 with a hint, not a bare 500
-        (task #1289: the dense-window query hang surfaced as an unhandled
-        httpx.ReadTimeout)."""
+    def test_a_read_that_exceeds_its_statement_timeout_returns_503(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        def _boom(_conn: object, **kwargs: Any) -> tuple[list[dict[str, Any]], bool]:
+            raise psycopg.errors.QueryCanceled("canceling statement due to statement timeout")
 
-        def _boom(**kwargs: Any) -> tuple[list[dict[str, Any]], bool]:
-            raise httpx.ReadTimeout("timed out")
-
-        monkeypatch.setattr(loki_events, "query_events", _boom)
+        monkeypatch.setattr(telemetry_rows, "query_events", _boom)
         with TestClient(app) as client:
             r = client.get("/api/events")
         assert r.status_code == 503
-        assert "retry" in r.json()["detail"]
-        assert r.headers["retry-after"] == "1"
-
-    def test_loki_disconnect_returns_503(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """Server-side disconnects map to the same 503."""
-
-        def _boom(**kwargs: Any) -> tuple[list[dict[str, Any]], bool]:
-            raise httpx.RemoteProtocolError("server disconnected")
-
-        monkeypatch.setattr(loki_events, "query_events", _boom)
-        with TestClient(app) as client:
-            r = client.get("/api/events")
-        assert r.status_code == 503
+        assert r.json()["detail"] == "events read timed out"
 
     def test_returns_newest_first_with_unified_shape(self, fake_events: _FakeEvents) -> None:
         fake_events.rows.extend([_row(), _row(event_name="llm_usage")])
@@ -159,20 +144,22 @@ class TestEventsApi:
 
     def test_filter_category_maps_to_categories(self, fake_events: _FakeEvents) -> None:
         with TestClient(app) as client:
-            client.get("/api/events", params={"category": "audit"})
-        assert fake_events.calls[0]["categories"] == ["audit"]
+            client.get("/api/events", params={"category": "telemetry"})
+        assert fake_events.calls[0]["categories"] == ["telemetry"]
 
-    def test_no_category_passes_none(self, fake_events: _FakeEvents) -> None:
-        # unlike the per-agent/admin endpoints, /api/events serves ALL
-        # categories (audit included) — no telemetry/log restriction
+    def test_no_category_reads_telemetry_and_log_from_telemetry_events(
+        self, fake_events: _FakeEvents
+    ) -> None:
+        # /api/events serves ALL categories: audit rows come from audit_events, so the
+        # telemetry side asks for telemetry and log only.
         with TestClient(app) as client:
             client.get("/api/events")
-        assert fake_events.calls[0]["categories"] is None
+        assert fake_events.calls[0]["categories"] == ["telemetry", "log"]
 
     def test_filter_event_name(self, fake_events: _FakeEvents) -> None:
         with TestClient(app) as client:
-            client.get("/api/events", params={"event_name": "spawn"})
-        assert fake_events.calls[0]["event_names"] == ["spawn"]
+            client.get("/api/events", params={"event_name": "llm_usage"})
+        assert fake_events.calls[0]["event_names"] == ["llm_usage"]
 
     def test_filter_tier_maps_a_comma_separated_list(self, fake_events: _FakeEvents) -> None:
         with TestClient(app) as client:
@@ -184,7 +171,7 @@ class TestEventsApi:
         param is ignored by FastAPI, so the request runs unfiltered — pinned
         deliberately as the post-removal wire semantics."""
         with TestClient(app) as client:
-            r = client.get("/api/events", params={"kind": "spawn"})
+            r = client.get("/api/events", params={"kind": "llm_usage"})
         assert r.status_code == 200
         assert fake_events.calls[0]["event_names"] is None
 
@@ -242,7 +229,7 @@ class TestEventsApi:
         assert before - timedelta(hours=25) <= from_ <= after - timedelta(hours=23, seconds=59)
 
     def test_total_skipped_by_default(self, fake_events: _FakeEvents) -> None:
-        """Without with_total the count path never runs — the only loki call
+        """Without with_total the count path never runs — the only telemetry read
         is the list fetch, and meta.total is null."""
         fake_events.rows.extend([_row()])
         with TestClient(app) as client:
@@ -273,7 +260,7 @@ class TestEventsApi:
 
     def test_limit_offset_paging(self, fake_events: _FakeEvents) -> None:
         with TestClient(app) as client:
-            client.get("/api/events", params={"limit": 5, "offset": 10})
+            client.get("/api/events", params={"category": "telemetry", "limit": 5, "offset": 10})
         kw = fake_events.calls[0]  # the query call (no count by default)
         assert kw["limit"] == 5
         assert kw["offset"] == 10

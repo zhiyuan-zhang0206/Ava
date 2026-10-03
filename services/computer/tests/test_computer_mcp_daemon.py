@@ -23,11 +23,12 @@ import services.computer.screen as screen_mod
 from services.computer.errors import ComputerUseError
 from services.computer.mcp_daemon import ComputerMcpDaemon
 from services.computer.protocol import Request, Response
+from services.computer.tests.slices import computer_use_config
 from services.permissions_helper.client import PermissionsHelperError
 
 
-def _daemon() -> ComputerMcpDaemon:
-    return ComputerMcpDaemon(sock="/nonexistent-test.sock")
+def _daemon(**config: Any) -> ComputerMcpDaemon:
+    return ComputerMcpDaemon(computer_use_config(**config), sock="/nonexistent-test.sock")
 
 
 def _req(
@@ -132,19 +133,17 @@ def fake_helper(monkeypatch: pytest.MonkeyPatch) -> FakeHelper:
 def audit_log(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]:
     log: list[dict[str, Any]] = []
 
-    def _stage(event: Any, *, origin_kind: str, origin_id: int) -> None:
+    def _record(event: Any) -> None:
         log.append(
             {
                 "event_type": event.event_name,
                 "agent_id": event.agent_id,
                 "source": event.source,
                 "payload": event.attributes,
-                "origin_kind": origin_kind,
-                "origin_id": origin_id,
             }
         )
 
-    monkeypatch.setattr("base.agents.impersonation_manifest.emit_staged_central_event", _stage)
+    monkeypatch.setattr("base.agents.impersonation_manifest.emit_recorded_central_event", _record)
     return log
 
 
@@ -195,6 +194,8 @@ async def test_list_tools_and_ping() -> None:
         "window_info",
         "session_info",
         "frontmost_app",
+        "ax_tree",
+        "ax_act",
     }
     ping = await d._dispatch(_req("ping"))
     assert ping["ok"] is True
@@ -883,7 +884,6 @@ async def test_audit_emitted_on_success(
     start, ev = audit_log
     assert start["event_type"] == "computer_session_start"
     assert start["payload"]["task_id"] == 42
-    assert start["origin_id"] == 42
     assert ev["event_type"] == "computer_action"
     assert ev["agent_id"] == 7
     assert ev["source"] == "agent:7"
@@ -892,7 +892,6 @@ async def test_audit_emitted_on_success(
     assert ev["payload"]["coords"] == "100,200"
     assert ev["payload"]["task_id"] == 42
     assert ev["payload"]["app"] == "Finder"
-    assert (ev["origin_kind"], ev["origin_id"]) == ("computer_action", 1)
 
 
 async def test_audit_emitted_on_error(fake_helper: FakeHelper, audit_log: list) -> None:
@@ -937,12 +936,7 @@ async def test_concurrent_calls_are_safe(
 # ── Phase 2: screen session coordination ────────────────────────────────────
 
 
-def _short_session(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Make the daemon's ScreenSession milliseconds-short (fast tests)."""
-    from base.config import settings
-
-    monkeypatch.setattr(settings.daemon, "computer_use_lease_s", 1.0)
-    monkeypatch.setattr(settings.daemon, "computer_use_queue_timeout_s", 0.05)
+SHORT_SESSION = {"computer_use_lease_s": 1.0, "computer_use_queue_timeout_s": 0.05}
 
 
 async def test_screen_busy_blocks_second_agent(
@@ -950,8 +944,7 @@ async def test_screen_busy_blocks_second_agent(
     audit_log: list,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    _short_session(monkeypatch)
-    d = _daemon()
+    d = _daemon(**SHORT_SESSION)
     # agent 7 takes the screen with a click
     assert (await _call(d, "click", {"x": 1, "y": 2}, agent_id=7))["ok"] is True
     # agent 8's action waits past the tiny queue timeout and fails busy
@@ -966,8 +959,7 @@ async def test_holder_continues_while_busy(
     audit_log: list,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    _short_session(monkeypatch)
-    d = _daemon()
+    d = _daemon(**SHORT_SESSION)
     await _call(d, "click", {"x": 1, "y": 2}, agent_id=7)
     # the holder's own next action passes through (lease renewed by the call)
     resp = await _call(d, "type_text", {"text": "hi"}, agent_id=7)
@@ -979,8 +971,7 @@ async def test_release_control_hands_over(
     audit_log: list,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    _short_session(monkeypatch)
-    d = _daemon()
+    d = _daemon(**SHORT_SESSION)
     await _call(d, "click", {"x": 1, "y": 2}, agent_id=7)
 
     async def waiter() -> Response:
@@ -999,8 +990,7 @@ async def test_release_control_by_non_holder_fails(
     audit_log: list,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    _short_session(monkeypatch)
-    d = _daemon()
+    d = _daemon(**SHORT_SESSION)
     await _call(d, "click", {"x": 1, "y": 2}, agent_id=7)
     resp = await _call(d, "release_control", {}, agent_id=8)
     assert resp["ok"] is False
@@ -1012,8 +1002,7 @@ async def test_operator_force_release_without_identity(
     audit_log: list,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    _short_session(monkeypatch)
-    d = _daemon()
+    d = _daemon(**SHORT_SESSION)
     await _call(d, "click", {"x": 1, "y": 2}, agent_id=7)
     # CLI path: no agent_id, force=true — releases whoever holds the screen
     resp = await _call(d, "release_control", {"force": True}, agent_id=None)
@@ -1034,8 +1023,7 @@ async def test_task_session_emit_failure_warns_but_action_succeeds(
     monkeypatch.setattr(daemon_mod.logger, "warning", lambda msg: warnings.append(str(msg)))  # pyright: ignore[reportUnknownArgumentType]
     log: list[dict[str, Any]] = []
 
-    def _stage(event: Any, *, origin_kind: str, origin_id: int) -> None:
-        del origin_kind, origin_id
+    def _stage(event: Any) -> None:
         if event.event_name.startswith("computer_session_"):
             # the envelope path is broken (unregistered name etc.)
             raise ValueError(f"unknown event name {event.event_name!r}")
@@ -1048,7 +1036,7 @@ async def test_task_session_emit_failure_warns_but_action_succeeds(
             }
         )  # pyright: ignore[reportUnknownMemberType]
 
-    monkeypatch.setattr("base.agents.impersonation_manifest.emit_staged_central_event", _stage)
+    monkeypatch.setattr("base.agents.impersonation_manifest.emit_recorded_central_event", _stage)
     d = _daemon()
     resp = await _call(d, "click", {"x": 1, "y": 2, "task_id": 42})
     assert resp["ok"] is True  # the action itself executed
@@ -1121,7 +1109,7 @@ async def test_shutdown_cancels_active_clients() -> None:
     daemon process (the #1137 dual-daemon root cause)."""
     d, sock, cleanup = _short_sock_dir()
     try:
-        daemon = daemon_mod.ComputerMcpDaemon(sock=str(sock))
+        daemon = daemon_mod.ComputerMcpDaemon(computer_use_config(), sock=str(sock))
         # A client handler that never returns unless cancelled — the persistent
         # SDK connection equivalent (a real client sits in handle()'s readline).
         started = asyncio.Event()
@@ -1157,11 +1145,7 @@ async def test_high_priority_waiter_jumps_the_queue(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A high-priority call queues ahead of an earlier normal one (Phase 3)."""
-    from base.config import settings
-
-    monkeypatch.setattr(settings.daemon, "computer_use_lease_s", 1.0)
-    monkeypatch.setattr(settings.daemon, "computer_use_queue_timeout_s", 0.5)
-    d = _daemon()
+    d = _daemon(computer_use_lease_s=1.0, computer_use_queue_timeout_s=0.5)
     await _call(d, "click", {"x": 1, "y": 2}, agent_id=7)
     order: list[str] = []
 

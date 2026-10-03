@@ -12,10 +12,7 @@ import psycopg
 import pytest
 from fastapi.testclient import TestClient
 
-from base.daemon.schedules.builtin_schedules import load_manifest
 from gateway.app import app
-
-BUILTIN_MANIFEST_NAMES = [s.name for s in load_manifest()]
 
 
 def _create(client: TestClient, **kw: object):
@@ -68,16 +65,14 @@ class TestReadUpdateDelete:
             assert client.get("/api/schedules/9999").status_code == 404
 
     def test_list_omits_script(self, db_conn: psycopg.Connection) -> None:
-        # The lifespan provisions the repo's built-in schedules on boot, so the
-        # list is the created row plus the manifest's built-ins.
+        # The gateway lifespan seeds nothing: the built-in schedules are provisioned
+        # by the schedule-manager service at its start, so the list is the created row.
         with TestClient(app) as client:
             _create(client, name="a")
             rows = client.get("/api/schedules").json()
-        assert len(rows) == 1 + len(BUILTIN_MANIFEST_NAMES)
+        assert [r["name"] for r in rows] == ["a"]
         assert "script" not in rows[0]
-        by_name = {r["name"]: r for r in rows}
-        assert by_name["a"]["enabled"] is True
-        assert set(by_name) == set(BUILTIN_MANIFEST_NAMES) | {"a"}
+        assert rows[0]["enabled"] is True
 
     def test_put_description_only_writes_no_new_version(self, db_conn: psycopg.Connection) -> None:
         with TestClient(app) as client:
@@ -105,14 +100,14 @@ class TestReadUpdateDelete:
         self, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """The CLI's update --disable surface shares stop's immediate reap path."""
-        from gateway.schedules.manager import ScheduleManager
+        from gateway.schedules import session_control
 
         synced: list[int] = []
 
-        async def _record_sync(self: object, schedule_id: int) -> None:
+        async def _record_sync(pool: object, schedule_id: int) -> None:
             synced.append(schedule_id)
 
-        monkeypatch.setattr(ScheduleManager, "sync", _record_sync)
+        monkeypatch.setattr(session_control, "request_sync", _record_sync)
         with TestClient(app) as client:
             sid = _create(client, name="e").json()["id"]
             stopped = client.put(f"/api/schedules/{sid}", json={"enabled": False})
@@ -125,14 +120,14 @@ class TestReadUpdateDelete:
         self, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """A no-op --enable must not interrupt an already-live schedule."""
-        from gateway.schedules.manager import ScheduleManager
+        from gateway.schedules import session_control
 
         synced: list[int] = []
 
-        async def _record_sync(self: object, schedule_id: int) -> None:
+        async def _record_sync(pool: object, schedule_id: int) -> None:
             synced.append(schedule_id)
 
-        monkeypatch.setattr(ScheduleManager, "sync", _record_sync)
+        monkeypatch.setattr(session_control, "request_sync", _record_sync)
         with TestClient(app) as client:
             sid = _create(client, name="e").json()["id"]
             enabled = client.put(f"/api/schedules/{sid}", json={"enabled": True})
@@ -154,18 +149,41 @@ class TestReadUpdateDelete:
             assert client.delete(f"/api/schedules/{sid}").status_code == 404
 
 
+class TestSyncRequests:
+    def test_control_writes_one_queued_request_per_schedule(
+        self, db_conn: psycopg.Connection
+    ) -> None:
+        """The API does not call the schedule-manager service: start / stop / delete
+        leave a row it consumes. Repeats for one schedule collapse to one row, and a
+        deleted schedule's request survives its row (the orphan session still needs
+        killing)."""
+        with TestClient(app) as client:
+            sid = _create(client, name="q", enabled=False).json()["id"]
+            client.post(f"/api/schedules/{sid}/start")
+            client.post(f"/api/schedules/{sid}/stop")
+            assert db_conn.execute("SELECT schedule_id FROM schedule_sync_requests").fetchall() == [
+                (sid,)
+            ]
+            db_conn.execute("DELETE FROM schedule_sync_requests")
+            db_conn.commit()
+            assert client.delete(f"/api/schedules/{sid}").status_code == 200
+            assert db_conn.execute("SELECT schedule_id FROM schedule_sync_requests").fetchall() == [
+                (sid,)
+            ]
+
+
 class TestControl:
     def test_start_stop_toggle_enabled_and_sync_the_session(
         self, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        from gateway.schedules.manager import ScheduleManager
+        from gateway.schedules import session_control
 
         synced: list[int] = []
 
-        async def _record_sync(self: object, schedule_id: int) -> None:
+        async def _record_sync(pool: object, schedule_id: int) -> None:
             synced.append(schedule_id)
 
-        monkeypatch.setattr(ScheduleManager, "sync", _record_sync)
+        monkeypatch.setattr(session_control, "request_sync", _record_sync)
         with TestClient(app) as client:
             sid = _create(client, name="c", enabled=False).json()["id"]
             assert client.post(f"/api/schedules/{sid}/start").json()["enabled"] is True
@@ -204,12 +222,12 @@ class TestLogsRunsDraft:
         """The live capture pads the screen to the terminal height — trailing
         blank rows are stripped so `logs --lines N` shows the content tail
         (the runner's output sits above blank display rows once scrolled)."""
-        from gateway.schedules.manager import ScheduleManager
+        from gateway.schedules import session_control
 
-        async def _fake_capture(self: object, schedule_id: int, lines: int) -> str:
+        async def _fake_capture(schedule_id: int, lines: int) -> str:
             return "line one\nline two\n\n\n\n"
 
-        monkeypatch.setattr(ScheduleManager, "capture", _fake_capture)
+        monkeypatch.setattr(session_control, "capture", _fake_capture)
         with TestClient(app) as client:
             sid = _create(client, name="l").json()["id"]
             body = client.get(f"/api/schedules/{sid}/logs").json()
@@ -222,15 +240,15 @@ class TestLogsRunsDraft:
         """A `--lines N` smaller than the terminal height must still show the
         runner's output: the capture window widens to cover the display
         padding, blank rows are stripped, then the tail is trimmed to N."""
-        from gateway.schedules.manager import ScheduleManager
+        from gateway.schedules import session_control
 
         seen: list[int] = []
 
-        async def _fake_capture(self: object, schedule_id: int, lines: int) -> str:
+        async def _fake_capture(schedule_id: int, lines: int) -> str:
             seen.append(lines)
             return "line one\nline two\n\n\n\n"  # display-padded screen
 
-        monkeypatch.setattr(ScheduleManager, "capture", _fake_capture)
+        monkeypatch.setattr(session_control, "capture", _fake_capture)
         with TestClient(app) as client:
             sid = _create(client, name="l").json()["id"]
             body = client.get(f"/api/schedules/{sid}/logs?lines=3").json()
@@ -337,7 +355,7 @@ class TestLogsRunsDraft:
         calls: dict[str, object] = {}
 
         async def _fake_create_launch(
-            body: SpawnAgentRequest, target: str, pool: object
+            body: SpawnAgentRequest, target: str, pool: object, db: object, bus: object
         ) -> SpawnedAgent:
             calls["label"] = body.label
             calls["prompt"] = body.prompt

@@ -6,12 +6,12 @@ import asyncio
 import json
 import logging
 import uuid
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Mapping
 from typing import Any, Literal
 
 import httpx
 
-from base.config import settings
+from services.im_bridge.config import ImBridgeConfig
 from services.im_bridge.types import AgentDetail, AgentDirectoryPage
 
 _log = logging.getLogger("services.im_bridge.gateway_client")
@@ -20,9 +20,13 @@ _log = logging.getLogger("services.im_bridge.gateway_client")
 class GatewayClient:
     """REST + SSE client for the Ava gateway (the Post Gateway)."""
 
-    def __init__(self) -> None:
-        self._base = settings.gateway.gateway_url.rstrip("/")
-        self._cookie: str | None = None
+    def __init__(
+        self, config: ImBridgeConfig, *, gateway_url: str, auth_headers: Mapping[str, str]
+    ) -> None:
+        self._config = config
+        self._base = gateway_url.rstrip("/")
+        # The machine API token's Bearer (`gateway_auth_headers()`), empty in the open posture.
+        self._auth_headers = dict(auth_headers)
         self._client: httpx.AsyncClient | None = None
 
     async def _http(self) -> httpx.AsyncClient:
@@ -32,19 +36,8 @@ class GatewayClient:
             )
         return self._client
 
-    async def login(self) -> None:
-        """POST /api/auth/login with the cluster secret; keep the session cookie."""
-        client = await self._http()
-        resp = await client.post(
-            "/api/auth/login",
-            json={"password": settings.data_plane.cluster_secret},
-        )
-        if resp.status_code != 200:
-            raise RuntimeError(f"gateway login failed: HTTP {resp.status_code}")
-        self._cookie = resp.headers.get("set-cookie", "")
-
     def _headers(self) -> dict[str, str]:
-        return {"Cookie": self._cookie} if self._cookie else {}
+        return dict(self._auth_headers)
 
     async def list_agents(
         self,
@@ -83,7 +76,7 @@ class GatewayClient:
         their persisted key (Task #1032), so a replay after a lost gateway
         response stays a no-op server-side."""
         key = idempotency_key or uuid.uuid4().hex
-        for attempt, delay in enumerate(settings.services.im_send_retry_delays, start=1):
+        for attempt, delay in enumerate(self._config.im_send_retry_delays, start=1):
             try:
                 client = await self._http()
                 resp = await client.post(
@@ -116,7 +109,7 @@ class GatewayClient:
                 )
                 await asyncio.sleep(delay)
         raise RuntimeError(
-            f"send to agent {agent_id} failed after {len(settings.services.im_send_retry_delays)} attempts"
+            f"send to agent {agent_id} failed after {len(self._config.im_send_retry_delays)} attempts"
         )
 
     async def list_presets(self) -> list[dict[str, Any]]:
@@ -170,7 +163,7 @@ class GatewayClient:
         from."""
         client = await self._http()
         if limit is None:
-            limit = settings.services.im_bridge_timeline_window
+            limit = self._config.im_bridge_timeline_window
         resp = await client.get(
             f"/api/agents/{agent_id}/timeline",
             headers=self._headers(),
@@ -189,7 +182,7 @@ class GatewayClient:
             "GET",
             f"/api/agents/{agent_id}/events/stream",
             headers=self._headers(),
-            timeout=httpx.Timeout(settings.services.im_sse_read_timeout_seconds, connect=10.0),
+            timeout=httpx.Timeout(self._config.im_sse_read_timeout_seconds, connect=10.0),
         ) as resp:
             if resp.status_code != 200:
                 raise RuntimeError(f"sse {agent_id} failed: HTTP {resp.status_code}")

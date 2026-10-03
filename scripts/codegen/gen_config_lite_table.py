@@ -202,9 +202,6 @@ LITE_MANIFEST: tuple[LiteField, ...] = (
     LiteField("sdk_call_sampling_enabled", "literal", None, "sdk_call_policy"),
     LiteField("sdk_call_sample_every", "literal", None, "sdk_call_policy"),
     LiteField(
-        "events_jsonl_rollup_retention_days", "literal", None, "telemetry._write_batch retention"
-    ),
-    LiteField(
         "sdk_disable",
         "factory_empty_list",
         None,

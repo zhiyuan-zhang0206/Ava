@@ -7,13 +7,14 @@ import pytest
 
 from base import paths
 from base.daemon import health
+from base.daemon.endpoints import ServiceEndpoints
 
 
 def test_daemon_pidfile_uses_run_directory_only(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(paths, "ava_home", lambda: tmp_path)
-    current = paths.pid_path("agent_host")
+    current = ServiceEndpoints.from_settings().of("agent_host").pidfile
     assert current == tmp_path / "run" / "agent_host.pid"
     (tmp_path / current.name).write_text(str(os.getpid()))
 

@@ -42,7 +42,7 @@ rendering) lives in agent/graph/memory_recall.py; this plugin is just the
 before_llm wiring plus its firing gates.
 
 Firing gates:
-- Feature gate: no-op unless `turn_settings.agent.passive_memory_recall_enabled`.
+- Feature gate: no-op unless `passive_memory_recall_enabled`.
 - Trigger gate: fire when the message tail carries fresh inbound from a real
   source — user chat, a peer agent (`agent:`), a scheduled turn (`schedule:`),
   or a system notice — and skip machine-originated wake-ups (`watcher:` /

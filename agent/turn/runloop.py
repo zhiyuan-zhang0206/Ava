@@ -10,6 +10,7 @@ from langgraph.graph.state import CompiledStateGraph
 
 from agent.graph.llm_errors import FatalLLMStreamError, FatalProviderError
 from agent.hooks.compact import CompactionFailedError
+from agent.startup import CHECKPOINT_INTERVAL_KEY
 from agent.state import BaseAgentState
 from agent.state_channels import (
     CIRCUIT_REASON_AUTH,
@@ -23,10 +24,9 @@ from agent.state_channels import (
     CircuitState,
 )
 from base.agents.context import AvaContext
-from base.config.turn_view import turn_settings
 from base.events.live.projection import Error
 from base.log import logger
-from base.telemetry.audit_events import insert_event_log_async
+from base.telemetry.audit_events import prepare_event_log, record_audit_reported_async
 
 # LangGraph recursion_limit defaults to 25 — far too low for this graph even
 # per-turn: one invocation is one TURN, and a turn is a whole work bout (the
@@ -106,7 +106,7 @@ def _provider_recovery(reason: str) -> str:
     return "Choose a different model overlay or resolve the provider policy rejection, then send a new message."
 
 
-def _model_vendor() -> str | None:
+def _model_vendor(ctx: AvaContext) -> str | None:
     """Vendor key of this turn's model — the account a failure bills to.
 
     The classifier stamps the same read onto the ``llm_provider_error`` log's
@@ -118,7 +118,7 @@ def _model_vendor() -> str | None:
     """
     from base.lm.factory import provider_key_of_model
 
-    return provider_key_of_model(turn_settings.lm.llm_model)
+    return provider_key_of_model(ctx.require_agent().brain.llm_model)
 
 
 async def _record_permanent_reject_outcome(
@@ -178,8 +178,11 @@ async def _record_permanent_reject_outcome(
             streak=streak,
             reason=reason,
         )
-        try:
-            await insert_event_log_async(
+        # The halt itself is already in force; a failed audit write is reported
+        # (`audit_write_failed`) instead of aborting the rest of the handling.
+        await record_audit_reported_async(
+            ctx.ops_pool,
+            prepare_event_log(
                 event_type="circuit_breaker",
                 agent_id=agent_id,
                 source="system",
@@ -190,12 +193,8 @@ async def _record_permanent_reject_outcome(
                     "error_class": exc.error_class,
                     "streak": streak,
                 },
-            )
-        except Exception:
-            logger.warning(
-                "failed to record the recovery-halt circuit_breaker event",
-                agent_id=agent_id,
-            )
+            ),
+        )
     try:
         from agent.db import enqueue_fatal_provider_report_to_nearest_alive_ancestor
 
@@ -204,7 +203,7 @@ async def _record_permanent_reject_outcome(
             agent_id,
             error_class=exc.error_class or "permanent",
             provider=exc.provider,
-            vendor=_model_vendor(),
+            vendor=_model_vendor(ctx),
             status=exc.status,
             reason=SUPPRESS_REASON_PERMANENT_REJECT,
             occurred_at=occurred_at if occurred_at is not None else datetime.now(UTC),
@@ -346,11 +345,13 @@ async def _handle_fatal_llm_error(
             reason=reason,
             status=exc.status,
         )
-        # Record the breaker-open event as an audit event (best-effort: a failure
-        # only loses the audit record, never the breaker state itself).
+        # Record the breaker-open event as an audit event. The breaker state is
+        # already set; a failed audit write is reported (`audit_write_failed`),
+        # never allowed to undo or skip the rest of the handling.
         if emit_reports and ctx.ops_pool is not None:
-            try:
-                await insert_event_log_async(
+            await record_audit_reported_async(
+                ctx.ops_pool,
+                prepare_event_log(
                     event_type="circuit_breaker",
                     agent_id=agent_id,
                     source="system",
@@ -360,13 +361,8 @@ async def _handle_fatal_llm_error(
                         "status": exc.status,
                         "error_class": exc.error_class,
                     },
-                )
-            except Exception as exc_log:
-                logger.warning(
-                    "failed to record circuit_breaker event: {exc!r}",
-                    agent_id=agent_id,
-                    exc=exc_log,
-                )
+                ),
+            )
         if emit_reports and ctx.ops_pool is not None and is_blocked_provider_failure:
             from agent.db import enqueue_fatal_provider_report_to_nearest_alive_ancestor
 
@@ -377,7 +373,7 @@ async def _handle_fatal_llm_error(
                     agent_id,
                     error_class=exc.error_class,
                     provider=exc.provider,
-                    vendor=_model_vendor(),
+                    vendor=_model_vendor(ctx),
                     status=exc.status,
                     reason=reason,
                     occurred_at=occurred_at if occurred_at is not None else datetime.now(UTC),
@@ -391,11 +387,13 @@ async def _handle_fatal_llm_error(
     return input_update
 
 
-def graph_config(agent_id: int, tags: list[str], metadata: dict[str, object]) -> RunnableConfig:
-    """LangGraph invoke config: thread_id + infinite recursion limit + the
-    trace fields (run_name / metadata / tags) for backend filtering."""
+def graph_config(
+    agent_id: int, tags: list[str], metadata: dict[str, object], checkpoint_interval: int
+) -> RunnableConfig:
+    """LangGraph invoke config: thread_id + the turn's checkpoint interval + infinite recursion
+    limit + the trace fields (run_name / metadata / tags) for backend filtering."""
     return {
-        "configurable": {"thread_id": str(agent_id)},
+        "configurable": {"thread_id": str(agent_id), CHECKPOINT_INTERVAL_KEY: checkpoint_interval},
         "recursion_limit": _RECURSION_LIMIT_INF,
         "run_name": f"ava-agent-{agent_id}",
         "metadata": metadata,

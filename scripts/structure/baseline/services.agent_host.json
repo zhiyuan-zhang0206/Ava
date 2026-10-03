@@ -1,7 +1,5 @@
 {
   "ambient_state": {
-    "services/agent_host/daemon.py::asyncio-task:_PageEventPublisher.emit": 1,
-    "services/agent_host/daemon.py::asyncio-task:_spawn_background_tasks": 4,
     "services/agent_host/daemon.py::asyncio-task:run": 1,
     "services/agent_host/dispatcher.py::asyncio-task:TurnScheduler._start": 1,
     "services/agent_host/host.py::asyncio-task:AgentHost.run_turn": 2,
@@ -16,9 +14,11 @@
     "services/agent_host/tests/test_host_pool_capacity.py::test_six_host_pools_settle_one_thousand_short_requests_through_pgbouncer": 15,
     "services/agent_host/tests/test_hosted_compact_failure.py::test_compaction_failure_is_visible_durable_and_recovers_on_new_inbound": 17,
     "services/agent_host/tests/test_hosted_failure_settlement_recovery.py::test_abort_survives_database_loss_before_halted_state_write": 17,
+    "services/agent_host/tests/test_hosted_lifecycle.py::test_hosted_applies_only_after_continuation_returns": 15,
     "services/agent_host/tests/test_maintenance_prior_failure.py::test_prior_tail_flush_outage_defers_receipt_until_reflushed": 16
   },
   "files": {
+    "services/agent_host/tests/test_agent_host.py": 1770,
     "services/agent_host/tests/test_circuit_breaker.py": 864,
     "services/agent_host/tests/test_turn_dispatcher.py": 1428
   },
@@ -29,6 +29,10 @@
     "services/agent_host/tests/test_hosted_backlog_recovery.py::agent.turn.progress._PROGRESS": 1,
     "services/agent_host/tests/test_hosted_compact_failure.py::agent.graph.claim._dispatch": 1,
     "services/agent_host/tests/test_hosted_failure_settlement_recovery.py::agent.graph.claim._dispatch": 1,
+    "services/agent_host/tests/test_hosted_force_quiescence.py::agent.graph.exec._process": 2,
+    "services/agent_host/tests/test_hosted_force_quiescence.py::agent.graph.exec._subprocess": 1,
+    "services/agent_host/tests/test_maintenance_receipt_grading.py::ops.agent_pause._wake": 3,
+    "services/agent_host/tests/test_maintenance_receipt_grading.py::ops.cluster_pause._unpause_local_cluster": 1,
     "services/agent_host/tests/test_reconcile_after_abort.py::base.agents.history.inbound_sideload._committed_ids_from_all_settled_writes": 1
   }
 }

@@ -3,16 +3,6 @@
     "tests/integration/test_grafana_native_runtime.py::test_anonymous_viewer_can_open_tempo_trace_in_explore": 19
   },
   "patch_targets": {
-    "tests/integration/test_cluster_instance.py::cli.commands.data_plane.cluster_instance._HBA_PROOF_TIMEOUT_S": 1,
-    "tests/integration/test_impersonation_manifest_operator_gate.py::base.agents.impersonation_manifest._insert_local_item": 1,
-    "tests/integration/test_impersonation_manifest_operator_gate.py::base.agents.impersonation_manifest._persist_capture_failure": 1,
-    "tests/integration/test_impersonation_manifest_operator_gate.py::base.agents.impersonation_manifest._upsert_manifest_alert": 1
-  },
-  "tests_location": {
-    "tests/integration/test_impersonation_manifest_contract.py::top-level": 1,
-    "tests/integration/test_impersonation_manifest_inventory.py::top-level": 1,
-    "tests/integration/test_impersonation_manifest_operator_gate.py::top-level": 1,
-    "tests/integration/test_impersonation_manifest_runner_role.py::top-level": 1,
-    "tests/integration/test_impersonation_notifications.py::top-level": 1
+    "tests/integration/test_cluster_instance.py::cli.commands.data_plane.cluster_instance._HBA_PROOF_TIMEOUT_S": 1
   }
 }

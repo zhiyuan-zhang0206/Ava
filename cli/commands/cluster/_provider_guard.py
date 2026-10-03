@@ -216,10 +216,10 @@ def _halted_agents_count(window_hours: float) -> int | None:
     pair stays coherent. None when the query cannot run — the caller reports
     "cannot judge" and passes, never a guessed healthy verdict.
     """
-    import base.db
+    from base.db import Database
 
     try:
-        with base.db.connect() as conn, conn.cursor() as cur:
+        with Database.from_settings().connect() as conn, conn.cursor() as cur:
             cur.execute(
                 "SELECT count(*) FROM agents_meta"
                 " WHERE permanent_reject_streak >= %s"

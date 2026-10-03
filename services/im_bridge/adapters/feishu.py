@@ -6,9 +6,8 @@ bridged; group chats and media messages are ignored. Replies go through the
 REST ``im/v1/messages`` create API keyed by the sender's ``open_id`` (the
 contract's feishu session id).
 
-Credentials are read from ``settings.feishu`` when that config domain exists,
-else from env vars (``AVA_FEISHU_APP_ID`` / ``FEISHU_APP_ID`` and
-``AVA_FEISHU_APP_SECRET`` / ``FEISHU_APP_SECRET``). Missing credentials make
+Credentials arrive in the ``FeishuCredentialsConfig`` slice the daemon builds
+(``AVA_FEISHU_APP_ID`` / ``AVA_FEISHU_APP_SECRET``). Missing credentials make
 ``start()`` log and no-op — the daemon keeps running without the feishu link.
 
 Platform side (operator action, not code): in the Feishu open platform enable
@@ -26,7 +25,9 @@ from collections import deque
 from typing import Any
 
 from base.log import logger
+from services.im_bridge.adapters import feishu_poll_cursor as cursors
 from services.im_bridge.adapters.feishu_ws_proxy import allow_env_proxy_for_ws
+from services.im_bridge.config import FeishuCredentialsConfig
 from services.im_bridge.types import IMAdapter, InboundMessage
 
 # Feishu caps a text message around 30KB of characters; segment conservatively.
@@ -61,8 +62,10 @@ class FeishuAdapter(IMAdapter):
 
     channel = "feishu"
 
-    def __init__(self, core: Any) -> None:
+    def __init__(self, core: Any, config: FeishuCredentialsConfig) -> None:
         super().__init__(core)
+        self._config = config
+        self._replay_window_s = config.delivery_watchdog_stale_claimed_threshold_seconds
         self._app_id = ""
         self._app_secret = ""
         self._main_loop: asyncio.AbstractEventLoop | None = None
@@ -82,6 +85,10 @@ class FeishuAdapter(IMAdapter):
         self._sent_chat_ids: dict[str, str] = {}  # open_id -> p2p chat id (from sends)
         self._poll_chats: set[str] = set()
         self._poll_cursor: dict[str, str] = {}  # chat_id -> last delivered message_id
+        # Cursor position's create time (ms); saved with the cursor so a restart
+        # resumes there. `_poll_replay`: saved chats awaiting their first round.
+        self._poll_cursor_ms: dict[str, int] = {}
+        self._poll_replay: set[str] = set()
         # Seeded chats are tracked separately from the cursor value: a
         # successful round with an empty window still marks the chat seeded,
         # so the first message that arrives afterwards is delivered instead
@@ -91,39 +98,13 @@ class FeishuAdapter(IMAdapter):
         self._poison_retries: dict[str, int] = {}  # "chat:msg" -> inbound failures
         self._seen_messages: deque[str] = deque(maxlen=500)
 
-    # -- credentials ---------------------------------------------------------
-
-    @staticmethod
-    def _credential(field: str, *env_names: str) -> str:
-        """Read a credential from ``settings.feishu`` — the repo's only
-        sanctioned env surface (lint os.environ forbids direct reads).
-        ``env_names`` is accepted for call-site clarity but unused."""
-        del env_names
-        try:
-            from base.config import settings
-
-            domain = getattr(settings, "feishu", None)
-            if domain is not None:
-                value: Any = getattr(domain, field, "")
-                if value:
-                    return (
-                        value.get_secret_value()
-                        if hasattr(value, "get_secret_value")
-                        else str(value)
-                    )
-        except Exception:
-            # base.config must never break the adapter (settings-lite verbs,
-            # bare checkouts, a gateway fetch failure).
-            logger.debug("FeishuAdapter: settings.feishu probe failed")
-        return ""
-
     # -- lifecycle -----------------------------------------------------------
 
     async def start(self) -> None:
         """Connect the long-connection client; no-op (with a log) when the
         credentials are missing so the daemon stays up either way."""
-        self._app_id = self._credential("feishu_app_id")
-        self._app_secret = self._credential("feishu_app_secret")
+        self._app_id = self._config.feishu_app_id
+        self._app_secret = self._config.feishu_app_secret
         if not self._app_id or not self._app_secret:
             logger.warning(
                 "FeishuAdapter: FEISHU_APP_ID / FEISHU_APP_SECRET not configured; "
@@ -212,14 +193,7 @@ class FeishuAdapter(IMAdapter):
         # Explicit timeout (G6, task #698): the lark SDK's own default is 30s
         # but that is an SDK-version property, not a contract — pin it so a hung
         # Feishu REST line cannot park an IM outbound longer than configured.
-        # Same fail-open guard as _credential: settings must never break the
-        # adapter in a settings-lite context.
-        try:
-            from base.config import settings
-
-            timeout = settings.feishu.feishu_rest_timeout_seconds
-        except Exception:
-            timeout = 30.0
+        timeout = self._config.feishu_rest_timeout_seconds
         return builder.app_id(self._app_id).app_secret(self._app_secret).timeout(timeout).build()
 
     # -- inbound -------------------------------------------------------------
@@ -325,6 +299,7 @@ class FeishuAdapter(IMAdapter):
             chat_id=open_id,  # contract: the feishu session IS the user's open_id
             text=text,
             message_id=message_id,
+            idempotency_key=cursors.idempotency_key(message_id),
         )
 
     # -- outbound ------------------------------------------------------------
@@ -356,25 +331,13 @@ class FeishuAdapter(IMAdapter):
         """Start the ListMessage poll loop (main loop task)."""
         if self._poll_task is not None and not self._poll_task.done():
             return
-        try:
-            from base.config import settings
-
-            interval = settings.feishu.feishu_poll_interval_seconds
-            bootstrap = (settings.feishu.feishu_poll_chat_id or "").strip()
-        except Exception:
-            interval = 1.0
-            bootstrap = ""
+        interval = self._config.feishu_poll_interval_seconds
+        bootstrap = self._config.feishu_poll_chat_id.strip()
         if interval <= 0:
             logger.info("FeishuAdapter: polling disabled (AVA_FEISHU_POLL_INTERVAL_SECONDS=0)")
             return
         if bootstrap:
             self._poll_chats.add(bootstrap)
-        if not self._poll_chats:
-            # No chat known yet: outbound sends add chats as they resolve.
-            logger.info(
-                "FeishuAdapter: poller idle — no chat id known yet "
-                "(set AVA_FEISHU_POLL_CHAT_ID or wait for an outbound send)"
-            )
         self._poll_task = asyncio.create_task(self._poll_loop(interval))
         logger.info(
             "FeishuAdapter: poller started interval={:.1f}s chats={}",
@@ -391,7 +354,18 @@ class FeishuAdapter(IMAdapter):
         persistent failure (e.g. the user deleted the bot) must never slow
         the healthy chats. Any fully-healthy round resets the backoff.
         """
+        loaded = False
+        # quiesce-exempt: polls the Feishu API; a cursor is written only when an update arrives, and forwarding goes through the gateway, which refuses business requests in the window
         while True:
+            if not loaded:
+                # before any round: an unrestored chat would seed, not replay
+                try:
+                    await self._restore_cursors()
+                    loaded = True
+                except Exception:
+                    logger.exception("FeishuAdapter: restoring poll cursors failed")
+                    await asyncio.sleep(interval)
+                    continue
             failed = 0
             total = len(self._poll_chats)
             try:
@@ -424,77 +398,106 @@ class FeishuAdapter(IMAdapter):
     async def _poll_once(self, chat_id: str) -> bool:
         """List the chat's newest messages; feed unseen user texts to core.
 
-        The first successful round only seeds the cursor (never replays
-        history on a daemon restart); later rounds process messages newer
-        than the cursor, oldest first, deduped by message id — the WS path
-        may deliver the same message concurrently. Returns False when the
-        list call failed (drives the poll loop's backoff); the cursor only
-        advances past messages that were delivered or are permanently
-        undeliverable, so a failed inbound is retried next round.
+        A chat's first-ever successful round only seeds the cursor (it never
+        replays pre-existing history); a chat with a persisted cursor replays
+        the messages newer than it, bounded by the replay window; later rounds
+        process messages newer than the cursor, oldest first, deduped by
+        message id — the WS path may deliver the same message concurrently,
+        and the gateway dedups on the message's idempotency key. Returns
+        False when the list call failed (drives the poll loop's backoff); the
+        cursor only advances past messages that were delivered or are
+        permanently undeliverable, so a failed inbound is retried next round.
         """
         if self._rest_client is None:
             self._rest_client = await asyncio.to_thread(self._build_rest_client)
-        from lark_oapi.api.im.v1 import ListMessageRequest
-
-        request = (
-            ListMessageRequest.builder()
-            .container_id_type("chat")
-            .container_id(chat_id)
-            .page_size(20)
-            .sort_type("ByCreateTimeDesc")
-            .build()
+        replay = chat_id in self._poll_replay
+        items = await cursors.list_chat(
+            self._rest_client,
+            chat_id,
+            deep=replay,
+            replay_window_s=self._replay_window_s,
+            cursor_id=self._poll_cursor.get(chat_id),
+            cursor_ms=self._poll_cursor_ms.get(chat_id),
         )
-        response = await asyncio.to_thread(self._rest_client.im.v1.message.list, request)
-        if response.code != 0:
-            logger.warning(
-                "FeishuAdapter: poll list failed chat={} code={} msg={}",
-                chat_id,
-                response.code,
-                getattr(response, "msg", ""),
-            )
+        if items is None:
             return False
-        items: list[Any] = list((response.data.items or []) if response.data is not None else [])
-        items.reverse()  # ascending by create time
         if chat_id not in self._poll_seeded:
-            # Seed round: remember the newest id without processing anything.
-            # The chat is marked seeded even when the window is empty, so the
-            # first real message afterwards is delivered rather than swallowed
-            # as "history". A failed round never marks seeded, preserving the
-            # no-replay guarantee across daemon restarts.
             self._poll_seeded.add(chat_id)
-            # Anchor on the newest item that carries an id: an id-less newest
-            # item (defensive — the API guarantees ids) must not leave the
-            # chat without a cursor, which would replay the whole window.
-            seed_item = next((item for item in reversed(items) if item.message_id), None)
-            if seed_item is not None:
-                self._poll_cursor[chat_id] = seed_item.message_id
-            # After a daemon restart the in-memory owner open id is gone;
-            # restore it from the newest user message in the window so
-            # outbound notifications do not fail until the user's next
-            # message (send_to_owner has no chat-id bootstrap path).
-            if not self._last_open_id:
-                for item in reversed(items):
-                    sender = getattr(item, "sender", None)
-                    if sender is None or getattr(sender, "sender_type", "") != "user":
-                        continue
-                    open_id = self._sender_open_id(sender)
-                    if open_id:
-                        self._last_open_id = open_id
-                        break
-            return True
-        cursor = self._poll_cursor.get(chat_id)
-        # Process everything after the cursor (ascending order); when the
-        # cursor rotated out of the window, fall back to the seen-id dedup.
-        pending = items
-        if cursor is not None:
-            for idx, item in enumerate(items):
-                if item.message_id == cursor:
-                    pending = items[idx + 1 :]
-                    break
+            self._restore_owner_open_id(items)
+            if not replay:
+                # Never polled before: seed only (no history replay), even on
+                # an empty window, so the first real message is delivered;
+                # a failed round never seeds. Saved cursors replay below.
+                message_id, self._poll_cursor_ms[chat_id] = cursors.anchor(items)
+                if message_id is not None:
+                    self._poll_cursor[chat_id] = message_id
+                await self._save_cursor(chat_id)
+                return True
+        pending, stale = cursors.pending_after(
+            items,
+            self._poll_cursor.get(chat_id),
+            self._poll_cursor_ms.get(chat_id),
+            replay=replay,
+            replay_window_s=self._replay_window_s,
+        )
+        if stale:
+            logger.warning(
+                "FeishuAdapter: replay skipped {} message(s) past the window chat={}",
+                len(stale),
+                chat_id,
+            )
+        self._poll_replay.discard(chat_id)
         last = await self._poll_deliver(pending, chat_id)
+        if last is None and stale and not pending:
+            last = stale[-1].message_id  # nothing replayable: move past the gap
         if last:
             self._poll_cursor[chat_id] = last
+            moved = next((cursors.create_ms(i) for i in items if i.message_id == last), None)
+            self._poll_cursor_ms[chat_id] = moved or self._poll_cursor_ms.get(chat_id, 0)
+            await self._save_cursor(chat_id)
         return True
+
+    async def _restore_cursors(self) -> None:
+        """Saved chats are polled again at once; their first round replays."""
+
+        store = getattr(self.core, "cursor_store", None)
+        saved: dict[str, tuple[str, int]] = (
+            await asyncio.to_thread(store.load_poll, self.channel) if store else {}
+        )
+        for chat_id, (message_id, create_ms) in saved.items():
+            if message_id:
+                self._poll_cursor[chat_id] = message_id
+            self._poll_cursor_ms[chat_id] = create_ms
+        self._poll_replay |= set(saved)
+        self._poll_chats |= set(saved)
+
+    async def _save_cursor(self, chat_id: str) -> None:
+        store = getattr(self.core, "cursor_store", None)
+        if store is not None:
+            await asyncio.to_thread(
+                store.save_poll,
+                self.channel,
+                chat_id,
+                self._poll_cursor.get(chat_id, ""),
+                self._poll_cursor_ms[chat_id],
+            )
+
+    def _restore_owner_open_id(self, items: list[Any]) -> None:
+        """After a daemon restart the in-memory owner open id is gone;
+        restore it from the newest user message in the window so outbound
+        notifications do not fail until the user's next message
+        (send_to_owner has no chat-id bootstrap path)."""
+
+        if self._last_open_id:
+            return
+        for item in reversed(items):
+            sender = getattr(item, "sender", None)
+            if sender is None or getattr(sender, "sender_type", "") != "user":
+                continue
+            open_id = self._sender_open_id(sender)
+            if open_id:
+                self._last_open_id = open_id
+                return
 
     async def _poll_deliver(self, pending: list[Any], chat_id: str) -> str | None:
         """Feed unseen user texts to core; return the newest message id the
@@ -596,6 +599,7 @@ class FeishuAdapter(IMAdapter):
             chat_id=open_id,
             text=content,
             message_id=getattr(item, "message_id", None),
+            idempotency_key=cursors.idempotency_key(getattr(item, "message_id", None)),
         )
 
     async def send(

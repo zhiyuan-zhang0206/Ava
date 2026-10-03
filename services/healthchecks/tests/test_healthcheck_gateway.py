@@ -150,3 +150,19 @@ def test_probe_passes_through_a_normal_verdict(monkeypatch: pytest.MonkeyPatch) 
     probe = hc._probe()
     assert probe.alive is True
     assert probe.detail == "home /x"
+
+
+def test_probe_reads_the_gateway_health_url_when_it_runs(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The URL is read per probe, not captured when the module imports."""
+    from base.config import settings
+
+    seen: list[str] = []
+
+    def fake_probe_home(url: str) -> DaemonProbe:
+        seen.append(url)
+        return DaemonProbe.up("ok")
+
+    monkeypatch.setattr(hc, "probe_home", fake_probe_home)
+    monkeypatch.setattr(settings.services, "gateway_health_url", "http://gw.example:1/api/health")
+    hc._probe()
+    assert seen == ["http://gw.example:1/api/health"]

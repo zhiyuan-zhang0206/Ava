@@ -25,6 +25,8 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
+from base.events.live.bus import EventBus
+from base.events.live.tests.fakes import patch_open_async_redis
 from services.agent_host import dispatcher
 from services.agent_host.dispatcher import (
     InboundWakeDispatcher,
@@ -657,7 +659,7 @@ class TestCancelBeforeTheFirstSlice:
             return [dispatcher.PendingInboundWake(agent_id=7, stale=True)]
 
         disp = InboundWakeDispatcher(
-            "redis://unused", sched, pending_scan=_pending, stale_after_s=180.0
+            EventBus.from_settings(), sched, pending_scan=_pending, stale_after_s=180.0
         )
 
         sched.wake(7)
@@ -776,7 +778,7 @@ class TestDispatcherMessageHandling:
             def wake(self, agent_id: int) -> None:
                 woken.append(agent_id)
 
-        return InboundWakeDispatcher("redis://unused", _Sched()), woken  # pyright: ignore[reportArgumentType]
+        return InboundWakeDispatcher(EventBus.from_settings(), _Sched()), woken  # pyright: ignore[reportArgumentType]
 
     def test_pmessage_wakes_its_agent(self) -> None:
         disp, woken = self._dispatcher()
@@ -844,7 +846,7 @@ class TestPendingScan:
             return [dispatcher.PendingInboundWake(agent_id=23, stale=False)]
 
         disp = InboundWakeDispatcher(
-            "redis://unused", scheduler, pending_scan=_pending, stale_after_s=180.0
+            EventBus.from_settings(), scheduler, pending_scan=_pending, stale_after_s=180.0
         )
 
         await disp.scan_once()
@@ -869,7 +871,7 @@ class TestPendingScan:
             return [dispatcher.PendingInboundWake(agent_id=23, stale=False)]
 
         disp = InboundWakeDispatcher(
-            "redis://unused", scheduler, pending_scan=_pending, stale_after_s=180.0
+            EventBus.from_settings(), scheduler, pending_scan=_pending, stale_after_s=180.0
         )
 
         await disp.scan_once()
@@ -891,7 +893,7 @@ class TestPendingScan:
             return [dispatcher.PendingInboundWake(agent_id=23, stale=True)]
 
         disp = InboundWakeDispatcher(
-            "redis://unused", scheduler, pending_scan=_pending, stale_after_s=180.0
+            EventBus.from_settings(), scheduler, pending_scan=_pending, stale_after_s=180.0
         )
 
         await disp.scan_once()
@@ -914,7 +916,7 @@ class TestPendingScan:
             return [dispatcher.PendingInboundWake(agent_id=23, stale=True)]
 
         disp = InboundWakeDispatcher(
-            "redis://unused", scheduler, pending_scan=_pending, stale_after_s=180.0
+            EventBus.from_settings(), scheduler, pending_scan=_pending, stale_after_s=180.0
         )
 
         with pytest.raises(dispatcher.HostRestartRequiredError, match="did not unwind"):
@@ -960,7 +962,7 @@ class TestStallRestartEscalation:
             return []
 
         disp = InboundWakeDispatcher(
-            "redis://unused",
+            EventBus.from_settings(),
             scheduler,
             pending_scan=_pending,
             stale_after_s=180.0,
@@ -1002,7 +1004,7 @@ class TestTurnLevelStaleScan:
             return []
 
         disp = InboundWakeDispatcher(
-            "redis://unused", scheduler, pending_scan=_pending, stale_after_s=180.0
+            EventBus.from_settings(), scheduler, pending_scan=_pending, stale_after_s=180.0
         )
 
         await disp.scan_once()
@@ -1020,7 +1022,7 @@ class TestTurnLevelStaleScan:
             return []
 
         disp = InboundWakeDispatcher(
-            "redis://unused", scheduler, pending_scan=_pending, stale_after_s=180.0
+            EventBus.from_settings(), scheduler, pending_scan=_pending, stale_after_s=180.0
         )
 
         await disp.scan_once()
@@ -1041,7 +1043,7 @@ class TestTurnLevelStaleScan:
             return []
 
         disp = InboundWakeDispatcher(
-            "redis://unused", scheduler, pending_scan=_pending, stale_after_s=180.0
+            EventBus.from_settings(), scheduler, pending_scan=_pending, stale_after_s=180.0
         )
 
         await disp.scan_once()
@@ -1059,7 +1061,7 @@ class TestTurnLevelStaleScan:
             return []
 
         disp = InboundWakeDispatcher(
-            "redis://unused", scheduler, pending_scan=_pending, stale_after_s=180.0
+            EventBus.from_settings(), scheduler, pending_scan=_pending, stale_after_s=180.0
         )
 
         with pytest.raises(dispatcher.HostRestartRequiredError, match="did not unwind"):
@@ -1105,7 +1107,7 @@ class TestTurnLevelStaleScan:
             return []
 
         disp = InboundWakeDispatcher(
-            "redis://unused", scheduler, pending_scan=_pending, stale_after_s=180.0
+            EventBus.from_settings(), scheduler, pending_scan=_pending, stale_after_s=180.0
         )
 
         await disp.scan_once()  # must not raise
@@ -1135,7 +1137,7 @@ class TestAdmissionWaitExemption:
                 return []
 
             disp = InboundWakeDispatcher(
-                "redis://unused", scheduler, pending_scan=_pending, stale_after_s=180.0
+                EventBus.from_settings(), scheduler, pending_scan=_pending, stale_after_s=180.0
             )
             await disp.scan_once()
         finally:
@@ -1158,7 +1160,7 @@ class TestAdmissionWaitExemption:
                 return [dispatcher.PendingInboundWake(agent_id=17, stale=True)]
 
             disp = InboundWakeDispatcher(
-                "redis://unused", scheduler, pending_scan=_pending, stale_after_s=180.0
+                EventBus.from_settings(), scheduler, pending_scan=_pending, stale_after_s=180.0
             )
             await disp.scan_once()
         finally:
@@ -1204,14 +1206,12 @@ def _patch_redis(monkeypatch: pytest.MonkeyPatch, pubsub: _QueueingPubSub) -> li
     """Record every client open; a scan failure must never add one."""
     clients: list[_QueueingRedis] = []
 
-    def _open(_url: str) -> _QueueingRedis:
+    def _open(_url: str, **_kw: object) -> _QueueingRedis:
         client = _QueueingRedis(pubsub)
         clients.append(client)
         return client
 
-    from base.events.live import redis_client
-
-    monkeypatch.setattr(redis_client, "open_async_redis", _open)
+    patch_open_async_redis(monkeypatch, _open)
     return clients
 
 
@@ -1239,7 +1239,7 @@ class TestSubscriptionRecovery:
 
         monkeypatch.setattr(dispatcher.logger, "warning", _warning)
         disp = InboundWakeDispatcher(
-            "redis://unused",
+            EventBus.from_settings(),
             _ScanScheduler(),
             pending_scan=_pending,
             stale_after_s=180.0,
@@ -1274,7 +1274,7 @@ class TestSubscriptionRecovery:
             raise RuntimeError("database unavailable")
 
         disp = InboundWakeDispatcher(
-            "redis://unused",
+            EventBus.from_settings(),
             scheduler,
             pending_scan=_pending,
             stale_after_s=180.0,
@@ -1318,7 +1318,7 @@ class TestSubscriptionRecovery:
             return []
 
         disp = InboundWakeDispatcher(
-            "redis://unused",
+            EventBus.from_settings(),
             _ScanScheduler(),
             pending_scan=_pending,
             stale_after_s=180.0,
@@ -1349,7 +1349,7 @@ class TestSubscriptionRecovery:
             raise dispatcher.HostRestartRequiredError("stale turn did not unwind")
 
         disp = InboundWakeDispatcher(
-            "redis://unused",
+            EventBus.from_settings(),
             _ScanScheduler(),
             pending_scan=_pending,
             stale_after_s=180.0,
@@ -1401,17 +1401,15 @@ class TestSubscriptionRecovery:
         clients = iter([first, second])
         second_opened = asyncio.Event()
 
-        def _open(_url: str) -> _Redis:
+        def _open(_url: str, **_kw: object) -> _Redis:
             client = next(clients)
             if client is second:
                 second_opened.set()
             return client
 
-        from base.events.live import redis_client
-
-        monkeypatch.setattr(redis_client, "open_async_redis", _open)
+        patch_open_async_redis(monkeypatch, _open)
         disp = InboundWakeDispatcher(
-            "redis://unused",
+            EventBus.from_settings(),
             _ScanScheduler(),
             subscription_read_timeout_s=0.01,
             subscription_read_deadline_grace_s=0.01,

@@ -18,8 +18,10 @@ from base.agents.context import AvaContext
 from base.agents.history.delta_read_compat import wrap_saver_reads_with_delta_reconstruction
 from base.cluster.machine import machine_name
 from base.config import settings
-from base.db import insert_inbound_message
+from base.db import Database, insert_inbound_message
 from base.deploy.maintenance import admission, cohort, pause_owner
+from base.events.live.bus import EventBus
+from base.host.env.agent_slices import AgentSlices
 from services.agent_host import host as host_module
 from services.agent_host import runtime as runtime_module
 from services.agent_host.runtime import TurnOutcome
@@ -56,12 +58,19 @@ async def _failed_turn(
         config, {"messages": [HumanMessage(content="Original request")]}, as_node="fail"
     )
     await flush_checkpoint(saver, agent)
-    host = host_module.AgentHost(pool=pool, checkpointer=saver, graph=graph, machine=machine_name())
+    host = host_module.AgentHost(
+        pool=pool,
+        checkpointer=saver,
+        graph=graph,
+        machine=machine_name(),
+        bus=EventBus.from_settings(),
+        db=Database.from_settings(),
+    )
     monkeypatch.setattr(host, "_runtime_for", AsyncMock(return_value=object()))
     monkeypatch.setattr(runtime_module, "validate_model_config", MagicMock())
-    ctx = AvaContext(ops_pool=pool, event_publisher=MagicMock())
+    ctx = AvaContext(ops_pool=pool, event_publisher=MagicMock(), agent=AgentSlices.resolve())
 
-    async def drive(target: int, _runtime: object) -> TurnOutcome:
+    async def drive(target: int, _runtime: object, _slices: object) -> TurnOutcome:
         return await host._invoke_until_done(target, ctx)
 
     monkeypatch.setattr(host, "_drive_turns", drive)

@@ -27,6 +27,7 @@ from audit import LeakPaths, invalidated, scan
 from label import label
 
 from base.agents.history.checkpoint import CheckpointReadError, load_checkpoint_messages_full
+from base.db import Database
 from base.telemetry.audit_events import SkillInvokedPayload
 
 # Chinese correction keywords — user is redirecting or correcting the agent.
@@ -191,7 +192,7 @@ def _msg_text(content: Any) -> str:
 def _transcript(agent_id: int) -> list[dict[str, str]]:
     """Full Task #1125 conversation, or [] if its checkpoint is unreadable."""
     try:
-        messages = load_checkpoint_messages_full(agent_id)
+        messages = load_checkpoint_messages_full(Database.from_settings(), agent_id)
     except CheckpointReadError:
         return []
     return [{"type": message.type, "content": _msg_text(message.content)} for message in messages]

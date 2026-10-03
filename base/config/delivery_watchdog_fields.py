@@ -29,7 +29,7 @@ class DeliveryWatchdogFields:
     delivery_watchdog_max_resurrect_per_tick: int = Field(
         default=3,
         alias="AVA_DELIVERY_WATCHDOG_MAX_RESURRECT_PER_TICK",
-        description="Ceiling on how many terminated-owner resurrect retries the delivery watchdog spawns per tick (Task #689 G4). A pile of dead letters drains over ticks; the cap plus the 60s per-agent cooldown and 2-way concurrency semaphore prevent an LLM wake storm when many terminated agents hold pending chats.",
+        description="Ceiling on how many terminated-owner resurrect retries the delivery watchdog starts per round (Task #689 G4). A pile of dead letters drains over rounds; the cap plus the 60s per-agent cooldown and 2-way concurrency semaphore prevent an LLM wake storm when many terminated agents hold pending chats.",
         json_schema_extra={
             "capability": "gateway",
             "restart_required": "all",
@@ -135,6 +135,19 @@ class DeliveryWatchdogFields:
         default=[5.0, 30.0, 120.0, 300.0],
         alias="AVA_DELIVERY_WATCHDOG_DISPATCH_BACKOFF_STEPS_S",
         description="Minimum seconds between successive delivery-watchdog wake re-dispatches, indexed by the row's current dispatch count (the first re-dispatch waits steps[0]). The last step repeats when the dispatch cap is longer than this list.",
+        json_schema_extra={
+            "restart_required": "all",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
+
+    delivery_watchdog_host_staleness_seconds: float = Field(
+        default=120.0,
+        gt=0,
+        alias="AVA_DELIVERY_WATCHDOG_HOST_STALENESS_SECONDS",
+        description="Host-verdict freshness window (seconds) for wake re-dispatch and poisoning: a row is dispatched or poisoned only while its owner's machine_probe row is fresh, the machine not graded offline (fewer than two consecutive probe failures), and the agent host alive — the host check is excused inside the one-failure grace window, because a failed probe necessarily nulls the host verdict. A stale, missing, offline-graded or (outside that window) host-less verdict freezes the row — no re-dispatch, no dispatch-count advance, no poison — and redelivery resumes on the next round once the verdict is fresh again (task #4872 route D: an outage must not burn a row's dispatch budget). The default covers the 60s liveness-pass cadence with its two-consecutive-failure grading, the same freshness contract the roster's availability read uses.",
         json_schema_extra={
             "restart_required": "all",
             "writable": True,

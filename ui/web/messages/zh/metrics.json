@@ -1,0 +1,15 @@
+{
+  "grafanaUnavailable": "Grafana 未响应（反向代理可能未开启）— 已停留本页，请查看下方回退路径。",
+  "movedTitle": "指标已迁移到 Grafana",
+  "intro": "独立指标页面已退役。",
+  "opsSection": "Ops 分区",
+  "introAfterOps": "链接到 Grafana 仪表盘（LLM 用量和延迟、Token、错误、重启、投递积压与插件指标）。",
+  "redirecting": "正在跳转…",
+  "openOpsDashboard": "打开 Ops 仪表盘",
+  "openGrafana": "打开 Grafana",
+  "fallbackBefore": "如果 Grafana 未加载，网关的 /grafana 反向代理可能未开启（AVA_GRAFANA_PROXY_ENABLED）。仍可通过以下方式查看原始聚合数据：",
+  "metricsScript": "scripts/metrics.py",
+  "fallbackMiddle": "和",
+  "metricsApi": "GET /api/metrics",
+  "fallbackAfter": "。"
+}

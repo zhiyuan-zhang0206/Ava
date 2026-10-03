@@ -21,12 +21,12 @@ from pathlib import Path
 
 from base import telemetry
 from base.config import settings
-from base.daemon.health import health_port, start_health_server, stop_health_server
+from base.daemon.endpoints import ServiceEndpoint, ServiceEndpoints
+from base.daemon.health import start_health_server, stop_health_server
 from base.daemon.health_schema import DEGRADED, OK, component
 from base.daemon.shutdown import cancel_and_drain, install_graceful_shutdown
 from base.daemon.shutdown import hard_exit as _hard_exit
 from base.log import init_gateway_process
-from base.paths import pid_path
 from services.backup import _cluster_tz, is_due
 from services.backup_scheduler.operation.custody import OperationBusyError
 from services.backup_scheduler.recovery_drill import (
@@ -44,8 +44,12 @@ BACKUP_STALE_AFTER_S = 26 * 3600
 _SLEEP_CHUNK_S = 60
 
 
+def _endpoint() -> ServiceEndpoint:
+    return ServiceEndpoints.from_settings().of("pg_backup")
+
+
 def _pidfile() -> Path:
-    return pid_path("pg_backup")
+    return _endpoint().pidfile
 
 
 @dataclass
@@ -173,6 +177,7 @@ async def _run_due_local_dump_restore(now: datetime) -> None:
 async def _backup_loop(state: _BackupState) -> None:
     """Run due dumps and retry a failed dump sooner than the next schedule."""
     _log.info("[pg-backup] scheduler started, pid=%s", os.getpid())
+    # quiesce-exempt: pg_dump dials the direct URL read-only, not the pool; a held pause must not stop backups
     while True:
         now = datetime.now(UTC)
         if not is_due(now):
@@ -203,11 +208,13 @@ async def run() -> None:
 
     _write_pidfile()
     state = _BackupState()
+    endpoint = _endpoint()
     health = await start_health_server(
         "pg_backup",
+        endpoint.health_port,
         components=lambda: _backup_components(state),
     )
-    _log.info("[pg-backup] healthz listening on :%s", health_port("pg_backup"))
+    _log.info("[pg-backup] healthz listening on :%s", endpoint.health_port)
     try:
         await _backup_loop(state)
     finally:

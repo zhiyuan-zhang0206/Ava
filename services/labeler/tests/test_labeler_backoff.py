@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Iterator
+from typing import Any
 
 import psycopg
 import pytest
@@ -15,6 +16,7 @@ from base.config import settings
 from base.daemon.health import Liveness
 from base.db import create_agent, pool
 from services.labeler import daemon
+from services.labeler.tests.slices import labeler_db
 
 
 @pytest.fixture(autouse=True)
@@ -146,12 +148,13 @@ def _seed_chat(db: psycopg.Connection, tid: int) -> None:
 async def test_dispatch_loop_uses_labeler_model_not_main_model(
     db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The poll loop labels with settings.lm.labeler_model (its own knob), not
+    """The root builds the slice from settings.lm.labeler_model (its own knob), not
     settings.lm.llm_model (the main reasoning model). Pin the two to different
-    values and assert the model handed to generate_label_async is the labeler
+    values and assert the model the poll loop's slice carries is the labeler
     one — guards against a future edit reverting the daemon to llm_model."""
     monkeypatch.setattr(settings.lm, "llm_model", "deepseek-v4-pro")
     monkeypatch.setattr(settings.lm, "labeler_model", "deepseek-v4-flash")
+    config = daemon.labeler_config()
     monkeypatch.setattr(daemon, "_POLL_INTERVAL_S", 0.0)
 
     a = create_agent(db_conn)
@@ -160,8 +163,8 @@ async def test_dispatch_loop_uses_labeler_model_not_main_model(
 
     captured: list[str] = []
 
-    async def _capture(_tid: int, _prompt: str, model: str) -> None:
-        captured.append(model)
+    async def _capture(_tid: int, _prompt: str, cfg: Any, _db: object) -> None:
+        captured.append(cfg.labeler_model)
         # Break the otherwise-infinite poll loop after the first dispatch.
         raise asyncio.CancelledError
 
@@ -170,7 +173,9 @@ async def test_dispatch_loop_uses_labeler_model_not_main_model(
     p = pool()
     try:
         with pytest.raises(asyncio.CancelledError):
-            await daemon._dispatch_loop(p, Liveness(daemon._LIVENESS_TIMEOUT_S))
+            await daemon._dispatch_loop(
+                p, labeler_db(), Liveness(daemon._LIVENESS_TIMEOUT_S), config
+            )
     finally:
         p.close()
 
@@ -285,7 +290,11 @@ async def test_dispatch_loop_backs_off_on_llm_failure(
     monkeypatch.setattr(labeler, "build_chat_model", _boom)
 
     p = pool()
-    task = asyncio.create_task(daemon._dispatch_loop(p, Liveness(daemon._LIVENESS_TIMEOUT_S)))
+    task = asyncio.create_task(
+        daemon._dispatch_loop(
+            p, labeler_db(), Liveness(daemon._LIVENESS_TIMEOUT_S), daemon.labeler_config()
+        )
+    )
     try:
         await asyncio.sleep(0.4)  # several poll rounds
         assert llm_calls["n"] == 1, "a failing label must back off, not hot-loop"

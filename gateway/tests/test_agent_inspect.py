@@ -119,7 +119,7 @@ def test_inspect_live_returns_only_window_independent_fields(
     db_conn.commit()
 
     async def dispatch(
-        target_machine: str, kind: str, payload: dict[str, object], **kwargs: object
+        _db: object, target_machine: str, kind: str, payload: dict[str, object], **kwargs: object
     ) -> dict[str, object]:
         assert (target_machine, kind, payload) == (
             "wsl",
@@ -261,7 +261,7 @@ def test_inspect_shells_probed_on_agents_machine(
     seen: dict[str, object] = {}
 
     async def _fake_dispatch(
-        target_machine: str, kind: str, payload: dict[str, object], **kwargs: object
+        _db: object, target_machine: str, kind: str, payload: dict[str, object], **kwargs: object
     ) -> dict[str, object]:
         seen["machine"] = target_machine
         seen["kind"] = kind
@@ -311,7 +311,7 @@ def test_inspect_shells_carry_ttl_deadline_from_gateway_db(
     db_conn.commit()
 
     async def _fake_dispatch(
-        target_machine: str, kind: str, payload: dict[str, object], **kwargs: object
+        _db: object, target_machine: str, kind: str, payload: dict[str, object], **kwargs: object
     ) -> dict[str, object]:
         return {
             "shells": [
@@ -340,7 +340,7 @@ def test_inspect_shells_degrade_to_empty_on_unreachable(
     db_conn.commit()
 
     async def _unreachable_dispatch(
-        target_machine: str, kind: str, payload: dict[str, object], **kwargs: object
+        _db: object, target_machine: str, kind: str, payload: dict[str, object], **kwargs: object
     ) -> dict[str, object]:
         raise cluster_rpc.ClusterOpUnreachable("connect failed")
 
@@ -363,7 +363,7 @@ def test_inspect_shells_degrade_to_empty_on_failed_op(
     db_conn.commit()
 
     async def _failed_dispatch(
-        target_machine: str, kind: str, payload: dict[str, object], **kwargs: object
+        _db: object, target_machine: str, kind: str, payload: dict[str, object], **kwargs: object
     ) -> dict[str, object]:
         raise cluster_rpc.ClusterOpFailed({"error": "unknown kind: shell_probe"})
 
@@ -748,7 +748,7 @@ def test_inspect_live_reads_committed_pause_when_all_log_reads_fail(
     def unavailable(*_args: Any, **_kwargs: Any) -> Any:
         raise AssertionError("live inspector must not query telemetry")
 
-    for name in ("query_events", "query_projected_lines", "attribute_aggregate"):
+    for name in ("query_events",):
         monkeypatch.setattr(loki_events, name, unavailable)
     with TestClient(app) as client:
         response = client.get(f"/api/agents/{aid}/inspect/live")

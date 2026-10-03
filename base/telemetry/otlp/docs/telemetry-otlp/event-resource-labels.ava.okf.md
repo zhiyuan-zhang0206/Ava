@@ -35,7 +35,7 @@ isolation.
 
 ## Verification
 
-`tests/base/test_telemetry_otlp.py` serializes one flush containing
+`base/telemetry/tests/test_telemetry_otlp.py` serializes one flush containing
 `llm_usage`, `node_exit`, and `log`, then asserts the resource event name equals
 every record event name in every generated OTLP resource group.
 

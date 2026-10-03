@@ -19,7 +19,7 @@ store returns the last committed snapshot, so a slightly stale view is
 acceptable on cold-load paths.
 
 Schema is a precondition, not a read-side effect. Fresh install creates it;
-later upstream changes travel through paired Ava migrations, and ``ava start``
+later upstream changes travel through Ava timestamp migrations, and ``ava start``
 verifies the complete applied set. These helpers only perform SELECTs so they
 also work under the least-privilege ``ava_runner`` role; a missing/outdated
 schema is a store failure, never an invitation for a request path to attempt
@@ -49,7 +49,7 @@ from psycopg.rows import DictRow, dict_row
 
 from base.agents.history.checkpoint_serde import STATIC_CHECKPOINT_MSGPACK_TYPES
 from base.agents.history.delta_read_compat import reconstruct_delta_messages
-from base.db import pool
+from base.db import Database
 from base.db.transaction import async_write_transaction
 
 _log = logging.getLogger(__name__)
@@ -64,9 +64,11 @@ class CheckpointReadError(RuntimeError):
 
 
 @contextmanager
-def _checkpoint_read_connection(*, row_factory: Any | None = None) -> Generator[Connection[Any]]:
-    """Borrow one short-lived autocommit read connection through base.db.pool."""
-    db_pool = pool(autocommit=True, row_factory=row_factory)
+def _checkpoint_read_connection(
+    db: Database, *, row_factory: Any | None = None
+) -> Generator[Connection[Any]]:
+    """Borrow one short-lived autocommit read connection from a pool of `db`."""
+    db_pool = db.pool(autocommit=True, row_factory=row_factory)
     try:
         with db_pool.connection() as conn:
             yield conn
@@ -74,7 +76,7 @@ def _checkpoint_read_connection(*, row_factory: Any | None = None) -> Generator[
         db_pool.close()
 
 
-def load_checkpoint_messages(agent_id: int) -> list[BaseMessage]:
+def load_checkpoint_messages(db: Database, agent_id: int) -> list[BaseMessage]:
     """Pull the stored message list for one agent.
 
     Returns the deserialized message list in conversation order, or an empty
@@ -101,7 +103,7 @@ def load_checkpoint_messages(agent_id: int) -> list[BaseMessage]:
         # Direct construction rather than `from_conn_string` — the classmethod
         # does not forward a `serde` argument, and the default permissive serde
         # is exactly what this module is avoiding.
-        with _checkpoint_read_connection(row_factory=dict_row) as conn:
+        with _checkpoint_read_connection(db, row_factory=dict_row) as conn:
             saver = PostgresSaver(conn=cast(Connection[DictRow], conn), serde=serde)
             tuple_ = saver.get_tuple(config)
             if tuple_ is not None:
@@ -122,7 +124,9 @@ def load_checkpoint_messages(agent_id: int) -> list[BaseMessage]:
     return ckpt["channel_values"].get("messages", [])
 
 
-def list_compact_boundary_checkpoint_ids(agent_id: int, *, limit: int | None = None) -> list[str]:
+def list_compact_boundary_checkpoint_ids(
+    db: Database, agent_id: int, *, limit: int | None = None
+) -> list[str]:
     """Return this agent's retained compact boundaries, newest first.
 
     The descending position is the history segment's current display rank;
@@ -140,7 +144,7 @@ def list_compact_boundary_checkpoint_ids(agent_id: int, *, limit: int | None = N
         " ORDER BY checkpoint_id DESC"
     )
     try:
-        with _checkpoint_read_connection() as conn:
+        with _checkpoint_read_connection(db) as conn:
             rows = (
                 conn.execute(query, (str(agent_id),)).fetchall()
                 if limit is None
@@ -153,7 +157,7 @@ def list_compact_boundary_checkpoint_ids(agent_id: int, *, limit: int | None = N
     return [str(row[0]) for row in rows]
 
 
-def latest_checkpoint_id(agent_id: int) -> str | None:
+def latest_checkpoint_id(db: Database, agent_id: int) -> str | None:
     """Return the agent's newest retained checkpoint id, or None.
 
     The tail channel's delta source (task #3981 C): the tail gate compares it
@@ -164,7 +168,7 @@ def latest_checkpoint_id(agent_id: int) -> str | None:
         CheckpointReadError: the checkpoint table could not be read.
     """
     try:
-        with _checkpoint_read_connection() as conn:
+        with _checkpoint_read_connection(db) as conn:
             row = conn.execute(
                 "SELECT max(checkpoint_id) FROM checkpoints WHERE thread_id = %s",
                 (str(agent_id),),
@@ -226,7 +230,7 @@ def _is_delta_snapshot_blob(blob_type: object, header: object) -> bool:
     )
 
 
-def load_checkpoint_message_count(agent_id: int) -> int:
+def load_checkpoint_message_count(db: Database, agent_id: int) -> int:
     """Return the live checkpoint's messages length without loading the blob.
 
     PostgresSaver stores each channel value in ``checkpoint_blobs``. Reading
@@ -239,7 +243,7 @@ def load_checkpoint_message_count(agent_id: int) -> int:
             not the stable MessagePack array representation.
     """
     try:
-        with _checkpoint_read_connection() as conn:
+        with _checkpoint_read_connection(db) as conn:
             row = conn.execute(
                 "SELECT b.type, substring(b.blob FROM 1 FOR 5)"
                 " FROM checkpoints c"
@@ -259,10 +263,10 @@ def load_checkpoint_message_count(agent_id: int) -> int:
             # version — the value lives in the write chain (tasks #3180/#3181).
             # Reconstruct and count; a vanilla thread that merely has nothing
             # written yet reconstructs to nothing and still counts 0.
-            return _reconstructed_message_count(agent_id)
+            return _reconstructed_message_count(db, agent_id)
         blob_type, header = row
         if _is_delta_snapshot_blob(blob_type, header):
-            return _reconstructed_message_count(agent_id)
+            return _reconstructed_message_count(db, agent_id)
         return _message_count_from_blob_header(blob_type, header)
     except Exception as exc:
         raise CheckpointReadError(
@@ -270,14 +274,14 @@ def load_checkpoint_message_count(agent_id: int) -> int:
         ) from exc
 
 
-def _reconstructed_message_count(agent_id: int) -> int:
+def _reconstructed_message_count(db: Database, agent_id: int) -> int:
     """Count a delta-written thread's messages via reconstruction (0 when not delta)."""
     from langgraph.checkpoint.postgres import PostgresSaver
     from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
 
     config: RunnableConfig = {"configurable": {"thread_id": str(agent_id)}}
     serde = JsonPlusSerializer(allowed_msgpack_modules=STATIC_CHECKPOINT_MSGPACK_TYPES)
-    with _checkpoint_read_connection(row_factory=dict_row) as conn:
+    with _checkpoint_read_connection(db, row_factory=dict_row) as conn:
         saver = PostgresSaver(conn=cast(Connection[DictRow], conn), serde=serde)
         tuple_ = saver.get_tuple(config)
         if tuple_ is None or not reconstruct_delta_messages(saver, tuple_):
@@ -286,7 +290,9 @@ def _reconstructed_message_count(agent_id: int) -> int:
         return len(messages)
 
 
-def load_checkpoint_messages_segment(agent_id: int, checkpoint_id: str) -> list[BaseMessage]:
+def load_checkpoint_messages_segment(
+    db: Database, agent_id: int, checkpoint_id: str
+) -> list[BaseMessage]:
     """Read one exact retained compaction segment without its system prompt.
 
     A missing checkpoint or an id that is not currently a compact boundary
@@ -304,7 +310,7 @@ def load_checkpoint_messages_segment(agent_id: int, checkpoint_id: str) -> list[
     config: RunnableConfig = {"configurable": {"thread_id": str(agent_id)}}
     serde = JsonPlusSerializer(allowed_msgpack_modules=STATIC_CHECKPOINT_MSGPACK_TYPES)
     try:
-        with _checkpoint_read_connection(row_factory=dict_row) as conn:
+        with _checkpoint_read_connection(db, row_factory=dict_row) as conn:
             boundary = conn.execute(
                 "SELECT checkpoint_id FROM checkpoints"
                 " WHERE thread_id = %s AND checkpoint_id = %s"
@@ -339,7 +345,7 @@ def load_checkpoint_messages_segment(agent_id: int, checkpoint_id: str) -> list[
     return messages[1:]
 
 
-def load_checkpoint_messages_full(agent_id: int) -> list[BaseMessage]:
+def load_checkpoint_messages_full(db: Database, agent_id: int) -> list[BaseMessage]:
     """Reconstruct one agent's full history across compaction segments.
 
     With no retained compaction boundary, returns the latest messages snapshot
@@ -357,7 +363,7 @@ def load_checkpoint_messages_full(agent_id: int) -> list[BaseMessage]:
     config: RunnableConfig = {"configurable": {"thread_id": str(agent_id)}}
     serde = JsonPlusSerializer(allowed_msgpack_modules=STATIC_CHECKPOINT_MSGPACK_TYPES)
     try:
-        with _checkpoint_read_connection(row_factory=dict_row) as conn:
+        with _checkpoint_read_connection(db, row_factory=dict_row) as conn:
             saver = PostgresSaver(conn=cast(Connection[DictRow], conn), serde=serde)
             latest_tuple = saver.get_tuple(config)
             if latest_tuple is None:
@@ -412,7 +418,7 @@ def load_checkpoint_messages_full(agent_id: int) -> list[BaseMessage]:
 
 
 def load_checkpoint_messages_by_trace(
-    agent_id: int, trace_id: str
+    db: Database, agent_id: int, trace_id: str
 ) -> tuple[str | None, list[BaseMessage]]:
     """(checkpoint_id, messages) for the newest checkpoint of this agent's
     thread whose metadata carries `trace_id`.
@@ -445,7 +451,7 @@ def load_checkpoint_messages_by_trace(
         # The id lookup rides tuple rows; blob deserialization uses dict rows.
         # Both paths borrow the data-plane pool URL, which already names
         # PgBouncer when pooling is enabled.
-        with _checkpoint_read_connection() as conn:
+        with _checkpoint_read_connection(db) as conn:
             row = conn.execute(
                 "SELECT checkpoint_id FROM checkpoints"
                 " WHERE thread_id = %s AND metadata->>'trace_id' = %s"
@@ -455,7 +461,7 @@ def load_checkpoint_messages_by_trace(
         if row is None:
             return None, []
         checkpoint_id: str = row[0]
-        with _checkpoint_read_connection(row_factory=dict_row) as conn:
+        with _checkpoint_read_connection(db, row_factory=dict_row) as conn:
             saver = PostgresSaver(conn=cast(Connection[DictRow], conn), serde=serde)
             ckpt = saver.get_tuple(
                 {

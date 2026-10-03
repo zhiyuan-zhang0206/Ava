@@ -9,6 +9,6 @@ def test_grid_constants_are_single_definitions() -> None:
     assert OPS_BUCKET_S == 60
     assert OPS_GRID_ORIGIN.isoformat() == "2000-01-01T00:00:00+00:00"
     # the consumers must import from the contract, not re-declare
-    from gateway.cluster.ops_series_lgtm import _GRID_ORIGIN as _LG_GRID
+    from gateway.cluster.ops_series import _GRID_ORIGIN as _LG_GRID
 
     assert _LG_GRID == OPS_GRID_ORIGIN

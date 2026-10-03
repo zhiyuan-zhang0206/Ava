@@ -43,6 +43,7 @@ from psycopg import Connection
 from psycopg_pool import ConnectionPool
 
 from base.cluster.machine import machine_name
+from base.db import Database
 from ops import cluster_rpc as _cluster_rpc
 from ops.rpc_schemas import (
     BillingBalanceReport,
@@ -240,7 +241,9 @@ def fetch_provider_balance() -> BillingBalanceReport:
     )
 
 
-async def run_billing_recovery(*, execute: bool, pool: ConnectionPool) -> BillingResurrectResponse:
+async def run_billing_recovery(
+    *, execute: bool, pool: ConnectionPool, db: Database
+) -> BillingResurrectResponse:
     """Preview (``execute=False``, read-only) or run the batch rescue."""
     candidates = await asyncio.to_thread(_enumerate_blocking, pool)
     survey = await asyncio.to_thread(_enumerate_halted_alive_blocking, pool)
@@ -280,7 +283,7 @@ async def run_billing_recovery(*, execute: bool, pool: ConnectionPool) -> Billin
         # Re-enumerate under the lock: a concurrent runner (or an operator)
         # may have changed the set since the preflight read.
         candidates = await asyncio.to_thread(_enumerate_blocking, pool)
-        outcomes = await _dispatch_all(candidates)
+        outcomes = await _dispatch_all(db, candidates)
     finally:
         await asyncio.to_thread(_release_run_lock, pool, lock_conn)
     await asyncio.to_thread(_record_run_event, balance, outcomes)
@@ -315,22 +318,25 @@ async def resurrect_billing_agent_op(agent_id: int) -> BillingResurrectAgentResp
     return BillingResurrectAgentResponse(status="spawned")
 
 
-async def _dispatch_all(candidates: list[BillingCandidate]) -> list[BillingResurrectAgentOutcome]:
+async def _dispatch_all(
+    db: Database, candidates: list[BillingCandidate]
+) -> list[BillingResurrectAgentOutcome]:
     from base.config import settings
 
     sem = asyncio.Semaphore(int(settings.daemon.billing_recovery_dispatch_concurrency))
 
     async def _guarded(candidate: BillingCandidate) -> BillingResurrectAgentOutcome:
         async with sem:
-            return await _dispatch_one(candidate)
+            return await _dispatch_one(db, candidate)
 
     return await asyncio.gather(*(_guarded(c) for c in candidates))
 
 
-async def _dispatch_one(candidate: BillingCandidate) -> BillingResurrectAgentOutcome:
+async def _dispatch_one(db: Database, candidate: BillingCandidate) -> BillingResurrectAgentOutcome:
     path = f"/api/agents/{candidate.agent_id}/resurrect-billing-v1"
     try:
         forwarded = await _cluster_rpc.dispatch_to_machine(
+            db,
             target_machine=candidate.machine,
             kind="lifecycle",
             payload={"path": path, "body": {}},
@@ -404,13 +410,13 @@ def _record_run_event(
     balance: BillingBalanceReport, outcomes: list[BillingResurrectAgentOutcome]
 ) -> None:
     from base import telemetry
-    from base.telemetry.audit_events import insert_event_log
+    from base.telemetry.audit_events import prepare_event_log, record_audit_standalone
 
     resurrected = [o.agent_id for o in outcomes if o.status == "resurrected"]
     refused = [o.agent_id for o in outcomes if o.status == "refused"]
     deferred = [o.agent_id for o in outcomes if o.status == "deferred"]
     failed = [o.agent_id for o in outcomes if o.status == "failed"]
-    insert_event_log(
+    run_event = prepare_event_log(
         event_type="billing_resurrect",
         agent_id=None,
         source="user",
@@ -437,3 +443,6 @@ def _record_run_event(
             "failed": len(failed),
         },
     )
+    # Last: the batch already ran, so a failed write raises after its summary
+    # event went out.
+    record_audit_standalone(run_event)

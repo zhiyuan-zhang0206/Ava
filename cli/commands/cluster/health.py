@@ -22,12 +22,6 @@ import time
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-from base.telemetry.loki_index_labels import (
-    LokiReadEra,
-    event_stream_selector,
-    split_index_label_window,
-)
-
 # Outage episodes and edge alerts live in
 # `health_alerts` (split out 2026-08-07 to stay under the 800-line ceiling).
 # The probe runner uses the pieces below; the rest are re-exported so tests
@@ -96,16 +90,16 @@ def _gateway_liveness_with_retry() -> bool:
 
 def _data_plane_abnormal() -> bool:
     """True when either dependency behind the gateway is currently unreachable."""
-    from base import db
-    from base.events.live.redis_client import sync_redis
+    from base.db import Database
+    from base.events.live.bus import EventBus
 
     try:
-        with db.connect(autocommit=True):
+        with Database.from_settings().connect(autocommit=True):
             pass
     except Exception:
         return True
     try:
-        client = sync_redis()
+        client = EventBus.from_settings().sync_redis()
         try:
             client.ping()  # pyright: ignore[reportUnknownMemberType] — redis-py types ping's optional argument as Unknown.
         finally:
@@ -120,10 +114,10 @@ def _agent_population(min_agents: int) -> bool:
 
     Queries the central DB directly — the probe runs on the gateway machine
     and has DB access. A cluster with zero live agents is effectively dead."""
-    from base import db
+    from base.db import Database
 
     try:
-        with db.connect(autocommit=True) as conn, conn.cursor() as cur:
+        with Database.from_settings().connect(autocommit=True) as conn, conn.cursor() as cur:
             cur.execute(
                 "SELECT COUNT(*) FROM agents_meta WHERE status IN ('running', 'idling') "
                 "AND lease_expires_at > now()"
@@ -142,12 +136,12 @@ def _agent_population(min_agents: int) -> bool:
 
 def _agent_population_failure_class(min_agents: int) -> str | None:
     """Classify observed low population against DB availability and local intent."""
-    from base import db
+    from base.db import Database
     from base.deploy.lifecycle import service_selection
     from base.deploy.maintenance import pause_owner
 
     try:
-        with db.connect(autocommit=True) as conn, conn.cursor() as cur:
+        with Database.from_settings().connect(autocommit=True) as conn, conn.cursor() as cur:
             cur.execute(
                 "SELECT COUNT(*) FROM agents_meta WHERE status IN ('running', 'idling') "
                 "AND lease_expires_at > now()"
@@ -195,48 +189,23 @@ def _crash_loop_detection(max_restarts: int, window_minutes: int) -> bool:
     repeatedly in a short window — the signature of a bad prompt / skill /
     code change that the update flow did not catch.
 
-    Reads the Loki event stream directly (task #1197): the PG events copy was
-    dropped with the archive cleanup, so the audit `resurrect` events come from
-    Loki. The CLI never imports gateway code (layering) — this is a straight
-    instant LogQL query."""
-    import httpx
-
-    from base.config import settings
+    Counts the audit `resurrect` rows of `audit_events` per agent. The CLI never imports
+    gateway code (layering) — this is a straight SQL read."""
+    from base.db import Database
 
     end = datetime.now(UTC)
     start = end - timedelta(minutes=window_minutes)
     try:
-        url = settings.observability.telemetry_loki_url.rstrip("/") + "/loki/api/v1/query"
-        restarts: dict[str, int] = {}
-        slices = split_index_label_window(start, end)
-        for slice_ in slices:
-            duration_s = max(1, int((slice_.end - slice_.start).total_seconds()))
-            selector = event_stream_selector(
-                era=slice_.era,
-                agent_id=None,
-                event_names=["resurrect"],
-                indexed_labeled=len(slices) == 2 and slice_.era is LokiReadEra.INDEXED,
-            )
-            # Instant evaluation at each slice end counts (start, end], so the
-            # final slice covers the current crash-loop window (now-w, now].
-            logql = (
-                f"sum by (agent_id) (count_over_time({selector} "
-                f'| event_name="resurrect" | category="audit"[{duration_s}s]))'
-            )
-            resp = httpx.get(
-                url, params={"query": logql, "time": slice_.end.timestamp()}, timeout=30
-            )
-            resp.raise_for_status()
-            for series in resp.json().get("data", {}).get("result", []):
-                value = series.get("value")
-                if value is None:
-                    continue
-                agent_id = str(series.get("metric", {}).get("agent_id", ""))
-                restarts[agent_id] = restarts.get(agent_id, 0) + int(value[1])
-        # Any agent at or over the threshold is a crash loop.
-        return not any(count > max_restarts for count in restarts.values())
+        with Database.from_settings().connect(autocommit=True) as conn:
+            rows = conn.execute(
+                "SELECT agent_id, count(*) FROM audit_events "
+                "WHERE event_name = 'resurrect' AND ts > %s AND ts <= %s GROUP BY agent_id",
+                (start, end),
+            ).fetchall()
+        # Any agent over the threshold is a crash loop.
+        return not any(count > max_restarts for _agent, count in rows)
     except Exception:
-        # Loki unreachable — can't check crash loops. Return True (healthy) to
+        # Database unreachable — can't check crash loops. Return True (healthy) to
         # avoid a false positive on this secondary signal; the gateway liveness
         # and agent population checks are the primary signals.
         return True
@@ -254,6 +223,7 @@ def _schema_health() -> bool:
     must not fire a false schema alert while code and DB are actually in sync
     (2026-08-03: probe alerted "applied version behind required" on a
     connection error during a pgbouncer flake)."""
+    from base.db import Database
     from base.deploy.schema.migrations import (
         CodeBehindSchema,
         SchemaVersionMismatch,
@@ -262,9 +232,8 @@ def _schema_health() -> bool:
 
     try:
         # check_schema_version expects a connection; connect+check inline
-        from base import db
 
-        with db.connect(autocommit=True) as conn:
+        with Database.from_settings().connect(autocommit=True) as conn:
             check_schema_version(conn)
         return True
     except (CodeBehindSchema, SchemaVersionMismatch):

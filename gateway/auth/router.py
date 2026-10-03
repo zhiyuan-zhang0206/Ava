@@ -175,8 +175,8 @@ async def check(request: Request) -> JSONResponse:
 
 def _sessions_that_authenticate(pool: Any, secret: str) -> list[dict[str, Any]]:
     """Unrevoked, unexpired sessions whose mint is still admitted: the rows
-    `current_session_fact` would accept. A revoked generation's runner-minted
-    sessions, a rotated secret's, and ids without a mint are dead and omitted."""
+    `current_session_fact` would accept. A rotated secret's sessions and ids without
+    a mint are dead and omitted."""
     admitted = session_mints(secret)
     return [row for row in list_sessions(pool) if session_mint(row["id"]) in admitted]
 

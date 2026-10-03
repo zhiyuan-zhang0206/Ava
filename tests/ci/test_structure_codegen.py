@@ -16,7 +16,7 @@ from unittest.mock import patch
 
 import yaml
 
-from tests.ci.codegen_sources import SourceGraph
+from base.events.tests.codegen_sources import SourceGraph
 
 ROOT = Path(__file__).resolve().parents[2]
 CONFIG = yaml.safe_load((ROOT / ".pre-commit-config.yaml").read_text())
@@ -349,11 +349,10 @@ def test_every_codegen_input_family_selects_freshness() -> None:
         "scripts/codegen/dump_frontend_constants.py",
         "ui/web/src/lib/constants-generated.ts",
         "base/events/contract.py",
-        "base/events/registry.py",
-        "base/events/registry_ops.py",
-        "base/events/payloads.py",
-        "base/events/registry_lifecycle.py",
-        "base/events/system.py",
+        "base/events/vocabulary.py",
+        "base/events/loader.py",
+        "base/events/declarations/__init__.py",
+        "base/events/declarations/host.py",
         "scripts/codegen/gen_event_registry.py",
         "base/events/registry.md",
         "base/host/env/config_registry.py",

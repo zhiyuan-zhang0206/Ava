@@ -25,6 +25,7 @@ from base.agents.messages.inbound_provenance import (
     content_sha256,
     source_assertion_match,
 )
+from base.db.config import DbConfig as DbConfig
 from base.db.connections import PG_KEEPALIVE_KWARGS as PG_KEEPALIVE_KWARGS
 from base.db.connections import (
     PG_STATEMENT_TIMEOUT_SET_SQL as PG_STATEMENT_TIMEOUT_SET_SQL,
@@ -36,6 +37,7 @@ from base.db.connections import connect as connect
 from base.db.connections import connect_url as connect_url
 from base.db.connections import direct_db_url as direct_db_url
 from base.db.connections import pool as pool
+from base.db.handle import Database as Database
 from base.db.transaction import write_transaction
 from base.log import logger
 from base.telemetry import Event
@@ -176,12 +178,12 @@ def publish_inbound_wake(agent_id: int, payload: str) -> bool:
     # lazy-imported to keep this module importable without the lease layer.
     from base.agents.impersonation import relay_liveness_alert
     from base.cluster import WAKE_KEY_TTL_S, inbound_channel, wake_key
-    from base.events.live.redis_client import sync_redis
+    from base.events.live.bus import EventBus
 
     relay_liveness_alert(agent_id)
     channel = inbound_channel(agent_id)
     try:
-        r = sync_redis()
+        r = EventBus.from_settings().sync_redis()
         try:
             # redis-py types publish()'s **kwargs as Unknown, so the bound
             # method reads as partially-unknown; the call itself is fully typed.
@@ -319,8 +321,8 @@ def insert_inbound_message(
         )
         new_id = fetch_one(cur, "insert inbound message")[0]
         if event_type is not None:
-            from base.agents.impersonation_manifest import stage_central_expected_event
-            from base.telemetry.audit_events import prepare_event_log
+            from base.agents.impersonation_manifest import record_central_event
+            from base.telemetry.audit_events import prepare_event_log, record_audit
 
             prepared_event = prepare_event_log(
                 event_type=event_type,
@@ -331,12 +333,7 @@ def insert_inbound_message(
                 if content
                 else {"inbound_id": new_id},
             )
-            prepared_event = stage_central_expected_event(
-                db,
-                prepared_event,
-                origin_kind="inbound_message",
-                origin_id=new_id,
-            )
+            prepared_event = record_audit(db, record_central_event(db, prepared_event))
     db.commit()
     _emit_prepared_event(prepared_event)
     # Publish to Redis to wake the idle agent. Agents subscribe to
@@ -349,16 +346,20 @@ def insert_inbound_message(
 
 def insert_spawn_prompt_in_transaction(
     cur: psycopg.Cursor, agent_id: int, content: str, source: str
-) -> int:
+) -> tuple[int, Event | None]:
     """Persist a spawn's first chat in the caller's row-creation transaction.
 
-    This path deliberately does not commit or publish. The caller announces the
-    committed inbound after the transaction, while the pending scan covers a
-    lost announcement. Spawn prompts have no multimodal payload or transport
-    provenance; caller identity still follows the ordinary inbound rules.
+    This path deliberately does not commit or publish. An agent-sourced prompt
+    is also recorded as a send_message audit fact in this transaction; the
+    returned event is for the caller to hand to :func:`announce_spawn_prompt`
+    after the commit. The pending scan covers a lost announcement. Spawn
+    prompts have no multimodal payload or transport provenance; caller identity
+    still follows the ordinary inbound rules.
     """
+    from base.agents.impersonation_manifest import record_central_event
     from base.agents.messages.caller_identity import caller_payload
     from base.agents.messages.envelope import reject_unnegotiated_caller, validate_writable_source
+    from base.telemetry.audit_events import prepare_event_log, record_audit
 
     validate_writable_source(source)
     reject_unnegotiated_caller(source)
@@ -368,33 +369,25 @@ def insert_spawn_prompt_in_transaction(
         "VALUES (%s, %s, 'chat', %s, %s::jsonb) RETURNING id",
         (agent_id, content, source, json.dumps(payload) if payload else None),
     )
-    return fetch_one(cur, "insert spawn prompt")[0]
+    inbound_id: int = fetch_one(cur, "insert spawn prompt")[0]
+    if not source.startswith("agent:"):
+        return inbound_id, None
+    event = prepare_event_log(
+        event_type="send_message",
+        agent_id=agent_id,
+        source=source,
+        target_agent_id=int(source.removeprefix("agent:")),
+        payload={"inbound_id": inbound_id, "content": content}
+        if content
+        else {"inbound_id": inbound_id},
+    )
+    return inbound_id, record_audit(cur.connection, record_central_event(cur.connection, event))
 
 
-def announce_spawn_prompt(agent_id: int, inbound_id: int, content: str, source: str) -> None:
-    """Emit the ordinary chat audit and wake hints after the prompt commits."""
+def announce_spawn_prompt(agent_id: int, inbound_id: int, event: Event | None) -> None:
+    """Emit the recorded chat audit event and the wake hint after the prompt commits."""
     try:
-        if source.startswith("agent:"):
-            from base.agents.impersonation_manifest import stage_central_expected_event
-            from base.telemetry.audit_events import prepare_event_log
-
-            prepared_event = prepare_event_log(
-                event_type="send_message",
-                agent_id=agent_id,
-                source=source,
-                target_agent_id=int(source.removeprefix("agent:")),
-                payload={"inbound_id": inbound_id, "content": content}
-                if content
-                else {"inbound_id": inbound_id},
-            )
-            with write_transaction() as conn:
-                prepared_event = stage_central_expected_event(
-                    conn,
-                    prepared_event,
-                    origin_kind="inbound_message",
-                    origin_id=inbound_id,
-                )
-            _emit_prepared_event(prepared_event)
+        _emit_prepared_event(event)
     finally:
         publish_inbound_wake(agent_id, str(inbound_id))
 
@@ -449,8 +442,8 @@ def insert_restart_completed_inbound(
     restart_completed_row = cur.fetchone()
     if restart_completed_row is None:
         raise RuntimeError("restart-completed inbound INSERT returned no id")
-    from base.agents.impersonation_manifest import stage_central_expected_event
-    from base.telemetry.audit_events import prepare_event_log
+    from base.agents.impersonation_manifest import record_central_event
+    from base.telemetry.audit_events import prepare_event_log, record_audit
 
     prepared_event = prepare_event_log(
         event_type="restart_completed",
@@ -458,11 +451,8 @@ def insert_restart_completed_inbound(
         source=source,
         payload={"config_overlay": config_overlay} if config_overlay else {},
     )
-    prepared_event = stage_central_expected_event(
-        cur.connection,
-        prepared_event,
-        origin_kind="restart_completed",
-        origin_id=int(restart_completed_row[0]),
+    prepared_event = record_audit(
+        cur.connection, record_central_event(cur.connection, prepared_event)
     )
     post_commit_events.append(prepared_event)
     return source, content, payload
@@ -657,15 +647,19 @@ def insert_compact_request_inbound(db: psycopg.Connection, agent_id: int) -> int
         if row is None:
             raise RuntimeError("compact request inbound INSERT returned no id")
         inbound_id = row[0]
-        from base.telemetry.audit_events import insert_event_log
+        from base.telemetry.audit_events import prepare_event_log, record_audit
 
-        insert_event_log(
-            event_type="compact",
-            agent_id=agent_id,
-            source="user",
-            payload={"compact_kind": "request"},
+        compact_event = record_audit(
+            db,
+            prepare_event_log(
+                event_type="compact",
+                agent_id=agent_id,
+                source="user",
+                payload={"compact_kind": "request"},
+            ),
         )
     db.commit()
+    _emit_prepared_event(compact_event)
     # Publish to Redis for agent wake-up (see insert_inbound_message + the
     # publish_inbound_wake docstring).
     publish_inbound_wake(agent_id, str(inbound_id))

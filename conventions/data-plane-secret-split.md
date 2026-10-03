@@ -9,9 +9,9 @@ internal data plane always authenticates, whatever the bearer
 | `AVA_CLUSTER_SECRET` | Gateway only | Human/operator bearer for the gateway API and frontend login (never served by bootstrap, never held by a remote unit); empty = unauthenticated user-facing API and `/ops`, loopback-only listeners |
 | `AVA_API_TOKEN` (launch environment; also `$AVA_HOME/run/ava-root/manifests.json`, 0600) | Each launched service, admitted operator processes | The write generation's machine API token of the process's class: the gateway admits the active generation's tokens, a unit's `/ops` its generation's two; delivered only while the API is authenticated. The manifest copy is root's own record of what it launched — it persists until the next start rewrites it, and is inert once a release fence revokes the generation |
 | `$AVA_HOME/backups/logical-backup.passphrase` (0600) | Gateway home | The logical-backup passphrase: minted and pinned at birth (a home born earlier carries `sha256(secret)`, pinned once), never derived and never changed by a secret rotation ([decision](../decisions/2026-09-28-backup-passphrase-minted-at-birth.md)); **backup-critical**: it is the only key to every logical backup |
-| OS user over the owner-only socket (`peer`) | Gateway host | Postgres administrator: provisioning, migrations (acting as the NOLOGIN schema owner), grants, the authority fence |
-| OS user mapped to `ava_monitor` (`peer map=ava_monitor`) | Gateway host's OTel collector | Password-less statistics reader (`pg_read_all_stats`, CONNECT); not a write generation, so no credential exists and a rotation leaves it alone |
-| `$AVA_HOME/db-authority/` (0700; files 0600) | Gateway home | `ledger.json` (owner, groups, active generation), `generations/<n>.json` (the write generation's two logins with passwords and SCRAM verifiers, and its two machine API tokens), `pooler-admin.json` (PgBouncer admin console `ava_pooler_admin`) |
+| OS user over the owner-only socket (`peer`) | Gateway host | Postgres administrator: provisioning, migrations (acting as the NOLOGIN schema owner), grants, the authority invariant |
+| OS user mapped to `ava_monitor` (`peer map=ava_monitor`) | Gateway host's OTel collector | Password-less statistics reader (`pg_read_all_stats`, CONNECT); not a write generation, so no credential exists |
+| `$AVA_HOME/db-authority/` (0700; files 0600) | Gateway home | `ledger.json` (owner, groups, active generation), `generations/0.json` (the write generation's two logins with passwords and SCRAM verifiers, and its two machine API tokens), `pooler-admin.json` (PgBouncer admin console `ava_pooler_admin`) |
 | `$AVA_HOME/db-authority/` (0700; files 0600) | Remote agent-runner home | `unit.json` (the installed runner login of one generation, bound to this unit and the served endpoint, with its API admission: the runner API token, the gateway token's digest and the telemetry token) |
 | `AVA_REDIS_ADMIN_PASSWORD` | Gateway only | Redis `default` user and `requirepass` |
 | `AVA_REDIS_PASSWORD` | Gateway file; embedded in `AVA_REDIS_URL` | Redis ACL runtime user |
@@ -19,8 +19,8 @@ internal data plane always authenticates, whatever the bearer
 
 A local plane's `.env` carries only the credential-free database endpoint
 (`postgresql://<owner>@host:port/<db>`). The schema owner is `NOLOGIN` without
-a password. Every application login is a write generation: `ava_g<n>_gateway`
-and `ava_g<n>_runner`, which inherit the `NOLOGIN` groups `ava_gateway` /
+a password. Every application login is the home's one write generation: `ava_g0_gateway`
+and `ava_g0_runner`, which inherit the `NOLOGIN` groups `ava_gateway` /
 `ava_runner` and own nothing (`base/cluster/authority/`).
 
 Delivery:
@@ -31,7 +31,7 @@ Delivery:
   and agent processes the runner login. The launch digest binds the generation
   number and credential digest, never a password. The same login also lands at
   rest, 0600, in `$AVA_HOME/run/ava-root/manifests.json` — root's own launched-unit
-  record, rewritten on the next start and inert after a generation rotation.
+  record, rewritten on the next start.
 - An operator process on the gateway home (the `ava` CLI, a script, an OS job)
   receives the gateway login only while it runs the home's admitted runtime:
   the source checkout the home was born from. Anything else keeps the
@@ -72,8 +72,8 @@ tickets, or put passwords in command arguments.
 
 ## Routine data-plane rotation
 
-PostgreSQL has nothing to rotate by hand: the owner never logs in, and
-application logins change only by the runbook's manual rotation.
+PostgreSQL has nothing to rotate: the owner never logs in, and the application
+logins are the home's one write generation, which nothing replaces.
 `scripts/data_plane_ops/rotate_data_plane_secrets.py` rotates the Redis credentials only; they
 do not rotate with the write generation
 ([decision](../decisions/2026-09-27-write-generation-rollout-choices.md)).

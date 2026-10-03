@@ -34,8 +34,8 @@ The sole resident Ava HTTP process on agent-runner (session `ops`) — Gateway r
 Dependency APIs remain available until existing native actions finish.
 Local service teardown closes new API admission only after the drain; normal
 start resumes the existing hold after readiness. The dispatch pool runs
-`min_size=0` and the shell-closure-notice flush waits while the unit is
-quiesced, then delivers once the start releases its hold. A cluster update stops and starts each unit through
+`min_size=0`. Shell-closure notices are not an ops task: `ava stop` writes
+them itself (`ops/pty_close_notices.py`). A cluster update stops and starts each unit through
 `cli.fleet_update`, not through ops kinds. See [[base/deploy/maintenance/docs/maintenance.ava.okf.md|Native pause and maintenance]].
 
 ## Strongly-Typed Wire Layer (`ops/rpc_schemas/__init__.py`)
@@ -43,6 +43,10 @@ quiesced, then delivers once the start releases its hold. A cluster update stops
 The wire contract — `OpEnvelope`/`OpResponse` envelopes, the `OpKind` literal,
 and the per-kind payload/result models the daemon validates before dispatch —
 is specified in [[services/docs/agent_runner_side/agent_ops/agent-ops/wire-layer.ava.okf.md]].
+
+## Resident Loops
+
+The ops server and the **delivery-outbox redelivery loop** (`services/agent_ops/outbox_flusher.py`) run under one `TaskGroup` in `_main`: a loop that raises cancels the server and ends the process, and the supervisor restarts the unit. The loop re-commits this machine's `$AVA_HOME/state/delivery-outbox/` records (chat sends that exhausted their retries) through the canonical chat-inbound path, one round per `AVA_DELIVERY_OUTBOX_FLUSH_INTERVAL_SECONDS`, skipping rounds while the unit is quiesced. Record state (attempts, backoff position, abandonment) lives in the record file, so a restart resumes every cooldown. The loop reports progress per record to `/healthz` (`loops.delivery-outbox`); a pass that handles no record for four flush intervals plus a minute reads as wedged.
 
 ## Key Dependencies
 - [[gateway-cli.ava.okf.md]] — Gateway issues ops commands to agent-runner via this service

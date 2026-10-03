@@ -35,7 +35,7 @@ from agent.graph.llm_errors import (
 )
 from agent.llm.cache import prepare_invocation
 from base.config import settings
-from base.config.turn_view import turn_settings
+from base.host.env.agent_slices import AgentSlices
 from base.log import logger
 
 
@@ -45,6 +45,7 @@ async def _consume_llm(
     *,
     chunks: list[AIMessageChunk],
     handler: RedisStreamHandler,
+    agent: AgentSlices,
 ) -> tuple[float | None, float | None]:
     """Unified LLM call entry — streaming-first, falls back once to non-stream on recoverable errors.
 
@@ -92,7 +93,7 @@ async def _consume_llm(
     from base.lm.factory import provider_key_of_model
     from base.lm.registry import resolve_setting
 
-    model = turn_settings.lm.llm_model
+    model = agent.brain.llm_model
     # One resolution feeds BOTH segments of a stalled call: the stream
     # segment's first-chunk bound and the post-stall non-streaming fallback.
     # Per-model defaults with shared fallback; explicit env values / the
@@ -106,11 +107,9 @@ async def _consume_llm(
             chunks=chunks,
             handler=handler,
             ttft_timeout=stall_segment_timeout,
-            total_timeout=resolve_setting(
-                "llm_stream_total_timeout_seconds", model=turn_settings.lm.llm_model
-            ),
+            total_timeout=resolve_setting("llm_stream_total_timeout_seconds", model=model),
             inter_chunk_timeout=resolve_setting(
-                "llm_stream_inter_chunk_timeout_seconds", model=turn_settings.lm.llm_model
+                "llm_stream_inter_chunk_timeout_seconds", model=model
             ),
         )
     except LLMStreamStallTimeoutError as e:
@@ -170,7 +169,7 @@ async def _consume_llm(
         # FatalProviderError. This trigger is NOT a stall, so the pair bound
         # above does not apply — the fallback keeps
         # `llm_non_streaming_fallback_timeout_seconds` as its ceiling.
-        if _is_fatal_provider_error_type(e):
+        if _is_fatal_provider_error_type(e, agent.llm_policy):
             error_type = _parse_provider_error_type(e) or "unknown"
             logger.warning(
                 "[{error_type}] retry non-streaming once: {error}",
@@ -338,6 +337,7 @@ async def _stream_with_cache_retry(
     *,
     chunks: list[AIMessageChunk],
     handler: RedisStreamHandler,
+    agent: AgentSlices,
 ) -> None:
     """Stream the LLM response into `chunks`, retrying once on a stale cache.
 
@@ -374,7 +374,7 @@ async def _stream_with_cache_retry(
     # to the provider, not about retry attempts.
     async def _run() -> None:
         call_started = time.monotonic()
-        invocation = await prepare_invocation(llm, messages)
+        invocation = await prepare_invocation(llm, messages, agent.llm_policy)
         # Cache provenance for the usage event: only the attempt that actually
         # succeeded counts (a stale-cache retry runs on the plain path).
         handler.used_explicit_cache = invocation.cache_ref is not None
@@ -384,6 +384,7 @@ async def _stream_with_cache_retry(
                 invocation.messages,
                 chunks=chunks,
                 handler=handler,
+                agent=agent,
             )
         except Exception as exc:
             if invocation.cache_ref is None:
@@ -409,13 +410,14 @@ async def _stream_with_cache_retry(
             # text) or stall code deltas (concatenated args JSON fails to parse).
             # Reset to a fresh-stream state; msg_idx / agent_id survive by design.
             handler.reset()
-            plain = await prepare_invocation(llm, messages)
+            plain = await prepare_invocation(llm, messages, agent.llm_policy)
             handler.used_explicit_cache = plain.cache_ref is not None  # plain path: always False
             first_ts, last_ts = await _consume_llm(
                 plain.runnable,  # pyright: ignore[reportUnknownMemberType, reportUnknownArgumentType]
                 plain.messages,
                 chunks=chunks,
                 handler=handler,
+                agent=agent,
             )
         handler.llm_latency_ms = (time.monotonic() - call_started) * 1000.0
         # Decode-stage wall-clock: first-token → last-token arrival from the

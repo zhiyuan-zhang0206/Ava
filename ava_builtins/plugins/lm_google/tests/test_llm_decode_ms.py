@@ -28,6 +28,7 @@ from agent.graph.llm._stream import _consume_stream_with_stall_timeout, _stream_
 from agent.llm.cache import LlmInvocation
 from ava_builtins.plugins.lm_google import gemini_cache
 from ava_builtins.plugins.lm_google.gemini_cache import CacheRef
+from base.host.env.agent_slices import AgentSlices
 
 
 class _FakeClock:
@@ -62,7 +63,7 @@ def _plain_invocation(llm: MagicMock) -> LlmInvocation:
 
 
 def _patch_prepare(monkeypatch: pytest.MonkeyPatch, invocation_factory):
-    async def _fake_prepare(llm, messages):
+    async def _fake_prepare(llm, messages, _policy):
         return invocation_factory(llm)
 
     monkeypatch.setattr("agent.graph.llm._stream.prepare_invocation", _fake_prepare)  # pyright: ignore[reportUnknownArgumentType]
@@ -134,7 +135,9 @@ async def test_stream_with_cache_retry_stamps_decode_ms(monkeypatch: pytest.Monk
 
     handler = _FakeHandler()
     chunks: list[AIMessageChunk] = []
-    await _stream_with_cache_retry(fake_llm, [], chunks=chunks, handler=handler)
+    await _stream_with_cache_retry(
+        fake_llm, [], chunks=chunks, handler=handler, agent=AgentSlices.resolve()
+    )
 
     assert handler.llm_decode_ms == 8000.0  # (1013 - 1005) * 1000
     assert handler.llm_latency_ms == 13000.0  # (1013 - 1000) * 1000
@@ -156,7 +159,9 @@ async def test_empty_stream_decode_ms_none(monkeypatch: pytest.MonkeyPatch) -> N
     _patch_prepare(monkeypatch, _plain_invocation)
 
     handler = _FakeHandler()
-    await _stream_with_cache_retry(fake_llm, [], chunks=[], handler=handler)
+    await _stream_with_cache_retry(
+        fake_llm, [], chunks=[], handler=handler, agent=AgentSlices.resolve()
+    )
     assert handler.llm_decode_ms is None
     assert handler.llm_latency_ms == 0.0  # (1000 - 1000) * 1000
 
@@ -183,7 +188,9 @@ async def test_non_streaming_fallback_decode_ms_none(monkeypatch: pytest.MonkeyP
 
     handler = _FakeHandler()
     chunks: list[AIMessageChunk] = []
-    await _stream_with_cache_retry(fake_llm, [], chunks=chunks, handler=handler)
+    await _stream_with_cache_retry(
+        fake_llm, [], chunks=chunks, handler=handler, agent=AgentSlices.resolve()
+    )
 
     assert handler.llm_decode_ms is None
     assert handler.llm_latency_ms is not None and handler.llm_latency_ms > 0
@@ -238,7 +245,9 @@ async def test_stale_cache_retry_uses_second_attempt_window(
 
     handler = _FakeHandler()
     chunks: list[AIMessageChunk] = []
-    await _stream_with_cache_retry(fake_llm, [], chunks=chunks, handler=handler)
+    await _stream_with_cache_retry(
+        fake_llm, [], chunks=chunks, handler=handler, agent=AgentSlices.resolve()
+    )
 
     assert handler.reset_calls == 1
     assert handler.llm_decode_ms == 3000.0  # (1008 - 1005) * 1000 — 2nd attempt only

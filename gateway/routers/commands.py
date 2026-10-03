@@ -61,6 +61,7 @@ async def get_commands(request: Request, agent_id: int | None = None) -> list[Co
         return _local_commands()
     try:
         result = await _cluster_rpc.dispatch_to_machine(
+            request.app.state.db,
             machine,
             "agent_skill_view",
             {"agent_id": agent_id},

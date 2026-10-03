@@ -43,10 +43,11 @@ from agent.graph.exec.node import (
     _ExecTimedOut,
 )
 from agent.state import AgentState
+from agent.tests._fakes import make_fake_ops_pool
 from base.agents.context import AvaContext
 from base.db import create_agent
 from base.events.live.projection import EVENT_ADAPTER, Cancelled
-from tests.agent._fakes import make_fake_ops_pool
+from base.host.env.agent_slices import AgentSlices
 
 # Most tests here drive exec_node/llm_node with mocked _run_in_subprocess / a
 # fake cancel_event, so they are deterministic and run in the parallel pool.
@@ -77,6 +78,7 @@ def _make_runtime(*, llm=None, ops_pool=None, event_publisher=None) -> Runtime[A
         ops_pool=ops_pool,  # pyright: ignore[reportUnknownArgumentType]
         llm=llm,  # pyright: ignore[reportUnknownArgumentType]
         event_publisher=event_publisher if event_publisher is not None else MagicMock(),  # pyright: ignore[reportUnknownArgumentType]
+        agent=AgentSlices.resolve(),
     )
     return Runtime(context=ctx)
 

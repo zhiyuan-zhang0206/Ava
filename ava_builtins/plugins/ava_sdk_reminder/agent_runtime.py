@@ -12,7 +12,7 @@ import builtins
 import keyword
 import re
 from datetime import UTC, datetime
-from typing import Any, Literal
+from typing import Any
 
 from langchain_core.messages import AIMessage, AnyMessage, HumanMessage, ToolMessage
 from langchain_core.runnables import RunnableConfig
@@ -25,7 +25,7 @@ from agent.messages import NoteTag, system_note_message, tail_has_agent_inbound
 from agent.state import AgentState, register_plugin_state
 from base.agents.context import AvaContext
 from base.agents.messages.kwargs import message_content
-from base.config.turn_view import turn_settings
+from base.host.env.agent_slices import Cadence
 from base.log import logger
 
 from ._state import (
@@ -105,7 +105,11 @@ def _rearmed_reminded(state: AgentState) -> tuple[set[str], int]:
 
 
 def _select_hints(
-    code: str, matched: list[str], reminded: set[str], nameerror_name: str | None
+    code: str,
+    matched: list[str],
+    reminded: set[str],
+    nameerror_name: str | None,
+    cadence: Cadence,
 ) -> tuple[list[str], set[str], str | None]:
     """Choose unsuppressed categories and a once-per-name persistence hint."""
     # A cell that sleeps while already naming `watcher` is the agent working
@@ -114,7 +118,7 @@ def _select_hints(
     # later this context window.
     silent: set[str] = {"wait"} if "wait" in matched and mentions_watcher(code) else set()
 
-    if turn_settings.agent.sdk_code_reminder_cadence == "every_time":
+    if cadence == "every_time":
         hinted = [cat for cat in matched if cat not in silent]
     else:
         hinted = [cat for cat in matched if cat not in reminded and cat not in silent]
@@ -189,7 +193,7 @@ class _SdkReminderAfterExecHook(Hook):
     async def _for_call(
         self,
         state: AgentState,
-        _runtime: Runtime[AvaContext],
+        runtime: Runtime[AvaContext],
         _config: RunnableConfig,
         /,
     ) -> dict[str, Any] | None:
@@ -207,10 +211,11 @@ class _SdkReminderAfterExecHook(Hook):
         if not code:
             return None
 
+        reminders = runtime.context.require_agent().sdk_reminders
         matched = detect_categories(code)
         nameerror_name = (
             _assumed_persistence_name(state.messages[:-2], out_msg)
-            if turn_settings.agent.sdk_nameerror_hint_enabled
+            if reminders.sdk_nameerror_hint_enabled
             else None
         )
         if not matched and nameerror_name is None:
@@ -218,7 +223,9 @@ class _SdkReminderAfterExecHook(Hook):
 
         reminded, new_bookmark = _rearmed_reminded(state)
 
-        hinted, newly_seen, nameerror_hint = _select_hints(code, matched, reminded, nameerror_name)
+        hinted, newly_seen, nameerror_hint = _select_hints(
+            code, matched, reminded, nameerror_name, reminders.sdk_code_reminder_cadence
+        )
         if not newly_seen:
             # Every once-scoped match is already seen this window (or silently
             # suppressed and already marked). The bookmark only advances on a path
@@ -266,7 +273,7 @@ class _SdkReminderAgentReplyHook(Hook):
     incoming batch holds a message from another agent.
 
     Runs before the reply is produced (a plain text reply runs no code). The
-    firing cadence is `turn_settings.agent.agent_reply_reminder_cadence`:
+    firing cadence is `agent_reply_reminder_cadence`:
     - `once_per_compaction` (default): fire at most once per context window; a
       compaction re-arms it (the shared `reminded` set / bookmark, same as the
       code categories).
@@ -283,7 +290,7 @@ class _SdkReminderAgentReplyHook(Hook):
     async def __call__(
         self,
         state: AgentState,
-        _runtime: Runtime[AvaContext],
+        runtime: Runtime[AvaContext],
         _config: RunnableConfig,
         /,
     ) -> dict[str, Any] | None:
@@ -299,7 +306,8 @@ class _SdkReminderAgentReplyHook(Hook):
         # then behind that boundary, already past), so the reminder effectively waits
         # for the *next* agent inbound. Leave AGENT_REPLY_CATEGORY unmarked so a
         # future inbound still qualifies.
-        if auto_compact_will_fire(state):
+        agent = runtime.context.require_agent()
+        if auto_compact_will_fire(state, agent.brain.llm_model):
             logger.info(
                 "[sdk-reminder] defer: auto-compact predicted, skipping agent-inbound hint this turn"
             )
@@ -308,12 +316,8 @@ class _SdkReminderAgentReplyHook(Hook):
         # The Literal config validates at Settings construction (an unknown value
         # fails fast there), so the match is exhaustive — a new cadence added to the
         # Literal turns this into a static non-exhaustive error rather than a silent
-        # fall-through. The turn view reads as Any, so re-assert the field's
-        # Literal here to keep that static exhaustiveness check alive.
-        cadence: Literal["once_per_compaction", "every_time"] = (
-            turn_settings.agent.agent_reply_reminder_cadence
-        )
-        match cadence:
+        # fall-through.
+        match agent.sdk_reminders.agent_reply_reminder_cadence:
             case "every_time":
                 return {"messages": [_agent_reply_note()]}
             case "once_per_compaction":

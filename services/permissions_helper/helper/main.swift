@@ -677,6 +677,383 @@ func axWindowInfo(_ req: [String: Any]) throws -> [String: Any] {
     return ["app": appName, "x": pos.x, "y": pos.y, "w": size.width, "h": size.height]
 }
 
+// MARK: - AX tree
+
+/// Accessibility-tree walk of one application window (`ax_tree`, read-only)
+/// and single-element actions on what it returned (`ax_act`).
+/// The helper serves one request at a time, so a walk is bounded three ways: a
+/// node cap, a depth cap and a total time budget, plus a per-element messaging
+/// timeout so one hung target app cannot hold the socket for the system default
+/// (about six seconds). Whatever was read when a bound trips is returned with
+/// `truncated` / `timed_out` set; filtering, collapsing, rendering and stable
+/// ids belong to the Python side, which tells nodes apart across walks by the
+/// fingerprint each carries. `ax_act` addresses a node by the raw id of the
+/// latest walk and answers `stale` when that element is gone or changed.
+private let axTreeAttributes: [String] = [
+    kAXRoleAttribute, kAXSubroleAttribute, kAXTitleAttribute, kAXDescriptionAttribute,
+    kAXValueAttribute, kAXIdentifierAttribute, kAXPositionAttribute, kAXSizeAttribute,
+    kAXEnabledAttribute, kAXFocusedAttribute, kAXSelectedAttribute,
+    kAXChildrenAttribute, kAXVisibleChildrenAttribute,
+]
+private let axVisibleChildrenRoles: Set<String> = [
+    "AXList", "AXTable", "AXOutline", "AXBrowser", "AXScrollArea",
+]
+private let axMaxStringLength = 200
+private let axTreeFrameworkMarkers: [(marker: String, name: String)] = [
+    ("Electron Framework.framework", "electron"),
+    ("Chromium Embedded Framework.framework", "cef"),
+    ("Google Chrome Framework.framework", "chromium"),
+    ("Microsoft Edge Framework.framework", "chromium"),
+    ("Brave Browser Framework.framework", "chromium"),
+]
+
+/// Processes whose Chromium accessibility we already switched on during this
+/// helper's life: the switch is sticky in the target app until it quits, so a
+/// repeat walk neither sets it again nor waits for the tree to appear.
+private var axEnabledPids: Set<pid_t> = []
+
+/// A live element reference plus the signature (role, identifier, title,
+/// description) it had when it was read; `ax_act` refuses an element whose
+/// signature changed since, so a recycled row is never acted on by mistake.
+private struct AXEntry {
+    let element: AXUIElement
+    let sig: String
+}
+
+/// Raw ids ("1", "2", ...) of the last walks; the client maps them to its own
+/// stable ids through each node's fingerprint. An unscoped walk replaces the
+/// table, a scoped one adds to it.
+private var axElementTable: [Int: AXEntry] = [:]
+private var axNextElementID = 1
+
+private func fnv1a(_ text: String) -> String {
+    var hash: UInt64 = 0xcbf29ce484222325
+    for byte in text.utf8 {
+        hash ^= UInt64(byte)
+        hash = hash &* 0x100000001b3
+    }
+    return String(hash, radix: 16)
+}
+
+/// The identity text that distinguishes siblings of one role: the explicit
+/// identifier, else the title, else the description. Values are excluded
+/// (they change as the user types). A window keeps its title so two windows of
+/// one app never share a fingerprint.
+private func axDiscriminator(_ values: [AnyObject?]) -> String {
+    for index in [5, 2, 3] {
+        if let v = axString(values[index]) { return String(v.prefix(60)) }
+    }
+    return ""
+}
+
+private func axSignature(role: String?, values: [AnyObject?]) -> String {
+    let parts = [role, axString(values[5]), axString(values[2]), axString(values[3])]
+    return fnv1a(parts.map { $0 ?? "" }.joined(separator: "\u{1f}"))
+}
+
+private func axBatch(_ element: AXUIElement, _ attributes: [String]) -> [AnyObject?]? {
+    var out: CFArray?
+    let status = AXUIElementCopyMultipleAttributeValues(
+        element, attributes as CFArray, AXCopyMultipleAttributeOptions(rawValue: 0), &out)
+    guard status == .success, let values = out as? [AnyObject], values.count == attributes.count
+    else { return nil }
+    return values.map { value in
+        // A missing attribute comes back as an AXValue of type axError.
+        if CFGetTypeID(value) == AXValueGetTypeID(),
+           AXValueGetType(value as! AXValue) == .axError { return nil }
+        return value
+    }
+}
+
+private func axString(_ value: AnyObject?) -> String? {
+    var text: String?
+    if let s = value as? String { text = s }
+    else if let n = value as? NSNumber, CFGetTypeID(n) != CFBooleanGetTypeID() { text = n.stringValue }
+    guard let t = text, !t.isEmpty else { return nil }
+    return t.count > axMaxStringLength ? String(t.prefix(axMaxStringLength)) : t
+}
+
+private func axFlag(_ value: AnyObject?) -> Bool? {
+    guard let n = value as? NSNumber, CFGetTypeID(n) == CFBooleanGetTypeID() else { return nil }
+    return n.boolValue
+}
+
+private func axElements(_ value: AnyObject?) -> [AXUIElement] {
+    guard let array = value as? [AnyObject] else { return [] }
+    return array.compactMap { item in
+        CFGetTypeID(item) == AXUIElementGetTypeID() ? (item as! AXUIElement) : nil
+    }
+}
+
+private func axFrame(_ position: AnyObject?, _ size: AnyObject?) -> (CGPoint, CGSize)? {
+    var pos = CGPoint.zero
+    var dim = CGSize.zero
+    guard let pv = position, let sv = size,
+          CFGetTypeID(pv) == AXValueGetTypeID(), CFGetTypeID(sv) == AXValueGetTypeID(),
+          AXValueGetValue(pv as! AXValue, .cgPoint, &pos),
+          AXValueGetValue(sv as! AXValue, .cgSize, &dim),
+          [pos.x, pos.y, dim.width, dim.height].allSatisfy({ $0.isFinite })  // else JSON serialization throws and hangs the client
+    else { return nil }
+    return (pos, dim)
+}
+
+private func axActionNames(_ element: AXUIElement) -> [String] {
+    var names: CFArray?
+    guard AXUIElementCopyActionNames(element, &names) == .success, let list = names as? [String]
+    else { return [] }
+    return list
+}
+
+private func axFrameworkHint(_ app: NSRunningApplication) -> String {
+    guard let bundle = app.bundleURL else { return "" }
+    for entry in axTreeFrameworkMarkers {
+        let path = bundle.appendingPathComponent("Contents/Frameworks/" + entry.marker).path
+        if FileManager.default.fileExists(atPath: path) { return entry.name }
+    }
+    // Chromium forks under their own name (Lark's "Lark Framework.framework")
+    // keep Chromium's multi-process layout: a framework whose Helpers directory
+    // holds a "... Helper (Renderer).app".
+    let frameworks = bundle.appendingPathComponent("Contents/Frameworks")
+    for entry in (try? FileManager.default.contentsOfDirectory(atPath: frameworks.path)) ?? []
+    where entry.hasSuffix(".framework") {
+        let helpers = frameworks.appendingPathComponent(entry + "/Helpers").path
+        if let inner = try? FileManager.default.contentsOfDirectory(atPath: helpers),
+           inner.contains(where: { $0.hasSuffix("Helper (Renderer).app") }) { return "chromium" }
+    }
+    return ""
+}
+
+/// Ask a Chromium-based app (Electron, CEF, Chrome family) to build its
+/// accessibility tree, which it otherwise skips unless an assistive tool is
+/// attached. `AXManualAccessibility` is the attribute built for exactly this;
+/// `AXEnhancedUserInterface` is deliberately not touched (it changes native
+/// window behavior and belongs to VoiceOver). The app builds the tree lazily,
+/// so the first time per process we wait, bounded, for its window to list
+/// children. Returns "set", "already" or "failed".
+private func axEnableChromiumAccessibility(_ axApp: AXUIElement, pid: pid_t) -> String {
+    if axEnabledPids.contains(pid) { return "already" }
+    let status = AXUIElementSetAttributeValue(axApp, "AXManualAccessibility" as CFString, kCFBooleanTrue)
+    guard status == .success else { return "failed" }
+    axEnabledPids.insert(pid)
+    for _ in 0..<10 {
+        if let window = axPickWindow(axApp).window {
+            var children: CFTypeRef?
+            if AXUIElementCopyAttributeValue(window, kAXChildrenAttribute as CFString, &children) == .success,
+               let list = children as? [AnyObject], !list.isEmpty { break }
+        }
+        Thread.sleep(forTimeInterval: 0.1)
+    }
+    return "set"
+}
+
+private func axPickWindow(_ axApp: AXUIElement) -> (window: AXUIElement?, count: Int) {
+    var count = 0
+    var listRef: CFTypeRef?
+    if AXUIElementCopyAttributeValue(axApp, kAXWindowsAttribute as CFString, &listRef) == .success {
+        count = (listRef as? [AnyObject])?.count ?? 0
+    }
+    for attribute in [kAXFocusedWindowAttribute, kAXMainWindowAttribute] {
+        var ref: CFTypeRef?
+        if AXUIElementCopyAttributeValue(axApp, attribute as CFString, &ref) == .success,
+           let window = ref, CFGetTypeID(window) == AXUIElementGetTypeID() {
+            return ((window as! AXUIElement), count)
+        }
+    }
+    if let first = axElements(listRef as AnyObject?).first { return (first, count) }
+    return (nil, count)
+}
+
+/// Walk one window (or, with `scope`, the subtree under an id from the last
+/// walk) breadth-first and return the raw node list.
+func axTree(_ req: [String: Any]) throws -> [String: Any] {
+    guard let appName = req["app"] as? String else { throw OpError.bad("ax_tree needs string app") }
+    guard let app = NSWorkspace.shared.runningApplications.first(where: {
+        $0.localizedName == appName || $0.bundleIdentifier == appName
+    }) else { throw OpError.bad("app not running: \(appName)") }
+    let maxNodes = max(1, min(Int(numericDouble(req["max_nodes"]) ?? 600), 2000))
+    let maxDepth = max(1, min(Int(numericDouble(req["max_depth"]) ?? 14), 40))
+    let budget = max(0.05, min((numericDouble(req["budget_ms"]) ?? 1500) / 1000, 10))
+    let messagingTimeout = Float(max(0.05, min((numericDouble(req["timeout_ms"]) ?? 400) / 1000, 5)))
+
+    let axApp = AXUIElementCreateApplication(app.processIdentifier)
+    AXUIElementSetMessagingTimeout(axApp, messagingTimeout)
+    let framework = axFrameworkHint(app)
+    // "n/a": not a Chromium-based app; "off": the caller opted out; "set" /
+    // "already" / "failed": see axEnableChromiumAccessibility. Scoped walks
+    // read an element that exists, so they never enable anything.
+    var enable = "n/a"
+    if !framework.isEmpty && req["scope"] == nil {
+        enable = (req["enable_ax"] as? Bool ?? true)
+            ? axEnableChromiumAccessibility(axApp, pid: app.processIdentifier) : "off"
+    }
+    let picked = axPickWindow(axApp)
+    var meta: [String: Any] = [
+        "app": appName, "pid": Int(app.processIdentifier), "windows": picked.count,
+        "framework": framework, "ax_enable": enable,
+    ]
+
+    let root: AXUIElement
+    let scopeFingerprint = req["scope_fp"] as? String
+    if let scopeID = numericDouble(req["scope"]).map({ Int($0) }) {
+        guard let scoped = axElementTable[scopeID]?.element
+        else { throw OpError.bad("unknown scope \(scopeID): the element table was replaced by a later walk") }
+        guard scopeFingerprint != nil else { throw OpError.bad("a scoped ax_tree needs scope_fp") }
+        var scopedPid: pid_t = 0
+        guard AXUIElementGetPid(scoped, &scopedPid) == .success, scopedPid == app.processIdentifier
+        else { throw OpError.bad("scope \(scopeID) does not belong to \(appName)") }
+        AXUIElementSetMessagingTimeout(scoped, messagingTimeout)
+        root = scoped
+    } else {
+        axElementTable.removeAll()
+        guard let window = picked.window else {
+            meta.merge(["nodes": [Any](), "visited": 0, "truncated": false, "timed_out": false,
+                        "unreadable": 0, "elapsed_ms": 0]) { $1 }
+            return meta
+        }
+        AXUIElementSetMessagingTimeout(window, messagingTimeout)
+        root = window
+    }
+
+    let started = Date()
+    var nodes: [[String: Any]] = []
+    var queue: [(element: AXUIElement, parent: Int?, parentFp: String, depth: Int)] = [(root, nil, "", 0)]
+    var siblingCounts: [String: Int] = [:]
+    var head = 0
+    var truncated = false
+    var timedOut = false
+    var unreadable = 0
+    while head < queue.count {
+        let (element, parent, parentFp, depth) = queue[head]
+        head += 1
+        if nodes.count >= maxNodes { truncated = true; break }
+        if Date().timeIntervalSince(started) > budget { timedOut = true; break }
+        guard let values = axBatch(element, axTreeAttributes) else { unreadable += 1; continue }
+        let role = axString(values[0])
+        let id = axNextElementID
+        axNextElementID += 1
+        axElementTable[id] = AXEntry(element: element, sig: axSignature(role: role, values: values))
+
+        // Path fingerprint: parent fingerprint + role + discriminator + the
+        // ordinal among same-keyed siblings. It survives value edits and
+        // sibling reordering of other kinds, and a scoped walk's root keeps the
+        // fingerprint the client already knows it by.
+        let fingerprint: String
+        if depth == 0, let known = scopeFingerprint {
+            fingerprint = known
+        } else {
+            let segment = (role ?? "") + "|" + axDiscriminator(values)
+            let ordinalKey = parentFp + "/" + segment
+            let ordinal = siblingCounts[ordinalKey, default: 0]
+            siblingCounts[ordinalKey] = ordinal + 1
+            fingerprint = fnv1a(ordinalKey + "#" + String(ordinal))
+        }
+
+        var node: [String: Any] = ["id": id, "depth": depth, "fp": fingerprint]
+        if let parent = parent { node["parent"] = parent }
+        if let role = role { node["role"] = role }
+        if let v = axString(values[1]) { node["subrole"] = v }
+        if let v = axString(values[2]) { node["title"] = v }
+        if let v = axString(values[3]) { node["desc"] = v }
+        // Secure fields are never echoed, whatever the target app exposes.
+        if node["subrole"] as? String != "AXSecureTextField", let v = axString(values[4]) { node["value"] = v }
+        if let v = axString(values[5]) { node["ident"] = v }
+        if let (pos, dim) = axFrame(values[6], values[7]) {
+            node["x"] = Double(pos.x); node["y"] = Double(pos.y)
+            node["w"] = Double(dim.width); node["h"] = Double(dim.height)
+        }
+        if let v = axFlag(values[8]) { node["enabled"] = v }
+        if let v = axFlag(values[9]) { node["focused"] = v }
+        if let v = axFlag(values[10]) { node["selected"] = v }
+        let actions = axActionNames(element)
+        if !actions.isEmpty { node["actions"] = actions }
+
+        var children = axElements(values[11])
+        if let role = role, axVisibleChildrenRoles.contains(role) {
+            let visible = axElements(values[12])
+            if !visible.isEmpty { children = visible }
+        }
+        node["n"] = children.count
+        nodes.append(node)
+        if depth + 1 >= maxDepth {
+            if !children.isEmpty { truncated = true }
+            continue
+        }
+        for child in children { queue.append((child, id, fingerprint, depth + 1)) }
+    }
+    meta.merge([
+        "nodes": nodes, "visited": nodes.count, "truncated": truncated, "timed_out": timedOut,
+        "unreadable": unreadable, "elapsed_ms": Int(Date().timeIntervalSince(started) * 1000),
+    ]) { $1 }
+    return meta
+}
+
+private let axActionTable: [String: String] = [
+    "press": kAXPressAction, "show_menu": kAXShowMenuAction,
+]
+
+/// Perform one action on an element of the latest walk. Outcomes:
+///   stale     -> {"stale": true, "completed": false}: the id is not in the table,
+///                or the element no longer answers / no longer has the role,
+///                identifier, title and description it had when it was read.
+///   completed -> {"completed": true, ...}: the app accepted the action.
+///   unanswered-> {"completed": false, "unanswered": true}: the app did not
+///                answer within the timeout; the action may still have run.
+/// Anything else (no such action, attribute not settable, AX error) throws.
+/// The value of `set_value` is written and never echoed or logged.
+func axAct(_ req: [String: Any]) throws -> [String: Any] {
+    guard let appName = req["app"] as? String, let action = req["action"] as? String,
+          let rawID = numericDouble(req["id"]).map({ Int($0) })
+    else { throw OpError.bad("ax_act needs string app, string action and numeric id") }
+    guard let app = NSWorkspace.shared.runningApplications.first(where: {
+        $0.localizedName == appName || $0.bundleIdentifier == appName
+    }) else { throw OpError.bad("app not running: \(appName)") }
+    let timeout = Float(max(0.1, min((numericDouble(req["timeout_ms"]) ?? 2000) / 1000, 10)))
+    let stale: [String: Any] = ["stale": true, "completed": false]
+    guard let entry = axElementTable[rawID] else { return stale }
+    var elementPid: pid_t = 0
+    guard AXUIElementGetPid(entry.element, &elementPid) == .success, elementPid == app.processIdentifier
+    else { return stale }
+    AXUIElementSetMessagingTimeout(entry.element, timeout)
+    guard let values = axBatch(entry.element, axTreeAttributes) else { return stale }
+    let role = axString(values[0])
+    guard axSignature(role: role, values: values) == entry.sig else { return stale }
+
+    var status: AXError
+    switch action {
+    case "press", "show_menu":
+        let name = axActionTable[action]!
+        let offered = axActionNames(entry.element)
+        guard offered.contains(name) else {
+            throw OpError.bad("element does not offer \(name) (it offers: \(offered.joined(separator: ", ")))")
+        }
+        status = AXUIElementPerformAction(entry.element, name as CFString)
+    case "focus":
+        status = AXUIElementSetAttributeValue(entry.element, kAXFocusedAttribute as CFString, kCFBooleanTrue)
+    case "set_value":
+        guard let text = req["value"] as? String else { throw OpError.bad("set_value needs string value") }
+        var settable = DarwinBoolean(false)
+        guard AXUIElementIsAttributeSettable(entry.element, kAXValueAttribute as CFString, &settable) == .success,
+              settable.boolValue
+        else { throw OpError.bad("element value is not settable") }
+        status = AXUIElementSetAttributeValue(entry.element, kAXValueAttribute as CFString, text as CFString)
+    default:
+        throw OpError.bad("unknown ax_act action: \(action)")
+    }
+    var result: [String: Any] = ["action": action, "completed": status == .success]
+    if let role = role { result["role"] = role }
+    if let label = axString(values[2]) ?? axString(values[3]) { result["label"] = String(label.prefix(80)) }
+    if let (pos, dim) = axFrame(values[6], values[7]) {
+        result["x"] = Double(pos.x); result["y"] = Double(pos.y)
+        result["w"] = Double(dim.width); result["h"] = Double(dim.height)
+    }
+    switch status {
+    case .success: break
+    case .cannotComplete: result["unanswered"] = true
+    default: throw OpError.bad("ax_act \(action) failed: AXError \(status.rawValue)")
+    }
+    return result
+}
+
 // MARK: - Root keeper
 
 /// Environment variable naming the JSON seed file the keeper loads when the
@@ -1246,7 +1623,7 @@ private let rootKeeper = RootKeeper()
 func dispatch(_ req: [String: Any]) -> [String: Any] {
     let id = req["id"]
     let method = req["method"] as? String ?? ""
-    let axGatedMethods: Set<String> = ["click", "type", "key", "scroll", "ax_window_info"]
+    let axGatedMethods: Set<String> = ["click", "type", "key", "scroll", "ax_window_info", "ax_tree", "ax_act"]
     if axGatedMethods.contains(method) && !axTrustedOrPrompt() {
         return ["id": id as Any, "ok": false, "error": axGrantError]
     }
@@ -1255,7 +1632,7 @@ func dispatch(_ req: [String: Any]) -> [String: Any] {
         switch method {
         case "ping":
             result = ["pong": true, "pid": Int(getpid()), "root_stop_intent_v1": true, "helper_shutdown_v1": true,
-                      "root_seed_report_v1": true,
+                      "root_seed_report_v1": true, "ax_tree_v1": true, "ax_act_v1": true,
                       "preflight_screen": CGPreflightScreenCaptureAccess(),
                       "ax_trusted": AXIsProcessTrusted()]
         case "file_list": result = try fileList(req)
@@ -1266,6 +1643,8 @@ func dispatch(_ req: [String: Any]) -> [String: Any] {
         case "key": result = try key(req)
         case "scroll": result = try scroll(req)
         case "ax_window_info": result = try axWindowInfo(req)
+        case "ax_tree": result = try axTree(req)
+        case "ax_act": result = try axAct(req)
         case "window_info": result = try windowInfo(req)
         case "session_info": result = sessionInfo()
         case "screen_size": result = try screenSize(req)

@@ -11,7 +11,7 @@ tags:
 # Exec domain closure
 
 The dedicated owner's `ExecProcessDomain.close_confirmed` keeps the POSIX root
-unreaped until [[../../process-group-closure.ava.okf.md|group closure]] is proven.
+unreaped until [[group-closure.ava.okf.md|group closure]] is proven.
 It is distinct from successful signal submission. On Windows,
 `WindowsJob.terminate_and_confirm` retains the original Job handle through
 termination and a zero `ActiveProcesses` readback, then closes it. Query failure

@@ -10,7 +10,7 @@ This module is the ONLY place a route contract is declared — the doorplate
 wall. Route authors add one entry per route they own; the pause middleware
 reads exemptions from here (via `gateway.middleware.pause_policy`), the SDK reads
 idempotency from here, and lint forces every gateway route to declare a
-doorplate (`tests/gateway/test_route_contracts.py`).
+doorplate (`gateway/tests/test_route_contracts_gateway.py`).
 
 Invariants (design concept v0.3):
 1. Declared at the boundary definition — idempotency / exemption are
@@ -110,9 +110,6 @@ ROUTE_CONTRACTS: dict[tuple[str, str], RouteContract] = {
     ("GET", "/api/agents/{agent_id}/born-chain"): RouteContract(),
     # ── gateway/alerts/router.py ───────────────────────────────────
     ("GET", "/api/alerts"): RouteContract(),
-    ("GET", "/api/alerts/impersonation-event-retention"): RouteContract(
-        note="machine-scoped retention-loss operator panel"
-    ),
     ("GET", "/api/alerts/stream"): RouteContract(
         note="SSE tail — subscribing mid-pause just idles; the UI's initial fetch covers the gap"
     ),

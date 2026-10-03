@@ -28,10 +28,10 @@ from contextlib import suppress
 from pathlib import Path
 from typing import Any
 
-from base.config import settings
 from base.db.transaction import write_transaction
 from base.paths import ava_home
 from services.im_bridge import copy
+from services.im_bridge.config import ImBridgeConfig
 
 _log = logging.getLogger("services.im_bridge.notice_bridge")
 
@@ -83,7 +83,8 @@ def _row_to_notice(r: tuple[Any, ...]) -> dict[str, Any]:
 class NoticeBridge:
     """Push fleet notices to the owner chat; own reply mode + filters."""
 
-    def __init__(self, core: Any, *, db_pool: Any = None) -> None:
+    def __init__(self, core: Any, config: ImBridgeConfig, *, db_pool: Any = None) -> None:
+        self._config = config
         self.core = core
         self.db_pool = db_pool
         self._cursor = 0
@@ -169,7 +170,7 @@ class NoticeBridge:
         from base.db import NOTICE_FYI_TTL_DAYS
 
         if limit is None:
-            limit = settings.display.notices_open_default_limit
+            limit = self._config.notices_open_default_limit
 
         with self.db_pool.connection() as conn, conn.cursor() as cur:
             cur.execute(
@@ -188,7 +189,7 @@ class NoticeBridge:
         from base.db import NOTICE_FYI_TTL_DAYS
 
         if limit is None:
-            limit = settings.services.im_bridge_notice_open_limit
+            limit = self._config.im_bridge_notice_open_limit
 
         with write_transaction(self.db_pool) as conn, conn.cursor() as cur:
             # Lazy FYI expiry, same as the gateway's open feed: expired FYIs
@@ -286,7 +287,7 @@ class NoticeBridge:
     def _arm_reply_mode(self, chat_id: str, agent_id: str, notice_id: str) -> str:
         """Tap [Reply]: arm the reply window on this chat. A new tap replaces
         an older mode; expired modes are dropped first."""
-        window_seconds = settings.services.im_bridge_notice_reply_window_seconds
+        window_seconds = self._config.im_bridge_notice_reply_window_seconds
         self._reply_modes = {
             k: v for k, v in self._reply_modes.items() if time.time() <= v["expires_at"]
         }
@@ -320,7 +321,7 @@ class NoticeBridge:
                     "/api/notices/open",
                     {
                         "include_awaiting": True,
-                        "limit": settings.services.im_bridge_notice_open_limit,
+                        "limit": self._config.im_bridge_notice_open_limit,
                     },
                 )
         except Exception:

@@ -11,9 +11,9 @@ from __future__ import annotations
 import asyncio
 import logging
 from datetime import UTC, datetime, timedelta
-from typing import Any
+from typing import Annotated, Any
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Query, Request
 from loguru import logger
 from psycopg_pool import ConnectionPool
 from pydantic import BaseModel
@@ -27,12 +27,14 @@ from base.cluster.machine import (
     machine_name,
 )
 from base.config import settings
+from base.db import Database
 from base.db.transaction import write_transaction
 from base.deploy.git.cluster_drift import prod_source_head_sha
+from gateway.cluster import snapshots
 from gateway.cluster.schemas import AgentMachineRow, MachineDeleteResponse
 from gateway.cluster.status import gather_cluster_status
+from gateway.events import telemetry_rows
 from gateway.events.schemas import AgentEventRow, AgentEventsResponse
-from gateway.lgtm import loki_events
 from ops import cluster as _ops
 from ops import cluster_rpc as _cluster_rpc
 from ops.cluster_pause import is_paused as cluster_is_paused
@@ -79,8 +81,18 @@ def _machines_rows_blocking(pool: ConnectionPool) -> list[tuple[Any, ...]]:
         return cur.fetchall()
 
 
+async def _roster_statuses(pool: ConnectionPool, *, fresh: bool) -> list[MachineStatus]:
+    """The roster of every unpaused machine: from the heartbeat liveness pass's
+    snapshot, or — when `fresh` — by dialing every runner now."""
+    rows = await asyncio.to_thread(_machines_rows_blocking, pool)
+    if not rows:
+        return []
+    found = None if fresh else await asyncio.to_thread(snapshots.read_all_blocking, pool)
+    return await gather_cluster_status(rows, machine_name(), snapshots=found)
+
+
 async def _dispatch_op(
-    target: str, kind: _cluster_rpc.OpKind, payload: dict[str, Any]
+    db: Database, target: str, kind: _cluster_rpc.OpKind, payload: dict[str, Any]
 ) -> dict[str, Any]:
     """POST one op to `target`'s ops server, mapping transport outcomes to HTTP.
 
@@ -95,7 +107,7 @@ async def _dispatch_op(
     """
     try:
         return await _cluster_rpc.dispatch_to_machine(
-            target_machine=target, kind=kind, payload=payload
+            db, target_machine=target, kind=kind, payload=payload
         )
     except _cluster_rpc.ClusterOpUnreachable as exc:
         raise HTTPException(
@@ -110,7 +122,7 @@ async def _dispatch_op(
 
 
 @router.post("/api/cluster/stopping", status_code=200)
-async def post_cluster_stopping(machine: str, home: str) -> dict[str, str]:
+async def post_cluster_stopping(machine: str, home: str, request: Request) -> dict[str, str]:
     """Record that the (machine, home) unit is shutting down intentionally.
 
     `ava stop` POSTs this (best-effort) just before local teardown so the
@@ -124,11 +136,11 @@ async def post_cluster_stopping(machine: str, home: str) -> dict[str, str]:
     Low-stakes: stopped_at is cosmetic and a spuriously-stamped live host still
     probes online=True.
     """
-    return await asyncio.to_thread(_ops.cluster_stopping_op, machine, home)
+    return await asyncio.to_thread(_ops.cluster_stopping_op, request.app.state.db, machine, home)
 
 
 @router.get("/api/cluster/status")
-async def get_cluster_status() -> ClusterStatus:
+async def get_cluster_status(request: Request) -> ClusterStatus:
     """This host's own snapshot (name / role / paused).
 
     On an agent-runner-capable host the snapshot comes from this host's ops
@@ -142,27 +154,37 @@ async def get_cluster_status() -> ClusterStatus:
     roster use `/api/cluster/roster`. Bypasses 503 mode so status stays visible
     during pause — observability is always online.
     """
+    return await cluster_status_snapshot(request.app.state.db)
+
+
+async def cluster_status_snapshot(db: Database) -> ClusterStatus:
+    """The `/api/cluster/status` body, also read by the MCP `cluster_status` tool."""
     if is_agent_runner():
-        result = await _dispatch_op(machine_name(), "status_probe", {})
+        result = await _dispatch_op(db, machine_name(), "status_probe", {})
         return ClusterStatus.model_validate(result)
     return await asyncio.to_thread(_local_snapshot_blocking)
 
 
 @router.get("/api/cluster/roster", response_model=list[MachineStatus])
-async def get_cluster_roster(request: Request) -> list[MachineStatus]:
-    """The full multi-machine roster — every registered machine + live status.
+async def get_cluster_roster(
+    request: Request,
+    *,
+    fresh: Annotated[
+        bool, Query(description="Dial every runner now instead of reading the last probe.")
+    ] = False,
+) -> list[MachineStatus]:
+    """The full multi-machine roster — every registered machine + status.
 
     Backs the thin-client `ava cluster status`: the gateway's own row is
-    resolved locally; each agent-runner is probed in parallel via the
-    status_probe op (total wall ≈ the probe timeout regardless
-    of N). Same fan-out the `/api/status` cluster panel uses. Bypasses 503 mode
-    so the roster stays visible during pause.
+    resolved locally; each agent-runner renders from the heartbeat liveness
+    pass's last status_probe (`MachineStatus.observed_at` says how old), so the
+    read dials nothing and a down host cannot slow it. `fresh=true` probes every
+    runner in parallel via the status_probe op instead (total wall ≈ the probe
+    timeout regardless of N) — for a caller that must see a restart land, such as
+    the fleet update. Same fan-out the `/api/status` cluster panel uses. Bypasses
+    503 mode so the roster stays visible during pause.
     """
-    rows = await asyncio.to_thread(_machines_rows_blocking, request.app.state.control_db_pool)
-    if not rows:
-        return []
-
-    return await gather_cluster_status(rows, machine_name())
+    return await _roster_statuses(request.app.state.control_db_pool, fresh=fresh)
 
 
 # --- Admin ops (token-only ops, ssh-free) -------------------------------------
@@ -187,6 +209,7 @@ _EVENTS_MAX_LIMIT = 1000
 
 @router.get("/api/cluster/admin/events", response_model=AgentEventsResponse)
 def get_cluster_admin_events(
+    request: Request,
     agent_id: int | None = None,
     service_only: bool = False,  # noqa: FBT001, FBT002 — FastAPI query param, always passed by name
     level: str | None = None,
@@ -195,9 +218,8 @@ def get_cluster_admin_events(
     grep: str | None = None,
     limit: int | None = None,
 ) -> AgentEventsResponse:
-    """Slice the unified event stream from Loki (category=telemetry/log) for
-    ops debugging without SSH — the LGTM replacement for the PG `events` read
-    (task #1197).
+    """Slice the unified event stream (category=telemetry/log, read from
+    `telemetry_events`) for ops debugging without SSH.
 
     Filters compose (AND):
       - `agent_id=N`: only this agent's events (gateway / daemon rows excluded).
@@ -206,8 +228,8 @@ def get_cluster_admin_events(
       - `since=2h` / `since=2026-05-25T00:00Z`: relative window or absolute
         timestamp. Relative format `<int><unit>` with unit `s/m/h/d`.
       - `event=spawn,terminate`: comma-separated event names.
-      - `grep=<substring>`: substring match on the raw log line (the JSON
-        body includes the `msg` payload).
+      - `grep=<substring>`: case-insensitive substring match on the event
+        name, source and payload (which includes the `msg` text).
       - `limit`: max rows to return, capped at 1000 (protective constant).
         Omitted returns the configured default
         (``display.cluster_events_default_limit`` - 200 out of the box).
@@ -240,16 +262,20 @@ def get_cluster_admin_events(
     since_dt = _parse_since(since) if since else None
     events = [e.strip() for e in event.split(",") if e.strip()] if event else None
 
-    rows, _ = loki_events.query_events(
-        agent_id=agent_id,
-        service_only=service_only,
-        categories=["telemetry", "log"],
-        event_names=events,
-        level_min=level_min,
-        grep=grep,
-        from_=since_dt,
-        limit=limit,
-    )
+    # A lower bound is always in effect; the default is the last 24 hours.
+    window_from = since_dt or datetime.now(UTC) - timedelta(hours=24)
+    with request.app.state.db_pool.connection() as conn:
+        rows, _ = telemetry_rows.query_events(
+            conn,
+            agent_id=agent_id,
+            service_only=service_only,
+            categories=["telemetry", "log"],
+            event_names=events,
+            level_min=level_min,
+            grep=grep,
+            from_=window_from,
+            limit=limit,
+        )
     return AgentEventsResponse(
         items=[
             AgentEventRow(
@@ -299,20 +325,22 @@ def _parse_since(s: str) -> datetime:
 
 
 @router.get("/api/cluster/machines", response_model=list[AgentMachineRow])
-async def get_cluster_machines(request: Request) -> list[AgentMachineRow]:
+async def get_cluster_machines(
+    request: Request,
+    *,
+    fresh: Annotated[
+        bool, Query(description="Dial every runner now instead of reading the last probe.")
+    ] = False,
+) -> list[AgentMachineRow]:
     """List every registered machine with its description + live status.
 
-    Backs ava.agents.list_machines(). Live status comes from the same
-    status_probe op round-trip the status panel uses
-    (gateway is live from its own perspective); total wall time is
-    bounded by the probe timeout regardless of machine count. role /
-    gateway_url are intentionally omitted — agents reason over the free-text
-    description, not ops topology.
+    Backs ava.agents.list_machines(). Live status comes from the same source the
+    roster uses: the heartbeat liveness pass's last status_probe, or with
+    `fresh=true` a probe of every runner now (gateway is live from its own
+    perspective). role / gateway_url are intentionally omitted — agents reason
+    over the free-text description, not ops topology.
     """
-    rows = await asyncio.to_thread(_machines_rows_blocking, request.app.state.control_db_pool)
-    if not rows:
-        return []
-    statuses = await gather_cluster_status(rows, machine_name())
+    statuses = await _roster_statuses(request.app.state.control_db_pool, fresh=fresh)
     # This is the AGENT view: it lists only machines that can run agent processes
     # (carry the agent-runner capability). A gateway-only node is intentionally
     # invisible here; a single-box gateway,agent-runner node shows up because it
@@ -339,7 +367,9 @@ class MachineStagingRequest(BaseModel):
 
 
 @router.post("/api/cluster/machines/{name}/staging", response_model=MachineDeleteResponse)
-def set_machine_staging(name: str, req: MachineStagingRequest) -> MachineDeleteResponse:
+def set_machine_staging(
+    name: str, req: MachineStagingRequest, request: Request
+) -> MachineDeleteResponse:
     """Set or clear a machine's operator staging flag (`is_staging`).
 
     The staging latch is what keeps a registered staging host out of the
@@ -348,7 +378,7 @@ def set_machine_staging(name: str, req: MachineStagingRequest) -> MachineDeleteR
     skips is_staging rows). Backed by `base.cluster.machines.set_staging`; the CLI
     verbs `ava cluster mark-staging` / `unmark-staging` call this endpoint.
     """
-    changed = machines.set_staging(name, is_staging=req.is_staging)
+    changed = machines.set_staging(request.app.state.db, name, is_staging=req.is_staging)
     if not changed:
         raise HTTPException(status_code=404, detail=f"no machine named {name!r}")
     return MachineDeleteResponse(deleted=True)

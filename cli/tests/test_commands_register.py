@@ -10,10 +10,12 @@ import pytest
 import cli.commands._probe as _probe_commands
 import ops.roster as _roster
 import ops.roster.service_spec as _service_spec
+from base.daemon.tests.fakes import pin_endpoints
+from base.db import Database
+from cli.commands._repo import _register_machine_or_die
 from cli.commands._setup import SetupValues
-from tests.cli._commands_helpers import _fake_session_backends as _fake_session_backends
-from tests.cli._commands_helpers import _hermetic_gateway_base as _hermetic_gateway_base
-from tests.cli._commands_helpers import _real_register_machine_or_die
+from cli.tests._commands_helpers import _fake_session_backends as _fake_session_backends
+from cli.tests._commands_helpers import _hermetic_gateway_base as _hermetic_gateway_base
 
 # ─── probe gateway via HTTP, not relying on pidfile ───────────────────────────────────
 
@@ -120,15 +122,12 @@ def test_register_gateway_advertises_without_gateway_url(monkeypatch: pytest.Mon
     (a loopback gateway_url advertisement was what made the page proxy refuse
     the host's page servers, the 2026-08-30 serve 400). The port falls back to
     the gateway bind-port setting.
-
-    The real `_register_machine_or_die` is used (autouse fixture replaces the
-    module attribute with a noop; `_real_register_machine_or_die` captures the
-    original at import time)."""
+    """
     from base.config import settings
 
     calls: list[str | None] = []
 
-    def fake_register_self(*, url: str | None = None) -> None:
+    def fake_register_self(_db: object, *, url: str | None = None) -> None:
         calls.append(url)
 
     monkeypatch.setattr("base.cluster.machines.register_self", fake_register_self)
@@ -136,8 +135,10 @@ def test_register_gateway_advertises_without_gateway_url(monkeypatch: pytest.Mon
     monkeypatch.setattr(settings.gateway, "gateway_port", 8000)
     monkeypatch.setattr("base.cluster.machine.reachable_host", lambda: "10.0.0.2")
 
-    rc = _real_register_machine_or_die(
-        cast(SetupValues, {"machine_name": "control"}), frozenset({"gateway"})
+    rc = _register_machine_or_die(
+        Database.from_settings(),
+        cast(SetupValues, {"machine_name": "control"}),
+        frozenset({"gateway"}),
     )
     assert rc == 0
     assert calls == ["http://10.0.0.2:8000"]
@@ -151,15 +152,17 @@ def test_register_gateway_only_advertises_reachable_host(monkeypatch: pytest.Mon
 
     calls: list[str | None] = []
 
-    def fake_register_self(*, url: str | None = None) -> None:
+    def fake_register_self(_db: object, *, url: str | None = None) -> None:
         calls.append(url)
 
     monkeypatch.setattr("base.cluster.machines.register_self", fake_register_self)
     monkeypatch.setattr(settings.gateway, "gateway_url", "https://ava.example:8000")
     monkeypatch.setattr("base.cluster.machine.reachable_host", lambda: "10.0.0.2")
 
-    rc = _real_register_machine_or_die(
-        cast(SetupValues, {"machine_name": "control"}), frozenset({"gateway"})
+    rc = _register_machine_or_die(
+        Database.from_settings(),
+        cast(SetupValues, {"machine_name": "control"}),
+        frozenset({"gateway"}),
     )
     assert rc == 0
     assert calls == ["http://10.0.0.2:8000"]
@@ -170,18 +173,17 @@ def test_register_agent_runner_advertises_ops_url(monkeypatch: pytest.MonkeyPatc
     gateway later dials. Shape: http://<reachable-host>:<ops_port>."""
     calls: list[str | None] = []
 
-    def fake_register_self(*, url: str | None = None) -> None:
+    def fake_register_self(_db: object, *, url: str | None = None) -> None:
         calls.append(url)
 
     monkeypatch.setattr("base.cluster.machines.register_self", fake_register_self)
     monkeypatch.setattr("base.cluster.machine.reachable_host", lambda: "10.0.0.2")
-    monkeypatch.setattr(
-        "base.daemon.health.health_port",
-        lambda name: 8106 if name == "ops" else 0,  # pyright: ignore[reportUnknownArgumentType]
-    )
+    pin_endpoints(monkeypatch, port=lambda name: 8106 if name == "ops" else 0)
 
-    rc = _real_register_machine_or_die(
-        cast(SetupValues, {"machine_name": "wsl"}), frozenset({"agent-runner"})
+    rc = _register_machine_or_die(
+        Database.from_settings(),
+        cast(SetupValues, {"machine_name": "wsl"}),
+        frozenset({"agent-runner"}),
     )
     assert rc == 0
     assert calls == ["http://10.0.0.2:8106"]
@@ -195,19 +197,18 @@ def test_register_agent_runner_loopback_host_exits_nonzero(monkeypatch: pytest.M
 
     calls: list[str | None] = []
 
-    def _reject(*, url: str | None = None) -> None:
+    def _reject(_db: object, *, url: str | None = None) -> None:
         calls.append(url)
         raise LoopbackDialUrlRefused(f"loopback dial url refused: {url}")
 
     monkeypatch.setattr("base.cluster.machines.register_self", _reject)
     monkeypatch.setattr("base.cluster.machine.reachable_host", lambda: "127.0.0.1")
-    monkeypatch.setattr(
-        "base.daemon.health.health_port",
-        lambda name: 8106 if name == "ops" else 0,  # pyright: ignore[reportUnknownArgumentType]
-    )
+    pin_endpoints(monkeypatch, port=lambda name: 8106 if name == "ops" else 0)
 
-    rc = _real_register_machine_or_die(
-        cast(SetupValues, {"machine_name": "wsl"}), frozenset({"agent-runner"})
+    rc = _register_machine_or_die(
+        Database.from_settings(),
+        cast(SetupValues, {"machine_name": "wsl"}),
+        frozenset({"agent-runner"}),
     )
     assert rc == 1
     # register_self was reached with the loopback URL and rejected it; the caller
@@ -236,15 +237,15 @@ def test_register_schema_behind_hint_names_working_commands(
 ) -> None:
     import psycopg
 
-    def _missing_table(*, url: str | None = None) -> None:
+    def _missing_table(_db: object, *, url: str | None = None) -> None:
         del url
         raise psycopg.errors.UndefinedTable('relation "machines" does not exist')
 
     monkeypatch.setattr("base.cluster.machines.register_self", _missing_table)
     monkeypatch.setattr("base.cluster.machine.reachable_host", lambda: "10.0.0.2")
 
-    rc = _real_register_machine_or_die(
-        cast(SetupValues, {"machine_name": "gw"}), frozenset({"gateway"})
+    rc = _register_machine_or_die(
+        Database.from_settings(), cast(SetupValues, {"machine_name": "gw"}), frozenset({"gateway"})
     )
 
     assert rc == 1

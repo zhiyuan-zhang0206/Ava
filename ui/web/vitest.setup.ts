@@ -162,7 +162,7 @@ globalThis.EventSource = GuardedEventSource as unknown as typeof EventSource;
 //
 // Components render with useTranslations() under test but no real
 // NextIntlClientProvider is mounted (tests render components directly). Mock
-// useTranslations to read the canonical en.json catalog — the same strings
+// useTranslations to read the canonical messages/en catalog — the same strings
 // the production English UI renders — so existing assertions on English copy
 // keep passing unchanged, and new i18n'd components need no provider wrapper.
 // Interpolation ({name}) is substituted so t("key", {n: 2}) behaves like the
@@ -173,7 +173,7 @@ vi.mock("next-intl", async (importOriginal) => {
   // eslint-disable-next-line @typescript-eslint/consistent-type-imports -- test double
   const actual = await importOriginal<typeof import("next-intl")>();
   // eslint-disable-next-line @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-assignment -- test double
-  const en = (await import("./messages/en.json")).default as any;
+  const en = (await import("./messages/en")).default as any;
 
   // Resolve a dotted path ("control.sections.guide") against the messages
   // tree; missing segments fall back to the raw key so a typo surfaces as the

@@ -53,6 +53,7 @@ from base.cluster.machines import (
     lookup as lookup_machine_url,
 )
 from base.config import settings
+from base.db import Database
 from ops.rpc_schemas import OpEnvelope, OpKind, OpResponse, is_op_kind
 
 __all__ = [
@@ -61,6 +62,7 @@ __all__ = [
     "ClusterOpUnreachable",
     "OpKind",
     "dispatch_to_machine",
+    "dispatch_to_url",
 ]
 
 _log = logging.getLogger(__name__)
@@ -117,6 +119,19 @@ def _retry_delay_s(attempt: int) -> float:
     # S311: jitter needs spread, not secrecy — stdlib random is right (same
     # ruling as base/lm/call.py's retry jitter).
     return base * random.uniform(0.5, 1.5)  # noqa: S311
+
+
+def worst_case_dispatch_seconds(timeout_s: float | None = None) -> float:
+    """Longest one `dispatch_to_machine` call can take with the default retry
+    budget: every attempt runs to its timeout (`timeout_s`, default the cluster
+    RPC timeout) and every backoff sleeps its jittered maximum. Callers that put
+    an overall deadline around a dispatch size it from this."""
+    retries = max(settings.gateway.cluster_rpc_max_retries, 0)
+    backoff = sum(
+        min(_RETRY_BASE_DELAY_S * (2**attempt), _RETRY_MAX_DELAY_S) for attempt in range(retries)
+    )
+    attempt_s = settings.gateway.cluster_rpc_timeout_seconds if timeout_s is None else timeout_s
+    return (retries + 1) * attempt_s + backoff * 1.5
 
 
 def _default_idempotency_key(target_machine: str, kind: OpKind, payload: dict[str, Any]) -> str:
@@ -276,16 +291,61 @@ async def _dispatch_once(
 
 
 async def dispatch_to_machine(
+    db: Database,
     target_machine: str,
     kind: str,
     payload: dict[str, Any],
     *,
     timeout_s: float | None = None,
-    ops_url: str | None = None,
     retries: int | None = None,
     idempotency_key: str | None = None,
 ) -> dict[str, Any]:
-    """POST one op to `target_machine`'s ops server, block on the response.
+    """Resolve `target_machine`'s ops URL from the `machines` table, then `dispatch_to_url`.
+
+    Raises:
+        ClusterOpTargetAbsent: no machines row exists for the target (a definitive absence --
+            see the exception's docstring). A subclass of `ClusterOpUnreachable`.
+        ClusterOpUnreachable: the host has no advertised address, or see `dispatch_to_url`.
+    """
+    if not is_op_kind(kind):
+        raise ValueError(f"unknown op kind: {kind!r}")
+    try:
+        ops_url = lookup_machine_url(db, target_machine)
+    except MachineNotRegistered as exc:
+        # No machines row at all — the machine is definitively absent under
+        # this name (deleted in a decommission / rename cleanup). Callers
+        # that own terminal-state cleanup branch on this exact type; the
+        # rest keep their ClusterOpUnreachable behavior (this is one).
+        raise ClusterOpTargetAbsent(
+            f"machine={target_machine!r} is absent from the machines registry "
+            f"(cannot resolve an address): {exc}"
+        ) from exc
+    except MachineGatewayUrlMissing as exc:
+        raise ClusterOpUnreachable(
+            f"cannot resolve an address for machine={target_machine!r}: {exc}"
+        ) from exc
+    return await dispatch_to_url(
+        target_machine,
+        kind,
+        payload,
+        ops_url=ops_url,
+        timeout_s=timeout_s,
+        retries=retries,
+        idempotency_key=idempotency_key,
+    )
+
+
+async def dispatch_to_url(
+    target_machine: str,
+    kind: str,
+    payload: dict[str, Any],
+    *,
+    ops_url: str,
+    timeout_s: float | None = None,
+    retries: int | None = None,
+    idempotency_key: str | None = None,
+) -> dict[str, Any]:
+    """POST one op to `target_machine`'s ops server at `ops_url`, block on the response.
 
     POSTs `{kind, payload}` to `{ops_url}/ops` and returns the op's result dict,
     retrying transient infrastructure failures (transport errors / timeouts and
@@ -307,44 +367,20 @@ async def dispatch_to_machine(
     `timeout_s` defaults to `settings.gateway.cluster_rpc_timeout_seconds`
     (AVA_CLUSTER_RPC_TIMEOUT_SECONDS) when omitted. It bounds each attempt.
 
-    `ops_url` is the host's ops base URL. Pass it pre-resolved (from a
-    `machines`-table read done earlier, while Postgres was known up) to make the
-    dial Postgres-independent — the compensating `cluster/resume` in a failed
-    The fleet update runs after the local update may have taken the data plane down,
-    so a lookup here would raise `psycopg.OperationalError` and sink the
-    compensation (the 2026-07-20 incident). Omitted (None) → resolve it from the
-    `machines` table now (the ordinary path, gateway + Postgres up).
+    `ops_url` is the host's ops base URL, already resolved. A caller that must dial while
+    Postgres may be down (the compensating `cluster/resume` of a failed fleet update, the
+    roster's per-machine probe) resolves it earlier and calls this directly; otherwise
+    `dispatch_to_machine` resolves it from the `machines` table.
 
     Raises:
-        ClusterOpUnreachable: the host has no advertised address, or the POST
-            hit a connect/read timeout or non-200 status (after retries for
-            transient statuses).
-        ClusterOpTargetAbsent: no machines row exists for the target (a
-            definitive absence — see the exception's docstring). A subclass of
-            `ClusterOpUnreachable`.
+        ClusterOpUnreachable: the POST hit a connect/read timeout or non-200
+            status (after retries for transient statuses).
         ClusterOpFailed: the host ran the op but it reported `status=failed`.
     """
     if not is_op_kind(kind):
         raise ValueError(f"unknown op kind: {kind!r}")
     if timeout_s is None:
         timeout_s = settings.gateway.cluster_rpc_timeout_seconds
-
-    if ops_url is None:
-        try:
-            ops_url = lookup_machine_url(target_machine)
-        except MachineNotRegistered as exc:
-            # No machines row at all — the machine is definitively absent under
-            # this name (deleted in a decommission / rename cleanup). Callers
-            # that own terminal-state cleanup branch on this exact type; the
-            # rest keep their ClusterOpUnreachable behavior (this is one).
-            raise ClusterOpTargetAbsent(
-                f"machine={target_machine!r} is absent from the machines registry "
-                f"(cannot resolve an address): {exc}"
-            ) from exc
-        except MachineGatewayUrlMissing as exc:
-            raise ClusterOpUnreachable(
-                f"cannot resolve an address for machine={target_machine!r}: {exc}"
-            ) from exc
 
     # A business id makes the key stable across separate dispatch calls too,
     # scoped to its target and full effect payload: re-sending a launch for the

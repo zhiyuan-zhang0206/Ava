@@ -5,7 +5,7 @@ registers a conftest, through `FixtureManager.parsefactories(holder=, node=)`. T
 tests pin that interface, the conftest-identical behavior (autouse names and their
 order, a session-scoped autouse fixture instantiated only for governed tests,
 subset runs, interleaved paths), and the two ways a table goes stale: a path that
-no longer exists, and a test that moved out without its new path listed.
+no longer exists, and a listed directory that no longer holds a test.
 """
 
 from __future__ import annotations
@@ -17,10 +17,11 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
 from _pytest.fixtures import FixtureManager
 
 from tests.fixtures import path_scopes
-from tests.fixtures.path_scopes import PATH_SCOPES, Scope, scope_problems
+from tests.fixtures.path_scopes import PATH_SCOPES, Scope, discover_scopes, scope_problems
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -71,10 +72,7 @@ def test_{name}(request):
 def _tree(root: Path, scopes: dict[str, Scope]) -> None:
     (root / "pytest.ini").write_text("[pytest]\n", encoding="utf-8")
     (root / "scoped_mod.py").write_text(_SCOPED, encoding="utf-8")
-    listed = ", ".join(
-        f"{module!r}: ps.Scope({scope.paths!r}, {scope.test_files})"
-        for module, scope in scopes.items()
-    )
+    listed = ", ".join(f"{module!r}: ps.Scope({scope.paths!r})" for module, scope in scopes.items())
     (root / "conftest.py").write_text('pytest_plugins = ["scoped_plugin"]\n', encoding="utf-8")
     (root / "scoped_plugin.py").write_text(
         _PLUGIN.format(scopes="{" + listed + "}"), encoding="utf-8"
@@ -92,7 +90,7 @@ def _tree(root: Path, scopes: dict[str, Scope]) -> None:
 
 
 def _scopes() -> dict[str, Scope]:
-    return {"scoped_mod": Scope(("gov", "one/test_c.py"), 3)}
+    return {"scoped_mod": Scope(("gov", "one/test_c.py"))}
 
 
 def _run(root: Path, *args: str) -> subprocess.CompletedProcess[str]:
@@ -154,7 +152,7 @@ def test_paths_that_leave_a_directory_and_come_back_keep_the_fixtures(tmp_path: 
 
 
 def test_a_listed_path_that_does_not_exist_stops_the_run(tmp_path: Path) -> None:
-    _tree(tmp_path, {"scoped_mod": Scope(("gov", "moved_away"), 3)})
+    _tree(tmp_path, {"scoped_mod": Scope(("gov", "moved_away"))})
     proc = _run(tmp_path)
     assert proc.returncode != 0
     assert "do not exist" in proc.stdout + proc.stderr
@@ -167,21 +165,51 @@ def test_the_recorded_table_matches_the_tree() -> None:
         importlib.import_module(module)
 
 
-def test_a_test_that_moved_out_without_its_new_path_is_reported(tmp_path: Path) -> None:
-    """The stale table a moved test file leaves behind: the directory still exists."""
-    for name in ("a", "b", "c"):
-        (tmp_path / "gov").mkdir(exist_ok=True)
-        (tmp_path / "gov" / f"test_{name}.py").write_text("", encoding="utf-8")
-    scopes = {"scoped_mod": Scope(("gov",), 3)}
+def test_a_directory_left_without_tests_is_reported(tmp_path: Path) -> None:
+    """The stale entry a directory leaves behind once its last test moved out."""
+    (tmp_path / "gov").mkdir()
+    (tmp_path / "gov" / "test_a.py").write_text("", encoding="utf-8")
+    scopes = {"scoped_mod": Scope(("gov",))}
     assert scope_problems(scopes, tmp_path) == []
-    (tmp_path / "gov" / "test_c.py").rename(tmp_path / "test_c.py")
+    (tmp_path / "gov" / "test_a.py").rename(tmp_path / "test_a.py")
     problems = scope_problems(scopes, tmp_path)
     assert len(problems) == 1, problems
-    assert "2 test files, 3 are recorded" in problems[0]
-    listed = {"scoped_mod": Scope(("gov", "test_c.py"), 3)}
-    assert scope_problems(listed, tmp_path) == []
+    assert "hold no test file" in problems[0]
+    assert scope_problems({"scoped_mod": Scope(("test_a.py",))}, tmp_path) == []
 
 
 def test_the_plugin_registers_only_listed_paths() -> None:
     by_path = path_scopes.modules_by_path(PATH_SCOPES)
     assert sorted(by_path) == sorted(p for scope in PATH_SCOPES.values() for p in scope.paths)
+
+
+def test_scopes_are_read_from_the_files_next_to_the_tests(tmp_path: Path) -> None:
+    """A declaration lives in the directory it governs: `"."` is that directory, a name is a
+    test file in it; modules merge across files and come out alphabetically."""
+    (tmp_path / "pkg" / "tests").mkdir(parents=True)
+    (tmp_path / "pkg" / "tests" / "path_scopes.toml").write_text(
+        '"mod_b" = ["."]\n"mod_a" = ["test_one.py", "test_two.py"]\n', encoding="utf-8"
+    )
+    (tmp_path / "other").mkdir()
+    (tmp_path / "other" / "path_scopes.toml").write_text('"mod_a" = ["."]\n', encoding="utf-8")
+    for ignored in (".venv", "node_modules", ".worktrees/x"):
+        (tmp_path / ignored).mkdir(parents=True)
+        (tmp_path / ignored / "path_scopes.toml").write_text('"mod_z" = ["."]\n', encoding="utf-8")
+
+    assert discover_scopes(tmp_path) == {
+        "mod_a": Scope(("other", "pkg/tests/test_one.py", "pkg/tests/test_two.py")),
+        "mod_b": Scope(("pkg/tests",)),
+    }
+
+
+def test_a_scope_file_that_does_not_list_names_is_refused(tmp_path: Path) -> None:
+    (tmp_path / "pkg").mkdir()
+    (tmp_path / "pkg" / "path_scopes.toml").write_text('"mod_a" = "."\n', encoding="utf-8")
+    with pytest.raises(ValueError, match="must be a list of names"):
+        discover_scopes(tmp_path)
+
+
+def test_the_plugin_module_holds_no_central_listing() -> None:
+    """The declarations stay next to the tests: nothing in the plugin names a test path."""
+    source = (_REPO_ROOT / "tests" / "fixtures" / "path_scopes.py").read_text(encoding="utf-8")
+    assert "tests/" not in source.split("def modules_by_path")[1]

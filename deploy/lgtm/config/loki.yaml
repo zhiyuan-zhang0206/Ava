@@ -111,23 +111,6 @@ limits_config:
     - selector: '{stream="archive"}'
       priority: 1
       period: 8760h
-    # Lineage class -> permanent (user ruling 2026-09-02). spawn/fork/resurrect
-    # plus the ops-mirror names of the same facts cannot be reconstructed from
-    # any current state — agents_meta.spawner is folded on terminate — so once
-    # these rows expire, "who spawned whom" is gone (2026-08-20: the
-    # pre-cutover archive, carrying the spawn rows of 52% of today's agents,
-    # expired in the global bucket before per-stream overrides existed). At
-    # ~412 rows/day, 0.11% of the stream, permanence costs ~100MB/year.
-    # 876000h = 100y is how "permanent" is spelled here: a period is a
-    # duration, with no infinity and a 24h floor.
-    # The names are DERIVED from the event registry's retention_class="lineage"
-    # declarations and pinned by loki_index_labels.validate_loki_deploy_config,
-    # so a lineage name added there fails validation, not production. Disjoint
-    # from the archive selector above (archive rows carry no event_name index
-    # label), so the equal priority never has to arbitrate.
-    - selector: '{event_name=~"spawn|fork|resurrect|agent_spawned|agent_resurrected"}'
-      priority: 1
-      period: 876000h
   reject_old_samples_max_age: 336h
   # The archive spans ~83 days (05-23 -> 08-12); Loki's default
   # max_query_length (30d1h) would reject any whole-span parity/read query.
@@ -163,10 +146,9 @@ limits_config:
   # box (upstream defaults — 1h splits, parallelism 32/128 — are sized for a
   # horizontally scaled querier fleet; here they turned one 30d instant
   # aggregation into ~128 hourly subqueries, 2026-08-18 incident). BOTH split
-  # keys matter: the gateway's aggregations (count_events / count_grouped /
-  # attribute_aggregate in gateway/lgtm/loki_events.py) are INSTANT queries
-  # governed only by the instant key; range queries (query_events,
-  # count_events_series, metric_range) follow the other.
+  # keys matter: Grafana's aggregations are INSTANT queries governed only by the
+  # instant key; range queries (the backfill's query_events, dashboard panels)
+  # follow the other.
   split_queries_by_interval: 24h
   split_instant_metric_queries_by_interval: 24h
   max_query_parallelism: 4
@@ -178,11 +160,10 @@ compactor:
   delete_request_store: filesystem
 
 # Result caches — without them every repeated aggregation re-reads and
-# re-unwraps the same chunks (the gateway's ops panels poll on fixed
+# re-unwraps the same chunks (Grafana's panels poll on fixed
 # intervals). Two caches because the two query shapes cache separately:
-# cache_results covers metric RANGE queries (count_events_series /
-# attribute_max_series / metric_range); the instant-metric pair covers the
-# gateway's aggregations, which run against /loki/api/v1/query with end=now —
+# cache_results covers metric RANGE queries; the instant-metric pair covers
+# aggregations that run against /loki/api/v1/query with end=now —
 # with split alignment the interior 24h-aligned subranges repeat across polls
 # and only the trailing partial interval recomputes. The instant-metric keys
 # are marked experimental upstream (3.x); acceptable for this single-binary

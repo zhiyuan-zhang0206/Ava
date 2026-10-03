@@ -42,50 +42,27 @@ are mounted. `hours` is the aggregation window, whitelisted to
 | Card data | Source |
 |---|---|
 | `live_count`, lifetime event estimate | Postgres metadata |
-| windowed tokens, cost, turn duration, warning/error counts | Loki event history |
-| warning/error `*_dismissed` / `*_net` split | active `event_dismissals` rows (Postgres) applied to the same window's Loki class counts |
+| windowed tokens, cost, turn duration, warning/error counts | `telemetry_events` (Postgres) |
+| warning/error `*_dismissed` / `*_net` split | active `event_dismissals` rows (Postgres) applied to the same window's class counts |
 | `plugin_stats` (plugin-declared cards) | `plugin_stats` rows (`base/packages/plugins/stats.py`), joined by the console against the `contributions.ui.stats` declarations; NOT windowed — a plugin value is a point in time |
 
-The gateway caches the whole response per requested window for
-`display.stats_dashboard_cache_ttl_s` (60s by default). After expiry, a payload
-within `display.stats_dashboard_swr_max_s` (300s since the last successful
-recompute) returns immediately with `stale=false`, keeping its original `as_of`.
-One daemon thread per window refreshes through the same pipeline and shared
-Loki query budget. Cold or over-cap requests wait for recompute, joining any
-in-flight refresh before rechecking freshness. A zero SWR cap disables detached
-refresh. Failed refreshes retain the payload and its age, mark subsequent serves
-`stale=true` within the existing failure cap, and back off background retries for
-one fresh TTL. Success clears degradation. Past either applicable cap, requests
-use the synchronous path with its existing failure contract. Transient Loki
-failures emit the same rate-capped stale event described below, even when the
-synchronous failure fallback is disabled. Unexpected non-Loki errors are logged.
-
-Loki work runs before the short Postgres metadata read, so waiting for the
-global Loki budget never holds a pooled DB connection. Token/cost sums combine
-settled UTC-day ledger rows with live Loki tails; turn/warning/error aggregates
-merge the shared helper's contiguous, clock-aligned 12h shards for a longer
-window. The warning/error section reads per-class counts with the
-events-maintenance daemon's grouped query and applies its class arithmetic
-(`resolution.level_splits`) over the SELECTED window (task #1935): events
+Every request computes its window in one pooled connection with an 8-second
+statement timeout (a timeout is a retriable 503): one scan of the window's
+`llm_usage` and `turn_end` rows (`gateway/cluster/_stats_events.py`) gives the
+token, cost and turn sums, and one grouped count of the warning, error and
+critical rows (served by the partial index `telemetry_events_anomaly_ts`) gives
+the event classes. The window is the requested one (7 days included), so
+`applied_window_hours` equals `window_hours`. The warning/error section applies the
+events-maintenance daemon's class arithmetic (`resolution.level_splits`) over the
+SELECTED window (task #1935): events
 whose class has an active dismissal in `event_dismissals` — an exact
 `(category, level, event_name, source, process)` match, or a wildcard row
 with an empty `process` (task #4329 B5) — land in `*_dismissed`, the rest in
 `*_net`, and dismissed + net == the raw total —
-the same cancellation the daemon's fixed-six-hour Grafana gauges apply. The `llm_usage.cost_usd` sum is
-the usage-time quote snapshot, not historical tokens repriced against today's
-registry. While a last-good response for the window is within
-`display.stats_dashboard_stale_max_s`, a failed recompute — a local budget
-refusal or a Loki transport/status failure — serves that last-good response
-marked `stale` (its `as_of` keeps the original read time) and emits one
-rate-capped `stats_dashboard_stale` event; with no last-good response, or
-past the cap, both degrade to the pre-existing 503 paths (the global typed
-budget envelope / a retriable `Retry-After: 1` after `loki_events` records
-the failing query shape).
-
-Every dashboard Loki read is explicitly scoped to the current home-derived
-cluster label. The fleet graph's Loki event tail applies the same dimension,
-and an unmarked gateway without an explicit Loki URL receives the shared clean
-503 instead of reading another home's loopback stack.
+the same cancellation the daemon's fixed-six-hour Grafana gauges apply. The
+`llm_usage.cost_usd` sum is the usage-time quote snapshot, not historical tokens
+repriced against today's registry. Every read is scoped to the current
+home-derived cluster label (rows with no label included).
 
 `GET /api/agents/{id}/inspect/statistics` owns window-dependent cost, stats,
 TPS and activity. It reads one repeatable-read Postgres snapshot over persisted

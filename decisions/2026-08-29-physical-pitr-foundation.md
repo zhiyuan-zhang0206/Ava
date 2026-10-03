@@ -60,3 +60,5 @@ independently by modification time.
   credentials/slots. Its flush acknowledgement means local receiver durability,
   not GCS durability, and a stalled slot can retain unbounded WAL. It remains a
   future option if the five-minute target proves insufficient.
+
+Superseded by: [`2026-10-02-delete-the-self-written-pitr-stack.md`](2026-10-02-delete-the-self-written-pitr-stack.md); the tool comparison is in [`2026-10-02-walg-over-pgbackrest-five-questions.md`](2026-10-02-walg-over-pgbackrest-five-questions.md).

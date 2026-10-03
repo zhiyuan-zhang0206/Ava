@@ -7,8 +7,8 @@ from typing import cast
 from urllib.request import ProxyHandler, build_opener
 from uuid import UUID
 
-from base.daemon.health import health_port
-from base.paths import ava_home, pid_path
+from base.daemon.endpoints import ServiceEndpoints
+from base.paths import ava_home
 
 _ROOT_SOCKET_NAME = "ava-root.sock"  # the K1 control socket under root_run_dir()
 
@@ -34,7 +34,7 @@ def host_running() -> bool:
 
     if get_backend().has_session(session_name("agent-host")):
         return True
-    path = pid_path("agent_host")
+    path = ServiceEndpoints.from_settings().of("agent_host").pidfile
     if path.exists():
         pid = int(path.read_text().strip())
         if psutil.pid_exists(pid):
@@ -129,7 +129,7 @@ def _root_supervises_agent_host(pid: int) -> bool:
 
 def host_identity() -> HostIdentity:
     """Refuse an old daemon, a foreign home, or a response from another PID."""
-    port = health_port("agent_host")
+    port = ServiceEndpoints.from_settings().of("agent_host").health_port
     with build_opener(ProxyHandler({})).open(
         f"http://127.0.0.1:{port}/stats", timeout=5
     ) as response:
@@ -139,7 +139,7 @@ def host_identity() -> HostIdentity:
     data = cast(dict[str, object], raw)
     if data["maintenance_protocol"] != 1 or data["home"] != str(ava_home()):
         raise RuntimeError("running agent-host does not support maintenance for this home")
-    pid = int(pid_path("agent_host").read_text().strip())
+    pid = int(ServiceEndpoints.from_settings().of("agent_host").pidfile.read_text().strip())
     if type(data["pid"]) is not int or data["pid"] != pid:
         raise RuntimeError("agent-host maintenance response does not match its pidfile")
     active = data["active_agents"]
@@ -180,17 +180,21 @@ def ops_quiescent(timeout: float) -> None:
     if not get_backend().has_session(session_name("ops")) and not _root_unit_running("ops"):
         return
     deadline = time.monotonic() + timeout
+    # quiesce-exempt: the stop's own bounded wait for ops to go idle, not a background loop
     while True:
         remaining = deadline - time.monotonic()
         if remaining <= 0:
             raise TimeoutError("ops still has admitted work; maintenance hold retained")
         with build_opener(ProxyHandler({})).open(
-            f"http://127.0.0.1:{health_port('ops')}/healthz", timeout=min(5, remaining)
+            f"http://127.0.0.1:{ServiceEndpoints.from_settings().of('ops').health_port}/healthz",
+            timeout=min(5, remaining),
         ) as response:
             data = json.loads(response.read(65537))
         if data["home"] != str(ava_home()):
             raise RuntimeError("ops health belongs to another home")
-        if data["pid"] != int(pid_path("ops").read_text().strip()):
+        if data["pid"] != int(
+            ServiceEndpoints.from_settings().of("ops").pidfile.read_text().strip()
+        ):
             raise RuntimeError("ops health does not match its recorded process")
         progress = data["maintenance"]
         if progress["protocol"] != 1:

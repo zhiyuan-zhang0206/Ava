@@ -40,6 +40,7 @@ def ensure_gateway_data_plane() -> int:
         redis_identity,
         redis_password_from_env,
     )
+    from base.cluster.authority.api import publish_telemetry_token
     from base.paths import ava_home
     from cli.commands.data_plane.cluster_instance import ensure_cluster_storage
 
@@ -51,6 +52,10 @@ def ensure_gateway_data_plane() -> int:
             file=sys.stderr,
         )
         return 1
+
+    # The root holding the human secret derives the telemetry token and keeps it where the
+    # gateway-side services that probe the observability station can read it.
+    publish_telemetry_token(ava_home().resolve(), settings.data_plane.cluster_secret)
 
     if settings.data_plane.is_remote:
         # Remote-managed data plane (Task #1752): the URLs name another host,
@@ -111,12 +116,12 @@ def remote_pg_reachable() -> tuple[bool, str]:
     line. Bounded by the connect keepalives (5s connect timeout). Returns
     (ok, detail) and never raises.
     """
-    import base.db
+    from base.db import Database
 
     host = url_host(settings.data_plane.db_url)
     port = urlsplit(settings.data_plane.db_url).port or 5432
     try:
-        with base.db.connect() as conn:
+        with Database.from_settings().connect() as conn:
             conn.execute("select 1")
         return True, f"postgres ({host}:{port})"
     except Exception as exc:
@@ -241,16 +246,17 @@ def prepare_memory_vectors() -> None:
     A local plane writes it acting as the schema owner, before the runner grants
     refresh; a remote-managed plane uses its provider URL, like its migrations.
     """
+    from base.db import Database
+
     if settings.services.memory_search_backend != "pgvector":
         return
-    import base.db
     from base.db.pg_admin import local_owner_authority
     from services.memory_indexer.backends.pgvector import prepare_table
     from services.memory_indexer.embeddings.factory import get_provider
 
     dim = get_provider().dim
     if settings.data_plane.is_remote:
-        with base.db.connect(direct=True) as conn:
+        with Database.from_settings().connect(direct=True) as conn:
             prepare_table(conn, dim)
         return
     with local_owner_authority().session() as conn:
@@ -399,7 +405,7 @@ def adopt_gateway_login(home: Path, endpoint: str) -> None:
 
 
 def _birth_generation(conn: psycopg.Connection[Any], home: Path, database: str) -> Generation:
-    """Initialization authority: groups, monitor, legacy logins retired, ledger,
+    """Birth: groups, monitor, owner and groups demoted to NOLOGIN, ledger,
     generation 0."""
     from functools import partial
 
@@ -408,14 +414,13 @@ def _birth_generation(conn: psycopg.Connection[Any], home: Path, database: str) 
 
     owner = cluster.db_identity()
     groups = authority.Groups(gateway=authority.GATEWAY_GROUP, runner=authority.RUNNER_GROUP)
-    birth = authority.BirthAuthority()
     authority.ensure_groups(conn, owner=owner, database=database, groups=groups)
     authority.ensure_monitor(conn, database=database)
-    authority.retire_legacy_logins(conn, owner=owner, groups=groups, authority=birth)
-    authority.create_ledger(home, owner=owner, groups=groups, authority=birth)
+    authority.retire_legacy_logins(conn, owner=owner, groups=groups)
+    authority.create_ledger(home, owner=owner, groups=groups)
     authority.ensure_pooler_admin(home, encrypt=partial(authority.scram_verifier, conn))
-    authority.mint_generation(conn, home, birth)
-    generation = authority.require_ledger(home).unrevoked
+    authority.mint_generation(conn, home)
+    generation = authority.require_ledger(home).generation
     if generation is None:
         raise RuntimeError("birth minted no write generation")
     return generation
@@ -424,8 +429,8 @@ def _birth_generation(conn: psycopg.Connection[Any], home: Path, database: str) 
 def _admitted_generation(
     conn: psycopg.Connection[Any], home: Path, database: str, *, refresh: bool
 ) -> Generation:
-    """Ordinary start: re-grant after migrations, converge the monitor, sweep,
-    then the invariant holds."""
+    """Ordinary start: re-grant after migrations, converge the monitor, then the
+    invariant holds."""
     from base import cluster
     from base.cluster import authority
 
@@ -439,13 +444,12 @@ def _admitted_generation(
         )
     if ledger.active is None:
         raise RuntimeError(
-            "the database authority has no active generation; the finite operation that "
-            "revoked or is minting it must continue before an ordinary start"
+            "the database authority has no active generation; the interrupted birth must "
+            "finish before an ordinary start"
         )
     if refresh:
         authority.ensure_groups(conn, owner=ledger.owner, database=database, groups=ledger.groups)
         authority.ensure_monitor(conn, database=database)
-    authority.sweep(conn, home)
     authority.check_invariant(conn, home, database=database, readonly_grantees=READONLY_GRANTEES)
     return ledger.active
 
@@ -454,12 +458,12 @@ def complete_gateway_data_plane(*, refresh_schema: bool = True) -> None:
     """Grant the final schema, establish the write generation, start the pooler,
     then verify consumer credentials.
 
-    Local plane, first start (initialization authority, `needs_provision`):
+    Local plane, first start (birth, `needs_provision`):
     groups -> retire legacy logins -> ledger -> mint generation 0 -> pooler
     serving exactly that pair, proven by a pooled login of each -> activate.
     Every step is idempotent, so an interrupted birth retries to the same
-    generation. Ordinary start: groups re-granted after migrations, the NOLOGIN
-    sweep, then the fail-closed catalog invariant; the pooler serves the active
+    generation. Ordinary start: groups re-granted after migrations, then the
+    fail-closed catalog invariant; the pooler serves the active
     pair (restarted only when its bytes change). A home without a ledger is a
     legacy home and refuses (`legacy_home_refusal`) — never converted here.
     """
@@ -507,7 +511,7 @@ def complete_gateway_data_plane(*, refresh_schema: bool = True) -> None:
             prove_generation_logins(home, generation, endpoint)
             if authority.require_ledger(home).active is None:
                 verified = authority.verify_generation(conn, home)
-                authority.activate(home, authority.BirthAuthority(), verified)
+                authority.activate(home, verified)
         adopt_gateway_login(home, endpoint)
         print(f"  ✓ database write generation {generation.number} admitted")
     if error := probe_redis(settings.data_plane.redis_url):

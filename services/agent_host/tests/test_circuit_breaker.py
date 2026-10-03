@@ -37,18 +37,13 @@ from agent.hooks.compact import (
     emergency_compact_summary,
 )
 from agent.state import AgentState, CircuitState
+from agent.tests.claim_status_support import _compact_tail, _pair_compact_cycles
+from agent.tests.claim_support import _config, _fake_llm, _insert_inbound_kind, _make_runtime
 from agent.turn.runloop import _handle_fatal_llm_error
 from base.agents.context import AvaContext
 from base.config import settings
 from base.events.live.publisher import AgentEventPublisher
-from tests.agent.test_claim import (
-    _compact_tail,
-    _config,
-    _fake_llm,
-    _insert_inbound_kind,
-    _make_runtime,
-    _pair_compact_cycles,
-)
+from base.host.env.agent_slices import AgentSlices
 from tests.fixtures.units import spawn_agent
 
 # A summary long enough to clear COMPACT_MIN_SUMMARY_CHARS.
@@ -95,7 +90,9 @@ def _overflow_state(breaker_reason: str | None = None) -> AgentState:
 def _breaker_ctx() -> AvaContext:
     """An AvaContext for `_handle_fatal_llm_error` — no ops_pool, so the
     best-effort event-log write is skipped (unit tests have no DB)."""
-    return AvaContext(ops_pool=None, llm=MagicMock(), event_publisher=MagicMock())
+    return AvaContext(
+        ops_pool=None, llm=MagicMock(), event_publisher=MagicMock(), agent=AgentSlices.resolve()
+    )
 
 
 # ── breaker open (runloop `_handle_fatal_llm_error`) ──
@@ -153,6 +150,7 @@ async def test_fatal_provider_error_emits_blocked_recovery_details() -> None:
         ops_pool=None,
         llm=MagicMock(),
         event_publisher=cast(AgentEventPublisher, publisher),
+        agent=AgentSlices.resolve(),
     )
     exc = FatalProviderError(
         "provider permanently rejected (HTTP 400): Content Exists Risk",
@@ -218,7 +216,12 @@ async def test_permanent_provider_error_reports_metadata_to_nearest_alive_ancest
     occurred_at = datetime(2026, 9, 3, 8, 0, tzinfo=UTC)
     await _handle_fatal_llm_error(
         exc,
-        AvaContext(ops_pool=aops_pool, llm=MagicMock(), event_publisher=MagicMock()),
+        AvaContext(
+            ops_pool=aops_pool,
+            llm=MagicMock(),
+            event_publisher=MagicMock(),
+            agent=AgentSlices.resolve(),
+        ),
         agent_id=child_id,
         occurred_at=occurred_at,
     )
@@ -269,7 +272,12 @@ async def test_context_overflow_self_recovery_does_not_report_to_an_ancestor(
             status=400,
             context_overflow=True,
         ),
-        AvaContext(ops_pool=aops_pool, llm=MagicMock(), event_publisher=MagicMock()),
+        AvaContext(
+            ops_pool=aops_pool,
+            llm=MagicMock(),
+            event_publisher=MagicMock(),
+            agent=AgentSlices.resolve(),
+        ),
         agent_id=child_id,
     )
 
@@ -549,7 +557,7 @@ async def test_emergency_compact_summary_uses_real_summary() -> None:
     """The compaction call succeeds → its summary is used (the no-LLM fallback
     only fires when the request cannot go out)."""
     msgs: list[AnyMessage] = [SystemMessage(content="<sys>"), HumanMessage(content="hi")]
-    summary = await emergency_compact_summary(msgs, _fake_llm(_LONG_SUMMARY))
+    summary = await emergency_compact_summary(msgs, _fake_llm(_LONG_SUMMARY), AgentSlices.resolve())
     assert summary == _LONG_SUMMARY
 
 
@@ -566,7 +574,7 @@ async def test_emergency_compact_summary_falls_back_on_permanent_rejection() -> 
         )
     )
 
-    summary = await emergency_compact_summary(msgs, llm)
+    summary = await emergency_compact_summary(msgs, llm, AgentSlices.resolve())
     assert _EMERGENCY_COMPACT_MARKER in summary
     assert llm.bind_tools.return_value.ainvoke.await_count == 1, (
         "a permanent rejection must not be retried — the request cannot succeed"
@@ -588,7 +596,7 @@ async def test_emergency_compact_summary_preserves_last_prior_summary() -> None:
     llm = MagicMock()
     llm.bind_tools.return_value.ainvoke = AsyncMock(side_effect=_FakeProviderStatusError(400))
 
-    summary = await emergency_compact_summary(msgs, llm)
+    summary = await emergency_compact_summary(msgs, llm, AgentSlices.resolve())
     assert prior in summary
     assert _EMERGENCY_COMPACT_MARKER in summary
 
@@ -602,7 +610,7 @@ async def test_emergency_compact_summary_raises_on_transient_exhaustion() -> Non
     llm.bind_tools.return_value.ainvoke = AsyncMock(side_effect=RuntimeError("provider 502"))
 
     with pytest.raises(CompactionFailedError, match="no usable summary"):
-        await emergency_compact_summary(msgs, llm)
+        await emergency_compact_summary(msgs, llm, AgentSlices.resolve())
     assert llm.bind_tools.return_value.ainvoke.await_count == COMPACT_MAX_ATTEMPTS
 
 
@@ -664,56 +672,6 @@ async def test_llm_node_cancel_does_not_close_circuit(fake_cancel_event) -> None
     assert cmd.update["halted"] is True  # pyright: ignore[reportOptionalSubscript, reportUnknownMemberType]
 
 
-@pytest.mark.parametrize("overflow", [False, True])
-async def test_host_persists_provider_failure_before_releasing_turn(
-    db_conn: psycopg.Connection,
-    aops_pool: AsyncConnectionPool,
-    overflow: bool,
-) -> None:
-    """A real graph failure is flushed to PG; a fresh reader sees its breaker."""
-    from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
-    from langgraph.graph import END, START, StateGraph
-
-    from agent.startup import wrap_saver_writes_with_nstep_interval
-    from base.config import settings
-    from services.agent_host.host import AgentHost
-
-    agent_id = spawn_agent()
-    calls = 0
-
-    def reject(state: AgentState) -> dict[str, object]:
-        nonlocal calls
-        calls += 1
-        raise FatalProviderError(
-            "synthetic provider refusal",
-            error_class="permanent",
-            provider="anthropic",
-            status=400 if overflow else 402,
-            context_overflow=overflow,
-        )
-
-    builder = StateGraph(AgentState, context_schema=AvaContext)
-    builder.add_node("reject", reject)  # pyright: ignore[reportUnknownMemberType]
-    builder.add_edge(START, "reject")
-    builder.add_edge("reject", END)
-    async with AsyncPostgresSaver.from_conn_string(settings.data_plane.db_url) as saver:
-        wrap_saver_writes_with_nstep_interval(saver, 100)
-        graph = builder.compile(checkpointer=saver)  # pyright: ignore[reportUnknownMemberType]
-        host = AgentHost(pool=aops_pool, checkpointer=saver, graph=graph, machine="test")
-        assert not (await host._invoke_until_done(agent_id, _breaker_ctx())).exited
-    # New saver/connection prevents in-memory buffered state from faking success.
-    async with AsyncPostgresSaver.from_conn_string(settings.data_plane.db_url) as reader:
-        stored = await reader.aget_tuple({"configurable": {"thread_id": str(agent_id)}})
-    assert stored is not None
-    values = stored.checkpoint["channel_values"]
-    assert values["halted"] is True
-    circuit = CircuitState.model_validate(values["circuit"])
-    assert circuit.open is True
-    assert circuit.reason == ("context_overflow" if overflow else "billing")
-    assert circuit.opened_at is not None
-    assert calls == 1
-
-
 # ── recovery circuit breaker (task #3617) ────────────────────────────────────
 
 
@@ -741,6 +699,7 @@ async def _reject_turn(
             ops_pool=aops_pool,
             llm=MagicMock(),
             event_publisher=cast(AgentEventPublisher, publisher),
+            agent=AgentSlices.resolve(),
         ),
         agent_id=agent_id,
         occurred_at=datetime(2026, 9, 16, 6, 0, tzinfo=UTC),
@@ -852,7 +811,12 @@ async def test_completed_turn_resets_the_streak_and_clears_the_marker(
     db_conn.commit()
 
     await _persist_last_active(
-        AvaContext(ops_pool=aops_pool, llm=MagicMock(), event_publisher=MagicMock()),
+        AvaContext(
+            ops_pool=aops_pool,
+            llm=MagicMock(),
+            event_publisher=MagicMock(),
+            agent=AgentSlices.resolve(),
+        ),
         child_id,
         "done",
     )

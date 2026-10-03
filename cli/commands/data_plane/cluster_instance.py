@@ -66,6 +66,7 @@ from base.cluster.dataplane.pg_tools import (
     pg_tz_args,
 )
 from base.config import settings
+from base.db import Database
 from base.db.pg_admin import pg_admin_url as _base_pg_admin_url
 from base.db.pg_admin import pg_socket_dir
 from base.host.net.url_secret import url_host
@@ -179,11 +180,11 @@ def _pg_hba_body(cluster_secret: str) -> str:
 
     The OS user (the initdb bootstrap superuser) reaches Postgres only through
     `peer` on the owner-only socket — the administrator authority provisioning,
-    migrations and the authority fence use. The same OS user reaches the
+    migrations and the authority invariant use. The same OS user reaches the
     password-less monitoring login (the collector's statistics reader) through
     `peer` with the `pg_ident` map `_pg_ident_body` writes. Every other role
     authenticates with SCRAM over the socket and loopback TCP; `NOLOGIN` roles
-    (the schema owner, the capability groups, revoked generations) never log in
+    (the schema owner and the capability groups) never log in
     under any method.
 
     The bearer decides only reach: a secret cluster adds its reachable address
@@ -631,7 +632,6 @@ def print_data_plane_status() -> None:
     actually use — client SCRAM against the userlist plus the SCRAM pass-through
     backend hop. With PgBouncer disabled `pooled_db_url == db_url` and the probe
     is direct anyway."""
-    import base.db
 
     if settings.data_plane.is_remote:
         # A remote-managed plane has no local instance to manage — probe the
@@ -656,7 +656,9 @@ def print_data_plane_status() -> None:
         print(f"  ✗ postgres ({pg_host}:{pg_port}) unreachable")
     else:
         try:
-            with base.db.connect() as conn:  # pooled front door (PgBouncer when enabled)
+            with (
+                Database.from_settings().connect() as conn
+            ):  # pooled front door (PgBouncer when enabled)
                 conn.execute("select 1")
             print(f"  ✓ postgres ({pg_host}:{pg_port})")
         except Exception as exc:
@@ -717,7 +719,17 @@ def stop_cluster_instance() -> int:
     from .pgbouncer import stop_pgbouncer
 
     stop_pgbouncer()
-    owned_postgres.stop(data)
+    from cli.commands.lifecycle.service_stop import (
+        PROCESS_CLEANUP_WAIT_S,
+        PROCESS_KILL_WAIT_S,
+        report_postgres_stop_escalation,
+    )
+
+    escalation = owned_postgres.stop(
+        data, immediate_wait=PROCESS_CLEANUP_WAIT_S, kill_wait=PROCESS_KILL_WAIT_S
+    )
+    if escalation is not None:
+        report_postgres_stop_escalation(escalation)
     print("  ✓ postgres stopped")
     if port is not None:
         subprocess.run(

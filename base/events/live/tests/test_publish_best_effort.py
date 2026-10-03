@@ -18,11 +18,16 @@ from redis.exceptions import NoPermissionError
 
 from base.config import settings
 from base.events.live import redis_client
-from base.events.live.redis_client import publish_best_effort, publish_best_effort_sync
+from base.events.live.bus import EventBus
+from base.events.live.tests.fakes import patch_async_redis, patch_sync_redis
+
+_bus = EventBus.from_settings()
 
 
 @pytest.fixture(autouse=True)
 def _skip_acl_backoff_waits(monkeypatch: pytest.MonkeyPatch) -> None:
+    global _bus  # noqa: PLW0603 — a bus built from the settings the session has by now
+    _bus = EventBus.from_settings()
     """Exercise the terminal best-effort contract without waiting 45.5 seconds.
 
     Retry cadence and its bound are asserted in test_redis_client; these tests
@@ -70,7 +75,7 @@ class TestPublishBestEffortSync:
     def test_returns_receiver_count_on_real_redis(self) -> None:
         """A successful publish returns the receiver count (0 with nobody subscribed)
         — an int, never None."""
-        n = publish_best_effort_sync(settings.data_plane.events_channel, "{}", context="test")
+        n = _bus.publish_best_effort_sync("{}", context="test")
         assert n == 0
 
     def test_never_raises_and_debug_logs_on_transient(
@@ -79,12 +84,8 @@ class TestPublishBestEffortSync:
         loguru_records: list[dict],
     ) -> None:
         """A transient failure (redis down) is swallowed → None, logged at DEBUG."""
-        monkeypatch.setattr(
-            redis_client,
-            "sync_redis",
-            lambda **_: _BoomSyncClient(RedisConnectionError("down")),  # pyright: ignore[reportUnknownArgumentType]
-        )
-        result = publish_best_effort_sync("ava:x", "{}", context="unit")
+        patch_sync_redis(monkeypatch, lambda: _BoomSyncClient(RedisConnectionError("down")))
+        result = _bus.publish_best_effort_sync("{}", channel="ava:x", context="unit")
         assert result is None
         hits = [r for r in loguru_records if "skipped" in r["message"] and "ava:x" in r["message"]]
         assert hits, "expected a best-effort DEBUG skip line"
@@ -98,12 +99,8 @@ class TestPublishBestEffortSync:
         """A ResponseError (redis NOPERM — ACL misconfig) is swallowed → None, but
         logged at WARNING because it silently disables live updates fleet-wide."""
         redis_client._warn_last.clear()  # deterministic first-warn (see throttle)
-        monkeypatch.setattr(
-            redis_client,
-            "sync_redis",
-            lambda **_: _BoomSyncClient(NoPermissionError("NOPERM")),  # pyright: ignore[reportUnknownArgumentType]
-        )
-        result = publish_best_effort_sync("ava:noperm-sync", "{}", context="unit")
+        patch_sync_redis(monkeypatch, lambda: _BoomSyncClient(NoPermissionError("NOPERM")))
+        result = _bus.publish_best_effort_sync("{}", channel="ava:noperm-sync", context="unit")
         assert result is None
         assert any(
             "rejected by redis" in r["message"] and r["level"].no >= 30  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
@@ -119,14 +116,10 @@ class TestPublishBestEffortSync:
         DEBUG — one event funnels the whole fleet through here, so the WARNING must
         not flood."""
         redis_client._warn_last.clear()
-        monkeypatch.setattr(
-            redis_client,
-            "sync_redis",
-            lambda **_: _BoomSyncClient(NoPermissionError("NOPERM")),  # pyright: ignore[reportUnknownArgumentType]
-        )
+        patch_sync_redis(monkeypatch, lambda: _BoomSyncClient(NoPermissionError("NOPERM")))
         channel = "ava:noperm-throttle"
         for _ in range(4):
-            assert publish_best_effort_sync(channel, "{}", context="unit") is None
+            assert _bus.publish_best_effort_sync("{}", channel=channel, context="unit") is None
         warnings = [
             r
             for r in loguru_records
@@ -140,7 +133,7 @@ class TestPublishBestEffortSync:
 
 class TestPublishBestEffortAsync:
     async def test_returns_receiver_count_on_real_redis(self) -> None:
-        n = await publish_best_effort(settings.data_plane.events_channel, "{}", context="test")
+        n = await _bus.publish_best_effort("{}", context="test")
         assert n == 0
 
     async def test_never_raises_and_debug_logs_on_transient(
@@ -148,12 +141,8 @@ class TestPublishBestEffortAsync:
         monkeypatch: pytest.MonkeyPatch,
         loguru_records: list[dict],
     ) -> None:
-        monkeypatch.setattr(
-            redis_client,
-            "get_async_redis",
-            lambda: _BoomAsyncClient(RedisConnectionError("down")),
-        )
-        result = await publish_best_effort("ava:x", "{}", context="unit")
+        patch_async_redis(monkeypatch, lambda: _BoomAsyncClient(RedisConnectionError("down")))
+        result = await _bus.publish_best_effort("{}", channel="ava:x", context="unit")
         assert result is None
         assert any("skipped" in r["message"] and r["level"].no < 30 for r in loguru_records), (  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
             "expected a best-effort DEBUG skip line"
@@ -165,12 +154,8 @@ class TestPublishBestEffortAsync:
         loguru_records: list[dict],
     ) -> None:
         redis_client._warn_last.clear()  # deterministic first-warn (see throttle)
-        monkeypatch.setattr(
-            redis_client,
-            "get_async_redis",
-            lambda: _BoomAsyncClient(NoPermissionError("NOPERM")),
-        )
-        result = await publish_best_effort("ava:noperm-async", "{}", context="unit")
+        patch_async_redis(monkeypatch, lambda: _BoomAsyncClient(NoPermissionError("NOPERM")))
+        result = await _bus.publish_best_effort("{}", channel="ava:noperm-async", context="unit")
         assert result is None
         assert any(
             "rejected by redis" in r["message"] and r["level"].no >= 30  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
@@ -188,7 +173,7 @@ class TestPublishBestEffortAsync:
         await pubsub.subscribe(channel)
         await pubsub.get_message(timeout=1.0)  # drain the subscribe confirmation
         try:
-            n = await publish_best_effort(channel, "{}", context="test")
+            n = await _bus.publish_best_effort("{}", channel=channel, context="test")
             assert n == 1
         finally:
             await pubsub.unsubscribe(channel)  # pyright: ignore[reportUnknownMemberType]
@@ -202,4 +187,4 @@ def test_zero_receivers_distinguished_from_failure() -> None:
     publish with no subscriber is 0, not None."""
     with redis.Redis.from_url(settings.data_plane.redis_url) as _r:  # pyright: ignore[reportUnknownMemberType]
         pass  # sanity: redis reachable
-    assert publish_best_effort_sync("ava:nobody", "{}") == 0
+    assert _bus.publish_best_effort_sync("{}", channel="ava:nobody") == 0

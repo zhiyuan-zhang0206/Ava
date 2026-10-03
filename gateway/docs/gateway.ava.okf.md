@@ -30,7 +30,7 @@ database posture is a status projection, not this gate's authority.
 - **Eval result boundary**: artifact-read endpoints reject eval-isolated callers from their stored per-agent configuration, so bypassing the SDK cannot expose another run's transcript, activity, events, memory search, or task results
 - **SSE event push**: Redis pub/sub → SSE bridge, pushing agent events to the browser in real time
 - **Runtime observability**: process CPU/RSS/file descriptors, event-loop lag/slow ticks, and SSE connection depth/open/close rates flow through the unified OTLP emitter
-- **Alert truth reconciliation**: startup + five-minute reads of Grafana's active Alertmanager instances repair stored alert resolutions whose one-shot webhook was lost
+- **Alert truth reconciliation**: the events-maintenance service's startup + five-minute reads of Grafana's active Alertmanager instances repair stored alert resolutions whose one-shot webhook was lost
 - **Failure feedback delivery**: authenticated CI, QA, and merge failure events are deduplicated durably, then delivered to the author through chat auto-resurrection, the nearest live birth ancestor, or a task-registry alert
 - **Schedule keep-alive**: built-in ScheduleManager, keeping schedule resident processes alive in their own sessions (not a timer trigger — timing logic is inside the script, the manager only ensures stay-up)
 - **Cluster ops API**: cluster, config, inventory, metrics, system and other management endpoints
@@ -49,7 +49,7 @@ Browser (frontend:3000) ──HTTP──▶ Gateway (:8000) ──▶ Postgres /
    daemon ──▶ detached process (runner) │   ScheduleManager._launch
 ```
 - **agents**: spawn / lifecycle uniformly goes through `_forward_to_home_machine` → `cluster_rpc` POST `/ops` to the agent-ops daemon, the runner commits durable work and publishes a wake to its agent host — **even if the target is the local machine, there is no in-process shortcut** (`gateway/agents/forward.py:_forward_to_home_machine()`)
-- **schedules**: `gateway/schedules/manager.py:ScheduleManager._launch` is gateway's **only** path that directly manages sessions (agent processes are hosted by the native supervisor on the runner side, not by the gateway)
+- **schedules**: the gateway only queues sync requests and reads log captures (`gateway/schedules/session_control.py`); the `schedule-manager` service launches schedule sessions
 
 - Gateway connects to Postgres via one `base.db.pool()` per process, borrowing one connection per request. Going through the factory rather than constructing a `ConnectionPool` is what gives the borrows `prepare_threshold=None` (never prepare; transaction-pooling-safe under PgBouncer) and `PG_KEEPALIVE_KWARGS` (a request-serving pool outlives host sleeps; without keepalives a borrow on a half-dead socket stalls on the OS TCP-retransmit timeout). Rule 5 (`postgres-dial`) enforces it
 - Event publishing uses a process-level shared `aredis.Redis` instance
@@ -66,7 +66,7 @@ Feature packages (routes + helpers + wire models):
 [[gateway/inspect/docs/inspect.ava.okf.md|inspect]],
 [[gateway/schedules/docs/schedules.ava.okf.md|schedules]],
 [[gateway/mcp_server/docs/mcp-endpoint.ava.okf.md|mcp_server]], `auth`, `lgtm`,
-`middleware`, `extensions`, `ttl_reaper`. [[routers.ava.okf.md]]:
+`middleware`, `extensions`. [[routers.ava.okf.md]]:
 single-module routers. [[db.ava.okf.md]]: Postgres pool.
 
 ## Entry Points

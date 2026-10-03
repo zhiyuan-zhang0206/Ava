@@ -12,7 +12,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from base.agents import AgentLaunchFailed, AvaAgentError
 from gateway.auth.cors import cors_allowed_origins
-from gateway.lgtm import loki_events, loki_query_budget, prom_metrics
+from gateway.lgtm import loki_events, loki_query_budget
 from gateway.middleware.error_envelope import error_response
 
 _log = logging.getLogger(__name__)
@@ -88,21 +88,6 @@ async def observability_read_unavailable_handler(
         status=503,
         detail=str(exc),
         retryable=True,
-    )
-
-
-async def prom_query_budget_error_handler(
-    request: Request,
-    exc: prom_metrics.PromQueryBudgetError,
-) -> JSONResponse:
-    """Map local Prometheus admission saturation to one retriable contract."""
-    return error_response(
-        request,
-        code="prom_query_budget_unavailable",
-        status=503,
-        detail=f"Prometheus query budget unavailable ({exc.reason}); retry",
-        retryable=True,
-        headers={"Retry-After": "1"},
     )
 
 

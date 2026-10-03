@@ -26,8 +26,9 @@ from agent.ownership.hosted import (
     admit_hosted_runtime,
 )
 from base.config import settings
-from base.db import create_agent
+from base.db import Database, create_agent
 from base.native_process.runtime_incarnation import RuntimeIncarnation
+from base.telemetry import Event
 from services.agent_host import settlement as settlement_mod
 from services.agent_host.runtime import TurnOutcome
 
@@ -66,6 +67,7 @@ async def _close_captured(
     await settlement_mod.close_hosted_turn(
         cast(AsyncConnectionPool[Any], object()),
         cast(AsyncConnectionPool[Any], object()),
+        Database.from_settings(),
         cast(AsyncPostgresSaver, object()),
         RuntimeIncarnation(42, uuid4(), uuid4()),
         outcome,
@@ -221,23 +223,21 @@ async def test_settle_boundary_prompt_reaps_the_second_crash_at_once(
     """
     events: list[dict[str, object]] = []
 
-    async def _event(
-        event_type: str, agent_id: int, *, payload: dict[str, object] | None = None, **_kw: object
-    ) -> None:
-        del event_type, agent_id
-        if payload is not None and payload.get("reason") == "corpse_reaper":
-            events.append(payload)
+    async def _event(_conn: object, event: Event) -> Event:
+        if event.attributes.get("reason") == "corpse_reaper":
+            events.append(event.attributes)
+        return event
 
-    monkeypatch.setattr("agent.ownership.corpse_reap.insert_event_log_async", _event)
+    monkeypatch.setattr("agent.ownership.corpse_reap.record_audit_async", _event)
     published: list[int] = []
 
-    async def _publish(agent_id: int) -> None:
+    async def _publish(_bus: object, agent_id: int) -> None:
         published.append(agent_id)
 
     monkeypatch.setattr("agent.ownership.corpse_reap.publish_agent_updated", _publish)
     attempts: list[list[ReapedCorpse]] = []
 
-    async def _recover(reaped: list[ReapedCorpse]) -> None:
+    async def _recover(_db: object, reaped: list[ReapedCorpse]) -> None:
         attempts.append(list(reaped))
 
     monkeypatch.setattr(settlement_mod, "recover_reaped_corpses", _recover)
@@ -251,6 +251,7 @@ async def test_settle_boundary_prompt_reaps_the_second_crash_at_once(
     await settlement_mod.close_hosted_turn(
         aops_pool,
         aops_pool,
+        Database.from_settings(),
         cast(AsyncPostgresSaver, object()),
         first,
         TurnOutcome(exited=False, crashed=True),
@@ -274,6 +275,7 @@ async def test_settle_boundary_prompt_reaps_the_second_crash_at_once(
     await settlement_mod.close_hosted_turn(
         aops_pool,
         aops_pool,
+        Database.from_settings(),
         cast(AsyncPostgresSaver, object()),
         retry,
         TurnOutcome(exited=False, crashed=True),

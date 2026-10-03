@@ -135,7 +135,7 @@ _state = _BootState()
 def _current_settings() -> Any:
     """The public `settings` object as bound on `base.config`.
 
-    Resolved per call — the same shape `turn_view` uses — so a caller (or a
+    Resolved per call — the same shape the agent pins use — so a caller (or a
     test) that replaces the module attribute is honored instead of silently
     reading a stale handle."""
     from base.config import settings

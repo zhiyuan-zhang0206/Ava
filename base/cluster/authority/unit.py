@@ -271,8 +271,7 @@ def issue_bundle(
     credential-free database URL bootstrap serves to runners;
     `cluster_secret` is the gateway's human secret, from which only the
     telemetry token is derived (empty = an open API: no `UnitApi`). A home
-    without an active generation raises (a pending or revoked one is never
-    issued).
+    without an active generation raises (a pending one is never issued).
     """
     if urlsplit(endpoint).password is not None:
         raise UnitCapabilityError("a capability names the credential-free endpoint")
@@ -406,12 +405,7 @@ def _require_supersedes(current: UnitCapability | None, new: UnitCapability) -> 
     if current is None:
         return
     old, fresh = current.generation, new.generation
-    if fresh.number < old.number:
-        raise UnitCapabilityError(
-            f"the bundle carries generation {fresh.number}, older than the installed "
-            f"generation {old.number}"
-        )
-    if fresh.number == old.number and fresh.credential_digest != old.credential_digest:
+    if fresh.credential_digest != old.credential_digest:
         raise UnitCapabilityError(
             f"the bundle contradicts the installed generation {old.number}'s credential digest"
         )
@@ -436,9 +430,8 @@ def install_bundle(
     """Install `bundle` as this unit's capability after every binding check.
 
     The bundle must name this unit (machine and home), the endpoint the gateway
-    serves right now, a generation not older than the installed one, and a
-    login the cluster accepts: a revoked generation's login is refused by the
-    database, so its bundle never installs.
+    serves right now, the installed generation's credentials, and a login the
+    cluster accepts.
     """
     capability = bundle.capability
     unit = UnitIdentity(machine=machine, home=str(home))
@@ -456,7 +449,7 @@ def install_bundle(
     except Exception as exc:
         raise UnitCapabilityError(
             f"the cluster refuses generation {capability.generation.number}'s runner login "
-            f"(a revoked generation, or an unreachable endpoint): {exc}"
+            f"(or the endpoint is unreachable): {exc}"
         ) from exc
     with _locked(home):
         write_private_bytes(unit_capability_path(home), _canonical(capability) + b"\n")

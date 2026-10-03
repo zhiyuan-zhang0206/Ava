@@ -268,6 +268,8 @@ async def upload_files(
             )
         await deliver_chat_inbound(
             request.app.state.db_pool,
+            request.app.state.db,
+            request.app.state.bus,
             agent_id,
             prepare=lambda _conn: message,
             provenance=request_inbound_provenance(request),
@@ -347,6 +349,7 @@ async def _pull_uploads_to_agent_machine(
     for name in names:
         try:
             result = await cluster_rpc.dispatch_to_machine(
+                request.app.state.db,
                 target_machine=machine,
                 kind="upload_receive",
                 payload={"agent_id": agent_id, "name": name},

@@ -34,7 +34,7 @@ reconciler:
 - `GET /api/alerts/stream` — SSE tail (channel `ava:alerts`, broadcast) of
   every ingest; the UI's initial fetch covers rows ingested before the
   subscription opened.
-- Grafana reconciliation — on gateway startup and every five minutes, fetch
+- Grafana reconciliation — on events-maintenance service start and every five minutes, fetch
   Grafana's current Alertmanager instances and resolve stored Grafana rows
   absent from that truth set. This closes the lost-RESOLVE-webhook gap.
 
@@ -75,7 +75,7 @@ Response: `{processed, inserted, updated, notified}`.
 
 ### Lost-resolution reconciliation
 
-With Grafana admin auth configured, a startup + five-minute task resolves
+With Grafana admin auth configured, the events-maintenance service's startup + five-minute loop resolves
 stored Grafana instances absent from Grafana's current Alertmanager truth.
 Exact identity, race boundaries, failure posture, and the rejected timestamp
 sweep: [[alert-reconciliation.ava.okf.md]].

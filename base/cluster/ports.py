@@ -42,6 +42,8 @@ class ClusterPorts(TypedDict):
     page_server: int
     agent_host: int
     pg_backup: int
+    ttl_reaper: int
+    schedule_manager: int
     memory_search: int
 
 

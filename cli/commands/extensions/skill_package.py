@@ -233,8 +233,8 @@ def _register_in_cluster(
     a fact about how this machine fetched it, and the cluster row is keyed by
     name and addressed by content.
     """
-    from base import db
     from base.cluster.machine import machine_name
+    from base.db import Database
     from base.packages.extensions import registry
 
     from ._pkg_source import looks_like_local_path
@@ -248,7 +248,7 @@ def _register_in_cluster(
     # The pool opens eagerly and owns worker threads; close it here rather
     # than letting ConnectionPool.__del__ run at interpreter exit (it then
     # joins its own worker and prints "cannot join current thread" noise).
-    with db.pool() as pool:
+    with Database.from_settings().pool() as pool:
         for pkg in packages:
             registry.register_tree(
                 pool,

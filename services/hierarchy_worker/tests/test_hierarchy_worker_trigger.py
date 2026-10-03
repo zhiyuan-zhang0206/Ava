@@ -10,7 +10,7 @@ guardrails (the 24h budget breaker, the halt marker, the done-time signals on
 the child's side).
 The scan's enqueue decisions and the child-side outcome live in
 `services/hierarchy_worker/tests/test_hierarchy_worker.py`; the enqueue SQL itself in
-`tests/test_checkpoint_cleanup.py`.
+`base/agents/history/tests/test_checkpoint_cleanup.py`.
 """
 
 from __future__ import annotations
@@ -22,10 +22,12 @@ import pytest
 
 from base.agents.history.hierarchy.pipeline import MaterializedTree
 from base.config import settings
+from base.db.tests.fakes import fake_database
 from base.events.contract import telemetry_events
 from services.hierarchy_worker import execute as execute_module
 from services.hierarchy_worker import runner
-from services.hierarchy_worker.scan import ScanOutcome, _has_clean_baseline, first_build, scan
+from services.hierarchy_worker.scan import ScanOutcome, _has_clean_baseline, first_build
+from services.hierarchy_worker.tests.slices import hierarchy_config, hierarchy_db, scan
 
 # Untyped fixtures and helper calls throughout: the call-site rules stay at warning for this file.
 # pyright: reportUnknownArgumentType = warning
@@ -110,7 +112,7 @@ def _armed_tick(monkeypatch: pytest.MonkeyPatch) -> None:
     """Arm a fake-connection tick test: switch on, first scan due, breaker quiet."""
     monkeypatch.setattr(settings.daemon, "hierarchy_worker_enabled", True)
     monkeypatch.setattr(runner, "_fallback_scanned_at", None)
-    monkeypatch.setattr(runner, "_regen_budget_check", lambda _conn: False)
+    monkeypatch.setattr(runner, "_regen_budget_check", lambda _conn, _config: False)
 
 
 # ---- the tick: drain semantics, scan cadence, switch ----
@@ -129,7 +131,7 @@ def test_run_tick_drains_back_to_back_and_scans_once_per_window(
         runner.ClaimedJob(id=2, agent_id=12, include_tail=False),
     ]
 
-    def fake_scan(conn: object) -> ScanOutcome:
+    def fake_scan(conn: object, _config: object) -> ScanOutcome:
         scanned.append(len(scanned))
         return ScanOutcome()
 
@@ -137,20 +139,21 @@ def test_run_tick_drains_back_to_back_and_scans_once_per_window(
         return jobs.pop(0) if jobs else None
 
     _armed_tick(monkeypatch)
-    monkeypatch.setattr(runner, "connect", _fake_connect)
     monkeypatch.setattr(runner, "scan", fake_scan)
     monkeypatch.setattr(runner, "claim_next", fake_claim)
 
-    def fake_child(job: runner.ClaimedJob) -> None:
+    def fake_child(job: runner.ClaimedJob, _config: object, _db: object) -> None:
         ran.append(job.id)
 
     monkeypatch.setattr(runner, "run_child", fake_child)
 
-    runner.run_tick()
+    runner.run_tick(hierarchy_config(), fake_database(_fake_connect))
     assert ran == [1, 2]
     assert len(scanned) == 1  # one due scan, then the claims drain
 
-    runner.run_tick()  # inside the fallback window: no re-scan, nothing due
+    runner.run_tick(
+        hierarchy_config(), fake_database(_fake_connect)
+    )  # inside the fallback window: no re-scan, nothing due
     assert len(scanned) == 1
 
 
@@ -158,28 +161,28 @@ def test_run_tick_returns_on_a_transient_failure(monkeypatch: pytest.MonkeyPatch
     """A transient DB failure ends the tick without raising — the next slot
     retries, so the manager never sees a crash for a blip."""
 
-    def failing_scan(conn: object) -> ScanOutcome:
+    def failing_scan(conn: object, _config: object) -> ScanOutcome:
         raise RuntimeError("db unavailable")
 
     _armed_tick(monkeypatch)
-    monkeypatch.setattr(runner, "connect", _fake_connect)
     monkeypatch.setattr(runner, "scan", failing_scan)
 
-    runner.run_tick()  # returns — no exception escapes the tick
+    runner.run_tick(
+        hierarchy_config(), fake_database(_fake_connect)
+    )  # returns — no exception escapes the tick
 
 
 def test_run_tick_raises_on_schema_drift(monkeypatch: pytest.MonkeyPatch) -> None:
     """Code<->DB drift escapes the tick so the manager's crash path records it."""
 
-    def drifted_scan(conn: object) -> ScanOutcome:
+    def drifted_scan(conn: object, _config: object) -> ScanOutcome:
         raise psycopg.ProgrammingError('relation "hierarchy_jobs" does not exist')
 
     _armed_tick(monkeypatch)
-    monkeypatch.setattr(runner, "connect", _fake_connect)
     monkeypatch.setattr(runner, "scan", drifted_scan)
 
     with pytest.raises(psycopg.ProgrammingError):
-        runner.run_tick()
+        runner.run_tick(hierarchy_config(), fake_database(_fake_connect))
 
 
 def test_run_tick_is_silent_while_the_switch_is_off(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -191,10 +194,9 @@ def test_run_tick_is_silent_while_the_switch_is_off(monkeypatch: pytest.MonkeyPa
         touched.append("connect")
         raise AssertionError("switch off must not open a connection")
 
-    monkeypatch.setattr(runner, "connect", exploding_connect)
     assert settings.daemon.hierarchy_worker_enabled is False  # the shipped default
 
-    runner.run_tick()
+    runner.run_tick(hierarchy_config(), fake_database(exploding_connect))
     assert touched == []
 
 
@@ -326,12 +328,12 @@ def test_regen_budget_trips_on_the_edge_and_stops_claiming(
     )
     db_conn.commit()
 
-    assert runner._regen_budget_check(db_conn) is True
+    assert runner._regen_budget_check(db_conn, hierarchy_config()) is True
     trips = [e for e in emitted if e[0] == "hierarchy_regen_budget_tripped"]
     assert trips == [("hierarchy_regen_budget_tripped", {"window_nodes": 4, "budget_nodes": 3})]
 
     # The edge: a second reading under the unreset trip emits nothing new.
-    assert runner._regen_budget_check(db_conn) is True
+    assert runner._regen_budget_check(db_conn, hierarchy_config()) is True
     assert len([e for e in emitted if e[0] == "hierarchy_regen_budget_tripped"]) == 1
 
 
@@ -343,7 +345,7 @@ def test_budget_at_exactly_the_budget_does_not_trip(
     monkeypatch.setattr(settings.daemon, "hierarchy_regen_daily_budget_nodes", 4)
     _hot_row(db_conn, 880_115, 4)
 
-    assert runner._regen_budget_check(db_conn) is False
+    assert runner._regen_budget_check(db_conn, hierarchy_config()) is False
     assert db_conn.execute("SELECT count(*) FROM hierarchy_worker_breaker").fetchone() == (0,)
 
 
@@ -353,11 +355,10 @@ def test_run_tick_stops_while_the_breaker_is_tripped(monkeypatch: pytest.MonkeyP
     claims: list[str] = []
 
     _armed_tick(monkeypatch)
-    monkeypatch.setattr(runner, "connect", _fake_connect)
-    monkeypatch.setattr(runner, "_regen_budget_check", lambda _conn: True)
+    monkeypatch.setattr(runner, "_regen_budget_check", lambda _conn, _config: True)
     monkeypatch.setattr(runner, "claim_next", lambda _conn: claims.append("claim"))
 
-    runner.run_tick()
+    runner.run_tick(hierarchy_config(), fake_database(_fake_connect))
     assert claims == []
 
 
@@ -373,13 +374,15 @@ def test_budget_reset_lifts_the_stop_and_a_cooled_window_rearms(
     monkeypatch.setattr("base.telemetry.emit", _record_emit(emitted))
     _hot_row(db_conn, 880_103, 4)
 
-    assert runner._regen_budget_check(db_conn) is True  # trip
+    assert runner._regen_budget_check(db_conn, hierarchy_config()) is True  # trip
 
     db_conn.execute(
         "UPDATE hierarchy_worker_breaker SET reset_at = now(), reset_note = 'test' WHERE id = 1"
     )
     db_conn.commit()
-    assert runner._regen_budget_check(db_conn) is False  # the reset lifts the stop...
+    assert (
+        runner._regen_budget_check(db_conn, hierarchy_config()) is False
+    )  # the reset lifts the stop...
     assert len([e for e in emitted if e[0] == "hierarchy_regen_budget_tripped"]) == 1
     row = db_conn.execute(
         "SELECT reset_at IS NULL, rearmed_at IS NOT NULL FROM hierarchy_worker_breaker WHERE id = 1"
@@ -388,14 +391,14 @@ def test_budget_reset_lifts_the_stop_and_a_cooled_window_rearms(
 
     db_conn.execute("DELETE FROM hierarchy_jobs")  # the window cools
     db_conn.commit()
-    assert runner._regen_budget_check(db_conn) is False
+    assert runner._regen_budget_check(db_conn, hierarchy_config()) is False
     row = db_conn.execute(
         "SELECT rearmed_at IS NOT NULL FROM hierarchy_worker_breaker WHERE id = 1"
     ).fetchone()
     assert row == (True,)  # the cooled reading re-armed it
 
     _hot_row(db_conn, 880_104, 4)  # a fresh excursion...
-    assert runner._regen_budget_check(db_conn) is True  # ...trips again
+    assert runner._regen_budget_check(db_conn, hierarchy_config()) is True  # ...trips again
     assert len([e for e in emitted if e[0] == "hierarchy_regen_budget_tripped"]) == 2
 
 
@@ -463,13 +466,13 @@ def test_halted_build_records_the_marker_and_emits_the_signals(
         seen_caps.append(kwargs.get("max_generated"))
         return halted
 
-    monkeypatch.setattr(execute_module, "load_known_texts", lambda _aid: {})
+    monkeypatch.setattr(execute_module, "load_known_texts", lambda _db, _aid: {})
     monkeypatch.setattr(execute_module, "build_generation_llm", lambda _model: object())
     monkeypatch.setattr(execute_module, "close_chat_model", lambda _llm: None)
     monkeypatch.setattr(execute_module, "build_agent_tree", fake_tree)
     monkeypatch.setattr(execute_module, "write_tree", lambda *_a, **_k: 0)
 
-    assert execute_module.execute_job(job_id) == 0
+    assert execute_module.execute_job(job_id, hierarchy_config(), hierarchy_db()) == 0
     assert seen_caps == [settings.daemon.hierarchy_regen_halt_nodes_per_job]
     row = db_conn.execute(
         "SELECT status, error FROM hierarchy_jobs WHERE id = %s", (job_id,)
@@ -495,20 +498,20 @@ def test_regen_signals_fire_only_past_their_thresholds(
     monkeypatch.setattr("base.telemetry.emit", _record_emit(emitted))
 
     cut = MaterializedTree(nodes=(), errors=(), pending={}, max_level=1, generated=4, reused=0)
-    execute_module._regen_signals(7, 9, cut)
+    execute_module._regen_signals(7, 9, cut, hierarchy_config())
     assert [e[0] for e in emitted] == ["hierarchy_regen_alert", "hierarchy_regen_low_reuse"]
     assert emitted[0][1] == {"agent_id": 7, "job_id": 9, "generated": 4, "threshold": 3}
 
     emitted.clear()
     small = MaterializedTree(nodes=(), errors=(), pending={}, max_level=1, generated=3, reused=0)
-    execute_module._regen_signals(7, 10, small)
+    execute_module._regen_signals(7, 10, small, hierarchy_config())
     assert emitted == []  # below the size gate: the reuse face never fires alone
 
     emitted.clear()
     ordinary = MaterializedTree(
         nodes=(), errors=(), pending={}, max_level=1, generated=2, reused=50
     )
-    execute_module._regen_signals(7, 11, ordinary)
+    execute_module._regen_signals(7, 11, ordinary, hierarchy_config())
     assert emitted == []
 
 

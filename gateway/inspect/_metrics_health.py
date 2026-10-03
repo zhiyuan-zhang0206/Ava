@@ -48,6 +48,7 @@ from psycopg.rows import dict_row
 from base.cluster import home_label
 from base.config import settings
 from base.db.transaction import write_transaction
+from base.events.live.bus import EventBus
 from base.log import logger
 from base.paths import ava_home
 from base.telemetry.alerts import (
@@ -158,7 +159,9 @@ def _open_episode_keys(pool: Any, agent_id: int) -> set[tuple[int, str, str]]:
     return keys
 
 
-def _emit_episode(pool: Any, agent_id: int, family: str, condition: str, *, firing: bool) -> None:
+def _emit_episode(
+    pool: Any, bus: EventBus, agent_id: int, family: str, condition: str, *, firing: bool
+) -> None:
     """One firing/resolved edge through the standard alerts machinery.
 
     The episode identity is (agent, family, condition) — the alert
@@ -194,9 +197,9 @@ def _emit_episode(pool: Any, agent_id: int, family: str, condition: str, *, firi
     # SSE publish + IM are best-effort tails — same split as the ingest funnel
     # (gateway/alerts/router.py): row first, then the live/notification side.
     try:
-        from gateway.alerts.router import publish_alert_rows
+        from gateway.alerts.publish import publish_alert_rows
 
-        publish_alert_rows([row])
+        publish_alert_rows(bus, [row])
     except Exception:
         logger.warning("inspect metrics coverage: SSE publish failed", agent_id=agent_id)
     if should_notify and text:
@@ -210,6 +213,7 @@ def _emit_episode(pool: Any, agent_id: int, family: str, condition: str, *, firi
 
 def note_inspect_metrics_coverage(
     pool: Any,
+    bus: EventBus,
     agent_id: int,
     metadata: InspectMetricsMetadata,
     *,
@@ -243,11 +247,11 @@ def note_inspect_metrics_coverage(
                 expected=condition in _EXPECTED,
             )
             if _unexpected(condition, historical=historical):
-                _emit_episode(pool, agent_id, family, condition, firing=True)
+                _emit_episode(pool, bus, agent_id, family, condition, firing=True)
         # Conditions this read no longer shows cannot still be firing — close
         # every open instance for them. The open set comes from the store
         # (not an in-process map), so a cold process resolves them too.
         for key in _open_episode_keys(pool, agent_id) - present:
-            _emit_episode(pool, agent_id, key[1], key[2], firing=False)
+            _emit_episode(pool, bus, agent_id, key[1], key[2], firing=False)
     except Exception:
         logger.exception("inspect metrics coverage note failed", agent_id=agent_id)

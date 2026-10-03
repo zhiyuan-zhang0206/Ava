@@ -14,7 +14,7 @@
     "base/telemetry/metrics/core/observability.py::import-time-call:base.telemetry.metrics.core.catalog.register_core_metric": 18,
     "base/telemetry/metrics/core/panels.py::import-time-call:base.telemetry.metrics.core.catalog.register_core_metric": 20,
     "base/telemetry/metrics/core/panels.py::import-time-call:base.telemetry.metrics.core.panels._tps": 3,
-    "base/telemetry/metrics/core/pr_flow.py::import-time-call:base.telemetry.metrics.core.catalog.register_core_metric": 4,
+    "base/telemetry/metrics/core/pr_flow.py::import-time-call:base.telemetry.metrics.core.catalog.register_core_metric": 3,
     "base/telemetry/metrics/plugin_metrics.py::ambient-container:_REGISTRY": 1,
     "base/telemetry/otlp/telemetry_otlp.py::thread:_OtlpBackend._ensure": 1,
     "base/telemetry/tracing.py::thread:_start_arm_thread": 1,
@@ -22,18 +22,25 @@
   },
   "complexity": {
     "base/telemetry/alerts.py::upsert_alert": 26,
-    "base/telemetry/metrics/aggregate.py::_row_reductions": 24,
     "base/telemetry/metrics/aggregate.py::_sections_from_aggregate": 31,
     "base/telemetry/metrics/core/tests/test_core_observability.py::test_pack_registers_all_metrics": 16,
     "base/telemetry/metrics/plugin_metrics.py::validate_metric_sql": 31,
     "base/telemetry/metrics/plugin_metrics_sql.py::_check_from_item": 20,
     "base/telemetry/metrics/tests/test_metrics_aggregate_equivalence.py::test_equivalence_full_thread": 24,
+    "base/telemetry/tests/test_telemetry_otlp.py::test_log_mapping_full_record_shape": 18,
+    "base/telemetry/tests/test_telemetry_otlp.py::test_metric_mapping_int_counter_float_histogram": 17,
     "base/telemetry/tests/test_tracing.py::test_turn_span_exports_root_at_start_not_at_end": 17
   },
   "files": {
+    "base/telemetry/tests/test_telemetry_otlp.py": 1169,
     "base/telemetry/tests/test_tracing.py": 1724
   },
+  "nesting": {
+    "base/telemetry/tests/test_telemetry_otlp_exit_delivery.py::_sent_pairs": 6
+  },
   "patch_targets": {
-    "base/telemetry/tests/test_observed_metrics.py::base.telemetry.metrics.observed_metrics._failures": 1
+    "base/telemetry/tests/test_observed_metrics.py::base.telemetry.metrics.observed_metrics._failures": 1,
+    "base/telemetry/tests/test_telemetry_otlp.py::base.telemetry.otlp.telemetry_otlp._OtlpBackend": 5,
+    "base/telemetry/tests/test_telemetry_otlp.py::base.telemetry.otlp.telemetry_otlp._build_providers": 3
   }
 }

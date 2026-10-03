@@ -35,7 +35,7 @@ Redis (`ava:events` channel); they do not share Python process state or
 semantic payload.
 
 Concurrency:
-- DB uses one `base.db.pool()` per process; each request borrows a connection
+- DB uses one `Database.pool()` per process; each request borrows a connection
 - Publish callsites reuse one process-wide `aredis.Redis` via
   `base.events.live.redis_client.get_async_redis()`; SSE / pubsub subscribers still
   open their own connection per request (subscriber lifecycle ≠ publisher).
@@ -66,23 +66,20 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
-import base.db
 from base.agents import AvaAgentError
-from base.agents.context import AvaContext
 from base.cluster.auth import cookie_name
 from base.config import settings
+from base.db import Database
+from base.events.live.bus import EventBus
 from base.host.system.cron import register_os_cron
 from base.lm.plugin_providers import ensure_provider_plugins_loaded
-from gateway import ttl_reaper
 from gateway._server import main as _run_gateway
-from gateway.agents import completion_notice_flusher, max_id_gauge
 from gateway.agents import conversation as conversation_router
 from gateway.agents import lifecycle as agents_lifecycle_router
 from gateway.agents import notices as notices_router
 from gateway.agents import router as agents_router
 from gateway.agents import state as agents_state_router
 from gateway.agents import timeline as timeline_router
-from gateway.alerts import reconciliation
 from gateway.alerts import router as alerts_router
 from gateway.auth import rejection_log
 from gateway.auth import router as auth_router
@@ -106,7 +103,7 @@ from gateway.extensions import plugin_ui as plugin_ui_router
 from gateway.extensions import skills as skills_router
 from gateway.extensions import ui_contributions as ui_contributions_router
 from gateway.inspect import router as inspect_router
-from gateway.lgtm import loki_events, loki_query_budget, prom_metrics
+from gateway.lgtm import loki_events, loki_query_budget
 from gateway.mcp_server import endpoint as mcp_server_endpoint
 from gateway.mcp_server import router as mcp_server_router
 from gateway.middleware import idempotency, latency, pause_policy, runtime_metrics
@@ -116,7 +113,6 @@ from gateway.middleware.error_handlers import (
     http_exception_handler,
     loki_query_budget_error_handler,
     observability_read_unavailable_handler,
-    prom_query_budget_error_handler,
     request_validation_error_handler,
     unhandled_exception_handler,
 )
@@ -170,7 +166,6 @@ from gateway.routers import (
 )
 from gateway.run_timeline import router as run_timeline_router
 from gateway.schedules import router as schedules_router
-from gateway.schedules.manager import ScheduleManager
 
 _log = logging.getLogger(__name__)
 
@@ -193,14 +188,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     """
     ensure_provider_plugins_loaded()
 
-    # AvaContext bundle — gateway is a non-graph entry point, so handles
-    # (llm / ops_pool / inbound_listener) stay None; string-level
-    # config (db_url / events_channel / ...) populates from settings defaults. Handlers that
-    # want a uniform view of "where this process should talk to infra" read
-    # app.state.ctx; raw db_pool / get_async_redis() keep working for
-    # call sites that aren't migrated yet.
-    app.state.ctx = AvaContext()
-    # Runtime consumer -> `base.db.pool()` dials the pooled URL (PgBouncer when
+    # Runtime consumer -> `Database.pool()` dials the pooled URL (PgBouncer when
     # enabled, else direct) and decides the connection kwargs in one place:
     # prepare_threshold=None keeps every borrowed connection transaction-pooling-safe,
     # and PG_KEEPALIVE_KWARGS bounds a borrow on a half-dead socket. The second
@@ -208,27 +196,19 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     # gateway process and serves every request, so a connection idle across a host
     # sleep or a network change comes back on a dead TCP flow and, unbounded, parks
     # the request handler on the OS TCP-retransmit timeout.
-    app.state.db_pool = base.db.pool(max_size=8)
+    app.state.db = Database.from_settings()
+    app.state.bus = EventBus.from_settings()
+    app.state.db_pool = app.state.db.pool(max_size=8)
     # The control plane must never queue behind the saturated data-plane pool.
     # Audit P0-2 follows the 2026-08-23 watchdog misjudgment chain: health and
     # recovery reads need their own short, small reservation.
-    app.state.control_db_pool = base.db.pool(min_size=1, max_size=2, timeout=2.0)
+    app.state.control_db_pool = app.state.db.pool(min_size=1, max_size=2, timeout=2.0)
 
     # Shared upstream client for the Grafana reverse proxy — one connection
     # pool across proxied requests instead of an AsyncClient per request.
     # Cheap when the proxy is disabled: no connection exists until the first
     # proxied request.
     app.state.grafana_client = grafana_router.build_proxy_client()
-    app.state.alert_reconciler = reconciliation.start_grafana_alert_reconciler(
-        app.state.db_pool,
-        app.state.grafana_client,
-        alerts_router.publish_alert_rows,
-    )
-
-    # TTL reaper — enforce serve() page and persistent-shell deadlines (user
-    # ruling 2026-08-25). Owns no request path; a pass that fails logs and
-    # retries on the next interval.
-    app.state.ttl_reaper = ttl_reaper.start_ttl_reaper(app.state.db_pool)
 
     # Register the OS-level health-probe cron (launchd plist on macOS, crontab
     # on Linux). This is the primary registration path — every gateway start
@@ -239,32 +219,15 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     except Exception:
         _log.warning("OS health-probe cron registration failed", exc_info=True)
 
-    # Cluster-internal schedule manager — one per cluster, owned by the gateway.
-    # Supervises one session per enabled `schedules` row (the successor to
-    # the retired cron scheduler).
-    app.state.schedule_manager = ScheduleManager(app.state.db_pool)
-    await app.state.schedule_manager.start()
-
-    # Automatic seeding is explicit configuration; unseeded previews still use
-    # the normal manager and schedule APIs without launching background workloads.
-    await app.state.schedule_manager.provision_builtins()
-
     # Config migrations (the retired override layers -> .env) run in the converge
     # phase before the gateway process starts, so by the time this Settings is
     # built the .env is already complete; nothing to do at lifespan startup.
 
-    # Periodic telemetry emitters (latency / auth-401 / agent max-id / runtime): each
+    # Periodic telemetry emitters (latency / auth-401 / runtime): each
     # drains its accumulator or DB sample once per 60s and emits ONE bounded
-    # event; the lifespan owns and stops every task or scheduled callback. The
-    # completion-notice digest flusher rides the same lifespan-owned task set.
+    # event; the lifespan owns and stops every task or scheduled callback.
     app.state.latency_flusher = asyncio.create_task(latency.latency_flusher())
     app.state.auth401_flusher = asyncio.create_task(rejection_log.auth401_flusher())
-    app.state.agent_max_id_flusher = asyncio.create_task(
-        max_id_gauge.max_agent_id_flusher(app.state.db_pool)
-    )
-    app.state.completion_notice_flusher = asyncio.create_task(
-        completion_notice_flusher.completion_notice_flusher(app.state.db_pool)
-    )
     app.state.runtime_metrics = runtime_metrics.start_runtime_monitor()
 
     # /mcp endpoint (design task #1212 step 1): flag-gated, built fresh per
@@ -273,7 +236,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     # /mcp answers 404 through the mcp_gateway wrapper and nothing changes.
     mcp_manager = None
     if settings.gateway.mcp_endpoint_enabled:
-        mcp_manager = mcp_server_endpoint.build_manager(app.state.db_pool)
+        mcp_manager = mcp_server_endpoint.build_manager(
+            app.state.db_pool, app.state.db, app.state.bus
+        )
         app.state.mcp_manager = mcp_manager
 
     try:
@@ -285,19 +250,14 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     finally:
         app.state.mcp_manager = None
         app.state.runtime_metrics.stop()
-        await ttl_reaper.stop_ttl_reaper(app.state.ttl_reaper)
-        await reconciliation.stop_grafana_alert_reconciler(app.state.alert_reconciler)
         await app.state.grafana_client.aclose()
         for flusher in (
             app.state.latency_flusher,
             app.state.auth401_flusher,
-            app.state.agent_max_id_flusher,
-            app.state.completion_notice_flusher,
         ):
             flusher.cancel()
             with suppress(asyncio.CancelledError):
                 await flusher
-        await app.state.schedule_manager.stop()
         app.state.db_pool.close()
         app.state.control_db_pool.close()
 
@@ -315,7 +275,7 @@ app = FastAPI(
 # only the tested decision function `gateway.middleware.pause_policy.should_bypass_pause`,
 # which reads the CONTROL_PLANE doorplates from `base/api_contracts/contracts.py`. The
 # exempt surface (control plane + agent self-reports) is enumerable and
-# audited by tests/gateway/test_route_contracts.py — a new exemption is a
+# audited by gateway/middleware/tests/test_route_contracts_middleware.py — a new exemption is a
 # deliberate declaration, not an incident patch.
 
 
@@ -423,7 +383,7 @@ async def _cookie_session(request: Request, secret: str) -> tuple[str, str] | No
     """The request's session cookie and its credential fact, when it authenticates.
 
     Valid only while the credential that minted the session is current (a
-    revoked generation's or a rotated secret's sessions end). Only a request
+    rotated secret's sessions end). Only a request
     carrying a cookie consults the session store: bearer and anonymous
     requests never pay its thread hop.
     """
@@ -523,7 +483,7 @@ async def _cluster_auth_middleware(
         return await call_next(request)
 
     # 2. Check Bearer token: the human secret, or the active write generation's
-    # machine API token (a revoked generation's never authenticates).
+    # machine API token (a pending generation's never authenticates).
     verified_by = cluster_credential(request.headers.get("Authorization"), secret)
     if verified_by is not None:
         request.state.auth_principal = AuthPrincipal("cluster", "administrator")
@@ -578,10 +538,6 @@ app.add_exception_handler(
 app.add_exception_handler(
     loki_events.ObservabilityReadUnavailable,
     observability_read_unavailable_handler,  # type: ignore[arg-type]
-)
-app.add_exception_handler(
-    prom_metrics.PromQueryBudgetError,
-    prom_query_budget_error_handler,  # type: ignore[arg-type]
 )
 app.add_exception_handler(RequestValidationError, request_validation_error_handler)  # type: ignore[arg-type]
 app.add_exception_handler(StarletteHTTPException, http_exception_handler)  # type: ignore[arg-type]

@@ -1,6 +1,6 @@
-"""Immutable event-class resolution — Loki counts -> dismissal state -> gauges.
+"""Immutable event-class resolution — event-class counts -> dismissal state -> gauges.
 
-The event stream is append-only in Loki, so no resolution path may write a
+The event record is append-only, so no resolution path may write a
 ``resolved_by`` attribute back onto historical events. Active rows in
 ``event_dismissals`` instead remove one exact (category, level, event_name,
 source, process) class from the count — a row whose ``process`` is empty is a
@@ -16,9 +16,9 @@ dismissed gauges; the gateway stats dashboard (``gateway/cluster/status.py``)
 applies the same arithmetic to the frontend-selected window, so the two
 surfaces agree class for class.
 
-The public seams are :func:`run_resolution_slice`, :func:`level_splits`,
-:func:`grouped_count_query`, and :func:`active_dismissals`; tests replace
-``_query_class_counts`` to cover the arithmetic without a Loki process.
+The counts are read from `telemetry_events` by :func:`class_counts`. The public seams are
+:func:`run_resolution_slice`, :func:`level_splits`, :func:`class_counts` and
+:func:`active_dismissals`.
 """
 
 from __future__ import annotations
@@ -32,15 +32,16 @@ from psycopg.rows import dict_row
 from psycopg_pool import ConnectionPool
 
 from base import telemetry
-from base.config import settings
-from base.telemetry.loki_index_labels import escape_logql_label
-from services.events_maintenance.rollup import _query_instant
+from services.events_maintenance.config import EventsMaintenanceConfig
 
 _log = logging.getLogger("services.events_maintenance.resolution")
 
-_UNRESOLVED_WINDOW = "6h"
-_BURST_WINDOW = "10m"
+_UNRESOLVED_WINDOW = timedelta(hours=6)
+_BURST_WINDOW = timedelta(minutes=10)
 _AUTO_SLICE = timedelta(hours=6)
+# The newest recorded event may lag now by this much before the counts are not trusted: a stalled
+# write path reads as an empty window, which must not be published as a recovery.
+_MAX_RECORD_LAG = timedelta(minutes=15)
 
 
 @dataclass(frozen=True)
@@ -100,60 +101,33 @@ class LevelSplit:
 _last_auto_dismiss_day: list[date | None] = [None]
 
 
-def grouped_count_query(window: str, *, cluster: str | None = None) -> str:
-    """One capped series aggregation for the event classes in ``window``.
+def class_counts(
+    conn: Any, *, start: datetime, end: datetime, cluster: str | None = None
+) -> dict[EventClass, int]:
+    """Counts of the warning, error and critical event classes over `(start, end]`.
 
-    Category/level/event-name stream-selector labels stayed out of the
-    selector until the label rollout's grace closed (2026-08-26): the legacy
-    chunks carried those values only in their JSON body, so filtering them in
-    the selector would have made active dismissals depend on a rollout
-    boundary (#1467).
-
-    ``cluster`` is an optional pipeline stage (``| cluster="X" or cluster=""``,
-    the same unlabeled-row acceptance the gateway's aggregate pipelines use)
-    — the daemon's fixed-window gauge pass leaves it unset, while the gateway
-    dashboard scopes its raw counts to the current home cluster. The
-    dismissal SET stays global either way, so the two surfaces cancel the
-    same classes (task #1935). ``process`` groups the emitting process; a row
-    whose body predates the dimension surfaces as the empty label and reads
-    as ``""`` (task #4329 B5).
+    Read from `telemetry_events`; `category` is always telemetry or log there. ``cluster``
+    keeps the rows of that cluster and the rows with no label (the same acceptance as the
+    other dashboard reads). The level predicate is a literal so the partial index on those
+    levels applies.
     """
-
-    pipeline = (
-        '{service_name="unknown_service"} | json | '
-        'category=~"telemetry|log" | level=~"warning|error|critical"'
-    )
+    query = """
+        SELECT category, level, event_name, source, process, count(*)
+        FROM telemetry_events
+        WHERE level IN ('warning', 'error', 'critical')
+          AND ts > %s AND ts <= %s
+    """
+    params: list[Any] = [start, end]
     if cluster is not None:
-        escaped = escape_logql_label(cluster)
-        pipeline += f' | cluster="{escaped}" or cluster=""'
-    return (
-        f"sum by (category, level, event_name, source, process) "
-        f"(count_over_time({pipeline} [{window}]))"
-    )
-
-
-def _query_class_counts(window: str, at: datetime) -> dict[EventClass, int]:
-    """Read one grouped Loki vector as exact event-class counts.
-
-    ``sum by`` gives one series per class via :func:`grouped_count_query` —
-    the same LogQL the gateway dashboard runs over its selected window, so a
-    class dismissed on one surface is subtracted identically on the other. A
-    malformed group is a read failure rather than a guessed class: emitting a
-    stale zero would make an unhealthy Loki side look resolved.
-    """
-
-    rows = _query_instant(grouped_count_query(window), at)
-    counts: dict[EventClass, int] = {}
-    for labels, value in rows:
-        event_class = EventClass(
-            category=labels["category"],
-            level=labels["level"],
-            event_name=labels["event_name"],
-            source=labels["source"],
-            process=labels.get("process", ""),
-        )
-        counts[event_class] = int(value)
-    return counts
+        query += " AND (cluster = %s OR cluster = '')"
+        params.append(cluster)
+    query += " GROUP BY category, level, event_name, source, process"
+    return {
+        EventClass(
+            category=row[0], level=row[1], event_name=row[2], source=row[3], process=row[4]
+        ): int(row[5])
+        for row in conn.execute(query, params).fetchall()
+    }
 
 
 def active_dismissals(conn: Any) -> list[Dismissal]:
@@ -161,7 +135,7 @@ def active_dismissals(conn: Any) -> list[Dismissal]:
 
     An empty ``process`` is a wildcard pattern; a concrete one targets a
     single emitting process (task #4329 B5). The v1 API rejects a non-NULL
-    agent_id rather than subtracting it from a class-wide Loki aggregate
+    agent_id rather than subtracting it from a class-wide count
     incorrectly; a manually inserted future per-agent row therefore remains
     visible in history but has no arithmetic effect until the query grouping
     grows that dimension.
@@ -235,28 +209,38 @@ def _insert_auto_dismissal(conn: Any, event_class: EventClass, days: int) -> boo
         return cur.fetchone() is not None
 
 
-def _stable_auto_classes(now: datetime, current: dict[EventClass, int]) -> set[EventClass]:
+def _stable_auto_classes(
+    now: datetime, conn: Any, current: dict[EventClass, int], config: EventsMaintenanceConfig
+) -> set[EventClass]:
     """Classes non-empty in every six-hour slice of the configured history.
 
     This is deliberately a small daily scan and default-off. It does not add a
-    second persistence table: the recent Loki window is the observed history,
-    and the partial unique index makes a restart's same-day repeat harmless.
+    second persistence table: the recorded history is the observation, and the
+    partial unique index makes a restart's same-day repeat harmless.
     """
 
-    if not settings.daemon.events_auto_dismiss_enabled:
+    if not config.events_auto_dismiss_enabled:
         return set()
     if _last_auto_dismiss_day[0] == now.date():
         return set()
 
-    slots = settings.daemon.events_auto_dismiss_days * 4
-    stable = {event_class for event_class, count in current.items() if count > 0}
-    for slot in range(1, slots):
-        observed = _query_class_counts(_UNRESOLVED_WINDOW, now - slot * _AUTO_SLICE)
-        stable &= {event_class for event_class, count in observed.items() if count > 0}
-        if not stable:
-            break
+    slots = config.events_auto_dismiss_days * 4
+    rows = conn.execute(
+        """
+        SELECT category, level, event_name, source, process
+        FROM telemetry_events
+        WHERE level IN ('warning', 'error', 'critical') AND ts > %s AND ts <= %s
+        GROUP BY category, level, event_name, source, process
+        HAVING count(DISTINCT floor(extract(epoch FROM (%s::timestamptz - ts)) / %s)) = %s
+        """,
+        (now - slots * _AUTO_SLICE, now, now, _AUTO_SLICE.total_seconds(), slots),
+    ).fetchall()
+    stable = {
+        EventClass(category=r[0], level=r[1], event_name=r[2], source=r[3], process=r[4])
+        for r in rows
+    }
     _last_auto_dismiss_day[0] = now.date()
-    return stable
+    return stable & {event_class for event_class, count in current.items() if count > 0}
 
 
 def _resolution_attributes(
@@ -347,7 +331,7 @@ def level_splits(counts: dict[EventClass, int], active: set[EventClass]) -> dict
     ``dismissed`` instead — an exact (process-scoped) row or a wildcard
     (``process=""``) row, see :func:`_is_dismissed`. Levels are ``"warning"``
     and ``"error"`` — ``critical`` classes fold into ``error`` exactly as the
-    Loki query's level domain (``warning|error|critical``) and the operator
+    count's level domain (``warning|error|critical``) and the operator
     gauges do, so the three-way split always sums to the raw level counts.
 
     This is the single arithmetic both the daemon's fixed-window gauges and
@@ -367,27 +351,46 @@ def level_splits(counts: dict[EventClass, int], active: set[EventClass]) -> dict
     return splits
 
 
-def run_resolution_slice(
-    pool: ConnectionPool, *, now: datetime | None = None
-) -> ResolutionResult | None:
-    """Run one fixed-window resolution pass, or return None when Loki is unsafe.
+def _read_window_counts(
+    pool: ConnectionPool, config: EventsMaintenanceConfig, at: datetime
+) -> tuple[dict[EventClass, int], dict[EventClass, int], set[EventClass]] | None:
+    """The six-hour and ten-minute class counts and the stable auto-dismiss classes at `at`,
+    or None when the newest recorded event is too old to trust an empty window."""
+    with pool.connection() as conn:
+        newest = conn.execute("SELECT max(ts) FROM telemetry_events").fetchone()
+        if newest is None or newest[0] is None or at - newest[0] > _MAX_RECORD_LAG:
+            _log.warning("telemetry_events is not current; resolution gauge not emitted")
+            return None
+        unresolved_counts = class_counts(conn, start=at - _UNRESOLVED_WINDOW, end=at)
+        burst_counts = class_counts(conn, start=at - _BURST_WINDOW, end=at)
+        return (
+            unresolved_counts,
+            burst_counts,
+            _stable_auto_classes(at, conn, unresolved_counts, config),
+        )
 
-    An empty six-hour result is deliberately not emitted as two zero gauges:
-    it is indistinguishable from a broken/empty query in this context, and a
-    stale last-good Prometheus value is more honest than a fabricated recovery.
+
+def run_resolution_slice(
+    pool: ConnectionPool, config: EventsMaintenanceConfig, *, now: datetime | None = None
+) -> ResolutionResult | None:
+    """Run one fixed-window resolution pass, or return None when the record is stale.
+
+    An empty six-hour result is a legitimate "no warnings or errors" when the record is
+    current, so the gauges are emitted; when the newest recorded event is older than
+    `_MAX_RECORD_LAG` the write path may be down and the window reads empty for that
+    reason, so no gauge is emitted (a stale last-good Prometheus value is more honest than
+    a fabricated recovery).
     """
 
     at = now or datetime.now(UTC)
     try:
-        unresolved_counts = _query_class_counts(_UNRESOLVED_WINDOW, at)
-        if not unresolved_counts:
-            _log.warning("resolution query returned no six-hour classes; gauge not emitted")
-            return None
-        burst_counts = _query_class_counts(_BURST_WINDOW, at)
-        auto_classes = _stable_auto_classes(at, unresolved_counts)
+        counts = _read_window_counts(pool, config, at)
     except Exception:
-        _log.warning("resolution Loki query failed; gauge not emitted", exc_info=True)
+        _log.warning("resolution query failed; gauge not emitted", exc_info=True)
         return None
+    if counts is None:
+        return None
+    unresolved_counts, burst_counts, auto_classes = counts
 
     reopened: list[tuple[Dismissal, int]] = []
     auto_dismissed: list[EventClass] = []
@@ -396,16 +399,15 @@ def run_resolution_slice(
         active_classes = {dismissal.event_class for dismissal in active}
         for dismissal in active:
             burst_count = _burst_count_for(dismissal.event_class, burst_counts)
-            if (
-                burst_count > settings.daemon.events_resolution_burst_threshold
-                and _reopen_for_burst(conn, dismissal, burst_count)
+            if burst_count > config.events_resolution_burst_threshold and _reopen_for_burst(
+                conn, dismissal, burst_count
             ):
                 reopened.append((dismissal, burst_count))
                 active_classes.discard(dismissal.event_class)
         for event_class in auto_classes:
             if _is_dismissed(event_class, active_classes):
                 continue
-            if _insert_auto_dismissal(conn, event_class, settings.daemon.events_auto_dismiss_days):
+            if _insert_auto_dismissal(conn, event_class, config.events_auto_dismiss_days):
                 auto_dismissed.append(event_class)
                 active_classes.add(event_class)
         conn.commit()
@@ -413,7 +415,7 @@ def run_resolution_slice(
     for dismissal, burst_count in reopened:
         _emit_reopened(dismissal, burst_count)
     for event_class in auto_dismissed:
-        _emit_auto_resolved(event_class, settings.daemon.events_auto_dismiss_days)
+        _emit_auto_resolved(event_class, config.events_auto_dismiss_days)
 
     splits = level_splits(unresolved_counts, active_classes)
     warning = splits.get("warning", LevelSplit(0, 0, 0))
@@ -427,7 +429,7 @@ def run_resolution_slice(
             "unresolved_errors": error.net,
             "dismissed_warnings": warning.dismissed,
             "dismissed_errors": error.dismissed,
-            "window": _UNRESOLVED_WINDOW,
+            "window": "6h",
         },
     )
     return ResolutionResult(

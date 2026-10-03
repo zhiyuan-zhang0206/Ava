@@ -21,7 +21,7 @@ def test_draft_spawns_ava_guide_agent(
     calls: dict[str, object] = {}
 
     async def _fake_create_launch(
-        body: SpawnAgentRequest, target: str, pool: object
+        body: SpawnAgentRequest, target: str, pool: object, db: object, bus: object
     ) -> SpawnedAgent:
         calls["label"] = body.label
         calls["prompt"] = body.prompt

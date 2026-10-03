@@ -51,12 +51,13 @@ from base.agents import AvaAgentError, ResurrectRefused
 from base.cluster.machine import machine_name
 from base.cluster.transport_encryption import verify_transport_encryption
 from base.config import settings
-from base.daemon.health import health_port, start_health_server, stop_health_server
+from base.daemon.endpoints import ServiceEndpoint, ServiceEndpoints
+from base.daemon.health import start_health_server, stop_health_server
+from base.daemon.loop_health import LivenessGroup
 from base.daemon.shutdown import cancel_and_drain, install_graceful_shutdown
 from base.daemon.shutdown import hard_exit as _hard_exit
 from base.db.transaction import write_transaction
 from base.log import init_gateway_process
-from base.paths import pid_path
 
 # The synchronous op arms and the op modules they call live in
 # `services.agent_ops.dispatch_sync` (split at the file-size ceiling, task
@@ -75,7 +76,7 @@ from ops.rpc_schemas import (
     OpEnvelope,
     is_op_kind,
 )
-from services.agent_ops import close_notices, health, outbox_flusher
+from services.agent_ops import health, outbox_flusher
 from services.agent_ops import maintenance as maintenance_activity
 from services.agent_ops._boot import (
     _open_db_pool,
@@ -89,8 +90,12 @@ from services.pidfile import acquire_pidfile, pidfile_holds_daemon, remove_pidfi
 _log = logging.getLogger("services.agent_ops.daemon")
 
 
+def _endpoint() -> ServiceEndpoint:
+    return ServiceEndpoints.from_settings().of("ops")
+
+
 def _pidfile() -> Path:
-    return pid_path("ops")
+    return _endpoint().pidfile
 
 
 # ── Idempotency-key dedup (Task #961) ────────────────────────────────────────
@@ -477,13 +482,13 @@ async def _main() -> None:
 
     pool = _open_db_pool()
     _db_pool = pool
-    # Flush shell-closure notices the previous stop journaled (issue #2044) —
-    # the first moment the DB is reachable again. Never fatal.
-    close_notices.start(pool)
     # Redeliver recorded delivery failures whenever the data plane allows
-    # (task #3757): a daemon-lifetime loop that outlives every sender process.
-    # Never fatal; a failed initial config read only skips the loop.
-    outbox_flusher.start(pool)
+    # (task #3757): a resident loop that outlives every sender process, owned with
+    # the server by the TaskGroup below.
+    liveness = LivenessGroup()
+    outbox_progress = liveness.register(
+        "delivery-outbox", outbox_flusher.INITIAL_LIVENESS_TIMEOUT_S
+    )
 
     try:
         # Every /ops dial presents a machine API token of this generation; an
@@ -492,10 +497,13 @@ async def _main() -> None:
         bind_host = _ops_bind_host(acceptance)
         if bind_host != "127.0.0.1":
             verify_transport_encryption(bind_host, authenticated=acceptance is not None)
+        endpoint = _endpoint()
         server = await start_health_server(
             "ops",
+            endpoint.health_port,
             host=bind_host,
             extra_routes={("POST", "/ops"): _ops_route},
+            liveness=liveness,
             components=lambda: health.ops_components(_active_ops),
             extra=lambda: {
                 "maintenance": maintenance_activity.progress(),
@@ -509,18 +517,19 @@ async def _main() -> None:
             "ava-ops up, machine=%s serving POST /ops on %s:%d",
             our_machine,
             bind_host,
-            health_port("ops"),
+            endpoint.health_port,
         )
         _register_boot()
         try:
-            async with server:
-                await server.serve_forever()
+            # One TaskGroup owns the server and the outbox loop: a loop that raises
+            # cancels the server and ends the process, and the supervisor restarts it.
+            async with server, asyncio.TaskGroup() as resident:
+                resident.create_task(server.serve_forever())
+                resident.create_task(outbox_flusher.outbox_loop(pool, outbox_progress))
         finally:
             await stop_health_server(server)
             _remove_pidfile()
     finally:
-        close_notices.stop()
-        outbox_flusher.stop()
         pool.close()
         _db_pool = None
         _dispatch_sem = None

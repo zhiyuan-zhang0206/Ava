@@ -117,7 +117,7 @@ def hosting_supervised_session() -> str | None:
 # `agent.exec_owner_child` as the root (`agent/exec_domain_owner.py`), which
 # runs the same payload via `runpy` in-process. Compared as whole argv
 # elements: the token is one exact argument, never a substring.
-_EXEC_DOMAIN_SESSION_ENTRIES = frozenset({"agent.exec_child", "agent.exec_owner_child"})
+EXEC_DOMAIN_SESSION_ENTRIES = frozenset({"agent.exec_child", "agent.exec_owner_child"})
 
 
 def hosting_exec_domain() -> str | None:
@@ -148,7 +148,7 @@ def hosting_exec_domain() -> str | None:
     if cmdline is None:
         return None
     for argument in cmdline:
-        if argument in _EXEC_DOMAIN_SESSION_ENTRIES:
+        if argument in EXEC_DOMAIN_SESSION_ENTRIES:
             return argument
     return None
 
