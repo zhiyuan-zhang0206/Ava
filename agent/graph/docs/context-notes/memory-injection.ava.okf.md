@@ -26,8 +26,7 @@ Context]] for the registry itself.
 - **Per-agent memory** (rank 40; workspace `memory/` dir: `memory/MEMORY.md`
   index, entries as sibling files read on demand) —
   `settings.agent.memory_per_agent_inject_enabled`, `on_fork`. Empty index
-  created if missing; a legacy single-file `<workspace>/MEMORY.md` migrates in
-  on first injection, never overwriting. **Only the index is injected**; past
+  created if missing. **Only the index is injected**; past
   `memory_per_agent_index_max_lines` (default 200, 0=off) a maintenance
   reminder is appended — no truncation.
 - **Inherited memory** (rank 45; `inherit.py`): the `inheritable` blocks an
