@@ -74,6 +74,7 @@ import re
 import sys
 from collections import defaultdict
 from pathlib import Path
+from typing import Any
 
 import yaml
 
@@ -515,28 +516,11 @@ def _duplicate_header_errors(path_str: str, text: str, fm_end_line: int) -> list
     return errors
 
 
-def lint_file(filepath: Path, all_paths: set[str], repo_root: Path) -> list[LintError]:
-    errors = []
-    path_str = str(filepath)
-
-    # Rule 1: file extension
-    if not filepath.name.endswith(".ava.okf.md"):
-        errors.append(LintError(path_str, 1, "E001", "File must end with .ava.okf.md"))
-        return errors
-
-    # Rules 9 + 14: where the node sits.
-    errors.extend(_placement_errors(filepath, repo_root, all_paths))
-
-    try:
-        text = filepath.read_text(encoding="utf-8")
-    except Exception as e:
-        errors.append(LintError(path_str, 1, "E000", f"Cannot read file: {e}"))
-        return errors
-
-    # Rule 7: file size
+def _size_errors(path_str: str, filepath: Path, text: str, rel_path: str) -> list[LintError]:
+    """Rules 7 + 10: the node is under the size ceiling, with a warning on approach."""
+    errors: list[LintError] = []
     line_count = text.count("\n") + 1
     char_count = len(text)
-    rel_path = _repo_rel(filepath, repo_root)
     stem = filepath.name[: -len(".ava.okf.md")]
     hint = _SPLIT_HINT.format(stem=stem, home=_split_home(rel_path, stem))
     if line_count > MAX_LINES:
@@ -571,17 +555,12 @@ def lint_file(filepath: Path, all_paths: set[str], repo_root: Path) -> list[Lint
                 f"section as its own node rather than trimming this one. {hint}",
             )
         )
+    return errors
 
-    # Parse frontmatter
-    fm, body, fm_end_line = parse_frontmatter(text)
-    if not fm:
-        errors.append(
-            LintError(
-                path_str, 1, "E002", "Missing or invalid YAML frontmatter (must start with ---)"
-            )
-        )
-        return errors  # can't validate further
 
+def _required_field_errors(path_str: str, fm: dict[str, Any]) -> list[LintError]:
+    """Rules 2 + 3 + 4: frontmatter type, title and description."""
+    errors: list[LintError] = []
     # Rule 2: type
     fm_type = fm.get("type")
     if not fm_type:
@@ -606,6 +585,41 @@ def lint_file(filepath: Path, all_paths: set[str], repo_root: Path) -> list[Lint
                 path_str, 1, "E004", "frontmatter 'description' is required and must be non-empty"
             )
         )
+    return errors
+
+
+def lint_file(filepath: Path, all_paths: set[str], repo_root: Path) -> list[LintError]:
+    errors = []
+    path_str = str(filepath)
+
+    # Rule 1: file extension
+    if not filepath.name.endswith(".ava.okf.md"):
+        errors.append(LintError(path_str, 1, "E001", "File must end with .ava.okf.md"))
+        return errors
+
+    # Rules 9 + 14: where the node sits.
+    errors.extend(_placement_errors(filepath, repo_root, all_paths))
+
+    try:
+        text = filepath.read_text(encoding="utf-8")
+    except Exception as e:
+        errors.append(LintError(path_str, 1, "E000", f"Cannot read file: {e}"))
+        return errors
+
+    rel_path = _repo_rel(filepath, repo_root)
+    errors.extend(_size_errors(path_str, filepath, text, rel_path))
+
+    # Parse frontmatter
+    fm, body, fm_end_line = parse_frontmatter(text)
+    if not fm:
+        errors.append(
+            LintError(
+                path_str, 1, "E002", "Missing or invalid YAML frontmatter (must start with ---)"
+            )
+        )
+        return errors  # can't validate further
+
+    errors.extend(_required_field_errors(path_str, fm))
 
     # Rules 5 + 6: tags format, forbidden keys
     errors.extend(_tags_errors(path_str, fm))
@@ -623,6 +637,24 @@ def lint_file(filepath: Path, all_paths: set[str], repo_root: Path) -> list[Lint
     errors.extend(_duplicate_header_errors(path_str, text, fm_end_line))
 
     return errors
+
+
+def _report(all_errors: dict[str, list[LintError]], repo_root: Path, n_files: int) -> int:
+    """Print every finding, per file; the error count (warnings excluded)."""
+    error_count = sum(1 for errs in all_errors.values() for e in errs if e.code.startswith("E"))
+    warn_count = sum(1 for errs in all_errors.values() for e in errs if e.code.startswith("W"))
+
+    for path, errs in sorted(all_errors.items()):
+        if not errs:
+            continue
+        rel = os.path.relpath(path, repo_root)
+        print(f"\n{rel}:")
+        for e in errs:
+            prefix = "  [ERR]" if e.code.startswith("E") else "  [WARN]"
+            print(f"{prefix} {e.code}: {e.msg}")
+
+    print(f"\n───\n{n_files} files checked, {error_count} error(s), {warn_count} warning(s)")
+    return error_count
 
 
 def main():
@@ -654,20 +686,7 @@ def main():
         errs = lint_file(f, all_paths, repo_root)
         all_errors[str(f)].extend(errs)
 
-    # Report
-    error_count = sum(1 for errs in all_errors.values() for e in errs if e.code.startswith("E"))
-    warn_count = sum(1 for errs in all_errors.values() for e in errs if e.code.startswith("W"))
-
-    for path, errs in sorted(all_errors.items()):
-        if not errs:
-            continue
-        rel = os.path.relpath(path, repo_root)
-        print(f"\n{rel}:")
-        for e in errs:
-            prefix = "  [ERR]" if e.code.startswith("E") else "  [WARN]"
-            print(f"{prefix} {e.code}: {e.msg}")
-
-    print(f"\n───\n{len(files)} files checked, {error_count} error(s), {warn_count} warning(s)")
+    error_count = _report(all_errors, repo_root, len(files))
 
     if error_count > 0:
         sys.exit(1)
