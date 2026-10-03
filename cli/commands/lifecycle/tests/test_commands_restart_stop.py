@@ -17,6 +17,7 @@ import cli.commands.lifecycle.root_driver as _root_driver_commands
 import cli.commands.lifecycle.start as _start_commands
 import cli.commands.lifecycle.stop as _stop_commands
 from base.deploy.lifecycle.start_serving import RootBirth
+from base.sessions.pty.paths import SERVICE_UNIT
 from cli.commands.lifecycle.stop import _force_stop
 from cli.tests._commands_helpers import (
     _FakeResponse,
@@ -117,7 +118,7 @@ def _root_stop_boundary(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(_root_driver_commands, "_root_tree_plan", lambda _preserve: [])  # pyright: ignore[reportUnknownArgumentType] — untyped test double
     monkeypatch.setattr(_root_driver_commands, "stop_root_service_tree", lambda **_kwargs: 0)  # pyright: ignore[reportUnknownArgumentType] — untyped test double
     monkeypatch.setattr(_stop_commands, "_reap_cluster_chrome", lambda: None)
-    monkeypatch.setattr("cli.commands.lifecycle.stop._stop_terminals_force", lambda: None)
+    monkeypatch.setattr("cli.commands.lifecycle.stop.force_close_terminals", lambda: None)
 
 
 # ─── restart ─────────────────────────────────────────────────────────────────
@@ -156,15 +157,16 @@ def test_cmd_restart_calls_stop_then_start(monkeypatch: pytest.MonkeyPatch) -> N
         require_confirmation,
         keep_infra=False,
         keep_browser=True,
-        reap_agents=True,
+        preserve_sessions=frozenset(),
         teardown_extras=True,
         force=False,
     ) -> int:
         assert require_confirmation is False, "cmd_restart must skip stdin confirmation"
         assert force is False
-        assert keep_browser is True and reap_agents is False and teardown_extras is False, (
-            "a restart keeps the browser, persistent terminals, Gate/helper/LGTM"
+        assert keep_browser is True and teardown_extras is False, (
+            "a restart keeps the browser and Gate/helper/LGTM"
         )
+        assert preserve_sessions == frozenset(), "a restart closes the terminals as a stop does"
         assert keep_infra is True, (
             "an internal restart must keep the shared pg/redis up — stopping the "
             "data plane kills the orchestrator's DB polling mid-rollout"
@@ -329,20 +331,27 @@ def test_stop_aborts_on_no(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_stop_proceeds_on_yes(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Confirmed force stop asks root before stopping the private data plane."""
+    """A confirmed force stop stops the services but keeps the pty-sessions service,
+    closes the terminals through it, then stops the service, and only then the
+    private data plane."""
     events: list[str] = []
     monkeypatch.setattr("builtins.input", lambda _prompt: "y")  # pyright: ignore[reportUnknownArgumentType] — untyped test double
     monkeypatch.setattr(
         _root_driver_commands,
         "stop_root_service_tree",
-        lambda **_kw: events.append("root"),  # pyright: ignore[reportUnknownArgumentType] — untyped test double
+        lambda **kw: events.append(  # pyright: ignore[reportUnknownArgumentType] — untyped test double
+            "root+terminal-service" if SERVICE_UNIT in kw["preserve"] else "root"
+        ),
+    )
+    monkeypatch.setattr(
+        "cli.commands.lifecycle.stop.force_close_terminals", lambda: events.append("terminals")
     )
     monkeypatch.setattr(
         "cli.commands.data_plane.cluster_instance.stop_cluster_instance",
         lambda: events.append("infra") or 0,
     )
     assert _stop_commands.cmd_stop(force=True) == 0
-    assert events == ["root", "infra"]
+    assert events == ["root+terminal-service", "terminals", "root", "infra"]
 
 
 def test_stop_revokes_serving_before_stopping_root(
@@ -361,7 +370,7 @@ def test_stop_revokes_serving_before_stopping_root(
     )
     monkeypatch.setattr("cli.commands.data_plane.cluster_instance.stop_cluster_instance", lambda: 0)
     assert _force_stop(tmp_path, require_confirmation=False) == 0
-    assert observed == [False]
+    assert observed == [False, False], "serving is revoked before either root stop"
 
 
 def test_do_stop_keep_infra_skips_infra_teardown(
@@ -378,7 +387,7 @@ def test_do_stop_keep_infra_skips_infra_teardown(
         lambda: events.append("infra") or 0,
     )
     assert _force_stop(tmp_path, require_confirmation=False, keep_infra=True) == 0
-    assert events == ["root"]
+    assert events == ["root", "root"], "the services, then the pty-sessions service"
 
 
 def test_do_stop_keeps_browser_by_default(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -392,16 +401,45 @@ def test_do_stop_keeps_browser_by_default(monkeypatch: pytest.MonkeyPatch, tmp_p
     monkeypatch.setattr(_stop_commands, "_reap_cluster_chrome", lambda: reaps.append(1))
     monkeypatch.setattr("cli.commands.data_plane.cluster_instance.stop_cluster_instance", lambda: 0)
     assert _force_stop(tmp_path, require_confirmation=False) == 0
-    assert calls == [{"preserve": frozenset({"browser"}), "force": True}]
+    assert calls == [
+        {"preserve": frozenset({"browser", SERVICE_UNIT}), "force": True},
+        {"preserve": frozenset({"browser"}), "force": True},
+    ], "the pty-sessions service outlives the services step and is stopped after the terminals"
     assert reaps == []
+
+
+def test_force_stop_keeping_the_pty_sessions_service_closes_no_terminals(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """`--keep-service pty-sessions` keeps the terminals it holds: one services step,
+    no terminal closure, no second stop of the service."""
+    calls: list[dict[str, object]] = []
+    monkeypatch.setattr(
+        _root_driver_commands,
+        "stop_root_service_tree",
+        lambda **kw: calls.append(kw),  # pyright: ignore[reportUnknownArgumentType] — untyped test double
+    )
+
+    def closed() -> None:
+        raise AssertionError("a kept service's terminals must not be closed")
+
+    monkeypatch.setattr("cli.commands.lifecycle.stop.force_close_terminals", closed)
+    monkeypatch.setattr("cli.commands.data_plane.cluster_instance.stop_cluster_instance", lambda: 0)
+    assert (
+        _force_stop(
+            tmp_path, require_confirmation=False, preserve_sessions=frozenset({SERVICE_UNIT})
+        )
+        == 0
+    )
+    assert calls == [{"preserve": frozenset({"browser", SERVICE_UNIT}), "force": True}]
 
 
 def test_do_stop_stop_browser_kills_it(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     events: list[str] = []
 
     def stop_root(**kwargs: object) -> None:
-        assert kwargs == {"preserve": frozenset(), "force": True}
-        events.append("root")
+        assert kwargs["force"] is True
+        events.append("root+terminal-service" if SERVICE_UNIT in kwargs["preserve"] else "root")  # pyright: ignore[reportOperatorIssue]
 
     monkeypatch.setattr(_root_driver_commands, "stop_root_service_tree", stop_root)
     monkeypatch.setattr(_stop_commands, "_reap_cluster_chrome", lambda: events.append("browser"))
@@ -410,7 +448,7 @@ def test_do_stop_stop_browser_kills_it(monkeypatch: pytest.MonkeyPatch, tmp_path
         lambda: events.append("infra") or 0,
     )
     assert _force_stop(tmp_path, require_confirmation=False, keep_browser=False) == 0
-    assert events == ["root", "browser", "infra"]
+    assert events == ["root+terminal-service", "browser", "root", "infra"]
 
 
 def test_reap_cluster_chrome_reports_pids_and_survives_a_failure(

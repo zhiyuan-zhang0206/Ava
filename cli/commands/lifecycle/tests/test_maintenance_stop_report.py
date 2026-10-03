@@ -1,16 +1,15 @@
 """What a terminal closure leaves: survivors keep their native identity and diagnostics.
 
-A normal stop SIGKILLs what outlives its grace, so a survivor here is a process
-the stop may not signal (another user's); `_unkillable` stands in for one. A
-PTY host its closed session left running is SIGKILLed rather than reported.
+A normal stop SIGKILLs what outlives its grace, so a survivor here is a process the
+closure may not signal (another user's); `stub_closure` stands in for the service's
+closure reporting one. The stop turns the survivors of an outcome into the failure
+report and the journal's structured inventory.
 """
 
 from __future__ import annotations
 
 import json
 import os
-import signal
-import subprocess
 import sys
 import time
 from pathlib import Path
@@ -22,32 +21,25 @@ import pytest
 from base.deploy.lifecycle import status_journal
 from base.native_process import ownership
 from base.native_process.ownership import OwnedProcess
-from base.sessions.record import SessionRecord
+from base.sessions.pty import closure
 from cli.commands.lifecycle import _maintenance_stop_report as report
 from cli.commands.lifecycle import _temporary_stop as command
 from cli.commands.lifecycle import service_stop as stop
-from cli.commands.lifecycle.tests.stop_support import Launcher
+from cli.commands.lifecycle.tests.stop_support import (
+    Launcher,
+    closed_session,
+    identity_of,
+    stub_closure,
+)
 from cli.commands.lifecycle.tests.stop_support import home as home
 from cli.commands.lifecycle.tests.stop_support import launch as launch
-from cli.commands.lifecycle.tests.test_stop_terminals import _unkillable
+from cli.commands.lifecycle.tests.stop_support import written as written
 from tests.agent.test_maintenance import WHEN
 
-pytestmark = pytest.mark.skipif(sys.platform == "win32", reason="real POSIX signal contract")
-
-
-def _terminal(
-    home: Path, process: subprocess.Popen[str], monkeypatch: pytest.MonkeyPatch
-) -> OwnedProcess:
-    identity = OwnedProcess.capture(psutil.Process(process.pid))
-    SessionRecord(
-        identity.pid, identity.birth, "private-terminal", str(home), time.time(), identity.starttime
-    ).write(home / "run/pty/private-terminal.json")
-    monkeypatch.setattr(
-        stop,
-        "get_shell_backend",
-        lambda: SimpleNamespace(list_sessions=lambda: ["private-terminal"]),
-    )
-    return identity
+pytestmark = [
+    pytest.mark.skipif(sys.platform == "win32", reason="real POSIX signal contract"),
+    pytest.mark.usefixtures("written"),
+]
 
 
 def test_terminal_survivor_names_itself_and_persists_exact_inventory(
@@ -61,8 +53,11 @@ def test_terminal_survivor_names_itself_and_persists_exact_inventory(
         "import signal,time; signal.signal(signal.SIGHUP,signal.SIG_IGN); "
         "signal.signal(signal.SIGTERM,signal.SIG_IGN); print('ready',flush=True); time.sleep(60)",
     )
-    identity = _terminal(home, process, monkeypatch)
-    _unkillable(monkeypatch)
+    identity = identity_of(process)
+    stub_closure(
+        monkeypatch,
+        closure.Outcome(survivors=(closure.Survivor("private-terminal", identity, "terminal"),)),
+    )
     assert status_journal.begin("stop")
     with pytest.raises(report.StopIncompleteError) as caught:
         stop.close_terminals(time.monotonic() + 0.25, "private-stop", WHEN, direct_db=False)
@@ -86,9 +81,11 @@ def test_terminal_survivor_names_itself_and_persists_exact_inventory(
     assert f"pid={identity.pid}" in capsys.readouterr().err
 
 
-def test_report_keeps_owned_job_after_shell_exits(
+def test_report_keeps_owned_job_of_a_closed_session(
     home: Path, launch: Launcher, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """The session's shell is gone but a job outlived the SIGKILL: the report names the
+    job, its role and its session."""
     armed = home / "job-armed"
     child_code = (
         "import signal,time,pathlib; signal.signal(signal.SIGTERM,signal.SIG_IGN); "
@@ -99,8 +96,6 @@ def test_report_keeps_owned_job_after_shell_exits(
         f"import subprocess,sys,time; subprocess.Popen([sys.executable,'-c',{child_code!r}]); "
         "print('ready',flush=True); time.sleep(60)",
     )
-    _terminal(home, parent, monkeypatch)
-    _unkillable(monkeypatch)
     deadline = time.monotonic() + 5
     while not armed.exists():
         assert time.monotonic() < deadline
@@ -108,49 +103,21 @@ def test_report_keeps_owned_job_after_shell_exits(
     children = psutil.Process(parent.pid).children()
     assert len(children) == 1
     child = OwnedProcess.capture(children[0])
-    try:
-        with pytest.raises(report.StopIncompleteError) as caught:
-            stop.close_terminals(time.monotonic() + 0.35, "private-stop", WHEN, direct_db=False)
-        assert parent.wait(timeout=5) == -signal.SIGHUP
-        assert child.live()
-        assert len(caught.value.survivors) == 1
-        survivor = caught.value.survivors[0]
-        assert survivor["pid"] == child.pid
-        assert survivor["role"] == "job" and survivor["service"] == "private-terminal"
-        assert str(armed) in str(survivor["cmdline"])
-    finally:
-        child.send_signal(signal.SIGKILL)
-
-
-def test_closure_sigkills_a_pty_host_its_closed_session_left_running(
-    home: Path, launch: Launcher, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """A host ends on its own once its shell is gone; one still running after
-    the closure's bound is wedged and gets SIGKILL to its captured birth, so the
-    closure completes instead of reporting a live terminal."""
-    shell = launch("private-terminal", "import time; print('ready',flush=True); time.sleep(60)")
-    wedged = launch(
-        "private-host",
-        "import signal,time; signal.signal(signal.SIGHUP,signal.SIG_IGN); "
-        "signal.signal(signal.SIGTERM,signal.SIG_IGN); print('ready',flush=True); time.sleep(60)",
+    stub_closure(
+        monkeypatch,
+        closure.Outcome(
+            closed=(closed_session("private-terminal", ((child.pid, "python"),)),),
+            survivors=(closure.Survivor("private-terminal", child, "job"),),
+        ),
     )
-    identity = _terminal(home, shell, monkeypatch)
-    host = OwnedProcess.capture(psutil.Process(wedged.pid))
-    path = home / "run/pty/private-terminal.json"
-    record = json.loads(path.read_text())
-    record |= {
-        "host_pid": host.pid,
-        "host_create_time": host.birth,
-        "host_starttime": host.starttime,
-    }
-    path.write_text(json.dumps(record))
-    listed = SimpleNamespace(list_sessions=lambda: ["private-terminal"] if identity.live() else [])
-    monkeypatch.setattr(stop, "get_shell_backend", lambda: listed)
-    monkeypatch.setattr(stop, "_TERMINAL_KILL_WAIT_S", 0.3)
-
-    stop.close_terminals(time.monotonic() + 5, "private-stop", WHEN, direct_db=False)
-    assert shell.wait(timeout=5) == -signal.SIGHUP
-    assert wedged.wait(timeout=5) == -signal.SIGKILL
+    with pytest.raises(report.StopIncompleteError) as caught:
+        stop.close_terminals(time.monotonic() + 0.35, "private-stop", WHEN, direct_db=False)
+    assert child.live()
+    assert len(caught.value.survivors) == 1
+    survivor = caught.value.survivors[0]
+    assert survivor["pid"] == child.pid
+    assert survivor["role"] == "job" and survivor["service"] == "private-terminal"
+    assert str(armed) in str(survivor["cmdline"])
 
 
 def test_report_reuses_the_native_birth_rule(monkeypatch: pytest.MonkeyPatch) -> None:

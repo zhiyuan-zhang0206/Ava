@@ -102,8 +102,9 @@ context for compaction and to END for idle or lifecycle control. Routing uses
 - `agent/graph/exec/node.py` runs `execute_code` in a disposable subprocess with an
   owned POSIX process group or Windows Job Object. Cleanup reaps its child and
   joins the output reader; this isolation is independent of host scheduling.
-- Persistent shell sessions run in their own PTY hosts and survive normal agent
-  restart and cluster pause. Full cluster stop closes them.
+- Persistent shell sessions are held by the machine's `pty-sessions` service and
+  survive normal agent restart and cluster pause. `ava stop` and `ava restart`
+  close them.
 
 ## Related contracts
 

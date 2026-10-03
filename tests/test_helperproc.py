@@ -292,66 +292,6 @@ def test_permissions_helper_spawn_defaults_off() -> None:
     }
 
 
-def test_pty_host_uses_direct_helper_child_when_enabled(
-    unit_home: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    from base.sessions import backend as session_backend
-    from base.sessions.pty import cli
-
-    calls: list[dict[str, object]] = []
-
-    def fake_spawn_via_helper(
-        name: str,
-        argv: list[str],
-        cwd: Path,
-        *,
-        env: dict[str, str],
-        stdout: Path,
-        stderr: Path,
-    ) -> int:
-        calls.append(
-            {
-                "name": name,
-                "argv": argv,
-                "cwd": cwd,
-                "env": env,
-                "stdout": stdout,
-                "stderr": stderr,
-            }
-        )
-        return os.getpid()
-
-    monkeypatch.setattr(session_backend, "helper_spawn_enabled", lambda: True)
-    monkeypatch.setattr(helperproc, "spawn_via_helper", fake_spawn_via_helper)
-    monkeypatch.setattr(cli, "session_request", lambda *_args: {"ok": True})
-    monkeypatch.setattr(
-        cli.subprocess,
-        "run",
-        lambda *_args, **_kwargs: pytest.fail("helper mode must not invoke _reparent"),
-    )
-    envfile = unit_home / "env.sh"
-
-    assert cli._spawn_host("ava-shell", str(unit_home), str(envfile), "gen-1", "") == 0
-    assert len(calls) == 1
-    call = calls[0]
-    assert call["name"] == "pty-host-ava-shell"
-    assert call["argv"] == [
-        sys.executable,
-        "-m",
-        "base.sessions.pty.host",
-        "ava-shell",
-        str(unit_home),
-        str(envfile),
-        str(cli.record_path("ava-shell")),
-        str(cli.socket_path("ava-shell")),
-        str(cli.transcript_path("ava-shell")),
-        "gen-1",
-    ]
-    assert call["cwd"] == unit_home
-    assert call["stdout"] == unit_home / "logs" / "ava-shell.host.log"
-    assert call["stderr"] == unit_home / "logs" / "ava-shell.host.log"
-
-
 def test_parent_chain_guard_allows_unmanaged_and_rejects_malformed_markers(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

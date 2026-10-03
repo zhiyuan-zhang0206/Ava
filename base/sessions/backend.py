@@ -3,7 +3,7 @@
 - ``get_backend()`` — the **service/daemon** backend: ``HelperProcSessionBackend``
   on macOS when helper spawning is enabled; otherwise ``PosixProcSessionBackend``.
 - ``get_shell_backend()`` — agent interactive shells / watchers:
-  ``PtySessionBackend`` (one detached host per session). Never addresses service sessions.
+  ``PtySessionBackend`` (the pty-sessions service). Never addresses service sessions.
 
 Platform supervisor imports are method-local so selecting one backend does not
 import every implementation.
@@ -12,20 +12,16 @@ import every implementation.
 from __future__ import annotations
 
 import abc
-import base64
 import logging
-import os
-import re
 import shlex
-import subprocess
-import sys
-import uuid
+from collections.abc import Callable
 from pathlib import Path
-from typing import Protocol, cast
+from typing import Any, Protocol, cast
 
-# ruff: noqa: S603 — subprocess calls use repo-internal literal args
 from base.native_process.os_platform import IS_MACOS
-from base.paths import logs_dir, run_dir
+from base.paths import logs_dir
+from base.sessions.pty import client
+from base.sessions.pty.keys import keys_to_bytes
 from base.sessions.record import SessionRecord
 
 _log = logging.getLogger(__name__)
@@ -249,7 +245,7 @@ class PosixProcSessionBackend(SessionBackend):
 
     PTY methods raise ``NotImplementedError`` — the native backend allocates no
     terminal; interactive shells (ava.shell.sessions, watchers) live in
-    detached per-session hosts via ``get_shell_backend()``.
+    the pty-sessions service via ``get_shell_backend()``.
 
     Each method imports ``posixproc`` locally rather than at module scope — see
     the module docstring.
@@ -328,58 +324,30 @@ class PosixProcSessionBackend(SessionBackend):
         return posixproc.session_log_path(name)
 
 
-# ── POSIX: per-session PTY hosts ───────────────────────────────────────────
-_PTY_CLI = "base.sessions.pty.cli"  # python -m <this> <name> <op> [args]
-_ENV_KEY_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")  # env keys a POSIX shell can assign
-
-
-def _write_session_env_file(env: dict[str, str]) -> Path:
-    """Fresh 0600 env handoff file the per-session host sources."""
-
-    directory = run_dir() / "session-env"
-    directory.mkdir(parents=True, exist_ok=True)
-    directory.chmod(0o700)
-    body = ""
-    for key, value in sorted(env.items()):
-        if not _ENV_KEY_RE.fullmatch(key):
-            continue
-        if "\0" in value:
-            raise RuntimeError(f"env {key} value contains \\0 and cannot be forwarded")
-        body += f"{key}={shlex.quote(value)}\n"
-    path = directory / f"{uuid.uuid4().hex}.env.sh"
-    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-    with os.fdopen(fd, "w", encoding="utf-8") as handle:
-        handle.write(body)
-    return path
+# ── POSIX: the pty-sessions service ────────────────────────────────────────
 
 
 class PtySessionBackend(SessionBackend):
     """POSIX backend for agent interactive shells / watchers — what
     ``get_shell_backend()`` returns on POSIX. Each session is an interactive
-    login shell (``bash -l -i``, the classic pane shape) carried by its own
-    detached host process (``base.sessions.pty.host``), so no infra process
-    holds every shell and sessions persist across agent exits, restarts, and
-    cluster updates. ``cmd`` is submitted after the shell is ready;
-    ``login_shell=False`` raises ``NotImplementedError``. Env rides a 0600
-    file, never argv (#974). Omitted env uses the standard projection, with
-    venv activation only for cwd inside this checkout (excluding worktrees).
-    The host clears inherited VIRTUAL_ENV before applying that projection.
-    Liveness ops map the CLI exit status to the interface's bool/tuple/list
-    shape; the enumeration ops read the session records in-process (no
-    subprocess, no socket — task #1200's snapshot-cost fix, now structural).
+    login shell (``bash -l -i``, the classic pane shape) held by the machine's
+    pty-sessions service (``services.pty_sessions``), a roster service, so a
+    session persists across agent exits and agent-host restarts, and a service
+    stop closes it. ``cmd`` is submitted after the shell is ready;
+    ``login_shell=False`` raises ``NotImplementedError``. The shell's environment
+    is the service's own overlaid with ``env`` (omitted: the standard projection,
+    with venv activation only for cwd inside this checkout), sent in the request
+    body of a 0600 socket, never on an argv (#974).
 
-    The mutating ops keep the CLI-subprocess shape rather than importing the
-    pty package's internals: ``new`` must outlive nothing (the host detaches
-    itself), and the subprocess boundary keeps this module import-light.
+    Every call is one short connection to the service (``base.sessions.pty.client``),
+    so a restarted agent simply dials again. A service that is not running holds no
+    sessions: the queries answer none and ``kill`` is a noop; ``new``, ``send`` and
+    ``capture`` raise ``RuntimeError``. The interface's bool/tuple/list shapes are
+    mapped from the service's answers.
     """
 
-    def _cli(self, *tokens: str) -> subprocess.CompletedProcess[str]:
-        return subprocess.run(
-            [sys.executable, "-m", _PTY_CLI, *tokens], capture_output=True, text=True, check=False
-        )
-
     def has_session(self, name: str) -> bool:
-        return self._cli(name, "has").returncode == 0
+        return client.has_session(name)
 
     def new_session(
         self,
@@ -398,34 +366,29 @@ class PtySessionBackend(SessionBackend):
             from base.sessions.env_forwarding import cwd_is_inside_checkout, forward_env_dict
 
             env = forward_env_dict(activate_venv=cwd_is_inside_checkout(cwd, repo_root()))
-        envfile = _write_session_env_file(env)
-        args = [name, "new", str(cwd), str(envfile)]
-        if cmd:  # the per-session host submits the base64 command when ready
-            args.append(base64.b64encode(cmd.encode()).decode("ascii"))
-        result = self._cli(*args)
-        if result.returncode != 0:
-            envfile.unlink(missing_ok=True)
-            detail = result.stderr.strip() or f"exit {result.returncode} without a diagnostic"
-            _log.warning("pty session allocation failed for %s: %s", name, detail)
+        try:
+            client.create_session(name, str(cwd), env, cmd or None)
+        except (client.ServiceError, client.ServiceUnavailableError) as exc:
+            _log.warning("pty session allocation failed for %s: %s", name, exc)
             return False
         return True
 
     def send(self, name: str, text: str) -> None:
-        result = self._cli(name, "send", base64.b64encode(text.encode()).decode("ascii"))
-        if result.returncode != 0:
-            raise RuntimeError(f"pty CLI send {name!r} failed: {result.stderr.strip()}")
+        self._call("send", name, client.send, name, text.encode())
 
     def send_keys(self, name: str, *keys: str) -> None:
-        result = self._cli(name, "send_keys", *keys)
-        if result.returncode != 0:
-            raise RuntimeError(f"pty CLI send_keys {name!r} failed: {result.stderr.strip()}")
+        self._call("send_keys", name, client.send, name, keys_to_bytes(keys))
 
     def capture_pane(self, name: str, lines: int = 200, *, scrollback: bool = True) -> str:
-        args = (str(lines), "--scrollback") if scrollback else ("--no-scrollback",)
-        result = self._cli(name, "capture", *args)
-        if result.returncode != 0:
-            raise RuntimeError(f"pty CLI capture {name!r} failed: {result.stderr.strip()}")
-        return result.stdout
+        return self._call("capture", name, client.capture, name, lines, scrollback=scrollback)
+
+    @staticmethod
+    def _call[T](op: str, name: str, call: Callable[..., T], *args: Any, **kwargs: Any) -> T:
+        """Run one service call; any failure is a RuntimeError naming the op and session."""
+        try:
+            return call(*args, **kwargs)
+        except (client.ServiceError, client.ServiceUnavailableError) as exc:
+            raise RuntimeError(f"pty {op} {name!r} failed: {exc}") from exc
 
     def kill_session(
         self,
@@ -435,9 +398,10 @@ class PtySessionBackend(SessionBackend):
         timeout: float = 15.0,
         expected: bool = False,
     ) -> tuple[bool, str]:
-        del timeout, expected  # the PTY CLI owns the graceful timeout
-        result = self._cli(name, "kill", "--graceful") if graceful else self._cli(name, "kill")
-        return result.returncode == 0, "graceful" if graceful else "forced"
+        ok, mode, _interrupted = self.kill_session_with_verdict(
+            name, graceful=graceful, timeout=timeout, expected=expected
+        )
+        return ok, mode
 
     def kill_session_with_verdict(
         self,
@@ -447,58 +411,38 @@ class PtySessionBackend(SessionBackend):
         timeout: float = 15.0,
         expected: bool = False,
     ) -> tuple[bool, str, bool]:
-        del timeout, expected  # the PTY CLI owns the graceful timeout
-        result = self._cli(name, "kill", "--graceful") if graceful else self._cli(name, "kill")
-        ok = result.returncode == 0
-        mode = "graceful" if graceful else "forced"
-        # stdout carries the host's kill-time verdict ("interrupted"/"idle");
-        # anything else (record-based fallback kill, wedged host) is not
-        # proven idle — report interrupted (fail-open).
-        interrupted = result.stdout.strip() != "idle"
-        return ok, mode, interrupted
+        del timeout, expected  # the service owns the graceful timeout
+        try:
+            verdict = client.kill(name, graceful=graceful)
+        except (client.ServiceError, client.ServiceUnavailableError) as exc:
+            _log.warning("pty kill of %s failed: %s", name, exc)
+            # A session that cannot be proven idle may well be running something (fail-open).
+            return False, "graceful" if graceful else "forced", True
+        return True, verdict.mode, verdict.interrupted
 
     def list_sessions(self, prefix: str = "") -> list[str]:
-        """Live session names from the record scan — no subprocess, no socket.
-
-        The records under ``$AVA_HOME/run/pty/`` ARE the session listing (one
-        per live host); a record whose shell is gone is swept as it is
-        discovered. There is no daemon whose downtime could blank this view.
-        """
-        from base.sessions.pty.cli import live_sessions
-
-        return sorted(live_sessions(prefix))
+        """Live session names, as the service lists them; none when it is not running."""
+        return [info.name for info in client.list_sessions(prefix)]
 
     def session_started_at(self, name: str) -> float | None:
-        """Epoch seconds the named pty session was launched, or None when it
-        is not alive — the CLI's record + shell-pid liveness rule, read
-        in-process (no subprocess, task #1200)."""
-        from base.sessions.pty.cli import session_started_at
-
-        return session_started_at(name)
+        """Epoch seconds the named pty session was launched, or None when it is not alive."""
+        return self.session_started_ats([name])[name]
 
     def session_started_ats(self, names: list[str]) -> dict[str, float | None]:
-        """Launch epochs for MANY sessions in one record scan — no subprocess
-        (the per-session CLI path costs one python startup each, and a status
-        snapshot queries every session serially: ~0.58s per CLI invocation on
-        a WSL runner, measured 2026-08-12, task #1200).
-
-        Falls back to individual record reads when the directory scan fails
-        with an I/O error, preserving the pre-batch behavior."""
+        """Launch epochs for MANY sessions in one call to the service: a status snapshot
+        asks about every session, and one round trip each would be the cost the
+        snapshot's probe timeout cannot afford (task #1200)."""
         if not names:
             return {}
-        from base.sessions.pty.cli import live_sessions
-
-        try:
-            live = live_sessions()
-        except OSError:
-            return super().session_started_ats(names)
-        return {name: (live[name].started_at if name in live else None) for name in names}
+        started = {info.name: info.started_at for info in client.list_sessions()}
+        return {name: started.get(name) for name in names}
 
     def session_generation(self, name: str) -> str | None:
-        """The live PTY record's flip generation, or None for legacy records."""
-        from base.sessions.pty.cli import session_generation
-
-        return session_generation(name)
+        """The live PTY session's allocation generation, or None for none."""
+        for info in client.list_sessions(name):
+            if info.name == name:
+                return info.generation
+        return None
 
     def session_log_path(self, name: str) -> Path | None:
         return logs_dir() / f"{name}.out.log"
@@ -554,7 +498,7 @@ _shell_backend: SessionBackend | None = None
 
 def get_shell_backend() -> SessionBackend:
     """Return the backend for AGENT interactive shells and watchers —
-    ``PtySessionBackend`` (one detached host per session); distinct from ``get_backend()``
+    ``PtySessionBackend`` (the pty-sessions service); distinct from ``get_backend()``
     (service/daemon sessions). ``ava.shell.sessions`` and
     watcher sessions use this PTY backend — never the service backend.
     """

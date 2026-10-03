@@ -22,8 +22,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from base.host.env.dotenv_boot import skip_config_fetch
 
 if __name__ == "__main__":
-    # The scan reads this machine's live session records (`$AVA_HOME/run/pty`), so it
-    # keeps the real home (no scratch home here). It reads only: no gateway fetch, no
+    # The scan asks this machine's pty-sessions service (`$AVA_HOME/run/pty-sessions.sock`),
+    # so it keeps the real home (no scratch home here). It reads only: no gateway fetch, no
     # database, no writes under the home.
     skip_config_fetch()
 

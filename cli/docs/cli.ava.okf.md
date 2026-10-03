@@ -20,7 +20,7 @@ The `ava` CLI — single entry point for cluster lifecycle. `cli/main.py` builds
 | `ava init` | Once per home, Settings-free: records the machine name, capabilities, credentials, ports and (for a runner) the gateway join, publishes `.env`, and starts nothing. An interrupted init resumes with no flags; an initialized home is refused |
 | `ava start` | Idempotent first and repeated startup of an initialized home; it takes only the service selection and refuses a home `ava init` has not finished. A Settings-free admission precedes host convergence, owned storage/schema provisioning (first start), root launch, and all-selected-service readiness. Exit 0 means ready, 4 means readiness failed, and 1 means a step failed |
 | `ava stop` | Same drain, then full local stop including terminals, browser, extras and private pg/redis; `--keep-infra` / repeatable `--keep-service` preserve selected resources; `--force` is explicit |
-| `ava restart` | Stop + start on this unit: services are replaced; PTYs, browser and infrastructure stay up |
+| `ava restart` | Stop + start on this unit: services are replaced and terminals close; the browser and infrastructure stay up |
 | `ava status` | status (including pg/redis and the end-to-end private-network Redis bridge view) |
 | `ava converge` | replays idempotent host wiring (symlink/PATH/dirs/plugin images and the macOS Redis bridge), usually via `ava start`; it never touches the memory pool |
 | `ava firewall status` / `ava firewall sync` | macOS Application Firewall allowlist manifest: `status` renders each manifest purpose, glob, resolved path, and Allow/Block/Missing state; `sync` applies it (repair + prune stale rules). Unprivileged mutation was empirically verified on the macmini running macOS 15.3.1, then falls back to non-interactive `sudo -n` and finally reports the exact manual commands on platforms that still require elevation |
@@ -39,7 +39,7 @@ groups are enumerated in [[cli/docs/operator-surfaces.ava.okf.md]].
 
 Ordinary `ava start` resumes the existing local maintenance hold after readiness. Durable
 agent identity and work survive both stop and restart; live terminal processes
-survive restart only. See [operator procedure](../../conventions/graceful-maintenance.md).
+survive neither. See [operator procedure](../../conventions/graceful-maintenance.md).
 
 ## Init and idempotent start
 

@@ -84,6 +84,19 @@ def read(path: Path) -> list[closure.Target]:
         return []
 
 
+def leftovers(path: Path) -> list[str]:
+    """The recorded sessions that still have a live process, by name.
+
+    What a stop that finds the service gone must still close: the sessions whose
+    shell, or a recorded member of it, outlived the service.
+    """
+    return sorted(target.name for target in read(path) if _has_live_process(target))
+
+
+def _has_live_process(target: closure.Target) -> bool:
+    return any(_alive(identity) for identity in (target.shell, *target.members))
+
+
 def sweep(path: Path) -> closure.Outcome:
     """Close every recorded session that still has a live process, then clear the ledger.
 
@@ -93,11 +106,7 @@ def sweep(path: Path) -> closure.Outcome:
     the busy sessions that were closed: the shape a caller turns into owner
     notices.
     """
-    targets = [
-        target
-        for target in read(path)
-        if any(_alive(identity) for identity in (target.shell, *target.members))
-    ]
+    targets = [target for target in read(path) if _has_live_process(target)]
     outcome = closure.Outcome()
     if targets:
         logger.warning(

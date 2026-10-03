@@ -180,11 +180,12 @@ def _build_boot(script_path: _pl.Path, watchdog_secs: float | None, agent_id: in
     Every bootstrap also arms the ORPHAN GUARD (task #1726): a daemon thread
     that compares ``os.getppid()`` against the parent the process booted
     under every few seconds and hard-exits with code 125 on a mismatch. The
-    pty host IS the session; when it dies (crash, SIGKILL, a reaper sweep),
-    the login shell dies with it and the watcher child is reparented to init
-    — still alive, still firing cron/at. The guard makes host death → child
-    death within a few seconds, on every host-death path (a kill-path
-    cascade cannot cover a crash or an external SIGKILL). This is the only
+    login shell IS the session; when it ends without taking the watcher
+    child with it (the pty-sessions service crashing, an external SIGKILL of
+    the shell), the child is reparented to init — still alive, still firing
+    cron/at. The guard makes session end → child death within a few
+    seconds, on every such path (a kill-path cascade cannot cover a crash
+    or an external SIGKILL). This is the only
     thing standing between a dead session and a watcher that keeps firing
     forever: nothing tracks or restarts watchers
     (decisions/2026-09-27-watchers-are-never-restarted.md), so a watcher
@@ -236,15 +237,15 @@ def _build_boot(script_path: _pl.Path, watchdog_secs: float | None, agent_id: in
         f'os.environ["AVA_PROCESS_PROFILE"] = "agent"\n'
         "\n"
         # Orphan guard (task #1726): a watcher child must never outlive
-        # its session. The pty host IS the session; when it dies (crash,
-        # SIGKILL, a reaper sweep), the login shell dies with it and this
-        # process is reparented to init — still alive, still firing
+        # its session. The login shell IS the session; when it ends without
+        # taking this process with it (service crash, external SIGKILL of
+        # the shell), this process is reparented to init — still alive, still firing
         # cron/at (2026-08-26: 49 of 85 watcher processes on the fleet
         # host were multi-generation orphans of exactly this shape).
         # Every few seconds, compare getppid() against the parent we
         # booted under: a mismatch means the session chain is gone, and
         # the watcher hard-exits instead of firing forever. This covers
-        # every host-death path — a kill-path cascade cannot (crash,
+        # every session-end path — a kill-path cascade cannot (crash,
         # external SIGKILL, ad-hoc sweeps).
         "_parent_pid = os.getppid()\n"
         "\n"
@@ -254,7 +255,7 @@ def _build_boot(script_path: _pl.Path, watchdog_secs: float | None, agent_id: in
         "        if os.getppid() != _parent_pid:\n"
         "            try:\n"
         "                print(\n"
-        "                    '[watcher] session gone (pty host died) — exiting (orphan guard)',\n"
+        "                    '[watcher] session gone (pty session ended) — exiting (orphan guard)',\n"
         "                    file=sys.stderr,\n"
         "                    flush=True,\n"
         "                )\n"

@@ -1,11 +1,12 @@
-"""The races around a PTY session kill (`base/sessions/pty/session_tree.py`, `host.py`).
+"""The races around a PTY session kill (`base/sessions/pty/session_tree.py`).
 
-Each test pins a window the #3521 review found: a kill that orphans a stopped
-process group and lets the kernel SIGCONT a frozen member; a member that keeps
-forking while the kill runs; a kill that raises with members still frozen; a
-host that exits while its own kill op still holds members frozen; and a
-member the caller may not signal, which must not turn a finished kill into an
-error that loses the owner's interruption notice.
+Each test pins a window the #3521 review found, on real processes: a kill that
+orphans a stopped process group and lets the kernel SIGCONT a frozen member; a
+member that keeps forking while the kill runs; a kill that raises with members
+still frozen; and a session id that only a live member can vouch for. The
+service's own kill (`services/pty_sessions/session.py`) runs this same
+`session_tree` core; its verdict for a member the caller may not signal is
+pinned in `services/pty_sessions/tests/test_session.py`.
 
 Every process a test starts carries the test's tmp dir on argv (it runs a
 script from there), so `pty_reaper` reaps whatever a failing kill leaves.
@@ -18,7 +19,6 @@ import os
 import signal
 import subprocess
 import sys
-import threading
 import time
 from collections.abc import Callable
 from pathlib import Path
@@ -29,11 +29,8 @@ import psutil
 import pytest
 
 from base.native_process.os_platform import IS_WINDOWS
-from base.native_process.ownership import OwnedProcess, shown_name, stable_create_time
-from base.sessions.pty import cli as pty_cli
-from base.sessions.pty import host as pty_host
-from base.sessions.pty import orphan_reaper, session_tree
-from base.sessions.record import SessionRecord, pid_starttime_ticks
+from base.native_process.ownership import OwnedProcess, shown_name
+from base.sessions.pty import session_tree
 from tests.path_scoped.pty_reaper import PtyReaper
 from tests.path_scoped.pty_reaper import pty_reaper as pty_reaper
 
@@ -262,175 +259,6 @@ def test_kill_that_raises_leaves_no_member_stopped(
     _reap(leader)
 
 
-def test_host_tree_kill_that_raises_leaves_the_host_not_stopped(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, pty_reaper: PtyReaper
-) -> None:
-    """The host is frozen before its sessions are killed; a session kill that
-    raises must not leave it stopped."""
-    host = _launch(tmp_path, _LEADER_WITH_CHILD, pty_reaper)
-    _pid(tmp_path, "child", pty_reaper)
-
-    def failing_kill(*_args: Any, **_kwargs: Any) -> session_tree.TreeKill:
-        raise RuntimeError("injected session-kill fault")
-
-    monkeypatch.setattr(session_tree, "kill_session_tree", failing_kill)
-
-    with pytest.raises(RuntimeError, match="injected session-kill fault"):
-        session_tree.kill_host_tree(psutil.Process(host.pid), wait_s=3.0)
-
-    assert _wait(lambda: _exited(host.pid), timeout=5.0), "the frozen host was left stopped"
-    _reap(host)
-
-
-def _session(tmp_path: Path, shell_pid: int) -> tuple[pty_host.PtySession, int]:
-    """A host-side session carrying a real shell stand-in; returns it and the
-    master pipe's write end (held open, so the master never reads EOF)."""
-    read_end, write_end = os.pipe()
-    process = psutil.Process(shell_pid)
-    record = SessionRecord(
-        pid=shell_pid,
-        create_time=stable_create_time(process),
-        cmd="",
-        cwd="",
-        started_at=0.0,
-        starttime=pid_starttime_ticks(shell_pid),
-    )
-    session = pty_host.PtySession(
-        "ava-test-race-1",
-        shell_pid,
-        read_end,
-        80,
-        24,
-        record,
-        tmp_path / "session.json",
-        tmp_path / "session.out.log",
-    )
-    return session, write_end
-
-
-def test_host_exit_waits_for_its_in_flight_kill(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, pty_reaper: PtyReaper
-) -> None:
-    """A graceful kill's TERM ends the shell, and the reader's teardown
-    schedules the host's exit while the kill op is still sweeping (and holds
-    members frozen). The host must exit only after the op answered."""
-    shell = _launch(tmp_path, "import time\ntime.sleep(60)\n", pty_reaper)
-    session, write_end = _session(tmp_path, shell.pid)
-    exits: list[float] = []
-    exited = threading.Event()
-
-    def record_exit(_code: int) -> None:
-        exits.append(time.monotonic())
-        exited.set()
-
-    real_kill = session_tree.kill_session_tree
-
-    def slow_kill(*args: Any, **kwargs: Any) -> session_tree.TreeKill:
-        time.sleep(pty_host._EXIT_DRAIN_S + 0.7)  # the sweep outlasts the exit drain
-        return real_kill(*args, **kwargs)
-
-    monkeypatch.setattr(pty_host.os, "_exit", record_exit)
-    monkeypatch.setattr(session_tree, "kill_session_tree", slow_kill)
-
-    def reader() -> None:
-        os.waitpid(shell.pid, 0)
-        pty_host._finish(session, tmp_path / "session.sock")
-
-    thread = threading.Thread(target=reader, daemon=True)
-    thread.start()
-    try:
-        response = pty_host._op_kill(session, {"graceful": True})
-        answered = time.monotonic()
-        # Wait for the exit either way, so no exit thread outlives the patch.
-        assert exited.wait(10), "the host never exited"
-    finally:
-        os.close(write_end)
-    thread.join(10)
-    assert response["ok"], response
-    assert exits[0] >= answered, "the host exited while its kill op was still running"
-
-
-def test_kill_with_only_unsignallable_survivors_answers_interrupted(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, pty_reaper: PtyReaper
-) -> None:
-    """The shell and everything this user may signal are gone; a member it may
-    not signal (a root `sudo` on the pty) survives. The session is over and
-    its work was cut short: `ok`, `interrupted`, and the survivor named — an
-    error here would make the TTL reaper retry into `absent` and drop the
-    owner's interruption notice."""
-    leader = _launch(tmp_path, _LEADER_WITH_CHILD, pty_reaper)
-    member = _pid(tmp_path, "child", pty_reaper)
-    session, write_end = _session(tmp_path, leader.pid)
-    real_suspend, real_kill = psutil.Process.suspend, psutil.Process.kill
-
-    def suspend(self: psutil.Process) -> None:
-        if self.pid == member:
-            raise psutil.AccessDenied(self.pid)
-        real_suspend(self)
-
-    def kill(self: psutil.Process) -> None:
-        if self.pid == member:
-            raise psutil.AccessDenied(self.pid)
-        real_kill(self)
-
-    # Nothing signalled the unsignallable member, so waiting for it cannot
-    # change its fate: the op answers without spending this wait on it (the
-    # TTL reaper's dispatch budget is 5 s end to end).
-    monkeypatch.setattr(pty_host, "_KILL_FORCE_WAIT_S", 5.0)
-
-    def reader() -> None:
-        os.waitpid(leader.pid, 0)
-        session.begin_finish()
-
-    thread = threading.Thread(target=reader, daemon=True)
-    thread.start()
-    try:
-        # A scoped patch: undone before teardown SIGKILLs the member.
-        with pytest.MonkeyPatch.context() as patch:
-            patch.setattr(psutil.Process, "suspend", suspend)
-            patch.setattr(psutil.Process, "kill", kill)
-            started = time.monotonic()
-            response = pty_host._op_kill(session, {})
-            elapsed = time.monotonic() - started
-    finally:
-        os.kill(member, signal.SIGKILL)
-        os.close(write_end)
-        os.close(session.master_fd)
-        os.close(session._log_fd)
-    thread.join(10)
-    assert response["ok"], response
-    assert response["data"] == {"mode": "forced", "interrupted": True, "survivors": [member]}
-    assert elapsed < 2.5, f"the op waited {elapsed:.2f}s for a member it could not signal"
-
-
-def test_cli_kill_names_the_unsignallable_survivors(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-) -> None:
-    """The CLI turns that answer into a successful, interrupted kill, and says
-    which processes were left for their owner to end."""
-    answer = {
-        "ok": True,
-        "code": 0,
-        "data": {"mode": "forced", "interrupted": True, "survivors": [4242]},
-        "error": None,
-    }
-
-    def session_request(_name: str, _req: dict[str, Any]) -> dict[str, Any]:
-        return answer
-
-    def reap_orphaned_hosts(*_args: object, **_kwargs: object) -> None:
-        return None
-
-    monkeypatch.setattr(pty_cli, "session_request", session_request)
-    monkeypatch.setattr(pty_cli, "_reap_orphaned_hosts", reap_orphaned_hosts)
-
-    assert pty_cli._op_kill("ava-test-race-2", []) == 0
-
-    captured = capsys.readouterr()
-    assert captured.out == "interrupted\n"
-    assert "[4242]" in captured.err
-
-
 # A session leader with a member M (its child, still in its session) and U,
 # double-forked out of its tree but still in its session.
 _MEMBER_AND_ORPHAN = (
@@ -568,34 +396,6 @@ def test_a_dead_members_recycled_pid_vouches_for_nothing(
     _reap(leader)
     stranger.kill()
     stranger.wait(timeout=10)
-
-
-def test_orphan_reap_passes_when_only_unsignallable_processes_survive(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """A force-reap whose only survivors are processes this user may not signal
-    killed everything it could — the host included — so it succeeds; a
-    survivor it could signal still fails it. The same `stuck` verdict as the
-    host's kill op and the record kill."""
-    denied = OwnedProcess(4242, 1.0, None)
-    stuck = OwnedProcess(4343, 1.0, None)
-    host = SimpleNamespace(pid=4141)
-    verdicts = iter(
-        [session_tree.TreeKill((), (denied,), (denied,)), session_tree.TreeKill((), (stuck,))]
-    )
-
-    def orphaned(*_args: object, **_kwargs: object) -> list[SimpleNamespace]:
-        return [host]
-
-    def kill_host_tree(*_args: object, **_kwargs: object) -> session_tree.TreeKill:
-        return next(verdicts)
-
-    monkeypatch.setattr(orphan_reaper, "_orphaned_host_processes", orphaned)
-    monkeypatch.setattr(orphan_reaper, "kill_host_tree", kill_host_tree)
-
-    assert orphan_reaper._reap_orphaned_hosts("ava-test-race-3") == 1
-    with pytest.raises(RuntimeError, match="survived force-reap: pids=\\[4343\\]"):
-        orphan_reaper._reap_orphaned_hosts("ava-test-race-3")
 
 
 def test_a_session_nothing_proves_is_still_looked_at_and_logged(

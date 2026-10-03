@@ -242,7 +242,7 @@ def _add_stop_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -
 def _add_restart_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
     restart_p = sub.add_parser(
         "restart",
-        help="[host] normal stop then start, retaining the data plane, browser and persistent terminals",
+        help="[host] normal stop then start, retaining the data plane and browser (persistent terminals close, as at stop)",
     )
     # task #4092 cli-default inventory: "smooth" is the safe default — force
     # must be asked for explicitly.
@@ -255,7 +255,7 @@ def _add_restart_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]
     restart_p.add_argument(
         "--force-reap",
         action="store_true",
-        help="explicitly permit forced resource shutdown; persistent terminals stay intact",
+        help="explicitly permit forced resource shutdown",
     )
     restart_p.set_defaults(func=_h_restart)
 

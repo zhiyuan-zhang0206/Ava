@@ -5,7 +5,6 @@ from __future__ import annotations
 import datetime as dt
 import importlib.util
 import json
-import os
 import shlex
 import sys
 import time
@@ -20,6 +19,8 @@ import pytest
 from ava.shell.coding_tools import _common, codex
 from base.native_process.os_platform import IS_WINDOWS
 from base.sessions import coding_session_owner
+from tests.path_scoped.pty_service import PtyServiceProcess
+from tests.path_scoped.pty_service import pty_service as pty_service
 
 _SKILL_DIR = Path(__file__).parents[4] / "ava_builtins" / "skills" / "ava-use-other-agents"
 
@@ -136,9 +137,10 @@ def test_supervisor_bootstrap_restores_owner_identity(tmp_path: Path) -> None:
 
 @pytest.mark.skipif(IS_WINDOWS, reason="PTY sessions require POSIX")
 def test_codex_supervisor_uses_projected_session_environment(
-    unit_home: Path, monkeypatch: pytest.MonkeyPatch
+    pty_service: PtyServiceProcess, unit_home: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The runner's real sessions.new path must remove an inherited foreign venv."""
+    """The runner's real sessions.new path must not hand the shell a foreign venv
+    that the pty-sessions service's own environment carries."""
     from ava.shell.tests.support import FakeDatabase
     from base.sessions.backend import PtySessionBackend
 
@@ -146,10 +148,11 @@ def test_codex_supervisor_uses_projected_session_environment(
     workspace = Path(owner.key.workspace)
     backend = PtySessionBackend()
     report = unit_home / "codex-child-env.json"
-    # unit_home pins in-process Settings; subprocesses read the raw env at boot.
-    monkeypatch.setitem(os.environ, "AVA_HOME", str(unit_home))
-    monkeypatch.setenv("HOME", str(unit_home))
-    monkeypatch.setenv("VIRTUAL_ENV", str(unit_home / "foreign" / ".venv"))
+    # The service environment is the shell's base: restart the service with a
+    # foreign virtualenv in it.
+    pty_service.stop()
+    service = PtyServiceProcess(unit_home, {"VIRTUAL_ENV": str(unit_home / "foreign" / ".venv")})
+    service.start()
     monkeypatch.setattr(codex.ava.agent_identity, "_agent_id", 41)
     monkeypatch.setattr("ava._settings.database", lambda: FakeDatabase(next_index=7))
 
@@ -159,7 +162,7 @@ def test_codex_supervisor_uses_projected_session_environment(
     monkeypatch.setattr("ava.shell.sessions.workspace_dir", workspace_for_owner)
 
     # Execute a probe in place of the long-running supervisor; session birth,
-    # envfile transport, host fork, and shell command delivery remain real.
+    # env transport, the service's shell spawn, and command delivery remain real.
     def supervisor_probe(_owner: coding_session_owner.CodingSessionOwner, _watcher: Path) -> str:
         return (
             "import json, os; from pathlib import Path; "
@@ -182,6 +185,7 @@ def test_codex_supervisor_uses_projected_session_environment(
         assert json.loads(report.read_text()) == {"virtual_env": None, "cwd": str(workspace)}
     finally:
         backend.kill_session(name)
+        service.stop()
 
 
 def test_failed_early_publish_kills_codex_session_before_startup(

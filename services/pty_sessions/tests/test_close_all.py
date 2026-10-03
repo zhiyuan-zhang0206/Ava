@@ -18,9 +18,10 @@ import pytest
 
 from base.native_process.os_platform import IS_WINDOWS
 from base.sessions.pty import client, closure
-from services.pty_sessions.tests import jobs, support
-from services.pty_sessions.tests.support import new, type_line, wait_for
+from tests.path_scoped import pty_jobs as jobs
+from tests.path_scoped import pty_shells as support
 from tests.path_scoped.pty_service import pty_service as pty_service
+from tests.path_scoped.pty_shells import new, type_line, wait_for
 
 pytestmark = [
     pytest.mark.skipif(IS_WINDOWS, reason="pty sessions are POSIX-only"),
@@ -99,7 +100,7 @@ def test_a_double_forked_orphan_of_the_session_is_killed(unit_home: Path) -> Non
     the closure captures it before the hangup, and it dies with the rest."""
     name = "ava-agent-987-shell-2046-orphan"
     pidfile = unit_home / "orphan.pid"
-    shell = jobs.start(name, unit_home, jobs.double_forked(pidfile, ignore=("SIGTERM", "SIGHUP")))
+    shell = jobs.create(name, unit_home, jobs.double_forked(pidfile, ignore=("SIGTERM", "SIGHUP")))
     orphan = jobs.wait_for_file(pidfile, "the double-forked worker")
     assert wait_for(lambda: psutil.Process(orphan) not in jobs.live_children(shell))
     assert psutil.Process(orphan).ppid() != shell.pid, "precondition: it left the shell's tree"

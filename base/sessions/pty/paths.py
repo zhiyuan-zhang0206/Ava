@@ -37,6 +37,9 @@ from base.sessions.record import SessionRecord
 # host and CLI always agree.
 SUN_PATH_MAX = 100
 
+# The roster unit (and root unit id) of the pty-sessions service.
+SERVICE_UNIT = "pty-sessions"
+
 # Terminal geometry defaults (the classic pane shape). Defined here — the
 # stdlib-only module — so the host can read them without importing the screen
 # module, whose import pulls pyte (kept lazy until a capture needs it).
@@ -83,21 +86,26 @@ def socket_path(name: str) -> Path:
     return Path(tempfile.gettempdir()) / f"ava-pty-{digest}.sock"
 
 
-def service_socket_path() -> Path:
+def service_socket_path(run: Path | None = None) -> Path:
     """The pty-sessions service's unix socket; ``$AVA_HOME/run/pty-sessions.sock``.
 
-    A path over the sun_path bound falls back to ``/tmp/ava-pty-<uid>/<digest>.sock``,
-    keyed by the home. The directory is fixed rather than ``tempfile.gettempdir()``
-    because the service (launched by root) and its clients (agent processes with
-    their own TMPDIR) must compute the same path; the service creates the directory
-    owner-only (`fallback_dir`).
-    """
-    from base.paths import run_dir
+    `run` names the run directory explicitly (a read-only scan that must not create
+    the home); the default is this process's own, created on first use.
 
-    natural = run_dir() / "pty-sessions.sock"
+    A path over the sun_path bound falls back to ``/tmp/ava-pty-<uid>/<digest>.sock``,
+    keyed by the run directory. The directory is fixed rather than
+    ``tempfile.gettempdir()`` because the service (launched by root) and its clients
+    (agent processes with their own TMPDIR) must compute the same path; the service
+    creates the directory owner-only (`fallback_dir`).
+    """
+    if run is None:
+        from base.paths import run_dir
+
+        run = run_dir()
+    natural = run / "pty-sessions.sock"
     if len(str(natural)) <= SUN_PATH_MAX:
         return natural
-    digest = hashlib.sha1(f"{run_dir()}\0pty-sessions".encode(), usedforsecurity=False).hexdigest()
+    digest = hashlib.sha1(f"{run}\0pty-sessions".encode(), usedforsecurity=False).hexdigest()
     return fallback_dir() / f"{digest[:12]}.sock"
 
 

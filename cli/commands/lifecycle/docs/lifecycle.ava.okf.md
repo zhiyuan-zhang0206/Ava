@@ -26,8 +26,8 @@ scripts reach them. The `_`-prefixed modules are steps only this package calls.
 ## Stop, restart and maintenance
 
 `stop.py` exposes `stop` through `_temporary_stop`; restart calls the same stop
-kernel with the data plane, browser and persistent terminals kept (`keep_infra`,
-`keep_browser`, `reap_agents=False`), once `_start_readiness_preflight` has not
+kernel with the data plane and browser kept (`keep_infra`,
+`keep_browser`); terminals are closed like in any stop, once `_start_readiness_preflight` has not
 refused it for a start that would fail ([[start-readiness-preflight.ava.okf.md]]).
 `ops.agent_pause` and `ops.agent_pause.probe` own prepare/drain and runtime
 capability checks; `service_stop` and `data_plane/maintenance_stop` verify

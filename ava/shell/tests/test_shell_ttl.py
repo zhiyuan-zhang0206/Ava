@@ -11,7 +11,7 @@ from base.native_process.os_platform import IS_WINDOWS
 
 pytestmark = [
     pytest.mark.skipif(IS_WINDOWS, reason="PTY supervisor is POSIX-only"),
-    pytest.mark.usefixtures("_pty_sessions_env", "_isolated_agent"),
+    pytest.mark.usefixtures("pty_service", "_isolated_agent"),
 ]
 
 

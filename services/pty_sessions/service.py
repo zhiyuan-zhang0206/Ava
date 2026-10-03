@@ -30,7 +30,7 @@ import time
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import psutil
 
@@ -125,7 +125,7 @@ def _child_env(overlay: object) -> dict[str, str]:
     env = child_env.inherited_process_env()
     env.pop("AVA_PROCESS_PROFILE", None)
     env.pop("VIRTUAL_ENV", None)
-    for key, value in overlay.items():
+    for key, value in cast("dict[object, object]", overlay).items():
         if not isinstance(key, str) or not isinstance(value, str):
             raise RequestError(protocol.BAD_REQUEST, "env must be an object of strings")
         if not key or "=" in key or "\0" in key or "\0" in value:

@@ -24,8 +24,8 @@ it is an operator entry point beside its `private-files/` manifest.
 
 `build_services()` supplies the application root manifest and local status roster.
 Agent-runner units execute agents inside one agent host. There is no per-agent
-process launcher or restarter service. Native service sessions and persistent
-PTY hosts remain separate execution resources.
+process launcher or restarter service. Native service sessions and the
+`pty-sessions` service's persistent shells remain separate execution resources.
 
 The application root owns service supervision. There is no controller manager,
 background checkout/update trigger, scheduled updater reaper, or automatic
@@ -34,7 +34,7 @@ stranded-hold restart path.
 Stop, restart and update hold admission and wait for native restart, checkpoint
 flush, actual continuation completion and resource settlement. Ordinary stop
 shares that drain and then closes the selected local services, PTYs and data
-plane; restart keeps the data plane, browser and PTYs.
+plane; restart keeps the data plane and browser.
 Timeout fails without implicit force. The complete operator contract is in
 [graceful maintenance](../conventions/graceful-maintenance.md).
 
@@ -44,7 +44,7 @@ is recorded in the
 updater RPCs cannot be used to fill those gaps.
 
 The native OS unit supervises the application root, which owns its service
-subprocesses. Agent shells use independent PTY hosts. Stop verifies captured
+subprocesses. Agent shells are held by the `pty-sessions` service. Stop verifies captured
 process identity before signalling.
 
 The import boundary is `base < ops < {gateway, cli}`. The supported RPC

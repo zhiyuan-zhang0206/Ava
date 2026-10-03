@@ -9,7 +9,7 @@ tags: []
 
 ## What it is
 
-Open `serve()`/`show()` pages are rows in `agent_pages`; the page-server daemon supervises serve() servers inside agent-owned persistent shell sessions, which are outside rollout service teardown. When a page server dies (platform update reaping the session, crash, OOM, manual kill) the row stays open and the link goes dead — recovery is the agent-side probe `agent/startup/__init__.py:reconcile_open_pages()`, with dead-page close and notification writes in `agent/startup/_page_reconcile.py`.
+Open `serve()`/`show()` pages are rows in `agent_pages`; the page-server daemon supervises serve() servers inside agent-owned persistent shell sessions, which survive agent restarts but not `ava stop` or `ava restart`. When a page server dies (platform update reaping the session, crash, OOM, manual kill) the row stays open and the link goes dead — recovery is the agent-side probe `agent/startup/__init__.py:reconcile_open_pages()`, with dead-page close and notification writes in `agent/startup/_page_reconcile.py`.
 
 Per open row:
 

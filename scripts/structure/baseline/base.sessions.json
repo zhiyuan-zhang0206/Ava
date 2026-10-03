@@ -10,10 +10,6 @@
     "base/sessions/pty/records.py::ambient-container:_retained_warning_reasons": 1
   },
   "complexity": {
-    "base/sessions/pty/tests/test_pty_sessions_cli.py::test_freeze_ack_has_no_later_session_start_during_concurrent_allocations": 19,
     "base/sessions/tests/subreaper_probe.py::ancestor": 16
-  },
-  "files": {
-    "base/sessions/pty/tests/test_pty_sessions_cli.py": 1436
   }
 }
