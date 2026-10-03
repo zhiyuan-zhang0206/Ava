@@ -83,6 +83,96 @@ def config_audit_read_op(last: int) -> ConfigAuditReadResult:
     return ConfigAuditReadResult(machine=machine_name(), records=read_env_write_records(last))
 
 
+def _field_verdicts(
+    overrides: dict[str, Any], metas: dict[str, Any], *, local: bool
+) -> dict[str, FieldWriteResult]:
+    """Per-field gate: known, host-scope, editable here, and (unless an unset) valid."""
+    results: dict[str, FieldWriteResult] = {}
+    for field, value in overrides.items():
+        if field not in metas:
+            results[field] = FieldWriteResult(ok=False, reason="unknown field")
+            continue
+        meta = metas[field]
+        if meta.scope != "host":
+            results[field] = FieldWriteResult(ok=False, reason="not a host-scope field")
+            continue
+        if not field_editable(meta, local=local):
+            results[field] = FieldWriteResult(
+                ok=False, reason="not editable" if local else "not remotely editable"
+            )
+            continue
+        if value is None:
+            # Explicit unset — no value to validate.
+            results[field] = FieldWriteResult(ok=True, reason=None)
+            continue
+        vr = config_validators.validate(field, value)
+        results[field] = FieldWriteResult(ok=vr.ok, reason=vr.reason)
+    return results
+
+
+def _reject_candidate(
+    errors_by_domain: dict[str, list[str]],
+    patched_fields: set[str],
+    results: dict[str, FieldWriteResult],
+) -> None:
+    """Fail the fields whose domain the candidate rejected (the first patched field if none)."""
+    rejected_fields = {field for field in patched_fields if field_domain(field) in errors_by_domain}
+    if not rejected_fields:
+        rejected_fields = {next(iter(sorted(patched_fields)))}
+    for field in rejected_fields:
+        errors = errors_by_domain.get(field_domain(field))
+        reason = "candidate rejected: " + "; ".join(errors or [])
+        results[field] = FieldWriteResult(ok=False, reason=reason)
+
+
+def _apply_patch(
+    overrides: dict[str, Any],
+    metas: dict[str, Any],
+    results: dict[str, FieldWriteResult],
+    *,
+    actor: str | None,
+    trace_id: str | None,
+) -> tuple[bool, list[str]]:
+    """Candidate-validate then write the patch; `(applied, restart_required)`.
+
+    A rejected candidate or a lost concurrent-write race flips the affected fields in `results`.
+    """
+    writes, removals = split_reducer_patch(overrides, metas)
+    candidate = validate_env_patch_for_write(writes, removals)
+    errors_by_domain = candidate.errors_by_domain
+    if errors_by_domain:
+        _reject_candidate(errors_by_domain, set(writes) | removals, results)
+        return False, []
+    applied = True
+    if writes or removals:
+        try:
+            runtime_config.write_fields(
+                writes,
+                removals,
+                expected_digest=candidate.expected_digest,
+                audit_site="ops_config_write",
+                actor=actor,
+                trace_id=trace_id,
+            )
+        except RuntimeError as exc:
+            if str(exc) != ".env changed before owned runtime-config write":
+                raise
+            applied = False
+            for field in set(writes) | removals:
+                results[field] = FieldWriteResult(
+                    ok=False,
+                    reason="config changed concurrently; retry the request",
+                )
+    restart_required = sorted(
+        {
+            metas[f].restart_required
+            for f in set(writes) | removals
+            if applied and metas[f].restart_required
+        }
+    )
+    return applied, restart_required
+
+
 def config_write_op(
     overrides: dict[str, Any],
     *,
@@ -112,74 +202,16 @@ def config_write_op(
     """
     metas = {m.name: m for m in get_config_metadata()}
 
-    results: dict[str, FieldWriteResult] = {}
-    for field, value in overrides.items():
-        if field not in metas:
-            results[field] = FieldWriteResult(ok=False, reason="unknown field")
-            continue
-        meta = metas[field]
-        if meta.scope != "host":
-            results[field] = FieldWriteResult(ok=False, reason="not a host-scope field")
-            continue
-        if not field_editable(meta, local=local):
-            results[field] = FieldWriteResult(
-                ok=False, reason="not editable" if local else "not remotely editable"
-            )
-            continue
-        if value is None:
-            # Explicit unset — no value to validate.
-            results[field] = FieldWriteResult(ok=True, reason=None)
-            continue
-        vr = config_validators.validate(field, value)
-        results[field] = FieldWriteResult(ok=vr.ok, reason=vr.reason)
+    results = _field_verdicts(overrides, metas, local=local)
 
     # all() over an empty dict is True, so an empty payload is trivially applied.
     applied = all(r.ok for r in results.values())
 
     restart_required: list[str] = []
     if applied:
-        writes, removals = split_reducer_patch(overrides, metas)
-        candidate = validate_env_patch_for_write(writes, removals)
-        errors_by_domain = candidate.errors_by_domain
-        if errors_by_domain:
-            applied = False
-            patched_fields = set(writes) | removals
-            rejected_fields = {
-                field for field in patched_fields if field_domain(field) in errors_by_domain
-            }
-            if not rejected_fields:
-                rejected_fields = {next(iter(sorted(patched_fields)))}
-            for field in rejected_fields:
-                errors = errors_by_domain.get(field_domain(field))
-                reason = "candidate rejected: " + "; ".join(errors or [])
-                results[field] = FieldWriteResult(ok=False, reason=reason)
-        else:
-            if writes or removals:
-                try:
-                    runtime_config.write_fields(
-                        writes,
-                        removals,
-                        expected_digest=candidate.expected_digest,
-                        audit_site="ops_config_write",
-                        actor=actor,
-                        trace_id=trace_id,
-                    )
-                except RuntimeError as exc:
-                    if str(exc) != ".env changed before owned runtime-config write":
-                        raise
-                    applied = False
-                    for field in set(writes) | removals:
-                        results[field] = FieldWriteResult(
-                            ok=False,
-                            reason="config changed concurrently; retry the request",
-                        )
-            restart_required = sorted(
-                {
-                    metas[f].restart_required
-                    for f in set(writes) | removals
-                    if applied and metas[f].restart_required
-                }
-            )
+        applied, restart_required = _apply_patch(
+            overrides, metas, results, actor=actor, trace_id=trace_id
+        )
 
     return ConfigWriteOpResult(
         machine=machine_name(),

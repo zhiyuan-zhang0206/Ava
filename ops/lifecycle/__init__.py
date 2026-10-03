@@ -95,13 +95,13 @@ from ops.lifecycle.resurrect_gates import (
     wake_suppression_active as _wake_suppression_active,
 )
 from ops.lifecycle.termination import (
-    _force_mark_terminated as _force_mark_terminated,
-)
-from ops.lifecycle.termination import (
     _force_terminate_transaction as _force_terminate_transaction,
 )
 from ops.lifecycle.termination import (
     _publish_force_terminate_inbound as _publish_force_terminate_inbound,
+)
+from ops.lifecycle.termination import (
+    force_mark_terminated as force_mark_terminated,
 )
 from ops.rpc_schemas import (
     BillingResurrectAgentResponse,

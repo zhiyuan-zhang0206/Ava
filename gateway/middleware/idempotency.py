@@ -193,6 +193,34 @@ class IdempotencyService:
 # ── middleware ─────────────────────────────────────────────────────────
 
 
+async def _await_owner(request: Request, service: IdempotencyService, key: str) -> Response | None:
+    """Another request owns the key (or already completed): poll for its outcome and replay it.
+
+    None when the owner failed and released the row and we re-claimed it (we execute instead).
+    """
+    store = service.store
+    deadline = service.monotonic() + service.max_wait_s
+    poll_delay = _POLL_INITIAL_S
+    while service.monotonic() < deadline:
+        done = await asyncio.to_thread(store.fetch, key, request.method, request.url.path)
+        if done is not None:
+            return _replay(done)
+        if await asyncio.to_thread(store.claim, key, request.method, request.url.path):
+            return None  # owner released (failed): we execute instead
+        await service.sleep(poll_delay)
+        poll_delay = min(poll_delay * _POLL_FACTOR, _POLL_MAX_S)
+    # Owner still executing past the wait bound — do NOT double-execute.
+    # 503 with a short Retry-After: the client's retry loop picks it up.
+    return error_response(
+        request,
+        code="idempotency_in_flight",
+        status=503,
+        detail="idempotent request still in flight, retry shortly",
+        retryable=True,
+        headers={"Retry-After": "1"},
+    )
+
+
 async def idempotency_middleware(
     request: Request,
     call_next: Callable[[Request], Awaitable[Response]],
@@ -235,30 +263,9 @@ async def idempotency_middleware(
     service: IdempotencyService = request.app.state.idempotency
     store = service.store
     if not await asyncio.to_thread(store.claim, key, request.method, request.url.path):
-        # Another request owns the key (or already completed). Poll for the
-        # owner's outcome and replay it; if the owner failed and released
-        # the row, re-claim and execute ourselves.
-        deadline = service.monotonic() + service.max_wait_s
-        poll_delay = _POLL_INITIAL_S
-        while service.monotonic() < deadline:
-            done = await asyncio.to_thread(store.fetch, key, request.method, request.url.path)
-            if done is not None:
-                return _replay(done)
-            if await asyncio.to_thread(store.claim, key, request.method, request.url.path):
-                break  # owner released (failed): we execute instead
-            await service.sleep(poll_delay)
-            poll_delay = min(poll_delay * _POLL_FACTOR, _POLL_MAX_S)
-        else:
-            # Owner still executing past the wait bound — do NOT double-execute.
-            # 503 with a short Retry-After: the client's retry loop picks it up.
-            return error_response(
-                request,
-                code="idempotency_in_flight",
-                status=503,
-                detail="idempotent request still in flight, retry shortly",
-                retryable=True,
-                headers={"Retry-After": "1"},
-            )
+        outcome = await _await_owner(request, service, key)
+        if outcome is not None:
+            return outcome
 
     # We own the key: execute, store the outcome, replay on same-key retries.
     # The whole owner section is one try/except so EVERY failure path between

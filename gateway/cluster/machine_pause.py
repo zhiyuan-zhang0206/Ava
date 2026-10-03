@@ -24,7 +24,7 @@ from base.cluster.machine import machine_name
 from base.db.transaction import write_transaction
 from gateway.agents import forward
 from gateway.cluster.schemas import MachinePauseRequest, MachinePauseResponse, MachineResumeResponse
-from ops.lifecycle import _force_mark_terminated
+from ops.lifecycle import force_mark_terminated
 
 router = APIRouter()
 
@@ -112,7 +112,7 @@ def _force_mark_terminated_blocking(pool: ConnectionPool, agent_id: int) -> None
     fallback writes the same terminate inbound fence under the agent row lock;
     the process is on the unreachable machine, so there is no local OS session
     to kill."""
-    _force_mark_terminated(agent_id, pool, source="machine-pause")
+    force_mark_terminated(agent_id, pool, source="machine-pause")
 
 
 def _resolve_machine_alerts_blocking(pool: ConnectionPool, name: str) -> None:

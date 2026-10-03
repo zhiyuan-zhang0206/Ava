@@ -15,7 +15,7 @@ from base.agents.messages.envelope import wrap_inbound
 from base.cluster.machine import machine_name
 from ops.agents import create_agent_row, resurrect_agent, wake
 from ops.agents.wake import ResurrectTriggerStaleError
-from ops.lifecycle import _force_mark_terminated
+from ops.lifecycle import force_mark_terminated
 from ops.tests.pool_support import make_test_pool
 
 
@@ -122,7 +122,7 @@ class TestResurrectAgent:
         db_conn.commit()
 
         with make_test_pool() as pool:
-            _force_mark_terminated(agent_id, pool)
+            force_mark_terminated(agent_id, pool)
             with db_conn.cursor() as cur:
                 cur.execute(
                     "SELECT status_changed_at, last_force_terminate_inbound_id "
@@ -138,7 +138,7 @@ class TestResurrectAgent:
             assert first_agent_row is not None and first_page_row is not None
             assert first_page_row[0] == first_agent_row[0]
 
-            _force_mark_terminated(agent_id, pool)
+            force_mark_terminated(agent_id, pool)
 
         with db_conn.cursor() as cur:
             cur.execute(
@@ -186,7 +186,7 @@ class TestResurrectAgent:
             db_conn, agent_id, "work before repeated force", source="user"
         )
         with make_test_pool() as pool:
-            _force_mark_terminated(agent_id, pool)
+            force_mark_terminated(agent_id, pool)
 
         await _settle_hosted_force(db_conn, aops_pool, agent_id)
 
@@ -391,7 +391,7 @@ class TestResurrectAgent:
             kind="compact_request",
         )
         with make_test_pool() as pool:
-            _force_mark_terminated(agent_id, pool)
+            force_mark_terminated(agent_id, pool)
 
         await _settle_hosted_force(db_conn, aops_pool, agent_id)
 
