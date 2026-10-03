@@ -14,16 +14,19 @@ from __future__ import annotations
 import contextlib
 import os
 import signal
+import socket
 import subprocess
 import sys
+import threading
 import time
 from collections.abc import Iterator
 from pathlib import Path
+from typing import Any
 
 import pytest
 
-from base.sessions.pty import client
-from base.sessions.pty.paths import service_socket_path
+from base.sessions.pty import client, protocol
+from base.sessions.pty.paths import fallback_dir, service_socket_path
 
 _REPO = Path(__file__).resolve().parents[2]
 
@@ -88,6 +91,47 @@ class PtyServiceProcess:
         except subprocess.TimeoutExpired:
             proc.kill()
             proc.wait(timeout=10)
+
+
+class FakePtyService:
+    """A stand-in pty-sessions service: answers every request with a fixed session list.
+
+    For tests of read-only scans that must not start (or create a home for) a real
+    service; bound at the path the scan computes for the home's run directory.
+    """
+
+    def __init__(self, path: Path, sessions: list[dict[str, Any]]) -> None:
+        if path.parent == fallback_dir():
+            path.parent.mkdir(mode=0o700, exist_ok=True)
+        path.unlink(missing_ok=True)
+        self._path = path
+        self._sessions = sessions
+        self._server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        self._server.bind(str(path))
+        self._server.listen(8)
+        self._thread = threading.Thread(target=self._serve, daemon=True)
+        self._thread.start()
+
+    def _serve(self) -> None:
+        while True:
+            try:
+                conn, _ = self._server.accept()
+            except OSError:
+                return
+            with conn:
+                line = protocol.read_line(conn)
+                if line is None:
+                    continue
+                request = protocol.decode_object(line)
+                conn.sendall(
+                    protocol.encode(protocol.ok(request["id"], {"sessions": self._sessions}))
+                )
+
+    def close(self) -> None:
+        self._server.close()
+        self._thread.join(timeout=5)
+        with contextlib.suppress(OSError):
+            self._path.unlink()
 
 
 @pytest.fixture

@@ -63,6 +63,7 @@ from tests.e2e._proc import (
     sweep_stale_e2e_processes,
     wait_for_port,
 )
+from tests.e2e._proc import pty_sessions_proc as pty_sessions_proc
 from tests.e2e._truncate import truncate_with_deadlock_retry
 
 # ---- module-level overrides (run after top-level conftest) ---------------------
@@ -607,7 +608,7 @@ def truncated_db(e2e_db: None) -> Iterator[None]:
 
 
 @pytest.fixture
-def agent_host_proc(gateway_proc: str) -> Iterator[None]:
+def agent_host_proc(gateway_proc: str, pty_sessions_proc: None) -> Iterator[None]:
     """Run the local agent host with this test's model and machine identity."""
     cmd = [sys.executable, "-m", "tests.e2e._proc", gateway_proc, "services.agent_host.daemon"]
     env = os.environ.copy()

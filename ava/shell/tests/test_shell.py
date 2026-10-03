@@ -409,10 +409,14 @@ def test_send_keys_up_arrow_recalls_history(_agent_row: int) -> None:
         shell.sessions.send(sid, "echo hist-marker-1")
         _capture_until(sid, "hist-marker-1")
         shell.sessions.send_keys(sid, "Up", "Enter")
-        _capture_until(sid, "hist-marker-1")  # the re-run echoes it again
-        # the recalled line must have EXECUTED again: count bare output lines
-        lines = [ln.strip() for ln in shell.sessions.capture(sid).split("\n")]
-        assert lines.count("hist-marker-1") >= 2
+
+        def _executions() -> int:
+            lines = [ln.strip() for ln in shell.sessions.capture(sid).split("\n")]
+            return lines.count("hist-marker-1")
+
+        # the recalled line must have EXECUTED again: its bare output line appears twice
+        # (the typed text echoes at once, the output only once the shell has run it)
+        assert _wait_for(lambda: _executions() >= 2), shell.sessions.capture(sid)
     finally:
         shell.sessions.kill(sid)
 
