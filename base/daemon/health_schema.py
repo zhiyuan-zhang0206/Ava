@@ -50,6 +50,14 @@ def component(
     return result
 
 
+def _degraded_reasons(components: list[dict[str, object]]) -> list[str]:
+    return [
+        f"{record['name']}: {record['detail'] if 'detail' in record else record['status']}"
+        for record in components
+        if record["status"] != OK
+    ]
+
+
 def render(
     identity: dict[str, object],
     components: list[dict[str, object]],
@@ -65,11 +73,7 @@ def render(
     stale signal for health sources without a ``Liveness`` or
     ``LivenessGroup`` instance.
     """
-    reasons = [
-        f"{record['name']}: {record['detail'] if 'detail' in record else record['status']}"
-        for record in components
-        if record["status"] != OK
-    ]
+    reasons = _degraded_reasons(components)
     stale = stale_for is not None or (liveness is not None and not liveness.is_alive())
     healthy = not reasons and not stale
     payload = dict(identity)
@@ -79,7 +83,6 @@ def render(
     payload.setdefault("readiness", OK if healthy else DEGRADED)
     payload.setdefault("components", components)
     payload.setdefault("degraded_reasons", reasons)
-    if extra is not None:
-        for key, value in extra.items():
-            payload.setdefault(key, value)
+    for key, value in (extra or {}).items():
+        payload.setdefault(key, value)
     return 200 if healthy else 503, json.dumps(payload).encode("utf-8")
