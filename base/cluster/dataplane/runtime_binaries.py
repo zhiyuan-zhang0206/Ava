@@ -39,7 +39,7 @@ from base.log import logger
 # Pinned Postgres distribution. A major-version bump is an expand step (a new
 # version dir beside the old + re-initdb / pg_upgrade), never an in-place swap —
 # initdb and the data dir it created must share a major.
-_PG_VERSION = "17.4.0"
+_PG_VERSION = "17.11.0"
 
 _MAVEN_BASE = "https://repo1.maven.org/maven2/io/zonky/test/postgres"
 
@@ -48,11 +48,11 @@ _MAVEN_BASE = "https://repo1.maven.org/maven2/io/zonky/test/postgres"
 _PG_ARTIFACTS: dict[str, tuple[str, str]] = {
     "darwin": (
         "embedded-postgres-binaries-darwin-arm64v8",
-        "686fb3585077fcbb8b894305fda2b2278552a0a1c497ce53d9373b7c524b615e",
+        "a1c2786acb0c398f9b2d76806fc52f5dc8b222cbc8e9383a9b9702084daaf3a5",
     ),
     "linux-x86_64": (
         "embedded-postgres-binaries-linux-amd64",
-        "d9d216d3c1c119ad31b8a8de60b3cf2826516f711a04d3745ef4f1913f21a938",
+        "0dd7b72b6f335b8ecfb355fa24c5781e8a93edd09880bb77eb52ebbf29b3e96d",
     ),
 }
 

@@ -291,8 +291,8 @@ def test_manifest_paths_resolves_globs_and_drops_absent(
 ) -> None:
     """Version-stamped families resolve to whatever is installed; an absent
     version contributes nothing (it needs no rule and causes no popup)."""
-    (tmp_path / "pg" / "17.4.0" / "bin").mkdir(parents=True)
-    (tmp_path / "pg" / "17.4.0" / "bin" / "postgres").write_text("#!/bin/sh\n")
+    (tmp_path / "pg" / "17.11.0" / "bin").mkdir(parents=True)
+    (tmp_path / "pg" / "17.11.0" / "bin" / "postgres").write_text("#!/bin/sh\n")
     (tmp_path / "pg" / "17.5.0" / "bin").mkdir(parents=True)
     (tmp_path / "pg" / "17.5.0" / "bin" / "postgres").write_text("#!/bin/sh\n")
     (tmp_path / "pg" / "18.0.0" / "bin").mkdir(parents=True)  # no binary inside
