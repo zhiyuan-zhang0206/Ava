@@ -9,6 +9,7 @@ Each helper opens its own connection, so it sees rows committed by the fixture.
 from __future__ import annotations
 
 import json
+import threading
 from typing import Any, cast
 
 import psycopg
@@ -89,11 +90,17 @@ def test_async_pool_fixes_the_transport_posture(monkeypatch: pytest.MonkeyPatch)
 
 def _spy_dials(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, dict[str, Any]]]:
     """Record each psycopg.connect (conninfo, kwargs) and refuse the pooled scrub:
-    the door must decide the posture without dialing anything real."""
+    the door must decide the posture without dialing anything real.
+
+    Only the test's own thread is recorded: the patch sits on the process-wide
+    ``psycopg.connect``, and a dial from another thread sharing the xdist worker
+    must not enter the list (2026-10-03 shard8 flake)."""
     dials: list[tuple[str, dict[str, Any]]] = []
+    owner = threading.current_thread()
 
     def spy(conninfo: str = "", **kwargs: Any) -> object:
-        dials.append((conninfo, kwargs))
+        if threading.current_thread() is owner:
+            dials.append((conninfo, kwargs))
         return object()
 
     def no_scrub(_conn: object) -> None:

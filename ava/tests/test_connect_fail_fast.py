@@ -159,6 +159,10 @@ def test_ava_db_connect_fails_fast(silent_peer_url: str, monkeypatch: pytest.Mon
 def _record_connect_kwargs(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
     """Replace `psycopg.connect` with a spy that records its kwargs and raises.
 
+    Only the test's own thread is recorded: the patch sits on the process-wide
+    `psycopg.connect`, and a dial from another thread sharing the xdist worker
+    must not enter `seen` (2026-10-03 shard8 flake).
+
     Used for the call sites whose *behaviour* is impractical to drive here
     (allocation needs an agent identity in `agents_meta`; the TTL dials and
     `ava.DB` need a live database). The behaviour is already proven above by
@@ -166,9 +170,11 @@ def _record_connect_kwargs(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
     kwargs, which is the whole mechanism.
     """
     seen: dict[str, Any] = {}
+    owner = threading.current_thread()
 
     def spy(_conninfo: str = "", **kwargs: Any) -> psycopg.Connection:
-        seen.update(kwargs)
+        if threading.current_thread() is owner:
+            seen.update(kwargs)
         raise psycopg.OperationalError("spy: connection not attempted")
 
     monkeypatch.setattr(psycopg, "connect", spy)
