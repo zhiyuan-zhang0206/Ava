@@ -342,7 +342,9 @@ def _init_prod_source(source: Path, *, branch: str = "main") -> None:
     (source / "f").write_text("x")
     run("add", ".")
     run("commit", "-m", "init")
-    if branch != "main":
+    if branch == "DETACHED":
+        run("checkout", "--detach", "HEAD")
+    elif branch != "main":
         run("checkout", "-b", branch)
 
 
@@ -378,6 +380,14 @@ def test_detect_prod_source_drift_feature_branch(
     assert _cluster_drift.prod_source_branch_drift() == "ava-7/fix"
 
 
+def test_detect_prod_source_drift_detached(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """Prod source detached at the released commit → "HEAD" (source-mode steady state)."""
+
+    _init_prod_source(tmp_path / "source", branch="DETACHED")
+    monkeypatch.setattr("base.paths.ava_home", lambda: tmp_path)
+    assert _cluster_drift.prod_source_branch_drift() == "HEAD"
+
+
 def test_cmd_status_warns_on_prod_source_drift(monkeypatch: pytest.MonkeyPatch, capsys) -> None:
     """cmd_status surfaces the drift warning when the prod source is off main
     (runs on any installed host, here agent-runner)."""
@@ -391,6 +401,25 @@ def test_cmd_status_warns_on_prod_source_drift(monkeypatch: pytest.MonkeyPatch, 
     out = capsys.readouterr().out  # pyright: ignore[reportUnknownMemberType]
     assert "prod source" in out
     assert "ava-7/fix" in out
+    assert "un-reviewed" in out
+    assert "do not `checkout main`" in out
+
+
+def test_cmd_status_detached_prod_source_is_not_a_warning(
+    monkeypatch: pytest.MonkeyPatch, capsys
+) -> None:
+    """A detached prod source (source-mode release state) prints an informational
+    line, not the drift warning, and steers away from `checkout main`."""
+
+    monkeypatch.setattr(_repo_commands, "_roles_or_none", lambda: frozenset({"agent-runner"}))
+    monkeypatch.setattr(_probe_commands, "_curl_ok", lambda _u: False)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr("cli.commands.lifecycle.status._detect_prod_source_drift", lambda: "HEAD")
+    rc = _status_commands.cmd_status()
+    assert rc == 0
+    out = capsys.readouterr().out  # pyright: ignore[reportUnknownMemberType]
+    assert "detached at the released commit" in out
+    assert "un-reviewed" not in out
+    assert "Recover:" not in out
 
 
 # ─── source identity (replaces the retired cluster pin line) ─────────────────
