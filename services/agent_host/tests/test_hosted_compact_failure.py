@@ -92,7 +92,7 @@ async def test_compaction_failure_is_visible_durable_and_recovers_on_new_inbound
 ) -> None:
     agent = _agent(db_conn)
     summary = AsyncMock(side_effect=RuntimeError("compaction provider unavailable"))
-    monkeypatch.setattr("agent.graph.claim._dispatch.generate_summary", summary)
+    monkeypatch.setattr("agent.hooks.compact.generate_summary", summary)
     replies: list[str] = []
 
     graph, saver, config, history = await _prepare_graph(aops_pool, agent, interval, replies)
