@@ -10,6 +10,7 @@ base/deploy/tests/test_migrations.py.
 from __future__ import annotations
 
 import os
+import threading
 import time
 from typing import Any
 from urllib.parse import urlsplit
@@ -222,11 +223,19 @@ def _patch_pg_connect(
     monkeypatch: pytest.MonkeyPatch, rows: list[tuple[object, ...] | None]
 ) -> tuple[list[str], list[_FakePgConn]]:
     """psycopg.connect pops one scripted row per connection; returns
-    (dialed urls, connections)."""
+    (dialed urls, connections).
+
+    Only the test's own thread draws a scripted row and is recorded: the patch
+    sits on the process-wide ``psycopg.connect``, and a dial from another thread
+    sharing the xdist worker must not consume this test's scripted answers
+    (2026-10-03 shard8 flake)."""
     urls: list[str] = []
     conns: list[_FakePgConn] = []
+    owner = threading.current_thread()
 
     def fake_connect(url: str, **_: object) -> _FakePgConn:
+        if threading.current_thread() is not owner:
+            return _FakePgConn(url, first_row=None)
         urls.append(url)
         conn = _FakePgConn(url, first_row=rows.pop(0))
         conns.append(conn)

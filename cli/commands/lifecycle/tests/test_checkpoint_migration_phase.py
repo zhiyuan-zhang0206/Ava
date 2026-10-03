@@ -8,6 +8,7 @@ any database work.
 
 from __future__ import annotations
 
+import threading
 from collections.abc import Generator
 from contextlib import contextmanager
 from pathlib import Path
@@ -72,6 +73,7 @@ def migration_phase(monkeypatch: pytest.MonkeyPatch) -> list[str]:
     from base.db import pg_admin
 
     calls: list[str] = []
+    owner = threading.current_thread()
     conn = object()
     admin_conn = _FakeAdminConnection("ava")
     authority = pg_admin.OwnerAuthority(
@@ -87,6 +89,9 @@ def migration_phase(monkeypatch: pytest.MonkeyPatch) -> list[str]:
         yield conn
 
     def fake_admin_connect(url: str, **kwargs: object) -> _FakeAdminConnection:
+        if threading.current_thread() is not owner:
+            # a bystander thread's dial never enters this test's call log
+            return _FakeAdminConnection("ava")
         assert url == authority.conninfo
         calls.append(f"admin:{kwargs}")
         return admin_conn
