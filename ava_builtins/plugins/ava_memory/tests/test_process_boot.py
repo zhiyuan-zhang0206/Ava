@@ -38,10 +38,11 @@ def test_eval_isolation_disables_network_and_result_sdk_surfaces() -> None:
 
         import ava
         from base.config import settings
-        from base.packages.plugins.context import PluginContext
+        from ava.sdk_surface import install
+        from base.packages.plugins.extensions import ExtensionRegistry
+        from ava_builtins.plugins.ava_memory import plugin
 
-        with PluginContext("ava_memory"):
-            from ava_builtins.plugins.ava_memory import plugin
+        install.install(ExtensionRegistry((("ava_memory", plugin.contribute()),)))
         ava.tasks = SimpleNamespace(list=lambda: [])
         ava.__all_for_ava__.append("tasks")
 
@@ -77,10 +78,11 @@ def test_eval_network_allowlist_preserves_explicitly_allowed_web() -> None:
         import os
         import ava
         from base.config import settings
-        from base.packages.plugins.context import PluginContext
+        from ava.sdk_surface import install
+        from base.packages.plugins.extensions import ExtensionRegistry
+        from ava_builtins.plugins.ava_memory import plugin
 
-        with PluginContext("ava_memory"):
-            from ava_builtins.plugins.ava_memory import plugin
+        install.install(ExtensionRegistry((("ava_memory", plugin.contribute()),)))
         os.environ["AVA_AGENT_ID"] = "418"
         ava.agent_identity.establish(418, owns_loop=True)
         settings.agent.eval_isolation = True
@@ -101,10 +103,11 @@ def test_eval_isolation_off_leaves_sdk_and_memory_unchanged() -> None:
     code, out, err = _run("""
         import ava
         from base.config import settings
-        from base.packages.plugins.context import PluginContext
+        from ava.sdk_surface import install
+        from base.packages.plugins.extensions import ExtensionRegistry
+        from ava_builtins.plugins.ava_memory import plugin
 
-        with PluginContext("ava_memory"):
-            from ava_builtins.plugins.ava_memory import plugin
+        install.install(ExtensionRegistry((("ava_memory", plugin.contribute()),)))
         original_path = ava.memory.PATH
         settings.agent.eval_isolation = False
 

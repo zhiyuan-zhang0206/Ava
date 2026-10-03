@@ -383,7 +383,7 @@ def close(name: str) -> None:
 
 
 def __getattr__(name: str) -> object:
-    # Plugin members land on ava.ui via register_namespace_member (ava_fleet adds
+    # Plugin members land on ava.ui via a declared `SdkMember` (ava_fleet adds
     # notify / edit_notice / dismiss_notice). In an agent-launched
     # persistent-shell child they are absent until plugins load, and this module
     # already exists so ava.__getattr__ never fires — trigger the shared lazy

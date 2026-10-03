@@ -49,7 +49,7 @@ Skill nodes see [[ava_builtins/plugins/ava_memory/skills/docs/skills.ava.okf.md|
 
 ## Provided SDK surface
 
-This plugin **owns** the `ava.memory` namespace — `plugin.py` assembles it and calls `register_namespace("memory", ...)`. There is no core `ava/memory.py`; disabling the plugin removes the surface entirely.
+This plugin **owns** the `ava.memory` namespace — `plugin.py` assembles it and declares it as `SdkNamespace("memory", ...)`. There is no core `ava/memory.py`; disabling the plugin removes the surface entirely.
 
 - `ava.memory.PATH` — memory pool root path (`$AVA_HOME/memory`, computed by `ava_home()` each time it is read), shared by all agents
 - `ava.memory.search(query, k=5)` — semantic search, returns `list[(path, description, tags)]`

@@ -9,7 +9,6 @@ does with the note (strip on fork + regraft) is pinned in
 
 from __future__ import annotations
 
-import sys
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
@@ -101,30 +100,12 @@ def chain(monkeypatch: pytest.MonkeyPatch) -> _FakeChain:
 
 
 @pytest.fixture
-def memory_plugin() -> Iterator[Any]:
-    """Load ava_memory through the real plugin-registration path (mirrors
-    agent/tests/test_fork_notes.py) so `fork_notes` runs against the
-    registered note set."""
-    from agent.state import clear_plugin_registrations
-    from base.packages.plugins.config_registration import bind_from_disk
-    from base.packages.plugins.context import PluginContext
+def memory_plugin() -> Any:
+    """The ava_memory agent-runtime face, so `fork_notes` runs against the notes
+    its `contribute()` declares (mirrors agent/tests/test_fork_notes.py)."""
+    from ava_builtins.plugins.ava_memory import agent_runtime as _plugin
 
-    clear_plugin_registrations()
-    for name in list(sys.modules):
-        if name.startswith("ava_builtins.plugins.ava_memory"):
-            del sys.modules[name]
-
-    with PluginContext("ava_memory"):
-        # the memory-note registrations live in the agent_runtime face (the full load imports it after plugin.py — task #3633).
-        from ava_builtins.plugins.ava_memory import agent_runtime as _plugin
-
-    bind_from_disk()
-    yield _plugin
-
-    clear_plugin_registrations()
-    for name in list(sys.modules):
-        if name.startswith("ava_builtins.plugins.ava_memory"):
-            del sys.modules[name]
+    return _plugin
 
 
 # ── the block parser ───────────────────────────────────────────────────

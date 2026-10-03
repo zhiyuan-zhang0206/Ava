@@ -423,7 +423,7 @@ def test_module_children_uses_all_whitelist_when_present() -> None:
 def test_module_children_drops_underscore_names_in_surface() -> None:
     """The underscore guard is applied to `__all_for_ava__` itself, not only to
     the dir() fallback: a private helper a plugin appended to the surface list
-    (`register_namespace_member` never allows it, but a hand-built list could)
+    (`install_member` never allows it, but a hand-built list could)
     must not leak into `help()`. This is the one guard, written once in
     `agent_visible_names`."""
     mod = _fake_module(

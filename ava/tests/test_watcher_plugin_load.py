@@ -8,10 +8,10 @@ resolves them.
 
 Runs the actual `_build_boot` output through `python <boot>` (no session needed),
 against an isolated $AVA_HOME: every repo builtin is disabled and one minimal
-external plugin registers `ava.probe`, so the real `load_extensions` runs
+external plugin declares `ava.probe`, so the real `load_extensions` runs
 without dragging in the DB-touching builtins. This exercises the whole path —
 `ensure_plugins_loaded` -> importlib -> `load_extensions` -> external plugin
-import -> `register_namespace` — in a genuinely separate interpreter.
+import -> `contribute()` -> SDK surface install — in a genuinely separate interpreter.
 """
 
 from __future__ import annotations
@@ -28,13 +28,16 @@ from base import paths
 
 def _write_isolated_home(home: Path) -> None:
     """An $AVA_HOME whose plugins.json disables every repo builtin and enables one
-    minimal external plugin that registers `ava.probe`."""
+    minimal external plugin that declares `ava.probe`."""
     plug = home / "plugins" / "probe_plugin"
     plug.mkdir(parents=True)
     (plug / "plugin.py").write_text(
-        "import ava\n"
         "from types import SimpleNamespace\n"
-        "ava.register_namespace('probe', SimpleNamespace(ok=lambda: 'yes', __doc__='probe plugin'))\n"
+        "from base.packages.plugins.extensions import PluginContributions, SdkNamespace\n"
+        "\n"
+        "def contribute():\n"
+        "    probe = SimpleNamespace(ok=lambda: 'yes', __doc__='probe plugin')\n"
+        "    return PluginContributions(sdk_namespaces=(SdkNamespace('probe', probe),))\n"
     )
     builtins = [
         p.name

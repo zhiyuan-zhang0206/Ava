@@ -63,7 +63,7 @@ Capabilities rather than standing as its own section.
   tool-call = idle) plus the `help(ava)` SDK overview.
 - **Core expanded SDK reference** — `agent/graph/system_prompt.py:_sdk_expand_section`,
   rendering `effective_sdk_expand()`: plugin registrations
-  (`ava.register_sdk_expand`, e.g. ava_code's `cwd`) first, then
+  (a plugin's declared `sdk_namespaces(expand=True)` / `sdk_expansions`, e.g. ava_code's `cwd`) first, then
   `settings.sdk_expand_in_system_prompt` (env `AVA_SDK_EXPAND`, default `*`),
   deduped keep-first — full `ava.help(ava.<path>)` stubs right after the
   overview. `*` expands to every top-level public namespace (discovered from

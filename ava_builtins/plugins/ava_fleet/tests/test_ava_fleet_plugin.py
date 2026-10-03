@@ -1,7 +1,7 @@
 """ava_builtins.plugins.ava_fleet integration.
 
 Two layers:
-- plugin load end-to-end (`load_extensions` real path): registers the
+- plugin surface end-to-end (`install` of its `contribute()`): installs the
   `ava.self.set_label` self member + the `ava.ui.notify` /
   `edit_notice` / `dismiss_notice` push members + a system-prompt section.
 - `set_label()` writes the agent's own label (sticky, so the
@@ -14,7 +14,6 @@ Two layers:
 
 import importlib
 import inspect
-import sys
 from collections.abc import Iterator
 from datetime import UTC
 
@@ -24,11 +23,13 @@ import pytest
 import ava
 import ava.agents
 from agent.graph.system_prompt import build_system_prompt
-from agent.state import clear_plugin_registrations
-from ava_builtins.plugins.ava_fleet.tests.registry_support import fleet_registry
+from ava.sdk_surface import install
+from ava_builtins.plugins.ava_fleet.tests.registry_support import (
+    fleet_registry,
+    installed_fleet_surface,
+)
 from base.agents.observation.snapshot import select_one
 from base.host.env.agent_slices import AgentSlices
-from base.packages.plugins.context import PluginContext
 from base.packages.plugins.extensions import EMPTY
 
 
@@ -64,29 +65,9 @@ def _sdk_via_inprocess_gateway(monkeypatch: pytest.MonkeyPatch):
 
 @pytest.fixture
 def _load_activity_plugin() -> Iterator[None]:
-    """Load plugins.ava_fleet via the real PluginContext path; tear down the
-    member + prompt-section + module cache so tests do not leak into each other
-    (a second import would hit MemberConflictError)."""
-    clear_plugin_registrations()
-    ava.clear_registered_namespaces()
-    for name in list(sys.modules):
-        if name.startswith("ava_builtins.plugins.ava_fleet"):
-            del sys.modules[name]
-
-    with PluginContext("ava_fleet"):
-        from ava_builtins.plugins.ava_fleet import (
-            agent_runtime as agent_runtime,  # import side effects (prompt section)
-        )
-        from ava_builtins.plugins.ava_fleet import (
-            plugin as plugin,  # surface: self/ui members, tasks namespace, spawn wrap
-        )
-
-    yield
-
-    # clear_plugin_registrations() runs ava.sdk_surface.wraps.clear_wraps(), which restores
-    # ava.agents.spawn to the captured core original — no reload needed.
-    clear_plugin_registrations()
-    ava.clear_registered_namespaces()
+    """Install the fleet plugin's declared SDK surface; uninstall it after the test."""
+    with installed_fleet_surface():
+        yield
 
 
 def test_plugin_registers_self_members(_load_activity_plugin: None):
@@ -95,10 +76,9 @@ def test_plugin_registers_self_members(_load_activity_plugin: None):
         assert name in ava.self.__all_for_ava__
 
 
-def test_member_torn_down_on_clear(_load_activity_plugin: None):
-    # The fixture loaded the plugin; clearing must remove the member from both
-    # the module and its __all_for_ava__ so a reload re-registers from empty state.
-    ava.clear_registered_namespaces()
+def test_member_torn_down_on_uninstall(_load_activity_plugin: None):
+    # Uninstall must remove the member from both the module and its __all_for_ava__.
+    install.uninstall()
     assert not hasattr(ava.self, "set_label")
     assert "set_label" not in ava.self.__all_for_ava__
 
@@ -286,9 +266,6 @@ def test_prompt_section_numeric_identifier_prefixes(_load_activity_plugin: None)
 def test_task_conversion_absent_when_plugin_disabled():
     """Prompt copy and the task SDK reference disappear together with the
     fleet plugin."""
-    clear_plugin_registrations()
-    ava.clear_registered_namespaces()
-
     prompt = build_system_prompt(EMPTY, AgentSlices.resolve())
 
     assert "## Fleet task interaction" not in prompt

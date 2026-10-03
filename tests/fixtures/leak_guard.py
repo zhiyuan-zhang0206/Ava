@@ -12,7 +12,7 @@ composition, so a leak the old order hid starts to hit others. Three shapes seen
   * `monkeypatch.delenv(key, raising=False)` on an absent key records nothing, so the key the
     code under test sets next stays in `os.environ` (PR #3793).
   * code under test assigns an attribute onto a module object that outlives the test
-    (`register_namespace` sets `_qualname`) and nothing takes it off.
+    (`install_namespace` sets `_qualname`) and nothing takes it off.
 
 One function-scoped autouse fixture snapshots the cheap-to-compare containers before the test
 and compares after the test's own fixtures are torn down, so the LEAKER is named, not a victim.

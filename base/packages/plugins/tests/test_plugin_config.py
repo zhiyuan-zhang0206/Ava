@@ -1,8 +1,9 @@
 """Tests for Plugin config registration + disk image (`agent/config.py`).
 
 Covers:
-- register_plugin_config: PluginContext required, duplicate registration raise, non-BaseModel raise
-- bind_from_disk: auto-write default (disk missing), instantiation OK; schema drift raise
+- bind_plugin_config: non-BaseModel raise, duplicate bind raise, auto-write default (disk missing),
+  instantiation OK, schema drift raise, undo drops the binding
+- install: a plugin whose config does not bind is refused whole and reported while others install
 - merge_disk_image_schema: new fields fill default, removed fields dropped, unchanged no-op
 - is_per_agent_field: json_schema_extra={"per_agent": True} recognition
 - ava._settings.plugins.<n> attribute access wrong name raise + list known plugins
@@ -18,27 +19,24 @@ import pytest
 from pydantic import BaseModel, ConfigDict, Field
 
 from base.host.env.agent_slices import AgentSlices
+from base.packages.plugins import load_report
 from base.packages.plugins.config_registration import (
     _PLUGIN_CONFIG_CLASSES,
     _PLUGIN_CONFIGS,
     DuplicateRegistration,
     InvalidConfigOverlay,
-    NoPluginContext,
     SchemaDriftError,
     apply_config_overlay,
-    bind_from_disk,
-    clear_plugin_configs,
+    bind_plugin_config,
     disk_image_path,
     effective_config_snapshot,
     get_plugin_config,
     is_per_agent_field,
     merge_disk_image_schema,
-    register_plugin_config,
     resolve_overlay_targets,
     validate_config_overlay,
     write_default_disk_image,
 )
-from base.packages.plugins.context import PluginContext
 
 
 class _FixtureConfig(BaseModel):
@@ -57,39 +55,32 @@ def isolated_registry():
     # Snapshot before
     snap_classes = dict(_PLUGIN_CONFIG_CLASSES)
     snap_configs = dict(_PLUGIN_CONFIGS)
-    clear_plugin_configs()
+    _PLUGIN_CONFIG_CLASSES.clear()
+    _PLUGIN_CONFIGS.clear()
     yield
-    clear_plugin_configs()
+    _PLUGIN_CONFIG_CLASSES.clear()
+    _PLUGIN_CONFIGS.clear()
     _PLUGIN_CONFIG_CLASSES.update(snap_classes)
     _PLUGIN_CONFIGS.update(snap_configs)
 
 
-def test_register_requires_plugin_context(isolated_registry):
-    """register_plugin_config outside PluginContext → NoPluginContext."""
-    with pytest.raises(NoPluginContext, match="PluginContext"):
-        register_plugin_config(_FixtureConfig)
-
-
-def test_register_non_basemodel_raises(isolated_registry):
+def test_bind_non_basemodel_raises(isolated_registry):
     class _NotBaseModel:
         pass
 
-    with PluginContext("test_plugin"), pytest.raises(TypeError, match="BaseModel subclass"):
-        register_plugin_config(_NotBaseModel)  # type: ignore[arg-type]
+    with pytest.raises(TypeError, match="BaseModel subclass"):
+        bind_plugin_config("test_plugin", _NotBaseModel)  # type: ignore[arg-type]
 
 
-def test_register_duplicate_raises(isolated_registry):
-    with PluginContext("test_plugin"):
-        register_plugin_config(_FixtureConfig)
-        with pytest.raises(DuplicateRegistration, match="test_plugin"):
-            register_plugin_config(_FixtureConfig)
+def test_bind_duplicate_raises(isolated_registry, unit_home):
+    bind_plugin_config("test_plugin", _FixtureConfig)
+    with pytest.raises(DuplicateRegistration, match="test_plugin"):
+        bind_plugin_config("test_plugin", _FixtureConfig)
 
 
-def test_bind_from_disk_auto_writes_default_when_missing(isolated_registry, unit_home):
-    """disk image missing → bind_from_disk auto-writes default + instantiation OK."""
-    with PluginContext("test_plugin"):
-        register_plugin_config(_FixtureConfig)
-    bind_from_disk()
+def test_bind_auto_writes_default_when_missing(isolated_registry, unit_home):
+    """disk image missing → bind_plugin_config auto-writes default + instantiation OK."""
+    bind_plugin_config("test_plugin", _FixtureConfig)
 
     cfg = get_plugin_config("test_plugin", AgentSlices.resolve(), _FixtureConfig)
     assert cfg.flag is True
@@ -100,33 +91,30 @@ def test_bind_from_disk_auto_writes_default_when_missing(isolated_registry, unit
     assert json.loads(img.read_text()) == {"flag": True, "marker": ".git"}
 
 
-def test_bind_from_disk_reads_existing_image(isolated_registry, unit_home):
+def test_bind_reads_existing_image(isolated_registry, unit_home):
     """disk image exists and schema matches → bind uses disk values, not cls defaults."""
     tmp_path = unit_home
     img = tmp_path / "configs" / "test_plugin" / "config.json"
     img.parent.mkdir(parents=True)  # pyright: ignore[reportUnknownMemberType]
     img.write_text(json.dumps({"flag": False, "marker": ".hg"}))  # pyright: ignore[reportUnknownMemberType]
 
-    with PluginContext("test_plugin"):
-        register_plugin_config(_FixtureConfig)
-    bind_from_disk()
+    bind_plugin_config("test_plugin", _FixtureConfig)
 
     cfg = get_plugin_config("test_plugin", AgentSlices.resolve(), _FixtureConfig)
     assert cfg.flag is False
     assert cfg.marker == ".hg"
 
 
-def test_bind_from_disk_schema_drift_raises(isolated_registry, unit_home):
+def test_bind_schema_drift_raises(isolated_registry, unit_home):
     """disk image field set doesn't match cls → SchemaDriftError to guide update."""
     tmp_path = unit_home
     img = tmp_path / "configs" / "test_plugin" / "config.json"
     img.parent.mkdir(parents=True)  # pyright: ignore[reportUnknownMemberType]
     img.write_text(json.dumps({"flag": True, "marker": ".git", "extra_field": 42}))  # pyright: ignore[reportUnknownMemberType]
 
-    with PluginContext("test_plugin"):
-        register_plugin_config(_FixtureConfig)
     with pytest.raises(SchemaDriftError, match="schema drift"):
-        bind_from_disk()
+        bind_plugin_config("test_plugin", _FixtureConfig)
+    assert "test_plugin" not in _PLUGIN_CONFIGS
 
 
 def test_merge_disk_image_adds_new_field(isolated_registry, unit_home):
@@ -147,7 +135,7 @@ def test_merge_disk_image_adds_new_field(isolated_registry, unit_home):
 def test_merge_disk_image_drops_removed_field(isolated_registry, unit_home):
     """Removed field (disk has, cls doesn't) → drop from disk image + return removed set for CLI display.
 
-    Dropping is key: the field-set strict equality check in bind_from_disk requires disk == cls; keeping leftover fields
+    Dropping is key: the field-set strict equality check in bind_plugin_config requires disk == cls; keeping leftover fields
     would cause every agent spawn after update to continue hitting SchemaDriftError and become terminated on startup.
     """
     tmp_path = unit_home
@@ -165,7 +153,7 @@ def test_merge_disk_image_drops_removed_field(isolated_registry, unit_home):
 
 def test_merge_then_bind_resolves_removed_field_drift(isolated_registry, unit_home):
     """Regression: after running merge on removed-field drift (= `ava plugins update` / converge's
-    plugin-config-images step), bind_from_disk does not raise SchemaDriftError.
+    plugin-config-images step), bind_plugin_config does not raise SchemaDriftError.
 
     This is the real production scenario where spawn resulted in terminated on startup (compact_tail_messages
     was removed from schema, leftover disk image). Before the fix, merge kept the leftover fields, bind still crashed.
@@ -177,9 +165,9 @@ def test_merge_then_bind_resolves_removed_field_drift(isolated_registry, unit_ho
 
     merge_disk_image_schema("test_plugin", _FixtureConfig)
 
-    with PluginContext("test_plugin"):
-        register_plugin_config(_FixtureConfig)
-    bind_from_disk()  # before fix, would raise SchemaDriftError here
+    bind_plugin_config(
+        "test_plugin", _FixtureConfig
+    )  # before fix, would raise SchemaDriftError here
 
     cfg = get_plugin_config("test_plugin", AgentSlices.resolve(), _FixtureConfig)
     assert cfg.flag is True
@@ -219,10 +207,9 @@ def test_write_default_disk_image_overwrites(isolated_registry, unit_home):
     assert json.loads(img.read_text()) == {"flag": True, "marker": ".git"}  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
 
 
-def test_is_per_agent_field_metadata(isolated_registry):
+def test_is_per_agent_field_metadata(isolated_registry, unit_home):
     """json_schema_extra={"per_agent": True} → is_per_agent_field True; otherwise False."""
-    with PluginContext("test_plugin"):
-        register_plugin_config(_FixtureConfig)
+    bind_plugin_config("test_plugin", _FixtureConfig)
 
     assert is_per_agent_field("test_plugin", "marker") is True  # has per_agent metadata
     assert is_per_agent_field("test_plugin", "flag") is False  # no per_agent metadata
@@ -234,15 +221,13 @@ def test_is_per_agent_field_metadata(isolated_registry):
 
 
 def _setup_overlayable_plugin():
-    """Register a frozen Config with per_agent=True fields, run bind_from_disk.
+    """Register a frozen Config with per_agent=True fields, run bind_plugin_config.
 
     Requires the `unit_home` fixture active in the calling test (AVA_HOME
-    pointing at a per-test tmp dir) so bind_from_disk writes the disk image there,
+    pointing at a per-test tmp dir) so bind_plugin_config writes the disk image there,
     not into the shared session home — callers must declare `unit_home`.
     """
-    with PluginContext("overlay_test"):
-        register_plugin_config(_FixtureConfig)
-    bind_from_disk()
+    bind_plugin_config("overlay_test", _FixtureConfig)
 
 
 def test_resolve_overlay_targets_unknown_key_raises(isolated_registry, unit_home):
@@ -551,9 +536,7 @@ def test_effective_config_snapshot_excludes_sensitive_fields(isolated_registry, 
             json_schema_extra={"sensitive": True},
         )
 
-    with PluginContext("sensitive_test"):
-        register_plugin_config(_SensitiveConfig)
-    bind_from_disk()
+    bind_plugin_config("sensitive_test", _SensitiveConfig)
 
     snap = effective_config_snapshot()
     assert "sensitive_test.marker" in snap
@@ -569,3 +552,75 @@ def test_syntax_fix_ruff_format_overlay_is_accepted() -> None:
 
     validate_config_overlay({"syntax_fix_ruff_format": True})  # must not raise
     validate_config_overlay({"syntax_fix_ruff_format": False})
+
+
+def test_bind_undo_drops_the_binding(isolated_registry, unit_home):
+    undo = bind_plugin_config("test_plugin", _FixtureConfig)
+    assert is_per_agent_field("test_plugin", "marker") is True
+    undo()
+
+    assert "test_plugin" not in _PLUGIN_CONFIGS
+    assert is_per_agent_field("test_plugin", "marker") is False
+    bind_plugin_config("test_plugin", _FixtureConfig)  # a rebind after the undo is legal
+
+
+def test_install_refuses_a_plugin_whose_config_does_not_bind_and_installs_the_rest(
+    isolated_registry, unit_home, monkeypatch: pytest.MonkeyPatch
+):
+    """A config that cannot bind (SchemaDriftError) is a load failure of that plugin alone: it is
+    rolled back whole (its earlier namespace too), reported, and absent from the returned registry,
+    while the plugins around it install."""
+    from types import SimpleNamespace
+
+    import ava
+    from ava.sdk_surface import install
+    from base.packages.plugins.extensions import (
+        ExtensionRegistry,
+        PluginContributions,
+        SdkNamespace,
+    )
+
+    drifted = disk_image_path("drifted")
+    drifted.parent.mkdir(parents=True)
+    drifted.write_text(json.dumps({"flag": True, "marker": ".git", "extra_field": 42}))
+
+    reported: list[tuple[str, BaseException]] = []
+
+    def _capture(name: str, exc: BaseException) -> None:
+        reported.append((name, exc))
+
+    monkeypatch.setattr(load_report, "report_plugin_load_failure", _capture)
+    registry = ExtensionRegistry(
+        (
+            (
+                "drifted",
+                PluginContributions(
+                    sdk_namespaces=(SdkNamespace("drifted_ns", SimpleNamespace()),),
+                    config=_FixtureConfig,
+                ),
+            ),
+            (
+                "healthy",
+                PluginContributions(
+                    sdk_namespaces=(SdkNamespace("healthy_ns", SimpleNamespace()),),
+                    config=_FixtureConfig,
+                ),
+            ),
+        )
+    )
+
+    admitted = install.install(registry)
+    try:
+        assert [name for name, _ in admitted.plugins] == ["healthy"]
+        assert [name for name, _ in reported if name == "drifted"] == ["drifted"]
+        assert isinstance(
+            next(exc for name, exc in reported if name == "drifted"), SchemaDriftError
+        )
+        assert not hasattr(ava, "drifted_ns")
+        assert hasattr(ava, "healthy_ns")
+        assert "drifted" not in _PLUGIN_CONFIGS
+        assert "healthy" in _PLUGIN_CONFIGS
+    finally:
+        install.uninstall()
+    assert not hasattr(ava, "healthy_ns")
+    assert "healthy" not in _PLUGIN_CONFIGS

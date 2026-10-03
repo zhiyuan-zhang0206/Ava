@@ -122,7 +122,7 @@ after = set(sys.modules)
 
 # Nothing beyond pool_ops itself and its own (stdlib) imports should load as a
 # side effect -- in particular, no sibling submodule that does plugin/hook
-# registration (plugin.py, sdk.py, services.py, setup.py, ...).
+# declaration (plugin.py, sdk.py, services.py, setup.py, ...).
 new_ava_builtins_modules = sorted(
     m for m in (after - before) if m.startswith("ava_builtins.plugins.ava_memory")
 )
@@ -130,13 +130,13 @@ print(",".join(new_ava_builtins_modules))
 """
 
 
-def test_importing_pool_ops_outside_a_plugin_context_registers_nothing() -> None:
+def test_importing_pool_ops_as_a_plain_module_loads_no_sibling_submodule() -> None:
     """Importing `ava_builtins.plugins.ava_memory.pool_ops` as a plain module
-    (the way the consolidation scripts do, outside any `PluginContext`) must not
-    pull in the plugin's registration surface (`plugin.py`, `sdk.py`,
+    (the way the consolidation scripts do) must not
+    pull in the plugin's declaration surface (`plugin.py`, `sdk.py`,
     `services.py`, ...) as a side effect. `ava_builtins/__init__.py`,
     `ava_builtins/plugins/__init__.py`, and `ava_builtins/plugins/ava_memory/
-    __init__.py` are all side-effect-free (no imports, no registration calls),
+    __init__.py` are all side-effect-free (no imports, no declarations),
     which this fresh-subprocess import locks in."""
     env = {k: v for k, v in os.environ.items() if not k.startswith("AVA_")}
     res = subprocess.run(  # noqa: S603 — fixed argv, repository-owned driver script

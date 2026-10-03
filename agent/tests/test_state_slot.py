@@ -51,7 +51,6 @@ from agent.state import (
     BaseAgentState,
     PluginStateHandle,
     build_agent_state,
-    clear_plugin_registrations,
 )
 from base.agents.context import AvaContext
 from base.host.env.agent_slices import AgentSlices
@@ -71,11 +70,9 @@ def _reset_state_slot(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(agent_state, "AgentState", BaseAgentState)
     ava.state = None
     ava.state_update = None
-    clear_plugin_registrations()
     yield
     ava.state = None
     ava.state_update = None
-    clear_plugin_registrations()
     # The exec-child findings buffer is process-global; a failed test must not
     # leak findings into the next test.
     import ava.security as _security

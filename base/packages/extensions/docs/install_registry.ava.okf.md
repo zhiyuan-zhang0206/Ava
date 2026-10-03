@@ -133,7 +133,7 @@ rejected alternatives:
 open gaps: [what's left](../../../../future/infra/skill-supply-chain-trust.md).
 
 Beyond the load dir, a plugin can contribute skill roots at scan time via
-`ava/skills.py:register_skill_source` — the `ava_code` plugin uses it to surface
+The `skill_sources` a plugin declares (`PluginContributions`) — the `ava_code` plugin uses it to surface
 the working repo's `.agents/skills` / `.claude/skills` as `ava.cwd` moves between
 projects.
 

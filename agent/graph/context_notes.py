@@ -93,7 +93,17 @@ def fork_notes(extensions: ExtensionRegistry, slices: AgentSlices) -> list[Human
 
 
 def _rendered(entries: list[ContextNote], slices: AgentSlices) -> list[HumanMessage]:
-    built = [(entry.rank, note) for entry in entries if (note := entry.build(slices)) is not None]
+    built: list[tuple[int, HumanMessage]] = []
+    for entry in entries:
+        note = entry.build(slices)
+        if note is None:
+            continue
+        if not isinstance(note, HumanMessage):
+            raise TypeError(
+                f"context note {entry.build.__name__} returned {type(note).__name__}, "
+                "not HumanMessage | None"
+            )
+        built.append((entry.rank, note))
     return [note for _, note in sorted(built, key=lambda pair: pair[0])]
 
 

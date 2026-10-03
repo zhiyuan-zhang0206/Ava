@@ -11,7 +11,7 @@ from pathlib import Path
 import pytest
 
 import ava.skills as skills_mod
-from ava.tests._skills_helpers import _clear_skill_sources as _clear_skill_sources
+from ava.sdk_surface import skill_sources
 from ava.tests._skills_helpers import _overlay_all_enabled as _overlay_all_enabled
 from ava.tests._skills_helpers import _write_skill
 from ava.tests._skills_helpers import fake_skills_dir as fake_skills_dir
@@ -303,7 +303,9 @@ def test_gate_applies_to_namespace_top_level(
     assert skills_mod.names() == []
 
 
-# ─── register_skill_source / skills_in (Layer H) ──────────────────────────
+# ─── skill-root providers (`skill_sources`) / skills_in (Layer H) ─────────
+# A provider is held by `skill_sources.scoped` (or `add`, which returns the undo) for the
+# duration of one test; nothing outlives it.
 
 
 def test_skills_in_scans_given_roots(tmp_path: Path) -> None:
@@ -322,13 +324,13 @@ def test_skills_in_skips_missing_root(tmp_path: Path) -> None:
     assert skills_mod.skills_in([tmp_path / "nope"]) == []
 
 
-def test_register_skill_source_surfaces_skills(fake_skills_dir: Path, tmp_path: Path) -> None:
-    """A registered provider's roots are scanned into names()."""
+def test_an_installed_skill_source_surfaces_skills(fake_skills_dir: Path, tmp_path: Path) -> None:
+    """An installed provider's roots are scanned into names()."""
     proj = tmp_path / "proj"
     proj.mkdir()
     _write_skill(proj, "proj-skill", "name: proj-skill\ndescription: project local")
-    skills_mod.register_skill_source(lambda: [proj])
-    assert "proj-skill" in {s["name"] for s in skills_mod.names()}
+    with skill_sources.scoped(lambda: [proj]):
+        assert "proj-skill" in {s["name"] for s in skills_mod.names()}
 
 
 def test_provider_root_overrides_builtin(fake_skills_dir: Path, tmp_path: Path) -> None:
@@ -338,21 +340,29 @@ def test_provider_root_overrides_builtin(fake_skills_dir: Path, tmp_path: Path) 
     proj = tmp_path / "proj"
     proj.mkdir()
     _write_skill(proj, "demo", "name: demo\ndescription: project version")
-    skills_mod.register_skill_source(lambda: [proj])
-    demo = next(s for s in skills_mod.names() if s["name"] == "demo")
+    with skill_sources.scoped(lambda: [proj]):
+        demo = next(s for s in skills_mod.names() if s["name"] == "demo")
     assert demo["description"] == "project version"
     assert demo["path"].startswith(str(proj))
 
 
-def test_clear_skill_sources_drops_providers(fake_skills_dir: Path, tmp_path: Path) -> None:
-    """clear_skill_sources removes registered providers."""
-    proj = tmp_path / "proj"
-    proj.mkdir()
-    _write_skill(proj, "gone", "name: gone\ndescription: temporary")
-    skills_mod.register_skill_source(lambda: [proj])
-    assert "gone" in {s["name"] for s in skills_mod.names()}
-    skills_mod.clear_skill_sources()
-    assert "gone" not in {s["name"] for s in skills_mod.names()}
+def test_a_skill_source_undo_drops_only_its_provider(fake_skills_dir: Path, tmp_path: Path) -> None:
+    """The undo `skill_sources.add` returns removes that provider and leaves the others."""
+    gone, kept = tmp_path / "gone", tmp_path / "kept"
+    gone.mkdir()
+    kept.mkdir()
+    _write_skill(gone, "gone", "name: gone\ndescription: temporary")
+    _write_skill(kept, "kept", "name: kept\ndescription: stays")
+    undo_kept = skill_sources.add(lambda: [kept])
+    try:
+        undo_gone = skill_sources.add(lambda: [gone])
+        assert {"gone", "kept"} <= {s["name"] for s in skills_mod.names()}
+        undo_gone()
+        names = {s["name"] for s in skills_mod.names()}
+        assert "gone" not in names and "kept" in names
+    finally:
+        undo_kept()
+    assert "kept" not in {s["name"] for s in skills_mod.names()}
 
 
 # ─── namespace folders (ava.skills.<folder>.<skill>) ───────────────────────

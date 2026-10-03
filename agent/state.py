@@ -87,7 +87,6 @@ from agent.state_channels import (
     _memory_state_merge,
 )
 from base.agents.history.checkpoint_serde import STATIC_CHECKPOINT_MSGPACK_TYPES
-from base.packages.plugins import contributions
 from base.packages.plugins.extensions import PLUGIN_WRITABLE_BASE_FIELDS, ExtensionRegistry
 
 AttachEntry = _AttachEntry
@@ -589,30 +588,6 @@ def plugin_state_schema(extensions: ExtensionRegistry) -> PluginStateSchema:
     return PluginStateSchema(
         extra_fields, namespace_fields, frozenset(base_declared), frozenset(classes)
     )
-
-
-def clear_plugin_registrations() -> None:
-    """Reset the plugin registrations still made at import — called by
-    `load_extensions` on entry so repeated loads (test fixture / CLI) don't accumulate ghosts.
-
-    Covers the SDK surface only: namespaces, wraps, skill sources, plugin configs, flag
-    declarations and the attribution ledger those write to. Hooks, state, system prompt sections
-    and context notes are declared, not registered (`PluginContributions`), so there is nothing of
-    theirs to clear.
-    """
-    # avoid circular import: lazy import inside the function for cross-module reset points
-    import ava
-    import ava.sdk_surface.skill_sources
-    import ava.sdk_surface.wraps
-    from base.packages.plugins.config_registration import clear_plugin_configs
-    from base.packages.plugins.flags import clear_plugin_flags
-
-    clear_plugin_configs()
-    clear_plugin_flags()
-    contributions.clear()
-    ava.clear_registered_namespaces()
-    ava.sdk_surface.wraps.clear_wraps()
-    ava.sdk_surface.skill_sources.clear()
 
 
 def _plugin_namespace_view(state: BaseAgentState, plugin: str) -> SimpleNamespace:

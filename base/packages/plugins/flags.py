@@ -1,24 +1,19 @@
 """Plugin access to declared, non-sensitive core configuration flags.
 
-Plugins declare every core flag they read at the top level of ``plugin.py``:
+Plugins declare every core flag they read in their ``plugin.py`` ``contribute()``:
 
-    from base.packages.plugins.flags import declare_flags
+    def contribute() -> PluginContributions:
+        return PluginContributions(
+            flags=("agent.prompt_invest_future_enabled", "agent.agent_communication_style")
+        )
 
-    declare_flags(
-        "agent.prompt_invest_future_enabled",
-        "agent.agent_communication_style",
-    )
-
-Later, plugin behavior identifies itself explicitly when it reads a declared
-flag from the current turn:
+The install (``ava.sdk_surface.install``) validates and records them through ``declare_flags``. Later,
+plugin behavior identifies itself explicitly when it reads a declared flag from the current turn:
 
     from base.packages.plugins.flags import read_flag
 
     if read_flag("agent.prompt_invest_future_enabled", runtime.context.require_agent(), plugin="ava_fleet"):
         ...
-
-During ``plugin.py`` import, ``read_flag`` may omit ``plugin`` because the
-loader-provided ``PluginContext`` supplies that identity as a fallback.
 
 Declaration is mandatory: ``read_flag`` rejects a key its identified plugin did
 not declare. Keys are fully qualified as ``<domain>.<field>``. The namespace is
@@ -32,20 +27,16 @@ agent's value directly. A cluster config change takes effect on the next
 process or agent start: values are read at start, not live.
 """
 
+from collections.abc import Callable
 from typing import Any
 
 from base.host.env.agent_slices import AgentSlices
 from base.host.env.config_registry import DOMAIN_ATTRS, fields
 from base.packages.plugins.config_registration import _field_is_sensitive
-from base.packages.plugins.context import current_plugin_name
 
 
 class PluginFlagError(Exception):
     """Root of plugin core-flag declaration and read failures."""
-
-
-class NoPluginContext(PluginFlagError):  # noqa: N818
-    """A plugin flag API could not identify the plugin making the call."""
 
 
 class UnknownFlag(PluginFlagError):  # noqa: N818
@@ -63,51 +54,50 @@ class FlagDomainUnavailable(PluginFlagError):  # noqa: N818
 _PLUGIN_FLAGS: dict[str, set[str]] = {}
 
 
-def declare_flags(*keys: str) -> None:
-    """Declare the core configuration flags the current plugin reads.
+def declare_flags(plugin: str, keys: tuple[str, ...]) -> Callable[[], None]:
+    """Record the core configuration flags `plugin` declared; returns the undo.
 
-    Called at top level during a plugin's ``plugin.py`` import, which the
-    loader wraps in ``PluginContext``. Every key is validated before this call
-    changes the registry, so a malformed declaration leaves no partial record.
+    Only the installer calls this. Every key is validated before the registry changes, so a malformed
+    declaration leaves no partial record.
 
     Args:
+        plugin: the declaring plugin.
         keys: Fully qualified ``<domain>.<field>`` core Settings keys.
 
     Raises:
-        NoPluginContext: the declaration ran outside ``PluginContext``.
         UnknownFlag: a key is malformed, does not name a core field, or is sensitive.
     """
-    plugin = _require_plugin_context("declare_flags")
     declared = {_validate_flag_key(key) for key in keys}
-    if plugin not in _PLUGIN_FLAGS:
-        _PLUGIN_FLAGS[plugin] = set()
-    _PLUGIN_FLAGS[plugin].update(declared)
+    _PLUGIN_FLAGS.setdefault(plugin, set()).update(declared)
+
+    def undo() -> None:
+        _PLUGIN_FLAGS.pop(plugin, None)
+
+    return undo
 
 
-def read_flag(key: str, slices: AgentSlices, *, plugin: str | None = None) -> Any:
+def read_flag(key: str, slices: AgentSlices, *, plugin: str) -> Any:
     """Return the effective value of a declared core configuration flag for the agent whose
     `slices` are given.
 
     Model-tuning fields use the framework's model-default layering. All other
-    fields return their raw value for that agent (its pin, else the live default). Behavior-time callers
-    pass their plugin name explicitly; import-time calls may use the active
-    ``PluginContext`` instead.
+    fields return their raw value for that agent (its pin, else the live default). The caller names
+    its plugin explicitly.
 
     Args:
         key: Fully qualified ``<domain>.<field>`` core Settings key.
         slices: The turn's `AgentSlices` (a hook reads `runtime.context.require_agent()`).
-        plugin: Explicit plugin identity. Takes precedence over ``PluginContext``.
+        plugin: The reading plugin's name.
 
     Raises:
-        NoPluginContext: the read has neither an explicit plugin nor ``PluginContext``.
         UndeclaredFlag: ``key`` is absent from the identified plugin declaration.
         FlagDomainUnavailable: the current process profile lacks the key's domain.
     """
-    plugin_name = _plugin_for_read(plugin)
+    plugin_name = plugin
     if plugin_name not in _PLUGIN_FLAGS or key not in _PLUGIN_FLAGS[plugin_name]:
         raise UndeclaredFlag(
             f"plugin {plugin_name!r} cannot read flag {key!r}: declaration is contract; "
-            "add it to declare_flags(...) first."
+            "add it to PluginContributions.flags first."
         )
 
     domain, field = key.split(".")
@@ -136,35 +126,6 @@ def declared_flags(plugin: str) -> frozenset[str]:
     if plugin not in _PLUGIN_FLAGS:
         return frozenset()
     return frozenset(_PLUGIN_FLAGS[plugin])
-
-
-def clear_plugin_flags() -> None:
-    """Reset all plugin flag declarations during extension reload and test cleanup."""
-    _PLUGIN_FLAGS.clear()
-
-
-def _require_plugin_context(api: str) -> str:
-    """Return the plugin currently importing, or raise the API-specific error."""
-    plugin = current_plugin_name()
-    if plugin is None:
-        raise NoPluginContext(
-            f"{api} must run inside PluginContext — the loader provides it during plugin import."
-        )
-    return plugin
-
-
-def _plugin_for_read(plugin: str | None) -> str:
-    """Return explicit behavior-time identity or the import-time context identity."""
-    if plugin is not None:
-        return plugin
-    context_plugin = current_plugin_name()
-    if context_plugin is not None:
-        return context_plugin
-    raise NoPluginContext(
-        "read_flag requires plugin identity: pass plugin=<name> explicitly "
-        "(e.g. read_flag(key, plugin='ava_fleet')), or run inside PluginContext "
-        "during plugin import."
-    )
 
 
 def _validate_flag_key(key: str) -> str:

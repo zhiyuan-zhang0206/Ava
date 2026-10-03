@@ -11,12 +11,10 @@ Every production load path shares the primitives here — `load_plugin_module`
 `sys.modules` registration before execution, reload-in-place) and
 `safe_load_plugin_module` (the fail-soft wrapper). `scan_and_load` is the
 external-only loader `agent/process_boot.py` calls at host boot;
-`agent/graph/_build.py:load_extensions` drives the same primitives, so a
+`agent/extensions/__init__.py:load_extensions` drives the same primitives, so a
 plugin sees the same module name, `__package__`, and `sys.modules` identity
-whichever production path imports it. Both wrap the import in
-`with PluginContext(name):`, so a wrap registered at plugin import time is
-attributed to its plugin without the author passing a name (see
-`ava/sdk_surface/wraps.py` for the wrap registration primitive itself).
+whichever production path imports it. Importing registers nothing: the SDK
+surface a plugin declares is installed by `ava/sdk_surface/install.py`.
 """
 
 from __future__ import annotations
@@ -125,6 +123,13 @@ def load_plugin_module(
         # from later `importlib.import_module` callers.
         register_plugin_parent_packages(pkg, name, plugin_py.parent)
     spec.loader.exec_module(loaded)
+    # What the import system does after loading a submodule: bind it as an attribute of its parent
+    # package, so `pkg.module` resolves by attribute (a dotted `monkeypatch` / `mock.patch` target
+    # walks attributes, and a by-path load left the parent without one).
+    parent_name, _, child_attr = spec.name.rpartition(".")
+    parent = sys.modules.get(parent_name)
+    if parent is not None:
+        setattr(parent, child_attr, loaded)
     return loaded
 
 
@@ -176,10 +181,10 @@ def scan_and_load(
         ├── token_budget/plugin.py
         └── my_custom/plugin.py
 
-    Each plugin.py runs `ava.extend.wrap` / other register calls at the top
-    level — side-effect driven registration; importing here triggers it. Every
-    import goes through `safe_load_plugin_module` inside
-    `with PluginContext(name):`, the exact contract
+    Importing a plugin.py registers nothing: it only makes the module (and its
+    `contribute()`) available to `agent.extensions.load_extensions`, which builds the
+    registry and installs the SDK surface. Every import goes through
+    `safe_load_plugin_module`, the exact contract
     `agent/graph/_build.py:load_extensions` uses for the same file — same
     dotted module name, same `sys.modules` identity, same fail-soft
     containment — so the two production load paths cannot disagree about what
@@ -212,8 +217,6 @@ def scan_and_load(
     if not root.exists():
         return []
 
-    from base.packages.plugins.context import PluginContext
-
     loaded: list[str] = []
     for plugin_subdir in sorted(root.iterdir()):
         # Dot-prefixed dirs are atomic-install residue (.name.staging /
@@ -231,8 +234,7 @@ def scan_and_load(
         if enabled is not None and plugin_name not in enabled:
             continue
 
-        with PluginContext(plugin_name):
-            module = safe_load_plugin_module(plugin_py, name=plugin_name, pkg="plugins")
+        module = safe_load_plugin_module(plugin_py, name=plugin_name, pkg="plugins")
         if module is None:
             continue
         loaded.append(plugin_name)

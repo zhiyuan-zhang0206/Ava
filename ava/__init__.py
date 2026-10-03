@@ -37,10 +37,6 @@ from .sdk_surface.plugins import NamespaceConflictError as NamespaceConflictErro
 from .sdk_surface.plugins import PluginNamespaceConflictError as PluginNamespaceConflictError
 from .sdk_surface.plugins import RegisterNamespaceError as RegisterNamespaceError
 from .sdk_surface.plugins import UnknownNamespaceError as UnknownNamespaceError
-from .sdk_surface.plugins import clear_registered_namespaces as clear_registered_namespaces
-from .sdk_surface.plugins import register_namespace as register_namespace
-from .sdk_surface.plugins import register_namespace_member as register_namespace_member
-from .sdk_surface.plugins import register_sdk_expand as register_sdk_expand
 
 # ── Framework-internal state slot ──────────────────────────────────────────
 #
@@ -235,7 +231,7 @@ def _maybe_load_plugins_for_missing(name: str) -> bool:
 
 
 # PEP 562 module-level `__getattr__`. Plugins set runtime attributes via
-# `ava.register_namespace("X", module)` (real setattr), so this fall-through is
+# the SDK install (a real setattr), so this fall-through is
 # only hit for genuinely unknown names — we want fail-fast there.
 # Its presence tells pyright the module supports dynamic attributes, so test
 # files that reference plugin-registered names (e.g. `ava.cwd` from the
@@ -289,15 +285,11 @@ from .sdk_surface import wraps as _wraps
 from .understand import understand as understand
 
 # ── ava.extend — the plugin extension surface ──────────────────────────────
-# Curated view of `ava.sdk_surface.wraps` for plugin authors: the wrap
-# registration primitive plus its introspection. Deliberately NOT added to
-# `__all_for_ava__` (and not a `register_namespace` call) — this is a
-# plugin-author API, so it stays out of the `help(ava)` view the agent sees.
-# `ava.sdk_surface.plugin_loader.scan_and_load` and `wraps.clear_wraps` are
-# framework-internal (reached via `ava.sdk_surface.plugin_loader` /
-# `ava.sdk_surface.wraps`), so they are absent from this surface.
+# Curated view of `ava.sdk_surface.wraps` for plugin authors: the wrap-stack
+# introspection (a plugin *declares* a wrap in `contribute()`; the SDK install applies
+# it). Deliberately NOT added to `__all_for_ava__` — this is a plugin-author API,
+# so it stays out of the `help(ava)` view the agent sees.
 extend = SimpleNamespace(
-    wrap=_wraps.wrap,
     stack=_wraps.stack,
     wrappers=_wraps.wrappers,
 )
@@ -306,11 +298,11 @@ extend._qualname = "ava.extend"  # type: ignore[attr-defined]  # agent-facing na
 # Agent-visible top-level surface — the namespaces + `help` the agent sees in
 # `help(ava)`. This is NOT Python's `__all__` (this package declares none —
 # nothing does `from ava import *`, and the module's re-exports use redundant-
-# alias imports which the type checker already honors). `register_namespace` /
-# `const` / `extend` / the exception classes are deliberately absent: they are
-# plugin-author / framework API, importable but out of the agent's view.
-# `register_namespace` appends to this list and AVA_SDK_DISABLE removes from it,
-# so it must be defined before `apply_sdk_disable` runs.
+# alias imports which the type checker already honors). `const` / `extend` / the
+# exception classes are deliberately absent: they are plugin-author / framework API,
+# importable but out of the agent's view. The SDK install (`ava.sdk_surface.install`)
+# appends plugin namespaces to this list and AVA_SDK_DISABLE removes from it, so it
+# must be defined before `apply_sdk_disable` runs.
 __all_for_ava__ = [
     "agents",
     "files",
@@ -336,10 +328,6 @@ _sdk_disable.apply_sdk_disable(_sdk_disable.sdk_disable_entries)
 for _entry in (
     help,
     const,
-    register_namespace,
-    register_sdk_expand,
-    register_namespace_member,
-    clear_registered_namespaces,
 ):
     _entry.__module__ = "ava"
 

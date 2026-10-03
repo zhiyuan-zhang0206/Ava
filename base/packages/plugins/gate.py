@@ -17,6 +17,8 @@ from typing import cast
 from base.packages.plugins.extensions import PluginContributions
 from base.packages.plugins.manifest import load_manifest
 
+_CONFIG_IDENTIFIER = "<declared>"
+
 
 class ContributionMismatch(Exception):  # noqa: N818 — a load failure of one plugin, not an error class family
     """A plugin's `ava-plugin.json` and its declaration disagree."""
@@ -36,15 +38,22 @@ def check_manifest(
     delivered: dict[str, set[str]] = {key: set() for key in gated}
     for record in contributions.as_records(name):
         if record.surface in delivered:
-            delivered[record.surface].add(record.identifier)
+            # `contributions.config` is an object (one config class or none), so it folds to a single
+            # identifier on both sides rather than comparing class names, which a rename would break.
+            delivered[record.surface].add(
+                _CONFIG_IDENTIFIER if record.surface == "config" else record.identifier
+            )
     problems: list[str] = []
     for key in gated:
         declared = cast(object, manifest.contributions.get(key))
-        declared_ids = (
-            {str(item) for item in cast(list[object], declared)}
-            if isinstance(declared, list)
-            else set[str]()
-        )
+        if key == "config":
+            declared_ids = {_CONFIG_IDENTIFIER} if isinstance(declared, dict) else set[str]()
+        else:
+            declared_ids = (
+                {str(item) for item in cast(list[object], declared)}
+                if isinstance(declared, list)
+                else set[str]()
+            )
         for identifier in sorted(declared_ids - delivered[key]):
             problems.append(f"{key}: {identifier!r} is declared but the plugin does not provide it")
         for identifier in sorted(delivered[key] - declared_ids):

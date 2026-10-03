@@ -27,7 +27,7 @@ The three systems are decoupled — plugins don't need skills, skills don't depe
 ## Entry Points
 - `base/packages/plugins/enable_config.py:discover_plugins()` — scans builtin + external plugin directories; `installed_plugin_dirs()` = plugins present on this machine (for service discovery, judged by presence regardless of enable state)
 - `plugins/<name>/services.py:services()` + `ops/spec.py:plugin_services()` — hook for plugin registering ops background services + the discovery side
-- `base/packages/plugins/config_registration.py:register_plugin_config()` — plugin Config class registration
+- `base/packages/plugins/config_registration.py:bind_plugin_config()` — binds a plugin's declared Config class from its disk image
 - `base/packages/plugins/extensions.py:PluginContributions` — hooks, state, sections and notes a plugin declares
 - `agent/state.py:plugin_state_schema()` — state field validation
 - `agent/extensions/catalog.py:SURFACES` — the enumeration of every plugin injection surface, with each entry point's live signature; `ava plugins inspect` renders it beside what each installed plugin actually registered ([[okf/plugins/plugins.ava.okf.md|Plugin System]])
