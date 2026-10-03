@@ -19,7 +19,7 @@ advancing to a value the run did not seal would lose that stretch for good.
 Generation is agent-shaped (task #4674): requests ride the target agent's own
 conversation prefix and tool schema so the provider serves them from its
 prefix cache, and the generation model is the agent's own effective model —
-`base.agents.observation.snapshot.agent_effective_model`.
+`base.agents.observation.snapshot.agent_model_target`.
 """
 
 from __future__ import annotations
@@ -37,8 +37,9 @@ from base.agents.history.hierarchy import ENGINE_VERSION, PROMPT_VERSION
 from base.agents.history.hierarchy.generate import build_generation_llm
 from base.agents.history.hierarchy.pipeline import MaterializedTree, build_agent_tree
 from base.agents.history.hierarchy.store import load_known_texts, write_tree
-from base.agents.observation.snapshot import agent_effective_model
+from base.agents.observation.snapshot import agent_model_target
 from base.db import Database
+from base.lm.context_budget import resolve_context_budget
 from base.lm.factory import close_chat_model
 from base.log import logger
 from services.hierarchy_worker.config import HierarchyWorkerConfig
@@ -77,7 +78,7 @@ def execute_job(job_id: int, config: HierarchyWorkerConfig, db: Database) -> int
         )
         return 0
 
-    model = agent_effective_model(db, agent_id, fallback=config.hierarchy_model)
+    model, overrides = agent_model_target(db, agent_id, fallback=config.hierarchy_model)
     started = time.monotonic()
     try:
         # Each channel reads only its own bookkeeping target: a compact run
@@ -97,7 +98,7 @@ def execute_job(job_id: int, config: HierarchyWorkerConfig, db: Database) -> int
         # reused across the run and closed as soon as generation ends, so
         # provider sockets do not linger (task #3915). Built inside the try so
         # a construction failure still records on the job row.
-        llm = build_generation_llm(model)
+        llm = build_generation_llm(model, overrides=overrides)
         # The regen halt (task #4674): a cumulative node cap on ordinary
         # compact-driven builds. First builds and tail seals are exempt —
         # their full windows are legitimately large (a measured worst first
@@ -115,6 +116,7 @@ def execute_job(job_id: int, config: HierarchyWorkerConfig, db: Database) -> int
                 deadline=deadline,
                 tools=[execute_code],
                 max_generated=halt_nodes,
+                context_window_tokens=resolve_context_budget(model).max_context_tokens,
             )
         finally:
             close_chat_model(llm)

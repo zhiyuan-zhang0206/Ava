@@ -116,9 +116,11 @@ def _pure_continuation(last: _LastJob) -> bool:
 def scan(conn: Connection, config: HierarchyWorkerConfig) -> ScanOutcome:
     """Run one scan pass on an autocommit connection; return the pass's effect."""
     stale_recovered = _recover_stale(conn, config)
+    served = config.served_agents()
     boundaries: dict[int, str] = {
         int(thread_id): str(latest)
         for thread_id, latest in conn.execute(_LATEST_BOUNDARY_SQL).fetchall()
+        if _admits(served, int(thread_id))
     }
     state: dict[int, str] = {
         int(agent_id): str(boundary)
@@ -142,6 +144,11 @@ def scan(conn: Connection, config: HierarchyWorkerConfig) -> ScanOutcome:
         tail_enqueued=tail_enqueued,
         stale_recovered=stale_recovered,
     )
+
+
+def _admits(served: frozenset[int], agent_id: int) -> bool:
+    """Whether the rollout allowlist serves this agent (empty = every agent)."""
+    return not served or agent_id in served
 
 
 def _recover_stale(conn: Connection, config: HierarchyWorkerConfig) -> int:
@@ -248,10 +255,7 @@ def _scan_tails(conn: Connection, state: dict[int, str], config: HierarchyWorker
     established baseline (a clean non-tail build): the tail channel continues
     coverage that exists, it never initializes one.
     """
-    latest = {
-        int(thread_id): str(checkpoint_id)
-        for thread_id, checkpoint_id in conn.execute(_LATEST_CHECKPOINT_SQL).fetchall()
-    }
+    latest = _latest_checkpoints(conn, config.served_agents())
     if not latest:
         return 0
     seals = {
@@ -297,6 +301,15 @@ def _scan_tails(conn: Connection, state: dict[int, str], config: HierarchyWorker
                 checkpoint=newest,
             )
     return enqueued
+
+
+def _latest_checkpoints(conn: Connection, served: frozenset[int]) -> dict[int, str]:
+    """The newest checkpoint id per served agent."""
+    return {
+        int(thread_id): str(checkpoint_id)
+        for thread_id, checkpoint_id in conn.execute(_LATEST_CHECKPOINT_SQL).fetchall()
+        if _admits(served, int(thread_id))
+    }
 
 
 def _checkpoint_time(checkpoint_id: str) -> datetime | None:

@@ -1,6 +1,6 @@
 """Contract tests for the manual hierarchy build entry (`scripts/codegen/build_hierarchy_once.py`).
 
-The script composes its entry points: `agent_effective_model` ->
+The script composes its entry points: `agent_model_target` ->
 `load_known_texts` -> `build_agent_tree` -> `write_tree`, plus the model
 lifecycle (`build_generation_llm` / `close_chat_model`). These tests fake all
 of them and lock the script's own contract: dry-run builds but never writes; a
@@ -21,6 +21,8 @@ from agent.llm import execute_code
 from base.agents.history.hierarchy.generate import GenResult
 from base.agents.history.hierarchy.pipeline import MaterializedNode, MaterializedTree
 from base.config import settings
+from base.host.env.agent_slices import ModelOverrides
+from base.lm.context_budget import ContextBudget
 from scripts.codegen import build_hierarchy_once as build
 
 
@@ -57,9 +59,13 @@ class _Recorder:
     def __init__(self) -> None:
         self.loaded: list[int] = []
         self.llm_models: list[str] = []
+        self.llm_overrides: list[ModelOverrides | None] = []
         self.llm_closes: list[Any] = []
         self.built: list[dict[str, Any]] = []
         self.written: list[dict[str, Any]] = []
+
+
+_AGENT_OVERRIDES = ModelOverrides.from_pins({"reasoning_effort": "max"})
 
 
 def _install_fakes(
@@ -75,16 +81,19 @@ def _install_fakes(
         rec.loaded.append(agent_id)
         return dict(known or {})
 
-    def fake_llm(model: str) -> Any:
+    def fake_llm(model: str, overrides: ModelOverrides | None = None) -> Any:
         rec.llm_models.append(model)
+        rec.llm_overrides.append(overrides)
         return object()
 
     def fake_close(llm: Any) -> None:
         rec.llm_closes.append(llm)
 
-    def fake_effective_model(_db: object, _agent_id: int, *, fallback: str) -> str:
+    def fake_model_target(
+        _db: object, _agent_id: int, *, fallback: str
+    ) -> tuple[str, ModelOverrides]:
         assert fallback == settings.lm.hierarchy_model
-        return "agent-own-model"
+        return "agent-own-model", _AGENT_OVERRIDES
 
     def fake_build(
         _db: object,
@@ -94,6 +103,7 @@ def _install_fakes(
         model: str,
         known_texts: Mapping[str, str] | None,
         tools: Sequence[Any] | None = None,
+        context_window_tokens: int | None = None,
     ) -> MaterializedTree:
         rec.built.append(
             {
@@ -102,6 +112,7 @@ def _install_fakes(
                 "model": model,
                 "known_texts": known_texts,
                 "tools": tools,
+                "context_window_tokens": context_window_tokens,
             }
         )
         if build_error is not None:
@@ -117,7 +128,12 @@ def _install_fakes(
     monkeypatch.setattr(build, "load_known_texts", fake_load)
     monkeypatch.setattr(build, "build_generation_llm", fake_llm)
     monkeypatch.setattr(build, "close_chat_model", fake_close)
-    monkeypatch.setattr(build, "agent_effective_model", fake_effective_model)
+    monkeypatch.setattr(build, "agent_model_target", fake_model_target)
+
+    def fake_budget(_model: str) -> ContextBudget:
+        return ContextBudget(200_000, 60_000, 80_000)
+
+    monkeypatch.setattr(build, "resolve_context_budget", fake_budget)
     monkeypatch.setattr(build, "build_agent_tree", fake_build)
     monkeypatch.setattr(build, "write_tree", fake_write)
     return rec
@@ -151,7 +167,9 @@ def test_clean_run_writes_nodes_under_the_resolved_model(
     assert rec.written[0]["nodes"] == nodes
     assert rec.built[0]["model"] == "agent-own-model"
     assert rec.built[0]["tools"] == [execute_code]
+    assert rec.built[0]["context_window_tokens"] == 200_000  # the prefix cap's window
     assert rec.llm_models == ["agent-own-model"]
+    assert rec.llm_overrides == [_AGENT_OVERRIDES]  # the agent's pinned effort rides in
     assert rec.llm_closes == [rec.built[0]["llm"]]
     assert rec.written[0]["model"] == "agent-own-model"
     assert "upserted 2 node row(s)" in capsys.readouterr().out

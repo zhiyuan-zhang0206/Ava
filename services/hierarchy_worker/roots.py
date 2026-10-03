@@ -30,10 +30,12 @@ def hierarchy_worker_config() -> HierarchyWorkerConfig:
         hierarchy_tail_min_interval_minutes=settings.daemon.hierarchy_tail_min_interval_minutes,
         hierarchy_tail_max_per_tick=settings.daemon.hierarchy_tail_max_per_tick,
         hierarchy_worker_enabled=settings.daemon.hierarchy_worker_enabled,
+        hierarchy_worker_agents=settings.daemon.hierarchy_worker_agents,
         hierarchy_fallback_scan_seconds=settings.daemon.hierarchy_fallback_scan_seconds,
         hierarchy_regen_alert_nodes_per_job=settings.daemon.hierarchy_regen_alert_nodes_per_job,
         hierarchy_regen_halt_nodes_per_job=settings.daemon.hierarchy_regen_halt_nodes_per_job,
         hierarchy_regen_daily_budget_nodes=settings.daemon.hierarchy_regen_daily_budget_nodes,
+        hierarchy_first_build_daily_budget_nodes=settings.daemon.hierarchy_first_build_daily_budget_nodes,
         hierarchy_regen_min_reuse_ratio=settings.daemon.hierarchy_regen_min_reuse_ratio,
     )
 

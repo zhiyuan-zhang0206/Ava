@@ -17,6 +17,7 @@ from base.agents.observation.roster import _LIVE_SQL, AgentCard, list_directory,
 from base.config import settings
 from base.db import Database
 from base.db.tests.fakes import fake_database
+from base.host.env.agent_slices import ModelOverrides
 
 
 def seed(conn: psycopg.Connection, rows: list[tuple[int, str, str]]) -> None:
@@ -245,27 +246,49 @@ def _install_conn(row: tuple[Any, ...] | None) -> tuple[Database, _FakeConn]:
 
 
 def test_effective_model_overlay_wins() -> None:
-    db, conn = _install_conn(({"llm_model": "deepseek-v4-pro"},))
-    assert snapshot.agent_effective_model(db, 42, fallback="fallback-x") == "deepseek-v4-pro"
+    db, conn = _install_conn(({"llm_model": "deepseek-v4-pro"}, {"llm_model": "deepseek-v4-flash"}))
+    assert snapshot.agent_model_target(db, 42, fallback="fallback-x")[0] == "deepseek-v4-pro"
     ((sql, params),) = conn.queries
     assert "agents_meta" in sql and params == (42,)
 
 
+def test_effective_model_is_the_birth_stamp_when_there_is_no_overlay() -> None:
+    """`llm_model` is birth-frozen: an agent born under an older default keeps it."""
+    db, _ = _install_conn(({}, {"llm_model": "deepseek-v4-pro"}))
+    assert snapshot.agent_model_target(db, 42, fallback="fallback-x")[0] == "deepseek-v4-pro"
+
+
 def test_effective_model_defaults_to_the_fleet_model_without_an_overlay() -> None:
-    db, _ = _install_conn(({},))
-    assert snapshot.agent_effective_model(db, 42, fallback="fallback-x") == settings.lm.llm_model
+    db, _ = _install_conn(({}, {}))
+    assert snapshot.agent_model_target(db, 42, fallback="fallback-x")[0] == settings.lm.llm_model
 
 
 def test_effective_model_defaults_to_the_fleet_model_when_the_row_vanished() -> None:
     db, _ = _install_conn(None)
-    assert snapshot.agent_effective_model(db, 42, fallback="fallback-x") == settings.lm.llm_model
+    assert snapshot.agent_model_target(db, 42, fallback="fallback-x")[0] == settings.lm.llm_model
 
 
 def test_effective_model_read_failure_returns_the_callers_fallback() -> None:
     def boom(**_kw: object) -> None:
         raise RuntimeError("db down")
 
-    assert (
-        snapshot.agent_effective_model(fake_database(boom), 42, fallback="fallback-x")
-        == "fallback-x"
+    model, overrides = snapshot.agent_model_target(fake_database(boom), 42, fallback="fallback-x")
+    assert model == "fallback-x"
+    assert overrides == ModelOverrides.from_pins(None)
+
+
+def test_model_target_carries_the_agents_tuning_pins() -> None:
+    """The overlay's pinned effort wins over the birth stamp's; unpinned fields stay unset."""
+    db, _ = _install_conn(
+        ({"reasoning_effort": "max"}, {"reasoning_effort": "low", "llm_model": "deepseek-v4-pro"})
     )
+    model, overrides = snapshot.agent_model_target(db, 42, fallback="fallback-x")
+    assert model == "deepseek-v4-pro"
+    assert overrides.reasoning_effort == "max"
+    assert overrides.claude_thinking_budget_tokens is None
+
+
+def test_model_target_without_pins_leaves_every_tuning_field_to_the_cluster_default() -> None:
+    db, _ = _install_conn(({}, {}))
+    _, overrides = snapshot.agent_model_target(db, 42, fallback="fallback-x")
+    assert overrides == ModelOverrides.from_pins(None)

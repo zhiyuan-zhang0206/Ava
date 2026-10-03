@@ -21,8 +21,8 @@ Modules:
   `execute.execute_job` owns the job row's outcome (scope + token stats; the
   scan-cursor advance for a `compact` job, the tail-seal delta column for a
   `tail` job) and the build itself. Generation runs agent-shaped (task #4674):
-  the child resolves the target agent's own model
-  (`base.agents.observation.snapshot.agent_effective_model`) and passes the agent's tool
+  the child resolves the target agent's own model and tuning pins
+  (`base.agents.observation.snapshot.agent_model_target`) and passes the agent's tool
   schema, so each request rides the agent's conversation prefix and serves
   from the provider's prefix cache.
 

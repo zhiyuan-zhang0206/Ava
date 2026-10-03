@@ -57,6 +57,7 @@ from psycopg_pool import AsyncConnectionPool, ConnectionPool
 
 from base import telemetry
 from base.config import settings
+from base.config.hierarchy_worker_fields import parse_hierarchy_worker_agents
 from base.db.transaction import async_write_transaction, write_transaction
 from base.log import logger
 
@@ -269,6 +270,14 @@ def _compact_agent_id(thread_id: str) -> int | None:
     return int(thread_id) if thread_id.isascii() and thread_id.isdigit() else None
 
 
+def _worker_serves(agent_id: int) -> bool:
+    """Whether the hierarchy worker is on and its rollout allowlist admits the agent."""
+    if not settings.daemon.hierarchy_worker_enabled:
+        return False
+    allowed = parse_hierarchy_worker_agents(settings.daemon.hierarchy_worker_agents)
+    return not allowed or agent_id in allowed
+
+
 def _enqueue_failed(agent_id: int, exc: Exception) -> None:
     """The enqueue-failure observability half — itself best-effort, never raises."""
     try:
@@ -318,7 +327,7 @@ async def _enqueue_compact_job(
     the run's own advance target.
     """
     agent_id = _compact_agent_id(thread_id)
-    if agent_id is None or boundary is None or not settings.daemon.hierarchy_worker_enabled:
+    if agent_id is None or boundary is None or not _worker_serves(agent_id):
         return
     try:
         async with async_write_transaction(pool) as conn, conn.cursor() as cur:

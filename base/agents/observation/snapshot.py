@@ -22,6 +22,7 @@ from base.agents.observation.evidence import (
 from base.agents.tasks.priority import Priority
 from base.config import settings
 from base.db import Database
+from base.host.env.agent_slices import ModelOverrides
 from base.log import logger
 
 # Canonical columns + JOIN. last_active_at is the agent's REAL-activity clock
@@ -68,7 +69,7 @@ _FULL_COLS = (
     "AND n.created_at > now() - interval '30 days') AS unread_notice_count"
     ", a.config_overlay, mp.last_probe_at, a.lease_expires_at, "
     "mp.agent_host_online, a.last_admission_outcome, a.last_admission_at, "
-    "a.last_launch_failure_reason, a.last_launch_failure_at"
+    "a.last_launch_failure_reason, a.last_launch_failure_at, a.birth_config"
 )
 _FROM = (
     "FROM agents_meta a "
@@ -139,8 +140,9 @@ class AgentSnapshot(BaseModel):
     `notices_awaiting_response` is the agent's open require_response notices,
     oldest first — empty when it is not waiting on the user.
 
-    `supports_vision` describes the effective model: the per-agent
-    `config_overlay.llm_model` when set, otherwise `settings.lm.llm_model`.
+    `supports_vision` describes the effective model, resolved as the agent host
+    resolves it (`_effective_model`: overlay over birth stamp over the live
+    default).
     It uses `base.lm.factory.model_supports_vision`, the same capability
     lookup as the message API's image-content gate.
     """
@@ -174,23 +176,25 @@ class AgentSnapshot(BaseModel):
     heartbeat_paused_until: datetime | None
 
 
-def _effective_model(config_overlay: Any) -> str:
+def _effective_model(config_overlay: Any, birth_config: Any) -> str:
     """The model an agent's own calls run, withdrawal-resolved (task #3212).
 
-    `config_overlay.llm_model` when set, otherwise `settings.lm.llm_model`; a
-    configured withdrawn id is served by its registered fallback. One
-    resolution site serves both the snapshot's capability judgment and
-    `agent_effective_model` — generation couples to the agent's own model for
-    provider cache parity (task #4674).
+    The agent host's own resolution: `llm_model` is a birth-frozen field, so the
+    pin is `config_overlay` over `birth_config` (an agent born under an older
+    cluster default keeps its birth model), `settings.lm.llm_model` only when
+    neither pins it, and a withdrawn id is served by its registered fallback.
+    One resolution site for the snapshot's capability judgment and
+    `agent_model_target`, so the two cannot drift.
     """
+    from base.config.agent_pins import resolve_agent_config_pins
+
+    return _model_of_pins(resolve_agent_config_pins(config_overlay, birth_config))
+
+
+def _model_of_pins(pins: dict[str, Any]) -> str:
     from base.lm.registry import resolve_available_model
 
-    configured = (
-        config_overlay["llm_model"]
-        if config_overlay and "llm_model" in config_overlay
-        else settings.lm.llm_model
-    )
-    return resolve_available_model(configured)
+    return resolve_available_model(pins.get("llm_model") or settings.lm.llm_model)
 
 
 def _row_to_snapshot(row: tuple[Any, ...]) -> AgentSnapshot:
@@ -199,7 +203,7 @@ def _row_to_snapshot(row: tuple[Any, ...]) -> AgentSnapshot:
     # Pydantic does the per-field type coercion / validation; the tuple
     # positions match the SELECT column order above. Capability judgments
     # answer for the model that will run (task #3212).
-    effective_model = _effective_model(row[17])
+    effective_model = _effective_model(row[17], row[25])
     return AgentSnapshot.model_validate(
         {
             "agent_id": row[0],
@@ -245,20 +249,27 @@ def select_one(conn: psycopg.Connection, agent_id: int) -> AgentSnapshot | None:
     return _row_to_snapshot(row) if row else None
 
 
-def agent_effective_model(db: Database, agent_id: int, *, fallback: str) -> str:
-    """The model `agent_id`'s own calls run, withdrawal-resolved.
+def agent_model_target(db: Database, agent_id: int, *, fallback: str) -> tuple[str, ModelOverrides]:
+    """The model `agent_id`'s own calls run, withdrawal-resolved, and its tuning pins.
 
-    The same resolution `_row_to_snapshot` applies for the snapshot, without
-    building one; a consumer couples to it so its requests ride the agent's
-    own model (hierarchy generation, task #4674 — a hard model mismatch
-    silently halves its provider cache hit rate). A failed agents_meta read
-    logs a warning and returns `fallback` — generation must not die on a
-    bookkeeping miss.
+    The agent host's own resolution: `llm_model` is a birth-frozen field, so the
+    pin is `config_overlay` over `birth_config` (an agent born under an older
+    cluster default keeps its birth model), the live cluster default only when
+    neither pins it, and a withdrawn id is served by its registered fallback. The
+    `ModelOverrides` are the agent's explicit tuning values (reasoning effort,
+    thinking budget, ...) from the same pins, unset ones left to the cluster
+    default exactly as `resolve_setting` reads them. A consumer couples to both so
+    its requests ride the agent's own model and parameters (hierarchy generation,
+    task #4674 — a mismatch silently halves its provider cache hit rate). A failed
+    agents_meta read logs a warning and returns `fallback` with no pins —
+    generation must not die on a bookkeeping miss.
     """
+    from base.config.agent_pins import resolve_agent_config_pins
+
     try:
         with db.connect(autocommit=True) as conn:
             row = conn.execute(
-                "SELECT config_overlay FROM agents_meta WHERE id = %s", (agent_id,)
+                "SELECT config_overlay, birth_config FROM agents_meta WHERE id = %s", (agent_id,)
             ).fetchone()
     except Exception as exc:
         logger.warning(
@@ -267,8 +278,9 @@ def agent_effective_model(db: Database, agent_id: int, *, fallback: str) -> str:
             error=exc,
             model=fallback,
         )
-        return fallback
-    return _effective_model(row[0] if row else None)
+        return fallback, ModelOverrides.from_pins(None)
+    pins = resolve_agent_config_pins(row[0] if row else None, row[1] if row else None)
+    return _model_of_pins(pins), ModelOverrides.from_pins(pins)
 
 
 class ActivityEntry(BaseModel):

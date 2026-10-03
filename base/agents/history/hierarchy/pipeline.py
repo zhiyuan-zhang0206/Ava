@@ -35,7 +35,7 @@ from typing import Any, NamedTuple
 
 from langchain_core.messages import BaseMessage, SystemMessage
 
-from base.agents.history.checkpoint import load_checkpoint_messages_full
+from base.agents.history.checkpoint import load_checkpoint_history_full
 from base.agents.history.hierarchy.blocks import COMPACT_ITEM_KINDS, Block, fold_blocks
 from base.agents.history.hierarchy.generate import (
     DEFAULT_MAX_CONCURRENT,
@@ -48,6 +48,7 @@ from base.agents.history.hierarchy.generate import (
     text_hash,
 )
 from base.agents.history.hierarchy.nodes import MaterializedNode
+from base.agents.history.hierarchy.prefix import PrefixPlanner
 from base.agents.history.hierarchy.render import RenderParams, render_block
 from base.agents.history.hierarchy.seal import (
     NodeSpec,
@@ -57,6 +58,7 @@ from base.agents.history.hierarchy.seal import (
     narrative_budget_tok,
     seal_cascade,
 )
+from base.agents.history.hierarchy.tokens import count_tokens
 from base.agents.history.timeline import TimelineItem, build_timeline_items
 from base.db import Database
 from base.log import logger
@@ -169,6 +171,7 @@ def materialize(
     tools: Sequence[Any] | None = None,
     deadline: float | None = None,
     max_generated: int | None = None,
+    prefixer: PrefixPlanner | None = None,
 ) -> MaterializedTree:
     """Generate the sealed tree's nodes, level by level, newest stretch first.
 
@@ -199,8 +202,14 @@ def materialize(
     `tools` (task #4674) is the agent's tool schema list (`[execute_code]`)
     threaded into the generation calls; together with each request's prefix it
     selects the agent-shaped request — see `generate.generate_nodes`.
+
+    `prefixer` picks each request's prefix from the history's segment layout
+    (the agent's own request head per compaction segment, window-capped — see
+    `prefix.PrefixPlanner`); omitted, the history is taken as one snapshot.
     """
     known = known_texts or {}
+    if prefixer is None:
+        prefixer = PrefixPlanner.single_segment(msgs)
     if tools is not None and msgs and not isinstance(msgs[0], SystemMessage):
         logger.warning(
             "hierarchy generation has tools but no SystemMessage head — requests "
@@ -228,6 +237,7 @@ def materialize(
             texts,
             known,
             render_params,
+            prefixer if tools is not None else None,
         )
         nodes.extend(plan.nodes)
         errors.extend(plan.errors)
@@ -292,23 +302,6 @@ class _LevelPlan(NamedTuple):
     failed: int
 
 
-def _request_prefix(msgs: Sequence[BaseMessage], spec: NodeSpec) -> tuple[BaseMessage, ...]:
-    """The request prefix for one node: everything before its span start (#4674).
-
-    The agent's SystemMessage snapshot plus the conversation up to (not
-    including) the node's first span message — byte-identical to the head of
-    the agent's own requests, so the generation call rides the provider's
-    prefix cache. Empty when the history head is not a SystemMessage: the
-    request then falls back to the material-only shape.
-    """
-    if not msgs or not isinstance(msgs[0], SystemMessage):
-        return ()
-    cut = spec.span[0]
-    if cut < 1:
-        return ()
-    return tuple(msgs[:cut])
-
-
 def _classify_level_specs(
     specs: list[NodeSpec],
     level: int,
@@ -317,6 +310,7 @@ def _classify_level_specs(
     texts: dict[str, str],
     known: Mapping[str, str],
     render_params: RenderParams | None,
+    prefixer: PrefixPlanner | None,
 ) -> _LevelPlan:
     """Classify one level's specs: materialize what needs no model call, queue
     what does. Alias specs materialize inline (their child's text); a group
@@ -358,13 +352,18 @@ def _classify_level_specs(
             )
             texts[spec.nid] = cached_text
             continue
+        prefix = (
+            prefixer.prefix_for(spec.span[0], count_tokens(input_text))
+            if prefixer is not None
+            else ()
+        )
         queued.append(
             (
                 GenRequest(
                     nid=spec.nid,
                     kind=kind_of_input,
                     input_text=input_text,
-                    prefix=_request_prefix(msgs, spec),
+                    prefix=prefix,
                 ),
                 spec,
                 key,
@@ -555,6 +554,7 @@ def build_agent_tree(
     tools: Sequence[Any] | None = None,
     deadline: float | None = None,
     max_generated: int | None = None,
+    context_window_tokens: int | None = None,
 ) -> MaterializedTree:
     """One full run for an agent over its retained checkpoint history.
 
@@ -568,8 +568,19 @@ def build_agent_tree(
     resumes from the reuse cache without redoing any of them. `max_generated`
     is threaded through to `materialize` as the regen halt (task #4674); its
     stop also lands in `skipped`, marked by `halted`.
+
+    `context_window_tokens` is the agent model's context window: the request
+    prefix of a node is capped at `GenParams.prefix_window_fraction` of it and
+    a node that would overflow falls back to the material-only request. None
+    = uncapped.
     """
-    msgs = load_checkpoint_messages_full(db, agent_id)
+    history = load_checkpoint_history_full(db, agent_id)
+    msgs = history.messages
+    prefixer = PrefixPlanner(
+        history,
+        window_tokens=context_window_tokens,
+        window_fraction=(gen_params or GenParams()).prefix_window_fraction,
+    )
     items, _ = build_timeline_items(msgs, [])
     blocks = fold_blocks(items)
     units, table = build_units(msgs, blocks, render_params)
@@ -589,5 +600,13 @@ def build_agent_tree(
         tools=tools,
         deadline=deadline,
         max_generated=max_generated,
+        prefixer=prefixer,
     )
+    if prefixer.capped:
+        logger.warning(
+            "agent {agent}: {count} node request(s) exceeded the context-window cap and"
+            " were sent material-only (no prefix cache)",
+            agent=agent_id,
+            count=prefixer.capped,
+        )
     return replace(tree, batches=len(batches))

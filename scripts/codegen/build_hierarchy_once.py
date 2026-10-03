@@ -26,9 +26,10 @@ from agent.llm import execute_code
 from base.agents.history.hierarchy.generate import build_generation_llm
 from base.agents.history.hierarchy.pipeline import MaterializedTree, build_agent_tree
 from base.agents.history.hierarchy.store import load_known_texts, write_tree
-from base.agents.observation.snapshot import agent_effective_model
+from base.agents.observation.snapshot import agent_model_target
 from base.config import settings
 from base.db import Database
+from base.lm.context_budget import resolve_context_budget
 from base.lm.factory import close_chat_model
 
 # How many failed-node lines the report shows before folding the rest into a
@@ -79,16 +80,23 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     db = Database.from_settings()
-    model: str = args.model or agent_effective_model(
+    agent_model, overrides = agent_model_target(
         db, args.agent_id, fallback=settings.lm.hierarchy_model
     )
+    model: str = args.model or agent_model
     print(f"target: {_db_label()} | agent {args.agent_id} | model {model}")
 
     known = load_known_texts(db, args.agent_id)
-    llm = build_generation_llm(model)
+    llm = build_generation_llm(model, overrides=overrides)
     try:
         tree = build_agent_tree(
-            db, args.agent_id, llm=llm, model=model, known_texts=known, tools=[execute_code]
+            db,
+            args.agent_id,
+            llm=llm,
+            model=model,
+            known_texts=known,
+            tools=[execute_code],
+            context_window_tokens=resolve_context_budget(model).max_context_tokens,
         )
     finally:
         close_chat_model(llm)

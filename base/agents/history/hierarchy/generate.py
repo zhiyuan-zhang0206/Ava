@@ -44,6 +44,7 @@ from loguru import logger
 from base.agents.history.hierarchy import ENGINE_VERSION, PROMPT_VERSION
 from base.agents.history.hierarchy.seal import narrative_budget_tok
 from base.agents.history.hierarchy.tokens import count_tokens
+from base.host.env.agent_slices import ModelOverrides
 from base.lm.call import extract_text, invoke_response, invoke_text
 
 # The node kinds `build_prompt` serves: a leaf's input is rendered source
@@ -114,8 +115,8 @@ class GenParams:
 
     These are engine-calibration constants with written reasons, the same
     shape as `seal.SealParams`; which model a run uses is resolved per target
-    agent (`base.agents.observation.snapshot.agent_effective_model` — overlay preferred,
-    fleet default else), with `settings.lm.hierarchy_model` as the last-resort
+    agent (`base.agents.observation.snapshot.agent_model_target` — overlay over the
+    birth stamp over the fleet default), with `settings.lm.hierarchy_model` as the last-resort
     fallback.
     """
 
@@ -142,10 +143,16 @@ class GenParams:
     # error result and re-invoked, and exhausting the rounds fails the node
     # (retried on a later pass) — never an unbounded loop.
     tool_rounds: int = 3
-    # The demo's effective reasoning level (its "low" clamps onto "high" for
-    # deepseek); the deepseek registry default ("max") is the agent-brain
-    # level and far more than a summarizer needs.
-    reasoning_effort: str = "high"
+    # The agent-shaped request (prefix + material + prompt) may fill this
+    # fraction of the model's context window before the node falls back to the
+    # material-only request: slack for the gap between the engine's o200k
+    # count and the provider's own tokenizer, and for the answer.
+    prefix_window_fraction: float = 0.8
+    # None = the model's own resolved effort, exactly what the agent's build
+    # (`build_chat_model(model)`) uses — the reasoning parameters are part of the
+    # request the provider matches its prompt cache against, so an override here
+    # would trade cache hits for a cheaper summarizer.
+    reasoning_effort: str | None = None
 
 
 # One batch's parallel fan-out. Mirrors the SDK batch ceiling
@@ -258,21 +265,25 @@ def text_hash(text: str) -> str:
     return hashlib.sha256(text.encode()).hexdigest()
 
 
-def build_generation_llm(model: str, params: GenParams | None = None) -> Any:
-    """Build the generation chat model at the pass's reasoning effort.
+def build_generation_llm(
+    model: str, params: GenParams | None = None, overrides: ModelOverrides | None = None
+) -> Any:
+    """Build the generation chat model the way the agent builds its own.
 
     The single source of the generation model's construction: `generate_nodes`
     builds one through here when the caller supplied none, and the hierarchy
     callers (the worker's job child, the manual build script) build their
     one-per-run model through here too — so every path reaches the same
-    provider shape and effort (`GenParams().reasoning_effort`, unless the
-    caller passes params). The caller owns the returned model: close it via
+    provider shape and effort (the model's resolved effort, unless the caller
+    passes `params.reasoning_effort`); `overrides` is the target agent's tuning pins
+    (`agent_model_target`), so a pinned reasoning effort or thinking budget is the agent's
+    own. The caller owns the returned model: close it via
     `base.lm.factory.close_chat_model` once the pass is done (task #3915).
     """
     from base.lm.factory import build_chat_model
 
     p = params or GenParams()
-    return build_chat_model(model, reasoning_effort=p.reasoning_effort)
+    return build_chat_model(model, reasoning_effort=p.reasoning_effort, overrides=overrides)
 
 
 def generate_nodes(
