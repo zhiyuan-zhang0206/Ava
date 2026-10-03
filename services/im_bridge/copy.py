@@ -106,3 +106,10 @@ PUSH_FAILURE_ALERT = '\u300c{channel}\u300d push link failed {failures} times co
 PUSH_RECOVERED_HINT = (
     "(system note: the '{channel}' push link failed earlier and has now recovered)"
 )
+
+# -- feishu owner seed (task #4930) -----------------------------------------
+
+# Boot could not restore the owner chat from the persisted switch state; the
+# outbound leg skips feishu until the user messages the bot once.
+FEISHU_OWNER_SEED_NO_SOURCE = 'Feishu alerts paused after the bridge restart: no feishu chat could be resolved from the bridge state. Send the feishu bot a message (e.g. "hi") to resume them.'
+FEISHU_OWNER_SEED_AMBIGUOUS = 'Feishu alerts paused after the bridge restart: the bridge state lists {count} feishu chats, so no owner could be picked. Send the feishu bot a message (e.g. "hi") to resume them.'
