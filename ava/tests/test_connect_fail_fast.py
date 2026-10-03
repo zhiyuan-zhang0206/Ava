@@ -27,7 +27,7 @@ import socket
 import threading
 import time
 from collections.abc import Callable, Generator
-from typing import Any
+from typing import Any, cast
 
 import psycopg
 import pytest
@@ -182,12 +182,14 @@ def test_shell_session_index_passes_the_resilience_kwargs(
     session-index allocation hands libpq `PG_KEEPALIVE_KWARGS` and never
     prepares (`prepare_threshold=None`)."""
     import ava.agent_identity
-    from ava.shell import sessions
+    from ava._settings import shell_sessions
+    from ava.shell.sessions import ShellSessions
 
     monkeypatch.setattr(ava.agent_identity, "agent_id", lambda: 1)
+    handle = cast("ShellSessions", shell_sessions())
     seen = _record_connect_kwargs(monkeypatch)
     with pytest.raises(psycopg.OperationalError):
-        sessions._next_session_index_from_db()
+        handle._next_session_index_from_db()
     assert seen.items() >= {**PG_KEEPALIVE_KWARGS, "prepare_threshold": None}.items()
 
 
@@ -212,12 +214,16 @@ def test_shell_session_ttl_sites_never_prepare(monkeypatch: pytest.MonkeyPatch) 
     everywhere."""
     from datetime import UTC, datetime
 
-    from ava.shell import sessions
+    import ava.agent_identity
+    from ava._settings import shell_sessions
+    from ava.shell.sessions import ShellSessions
 
+    monkeypatch.setattr(ava.agent_identity, "agent_id", lambda: 1)
+    handle = cast("ShellSessions", shell_sessions())
     dials: list[Callable[[], object]] = [
-        lambda: sessions._record_ttl(1, 60.0),
-        lambda: sessions._read_expiry_row(1, 2),
-        lambda: sessions._apply_renewal(1, 2, 60.0, datetime.now(UTC)),
+        lambda: handle.record_ttl(1, 60.0),
+        lambda: handle._read_expiry_row(2),
+        lambda: handle._apply_renewal(2, 60.0, datetime.now(UTC)),
     ]
     for dial in dials:
         seen = _record_connect_kwargs(monkeypatch)
