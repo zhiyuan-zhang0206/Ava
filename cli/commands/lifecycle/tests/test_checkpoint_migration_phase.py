@@ -172,7 +172,12 @@ def test_admin_session_without_owner_role_refuses_before_migration_ddl(
     from base.db import pg_admin
     from cli.commands.lifecycle.migrations import cmd_migrations_apply
 
+    owner = threading.current_thread()
+
     def superuser_dial(_url: str, **_kwargs: object) -> _FakeAdminConnection:
+        if threading.current_thread() is not owner:
+            # a bystander thread's dial never enters this test's assertion path
+            return _FakeAdminConnection("ava")
         return _FakeAdminConnection("postgres")
 
     monkeypatch.setattr(pg_admin.psycopg, "connect", superuser_dial)
