@@ -27,6 +27,13 @@ rewrite the lock. Existing machine uv/pip single-index settings are recognized;
 explicit environment settings win. See
 [Machine Python indexes](../../../../conventions/dev-setup.md#machine-python-indexes).
 
+npm follows the same split: `npm ci` downloads each tarball through the
+configured registry, while the committed `ui/web/package-lock.json` keeps
+`registry.npmjs.org` origins. Adding or regenerating dependencies must run
+against the public registry (an entry materialized under a mirror records the
+mirror host), and `scripts/lint/locks/package_lock.py` guards the lock in the commit
+hook and in CI.
+
 Toolchain downloads and OS package repositories have separate configuration.
 Acquire the approved uv and Python versions using trusted, verified transport;
 a Python package mirror does not also mirror GitHub releases, Node, or the OS

@@ -226,7 +226,10 @@ jobs:
         run: python3 scripts/lint/ava_root_scope.py
 
       - name: Check canonical Python lock sources (stdlib only)
-        run: python3 scripts/lint/python_lock.py
+        run: python3 scripts/lint/locks/python_lock.py
+
+      - name: Check canonical npm lock sources (stdlib only)
+        run: python3 scripts/lint/locks/package_lock.py
 
   core-content-manifests:
     # The content-channel gate (tasks #2915/#3267): core manifests' declared
