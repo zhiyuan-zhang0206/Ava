@@ -25,13 +25,15 @@ Entry points:
 - ``load_extensions(surface=False)`` — full load, the agent-side contract
   (reset, then import plugin.py + agent_runtime.py for every enabled plugin).
 - ``load_extensions(surface=True)`` — surfaces only (child contexts).
-- ``build_registry()`` — the `ExtensionRegistry` of what the loaded faces declare through
-  `contribute()`; the host builds it after the graph and hands it to its turns.
 - ``load_agent_faces()`` — runtime faces only, for a process that already
   loaded the surfaces (host boot after `scan_and_load`; a child upgrading to
   the full load because its request carries a state snapshot).
 
-The package's one submodule, `catalog.py`, reads back what the loaded plugins
+`registry.py` builds the `ExtensionRegistry` of what the loaded faces declare through
+`contribute()` (the host builds it after the graph and hands it to its turns); it lives apart because
+the declaration types import LangChain, which a child's surface load must not pull.
+
+`catalog.py` reads back what the loaded plugins
 registered (`ava plugins inspect`); it runs this loader in the calling process.
 This module stays the loader itself so `importlib.import_module("agent.extensions")`
 (the `ava` layer's runtime-string reach) keeps resolving to it.
@@ -40,12 +42,10 @@ This module stays the loader itself so `importlib.import_module("agent.extension
 from __future__ import annotations
 
 import sys
-from collections.abc import Callable
 from pathlib import Path
 
 from base import paths
 from base.packages.plugins import enable_config as plugins_cfg
-from base.packages.plugins.extensions import ExtensionRegistry, PluginContributions
 
 FACE_MODULE = "agent_runtime"
 
@@ -164,42 +164,6 @@ def load_extensions(*, surface: bool = False) -> plugins_cfg.PluginsConfig:
     metering.install()
 
     return config
-
-
-def _declared(name: str, contribute: Callable[[], object]) -> PluginContributions:
-    """One face's `contribute()` result, refused unless it is a `PluginContributions`."""
-    contributions = contribute()
-    if not isinstance(contributions, PluginContributions):
-        raise TypeError(
-            f"{name}.{FACE_MODULE}.contribute() returned {type(contributions).__name__}, "
-            "not PluginContributions"
-        )
-    return contributions
-
-
-def build_registry() -> ExtensionRegistry:
-    """What every enabled plugin declares for the agent runtime, as a new registry.
-
-    Calls `contribute()` on each loaded `agent_runtime` face, in plugin name order. Pure: nothing
-    is registered anywhere, so calling it again after a reload is the whole of a registry reload.
-    A face with no `contribute()` contributes nothing; one whose `contribute()` raises or returns
-    something else is reported and skipped, like a plugin that fails to import.
-    """
-    from base.packages.plugins import load_report
-
-    declared: list[tuple[str, PluginContributions]] = []
-    for name, plugin_dir in _enabled_plugin_dirs():
-        face = sys.modules.get(f"{_pkg_of(plugin_dir)}.{name}.{FACE_MODULE}")
-        contribute = getattr(face, "contribute", None)
-        if contribute is None:
-            continue
-        try:
-            contributions = _declared(name, contribute)
-        except Exception as exc:
-            load_report.report_plugin_load_failure(name, exc)
-            continue
-        declared.append((name, contributions))
-    return ExtensionRegistry(tuple(declared))
 
 
 def load_agent_faces() -> None:

@@ -315,7 +315,8 @@ def build_catalog() -> Catalog:
     config is bound from disk. Call it from a short-lived process (the CLI), not
     from one that must keep a pristine `ava`.
     """
-    from agent.extensions import build_registry, load_extensions
+    from agent.extensions import load_extensions
+    from agent.extensions.registry import build_registry
 
     config = load_extensions()
     registry = build_registry()
