@@ -330,33 +330,6 @@ def test_linux_root_launch_never_consults_a_helper(
     assert spawned == [tmp_path]
 
 
-def test_selected_stop_preserves_exact_home_qualified_names(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    from cli.commands.lifecycle.service_stop import stop_services
-
-    captured: list[frozenset[str]] = []
-
-    def selection() -> dict[str, str]:
-        return {"ava-home-abc-gateway": "gateway", "ava-home-abc-browser": "browser"}
-
-    def stop(
-        *, preserve: frozenset[str], timeout_s: float, force: bool, selected: frozenset[str] | None
-    ) -> None:
-        assert selected == frozenset({"gateway"})
-        assert timeout_s > 0 and force is False
-        captured.append(preserve)
-
-    monkeypatch.setattr(driver, "root_tree_selection", selection)
-    monkeypatch.setattr(driver, "stop_root_service_tree", stop)
-    assert stop_services(1, keep_terminals=True, selected=frozenset({"ava-home-abc-gateway"})) == [
-        "ava-home-abc-gateway"
-    ]
-    assert captured == [frozenset({"browser"})]
-    assert stop_services(1, keep_terminals=True, selected=frozenset({"ava-neighbor-gateway"})) == []
-    assert len(captured) == 1
-
-
 @pytest.mark.parametrize("removed", [False, True])
 def test_generation_change_refuses_without_signal_or_seed_publication(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, removed: bool

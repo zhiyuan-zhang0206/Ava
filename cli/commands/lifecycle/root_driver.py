@@ -749,7 +749,6 @@ def stop_root_service_tree(
     preserve: frozenset[str],
     timeout_s: float = _ROOT_STOP_TIMEOUT_S,
     force: bool = False,
-    selected: frozenset[str] | None = None,
 ) -> None:
     """Stop the root-owned tree — everything, or only the units not preserved.
 
@@ -765,18 +764,12 @@ def stop_root_service_tree(
     status = _root_status(client)
     if status is None:
         require_root_absent()
-        if selected is not None:
-            return
         _stop_dormant_helper_root(deadline)
         print("  ava-root: no live owner or retained service custody")
         return
     units = _root_units(status)
     _require_root_owner(status)
     preserved = set(units) & preserve
-    if selected is not None:
-        preserved |= set(units) - selected
-        if not (set(units) & selected):
-            return
     stop_ids = sorted(set(units) - preserved)
     if not stop_ids and preserved:
         print("  ava-root: every unit is preserved — tree left running")

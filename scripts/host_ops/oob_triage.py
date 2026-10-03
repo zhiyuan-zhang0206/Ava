@@ -31,7 +31,7 @@ Classifications (advisory only -- nothing here acts):
 - ``owned``: an active hold whose recorded shepherd is alive; something is
   still driving it.
 - ``stranded``: an active hold with failed receipts -- the repair path, not
-  ``resume --cancel``.
+  ``cancel``.
 - ``undetermined``: evidence missing or unreadable; the alert degrades to the
   plain copy plus ``hold=undetermined``.
 
@@ -188,7 +188,7 @@ def render_command(
 ) -> str | None:
     """The one official recovery command for a phase (spec part 2 v1.1.1 B4).
 
-    Two rows only: a pre-stop hold resumes ``--cancel``; a stop-class hold is
+    Two rows only: a pre-stop hold is cancelled; a stop-class hold is
     restarted end-to-end. An uncovered or unknown phase renders none. A value
     that failed the whitelist renders as ``?`` -- visibly incomplete, never
     remote free text. An invalid host renders none too (defense in depth;
@@ -198,8 +198,8 @@ def render_command(
         return None
     if phase in _RESUME_PHASES:
         return (
-            f"ssh {host} 'cd ~/.ava/source && .venv/bin/ava maintenance resume"
-            f" --operation {operation or '?'} --acquired-at {acquired_at or '?'} --cancel'"
+            f"ssh {host} 'cd ~/.ava/source && .venv/bin/ava maintenance cancel"
+            f" --operation {operation or '?'} --acquired-at {acquired_at or '?'}'"
         )
     if phase in _START_PHASES:
         return f"ssh {host} 'cd ~/.ava/source && .venv/bin/ava start'"

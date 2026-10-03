@@ -1,4 +1,4 @@
-"""Explicit host-local maintenance; fleet transport belongs to the operator."""
+"""Host-local maintenance hold exits: read it, repair it, cancel it."""
 
 from __future__ import annotations
 
@@ -35,62 +35,29 @@ def _handle(args: argparse.Namespace) -> int:
 def _add_maintenance_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
     parser = sub.add_parser(
         "maintenance",
-        help="[host] hold, drain and stop this unit without force; coordinate other hosts explicitly",
+        help="[host] read this unit's maintenance hold, or end one that cannot finish on its own",
     )
     verbs = parser.add_subparsers(dest="maintenance_cmd", required=True)
-    for verb in (
-        "prepare",
-        "status",
-        "drain",
-        "stop",
-        "start",
-        "resume",
-        "repair",
-        "stop-data-plane",
+    status = verbs.add_parser("status", help="[host] print this unit's maintenance hold as JSON")
+    status.set_defaults(func=_handle)
+    for verb, summary in (
+        ("repair", "release a hold latched on failed receipts after the root cause is fixed"),
+        ("cancel", "abandon a drain that has not started stopping; services stay as they are"),
     ):
-        command = verbs.add_parser(verb, help=f"[host] {verb} this unit's maintenance operation")
+        command = verbs.add_parser(verb, help=f"[host] {summary}")
         command.set_defaults(func=_handle)
-        if verb != "status":
-            command.add_argument(
-                "--operation",
-                required=True,
-                type=_operation_arg,
-                help="same holder on every participating unit",
-            )
-            command.add_argument(
-                "--acquired-at",
-                required=True,
-                type=_acquired_at_arg,
-                help="same timezone-aware operation timestamp",
-            )
-        if verb in ("drain", "stop", "stop-data-plane"):
-            # task #4092 cli-default inventory: total wait — the wait never forces,
-            # and a slow drain raises it per invocation instead of parking forever.
-            command.add_argument(
-                "--timeout",
-                type=float,
-                default=300,
-                help="total wait; timeout retains hold and never forces",
-            )
-        if verb in ("stop", "stop-data-plane"):
-            command.add_argument(
-                "--keep-terminals",
-                action="store_true",
-                help="preserve terminals; operator must separately verify their business work has stopped",
-            )
-            command.add_argument(
-                "--gateway-last",
-                action="store_true",
-                help="operator assertion that all remote units were verified stopped; does not probe them",
-            )
-        if verb == "resume":
-            command.add_argument(
-                "--cancel",
-                action="store_true",
-                help="explicitly abandon an unfinished drain and restore ordinary lifecycle "
-                "recovery; restarts already issued are not retracted and still complete "
-                "on next admission",
-            )
+        command.add_argument(
+            "--operation",
+            required=True,
+            type=_operation_arg,
+            help="the hold's operation, as `ava maintenance status` prints it",
+        )
+        command.add_argument(
+            "--acquired-at",
+            required=True,
+            type=_acquired_at_arg,
+            help="the hold's timezone-aware acquired_at, as `ava maintenance status` prints it",
+        )
         if verb == "repair":
             command.add_argument(
                 "--operator",

@@ -58,7 +58,6 @@ ensure_line_buffered_stdio()
 _CLI_LOG_NAMES: dict[tuple[str, ...], str] = {
     ("start",): "cli-start",
     ("restart",): "cli-restart",
-    ("maintenance", "start"): "cli-maintenance-start",
     ("lgtm", "on"): "cli-lgtm",
     ("lgtm", "off"): "cli-lgtm",
 }
@@ -172,17 +171,12 @@ def _normalize_process_profile() -> None:
 
 def _opt_into_lite_config(args_in: list[str]) -> None:
     """Verbs that must run without the config fetch build settings-lite instead."""
-    # Maintenance verbs build settings-lite only for `status` (journal-only) and
-    # `stop-data-plane` (a gateway-role verb, where the fetch is local anyway).
-    # `maintenance stop` deliberately does NOT: its verify-drained and
-    # host-identity legs dial this unit's real data plane, so on a pure runner a
-    # lite stop could only ever hit the never-dialed placeholder DB URL
-    # (PlaceholderDbUrlError — the 2026-09-13 drill stall, issue #2346). With the
-    # gateway down such a stop now fails at the fetch with the actionable
-    # BootstrapFetchError — the same contract `restart` took above. Every other
-    # verb — start, converge, update, trace-ship — and every daemon/agent process
-    # fetches per its own role at Settings build. base.sessions.env_forwarding does not
-    # forward this var, so processes a lite verb spawns never inherit the opt-out.
+    # `maintenance status` builds settings-lite: it only reads the local journal.
+    # `repair` and `cancel` dial this unit's real database, so they fetch like
+    # every other verb -- start, converge, update, trace-ship -- and every
+    # daemon/agent process fetches per its own role at Settings build.
+    # base.sessions.env_forwarding does not forward this var, so processes a
+    # lite verb spawns never inherit the opt-out.
     from cli.preflight import unit_already_stopped
 
     if (
@@ -191,10 +185,7 @@ def _opt_into_lite_config(args_in: list[str]) -> None:
         and (args_in[0] != "stop" or "--force" in args_in or unit_already_stopped())
     ):
         os.environ.setdefault("AVA_CONFIG_FETCH", "skip")
-    if args_in[:2] in (
-        ["maintenance", "status"],
-        ["maintenance", "stop-data-plane"],
-    ):
+    if args_in[:2] == ["maintenance", "status"]:
         os.environ.setdefault("AVA_CONFIG_FETCH", "skip")
 
 

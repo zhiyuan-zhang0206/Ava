@@ -41,7 +41,7 @@ A stop retains agent IDs, history, checkpoints, pending messages, workspaces,
 browser profiles and observability data. It does not terminate agent identities
 or destroy the cluster. A full stop closes persistent shells; their running
 processes and shell variables cannot be restored by `start`. No `ava stop` option
-keeps them: `ava restart` and `ava maintenance stop --keep-terminals` do.
+keeps them; only `ava restart` does.
 Externally launched tools are not owned by one local home.
 
 Impersonation is a separate agent identity protocol. These commands do not
@@ -85,8 +85,8 @@ failure. A drain that hits its deadline reports every unfinished agent — its
 restart command's delivery state, the row's owner/lease/resource facts, the
 agent's last activity and the live host's view — and names the predecessor-owner
 fence explicitly when a successor boot is looking at a row its predecessor left:
-that one needs `ava maintenance status` plus an explicit `resume --cancel` or
-`repair`, never a retry loop. A rollout's own pause no longer defers the held
+that one needs `ava maintenance status` plus an explicit `ava maintenance cancel`
+or `repair`, never a retry loop. A rollout's own pause no longer defers the held
 continuation it requires, so the ordinary update drain consumes and certifies.
 For ordinary local maintenance, retry the command or run `ava start` to restore
 services and release the hold after readiness succeeds. A failed start keeps
@@ -162,29 +162,21 @@ still refuse immediately. See the
 [preparation settlement and wait contract](../base/deploy/maintenance/docs/lifecycle-wait.ava.okf.md)
 for eligibility, stale cutoff, and retry semantics.
 
-## Explicit maintenance steps
+## Holds and their exits
 
-`ava maintenance prepare/drain/status/stop/stop-data-plane/start/resume` remains
-available for an operator who needs to inspect intermediate phases. These are
-local commands using the same journal and native drain, not a second agent
-ownership mechanism. They take a matching `--operation` and timezone-aware
-`--acquired-at`; ordinary stop/restart/start does not need these arguments.
+`ava stop` and `ava restart` take the hold and walk it through drain and stop;
+`ava start` releases it after readiness. No command runs those steps one at a
+time. `ava maintenance` is only the journal's reader and its two exits, each
+local and taking the journal's exact `--operation` and timezone-aware
+`--acquired-at`: `status` prints the hold, `repair` releases failed receipts
+(below), and `cancel` abandons preparation/drain while services are usable. It is
+not for bypassing a partial stop or a failed startup.
 
-The explicit `maintenance stop` retains the data plane and refuses live
-terminals unless `--keep-terminals` asserts a separately verified work boundary.
-On a gateway, `--gateway-last` asserts the remote stops were independently
-verified. `maintenance stop-data-plane` separately stops the verified private
-data plane and saves Redis. `maintenance start` keeps admission held for an
-explicit `maintenance resume`; ordinary `ava start` can instead complete the
-same recovery and resume after its readiness gate. `resume --cancel` is for
-abandoning preparation/drain while services are usable, not for bypassing a
-partial stop or a failed startup.
-
-`resume --cancel` releases the hold; it does not retract restarts already
+`cancel` releases the hold; it does not retract restarts already
 issued (durable per-agent intents). Members not yet at their boundary still
 complete that restart, with its cold recovery, on next admission.
 
-A drain aborted by failed receipts keeps the hold, and `resume --cancel`
+A drain aborted by failed receipts keeps the hold, and `cancel`
 refuses while blocked failures remain. Receipts whose turn raised a
 database-outage exception (`psycopg.OperationalError`, `PoolTimeout` — the
 crash-equivalent family; every database channel hang surfaces as one of
@@ -210,7 +202,7 @@ can establish host absence and skip its identity probe; a refused health
 connection alone is insufficient. Repair records operator identity (timestamp,
 operator label, OS user/uid/pid, parent process, machine) in the journal — both sides of the
 repair CAS stay visible via `ava maintenance status`. A partial release after
-a successful repair is completed by `resume --cancel`.
+a successful repair is completed by `cancel`.
 
 ## Recovering a stuck maintenance operation
 
@@ -229,17 +221,16 @@ For ordinary maintenance, read the exact generation and phase:
 ava maintenance status
 ```
 
-Every explicit command uses the journal's same `--operation` and timezone-aware
+`cancel` and `repair` use the journal's same `--operation` and timezone-aware
 `--acquired-at`. Status includes recorded process identity and judged liveness;
 a refused connection alone does not establish that the owner is absent.
 
 | Phase found | Recovery after confirming there is no competing owner |
 | --- | --- |
-| `preparing`, `draining` | `ava maintenance resume --cancel` abandons the drain while services are usable. |
-| `drained` | Cancel the drain, or complete `maintenance stop`, `maintenance start`, then `maintenance resume`. |
-| `stopping` | Repeat `maintenance stop` to verify and finish closure, then start and resume. |
-| `stopped`, `starting` | Run `maintenance start`, verify readiness, then `maintenance resume`. |
-| `ready` | `maintenance resume` verifies the generation and opens admission. |
+| `preparing`, `draining` | `ava maintenance cancel` abandons the drain while services are usable. |
+| `drained` | `ava maintenance cancel`, or re-run `ava stop`. |
+| `stopping` | Re-run `ava stop` to verify and finish closure, then `ava start`; or `ava start` directly. |
+| `stopped`, `starting`, `ready` | `ava start` brings services back, verifies readiness and releases the hold. |
 
 An unreadable journal, or a `paused` record with no maintenance hold (what the
 retired updater's stop left), has no exact generation for these commands to
@@ -248,12 +239,9 @@ maintenance` command is in flight for this home (`ava maintenance status`
 reports what it can read), remove `$AVA_HOME/run/deploy-pause-owner.json` by
 hand and run `ava start`.
 
-On a gateway, `maintenance stop` requires `--gateway-last`, asserting that the
-operator independently verified remote stops. Live terminals refuse unless
-`--keep-terminals` asserts a separately verified work boundary. A failed stop
-retains its process inventory and hold. Force remains an explicit owned-process
-escalation, not an inference from a timeout or a way to manufacture a drain
-receipt.
+A failed stop retains its process inventory and hold. Force remains an explicit
+owned-process escalation, not an inference from a timeout or a way to
+manufacture a drain receipt.
 
 An ordinary `ava start` can complete ordinary stopped/starting recovery and
 resume after full readiness. Blocking checkpoint/continuation failures refuse

@@ -19,7 +19,7 @@ The sole resident Ava HTTP process on agent-runner (session `ops`) — Gateway r
 - **Off the event loop**: agent launch and lifecycle operations run on the loop;
   synchronous arms run in the daemon's worker pool through
   `services/agent_ops/dispatch_sync.py:dispatch_sync`. Blocking filesystem work
-  leaves health and generation-checked maintenance resume reachable.
+  leaves health and the generation-checked hold release reachable.
   Configuration and inventory read-modify-write operations share a thread lock.
 - **Admission**: only the current `OpKind` vocabulary reaches maintenance
   admission or idempotency storage. Retired updater RPCs fail without effects,

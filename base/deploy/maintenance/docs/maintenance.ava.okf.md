@@ -61,9 +61,11 @@ path (no failure fence), and certification still requires the applied
 restart, so a drain never certifies an un-flushed tail. Other failures block.
 
 Phases are `preparing → draining → drained → stopping → stopped → starting →
-ready`. Failed prepare/drain/stop/start keeps the hold. Ordinary `ava start`
-authorizes the existing operation for bring-up and resumes after readiness;
-explicit `ava maintenance start` leaves resume to the operator. The internal
+ready`; `ava stop` / `ava restart` walk the first five, and no verb enters
+`starting` or `ready` any more (they remain in the journal vocabulary so an
+older journal still decodes). A failed prepare/drain/stop keeps the hold. Ordinary
+`ava start` authorizes the existing operation for bring-up and resumes after
+readiness. The internal
 `authorized_start` ContextVar is exact-operation authority for nested calls,
 not a service-process credential. Stranded-pause recovery cannot abandon a
 maintenance hold. A recorded blocking continuation/flush failure blocks ordinary start
@@ -109,12 +111,11 @@ inventing a restart/flush receipt. It preserves the original metadata for the
 existing crash-recovery policy, whose auto-resurrection and retry limits still
 apply; it does not promise the normal drain's continuation guarantee.
 
-The compatibility `ava maintenance` surface exposes intermediate phases.
-Its service/data-plane stop refuses live terminals unless `--keep-terminals`
-asserts a separately verified work boundary. This flag preserves the terminal,
-not proof that its script cannot write. `resume --cancel` restores ordinary
-recovery during preparation/drain; it cannot bypass a partial service stop or
-prove replay safety for a failed arbitrary external effect.
+`ava maintenance` is only the hold journal's reader and exits: `status`,
+`repair` and `cancel`. `cancel` restores ordinary recovery during
+preparation/drain; it cannot bypass a partial service stop or prove replay
+safety for a failed arbitrary external effect. A stop that failed past the
+drain is retried with `ava stop`, or finished with `ava start`.
 
 See [operator procedure](../../../../conventions/graceful-maintenance.md) for
 resource scopes, recovery and the first-deployment limitation.

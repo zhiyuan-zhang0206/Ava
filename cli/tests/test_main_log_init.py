@@ -3,8 +3,8 @@
 Importing `base.log` drops loguru's default handler, so a CLI process that
 opens no sink discards every record it writes through loguru. On the start
 path some warnings exist only there: a skipped pgvector pre-create, untracked
-migration files that will not be applied. `ava start`, `ava restart`,
-`ava maintenance start` and `ava lgtm on|off` (every in-process `cmd_start`)
+migration files that will not be applied. `ava start`, `ava restart`
+and `ava lgtm on|off` (every in-process `cmd_start`)
 open the sinks `base.log.init_cli_process` gives: stderr, the unit's
 `logs/cli-<verb>.log` and the event pipeline, without a `service_started`
 row. Other verbs print to the caller's terminal and open none.
@@ -101,11 +101,11 @@ def _dispatching(sink: list[str]) -> argparse.ArgumentParser:
     ("argv", "name"),
     [
         (["restart"], "cli-restart"),
-        (["maintenance", "start"], "cli-maintenance-start"),
         (["lgtm", "on"], "cli-lgtm"),
         (["lgtm", "off"], "cli-lgtm"),
         (["status"], None),
         (["maintenance", "status"], None),
+        (["maintenance", "repair"], None),
         (["lgtm", "status"], None),
     ],
 )

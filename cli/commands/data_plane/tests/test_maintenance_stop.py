@@ -21,11 +21,10 @@ from base.cluster import ownership
 from base.cluster.dataplane import pooler as base_pooler
 from base.config import settings
 from base.native_process import pid_starttime_ticks
-from base.sessions.backend import PosixProcSessionBackend, PtySessionBackend
+from base.sessions.backend import PosixProcSessionBackend
 from base.sessions.record import SessionRecord
 from cli.commands.data_plane import maintenance_stop as plane
 from cli.commands.data_plane import pgbouncer as pb
-from cli.commands.lifecycle import root_driver
 from cli.commands.lifecycle import service_stop as stop
 from cli.commands.lifecycle.tests.stop_support import Launcher
 from cli.commands.lifecycle.tests.stop_support import home as home
@@ -54,67 +53,12 @@ def test_persistent_terminals_refuse_before_signalling(
         stop, "get_shell_backend", lambda: SimpleNamespace(list_sessions=lambda: ["schedule-8"])
     )
     with pytest.raises(RuntimeError, match="will not kill or replay"):
-        stop.stop_services(1)
+        stop.require_no_terminals()
     assert proc.poll() is None
-
-
-def test_explicit_keep_preserves_real_idle_terminal_during_service_stop(
-    home: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    from base.sessions.pty import cli as pty
-    from base.sessions.pty._paths import host_identity
-
-    name = "ava-agent-123-shell-1"
-    monkeypatch.setattr(stop, "get_shell_backend", PtySessionBackend)
-    envfile = pty.write_env_file({})
-    try:
-        created = subprocess.run(
-            [sys.executable, "-m", "base.sessions.pty.cli", name, "new", str(home), str(envfile)],
-            env={**os.environ, "AVA_HOME": str(home), "HOME": str(home)},
-            capture_output=True,
-            text=True,
-            timeout=30,
-            check=False,
-        )
-        assert created.returncode == 0, created.stderr
-        path = home / "run/pty" / f"{name}.json"
-        record = SessionRecord.read(path)
-        host = host_identity(path)
-        assert record is not None and host is not None
-        shell = stop.OwnedProcess(record.pid, record.create_time, record.starttime)
-        terminal_host = stop.OwnedProcess.capture(psutil.Process(host[0]))
-        deadline = time.monotonic() + 5
-        while psutil.Process(record.pid).children(recursive=True):
-            assert time.monotonic() < deadline, "terminal did not reach an idle shell"
-            time.sleep(0.05)
-        calls: list[dict[str, object]] = []
-
-        def record_stop(**kwargs: object) -> None:
-            calls.append(kwargs)
-
-        monkeypatch.setattr(
-            root_driver, "root_tree_selection", lambda: {"ava-agent-host": "agent-host"}
-        )
-        monkeypatch.setattr(root_driver, "stop_root_service_tree", record_stop)
-        with pytest.raises(RuntimeError, match="will not kill or replay"):
-            stop.stop_services(3)
-        assert not calls
-        assert stop.stop_services(3, keep_terminals=True) == ["ava-agent-host"]
-        assert len(calls) == 1 and calls[0]["force"] is False
-        assert SessionRecord.read(path) == record and host_identity(path) == host
-        assert shell.live() and terminal_host.live()
-        assert PtySessionBackend().list_sessions() == [name]
-    finally:
-        # Only this fixture's named terminal is eligible for fixture cleanup.
-        if name in pty.live_sessions():
-            pty.session_request(name, {"op": "kill"})
-        envfile.unlink(missing_ok=True)
 
 
 @pytest.mark.parametrize("timeout", [0, -1, float("nan"), float("inf")])
 def test_invalid_timeout_refuses(timeout: float, home: Path) -> None:
-    with pytest.raises(ValueError):
-        stop.stop_services(timeout)
     with pytest.raises(ValueError):
         stop.stop_data_plane(timeout)
 
@@ -308,7 +252,7 @@ def test_live_pty_host_with_dead_shell_blocks_stop(home: Path, launch: Launcher)
         host_starttime=host_identity.starttime,
     )
     with pytest.raises(RuntimeError, match="will not kill or replay"):
-        stop.stop_services(1)
+        stop.require_no_terminals()
     assert proc.poll() is None
 
 
@@ -320,7 +264,7 @@ def test_malformed_terminal_record_refuses_before_listing(
     path.write_text("{")
     monkeypatch.setattr(PosixProcSessionBackend, "list_sessions", forbidden)
     with pytest.raises(RuntimeError, match="cannot verify terminal record"):
-        stop.stop_services(1)
+        stop.require_no_terminals()
     assert path.read_text() == "{"
 
 
@@ -622,39 +566,3 @@ def test_real_start_retains_pooler_with_held_client(
             assert (base_pooler.ini_path().read_bytes(), pb._userlist_path().read_bytes()) == config
     finally:
         _kill_test_poolers(pid)
-
-
-def test_selected_service_stop_delegates_exact_units_to_root(
-    home: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    calls: list[dict[str, object]] = []
-
-    def record_stop(**kwargs: object) -> None:
-        calls.append(kwargs)
-
-    monkeypatch.setattr(
-        root_driver,
-        "root_tree_selection",
-        lambda: {"ava-gateway": "gateway", "ava-agent-host": "agent-host"},
-    )
-    monkeypatch.setattr(root_driver, "stop_root_service_tree", record_stop)
-    assert stop.stop_services(3, selected=frozenset({"ava-agent-host"})) == ["ava-agent-host"]
-    assert len(calls) == 1
-    assert calls[0]["preserve"] == frozenset({"gateway"})
-    assert calls[0]["selected"] == frozenset({"agent-host"})
-    assert calls[0]["force"] is False
-    timeout = calls[0]["timeout_s"]
-    assert isinstance(timeout, float) and 0 < timeout <= 3
-
-
-def test_root_stop_failure_is_not_reported_as_success(
-    home: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.setattr(root_driver, "root_tree_selection", lambda: {"ava-gateway": "gateway"})
-
-    def refuse(**_kwargs: object) -> None:
-        raise RuntimeError("root custody unavailable")
-
-    monkeypatch.setattr(root_driver, "stop_root_service_tree", refuse)
-    with pytest.raises(RuntimeError, match="root custody unavailable"):
-        stop.stop_services(3)

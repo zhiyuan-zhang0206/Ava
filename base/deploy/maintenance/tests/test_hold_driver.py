@@ -224,7 +224,7 @@ def test_the_relay_predicate_reads_only_inline_command_shells() -> None:
     def relay(argv: list[str]) -> bool:
         return hold_driver._is_relay_shim(cast("psutil.Process", _CmdProc(argv)))
 
-    assert relay(["/bin/sh", "-c", "ava maintenance prepare"])
+    assert relay(["/bin/sh", "-c", "ava stop -y"])
     assert relay(["bash", "-lc", "ava start"])
     assert not relay(["bash", "drill.sh"])
     assert not relay([sys.executable, "-c", "print(1)"])

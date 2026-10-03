@@ -120,17 +120,6 @@ def test_held_health_exemption_preserves_authentication(monkeypatch: pytest.Monk
     assert admission.held()
 
 
-@pytest.mark.usefixtures("held")
-def test_maintenance_start_waiver_does_not_publish_ready(monkeypatch: pytest.MonkeyPatch) -> None:
-    from cli.commands.lifecycle import maintenance as cli_maintenance
-
-    monkeypatch.setattr("cli.commands.lifecycle.start.cmd_start", MagicMock(return_value=0))
-    assert cli_maintenance._start("update", WHEN) != 0
-    current = admission.snapshot()
-    assert current is not None and current.maintenance is not None
-    assert current.maintenance.phase == "starting"
-
-
 def _authenticated(monkeypatch: pytest.MonkeyPatch) -> str:
     """The served home's ledger authenticates machine tokens; returns the human secret."""
     secret = uuid4().hex
