@@ -160,7 +160,7 @@ def _patch_compact_config(monkeypatch: pytest.MonkeyPatch) -> None:
     )
     monkeypatch.setattr(
         "agent.hooks.compact.resolve_context_budget",  # pyright: ignore[reportUnknownArgumentType]
-        lambda _model: budget,  # pyright: ignore[reportUnknownArgumentType]
+        lambda *_: budget,  # pyright: ignore[reportUnknownArgumentType]
     )
 
 

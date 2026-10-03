@@ -442,7 +442,7 @@ def _summary_awaits_reply(messages: list[AnyMessage]) -> bool:
     return False
 
 
-def auto_compact_will_fire(state: AgentState, llm_model: str) -> bool:
+def auto_compact_will_fire(state: AgentState, agent: AgentSlices) -> bool:
     """Whether the force-compact path would replace ``state.messages`` this turn:
     occupancy over the model's hard ceiling AND a non-empty conversation to
     compress. The single gate — plugins that must defer a message write on a
@@ -450,12 +450,13 @@ def auto_compact_will_fire(state: AgentState, llm_model: str) -> bool:
     this instead of replicating the estimate + threshold, so the prediction can
     never drift from ``auto_compact_for_llm``.
 
-    Resolves the ceiling from the agent's own model (`llm_model`, the brain slice,
-    which the spawn overlay already applied); ``UnknownModelWindowError`` surfaces
-    rather than silently mis-gating an agent whose window we do not know."""
+    Resolves the ceiling from the agent's own model and its own threshold overrides
+    (the brain and overrides slices, which the spawn overlay already applied);
+    ``UnknownModelWindowError`` surfaces rather than silently mis-gating an agent
+    whose window we do not know."""
     if _summary_awaits_reply(state.messages):
         return False
-    budget = resolve_context_budget(llm_model)
+    budget = resolve_context_budget(agent.brain.llm_model, agent.overrides)
     if _context_occupancy(state.messages) <= budget.hard_compact_tokens:
         return False
     return bool(conversation_messages(state.messages))
@@ -533,8 +534,9 @@ async def auto_compact_for_llm(
     if _summary_awaits_reply(state.messages):
         return None
     occupancy = _context_occupancy(state.messages)
-    llm_model = runtime.context.require_agent().brain.llm_model
-    if occupancy <= resolve_context_budget(llm_model).hard_compact_tokens:
+    agent = runtime.context.require_agent()
+    budget = resolve_context_budget(agent.brain.llm_model, agent.overrides)
+    if occupancy <= budget.hard_compact_tokens:
         return None
     content_msgs = conversation_messages(state.messages)
     if not content_msgs:
@@ -703,7 +705,7 @@ COMPACT_REMINDER_NOTE = (
 )
 
 
-def _compact_reminder_update(state: AgentState, llm_model: str) -> dict | None:
+def _compact_reminder_update(state: AgentState, agent: AgentSlices) -> dict | None:
     """The one-time wind-down reminder, injected when occupancy sits in the band
     below the forced ceiling (soft_compact_tokens < occupancy <=
     hard_compact_tokens). Returns the `messages` update + bookkeeping, or None.
@@ -720,7 +722,10 @@ def _compact_reminder_update(state: AgentState, llm_model: str) -> dict | None:
       compaction advances compact.version past the stored bookmark.
     """
     occupancy = _context_occupancy(state.messages)
-    if occupancy <= resolve_context_budget(llm_model).soft_compact_tokens:
+    if (
+        occupancy
+        <= resolve_context_budget(agent.brain.llm_model, agent.overrides).soft_compact_tokens
+    ):
         return None
     if not conversation_messages(state.messages):
         return None
@@ -773,10 +778,10 @@ class _CompactReminderHook(Hook):
         _config: RunnableConfig,
         /,
     ) -> dict | None:
-        llm_model = runtime.context.require_agent().brain.llm_model
-        if _summary_awaits_reply(state.messages) or auto_compact_will_fire(state, llm_model):
+        agent = runtime.context.require_agent()
+        if _summary_awaits_reply(state.messages) or auto_compact_will_fire(state, agent):
             return None
-        return _compact_reminder_update(state, llm_model)
+        return _compact_reminder_update(state, agent)
 
 
 _compact_reminder = _CompactReminderHook()

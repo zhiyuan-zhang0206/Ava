@@ -218,7 +218,7 @@ class _PassiveMemoryRecallHook(Hook):
         if not tail_has_recallable_inbound(state.messages):
             return None
 
-        if auto_compact_will_fire(state, agent.brain.llm_model):
+        if auto_compact_will_fire(state, agent):
             logger.info(
                 "[{label}] {body}",
                 label="passive-recall",

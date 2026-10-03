@@ -27,6 +27,9 @@ per-agent setting through `ava._settings.agent_setting`.
 `base` modules listed in _EXTRA_FILES. Any `settings.<domain>.<field>`
 attribute read where `<field>` is a `per_agent=True` field in the config
 registry is an error — the site must read the agent's slices (or `agent_setting`).
+The same goes for `get_field("<field>")` and for `resolve_setting("<field>", ...)` without
+`overrides=`: the model layering takes its explicit layer from the agent's `overrides` slice,
+and without it the layer is the cluster's value.
 
 The per-agent field set is read from the live config registry
 (`base.config.per_agent_field_names`), so declaring a new per-agent field
@@ -98,6 +101,9 @@ _PLUGIN_MECHANISM_FILES = frozenset(
 )
 
 _SETTINGS_ATTR = re.compile(r"\bsettings\.([a-z_]+)\.([a-z_]+)")
+# A per-agent field read through the model layering or `get_field` by its literal name; the first
+# group is the field, the second the rest of the call (to see whether it names `overrides`).
+_LAYERED_READ = re.compile(r"\b(?:resolve_setting|get_field)\(\s*[\"']([a-z_]+)[\"']([^)]*)\)")
 # Subscript only — `name in _PLUGIN_CONFIGS` is a registration probe, not a read.
 _PLUGIN_CONFIGS_READ = re.compile(r"\b_PLUGIN_CONFIGS\[")
 
@@ -116,6 +122,23 @@ def _iter_files(paths: list[str]) -> list[Path]:
 _RULE_INPUTS = ("base/config/", "base/host/env/")
 
 
+def _layered_reads(text: str, rel: str, per_agent: set[str]) -> list[str]:
+    """`file:line: call` for each per-agent setting read by name without the agent's overrides."""
+    return [
+        f"{rel}:{text.count(chr(10), 0, m.start()) + 1}: {m.group(0).splitlines()[0].strip()}"
+        for m in _LAYERED_READ.finditer(text)
+        if m.group(1) in per_agent and "overrides" not in m.group(2)
+    ]
+
+
+def _report(heading: str, entries: list[str]) -> None:
+    if not entries:
+        return
+    print(heading + "\n", file=sys.stderr)
+    for entry in entries:
+        print(f"  {entry}", file=sys.stderr)
+
+
 def main(argv: list[str]) -> int:
     from base.config import per_agent_field_names
 
@@ -127,6 +150,7 @@ def main(argv: list[str]) -> int:
     scope = lint_common.changed_scope(only, _REPO_ROOT, inputs=_RULE_INPUTS)
     per_agent = set(per_agent_field_names())
     errors: list[str] = []
+    layered_errors: list[str] = []
     plugin_errors: list[str] = []
     for path in lint_common.restrict(_iter_files(argv), scope, _REPO_ROOT):
         resolved = path.resolve()
@@ -142,6 +166,7 @@ def main(argv: list[str]) -> int:
             text = path.read_text(encoding="utf-8")
         except (OSError, UnicodeDecodeError):
             continue
+        layered_errors.extend(_layered_reads(text, rel, per_agent))
         for lineno, line in enumerate(text.splitlines(), start=1):
             if line.lstrip().startswith("#"):
                 continue
@@ -150,29 +175,26 @@ def main(argv: list[str]) -> int:
                     errors.append(f"{rel}:{lineno}: {line.strip()}")
             if rel not in _PLUGIN_MECHANISM_FILES and _PLUGIN_CONFIGS_READ.search(line):
                 plugin_errors.append(f"{rel}:{lineno}: {line.strip()}")
-    if plugin_errors:
-        print(
-            "plugin config read straight out of the process-global "
-            "_PLUGIN_CONFIGS in turn-scoped code — use "
-            "`get_plugin_config(<plugin>, slices)` (or `process_plugin_config` in the "
-            "exec child); in hosted mode the map holds whichever agent booted the "
-            "process:\n",
-            file=sys.stderr,
-        )
-        for e in plugin_errors:
-            print(f"  {e}", file=sys.stderr)
-    if errors:
-        print(
-            "per-agent config read through the bare settings singleton in "
-            "turn-scoped code — read it from the agent's slices "
-            "(base/host/env/agent_slices.py) or `ava._settings.agent_setting`; in "
-            "hosted mode the singleton holds the CLUSTER default, not this agent's "
-            "overlay:\n",
-            file=sys.stderr,
-        )
-        for e in errors:
-            print(f"  {e}", file=sys.stderr)
-    return 1 if (errors or plugin_errors) else 0
+    _report(
+        "plugin config read straight out of the process-global _PLUGIN_CONFIGS in turn-scoped "
+        "code — use `get_plugin_config(<plugin>, slices)` (or `process_plugin_config` in the "
+        "exec child); in hosted mode the map holds whichever agent booted the process:",
+        plugin_errors,
+    )
+    _report(
+        "per-agent setting resolved from the cluster value in turn-scoped code — pass the "
+        "agent's `overrides` slice to `resolve_setting`, and read other per-agent fields "
+        "from the slices:",
+        layered_errors,
+    )
+    _report(
+        "per-agent config read through the bare settings singleton in turn-scoped code — read "
+        "it from the agent's slices (base/host/env/agent_slices.py) or "
+        "`ava._settings.agent_setting`; in hosted mode the singleton holds the CLUSTER default, "
+        "not this agent's overlay:",
+        errors,
+    )
+    return 1 if (errors or plugin_errors or layered_errors) else 0
 
 
 if __name__ == "__main__":

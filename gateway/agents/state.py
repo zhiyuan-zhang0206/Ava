@@ -40,6 +40,7 @@ from base.db.transaction import write_transaction
 from gateway.agents.delivery import deliver_chat_inbound, reconcile_chat_delivery
 from gateway.agents.eval_guard import caller_eval_isolation, deny_isolated_result_read
 from gateway.agents.inbound_provenance import request_inbound_provenance
+from gateway.agents.model_overrides import agent_overrides, read_agent_overrides
 from gateway.agents.schemas import (
     AgentMessageEnqueued,
     AgentMessagesResponse,
@@ -670,18 +671,19 @@ def get_token_usage(agent_id: int, request: Request) -> TokenUsageResponse:
     try:
         with request.app.state.db_pool.connection() as conn, conn.cursor() as cur:
             cur.execute(
-                "SELECT config_overlay FROM agents_meta WHERE id = %s",
+                "SELECT config_overlay, birth_config FROM agents_meta WHERE id = %s",
                 (agent_id,),
             )
             row = cur.fetchone()
         config_overlay: dict[str, Any] | None = row[0] if row and row[0] else None
+        overrides = agent_overrides(config_overlay, row[1] if row else None)
         model: str | None = config_overlay.get("llm_model") if config_overlay else None
         if not model:
             from base.config import settings
 
             model = settings.lm.llm_model
         if model:
-            budget = resolve_context_budget(model)
+            budget = resolve_context_budget(model, overrides)
             max_input_tokens = budget.max_context_tokens
             soft_compact_tokens = budget.soft_compact_tokens
             hard_compact_tokens = budget.hard_compact_tokens
@@ -764,9 +766,10 @@ def get_context_breakdown(agent_id: int, request: Request) -> ContextBreakdownRe
         )
 
     model = _resolve_agent_model(request, agent_id)
+    overrides = read_agent_overrides(request, agent_id)
     max_input_tokens = soft_compact_tokens = hard_compact_tokens = 0
     try:
-        budget = resolve_context_budget(model)
+        budget = resolve_context_budget(model, overrides)
         max_input_tokens = budget.max_context_tokens
         soft_compact_tokens = budget.soft_compact_tokens
         hard_compact_tokens = budget.hard_compact_tokens

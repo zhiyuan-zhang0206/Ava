@@ -44,7 +44,7 @@ def _pin_compact_budget(
         soft_compact_tokens=soft_tokens,
         hard_compact_tokens=hard_tokens,
     )
-    monkeypatch.setattr("agent.hooks.compact.resolve_context_budget", lambda _model: budget)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr("agent.hooks.compact.resolve_context_budget", lambda *_: budget)  # pyright: ignore[reportUnknownArgumentType]
 
 
 @pytest.fixture
@@ -905,7 +905,7 @@ async def test_defer_predicate_matches_real_gate(
     monkeypatch.setattr(compact_mod, "generate_summary", _fake_generate_summary)  # pyright: ignore[reportUnknownArgumentType]
 
     state = _state(msgs)
-    predicate = auto_compact_will_fire(state, "deepseek-flash")
+    predicate = auto_compact_will_fire(state, _runtime_for_runner().context.require_agent())
     real = await compact_mod.auto_compact_for_llm(state, _runtime_for_runner(), _config())  # pyright: ignore[reportUnknownMemberType]
     assert predicate is expect_fire
     assert predicate == (real is not None)

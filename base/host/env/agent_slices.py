@@ -101,6 +101,32 @@ class Sandbox:
 
 
 @dataclass(frozen=True)
+class ModelOverrides:
+    """The agent's explicit values for the per-model-defaultable settings (`None` = not set).
+
+    A set value wins over the model's registry default (`base.lm.registry.resolve_setting`), so
+    these are the inputs of that layering rather than final values: stream timeouts, reasoning
+    effort, thinking budget and the compaction thresholds.
+    """
+
+    llm_stream_ttft_timeout_seconds: float | None
+    llm_stream_total_timeout_seconds: float | None
+    llm_stream_inter_chunk_timeout_seconds: float | None
+    reasoning_effort: str | None
+    claude_thinking_budget_tokens: int | None
+    auto_compact_fraction: float | None
+    auto_compact_ceiling_tokens: int | None
+    compact_reminder_fraction: float | None
+
+    @classmethod
+    def from_pins(cls, pins: Mapping[str, Any] | None) -> ModelOverrides:
+        """Only what `pins` holds, with no read of the live cluster default: for a process that
+        displays an agent's values and does not hold the agent domain of the config (the gateway)."""
+        pins = pins or {}
+        return cls(**{f.name: pins.get(f.name) for f in fields(cls)})
+
+
+@dataclass(frozen=True)
 class AgentKernel:
     """The turn loop's own pacing."""
 
@@ -142,6 +168,7 @@ class AgentSlices:
     history_dump: HistoryDump
     sdk_reminders: SdkReminders
     llm_policy: LlmCallPolicy
+    overrides: ModelOverrides
     sandbox: Sandbox
     kernel: AgentKernel
     # The agent's framework pins, for the settings no slice names (`read`), and its plugin pins
@@ -169,6 +196,7 @@ class AgentSlices:
             history_dump=HistoryDump(**_kwargs(HistoryDump, pins)),
             sdk_reminders=SdkReminders(**_kwargs(SdkReminders, pins)),
             llm_policy=LlmCallPolicy(**_kwargs(LlmCallPolicy, pins)),
+            overrides=ModelOverrides(**_kwargs(ModelOverrides, pins)),
             sandbox=Sandbox(**_kwargs(Sandbox, pins)),
             kernel=AgentKernel(**_kwargs(AgentKernel, pins)),
             pins=MappingProxyType(dict(pins)),

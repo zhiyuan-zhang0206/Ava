@@ -52,6 +52,7 @@ from dataclasses import dataclass, field
 from dataclasses import fields as dataclass_fields
 from typing import Any
 
+from base.host.env.agent_slices import ModelOverrides
 from base.lm.plugin_providers import ensure_provider_plugins_loaded
 
 # ---------------------------------------------------------------------------
@@ -615,6 +616,9 @@ class ResolvedSetting:
     explicit_value: Any | None  # the user's pinned value (None = not pinned)
 
 
+_OVERRIDE_FIELDS = frozenset(f.name for f in dataclass_fields(ModelOverrides))
+
+
 def tuning_field_names() -> tuple[str, ...]:
     """Every per-model-defaultable settings field name, in ``ModelTuning`` order.
 
@@ -644,7 +648,7 @@ def explain_setting(setting: str, *, model: str, explicit: Any) -> ResolvedSetti
     return ResolvedSetting(setting, floor, "shared-default", floor, tuned, None)
 
 
-def resolve_setting(setting: str, *, model: str) -> Any:
+def resolve_setting(setting: str, *, model: str, overrides: ModelOverrides | None = None) -> Any:
     """The effective value of a per-model-defaultable settings field for `model`.
 
     Layering (weakest first): ``DEFAULT_TUNING`` shared default < the model's
@@ -658,6 +662,10 @@ def resolve_setting(setting: str, *, model: str) -> Any:
             (AttributeError otherwise — a typo fails fast).
         model: the model id whose per-model default applies. An unregistered
             model simply has no per-model layer.
+        overrides: the agent's explicit values (its slices' `overrides`). A
+            value the agent set is the explicit layer; an unset one is the
+            cluster default, as is every value when `overrides` is omitted, which
+            is right only for a reader that is not serving one agent (a daemon).
     """
     from base.config import get_field
 
@@ -666,6 +674,10 @@ def resolve_setting(setting: str, *, model: str) -> Any:
     # only inside explain_setting) keeps the AttributeError ahead of the
     # get_field lookup, which would KeyError on a name that is no config field.
     getattr(DEFAULT_TUNING, setting)
+    if overrides is not None and setting in _OVERRIDE_FIELDS:
+        pinned = getattr(overrides, setting)
+        if pinned is not None:
+            return explain_setting(setting, model=model, explicit=pinned).value
     try:
         explicit = get_field(setting)
     except AttributeError:
