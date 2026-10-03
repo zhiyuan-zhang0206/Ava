@@ -115,6 +115,32 @@ def _core_rate(per_domain: dict[str, list[int]]) -> tuple[float, int, int]:
     return _rate(covered, valid), covered, valid
 
 
+def _print_domain_table(per_domain: dict[str, list[int]]) -> None:
+    print("all measured domains (covered/total lines):")
+    for name, (covered, valid) in sorted(per_domain.items(), key=lambda kv: kv[1][1], reverse=True):
+        note = ""
+        if name in CORE_DOMAINS:
+            note = " — core gate"
+        elif name in FLOORS:
+            rate = _rate(covered, valid)
+            verdict = "ok" if rate >= FLOORS[name] else f"FAIL (floor {FLOORS[name]}%)"
+            note = f" — floor {FLOORS[name]}% {verdict}"
+        print(f"  {name:>20} {_rate(covered, valid):>6}% ({covered}/{valid}){note}")
+
+
+def _print_floored_subdomains(
+    per_domain: dict[str, list[int]], per_subdomain: dict[str, list[int]]
+) -> None:
+    floored_subdomains = [p for p in FLOORS if "/" in p]
+    if not floored_subdomains:
+        return
+    print("floored subdomains:")
+    for prefix in floored_subdomains:
+        rate, covered, valid = _prefix_rate(per_domain, per_subdomain, prefix)
+        verdict = "ok" if rate >= FLOORS[prefix] else f"FAIL (floor {FLOORS[prefix]}%)"
+        print(f"  {prefix:>20} {rate:>6}% ({covered}/{valid}) — floor {FLOORS[prefix]}% {verdict}")
+
+
 def check(files: dict[str, dict], threshold: float) -> int:
     """Enforce the gates against a coverage.json `files` map.
 
@@ -132,29 +158,11 @@ def check(files: dict[str, dict], threshold: float) -> int:
     if core_rate < threshold:
         failures.append(f"core combined coverage {core_rate}% below {threshold}%")
 
-    print("all measured domains (covered/total lines):")
-    for name, (covered, valid) in sorted(per_domain.items(), key=lambda kv: kv[1][1], reverse=True):
-        note = ""
-        if name in CORE_DOMAINS:
-            note = " — core gate"
-        elif name in FLOORS:
-            rate = _rate(covered, valid)
-            verdict = "ok" if rate >= FLOORS[name] else f"FAIL (floor {FLOORS[name]}%)"
-            note = f" — floor {FLOORS[name]}% {verdict}"
-        print(f"  {name:>20} {_rate(covered, valid):>6}% ({covered}/{valid}){note}")
-
-    floored_subdomains = [p for p in FLOORS if "/" in p]
-    if floored_subdomains:
-        print("floored subdomains:")
-        for prefix in floored_subdomains:
-            rate, covered, valid = _prefix_rate(per_domain, per_subdomain, prefix)
-            verdict = "ok" if rate >= FLOORS[prefix] else f"FAIL (floor {FLOORS[prefix]}%)"
-            print(
-                f"  {prefix:>20} {rate:>6}% ({covered}/{valid}) — floor {FLOORS[prefix]}% {verdict}"
-            )
+    _print_domain_table(per_domain)
+    _print_floored_subdomains(per_domain, per_subdomain)
 
     for prefix, floor in FLOORS.items():
-        rate, covered, valid = _prefix_rate(per_domain, per_subdomain, prefix)
+        rate, _covered, valid = _prefix_rate(per_domain, per_subdomain, prefix)
         if valid == 0:
             # Existence check, independent of the floor value: a floored
             # domain with no measured lines means the package vanished or

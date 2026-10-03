@@ -76,15 +76,12 @@ from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
 
-# Script-mode path guards (PYTHONSAFEPATH=1 removed the implicit script-dir
-# entry): this checkout's root first so `base` resolves against this tree,
-# then the scripts dir for the sibling script (ci_utils).
+# Script-mode path guard (PYTHONSAFEPATH=1 removed the implicit script-dir
+# entry): this checkout's root first so `base` and `scripts.ci` resolve against
+# this tree.
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
-_SCRIPTS_DIR = Path(__file__).resolve().parent
-if str(_SCRIPTS_DIR) not in sys.path:
-    sys.path.insert(0, str(_SCRIPTS_DIR))
 
 DEFAULT_REPO = "zhiyuan-zhang0206/Ava"
 DEFAULT_WINDOW_DAYS = 30
@@ -376,16 +373,16 @@ def load_trunk_token() -> str | None:
 
 @contextlib.contextmanager
 def _trunk_client() -> Any:
-    """Import `scripts/ci_utils.py` (the repo's Trunk channel) lazily."""
-    import ci_utils
+    """The repo's Trunk API channel (`scripts/ci/trunk_api.py`), imported lazily."""
+    from scripts.ci import trunk_api
 
-    yield ci_utils
+    yield trunk_api
 
 
 def fetch_queue_depth(repo: str, token: str, stats: RunStats) -> int | None:
     """The Trunk merge queue's pending depth right now; None on any failure."""
-    with _trunk_client() as ci_utils:
-        data, error = ci_utils._trunk_post("getQueue", ci_utils._trunk_target_payload(repo), token)
+    with _trunk_client() as trunk:
+        data, error = trunk.post("getQueue", trunk.target_payload(repo), token)
     stats.trunk_calls += 1
     if error is not None or data is None:
         stats.trunk_error = error or "no data"
@@ -404,7 +401,7 @@ def fetch_quarantined(repo: str, token: str, stats: RunStats) -> list[dict[str, 
     silently truncating the counts.
     """
     owner, name = repo.split("/", maxsplit=1)
-    with _trunk_client() as ci_utils:
+    with _trunk_client() as trunk:
         collected: list[dict[str, Any]] = []
         page_token: str | None = None
         for _ in range(_MAX_FLAKY_PAGES):
@@ -413,10 +410,10 @@ def fetch_quarantined(repo: str, token: str, stats: RunStats) -> list[dict[str, 
                 page_query["page_token"] = page_token
             payload: dict[str, object] = {
                 "repo": {"host": "github.com", "owner": owner, "name": name},
-                "org_url_slug": ci_utils._TRUNK_ORG_SLUG,
+                "org_url_slug": trunk.ORG_SLUG,
                 "page_query": page_query,
             }
-            data, error = ci_utils._trunk_post("flaky-tests/list-quarantined-tests", payload, token)
+            data, error = trunk.post("flaky-tests/list-quarantined-tests", payload, token)
             stats.trunk_calls += 1
             if error is not None or data is None:
                 stats.trunk_error = error or "no data"
@@ -502,49 +499,66 @@ def collect_records(
     wanted = set(window)
     records: list[PrRecord] = []
     for meta in prs:
-        merged_raw = meta.get("merged_at")
-        if not isinstance(merged_raw, str) or not merged_raw:
-            continue
-        try:
-            merged_day = datetime.fromisoformat(merged_raw).astimezone(tz).date()
-        except ValueError:
-            continue
-        if merged_day not in wanted:
+        merged_raw = _merged_in_window(meta, wanted, tz)
+        if merged_raw is None:
             continue
         number = int(meta["number"])
         cached_raw = cache.get(str(number))
         cached = PrRecord.from_cache(number, cached_raw) if cached_raw else None
-        if (
-            cached is not None
-            and not cached.partial
-            and cached.updated_at == str(meta.get("updated_at") or "")
-            and cached.ready_at
-        ):
+        if cached is not None and _cache_current(cached, meta):
             stats.timeline_cache_hits += 1
             records.append(cached)
             continue
         stats.timeline_fetches += 1
-        try:
-            events = fetch(repo, number, stats)
-        except (PrFlowError, subprocess.TimeoutExpired, json.JSONDecodeError) as exc:
-            stats.timeline_failures += 1
-            print(f"pr-flow: timeline fetch failed for PR #{number}: {exc}", file=sys.stderr)
-            if cached is not None and cached.ready_at:
-                records.append(cached)
-            else:
-                records.append(
-                    PrRecord(
-                        number=number,
-                        updated_at=str(meta.get("updated_at") or ""),
-                        created_at=str(meta.get("created_at") or ""),
-                        merged_at=merged_raw,
-                        ready_at="",
-                        partial=True,
-                    )
-                )
-            continue
-        records.append(build_record(meta, events))
+        records.append(_refresh_record(meta, merged_raw, cached, repo, stats, fetch))
     return records
+
+
+def _merged_in_window(meta: dict[str, Any], wanted: set[date], tz: ZoneInfo) -> str | None:
+    """The PR's `merged_at` string when it merged on a day in the window, else None."""
+    merged_raw = meta.get("merged_at")
+    if not isinstance(merged_raw, str) or not merged_raw:
+        return None
+    try:
+        merged_day = datetime.fromisoformat(merged_raw).astimezone(tz).date()
+    except ValueError:
+        return None
+    return merged_raw if merged_day in wanted else None
+
+
+def _cache_current(cached: PrRecord, meta: dict[str, Any]) -> bool:
+    return (
+        not cached.partial
+        and cached.updated_at == str(meta.get("updated_at") or "")
+        and bool(cached.ready_at)
+    )
+
+
+def _refresh_record(
+    meta: dict[str, Any],
+    merged_raw: str,
+    cached: PrRecord | None,
+    repo: str,
+    stats: RunStats,
+    fetch: Callable[[str, int, RunStats], list[dict[str, Any]]],
+) -> PrRecord:
+    number = int(meta["number"])
+    try:
+        events = fetch(repo, number, stats)
+    except (PrFlowError, subprocess.TimeoutExpired, json.JSONDecodeError) as exc:
+        stats.timeline_failures += 1
+        print(f"pr-flow: timeline fetch failed for PR #{number}: {exc}", file=sys.stderr)
+        if cached is not None and cached.ready_at:
+            return cached
+        return PrRecord(
+            number=number,
+            updated_at=str(meta.get("updated_at") or ""),
+            created_at=str(meta.get("created_at") or ""),
+            merged_at=merged_raw,
+            ready_at="",
+            partial=True,
+        )
+    return build_record(meta, events)
 
 
 def build_snapshot(

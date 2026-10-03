@@ -70,8 +70,6 @@ import re
 import subprocess
 import sys
 import time
-import urllib.error
-import urllib.request
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
@@ -83,12 +81,10 @@ from typing import Any, TypedDict
 # sibling module; under pytest pythonpath=["."] this is a redundant no-op.
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from scripts.ci import trunk_api
 from scripts.ci.accounting import DEFAULT_LEDGER, load_ledger, report_rows
+from scripts.ci.ci_diagnose import diagnose_pr, print_diagnosis
 from scripts.ci.job_rerun import CiJobRerunError, list_failed_jobs, rerun_failed_jobs
-
-# The Ava checkout root this script ships in — anchors base-freshness git reads
-# against THIS repo's origin regardless of the caller's cwd (task #2496).
-_REPO_ROOT = Path(__file__).resolve().parent.parent
 
 
 class CIStatus(Enum):
@@ -159,8 +155,6 @@ RETRY_BACKOFF_SECONDS = 300
 _QUEUE_CHOICES = ("trunk",)
 _QUEUE_NAMES = frozenset(_QUEUE_CHOICES)
 _TRUNK_PRIORITIES = {"urgent": 0, "high": 10, "medium": 100, "low": 200}
-_TRUNK_API_BASE_URL = "https://api.trunk.io/v1"
-_TRUNK_REQUEST_TIMEOUT_SECONDS = 30
 
 
 def _resolve_queue(queue: str | None) -> str:
@@ -511,15 +505,8 @@ def _main_workflow_run_completed(head_sha: str, repo: str | None) -> bool | None
     return count > 0
 
 
-def _limbo_runs(head_sha: str, repo: str | None) -> list[LimboRun] | None:
-    """Runs for `head_sha` that look permanently stuck in GitHub limbo.
-    The class (task #3275, 2026-09-13): `queued`, ZERO jobs ever created, and past
-    `_LIMBO_AGE_SECONDS`. Such a run stays in every non-completed answer forever, so without this
-    probe it holds an all-green rollup PENDING until the caller's timeout -- silently. None means
-    the probe could not answer (missing evidence, never "no limbo"); a candidate whose job count
-    cannot be read is skipped, not assumed stuck.
-    """
-    owner = repo if repo else "{owner}/{repo}"
+def _queued_run_candidates(owner: str, head_sha: str) -> list[Any] | None:
+    """The head's `queued` runs as {id, name, created_at} rows; None when the probe cannot answer."""
     r = subprocess.run(  # noqa: S603
         [
             "gh",
@@ -538,7 +525,36 @@ def _limbo_runs(head_sha: str, repo: str | None) -> list[LimboRun] | None:
         candidates = json.loads(r.stdout.strip() or "[]")
     except json.JSONDecodeError:
         return None
-    if not isinstance(candidates, list):
+    return candidates if isinstance(candidates, list) else None
+
+
+def _run_job_count(owner: str, run_id: int) -> int | None:
+    """How many jobs a run has; None when the count cannot be read."""
+    jobs = subprocess.run(  # noqa: S603
+        ["gh", "api", f"repos/{owner}/actions/runs/{run_id}/jobs", "--jq", ".total_count"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if jobs.returncode != 0:
+        return None
+    try:
+        return int(jobs.stdout.strip())
+    except ValueError:
+        return None
+
+
+def _limbo_runs(head_sha: str, repo: str | None) -> list[LimboRun] | None:
+    """Runs for `head_sha` that look permanently stuck in GitHub limbo.
+    The class (task #3275, 2026-09-13): `queued`, ZERO jobs ever created, and past
+    `_LIMBO_AGE_SECONDS`. Such a run stays in every non-completed answer forever, so without this
+    probe it holds an all-green rollup PENDING until the caller's timeout -- silently. None means
+    the probe could not answer (missing evidence, never "no limbo"); a candidate whose job count
+    cannot be read is skipped, not assumed stuck.
+    """
+    owner = repo if repo else "{owner}/{repo}"
+    candidates = _queued_run_candidates(owner, head_sha)
+    if candidates is None:
         return None
     now = time.time()
     limbo: list[LimboRun] = []
@@ -553,19 +569,7 @@ def _limbo_runs(head_sha: str, repo: str | None) -> list[LimboRun] | None:
         age = now - created_ts
         if age < _LIMBO_AGE_SECONDS:
             continue
-        jobs = subprocess.run(  # noqa: S603
-            ["gh", "api", f"repos/{owner}/actions/runs/{raw_id}/jobs", "--jq", ".total_count"],
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        if jobs.returncode != 0:
-            continue
-        try:
-            total = int(jobs.stdout.strip())
-        except ValueError:
-            continue
-        if total == 0:
+        if _run_job_count(owner, raw_id) == 0:
             limbo.append(
                 {"id": raw_id, "name": str(candidate.get("name") or "?"), "age_s": round(age)}
             )
@@ -625,6 +629,82 @@ def _merge_conflict_result(data: dict, result: CIResult) -> CIResult:
         else:
             result.pending.append(name)
     return result
+
+
+def _attached_checks_verdict(result: CIResult, head_sha: str, repo: str | None) -> None:
+    """Resolve the verdict once every attached check has passed and none is still pending."""
+    # Every check attached so far has passed. Attached, though, is not the same as finished: a
+    # run that is queued / in progress has attached nothing to this commit yet, so a rollup
+    # carrying part of the suite — all green — is indistinguishable from a finished suite.
+    # Multi-workflow repos on self-hosted runners sit in that window routinely (2026-09-10,
+    # MonsoraV2 #774: ALL_PASSED in ~2s while ci.yml run 34487002348 was still queued), and a
+    # green verdict there ends the watch early. Ask the runs API once, before any green
+    # verdict, whether more is coming.
+    scheduled = _runs_not_yet_reporting(head_sha, repo)
+    if scheduled:
+        result.pending.extend(scheduled)
+        result.verdict = CIStatus.PENDING
+        result.limbo = _limbo_runs(head_sha, repo) or []
+    elif not result.workflow_checks and _repo_has_workflows():
+        # Nothing from a workflow is attached — and nothing is confirmed scheduled (an
+        # unanswerable probe, None, reads the same here) — while this checkout does define
+        # workflows: the suite did not run. Reporting ALL_PASSED here is how a broken `runs-on`
+        # — 2026-07-28, hosted runners a private repo could not schedule — reads as green: the
+        # only check left standing was a GitHub App's, and it passed.
+        #
+        # Residual false positive (2026-09-12, task #3160): in the window right after a head
+        # change (force-push or push), an app check has attached while the new run has not
+        # *registered* yet — invisible to the runs probe, so a healthy PR can read as this
+        # verdict once (2026-08-02 #1216; 2026-09-12: queue lag of minutes observed — the
+        # attached app check is the tell). It is not proof the suite will not run: corroborate
+        # head-precisely — `gh run list --commit <head-sha>` (add `--repo <owner/repo>` when
+        # cwd is not the checkout) — a queued / in_progress run there means it is coming.
+        # `--branch` is not an equivalent check: it also lists the runs of the head this one
+        # replaced, and a force-push leaves those completed, which reads as either answer. The
+        # genuine #885 shape stays distinguishable by re-checking after a pause; read later in
+        # a watch, on a settled head, this verdict means what it says.
+        result.verdict = CIStatus.NO_WORKFLOW_RUNS
+    elif scheduled is None:
+        # The attached checks all passed, but the probe could not answer whether more runs are
+        # still queued. Unanswerable is not "nothing scheduled": report ERROR (unknown) —
+        # --wait prints it and exits 3 if it persists — rather than guess green, and rather
+        # than a PENDING that would claim checks are pending when none are.
+        result.verdict = CIStatus.ERROR
+        result.error_detail = (
+            "runs API probe failed: cannot confirm no workflow run is still queued for this head"
+        )
+    else:
+        # Nothing is still running — but that only rules out runs that HAVE registered.
+        # Registration lags a head change, and in that window a rollup of second-scale checks
+        # (GitHub Apps, small proof workflows) all passing is indistinguishable from a finished
+        # suite: the incomplete-runs probe above sees nothing to wait for, so green here would
+        # end a watch before the suite began (2026-09-21, PR #3137: "CI all green (3 checks
+        # passed)" ~3s after the push; 18 checks were running seconds later). A green verdict
+        # therefore also confirms the main CI workflow has been SEEN for this head — a
+        # completed, non-skipped run of MAIN_CI_WORKFLOW_NAME — and a check-set far smaller
+        # than the repo's suite is the tell to corroborate by hand. Scoped by
+        # _repo_has_workflows(): a checkout with no workflows is legitimately green on app
+        # checks alone.
+        #
+        # Not seen -> PENDING with the run name in `pending`: --wait keeps
+        # polling (bounded by --timeout), and the one-shot keeps its legacy
+        # contract — it prints this pending summary, never "all green".
+        main_run = _main_workflow_run_completed(head_sha, repo) if _repo_has_workflows() else True
+        if main_run is None:
+            # Same asymmetry as every probe here: unanswerable is unknown,
+            # never green (--wait exits 3 if it persists).
+            result.verdict = CIStatus.ERROR
+            result.error_detail = (
+                "runs API probe failed: cannot confirm the main CI workflow "
+                "has finished a run for this head"
+            )
+        elif not main_run:
+            result.pending.append(MAIN_CI_WORKFLOW_NAME)
+            result.verdict = CIStatus.PENDING
+        else:
+            # All completed, none failed, nothing left scheduled, and the
+            # main workflow's run is seen.
+            result.verdict = CIStatus.ALL_PASSED
 
 
 def check_ci(pr_number: str | int, *, repo: str | None = None) -> CIResult:
@@ -707,83 +787,7 @@ def check_ci(pr_number: str | int, *, repo: str | None = None) -> CIResult:
     elif result.pending:
         result.verdict = CIStatus.PENDING
     else:
-        # Every check attached so far has passed. Attached, though, is not the same as finished: a
-        # run that is queued / in progress has attached nothing to this commit yet, so a rollup
-        # carrying part of the suite — all green — is indistinguishable from a finished suite.
-        # Multi-workflow repos on self-hosted runners sit in that window routinely (2026-09-10,
-        # MonsoraV2 #774: ALL_PASSED in ~2s while ci.yml run 34487002348 was still queued), and a
-        # green verdict there ends the watch early. Ask the runs API once, before any green
-        # verdict, whether more is coming.
-        scheduled = _runs_not_yet_reporting(data.get("headRefOid", ""), repo)
-        if scheduled:
-            result.pending.extend(scheduled)
-            result.verdict = CIStatus.PENDING
-            result.limbo = _limbo_runs(data.get("headRefOid", ""), repo) or []
-        elif not result.workflow_checks and _repo_has_workflows():
-            # Nothing from a workflow is attached — and nothing is confirmed scheduled (an
-            # unanswerable probe, None, reads the same here) — while this checkout does define
-            # workflows: the suite did not run. Reporting ALL_PASSED here is how a broken `runs-on`
-            # — 2026-07-28, hosted runners a private repo could not schedule — reads as green: the
-            # only check left standing was a GitHub App's, and it passed.
-            #
-            # Residual false positive (2026-09-12, task #3160): in the window right after a head
-            # change (force-push or push), an app check has attached while the new run has not
-            # *registered* yet — invisible to the runs probe, so a healthy PR can read as this
-            # verdict once (2026-08-02 #1216; 2026-09-12: queue lag of minutes observed — the
-            # attached app check is the tell). It is not proof the suite will not run: corroborate
-            # head-precisely — `gh run list --commit <head-sha>` (add `--repo <owner/repo>` when
-            # cwd is not the checkout) — a queued / in_progress run there means it is coming.
-            # `--branch` is not an equivalent check: it also lists the runs of the head this one
-            # replaced, and a force-push leaves those completed, which reads as either answer. The
-            # genuine #885 shape stays distinguishable by re-checking after a pause; read later in
-            # a watch, on a settled head, this verdict means what it says.
-            result.verdict = CIStatus.NO_WORKFLOW_RUNS
-        elif scheduled is None:
-            # The attached checks all passed, but the probe could not answer whether more runs are
-            # still queued. Unanswerable is not "nothing scheduled": report ERROR (unknown) —
-            # --wait prints it and exits 3 if it persists — rather than guess green, and rather
-            # than a PENDING that would claim checks are pending when none are.
-            result.verdict = CIStatus.ERROR
-            result.error_detail = (
-                "runs API probe failed: cannot confirm no workflow run is still "
-                "queued for this head"
-            )
-        else:
-            # Nothing is still running — but that only rules out runs that HAVE registered.
-            # Registration lags a head change, and in that window a rollup of second-scale checks
-            # (GitHub Apps, small proof workflows) all passing is indistinguishable from a finished
-            # suite: the incomplete-runs probe above sees nothing to wait for, so green here would
-            # end a watch before the suite began (2026-09-21, PR #3137: "CI all green (3 checks
-            # passed)" ~3s after the push; 18 checks were running seconds later). A green verdict
-            # therefore also confirms the main CI workflow has been SEEN for this head — a
-            # completed, non-skipped run of MAIN_CI_WORKFLOW_NAME — and a check-set far smaller
-            # than the repo's suite is the tell to corroborate by hand. Scoped by
-            # _repo_has_workflows(): a checkout with no workflows is legitimately green on app
-            # checks alone.
-            #
-            # Not seen -> PENDING with the run name in `pending`: --wait keeps
-            # polling (bounded by --timeout), and the one-shot keeps its legacy
-            # contract — it prints this pending summary, never "all green".
-            main_run = (
-                _main_workflow_run_completed(data.get("headRefOid", ""), repo)
-                if _repo_has_workflows()
-                else True
-            )
-            if main_run is None:
-                # Same asymmetry as every probe here: unanswerable is unknown,
-                # never green (--wait exits 3 if it persists).
-                result.verdict = CIStatus.ERROR
-                result.error_detail = (
-                    "runs API probe failed: cannot confirm the main CI workflow "
-                    "has finished a run for this head"
-                )
-            elif not main_run:
-                result.pending.append(MAIN_CI_WORKFLOW_NAME)
-                result.verdict = CIStatus.PENDING
-            else:
-                # All completed, none failed, nothing left scheduled, and the
-                # main workflow's run is seen.
-                result.verdict = CIStatus.ALL_PASSED
+        _attached_checks_verdict(result, data.get("headRefOid", ""), repo)
 
     return result
 
@@ -844,113 +848,12 @@ def _deadline_hit(
     return False
 
 
-def _trunk_target_payload(repo: str) -> dict[str, object]:
-    """Build the repository and target branch identity Trunk endpoints share."""
-    owner, name = repo.split("/", maxsplit=1)
-    return {
-        "repo": {"host": "github.com", "owner": owner, "name": name},
-        "targetBranch": "main",
-    }
-
-
-def _trunk_pr_payload(pr: str, repo: str) -> dict[str, object]:
-    """Build the repository, PR, and target branch identity Trunk requires."""
-    payload = _trunk_target_payload(repo)
-    payload["pr"] = {"number": int(pr)}
-    return payload
-
-
-_SHA1_RE = re.compile(r"^[0-9a-f]{40}$")
-_SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
-
-
-def _is_sha(value: str) -> bool:
-    return bool(_SHA1_RE.match(value) or _SHA256_RE.match(value))
-
-
-def _base_freshness(pr: str, repo: str) -> tuple[tuple[str, str] | None, bool]:
-    """Return ((base_sha, main_sha) when stale else None, unreadable).
-    The PR's `baseRefOid` is the base-branch SHA GitHub last evaluated the PR against. When
-    current main is ahead of it, the queue's predictive branch will include commits this PR's green
-    CI never saw, so Trunk re-tests the tree against the newer base — the extra in-queue round task
-    #2496 (A1) wants operators warned about. Advisory only: any read error or non-SHA output sets
-    `unreadable` and never blocks submission.
-    """
-    result = subprocess.run(  # noqa: S603
-        ["gh", "pr", "view", pr, "--repo", repo, "--json", "baseRefOid", "--jq", ".baseRefOid"],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    if result.returncode != 0:
-        return None, True
-    base_sha = result.stdout.strip()
-    if not _is_sha(base_sha):
-        return None, True
-    result = subprocess.run(  # noqa: S603
-        # -C anchors the checkout: cwd can be another git repo (e.g. the memory
-        # pool), whose origin would answer with a VALID sha and mis-refuse in
-        # require mode (QA NIT, 2026-09-06).
-        ["git", "-C", str(_REPO_ROOT), "ls-remote", "origin", "refs/heads/main"],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    if result.returncode != 0:
-        return None, True
-    main_sha = result.stdout.split(maxsplit=1)[0]
-    if not _is_sha(main_sha):
-        return None, True
-    if base_sha == main_sha:
-        return None, False
-    return (base_sha, main_sha), False
-
-
-def _trunk_post(
-    endpoint: str, payload: dict[str, object], token: str
-) -> tuple[dict[str, object] | None, str | None]:
-    """POST one Trunk API request, returning its object response or an error."""
-    request = urllib.request.Request(  # noqa: S310 - fixed HTTPS Trunk API endpoint
-        f"{_TRUNK_API_BASE_URL}/{endpoint}",
-        data=json.dumps(payload).encode(),
-        headers={"Content-Type": "application/json", "x-api-token": token},
-        method="POST",
-    )
-    try:
-        with urllib.request.urlopen(  # noqa: S310 - request uses the fixed HTTPS endpoint above
-            request, timeout=_TRUNK_REQUEST_TIMEOUT_SECONDS
-        ) as response:
-            status = response.status
-            body = response.read()
-    except urllib.error.HTTPError as error:
-        # urllib raises HTTPError (a URLError subclass) instead of returning
-        # the response for 4xx/5xx, and its str() is "HTTP Error 409: ..." —
-        # normalize to "HTTP <code>" so callers can match statuses exactly.
-        return None, f"HTTP {error.code}"
-    except (urllib.error.URLError, OSError, TimeoutError) as error:
-        return None, str(error)
-    if status != 200:
-        return None, f"HTTP {status}"
-    if not body:
-        return {}, None
-    try:
-        data = json.loads(body)
-    except (UnicodeDecodeError, json.JSONDecodeError):
-        # submitPullRequest / cancelPullRequest answer 200 with a plain-text
-        # "OK" body (verified live 2026-09-01); a 200 is a success regardless
-        # of body shape, so a non-JSON body must not be read as an error.
-        return {}, None
-    if not isinstance(data, dict):
-        return None, "response was not a JSON object"
-    return data, None
-
-
 def _submit_trunk(pr: str, repo: str, priority: str, *, token: str) -> int:
     """Submit a green PR to Trunk, retrying one failed submission."""
-    payload = _trunk_pr_payload(pr, repo)
+    payload = trunk_api.pr_payload(pr, repo)
     payload.update({"priority": _trunk_priority(priority), "noBatch": False})
     for attempt in range(2):
-        _, error = _trunk_post("submitPullRequest", payload, token)
+        _, error = trunk_api.post("submitPullRequest", payload, token)
         if error is None:
             print(f"PR #{pr} submitted to the Trunk merge queue", file=sys.stderr, flush=True)
             return 0
@@ -984,8 +887,8 @@ def _trunk_cancel(pr: str, repo: str, *, token: str) -> int:
     in the queue). There is no reorder endpoint — a mid-queue reshuffle cannot be scripted, only
     cancel and re-submit.
     """
-    payload = _trunk_pr_payload(pr, repo)
-    _, error = _trunk_post("cancelPullRequest", payload, token)
+    payload = trunk_api.pr_payload(pr, repo)
+    _, error = trunk_api.post("cancelPullRequest", payload, token)
     if error is None:
         print(
             f"PR #{pr} cancelled from the Trunk merge queue",
@@ -1010,8 +913,8 @@ def _trunk_queue_status(repo: str, *, token: str, as_json: bool) -> int:
     carrying state / priority / sha). States are lowercase as returned: queued / pending / testing
     / merged / failed / cancelled.
     """
-    payload = _trunk_target_payload(repo)
-    data, error = _trunk_post("getQueue", payload, token)
+    payload = trunk_api.target_payload(repo)
+    data, error = trunk_api.post("getQueue", payload, token)
     if error is not None:
         print(f"[ci] Trunk queue status error: {error}", file=sys.stderr, flush=True)
         return 3
@@ -1162,318 +1065,6 @@ def _ci_usage_command(args: argparse.Namespace, parser: argparse.ArgumentParser)
 
 # --- Trunk queue failure diagnosis (task #2572) ---
 
-_TRUNK_ORG_SLUG = "ava"
-_DIAGNOSE_LOG_TAIL = 4000
-_DIAGNOSE_MAX_JOB_LOGS = 8
-_DIAGNOSE_MAX_SYNTHETIC_PRS = 3
-
-# (regex, classification, suggested action) — first match wins.
-_FAILURE_SIGNATURES: list[tuple[str, str, str]] = [
-    (
-        r"over the 800-line hard ceiling",
-        "lint hard limit (file over 800 lines)",
-        "split the file into focused modules, fix, resubmit",
-    ),
-    (
-        r"First Load JS shared by all",
-        "frontend first-load JavaScript budget",
-        "reduce the bundle or update the budget baseline, fix, resubmit",
-    ),
-    (
-        r"toMatchImageSnapshot|visual regression|baseline image|snapshot baseline",
-        "e2e visual regression (stale snapshot baseline)",
-        "UI change: refresh the visual snapshot baseline, resubmit",
-    ),
-    (
-        r"archive cache is empty|no offline fallback|apt-get install",
-        "runner-side network flake (pgdg/apt family)",
-        "rerun the failed job — no code change; resubmit if the queue already failed",
-    ),
-    (
-        r"truncate-isolation|comment-stripping regex",
-        "deterministic truncate-isolation lint failure",
-        "fix the triggering comment/word, resubmit",
-    ),
-    (
-        r"lattice-vocabulary|clock lattice",
-        "deterministic clock-lattice lint failure (constant outside its family module)",
-        "move the constant into the family module, fix, resubmit",
-    ),
-]
-
-
-def _pr_view(pr: str, repo: str, fields: str) -> dict[str, object] | None:
-    """gh pr view --json; None when gh fails or the output is not an object."""
-    result = subprocess.run(  # noqa: S603
-        ["gh", "pr", "view", pr, "--repo", repo, "--json", fields],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    if result.returncode != 0:
-        return None
-    try:
-        data = json.loads(result.stdout)
-    except json.JSONDecodeError:
-        return None
-    return data if isinstance(data, dict) else None
-
-
-def _job_log_tail(job_id: int, repo: str) -> str:
-    """The last `_DIAGNOSE_LOG_TAIL` chars of a job log; empty when unreadable."""
-    result = subprocess.run(  # noqa: S603
-        ["gh", "api", f"repos/{repo}/actions/jobs/{job_id}/logs"],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    if result.returncode != 0:
-        return ""
-    return result.stdout[-_DIAGNOSE_LOG_TAIL:]
-
-
-def _failed_test_names(log: str) -> list[str]:
-    """Test ids from pytest's `FAILED <file>::<test>` summary lines."""
-    return re.findall(r"^FAILED\s+(\S+)", log, re.MULTILINE)
-
-
-def _quarantined_tests(repo: str, *, token: str | None) -> list[dict[str, object]]:
-    """Trunk's quarantined (flaky/broken) tests; empty when unavailable.
-    The lookup needs TRUNK_API_TOKEN and the Flaky Tests upload wiring (PR #1626); without either,
-    the diagnosis cannot vouch for flakiness and says so instead of guessing.
-    """
-    if not token:
-        return []
-    owner, name = repo.split("/", maxsplit=1)
-    payload: dict[str, object] = {
-        "repo": {"host": "github.com", "owner": owner, "name": name},
-        "org_url_slug": _TRUNK_ORG_SLUG,
-        # Trunk's page ceiling: 100 per page; one page is the whole lookup
-        # (task #3696 exception inventory).
-        "page_query": {"page_size": 100},
-    }
-    data, error = _trunk_post("flaky-tests/list-quarantined-tests", payload, token)
-    if error is not None or data is None:
-        return []
-    raw = data.get("quarantined_tests", [])
-    tests = raw if isinstance(raw, list) else []
-    return [t for t in tests if isinstance(t, dict)]
-
-
-def _match_quarantined(
-    failed: list[str], quarantined: list[dict[str, object]]
-) -> list[dict[str, object]]:
-    """Quarantined entries whose test name appears among the failed tests."""
-    hits: list[dict[str, object]] = []
-    for entry in quarantined:
-        entry_name = str(entry.get("name") or "")
-        if not entry_name:
-            continue
-        if any(test_id.endswith("::" + entry_name) for test_id in failed):
-            hits.append(entry)
-    return hits
-
-
-def _classify_check(name: str, log: str, quarantined: list[dict[str, object]]) -> tuple[str, str]:
-    """(classification, suggested action) for one failing check."""
-    hits = _match_quarantined(_failed_test_names(log), quarantined)
-    if hits:
-        statuses = sorted({str(h.get("status")) for h in hits})
-        return (
-            f"known flake ({', '.join(statuses)} in Trunk flaky DB)",
-            "rerun the failed job — no code change; resubmit if the queue failed",
-        )
-    for pattern, label, action in _FAILURE_SIGNATURES:
-        if re.search(pattern, log, re.IGNORECASE):
-            return label, action
-    if "lint" in name.lower():
-        return "deterministic lint failure", "fix the offending code/comment, resubmit"
-    return "unclassified CI failure", "read the log tail; rerun once if it looks environmental"
-
-
-def _pull_head_ref(pull: dict[str, object]) -> str:
-    """The head branch ref of a pull payload; empty when unreadable."""
-    head = pull.get("head")
-    if not isinstance(head, dict):
-        return ""
-    return str(head.get("ref") or "")
-
-
-def _synthetic_test_prs(pr: str, repo: str) -> list[dict[str, object]]:
-    """Trunk's trunk-merge/pr-<n>/* test PRs (each = one queue attempt)."""
-    result = subprocess.run(  # noqa: S603
-        [
-            "gh",
-            "api",
-            f"repos/{repo}/pulls",
-            "-X",
-            "GET",
-            "-f",
-            "state=all",
-            "-f",
-            "per_page=100",
-            "-f",
-            "sort=updated",
-            "-f",
-            "direction=desc",
-        ],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    if result.returncode != 0:
-        return []
-    try:
-        pulls = json.loads(result.stdout)
-    except json.JSONDecodeError:
-        return []
-    prefix = f"trunk-merge/pr-{pr}/"
-    return [
-        pull for pull in pulls if isinstance(pull, dict) and _pull_head_ref(pull).startswith(prefix)
-    ][:_DIAGNOSE_MAX_SYNTHETIC_PRS]
-
-
-def _diagnose_pr(pr: str, repo: str, *, token: str | None) -> dict[str, Any]:
-    """Collect the PR's failure evidence and classify it (task #2572).
-    Diagnosis only — no repair action is taken here; the operator executes the suggested action.
-    Evidence sources: the PR's check rollup + job log tails, Trunk's queue state + flaky DB, and
-    the synthetic trunk-merge test PRs.
-    """
-    diag: dict[str, Any] = {
-        "pr": pr,
-        "repo": repo,
-        "issues": [],
-        "checks": [],
-        "trunk": None,
-        "synthetic_test_prs": [],
-        "flaky_db_available": token is not None,
-    }
-    view = _pr_view(pr, repo, "mergeable,headRefOid,state,statusCheckRollup")
-    if view is None:
-        diag["gh_error"] = "gh pr view failed"
-        return diag
-    diag["state"] = view.get("state")
-    mergeable = view.get("mergeable")
-    diag["mergeable"] = mergeable
-    # A merged/closed PR reports mergeable=UNKNOWN and its recorded base is
-    # naturally behind main — those are not diagnosable problems.
-    if view.get("state") == "OPEN" and mergeable == "CONFLICTING":
-        diag["issues"].append(
-            {
-                "kind": "merge_conflict",
-                "detail": f"mergeable={mergeable}",
-                "action": "rebase on origin/main, resubmit",
-            }
-        )
-    stale = None
-    unreadable = False
-    if view.get("state") == "OPEN":
-        stale, unreadable = _base_freshness(pr, repo)
-    if stale:
-        diag["issues"].append(
-            {
-                "kind": "stale_base",
-                "detail": f"base {stale[0][:8]} vs main {stale[1][:8]}",
-                "action": "rebase, or drop --require-fresh-base and let the queue re-test the new base",
-            }
-        )
-    elif unreadable:
-        diag["issues"].append(
-            {
-                "kind": "base_unreadable",
-                "detail": "base freshness could not be read",
-                "action": "verify the PR base against current main manually",
-            }
-        )
-
-    quarantined = _quarantined_tests(repo, token=token)
-    try:
-        failed_jobs = list_failed_jobs(pr, repo)
-    except CiJobRerunError:
-        # Diagnosis stays best-effort: the rollup still names the failing
-        # checks; only the per-job log tail enrichment degrades.
-        failed_jobs = []
-    raw_rollup = view.get("statusCheckRollup", [])
-    rollup_rows = raw_rollup if isinstance(raw_rollup, list) else []
-    rollup = [c for c in rollup_rows if isinstance(c, dict)]
-    failing_checks = [c for c in rollup if c.get("conclusion") in FAILING][:_DIAGNOSE_MAX_JOB_LOGS]
-    for check in failing_checks:
-        check_name = str(check.get("name") or "unnamed check")
-        job = next((j for j in failed_jobs if j.get("name") == check_name), None)
-        log = _job_log_tail(int(job["job_id"]), repo) if job else ""
-        classification, action = _classify_check(check_name, log, quarantined)
-        entry: dict[str, object] = {
-            "check": check_name,
-            "conclusion": check.get("conclusion"),
-            "classification": classification,
-            "action": action,
-            "log_tail": log[-800:],
-        }
-        if job:
-            entry["job_id"] = job["job_id"]
-        diag["checks"].append(entry)
-
-    if token:
-        payload = _trunk_pr_payload(pr, repo)
-        data, error = _trunk_post("getSubmittedPullRequest", payload, token)
-        if error is None and data is not None:
-            diag["trunk"] = {
-                "state": data.get("state"),
-                "reason": data.get("reason"),
-                "readiness": data.get("readiness"),
-                "verifiedByTestRun": data.get("verifiedByTestRun"),
-            }
-        else:
-            diag["trunk"] = {"error": error}
-    diag["synthetic_test_prs"] = [
-        {
-            "number": pull.get("number"),
-            "state": pull.get("state"),
-            "head_ref": _pull_head_ref(pull),
-        }
-        for pull in _synthetic_test_prs(pr, repo)
-    ]
-    return diag
-
-
-def _print_diagnosis(diag: dict[str, Any]) -> None:
-    """Human-readable --diagnose report."""
-    if diag.get("gh_error"):
-        print(f"PR #{diag['pr']} diagnosis failed: {diag['gh_error']}", file=sys.stderr)
-        return
-    print(
-        f"PR #{diag['pr']} diagnosis (state={diag.get('state')}, mergeable={diag.get('mergeable')})"
-    )
-    issues = diag.get("issues", [])
-    if not issues:
-        print("No PR-level issues found.")
-    for issue in issues:
-        print(f"- {issue['kind']}: {issue['detail']} → {issue['action']}")
-    checks = diag.get("checks", [])
-    if not checks:
-        print("No failing checks on the PR head.")
-    for check in checks:
-        print(f"  check {check['check']}: {check['classification']} → {check['action']}")
-    trunk = diag.get("trunk")
-    if isinstance(trunk, dict):
-        if trunk.get("error"):
-            print(f"Trunk queue: not queryable ({trunk['error']})")
-        else:
-            print(f"Trunk queue: state={trunk.get('state')} reason={trunk.get('reason')}")
-    if not diag.get("flaky_db_available"):
-        print("Flaky DB: not checked (TRUNK_API_TOKEN missing) — flake calls stay unverified")
-    synthetic = diag.get("synthetic_test_prs", [])
-    for pull in synthetic:
-        print(
-            f"  synthetic test PR #{pull.get('number')} [{pull.get('state')}] "
-            f"{pull.get('head_ref')}"
-        )
-    if synthetic:
-        print(
-            "  → queue-attempt failures: inspect the synthetic PR's failed job log "
-            "(runner-side flake families rerun without code change)"
-        )
-
 
 def _diagnose_command(args: argparse.Namespace, parser: argparse.ArgumentParser) -> int | None:
     """Dispatch --diagnose when set; None when not set."""
@@ -1485,11 +1076,11 @@ def _diagnose_command(args: argparse.Namespace, parser: argparse.ArgumentParser)
         )
     if args.pr is None:
         parser.error("PR number is required with --diagnose")
-    diag = _diagnose_pr(args.pr, args.repo, token=os.environ.get("TRUNK_API_TOKEN"))
+    diag = diagnose_pr(args.pr, args.repo, token=os.environ.get("TRUNK_API_TOKEN"))
     if args.json:
         print(json.dumps(diag, indent=2))
     else:
-        _print_diagnosis(diag)
+        print_diagnosis(diag)
     return 0
 
 
@@ -1507,10 +1098,10 @@ def _watch_trunk_enqueue(
     (waiting for a batch), "not_ready" (required statuses not yet green), and "testing" (merge-tree
     test run in progress, observed live 2026-09-03) — is non-terminal: keep polling.
     """
-    payload = _trunk_pr_payload(pr, repo)
+    payload = trunk_api.pr_payload(pr, repo)
     consecutive_errors = 0
     while True:
-        data, error = _trunk_post("getSubmittedPullRequest", payload, token)
+        data, error = trunk_api.post("getSubmittedPullRequest", payload, token)
         if error is not None:
             consecutive_errors += 1
             print(
@@ -1583,7 +1174,7 @@ def _trunk_merge_flow(
         print(f"PR #{pr} CI no longer green: {result.summary()}", file=sys.stderr, flush=True)
         return 1
 
-    stale, unreadable = _base_freshness(pr, repo)
+    stale, unreadable = trunk_api.base_freshness(pr, repo)
     if stale is not None:
         base_sha, main_sha = stale
         print(
@@ -1654,6 +1245,53 @@ def _limbo_timeout_note(pr: str, result: CIResult) -> None:
         file=sys.stderr,
         flush=True,
     )
+
+
+def _conclude_settled(
+    result: CIResult,
+    pr: str,
+    repo: str,
+    *,
+    forced_green: bool,
+    merge: bool,
+    priority: str,
+    every: int,
+    timeout: int,
+    trunk_token: str | None,
+    require_fresh_base: bool,
+) -> int:
+    """Report a settled `--wait` verdict and return its exit code (green runs the merge flow)."""
+    if result.verdict is CIStatus.ALL_PASSED or forced_green:
+        if forced_green:
+            names = ", ".join(f"{r['name']} (#{r['id']})" for r in result.limbo)
+            print(
+                f"PR #{pr} CI green (--force: proceeding despite {len(result.limbo)} "
+                f"GitHub-limbo run(s) — task #3275)"
+            )
+            print(f"[ci] forced past: {names}", file=sys.stderr, flush=True)
+        else:
+            print(f"PR #{pr} CI green: {result.summary()}")
+        if merge:
+            if trunk_token is None:
+                raise AssertionError("Trunk merge flow requires a token")
+            return _trunk_merge_flow(
+                pr,
+                repo,
+                priority,
+                every=every,
+                timeout=timeout,
+                token=trunk_token,
+                require_fresh_base=require_fresh_base,
+            )
+        return 0
+
+    print(f"PR #{pr} CI NOT green: {result.summary()}", file=sys.stderr, flush=True)
+    if result.failed:
+        names = ", ".join(c.get("name", "?") for c in result.failed)
+        print(f"PR #{pr} failed checks: {names}", file=sys.stderr, flush=True)
+    if result.error_detail:
+        print(f"PR #{pr} detail: {result.error_detail}", file=sys.stderr, flush=True)
+    return 1
 
 
 def _wait_for_verdict(
@@ -1733,37 +1371,18 @@ def _wait_for_verdict(
             continue
 
         # Settled verdict — FAILED / NOT_READY / MERGE_CONFLICT / NO_WORKFLOW_RUNS / ALL_PASSED
-        if verdict is CIStatus.ALL_PASSED or forced_green:
-            if forced_green:
-                names = ", ".join(f"{r['name']} (#{r['id']})" for r in result.limbo)
-                print(
-                    f"PR #{pr} CI green (--force: proceeding despite {len(result.limbo)} "
-                    f"GitHub-limbo run(s) — task #3275)"
-                )
-                print(f"[ci] forced past: {names}", file=sys.stderr, flush=True)
-            else:
-                print(f"PR #{pr} CI green: {result.summary()}")
-            if merge:
-                if trunk_token is None:
-                    raise AssertionError("Trunk merge flow requires a token")
-                return _trunk_merge_flow(
-                    pr,
-                    repo,
-                    priority,
-                    every=every,
-                    timeout=timeout,
-                    token=trunk_token,
-                    require_fresh_base=require_fresh_base,
-                )
-            return 0
-
-        print(f"PR #{pr} CI NOT green: {result.summary()}", file=sys.stderr, flush=True)
-        if result.failed:
-            names = ", ".join(c.get("name", "?") for c in result.failed)
-            print(f"PR #{pr} failed checks: {names}", file=sys.stderr, flush=True)
-        if result.error_detail:
-            print(f"PR #{pr} detail: {result.error_detail}", file=sys.stderr, flush=True)
-        return 1
+        return _conclude_settled(
+            result,
+            pr,
+            repo,
+            forced_green=forced_green,
+            merge=merge,
+            priority=priority,
+            every=every,
+            timeout=timeout,
+            trunk_token=trunk_token,
+            require_fresh_base=require_fresh_base,
+        )
 
 
 def main(argv: list[str] | None = None) -> int:
