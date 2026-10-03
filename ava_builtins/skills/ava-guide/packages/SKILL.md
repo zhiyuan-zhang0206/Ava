@@ -109,7 +109,7 @@ installed skill with a recorded source is on the **git** channel.
 
 ```bash
 ava packages status [--json]                 # host version, channels, per-package policy/state
-ava packages refresh [--check] [--package NAME] [--force]   # check + apply due updates now
+ava packages refresh [--check] [--package NAME]   # check + apply due updates now
 ava packages policy <name> --update-mode auto|notify|off [--check-every 24h]
 ava packages rollback <name> [--force]       # restore the previous tree kept by the last apply
 ```
@@ -119,8 +119,8 @@ ava packages rollback <name> [--force]       # restore the previous tree kept by
   registry data. Manual runs check on demand.
 - Refresh never restarts anything — a landed skill activates at the next skill
   scan. It never writes the checkout (the core channel fetches commit objects
-  only) and never overwrites a hand-edited copy: conflicts are recorded and
-  `--force` is the human-only override.
+  only), and a differing local copy is replaced — reported, with the differing
+  files named (a load-dir copy is derived state, never hand-edited).
 - Version contract: a package may ship an optional `ava-plugin.json` beside
   `SKILL.md` (`engines.ava` range / `requires_commit`). Out-of-range content is
   refused at landing (`blocked_version` in `status`) and dropped from the

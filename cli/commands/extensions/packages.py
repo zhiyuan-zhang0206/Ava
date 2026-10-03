@@ -285,10 +285,9 @@ def cmd_packages_refresh(
     check_only: bool = False,
     only: str | None = None,
     json_output: bool = False,
-    force: bool = False,
     from_job: bool = False,
 ) -> int:
-    """`ava packages refresh [--check] [--package NAME] [--force] [--json]
+    """`ava packages refresh [--check] [--package NAME] [--json]
     [--from-job]` — check the channels and apply due updates to this machine's
     skill packages. The same code path serves the OS job (`--from-job`); manual
     runs work regardless of cadence. Returns 1 only when the registry is
@@ -298,7 +297,7 @@ def cmd_packages_refresh(
 
     from cli.commands.extensions.packages_refresh import run_refresh
 
-    report = run_refresh(check_only=check_only, only=only, force=force, from_job=from_job)
+    report = run_refresh(check_only=check_only, only=only, from_job=from_job)
     if json_output:
         payload = {
             "ran": report.ran,

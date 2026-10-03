@@ -72,14 +72,11 @@ def parse_duration(text: str) -> int:
     return max(1, int(match.group(1)) * _DURATION_UNITS[match.group(2) or "s"])
 
 
-_CONFLICT = "conflict: local copy differs from the last applied content"
-
-
 @dataclass(frozen=True)
 class ItemOutcome:
     """One package's pass result (`result` uses the registry's last_result
     vocabulary: up_to_date | applied | available: … | blocked_version: … |
-    conflict: … | refused_scan: … | error: …)."""
+    refused_scan: … | error: …)."""
 
     name: str
     kind: str
@@ -117,14 +114,12 @@ class _Pass:
         *,
         check_only: bool,
         only: str | None,
-        force: bool,
         from_job: bool,
         now: datetime,
         repo: Path | None,
     ) -> None:
         self.check_only = check_only
         self.only = only
-        self.force = force
         self.from_job = from_job
         self.now = now
         self.repo = repo or paths.repo_root()
@@ -537,10 +532,9 @@ class _Pass:
         gate_error = staged_gate_error(staged, self.repo)
         if gate_error is not None:
             return gate_error, None
-        if dest_hash is not None and (
-            conflict := self._local_edit_conflict(pkg, staged, dest, dest_hash)
-        ):
-            return conflict, None
+        if dest_hash is not None and dest_hash != (pkg.installed_hash or pkg.content_hash):
+            names = install_registry.differing_paths(dest, staged, skip_subtrees=skip)
+            logger.info("packages refresh: '{}' local copy replaced; differs: {}", pkg.name, names)
         for parts in skip:
             sub = dest.joinpath(*parts)
             if sub.exists():
@@ -556,21 +550,6 @@ class _Pass:
         self.applies_used += 1
         logger.info("packages refresh: applied '{}' at {}", pkg.name, remote_rev[:7])
         return "applied", install_registry.tree_hash(dest, skip_subtrees=skip)
-
-    def _local_edit_conflict(
-        self, pkg: install_registry.InstalledPackage, staged: Path, dest: Path, dest_hash: str
-    ) -> str | None:
-        """Conflict result when `dest` no longer matches the last applied content.
-        A core-channel copy is derived state of reviewed main content: reported
-        (old tree kept as `.<name>.prev`), never blocking."""
-        if dest_hash == (pkg.installed_hash or pkg.content_hash):
-            return None
-        if install_registry.resolved_policy(pkg).channel != "core":
-            return None if self.force else _CONFLICT
-        skip = install_registry.preserved_subpaths(dest)
-        names = install_registry.differing_paths(dest, staged, skip_subtrees=skip)
-        logger.warning("packages refresh: '{}' local copy replaced; differs: {}", pkg.name, names)
-        return None
 
     # -- git channel ---------------------------------------------------------
 
@@ -726,7 +705,6 @@ def run_refresh(
     *,
     check_only: bool = False,
     only: str | None = None,
-    force: bool = False,
     from_job: bool = False,
     now: datetime | None = None,
     repo: Path | None = None,
@@ -735,8 +713,8 @@ def run_refresh(
 
     `from_job` adds the job-only gates (os jobs enabled, refresh enabled,
     due-time + backoff). A manual run checks every channel-backed package
-    regardless of cadence; `--check` never stages or applies; `force` overrides
-    the local-edit guard (human-only — the job never passes it)."""
+    regardless of cadence; `--check` never stages or applies. A differing local
+    copy is replaced (reported as an info line)."""
     moment = now or datetime.now(UTC)
     if from_job and not os_jobs_enabled():
         return _skip("OS jobs disabled (AVA_OS_JOBS_ENABLED=false)")
@@ -748,7 +726,6 @@ def run_refresh(
             pass_ = _Pass(
                 check_only=check_only,
                 only=only,
-                force=force,
                 from_job=from_job,
                 now=moment,
                 repo=repo,

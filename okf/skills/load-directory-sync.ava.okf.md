@@ -22,9 +22,9 @@ the fleet update / `ava converge`) syncs two source types into it:
    its own cadence — commit objects fetched without ever touching the
    checkout's working tree. `ava skill update` and the rollout legs (issue
    #1289) now SKIP channel-managed packages; `ava packages policy <name>
-   --update-mode off` opts one back onto the rollout path. Local edits are
-   never clobbered either way: refresh records a conflict and leaves the copy
-   untouched, the same contract the rollout always had.
+   --update-mode off` opts one back onto the rollout path. A differing local
+   copy is replaced (reported; the old tree stays at `.<name>.prev` for
+   rollback): local copies are derived state (user ruling 2026-10-03).
 2. **Plugin-carried** (origin=plugin): `<repo>/ava_builtins/plugins/<p>/skills/`
    and `~/.ava/plugins/<p>/skills/` → `~/.ava/skills/<p>/`.
 
