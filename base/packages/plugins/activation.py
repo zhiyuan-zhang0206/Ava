@@ -1,11 +1,11 @@
 """Injection-surface activation telemetry — what a plugin actually DID, as
-opposed to what it registered.
+opposed to what it declared.
 
-`base/packages/plugins/contributions.py` is the registration ledger: it answers "which
+`PluginContributions.as_records` (`base/packages/plugins/extensions.py`) answers "which
 plugin put this hook / wrap / prompt section here". It deliberately records
 nothing about runtime. This module is its runtime half: one `plugin_activation`
-event each time a registered injection surface actually fires, keyed by exactly
-the `(plugin, surface, identifier)` triple the ledger stores — so a `Contribution`
+event each time a declared injection surface actually fires, keyed by exactly
+the `(plugin, surface, identifier)` triple a `Contribution` stores — so a `Contribution`
 row and the activation events for it join on the same three strings, with no
 second identifier space to keep in sync.
 
@@ -30,11 +30,9 @@ Two consumers asked for it (issue #40):
 | `state` | — | covered by the `hooks` record: plugin state writes travel through hook returns, so a separate probe would double-count |
 | `sdkNamespaces` | — | already metered as `sdk_call` by `ava/sdk_surface/metering.py`; counting it here too would double-count |
 
-**Only plugin registrations are recorded.** `plugin` is `None` for the
-framework's own hooks and prompt sections (registered outside a `PluginContext`)
-and for a test's direct `ava.extend.wrap`, and those record nothing — exactly the
-gate `plugin_contributions.record` applies to the ledger, so the two stay
-parallel by construction.
+**Only plugin contributions are recorded.** `plugin` is `None` for the
+framework's own hooks and prompt sections (they have no plugin entry), and
+those record nothing.
 
 **Side-channel contract**, identical to `base/agents/sdk/telemetry.py`: a recording
 failure is swallowed (`Exception` only, so cancel/timeout injection still

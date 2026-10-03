@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 import sys
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterator, Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from importlib import import_module, util
 from pathlib import Path
@@ -14,14 +14,14 @@ import pytest
 import yaml
 
 import ava
-from agent.state import build_agent_state, clear_plugin_registrations
-from base.packages.plugins.context import PluginContext
+from agent.state import build_agent_state
+from ava.sdk_surface import install
 from base.packages.plugins.extensions import ExtensionRegistry
 
 
 @pytest.fixture
-def memory_plugin(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Any:
-    """Load ava_memory through its registration path against isolated stores."""
+def memory_plugin(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Iterator[Any]:
+    """Install the ava_memory SDK surface against isolated stores."""
     import base.cluster.machine
     import base.paths
     from ava import agent_identity
@@ -47,20 +47,11 @@ def memory_plugin(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Any:
     monkeypatch.setattr(base.cluster.machine, "machine_name", isolated_machine_name)
     monkeypatch.setattr(agent_identity, "_agent_id", 17)
 
-    clear_plugin_registrations()
-    for name in list(sys.modules):
-        if name.startswith("ava_builtins.plugins.ava_memory"):
-            del sys.modules[name]
+    from ava_builtins.plugins.ava_memory import plugin
 
-    with PluginContext("ava_memory"):
-        from ava_builtins.plugins.ava_memory import plugin as plugin
-
+    install.install(ExtensionRegistry((("ava_memory", plugin.contribute()),)))
     yield plugin
-
-    clear_plugin_registrations()
-    for name in list(sys.modules):
-        if name.startswith("ava_builtins.plugins.ava_memory"):
-            del sys.modules[name]
+    install.uninstall()
 
 
 def test_personal_write_creates_entry_and_upserts_index(memory_plugin: Any, tmp_path: Path) -> None:
@@ -466,14 +457,20 @@ def test_write_requires_exactly_one_type_tag(memory_plugin: Any) -> None:
 
 def test_personal_write_is_immune_to_ava_cwd_drift(memory_plugin: Any, tmp_path: Path) -> None:
     """The dedicated API derives its destination from the agent, not ava.cwd."""
-    for name in list(sys.modules):
-        if name.startswith("ava_builtins.plugins.ava_code"):
-            del sys.modules[name]
-    with PluginContext("ava_code"):
-        import_module("ava_builtins.plugins.ava_code.plugin")
-        # The state class + real handle live in the runtime face (task #3633); load the face
-        # so the handle is bound, as in production.
-        code_face = import_module("ava_builtins.plugins.ava_code.agent_runtime")
+    # The state class + real handle live in the runtime face (task #3633); load the face
+    # so the handle is bound, as in production.
+    code_plugin = import_module("ava_builtins.plugins.ava_code.plugin")
+    code_face = import_module("ava_builtins.plugins.ava_code.agent_runtime")
+    # `ava.cwd` is ava_code's namespace: install it beside ava_memory's.
+    install.uninstall()
+    install.install(
+        ExtensionRegistry(
+            (
+                ("ava_code", code_plugin.contribute()),
+                ("ava_memory", memory_plugin.contribute()),
+            )
+        )
+    )
 
     drifted_cwd = tmp_path / "repository"
     drifted_cwd.mkdir()
@@ -552,16 +549,16 @@ def test_plugin_loads_and_writes_without_fcntl(
     monkeypatch.setattr(base.cluster.machine, "machine_name", lambda: "memory-host")
     monkeypatch.setattr(agent_identity, "_agent_id", 17)
 
-    clear_plugin_registrations()
+    # The guard is import-time: re-import the plugin face and its sdk while `import fcntl` raises.
     for name in list(sys.modules):
         if name.startswith("ava_builtins.plugins.ava_memory"):
             del sys.modules[name]
 
     try:
-        with PluginContext("ava_memory"):
-            from ava_builtins.plugins.ava_memory import plugin as plugin
-            from ava_builtins.plugins.ava_memory import sdk as memory_sdk
+        from ava_builtins.plugins.ava_memory import plugin as plugin
+        from ava_builtins.plugins.ava_memory import sdk as memory_sdk
 
+        install.install(ExtensionRegistry((("ava_memory", plugin.contribute()),)))
         assert memory_sdk.fcntl is None  # the guard fired: fcntl unavailable
 
         entry = ava.memory.write(
@@ -576,7 +573,7 @@ def test_plugin_loads_and_writes_without_fcntl(
             "- [No fcntl](no-fcntl.md) — Windows smoke write\n"
         )
     finally:
-        clear_plugin_registrations()
+        install.uninstall()
         for name in list(sys.modules):
             if name.startswith("ava_builtins.plugins.ava_memory"):
                 del sys.modules[name]

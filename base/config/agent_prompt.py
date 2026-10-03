@@ -42,7 +42,7 @@ class AgentPromptSettings(EnvSettings):
         # `*` expands every top-level public namespace, discovered from the live
         # `help(ava)` surface and sorted — so a newly added namespace is covered
         # without editing this default. A plugin namespace (e.g. ava_code's cwd)
-        # still promotes its own paths via `ava.register_sdk_expand`, which
+        # still promotes its own paths via a declared `SdkNamespace(expand=True)` / `sdk_expansions`, which
         # render ahead of this list (issue #1011).
         default_factory=lambda: ["*"],
         alias="AVA_SDK_EXPAND",

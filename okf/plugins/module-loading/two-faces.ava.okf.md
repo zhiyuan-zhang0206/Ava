@@ -23,7 +23,7 @@ Which faces load is the caller's choice:
   stateless boot; a reset would import `agent.state` and put the graph stack
   back on the child's path.
 - `load_extensions(surface=False)` (the default) — reset
-  (`clear_plugin_registrations()`, SDK surface only), then each plugin's surface followed by its
+  (`ava.sdk_surface.install.uninstall()`), then each plugin's surface followed by its
   face. The graph build and agent-side tooling take the full form.
 - `load_agent_faces()` — faces alone, for a process whose surfaces are already
   loaded: host boot after `scan_and_load`, and a stateful child whose lazy

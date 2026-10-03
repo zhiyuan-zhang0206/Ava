@@ -117,8 +117,8 @@ def test_capture_ava_overview_is_pure_no_stdout_leak(capsys) -> None:
     )
 
 
-def test_get_ava_overview_advertises_registered_plugin_namespace() -> None:
-    """A plugin-registered namespace **does** appear in the overview index.
+def test_get_ava_overview_advertises_installed_plugin_namespace() -> None:
+    """A plugin-installed namespace **does** appear in the overview index.
 
     The namespace itself must be discoverable at the top level even if the
     plugin adds no declared system prompt section of its own — otherwise a
@@ -128,10 +128,7 @@ def test_get_ava_overview_advertises_registered_plugin_namespace() -> None:
     """
     from types import SimpleNamespace
 
-    import ava
-
-    if "fake_late" in getattr(ava, "_REGISTERED_NAMESPACES", {}):
-        ava.clear_registered_namespaces()
+    from ava.sdk_surface import plugins
 
     fake_ns = SimpleNamespace(
         __doc__="Fake plugin namespace just for this test.",
@@ -140,15 +137,15 @@ def test_get_ava_overview_advertises_registered_plugin_namespace() -> None:
     )
     fake_ns.ping.__doc__ = "Return pong."
 
-    ava.register_namespace("fake_late", fake_ns)
+    undo = plugins.install_namespace("fake-plugin", "fake_late", fake_ns, {})
     try:
         overview = _get_ava_overview()
         assert "fake_late" in overview, (
-            f"overview should advertise the registered plugin namespace (otherwise a namespace "
+            f"overview should advertise the installed plugin namespace (otherwise a namespace "
             f"without a section would disappear). overview:\n{overview[:600]}"
         )
     finally:
-        ava.clear_registered_namespaces()
+        undo()
 
 
 # ───────────── cancel-detection boundary (mutmut_44: cancel_task in done) ─────────────

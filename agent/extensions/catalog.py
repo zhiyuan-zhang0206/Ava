@@ -5,25 +5,24 @@ Two halves, deliberately different in kind:
 
 - **Surfaces** — the framework's extension points. The list of surfaces and the
   one-line note on each are the only hand-written facts here; every signature is
-  rendered from the live `register_*` / `contribute()` object at call time, so a changed
-  parameter list shows up in the catalog without anyone editing it.
-- **Contributions** — what the plugins on THIS machine registered, read off the
-  attribution ledger (`base.packages.plugins.contributions`) that every `register_*`
-  entry point writes to. Facts, not documentation: a plugin appears here because
-  its import called the entry point, not because someone wrote it down.
+  rendered from the live `PluginContributions` object at call time, so a changed
+  field list shows up in the catalog without anyone editing it.
+- **Contributions** — what the plugins on THIS machine declared, read off their
+  `contribute()` results (`PluginContributions.as_records`). Facts, not documentation:
+  a plugin appears here because its face declared it, not because someone wrote it down.
 
 Reading the second half requires the plugins to be loaded, and loading them is
 importing them — the catalog runs `load_extensions()` in the calling process,
 exactly as an agent boot does. A DISABLED plugin is therefore listed with its
-enable-state and nothing else: nothing imported it, so there is no registration
+enable-state and nothing else: nothing imported it, so there is no declaration
 fact to report, and inventing one from its source would be the docs-drift this
 catalog exists to replace.
 
-`declared_vs_registered` is the same computation plugin-spec-v2 S3 turns into a
-load-time gate (`conventions/plugin-spec-v2.md`). Here it only reports:
-`declared-not-registered` is the warning shape (a manifest promising a surface
-the code never touched), `registered-not-declared` the flagged one (a surface the
-manifest failed to mention). Surfaces the manifest grammar cannot express are
+`declared_vs_registered` is the same computation `build_registry()` enforces as a
+load-time gate (`agent/extensions/registry.py`). Here it only reports, on every
+surface with a manifest key: `declared-not-registered` is the warning shape (a manifest
+promising a surface the code never declared), `registered-not-declared` the flagged
+one (a surface the manifest failed to mention). Surfaces the manifest grammar cannot express are
 reported as `undeclarable` rather than as drift — flagging them would train a
 reader to ignore the diff.
 """
@@ -36,7 +35,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, cast
 
-from base.packages.plugins import contributions as contribution_ledger
 from base.packages.plugins import enable_config
 from base.packages.plugins.contributions import Contribution
 from base.packages.plugins.manifest import CONTRIBUTION_KEYS, PluginManifest, load_manifest
@@ -97,38 +95,42 @@ SURFACES: tuple[Surface, ...] = (
     ),
     Surface(
         id="sdkNamespaces",
-        entry_points=("ava:register_namespace",),
+        entry_points=("base.packages.plugins.extensions:SdkNamespace",),
         manifest_key="sdkNamespaces",
         protocol=None,
-        note="adds ava.<name> for the agent to call; conflicts with an existing name are refused",
+        note=(
+            "`sdk_namespaces` of what `plugin.py`'s `contribute()` returns: adds ava.<name> for the "
+            "agent to call (`expand=True` also promotes it into the prompt's expanded SDK "
+            "reference); a name that conflicts with an existing one refuses the plugin"
+        ),
     ),
     Surface(
         id="sdkMembers",
-        entry_points=("ava:register_namespace_member",),
+        entry_points=("base.packages.plugins.extensions:SdkMember",),
         manifest_key=None,
         protocol=None,
         note=(
-            "hangs one callable on an existing namespace (ava.self.set_label); preferred over "
+            "`sdk_members`: hangs one callable on an existing namespace (ava.self.set_label); preferred over "
             "a new top-level name, and its docstring is what the agent reads"
         ),
     ),
     Surface(
         id="sdkExpansions",
-        entry_points=("ava:register_sdk_expand",),
+        entry_points=("base.packages.plugins.extensions:PluginContributions",),
         manifest_key=None,
         protocol=None,
         note=(
-            "promotes a dotted ava path into the system prompt's expanded SDK reference, "
+            "`sdk_expansions`: promotes a dotted ava path into the system prompt's expanded SDK reference, "
             "ahead of the framework list"
         ),
     ),
     Surface(
         id="sdkWraps",
-        entry_points=("ava:extend.wrap",),
+        entry_points=("base.packages.plugins.extensions:SdkWrap",),
         manifest_key="sdkWraps",
         protocol="wrapper(inner: Callable, *args, **kwargs) -> Any",
         note=(
-            "installs a layer around an existing ava callable; layers stack in plugin load "
+            "`sdk_wraps`: installs a layer around an existing ava callable; layers stack in plugin load "
             "order and `ava.extend.stack(target)` shows the whole chain"
         ),
     ),
@@ -176,21 +178,21 @@ SURFACES: tuple[Surface, ...] = (
     ),
     Surface(
         id="skillSources",
-        entry_points=("ava.skills:register_skill_source",),
+        entry_points=("base.packages.plugins.extensions:PluginContributions",),
         manifest_key=None,
         protocol="provider() -> list[Path]",
         note=(
-            "contributes skill roots computed at scan time (project-local skills that follow "
+            "`skill_sources`: contributes skill roots computed at scan time (project-local skills that follow "
             "the agent's cwd); provider roots scan last, so they override same-named builtins"
         ),
     ),
     Surface(
         id="config",
-        entry_points=("base.packages.plugins.config_registration:register_plugin_config",),
+        entry_points=("base.packages.plugins.extensions:PluginContributions",),
         manifest_key="config",
         protocol=None,
         note=(
-            "a frozen BaseModel bound once from $AVA_HOME/configs/<plugin>/config.json and "
+            "`config`: a frozen BaseModel bound once from $AVA_HOME/configs/<plugin>/config.json and "
             "read as ava._settings.plugins.<plugin>; schema drift points at `ava plugins update`"
         ),
     ),
@@ -336,7 +338,7 @@ def build_catalog() -> Catalog:
     from agent.extensions import load_extensions
     from agent.extensions.registry import declarations
 
-    config = load_extensions()
+    config = load_extensions().config
     declared = {name: contributions for name, _dir, contributions in declarations()}
     data_records = _data_records()
     discovered = enable_config.installed_plugin_dirs()
@@ -357,7 +359,6 @@ def build_catalog() -> Catalog:
                 directory=directory,
                 description=enable_config.parse_description(directory / "plugin.py"),
                 contributions=(
-                    *contribution_ledger.contributions_of(name),
                     *(declared[name].as_records(name) if name in declared else ()),
                     *data_records.get(name, ()),
                 ),

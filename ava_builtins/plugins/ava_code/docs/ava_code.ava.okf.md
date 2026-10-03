@@ -66,11 +66,10 @@ state_handle = PluginStateHandle(AvaCodeState, "ava_code")
 - `cwd` is read/written via `ava.cwd.get() / set()` and is purely logical LangGraph state: `set()` never mutates the parent or disposable child's OS cwd
 - SDK wraps (`ava.files.read/edit/write/append/delete/glob`, `ava.shell.run`, `ava.understand`) resolve relative paths using cwd (for `ava.understand` the wrap walks the batch and resolves each target's `path`)
 
-### SDK namespace registration
+### SDK namespace declaration
 
 ```python
-ava.register_namespace("cwd", _code_namespace)
-ava.register_sdk_expand("cwd")
+PluginContributions(sdk_namespaces=(SdkNamespace("cwd", _code_namespace, expand=True),), ...)
 ```
 
 - `ava.cwd.get()` → returns the current logical working directory

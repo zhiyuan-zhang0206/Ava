@@ -16,7 +16,7 @@ def get() -> Path:
     # MODULE attribute — a stale local keeps calling the stand-in after
     # `ava.state` has become the real state (task #3665). The lazy import keeps
     # `from . import _code_namespace` cycle-free (the binding happens after
-    # register_namespace in plugin.py).
+    # the namespace install of `plugin.py`'s declaration).
     from . import plugin as _plugin
 
     return Path(_plugin.state_handle.read().cwd)

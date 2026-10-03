@@ -6,11 +6,8 @@ from pydantic import BaseModel, ConfigDict, Field
 from base.packages.plugins.config_registration import (
     _PLUGIN_CONFIG_CLASSES,
     _PLUGIN_CONFIGS,
-    bind_from_disk,
-    clear_plugin_configs,
-    register_plugin_config,
+    bind_plugin_config,
 )
-from base.packages.plugins.context import PluginContext
 
 
 class _FixtureConfig(BaseModel):
@@ -29,18 +26,18 @@ def isolated_registry():
     # Snapshot before
     snap_classes = dict(_PLUGIN_CONFIG_CLASSES)
     snap_configs = dict(_PLUGIN_CONFIGS)
-    clear_plugin_configs()
+    _PLUGIN_CONFIG_CLASSES.clear()
+    _PLUGIN_CONFIGS.clear()
     yield
-    clear_plugin_configs()
+    _PLUGIN_CONFIG_CLASSES.clear()
+    _PLUGIN_CONFIGS.clear()
     _PLUGIN_CONFIG_CLASSES.update(snap_classes)
     _PLUGIN_CONFIGS.update(snap_configs)
 
 
 def test_ava_settings_plugins_attribute_access(isolated_registry, unit_home):
     """`ava._settings.plugins.<n>` returns instance; unregistered plugin name raise + lists known plugins."""
-    with PluginContext("test_plugin"):
-        register_plugin_config(_FixtureConfig)
-    bind_from_disk()
+    bind_plugin_config("test_plugin", _FixtureConfig)
 
     import ava._settings as _ava_settings
 

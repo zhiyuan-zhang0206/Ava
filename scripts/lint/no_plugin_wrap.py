@@ -1,4 +1,4 @@
-"""Forbid bare monkey-patching of `ava.*` in plugins — wraps must go through `ava.extend.wrap`.
+"""Forbid bare monkey-patching of `ava.*` in plugins — wraps must be declared as `SdkWrap`.
 
 Run: `.venv/bin/python scripts/lint/no_plugin_wrap.py [path ...]` (defaults to scanning
 `ava_builtins/plugins/`, the built-in plugins; a missing default dir is an error;
@@ -7,8 +7,8 @@ silent no-op). Also run automatically via pre-commit hook before commit.
 
 ## Why
 
-`ava.extend.wrap(target, wrapper)` is the registration primitive for extending
-SDK behavior: it makes the wrap stack enumerable (`ava.extend.stack`),
+A plugin's `contribute()` declares `SdkWrap(target, wrapper)` to extend
+SDK behavior; the SDK install applies it: it makes the wrap stack enumerable (`ava.extend.stack`),
 deterministic (registration = plugin load order), and reversible (originals
 restored on reload). A plugin that instead does `ava.files.read = my_read`
 (or `setattr(ava.files, "read", my_read)`) monkey-patches invisibly — no record
@@ -22,15 +22,14 @@ In every `plugin.py` (and sibling modules) under `ava_builtins/plugins/`, an ass
 whose target is an `ava`-rooted attribute path ending in a function-style name
 is an error:
 
-    ava.files.read = _wrapped_read          # error -> ava.extend.wrap("files.read", ...)
-    ava.agents.spawn = _spawn_with_label    # error -> ava.extend.wrap("agents.spawn", ...)
-    setattr(ava.files, "read", _wrapped)    # error -> ava.extend.wrap(...)
+    ava.files.read = _wrapped_read          # error -> SdkWrap("files.read", ...)
+    ava.agents.spawn = _spawn_with_label    # error -> SdkWrap("agents.spawn", ...)
+    setattr(ava.files, "read", _wrapped)    # error -> SdkWrap(...)
 
 Not flagged: dunder assignments (`ava.files.__doc__ = ...` — a legitimate
 module-docstring override) and ALL-CAPS constant assignments
-(`ava.memory.PATH = ...`). New namespaces / members still go through
-`ava.register_namespace` / `register_namespace_member` (Call nodes, never
-matched here).
+(`ava.memory.PATH = ...`). New namespaces / members are declared as
+`SdkNamespace` / `SdkMember` (Call nodes, never matched here).
 
 Known gap: assignment through a module alias (`import ava.files as f; f.read = x`)
 is not caught — the target must be a literal `ava.…` attribute chain. The
@@ -109,7 +108,7 @@ def _assign_violations(
                 (
                     node.lineno,
                     f"bare `{path_str} = ...` monkey-patches the SDK — use "
-                    f'`ava.extend.wrap("{path_str.removeprefix("ava.")}", wrapper)`',
+                    f'`SdkWrap("{path_str.removeprefix("ava.")}", wrapper)`',
                 )
             )
     return out
@@ -150,7 +149,7 @@ def _scan_file(path: Path) -> list[tuple[int, str]]:
                 (
                     node.lineno,
                     "bare `setattr(ava..., ...)` monkey-patches the SDK — use "
-                    "`ava.extend.wrap(target, wrapper)` (or register_namespace for new members)",
+                    "`SdkWrap(target, wrapper)` in `contribute()` (or SdkNamespace / SdkMember for new members)",
                 )
             )
     return out
@@ -207,7 +206,7 @@ def main(argv: list[str] | None = None) -> int:
     if total:
         print(
             f"\n{total} bare-wrap violation(s). Route SDK wraps through "
-            "`ava.extend.wrap`; see scripts/lint/no_plugin_wrap.py for the "
+            "`SdkWrap`; see scripts/lint/no_plugin_wrap.py for the "
             "`# wrap-ok:` exemption.",
             file=sys.stderr,
         )

@@ -1,52 +1,43 @@
-"""Plugin/extension loader — the surface and agent-runtime faces.
+"""Plugin/extension loader — imports each plugin's faces and installs what they declare.
 
-The loader lives in the agent layer and is reached from `ava` via importlib
-(a runtime string, not a static import), so the ava-layer module keeps no
-static dependency on agent. Moved here from `agent.graph._build` (task #3633):
-a process that only needs the plugin surface must not import the graph kernel
-to reach it.
+A plugin declares; the framework registers. Every plugin loads in up to two faces here, each exporting a
+pure `contribute()` that returns the `PluginContributions` fields it owns (`registry.py` merges them):
 
-Every plugin loads in up to two faces:
-
-- ``plugin.py`` — the SDK **surface**: namespaces, wraps, and the other
-  registrations an agent-launched child needs to run agent-authored code.
-  Its imports must stay off the agent runtime (no `agent.state`,
-  `agent.hooks`, `agent.graph.*`, or LangChain chain).
-- ``agent_runtime.py`` — optional sibling file: the plugin's **agent-runtime
-  registrations** (state fields, graph hooks) and its `contribute()` declaration
-  (system-prompt sections, context notes).
-  Imported on the full path only (the agent process: `load_agent_faces()`
-  after the host boot's `scan_and_load`, and `load_extensions()` per graph
-  build). An exec / watcher / schedule child never imports it — its boot
-  stays off the graph and LM stacks (task #3633).
+- ``plugin.py`` — the SDK **surface**: `sdk_namespaces`, `sdk_members`, `sdk_wraps`, `skill_sources`,
+  `config`, `flags`. Its imports must stay off the agent runtime (no `agent.state`, `agent.hooks`,
+  `agent.graph.*`, or LangChain chain), because every process that runs agent code loads it.
+- ``agent_runtime.py`` — optional sibling file: the plugin's **agent runtime** (hooks, state, system
+  prompt sections, context notes). Imported on the full path only (the agent process:
+  `load_agent_faces()` after the host boot's `scan_and_load`, and `load_extensions()` at host boot). An
+  exec / watcher / schedule child never imports it — its boot stays off the graph and LM stacks.
 
 Entry points:
 
-- ``load_extensions(surface=False)`` — full load, the agent-side contract
-  (reset, then import plugin.py + agent_runtime.py for every enabled plugin).
-- ``load_extensions(surface=True)`` — surfaces only (child contexts).
-- ``load_agent_faces()`` — runtime faces only, for a process that already
-  loaded the surfaces (host boot after `scan_and_load`; a child upgrading to
-  the full load because its request carries a state snapshot).
+- ``load_extensions(surface=False)`` — full load, the agent-side contract: uninstall the previous load's
+  SDK surface, import plugin.py + agent_runtime.py for every enabled plugin, build the gated registry of
+  what they declare, install its SDK surface into `ava`, return the admitted registry (plus the enable
+  config). The host builds the graph, the checkpoint serde and its turns from that one registry.
+- ``load_extensions(surface=True)`` — surfaces only (child contexts); no uninstall.
+- ``load_agent_faces()`` — runtime faces only, for a process that already loaded the surfaces (host boot
+  after `scan_and_load`; a child upgrading to the full load because its request carries a state snapshot).
 
-`registry.py` builds the `ExtensionRegistry` of what the loaded faces declare through
-`contribute()` (the host builds it after the graph and hands it to its turns); it lives apart because
-the declaration types import LangChain, which a child's surface load must not pull.
-
-`catalog.py` reads back what the loaded plugins
-registered (`ava plugins inspect`); it runs this loader in the calling process.
-This module stays the loader itself so `importlib.import_module("agent.extensions")`
-(the `ava` layer's runtime-string reach) keeps resolving to it.
+`registry.py` builds the `ExtensionRegistry` from the loaded faces; `catalog.py` reads back what the
+loaded plugins declare (`ava plugins inspect`) and runs this loader in the calling process. This module
+stays the loader itself so `importlib.import_module("agent.extensions")` (the `ava` layer's runtime-string
+reach) keeps resolving to it.
 """
 
 from __future__ import annotations
 
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 
 from base import paths
 from base.packages.plugins import enable_config as plugins_cfg
+from base.packages.plugins.extensions import ExtensionRegistry
 
+SURFACE_MODULE = "plugin"
 FACE_MODULE = "agent_runtime"
 
 
@@ -100,36 +91,41 @@ def _load_face(name: str, plugin_dir: Path, *, pkg: str) -> None:
     safe_load_plugin_module(face_py, name=name, pkg=pkg, module=FACE_MODULE)
 
 
-def load_extensions(*, surface: bool = False) -> plugins_cfg.PluginsConfig:
-    """Read plugins_config.json, trigger import side-effects for enabled plugins.
+@dataclass(frozen=True)
+class LoadedExtensions:
+    """What a load produced: the enable config and the registry of the plugins admitted."""
 
-    Full form (`surface=False`, the default): reset the previous round, then
-    import every enabled plugin's `plugin.py` (hook registration + Layer A wrap
-    + system prompt contribution) followed by its `agent_runtime.py` face
-    (state fields, hooks, prompt sections). Called per graph build and by the
-    agent-side tooling.
+    config: plugins_cfg.PluginsConfig
+    registry: ExtensionRegistry
 
-    Surface form (`surface=True`): import only the `plugin.py` surfaces — the
-    load an agent-launched child runs. No reset: a child loads once per process
-    and never runs the agent runtime, and importing `agent.state` for the reset
-    would put the graph/LM stack back on the child's boot path (task #3633).
 
-    The import loop is fail-soft (2026-08-28 ava_ledger incident): a broken
-    plugin — a missing sibling module, a syntax error, a top-level exception —
-    is skipped with a loud report, never a blocked `import ava` / graph build
-    for the whole cluster. The remaining enabled plugins keep loading; the
-    half-executed module was dropped from `sys.modules` so a later reload
-    retries from a clean slate.
+def load_extensions(*, surface: bool = False) -> LoadedExtensions:
+    """Read plugins_config.json, import the enabled plugins' faces, install what they declare.
+
+    Full form (`surface=False`, the default): uninstall the previous round's SDK surface, import every
+    enabled plugin's `plugin.py` followed by its `agent_runtime.py` face, build the gated registry of
+    what the faces declare and install its SDK surface into `ava` (the one place `ava` is written:
+    `ava.sdk_surface.install`). Called at host boot and by the agent-side tooling. The returned registry
+    holds the plugins admitted — one the install refused (a namespace conflict, a bad wrap target, a
+    config that does not bind) is reported and absent.
+
+    Surface form (`surface=True`): import only the `plugin.py` surfaces and install the surface-only
+    registry — the load an agent-launched child runs. No uninstall: a child loads once per process and
+    never runs the agent runtime, and the graph/LM stacks stay off its boot path.
+
+    The import loop is fail-soft (2026-08-28 ava_ledger incident): a broken plugin — a missing sibling
+    module, a syntax error, a top-level exception — is skipped with a loud report, never a blocked
+    `import ava` / host boot for the whole cluster. The remaining enabled plugins keep loading; the
+    half-executed module was dropped from `sys.modules` so a later reload retries from a clean slate.
     """
-    if not surface:
-        from agent.state import clear_plugin_registrations
+    from agent.extensions.registry import ALL_FACES, build_registry
+    from ava.sdk_surface import install as sdk_install
+    from ava.sdk_surface.plugin_loader import safe_load_plugin_module
 
-        clear_plugin_registrations()
+    if not surface:
+        sdk_install.uninstall()
 
     discovered, config = _discovered_and_config()
-
-    from ava.sdk_surface.plugin_loader import safe_load_plugin_module
-    from base.packages.plugins.context import PluginContext
 
     for name in sorted(config.plugins):
         if not config.plugins[name].enabled:
@@ -140,30 +136,13 @@ def load_extensions(*, surface: bool = False) -> plugins_cfg.PluginsConfig:
         assert name in discovered, f"load() invariant broken: {name} not in discovered"  # noqa: S101
         plugin_dir = discovered[name]
         pkg = _pkg_of(plugin_dir)
-        with PluginContext(name):
-            if safe_load_plugin_module(plugin_dir / "plugin.py", name=name, pkg=pkg) is None:
-                continue
-            if not surface:
-                _load_face(name, plugin_dir, pkg=pkg)
+        if safe_load_plugin_module(plugin_dir / "plugin.py", name=name, pkg=pkg) is None:
+            continue
+        if not surface:
+            _load_face(name, plugin_dir, pkg=pkg)
 
-    # Bind plugin config from disk — only batch bind after all plugin imports
-    # complete, so that when hook callbacks actually fire,
-    # `ava._settings.plugins.<n>` is ready. Missing disk image auto-writes
-    # default; schema drift raises (guides `ava plugins update`).
-    from base.packages.plugins.config_registration import bind_from_disk
-
-    bind_from_disk()
-
-    # Install the SDK-usage recorder over the final ava.* surface. Runs last so
-    # it wraps plugin-registered namespaces / members and sits outermost of any
-    # plugin `ava.extend.wrap` layer (one count per agent call). Idempotent; a
-    # plugin reload re-runs it after clear_wraps restores plugin-touched
-    # targets.
-    from ava.sdk_surface import metering
-
-    metering.install()
-
-    return config
+    registry = build_registry((SURFACE_MODULE,) if surface else ALL_FACES)
+    return LoadedExtensions(config, sdk_install.install(registry))
 
 
 def load_agent_faces() -> None:
@@ -175,13 +154,10 @@ def load_agent_faces() -> None:
     surface has not loaded are skipped too: the surface owns the module
     identity the face imports against.
     """
-    from base.packages.plugins.context import PluginContext
-
     for name, plugin_dir in _enabled_plugin_dirs():
         pkg = _pkg_of(plugin_dir)
         if f"{pkg}.{name}.{FACE_MODULE}" in sys.modules:
             continue
-        if f"{pkg}.{name}.plugin" not in sys.modules:
+        if f"{pkg}.{name}.{SURFACE_MODULE}" not in sys.modules:
             continue
-        with PluginContext(name):
-            _load_face(name, plugin_dir, pkg=pkg)
+        _load_face(name, plugin_dir, pkg=pkg)

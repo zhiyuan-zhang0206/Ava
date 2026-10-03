@@ -20,8 +20,15 @@ from unittest.mock import patch
 import pytest
 
 import ava
-from ava.sdk_surface import metering
+from ava.sdk_surface import install, metering
 from base.agents.sdk import telemetry as sdk_usage_telemetry
+from base.packages.plugins.extensions import (
+    ExtensionRegistry,
+    PluginContributions,
+    SdkMember,
+    SdkNamespace,
+    SdkWrap,
+)
 
 
 def _spy_emit(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, dict[str, object], float | None]]:
@@ -230,14 +237,24 @@ def test_mcp_recorder_derives_fq_from_runtime_args(monkeypatch: pytest.MonkeyPat
     assert calls[0][0] == "mcps.chrome.navigate"
 
 
-def test_a_namespace_registered_without_the_agent_layer_is_seen() -> None:
+def test_a_surface_installed_without_the_agent_layer_is_seen() -> None:
     """A plugin load that never imports `agent.state` (the schedule runner's in-process script)
-    still registers namespaces and members on the SDK surface. The gate must see them, or the
+    still installs namespaces and members on the SDK surface. The gate must see them, or the
     fixture never drops them and they stay for the rest of the worker."""
     from tests.fixtures.plugin_registrations import plugin_registrations_present
 
     assert not plugin_registrations_present()
-    ava.register_namespace("gate_probe", SimpleNamespace())  # the autouse teardown drops it
+    registry = ExtensionRegistry(
+        (
+            (
+                "probe",
+                PluginContributions(
+                    sdk_namespaces=(SdkNamespace("gate_probe", SimpleNamespace()),)
+                ),
+            ),
+        )
+    )
+    install.install(registry)  # the autouse teardown drops it
     with patch.dict(sys.modules):
         sys.modules.pop("agent.state", None)
         assert plugin_registrations_present()
@@ -296,9 +313,8 @@ def test_teardown_survives_a_poisoned_dynamic_surface(monkeypatch: pytest.Monkey
 
     metering.uninstall()
     # Completeness on the precise unit of the guarantee: no recorded pair still
-    # holds a recorder. (The set itself may retain recorders that
-    # `ava.sdk_surface.wraps._ORIGINALS` captured before this test armed metering — that
-    # retention predates task #3426 and is not this fix's business.)
+    # holds a recorder. (The set itself may retain recorders captured before this test armed
+    # metering — that retention predates task #3426 and is not this fix's business.)
     for parent, attr in recorded:
         assert getattr(parent, attr, None) not in metering._RECORDERS
     assert ava.files.read not in metering._RECORDERS
@@ -363,9 +379,6 @@ async def test_plugin_wrap_preserves_awaited_single_event(
     import asyncio
     from collections.abc import Awaitable, Callable
 
-    from ava.sdk_surface import wraps
-    from base.packages.plugins.context import PluginContext
-
     calls = _spy_emit(monkeypatch)
     clock = [0.0]
     monkeypatch.setattr(sdk_usage_telemetry.time, "monotonic", lambda: clock[0])
@@ -382,12 +395,23 @@ async def test_plugin_wrap_preserves_awaited_single_event(
     async def awaited(inner: Callable[[], Awaitable[str]]) -> str:
         return await inner()
 
-    ava.register_namespace_member("self", "review_async_test", body)
+    registry = ExtensionRegistry(
+        (
+            (
+                "async-test",
+                PluginContributions(
+                    sdk_members=(SdkMember("self", "review_async_test", body),),
+                    sdk_wraps=(
+                        SdkWrap(
+                            "self.review_async_test", awaited if async_wrapper else passthrough
+                        ),
+                    ),
+                ),
+            ),
+        )
+    )
     try:
-        metering.install()
-        with PluginContext("async-test"):
-            ava.extend.wrap("self.review_async_test", awaited if async_wrapper else passthrough)
-        metering.install()
+        install.install(registry)  # the recorder goes on last, over the plugin's wrap
         call = ava.self.review_async_test
         assert inspect.iscoroutinefunction(call)
         calls.clear()
@@ -396,9 +420,7 @@ async def test_plugin_wrap_preserves_awaited_single_event(
         assert await pending == "ok"
         assert calls == [("self.review_async_test", {"body": True}, 2.0)]
     finally:
-        metering.uninstall()
-        wraps.clear_wraps()
-        ava.clear_registered_namespaces()
+        install.uninstall()
 
 
 def test_install_does_not_evaluate_dynamic_namespace_directory(

@@ -7,8 +7,7 @@ fail-fast AttributeError.
 
 These lock the gating matrix + the once-latch so a future edit can't silently
 (a) start loading plugins in the gateway / cli, (b) re-run load_extensions in
-the agent process (which would clear the built-in repair/compact hooks that
-build_graph — not load_extensions — re-registers), or (c) turn a dunder probe
+the agent process (which would uninstall and reinstall the whole SDK surface under it), or (c) turn a dunder probe
 into a plugin load.
 """
 
@@ -16,41 +15,40 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 from types import SimpleNamespace
-from typing import Any
 
 import pytest
 
 import ava
 from ava import agent_identity
-from ava.sdk_surface import plugins
+from ava.sdk_surface import install
+from base.packages.plugins.extensions import (
+    ExtensionRegistry,
+    PluginContributions,
+    SdkMember,
+    SdkNamespace,
+)
 
 
 @pytest.fixture(autouse=True)
 def _reset(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
     # Each test drives _plugins_loaded + agent identity explicitly; snapshot-restore
-    # so nothing leaks between tests. Save existing plugin namespace objects before
-    # clearing so they can be re-registered — never permanently wipe namespaces
-    # registered by other plugins during import ava (ava.memory, ava.tasks, ava.cwd).
+    # so nothing leaks between tests. Any SDK surface already installed in this process
+    # (ava.memory, ava.tasks, ava.cwd ...) is taken out for the test and put back after, so the
+    # lazy loads below start from a surface with no plugin namespaces and never wipe the others.
     monkeypatch.setattr(ava, "_plugins_loaded", False)
     monkeypatch.setattr(agent_identity, "_agent_id", agent_identity._agent_id)
     monkeypatch.setattr(agent_identity, "_owns_loop", agent_identity._owns_loop)
-    # Save existing namespace objects before clearing
-    _saved_ns: dict[str, Any] = {}
-    for _name in list(plugins._REGISTERED_NAMESPACES):
-        _obj = getattr(ava, _name, None)
-        if _obj is not None:
-            _saved_ns[_name] = _obj
-    ava.clear_registered_namespaces()
+    prior = install.installed()
+    install.uninstall()
     yield
-    ava.clear_registered_namespaces()
-    # Restore saved plugin namespaces (setattr directly, bypass register_namespace
-    # conflict checks since we know these were originally here)
-    for _name, _obj in _saved_ns.items():
-        setattr(ava, _name, _obj)
-        if _name not in plugins._REGISTERED_NAMESPACES:
-            plugins._REGISTERED_NAMESPACES[_name] = "<restored>"
-        if _name not in ava.__all_for_ava__:
-            ava.__all_for_ava__.append(_name)
+    install.uninstall()
+    if prior is not None:
+        install.install(prior.registry)
+
+
+def _installing(*plugins: tuple[str, PluginContributions]) -> None:
+    """What a real `load_extensions` does to the surface: install these plugins' declarations."""
+    install.install(ExtensionRegistry(plugins))
 
 
 def _spy_loader(monkeypatch: pytest.MonkeyPatch, *, register: str | None) -> list[int]:
@@ -64,7 +62,18 @@ def _spy_loader(monkeypatch: pytest.MonkeyPatch, *, register: str | None) -> lis
     def fake(*, surface: bool = False) -> None:
         calls.append(1)
         if register is not None:
-            ava.register_namespace(register, SimpleNamespace(ping=lambda: "pong", __doc__="t"))
+            _installing(
+                (
+                    register,
+                    PluginContributions(
+                        sdk_namespaces=(
+                            SdkNamespace(
+                                register, SimpleNamespace(ping=lambda: "pong", __doc__="t")
+                            ),
+                        )
+                    ),
+                )
+            )
 
     monkeypatch.setattr(extensions, "load_extensions", fake)
     return calls
@@ -244,7 +253,18 @@ def test_lazy_miss_fails_fast_while_deferred_and_succeeds_after(
 
     def fake(*, surface: bool = False) -> None:
         calls.append(1)
-        ava.register_namespace("deferrednsp", SimpleNamespace(ping=lambda: "pong", __doc__="t"))
+        _installing(
+            (
+                "deferred",
+                PluginContributions(
+                    sdk_namespaces=(
+                        SdkNamespace(
+                            "deferrednsp", SimpleNamespace(ping=lambda: "pong", __doc__="t")
+                        ),
+                    )
+                ),
+            )
+        )
 
     monkeypatch.delattr(extensions, "load_extensions")
     monkeypatch.setattr(extensions.__spec__, "_initializing", True, raising=False)
@@ -274,7 +294,12 @@ def _spy_member_loader(
 
     def fake(*, surface: bool = False) -> None:
         calls.append(1)
-        ava.register_namespace_member(namespace, member, lambda: "pong")
+        _installing(
+            (
+                "member-plugin",
+                PluginContributions(sdk_members=(SdkMember(namespace, member, lambda: "pong"),)),
+            )
+        )
 
     monkeypatch.setattr(extensions, "load_extensions", fake)
     return calls

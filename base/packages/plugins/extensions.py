@@ -16,10 +16,11 @@ is one coherent plugin set for both.
 from __future__ import annotations
 
 from collections.abc import Callable, Iterator
-from dataclasses import dataclass
+from dataclasses import dataclass, fields
+from pathlib import Path
+from types import ModuleType, SimpleNamespace
 from typing import Any, Literal, Protocol
 
-from langchain_core.messages import HumanMessage
 from pydantic import BaseModel
 
 from base.host.env.agent_slices import AgentSlices
@@ -27,7 +28,10 @@ from base.packages.plugins.contributions import Contribution
 from base.packages.plugins.inspector import InspectWidgetSpec
 from base.telemetry.metrics.plugin_metrics import MetricSpec
 
-NoteBuilder = Callable[[AgentSlices], HumanMessage | None]
+# A note builder returns a langchain `HumanMessage`, or None when it has nothing to say; the type is
+# `object` here because this module is imported by processes that must stay off the LM stack (a
+# child's surface load), and `agent.graph.context_notes` checks what a builder returns.
+NoteBuilder = Callable[[AgentSlices], object | None]
 SectionFn = Callable[[AgentSlices], str]
 
 HookPoint = Literal["after_init", "before_llm", "before_exec", "after_exec"]
@@ -75,8 +79,43 @@ class ContextNote:
 
 
 @dataclass(frozen=True)
+class SdkNamespace:
+    """A top-level `ava.<name>` namespace a plugin adds; `expand` also promotes it into the system
+    prompt's expanded SDK reference, ahead of the framework's list."""
+
+    name: str
+    module: ModuleType | SimpleNamespace
+    expand: bool = False
+
+
+@dataclass(frozen=True)
+class SdkMember:
+    """A callable a plugin hangs on an existing namespace (`ava.<namespace>.<name>(...)`)."""
+
+    namespace: str
+    name: str
+    fn: Callable[..., Any]
+
+
+@dataclass(frozen=True)
+class SdkWrap:
+    """A layer around the `ava` callable at dotted `target` (`wrapper(inner, *args, **kwargs)`).
+
+    Layers stack in plugin load order, then declaration order; later layers wrap outermost."""
+
+    target: str
+    wrapper: Callable[..., Any]
+
+
+@dataclass(frozen=True)
 class PluginContributions:
-    """Everything one plugin declares for the agent runtime."""
+    """Everything one plugin declares, field by field, whichever face it comes from.
+
+    A plugin's `plugin.py` (the SDK surface, loaded by every process that runs agent code) declares
+    `sdk_*`, `skill_sources`, `config` and `flags`; its `agent_runtime.py` declares the agent
+    runtime's fields; `metrics.py` / `inspector.py` the data surfaces. A face fills only its own
+    fields, so the faces of one plugin merge with `merged`.
+    """
 
     system_prompt_sections: tuple[SectionFn, ...] = ()
     context_notes: tuple[ContextNote, ...] = ()
@@ -92,6 +131,30 @@ class PluginContributions:
     # validates them and fills each spec's `plugin`.
     metrics: tuple[MetricSpec, ...] = ()
     inspect_widgets: tuple[InspectWidgetSpec, ...] = ()
+    # The SDK surface (`ava.*`): namespaces (optionally promoted into the prompt's expanded SDK
+    # reference), members hung on an existing namespace, wrap layers, and skill-root providers.
+    sdk_namespaces: tuple[SdkNamespace, ...] = ()
+    sdk_members: tuple[SdkMember, ...] = ()
+    sdk_wraps: tuple[SdkWrap, ...] = ()
+    skill_sources: tuple[Callable[[], list[Path]], ...] = ()
+    # Dotted `ava` paths promoted into the expanded SDK reference without declaring a namespace
+    # (a member group, a framework sub-namespace the plugin extends).
+    sdk_expansions: tuple[str, ...] = ()
+    # One frozen BaseModel bound once from `$AVA_HOME/configs/<plugin>/config.json`.
+    config: type[BaseModel] | None = None
+    # Fully qualified `<domain>.<field>` core settings the plugin may read through `read_flag`.
+    flags: tuple[str, ...] = ()
+
+    def merged(self, other: PluginContributions) -> PluginContributions:
+        """This declaration followed by `other` (another face of the same plugin): tuple fields
+        concatenate, `config` may be declared by one face only."""
+        if self.config is not None and other.config is not None:
+            raise ValueError("config is declared by more than one face")
+        values: dict[str, object] = {}
+        for f in fields(self):
+            mine, theirs = getattr(self, f.name), getattr(other, f.name)
+            values[f.name] = mine + theirs if isinstance(mine, tuple) else mine or theirs
+        return PluginContributions(**values)  # pyright: ignore[reportArgumentType]
 
     def hooks(self, point: HookPoint) -> tuple[GraphHook, ...]:
         return getattr(self, point)
@@ -99,6 +162,13 @@ class PluginContributions:
     def as_records(self, plugin: str) -> tuple[Contribution, ...]:
         """The same facts as attribution records, spelled the way the manifest declares them
         (`ava plugins inspect` shows these; the manifest check compares them)."""
+        return (
+            *self._runtime_records(plugin),
+            *self._data_records(plugin),
+            *self._sdk_records(plugin),
+        )
+
+    def _runtime_records(self, plugin: str) -> tuple[Contribution, ...]:
         sections = (
             Contribution("systemPromptSections", fn.__name__, plugin, fn.__module__)
             for fn in self.system_prompt_sections
@@ -124,12 +194,60 @@ class PluginContributions:
             for cls in self.state
             for name in cls.model_fields
         )
+        return (*sections, *notes, *hooks, *state)
+
+    def _data_records(self, plugin: str) -> tuple[Contribution, ...]:
         metrics = (Contribution("metrics", spec.name, plugin, spec.title) for spec in self.metrics)
         widgets = (
             Contribution("inspectWidgets", spec.id, plugin, spec.kind)
             for spec in self.inspect_widgets
         )
-        return (*sections, *notes, *hooks, *state, *metrics, *widgets)
+        return (*metrics, *widgets)
+
+    def _sdk_records(self, plugin: str) -> tuple[Contribution, ...]:
+        namespaces = (
+            Contribution("sdkNamespaces", ns.name, plugin, getattr(ns.module, "__name__", ""))
+            for ns in self.sdk_namespaces
+        )
+        members = (
+            Contribution(
+                "sdkMembers",
+                f"{m.namespace}.{m.name}",
+                plugin,
+                f"{getattr(m.fn, '__module__', '?')}.{getattr(m.fn, '__qualname__', m.fn)}",
+            )
+            for m in self.sdk_members
+        )
+        promoted = (*(ns.name for ns in self.sdk_namespaces if ns.expand), *self.sdk_expansions)
+        expansions = (
+            Contribution("sdkExpansions", path, plugin, "expanded ahead of the framework list")
+            for path in promoted
+        )
+        wraps = (
+            Contribution(
+                "sdkWraps",
+                w.target,
+                plugin,
+                f"{getattr(w.wrapper, '__module__', '?')}.{getattr(w.wrapper, '__qualname__', w.wrapper)}",
+            )
+            for w in self.sdk_wraps
+        )
+        sources = (
+            Contribution(
+                "skillSources",
+                getattr(p, "__name__", repr(p)),
+                plugin,
+                getattr(p, "__module__", "?"),
+            )
+            for p in self.skill_sources
+        )
+        config: tuple[Contribution, ...] = ()
+        if self.config is not None:
+            fields_text = ", ".join(self.config.model_fields) or "<none>"
+            config = (
+                Contribution("config", self.config.__name__, plugin, f"fields: {fields_text}"),
+            )
+        return (*namespaces, *members, *expansions, *wraps, *sources, *config)
 
 
 @dataclass(frozen=True)
@@ -162,6 +280,12 @@ class ExtensionRegistry:
         for plugin, contributions in self.plugins:
             for cls in contributions.state:
                 yield plugin, cls
+
+    def sdk_wraps(self) -> Iterator[tuple[str, SdkWrap]]:
+        """(plugin, wrap) in load order, then declaration order."""
+        for plugin, contributions in self.plugins:
+            for wrap in contributions.sdk_wraps:
+                yield plugin, wrap
 
     def metrics(self) -> Iterator[MetricSpec]:
         """Every plugin's metric specs, in load order, then declaration order."""

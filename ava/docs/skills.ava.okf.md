@@ -76,7 +76,7 @@ plugin carries are dash-named like any other.
 - `ava.skills.<path>` — Access a skill or namespace (module `__getattr__` lazy resolution). Resolution is exposure, not use — it records nothing. The `skill_invoked` event at depth `loaded` (the only depth ava_self_evolution scores as real use) fires on first SKILL.md body consumption: `ava.help(ava.skills.<path>)` or a direct `__doc__` read loads the body lazily and attributes it there. All attribution rows go through one writer, `_insert_skill_events`, which batches a whole list onto a single connection — prompt injection now covers the entire catalog, and a connect-per-skill would sit on the pre-first-turn critical path.
 - `ava.help(ava.skills.<path>)` — Load full text (path line + SKILL.md body).
 - `ava.help(ava.skills)` / `dir(ava.skills)` — **Index only**: one `ava.skills.<path>` heading + one-line description per entry, never a body. The child walk reads frontmatter `_description`s and never touches `__doc__`, and node resolution records no `loaded` attribution — listing the catalog is silent. The agent-visible surface is the `__all_for_ava__` property on `_SkillsModule` (the module's own class) — `agent_visible_names` reads it with `getattr_static`, which a PEP 562 module `__getattr__` cannot serve.
-- `register_skill_source(provider)` — Plugin extension point: contribute skill roots resolved during scanning (project-local, scanned last can override same-named built-ins).
+- Plugin skill sources: a plugin declares `skill_sources` (`provider() -> list[Path]`) in `contribute()`; the SDK install adds them and the scan reads them (project-local, scanned last, can override same-named built-ins).
 
 ## Loading Sources
 

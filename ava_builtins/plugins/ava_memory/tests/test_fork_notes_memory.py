@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import sys
 from typing import Any, cast
 
 import psycopg
@@ -31,29 +30,11 @@ from tests.path_scoped.agent_tests import (
 
 @pytest.fixture(autouse=True)
 def memory_plugin() -> Any:
-    """Load ava_memory through the real plugin-registration path (mirrors
-    ava_builtins/plugins/ava_memory/tests/test_ava_memory_notes.py) so the memory-note registrations
-    exist regardless of what earlier modules cleared."""
-    from agent.state import clear_plugin_registrations
-    from base.packages.plugins.config_registration import bind_from_disk
-    from base.packages.plugins.context import PluginContext
+    """The ava_memory agent-runtime face; its `contribute()` declares the memory
+    notes (mirrors ava_builtins/plugins/ava_memory/tests/test_ava_memory_notes.py)."""
+    from ava_builtins.plugins.ava_memory import agent_runtime as _plugin
 
-    clear_plugin_registrations()
-    for name in list(sys.modules):
-        if name.startswith("ava_builtins.plugins.ava_memory"):
-            del sys.modules[name]
-
-    with PluginContext("ava_memory"):
-        # the memory-note registrations live in the agent_runtime face (the full load imports it after plugin.py — task #3633).
-        from ava_builtins.plugins.ava_memory import agent_runtime as _plugin
-
-    bind_from_disk()
-    yield _plugin
-
-    clear_plugin_registrations()
-    for name in list(sys.modules):
-        if name.startswith("ava_builtins.plugins.ava_memory"):
-            del sys.modules[name]
+    return _plugin
 
 
 def _registry(memory_plugin: Any) -> ExtensionRegistry:

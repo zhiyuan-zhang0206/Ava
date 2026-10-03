@@ -23,14 +23,16 @@ def _plugin(unit_home: Path) -> None:
     plugin = unit_home / "plugins" / "exec_config_probe"
     plugin.mkdir(parents=True)
     (plugin / "plugin.py").write_text(
-        "__description__ = 'Private configuration probe'\nfrom . import default_config\n"
+        "__description__ = 'Private configuration probe'\n"
+        "from base.packages.plugins.extensions import PluginContributions\n"
+        "from . import default_config\n"
+        "def contribute():\n"
+        "    return PluginContributions(config=default_config.Config)\n"
     )
     (plugin / "default_config.py").write_text(
         "from pydantic import BaseModel, Field\n"
-        "from base.packages.plugins.config_registration import register_plugin_config\n"
         "class Config(BaseModel):\n"
         "    exec_probe_marker: str = Field(default='default-marker', json_schema_extra={'per_agent': True})\n"
-        "register_plugin_config(Config)\n"
     )
     (unit_home / "plugins.json").write_text(
         json.dumps({"plugins": {"exec_config_probe": {"enabled": True}}})
