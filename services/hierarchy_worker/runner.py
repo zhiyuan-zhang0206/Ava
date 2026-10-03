@@ -162,7 +162,7 @@ def _baseline_untracked(conn: Connection, job_id: int, agent_id: int, boundary: 
     )
 
 
-def claim_next(conn: Connection) -> ClaimedJob | None:
+def claim_next(conn: Connection, *, agents: frozenset[int] = frozenset()) -> ClaimedJob | None:
     """Claim the oldest pending job, atomically; never-seen compact jobs are
     silent-baselined instead of built (task #4674) — the scan's first-sight
     pass normally retires those first, so this claim-side branch covers the
@@ -175,6 +175,9 @@ def claim_next(conn: Connection) -> ClaimedJob | None:
     rows already carry their enqueue-time value, and `first_build` is monotone
     (a success can only appear, and a live job blocks other work for the
     same agent), so that value never turns stale-true before the claim.
+    `agents` is the rollout allowlist (empty = every agent): a pending job of an
+    unlisted agent is left parked, not claimed.
+
     Returns None when nothing (left) is pending — baselines drained in
     passing do not stop the drain.
     """
@@ -187,8 +190,10 @@ def claim_next(conn: Connection) -> ClaimedJob | None:
             row = conn.execute(
                 "UPDATE hierarchy_jobs SET status = 'running', started_at = now()"
                 " WHERE id = (SELECT id FROM hierarchy_jobs WHERE status = 'pending'"
+                "             AND (cardinality(%s::bigint[]) = 0 OR agent_id = ANY(%s::bigint[]))"
                 "             ORDER BY id LIMIT 1 FOR UPDATE SKIP LOCKED)"
-                " RETURNING id, agent_id, include_tail, kind, trigger_boundary"
+                " RETURNING id, agent_id, include_tail, kind, trigger_boundary",
+                (sorted(agents), sorted(agents)),
             ).fetchone()
             if row is None:
                 return None
@@ -290,7 +295,7 @@ def run_tick(config: HierarchyWorkerConfig, db: Database) -> None:
                             tail=outcome.tail_enqueued,
                             stale=outcome.stale_recovered,
                         )
-                job = claim_next(conn)
+                job = claim_next(conn, agents=config.served_agents())
         except psycopg.ProgrammingError:
             # Code<->DB drift: no retry self-heals. Exit so the manager's
             # crash path (backoff + breaker + last_error) exposes it.
