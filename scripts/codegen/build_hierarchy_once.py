@@ -29,6 +29,7 @@ from base.agents.history.hierarchy.store import load_known_texts, write_tree
 from base.agents.observation.snapshot import agent_effective_model
 from base.config import settings
 from base.db import Database
+from base.lm.context_budget import resolve_context_budget
 from base.lm.factory import close_chat_model
 
 # How many failed-node lines the report shows before folding the rest into a
@@ -88,7 +89,13 @@ def main(argv: list[str] | None = None) -> int:
     llm = build_generation_llm(model)
     try:
         tree = build_agent_tree(
-            db, args.agent_id, llm=llm, model=model, known_texts=known, tools=[execute_code]
+            db,
+            args.agent_id,
+            llm=llm,
+            model=model,
+            known_texts=known,
+            tools=[execute_code],
+            context_window_tokens=resolve_context_budget(model).max_context_tokens,
         )
     finally:
         close_chat_model(llm)

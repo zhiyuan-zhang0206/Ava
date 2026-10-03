@@ -142,6 +142,11 @@ class GenParams:
     # error result and re-invoked, and exhausting the rounds fails the node
     # (retried on a later pass) — never an unbounded loop.
     tool_rounds: int = 3
+    # The agent-shaped request (prefix + material + prompt) may fill this
+    # fraction of the model's context window before the node falls back to the
+    # material-only request: slack for the gap between the engine's o200k
+    # count and the provider's own tokenizer, and for the answer.
+    prefix_window_fraction: float = 0.8
     # The demo's effective reasoning level (its "low" clamps onto "high" for
     # deepseek); the deepseek registry default ("max") is the agent-brain
     # level and far more than a summarizer needs.

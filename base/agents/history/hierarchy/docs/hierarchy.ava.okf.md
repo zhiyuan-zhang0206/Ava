@@ -43,6 +43,13 @@ merge are the layers built on top.
   trailing material + prompt + text-only message, tools bound for schema
   parity; a tool-call response is refused with a `ToolMessage` error and
   re-invoked up to `GenParams.tool_rounds` rounds.
+- `prefix.py` — `PrefixPlanner` picks each node's request prefix from the
+  segment layout of the stitched history (`checkpoint.FullHistory`): the node's
+  own compaction segment's SystemMessage plus that segment's messages up to the
+  node — the head the agent really sent, never the stitched history of every
+  earlier segment. A prefix that with its material would exceed
+  `GenParams.prefix_window_fraction` of the model's window (or a segment with
+  no head SystemMessage) falls back to the material-only request.
 - `pipeline.py` — assembly: items to blocks to units to trigger batches to the
   seal cascade, then `materialize` walks levels bottom-up (leaves render
   blocks, upper nodes reduce children texts, aliases copy their child) using
