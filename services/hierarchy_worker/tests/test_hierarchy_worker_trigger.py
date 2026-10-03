@@ -24,6 +24,7 @@ from base.agents.history.hierarchy.pipeline import MaterializedTree
 from base.config import settings
 from base.db.tests.fakes import fake_database
 from base.events.contract import telemetry_events
+from base.host.env.agent_slices import ModelOverrides
 from services.hierarchy_worker import execute as execute_module
 from services.hierarchy_worker import runner
 from services.hierarchy_worker.scan import ScanOutcome, _has_clean_baseline, first_build
@@ -439,6 +440,39 @@ def test_halt_marker_routes_the_continuation_to_backoff(db_conn: psycopg.Connect
 # ---- the child side: the halt marker + the done-time signals ----
 
 
+def test_generation_model_is_built_with_the_agents_tuning_pins(
+    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An agent that pinned its reasoning effort is generated for at that effort, so the
+    request matches the one its own turns send (task #4674)."""
+    agent_id = 880_107
+    _state(db_conn, agent_id, cid(1))
+    job_id = _pending_job(db_conn, agent_id, cid(1))
+    assert runner.claim_next(db_conn) is not None
+    db_conn.commit()
+
+    pinned = ModelOverrides.from_pins({"reasoning_effort": "max"})
+    built: list[ModelOverrides | None] = []
+
+    def fake_build(_model: str, overrides: ModelOverrides | None = None) -> object:
+        built.append(overrides)
+        return object()
+
+    def fake_target(_db: object, _agent_id: int, *, fallback: str) -> tuple[str, ModelOverrides]:
+        return fallback, pinned
+
+    empty = MaterializedTree(nodes=(), errors=(), pending={}, max_level=1)
+    monkeypatch.setattr(execute_module, "agent_model_target", fake_target)
+    monkeypatch.setattr(execute_module, "load_known_texts", lambda _db, _aid: {})
+    monkeypatch.setattr(execute_module, "build_generation_llm", fake_build)
+    monkeypatch.setattr(execute_module, "close_chat_model", lambda _llm: None)
+    monkeypatch.setattr(execute_module, "build_agent_tree", lambda *_a, **_k: empty)
+    monkeypatch.setattr(execute_module, "write_tree", lambda *_a, **_k: 0)
+
+    assert execute_module.execute_job(job_id, hierarchy_config(), hierarchy_db()) == 0
+    assert built == [pinned]
+
+
 def test_halted_build_records_the_marker_and_emits_the_signals(
     db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -468,7 +502,7 @@ def test_halted_build_records_the_marker_and_emits_the_signals(
         return halted
 
     monkeypatch.setattr(execute_module, "load_known_texts", lambda _db, _aid: {})
-    monkeypatch.setattr(execute_module, "build_generation_llm", lambda _model: object())
+    monkeypatch.setattr(execute_module, "build_generation_llm", lambda _model, **_kw: object())
     monkeypatch.setattr(execute_module, "close_chat_model", lambda _llm: None)
     monkeypatch.setattr(execute_module, "build_agent_tree", fake_tree)
     monkeypatch.setattr(execute_module, "write_tree", lambda *_a, **_k: 0)

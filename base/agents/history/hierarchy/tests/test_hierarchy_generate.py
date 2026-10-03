@@ -33,6 +33,7 @@ from base.agents.history.hierarchy.generate import (
 )
 from base.agents.history.hierarchy.seal import NARRATIVE_CAP_TOK, narrative_budget_tok
 from base.agents.history.hierarchy.tokens import count_tokens
+from base.host.env.agent_slices import ModelOverrides
 
 MODEL = "deepseek-v4-flash"
 
@@ -399,6 +400,9 @@ def test_build_generation_llm_forwards_params_effort(monkeypatch: pytest.MonkeyP
     build_generation_llm(MODEL)
     assert captured["model"] == MODEL
     # The default follows the agent's own build: no effort override.
-    assert captured["kwargs"] == {"reasoning_effort": None}
+    assert captured["kwargs"] == {"reasoning_effort": None, "overrides": None}
     build_generation_llm(MODEL, GenParams(reasoning_effort="max"))
-    assert captured["kwargs"] == {"reasoning_effort": "max"}
+    assert captured["kwargs"] == {"reasoning_effort": "max", "overrides": None}
+    pinned = ModelOverrides.from_pins({"reasoning_effort": "high"})
+    build_generation_llm(MODEL, overrides=pinned)
+    assert captured["kwargs"] == {"reasoning_effort": None, "overrides": pinned}

@@ -78,8 +78,8 @@ claimed, so listing it later starts it as a first-sight agent.
   master switch and reconcile cadence, the regen alert / halt / daily-budget
   thresholds and the first-build budget and the low-reuse ratio (task #4674), and the child-kill /
   stale-row graces; the generation model is the target agent's own effective
-  model (`base.agents.observation.snapshot.agent_effective_model` — overlay over
-  the birth stamp over the fleet default, the agent host's own resolution), with `settings.lm.hierarchy_model` as the last-resort
+  model (`base.agents.observation.snapshot.agent_model_target` — overlay over
+  the birth stamp over the fleet default, the agent host's own resolution) and its tuning pins (`ModelOverrides`: reasoning effort, thinking budget), with `settings.lm.hierarchy_model` as the last-resort
   fallback.
 - **Cost observability**: each job row records the run's scope (stretches,
   nodes generated/reused/failed/skipped) and its token sums; the LLM usage

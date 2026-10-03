@@ -13,8 +13,8 @@ gateway-hosted schedule (`schedules/hierarchy-worker-schedule.py`, one cron
 slot a minute) that drains the compact-boundary event queue (task #4674; the
 reconcile scan runs behind it) and runs per-agent builds through
 `services.hierarchy_worker`. The generation model is the target agent's own
-effective model (`base.agents.observation.snapshot.agent_effective_model` — overlay
-over the birth stamp over the fleet default), with `settings.lm.hierarchy_model` as the
+effective model (`base.agents.observation.snapshot.agent_model_target` — overlay
+over the birth stamp over the fleet default) with its reasoning/thinking pins, with `settings.lm.hierarchy_model` as the
 last-resort fallback.
 """
 
