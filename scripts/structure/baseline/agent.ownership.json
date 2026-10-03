@@ -1,5 +1,1 @@
-{
-  "complexity": {
-    "agent/ownership/hosted.py::admit_hosted_runtime": 20
-  }
-}
+{}

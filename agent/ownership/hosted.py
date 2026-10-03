@@ -12,6 +12,7 @@ import psutil
 import psycopg
 from psycopg_pool import AsyncConnectionPool
 
+from agent.ownership.hosted_claim import claim_admission_row
 from base import telemetry
 from base.agents.incarnation.host_process_evidence import local_host_evidence
 from base.agents.incarnation.lifecycle_acceptance import (
@@ -398,6 +399,64 @@ async def _dead_predecessor_evidence(
     return None, False
 
 
+async def _lock_previous(conn: psycopg.AsyncConnection[Any], agent_id: int, owner: UUID) -> Any:
+    """Lock and return the agent's runtime row; refuses an unknown row, a held cohort or
+    stored evidence the current model cannot decode."""
+    previous = await (
+        await conn.execute(
+            "SELECT runtime_generation,runtime_owner,runtime_kind,machine,"
+            "incarnation_resources,lease_expires_at FROM agents_meta "
+            "WHERE id=%s FOR UPDATE",
+            (agent_id,),
+        )
+    ).fetchone()
+    if previous is None:
+        _refuse_hosted_admission()
+    if admission.held() and (
+        admission.pending_command(agent_id) is None or previous[1:3] != (owner, "hosted")
+    ):
+        # A successor cannot certify that its predecessor flushed.
+        # A host crash during drain therefore retains the hold and
+        # requires explicit cancellation/recovery, never a fake ACK.
+        _refuse_hosted_admission()
+    if previous[4] is not None:
+        # A stored value the current model cannot decode (a retired
+        # writer's shape) refuses under every admission.
+        try:
+            decode_resources(previous[4])
+        except ResourceEvidenceError as exc:
+            _refuse_hosted_admission(AdmissionOutcome.RESOURCE_FENCE, str(exc))
+    return previous
+
+
+async def _record_legacy_adoption(
+    conn: psycopg.AsyncConnection[Any], agent_id: int, adoption: _LegacyAdoption
+) -> telemetry.Event:
+    """The adoption audit: who was replaced, on what evidence, and how stale the predecessor's
+    ownership beat was. Recorded in the takeover's own transaction."""
+    adoption_event = prepare_event_log(
+        event_type="hosted_legacy_adoption",
+        agent_id=agent_id,
+        source="system",
+        payload={
+            "predecessor_owner": str(adoption.owner),
+            "lease_silence_s": round(adoption.silence_s, 1),
+            "same_home_host_daemons": 0,
+            "agent_exec_children": 0,
+        },
+    )
+    recorded = await record_audit_async(conn, adoption_event)
+    logger.info(
+        "hosted legacy adoption: admitted agent {agent_id} over dead local "
+        "predecessor {predecessor} after {silence}s of lease silence "
+        "(no live same-home host daemon, no live exec child)",
+        agent_id=agent_id,
+        predecessor=str(adoption.owner),
+        silence=round(adoption.silence_s, 1),
+    )
+    return recorded
+
+
 async def admit_hosted_runtime(
     pool: AsyncConnectionPool,
     agent_id: int,
@@ -431,30 +490,7 @@ async def admit_hosted_runtime(
     recorded: list[telemetry.Event] = []
     try:
         async with async_write_transaction(pool) as conn:
-            previous = await (
-                await conn.execute(
-                    "SELECT runtime_generation,runtime_owner,runtime_kind,machine,"
-                    "incarnation_resources,lease_expires_at FROM agents_meta "
-                    "WHERE id=%s FOR UPDATE",
-                    (agent_id,),
-                )
-            ).fetchone()
-            if previous is None:
-                _refuse_hosted_admission()
-            if admission.held() and (
-                admission.pending_command(agent_id) is None or previous[1:3] != (owner, "hosted")
-            ):
-                # A successor cannot certify that its predecessor flushed.
-                # A host crash during drain therefore retains the hold and
-                # requires explicit cancellation/recovery, never a fake ACK.
-                _refuse_hosted_admission()
-            if previous[4] is not None:
-                # A stored value the current model cannot decode (a retired
-                # writer's shape) refuses under every admission.
-                try:
-                    decode_resources(previous[4])
-                except ResourceEvidenceError as exc:
-                    _refuse_hosted_admission(AdmissionOutcome.RESOURCE_FENCE, str(exc))
+            previous = await _lock_previous(conn, agent_id, owner)
             generation = (
                 previous[0]
                 if previous[1:3] == (owner, "hosted") and previous[0] is not None
@@ -478,67 +514,20 @@ async def admit_hosted_runtime(
             # its remaining lease; the same row lock protects both proofs. A
             # legacy NULL row has no exact process to prove: its re-pinned
             # evidence set stands in for the proof (issue #2156).
-            row = await (
-                await conn.execute(
-                    "UPDATE agents_meta SET status = 'running', runtime_kind = 'hosted', "
-                    "runtime_generation = CASE WHEN runtime_owner = %s AND runtime_kind = 'hosted' "
-                    "AND runtime_generation IS NOT NULL "
-                    "THEN runtime_generation ELSE %s END, runtime_owner = %s, "
-                    "runtime_protocol_version = 0, "
-                    "last_admission_outcome = 'admitted', "
-                    "last_admission_at = clock_timestamp(), "
-                    "last_launch_failure_reason = NULL, last_launch_failure_at = NULL, "
-                    "lease_expires_at = now() + make_interval(secs => %s) "
-                    "WHERE id = %s AND machine = %s AND status = %s AND pid IS NULL "
-                    "AND status IN ('running','idling') "
-                    "AND NOT EXISTS (SELECT 1 FROM inbound_messages force "
-                    "WHERE force.id=agents_meta.lifecycle_command_id AND force.kind='terminate' "
-                    "AND force.status='claimed' AND force.applied_at IS NOT NULL "
-                    "AND force.observed_at IS NULL) "
-                    "AND (runtime_kind IS NULL OR runtime_kind = 'hosted') "
-                    "AND (runtime_owner IS NULL OR runtime_owner = %s "
-                    "OR lease_expires_at IS NULL OR lease_expires_at <= now() OR %s) "
-                    "RETURNING runtime_generation",
-                    (
-                        owner,
-                        generation,
-                        owner,
-                        AGENT_LEASE_TTL_S,
-                        agent_id,
-                        machine,
-                        expected_from,
-                        owner,
-                        exited_predecessor is not None or legacy_adoption_used,
-                    ),
-                )
-            ).fetchone()
+            row = await claim_admission_row(
+                conn,
+                agent_id=agent_id,
+                machine=machine,
+                owner=owner,
+                generation=generation,
+                expected_from=expected_from,
+                takeover=exited_predecessor is not None or legacy_adoption_used,
+            )
             if row is None:
                 # Resource transfer and ordinary admission are one transaction.
                 _refuse_hosted_admission()
             if legacy_adoption_used and legacy_adoption is not None:
-                # The adoption audit: who was replaced, on what evidence, and
-                # how stale the predecessor's ownership beat was. Recorded in
-                # the takeover's own transaction.
-                adoption_event = prepare_event_log(
-                    event_type="hosted_legacy_adoption",
-                    agent_id=agent_id,
-                    source="system",
-                    payload={
-                        "predecessor_owner": str(legacy_adoption.owner),
-                        "lease_silence_s": round(legacy_adoption.silence_s, 1),
-                        "same_home_host_daemons": 0,
-                        "agent_exec_children": 0,
-                    },
-                )
-                recorded.append(await record_audit_async(conn, adoption_event))
-                logger.info(
-                    "hosted legacy adoption: admitted agent {agent_id} over dead local "
-                    "predecessor {predecessor} after {silence}s of lease silence "
-                    "(no live same-home host daemon, no live exec child)",
-                    agent_id=agent_id,
-                    predecessor=str(legacy_adoption.owner),
-                    silence=round(legacy_adoption.silence_s, 1),
-                )
+                recorded.append(await _record_legacy_adoption(conn, agent_id, legacy_adoption))
             from agent.ownership.lifecycle_intent import observe_hosted_admission
 
             await observe_hosted_admission(conn, RuntimeIncarnation(agent_id, row[0], owner))
