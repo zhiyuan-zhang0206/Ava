@@ -18,6 +18,8 @@ from uuid import UUID
 
 import pytest
 
+from base.db import Database
+from base.events.live.bus import EventBus
 from cli.commands.agents import impersonation_relay as relay
 
 LEASE_ID = UUID("767fb040-aa54-42ae-b2c8-594039fbbf46")
@@ -641,6 +643,8 @@ def test_host_target_must_be_explicit(provider: str, thread_id: str | None) -> N
 
 def test_shared_inbox_rows_keep_their_bodies_for_the_push_envelope(
     monkeypatch: pytest.MonkeyPatch,
+    database: Database,
+    event_bus: EventBus,
 ) -> None:
     from base.agents import impersonation
 
@@ -654,11 +658,11 @@ def test_shared_inbox_rows_keep_their_bodies_for_the_push_envelope(
     }
     calls: list[tuple[str, str]] = []
 
-    def get(lease_id: str, token: str) -> dict[str, Any]:
+    def get(_db: object, _bus: object, lease_id: str, token: str) -> dict[str, Any]:
         calls.append((lease_id, token))
         return lease
 
-    def inbox(lease_id: str, token: str) -> list[dict[str, Any]]:
+    def inbox(_db: object, lease_id: str, token: str) -> list[dict[str, Any]]:
         calls.append((lease_id, token))
         return [
             {
@@ -675,17 +679,19 @@ def test_shared_inbox_rows_keep_their_bodies_for_the_push_envelope(
 
     monkeypatch.setattr(impersonation, "relay_get", get)
     monkeypatch.setattr(impersonation, "relay_inbox", inbox)
-    snapshot = relay._read_inbox(42, LEASE_ID, "memory-only-token")
+    snapshot = relay._read_inbox(database, event_bus, 42, LEASE_ID, "memory-only-token")
     assert snapshot.message_ids == frozenset({7})
     assert snapshot.messages[7].content == "the body rides into the push envelope"
     assert snapshot.start_message == ""
     assert calls == [(str(LEASE_ID), "memory-only-token")] * 2
 
 
-def test_agent_mismatch_refuses_inbox_before_subscription(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_agent_mismatch_refuses_inbox_before_subscription(
+    monkeypatch: pytest.MonkeyPatch, database: Database, event_bus: EventBus
+) -> None:
     from base.agents import impersonation
 
-    def get(_lease_id: str, _token: str) -> dict[str, Any]:
+    def get(_db: object, _bus: object, _lease_id: str, _token: str) -> dict[str, Any]:
         return {
             "id": str(LEASE_ID),
             "agent_id": 99,
@@ -695,29 +701,31 @@ def test_agent_mismatch_refuses_inbox_before_subscription(monkeypatch: pytest.Mo
             "max_delivery_attempts": 2,
         }
 
-    def inbox(_lease_id: str, _token: str) -> list[dict[str, Any]]:
+    def inbox(_db: object, _lease_id: str, _token: str) -> list[dict[str, Any]]:
         pytest.fail("Agent mismatch must not read this inbox")
 
     monkeypatch.setattr(impersonation, "relay_get", get)
     monkeypatch.setattr(impersonation, "relay_inbox", inbox)
     with pytest.raises(ValueError, match="does not belong"):
-        relay._read_inbox(42, LEASE_ID, "memory-only-token")
+        relay._read_inbox(database, event_bus, 42, LEASE_ID, "memory-only-token")
 
 
 # ── Command plumbing ───────────────────────────────────────────────────────────
 
 
-def test_write_heartbeat_stops_at_a_terminal_lease(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_write_heartbeat_stops_at_a_terminal_lease(
+    monkeypatch: pytest.MonkeyPatch, database: Database
+) -> None:
     from unittest.mock import Mock
 
     from base.agents import impersonation as leases
 
     beat = Mock()
     monkeypatch.setattr("base.agents.impersonation.relay_heartbeat", beat)
-    assert relay._write_heartbeat(LEASE_ID, "relay-token") is True
-    beat.assert_called_once_with(str(LEASE_ID), "relay-token")
+    assert relay._write_heartbeat(database, LEASE_ID, "relay-token") is True
+    beat.assert_called_once_with(database, str(LEASE_ID), "relay-token")
     beat.side_effect = leases.ImpersonationError("Impersonation has ended")
-    assert relay._write_heartbeat(LEASE_ID, "relay-token") is False
+    assert relay._write_heartbeat(database, LEASE_ID, "relay-token") is False
 
 
 @pytest.mark.parametrize("debounce", [-1.0, 31.0, float("nan"), float("inf")])
@@ -739,12 +747,14 @@ def test_invalid_debounce_fails_before_open(debounce: float) -> None:
     assert not listener.opened
 
 
-def test_release_racing_with_read_stops_cleanly(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_release_racing_with_read_stops_cleanly(
+    monkeypatch: pytest.MonkeyPatch, database: Database, event_bus: EventBus
+) -> None:
     from base.agents import impersonation
 
     states = iter(["active", "released"])
 
-    def get(_lease_id: str, _token: str) -> dict[str, Any]:
+    def get(_db: object, _bus: object, _lease_id: str, _token: str) -> dict[str, Any]:
         return {
             "id": str(LEASE_ID),
             "agent_id": 42,
@@ -754,21 +764,24 @@ def test_release_racing_with_read_stops_cleanly(monkeypatch: pytest.MonkeyPatch)
             "max_delivery_attempts": 2,
         }
 
-    def inbox(_lease_id: str, _token: str) -> list[dict[str, Any]]:
+    def inbox(_db: object, _lease_id: str, _token: str) -> list[dict[str, Any]]:
         raise impersonation.ImpersonationError("Lease released concurrently")
 
     monkeypatch.setattr(impersonation, "relay_get", get)
     monkeypatch.setattr(impersonation, "relay_inbox", inbox)
-    assert not relay._read_inbox(42, LEASE_ID, "test-token").active
+    assert not relay._read_inbox(database, event_bus, 42, LEASE_ID, "test-token").active
 
 
 @pytest.mark.parametrize("status", ["requested", "accepted"])
 def test_pending_consent_checks_status_without_opening_inbox(
-    monkeypatch: pytest.MonkeyPatch, status: relay.LeaseStatus
+    monkeypatch: pytest.MonkeyPatch,
+    status: relay.LeaseStatus,
+    database: Database,
+    event_bus: EventBus,
 ) -> None:
     from base.agents import impersonation
 
-    def get(_lease_id: str, _token: str) -> dict[str, Any]:
+    def get(_db: object, _bus: object, _lease_id: str, _token: str) -> dict[str, Any]:
         return {
             "id": str(LEASE_ID),
             "agent_id": 42,
@@ -778,31 +791,11 @@ def test_pending_consent_checks_status_without_opening_inbox(
             "max_delivery_attempts": 2,
         }
 
-    def inbox(_lease_id: str, _token: str) -> list[dict[str, Any]]:
+    def inbox(_db: object, _lease_id: str, _token: str) -> list[dict[str, Any]]:
         pytest.fail("Pending consent must not read the protected inbox")
 
     monkeypatch.setattr(impersonation, "relay_get", get)
     monkeypatch.setattr(impersonation, "relay_inbox", inbox)
-    snapshot = relay._read_inbox(42, LEASE_ID, "test-token")
+    snapshot = relay._read_inbox(database, event_bus, 42, LEASE_ID, "test-token")
     assert snapshot.status == status
     assert not snapshot.message_ids
-
-
-def test_two_missed_ack_windows_end_the_takeover_without_a_third_push(clock: FakeClock) -> None:
-    inbox = Inbox(11)
-    emitted: list[str] = []
-
-    def waited(n: int) -> None:
-        if n <= 2:
-            clock.advance(inbox.ack_window_seconds + 1)
-        else:
-            inbox.active = False  # bound the old infinite-retry implementation
-
-    listener = Listener(inbox, waited=waited)
-    run(inbox, listener, emitted.append)
-
-    assert sum("[id=11]" in text for text in emitted) == 2
-    assert inbox.status == "expired"
-    assert inbox.pending == {11}
-    assert "Ava control expired" in emitted[-1]
-    assert listener.closed

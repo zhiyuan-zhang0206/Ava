@@ -15,6 +15,7 @@ from typing import Any, Self
 from uuid import uuid4
 
 from ava import agent_identity
+from ava._settings import database
 from base.agents import impersonation as control
 from base.cluster.machine import machine_name
 from base.config.agent_pins import resolve_agent_config_pins
@@ -129,7 +130,7 @@ class Attachment:
             raise
 
     def _lease(self) -> dict[str, Any]:
-        lease = control.require_active(self.lease_id, process_metadata())
+        lease = control.require_active(database(), self.lease_id, process_metadata())
         if lease["machine"] != machine_name():
             raise RuntimeError(f"external SDK must run on agent machine {lease['machine']!r}")
         return lease
@@ -163,7 +164,11 @@ class Attachment:
         if ava.state_update:
             encoded = encode_plugin_delta(ava.state_update)
             control.merge_plugin_delta(
-                self.lease_id, process_metadata(), encoded, expected_version=self._version
+                database(),
+                self.lease_id,
+                process_metadata(),
+                encoded,
+                expected_version=self._version,
             )
             self._version += 1
             ava.state_update = {}
@@ -203,12 +208,14 @@ class Attachment:
         if not is_log_native(self._lease()):
             return
         source_key = f"attachment:{process_metadata()['pid']}:{uuid4().hex}"
-        if open_local_participant(self.lease_id, agent_id=self.agent_id, source_key=source_key):
+        db = database()
+        if open_local_participant(db, self.lease_id, agent_id=self.agent_id, source_key=source_key):
             participant = LocalParticipant(
                 lease_id=self.lease_id,
                 agent_id=self.agent_id,
                 session_id=self.session_id,
                 source_key=source_key,
+                db=db,
             )
             bind_local_participant(participant)
             self._event_participant = participant
@@ -300,7 +307,7 @@ def attach(session_id: int | str, *, agent_id: int | None = None) -> Attachment:
     from base.agents.impersonation.sessions import private_id
 
     if isinstance(session_id, int) and not isinstance(session_id, bool) and agent_id is not None:
-        return Attachment(private_id(agent_id, session_id))
+        return Attachment(private_id(database(), agent_id, session_id))
     if isinstance(session_id, str) and agent_id is None:
         return Attachment(session_id)
     raise ValueError("attach requires an agent_id and an integer session_id")

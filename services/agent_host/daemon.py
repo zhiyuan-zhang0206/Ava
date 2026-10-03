@@ -457,11 +457,11 @@ async def run() -> None:
         load_process_extensions,
     )
 
+    workload_pool, control_pool, bus, db = _boot_handles()
     init_process_scope()
-    land_cluster_extensions()
+    land_cluster_extensions(db)
     load_process_extensions()
 
-    workload_pool, control_pool, bus, db = _boot_handles()
     liveness = Liveness(_LIVENESS_TIMEOUT_S)
     beat: asyncio.Task[None] | None = None
     health = None

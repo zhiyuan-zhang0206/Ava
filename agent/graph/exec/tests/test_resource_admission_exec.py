@@ -13,11 +13,12 @@ import pytest
 from base.agents.incarnation.exec_owner_protocol import OwnerClosed, OwnerContext, OwnerReady
 from base.agents.incarnation.resources import IncarnationResources, decode_resources
 from base.agents.incarnation.tests.test_resources import _admitted
+from base.db import Database
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 
 
 async def test_real_exec_dispatch_uses_owner_and_discharges_exact_map(
-    db_conn: psycopg.Connection, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    db_conn: psycopg.Connection, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, database: Database
 ) -> None:
     from agent.graph.exec import _owned_run
     from agent.graph.exec._result import _ExecDone
@@ -30,7 +31,12 @@ async def test_real_exec_dispatch_uses_owner_and_discharges_exact_map(
 
     monkeypatch.setattr(_owned_run, "current_incarnation", admitted)
     result, payload = await _run_in_subprocess(
-        "print('owned-runtime-proof')", target.agent_id, asyncio.Event(), 30, exec_dir=tmp_path
+        database,
+        "print('owned-runtime-proof')",
+        target.agent_id,
+        asyncio.Event(),
+        30,
+        exec_dir=tmp_path,
     )
     assert isinstance(result, _ExecDone), result.output
     assert payload is not None and payload.kind == "done"
@@ -43,7 +49,7 @@ async def test_real_exec_dispatch_uses_owner_and_discharges_exact_map(
 
 
 async def test_managed_exec_streams_output_and_keepalive_before_completion(
-    db_conn: psycopg.Connection, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    db_conn: psycopg.Connection, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, database: Database
 ) -> None:
     from agent.graph.exec import _owned_run
     from agent.graph.exec._result import _ExecDone
@@ -70,6 +76,7 @@ async def test_managed_exec_streams_output_and_keepalive_before_completion(
     publisher = ExecOutputChunkPublisher(emitter, agent_id=target.agent_id, item_id="7.0")
     task = asyncio.create_task(
         _run_in_subprocess(
+            database,
             "import time; print('managed-first', flush=True); time.sleep(1.4)",
             target.agent_id,
             asyncio.Event(),
@@ -99,6 +106,7 @@ async def test_execution_domain_cancellation_consumes_exact_owner_receipt(
     db_conn: psycopg.Connection,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    database: Database,
 ) -> None:
     """Cancellation returns only after the attached allocation is discharged."""
     from agent.graph.exec import _owned_run
@@ -112,6 +120,7 @@ async def test_execution_domain_cancellation_consumes_exact_owner_receipt(
     monkeypatch.setattr(_owned_run, "current_incarnation", admitted)
     task = asyncio.create_task(
         _run_in_subprocess(
+            database,
             "import time; print('managed-started', flush=True); time.sleep(60)",
             target.agent_id,
             asyncio.Event(),
@@ -157,6 +166,7 @@ async def test_execution_domain_cancellation_waits_for_inflight_registration(
     db_conn: psycopg.Connection,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    database: Database,
 ) -> None:
     """A cancelled to_thread caller cannot orphan a later registration commit."""
     from agent.graph.exec import _owned_run
@@ -172,14 +182,15 @@ async def test_execution_domain_cancellation_waits_for_inflight_registration(
     entered = threading.Event()
     release = threading.Event()
 
-    def delayed_register(context: OwnerContext, ready: OwnerReady) -> None:
+    def delayed_register(db: Database, context: OwnerContext, ready: OwnerReady) -> None:
         entered.set()
         assert release.wait(10)
-        original_register(context, ready)
+        original_register(db, context, ready)
 
     monkeypatch.setattr(_owned_run, "_register_attached", delayed_register)
     task = asyncio.create_task(
         _run_in_subprocess(
+            database,
             "raise AssertionError('host cancellation must win before user code')",
             target.agent_id,
             asyncio.Event(),

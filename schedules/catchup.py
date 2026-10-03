@@ -16,10 +16,9 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Generic, TypeVar
 
-import base.db
 from base.clock import Clock
-from base.db.transaction import write_transaction
 from base.daemon.schedules.watcher import previous_fire
+from base.db import Database
 
 _log = logging.getLogger(__name__)
 
@@ -63,9 +62,9 @@ def _as_utc(value: datetime, *, field: str) -> datetime:
     return value.astimezone(UTC)
 
 
-def _catch_up_baseline(schedule_id: int) -> datetime:
+def _catch_up_baseline(db: Database, schedule_id: int) -> datetime:
     """Return the newest claimed slot, or schedule creation on first use."""
-    with base.db.connect(autocommit=True) as conn, conn.cursor() as cur:
+    with db.connect(autocommit=True) as conn, conn.cursor() as cur:
         cur.execute(
             "SELECT COALESCE(MAX(f.slot_fire_at), s.created_at) "
             "FROM schedules AS s "
@@ -90,6 +89,7 @@ def claimed_slot() -> datetime | None:
 
 
 def fire_slot_once(
+    db: Database,
     slot_fire_at: datetime,
     payload: _Payload,
     *,
@@ -105,7 +105,7 @@ def fire_slot_once(
     """
     resolved_id = _schedule_id(schedule_id)
     slot = _as_utc(slot_fire_at, field="slot_fire_at")
-    with write_transaction() as conn, conn.cursor() as cur:
+    with db.write_transaction() as conn, conn.cursor() as cur:
         cur.execute(
             "INSERT INTO schedule_fire_log (schedule_id, slot_fire_at) "
             "VALUES (%s, %s) ON CONFLICT (schedule_id, slot_fire_at) DO NOTHING "
@@ -124,6 +124,7 @@ def fire_slot_once(
 
 
 def catch_up(
+    db: Database,
     triggers: Sequence[tuple[str, _Payload]],
     *,
     timezone: str | None,
@@ -144,7 +145,7 @@ def catch_up(
         raise ValueError(f"catch-up limit must be positive, got {limit}")
     resolved_id = _schedule_id(schedule_id)
     current = _as_utc(now or datetime.now(UTC), field="now")
-    baseline = _catch_up_baseline(resolved_id)
+    baseline = _catch_up_baseline(db, resolved_id)
     by_fire_at: dict[datetime, _MissedSlot[_Payload]] = {}
 
     for expression, payload in triggers:
@@ -172,6 +173,7 @@ def catch_up(
     fired: list[datetime] = []
     for slot in ordered:
         if fire_slot_once(
+            db,
             slot.fire_at,
             slot.payload,
             fire=fire,

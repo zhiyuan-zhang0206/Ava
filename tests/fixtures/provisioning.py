@@ -16,11 +16,12 @@ Sync vs async connection fixtures:
 - `adb_conn` (async `psycopg.AsyncConnection`) — for kernel `agent/db/__init__.py`
 """
 
+import functools
 import os
 import re
 import subprocess
 import sys
-from collections.abc import AsyncIterator, Iterator, Mapping
+from collections.abc import AsyncIterator, Callable, Iterator, Mapping
 from pathlib import Path
 
 import psycopg
@@ -30,7 +31,9 @@ import redis
 from langgraph.checkpoint.postgres import PostgresSaver
 
 from base.config import settings
+from base.db import Database, insert_inbound_message, publish_inbound_wake
 from base.db.test_db_guard import assert_test_db_url
+from base.events.live.bus import EventBus
 from tests._containers import postgres, redis_server
 from tests._os_jobs import host_ava_os_jobs
 from tests._test_env_file import rewrite_line as _rewrite_test_env_file_line
@@ -455,6 +458,30 @@ def cluster_defaults_unset(db_conn: psycopg.Connection) -> Iterator[None]:
 def db_url() -> str:
     """The session's test database URL, for tests that open their own connections."""
     return settings.data_plane.db_url
+
+
+@pytest.fixture
+def database() -> Database:
+    """The `Database` handle a composition root would pass down, bound to the session's test DB."""
+    return Database.from_settings()
+
+
+@pytest.fixture
+def publish_wake(database: Database, event_bus: EventBus) -> Callable[[int, str], bool]:
+    """`publish_inbound_wake` bound to the session's handles, the wake callable a delivery takes."""
+    return functools.partial(publish_inbound_wake, database, event_bus)
+
+
+@pytest.fixture
+def insert_inbound(database: Database, event_bus: EventBus) -> Callable[..., int]:
+    """`insert_inbound_message` bound to the session's handles."""
+    return functools.partial(insert_inbound_message, database=database, bus=event_bus)
+
+
+@pytest.fixture
+def event_bus() -> EventBus:
+    """The `EventBus` handle a composition root would pass down, bound to the session's test Redis."""
+    return EventBus.from_settings()
 
 
 @pytest.fixture

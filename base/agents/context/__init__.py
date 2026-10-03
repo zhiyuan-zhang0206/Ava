@@ -86,6 +86,18 @@ class AvaContext:
     """What the enabled plugins contribute (prompt sections, context notes), as the loader built it
     for this host. Empty for the eval driver and tests that run no plugins."""
 
+    def require_db(self) -> Database:
+        """The cluster database handle; a context built without one fails here."""
+        if self.db is None:
+            raise RuntimeError("this AvaContext carries no Database (ctx.db is None)")
+        return self.db
+
+    def require_bus(self) -> EventBus:
+        """The cluster event bus handle; a context built without one fails here."""
+        if self.bus is None:
+            raise RuntimeError("this AvaContext carries no EventBus (ctx.bus is None)")
+        return self.bus
+
     def require_agent(self) -> AgentSlices:
         """The agent's slices; a graph run built without them fails here, not on first read."""
         if self.agent is None:

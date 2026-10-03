@@ -31,7 +31,8 @@ from agent.state import AgentState
 from base.agents.context import AvaContext
 from base.agents.messages.kwargs import AvaMsgType, read_ava_kwargs
 from base.config import settings
-from base.db import insert_inbound_message
+from base.db import Database, insert_inbound_message
+from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices
 from tests.fixtures.units import spawn_agent
 
@@ -66,6 +67,8 @@ class _Turn:
                 llm=MagicMock(),
                 event_publisher=MagicMock(),
                 agent=AgentSlices.resolve(),
+                db=Database.from_settings(),
+                bus=EventBus.from_settings(),
             )
         )
         self.claimed: list[AnyMessage] = []
@@ -155,12 +158,28 @@ async def test_interleaved_turns_deliver_each_finding_to_its_own_agent(
     order: list[str],
     a_sources: list[str],
     b_sources: list[str],
+    database: Database,
+    event_bus: EventBus,
 ) -> None:
     """Agent A's SECURITY note is in A's messages and in no other agent's,
     whichever way the two agents' claim and exec nodes interleave."""
     turns = {"a": _Turn(aops_pool, spawn_agent()), "b": _Turn(aops_pool, spawn_agent())}
-    insert_inbound_message(db_conn, turns["a"].agent_id, a_inbound[0], source=a_inbound[1])
-    insert_inbound_message(db_conn, turns["b"].agent_id, b_inbound[0], source=b_inbound[1])
+    insert_inbound_message(
+        db_conn,
+        turns["a"].agent_id,
+        a_inbound[0],
+        source=a_inbound[1],
+        bus=event_bus,
+        database=database,
+    )
+    insert_inbound_message(
+        db_conn,
+        turns["b"].agent_id,
+        b_inbound[0],
+        source=b_inbound[1],
+        bus=event_bus,
+        database=database,
+    )
 
     for step in order:
         node, who = step.split()

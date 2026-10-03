@@ -13,6 +13,7 @@ import psycopg
 import pytest
 
 from base import telemetry
+from base.db import Database
 from base.telemetry import emitter
 from base.telemetry.metrics import observed_metrics as metrics
 
@@ -239,16 +240,18 @@ def test_projection_failure_keeps_jsonl_and_otlp_and_never_emits_recursively(
 
 def test_one_malformed_fact_does_not_discard_other_supported_rows(
     monkeypatch: pytest.MonkeyPatch,
+    database: Database,
 ) -> None:
     write = Mock(return_value=1)
     report = Mock()
     monkeypatch.setattr(metrics, "write_observations", write)
     monkeypatch.setattr(telemetry, "report_no_pipeline", report)
     metrics.project_events(
+        database,
         [
             _event("turn_end", duration_seconds="invalid", ok=True),
             _event("turn_end", duration_seconds=1.25, ok=False),
-        ]
+        ],
     )
     assert len(write.call_args.args[0]) == 1
     assert write.call_args.args[0][0].turn_duration_seconds == 1.25

@@ -15,6 +15,8 @@ from agent.state import CircuitState
 from agent.turn.runloop import _handle_fatal_llm_error
 from base import telemetry
 from base.agents.context import AvaContext
+from base.db import Database
+from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices
 from tests.fixtures.units import spawn_agent
 
@@ -41,6 +43,8 @@ async def test_the_breaker_open_event_is_recorded_in_audit_events(
             llm=MagicMock(),
             event_publisher=MagicMock(),
             agent=AgentSlices.resolve(),
+            db=Database.from_settings(),
+            bus=EventBus.from_settings(),
         ),
         agent_id=agent_id,
     )
@@ -79,6 +83,8 @@ async def test_a_failed_audit_write_is_reported_and_does_not_undo_the_open_break
             llm=MagicMock(),
             event_publisher=MagicMock(),
             agent=AgentSlices.resolve(),
+            db=Database.from_settings(),
+            bus=EventBus.from_settings(),
         ),
         agent_id=agent_id,
     )

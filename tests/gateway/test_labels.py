@@ -107,6 +107,7 @@ class TestNormalize:
 @pytest.mark.asyncio
 async def test_labeler_emits_batch_billing_after_a_successful_llm_call(
     monkeypatch: pytest.MonkeyPatch,
+    event_bus: EventBus,
 ) -> None:
     """A label response is accounted as a batch call before label validation.
 
@@ -150,7 +151,7 @@ async def test_labeler_emits_batch_billing_after_a_successful_llm_call(
 
     assert (
         await generate_label_async(
-            1, "prompt", labeler_config(labeler_model="deepseek-v4-pro"), labeler_db()
+            1, "prompt", labeler_config(labeler_model="deepseek-v4-pro"), labeler_db(), event_bus
         )
         is False
     )
@@ -169,7 +170,7 @@ async def test_labeler_emits_batch_billing_after_a_successful_llm_call(
 class TestGenerateLabelAsync:
     @pytest.mark.asyncio
     async def test_writes_label_when_null_and_publishes(
-        self, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+        self, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch, event_bus: EventBus
     ) -> None:
         tid = create_agent(db_conn)  # label NULL + label_user_set FALSE by default
         monkeypatch.setattr(
@@ -192,6 +193,7 @@ class TestGenerateLabelAsync:
             "\u67e5\u4e00\u4e0b X \u6a21\u5757\u600e\u4e48\u8c03",
             labeler_config(labeler_model="deepseek-v4-pro"),
             labeler_db(),
+            event_bus,
         )
         assert _label_of(db_conn, tid) == "\u67e5 X \u6a21\u5757"
         # LLM write does not flip sticky bit — user can still PATCH rename (LLM-written label counts as "not yet user-touched")
@@ -203,7 +205,7 @@ class TestGenerateLabelAsync:
 
     @pytest.mark.asyncio
     async def test_cas_skips_when_label_already_set(
-        self, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+        self, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch, event_bus: EventBus
     ) -> None:
         """When the user has already written a label via PATCH → LLM result should not overwrite."""
         tid = create_agent(db_conn)
@@ -231,6 +233,7 @@ class TestGenerateLabelAsync:
             "\u539f\u59cb prompt",
             labeler_config(labeler_model="deepseek-v4-pro"),
             labeler_db(),
+            event_bus,
         )
         assert _label_of(db_conn, tid) == "\u7528\u6237\u6539\u7684"
         # CAS miss → do not publish
@@ -238,7 +241,7 @@ class TestGenerateLabelAsync:
 
     @pytest.mark.asyncio
     async def test_cas_skips_after_user_reset(
-        self, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+        self, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch, event_bus: EventBus
     ) -> None:
         """After user PATCH reset writes label back to NULL + label_user_set=TRUE, the LLM
         result should not hit again (blocked by `AND NOT label_user_set`). This is a critical race —
@@ -269,13 +272,14 @@ class TestGenerateLabelAsync:
             "\u539f\u59cb prompt",
             labeler_config(labeler_model="deepseek-v4-pro"),
             labeler_db(),
+            event_bus,
         )
         assert _label_of(db_conn, tid) is None
         assert published == []
 
     @pytest.mark.asyncio
     async def test_llm_failure_leaves_label_null(
-        self, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+        self, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch, event_bus: EventBus
     ) -> None:
         tid = create_agent(db_conn)
 
@@ -294,14 +298,14 @@ class TestGenerateLabelAsync:
 
         # fail-soft: does not raise
         await generate_label_async(
-            tid, "p", labeler_config(labeler_model="deepseek-v4-pro"), labeler_db()
+            tid, "p", labeler_config(labeler_model="deepseek-v4-pro"), labeler_db(), event_bus
         )
         assert _label_of(db_conn, tid) is None
         assert published == []
 
     @pytest.mark.asyncio
     async def test_empty_normalized_label_skipped(
-        self, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+        self, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch, event_bus: EventBus
     ) -> None:
         """LLM returns blank / only quotes → _normalize returns "" → do not write to DB, do not publish."""
         tid = create_agent(db_conn)
@@ -315,14 +319,14 @@ class TestGenerateLabelAsync:
         monkeypatch.setattr(aredis.Redis, "publish", _capture, raising=False)
 
         await generate_label_async(
-            tid, "p", labeler_config(labeler_model="deepseek-v4-pro"), labeler_db()
+            tid, "p", labeler_config(labeler_model="deepseek-v4-pro"), labeler_db(), event_bus
         )
         assert _label_of(db_conn, tid) is None
         assert published == []
 
     @pytest.mark.asyncio
     async def test_extracts_text_from_thinking_blocks(
-        self, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+        self, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch, event_bus: EventBus
     ) -> None:
         """content is list [thinking, text] -> only text block extracted, signature NOT in label."""
         tid = create_agent(db_conn)
@@ -344,13 +348,14 @@ class TestGenerateLabelAsync:
             "migrate database schema",
             labeler_config(labeler_model="deepseek-v4-pro"),
             labeler_db(),
+            event_bus,
         )
         assert _label_of(db_conn, tid) == "migrate data"
         assert '"label":"migrate data"' in published[0]
 
     @pytest.mark.asyncio
     async def test_thinking_only_blocks_yield_empty(
-        self, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+        self, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch, event_bus: EventBus
     ) -> None:
         """content is all thinking blocks with no text -> raw="" -> skip, label stays NULL.
 
@@ -382,14 +387,14 @@ class TestGenerateLabelAsync:
         monkeypatch.setattr(aredis.Redis, "publish", _capture, raising=False)
 
         await generate_label_async(
-            tid, "p", labeler_config(labeler_model="deepseek-v4-pro"), labeler_db()
+            tid, "p", labeler_config(labeler_model="deepseek-v4-pro"), labeler_db(), event_bus
         )
         assert _label_of(db_conn, tid) is None
         assert published == []
 
     @pytest.mark.asyncio
     async def test_multiple_text_blocks_joined(
-        self, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+        self, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch, event_bus: EventBus
     ) -> None:
         """Multiple text blocks -> joined with space.
 
@@ -418,7 +423,7 @@ class TestGenerateLabelAsync:
         monkeypatch.setattr(aredis.Redis, "publish", _capture, raising=False)
 
         await generate_label_async(
-            tid, "p", labeler_config(labeler_model="deepseek-v4-pro"), labeler_db()
+            tid, "p", labeler_config(labeler_model="deepseek-v4-pro"), labeler_db(), event_bus
         )
         assert _label_of(db_conn, tid) == "migrate data"
 

@@ -30,8 +30,8 @@ from loguru import logger as loguru_logger
 from base import db
 from base.agents.exit_codes import CODE_BEHIND_MINIMUM_EXIT_CODE
 from base.config import settings
+from base.db import Database, connections
 from base.db import code_version_gate as gate
-from base.db import connections
 from base.events.live.bus import EventBus
 from base.log.sinks import add_sink
 from base.native_process import code_version
@@ -393,20 +393,24 @@ def _read_minimum() -> int:
     return int(row[0])
 
 
-def test_gateway_start_raises_the_minimum_to_its_version(stored_minimum: int) -> None:
+def test_gateway_start_raises_the_minimum_to_its_version(
+    stored_minimum: int, database: Database
+) -> None:
     _set_minimum(0)
-    assert gate.raise_min_code_version() == _VERSION
+    assert gate.raise_min_code_version(database) == _VERSION
     assert _read_minimum() == _VERSION
 
 
-def test_a_repeat_start_at_the_same_version_changes_nothing(stored_minimum: int) -> None:
+def test_a_repeat_start_at_the_same_version_changes_nothing(
+    stored_minimum: int, database: Database
+) -> None:
     _set_minimum(_VERSION)
-    assert gate.raise_min_code_version() == _VERSION
+    assert gate.raise_min_code_version(database) == _VERSION
     assert _read_minimum() == _VERSION
 
 
 def test_the_raise_is_greatest_and_never_lowers_the_minimum(
-    monkeypatch: pytest.MonkeyPatch, stored_minimum: int
+    monkeypatch: pytest.MonkeyPatch, stored_minimum: int, database: Database
 ) -> None:
     """The gate stops an older process before its update runs, so the race GREATEST
     closes (two gateways starting at once) is reproduced by an exempt dial, which
@@ -415,16 +419,18 @@ def test_the_raise_is_greatest_and_never_lowers_the_minimum(
     code_version.exempt_from_db_gate()
     monkeypatch.setattr(code_version, "_version", _VERSION)
 
-    assert gate.raise_min_code_version() == _VERSION + 25
+    assert gate.raise_min_code_version(database) == _VERSION + 25
     assert _read_minimum() == _VERSION + 25
 
 
-def test_the_raise_refuses_when_the_singleton_row_is_missing(stored_minimum: int) -> None:
+def test_the_raise_refuses_when_the_singleton_row_is_missing(
+    stored_minimum: int, database: Database
+) -> None:
     with psycopg.connect(settings.data_plane.db_url, autocommit=True) as conn:
         conn.execute("DELETE FROM deployment_state")
         try:
             with pytest.raises(RuntimeError, match="singleton row is missing"):
-                gate.raise_min_code_version()
+                gate.raise_min_code_version(database)
         finally:
             conn.execute(
                 "INSERT INTO deployment_state (id, min_code_version) VALUES (1, %s)",

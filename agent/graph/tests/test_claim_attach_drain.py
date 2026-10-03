@@ -19,6 +19,8 @@ from agent.nodes import CLAIM
 from agent.state import AttachEntry, AttachState, BaseAgentState
 from base.agents.context import AvaContext
 from base.agents.messages.kwargs import AvaMsgType
+from base.db import Database
+from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices
 
 
@@ -34,6 +36,8 @@ def _context(model_name: str) -> AvaContext:
         llm=cast("BaseChatModel", SimpleNamespace(model_name=model_name)),
         event_publisher=MagicMock(),
         agent=AgentSlices.resolve(),
+        db=Database.from_settings(),
+        bus=EventBus.from_settings(),
     )
 
 

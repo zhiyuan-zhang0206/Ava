@@ -201,6 +201,8 @@ async def _record_permanent_reject_outcome(
         await enqueue_fatal_provider_report_to_nearest_alive_ancestor(
             ctx.ops_pool,
             agent_id,
+            db=ctx.require_db(),
+            bus=ctx.require_bus(),
             error_class=exc.error_class or "permanent",
             provider=exc.provider,
             vendor=_model_vendor(ctx),
@@ -313,6 +315,8 @@ async def _report_blocked_failure(
         await enqueue_fatal_provider_report_to_nearest_alive_ancestor(
             ctx.ops_pool,
             agent_id,
+            db=ctx.require_db(),
+            bus=ctx.require_bus(),
             error_class=exc.error_class,
             provider=exc.provider,
             vendor=_model_vendor(ctx),

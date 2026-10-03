@@ -4,8 +4,10 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from functools import wraps
 
+from base.db import Database
 from base.deploy.lifecycle import start_serving
 from base.deploy.maintenance import admission
+from base.events.live.bus import EventBus
 
 
 @dataclass(frozen=True)
@@ -48,7 +50,7 @@ def resume_after_start[**P](start: Callable[P, int | StartDelegation]) -> Callab
         if result == 0 and start_serving.is_serving():
             from ops.cluster_pause import unpause_local_cluster
 
-            unpause_local_cluster()
+            unpause_local_cluster(Database.from_settings(), EventBus.from_settings())
             # start()'s status snapshot was taken under the hold, so it read paused.
             print(
                 "\n→ maintenance hold released: admission reopened, the cluster is serving "

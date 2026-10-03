@@ -24,7 +24,6 @@ from typing import Any
 from pydantic import BaseModel
 
 import base.cluster
-import base.db
 import base.deploy.state.host_deploy_state
 from base.api_contracts.status import PausedReason, SchemaMismatchStatus
 from base.clock import Clock
@@ -35,6 +34,7 @@ from base.cluster.machine import (
     machine_name,
 )
 from base.daemon.endpoints import ServiceEndpoints
+from base.db import Database
 from base.host.proc import process_alive
 from base.host.resource_sample import ResourceSample
 from base.sessions.page_session import is_page_label
@@ -407,6 +407,7 @@ def _collect_sessions() -> tuple[list[SessionInfo], int, int]:
 
 
 def _read_deploy_snapshot(
+    db: Database,
     pool: Any | None,
 ) -> tuple[
     base.deploy.state.host_deploy_state.HostDeployState | None,
@@ -416,14 +417,14 @@ def _read_deploy_snapshot(
     """Read deploy state, agents, and schema through one snapshot-local connection."""
     try:
         connection = (
-            base.db.connect(autocommit=True)
+            db.connect(autocommit=True)
             if pool is None
             else pool.connection(timeout=_POOL_BORROW_TIMEOUT_S)
         )
         with connection as conn:
-            state = base.deploy.state.host_deploy_state.read(conn=conn)
+            state = base.deploy.state.host_deploy_state.read(db, conn=conn)
             agent_count = _count_local_agents(conn) if is_agent_runner() else 0
-            schema_status = schema_mismatch_status(conn=conn)
+            schema_status = schema_mismatch_status(db, conn=conn)
         return state, agent_count, schema_status
     except Exception as exc:  # status degrades when the central DB is unavailable
         # Deploy state and agent count share one bounded connection. During a
@@ -453,6 +454,7 @@ def _read_resource_sample() -> ResourceSample | None:
 
 
 def _paused_reason(
+    db: Database,
     state: base.deploy.state.host_deploy_state.HostDeployState | None,
 ) -> PausedReason | None:
     """The first true clause of the `paused` verdict, in its own clause order.
@@ -469,7 +471,7 @@ def _paused_reason(
 
     if state is None:
         return "no_state"
-    if cluster_pause.is_paused(state):
+    if cluster_pause.is_paused(db, state):
         return "business_pause"
     if admission.held():
         return "maintenance"
@@ -488,7 +490,7 @@ def _supervisor_online() -> bool | None:
         return None
 
 
-def status_snapshot(pool: Any | None = None) -> ClusterStatus:
+def status_snapshot(db: Database, pool: Any | None = None) -> ClusterStatus:
     """Assemble this host's cluster state — used by `/api/cluster/status`.
 
     When setup is missing, base/cluster/machine.py's machine_name /
@@ -515,11 +517,11 @@ def status_snapshot(pool: Any | None = None) -> ClusterStatus:
     # of those independent operations, not their sum.
     with ThreadPoolExecutor(max_workers=1) as executor:
         resource_future = executor.submit(_read_resource_sample)
-        state, agent_count, schema_status = _read_deploy_snapshot(pool)
+        state, agent_count, schema_status = _read_deploy_snapshot(db, pool)
         resource = resource_future.result()
     # One source of truth for the pair: `paused` is exactly "a clause fired",
     # so the bool can never drift from its reason.
-    paused_reason = _paused_reason(state)
+    paused_reason = _paused_reason(db, state)
     return ClusterStatus(
         machine_name=machine_name(),
         serve_gateway=is_gateway(),

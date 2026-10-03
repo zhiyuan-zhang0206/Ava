@@ -27,6 +27,7 @@ from agent.ownership.hosted import (
 )
 from base.config import settings
 from base.db import Database, create_agent
+from base.events.live.bus import EventBus
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from base.telemetry import Event
 from services.agent_host import settlement as settlement_mod
@@ -48,7 +49,7 @@ async def _close_captured(
     """Run the real close_hosted_turn with each step swapped for a recorder."""
 
     async def settle_and_stamp(
-        _pool: object, _incarnation: object, *, exited: bool, crashed: bool
+        _pool: object, _incarnation: object, *, bus: object, exited: bool, crashed: bool
     ) -> TurnSettlement:
         del exited, crashed
         order.append("settle")
@@ -57,7 +58,7 @@ async def _close_captured(
     async def reconcile(_pool: object, _checkpointer: object, _incarnation: object) -> None:
         order.append("reconcile")
 
-    async def reap(_pool: object, _incarnation: object) -> list[int]:
+    async def reap(_pool: object, _incarnation: object, *, bus: object) -> list[int]:
         order.append("reap")
         return reap_result if reap_result is not None else []
 
@@ -68,6 +69,7 @@ async def _close_captured(
         cast(AsyncConnectionPool[Any], object()),
         cast(AsyncConnectionPool[Any], object()),
         Database.from_settings(),
+        EventBus.from_settings(),
         cast(AsyncPostgresSaver, object()),
         RuntimeIncarnation(42, uuid4(), uuid4()),
         outcome,
@@ -214,6 +216,8 @@ async def test_settle_boundary_prompt_reaps_the_second_crash_at_once(
     monkeypatch: pytest.MonkeyPatch,
     reap_enabled: None,
     loguru_records: list[dict[str, Any]],
+    database: Database,
+    event_bus: EventBus,
 ) -> None:
     """The drill: crash -> (grace kept) -> retry crash -> immediate reap.
 
@@ -237,14 +241,14 @@ async def test_settle_boundary_prompt_reaps_the_second_crash_at_once(
     monkeypatch.setattr("agent.ownership.corpse_reap.publish_agent_updated", _publish)
     attempts: list[list[ReapedCorpse]] = []
 
-    async def _recover(_db: object, reaped: list[ReapedCorpse]) -> None:
+    async def _recover(_db: object, _bus: object, reaped: list[ReapedCorpse]) -> None:
         attempts.append(list(reaped))
 
     monkeypatch.setattr(settlement_mod, "recover_reaped_corpses", _recover)
 
     agent_id, owner = _agent(db_conn), uuid4()
     first = await admit_hosted_runtime(
-        aops_pool, agent_id, "host-test", owner, expected_from="idling"
+        aops_pool, agent_id, "host-test", owner, expected_from="idling", db=database
     )
     assert first is not None
 
@@ -252,6 +256,7 @@ async def test_settle_boundary_prompt_reaps_the_second_crash_at_once(
         aops_pool,
         aops_pool,
         Database.from_settings(),
+        event_bus,
         cast(AsyncPostgresSaver, object()),
         first,
         TurnOutcome(exited=False, crashed=True),
@@ -264,18 +269,19 @@ async def test_settle_boundary_prompt_reaps_the_second_crash_at_once(
     assert row == ("idling", True)
     # The first death is not harvested: it keeps the whole grace window even
     # under an enabled switch.
-    assert await reap_crash_corpses(aops_pool, "host-test", owner) == []
+    assert await reap_crash_corpses(aops_pool, "host-test", owner, bus=event_bus) == []
     assert events == [] and published == []
 
     # The retry: a wake admits the zombie again, and this turn dies too.
     retry = await admit_hosted_runtime(
-        aops_pool, agent_id, "host-test", owner, expected_from="idling"
+        aops_pool, agent_id, "host-test", owner, expected_from="idling", db=database
     )
     assert retry is not None
     await settlement_mod.close_hosted_turn(
         aops_pool,
         aops_pool,
         Database.from_settings(),
+        event_bus,
         cast(AsyncPostgresSaver, object()),
         retry,
         TurnOutcome(exited=False, crashed=True),

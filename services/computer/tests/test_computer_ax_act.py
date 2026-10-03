@@ -13,6 +13,7 @@ from typing import Any
 
 import pytest
 
+from base.db import Database
 from services.computer.ax_ids import AxIdTable, AxSession
 from services.computer.errors import ComputerUseError
 from services.computer.mcp_daemon import ComputerMcpDaemon
@@ -155,7 +156,7 @@ def app(monkeypatch: pytest.MonkeyPatch) -> FakeAxApp:
 def audit_log(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]:
     log: list[dict[str, Any]] = []
 
-    def record(event: Any) -> None:
+    def record(_db: object, event: Any) -> None:
         log.append({"event_type": event.event_name, "payload": event.attributes})
 
     monkeypatch.setattr("base.agents.impersonation_manifest.emit_recorded_central_event", record)
@@ -163,8 +164,8 @@ def audit_log(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]:
 
 
 @pytest.fixture
-def daemon() -> ComputerMcpDaemon:
-    return ComputerMcpDaemon(computer_use_config(), sock="/nonexistent-test.sock")
+def daemon(database: Database) -> ComputerMcpDaemon:
+    return ComputerMcpDaemon(computer_use_config(), database, sock="/nonexistent-test.sock")
 
 
 async def call(
@@ -398,8 +399,8 @@ async def test_a_failed_set_value_leaves_the_value_out_of_the_audit_too(
     assert TYPED_TEXT not in json.dumps(audit_log)
 
 
-async def test_ax_act_is_declared_with_its_required_arguments() -> None:
-    daemon = ComputerMcpDaemon(computer_use_config(), sock="/nonexistent-test.sock")
+async def test_ax_act_is_declared_with_its_required_arguments(database: Database) -> None:
+    daemon = ComputerMcpDaemon(computer_use_config(), database, sock="/nonexistent-test.sock")
     resp = await daemon._dispatch({"id": 1, "method": "list_tools"})
     assert resp["ok"] is True
     tools: list[dict[str, Any]] = resp["result"]

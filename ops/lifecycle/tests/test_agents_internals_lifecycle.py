@@ -13,13 +13,15 @@ import base.db
 from base.agents import AgentNotFound, ResurrectAlreadyAlive, ResurrectError
 from base.agents.messages.envelope import wrap_inbound
 from base.cluster.machine import machine_name
+from base.db import Database
+from base.events.live.bus import EventBus
 from ops.agents import create_agent_row, resurrect_agent, wake
 from ops.agents.wake import ResurrectTriggerStaleError
 from ops.lifecycle import force_mark_terminated
 from ops.tests.pool_support import make_test_pool
 
 
-def _noop(*_args: object, **_kwargs: object) -> None:
+def _noop(_db: object, _bus: object, *_args: object, **_kwargs: object) -> None:
     return None
 
 
@@ -56,6 +58,8 @@ def _spawn_agent(
     (runner-side), with the launch stubbed by the autouse guard. The launch op's
     prompt-delivery half is covered in ops/lifecycle/tests/test_operations.py."""
     agent_id, _birth_config, _prompt_id, _attempt_id = create_agent_row(
+        Database.from_settings(),
+        EventBus.from_settings(),
         spawner=spawner,
         fork_from=fork_from,
         fork_checkpoint=fork_checkpoint,
@@ -65,7 +69,7 @@ def _spawn_agent(
         prompt=prompt,
         prompt_source=prompt_source,
     )
-    base.db.publish_inbound_wake(agent_id, "0")
+    base.db.publish_inbound_wake(Database.from_settings(), EventBus.from_settings(), agent_id, "0")
     return agent_id
 
 
@@ -109,6 +113,8 @@ class TestResurrectAgent:
         db_conn: psycopg.Connection,
         monkeypatch: pytest.MonkeyPatch,
         aops_pool: AsyncConnectionPool,
+        database: Database,
+        event_bus: EventBus,
     ) -> None:
         """A repeated force creates a newer intent fence without changing the
         real status-transition epoch used to reopen pages on manual resurrect."""
@@ -122,7 +128,7 @@ class TestResurrectAgent:
         db_conn.commit()
 
         with make_test_pool() as pool:
-            force_mark_terminated(agent_id, pool)
+            force_mark_terminated(database, event_bus, agent_id, pool)
             with db_conn.cursor() as cur:
                 cur.execute(
                     "SELECT status_changed_at, last_force_terminate_inbound_id "
@@ -138,7 +144,7 @@ class TestResurrectAgent:
             assert first_agent_row is not None and first_page_row is not None
             assert first_page_row[0] == first_agent_row[0]
 
-            force_mark_terminated(agent_id, pool)
+            force_mark_terminated(database, event_bus, agent_id, pool)
 
         with db_conn.cursor() as cur:
             cur.execute(
@@ -159,7 +165,7 @@ class TestResurrectAgent:
 
         await _settle_hosted_force(db_conn, aops_pool, agent_id)
 
-        resurrect_agent(agent_id, resurrected_by="user")
+        resurrect_agent(database, event_bus, agent_id, resurrected_by="user")
 
         with db_conn.cursor() as cur:
             cur.execute(
@@ -174,6 +180,8 @@ class TestResurrectAgent:
         db_conn: psycopg.Connection,
         monkeypatch: pytest.MonkeyPatch,
         aops_pool: AsyncConnectionPool,
+        database: Database,
+        event_bus: EventBus,
     ) -> None:
         """Even without a real status transition, a repeated explicit force
         fences every chat inbound that existed before that latest intent."""
@@ -183,15 +191,22 @@ class TestResurrectAgent:
             cur.execute("UPDATE agents_meta SET status = 'terminated' WHERE id = %s", (agent_id,))
         db_conn.commit()
         trigger_id = base.db.insert_inbound_message(
-            db_conn, agent_id, "work before repeated force", source="user"
+            db_conn,
+            agent_id,
+            "work before repeated force",
+            source="user",
+            bus=event_bus,
+            database=database,
         )
         with make_test_pool() as pool:
-            force_mark_terminated(agent_id, pool)
+            force_mark_terminated(database, event_bus, agent_id, pool)
 
         await _settle_hosted_force(db_conn, aops_pool, agent_id)
 
         with pytest.raises(ResurrectTriggerStaleError, match="trigger work no longer qualifies"):
             resurrect_agent(
+                database,
+                event_bus,
                 agent_id,
                 resurrected_by="system",
                 trigger_inbound_id=trigger_id,
@@ -202,7 +217,11 @@ class TestResurrectAgent:
         assert row is not None and row[2] == "terminated"
 
     def test_guarded_resurrect_rejects_chat_from_prior_termination(
-        self, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+        self,
+        db_conn: psycopg.Connection,
+        monkeypatch: pytest.MonkeyPatch,
+        database: Database,
+        event_bus: EventBus,
     ) -> None:
         """A watchdog task selected for one death must not revive a later
         explicit kill while its RPC was in flight."""
@@ -211,7 +230,12 @@ class TestResurrectAgent:
             cur.execute("UPDATE agents_meta SET status = 'terminated' WHERE id = %s", (agent_id,))
         db_conn.commit()
         trigger_id = base.db.insert_inbound_message(
-            db_conn, agent_id, "wake after first death", source="user"
+            db_conn,
+            agent_id,
+            "wake after first death",
+            source="user",
+            bus=event_bus,
+            database=database,
         )
 
         # The agent came back by another path and was explicitly killed again
@@ -232,6 +256,8 @@ class TestResurrectAgent:
 
         with pytest.raises(ResurrectTriggerStaleError, match="trigger work no longer qualifies"):
             resurrect_agent(
+                database,
+                event_bus,
                 agent_id,
                 resurrected_by="system",
                 trigger_inbound_id=trigger_id,
@@ -243,7 +269,11 @@ class TestResurrectAgent:
         assert _inbound_rows(db_conn, agent_id) == [("wake after first death", "chat", "user")]
 
     def test_guarded_resurrect_rejects_chat_that_is_no_longer_pending(
-        self, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+        self,
+        db_conn: psycopg.Connection,
+        monkeypatch: pytest.MonkeyPatch,
+        database: Database,
+        event_bus: EventBus,
     ) -> None:
         """A trigger claimed while the RPC is in flight no longer justifies
         launching the terminated owner."""
@@ -252,7 +282,7 @@ class TestResurrectAgent:
             cur.execute("UPDATE agents_meta SET status = 'terminated' WHERE id = %s", (agent_id,))
         db_conn.commit()
         trigger_id = base.db.insert_inbound_message(
-            db_conn, agent_id, "already handled", source="user"
+            db_conn, agent_id, "already handled", source="user", bus=event_bus, database=database
         )
         with db_conn.cursor() as cur:
             cur.execute(
@@ -263,6 +293,8 @@ class TestResurrectAgent:
 
         with pytest.raises(ResurrectTriggerStaleError, match="trigger work no longer qualifies"):
             resurrect_agent(
+                database,
+                event_bus,
                 agent_id,
                 resurrected_by="system",
                 trigger_inbound_id=trigger_id,
@@ -274,7 +306,11 @@ class TestResurrectAgent:
         assert _inbound_rows(db_conn, agent_id) == [("already handled", "chat", "user")]
 
     def test_guarded_resurrect_accepts_pending_chat_after_current_termination(
-        self, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+        self,
+        db_conn: psycopg.Connection,
+        monkeypatch: pytest.MonkeyPatch,
+        database: Database,
+        event_bus: EventBus,
     ) -> None:
         """A pending chat created after the current death still auto-wakes the
         agent, preserving the post-termination delivery contract."""
@@ -283,9 +319,16 @@ class TestResurrectAgent:
             cur.execute("UPDATE agents_meta SET status = 'terminated' WHERE id = %s", (agent_id,))
         db_conn.commit()
         trigger_id = base.db.insert_inbound_message(
-            db_conn, agent_id, "new work after death", source="user"
+            db_conn,
+            agent_id,
+            "new work after death",
+            source="user",
+            bus=event_bus,
+            database=database,
         )
         returned = resurrect_agent(
+            database,
+            event_bus,
             agent_id,
             resurrected_by="system",
             trigger_inbound_id=trigger_id,
@@ -301,7 +344,11 @@ class TestResurrectAgent:
         ]
 
     def test_guarded_resurrect_accepts_exact_pending_compact_after_termination(
-        self, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+        self,
+        db_conn: psycopg.Connection,
+        monkeypatch: pytest.MonkeyPatch,
+        database: Database,
+        event_bus: EventBus,
     ) -> None:
         """UI compact is guarded work too: its exact durable id and expected
         kind qualify only while pending after the current death."""
@@ -315,8 +362,12 @@ class TestResurrectAgent:
             "",
             source="user",
             kind="compact_request",
+            bus=event_bus,
+            database=database,
         )
         returned = resurrect_agent(
+            database,
+            event_bus,
             agent_id,
             resurrected_by="system",
             trigger_inbound_id=compact_id,
@@ -331,7 +382,11 @@ class TestResurrectAgent:
         ]
 
     def test_guarded_compact_rejects_kind_mismatch_and_claimed_trigger(
-        self, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+        self,
+        db_conn: psycopg.Connection,
+        monkeypatch: pytest.MonkeyPatch,
+        database: Database,
+        event_bus: EventBus,
     ) -> None:
         """The caller's expected kind is part of the CAS, and a compact that
         has already been claimed no longer licenses a new process."""
@@ -345,10 +400,14 @@ class TestResurrectAgent:
             "",
             source="user",
             kind="compact_request",
+            bus=event_bus,
+            database=database,
         )
 
         with pytest.raises(ResurrectTriggerStaleError):
             resurrect_agent(
+                database,
+                event_bus,
                 agent_id,
                 resurrected_by="system",
                 trigger_inbound_id=compact_id,
@@ -362,6 +421,8 @@ class TestResurrectAgent:
         db_conn.commit()
         with pytest.raises(ResurrectTriggerStaleError):
             resurrect_agent(
+                database,
+                event_bus,
                 agent_id,
                 resurrected_by="system",
                 trigger_inbound_id=compact_id,
@@ -375,6 +436,8 @@ class TestResurrectAgent:
         db_conn: psycopg.Connection,
         monkeypatch: pytest.MonkeyPatch,
         aops_pool: AsyncConnectionPool,
+        database: Database,
+        event_bus: EventBus,
     ) -> None:
         """A force after compact enqueue fences that older work exactly like
         chat, even though no second status transition occurs."""
@@ -389,14 +452,18 @@ class TestResurrectAgent:
             "",
             source="user",
             kind="compact_request",
+            bus=event_bus,
+            database=database,
         )
         with make_test_pool() as pool:
-            force_mark_terminated(agent_id, pool)
+            force_mark_terminated(database, event_bus, agent_id, pool)
 
         await _settle_hosted_force(db_conn, aops_pool, agent_id)
 
         with pytest.raises(ResurrectTriggerStaleError):
             resurrect_agent(
+                database,
+                event_bus,
                 agent_id,
                 resurrected_by="system",
                 trigger_inbound_id=compact_id,
@@ -405,7 +472,11 @@ class TestResurrectAgent:
         assert _agents_row(db_conn, agent_id)[2] == "terminated"  # type: ignore[index]
 
     def test_resurrects_terminated_agent_and_inserts_resurrect_inbound(
-        self, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+        self,
+        db_conn: psycopg.Connection,
+        monkeypatch: pytest.MonkeyPatch,
+        database: Database,
+        event_bus: EventBus,
     ) -> None:
         """Terminated -> unclaimed idling with durable resurrection and optional chat."""
         agent_id = _hosted_agent(db_conn)
@@ -414,7 +485,9 @@ class TestResurrectAgent:
             cur.execute("UPDATE agents_meta SET status = 'terminated' WHERE id = %s", (agent_id,))
         db_conn.commit()
 
-        returned = resurrect_agent(agent_id, resurrected_by="user", prompt="resume work")
+        returned = resurrect_agent(
+            database, event_bus, agent_id, resurrected_by="user", prompt="resume work"
+        )
 
         assert returned == agent_id
         row = _agents_row(db_conn, agent_id)
@@ -426,7 +499,11 @@ class TestResurrectAgent:
         assert rows == [("", "resurrect", "user"), ("resume work", "chat", "user")]
 
     def test_resurrect_without_prompt_inserts_only_lifecycle_inbound(
-        self, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+        self,
+        db_conn: psycopg.Connection,
+        monkeypatch: pytest.MonkeyPatch,
+        database: Database,
+        event_bus: EventBus,
     ) -> None:
         """The UI resurrect button is a pure lifecycle event — no prompt. Only
         the kind='resurrect' marker inbound is written; no chat inbound. The
@@ -436,13 +513,17 @@ class TestResurrectAgent:
             cur.execute("UPDATE agents_meta SET status = 'terminated' WHERE id = %s", (agent_id,))
         db_conn.commit()
 
-        returned = resurrect_agent(agent_id, resurrected_by="user")
+        returned = resurrect_agent(database, event_bus, agent_id, resurrected_by="user")
 
         assert returned == agent_id
         assert _inbound_rows(db_conn, agent_id) == [("", "resurrect", "user")]
 
     def test_resurrect_records_resurrected_by_in_inbound_source(
-        self, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+        self,
+        db_conn: psycopg.Connection,
+        monkeypatch: pytest.MonkeyPatch,
+        database: Database,
+        event_bus: EventBus,
     ) -> None:
         """resurrected_by is written as-is into the inbound source field (not into content), so that claim
         can compose it into the lifecycle marker during dispatch. SDK paths pass 'agent:N', gateway passes 'user'."""
@@ -451,7 +532,9 @@ class TestResurrectAgent:
             cur.execute("UPDATE agents_meta SET status = 'terminated' WHERE id = %s", (agent_id,))
         db_conn.commit()
 
-        resurrect_agent(agent_id, resurrected_by="agent:42", prompt="resume work")
+        resurrect_agent(
+            database, event_bus, agent_id, resurrected_by="agent:42", prompt="resume work"
+        )
 
         rows = _inbound_rows(db_conn, agent_id)
         assert rows == [
@@ -460,7 +543,11 @@ class TestResurrectAgent:
         ]
 
     def test_resurrect_with_prompt_chat_inbound_has_wrappable_source(
-        self, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+        self,
+        db_conn: psycopg.Connection,
+        monkeypatch: pytest.MonkeyPatch,
+        database: Database,
+        event_bus: EventBus,
     ) -> None:
         """A resurrect with a prompt writes two inbounds (lifecycle + chat); the chat inbound reuses
         resurrected_by as its source — that value must survive envelope wrap, otherwise
@@ -470,7 +557,9 @@ class TestResurrectAgent:
             cur.execute("UPDATE agents_meta SET status = 'terminated' WHERE id = %s", (agent_id,))
         db_conn.commit()
 
-        resurrect_agent(agent_id, resurrected_by="user", prompt="catch up with #341")
+        resurrect_agent(
+            database, event_bus, agent_id, resurrected_by="user", prompt="catch up with #341"
+        )
 
         rows = _inbound_rows(db_conn, agent_id)
         assert rows == [
@@ -490,9 +579,11 @@ class TestResurrectAgent:
         self,
         db_conn: psycopg.Connection,
         monkeypatch: pytest.MonkeyPatch,
+        database: Database,
+        event_bus: EventBus,
     ) -> None:
         with pytest.raises(AgentNotFound, match="does not exist"):
-            resurrect_agent(9999, resurrected_by="user", prompt="test")
+            resurrect_agent(database, event_bus, 9999, resurrected_by="user", prompt="test")
 
     @pytest.mark.parametrize(
         "alive_status",
@@ -503,6 +594,8 @@ class TestResurrectAgent:
         db_conn: psycopg.Connection,
         monkeypatch: pytest.MonkeyPatch,
         alive_status: str,
+        database: Database,
+        event_bus: EventBus,
     ) -> None:
         """Any status other than 'terminated' cannot be resurrected — only 'terminated' is a valid source state.
 
@@ -523,12 +616,16 @@ class TestResurrectAgent:
                 )
             db_conn.commit()
         with pytest.raises(ResurrectAlreadyAlive, match=alive_status):
-            resurrect_agent(agent_id, resurrected_by="user", prompt="test")
+            resurrect_agent(database, event_bus, agent_id, resurrected_by="user", prompt="test")
         # The failure path must not insert inbound (transaction inner raise prevents commit)
         assert _inbound_count(db_conn, agent_id) == 0
 
     def test_resurrect_select_update_race_does_not_insert_inbound(
-        self, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+        self,
+        db_conn: psycopg.Connection,
+        monkeypatch: pytest.MonkeyPatch,
+        database: Database,
+        event_bus: EventBus,
     ) -> None:
         """SELECT sees 'terminated' → after SELECT the row is concurrently changed to 'idling' → UPDATE
         WHERE status='terminated' hits 0 rows — at this point we must **not** proceed to INSERT a fake revival
@@ -562,7 +659,7 @@ class TestResurrectAgent:
         monkeypatch.setattr(psycopg.Cursor, "fetchone", lying_fetchone)
 
         with pytest.raises(ResurrectAlreadyAlive, match="concurrently modified"):
-            resurrect_agent(agent_id, resurrected_by="user", prompt="test")
+            resurrect_agent(database, event_bus, agent_id, resurrected_by="user", prompt="test")
 
         # key invariant 1: did not deliver a fake notification to a live agent
         monkeypatch.undo()  # restore fetchone so subsequent queries work
@@ -575,7 +672,9 @@ class TestResurrectAgent:
         self,
         db_conn: psycopg.Connection,
         monkeypatch: pytest.MonkeyPatch,
+        database: Database,
+        event_bus: EventBus,
     ) -> None:
         """Both subclasses belong to ResurrectError — a coarse catch with ResurrectError can catch them."""
         with pytest.raises(ResurrectError):
-            resurrect_agent(9999, resurrected_by="user", prompt="test")
+            resurrect_agent(database, event_bus, 9999, resurrected_by="user", prompt="test")

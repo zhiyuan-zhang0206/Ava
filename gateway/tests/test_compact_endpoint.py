@@ -16,6 +16,7 @@ from fastapi.testclient import TestClient
 
 from base.agents import AgentStatus
 from base.cluster.machine import machine_name
+from base.events.live.bus import EventBus
 from gateway.app import app
 
 
@@ -93,6 +94,7 @@ def test_compact_passes_inserted_id_and_kind_to_guarded_resurrect(
 
     async def _resurrect(
         _db: object,
+        _bus: EventBus,
         agent_id: int,
         *,
         trigger_inbound_id: int | None = None,

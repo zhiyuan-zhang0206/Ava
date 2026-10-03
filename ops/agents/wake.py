@@ -23,8 +23,7 @@ from base.agents.incarnation.lifecycle_acceptance import (
 )
 from base.cluster.machine import machine_name
 from base.config import field_alias, get_field, settings
-from base.db import fetch_one, publish_inbound_wake
-from base.db.transaction import write_transaction
+from base.db import Database, fetch_one, publish_inbound_wake
 from base.events.live.announce import publish_agent_updated_sync
 from base.events.live.bus import EventBus
 from base.log import logger
@@ -184,6 +183,8 @@ def _auto_resurrect_max_attempts() -> int:
 
 
 def _prepare_resurrect_attempt(
+    db: Database,
+    bus: EventBus,
     agent_id: int,
     *,
     resurrected_by: str,
@@ -205,8 +206,8 @@ def _prepare_resurrect_attempt(
     from base.agents.messages.envelope import reject_unnegotiated_caller
 
     reject_unnegotiated_caller(resurrected_by)
-    recover_local_resources(agent_id, machine_name())
-    with write_transaction() as conn, conn.cursor() as cur:
+    recover_local_resources(db, agent_id, machine_name())
+    with db.write_transaction() as conn, conn.cursor() as cur:
         latched_machine = _lock_active_home_machine(cur, agent_id)
         cur.execute(_RESURRECTION_ROW, (agent_id,))
         row = cur.fetchone()
@@ -295,8 +296,8 @@ def _prepare_resurrect_attempt(
             billing_recovery=billing_recovery,
         )
         conn.commit()
-        publish_agent_updated_sync(EventBus.from_settings(), agent_id)
-    publish_inbound_wake(agent_id, "0")
+        publish_agent_updated_sync(bus, agent_id)
+    publish_inbound_wake(db, bus, agent_id, "0")
     return prepared_event
 
 
@@ -325,6 +326,8 @@ def _stage_resurrect_event(
 
 
 def resurrect_agent(
+    db: Database,
+    bus: EventBus,
     agent_id: int,
     *,
     resurrected_by: str,
@@ -355,6 +358,8 @@ def resurrect_agent(
     if (trigger_inbound_id is None) != (trigger_inbound_kind is None):
         raise ValueError("trigger inbound id and kind must be provided together")
     prepared_event = _prepare_resurrect_attempt(
+        db,
+        bus,
         agent_id,
         resurrected_by=resurrected_by,
         prompt=prompt,

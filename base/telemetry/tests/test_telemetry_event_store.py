@@ -13,6 +13,7 @@ from uuid import uuid4
 import psycopg
 import pytest
 
+from base.db import Database
 from base.db.connections import NoDatabaseAuthorityError
 from base.telemetry import event_store
 from base.telemetry.emitter import Event, category_for_kind
@@ -55,6 +56,7 @@ def _rows(db_conn: psycopg.Connection[Any], marker: str) -> list[tuple[Any, ...]
 
 def test_telemetry_and_log_events_land_and_audit_events_do_not(
     db_conn: psycopg.Connection[Any],
+    database: Database,
 ) -> None:
     marker = uuid4().hex
     batch = [
@@ -62,8 +64,8 @@ def test_telemetry_and_log_events_land_and_audit_events_do_not(
         replace(_event("log", marker), level="error"),
         _event("spawn", marker),
     ]
-    event_store.store_events(batch)
-    event_store.store_events(batch)  # a redelivered batch adds nothing
+    event_store.store_events(database, batch)
+    event_store.store_events(database, batch)  # a redelivered batch adds nothing
 
     assert [(r[0], r[1], r[2]) for r in _rows(db_conn, marker)] == [
         ("llm_usage", "telemetry", "store-cluster"),
@@ -71,9 +73,12 @@ def test_telemetry_and_log_events_land_and_audit_events_do_not(
     ]
 
 
-def test_only_events_somebody_reads_land(db_conn: psycopg.Connection[Any]) -> None:
+def test_only_events_somebody_reads_land(
+    db_conn: psycopg.Connection[Any], database: Database
+) -> None:
     marker = uuid4().hex
     event_store.store_events(
+        database,
         [
             _event("llm_usage", marker),  # persist=True
             _event("exec_envelope", marker),  # registered, no reader by name
@@ -81,7 +86,7 @@ def test_only_events_somebody_reads_land(db_conn: psycopg.Connection[Any]) -> No
             _event("never_registered_name", marker),  # unregistered: kept
             replace(_event("log", marker), level="error"),  # level reads
             replace(_event("exec_envelope", marker), level="warning"),  # the level reads it
-        ]
+        ],
     )
 
     assert [(r[0], r[1]) for r in _rows(db_conn, marker)] == [
@@ -142,23 +147,25 @@ def test_the_mirror_replay_applies_the_same_judgment() -> None:
     ]
 
 
-def test_a_nul_character_is_replaced_not_fatal(db_conn: psycopg.Connection[Any]) -> None:
+def test_a_nul_character_is_replaced_not_fatal(
+    db_conn: psycopg.Connection[Any], database: Database
+) -> None:
     marker = uuid4().hex
-    event_store.store_events([_event("exec", marker, body="a\x00b")])
+    event_store.store_events(database, [_event("exec", marker, body="a\x00b")])
 
     [row] = _rows(db_conn, marker)
     assert row[3]["body"] == "a�b"
 
 
 def test_a_failed_batch_is_reported_once_then_backs_off_and_recovers(
-    db_conn: psycopg.Connection[Any], monkeypatch: pytest.MonkeyPatch
+    db_conn: psycopg.Connection[Any], monkeypatch: pytest.MonkeyPatch, database: Database
 ) -> None:
     marker = uuid4().hex
     emitted: list[dict[str, Any]] = []
     attempts: list[int] = []
     real_write = event_store._write
 
-    def failing_write(records: list[dict[str, Any]]) -> None:
+    def failing_write(_db: Database, records: list[dict[str, Any]]) -> None:
         attempts.append(len(records))
         raise psycopg.OperationalError("database is down")
 
@@ -168,8 +175,8 @@ def test_a_failed_batch_is_reported_once_then_backs_off_and_recovers(
         emitted.append(kwargs["attributes"])
 
     monkeypatch.setattr("base.telemetry.emit", capture_emit)
-    event_store.store_events([_event("llm_usage", marker)])
-    event_store.store_events([_event("llm_usage", marker)])  # inside the backoff window
+    event_store.store_events(database, [_event("llm_usage", marker)])
+    event_store.store_events(database, [_event("llm_usage", marker)])  # inside the backoff window
 
     assert attempts == [1]
     assert [(e["rows"], e["consecutive_failures"], e["error_class"]) for e in emitted] == [
@@ -179,7 +186,7 @@ def test_a_failed_batch_is_reported_once_then_backs_off_and_recovers(
 
     monkeypatch.setattr(event_store, "_write", real_write)
     event_store._retry_at = time.monotonic() - 1
-    event_store.store_events([_event("llm_usage", marker)])
+    event_store.store_events(database, [_event("llm_usage", marker)])
 
     assert len(_rows(db_conn, marker)) == 1
     assert event_store._failures == 0
@@ -187,15 +194,16 @@ def test_a_failed_batch_is_reported_once_then_backs_off_and_recovers(
 
 def test_a_process_without_database_authority_turns_the_sink_off(
     monkeypatch: pytest.MonkeyPatch,
+    database: Database,
 ) -> None:
     attempts: list[int] = []
 
-    def refused(records: list[dict[str, Any]]) -> None:
+    def refused(_db: Database, records: list[dict[str, Any]]) -> None:
         attempts.append(len(records))
         raise NoDatabaseAuthorityError("no login for this home")
 
     monkeypatch.setattr(event_store, "_write", refused)
-    event_store.store_events([_event("llm_usage", "x")])
-    event_store.store_events([_event("llm_usage", "x")])
+    event_store.store_events(database, [_event("llm_usage", "x")])
+    event_store.store_events(database, [_event("llm_usage", "x")])
 
     assert attempts == [1]

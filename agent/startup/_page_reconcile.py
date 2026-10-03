@@ -9,7 +9,9 @@ from typing import Any
 from psycopg_pool import AsyncConnectionPool
 
 from base.agents import page_recovery
+from base.db import Database
 from base.db.transaction import async_write_transaction
+from base.events.live.bus import EventBus
 from base.log import logger
 
 # The notice wording, dedupe window and statements are shared with the page-server
@@ -31,6 +33,8 @@ async def _recent_page_recovery_notice(cur: Any, agent_id: int) -> bool:
 
 async def _close_dead_show_pages(
     pool: AsyncConnectionPool,
+    db: Database,
+    bus: EventBus,
     agent_id: int,
     dead: Sequence[tuple[str, int]],
     event_publisher: Any | None,
@@ -95,7 +99,7 @@ async def _close_dead_show_pages(
         # the listener SELECT immediately on subscribe.
         from base.db import publish_inbound_wake
 
-        await asyncio.to_thread(publish_inbound_wake, agent_id, "0")
+        await asyncio.to_thread(publish_inbound_wake, db, bus, agent_id, "0")
         logger.bind(event="page_restore_notified", agent_id=agent_id).info(
             "page-restore: told agent {agent_id} to re-serve dead show page(s) {names}",
             agent_id=agent_id,

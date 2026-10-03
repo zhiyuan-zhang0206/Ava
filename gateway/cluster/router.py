@@ -45,14 +45,14 @@ router = APIRouter()
 _log = logging.getLogger(__name__)
 
 
-def _local_snapshot_blocking() -> ClusterStatus:
+def _local_snapshot_blocking(db: Database) -> ClusterStatus:
     """Sync local snapshot for a pure gateway (no ops server) — via to_thread:
     paused flag (file), orchestration liveness (session probe) and the
     prod-source HEAD (git rev-parse) are all child-process / disk reads that
     must not run on the event loop."""
     from base.native_process import loaded_commit as _process_sha
 
-    paused = cluster_is_paused()
+    paused = cluster_is_paused(db)
     return ClusterStatus(
         machine_name=machine_name(),
         serve_gateway=is_gateway(),
@@ -67,7 +67,7 @@ def _local_snapshot_blocking() -> ClusterStatus:
         # gateway that outlived a checkout advance reports the old commit and the
         # roster shows the drift.
         running_sha=_process_sha.get(),
-        schema_mismatch=schema_mismatch_status(),
+        schema_mismatch=schema_mismatch_status(db),
     )
 
 
@@ -81,14 +81,16 @@ def _machines_rows_blocking(pool: ConnectionPool) -> list[tuple[Any, ...]]:
         return cur.fetchall()
 
 
-async def _roster_statuses(pool: ConnectionPool, *, fresh: bool) -> list[MachineStatus]:
+async def _roster_statuses(
+    pool: ConnectionPool, db: Database, *, fresh: bool
+) -> list[MachineStatus]:
     """The roster of every unpaused machine: from the heartbeat liveness pass's
     snapshot, or — when `fresh` — by dialing every runner now."""
     rows = await asyncio.to_thread(_machines_rows_blocking, pool)
     if not rows:
         return []
     found = None if fresh else await asyncio.to_thread(snapshots.read_all_blocking, pool)
-    return await gather_cluster_status(rows, machine_name(), snapshots=found)
+    return await gather_cluster_status(db, rows, machine_name(), snapshots=found)
 
 
 async def _dispatch_op(
@@ -162,7 +164,7 @@ async def cluster_status_snapshot(db: Database) -> ClusterStatus:
     if is_agent_runner():
         result = await _dispatch_op(db, machine_name(), "status_probe", {})
         return ClusterStatus.model_validate(result)
-    return await asyncio.to_thread(_local_snapshot_blocking)
+    return await asyncio.to_thread(_local_snapshot_blocking, db)
 
 
 @router.get("/api/cluster/roster", response_model=list[MachineStatus])
@@ -184,7 +186,9 @@ async def get_cluster_roster(
     the fleet update. Same fan-out the `/api/status` cluster panel uses. Bypasses
     503 mode so the roster stays visible during pause.
     """
-    return await _roster_statuses(request.app.state.control_db_pool, fresh=fresh)
+    return await _roster_statuses(
+        request.app.state.control_db_pool, request.app.state.db, fresh=fresh
+    )
 
 
 # --- Admin ops (token-only ops, ssh-free) -------------------------------------
@@ -340,7 +344,9 @@ async def get_cluster_machines(
     perspective). role / gateway_url are intentionally omitted — agents reason
     over the free-text description, not ops topology.
     """
-    statuses = await _roster_statuses(request.app.state.control_db_pool, fresh=fresh)
+    statuses = await _roster_statuses(
+        request.app.state.control_db_pool, request.app.state.db, fresh=fresh
+    )
     # This is the AGENT view: it lists only machines that can run agent processes
     # (carry the agent-runner capability). A gateway-only node is intentionally
     # invisible here; a single-box gateway,agent-runner node shows up because it

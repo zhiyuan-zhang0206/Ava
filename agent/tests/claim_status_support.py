@@ -9,6 +9,7 @@ import pytest
 from langgraph.graph.message import REMOVE_ALL_MESSAGES
 from psycopg_pool import AsyncConnectionPool
 
+from base.db import Database
 from tests.fixtures.units import spawn_agent
 
 
@@ -74,7 +75,7 @@ def _set_agent_status(db: psycopg.Connection, agent_id: int, status: str) -> Non
 
 
 @pytest.fixture
-async def running_agent(aops_pool: AsyncConnectionPool):
+async def running_agent(aops_pool: AsyncConnectionPool, database: Database):
     """Admit a real hosted owner and bind it throughout each dispatch test."""
     from uuid import uuid4
 
@@ -84,7 +85,7 @@ async def running_agent(aops_pool: AsyncConnectionPool):
 
     agent_id = spawn_agent()
     incarnation = await admit_hosted_runtime(
-        aops_pool, agent_id, machine_name(), uuid4(), expected_from="idling"
+        aops_pool, agent_id, machine_name(), uuid4(), expected_from="idling", db=database
     )
     assert incarnation is not None
     with bind_turn_identity(agent_id, incarnation=incarnation):

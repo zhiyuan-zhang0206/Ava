@@ -29,6 +29,7 @@ import pytest
 from base.cluster import machines as _machines
 from base.cluster.machine import machine_name
 from base.db import Database
+from base.events.live.bus import EventBus
 from base.lm.plugin_providers import ensure_provider_plugins_loaded
 from gateway.agents import forward as _agents_forward_router
 from gateway.agents import router as _agents_router
@@ -56,7 +57,9 @@ def _provider_plugins_loaded() -> None:
 
 
 @pytest.fixture(autouse=True)
-def _local_spawn_in_process(monkeypatch: pytest.MonkeyPatch) -> None:
+def _local_spawn_in_process(
+    monkeypatch: pytest.MonkeyPatch, database: Database, event_bus: EventBus
+) -> None:
     # The integration tests take this fixture from here (imported into their module).
     async def _in_process_forward(
         _db: object, target: str, body: LaunchAgentRequest
@@ -64,7 +67,7 @@ def _local_spawn_in_process(monkeypatch: pytest.MonkeyPatch) -> None:
         # The gateway creates the agent row in-process (create_agent_row, real
         # DB); the runner's ops daemon dispatches launch_agent_op in-process —
         # mirror that here so a forwarded local launch produces a real child.
-        return await launch_agent_op(body, app.state.db_pool)
+        return await launch_agent_op(database, event_bus, body, app.state.db_pool)
 
     monkeypatch.setattr(_agents_router, "forward_spawn_to_remote", _in_process_forward)
 
@@ -100,14 +103,18 @@ def _local_spawn_in_process(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.fixture(autouse=True)
-def _local_lifecycle_in_process(monkeypatch: pytest.MonkeyPatch) -> None:
+def _local_lifecycle_in_process(
+    monkeypatch: pytest.MonkeyPatch, database: Database, event_bus: EventBus
+) -> None:
     async def _in_process_lifecycle(_db: object, target: str, path: str, json_body: dict) -> dict:
         # The runner's ops daemon dispatches lifecycle_op in-process; mirror
         # that here so a forwarded local terminate/resurrect/restart executes
         # against the test DB. AvaAgentError raises propagate directly — the
         # same exception types the wire round-trip would reconstruct. model_dump
         # mirrors the daemon serializing the response model onto the wire dict.
-        return (await lifecycle_op(path, json_body, app.state.db_pool)).model_dump(mode="json")  # pyright: ignore[reportUnknownArgumentType]
+        return (
+            await lifecycle_op(database, event_bus, path, json_body, app.state.db_pool)  # pyright: ignore[reportUnknownArgumentType]
+        ).model_dump(mode="json")  # pyright: ignore[reportUnknownArgumentType]
 
     monkeypatch.setattr(_agents_forward_router, "enqueue_lifecycle", _in_process_lifecycle)  # pyright: ignore[reportUnknownArgumentType]
 

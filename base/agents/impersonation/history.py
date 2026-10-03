@@ -19,8 +19,8 @@ from psycopg.types.json import Jsonb
 from pydantic import BaseModel
 
 from base.cluster.machine import machine_name
-from base.db import connect
-from base.db.transaction import write_transaction
+from base.db import Database
+from base.events.live.bus import EventBus
 from base.host.private_storage import write_private_bytes
 from base.paths import workspace_dir
 
@@ -102,10 +102,10 @@ def public_session(lease: dict[str, Any]) -> dict[str, Any]:
     return result
 
 
-def resolve(agent_id: int, session_id: int) -> dict[str, Any]:
+def resolve(db: Database, agent_id: int, session_id: int) -> dict[str, Any]:
     if isinstance(session_id, bool) or not isinstance(session_id, int) or session_id < 0:
         raise ValueError("session_id must be a nonnegative integer")
-    with connect() as conn, conn.cursor(row_factory=dict_row) as cur:
+    with db.connect() as conn, conn.cursor(row_factory=dict_row) as cur:
         cur.execute(
             "SELECT * FROM agent_impersonations WHERE agent_id=%s AND session_id=%s",
             (agent_id, session_id),
@@ -197,6 +197,8 @@ def capture_pending(conn: psycopg.Connection, lease: dict[str, Any]) -> None:
 
 
 def say(
+    db: Database,
+    bus: EventBus,
     lease_id: str,
     caller: object,
     content: str,
@@ -206,12 +208,11 @@ def say(
 ) -> int:
     """Commit a user-visible reply before publishing its refresh notification."""
     from base.agents.impersonation._store import lock_lease, require_active_locked
-    from base.events.live.bus import EventBus
     from base.events.live.projection import ImpersonationChanged
 
     if not content.strip() or phase not in ("commentary", "final") or not message_key.strip():
         raise ValueError("A message needs nonempty content/key and commentary or final phase")
-    with write_transaction() as conn:
+    with db.write_transaction() as conn:
         lease = lock_lease(conn, lease_id)
         require_active_locked(conn, lease, caller)
         seq = append(
@@ -232,7 +233,7 @@ def say(
                 "UPDATE agents_meta SET last_message_text=%s,last_active_at=clock_timestamp() WHERE id=%s",
                 (content, lease["agent_id"]),
             )
-    EventBus.from_settings().publish_best_effort_sync(
+    bus.publish_best_effort_sync(
         ImpersonationChanged(agent_id=lease["agent_id"]).model_dump_json(),
         context="impersonation_message",
     )

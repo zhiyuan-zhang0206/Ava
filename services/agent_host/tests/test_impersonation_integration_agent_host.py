@@ -24,6 +24,8 @@ async def test_replacement_host_adopts_held_agent_without_model(
     aops_pool: AsyncConnectionPool[Any],
     monkeypatch: pytest.MonkeyPatch,
     control: str,
+    database: Database,
+    event_bus: EventBus,
 ) -> None:
     from services.agent_host.host import AgentHost
 
@@ -34,18 +36,20 @@ async def test_replacement_host_adopts_held_agent_without_model(
     )
     db_conn.commit()
     owner = await admit_hosted_runtime(
-        aops_pool, agent_id, machine, uuid4(), expected_from="idling"
+        aops_pool, agent_id, machine, uuid4(), expected_from="idling", db=database
     )
     assert owner is not None
     lease = leases.request(
+        database,
+        event_bus,
         agent_id,
         caller=CallerIdentity(kind="external_agent", subject="codex"),
         process_metadata=recorded_tree(),
         relay_provider="codex",
         relay_thread_id=str(uuid4()),
     )
-    leases.accept(lease["id"], agent_id, owner, "Handoff brief")
-    leases.activate(lease["id"], owner)
+    leases.accept(database, event_bus, lease["id"], agent_id, owner, "Handoff brief")
+    leases.activate(database, event_bus, lease["id"], owner)
     # The held-controls supervision may re-provision the restart-lost bound
     # relay; a real codex relay process must never start inside the test
     # environment. The recorded controller tree is synthetic (its pids are not
@@ -81,7 +85,9 @@ async def test_replacement_host_adopts_held_agent_without_model(
         (agent_id,),
     ).fetchone() == (host._owner, "idling", True)
     db_conn.commit()
-    assert leases.require_active(lease["id"], attested_caller(lease))["status"] == "active"
+    assert (
+        leases.require_active(database, lease["id"], attested_caller(lease))["status"] == "active"
+    )
     # The open lease keeps the row in the periodic pull scan: held supervision
     # must never rely on a wake being delivered (task #3998).
     assert agent_id in {wake.agent_id for wake in await host.pending_inbound_wakes(180)}
@@ -108,7 +114,9 @@ async def test_replacement_host_adopts_held_agent_without_model(
     db_conn.commit()
     await host.run_turn(agent_id)
     expected = "expired" if control == "terminate" else "active"
-    assert leases.get(lease["id"], attested_caller(lease))["status"] == expected
+    assert (
+        leases.get(database, event_bus, lease["id"], attested_caller(lease))["status"] == expected
+    )
     if control == "cancel":
         assert db_conn.execute(
             "SELECT status FROM inbound_messages WHERE agent_id=%s AND kind='cancel'",
@@ -121,6 +129,9 @@ async def test_replacement_host_adopts_held_agent_without_model(
     if control == "restart":
         # The replacement logical incarnation also adopts without boot hooks.
         await host.run_turn(agent_id)
-        assert leases.require_active(lease["id"], attested_caller(lease))["status"] == "active"
+        assert (
+            leases.require_active(database, lease["id"], attested_caller(lease))["status"]
+            == "active"
+        )
     graph.ainvoke.assert_not_called()
     impersonation._relay_children.clear()

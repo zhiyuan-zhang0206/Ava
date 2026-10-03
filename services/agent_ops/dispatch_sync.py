@@ -15,6 +15,7 @@ from typing import Any
 
 from psycopg_pool import ConnectionPool
 
+from base.db import Database
 from ops import cluster, host_config, inventory, uploads
 from ops.rpc_schemas import (
     AgentSkillViewPayload,
@@ -43,7 +44,7 @@ _state_write_lock = threading.Lock()
 
 
 def dispatch_sync(
-    kind: str, payload: dict[str, Any], *, pool: ConnectionPool | None
+    kind: str, payload: dict[str, Any], *, pool: ConnectionPool | None, db: Database
 ) -> tuple[str, dict[str, object]]:
     """Run synchronous ops on the daemon's worker pool, never the event loop.
 
@@ -53,7 +54,7 @@ def dispatch_sync(
     """
     match kind:
         case "status_probe":
-            return "completed", cluster.cluster_status_op(pool).model_dump(mode="json")
+            return "completed", cluster.cluster_status_op(db, pool).model_dump(mode="json")
         case "config_read":
             return "completed", host_config.config_read_op().model_dump(mode="json")
         case "config_audit_read":

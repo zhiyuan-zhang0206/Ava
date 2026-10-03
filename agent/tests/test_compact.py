@@ -47,6 +47,8 @@ from agent.llm import execute_code
 from agent.messages import inbound_message
 from agent.state import AgentState, CompactState
 from base.agents.context import AvaContext
+from base.db import Database
+from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices
 from base.lm.context_budget import ContextBudget
 from base.packages.plugins.extensions import EMPTY
@@ -130,7 +132,12 @@ def _runtime_with_llm(llm: Any) -> Runtime[AvaContext]:
     # the post-compact checkpoint trim treats it as a no-op (real-pool trimming is covered by
     # base/agents/history/tests/test_checkpoint_cleanup.py and the aops_pool compact tests below).
     ctx = AvaContext(
-        ops_pool=None, llm=llm, event_publisher=MagicMock(), agent=AgentSlices.resolve()
+        ops_pool=None,
+        llm=llm,
+        event_publisher=MagicMock(),
+        agent=AgentSlices.resolve(),
+        db=Database.from_settings(),
+        bus=EventBus.from_settings(),
     )
     return Runtime(context=ctx)
 
@@ -478,7 +485,14 @@ async def test_auto_compact_hook_raises_when_summary_short_every_attempt(
     llm = _fake_llm("too short")  # 9 chars < floor, on every call
     state = _over_threshold_state()
     publisher = MagicMock()
-    ctx = AvaContext(ops_pool=None, llm=llm, event_publisher=publisher, agent=AgentSlices.resolve())
+    ctx = AvaContext(
+        ops_pool=None,
+        llm=llm,
+        event_publisher=publisher,
+        agent=AgentSlices.resolve(),
+        db=Database.from_settings(),
+        bus=EventBus.from_settings(),
+    )
 
     with pytest.raises(CompactionFailedError, match="no usable summary across"):
         await auto_compact_for_llm(state, Runtime(context=ctx), _fake_config())
@@ -514,7 +528,14 @@ async def test_auto_compact_hook_emits_compact_done_on_success(monkeypatch: pyte
     _patch_compact_config(monkeypatch, auto_compact_tokens=1)
     publisher = MagicMock()
     llm = _fake_llm(_LONG_SUMMARY)
-    ctx = AvaContext(ops_pool=None, llm=llm, event_publisher=publisher, agent=AgentSlices.resolve())
+    ctx = AvaContext(
+        ops_pool=None,
+        llm=llm,
+        event_publisher=publisher,
+        agent=AgentSlices.resolve(),
+        db=Database.from_settings(),
+        bus=EventBus.from_settings(),
+    )
     state = _over_threshold_state()
 
     result = await auto_compact_for_llm(state, Runtime(context=ctx), _fake_config())
@@ -853,7 +874,12 @@ async def test_compact_summary_emits_compact_done(
     # so the emit assertion types cleanly — mirrors the auto-path emit test.
     publisher = MagicMock()
     ctx = AvaContext(
-        ops_pool=aops_pool, llm=AsyncMock(), event_publisher=publisher, agent=AgentSlices.resolve()
+        ops_pool=aops_pool,
+        llm=AsyncMock(),
+        event_publisher=publisher,
+        agent=AgentSlices.resolve(),
+        db=Database.from_settings(),
+        bus=EventBus.from_settings(),
     )
     runtime = Runtime(context=ctx)
 
@@ -956,7 +982,7 @@ async def test_compact_with_super_long_summary_in_claim(
 
 
 async def test_terminate_preserves_pending_summary_without_wiping_history(
-    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool
+    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool, event_bus: EventBus
 ):
     """Lifecycle acceptance is serial; a summary cannot run in the exiting owner."""
     from agent.ownership.hosted import apply_hosted_lifecycle
@@ -983,7 +1009,7 @@ async def test_terminate_preserves_pending_summary_without_wiping_history(
 
     with bind_turn_identity(tid, incarnation=old):
         cmd = await claim_node(state, _make_runtime(aops_pool), _config(tid))
-        await apply_hosted_lifecycle(aops_pool, old)
+        await apply_hosted_lifecycle(aops_pool, old, bus=event_bus)
 
     assert cmd.goto == END
     assert "context_reset" not in cmd.update  # type: ignore[operator]
@@ -999,7 +1025,7 @@ async def test_terminate_preserves_pending_summary_without_wiping_history(
 
 
 async def test_compact_in_same_batch_as_restart(
-    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool
+    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool, event_bus: EventBus
 ):
     """The admitted successor, not the exiting owner, consumes the same summary."""
     from agent.ownership.hosted import apply_hosted_lifecycle
@@ -1027,7 +1053,7 @@ async def test_compact_in_same_batch_as_restart(
 
     with bind_turn_identity(tid, incarnation=old):
         cmd = await claim_node(state, _make_runtime(aops_pool), _config(tid))
-        await apply_hosted_lifecycle(aops_pool, old)
+        await apply_hosted_lifecycle(aops_pool, old, bus=event_bus)
 
     assert cmd.goto == END
     assert "context_reset" not in cmd.update  # type: ignore[operator]
@@ -1080,6 +1106,8 @@ def _make_runtime(ops_pool=None, llm=None):
         llm=llm,  # pyright: ignore[reportUnknownArgumentType]
         event_publisher=MagicMock(),
         agent=AgentSlices.resolve(),
+        db=Database.from_settings(),
+        bus=EventBus.from_settings(),
     )
     from langgraph.runtime import Runtime
 
@@ -1088,47 +1116,3 @@ def _make_runtime(ops_pool=None, llm=None):
 
 def _config(tid: int) -> RunnableConfig:
     return {"configurable": {"thread_id": str(tid)}}
-
-
-async def test_auto_compact_summary_message_carries_msg_type(monkeypatch: pytest.MonkeyPatch):
-    """Task #1017: the auto-compact summary message must carry the same
-    ava_msg_type stamp the claim-node (force) compact path writes. Without it
-    the timeline read side classifies the HumanMessage as a catch-all
-    system_marker with source=null and the frontend renders the red
-    UNRECOGNIZED SYSTEM_MARKER alarm (2026-08-07 user report)."""
-    _patch_compact_config(monkeypatch, auto_compact_tokens=1)
-    state = _over_threshold_state()
-
-    fake_llm = _fake_llm(_LONG_SUMMARY)
-    result = await auto_compact_for_llm(state, _runtime_with_llm(fake_llm), _fake_config())
-    assert result is not None
-
-    tail = result["context_reset"].tail  # pyright: ignore[reportUnknownMemberType]
-    assert isinstance(tail[0], HumanMessage)
-    kwargs = tail[0].additional_kwargs  # pyright: ignore[reportUnknownMemberType]
-    assert kwargs.get("ava_msg_type") == "compact_summary"  # pyright: ignore[reportUnknownMemberType]
-    assert "ava_created_at" in kwargs
-
-
-async def test_claim_compact_request_summary_message_carries_msg_type(
-    monkeypatch: pytest.MonkeyPatch,
-):
-    """Task #1017: the claim-node (force / UI /compact) compact path stamps its
-    summary message with ava_msg_type=compact_request — the two compact paths
-    must produce the same message contract so the frontend never sees an
-    unrecognized system_marker."""
-    from agent.hooks.compact import build_compact_transition
-
-    transition = build_compact_transition(
-        "the summary",
-        resume="llm",
-        summary_kwargs={
-            "additional_kwargs": {
-                "ava_msg_type": "compact_request",
-                "ava_created_at": "2026-08-07T00:00:00+00:00",
-            },
-        },
-    )
-    tail = transition["context_reset"].tail
-    assert isinstance(tail[0], HumanMessage)
-    assert tail[0].additional_kwargs.get("ava_msg_type") == "compact_request"

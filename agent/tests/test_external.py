@@ -21,6 +21,7 @@ from ava._settings import agent_setting
 from ava.external import state
 from ava.external.state import apply_plugin_delta, decode_plugin_delta, encode_plugin_delta
 from base import telemetry
+from base.db import Database
 from base.telemetry import Event as TelemetryEvent
 from base.telemetry.otlp import telemetry_otlp
 
@@ -88,7 +89,7 @@ def attached_runtime(
 
     monkeypatch.setattr(external, "load_snapshot", load)
 
-    def require(lease_id: str, attesting: dict[str, Any]) -> dict[str, Any]:
+    def require(_db: Database, lease_id: str, attesting: dict[str, Any]) -> dict[str, Any]:
         assert lease_id == "lease"
         assert attesting == {"pid": 777}
         if lease["status"] != "active":
@@ -96,9 +97,14 @@ def attached_runtime(
         return dict(lease)
 
     def stage(
-        lease_id: str, attesting: dict[str, Any], delta: dict[str, Any], *, expected_version: int
+        db: Database,
+        lease_id: str,
+        attesting: dict[str, Any],
+        delta: dict[str, Any],
+        *,
+        expected_version: int,
     ) -> None:
-        require(lease_id, attesting)
+        require(db, lease_id, attesting)
         if expected_version != lease["delta_version"]:
             raise RuntimeError("stale version")
         staged.append(delta)
@@ -113,7 +119,7 @@ def attached_runtime(
     # id. The receipt seam is integration-tested against real UUID leases;
     # keeping it outside this state-machine fixture avoids an accidental DB
     # dial that the fixture cannot represent.
-    def no_local_participant(*_args: Any, **_kwargs: Any) -> bool:
+    def no_local_participant(_db: object, *_args: Any, **_kwargs: Any) -> bool:
         return False
 
     monkeypatch.setattr(
@@ -146,7 +152,7 @@ def test_legacy_attachment_never_opens_an_event_receipt(
 ) -> None:
     """A NULL-version legacy attachment has no event-log database side effect."""
 
-    def unexpected_open(_lease_id: str, *, agent_id: int, source_key: str) -> bool:
+    def unexpected_open(_db: object, _lease_id: str, *, agent_id: int, source_key: str) -> bool:
         del agent_id, source_key
         pytest.fail("legacy attachment opened an event receipt")
 
@@ -264,7 +270,7 @@ def test_failed_context_entry_restores_prior_binding_and_allows_next_attachment(
 
     next_lease = {**lease, "id": "next", "status": "active", "delta_version": 0}
 
-    def require_next(lease_id: str, attesting: dict[str, Any]) -> dict[str, Any]:
+    def require_next(_db: Database, lease_id: str, attesting: dict[str, Any]) -> dict[str, Any]:
         assert lease_id == "next"
         assert attesting == {"pid": 777}
         return next_lease
@@ -287,11 +293,11 @@ def test_concurrent_constructor_fails_before_lease_lookup(
     first_lookup = Event()
     continue_lookup = Event()
 
-    def blocked_require(lease_id: str, attesting: dict[str, Any]) -> dict[str, Any]:
+    def blocked_require(db: Database, lease_id: str, attesting: dict[str, Any]) -> dict[str, Any]:
         if next(calls) == 0:
             first_lookup.set()
             assert continue_lookup.wait(5), "test did not release the first lease lookup"
-        return require(lease_id, attesting)
+        return require(db, lease_id, attesting)
 
     def attach_in_worker() -> None:
         with external.attach("lease"):
@@ -330,7 +336,7 @@ def test_constructor_failure_restores_binding_and_allows_next_attachment(
     monkeypatch.setattr(ava, "state", prior_state)
     monkeypatch.setattr(ava, "state_update", prior_update)
 
-    def fail(*_args: Any) -> Any:
+    def fail(_db: object, *_args: Any) -> Any:
         raise RuntimeError("constructor interrupted")
 
     with monkeypatch.context() as failure_patch:
@@ -367,12 +373,15 @@ def test_repeated_close_cannot_release_another_attachment(
 def test_close_rejects_a_new_sdk_effect_before_it_reaches_the_gateway(
     attached_runtime: tuple[dict[str, Any], Any, list[dict[str, Any]]],
     monkeypatch: pytest.MonkeyPatch,
+    database: Database,
 ) -> None:
     """Close fences a new SDK call before its gateway effect, not only at detach."""
     from base.agents import impersonation_manifest as manifest
 
     attachment = external.attach("lease")
-    participant = manifest.LocalParticipant("lease", attachment.agent_id, 0, "post-close-sdk")
+    participant = manifest.LocalParticipant(
+        "lease", attachment.agent_id, 0, "post-close-sdk", database
+    )
     manifest.bind_local_participant(participant)
     attachment._event_participant = participant
     delivered: list[tuple[int, str]] = []
@@ -398,12 +407,15 @@ def test_close_rejects_a_new_sdk_effect_before_it_reaches_the_gateway(
 def test_close_does_not_revoke_an_sdk_call_admitted_before_the_fence(
     attached_runtime: tuple[dict[str, Any], Any, list[dict[str, Any]]],
     monkeypatch: pytest.MonkeyPatch,
+    database: Database,
 ) -> None:
     """An SDK call already inside its metering admission finishes its gateway effect."""
     from base.agents import impersonation_manifest as manifest
 
     attachment = external.attach("lease")
-    participant = manifest.LocalParticipant("lease", attachment.agent_id, 0, "pre-close-sdk")
+    participant = manifest.LocalParticipant(
+        "lease", attachment.agent_id, 0, "pre-close-sdk", database
+    )
     manifest.bind_local_participant(participant)
     attachment._event_participant = participant
     entered, release = Event(), Event()

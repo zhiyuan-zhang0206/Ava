@@ -13,9 +13,11 @@ import pytest
 import cli.commands._repo as _repo_commands
 import cli.commands.lifecycle.root_driver as _root_driver_commands
 from base.agents.exit_codes import SERVICES_NOT_READY_EXIT_CODE
+from base.db import Database
 from base.deploy.lifecycle import start_serving
 from base.deploy.maintenance import admission, pause_owner
 from base.deploy.maintenance.state import MaintenanceHold
+from base.events.live.bus import EventBus
 from base.sessions.backend import PtySessionBackend
 from cli.commands.lifecycle import _temporary_stop as command
 from cli.commands.lifecycle import stop as entry
@@ -106,7 +108,7 @@ def test_normal_start_releases_hold_only_after_successful_readiness(
 ) -> None:
     drained()
     monkeypatch.setattr("base.deploy.state.host_deploy_state.set_posture", MagicMock())
-    monkeypatch.setattr(agent_pause, "publish_inbound_wake", lambda *_a: None)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(agent_pause, "publish_inbound_wake", lambda _db, _bus, *_a: None)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(start_serving, "is_serving", lambda: True)
 
     @resume_after_start
@@ -169,7 +171,7 @@ def test_repeated_stop_needs_no_live_database_or_host(
     monkeypatch.setattr(
         agent_pause, "host_identity", MagicMock(side_effect=AssertionError("host is down"))
     )
-    monkeypatch.setattr(agent_pause, "connect", MagicMock(side_effect=AssertionError("DB is down")))
+    monkeypatch.setattr(Database, "connect", MagicMock(side_effect=AssertionError("DB is down")))
     monkeypatch.setattr(
         "base.deploy.state.host_deploy_state.set_posture",
         MagicMock(side_effect=AssertionError("DB is down")),
@@ -179,6 +181,8 @@ def test_repeated_stop_needs_no_live_database_or_host(
 
 def test_failed_flush_cannot_be_released_by_a_healthy_start(
     monkeypatch: pytest.MonkeyPatch,
+    database: Database,
+    event_bus: EventBus,
 ) -> None:
     drained()
     current = admission.require_operation("local", WHEN)
@@ -193,9 +197,9 @@ def test_failed_flush_cannot_be_released_by_a_healthy_start(
     from ops.cluster_pause import unpause_local_cluster
 
     with pytest.raises(RuntimeError, match="failed continuation/flush"):
-        unpause_local_cluster()
+        unpause_local_cluster(database, event_bus)
     with pytest.raises(RuntimeError, match="failed continuation/flush"):
-        agent_pause.resume_agents()
+        agent_pause.resume_agents(database, event_bus)
     assert admission.held()
 
 

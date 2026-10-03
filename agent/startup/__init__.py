@@ -55,6 +55,8 @@ from agent.startup._page_reconcile import (
 from agent.startup._page_reconcile import (
     _recent_page_recovery_notice as _recent_page_recovery_notice,
 )
+from base.db import Database
+from base.events.live.bus import EventBus
 from base.log import logger
 
 
@@ -557,6 +559,8 @@ async def reconcile_open_pages(
     pool: AsyncConnectionPool,
     agent_id: int,
     *,
+    db: Database,
+    bus: EventBus,
     event_publisher: Any | None = None,
 ) -> None:
     """Probe every open page's server and restore it — boot and heartbeat.
@@ -656,4 +660,4 @@ async def reconcile_open_pages(
             )
 
     if dead_shows:
-        await _close_dead_show_pages(pool, agent_id, dead_shows, event_publisher)
+        await _close_dead_show_pages(pool, db, bus, agent_id, dead_shows, event_publisher)

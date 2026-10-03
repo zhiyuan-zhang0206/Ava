@@ -28,6 +28,7 @@ from starlette.requests import Request
 
 from base.agents import AgentStatus
 from base.api_contracts.contracts import Idempotency
+from base.events.live.bus import EventBus
 from gateway.app import app
 from gateway.middleware import idempotency
 from ops.rpc_schemas import ContentBlock
@@ -287,7 +288,7 @@ def test_reconcile_heals_crash_after_commit_before_resurrect(
     db_conn.commit()
     calls = 0
 
-    async def _crash_then_heal(_db: object, aid: int, **kw: object) -> AgentStatus:
+    async def _crash_then_heal(_db: object, _bus: EventBus, aid: int, **kw: object) -> AgentStatus:
         nonlocal calls
         calls += 1
         assert aid == agent_id

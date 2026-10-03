@@ -83,7 +83,7 @@ def _resurrect_shape(conn: psycopg.Connection, agent_id: int) -> None:
 
 
 async def test_the_applied_force_mid_invocation_closes_quietly(
-    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool
+    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool, event_bus: EventBus
 ) -> None:
     agent_id = _agent(db_conn)
     incarnation = await _admit(aops_pool, agent_id)
@@ -104,7 +104,13 @@ async def test_the_applied_force_mid_invocation_closes_quietly(
     with bind_turn_identity(agent_id, incarnation=incarnation):
         outcome = await host._invoke_until_done(
             agent_id,
-            AvaContext(ops_pool=aops_pool, event_publisher=publisher, agent=AgentSlices.resolve()),
+            AvaContext(
+                ops_pool=aops_pool,
+                event_publisher=publisher,
+                agent=AgentSlices.resolve(),
+                db=Database.from_settings(),
+                bus=EventBus.from_settings(),
+            ),
         )
 
     assert outcome.truncated and not outcome.crashed and not outcome.exited
@@ -115,7 +121,7 @@ async def test_the_applied_force_mid_invocation_closes_quietly(
     # The classify does NOT consume the command: the pump's own boundary
     # observes it, and the settle boundary leaves the row as the force left it.
     await close_hosted_turn(
-        aops_pool, aops_pool, Database.from_settings(), Mock(), incarnation, outcome
+        aops_pool, aops_pool, Database.from_settings(), event_bus, Mock(), incarnation, outcome
     )
     assert db_conn.execute(
         "SELECT status, last_turn_fatal_at FROM agents_meta WHERE id=%s", (agent_id,)
@@ -144,7 +150,13 @@ async def test_the_force_still_classifies_after_the_resurrect_nulls_the_row(
     host = _host(_raising_graph(), aops_pool)
     with bind_turn_identity(agent_id, incarnation=incarnation):
         outcome = await host._invoke_until_done(
-            agent_id, AvaContext(ops_pool=aops_pool, agent=AgentSlices.resolve())
+            agent_id,
+            AvaContext(
+                ops_pool=aops_pool,
+                agent=AgentSlices.resolve(),
+                db=Database.from_settings(),
+                bus=EventBus.from_settings(),
+            ),
         )
     assert outcome.truncated and not outcome.crashed
 
@@ -160,7 +172,13 @@ async def test_the_turn_starting_under_the_force_closes_quietly(
     host = _host(graph, aops_pool)
     with bind_turn_identity(agent_id, incarnation=incarnation):
         outcome = await host._invoke_until_done(
-            agent_id, AvaContext(ops_pool=aops_pool, agent=AgentSlices.resolve())
+            agent_id,
+            AvaContext(
+                ops_pool=aops_pool,
+                agent=AgentSlices.resolve(),
+                db=Database.from_settings(),
+                bus=EventBus.from_settings(),
+            ),
         )
     assert outcome.truncated and not outcome.crashed
     assert graph.ainvoke.await_count == 0  # the settle probe refused first
@@ -176,7 +194,13 @@ async def test_a_cli_style_user_force_closes_quietly_too(
     host = _host(_raising_graph(), aops_pool)
     with bind_turn_identity(agent_id, incarnation=incarnation):
         outcome = await host._invoke_until_done(
-            agent_id, AvaContext(ops_pool=aops_pool, agent=AgentSlices.resolve())
+            agent_id,
+            AvaContext(
+                ops_pool=aops_pool,
+                agent=AgentSlices.resolve(),
+                db=Database.from_settings(),
+                bus=EventBus.from_settings(),
+            ),
         )
     assert outcome.truncated and not outcome.crashed
 
@@ -212,7 +236,13 @@ async def test_an_observed_force_still_crashes(
     host = _host(_raising_graph(), aops_pool)
     with bind_turn_identity(agent_id, incarnation=incarnation), pytest.raises(ImpersonationError):
         await host._invoke_until_done(
-            agent_id, AvaContext(ops_pool=aops_pool, agent=AgentSlices.resolve())
+            agent_id,
+            AvaContext(
+                ops_pool=aops_pool,
+                agent=AgentSlices.resolve(),
+                db=Database.from_settings(),
+                bus=EventBus.from_settings(),
+            ),
         )
 
 
@@ -227,7 +257,13 @@ async def test_a_foreign_incarnation_force_still_crashes(
     host = _host(_raising_graph(), aops_pool)
     with bind_turn_identity(agent_id, incarnation=incarnation), pytest.raises(ImpersonationError):
         await host._invoke_until_done(
-            agent_id, AvaContext(ops_pool=aops_pool, agent=AgentSlices.resolve())
+            agent_id,
+            AvaContext(
+                ops_pool=aops_pool,
+                agent=AgentSlices.resolve(),
+                db=Database.from_settings(),
+                bus=EventBus.from_settings(),
+            ),
         )
 
 
@@ -243,7 +279,13 @@ async def test_a_detached_pointer_still_crashes(
     host = _host(_raising_graph(), aops_pool)
     with bind_turn_identity(agent_id, incarnation=incarnation), pytest.raises(ImpersonationError):
         await host._invoke_until_done(
-            agent_id, AvaContext(ops_pool=aops_pool, agent=AgentSlices.resolve())
+            agent_id,
+            AvaContext(
+                ops_pool=aops_pool,
+                agent=AgentSlices.resolve(),
+                db=Database.from_settings(),
+                bus=EventBus.from_settings(),
+            ),
         )
 
 
@@ -262,7 +304,13 @@ async def test_a_non_impersonation_exception_still_crashes(
     host = _host(graph, aops_pool)
     with bind_turn_identity(agent_id, incarnation=incarnation), pytest.raises(RuntimeError):
         await host._invoke_until_done(
-            agent_id, AvaContext(ops_pool=aops_pool, agent=AgentSlices.resolve())
+            agent_id,
+            AvaContext(
+                ops_pool=aops_pool,
+                agent=AgentSlices.resolve(),
+                db=Database.from_settings(),
+                bus=EventBus.from_settings(),
+            ),
         )
 
 
@@ -292,7 +340,13 @@ async def test_a_superseded_older_force_cannot_classify(
     host = _host(_raising_graph(), aops_pool)
     with bind_turn_identity(agent_id, incarnation=incarnation), pytest.raises(ImpersonationError):
         await host._invoke_until_done(
-            agent_id, AvaContext(ops_pool=aops_pool, agent=AgentSlices.resolve())
+            agent_id,
+            AvaContext(
+                ops_pool=aops_pool,
+                agent=AgentSlices.resolve(),
+                db=Database.from_settings(),
+                bus=EventBus.from_settings(),
+            ),
         )
 
 
@@ -310,5 +364,11 @@ async def test_a_lapsed_lease_still_crashes(
     host = _host(_raising_graph(), aops_pool)
     with bind_turn_identity(agent_id, incarnation=incarnation), pytest.raises(ImpersonationError):
         await host._invoke_until_done(
-            agent_id, AvaContext(ops_pool=aops_pool, agent=AgentSlices.resolve())
+            agent_id,
+            AvaContext(
+                ops_pool=aops_pool,
+                agent=AgentSlices.resolve(),
+                db=Database.from_settings(),
+                bus=EventBus.from_settings(),
+            ),
         )

@@ -194,12 +194,15 @@ def _execute(request: dict[str, object], work: Path) -> dict[str, object]:
     if set(request) != {"kind", "now"}:
         raise ValueError("invalid logical backup request")
     if request["kind"] == "dump":
+        from base.db import Database
         from services.backup import run_backup
 
         stamp = request["now"]
         if not isinstance(stamp, str):
             raise TypeError("logical dump requires its captured timestamp")
-        artifact = run_backup(datetime.fromisoformat(stamp), staging=work / "artifact")
+        artifact = run_backup(
+            datetime.fromisoformat(stamp), db=Database.from_settings(), staging=work / "artifact"
+        )
         return {"artifact": artifact.name, "sha256": _sha256(artifact)}
     if request == {"kind": "restore", "now": None}:
         from scripts.data_plane_ops.restore_drill import run_drill

@@ -134,6 +134,7 @@ async def test_deliver_passes_inserted_chat_as_auto_resurrect_guard(
 
     async def _resurrect(
         _db: object,
+        _bus: EventBus,
         agent_id: int,
         *,
         trigger_inbound_id: int | None = None,
@@ -182,6 +183,7 @@ async def test_retried_client_message_resurrects_terminated_agent_once(
 
     async def _resurrect_once(
         _db: object,
+        _bus: EventBus,
         agent_id: int,
         *,
         trigger_inbound_id: int,
@@ -321,6 +323,7 @@ async def test_concurrent_same_key_terminated_delivery_has_one_resurrect_effect(
 
     async def _real_guard(
         _db: object,
+        _bus: EventBus,
         agent_id: int,
         *,
         trigger_inbound_id: int,

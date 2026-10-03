@@ -45,6 +45,8 @@ async def test_held_host_wake_returns_before_runtime_or_slot(
     host._owner = uuid4()
     host._maintenance_failed = {}
     host._control_pool = MagicMock()
+    host._db = MagicMock()
+    host._bus = MagicMock()
     host._checkpointer = cast(Any, MemorySaver())
     host._read_stored_config = AsyncMock(
         return_value=_StoredConfig(
@@ -77,6 +79,8 @@ async def test_held_host_refuses_unaccepted_control_batch(monkeypatch: pytest.Mo
     host._machine = "local"
     host._owner = uuid4()
     host._control_pool = MagicMock()
+    host._db = MagicMock()
+    host._bus = MagicMock()
     host._checkpointer = cast(Any, MemorySaver())
     owner = RuntimeIncarnation(42, uuid4(), host._owner)
     monkeypatch.setattr(
@@ -107,6 +111,8 @@ async def test_held_controls_supervise_the_active_lease_relay(
     host._machine = "local"
     host._owner = uuid4()
     host._control_pool = MagicMock()
+    host._db = MagicMock()
+    host._bus = MagicMock()
     host._checkpointer = cast(Any, MemorySaver())
     owner = RuntimeIncarnation(42, uuid4(), host._owner)
     monkeypatch.setattr(
@@ -122,7 +128,7 @@ async def test_held_controls_supervise_the_active_lease_relay(
     )
     monkeypatch.setattr("services.agent_host.host.settle_hosted_runtime", AsyncMock())
     await host._run_held_controls(42, "idling")
-    supervise.assert_awaited_once_with(session, 42)
+    supervise.assert_awaited_once_with(host._db, host._bus, session, 42)
 
 
 def _relay_session(

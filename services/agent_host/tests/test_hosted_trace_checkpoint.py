@@ -74,7 +74,13 @@ async def test_host_trace_reads_final_messages_after_nstep_flush(
         )
         assert not (
             await host._invoke_until_done(
-                agent_id, AvaContext(ops_pool=aops_pool, agent=AgentSlices.resolve())
+                agent_id,
+                AvaContext(
+                    ops_pool=aops_pool,
+                    agent=AgentSlices.resolve(),
+                    db=Database.from_settings(),
+                    bus=EventBus.from_settings(),
+                ),
             )
         ).exited
 

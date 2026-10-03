@@ -11,12 +11,13 @@ from psycopg_pool import AsyncConnectionPool
 from agent.graph import claim_node
 from agent.state import AgentState
 from agent.tests.claim_support import _config, _insert_inbound_kind, _make_runtime
-from base.db import insert_inbound_message
+from base.db import Database, insert_inbound_message
+from base.events.live.bus import EventBus
 from tests.fixtures.units import spawn_agent
 
 
 @pytest.fixture
-async def running_agent(aops_pool: AsyncConnectionPool):
+async def running_agent(aops_pool: AsyncConnectionPool, database: Database):
     """Admit a real hosted owner and bind it throughout each dispatch test."""
     from uuid import uuid4
 
@@ -26,7 +27,7 @@ async def running_agent(aops_pool: AsyncConnectionPool):
 
     agent_id = spawn_agent()
     incarnation = await admit_hosted_runtime(
-        aops_pool, agent_id, machine_name(), uuid4(), expected_from="idling"
+        aops_pool, agent_id, machine_name(), uuid4(), expected_from="idling", db=database
     )
     assert incarnation is not None
     with bind_turn_identity(agent_id, incarnation=incarnation):
@@ -38,6 +39,8 @@ async def test_claim_auto_resurrect_chat_batch_wakes_and_keeps_chat(
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     monkeypatch: pytest.MonkeyPatch,
+    database: Database,
+    event_bus: EventBus,
 ):
     """A settled prior command, not marker recency, protects the real successor."""
 
@@ -65,13 +68,15 @@ async def test_claim_auto_resurrect_chat_batch_wakes_and_keeps_chat(
         tid,
     )
     assert old is not None
-    assert await apply_hosted_lifecycle(aops_pool, old) == "terminate"
+    assert await apply_hosted_lifecycle(aops_pool, old, bus=event_bus) == "terminate"
     assert db_conn.execute(
         "SELECT status,observed_at IS NOT NULL FROM inbound_messages WHERE id=%s", (stop,)
     ).fetchone() == ("done", True)
     db_conn.commit()
-    insert_inbound_message(db_conn, tid, "are you there?", source="user")
-    resurrect_agent(tid, resurrected_by="user")
+    insert_inbound_message(
+        db_conn, tid, "are you there?", source="user", bus=event_bus, database=database
+    )
+    resurrect_agent(database, event_bus, tid, resurrected_by="user")
     launch = db_conn.execute(
         "SELECT id FROM inbound_messages WHERE agent_id=%s AND kind='resurrect' "
         "AND status='pending'",
@@ -80,7 +85,7 @@ async def test_claim_auto_resurrect_chat_batch_wakes_and_keeps_chat(
     assert launch is not None
     db_conn.commit()
     successor = await admit_hosted_runtime(
-        aops_pool, tid, machine_name(), uuid4(), expected_from="idling"
+        aops_pool, tid, machine_name(), uuid4(), expected_from="idling", db=database
     )
     assert successor is not None
 

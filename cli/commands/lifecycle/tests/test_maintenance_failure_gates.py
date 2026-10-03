@@ -19,9 +19,10 @@ import psycopg
 import pytest
 
 from base.cluster.machine import machine_name
-from base.db import create_agent, insert_inbound_message
+from base.db import Database, create_agent, insert_inbound_message
 from base.deploy.maintenance import admission, cohort, pause_owner
 from base.deploy.maintenance.state import MaintenanceHold
+from base.events.live.bus import EventBus
 from ops import agent_pause, cluster_pause
 from ops.agent_pause.probe import HostIdentity, host_identity_or_none
 
@@ -53,7 +54,14 @@ def _landed_member(db_conn: psycopg.Connection) -> tuple[int, int]:
         (agent, machine_name()),
     )
     command = insert_inbound_message(
-        db_conn, agent, "", "system:maintenance", kind="restart", payload=_MAINTENANCE_PAYLOAD
+        db_conn,
+        agent,
+        "",
+        "system:maintenance",
+        kind="restart",
+        payload=_MAINTENANCE_PAYLOAD,
+        database=Database.from_settings(),
+        bus=EventBus.from_settings(),
     )
     db_conn.execute(
         "UPDATE inbound_messages SET status='claimed', claimed_at=clock_timestamp(), "
@@ -102,29 +110,33 @@ def test_set_phase_refuses_a_recorded_failure() -> None:
         admission.set_phase(HOLDER, WHEN, "drained")
 
 
-def test_unpause_names_repair_for_a_recorded_failure() -> None:
+def test_unpause_names_repair_for_a_recorded_failure(
+    database: Database, event_bus: EventBus
+) -> None:
     _publish(MaintenanceHold("draining", {1: 11}, failures={1: "RuntimeError"}))
 
     with pytest.raises(RuntimeError, match="maintenance repair"):
-        cluster_pause.unpause_local_cluster()
+        cluster_pause.unpause_local_cluster(database, event_bus)
     assert pause_owner.read().status == "paused"
 
 
-def test_drain_aborts_on_a_recorded_failure() -> None:
+def test_drain_aborts_on_a_recorded_failure(database: Database) -> None:
     _publish(
         MaintenanceHold("draining", {1: 11, 2: 22}, drained=(2,), failures={1: "RuntimeError"})
     )
 
     with pytest.raises(RuntimeError, match="continuations failed; hold retained"):
-        agent_pause.drain(HOLDER, WHEN, 1.0)
+        agent_pause.drain(database, HOLDER, WHEN, 1.0)
 
 
-def test_resume_agents_refuses_a_recorded_failure(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_resume_agents_refuses_a_recorded_failure(
+    monkeypatch: pytest.MonkeyPatch, database: Database, event_bus: EventBus
+) -> None:
     _publish(MaintenanceHold("draining", {1: 11}, failures={1: "RuntimeError"}))
     monkeypatch.setattr(agent_pause, "publish_inbound_wake", MagicMock())
 
     with pytest.raises(RuntimeError, match="cannot resume failed"):
-        agent_pause.resume_agents()
+        agent_pause.resume_agents(database, event_bus)
 
 
 def test_start_path_refuses_a_recorded_failure() -> None:

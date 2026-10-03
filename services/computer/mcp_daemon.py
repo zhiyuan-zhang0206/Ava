@@ -71,6 +71,7 @@ from pathlib import Path
 from typing import Any
 
 from base.config import settings
+from base.db import Database
 from base.log import logger
 from base.paths import computer_mcp_socket
 from base.telemetry import audit_events
@@ -122,7 +123,8 @@ def computer_use_config() -> ComputerUseConfig:
 class ComputerMcpDaemon:
     """Unix-socket server for the computer-mcp line protocol."""
 
-    def __init__(self, config: ComputerUseConfig, sock: str | None = None) -> None:
+    def __init__(self, config: ComputerUseConfig, db: Database, sock: str | None = None) -> None:
+        self._db = db
         self._sock = sock or str(computer_mcp_socket())
         # Last pointer position in PHYSICAL pixels (set by click / explicit
         # scroll); the scroll fallback when the caller gives no x/y.
@@ -299,8 +301,8 @@ class ComputerMcpDaemon:
                 "result": _mcp_result({"released": released, "holder": self._screen.holder}),
             }
 
-    @staticmethod
     def _emit_action(
+        self,
         agent_id: int | None,
         tool: str,
         args: dict[str, Any],
@@ -332,10 +334,9 @@ class ComputerMcpDaemon:
         )
         from base.agents.impersonation_manifest import emit_recorded_central_event
 
-        emit_recorded_central_event(event)
+        emit_recorded_central_event(self._db, event)
 
-    @staticmethod
-    def _emit_session_event(event_type: str, agent_id: int, payload: dict[str, Any]) -> None:
+    def _emit_session_event(self, event_type: str, agent_id: int, payload: dict[str, Any]) -> None:
         """One computer_session_start/end audit row (no app lookup — the
         envelope describes the task, not a screen state)."""
         event = audit_events.prepare_event_log(
@@ -346,7 +347,7 @@ class ComputerMcpDaemon:
         )
         from base.agents.impersonation_manifest import emit_recorded_central_event
 
-        emit_recorded_central_event(event)
+        emit_recorded_central_event(self._db, event)
 
 
 async def _socket_in_use(path: Path) -> bool:
@@ -390,7 +391,7 @@ def _tracked_client(
 
 
 async def run(sock: str | None = None) -> None:
-    daemon = ComputerMcpDaemon(computer_use_config(), sock)
+    daemon = ComputerMcpDaemon(computer_use_config(), Database.from_settings(), sock)
     path = Path(daemon._sock)
     if await _socket_in_use(path):
         logger.error(

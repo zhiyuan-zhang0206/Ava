@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 
 from base.config import settings
+from base.db import Database
 from gateway import _server
 
 
@@ -69,7 +70,7 @@ def test_gateway_start_raises_the_min_code_version_after_schema_and_logging(
     def _schema_asserted(_url: str) -> None:
         steps.append("schema")
 
-    def _raised() -> int:
+    def _raised(_db: Database) -> int:
         steps.append("raise")
         return 1
 

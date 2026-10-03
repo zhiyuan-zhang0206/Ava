@@ -431,6 +431,8 @@ async def create_and_launch_agent(
     fork_checkpoint = await asyncio.to_thread(spawn_prechecks_blocking, body, pool)
     new_id, birth_config, prompt_inbound_id, launch_attempt_id = await asyncio.to_thread(
         create_agent_row,
+        db,
+        bus,
         spawner=body.spawner,
         fork_from=body.fork_from,
         fork_checkpoint=fork_checkpoint,

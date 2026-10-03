@@ -18,6 +18,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from base.db import Database
 from base.host.atomic_io import write_text_atomic
 
 __all__ = ["cmd_grafana_render"]
@@ -98,7 +99,7 @@ def cmd_grafana_render(*, force: bool, repo_only: bool) -> int:
 
     from base.telemetry.metrics.grafana_dashboard_supply import render_dashboard_json
 
-    rendered, failed = render_dashboard_json(repo_only=repo_only)
+    rendered, failed = render_dashboard_json(Database.from_settings(), repo_only=repo_only)
     if failed:
         print(
             f"plugin load failures (skipped, panels missing from this render): {', '.join(failed)}",

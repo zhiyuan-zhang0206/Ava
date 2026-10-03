@@ -33,7 +33,7 @@ _INVENTORY: dict[str, str] = {
     "ops/agents/wake.py::_stage_resurrect_event": "central",
     "ops/lifecycle/billing_recovery.py::_record_run_event": "ineligible",
     "ops/lifecycle/termination.py::_stage_termination_event": "central",
-    "ops/lifecycle/__init__.py::_recover_crash_marked_blocking": "central",
+    "ops/lifecycle/crash_harvest.py::_recover_crash_marked_blocking": "central",
     "services/computer/mcp_daemon.py::ComputerMcpDaemon._emit_action": "central",
     "services/computer/mcp_daemon.py::ComputerMcpDaemon._emit_session_event": "central",
     "base/agents/messages/chat_delivery.py::_insert_chat_inbound_once": "central",

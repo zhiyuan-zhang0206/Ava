@@ -20,6 +20,7 @@ import pytest
 import services.computer.mcp_daemon as daemon_mod
 import services.computer.ocr_text as ocr_text_mod
 import services.computer.screen as screen_mod
+from base.db import Database
 from services.computer.errors import ComputerUseError
 from services.computer.mcp_daemon import ComputerMcpDaemon
 from services.computer.protocol import Request, Response
@@ -28,7 +29,9 @@ from services.permissions_helper.client import PermissionsHelperError
 
 
 def _daemon(**config: Any) -> ComputerMcpDaemon:
-    return ComputerMcpDaemon(computer_use_config(**config), sock="/nonexistent-test.sock")
+    return ComputerMcpDaemon(
+        computer_use_config(**config), Database.from_settings(), sock="/nonexistent-test.sock"
+    )
 
 
 def _req(
@@ -133,7 +136,7 @@ def fake_helper(monkeypatch: pytest.MonkeyPatch) -> FakeHelper:
 def audit_log(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]:
     log: list[dict[str, Any]] = []
 
-    def _record(event: Any) -> None:
+    def _record(_db: object, event: Any) -> None:
         log.append(
             {
                 "event_type": event.event_name,
@@ -1023,7 +1026,7 @@ async def test_task_session_emit_failure_warns_but_action_succeeds(
     monkeypatch.setattr(daemon_mod.logger, "warning", lambda msg: warnings.append(str(msg)))  # pyright: ignore[reportUnknownArgumentType]
     log: list[dict[str, Any]] = []
 
-    def _stage(event: Any) -> None:
+    def _stage(_db: object, event: Any) -> None:
         if event.event_name.startswith("computer_session_"):
             # the envelope path is broken (unregistered name etc.)
             raise ValueError(f"unknown event name {event.event_name!r}")
@@ -1103,13 +1106,13 @@ async def test_socket_in_use_true_when_listener_present() -> None:
         cleanup(d)
 
 
-async def test_shutdown_cancels_active_clients() -> None:
+async def test_shutdown_cancels_active_clients(database: Database) -> None:
     """run()'s shutdown path cancels tracked client handlers, so a client that
     holds its connection open cannot hang server.wait_closed() and orphan the
     daemon process (the #1137 dual-daemon root cause)."""
     d, sock, cleanup = _short_sock_dir()
     try:
-        daemon = daemon_mod.ComputerMcpDaemon(computer_use_config(), sock=str(sock))
+        daemon = daemon_mod.ComputerMcpDaemon(computer_use_config(), database, sock=str(sock))
         # A client handler that never returns unless cancelled — the persistent
         # SDK connection equivalent (a real client sits in handle()'s readline).
         started = asyncio.Event()

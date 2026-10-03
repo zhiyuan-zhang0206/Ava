@@ -16,7 +16,7 @@ async def test_heartbeat_runs_page_reconcile(monkeypatch: pytest.MonkeyPatch) ->
 
     calls: list[tuple[object, int, object | None]] = []
 
-    async def _fake_reconcile(pool, agent_id, *, event_publisher=None):
+    async def _fake_reconcile(pool, agent_id, *, event_publisher, db: object, bus: object):
         calls.append((pool, agent_id, event_publisher))  # pyright: ignore[reportUnknownArgumentType]
 
     monkeypatch.setattr("agent.startup.reconcile_open_pages", _fake_reconcile)  # pyright: ignore[reportUnknownArgumentType]
@@ -24,6 +24,12 @@ async def test_heartbeat_runs_page_reconcile(monkeypatch: pytest.MonkeyPatch) ->
     class _Ctx:
         ops_pool = object()
         event_publisher = object()
+
+        def require_db(self) -> object:
+            return object()
+
+        def require_bus(self) -> object:
+            return object()
 
     item = ClaimedInbound(id=1, agent_id=7, content="check-in", kind="heartbeat", source="system")
     st = _BatchState()

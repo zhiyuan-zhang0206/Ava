@@ -8,17 +8,18 @@ from pathlib import Path
 
 import pytest
 
+from base.db import Database
 from services import backup
 
 
 def test_interrupted_snapshot_dump_leaves_no_plaintext(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, database: Database
 ) -> None:
     """A dump interrupted mid-run (stop, Ctrl-C, timeout) kills and reaps
     its writer before the plaintext partial is removed."""
     monkeypatch.setattr(backup, "backup_dir", lambda: tmp_path)
 
-    def composition(_db_url: str | None = None) -> str:
+    def composition(_db: Database, _db_url: str | None = None) -> str:
         return "test"
 
     monkeypatch.setattr(backup, "_db_size_breakdown", composition)
@@ -42,7 +43,7 @@ def test_interrupted_snapshot_dump_leaves_no_plaintext(
 
     monkeypatch.setattr(backup, "_PROGRESS_INTERVAL_S", 0.2)
     with pytest.raises(KeyboardInterrupt):
-        backup.run_backup(db_url="dbname=ava", publish=False, progress=interrupt)
+        backup.run_backup(db_url="dbname=ava", publish=False, progress=interrupt, db=database)
     assert not list(tmp_path.glob("*.partial")) and not list(tmp_path.glob(".backup-key-*"))
 
 
@@ -78,7 +79,7 @@ def test_stale_partial_waits_for_its_orphaned_writer_to_close(tmp_path: Path) ->
 
 
 def test_every_backup_run_sweeps_closed_intermediates_from_the_backup_directory(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, database: Database
 ) -> None:
     """A killed run's plaintext partial never outlives the next run: the
     scheduled (staged) worker run sweeps the backup directory too, and the same
@@ -89,7 +90,7 @@ def test_every_backup_run_sweeps_closed_intermediates_from_the_backup_directory(
     published.mkdir(mode=0o700)
     monkeypatch.setattr(backup, "backup_dir", lambda: published)
 
-    def composition(_db_url: str | None = None) -> str:
+    def composition(_db: Database, _db_url: str | None = None) -> str:
         return "test"
 
     monkeypatch.setattr(backup, "_db_size_breakdown", composition)
@@ -113,7 +114,11 @@ def test_every_backup_run_sweeps_closed_intermediates_from_the_backup_directory(
         path.write_bytes(b"PLAINTEXT")
     staging = tmp_path / "controls" / "artifact"
     artifact = backup.run_backup(
-        datetime(2026, 9, 26, 3, tzinfo=UTC), db_url="dbname=ava", publish=False, staging=staging
+        datetime(2026, 9, 26, 3, tzinfo=UTC),
+        db_url="dbname=ava",
+        publish=False,
+        staging=staging,
+        db=database,
     )
     assert artifact.parent == staging
     assert [path.name for path in stale if path.exists()] == []

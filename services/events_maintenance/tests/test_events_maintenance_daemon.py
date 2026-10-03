@@ -176,7 +176,10 @@ def test_wedged_dispatch_parks_without_entering_retry_sleep(
     progress = LoopProgress("dispatch", timeout_s=1.0)
     asyncio.run(
         daemon._dispatch_loop(
-            _FAKE_POOL, progress, events_maintenance_config(), events_maintenance_db()
+            _FAKE_POOL,
+            progress,
+            events_maintenance_config(),
+            events_maintenance_db(),
         )
     )
 

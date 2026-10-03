@@ -16,6 +16,7 @@ from psycopg_pool import ConnectionPool
 from base.config import settings
 from base.daemon.health import stop_health_server
 from base.daemon.http_transport import start_daemon_http
+from base.db import Database
 from base.deploy.lifecycle import start_serving
 from base.deploy.maintenance import admission, pause_owner
 from base.deploy.maintenance.state import MaintenanceHold
@@ -153,12 +154,12 @@ async def test_server_close_after_client_reset_is_not_request_completion() -> No
 
 
 @pytest.fixture
-def held(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+def held(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, database: Database) -> None:
     """A stopped generation: the update hold is published and the host is paused."""
     monkeypatch.setattr(start_serving, "state_path", lambda: tmp_path / "serving.json")
     pause_owner.begin_maintenance("update", WHEN)
     pause_owner.change_maintenance("update", WHEN, MaintenanceHold(), MaintenanceHold("stopped"))
-    host_deploy_state.set_posture("paused")
+    host_deploy_state.set_posture(database, "paused")
     start_serving.begin_start()
 
 

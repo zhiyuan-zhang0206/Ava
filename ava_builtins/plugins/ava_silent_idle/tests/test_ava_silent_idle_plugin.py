@@ -26,6 +26,8 @@ from langgraph.runtime import Runtime
 from agent.messages import NoteTag
 from agent.state import build_agent_state
 from base.agents.context import AvaContext
+from base.db import Database
+from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices
 from base.packages.plugins.extensions import EMPTY
 
@@ -56,6 +58,8 @@ def _runtime() -> Runtime[AvaContext]:
         llm=MagicMock(),
         event_publisher=MagicMock(),
         agent=AgentSlices.resolve(),
+        db=Database.from_settings(),
+        bus=EventBus.from_settings(),
     )
     return Runtime(context=ctx)
 

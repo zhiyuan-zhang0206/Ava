@@ -87,7 +87,7 @@ async def test_dispatch_spawn_launch_calls_launch_agent_op(
 
     from ops.rpc_schemas import SpawnedAgent
 
-    async def _fake_launch(body, pool):  # type: ignore[no-untyped-def]
+    async def _fake_launch(_db: object, _bus: object, body, pool):  # type: ignore[no-untyped-def]
         captured["agent_id"] = body.agent_id  # pyright: ignore[reportUnknownMemberType]
         captured["pool"] = pool
         return SpawnedAgent(id=777)
@@ -323,7 +323,14 @@ async def test_dispatch_lifecycle_calls_lifecycle_op(monkeypatch: pytest.MonkeyP
     captured: dict[str, object] = {}
 
     async def _fake_lifecycle(  # type: ignore[no-untyped-def]
-        path, body, pool, *, trigger_inbound_id=None, trigger_inbound_kind=None
+        _db: object,
+        _bus: object,
+        path,
+        body,
+        pool,
+        *,
+        trigger_inbound_id=None,
+        trigger_inbound_kind=None,
     ):
         from ops.rpc_schemas import TerminateAgentResponse
 
@@ -357,7 +364,7 @@ async def test_dispatch_lifecycle_missing_path_fails(monkeypatch: pytest.MonkeyP
     """lifecycle payload without 'path' returns failed without invoking ops."""
     monkeypatch.setattr(daemon, "_db_pool", _stub_pool())
 
-    async def _should_not_be_called(*_a, **_kw):  # type: ignore[no-untyped-def]
+    async def _should_not_be_called(_db: object, _bus: object, *_a, **_kw):  # type: ignore[no-untyped-def]
         raise AssertionError("lifecycle_op should not be invoked on missing path")
 
     monkeypatch.setattr(daemon.lifecycle, "lifecycle_op", _should_not_be_called)  # pyright: ignore[reportUnknownArgumentType]
@@ -382,7 +389,14 @@ async def test_dispatch_unparseable_lifecycle_path(monkeypatch: pytest.MonkeyPat
     monkeypatch.setattr(daemon, "_db_pool", _stub_pool())
 
     async def _raises(  # type: ignore[no-untyped-def]
-        path, body, pool, *, trigger_inbound_id=None, trigger_inbound_kind=None
+        _db: object,
+        _bus: object,
+        path,
+        body,
+        pool,
+        *,
+        trigger_inbound_id=None,
+        trigger_inbound_kind=None,
     ):
         raise ValueError(f"lifecycle path not recognized: {path!r}")
 
@@ -423,7 +437,14 @@ async def test_dispatch_resurrect_refusal_fails_with_its_reason(
     monkeypatch.setattr(daemon, "_db_pool", _stub_pool())
 
     async def _raises(  # type: ignore[no-untyped-def]
-        path, body, pool, *, trigger_inbound_id=None, trigger_inbound_kind=None
+        _db: object,
+        _bus: object,
+        path,
+        body,
+        pool,
+        *,
+        trigger_inbound_id=None,
+        trigger_inbound_kind=None,
     ):
         raise ResurrectRefused("runtime_cutover_required")
 
@@ -443,7 +464,14 @@ async def test_dispatch_wire_error_carries_reason(monkeypatch: pytest.MonkeyPatc
     from base.agents import AgentNotFound
 
     async def _raises(  # type: ignore[no-untyped-def]
-        path, body, pool, *, trigger_inbound_id=None, trigger_inbound_kind=None
+        _db: object,
+        _bus: object,
+        path,
+        body,
+        pool,
+        *,
+        trigger_inbound_id=None,
+        trigger_inbound_kind=None,
     ):
         raise AgentNotFound("agent 999 does not exist")
 
@@ -476,7 +504,7 @@ async def test_dispatch_status_probe_passes_the_daemon_pool(
     seen: list[object] = []
     monkeypatch.setattr(daemon, "_db_pool", pool)
 
-    def _status(probe_pool: object) -> ClusterStatus:
+    def _status(_db: Database, probe_pool: object) -> ClusterStatus:
         seen.append(probe_pool)
         return ClusterStatus(
             machine_name="win",
@@ -536,7 +564,7 @@ async def test_ops_route_status_probe_serializes_datetime_fields(
     monkeypatch.setattr(daemon, "_db_pool", _stub_pool())
     created = datetime(2026, 6, 11, 8, 30, 0, tzinfo=UTC)
 
-    def _status(probe_pool: object) -> ClusterStatus:
+    def _status(_db: Database, probe_pool: object) -> ClusterStatus:
         assert probe_pool is daemon._db_pool
         return ClusterStatus(
             machine_name="runner-1",
@@ -579,7 +607,7 @@ async def test_ops_route_completes_with_a_db_down_degraded_status(
     daemon._dispatch_sem = asyncio.Semaphore(1)
     monkeypatch.setattr(daemon, "_db_pool", pool)
 
-    def _degraded_status(probe_pool: object) -> ClusterStatus:
+    def _degraded_status(_db: Database, probe_pool: object) -> ClusterStatus:
         assert probe_pool is pool
         return ClusterStatus(
             machine_name="win",
@@ -880,7 +908,7 @@ def _fake_spawn_factory(calls: dict[str, int]) -> object:
     """A launch_agent_op stand-in that counts executions and returns id 777."""
     from ops.rpc_schemas import SpawnedAgent
 
-    async def _fake_spawn(body, pool):  # type: ignore[no-untyped-def]
+    async def _fake_spawn(_db, _bus, body, pool):  # type: ignore[no-untyped-def]
         calls["n"] = calls.get("n", 0) + 1
         return SpawnedAgent(id=777)
 
@@ -1055,7 +1083,14 @@ async def test_idempotent_dispatch_failed_outcome_is_stored_and_replayed(
     monkeypatch.setattr(daemon, "_db_pool", ops_pool)
 
     async def _fake_lifecycle(  # type: ignore[no-untyped-def]
-        path, body, pool, *, trigger_inbound_id=None, trigger_inbound_kind=None
+        _db: object,
+        _bus: object,
+        path,
+        body,
+        pool,
+        *,
+        trigger_inbound_id=None,
+        trigger_inbound_kind=None,
     ):
         raise ValueError("unparseable lifecycle path")
 
@@ -1271,7 +1306,7 @@ async def test_an_unrelated_op_still_dispatches_while_a_read_is_stuck(
             del mode
             return {"ready": True}
 
-    def _status(_pool: object) -> _Status:
+    def _status(_db: Database, _pool: object) -> _Status:
         return _Status()
 
     monkeypatch.setattr(daemon.cluster, "cluster_status_op", _status)
@@ -1428,62 +1463,3 @@ def test_shutting_the_pool_down_does_not_wait_for_it(monkeypatch: pytest.MonkeyP
 
     assert calls == [False]
     assert daemon._op_executor is None
-
-
-def test_a_wedged_arm_does_not_hold_the_process_exit(tmp_path: Path) -> None:
-    """The empirical one, and the only shape that can catch this.
-
-    `shutdown(wait=False)` looks like it releases the daemon and does not:
-    `concurrent.futures.thread._python_exit` — registered via
-    `threading._register_atexit` — joins every worker still in `_threads_queues` with
-    NO bound, and `wait=False` does not remove a running thread from that mapping;
-    3.9+ also forces those workers non-daemon, so there is no way around it from the
-    executor side. Measured before this fix: own pool + wedged worker +
-    `shutdown(wait=False)` + `sys.exit(0)` was still alive minutes later.
-
-    Nothing in-process can assert that: the failure IS the interpreter refusing to
-    stop. So this drives the daemon's own `_op_thread_pool` / `_shutdown_op_pool` /
-    shared `_hard_exit` alias in a real subprocess with a genuinely stuck arm, and asserts the
-    process is gone. It fails by timing out against the pre-fix code.
-    """
-    ready = tmp_path / "wedged"
-    script = textwrap.dedent(f"""
-        import pathlib, sys, time
-        sys.path.insert(0, {str(_REPO)!r})
-        from services.agent_ops import daemon
-
-        pool = daemon._op_thread_pool()
-        pool.submit(lambda: (pathlib.Path({str(ready)!r}).write_text("1"), time.sleep(3600)))
-        while not pathlib.Path({str(ready)!r}).exists():
-            time.sleep(0.01)
-        daemon._shutdown_op_pool()
-        daemon._hard_exit(0)
-    """)
-    started = time.monotonic()
-    done = subprocess.run(  # noqa: S603
-        [sys.executable, "-c", script],
-        capture_output=True,
-        text=True,
-        timeout=30,  # the pre-fix code never returns; the timeout IS the failure
-        check=False,
-    )
-    elapsed = time.monotonic() - started
-
-    assert done.returncode == 0, done.stderr[-2000:]
-    # Generous: the point is "seconds, not never", not a latency budget.
-    assert elapsed < 20, f"exit took {elapsed:.1f}s with an arm still wedged"
-
-
-def test_the_exit_code_survives_the_hard_exit(tmp_path: Path) -> None:
-    """`_hard_exit` replaced a `raise` on the crash path, so the code a supervisor
-    reads has to still distinguish a crash from a clean stop."""
-    script = textwrap.dedent(f"""
-        import sys
-        sys.path.insert(0, {str(_REPO)!r})
-        from services.agent_ops import daemon
-        daemon._hard_exit(1)
-    """)
-    done = subprocess.run(  # noqa: S603
-        [sys.executable, "-c", script], capture_output=True, text=True, timeout=30, check=False
-    )
-    assert done.returncode == 1

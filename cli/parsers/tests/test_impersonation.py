@@ -19,7 +19,7 @@ from cli.commands.agents import impersonation as cli
 from cli.parsers import build_parser
 
 
-def _private_id(agent_id: int, session_id: int) -> str:
+def _private_id(_db: object, agent_id: int, session_id: int) -> str:
     assert (agent_id, session_id) == (405, 0)
     return "lease"
 
@@ -53,7 +53,7 @@ def test_request_uses_external_identity_without_delivering_a_credential(
 ) -> None:
     seen: dict[str, Any] = {}
 
-    def request(agent_id: int, **kwargs: Any) -> dict[str, Any]:
+    def request(_db: object, _bus: object, agent_id: int, **kwargs: Any) -> dict[str, Any]:
         seen.update({"agent_id": agent_id, **kwargs})
         return {
             "id": "lease",
@@ -138,7 +138,7 @@ def test_request_records_the_shared_app_server_endpoint(
 ) -> None:
     seen: dict[str, Any] = {}
 
-    def request(agent_id: int, **kwargs: Any) -> dict[str, Any]:
+    def request(_db: object, _bus: object, agent_id: int, **kwargs: Any) -> dict[str, Any]:
         seen.update({"agent_id": agent_id, **kwargs})
         return {"id": "lease", "expires_at": datetime(2026, 9, 5, tzinfo=UTC)}
 
@@ -176,7 +176,7 @@ def test_request_records_the_shared_app_server_endpoint(
 def test_claude_request_reports_the_relay_handoff(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    def request(agent_id: int, **kwargs: Any) -> dict[str, Any]:
+    def request(_db: object, _bus: object, agent_id: int, **kwargs: Any) -> dict[str, Any]:
         return {"id": "lease", "relay_token": "relay-token"}
 
     monkeypatch.setattr(sessions, "request", request)
@@ -234,7 +234,9 @@ def test_ack_uses_explicit_processed_ids_only(
 ) -> None:
     seen: list[tuple[str, dict[str, Any], list[int]]] = []
 
-    def ack(lease: str, attesting: dict[str, Any], ids: list[int]) -> None:
+    def ack(
+        _db: object, _bus: object, lease: str, attesting: dict[str, Any], ids: list[int]
+    ) -> None:
         seen.append((lease, attesting, ids))
 
     monkeypatch.setattr(
@@ -255,7 +257,7 @@ def test_classified_attestation_refusal_fails_without_leaking_state(
 ) -> None:
     from base.agents.impersonation import ImpersonationError
 
-    def deny(_lease: str, _caller: object) -> dict[str, Any]:
+    def deny(_db: object, _bus: object, _lease: str, _caller: object) -> dict[str, Any]:
         raise ImpersonationError("Controller caller check failed (chain-mismatch): see docs")
 
     monkeypatch.setattr(sessions, "private_id", _private_id)
@@ -269,7 +271,9 @@ def test_classified_attestation_refusal_fails_without_leaking_state(
 def test_release_preserves_summary(monkeypatch: pytest.MonkeyPatch) -> None:
     seen: list[str] = []
 
-    def release(_lease: str, _caller: object, summary: str) -> dict[str, Any]:
+    def release(
+        _db: object, _bus: object, _lease: str, _caller: object, summary: str
+    ) -> dict[str, Any]:
         seen.append(summary)
         return {"status": "released"}
 
@@ -478,7 +482,7 @@ def test_send_delivers_as_the_borrowed_agent(
         seen.append((agent_id, content, source))
         return "enqueued"
 
-    def require_active(lease: str, caller: dict[str, Any]) -> dict[str, Any]:
+    def require_active(_db: object, lease: str, caller: dict[str, Any]) -> dict[str, Any]:
         assert lease == "lease"
         assert caller["pid"] > 0
         return {"agent_id": 405}
@@ -628,7 +632,7 @@ def test_request_writes_the_resident_stub_when_scoped(
     capsys: pytest.CaptureFixture[str],
     tmp_path: Path,
 ) -> None:
-    def request(agent_id: int, **kwargs: Any) -> dict[str, Any]:
+    def request(_db: object, _bus: object, agent_id: int, **kwargs: Any) -> dict[str, Any]:
         return {
             "id": "lease",
             "session_id": 9,

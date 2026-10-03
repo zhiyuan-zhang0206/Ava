@@ -89,6 +89,8 @@ async def reap_crash_corpses(
     pool: AsyncConnectionPool,
     machine: str,
     owner: UUID,
+    *,
+    bus: EventBus,
 ) -> list[ReapedCorpse]:
     """Terminate crash-marked idling corpses whose grace window has elapsed.
 
@@ -144,7 +146,7 @@ async def reap_crash_corpses(
             n=len(reaped),
         )
         await _log_queued_wakes(reaped)
-    await _publish_reaped_corpses([corpse.agent_id for corpse in reaped])
+    await _publish_reaped_corpses(bus, [corpse.agent_id for corpse in reaped])
     return reaped
 
 
@@ -164,11 +166,11 @@ async def _log_queued_wakes(reaped: list[ReapedCorpse]) -> None:
         )
 
 
-async def _publish_reaped_corpses(reaped: list[int]) -> None:
+async def _publish_reaped_corpses(bus: EventBus, reaped: list[int]) -> None:
     """Best-effort refresh of mounted frontends; the durable flip already committed."""
     for agent_id in reaped:
         try:
-            await publish_agent_updated(EventBus.from_settings(), agent_id)
+            await publish_agent_updated(bus, agent_id)
         except Exception:
             logger.exception(
                 "corpse reap lifecycle hint publish failed",
@@ -186,6 +188,8 @@ RECRASH_CONFIRMED_CRASHES = 2
 async def reap_recrashed_corpse(
     pool: AsyncConnectionPool,
     incarnation: RuntimeIncarnation,
+    *,
+    bus: EventBus,
 ) -> list[ReapedCorpse]:
     """Terminate the corpse this incarnation just re-crashed (task #3616).
 
@@ -243,5 +247,5 @@ async def reap_recrashed_corpse(
             crash_count=RECRASH_CONFIRMED_CRASHES,
         )
         await _log_queued_wakes(reaped)
-    await _publish_reaped_corpses([corpse.agent_id for corpse in reaped])
+    await _publish_reaped_corpses(bus, [corpse.agent_id for corpse in reaped])
     return reaped

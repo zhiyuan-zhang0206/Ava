@@ -22,8 +22,9 @@ from psycopg_pool import AsyncConnectionPool
 from agent.ownership.hosted import admit_hosted_runtime, settle_hosted_runtime
 from base.agents.incarnation import exec_request_evidence
 from base.cluster.machine import machine_name
-from base.db import insert_inbound_message
+from base.db import Database, insert_inbound_message
 from base.deploy.maintenance import cohort, pause_owner
+from base.events.live.bus import EventBus
 from ops.agent_pause import resume_agents
 from tests.agent.test_maintenance import WHEN, _agent
 from tests.agent.test_maintenance import isolate as isolate
@@ -88,7 +89,8 @@ def _retired(conn: psycopg.Connection[Any]) -> int:
 
 
 def test_completed_retired_consumer_parks_without_inventing_receipts(
-    db_conn: psycopg.Connection[Any], monkeypatch: pytest.MonkeyPatch
+    db_conn: psycopg.Connection[Any],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _hide_machine_processes(monkeypatch)
     agent = _retired(db_conn)
@@ -185,10 +187,10 @@ def test_incomplete_or_live_end_is_not_parked(
 
 @pytest.mark.parametrize("kind", ["restart", "terminate"])
 def test_pending_lifecycle_keeps_the_original_cold_intent(
-    db_conn: psycopg.Connection[Any], kind: str
+    db_conn: psycopg.Connection[Any], kind: str, database: Database, event_bus: EventBus
 ) -> None:
     agent = _retired(db_conn)
-    insert_inbound_message(db_conn, agent, "", "user", kind=kind)
+    insert_inbound_message(db_conn, agent, "", "user", kind=kind, bus=event_bus, database=database)
     before = db_conn.execute("SELECT * FROM agents_meta WHERE id=%s", (agent,)).fetchone()
     db_conn.commit()
     with pytest.raises(RuntimeError):
@@ -408,7 +410,10 @@ def test_checkpoint_replaced_by_real_second_connection_refuses_parking(
 
 
 async def test_resume_admits_a_successor_without_rewriting_legacy_history(
-    db_conn: psycopg.Connection[Any], aops_pool: AsyncConnectionPool[Any]
+    db_conn: psycopg.Connection[Any],
+    aops_pool: AsyncConnectionPool[Any],
+    database: Database,
+    event_bus: EventBus,
 ) -> None:
     agent = _retired(db_conn)
     history = db_conn.execute(
@@ -423,15 +428,17 @@ async def test_resume_admits_a_successor_without_rewriting_legacy_history(
     db_conn.commit()
     owner = uuid4()
     assert (
-        await admit_hosted_runtime(aops_pool, agent, machine_name(), owner, expected_from="idling")
+        await admit_hosted_runtime(
+            aops_pool, agent, machine_name(), owner, expected_from="idling", db=database
+        )
         is None
     )
-    resume_agents()
+    resume_agents(database, event_bus)
     admitted = await admit_hosted_runtime(
-        aops_pool, agent, machine_name(), owner, expected_from="idling"
+        aops_pool, agent, machine_name(), owner, expected_from="idling", db=database
     )
     assert admitted is not None and admitted.owner == owner
-    assert await settle_hosted_runtime(aops_pool, admitted)
+    assert await settle_hosted_runtime(aops_pool, admitted, bus=event_bus)
     assert db_conn.execute(
         "SELECT status,runtime_owner FROM agents_meta WHERE id=%s", (agent,)
     ).fetchone() == ("idling", owner)

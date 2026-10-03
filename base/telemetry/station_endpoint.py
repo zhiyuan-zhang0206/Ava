@@ -9,6 +9,7 @@ from urllib.parse import urlparse, urlsplit
 import psycopg
 
 from base.config import settings
+from base.db import Database
 
 
 @dataclass(frozen=True)
@@ -37,14 +38,12 @@ def advertised_station_unit(conn: psycopg.Connection, base: str) -> tuple[str, s
     return matches[0] if matches else None
 
 
-def resolve_station_target(base: str) -> StationTarget:
+def resolve_station_target(db: Database, base: str) -> StationTarget:
     """Use the station's own port, never the consuming unit's receiver port.
 
     Database discovery errors propagate: rendering an invented target during
     an outage would persist it beyond recovery. Probe callers may skip a round.
     """
-    from base import db
-
     with db.connect() as conn:
         advertised = advertised_station_unit(conn, base)
     if advertised is not None:

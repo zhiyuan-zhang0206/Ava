@@ -82,6 +82,7 @@ from services.agent_ops._boot import (
     _open_db_pool,
     _ops_acceptance,
     _ops_bind_host,
+    _ops_handles,
     _register_boot,
 )
 from services.agent_ops.dispatch_sync import dispatch_sync
@@ -214,7 +215,7 @@ def _dispatch_sync(kind: str, payload: dict[str, Any]) -> tuple[str, dict[str, o
     ceiling, task #4129 I4). The binding stays here so `_run_arm` and the
     tests' patch surface (`ops_daemon._dispatch_sync`) keep working unchanged.
     """
-    return dispatch_sync(kind, payload, pool=_db_pool)
+    return dispatch_sync(kind, payload, pool=_db_pool, db=_ops_handles()[0])
 
 
 async def _dispatch(kind: str, payload: dict[str, Any]) -> tuple[str, dict[str, object]]:
@@ -251,8 +252,9 @@ async def _dispatch(kind: str, payload: dict[str, Any]) -> tuple[str, dict[str, 
     try:
         match kind:
             case "spawn-launch" | "spawn-launch-v2":
+                db, bus = _ops_handles()
                 spawned = await lifecycle.launch_agent_op(
-                    LaunchAgentRequest.model_validate(payload), pool
+                    db, bus, LaunchAgentRequest.model_validate(payload), pool
                 )
                 # `exclude_none`: the settlement receipt is present only when a
                 # withdrawn model was rewritten (task #4306) — the common wire
@@ -260,7 +262,10 @@ async def _dispatch(kind: str, payload: dict[str, Any]) -> tuple[str, dict[str, 
                 return "completed", spawned.model_dump(mode="json", exclude_none=True)
             case "lifecycle":
                 lc = LifecyclePayload.model_validate(payload)
+                db, bus = _ops_handles()
                 resp = await lifecycle.lifecycle_op(
+                    db,
+                    bus,
                     lc.path,
                     lc.body,
                     pool,
@@ -482,6 +487,7 @@ async def _main() -> None:
 
     pool = _open_db_pool()
     _db_pool = pool
+    db, bus = _ops_handles()
     # Redeliver recorded delivery failures whenever the data plane allows
     # (task #3757): a resident loop that outlives every sender process, owned with
     # the server by the TaskGroup below.
@@ -525,7 +531,7 @@ async def _main() -> None:
             # cancels the server and ends the process, and the supervisor restarts it.
             async with server, asyncio.TaskGroup() as resident:
                 resident.create_task(server.serve_forever())
-                resident.create_task(outbox_flusher.outbox_loop(pool, outbox_progress))
+                resident.create_task(outbox_flusher.outbox_loop(pool, db, bus, outbox_progress))
         finally:
             await stop_health_server(server)
             _remove_pidfile()

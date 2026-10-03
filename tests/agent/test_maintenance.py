@@ -52,14 +52,16 @@ def _agent(conn: psycopg.Connection[Any]) -> int:
 
 
 async def test_admission_waiting_on_real_row_lock_cannot_escape_published_hold(
-    db_conn: psycopg.Connection[Any], aops_pool: AsyncConnectionPool[Any]
+    db_conn: psycopg.Connection[Any], aops_pool: AsyncConnectionPool[Any], database: Database
 ) -> None:
     agent = _agent(db_conn)
     # This is a real PostgreSQL lock wait, not a mocked held() return.
     async with aops_pool.connection() as blocker, blocker.transaction():
         await blocker.execute("SELECT id FROM agents_meta WHERE id=%s FOR UPDATE", (agent,))
         attempt = asyncio.create_task(
-            admit_hosted_runtime(aops_pool, agent, machine_name(), uuid4(), expected_from="idling")
+            admit_hosted_runtime(
+                aops_pool, agent, machine_name(), uuid4(), expected_from="idling", db=database
+            )
         )
         try:
             async with asyncio.timeout(3):
@@ -84,29 +86,42 @@ async def test_admission_waiting_on_real_row_lock_cannot_escape_published_hold(
 
 
 async def test_original_idle_cohort_preserves_pending_messages_and_rejects_successor(
-    db_conn: psycopg.Connection[Any], aops_pool: AsyncConnectionPool[Any]
+    db_conn: psycopg.Connection[Any],
+    aops_pool: AsyncConnectionPool[Any],
+    database: Database,
+    event_bus: EventBus,
 ) -> None:
     agent, owner = _agent(db_conn), uuid4()
     incarnation = await admit_hosted_runtime(
-        aops_pool, agent, machine_name(), owner, expected_from="idling"
+        aops_pool, agent, machine_name(), owner, expected_from="idling", db=database
     )
     assert incarnation is not None
-    assert await settle_hosted_runtime(aops_pool, incarnation)
-    message = insert_inbound_message(db_conn, agent, "pending work", "user")
+    assert await settle_hosted_runtime(aops_pool, incarnation, bus=event_bus)
+    message = insert_inbound_message(
+        db_conn, agent, "pending work", "user", bus=event_bus, database=database
+    )
     pause_owner.begin_maintenance("move", WHEN)
     hold = cohort.prepare(
-        db_conn, machine=machine_name(), host_owner=owner, holder="move", acquired_at=WHEN
+        db_conn,
+        machine=machine_name(),
+        host_owner=owner,
+        holder="move",
+        acquired_at=WHEN,
     )
     assert set(hold.commands) == {agent}
     assert (
         cohort.prepare(
-            db_conn, machine=machine_name(), host_owner=owner, holder="move", acquired_at=WHEN
+            db_conn,
+            machine=machine_name(),
+            host_owner=owner,
+            holder="move",
+            acquired_at=WHEN,
         )
         == hold
     )
     assert (
         await admit_hosted_runtime(
-            aops_pool, agent, machine_name(), uuid4(), expected_from="idling"
+            aops_pool, agent, machine_name(), uuid4(), expected_from="idling", db=database
         )
         is None
     )
@@ -196,6 +211,8 @@ async def test_admitted_model_finishes_real_exec_and_after_exec_before_drain_rec
         event_publisher=MagicMock(),
         llm=MagicMock(),
         agent=AgentSlices.resolve(),
+        db=Database.from_settings(),
+        bus=EventBus.from_settings(),
     )
     host = AgentHost(
         pool=aops_pool,
@@ -217,7 +234,11 @@ async def test_admitted_model_finishes_real_exec_and_after_exec_before_drain_rec
         await asyncio.wait_for(entered.wait(), 5)
         pause_owner.begin_maintenance("move", WHEN)
         hold = cohort.prepare(
-            db_conn, machine=machine_name(), host_owner=host._owner, holder="move", acquired_at=WHEN
+            db_conn,
+            machine=machine_name(),
+            host_owner=host._owner,
+            holder="move",
+            acquired_at=WHEN,
         )
         assert not hold.drained
         finish.set()

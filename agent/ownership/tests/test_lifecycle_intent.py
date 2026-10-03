@@ -8,12 +8,15 @@ from psycopg_pool import AsyncConnectionPool
 
 from agent.ownership.lifecycle_intent import accept_lifecycle_intent, settle_superseded_intent
 from agent.tests.test_inbound_ownership import _admit, _agent
-from base.db import insert_inbound_message
+from base.db import Database, insert_inbound_message
 from base.db.transaction import async_write_transaction
+from base.events.live.bus import EventBus
 from base.native_process.turn_identity import bind_turn_identity
 
 
-def test_request_cannot_prepopulate_reserved_result(db_conn: psycopg.Connection) -> None:
+def test_request_cannot_prepopulate_reserved_result(
+    db_conn: psycopg.Connection, database: Database, event_bus: EventBus
+) -> None:
     agent_id = _agent(db_conn)
     with pytest.raises(ValueError, match="reserved"):
         insert_inbound_message(
@@ -23,6 +26,8 @@ def test_request_cannot_prepopulate_reserved_result(db_conn: psycopg.Connection)
             "user",
             "restart",
             {"lifecycle_result": {"outcome": "superseded", "reason": "target_replaced"}},
+            bus=event_bus,
+            database=database,
         )
     assert db_conn.execute(
         "SELECT count(*) FROM inbound_messages WHERE agent_id=%s", (agent_id,)

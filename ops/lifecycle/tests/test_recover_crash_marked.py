@@ -17,9 +17,11 @@ import pytest
 from base.agents import AgentNotFound
 from base.cluster.machine import machine_name
 from base.db import Database
+from base.events.live.bus import EventBus
 from base.telemetry import Event
 from ops import cluster_rpc, lifecycle
 from ops.agents import create_agent_row
+from ops.lifecycle import crash_harvest
 from ops.rpc_schemas import RecoverCrashMarkedResponse
 
 
@@ -45,7 +47,10 @@ def _park_corpse(
     `agent.ownership.hosted.stamp_turn_fatal`), so the scenario sets the
     marker, the settle fields, and any suppression window explicitly."""
     aid, _birth, _prompt_id, _attempt_id = create_agent_row(
-        spawner="user", machine=machine or machine_name()
+        Database.from_settings(),
+        EventBus.from_settings(),
+        spawner="user",
+        machine=machine or machine_name(),
     )
     with db.cursor() as cur:
         cur.execute(
@@ -80,7 +85,7 @@ def stubs(monkeypatch: pytest.MonkeyPatch) -> _Stubs:
     """Capture the prepared audit and frontend publish without touching Redis."""
     events: list[dict[str, object]] = []
     published: list[int] = []
-    prepare = lifecycle.prepare_event_log
+    prepare = crash_harvest.prepare_event_log
 
     def _record_event(
         *,
@@ -109,20 +114,20 @@ def stubs(monkeypatch: pytest.MonkeyPatch) -> _Stubs:
     def _record_publish(_bus: object, agent_id: int) -> None:
         published.append(agent_id)
 
-    monkeypatch.setattr(lifecycle, "prepare_event_log", _record_event)
-    monkeypatch.setattr(lifecycle, "publish_agent_updated_sync", _record_publish)
+    monkeypatch.setattr(crash_harvest, "prepare_event_log", _record_event)
+    monkeypatch.setattr(crash_harvest, "publish_agent_updated_sync", _record_publish)
     return _Stubs(events=events, published=published)
 
 
-def _no_halt(_aid: int) -> str | None:
+def _no_halt(_db: object, _aid: int) -> str | None:
     return None
 
 
-def _halted_permanent(_aid: int) -> str | None:
+def _halted_permanent(_db: object, _aid: int) -> str | None:
     return "permanent_provider_reject"
 
 
-def _home_a(_aid: int) -> str:
+def _home_a(_db: Database, _aid: int) -> str:
     return "home-a"
 
 
@@ -136,10 +141,10 @@ def _local_home_name() -> str:
 
 class TestRecoverCrashMarkedOp:
     def test_harvests_a_marked_idling_corpse(
-        self, db_conn: psycopg.Connection, stubs: _Stubs
+        self, db_conn: psycopg.Connection, stubs: _Stubs, database: Database, event_bus: EventBus
     ) -> None:
         aid = _park_corpse(db_conn)
-        response = lifecycle._recover_crash_marked_blocking(aid)
+        response = lifecycle._recover_crash_marked_blocking(database, event_bus, aid)
         assert response.status == "harvested"
         assert response.reason is None
         with db_conn.cursor() as cur:
@@ -174,95 +179,109 @@ class TestRecoverCrashMarkedOp:
             ("system", {"from": "idling", "to": "terminated", "reason": "corpse_reaper"})
         ]
 
-    def test_repeat_call_is_idempotent(self, db_conn: psycopg.Connection, stubs: _Stubs) -> None:
+    def test_repeat_call_is_idempotent(
+        self, db_conn: psycopg.Connection, stubs: _Stubs, database: Database, event_bus: EventBus
+    ) -> None:
         aid = _park_corpse(db_conn)
-        assert lifecycle._recover_crash_marked_blocking(aid).status == "harvested"
-        second = lifecycle._recover_crash_marked_blocking(aid)
+        assert (
+            lifecycle._recover_crash_marked_blocking(database, event_bus, aid).status == "harvested"
+        )
+        second = lifecycle._recover_crash_marked_blocking(database, event_bus, aid)
         assert second.status == "already_terminated"
         assert second.reason is None
         assert len(stubs.events) == 1  # no second harvest event
 
-    def test_refuses_unmarked(self, db_conn: psycopg.Connection, stubs: _Stubs) -> None:
+    def test_refuses_unmarked(
+        self, db_conn: psycopg.Connection, stubs: _Stubs, database: Database, event_bus: EventBus
+    ) -> None:
         aid = _park_corpse(db_conn, marked=False)
-        response = lifecycle._recover_crash_marked_blocking(aid)
+        response = lifecycle._recover_crash_marked_blocking(database, event_bus, aid)
         assert (response.status, response.reason) == ("refused", "not_marked")
         assert stubs.events == []
 
     def test_refuses_unsettled_running_owner(
-        self, db_conn: psycopg.Connection, stubs: _Stubs
+        self, db_conn: psycopg.Connection, stubs: _Stubs, database: Database, event_bus: EventBus
     ) -> None:
         aid = _park_corpse(db_conn, status="running")
-        response = lifecycle._recover_crash_marked_blocking(aid)
+        response = lifecycle._recover_crash_marked_blocking(database, event_bus, aid)
         assert (response.status, response.reason) == ("refused", "not_settled:running")
 
-    def test_refuses_non_hosted_runtime(self, db_conn: psycopg.Connection, stubs: _Stubs) -> None:
+    def test_refuses_non_hosted_runtime(
+        self, db_conn: psycopg.Connection, stubs: _Stubs, database: Database, event_bus: EventBus
+    ) -> None:
         aid = _park_corpse(db_conn, runtime_kind="process")
-        response = lifecycle._recover_crash_marked_blocking(aid)
+        response = lifecycle._recover_crash_marked_blocking(database, event_bus, aid)
         assert (response.status, response.reason) == ("refused", "not_settled:runtime_kind=process")
 
-    def test_refuses_foreign_machine(self, db_conn: psycopg.Connection, stubs: _Stubs) -> None:
+    def test_refuses_foreign_machine(
+        self, db_conn: psycopg.Connection, stubs: _Stubs, database: Database, event_bus: EventBus
+    ) -> None:
         aid = _park_corpse(db_conn, machine="somewhere-else")
-        response = lifecycle._recover_crash_marked_blocking(aid)
+        response = lifecycle._recover_crash_marked_blocking(database, event_bus, aid)
         assert (response.status, response.reason) == ("refused", "wrong_machine")
 
-    def test_refuses_live_lease(self, db_conn: psycopg.Connection, stubs: _Stubs) -> None:
+    def test_refuses_live_lease(
+        self, db_conn: psycopg.Connection, stubs: _Stubs, database: Database, event_bus: EventBus
+    ) -> None:
         aid = _park_corpse(db_conn, lease_seconds=3600.0)
-        response = lifecycle._recover_crash_marked_blocking(aid)
+        response = lifecycle._recover_crash_marked_blocking(database, event_bus, aid)
         assert (response.status, response.reason) == ("refused", "lease_alive")
 
     def test_refuses_while_wake_suppressed(
-        self, db_conn: psycopg.Connection, stubs: _Stubs
+        self, db_conn: psycopg.Connection, stubs: _Stubs, database: Database, event_bus: EventBus
     ) -> None:
         """An active suppression window (without a tripped breaker) still
         refuses: automatic recovery is halted until the window expires."""
         aid = _park_corpse(
             db_conn, suppress_reason="permanent_provider_reject", suppress_seconds=3600.0
         )
-        response = lifecycle._recover_crash_marked_blocking(aid)
+        response = lifecycle._recover_crash_marked_blocking(database, event_bus, aid)
         assert (response.status, response.reason) == ("refused", "permanent_provider_reject")
         assert stubs.events == []
 
     def test_refuses_when_the_recovery_breaker_tripped(
-        self, db_conn: psycopg.Connection, stubs: _Stubs
+        self, db_conn: psycopg.Connection, stubs: _Stubs, database: Database, event_bus: EventBus
     ) -> None:
         """The durable streak gate holds even with no suppression window: a
         claim that cleared the window must not unlock a halted agent."""
         aid = _park_corpse(db_conn, streak=2)
-        response = lifecycle._recover_crash_marked_blocking(aid)
+        response = lifecycle._recover_crash_marked_blocking(database, event_bus, aid)
         assert (response.status, response.reason) == ("refused", "permanent_provider_reject")
         assert stubs.events == []
 
     def test_refuses_with_fallback_reason_for_reasonless_window(
-        self, db_conn: psycopg.Connection, stubs: _Stubs
+        self, db_conn: psycopg.Connection, stubs: _Stubs, database: Database, event_bus: EventBus
     ) -> None:
         aid = _park_corpse(db_conn, suppress_seconds=3600.0)
-        response = lifecycle._recover_crash_marked_blocking(aid)
+        response = lifecycle._recover_crash_marked_blocking(database, event_bus, aid)
         assert (response.status, response.reason) == ("refused", "wake_suppressed")
 
-    def test_missing_agent_raises(self, db_conn: psycopg.Connection, stubs: _Stubs) -> None:
+    def test_missing_agent_raises(
+        self, db_conn: psycopg.Connection, stubs: _Stubs, database: Database, event_bus: EventBus
+    ) -> None:
         with pytest.raises(AgentNotFound):
-            lifecycle._recover_crash_marked_blocking(10**9)
+            lifecycle._recover_crash_marked_blocking(database, event_bus, 10**9)
 
 
 class TestRecoverCrashMarkedRequester:
     @pytest.mark.asyncio
     async def test_suppressed_short_circuits_before_any_rpc(
-        self, monkeypatch: pytest.MonkeyPatch
+        self, monkeypatch: pytest.MonkeyPatch, event_bus: EventBus
     ) -> None:
         monkeypatch.setattr(lifecycle, "_recovery_halt_reason", _halted_permanent)
 
-        def _no_machine_read(_aid: int) -> str:
+        def _no_machine_read(_db: Database, _aid: int) -> str:
             raise AssertionError("a suppressed requester must not read or contact the home")
 
         monkeypatch.setattr(lifecycle, "get_agent_machine", _no_machine_read)
         decision, reason = await lifecycle.recover_crash_marked_if_stalled(
-            Database.from_settings(), 7, stalled_inbound_id=88
+            Database.from_settings(), event_bus, 7, stalled_inbound_id=88
         )
         assert (decision, reason) == ("refused", "permanent_provider_reject")
 
     @pytest.mark.asyncio
     async def test_forwards_to_home_and_maps_the_verdict(
-        self, monkeypatch: pytest.MonkeyPatch
+        self, monkeypatch: pytest.MonkeyPatch, event_bus: EventBus
     ) -> None:
         monkeypatch.setattr(lifecycle, "_recovery_halt_reason", _no_halt)
         monkeypatch.setattr(lifecycle, "get_agent_machine", _home_a)
@@ -276,7 +295,7 @@ class TestRecoverCrashMarkedRequester:
 
         monkeypatch.setattr(cluster_rpc, "dispatch_to_machine", _dispatch)
         decision, reason = await lifecycle.recover_crash_marked_if_stalled(
-            Database.from_settings(), 7, stalled_inbound_id=88
+            Database.from_settings(), event_bus, 7, stalled_inbound_id=88
         )
         assert (decision, reason) == ("harvested", None)
         assert seen == [
@@ -288,16 +307,19 @@ class TestRecoverCrashMarkedRequester:
         ]
 
     @pytest.mark.asyncio
-    async def test_local_home_falls_back_in_process(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    async def test_local_home_falls_back_in_process(
+        self, monkeypatch: pytest.MonkeyPatch, event_bus: EventBus
+    ) -> None:
         monkeypatch.setattr(lifecycle, "_recovery_halt_reason", _no_halt)
         monkeypatch.setattr(lifecycle, "get_agent_machine", _home_a)
         monkeypatch.setattr(lifecycle, "machine_name", _local_home_name)
         calls: list[int] = []
 
-        async def _local_op(agent_id: int) -> RecoverCrashMarkedResponse:
+        async def _local_op(_db: object, _bus: object, agent_id: int) -> RecoverCrashMarkedResponse:
             calls.append(agent_id)
             return RecoverCrashMarkedResponse(status="refused", reason="not_settled:running")
 
+        # pyright: ignore[reportUnknownArgumentType]
         monkeypatch.setattr(lifecycle, "recover_crash_marked_op", _local_op)
 
         async def _unreachable(_db: object, **_kwargs: object) -> dict[str, object]:
@@ -305,14 +327,14 @@ class TestRecoverCrashMarkedRequester:
 
         monkeypatch.setattr(cluster_rpc, "dispatch_to_machine", _unreachable)
         decision, reason = await lifecycle.recover_crash_marked_if_stalled(
-            Database.from_settings(), 7, stalled_inbound_id=88
+            Database.from_settings(), event_bus, 7, stalled_inbound_id=88
         )
         assert (decision, reason) == ("refused", "not_settled:running")
         assert calls == [7]
 
     @pytest.mark.asyncio
     async def test_remote_home_unreachable_reports_unreachable(
-        self, monkeypatch: pytest.MonkeyPatch
+        self, monkeypatch: pytest.MonkeyPatch, event_bus: EventBus
     ) -> None:
         monkeypatch.setattr(lifecycle, "_recovery_halt_reason", _no_halt)
         monkeypatch.setattr(lifecycle, "get_agent_machine", _home_a)
@@ -323,13 +345,15 @@ class TestRecoverCrashMarkedRequester:
 
         monkeypatch.setattr(cluster_rpc, "dispatch_to_machine", _unreachable)
         decision, reason = await lifecycle.recover_crash_marked_if_stalled(
-            Database.from_settings(), 7, stalled_inbound_id=88
+            Database.from_settings(), event_bus, 7, stalled_inbound_id=88
         )
         assert decision == "unreachable"
         assert reason == "connect timeout"
 
     @pytest.mark.asyncio
-    async def test_unexpected_failure_maps_to_error(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    async def test_unexpected_failure_maps_to_error(
+        self, monkeypatch: pytest.MonkeyPatch, event_bus: EventBus
+    ) -> None:
         monkeypatch.setattr(lifecycle, "_recovery_halt_reason", _no_halt)
         monkeypatch.setattr(lifecycle, "get_agent_machine", _home_a)
 
@@ -338,21 +362,26 @@ class TestRecoverCrashMarkedRequester:
 
         monkeypatch.setattr(cluster_rpc, "dispatch_to_machine", _explode)
         decision, reason = await lifecycle.recover_crash_marked_if_stalled(
-            Database.from_settings(), 7, stalled_inbound_id=88
+            Database.from_settings(), event_bus, 7, stalled_inbound_id=88
         )
         assert (decision, reason) == ("error", "harvest request failed")
 
 
 @pytest.mark.asyncio
-async def test_lifecycle_op_dispatches_the_recover_path(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_lifecycle_op_dispatches_the_recover_path(
+    monkeypatch: pytest.MonkeyPatch, database: Database, event_bus: EventBus
+) -> None:
     calls: list[int] = []
 
-    async def _fake_op(agent_id: int) -> RecoverCrashMarkedResponse:
+    async def _fake_op(_db: object, _bus: object, agent_id: int) -> RecoverCrashMarkedResponse:
         calls.append(agent_id)
         return RecoverCrashMarkedResponse(status="harvested")
 
+    # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(lifecycle, "recover_crash_marked_op", _fake_op)
     result = await lifecycle.lifecycle_op(
+        database,
+        event_bus,
         "/api/agents/42/recover-crash-marked-v2",
         {},
         object(),  # type: ignore[arg-type]

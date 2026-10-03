@@ -22,6 +22,7 @@ error — the flush pass keeps the record and counts the attempt.
 from __future__ import annotations
 
 import asyncio
+import functools
 import logging
 
 from psycopg_pool import ConnectionPool
@@ -29,6 +30,8 @@ from psycopg_pool import ConnectionPool
 from base.agents.messages import delivery_outbox
 from base.daemon import round_loop
 from base.daemon.loop_health import LoopProgress
+from base.db import Database, publish_inbound_wake
+from base.events.live.bus import EventBus
 
 _log = logging.getLogger("services.agent_ops.outbox_flusher")
 
@@ -47,7 +50,13 @@ def liveness_timeout_s(flush_interval_seconds: float) -> float:
     return (_CONNECTIONS_PER_RECORD + 1) * flush_interval_seconds + _LIVENESS_SLACK_S
 
 
-async def outbox_round(pool: ConnectionPool, progress: LoopProgress, cadence: list[float]) -> None:
+async def outbox_round(
+    pool: ConnectionPool,
+    db: Database,
+    bus: EventBus,
+    progress: LoopProgress,
+    cadence: list[float],
+) -> None:
     """One redelivery round: read the live knobs, then flush. A quiesced unit never
     gets here: `run_rounds` skips the round.
 
@@ -57,7 +66,12 @@ async def outbox_round(pool: ConnectionPool, progress: LoopProgress, cadence: li
     knobs = await asyncio.to_thread(delivery_outbox.limits)
     cadence[:] = [knobs.flush_interval_seconds]
     progress.timeout_s = liveness_timeout_s(knobs.flush_interval_seconds)
-    report = await asyncio.to_thread(delivery_outbox.flush, pool, on_record=progress.beat)
+    report = await asyncio.to_thread(
+        delivery_outbox.flush,
+        pool,
+        functools.partial(publish_inbound_wake, db, bus),
+        on_record=progress.beat,
+    )
     if report.touched or report.expired:
         _log.info(
             "[delivery-outbox] flush pass: delivered=%s buffered=%s abandoned=%s "
@@ -71,13 +85,15 @@ async def outbox_round(pool: ConnectionPool, progress: LoopProgress, cadence: li
         )
 
 
-async def outbox_loop(pool: ConnectionPool, progress: LoopProgress) -> None:
+async def outbox_loop(
+    pool: ConnectionPool, db: Database, bus: EventBus, progress: LoopProgress
+) -> None:
     """The outbox redelivery as a resident sequential loop, one immediate round
     first (so a restart right after a recovery backfills at once)."""
     cadence: list[float] = []
 
     async def one_round() -> None:
-        await outbox_round(pool, progress, cadence)
+        await outbox_round(pool, db, bus, progress, cadence)
 
     def next_wait_s() -> float:
         # A quiesced unit skips its rounds, so the first wait can precede the first read.

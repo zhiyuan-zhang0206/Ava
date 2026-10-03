@@ -16,6 +16,7 @@ from datetime import UTC, datetime, timedelta
 import ava
 from ava.agents import AgentStatus as S
 from schedules.agent_status_guard import ensure_agent_status_members
+from base.db import Database
 from schedules.catchup import catch_up, cluster_timezone, fire_slot_once
 from base.daemon.schedules.watcher import next_fire
 
@@ -133,7 +134,8 @@ def _fire_scan(_trigger: None) -> None:
 
 
 def main() -> None:
-    catch_up([(CRON, None)], timezone=cluster_timezone(), fire=_fire_scan)
+    db = Database.from_settings()
+    catch_up(db, [(CRON, None)], timezone=cluster_timezone(), fire=_fire_scan)
     while True:
         # after=now-2min gives trigger tolerance: sleep precision delay can land `now`
         # a fraction of a second past the hour; croniter get_next (strictly > base)
@@ -145,7 +147,7 @@ def main() -> None:
         if wait > 60:
             time.sleep(min(wait, 3600))
             continue
-        fire_slot_once(nxt, None, fire=_fire_scan)
+        fire_slot_once(db, nxt, None, fire=_fire_scan)
         time.sleep(120)
 
 

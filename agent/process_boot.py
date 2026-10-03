@@ -16,6 +16,7 @@ from typing import Any
 
 import ava
 from ava.sdk_surface import plugin_loader, sdk_disable
+from base.db import Database
 from base.host.env.agent_slices import ModelOverrides, agent_setting
 from base.log import logger
 from base.paths import workspace_dir
@@ -94,7 +95,7 @@ def init_process_scope() -> None:
     initialize_tracing()
 
 
-def land_cluster_extensions() -> None:
+def land_cluster_extensions(db: Database) -> None:
     """Process-scope boot: land the cluster's installed skills onto this machine.
 
     The boot-side sibling of `cli/commands/extensions/materialize.py`
@@ -128,7 +129,7 @@ def land_cluster_extensions() -> None:
     On a cluster with no installed extensions this is one indexed query
     returning no rows.
     """
-    from base import db, paths
+    from base import paths
     from base.packages.extensions import materialize
 
     try:

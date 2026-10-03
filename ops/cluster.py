@@ -50,9 +50,9 @@ def cluster_stopping_op(db: Database, machine: str, home: str) -> dict[str, str]
     return {"machine": machine}
 
 
-def cluster_status_op(pool: Any | None = None) -> ClusterStatus:
+def cluster_status_op(db: Database, pool: Any | None = None) -> ClusterStatus:
     """Local snapshot — assembled by `status_snapshot()`."""
-    return status_snapshot(pool=pool)
+    return status_snapshot(db, pool=pool)
 
 
 def shell_probe_op(agent_id: int) -> ShellProbeResult:

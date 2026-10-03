@@ -21,12 +21,14 @@ from services.delivery_watchdog import daemon, resurrect_retry, stall_recovery, 
 _Loop = Callable[[ConnectionPool, LoopProgress], Coroutine[Any, Any, None]]
 
 _LOOPS: dict[str, _Loop] = {
-    "scan": daemon._scan_loop,
+    "scan": lambda pool, progress: daemon._scan_loop(
+        pool, Database.from_settings(), EventBus.from_settings(), progress
+    ),
     "resurrect": lambda pool, progress: resurrect_retry.resurrect_loop(
-        pool, Database.from_settings(), progress, 0.01, 10, 60.0
+        pool, Database.from_settings(), EventBus.from_settings(), progress, 0.01, 10, 60.0
     ),
     "harvest": lambda pool, progress: stall_recovery.stall_recovery_loop(
-        pool, Database.from_settings(), progress, 0.01, 60.0
+        pool, Database.from_settings(), EventBus.from_settings(), progress, 0.01, 60.0
     ),
     "hosted_turn": lambda pool, progress: turn_liveness.hosted_turn_recovery_loop(
         pool, Database.from_settings(), cast("EventBus", MagicMock()), progress, 0.01, 60.0

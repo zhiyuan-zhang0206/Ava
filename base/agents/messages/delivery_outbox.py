@@ -61,13 +61,17 @@ import time
 import uuid
 from collections import Counter
 from collections.abc import Callable, Iterator
-from contextlib import AbstractContextManager, suppress
+from contextlib import suppress
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Any, Literal, Protocol, cast
+from typing import Literal, cast
 
+from base.agents.messages.delivery_outbox_types import FlushPool as FlushPool
 from base.agents.messages.delivery_outbox_types import FlushReport
+from base.agents.messages.delivery_outbox_types import (
+    PermanentDeliveryError as PermanentDeliveryError,
+)
 from base.daemon.schedules import completion_notices
 from base.host.atomic_io import write_text_atomic
 from base.log import logger
@@ -518,40 +522,18 @@ def record_failed_send(
 # ── Flusher side (agent-ops) ─────────────────────────────────────────────────
 
 
-class FlushPool(Protocol):
-    """Structural type of the ops daemon's connection pool.
-
-    Kept psycopg-free so the sender-side import of this module stays light:
-    only the flush side (the ops daemon) holds a real pool, and it passes it
-    in. `connection` mirrors the psycopg_pool call the flush makes — a bounded
-    wait so a down data plane cannot park the flusher past its next tick.
-    """
-
-    def connection(self, *, timeout: float | None = None) -> AbstractContextManager[Any]: ...
-
-
-class PermanentDeliveryError(Exception):
-    """The record can never be delivered; abandon it with this reason.
-
-    `detail` carries the readable upstream text (the exception that decided the
-    refusal, when one exists), so the abandonment record explains its code
-    instead of only naming it.
-    """
-
-    def __init__(self, reason: str, detail: str | None = None) -> None:
-        super().__init__(reason)
-        self.reason = reason
-        self.detail = detail
-
-
-def _deliver(pool: FlushPool, entry: OutboxEntry, connect_timeout_s: float) -> int | None:
+def _deliver(
+    pool: FlushPool,
+    publish_wake: Callable[[int, str], bool],
+    entry: OutboxEntry,
+    connect_timeout_s: float,
+) -> int | None:
     """Commit one entry through the canonical chat-inbound path; returns the id."""
     from base.agents.messages.caller_protocol import CallerProtocolUnavailableError
     from base.agents.messages.chat_delivery import (
         ClientMessageConflictError,
         insert_chat_inbound_once,
     )
-    from base.db import publish_inbound_wake
 
     text, payload = split_content(entry.content)
     with pool.connection(timeout=connect_timeout_s) as conn, conn.cursor() as cur:
@@ -585,6 +567,7 @@ def _deliver(pool: FlushPool, entry: OutboxEntry, connect_timeout_s: float) -> i
                 source=entry.source,
                 payload=payload,
                 client_message_id=entry.client_message_id,
+                publish_wake=publish_wake,
             )
     except ClientMessageConflictError as exc:
         raise PermanentDeliveryError("key_conflict", detail=str(exc)) from exc
@@ -593,7 +576,7 @@ def _deliver(pool: FlushPool, entry: OutboxEntry, connect_timeout_s: float) -> i
     # A same-key receipt (a previous attempt or flush already committed) can
     # still be pending — heal the wake tail, mirroring `deliver_chat_inbound`.
     if not receipt.inserted and receipt.pending:
-        publish_inbound_wake(entry.agent_id, str(receipt.inbound_id))
+        publish_wake(entry.agent_id, str(receipt.inbound_id))
     return receipt.inbound_id
 
 
@@ -684,7 +667,11 @@ def _paced(paths: list[Path], on_record: Callable[[], None] | None) -> Iterator[
 
 
 def _flush_path(
-    pool: FlushPool, path: Path, snapshot: DeliveryOutboxLimits, moment: datetime
+    pool: FlushPool,
+    publish_wake: Callable[[int, str], bool],
+    path: Path,
+    snapshot: DeliveryOutboxLimits,
+    moment: datetime,
 ) -> str | None:
     """One entry's flush outcome (a `FlushReport` counter name); None for a non-record."""
     if path.suffix != _ENTRY_SUFFIX or not path.is_file():
@@ -708,7 +695,7 @@ def _flush_path(
     if moment < _due_at(entry, snapshot.retry_backoff_steps):
         return "deferred"
     try:
-        inbound_id = _deliver(pool, entry, snapshot.flush_interval_seconds)
+        inbound_id = _deliver(pool, publish_wake, entry, snapshot.flush_interval_seconds)
     except PermanentDeliveryError as exc:
         _abandon(path, entry, exc.reason, moment, detail=exc.detail)
         return "abandoned"
@@ -764,6 +751,7 @@ def _log_redelivery(entry: OutboxEntry, inbound_id: int | None, age_s: float) ->
 
 def flush(
     pool: FlushPool,
+    publish_wake: Callable[[int, str], bool],
     *,
     now: datetime | None = None,
     on_record: Callable[[], None] | None = None,
@@ -783,7 +771,9 @@ def flush(
     timestamps) is counted unreadable and kept for inspection; it never stops
     the pass. While the outbox is disabled, nothing is touched and records
     stay for a re-enable or the operator. `on_record` is called before each
-    directory entry, for a caller that tracks the pass's progress.
+    directory entry, for a caller that tracks the pass's progress. `publish_wake` is the
+    best-effort wake for a delivered inbound (`base.db.publish_inbound_wake` bound to the
+    flusher's handles); this module stays free of the database stack.
     """
     snapshot = limits()
     moment = now or datetime.now(UTC)
@@ -792,7 +782,7 @@ def flush(
         return FlushReport()
     outcomes: Counter[str] = Counter()
     for path in _paced(sorted(directory.iterdir()), on_record):
-        outcome = _flush_path(pool, path, snapshot, moment)
+        outcome = _flush_path(pool, publish_wake, path, snapshot, moment)
         if outcome is not None:
             outcomes[outcome] += 1
     return FlushReport(**outcomes)

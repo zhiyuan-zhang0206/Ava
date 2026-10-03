@@ -51,7 +51,7 @@ _STUB_RENDER = '{"title": "Ava Ops", "panels": []}\n'
 
 @pytest.fixture(autouse=True)
 def _stub_dashboard_render(monkeypatch: pytest.MonkeyPatch) -> None:
-    def render_dashboard_json(_repo_only: bool = False) -> tuple[str, tuple[str, ...]]:
+    def render_dashboard_json(_db: object, _repo_only: bool = False) -> tuple[str, tuple[str, ...]]:
         return _STUB_RENDER, ()
 
     monkeypatch.setattr(
@@ -538,7 +538,7 @@ def test_render_provisioning_dashboard_failure_keeps_the_previous_file(
     dest = native / "config/provisioning/dashboards/ava-ops-main.json"
     before = dest.read_text(encoding="utf-8")
 
-    def broken_render(_repo_only: bool = False) -> tuple[str, tuple[str, ...]]:
+    def broken_render(_db: object, _repo_only: bool = False) -> tuple[str, tuple[str, ...]]:
         raise RuntimeError("render exploded")
 
     monkeypatch.setattr(

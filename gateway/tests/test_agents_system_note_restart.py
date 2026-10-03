@@ -10,6 +10,8 @@ import pytest
 from fastapi.testclient import TestClient
 from psycopg_pool import ConnectionPool
 
+from base.db import Database
+from base.events.live.bus import EventBus
 from gateway.app import app
 from gateway.tests.test_agents_endpoints import _inbound_rows, _returned_id, _terminate_hosted
 from gateway.tests.test_agents_endpoints import withdrawn_model as withdrawn_model
@@ -136,11 +138,15 @@ class TestSystemNote:
         assert "is not owned by agent" in str(resp.json())
 
     def test_system_note_task_ownership_stays_locked_through_enqueue(
-        self, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+        self,
+        db_conn: psycopg.Connection,
+        monkeypatch: pytest.MonkeyPatch,
+        database: Database,
+        event_bus: EventBus,
     ) -> None:
         """A reassignment cannot land after validation but before task-note enqueueing."""
         from base.db import connect, pool
-        from gateway.agents import state
+        from gateway.agents import system_note
 
         enqueue_entered, release_enqueue, reassign_started, reassign_finished = (
             threading.Event(),
@@ -157,8 +163,9 @@ class TestSystemNote:
             source: str,
             kind: str = "chat",
             payload: dict[str, object] | None = None,
+            **handles: object,
         ) -> int:
-            del db, agent_id, content, source, kind, payload
+            del db, agent_id, content, source, kind, payload, handles
             enqueue_entered.set()
             assert release_enqueue.wait(timeout=2)
             return 1
@@ -175,11 +182,13 @@ class TestSystemNote:
             )
             task_id = _returned_id(cur)
         db_conn.commit()
-        monkeypatch.setattr(state, "insert_inbound_message", pause_enqueue)
+        monkeypatch.setattr(system_note, "insert_inbound_message", pause_enqueue)
 
         def enqueue(note_pool: ConnectionPool) -> None:
             try:
-                state._system_note_blocking(
+                system_note._system_note_blocking(
+                    database,
+                    event_bus,
                     note_pool,
                     owner_id,
                     "x",

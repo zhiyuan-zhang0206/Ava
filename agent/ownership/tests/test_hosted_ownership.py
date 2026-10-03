@@ -24,7 +24,8 @@ from base.agents.incarnation.resources import (
     ResourceProcess,
     decode_resources,
 )
-from base.db import create_agent
+from base.db import Database, create_agent
+from base.events.live.bus import EventBus
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from base.telemetry import Event
 
@@ -51,19 +52,21 @@ def _version(conn: psycopg.Connection, agent_id: int) -> int:
 async def test_hosted_incarnation_survives_idle_and_next_turn(
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
+    database: Database,
+    event_bus: EventBus,
 ) -> None:
     agent_id, owner = _agent(db_conn), uuid4()
     first = await admit_hosted_runtime(
-        aops_pool, agent_id, "host-test", owner, expected_from="idling"
+        aops_pool, agent_id, "host-test", owner, expected_from="idling", db=database
     )
     assert first is not None
     # A legacy admission (no current publication) advertises protocol zero,
     # and settling neither invents nor clears an advertisement (task #4122).
     assert _version(db_conn, agent_id) == 0
-    assert await settle_hosted_runtime(aops_pool, first)
+    assert await settle_hosted_runtime(aops_pool, first, bus=event_bus)
     assert _version(db_conn, agent_id) == 0
     second = await admit_hosted_runtime(
-        aops_pool, agent_id, "host-test", owner, expected_from="idling"
+        aops_pool, agent_id, "host-test", owner, expected_from="idling", db=database
     )
     assert second == first
 
@@ -73,16 +76,20 @@ async def test_live_other_host_owner_cannot_be_admitted(
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     status: str,
+    database: Database,
+    event_bus: EventBus,
 ) -> None:
     agent_id = _agent(db_conn)
     first = await admit_hosted_runtime(
-        aops_pool, agent_id, "host-test", uuid4(), expected_from="idling"
+        aops_pool, agent_id, "host-test", uuid4(), expected_from="idling", db=database
     )
     assert first is not None
     if status == "idling":
-        assert await settle_hosted_runtime(aops_pool, first)
+        assert await settle_hosted_runtime(aops_pool, first, bus=event_bus)
     assert (
-        await admit_hosted_runtime(aops_pool, agent_id, "host-test", uuid4(), expected_from=status)
+        await admit_hosted_runtime(
+            aops_pool, agent_id, "host-test", uuid4(), expected_from=status, db=database
+        )
         is None
     )
 
@@ -90,19 +97,21 @@ async def test_live_other_host_owner_cannot_be_admitted(
 async def test_expired_owner_replacement_fences_old_settlement(
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
+    database: Database,
+    event_bus: EventBus,
 ) -> None:
     agent_id = _agent(db_conn)
     old = await admit_hosted_runtime(
-        aops_pool, agent_id, "host-test", uuid4(), expected_from="idling"
+        aops_pool, agent_id, "host-test", uuid4(), expected_from="idling", db=database
     )
     assert old is not None
     db_conn.execute("UPDATE agents_meta SET lease_expires_at = NULL WHERE id = %s", (agent_id,))
     db_conn.commit()
     new = await admit_hosted_runtime(
-        aops_pool, agent_id, "host-test", uuid4(), expected_from="running"
+        aops_pool, agent_id, "host-test", uuid4(), expected_from="running", db=database
     )
     assert new is not None and new.generation != old.generation
-    assert not await settle_hosted_runtime(aops_pool, old)
+    assert not await settle_hosted_runtime(aops_pool, old, bus=event_bus)
 
 
 @pytest.mark.parametrize("status", ["running", "idling"])
@@ -112,6 +121,8 @@ async def test_new_host_owner_requires_exact_old_host_exit_for_managed_set(
     aops_pool: AsyncConnectionPool,
     status: str,
     release_lease: bool,
+    database: Database,
+    event_bus: EventBus,
 ) -> None:
     """A normal agent-host restart transfers only an empty set whose host died."""
     agent_id = _agent(db_conn)
@@ -146,6 +157,7 @@ async def test_new_host_owner_requires_exact_old_host_exit_for_managed_set(
                 "host-test",
                 uuid4(),
                 expected_from=status,
+                db=database,
             )
             is None
         )
@@ -160,6 +172,7 @@ async def test_new_host_owner_requires_exact_old_host_exit_for_managed_set(
             "host-test",
             uuid4(),
             expected_from=status,
+            db=database,
         )
         assert successor is not None and successor.generation != old.generation
         stored = db_conn.execute(
@@ -175,7 +188,7 @@ async def test_new_host_owner_requires_exact_old_host_exit_for_managed_set(
         assert transferred.requests == {}
         assert transferred.host_process is not None
         assert transferred.host_process.pid == psutil.Process().pid
-        assert not await settle_hosted_runtime(aops_pool, old)
+        assert not await settle_hosted_runtime(aops_pool, old, bus=event_bus)
     finally:
         if old_host.poll() is None:
             old_host.kill()
@@ -185,6 +198,7 @@ async def test_new_host_owner_requires_exact_old_host_exit_for_managed_set(
 async def test_admission_does_not_lock_deployment_state(
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
+    database: Database,
 ) -> None:
     """A concurrently held row lock on the deployment singleton does not stall a
     hosted birth: admission reads and locks nothing but the agent's own row, and
@@ -193,7 +207,9 @@ async def test_admission_does_not_lock_deployment_state(
     try:
         db_conn.execute("SELECT id FROM deployment_state WHERE id = 1 FOR UPDATE")
         admitted = await asyncio.wait_for(
-            admit_hosted_runtime(aops_pool, agent_id, "host-test", owner, expected_from="idling"),
+            admit_hosted_runtime(
+                aops_pool, agent_id, "host-test", owner, expected_from="idling", db=database
+            ),
             10,
         )
         assert admitted is not None
@@ -205,31 +221,35 @@ async def test_admission_does_not_lock_deployment_state(
 async def test_settle_retains_a_granted_advertisement(
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
+    database: Database,
+    event_bus: EventBus,
 ) -> None:
     """An ordinary settle keeps a protocol advertisement already granted (task #4122)."""
     agent_id, owner = _agent(db_conn), uuid4()
     admitted = await admit_hosted_runtime(
-        aops_pool, agent_id, "host-test", owner, expected_from="idling"
+        aops_pool, agent_id, "host-test", owner, expected_from="idling", db=database
     )
     assert admitted is not None
     db_conn.execute(
         "UPDATE agents_meta SET runtime_protocol_version = 1 WHERE id = %s", (agent_id,)
     )
     db_conn.commit()
-    assert await settle_hosted_runtime(aops_pool, admitted)
+    assert await settle_hosted_runtime(aops_pool, admitted, bus=event_bus)
     assert _version(db_conn, agent_id) == 1
 
 
 async def test_owner_beat_renews_idle_but_not_other_owner(
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
+    database: Database,
+    event_bus: EventBus,
 ) -> None:
     agent_id, owner = _agent(db_conn), uuid4()
     incarnation = await admit_hosted_runtime(
-        aops_pool, agent_id, "host-test", owner, expected_from="idling"
+        aops_pool, agent_id, "host-test", owner, expected_from="idling", db=database
     )
     assert incarnation is not None
-    assert await settle_hosted_runtime(aops_pool, incarnation)
+    assert await settle_hosted_runtime(aops_pool, incarnation, bus=event_bus)
     db_conn.execute("UPDATE agents_meta SET lease_expires_at = NULL WHERE id = %s", (agent_id,))
     db_conn.commit()
     await renew_hosted_owner(aops_pool, "host-test", uuid4())
@@ -274,10 +294,12 @@ def _set_marker(
 async def test_stamp_turn_fatal_is_monotonic_and_cas_guarded(
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
+    database: Database,
+    event_bus: EventBus,
 ) -> None:
     agent_id, owner = _agent(db_conn), uuid4()
     incarnation = await admit_hosted_runtime(
-        aops_pool, agent_id, "host-test", owner, expected_from="idling"
+        aops_pool, agent_id, "host-test", owner, expected_from="idling", db=database
     )
     assert incarnation is not None
 
@@ -302,7 +324,7 @@ async def test_stamp_turn_fatal_is_monotonic_and_cas_guarded(
 
     # A settled (non-running) row is not stamped — the mark names the live
     # incarnation only.
-    assert await settle_hosted_runtime(aops_pool, incarnation)
+    assert await settle_hosted_runtime(aops_pool, incarnation, bus=event_bus)
     assert not (await stamp_turn_fatal(aops_pool, incarnation)).applied
 
     # A foreign incarnation's stamp is a no-op.
@@ -313,6 +335,8 @@ async def test_stamp_turn_fatal_is_monotonic_and_cas_guarded(
 async def test_settle_never_touches_the_corpse_marker(
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
+    database: Database,
+    event_bus: EventBus,
 ) -> None:
     """Settlement only writes the idling flip. The marker lifecycle belongs
     elsewhere (stamp at crash, clear on a completed LLM turn / resurrect), so
@@ -320,20 +344,20 @@ async def test_settle_never_touches_the_corpse_marker(
     resume its lease renewal forever (the 5858 escape)."""
     agent_id, owner = _agent(db_conn), uuid4()
     incarnation = await admit_hosted_runtime(
-        aops_pool, agent_id, "host-test", owner, expected_from="idling"
+        aops_pool, agent_id, "host-test", owner, expected_from="idling", db=database
     )
     assert incarnation is not None
 
     _set_marker(db_conn, agent_id, minutes_ago=30)
-    assert await settle_hosted_runtime(aops_pool, incarnation)
+    assert await settle_hosted_runtime(aops_pool, incarnation, bus=event_bus)
     assert _marker(db_conn, agent_id) is not None
 
     # A markerless row stays markerless — settle invents nothing.
     assert await admit_hosted_runtime(
-        aops_pool, agent_id, "host-test", owner, expected_from="idling"
+        aops_pool, agent_id, "host-test", owner, expected_from="idling", db=database
     )
     _set_marker(db_conn, agent_id, minutes_ago=None)
-    assert await settle_hosted_runtime(aops_pool, incarnation)
+    assert await settle_hosted_runtime(aops_pool, incarnation, bus=event_bus)
     assert _marker(db_conn, agent_id) is None
 
 
@@ -341,6 +365,8 @@ async def test_reap_crash_corpses_terminates_only_grace_elapsed_idling_corpses(
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     monkeypatch: pytest.MonkeyPatch,
+    database: Database,
+    event_bus: EventBus,
 ) -> None:
     events: list[tuple[int, str, str]] = []
 
@@ -364,10 +390,10 @@ async def test_reap_crash_corpses_terminates_only_grace_elapsed_idling_corpses(
     ) -> int:
         agent_id, _owner = _agent(db_conn), owner
         incarnation = await admit_hosted_runtime(
-            aops_pool, agent_id, "host-test", _owner, expected_from="idling"
+            aops_pool, agent_id, "host-test", _owner, expected_from="idling", db=database
         )
         assert incarnation is not None
-        await settle_hosted_runtime(aops_pool, incarnation)
+        await settle_hosted_runtime(aops_pool, incarnation, bus=event_bus)
         db_conn.execute(
             "UPDATE agents_meta SET status=%s, runtime_owner=%s WHERE id=%s",
             (status, row_owner, agent_id),
@@ -390,7 +416,7 @@ async def test_reap_crash_corpses_terminates_only_grace_elapsed_idling_corpses(
     db_conn.commit()
 
     published.clear()  # settle publishes on every flip; keep only reap's
-    reaped = await reap_crash_corpses(aops_pool, "host-test", owner)
+    reaped = await reap_crash_corpses(aops_pool, "host-test", owner, bus=event_bus)
     assert sorted(corpse.agent_id for corpse in reaped) == sorted([past_grace, abandoned_corpse])
 
     for corpse in reaped:
@@ -419,25 +445,27 @@ async def test_reap_crash_corpses_terminates_only_grace_elapsed_idling_corpses(
     )
     assert sorted(published) == sorted([past_grace, abandoned_corpse])
     # A second pass finds nothing new (the corpses are terminated).
-    assert await reap_crash_corpses(aops_pool, "host-test", owner) == []
+    assert await reap_crash_corpses(aops_pool, "host-test", owner, bus=event_bus) == []
 
 
 async def test_crash_pipeline_marker_survives_settle_and_reaper_terminates(
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
+    database: Database,
+    event_bus: EventBus,
 ) -> None:
     """The 5858 flow end-to-end at the ownership layer: crash stamps while
     running, the idling settle keeps the stamp, renew stops renewing the
     corpse, and the reaper terminates it once the grace window elapses."""
     agent_id, owner = _agent(db_conn), uuid4()
     incarnation = await admit_hosted_runtime(
-        aops_pool, agent_id, "host-test", owner, expected_from="idling"
+        aops_pool, agent_id, "host-test", owner, expected_from="idling", db=database
     )
     assert incarnation is not None
 
     # Crash while running: stamp first (CAS on running), then settle.
     assert await stamp_turn_fatal(aops_pool, incarnation)
-    assert await settle_hosted_runtime(aops_pool, incarnation)
+    assert await settle_hosted_runtime(aops_pool, incarnation, bus=event_bus)
     assert _marker(db_conn, agent_id) is not None
 
     # The beat renews healthy rows only — the corpse's lease stays expired.
@@ -449,11 +477,11 @@ async def test_crash_pipeline_marker_survives_settle_and_reaper_terminates(
     ).fetchone() == (None,)
 
     # Within the grace window the row is dead-but-waiting, not terminated.
-    assert await reap_crash_corpses(aops_pool, "host-test", owner) == []
+    assert await reap_crash_corpses(aops_pool, "host-test", owner, bus=event_bus) == []
 
     # Past the grace window the reaper terminates it with the reaper stamp.
     _set_marker(db_conn, agent_id, minutes_ago=16)
-    reaped = await reap_crash_corpses(aops_pool, "host-test", owner)
+    reaped = await reap_crash_corpses(aops_pool, "host-test", owner, bus=event_bus)
     assert [corpse.agent_id for corpse in reaped] == [agent_id]
     row = db_conn.execute(
         "SELECT status, termination_source FROM agents_meta WHERE id = %s", (agent_id,)
@@ -465,16 +493,18 @@ async def test_crash_pipeline_marker_survives_settle_and_reaper_terminates(
 async def test_renew_hosted_owner_skips_crash_marked_rows(
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
+    database: Database,
+    event_bus: EventBus,
 ) -> None:
     owner = uuid4()
 
     async def _row(marked: bool) -> int:
         agent_id, _owner = _agent(db_conn), owner
         incarnation = await admit_hosted_runtime(
-            aops_pool, agent_id, "host-test", _owner, expected_from="idling"
+            aops_pool, agent_id, "host-test", _owner, expected_from="idling", db=database
         )
         assert incarnation is not None
-        await settle_hosted_runtime(aops_pool, incarnation)
+        await settle_hosted_runtime(aops_pool, incarnation, bus=event_bus)
         if marked:
             _set_marker(db_conn, agent_id, minutes_ago=0)
         db_conn.execute("UPDATE agents_meta SET lease_expires_at = NULL WHERE id = %s", (agent_id,))

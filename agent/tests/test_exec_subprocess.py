@@ -36,6 +36,7 @@ from agent.graph.exec._stream import ExecOutputChunkPublisher
 from agent.graph.exec._subprocess import _run_in_subprocess
 from base.agents.lifecycle import AgentRestart, AgentTermination, SystemHalt
 from base.config import settings
+from base.db import Database
 from base.host.proc import kill_process_tree
 from base.paths import logs_dir
 from tests._test_env_file import rewrite_line
@@ -82,6 +83,7 @@ async def _run(
         # the exec node's delta/findings extraction; tests assert on the
         # result here.
         result, _payload = await _run_in_subprocess(
+            Database.from_settings(),
             code,
             _AGENT_ID,
             cancel_event,
@@ -402,7 +404,9 @@ async def test_natural_exit_reaps_ordinary_descendant_holding_stdout(tmp_path: P
             kill_process_tree(descendant_pid, grace_s=0.0)
 
 
-async def test_outer_task_cancel_reaps_child_and_descendant(tmp_path: Path) -> None:
+async def test_outer_task_cancel_reaps_child_and_descendant(
+    tmp_path: Path, database: Database
+) -> None:
     """Graph-task cancellation is a teardown barrier: the direct child and an
     ordinary descendant are gone and reaped before CancelledError escapes."""
     pid_file = tmp_path / "exec-tree.pids"
@@ -419,6 +423,7 @@ async def test_outer_task_cancel_reaps_child_and_descendant(tmp_path: Path) -> N
     )
     task = asyncio.create_task(
         _run_in_subprocess(
+            database,
             code,
             _AGENT_ID,
             asyncio.Event(),

@@ -27,6 +27,7 @@ from base.agents.incarnation.resources import (
     decode_resources,
 )
 from base.agents.observation.evidence import AdmissionOutcome
+from base.db import Database
 from base.db.transaction import async_write_transaction
 from base.deploy.maintenance import admission
 from base.deploy.progress_timeout import (
@@ -91,6 +92,7 @@ async def apply_hosted_lifecycle(
     pool: AsyncConnectionPool,
     incarnation: RuntimeIncarnation,
     *,
+    bus: EventBus,
     kill_shell_sessions: Callable[[int], None] | None = None,
 ) -> str | None:
     """Apply after the existing single-flight continuation has safely ended.
@@ -171,7 +173,7 @@ async def apply_hosted_lifecycle(
                 (incarnation.agent_id, row[0]),
             )
     if lifecycle_kind == "terminate":
-        await publish_agent_updated(EventBus.from_settings(), incarnation.agent_id)
+        await publish_agent_updated(bus, incarnation.agent_id)
     return lifecycle_kind
 
 
@@ -463,6 +465,7 @@ async def admit_hosted_runtime(
     machine: str,
     owner: UUID,
     *,
+    db: Database,
     expected_from: str,
 ) -> RuntimeIncarnation | None:
     """Keep this owner's logical incarnation across turns; reject live others.
@@ -483,7 +486,7 @@ async def admit_hosted_runtime(
         )
         return None
 
-    await asyncio.to_thread(recover_local_resources, agent_id, machine)
+    await asyncio.to_thread(recover_local_resources, db, agent_id, machine)
     native = psutil.Process()
     host_identity = ResourceProcess.capture(native)
     legacy_adoption = await _legacy_dead_host_adoption(pool, agent_id, machine, owner)
@@ -557,6 +560,8 @@ async def admit_hosted_runtime(
 async def settle_hosted_runtime(
     pool: AsyncConnectionPool,
     incarnation: RuntimeIncarnation,
+    *,
+    bus: EventBus,
 ) -> bool:
     """Settle an ordinary turn; only durable lifecycle apply releases ownership.
 
@@ -605,7 +610,7 @@ async def settle_hosted_runtime(
     if settled_event is not None:
         telemetry.emit_prepared(settled_event)
     if changed:
-        await publish_agent_updated(EventBus.from_settings(), incarnation.agent_id)
+        await publish_agent_updated(bus, incarnation.agent_id)
     return changed
 
 
@@ -709,6 +714,7 @@ async def settle_and_stamp_turn(
     pool: AsyncConnectionPool,
     incarnation: RuntimeIncarnation,
     *,
+    bus: EventBus,
     exited: bool,
     crashed: bool,
 ) -> TurnSettlement:
@@ -737,7 +743,7 @@ async def settle_and_stamp_turn(
             )
     settled = False
     if not exited:
-        settled = await settle_hosted_runtime(pool, incarnation)
+        settled = await settle_hosted_runtime(pool, incarnation, bus=bus)
     return TurnSettlement(stamp=stamp, settled=settled)
 
 

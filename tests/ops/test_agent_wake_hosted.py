@@ -9,6 +9,8 @@ import pytest
 from psycopg_pool import AsyncConnectionPool
 
 from base.cluster.machine import machine_name
+from base.db import Database
+from base.events.live.bus import EventBus
 from ops.agents import wake
 from ops.agents.spawn import create_agent_row
 
@@ -21,7 +23,7 @@ def wakes() -> Iterator[list[tuple[int, str]]]:
 
 @pytest.fixture(autouse=True)
 def _capture_wakes(monkeypatch: pytest.MonkeyPatch, wakes: list[tuple[int, str]]) -> Iterator[None]:
-    def _record(agent_id: int, payload: str) -> None:
+    def _record(_db: object, _bus: object, agent_id: int, payload: str) -> None:
         wakes.append((agent_id, payload))
 
     # Both wake modules publish through their own namespace (the split moved
@@ -37,7 +39,9 @@ def _park(
     pid: int | None = None,
 ) -> int:
     """Seed admission input or a terminated hosted incarnation without launching."""
-    aid, _birth, _prompt_id, _attempt_id = create_agent_row(spawner="user", machine=machine_name())
+    aid, _birth, _prompt_id, _attempt_id = create_agent_row(
+        Database.from_settings(), EventBus.from_settings(), spawner="user", machine=machine_name()
+    )
     with db.cursor() as cur:
         cur.execute("UPDATE agents_meta SET status=%s, pid=%s WHERE id=%s", (status, pid, aid))
         if status == "terminated":
@@ -74,12 +78,15 @@ def _kind_rows(db: psycopg.Connection, aid: int, kind: str) -> int:
 
 
 def test_resurrect_agent_hosted_flips_and_wakes(
-    db_conn: psycopg.Connection, wakes: list[tuple[int, str]]
+    db_conn: psycopg.Connection,
+    wakes: list[tuple[int, str]],
+    database: Database,
+    event_bus: EventBus,
 ) -> None:
     """terminated -> idling + resurrect inbound + one wake; no launch, no
     pid-confirm polling."""
     aid = _park(db_conn, status="terminated")
-    out = wake.resurrect_agent(aid, resurrected_by="user")
+    out = wake.resurrect_agent(database, event_bus, aid, resurrected_by="user")
     assert out == aid
     assert _row(db_conn, aid) == ("idling", None)
     assert _kind_rows(db_conn, aid, "resurrect") == 1
@@ -87,7 +94,10 @@ def test_resurrect_agent_hosted_flips_and_wakes(
 
 
 def test_resurrect_agent_hosted_clears_the_corpse_marker(
-    db_conn: psycopg.Connection, wakes: list[tuple[int, str]]
+    db_conn: psycopg.Connection,
+    wakes: list[tuple[int, str]],
+    database: Database,
+    event_bus: EventBus,
 ) -> None:
     """A reaper-terminated corpse keeps `last_turn_fatal_at` stamped; the
     resurrect transition must clear it or the reaper's next beat would
@@ -99,20 +109,25 @@ def test_resurrect_agent_hosted_clears_the_corpse_marker(
         (aid,),
     )
     db_conn.commit()
-    wake.resurrect_agent(aid, resurrected_by="user")
+    wake.resurrect_agent(database, event_bus, aid, resurrected_by="user")
     assert db_conn.execute(
         "SELECT last_turn_fatal_at FROM agents_meta WHERE id = %s", (aid,)
     ).fetchone() == (None,)
 
 
 def test_resurrect_agent_hosted_keeps_trigger_guard(
-    db_conn: psycopg.Connection, wakes: list[tuple[int, str]]
+    db_conn: psycopg.Connection,
+    wakes: list[tuple[int, str]],
+    database: Database,
+    event_bus: EventBus,
 ) -> None:
     """The auto-resurrect trigger CAS semantics are mode-independent: a stale
     trigger still refuses the transition."""
     aid = _park(db_conn, status="terminated")
     with pytest.raises(wake.ResurrectTriggerStaleError):
         wake.resurrect_agent(
+            database,
+            event_bus,
             aid,
             resurrected_by="system",
             trigger_inbound_id=999999,
@@ -129,6 +144,8 @@ async def test_resurrection_admits_a_new_incarnation_on_the_same_host(
     aops_pool: AsyncConnectionPool,
     guarded: bool,
     managed: bool,
+    database: Database,
+    event_bus: EventBus,
 ) -> None:
     """An observed termination never revalidates its original runtime token."""
     from uuid import uuid4
@@ -150,21 +167,29 @@ async def test_resurrection_admits_a_new_incarnation_on_the_same_host(
         )
         db_conn.commit()
     owner = uuid4()
-    old = await admit_hosted_runtime(aops_pool, aid, machine_name(), owner, expected_from="idling")
+    old = await admit_hosted_runtime(
+        aops_pool, aid, machine_name(), owner, expected_from="idling", db=database
+    )
     assert old is not None
-    command = insert_inbound_message(db_conn, aid, "", "self", kind="terminate")
+    command = insert_inbound_message(
+        db_conn, aid, "", "self", kind="terminate", bus=event_bus, database=database
+    )
     with bind_turn_identity(aid, incarnation=old):
         assert [item.id for item in await claim_inbound_batch(aops_pool, aid)] == [command]
-        assert await apply_hosted_lifecycle(aops_pool, old) == "terminate"
-    trigger = insert_inbound_message(db_conn, aid, "continue", "user")
+        assert await apply_hosted_lifecycle(aops_pool, old, bus=event_bus) == "terminate"
+    trigger = insert_inbound_message(
+        db_conn, aid, "continue", "user", bus=event_bus, database=database
+    )
     wake.resurrect_agent(
+        database,
+        event_bus,
         aid,
         resurrected_by="system" if guarded else "user",
         trigger_inbound_id=trigger if guarded else None,
         trigger_inbound_kind="chat" if guarded else None,
     )
     successor = await admit_hosted_runtime(
-        aops_pool, aid, machine_name(), owner, expected_from="idling"
+        aops_pool, aid, machine_name(), owner, expected_from="idling", db=database
     )
     assert successor is not None and successor.generation != old.generation
     with bind_turn_identity(aid, incarnation=old), pytest.raises(RuntimeOwnershipLostError):
@@ -196,7 +221,14 @@ def _reaped_crash_park(db: psycopg.Connection) -> tuple[int, int]:
     from base.db import insert_inbound_message
 
     aid = _park(db, status="terminated")
-    trigger = insert_inbound_message(db, aid, "leftover work", "user")
+    trigger = insert_inbound_message(
+        db,
+        aid,
+        "leftover work",
+        "user",
+        bus=EventBus.from_settings(),
+        database=Database.from_settings(),
+    )
     with db.cursor() as cur:
         cur.execute(
             "UPDATE agents_meta SET termination_source = 'reaper', "
@@ -210,6 +242,8 @@ def _reaped_crash_park(db: psycopg.Connection) -> tuple[int, int]:
 
 def _guarded_resurrect(aid: int, trigger: int) -> None:
     wake.resurrect_agent(
+        Database.from_settings(),
+        EventBus.from_settings(),
         aid,
         resurrected_by="system",
         trigger_inbound_id=trigger,
@@ -218,7 +252,10 @@ def _guarded_resurrect(aid: int, trigger: int) -> None:
 
 
 def test_reaped_crash_row_resumes_leftover_work(
-    db_conn: psycopg.Connection, wakes: list[tuple[int, str]]
+    db_conn: psycopg.Connection,
+    wakes: list[tuple[int, str]],
+    database: Database,
+    event_bus: EventBus,
 ) -> None:
     """A reaper death is not an operator decision, so a chat that predates it
     still qualifies as the pending-work trigger (task #3617, design section 6)."""
@@ -226,7 +263,12 @@ def test_reaped_crash_row_resumes_leftover_work(
 
     assert (
         wake.resurrect_agent(
-            aid, resurrected_by="system", trigger_inbound_id=trigger, trigger_inbound_kind="chat"
+            database,
+            event_bus,
+            aid,
+            resurrected_by="system",
+            trigger_inbound_id=trigger,
+            trigger_inbound_kind="chat",
         )
         == aid
     )
@@ -234,13 +276,17 @@ def test_reaped_crash_row_resumes_leftover_work(
     assert wakes == [(aid, "0")]
 
 
-def test_operator_death_still_refuses_leftover_work(db_conn: psycopg.Connection) -> None:
+def test_operator_death_still_refuses_leftover_work(
+    db_conn: psycopg.Connection, database: Database, event_bus: EventBus
+) -> None:
     """The crash marker alone never relaxes the fence: a user kill keeps its
     contract — the leftover chat cannot undo it."""
     from base.db import insert_inbound_message
 
     aid = _park(db_conn, status="terminated")
-    trigger = insert_inbound_message(db_conn, aid, "leftover work", "user")
+    trigger = insert_inbound_message(
+        db_conn, aid, "leftover work", "user", bus=event_bus, database=database
+    )
     db_conn.execute(
         "UPDATE agents_meta SET termination_source = 'user', "
         "last_turn_fatal_at = now() - interval '1 hour' WHERE id = %s",
@@ -315,6 +361,8 @@ def test_reaped_crash_row_keeps_the_failed_restart_fence(
 
 def test_reaped_crash_row_keeps_the_auto_resurrect_budget(
     db_conn: psycopg.Connection,
+    database: Database,
+    event_bus: EventBus,
 ) -> None:
     """The relaxed fence is not a budget bypass: an exhausted auto-resurrect
     budget refuses even a reaper-marked leftover."""
@@ -323,7 +371,9 @@ def test_reaped_crash_row_keeps_the_auto_resurrect_budget(
 
     aid, trigger = _reaped_crash_park(db_conn)
     for _ in range(wake._auto_resurrect_max_attempts()):
-        insert_inbound_message(db_conn, aid, "", "system", kind="resurrect")
+        insert_inbound_message(
+            db_conn, aid, "", "system", kind="resurrect", bus=event_bus, database=database
+        )
 
     with pytest.raises(ResurrectBudgetExhausted):
         _guarded_resurrect(aid, trigger)
@@ -331,7 +381,10 @@ def test_reaped_crash_row_keeps_the_auto_resurrect_budget(
 
 
 def test_manual_resurrect_stays_exempt_from_the_gates(
-    db_conn: psycopg.Connection, wakes: list[tuple[int, str]]
+    db_conn: psycopg.Connection,
+    wakes: list[tuple[int, str]],
+    database: Database,
+    event_bus: EventBus,
 ) -> None:
     """A manual resurrect passes no trigger: the explicit human override
     bypasses both suppression and the tripped breaker (the breaker record —
@@ -345,7 +398,7 @@ def test_manual_resurrect_stays_exempt_from_the_gates(
     )
     db_conn.commit()
 
-    assert wake.resurrect_agent(aid, resurrected_by="user") == aid
+    assert wake.resurrect_agent(database, event_bus, aid, resurrected_by="user") == aid
     assert _row(db_conn, aid) == ("idling", None)
     assert wakes == [(aid, "0")]
     row = db_conn.execute(
@@ -364,6 +417,8 @@ def test_historical_runtime_cannot_be_resurrected(
     runtime_kind: str | None,
     has_identity: bool,
     guarded: bool,
+    database: Database,
+    event_bus: EventBus,
 ) -> None:
     """An absent command pointer cannot adopt a historical or unknown runtime."""
     from base.agents import ResurrectRefused
@@ -377,13 +432,17 @@ def test_historical_runtime_cannot_be_resurrected(
         (runtime_kind, has_identity, has_identity, aid),
     )
     db_conn.commit()
-    trigger = insert_inbound_message(db_conn, aid, "continue", "user")
+    trigger = insert_inbound_message(
+        db_conn, aid, "continue", "user", bus=event_bus, database=database
+    )
     query = "SELECT row_to_json(a) FROM agents_meta a WHERE id=%s"
     before = db_conn.execute(query, (aid,)).fetchone()
     db_conn.commit()
 
     with pytest.raises(ResurrectRefused, match="runtime_cutover_required"):
         wake.resurrect_agent(
+            database,
+            event_bus,
             aid,
             resurrected_by="system" if guarded else "user",
             trigger_inbound_id=trigger if guarded else None,
@@ -397,7 +456,11 @@ def test_historical_runtime_cannot_be_resurrected(
 
 @pytest.mark.parametrize("missing", ["runtime_generation", "runtime_owner", "pid"])
 def test_incomplete_hosted_target_requires_cutover(
-    db_conn: psycopg.Connection, wakes: list[tuple[int, str]], missing: str
+    db_conn: psycopg.Connection,
+    wakes: list[tuple[int, str]],
+    missing: str,
+    database: Database,
+    event_bus: EventBus,
 ) -> None:
     """A hosted label alone cannot replace the retained incarnation authority."""
     from psycopg import sql
@@ -411,7 +474,7 @@ def test_incomplete_hosted_target_requires_cutover(
     )
     db_conn.commit()
     with pytest.raises(ResurrectRefused, match="runtime_cutover_required"):
-        wake.resurrect_agent(aid, resurrected_by="user")
+        wake.resurrect_agent(database, event_bus, aid, resurrected_by="user")
     assert _row(db_conn, aid)[0] == "terminated"
     assert _kind_rows(db_conn, aid, "resurrect") == 0
     assert wakes == []

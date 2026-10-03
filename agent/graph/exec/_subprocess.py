@@ -43,6 +43,7 @@ from agent.graph.exec.protocol import (
     read_result,
     write_request,
 )
+from base.db import Database
 from base.deploy.release import editable_install
 from base.host.env.registry import AGENT_BIRTH_CONFIG_ENV, AGENT_CONFIG_OVERLAY_ENV
 from base.log import logger
@@ -385,6 +386,7 @@ def _retain_late_reader_completion(
 
 
 async def _run_in_subprocess(
+    db: Database,
     code: str,
     agent_id: int | None,
     cancel_event: asyncio.Event,
@@ -403,9 +405,10 @@ async def _run_in_subprocess(
         return guard_failure, None
     from agent.graph.exec._owned_run import managed_target, run_owned
 
-    target = await asyncio.to_thread(managed_target, agent_id)
+    target = await asyncio.to_thread(managed_target, db, agent_id)
     if target is not None:
         return await run_owned(
+            db,
             target,
             code,
             cancel_event,

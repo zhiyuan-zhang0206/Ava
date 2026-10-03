@@ -29,7 +29,8 @@ from agent.tests.claim_support import (
     _insert_inbound_kind,
     _make_runtime,
 )
-from base.db import insert_inbound_message
+from base.db import Database, insert_inbound_message
+from base.events.live.bus import EventBus
 from tests.fixtures.units import spawn_agent
 from tests.path_scoped.agent_tests import _fresh_snapshot_cursor as _fresh_snapshot_cursor
 from tests.path_scoped.agent_tests import (
@@ -407,7 +408,10 @@ async def test_claim_compact_request_retries_then_succeeds(
 
 
 async def test_claim_compact_summary_with_chat_in_same_batch_defers_chat(
-    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    database: Database,
+    event_bus: EventBus,
 ):
     """A chat sent between the agent's ava.self.compact and claim's wake lands in
     the same batch as the compact_summary — it must not be lost, and it must NOT
@@ -419,7 +423,9 @@ async def test_claim_compact_summary_with_chat_in_same_batch_defers_chat(
     tid = spawn_agent()
     summary_text = "agent summary"
     _insert_inbound_kind(db_conn, tid, summary_text, "compact_summary")
-    chat_id = insert_inbound_message(db_conn, tid, "user during compact", source="user")
+    chat_id = insert_inbound_message(
+        db_conn, tid, "user during compact", source="user", bus=event_bus, database=database
+    )
 
     sys_msg = SystemMessage(content="<test sys prompt>")
     initial_msgs: list[AnyMessage] = [
@@ -452,7 +458,10 @@ async def test_claim_compact_summary_with_chat_in_same_batch_defers_chat(
 
 
 async def test_claim_compact_summary_finalizes_claimed_history(
-    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    database: Database,
+    event_bus: EventBus,
 ):
     """A compaction finalizes every already-claimed inbound row to 'done'
     BEFORE the REMOVE_ALL wipe. Those rows' HumanMessages live in
@@ -465,8 +474,12 @@ async def test_claim_compact_summary_finalizes_claimed_history(
     _insert_inbound_kind(db_conn, tid, "agent summary", "compact_summary")
     # Two chats claimed earlier (their HumanMessages are in state.messages,
     # status still 'claimed' — the two-phase path finalizes only at startup).
-    chat1 = insert_inbound_message(db_conn, tid, "user q1", source="user")
-    chat2 = insert_inbound_message(db_conn, tid, "user q2", source="user")
+    chat1 = insert_inbound_message(
+        db_conn, tid, "user q1", source="user", bus=event_bus, database=database
+    )
+    chat2 = insert_inbound_message(
+        db_conn, tid, "user q2", source="user", bus=event_bus, database=database
+    )
     with db_conn.cursor() as cur:
         cur.execute(
             "UPDATE inbound_messages SET status = 'claimed', claimed_at = now() WHERE id = ANY(%s)",

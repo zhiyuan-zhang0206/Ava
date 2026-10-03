@@ -15,6 +15,7 @@ import psycopg
 import pytest
 from fastapi.testclient import TestClient
 
+from base.db import Database
 from gateway.app import app
 from gateway.cluster import status as status_router
 from gateway.cluster.status import StatusCache
@@ -45,7 +46,11 @@ def fake_flag(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
     name is shimmed to the file's existence so this suite keeps simulating the
     pause with a file."""
     flag = tmp_path / "cluster_paused"
-    monkeypatch.setattr("gateway.cluster.status.cluster_is_paused", flag.exists)
+
+    def paused(_db: Database) -> bool:
+        return flag.exists()
+
+    monkeypatch.setattr("gateway.cluster.status.cluster_is_paused", paused)
     return flag
 
 
@@ -174,6 +179,7 @@ class TestClusterPanel:
         fake_flag: Path,
         stub_machine_identity: None,
         stub_remote_probe: dict[str, tuple[bool, bool | None]],
+        database: Database,
     ) -> None:
         """During a pause /api/status is short-circuited to 503 by middleware; call the
         helper directly to verify the cluster sub-section correctly reflects the paused flag."""
@@ -181,7 +187,7 @@ class TestClusterPanel:
         _ = stub_machine_identity
         fake_flag.write_text("")
         with db_conn.cursor() as cur:
-            panel = status_router._get_cluster_status(cur)
+            panel = status_router._get_cluster_status(database, cur)
         assert panel.current_paused is True
 
     def test_machines_list_local_plus_remote(
@@ -550,6 +556,7 @@ class TestPanelCarriesNoFrozenPin:
         fake_flag: Path,
         stub_machine_identity: None,
         monkeypatch: pytest.MonkeyPatch,
+        database: Database,
     ) -> None:
         """The panel reports each node's checkout and carries no cluster target or
         known-good verdict."""
@@ -558,7 +565,7 @@ class TestPanelCarriesNoFrozenPin:
 
         monkeypatch.setattr(status_router, "prod_source_head_sha", lambda: "abc1234")
         with db_conn.cursor() as cur:
-            panel = status_router._get_cluster_status(cur)
+            panel = status_router._get_cluster_status(database, cur)
         body = panel.model_dump()
         assert "cluster_target_sha" not in body
         assert "cluster_last_known_good_sha" not in body

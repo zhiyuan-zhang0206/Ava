@@ -15,6 +15,7 @@ from base.agents.incarnation.resources import (
     register_exec,
 )
 from base.agents.incarnation.tests.test_resources import _admitted, _entry, _force, _process
+from base.db import Database
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 
 
@@ -72,7 +73,7 @@ def test_malformed_never_downgrades_to_legacy(db_conn: psycopg.Connection) -> No
 
 
 def test_actual_owner_receipt_recovers_only_exact_persisted_allocation(
-    db_conn: psycopg.Connection, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    db_conn: psycopg.Connection, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, database: Database
 ) -> None:
     from agent.tests.test_exec_owner_entry import _context, _ready, _start
     from base.agents.incarnation import exec_owner_recovery
@@ -106,21 +107,21 @@ def test_actual_owner_receipt_recovers_only_exact_persisted_allocation(
         receipt = directory / "owner.closed"
         withheld = directory / "withheld.closed"
         receipt.rename(withheld)
-        exec_owner_recovery.recover_local_resources(target.agent_id, "resource-test")
+        exec_owner_recovery.recover_local_resources(database, target.agent_id, "resource-test")
         row = db_conn.execute(
             "SELECT incarnation_resources FROM agents_meta WHERE id=%s", (target.agent_id,)
         ).fetchone()
         assert row is not None and str(context.allocation.request) in row[0]["requests"]
         db_conn.commit()
         withheld.rename(receipt)
-        exec_owner_recovery.recover_local_resources(target.agent_id, "resource-test")
+        exec_owner_recovery.recover_local_resources(database, target.agent_id, "resource-test")
         row = db_conn.execute(
             "SELECT incarnation_resources FROM agents_meta WHERE id=%s", (target.agent_id,)
         ).fetchone()
         assert row is not None and row[0]["requests"] == {}
         # Replaying the same exact observation is a no-op, not a new admission.
         db_conn.commit()
-        exec_owner_recovery.recover_local_resources(target.agent_id, "resource-test")
+        exec_owner_recovery.recover_local_resources(database, target.agent_id, "resource-test")
     finally:
         if proc.poll() is None:
             proc.kill()

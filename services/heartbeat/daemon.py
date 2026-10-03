@@ -33,7 +33,6 @@ from pathlib import Path
 import psycopg
 from psycopg_pool import ConnectionPool
 
-import base.db
 from base import telemetry
 from base.config import settings
 from base.daemon.endpoints import ServiceEndpoint, ServiceEndpoints
@@ -41,7 +40,7 @@ from base.daemon.health import start_health_server, stop_health_server
 from base.daemon.loop_health import LivenessGroup, LoopProgress
 from base.daemon.shutdown import cancel_and_drain, install_graceful_shutdown
 from base.daemon.shutdown import hard_exit as _hard_exit
-from base.db import Database
+from base.db import Database, publish_inbound_wake
 from base.db.transaction import write_transaction
 from base.deploy.maintenance import admission
 from base.events.live.bus import EventBus
@@ -240,7 +239,9 @@ def _select_idle_agents_needing_heartbeat(
     return rows
 
 
-def _send_heartbeat_checkin(pool: ConnectionPool, agent_id: int, idle_minutes: float) -> None:
+def _send_heartbeat_checkin(
+    pool: ConnectionPool, db: Database, bus: EventBus, agent_id: int, idle_minutes: float
+) -> None:
     """INSERT one `heartbeat` inbound for `agent_id`, then publish a Redis wake so
     the (idle-by-selection) target picks it up now instead of at its next inbound-
     wait SELECT recheck. Delivered as a system note (kind='heartbeat') — the claim
@@ -279,7 +280,7 @@ def _send_heartbeat_checkin(pool: ConnectionPool, agent_id: int, idle_minutes: f
     # is published after the inbound row is durable. Best-effort wake (see
     # base.db.publish_inbound_wake); heartbeat carries no user-facing inbound
     # id, so "0".
-    base.db.publish_inbound_wake(agent_id, "0")
+    publish_inbound_wake(db, bus, agent_id, "0")
 
 
 def _reconcile_agent(
@@ -532,7 +533,9 @@ async def _sleep_with_liveness(liveness: LoopProgress, total_s: float) -> None:
         remaining -= step
 
 
-async def _dispatch_loop(pool: ConnectionPool, liveness: LoopProgress) -> None:
+async def _dispatch_loop(
+    pool: ConnectionPool, db: Database, bus: EventBus, liveness: LoopProgress
+) -> None:
     """Main loop: on bounded dispatch steps, send a check-in to due idle agents
     that have not paused.
 
@@ -593,7 +596,7 @@ async def _dispatch_loop(pool: ConnectionPool, liveness: LoopProgress) -> None:
             )
             for agent_id, idle_minutes in rows:
                 try:
-                    _send_heartbeat_checkin(pool, agent_id, idle_minutes)
+                    _send_heartbeat_checkin(pool, db, bus, agent_id, idle_minutes)
                     pending_checkin[agent_id] = idle_minutes
                     _log.info(
                         "[heartbeat] checked in on idle agent %s (idle %.0f min)",
@@ -659,7 +662,7 @@ async def run() -> None:
         # check-in; the completion digest is a third. A loop that raises cancels
         # its siblings and ends the process, and the supervisor restarts it.
         async with asyncio.TaskGroup() as loops:
-            loops.create_task(_dispatch_loop(pool, dispatch_progress))
+            loops.create_task(_dispatch_loop(pool, db, bus, dispatch_progress))
             loops.create_task(_liveness_loop(db, pool, bus, liveness_progress))
             loops.create_task(
                 completion_digest.completion_digest_loop(pool, db, bus, digest_progress)

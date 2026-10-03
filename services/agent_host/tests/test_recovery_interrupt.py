@@ -14,7 +14,8 @@ from psycopg_pool import AsyncConnectionPool, PoolTimeout
 from agent import state as states
 from base.cluster.machine import machine_name
 from base.config import settings
-from base.db import insert_inbound_message
+from base.db import Database, insert_inbound_message
+from base.events.live.bus import EventBus
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from base.native_process.turn_identity import bind_turn_identity
 from ops.agents.spawn import create_agent_row
@@ -25,11 +26,19 @@ from services.agent_host.tests.test_hosted_db_recovery import _admit, _graph
 
 @pytest.mark.parametrize("kind", ["cancel", "terminate"])
 async def test_pending_external_interrupt_shortens_backoff_without_claiming(
-    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool, kind: str
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    kind: str,
+    database: Database,
+    event_bus: EventBus,
 ) -> None:
-    agent, _, _prompt_id, _attempt_id = create_agent_row(spawner="user", machine=machine_name())
+    agent, _, _prompt_id, _attempt_id = create_agent_row(
+        database, event_bus, spawner="user", machine=machine_name()
+    )
     incarnation = RuntimeIncarnation(agent, uuid4(), uuid4())
-    command = insert_inbound_message(db_conn, agent, "", "user", kind=kind)
+    command = insert_inbound_message(
+        db_conn, agent, "", "user", kind=kind, bus=event_bus, database=database
+    )
     db_conn.commit()
     interrupt = RecoveryInterrupt(aops_pool, incarnation)
 
@@ -47,9 +56,15 @@ async def test_pending_external_interrupt_shortens_backoff_without_claiming(
 
 
 async def test_interrupt_arriving_during_backoff_is_observed(
-    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool, monkeypatch: pytest.MonkeyPatch
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    monkeypatch: pytest.MonkeyPatch,
+    database: Database,
+    event_bus: EventBus,
 ) -> None:
-    agent, _, _prompt_id, _attempt_id = create_agent_row(spawner="user", machine=machine_name())
+    agent, _, _prompt_id, _attempt_id = create_agent_row(
+        database, event_bus, spawner="user", machine=machine_name()
+    )
     interrupt = RecoveryInterrupt(aops_pool, RuntimeIncarnation(agent, uuid4(), uuid4()))
     checked = asyncio.Event()
     original = recovery_interrupt.has_pending_interrupt
@@ -64,7 +79,9 @@ async def test_interrupt_arriving_during_backoff_is_observed(
     waiter = asyncio.create_task(interrupt.wait_backoff(30))
     try:
         await asyncio.wait_for(checked.wait(), 1)
-        command = insert_inbound_message(db_conn, agent, "", "user", kind="cancel")
+        command = insert_inbound_message(
+            db_conn, agent, "", "user", kind="cancel", bus=event_bus, database=database
+        )
         db_conn.commit()
         await asyncio.wait_for(waiter, 1)
     finally:
@@ -78,10 +95,17 @@ async def test_interrupt_arriving_during_backoff_is_observed(
 
 
 async def test_self_control_does_not_shorten_backoff(
-    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    database: Database,
+    event_bus: EventBus,
 ) -> None:
-    agent, _, _prompt_id, _attempt_id = create_agent_row(spawner="user", machine=machine_name())
-    insert_inbound_message(db_conn, agent, "", "self", kind="terminate")
+    agent, _, _prompt_id, _attempt_id = create_agent_row(
+        database, event_bus, spawner="user", machine=machine_name()
+    )
+    insert_inbound_message(
+        db_conn, agent, "", "self", kind="terminate", bus=event_bus, database=database
+    )
     db_conn.commit()
     interrupt = RecoveryInterrupt(aops_pool, RuntimeIncarnation(agent, uuid4(), uuid4()))
     started = time.monotonic()
@@ -169,6 +193,8 @@ async def test_recovery_retries_promptly_but_does_not_execute_or_ack_control(
     aops_pool: AsyncConnectionPool,
     monkeypatch: pytest.MonkeyPatch,
     persistent_failure: bool,
+    database: Database,
+    event_bus: EventBus,
 ) -> None:
     incarnation = await _admit(aops_pool)
     agent = incarnation.agent_id
@@ -179,7 +205,9 @@ async def test_recovery_retries_promptly_but_does_not_execute_or_ack_control(
     graph, saver = await _graph(aops_pool, agent, never)
     config: RunnableConfig = {"configurable": {"thread_id": str(agent)}}
     before = await saver.aget(config)
-    command = insert_inbound_message(db_conn, agent, "", "user", kind="cancel")
+    command = insert_inbound_message(
+        db_conn, agent, "", "user", kind="cancel", bus=event_bus, database=database
+    )
     db_conn.commit()
     flush = db_recovery.flush_checkpoint
     attempts = 0

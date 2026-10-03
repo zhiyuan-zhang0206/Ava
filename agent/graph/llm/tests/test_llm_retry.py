@@ -38,6 +38,8 @@ from agent.graph.llm_errors import (
 from agent.hooks.compact import CompactionFailedError
 from base.agents.context import AvaContext
 from base.config import settings
+from base.db import Database
+from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices
 
 _MODEL = "deepseek-flash"
@@ -298,7 +300,12 @@ def test_a_spent_streak_fails_the_turn_at_node_entry_and_resets(streak_agent: in
 
 def _runtime() -> Runtime[AvaContext]:
     ctx = AvaContext(
-        ops_pool=None, llm=MagicMock(), event_publisher=MagicMock(), agent=AgentSlices.resolve()
+        ops_pool=None,
+        llm=MagicMock(),
+        event_publisher=MagicMock(),
+        agent=AgentSlices.resolve(),
+        db=Database.from_settings(),
+        bus=EventBus.from_settings(),
     )
     return Runtime(context=ctx)
 
@@ -406,6 +413,8 @@ def _failing_node_run(
         llm=MagicMock(),
         event_publisher=MagicMock(),
         agent=AgentSlices.resolve({"llm_model": model}),
+        db=Database.from_settings(),
+        bus=EventBus.from_settings(),
     )
     config: RunnableConfig = {"configurable": {"thread_id": thread}}
     with pytest.raises(ConnectionError):

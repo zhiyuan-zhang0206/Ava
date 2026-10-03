@@ -29,6 +29,8 @@ import psutil
 from base import telemetry
 from base.cluster import postgres as owned_postgres
 from base.cluster.machine import machine_name
+from base.db import Database
+from base.events.live.bus import EventBus
 from base.native_process.ownership import OwnedProcess, capture_tree, retain_processes
 from base.paths import run_dir
 from base.sessions.backend import get_shell_backend
@@ -463,7 +465,9 @@ def _record_close_notices(closed: _Closed, notice: _Notice, *, direct_db: bool) 
         )
         if built is not None:
             notices.append(built)
-    for unwritten, exc in pty_close_notices.write_notices(notices, direct=direct_db):
+    for unwritten, exc in pty_close_notices.write_notices(
+        Database.from_settings(), EventBus.from_settings(), notices, direct=direct_db
+    ):
         # The side-channel notice must never fail a closure; stay loud so the
         # gap is visible either way.
         print(

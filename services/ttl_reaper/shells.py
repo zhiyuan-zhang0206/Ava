@@ -53,6 +53,7 @@ from base.daemon import round_loop
 from base.daemon.loop_health import LoopProgress
 from base.db import Database
 from base.db.transaction import write_transaction
+from base.events.live.bus import EventBus
 from ops import cluster_rpc
 from services.ttl_reaper.owner_notice import PASS_BATCH, notify_owner
 
@@ -156,6 +157,8 @@ def _wall_clock(dt: datetime) -> str:
 
 def delete_shell_row(
     pool: ConnectionPool,
+    db: Database,
+    bus: EventBus,
     agent_id: int,
     session_id: int,
     *,
@@ -194,6 +197,8 @@ def delete_shell_row(
                 detail = f" at {_wall_clock(expires_at)}{ttl}"
             notify_owner(
                 conn,
+                db,
+                bus,
                 agent_id,
                 f"{label} was reclaimed after its TTL expired{detail}, interrupting a running task.",
             )
@@ -240,7 +245,7 @@ async def _dispatch_shell_kill(
 
 
 async def _reclaim_row(
-    pool: ConnectionPool, db: Database, machine: str, row: dict[str, Any]
+    pool: ConnectionPool, db: Database, bus: EventBus, machine: str, row: dict[str, Any]
 ) -> tuple[int, int] | None:
     """Reclaim one expired shell on `machine`; the (agent, session) when its row
     was settled, None when the row is left for the next round."""
@@ -273,6 +278,8 @@ async def _reclaim_row(
         functools.partial(
             delete_shell_row,
             pool,
+            db,
+            bus,
             agent_id,
             session_id,
             interrupted=interrupted,
@@ -297,7 +304,7 @@ async def _reclaim_row(
 
 
 async def reap_expired_shells(
-    pool: ConnectionPool, db: Database, progress: LoopProgress
+    pool: ConnectionPool, db: Database, bus: EventBus, progress: LoopProgress
 ) -> list[tuple[int, int]]:
     """Kill every TTL-expired shell session on its home machine; return the
     (agent, session) pairs whose rows were settled.
@@ -322,7 +329,7 @@ async def reap_expired_shells(
 
     async def reclaim_machine(machine: str, machine_rows: list[dict[str, Any]]) -> None:
         for row in machine_rows:
-            settled = await _reclaim_row(pool, db, machine, row)
+            settled = await _reclaim_row(pool, db, bus, machine, row)
             if settled is not None:
                 reaped.append(settled)
             progress.beat()

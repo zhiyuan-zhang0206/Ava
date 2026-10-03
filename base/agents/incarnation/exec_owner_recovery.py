@@ -26,7 +26,7 @@ from base.agents.incarnation.resources import (
     complete_exec,
     decode_resources,
 )
-from base.db.transaction import write_transaction
+from base.db import Database
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from base.paths import exec_run_dir
 
@@ -54,10 +54,10 @@ def _recoverable(value: object) -> object:
 
 
 def _load_recoverable(
-    agent_id: int, machine: str
+    db: Database, agent_id: int, machine: str
 ) -> tuple[object, IncarnationResources, RuntimeIncarnation] | None:
     """The agent's raw resources, decoded state and incarnation when this host may recover them."""
-    with write_transaction() as conn:
+    with db.write_transaction() as conn:
         row = conn.execute(
             "SELECT incarnation_resources,runtime_generation,runtime_owner,machine FROM agents_meta WHERE id=%s",
             (agent_id,),
@@ -130,14 +130,14 @@ def _settle_frozen_terminate(
         )
 
 
-def recover_local_resources(agent_id: int, machine: str) -> None:
-    loaded = _load_recoverable(agent_id, machine)
+def recover_local_resources(db: Database, agent_id: int, machine: str) -> None:
+    loaded = _load_recoverable(db, agent_id, machine)
     if loaded is None:
         return
     raw_resources, state, target = loaded
     completed = _completed_allocations(agent_id, target, state)
     host_ended = state.host_process is not None and process_ended(state.host_process)
-    with write_transaction() as conn:
+    with db.write_transaction() as conn:
         current = conn.execute(
             "SELECT incarnation_resources,machine,runtime_generation,runtime_owner,lifecycle_command_id FROM agents_meta WHERE id=%s FOR UPDATE",
             (agent_id,),

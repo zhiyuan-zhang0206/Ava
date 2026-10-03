@@ -19,7 +19,8 @@ from base.agents import impersonation as leases
 from base.agents.messages.caller_identity import CallerIdentity
 from base.cluster.machine import machine_name
 from base.config import settings
-from base.db import create_agent
+from base.db import Database, create_agent
+from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from base.packages.plugins.extensions import ExtensionRegistry, PluginContributions
@@ -91,6 +92,8 @@ def test_external_memory_write_uses_borrowed_identity(
     tmp_path: Path,
     store: str,
     stale_process_identity: bool,
+    database: Database,
+    event_bus: EventBus,
 ) -> None:
     from ava_builtins.plugins.ava_memory import sdk as memory_sdk
     from base import paths
@@ -106,14 +109,16 @@ def test_external_memory_write_uses_borrowed_identity(
     monkeypatch.setattr(paths, "workspace_dir", workspace)
     monkeypatch.setattr(paths, "memory_dir", lambda: tmp_path / "shared")
     lease = leases.request(
+        database,
+        event_bus,
         owner.agent_id,
         caller=CallerIdentity(kind="external_agent", subject="codex"),
         process_metadata=recorded_tree(),
         relay_provider="codex",
         relay_thread_id=str(uuid4()),
     )
-    leases.accept(lease["id"], owner.agent_id, owner, "Handoff brief")
-    leases.activate(lease["id"], owner)
+    leases.accept(database, event_bus, lease["id"], owner.agent_id, owner, "Handoff brief")
+    leases.activate(database, event_bus, lease["id"], owner)
     monkeypatch.setattr(external, "process_metadata", lambda: attested_caller(lease))
 
     with external.attach(lease["id"]):
@@ -127,7 +132,9 @@ def test_external_memory_write_uses_borrowed_identity(
     if store == "shared":
         assert f"ava_agent: {owner.agent_id}\n" in entry.read_text()
     # Memory files are immediate SDK effects, separate from checkpoint deltas.
-    assert leases.get(lease["id"], attested_caller(lease))["delta_version"] == 0
+    assert (
+        leases.get(database, event_bus, lease["id"], attested_caller(lease))["delta_version"] == 0
+    )
 
 
 @pytest.mark.parametrize("operation", ["write", "note"])
@@ -137,6 +144,8 @@ def test_external_memory_rechecks_lease_before_filesystem_effects(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     operation: str,
+    database: Database,
+    event_bus: EventBus,
 ) -> None:
     from ava_builtins.plugins.ava_memory import notes, sdk
     from base import paths
@@ -151,14 +160,16 @@ def test_external_memory_rechecks_lease_before_filesystem_effects(
     monkeypatch.setattr(notes, "workspace_dir", workspace)
     monkeypatch.setattr(settings.agent, "memory_per_agent_inject_enabled", True)
     lease = leases.request(
+        database,
+        event_bus,
         owner.agent_id,
         caller=CallerIdentity(kind="external_agent", subject="codex"),
         process_metadata=recorded_tree(),
         relay_provider="codex",
         relay_thread_id=str(uuid4()),
     )
-    leases.accept(lease["id"], owner.agent_id, owner, "Handoff brief")
-    leases.activate(lease["id"], owner)
+    leases.accept(database, event_bus, lease["id"], owner.agent_id, owner, "Handoff brief")
+    leases.activate(database, event_bus, lease["id"], owner)
     monkeypatch.setattr(external, "process_metadata", lambda: attested_caller(lease))
     attachment = external.attach(lease["id"])
     try:

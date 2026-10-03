@@ -8,13 +8,16 @@ from fastapi.testclient import TestClient
 from base.agents import impersonation
 from base.agents.messages.caller_identity import CallerIdentity
 from base.cluster.machine import machine_name
-from base.db import create_agent
+from base.db import Database, create_agent
+from base.events.live.bus import EventBus
 from gateway.app import app
 from tests.impersonation_support import recorded_tree
 
 
 def test_force_expire_endpoint_requires_observed_session_and_returns_distinct_status(
     db_conn: psycopg.Connection,
+    database: Database,
+    event_bus: EventBus,
 ) -> None:
     agent_id = create_agent(db_conn)
     db_conn.execute(
@@ -25,6 +28,8 @@ def test_force_expire_endpoint_requires_observed_session_and_returns_distinct_st
     )
     db_conn.commit()
     lease = impersonation.request(
+        database,
+        event_bus,
         agent_id,
         caller=CallerIdentity(kind="external_agent", subject="codex", instance="test"),
         reason="Work",

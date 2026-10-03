@@ -21,7 +21,9 @@ from psycopg_pool import ConnectionPool
 from base.agents.tasks.notes import task_note_line
 from base.cluster import machines
 from base.cluster.machine import machine_name
+from base.db import Database
 from base.db.transaction import write_transaction
+from base.events.live.bus import EventBus
 from gateway.agents import forward
 from gateway.cluster.schemas import MachinePauseRequest, MachinePauseResponse, MachineResumeResponse
 from ops.lifecycle import force_mark_terminated
@@ -105,14 +107,16 @@ def _list_agent_rows_for_pause_blocking(pool: ConnectionPool, name: str) -> list
         return [(r[0], r[1] != "terminated") for r in cur.fetchall()]
 
 
-def _force_mark_terminated_blocking(pool: ConnectionPool, agent_id: int) -> None:
+def _force_mark_terminated_blocking(
+    db: Database, bus: EventBus, pool: ConnectionPool, agent_id: int
+) -> None:
     """Force-mark one agent row terminated in the shared DB — the fallback
     when the machine's ops server could not take the force terminate (the
     machine is already unreachable). Reuses the lifecycle primitive so the
     fallback writes the same terminate inbound fence under the agent row lock;
     the process is on the unreachable machine, so there is no local OS session
     to kill."""
-    force_mark_terminated(agent_id, pool, source="machine-pause")
+    force_mark_terminated(db, bus, agent_id, pool, source="machine-pause")
 
 
 def _resolve_machine_alerts_blocking(pool: ConnectionPool, name: str) -> None:
@@ -235,7 +239,13 @@ async def pause_cluster_machine(
             if was_live:
                 terminated += 1
         except Exception:
-            await asyncio.to_thread(_force_mark_terminated_blocking, pool, agent_id)
+            await asyncio.to_thread(
+                _force_mark_terminated_blocking,
+                request.app.state.db,
+                request.app.state.bus,
+                pool,
+                agent_id,
+            )
             if was_live:
                 force_marked += 1
 

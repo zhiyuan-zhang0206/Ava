@@ -23,6 +23,7 @@
 import time
 from datetime import UTC, datetime
 
+from base.db import Database
 from schedules.catchup import catch_up, cluster_timezone, fire_slot_once
 from services.hierarchy_worker.roots import prepare, tick
 from base.daemon.schedules.watcher import next_fire
@@ -38,13 +39,14 @@ def _fire_tick(_trigger: None) -> None:
 
 
 def main() -> None:
+    db = Database.from_settings()
     prepare()
-    catch_up([(CRON, None)], timezone=cluster_timezone(), fire=_fire_tick)
+    catch_up(db, [(CRON, None)], timezone=cluster_timezone(), fire=_fire_tick)
     while True:
         nxt = next_fire(CRON, after=datetime.now(UTC), timezone=cluster_timezone())
         while datetime.now(UTC) < nxt:
             time.sleep(30)
-        fire_slot_once(nxt, None, fire=_fire_tick)
+        fire_slot_once(db, nxt, None, fire=_fire_tick)
 
 
 if __name__ == "__main__":

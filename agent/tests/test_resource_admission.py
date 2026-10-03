@@ -16,6 +16,7 @@ from base.agents.incarnation.resources import (
     decode_resources,
 )
 from base.agents.incarnation.tests.test_resources import _admitted, _force
+from base.db import Database
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 
 
@@ -24,6 +25,7 @@ async def test_force_at_owner_ready_leaves_no_resurrection_blocker(  # noqa: PLR
     aops_pool: AsyncConnectionPool,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    database: Database,
 ) -> None:
     """Force before native attachment cannot freeze an unattached reservation."""
     from agent.graph.exec import _owned_run
@@ -74,6 +76,7 @@ async def test_force_at_owner_ready_leaves_no_resurrection_blocker(  # noqa: PLR
     thread = threading.Thread(target=force_after_ready)
     thread.start()
     result, _ = await _run_in_subprocess(
+        database,
         f"from pathlib import Path; Path({str(marker)!r}).touch()",
         target.agent_id,
         asyncio.Event(),
@@ -112,5 +115,6 @@ async def test_force_at_owner_ready_leaves_no_resurrection_blocker(  # noqa: PLR
         "resource-test",
         uuid4(),
         expected_from="idling",
+        db=database,
     )
     assert successor is not None and successor.generation != target.generation

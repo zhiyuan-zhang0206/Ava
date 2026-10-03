@@ -3,6 +3,7 @@
 import asyncio
 import subprocess
 import sys
+from collections.abc import Callable
 from typing import Any, cast
 from unittest.mock import AsyncMock
 from uuid import uuid4
@@ -20,7 +21,7 @@ from agent.state import AgentState
 from agent.turn import progress
 from base.agents.incarnation import resources as resource_codec
 from base.cluster.machine import machine_name
-from base.db import Database, insert_inbound_message
+from base.db import Database
 from base.events.live.bus import EventBus
 from services.agent_host import dispatcher
 from services.agent_host import host as host_module
@@ -50,12 +51,12 @@ def isolated_clocks(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 async def test_pending_scan_classifies_lifecycle_work_and_lease(
-    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool
+    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool, insert_inbound: Callable[..., int]
 ) -> None:
     incarnation = await _admit(aops_pool)
     agent = incarnation.agent_id
     db_conn.execute("UPDATE agents_meta SET status='idling' WHERE id=%s", (agent,))
-    lifecycle = insert_inbound_message(db_conn, agent, "", "system:test", kind="restart")
+    lifecycle = insert_inbound(db_conn, agent, "", "system:test", kind="restart")
     db_conn.commit()
     host = AgentHost(
         pool=aops_pool,
@@ -69,7 +70,7 @@ async def test_pending_scan_classifies_lifecycle_work_and_lease(
         (agent, True)
     ]
 
-    ordinary = insert_inbound_message(db_conn, agent, "Need a reply", "user")
+    ordinary = insert_inbound(db_conn, agent, "Need a reply", "user")
     db_conn.commit()
     assert [(wake.agent_id, wake.recovery) for wake in await host.pending_inbound_wakes(60)] == [
         (agent, False)
@@ -92,11 +93,14 @@ async def test_pending_scan_classifies_lifecycle_work_and_lease(
 
 @pytest.mark.parametrize("known_progress", [True, False])
 async def test_old_pending_does_not_cancel_current_graph_progress(
-    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool, known_progress: bool
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    known_progress: bool,
+    insert_inbound: Callable[..., int],
 ) -> None:
     incarnation = await _admit(aops_pool)
     agent = incarnation.agent_id
-    inbound = insert_inbound_message(db_conn, agent, "Queued before host recovery", "user")
+    inbound = insert_inbound(db_conn, agent, "Queued before host recovery", "user")
     db_conn.execute(
         "UPDATE inbound_messages SET created_at=now()-interval '1 day' WHERE id=%s", (inbound,)
     )
@@ -153,11 +157,11 @@ async def test_old_pending_does_not_cancel_current_graph_progress(
 
 
 async def test_expired_predecessor_is_rediscovered_after_boot_without_pending_messages(
-    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool
+    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool, insert_inbound: Callable[..., int]
 ) -> None:
     incarnation = await _admit(aops_pool)
     agent = incarnation.agent_id
-    inbound = insert_inbound_message(db_conn, agent, "Claimed before host exit", "user")
+    inbound = insert_inbound(db_conn, agent, "Claimed before host exit", "user")
     db_conn.execute("UPDATE inbound_messages SET status='claimed' WHERE id=%s", (inbound,))
     db_conn.commit()
     with subprocess.Popen(
@@ -774,16 +778,12 @@ class TestHostedHostWakePacing:
             ]
 
         monkeypatch.setattr(
-            "services.agent_host.host.maintenance_receipts.pending_wakes",
-            held_wakes,
+            "services.agent_host.host.maintenance_receipts.pending_wakes", held_wakes
         )
         # The drain's held re-drive is update machinery: never paced.
         assert [
             (wake.agent_id, wake.recovery) for wake in await host.pending_inbound_wakes(30)
-        ] == [
-            (17, False),
-            (23, False),
-        ]
+        ] == [(17, False), (23, False)]
         scheduler = _ScanScheduler()
         wake_dispatcher = InboundWakeDispatcher(
             EventBus.from_settings(),

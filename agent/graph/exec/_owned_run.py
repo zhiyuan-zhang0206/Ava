@@ -40,20 +40,20 @@ from base.agents.incarnation.resources import (
     decode_resources,
     register_exec,
 )
-from base.db.transaction import write_transaction
+from base.db import Database
 from base.native_process.exec_kill_notice import read_notice
 from base.native_process.runtime_incarnation import RuntimeIncarnation, current_incarnation
 from base.native_process.turn_identity import current_hosted_resources
 from base.paths import exec_run_dir
 
 
-def managed_target(agent_id: int | None) -> RuntimeIncarnation | None:
+def managed_target(db: Database, agent_id: int | None) -> RuntimeIncarnation | None:
     if agent_id is None:
         return None
     target = current_incarnation(agent_id)
     if target is None:
         return None
-    with write_transaction() as conn:
+    with db.write_transaction() as conn:
         row = conn.execute(
             "SELECT incarnation_resources FROM agents_meta WHERE id=%s AND runtime_generation=%s AND runtime_owner=%s",
             (agent_id, target.generation, target.owner),
@@ -68,9 +68,9 @@ def managed_target(agent_id: int | None) -> RuntimeIncarnation | None:
         return target
 
 
-def _register_attached(context: OwnerContext, ready: OwnerReady) -> None:
+def _register_attached(db: Database, context: OwnerContext, ready: OwnerReady) -> None:
     """Publish only an attached allocation; force can win before this transaction."""
-    with write_transaction() as conn:
+    with db.write_transaction() as conn:
         target = RuntimeIncarnation(context.agent_id, context.generation, context.runtime_owner)
         register_exec(conn, target, context.allocation)
         attach_exec(
@@ -95,8 +95,8 @@ def validate_closed(context: OwnerContext, attached: ExecAllocation, path: Path)
     return receipt
 
 
-def _complete(context: OwnerContext, attached: ExecAllocation) -> None:
-    with write_transaction() as conn:
+def _complete(db: Database, context: OwnerContext, attached: ExecAllocation) -> None:
+    with db.write_transaction() as conn:
         complete_exec(
             conn,
             RuntimeIncarnation(context.agent_id, context.generation, context.runtime_owner),
@@ -109,6 +109,7 @@ class _OwnedRun:
 
     def __init__(
         self,
+        db: Database,
         target: RuntimeIncarnation,
         code: str,
         cancel_event: asyncio.Event,
@@ -118,6 +119,7 @@ class _OwnedRun:
         state: dict[str, Any] | None,
         exec_dir: Path | None,
     ) -> None:
+        self.db = db
         self.cancel_event = cancel_event
         self.chunk_publisher = chunk_publisher
         self.request_id = uuid4()
@@ -212,7 +214,7 @@ class _OwnedRun:
         await asyncio.to_thread(reader.join, max(0, self.bound - time.monotonic()))
         if reader.is_alive():
             raise ResourceEvidenceError("owner output reader remains unresolved")
-        await asyncio.to_thread(_complete, self.context, ready.allocation)
+        await asyncio.to_thread(_complete, self.db, self.context, ready.allocation)
         if self.scope is not None:
             self.scope.complete(self.request, ready)
         return receipt
@@ -422,6 +424,7 @@ def _unbound_completion() -> asyncio.Task[OwnerClosed]:
 
 
 async def run_owned(
+    db: Database,
     target: RuntimeIncarnation,
     code: str,
     cancel_event: asyncio.Event,
@@ -437,7 +440,7 @@ async def run_owned(
     from agent.graph.exec._subprocess import _drain_output
 
     owned = _OwnedRun(
-        target, code, cancel_event, timeout, chunk_publisher, state=state, exec_dir=exec_dir
+        db, target, code, cancel_event, timeout, chunk_publisher, state=state, exec_dir=exec_dir
     )
 
     def attached_completion() -> asyncio.Task[OwnerClosed]:
@@ -459,7 +462,7 @@ async def run_owned(
             if owned.ready_pending():
                 ready = owned.read_ready(launcher)
                 owned.registration = asyncio.create_task(
-                    asyncio.to_thread(_register_attached, owned.context, ready),
+                    asyncio.to_thread(_register_attached, owned.db, owned.context, ready),
                     name=f"exec-owner-register-{owned.request_id}",
                 )
                 await owned.finish_attach(owned.registration, ready)

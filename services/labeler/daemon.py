@@ -34,6 +34,7 @@ from base.daemon.shutdown import cancel_and_drain, install_graceful_shutdown
 from base.daemon.shutdown import hard_exit as _hard_exit
 from base.db import Database
 from base.deploy.maintenance import admission
+from base.events.live.bus import EventBus
 from base.log import init_gateway_process
 from services.labeler.config import LabelerConfig
 from services.labeler.labeler import generate_label_async
@@ -228,7 +229,7 @@ def _is_running() -> bool:
 
 
 async def _dispatch_loop(
-    pool: ConnectionPool, db: Database, liveness: Liveness, config: LabelerConfig
+    pool: ConnectionPool, db: Database, bus: EventBus, liveness: Liveness, config: LabelerConfig
 ) -> None:
     """Main loop: every second, poll the newest unlabeled agents
     (`_select_unlabeled`, minus those in failure-backoff) -> grab first prompt ->
@@ -255,7 +256,7 @@ async def _dispatch_loop(
                 if not prompt:
                     continue
                 try:
-                    result = await generate_label_async(tid, prompt, config, db)
+                    result = await generate_label_async(tid, prompt, config, db, bus)
                 except Exception as exc:
                     # Defensive: generate_label_async returns False on LLM
                     # failures instead of raising; an escaping exception is
@@ -311,7 +312,7 @@ async def run() -> None:
     db = Database.from_settings()
     pool = db.pool()
     try:
-        await _dispatch_loop(pool, db, liveness, labeler_config())
+        await _dispatch_loop(pool, db, EventBus.from_settings(), liveness, labeler_config())
     finally:
         pool.close()
         await stop_health_server(health)

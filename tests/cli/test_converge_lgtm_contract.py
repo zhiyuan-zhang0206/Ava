@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 import yaml
 
+from base.db import Database
 from base.telemetry.lgtm_local import service_argv
 from cli.commands.observability import lgtm_native
 
@@ -36,7 +37,9 @@ def _default_provisioning_endpoints(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("base.config.settings.gateway.gateway_url", "")
     monkeypatch.setattr("base.config.settings.gateway.gateway_port", 8000)
 
-    def render_dashboard_json(_repo_only: bool = False) -> tuple[str, tuple[str, ...]]:
+    def render_dashboard_json(
+        _db: Database, _repo_only: bool = False
+    ) -> tuple[str, tuple[str, ...]]:
         return _STUB_RENDER, ()
 
     monkeypatch.setattr(

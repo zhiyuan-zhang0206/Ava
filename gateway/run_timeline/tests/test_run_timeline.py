@@ -500,17 +500,18 @@ def test_narrative_for_window_clamps_activity_to_the_window(
 
 def test_inbounds_for_window_maps_delivery_facts_to_wire_rows(
     monkeypatch: pytest.MonkeyPatch,
+    database: Database,
 ) -> None:
     """Wiring lock: chat delivery facts -> ts/source/inbound_id rows."""
     start = datetime(2026, 9, 12, 4, tzinfo=UTC)
     end = start + timedelta(hours=2)
     facts = [ChatInboundFact(id=31, source="agent:405", created_at=start + timedelta(minutes=5))]
 
-    def _facts(*_args: object, **_kwargs: object) -> list[ChatInboundFact]:
+    def _facts(_db: object, *_args: object, **_kwargs: object) -> list[ChatInboundFact]:
         return facts
 
     monkeypatch.setattr("base.db.list_chat_inbound_facts", _facts)
-    rows = _inbounds_for_window(406, start, end)
+    rows = _inbounds_for_window(database, 406, start, end)
     assert rows is not None
     (row,) = rows
     assert (row.inbound_id, row.source, row.ts) == (31, "agent:405", start + timedelta(minutes=5))
@@ -518,12 +519,13 @@ def test_inbounds_for_window_maps_delivery_facts_to_wire_rows(
 
 def test_inbounds_for_window_degrades_to_none_on_read_failure(
     monkeypatch: pytest.MonkeyPatch,
+    database: Database,
 ) -> None:
     """A failing delivery-fact read must not fail the endpoint."""
     start = datetime(2026, 9, 12, 4, tzinfo=UTC)
 
-    def _boom(*_args: object, **_kwargs: object) -> list[ChatInboundFact]:
+    def _boom(_db: object, *_args: object, **_kwargs: object) -> list[ChatInboundFact]:
         raise RuntimeError("store gone")
 
     monkeypatch.setattr("base.db.list_chat_inbound_facts", _boom)
-    assert _inbounds_for_window(406, start, start + timedelta(hours=1)) is None
+    assert _inbounds_for_window(database, 406, start, start + timedelta(hours=1)) is None

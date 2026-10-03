@@ -12,12 +12,13 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import ModuleType
 from typing import Any
-from unittest.mock import Mock
+from unittest.mock import ANY, Mock
 
 import psycopg
 import pytest
 
 from base.config import settings
+from base.db import Database
 from schedules.catchup import catch_up, claimed_slot, fire_slot_once
 
 _ROOT = Path(__file__).resolve().parents[2]
@@ -72,7 +73,7 @@ def test_daily_loop_skips_an_already_seen_slot_and_sleeps_until_next_fire(
         module._main_loop()
 
     catch_up_call.assert_called_once_with(
-        [(module.CRON, None)], timezone=settings.general.timezone, fire=module._fire
+        ANY, [(module.CRON, None)], timezone=settings.general.timezone, fire=module._fire
     )
     assert [call.kwargs["after"] for call in next_fire_call.call_args_list] == [
         now - timedelta(minutes=2),
@@ -110,7 +111,7 @@ def test_daily_loop_claims_one_due_slot_then_waits_without_retrying(
     with pytest.raises(_LoopStoppedError):
         module._main_loop()
 
-    claim.assert_called_once_with(slot, None, fire=module._fire)
+    claim.assert_called_once_with(ANY, slot, None, fire=module._fire)
     sleep.assert_called_once_with(120)
 
 
@@ -150,6 +151,7 @@ def _claim_worker(
         outcomes.put("timeout")
         return
     claimed = fire_slot_once(
+        Database.from_settings(),
         datetime.fromisoformat(slot_iso),
         "payload",
         fire=lambda _payload: outcomes.put("fired"),
@@ -191,6 +193,7 @@ def test_concurrent_processes_execute_a_slot_at_most_once(
 def test_claimed_slot_exposes_the_slot_around_the_fire_callback(
     db_conn: psycopg.Connection,
     monkeypatch: pytest.MonkeyPatch,
+    database: Database,
 ) -> None:
     """The winner's callback sees its slot via claimed_slot(); losers never
     run, and the slot is restored afterwards — the binding window-based
@@ -204,8 +207,8 @@ def test_claimed_slot_exposes_the_slot_around_the_fire_callback(
         observed.append(claimed_slot())
 
     assert claimed_slot() is None
-    assert fire_slot_once(slot, "payload", fire=fire)
-    assert not fire_slot_once(slot, "payload", fire=lambda _payload: None)
+    assert fire_slot_once(database, slot, "payload", fire=fire)
+    assert not fire_slot_once(database, slot, "payload", fire=lambda _payload: None)
     assert observed == [slot]
     assert claimed_slot() is None
     assert _claimed_slots(db_conn, schedule_id) == [slot]
@@ -215,6 +218,7 @@ def test_catch_up_fires_only_the_two_most_recent_slots(
     db_conn: psycopg.Connection,
     monkeypatch: pytest.MonkeyPatch,
     caplog: pytest.LogCaptureFixture,
+    database: Database,
 ) -> None:
     schedule_id = _insert_schedule(db_conn, created_at=datetime(2026, 9, 6, 0, 30, tzinfo=UTC))
     monkeypatch.setenv("AVA_SCHEDULE_ID", str(schedule_id))
@@ -222,6 +226,7 @@ def test_catch_up_fires_only_the_two_most_recent_slots(
 
     with caplog.at_level(logging.WARNING, logger="schedules.catchup"):
         slots = catch_up(
+            database,
             [("0 * * * *", "hourly")],
             timezone="UTC",
             fire=fired.append,
@@ -240,14 +245,16 @@ def test_catch_up_fires_only_the_two_most_recent_slots(
 def test_online_schedule_with_latest_slot_claimed_has_no_catch_up(
     db_conn: psycopg.Connection,
     monkeypatch: pytest.MonkeyPatch,
+    database: Database,
 ) -> None:
     schedule_id = _insert_schedule(db_conn, created_at=datetime(2026, 9, 5, 0, 0, tzinfo=UTC))
     monkeypatch.setenv("AVA_SCHEDULE_ID", str(schedule_id))
     last_slot = datetime(2026, 9, 6, 10, 0, tzinfo=UTC)
-    assert fire_slot_once(last_slot, "normal", fire=lambda _payload: None)
+    assert fire_slot_once(database, last_slot, "normal", fire=lambda _payload: None)
     fired: list[str] = []
 
     slots = catch_up(
+        database,
         [("0 * * * *", "catch-up")],
         timezone="UTC",
         fire=fired.append,
@@ -262,14 +269,18 @@ def test_online_schedule_with_latest_slot_claimed_has_no_catch_up(
 def test_restart_after_missed_slot_fires_exactly_once(
     db_conn: psycopg.Connection,
     monkeypatch: pytest.MonkeyPatch,
+    database: Database,
 ) -> None:
     schedule_id = _insert_schedule(db_conn, created_at=datetime(2026, 9, 6, 9, 30, tzinfo=UTC))
     monkeypatch.setenv("AVA_SCHEDULE_ID", str(schedule_id))
     fired: list[str] = []
     now = datetime(2026, 9, 6, 10, 30, tzinfo=UTC)
 
-    first = catch_up([("0 * * * *", "missed")], timezone="UTC", fire=fired.append, now=now)
+    first = catch_up(
+        database, [("0 * * * *", "missed")], timezone="UTC", fire=fired.append, now=now
+    )
     second = catch_up(
+        database,
         [("0 * * * *", "missed")],
         timezone="UTC",
         fire=fired.append,
@@ -286,6 +297,7 @@ def test_restart_after_missed_slot_fires_exactly_once(
 def test_claim_survives_fire_failure(
     db_conn: psycopg.Connection,
     monkeypatch: pytest.MonkeyPatch,
+    database: Database,
 ) -> None:
     schedule_id = _insert_schedule(db_conn, created_at=datetime(2026, 9, 6, 9, 30, tzinfo=UTC))
     monkeypatch.setenv("AVA_SCHEDULE_ID", str(schedule_id))
@@ -293,10 +305,15 @@ def test_claim_survives_fire_failure(
 
     with pytest.raises(RuntimeError, match="after claim"):
         fire_slot_once(
-            slot, None, fire=lambda _payload: (_ for _ in ()).throw(RuntimeError("after claim"))
+            database,
+            slot,
+            None,
+            fire=lambda _payload: (_ for _ in ()).throw(RuntimeError("after claim")),
         )
 
-    assert not fire_slot_once(slot, None, fire=lambda _payload: pytest.fail("duplicate fire"))
+    assert not fire_slot_once(
+        database, slot, None, fire=lambda _payload: pytest.fail("duplicate fire")
+    )
     assert _claimed_slots(db_conn, schedule_id) == [slot]
 
 

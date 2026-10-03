@@ -13,6 +13,7 @@ from psycopg_pool import ConnectionPool
 from base.daemon.health import Liveness
 from base.db import Database
 from base.deploy.maintenance import admission
+from base.events.live.bus import EventBus
 from services.labeler import daemon
 
 
@@ -27,6 +28,7 @@ async def test_a_quiesced_unit_borrows_no_connection(
         daemon._dispatch_loop(
             cast("ConnectionPool", pool),
             Database.from_settings(),
+            EventBus.from_settings(),
             Liveness(daemon._LIVENESS_TIMEOUT_S),
             daemon.labeler_config(),
         )

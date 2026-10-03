@@ -28,13 +28,12 @@ from uuid import UUID, uuid4
 
 import psycopg
 
-import base.db
 from base import telemetry
 from base.agents.birth_config import resolve_birth_config
 from base.agents.history.checkpoint_copy import copy_checkpoint_chain
 from base.agents.impersonation_manifest import record_central_event
 from base.agents.labels import spawn_prompt_with_label
-from base.db import announce_spawn_prompt, fetch_one, insert_spawn_prompt_in_transaction
+from base.db import Database, announce_spawn_prompt, fetch_one, insert_spawn_prompt_in_transaction
 from base.events.live.announce import publish_agent_spawned_sync
 from base.events.live.bus import EventBus
 from base.lm.registry import normalize_overlay_llm_model
@@ -135,6 +134,8 @@ def _record_birth_event(
 
 
 def _announce_created_agent(
+    db: Database,
+    bus: EventBus,
     agent_id: int,
     birth_event: telemetry.Event,
     prompt_inbound_id: int | None,
@@ -144,11 +145,11 @@ def _announce_created_agent(
     telemetry.emit_prepared(birth_event)
     if prompt_inbound_id is not None:
         try:
-            announce_spawn_prompt(agent_id, prompt_inbound_id, prompt_event)
+            announce_spawn_prompt(db, bus, agent_id, prompt_inbound_id, prompt_event)
         except Exception:
             logger.exception("agent {} prompt announcement failed", agent_id)
     try:
-        publish_agent_spawned_sync(EventBus.from_settings(), agent_id)
+        publish_agent_spawned_sync(bus, agent_id)
     except Exception:
         logger.exception("agent {} roster announcement failed", agent_id)
 
@@ -179,6 +180,8 @@ def _validate_spawn_args(
 
 
 def create_agent_row(
+    db: Database,
+    bus: EventBus,
     *,
     spawner: str = "user",
     fork_from: int | None = None,
@@ -266,7 +269,7 @@ def create_agent_row(
     launch_attempt_id = uuid4()
     prompt_inbound_id: int | None = None
     prompt_event: telemetry.Event | None = None
-    with base.db.connect() as conn, conn.cursor() as cur:
+    with db.connect() as conn, conn.cursor() as cur:
         conn.execute("SET TRANSACTION READ WRITE")
         # label: when the spawner assigns one, store it sticky (label_user_set=TRUE)
         # so the labeler's CAS (WHERE label IS NULL AND NOT label_user_set) skips it.
@@ -372,7 +375,7 @@ def create_agent_row(
         conn.commit()
         # The recorded events reach the observation sink and the live hints go
         # out only after commit.
-        _announce_created_agent(new_id, birth_event, prompt_inbound_id, prompt_event)
+        _announce_created_agent(db, bus, new_id, birth_event, prompt_inbound_id, prompt_event)
     # Launch is the runner's job now (the launch op) — the row is created and
     # the caller forwards it. The `agent_spawned` telemetry event keeps its
     # registered name (contract.py) — the row INSERT is still the spawn

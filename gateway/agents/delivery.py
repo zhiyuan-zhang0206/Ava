@@ -10,6 +10,7 @@ INSERT + publish dance.
 from __future__ import annotations
 
 import asyncio
+import functools
 from collections.abc import Callable, Coroutine
 from typing import Any, NamedTuple
 
@@ -93,6 +94,8 @@ async def deliver_chat_inbound(
         inbound: tuple[int, str, bool, bool] | None = await asyncio.to_thread(
             _deliver_blocking,
             pool,
+            db,
+            bus,
             agent_id,
             prepare,
             source,
@@ -119,7 +122,7 @@ async def deliver_chat_inbound(
         # Nothing delivered (e.g. a report dismissed without a reply) — just
         # report the delivery-time status, no announce and no resurrect.
         # Off the event loop: get_agent_status opens a fresh DB connection.
-        status = await asyncio.to_thread(get_agent_status, agent_id)
+        status = await asyncio.to_thread(get_agent_status, db, agent_id)
         return ChatDelivery(status, None)
     # Fire-and-forget: publish the InboundArrived event to Redis for the
     # frontend SSE channel.  The full content is in the event payload;
@@ -133,7 +136,7 @@ async def deliver_chat_inbound(
         # A same-key retry is also the recovery path for a process death after
         # COMMIT but before the original wake. Redis wake is idempotent and the
         # exact pending-row guard below makes resurrection safe to repeat.
-        await asyncio.to_thread(publish_inbound_wake, agent_id, str(inbound_id))
+        await asyncio.to_thread(publish_inbound_wake, db, bus, agent_id, str(inbound_id))
     if pending:
         _spawn_background(
             _ops.publish_inbound_arrived(bus, agent_id, inbound_id, "chat", source, content)
@@ -144,6 +147,7 @@ async def deliver_chat_inbound(
         # with the compact path via `resurrect_if_terminated`.
         status = await _ops.resurrect_if_terminated(
             db,
+            bus,
             agent_id,
             trigger_inbound_id=inbound_id,
             trigger_inbound_kind="chat",
@@ -151,7 +155,7 @@ async def deliver_chat_inbound(
     else:
         # The durable row was already claimed/done. Reconciliation is a receipt
         # lookup only in this state: never resurrect from stale work.
-        status = await asyncio.to_thread(get_agent_status, agent_id)
+        status = await asyncio.to_thread(get_agent_status, db, agent_id)
     return ChatDelivery(status, inbound_id)
 
 
@@ -185,14 +189,15 @@ async def reconcile_chat_delivery(
     if receipt is None:
         return None
     if not receipt.pending:
-        status = await asyncio.to_thread(get_agent_status, agent_id)
+        status = await asyncio.to_thread(get_agent_status, db, agent_id)
         return ChatDelivery(status, receipt.inbound_id)
-    await asyncio.to_thread(publish_inbound_wake, agent_id, str(receipt.inbound_id))
+    await asyncio.to_thread(publish_inbound_wake, db, bus, agent_id, str(receipt.inbound_id))
     _spawn_background(
         _ops.publish_inbound_arrived(bus, agent_id, receipt.inbound_id, "chat", source, content)
     )
     status = await _ops.resurrect_if_terminated(
         db,
+        bus,
         agent_id,
         trigger_inbound_id=receipt.inbound_id,
         trigger_inbound_kind="chat",
@@ -202,6 +207,8 @@ async def reconcile_chat_delivery(
 
 def _deliver_blocking(
     pool: ConnectionPool,
+    db: Database,
+    bus: EventBus,
     agent_id: int,
     prepare: Callable[[psycopg.Connection], str | None],
     source: str,
@@ -223,6 +230,7 @@ def _deliver_blocking(
                 payload=payload,
                 client_message_id=client_message_id,
                 provenance=provenance,
+                publish_wake=functools.partial(publish_inbound_wake, db, bus),
             )
             return (receipt.inbound_id, content, receipt.inserted, receipt.pending)
     return None

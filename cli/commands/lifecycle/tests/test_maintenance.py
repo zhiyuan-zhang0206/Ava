@@ -10,11 +10,13 @@ from uuid import uuid4
 
 import pytest
 
+from base.db import Database
 from base.db.tests.fakes import patch_database
 from base.deploy.lifecycle import start_serving
 from base.deploy.lifecycle.start_serving import RootBirth
 from base.deploy.maintenance import admission, pause_owner
 from base.deploy.maintenance.state import MaintenanceHold
+from base.events.live.bus import EventBus
 from cli.commands.lifecycle import maintenance as command
 from ops.agent_pause.probe import HostIdentity
 from ops.agent_pause.probe import host_identity_or_none as real_host_identity_or_none
@@ -74,7 +76,11 @@ def test_gateway_last_is_required_before_any_stop(monkeypatch: pytest.MonkeyPatc
 
 
 def test_start_keeps_hold_until_explicit_resume(
-    serving_root: RootBirth, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    serving_root: RootBirth,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    database: Database,
+    event_bus: EventBus,
 ) -> None:
     phase("stopped")
     monkeypatch.setattr(start_serving, "state_path", lambda: tmp_path / "serving.json")
@@ -87,12 +93,12 @@ def test_start_keeps_hold_until_explicit_resume(
         assert start_serving.mark_serving(generation, runtime=serving_root.runtime)
         return 0
 
-    def unpause() -> None:
+    def unpause(_db: object, _bus: object) -> None:
         from ops.agent_pause import resume_agents
 
         admission.require_start_allowed()
         assert admission.held()
-        resume_agents()
+        resume_agents(database, event_bus)
 
     monkeypatch.setattr("cli.commands.lifecycle.start.cmd_start", start)
     monkeypatch.setattr("ops.cluster_pause.unpause_local_cluster", unpause)
@@ -313,7 +319,7 @@ def test_repair_moves_failures_to_repaired_with_operator_record(
 def test_repair_partial_release_is_completed_by_cancel(monkeypatch: pytest.MonkeyPatch) -> None:
     failed_hold(7)
 
-    def failing_unpause() -> None:
+    def failing_unpause(_db: object, _bus: object) -> None:
         raise RuntimeError("posture restore failed")
 
     monkeypatch.setattr("ops.cluster_pause.unpause_local_cluster", failing_unpause)

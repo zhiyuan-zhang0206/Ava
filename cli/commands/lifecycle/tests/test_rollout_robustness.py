@@ -87,7 +87,7 @@ def _paused_posture(monkeypatch: pytest.MonkeyPatch) -> None:
 
     monkeypatch.setattr(
         "base.deploy.state.host_deploy_state.read",
-        lambda *_a, **_k: HostDeployState(  # pyright: ignore[reportUnknownArgumentType]
+        lambda _db, *_a, **_k: HostDeployState(  # pyright: ignore[reportUnknownArgumentType]
             machine="test",
             posture="paused",
             updated_at=datetime.now(UTC),
@@ -105,7 +105,10 @@ def test_declined_restart_releases_a_pause_nothing_else_owns(
     _paused_posture(monkeypatch)
     monkeypatch.setattr("base.deploy.maintenance.admission.snapshot", lambda: None)
     unpaused: list[bool] = []
-    monkeypatch.setattr("ops.cluster_pause.unpause_local_cluster", lambda: unpaused.append(True))
+    monkeypatch.setattr(
+        "ops.cluster_pause.unpause_local_cluster",
+        lambda _db, _bus: unpaused.append(True),  # pyright: ignore[reportUnknownArgumentType]
+    )
 
     _stop_commands._release_self_heal_pause()
     assert unpaused == [True]
@@ -129,7 +132,10 @@ def test_declined_restart_leaves_a_stop_holds_pause_alone(
     )
     monkeypatch.setattr("base.deploy.maintenance.admission.snapshot", lambda: held)
     unpaused: list[bool] = []
-    monkeypatch.setattr("ops.cluster_pause.unpause_local_cluster", lambda: unpaused.append(True))
+    monkeypatch.setattr(
+        "ops.cluster_pause.unpause_local_cluster",
+        lambda _db, _bus: unpaused.append(True),  # pyright: ignore[reportUnknownArgumentType]
+    )
 
     _stop_commands._release_self_heal_pause()
     assert unpaused == []

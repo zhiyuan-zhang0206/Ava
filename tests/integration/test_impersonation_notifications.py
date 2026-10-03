@@ -23,7 +23,8 @@ from base.agents.impersonation.maintenance import remind_expiring_impersonations
 from base.agents.incarnation.hosted_force import original_host_force
 from base.agents.messages.caller_identity import CallerIdentity
 from base.cluster.machine import machine_name
-from base.db import create_agent, pool
+from base.db import Database, create_agent, pool
+from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from base.native_process.turn_identity import bind_turn_identity
@@ -36,7 +37,9 @@ from ops.lifecycle.termination import (
 from tests.impersonation_support import recorded_tree
 
 
-def test_reminder_commands_are_bare_ava(db_conn: psycopg.Connection) -> None:
+def test_reminder_commands_are_bare_ava(
+    db_conn: psycopg.Connection, database: Database, event_bus: EventBus
+) -> None:
     """The renewal reminder names no interpreter or home: a bare `ava` resolves
     through the executor's inherited AVA_HOME."""
     agent_id = create_agent(db_conn)
@@ -49,6 +52,8 @@ def test_reminder_commands_are_bare_ava(db_conn: psycopg.Connection) -> None:
     )
     db_conn.commit()
     lease = leases.request(
+        database,
+        event_bus,
         agent_id,
         caller=CallerIdentity(kind="external_agent", subject="codex", instance="test"),
         ttl_seconds=300,
@@ -57,8 +62,8 @@ def test_reminder_commands_are_bare_ava(db_conn: psycopg.Connection) -> None:
         relay_provider="codex",
         relay_thread_id=str(uuid4()),
     )
-    leases.accept(lease["id"], agent_id, owner, "Handoff brief")
-    leases.activate(lease["id"], owner)
+    leases.accept(database, event_bus, lease["id"], agent_id, owner, "Handoff brief")
+    leases.activate(database, event_bus, lease["id"], owner)
     db_conn.execute(
         "UPDATE agent_impersonations SET expires_at=clock_timestamp()+interval '4 minutes' "
         "WHERE id=%s",
@@ -66,7 +71,7 @@ def test_reminder_commands_are_bare_ava(db_conn: psycopg.Connection) -> None:
     )
     db_conn.commit()
     with pool(max_size=2) as reaper_pool:
-        assert remind_expiring_impersonations(reaper_pool) == 1
+        assert remind_expiring_impersonations(reaper_pool, database, event_bus) == 1
     reminder = db_conn.execute(
         "SELECT content FROM inbound_messages WHERE agent_id=%s AND kind='reminder'",
         (agent_id,),
@@ -83,7 +88,7 @@ def test_reminder_commands_are_bare_ava(db_conn: psycopg.Connection) -> None:
 
 @pytest.mark.parametrize("bad", [7, "", "  ", ["python"]])
 def test_request_rejects_a_malformed_invoked_python(
-    db_conn: psycopg.Connection, bad: object
+    db_conn: psycopg.Connection, bad: object, database: Database, event_bus: EventBus
 ) -> None:
     agent_id = create_agent(db_conn)
     owner = RuntimeIncarnation(agent_id, uuid4(), uuid4())
@@ -96,6 +101,8 @@ def test_request_rejects_a_malformed_invoked_python(
     db_conn.commit()
     with pytest.raises(ValueError, match="invoked_python"):
         leases.request(
+            database,
+            event_bus,
             agent_id,
             caller=CallerIdentity(kind="external_agent", subject="codex", instance="test"),
             reason="Handle the next message",
@@ -119,10 +126,17 @@ async def _termination_session(
     )
     conn.commit()
     owner = await admit_hosted_runtime(
-        aops_pool, agent_id, machine_name(), uuid4(), expected_from="idling"
+        aops_pool,
+        agent_id,
+        machine_name(),
+        uuid4(),
+        expected_from="idling",
+        db=Database.from_settings(),
     )
     assert owner is not None
     session = leases.request(
+        Database.from_settings(),
+        EventBus.from_settings(),
         agent_id,
         caller=CallerIdentity(kind="external_agent", subject="codex"),
         ttl_seconds=300,
@@ -134,9 +148,16 @@ async def _termination_session(
         automatic=automatic,
     )
     if status in ("accepted", "active"):
-        leases.accept(session["id"], agent_id, owner, "Handoff brief")
+        leases.accept(
+            Database.from_settings(),
+            EventBus.from_settings(),
+            session["id"],
+            agent_id,
+            owner,
+            "Handoff brief",
+        )
     if status == "active":
-        leases.activate(session["id"], owner)
+        leases.activate(Database.from_settings(), EventBus.from_settings(), session["id"], owner)
     return owner, session
 
 
@@ -166,7 +187,12 @@ async def _terminate_native(
             )
         else:
             terminate_id = _enqueue_termination_inbounds(
-                owner.agent_id, ops_pool, source="user", message=None
+                Database.from_settings(),
+                EventBus.from_settings(),
+                owner.agent_id,
+                ops_pool,
+                source="user",
+                message=None,
             )
             if mode == "live":
                 accepted = await claim_node(state, runtime, config)
@@ -176,7 +202,10 @@ async def _terminate_native(
                 batch = await claim_inbound_batch(aops_pool, owner.agent_id, lifecycle_only=True)
                 assert [item.id for item in batch] == [terminate_id]
             assert _native_notices(db_conn, owner.agent_id) == []
-            assert await apply_hosted_lifecycle(aops_pool, owner) == "terminate"
+            assert (
+                await apply_hosted_lifecycle(aops_pool, owner, bus=EventBus.from_settings())
+                == "terminate"
+            )
     notices = _native_notices(db_conn, owner.agent_id)
     assert [row[2] for row in notices] == ["impersonation", "lifecycle_terminate"]
     assert all(row[3] == "pending" for row in notices)
@@ -190,22 +219,30 @@ async def _terminate_native(
 
 @pytest.mark.parametrize("mode", ["live", "drained", "force", "delayed_resurrection"])
 async def test_termination_notices_precede_resurrection_in_native_claim(
-    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool, mode: str
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    mode: str,
+    database: Database,
+    event_bus: EventBus,
 ) -> None:
     owner, session = await _termination_session(
         db_conn, aops_pool, status="requested" if mode == "live" else "active"
     )
     runtime = Runtime(
         context=AvaContext(
-            ops_pool=aops_pool, event_publisher=MagicMock(), agent=AgentSlices.resolve()
+            ops_pool=aops_pool,
+            event_publisher=MagicMock(),
+            agent=AgentSlices.resolve(),
+            db=Database.from_settings(),
+            bus=EventBus.from_settings(),
         )
     )
     await _terminate_native(db_conn, aops_pool, owner, session, runtime, mode)
     if mode == "delayed_resurrection":
         _age_and_sweep_notices(db_conn, owner.agent_id)
-    resurrect_agent(owner.agent_id, resurrected_by="user")
+    resurrect_agent(database, event_bus, owner.agent_id, resurrected_by="user")
     successor = await admit_hosted_runtime(
-        aops_pool, owner.agent_id, machine_name(), uuid4(), expected_from="idling"
+        aops_pool, owner.agent_id, machine_name(), uuid4(), expected_from="idling", db=database
     )
     assert successor is not None
     with bind_turn_identity(owner.agent_id, incarnation=successor):
@@ -327,7 +364,7 @@ async def test_terminal_relay_start_delivers_interruption_best_effort(
         if transport_dead:
             raise OSError("executor transport is gone")
 
-    def forbidden(*_args: Any, **_kwargs: Any) -> Any:
+    def forbidden(_db: object, *_args: Any, **_kwargs: Any) -> Any:
         pytest.fail("A terminal relay must not read/reserve an ordinary inbox or renew its lease")
 
     monkeypatch.setattr(relay, "monitor_claude", emit)
@@ -365,6 +402,8 @@ async def test_running_relay_delivers_termination_once_without_reserving_input(
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     monkeypatch: pytest.MonkeyPatch,
+    database: Database,
+    event_bus: EventBus,
 ) -> None:
     owner, session = await _termination_session(db_conn, aops_pool)
     reads = 0
@@ -378,7 +417,9 @@ async def test_running_relay_delivers_termination_once_without_reserving_input(
                 "UPDATE agents_meta SET status='terminated' WHERE id=%s", (owner.agent_id,)
             )
             db_conn.commit()
-        return relay._read_inbox(owner.agent_id, lease_uuid, session["relay_token"])
+        return relay._read_inbox(
+            database, event_bus, owner.agent_id, lease_uuid, session["relay_token"]
+        )
 
     async def reserve(_ids: list[int]) -> frozenset[int]:
         pytest.fail("A terminal notice cannot reserve ordinary input")
@@ -417,8 +458,9 @@ async def test_resurrection_timestamp_follows_notes_even_in_an_older_transaction
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     monkeypatch: pytest.MonkeyPatch,
+    database: Database,
+    event_bus: EventBus,
 ) -> None:
-    from ops.agents import wake
 
     owner, _session = await _termination_session(db_conn, aops_pool)
     started = db_conn.execute("SELECT transaction_timestamp()").fetchone()
@@ -429,11 +471,11 @@ async def test_resurrection_timestamp_follows_notes_even_in_an_older_transaction
     assert notices[0][4] > started[0]
 
     @contextmanager
-    def earlier_transaction():
+    def earlier_transaction(_self: Database):
         yield db_conn
 
-    monkeypatch.setattr(wake, "write_transaction", earlier_transaction)
-    resurrect_agent(owner.agent_id, resurrected_by="user", prompt="Continue")
+    monkeypatch.setattr(Database, "write_transaction", earlier_transaction)
+    resurrect_agent(database, event_bus, owner.agent_id, resurrected_by="user", prompt="Continue")
     ordered = db_conn.execute(
         "SELECT kind,payload->>'note_tag' FROM inbound_messages "
         "WHERE agent_id=%s ORDER BY created_at,id",
