@@ -238,7 +238,7 @@ def refresh_driver(
     """Re-stamp a matching standing hold with this process's shepherding identity.
 
     Operator-side entries call this at the start of every maintenance verb (and
-    the local stop/pause flow calls it after the drain) so the binding tracks
+    the local stop flow calls it after the drain) so the binding tracks
     the process that last ran a ladder step. Returns False when this journal is
     not the matching paused generation -- nothing re-stamped, which is a no-op
     for entries that never wrote this hold (`prepare`'s first run).

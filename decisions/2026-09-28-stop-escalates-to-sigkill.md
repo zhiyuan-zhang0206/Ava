@@ -109,3 +109,5 @@ Forward: [decisions/2026-09-28-session-id-proven-by-a-live-member.md](2026-09-28
 closes the escape in the third consequence above (a process forked and
 orphaned after the shell is gone), and a closed session's notice is now
 recorded even when another session leaves the stop incomplete.
+
+Forward link (2026-10-03): `ava pause` was deleted; a stop with a different keep set replaces it. See [delete ava pause](2026-10-03-delete-ava-pause.md).

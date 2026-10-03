@@ -97,3 +97,5 @@ deployment state.
 
 The release/image path is to be deleted, and stale processes are to be kept
 out by a version gate instead; see the follow-up decision.
+
+Forward link (2026-10-03): `ava pause` was deleted; a stop with a different keep set replaces it. See [delete ava pause](2026-10-03-delete-ava-pause.md).

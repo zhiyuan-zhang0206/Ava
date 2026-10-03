@@ -1,9 +1,9 @@
-"""Local pause, stop and restart commands over the shared native drain boundary.
+"""Local stop and restart commands over the shared native drain boundary.
 
 Normal paths retain checkpoints and never escalate a service or data-plane
 stop on timeout; a normal stop's terminal closure SIGKILLs what outlives its
 bounded grace. Explicit force uses the separate legacy resource teardown;
-updates preserve persistent PTYs.
+a restart preserves persistent PTYs.
 """
 
 from __future__ import annotations
@@ -17,8 +17,8 @@ from cli.commands._repo import _repo_root, session_name
 from cli.commands.lifecycle._pause_resume import exclusive_resources
 from cli.start_runtime import StartRuntime
 
-# The browser service runs a headed Chrome on a persistent login profile. An
-# pause / backend update preserves it by default (keep_browser=True):
+# The browser service runs a headed Chrome on a persistent login profile. A
+# restart / backend update preserves it by default (keep_browser=True):
 # bouncing it pops a window, risks a session-restore prompt, and re-attaches CDP
 # for no gain — the login state is the expensive part. Only a full teardown
 # (`ava stop`, `ava cluster destroy`) takes it down.
@@ -233,7 +233,7 @@ def _do_stop(
     force: bool = False,
     timeout: float = 300,
 ) -> int:
-    """Shared pause/stop kernel; only explicit force escalates a service stop."""
+    """Shared stop kernel; only explicit force escalates a service stop."""
     if force:
         return _force_stop(
             _repo,
@@ -277,24 +277,6 @@ def cmd_stop(
         reap_agents=True,
         announce=True,
         teardown_extras=True,
-        force=force,
-        timeout=timeout,
-    )
-
-
-def cmd_pause(
-    *,
-    preserve_sessions: frozenset[str] = frozenset(),
-    force: bool = False,
-    timeout: float = 300,
-) -> int:
-    """Pause for maintenance, retaining infrastructure, browser and terminals."""
-    return _do_stop(
-        _repo_root(),
-        require_confirmation=False,
-        keep_infra=True,
-        preserve_sessions=preserve_sessions,
-        keep_browser=True,
         force=force,
         timeout=timeout,
     )
@@ -383,7 +365,7 @@ def _restart_runtime() -> StartRuntime:
 def _cmd_restart_body(*, mode: str = "smooth", force_reap: bool = False) -> int:
     """Stop then start without a stdin confirmation prompt.
 
-    Hosted agents drain through the shared pause boundary before service stop.
+    Hosted agents drain through the shared stop boundary before service stop.
     Explicit force authorizes interrupting resource shutdown.
     """
     from base.agents.exit_codes import RESTART_DECLINED_EXIT_CODE
@@ -490,16 +472,22 @@ def _cmd_restart_body(*, mode: str = "smooth", force_reap: bool = False) -> int:
             )
         return RESTART_DECLINED_EXIT_CODE
 
-    # Every restart uses the shared hosted pause kernel; a timeout never
+    # Every restart uses the shared hosted stop kernel; a timeout never
     # silently authorizes force.
     _require_restart_runtime(runtime)
 
-    # Restart retains the private data plane while replacing application services.
+    # Restart replaces the application services and keeps everything else: the
+    # private data plane (keep_infra), the browser (keep_browser), persistent
+    # terminals (reap_agents=False skips the stop's terminals phase), and, with
+    # teardown_extras left off, Gate, the permissions helper and native LGTM.
     with status_journal.phase("stop"):
         rc = _do_stop(
             repo,
             require_confirmation=False,
             keep_infra=True,
+            keep_browser=True,
+            reap_agents=False,
+            teardown_extras=False,
             force=mode == "force" or force_reap,
         )
     if rc != 0:

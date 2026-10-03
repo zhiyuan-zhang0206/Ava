@@ -150,9 +150,21 @@ def test_cmd_restart_calls_stop_then_start(monkeypatch: pytest.MonkeyPatch) -> N
 
     order: list[str] = []
 
-    def fake_do_stop(_repo, *, require_confirmation, keep_infra=False, force=False) -> int:
+    def fake_do_stop(
+        _repo,
+        *,
+        require_confirmation,
+        keep_infra=False,
+        keep_browser=True,
+        reap_agents=True,
+        teardown_extras=True,
+        force=False,
+    ) -> int:
         assert require_confirmation is False, "cmd_restart must skip stdin confirmation"
         assert force is False
+        assert keep_browser is True and reap_agents is False and teardown_extras is False, (
+            "a restart keeps the browser, persistent terminals, Gate/helper/LGTM"
+        )
         assert keep_infra is True, (
             "an internal restart must keep the shared pg/redis up — stopping the "
             "data plane kills the orchestrator's DB polling mid-rollout"

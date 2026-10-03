@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import os
 import time
+from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 from unittest.mock import MagicMock
 
 import psutil
@@ -30,11 +32,24 @@ from tests.agent.test_maintenance import WHEN
 from tests.agent.test_maintenance import isolate as isolate
 from tests.path_scoped.pty_reaper import PtyReaper
 
+
+def _stop_keeping_terminals(**kwargs: Any) -> int:
+    """The stop leg of `ava restart`: no prompt; the data plane, browser and persistent terminals stay."""
+    return entry._do_stop(
+        Path("/unused"),
+        require_confirmation=False,
+        keep_infra=True,
+        keep_browser=True,
+        reap_agents=False,
+        **kwargs,
+    )
+
+
 _NORMAL = "import signal,sys,time\nsignal.signal(signal.SIGTERM,lambda *_:sys.exit(0))\nprint('ready',flush=True)\nwhile True:time.sleep(.02)"
 _IGNORE = "import signal,time\nsignal.signal(signal.SIGTERM,signal.SIG_IGN)\nprint('ready',flush=True)\nwhile True:time.sleep(.02)"
 
 
-def test_pause_preserves_unselected_process_and_real_pty(
+def test_stop_keeping_terminals_preserves_unselected_process_and_real_pty(
     home: Path,
     launch: Launcher,
     monkeypatch: pytest.MonkeyPatch,
@@ -53,12 +68,81 @@ def test_pause_preserves_unselected_process_and_real_pty(
     while psutil.Process(identity.pid).children(recursive=True):
         assert time.monotonic() < deadline
         time.sleep(0.05)
-    assert entry.cmd_pause(timeout=5) == 0
+    assert _stop_keeping_terminals(timeout=5) == 0
     assert orchestration.poll() is None
     assert terminal.has_session(name) and identity.live()
     current = admission.snapshot()
     assert current is not None and current.maintenance is not None
     assert current.maintenance.phase == "stopped"
+
+
+def test_smooth_restart_replaces_services_and_keeps_shell_and_data_plane(
+    home: Path,
+    launch: Launcher,
+    monkeypatch: pytest.MonkeyPatch,
+    pty_reaper: PtyReaper,
+) -> None:
+    """`ava restart` (smooth) stops and restarts the application services but leaves a live
+    persistent shell, the browser, the permissions helper and the data plane alone, on a gateway
+    host where a full stop would take each of them down."""
+    import cli.commands.lifecycle.start as start_commands
+    import cli.commands.lifecycle.stop as stop_commands
+    from cli.commands.lifecycle import _start_readiness_preflight
+    from cli.commands.lifecycle import service_stop as strict
+
+    dependencies(monkeypatch)
+    monkeypatch.setitem(os.environ, "AVA_HOME", str(home))
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setattr(command, "machine_role", lambda: frozenset({"gateway"}))
+    unowned = launch("unowned-test-process", _IGNORE)
+    terminal = PtySessionBackend()
+    # A terminals phase that ran would find, and close, this shell.
+    monkeypatch.setattr(strict, "get_shell_backend", lambda: terminal)
+    name = "ava-agent-987-shell-smooth"
+    assert terminal.new_session(name, "", home, env={"AVA_HOME": str(home)})
+    identity = pty_reaper.track_session(name)
+
+    events: list[str] = []
+
+    def record_root_stop(**kwargs: object) -> None:
+        # Only the browser is retained from the service tree: the services are replaced.
+        assert kwargs.get("force", False) is False
+        assert kwargs["preserve"] == frozenset({"browser"})
+        events.append("services-stopped")
+
+    def record(label: str) -> Callable[..., object]:
+        return lambda *_args, **_kwargs: events.append(label)
+
+    def record_start(**kwargs: object) -> int:
+        assert kwargs["persist_services"] is False
+        events.append("services-started")
+        return 0
+
+    monkeypatch.setattr(_root_driver_commands, "stop_root_service_tree", record_root_stop)
+    monkeypatch.setattr(command, "stop_data_plane", record("data-plane-stopped"))
+    monkeypatch.setattr(command, "_stop_browser", record("browser-stopped"))
+    monkeypatch.setattr(command, "_stop_extras", record("extras-stopped"))
+    monkeypatch.setattr(command, "close_terminals", record("terminals-closed"))
+    monkeypatch.setattr(stop_commands, "_announce_stopping", record("announced"))
+    runtime = MagicMock()
+    monkeypatch.setattr(stop_commands, "_restart_runtime", lambda: runtime)
+    monkeypatch.setattr(stop_commands, "_require_restart_runtime", lambda _runtime: None)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_repo_commands, "_preflight_probes", lambda _db: 0)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(
+        _start_readiness_preflight,
+        "preflight_start_readiness",
+        lambda *_a, **_k: 0,  # pyright: ignore[reportUnknownArgumentType]
+    )
+    monkeypatch.setattr(start_commands, "_cmd_start_body", record_start)
+
+    assert entry.cmd_restart(mode="smooth") == 0
+
+    assert events == ["services-stopped", "services-started"]
+    assert terminal.has_session(name) and identity.live()
+    assert unowned.poll() is None
+    current = admission.snapshot()
+    assert current is not None and current.maintenance is not None
+    assert current.maintenance.phase == "stopped"  # the start leg, not the stop, releases the hold
 
 
 def test_root_stop_refusal_keeps_hold_without_force(
@@ -75,7 +159,7 @@ def test_root_stop_refusal_keeps_hold_without_force(
         raise RuntimeError("root service did not stop")
 
     monkeypatch.setattr(_root_driver_commands, "stop_root_service_tree", refuse)
-    assert entry.cmd_pause(timeout=0.2) == 1
+    assert _stop_keeping_terminals(timeout=0.2) == 1
     assert service.poll() is None
     assert psutil.Process(service.pid).create_time() == before
     assert admission.held()
@@ -176,7 +260,7 @@ def test_repeated_stop_needs_no_live_database_or_host(
         "base.deploy.state.host_deploy_state.set_posture",
         MagicMock(side_effect=AssertionError("DB is down")),
     )
-    assert entry.cmd_pause(timeout=1) == 0
+    assert _stop_keeping_terminals(timeout=1) == 0
 
 
 def test_failed_flush_cannot_be_released_by_a_healthy_start(
@@ -203,7 +287,7 @@ def test_failed_flush_cannot_be_released_by_a_healthy_start(
     assert admission.held()
 
 
-def test_two_pause_start_cycles_reuse_identity_not_old_operation(
+def test_two_stop_start_cycles_reuse_identity_not_old_operation(
     home: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     dependencies(monkeypatch)
@@ -215,7 +299,7 @@ def test_two_pause_start_cycles_reuse_identity_not_old_operation(
     starts = resume_after_start(lambda: 0)
     holders: list[str | None] = []
     for _ in range(2):
-        assert entry.cmd_pause(timeout=3) == 0
+        assert _stop_keeping_terminals(timeout=3) == 0
         holders.append(pause_owner.read().holder)
         assert admission.held()
         assert starts() == 0
@@ -262,7 +346,7 @@ def test_resource_stop_excludes_concurrent_start(
 
 
 @pytest.mark.parametrize("full_stop", [False, True])
-def test_explicit_force_stops_host_and_preserves_only_pause_terminals(
+def test_explicit_force_stops_host_and_preserves_only_kept_terminals(
     home: Path,
     monkeypatch: pytest.MonkeyPatch,
     pty_reaper: PtyReaper,
@@ -291,7 +375,7 @@ def test_explicit_force_stops_host_and_preserves_only_pause_terminals(
     if full_stop:
         rc = entry.cmd_stop(force=True, require_confirmation=False, stop_browser=False)
     else:
-        rc = entry.cmd_pause(force=True)
+        rc = _stop_keeping_terminals(force=True)
     assert rc == 0
     assert len(root_calls) == 1 and root_calls[0]["force"] is True
     assert terminal.has_session(name) is not full_stop
@@ -524,15 +608,17 @@ def test_services_restore_reports_a_child_that_never_returns(
     assert message in capsys.readouterr().err
 
 
-def test_pause_refused_inside_an_exec_domain(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Issue #2331: an exec-domain pause is SIGKILLed mid-drain with the call's
-    process group; the refusal names `run_background` — a pause retains
-    persistent terminals, so a session hosted there survives."""
+def test_terminal_keeping_stop_refused_inside_an_exec_domain(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Issue #2331: an exec-domain stop is SIGKILLed mid-drain with the call's
+    process group; the refusal names `run_background` — a stop that keeps
+    persistent terminals leaves a session hosted there alive."""
     dependencies(monkeypatch)
     monkeypatch.setattr("base.host.proc.hosting_exec_domain", lambda: "agent.exec_child")
 
     with pytest.raises(RuntimeError, match=r"ava\.shell\.run_background"):
-        entry.cmd_pause(timeout=1)
+        _stop_keeping_terminals(timeout=1)
 
 
 def test_stop_refused_inside_an_exec_domain(monkeypatch: pytest.MonkeyPatch) -> None:

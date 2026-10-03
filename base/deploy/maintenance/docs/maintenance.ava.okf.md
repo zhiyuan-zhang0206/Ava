@@ -1,7 +1,7 @@
 ---
 type: doc
 title: Native pause and maintenance
-description: A durable home-local admission hold around existing restart, claim and checkpoint boundaries, shared by pause, stop and update.
+description: A durable home-local admission hold around existing restart, claim and checkpoint boundaries, shared by stop, restart and update.
 status: current
 ---
 
@@ -86,7 +86,7 @@ idempotent stop. First-time normal drain still needs data-plane configuration.
 
 SDK dependencies remain available through prepare/drain. Service stop closes
 new ordinary ops admission and waits for admitted handlers and executor work before
-signalling services. `ava pause` retains infrastructure and persistent PTYs;
+signalling services. `ava restart` retains infrastructure and persistent PTYs;
 `ava stop` closes terminal jobs and shells and stops home-owned infrastructure
 unless explicitly preserved. `service_stop` verifies process identities
 and exits; `data_plane/maintenance_stop` saves Redis before its verified shutdown.

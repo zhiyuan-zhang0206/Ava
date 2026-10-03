@@ -1,7 +1,7 @@
 ---
 type: doc
 title: Home Lifecycle Mutex
-description: The home-local advisory lock that serializes long start/stop/pause transitions with a bounded wait.
+description: The home-local advisory lock that serializes long start/stop transitions with a bounded wait.
 tags:
 - deploy
 - state
@@ -14,7 +14,7 @@ tags:
 `base/deploy/lifecycle/home_lifecycle_locks.py` owns one OS advisory lock under `$AVA_HOME`:
 
 - `resource_lock` (`deploy-state.lifecycle.lock`) serializes long local
-  start/stop/pause transitions with a bounded wait.
+  start/stop transitions with a bounded wait.
 
 ## Diagnostics
 

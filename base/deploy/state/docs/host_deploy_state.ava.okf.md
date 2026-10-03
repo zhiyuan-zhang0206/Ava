@@ -43,7 +43,7 @@ The table carries only `machine`, `posture` and `updated_at`: the updater lease,
 ## Notes
 
 - `deployment_state` is a singleton row whose live consumer is the [[base/db/docs/code-version-gate.ava.okf.md|code-version gate]] (`min_code_version`); nothing takes a cluster deploy lease on it any more. Agents carry their own leases in `agents_meta`.
-- The home lifecycle mutex that serializes local start/stop/pause is in [[home_lifecycle_locks.ava.okf.md|Home Lifecycle Mutex]].
+- The home lifecycle mutex that serializes local start/stop is in [[home_lifecycle_locks.ava.okf.md|Home Lifecycle Mutex]].
 
 The controller-driven stranded-hold writer, budget, local note queue, heartbeat
 alert, and status projection have been removed. Their five physical columns

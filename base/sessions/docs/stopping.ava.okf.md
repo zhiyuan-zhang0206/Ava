@@ -13,9 +13,9 @@ tags:
 
 ## What it is
 
-The primitives for ending a process Ava started. Normal `pause` and `stop`
-use `cli/commands/lifecycle/service_stop.py`: deliver a verified graceful signal and
-wait for actual process exit without implicit escalation. Their shared deadline
+The primitives for ending a process Ava started. Normal `stop`
+uses `cli/commands/lifecycle/service_stop.py`: deliver a verified graceful signal and
+wait for actual process exit without implicit escalation. Its shared deadline
 reports an incomplete stop if resources remain. Persistent terminals are the
 exception: a stop HUPs/TERMs each shell's
 captured session and SIGKILLs what outlives a bounded grace
@@ -83,7 +83,7 @@ it back.
 
 ### Stops that do not go through a session
 
-Not every process Ava stops is a named session: the pooler, an orphan holding a unit port, the gate daemon. Those go through `base/host/proc.py`'s trio — `process_alive` (probe) / `request_stop` (ask) / `force_kill` (force). `cli/commands/data_plane/pgbouncer.py:stop_pgbouncer` captures the exact pooler owner and delegates to its native custodian; an incomplete stop retains custody and fails. Normal pause/stop instead use the data-plane boundary in `cli/commands/data_plane/maintenance_stop.py`: it does not escalate the pooler, and ends a Postgres fast shutdown that outlives its share of the budget with an immediate shutdown (see the 2026-10-02 decision). A pid this user may not signal is handled the same way on all three legs: alive, undeliverable, reported as a survivor — never an exception out of the middle of a stop. Same file: `kill_process_tree` (parent + descendants, enumerated before the kill) and `run_bounded` (a timeout that bounds the work, not just the wrapper).
+Not every process Ava stops is a named session: the pooler, an orphan holding a unit port, the gate daemon. Those go through `base/host/proc.py`'s trio — `process_alive` (probe) / `request_stop` (ask) / `force_kill` (force). `cli/commands/data_plane/pgbouncer.py:stop_pgbouncer` captures the exact pooler owner and delegates to its native custodian; an incomplete stop retains custody and fails. Normal stop instead uses the data-plane boundary in `cli/commands/data_plane/maintenance_stop.py`: it does not escalate the pooler, and ends a Postgres fast shutdown that outlives its share of the budget with an immediate shutdown (see the 2026-10-02 decision). A pid this user may not signal is handled the same way on all three legs: alive, undeliverable, reported as a survivor — never an exception out of the middle of a stop. Same file: `kill_process_tree` (parent + descendants, enumerated before the kill) and `run_bounded` (a timeout that bounds the work, not just the wrapper).
 
 ## Entry points
 

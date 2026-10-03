@@ -100,7 +100,7 @@ _DEFAULT_MAX_SCAN_BACKOFF_S = 300.0
 # the host, and nothing anywhere says why.
 #
 # These bounds limit diagnostics after cancellation, not graceful maintenance.
-# Normal pause/stop waits for durable drain and fails on timeout without an
+# Normal stop waits for durable drain and fails on timeout without an
 # implicit force-kill. Explicit force can interrupt the host and its report.
 #
 # Ceiling on reading the stuck agents' activity clocks, on the shutdown path.

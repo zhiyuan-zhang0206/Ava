@@ -29,7 +29,7 @@ _log = logging.getLogger(__name__)
 
 PAUSE_TIMEOUT_SECONDS = 300.0
 
-# Every hold a local pause or stop takes is named with this prefix.
+# Every hold a local stop takes is named with this prefix.
 STOP_HOLDER_PREFIX = "local-pause:"
 
 # The retry cadence for the bounded wait on an in-flight agent lifecycle
@@ -133,7 +133,7 @@ def _prepare_cohort(
     deadline = time.monotonic() + bound
     started: float | None = None
     waited_on: tuple[int, ...] = ()
-    # quiesce-exempt: the pause command's own bounded prepare wait; it runs before the window opens
+    # quiesce-exempt: the stop command's own bounded prepare wait; it runs before the window opens
     while True:
         try:
             with db.connect() as conn:
@@ -175,7 +175,7 @@ def drain(db: Database, holder: str, at: datetime, timeout: float) -> None:
     if not math.isfinite(timeout) or timeout <= 0:
         raise ValueError("drain timeout must be finite and positive")
     deadline = time.monotonic() + timeout
-    # quiesce-exempt: the pause command's own bounded drain wait; it ends the moment the drain lands
+    # quiesce-exempt: the stop command's own bounded drain wait; it ends the moment the drain lands
     while True:
         hold = _hold(holder, at)
         if hold.phase == "preparing":
@@ -311,7 +311,7 @@ def pause_agents(
 ) -> None:
     """Idempotently drain this unit, leaving persistent terminals untouched.
 
-    `driver` is minted by operator-side callers (`ava stop` / `ava pause`);
+    `driver` is minted by operator-side callers (`ava stop`);
     a daemon-driven caller passes None so a long-lived caller process never
     masks a dead ladder shepherd. A drain never kills a straggler: it waits
     out `timeout` and aborts with the hold retained.

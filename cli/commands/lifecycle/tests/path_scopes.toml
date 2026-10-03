@@ -8,7 +8,6 @@
     "test_commands_status.py",
     "test_extension_materialize_ordering.py",
     "test_maintenance_stop_report.py",
-    "test_pause_stop.py",
     "test_remote_data_plane.py",
     "test_rollout_robustness.py",
     "test_root_driver.py",
@@ -18,6 +17,7 @@
     "test_start_partial_stop.py",
     "test_start_readiness_gate.py",
     "test_start_readiness_preflight.py",
+    "test_stop.py",
     "test_stop_extras.py",
     "test_stop_terminals.py",
 ]

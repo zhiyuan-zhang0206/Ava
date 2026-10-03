@@ -18,7 +18,7 @@ The three are loosely coupled via HTTP + SSE: frontend directly calls Gateway AP
 ## Core Responsibilities
 
 - **Gateway**: HTTP API + SSE event push
-- **CLI**: cluster lifecycle (start/pause/stop/status/update) + operational diagnosis
+- **CLI**: cluster lifecycle (start/stop/restart/status/update) + operational diagnosis
 - **Frontend**: Web UI, real-time agent conversation + fleet monitoring + configuration management
 
 ## Key Dependencies

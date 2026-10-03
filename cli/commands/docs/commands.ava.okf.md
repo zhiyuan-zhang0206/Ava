@@ -40,7 +40,7 @@ subpackages hold the domains, each an independent package door:
   rendered-file guard, and host-wiring steps owned by no other domain
   (firewall, Redis bridge, OS jobs including the WAL-G daily tick job, the WAL-G
   install/validate step `walg.py`).
-- `lifecycle/` — `ava start` / `pause` / `stop` / `restart` / `maintenance` /
+- `lifecycle/` — `ava start` / `stop` / `restart` / `maintenance` /
   `status`, the pending-migration step, and the single application root they
   drive: [[cli/commands/lifecycle/docs/lifecycle.ava.okf.md|Host lifecycle]].
 
@@ -50,8 +50,8 @@ the `_`-prefixed steps host commands call (`_probe`, `_setup`, `_repo`,
 `cli/commands/`. `root_driver.py`, `service_stop.py` and `start_generation.py`
 are internal steps under public names because other packages reach them.
 
-`stop.py` exposes `pause` and `stop` through `_temporary_stop`; restart reuses
-its native drain. `ops.agent_pause` and `ops.agent_pause.probe`
+`stop.py` exposes `stop` through `_temporary_stop`; restart calls the same stop
+kernel with the data plane, browser and persistent terminals kept. `ops.agent_pause` and `ops.agent_pause.probe`
 own prepare/drain and runtime capability checks; `service_stop` and
 `data_plane/maintenance_stop` verify resource exits.
 `data_plane/_pooler_stop.OwnedPooler` owns
@@ -121,5 +121,5 @@ Gateway data-plane startup (`data_plane/cluster_instance`, `data_plane/bringup`,
 
 - [[cli.ava.okf.md]] — the CLI domain overview: verbs, cluster identity, idempotent first start
 - [[packages.ava.okf.md]] — the `ava plugins` / `ava skill` / `ava mcp` package surface
-- [[cli/commands/lifecycle/docs/lifecycle.ava.okf.md]] — start, stop, pause,
+- [[cli/commands/lifecycle/docs/lifecycle.ava.okf.md]] — start, stop, restart,
   maintenance and the application root

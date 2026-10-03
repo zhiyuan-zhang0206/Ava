@@ -384,7 +384,7 @@ def test_maintenance_verbs_opt_out_of_the_gateway_fetch(
 ) -> None:
     """`status` / `cluster` / `agents` / `config` / `logs` set AVA_CONFIG_FETCH=skip
     before dispatch (settings-lite: they must work while the gateway is down);
-    start and normal pause/stop need the real cluster configuration."""
+    start and normal stop need the real cluster configuration."""
     import os as _os
 
     # Blanking os.environ drops AVA_HOME, which would make the home `~/.ava` —
@@ -399,7 +399,7 @@ def test_maintenance_verbs_opt_out_of_the_gateway_fetch(
         assert env.get("AVA_CONFIG_FETCH") == "skip", f"{verb} must be settings-lite"
 
     # Starting and graceful draining both need data-plane configuration.
-    for verb in ("start", "pause", "stop"):
+    for verb in ("start", "stop"):
         env = {"PATH": "/usr/bin", "AVA_HOME": str(tmp_path)}
         monkeypatch.setattr(_os, "environ", env)
         monkeypatch.setattr(_main, "_build_parser", lambda v=verb: _noop_parser(v))
@@ -455,7 +455,6 @@ def _owned_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     [
         ["start"],
         ["stop", "-y"],
-        ["pause"],
         ["restart"],
         ["converge"],
         ["maintenance", "stop"],

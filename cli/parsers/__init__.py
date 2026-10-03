@@ -33,7 +33,6 @@ from cli.parsers.host import (
     _add_firewall_parser,
     _add_init_parser,
     _add_lgtm_parser,
-    _add_pause_parser,
     _add_restart_parser,
     _add_start_parser,
     _add_status_parser,
@@ -69,7 +68,6 @@ def build_parser() -> argparse.ArgumentParser:
     _add_init_parser(sub)
     _add_start_parser(sub)
     _add_stop_parser(sub)
-    _add_pause_parser(sub)
     _add_maintenance_parser(sub)
     _add_restart_parser(sub)
     _add_status_parser(sub)
