@@ -9,6 +9,7 @@ import signal
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 from collections.abc import Iterator
 from contextlib import nullcontext
@@ -96,7 +97,12 @@ def test_startup_failure_reaps_the_native_postmaster(
 ) -> None:
     """An invalid native invocation must fail with its direct child already reaped."""
 
-    def no_connection(**_kwargs: Any) -> None:
+    owner = threading.current_thread()
+
+    def no_connection(*_args: object, **_kwargs: Any) -> MagicMock:
+        if threading.current_thread() is not owner:
+            # a bystander thread sharing the xdist worker gets an inert dial
+            return MagicMock()
         raise psycopg.OperationalError("test child cannot listen")
 
     with monkeypatch.context() as scoped:
@@ -128,10 +134,19 @@ def test_readiness_rejects_an_unrelated_postgres_on_the_selected_port(
     process = MagicMock(spec=subprocess.Popen)
     process.poll.return_value = None
     process.wait.return_value = 0
+    owner = threading.current_thread()
     connection = MagicMock()
     connection.__enter__.return_value = connection
     connection.execute.return_value.fetchone.return_value = (str(tmp_path / "other-db"),)
-    monkeypatch.setattr(pg_foreground.psycopg, "connect", MagicMock(return_value=connection))
+
+    def fake_connect(*_args: object, **_kwargs: object) -> MagicMock:
+        if threading.current_thread() is not owner:
+            # the patch sits process-wide: a bystander thread's dial never lands
+            # on this test's scripted connection
+            return MagicMock()
+        return connection
+
+    monkeypatch.setattr(pg_foreground.psycopg, "connect", fake_connect)
 
     with pytest.raises(RuntimeError, match="another data directory"):
         pg_foreground.wait_foreground_postgres(
