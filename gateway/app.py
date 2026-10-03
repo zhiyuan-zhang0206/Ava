@@ -199,6 +199,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     app.state.bus = EventBus.from_settings()
     app.state.telemetry_staleness = TelemetryStaleness()
     app.state.status_cache = StatusCache()
+    app.state.inspect_query_cache = inspect_router.build_query_cache()
     app.state.db_pool = app.state.db.pool(max_size=8)
     app.state.idempotency = idempotency.IdempotencyService(
         idempotency.IdempotencyStore(app.state.db_pool)
