@@ -544,9 +544,9 @@ def test_runner_grant_matrix(runner_db: str) -> None:  # noqa: PLR0915 -- one gr
         )
         # agents_meta status/liveness (SELECT + UPDATE; INSERT stays with spawn)
         conn.execute("UPDATE agents_meta SET status = 'idling' WHERE id = %s", (agent_id,))
-        # ava.self.set_label writes the agent's OWN agents row (agents INSERT
-        # stays denied — spawn-only)
-        conn.execute("UPDATE agents SET label = 'me' WHERE id = %s", (agent_id,))
+        # agents is gateway-written only: labels go through the gateway API
+        with pytest.raises(psycopg.errors.InsufficientPrivilege):
+            conn.execute("UPDATE agents SET label = 'me' WHERE id = %s", (agent_id,))
         # SDK write surfaces the runner process uses directly:
         # ava.tasks (INSERT + UPDATE) ...
         conn.execute(
@@ -703,6 +703,14 @@ def _exercise_impersonation_entry_grants(conn: psycopg.Connection, agent_id: int
         "SELECT count(*) FROM agent_impersonation_entries WHERE lease_id = %s", (lease[0],)
     ).fetchone()
     assert row == (1,)
+    # The session allocator bumps agents.impersonation_index on the runner's
+    # behalf (SECURITY DEFINER), though the runner holds no UPDATE on agents.
+    allocated = conn.execute(
+        "SELECT a.session_id, g.impersonation_index FROM agent_impersonations a"
+        " JOIN agents g ON g.id = a.agent_id WHERE a.id = %s",
+        (lease[0],),
+    ).fetchone()
+    assert allocated == (0, 1)
 
 
 def _exercise_understanding_node_grants(conn: psycopg.Connection, agent_id: int) -> None:
