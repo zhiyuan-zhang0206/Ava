@@ -10,6 +10,9 @@ permissions:
   contents: write
   pull-requests: write
 
+env:
+  UV_FROZEN: "1"
+
 concurrency:
   group: update-model-pricing
   cancel-in-progress: false

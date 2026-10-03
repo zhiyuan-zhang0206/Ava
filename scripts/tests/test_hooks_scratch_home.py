@@ -38,7 +38,7 @@ _SCRATCH_PROVIDER = "base.host.env.dotenv_boot"
 
 # A hook script that reaches application code and still needs no scratch home.
 _BOOTS_NOTHING = {
-    "scripts/lint/python_lock.py": (
+    "scripts/lint/locks/python_lock.py": (
         "CI runs it on a bare python3, and its one application import "
         "(`base.deploy.release.python_lock`) is stdlib-only: it can never reach the config boot"
     ),

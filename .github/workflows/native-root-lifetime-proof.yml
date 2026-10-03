@@ -27,6 +27,8 @@ on:
       - '.github/workflows/native-root-lifetime-proof.yml'
 permissions:
   contents: read
+env:
+  UV_FROZEN: "1"
 jobs:
   root-lifetime:
     runs-on: ubuntu-24.04
@@ -46,7 +48,7 @@ jobs:
           systemctl --version
       - name: Root lifetime and independent data sibling
         run: uv run pytest --noconftest services/ava_root/tests/test_ava_root_daemon.py::test_native_systemd_root_lifetime -q --junitxml=root-lifetime.xml
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: always()
         with:
           name: native-root-lifetime
