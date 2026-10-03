@@ -25,9 +25,11 @@ from collections import deque
 from typing import Any
 
 from base.log import logger
+from services.im_bridge import copy
 from services.im_bridge.adapters import feishu_poll_cursor as cursors
 from services.im_bridge.adapters.feishu_ws_proxy import allow_env_proxy_for_ws
 from services.im_bridge.config import FeishuCredentialsConfig
+from services.im_bridge.state import _load_switch_state
 from services.im_bridge.types import IMAdapter, InboundMessage
 
 # Feishu caps a text message around 30KB of characters; segment conservatively.
@@ -111,6 +113,8 @@ class FeishuAdapter(IMAdapter):
                 "feishu link disabled (set the credentials to enable)"
             )
             return
+        # Seed the memory-only owner open id lost by a restart (task #4930).
+        await self._seed_owner_from_switch_state()
         self._main_loop = asyncio.get_running_loop()
         self._ws_thread = threading.Thread(target=self._run_ws, name="feishu-ws", daemon=True)
         self._ws_thread.start()
@@ -132,6 +136,35 @@ class FeishuAdapter(IMAdapter):
             self._ws_client.start()  # blocks; SDK reconnects internally
         except Exception as exc:
             logger.error("FeishuAdapter: ws connection failed: {}", exc)
+
+    async def _seed_owner_from_switch_state(self) -> None:
+        """Seed the owner open id lost by a restart from the persisted switch state.
+
+        Exactly one ``feishu:<open_id>`` entry restores it, never overwriting an
+        owner already known; anything else keeps it empty and alerts via telegram.
+        """
+        if self._last_open_id:
+            return
+        prefix = f"{self.channel}:"
+        try:
+            keys = [k for k in _load_switch_state() if k.startswith(prefix) and k != prefix]
+        except Exception as exc:
+            logger.warning("FeishuAdapter: switch state unreadable: {!r}", exc)
+            keys = []
+        if len(keys) == 1:
+            self._last_open_id = keys[0][len(prefix) :]
+            logger.info("FeishuAdapter: seeded owner open id: {}", self._last_open_id)
+            return
+        text = copy.FEISHU_OWNER_SEED_NO_SOURCE
+        if len(keys) > 1:
+            text = copy.FEISHU_OWNER_SEED_AMBIGUOUS.format(count=len(keys))
+        logger.error("FeishuAdapter: owner seed failed; feishu notifications are blind")
+        telegram = self.core.adapters.get("telegram")
+        if telegram is not None:
+            try:
+                await telegram.send_to_owner(text)
+            except Exception as exc:
+                logger.warning("FeishuAdapter: owner-seed alert not sent: {!r}", exc)
 
     async def stop(self) -> None:
         """Close the ws connection (the SDK has no public stop; its private
