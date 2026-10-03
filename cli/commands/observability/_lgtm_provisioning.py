@@ -34,10 +34,13 @@ def _render_ava_ops_dashboard(dest: Path, hashes_path: Path, key: str) -> None:
     from the checkout, so plugin installs/uninstalls move its panels with no
     hand-edited JSON. Change-only: an identical render re-records the hash
     sidecar without touching the file (keeps converge idempotent and the
-    Grafana restart fingerprint stable); a differing render goes through the
-    same content-hash user-edit guard and atomic write as the verbatim
-    copies. A render failure keeps the previous file and emits a warning
-    event — a dashboard must never fail converge.
+    Grafana restart fingerprint stable); a differing render replaces the file
+    atomically, WITHOUT the user-edit guard the verbatim copies have — the file
+    is derived state with no hand-edit contract, and the guard turned a file
+    written outside converge (`ava lgtm render --force` leaves the sidecar
+    behind) into a dashboard frozen at that render across every later rollout.
+    A render failure keeps the previous file and emits a warning event — a
+    dashboard must never fail converge.
     """
     from base.telemetry.metrics.grafana_dashboard_supply import render_dashboard_json
 
@@ -66,11 +69,10 @@ def _render_ava_ops_dashboard(dest: Path, hashes_path: Path, key: str) -> None:
     if dest.exists() and dest.read_text(encoding="utf-8") == rendered:
         _record_rendered_hash(hashes_path, key, digest)
         return
-    warning = write_rendered_guarded(
-        dest, rendered, hashes_path, key, surface="lgtm-dashboard", writer=_atomic_write
-    )
-    if warning is not None:
-        print(f"  ! lgtm native: {warning}", file=sys.stderr)
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    _atomic_write(dest, rendered)
+    _record_rendered_hash(hashes_path, key, digest)
+    print(f"  lgtm native: ava-ops dashboard re-rendered (sha256 {digest[:12]})")
 
 
 def _record_rendered_hash(hashes_path: Path, key: str, digest: str) -> None:
