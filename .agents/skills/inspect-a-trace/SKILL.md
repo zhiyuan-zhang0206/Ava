@@ -19,7 +19,7 @@ The evidence is queried live, against the version that is actually running.
 | Surface | Holds | Reach it with |
 |---|---|---|
 | **Postgres checkpoints** | the conversation itself — prompts, tool calls, results, system prompt | SQL + `base.agents.history.checkpoint` ([find-the-run](references/find-the-run.md)) |
-| **Loki** | the unified event river — every `exec`, `llm_usage`, `turn_end`, `halt`, lifecycle event | LogQL, or `GET /api/events` ([event-stream](references/event-stream.md)) |
+| **Loki** | the unified event river — every event, within its 84-hour window | LogQL ([event-stream](references/event-stream.md)); `GET /api/events` answers from Postgres, which stores only the events a reader queries and warning-or-higher ones |
 | **Tempo** | the span tree of one traced stretch — durations, langgraph node path, LLM call shape | TraceQL + the local JSONL mirror ([spans](references/spans.md)) |
 | **Grafana** | the human-browsable view of both | a constructed URL (below) |
 
