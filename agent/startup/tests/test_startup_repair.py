@@ -18,14 +18,13 @@ from langchain_core.messages import AIMessage, AnyMessage, HumanMessage, ToolMes
 from langchain_core.messages.modifier import RemoveMessage
 from langgraph.graph.message import REMOVE_ALL_MESSAGES, add_messages
 
-from agent.hooks import HOOKS
 from agent.hooks import repair as repair_module
+from agent.hooks.framework import framework_hooks
 from agent.hooks.repair import (
     _redundant_tool_results,
     _repair_dangling_tool_pairing,
     _unpaired_tool_calls,
     dangling_tool_pairing_repairs,
-    register_repair_hooks,
 )
 from agent.startup import repair_dangling_tool_use_at_startup
 
@@ -389,13 +388,8 @@ async def test_hook_returns_messages_update_for_buried_dangling() -> None:
     assert isinstance(update["messages"][0], RemoveMessage)
 
 
-def test_register_repair_hooks_registers_before_llm() -> None:
-    before = list(HOOKS["before_llm"])
-    try:
-        register_repair_hooks()
-        assert HOOKS["before_llm"][-1] is _repair_dangling_tool_pairing
-    finally:
-        HOOKS["before_llm"][:] = before
+def test_repair_is_the_first_framework_before_llm_hook() -> None:
+    assert framework_hooks()["before_llm"][0] is _repair_dangling_tool_pairing
 
 
 # --- boot pass over the compiled graph ------------------------------------------
