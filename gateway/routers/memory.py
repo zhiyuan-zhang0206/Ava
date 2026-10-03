@@ -20,9 +20,10 @@ from __future__ import annotations
 
 import asyncio
 import subprocess
+import threading
+from collections import OrderedDict
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
-from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
@@ -65,10 +66,9 @@ router = APIRouter()
 # recall wedged with it.
 
 
-@lru_cache(maxsize=1)
-def _search_semaphore() -> asyncio.Semaphore:
-    """The query-embed concurrency gate, built once per process from the
-    `memory_search_max_concurrency` setting — a knob, not a hardcoded
+def build_search_gate() -> asyncio.Semaphore:
+    """The query-embed concurrency gate, built once per process by the app lifespan from
+    the `memory_search_max_concurrency` setting — a knob, not a hardcoded
     constant, so a deployment can widen or narrow it without a code change
     (config panel or env; takes effect on gateway restart)."""
     return asyncio.Semaphore(settings.services.memory_search_max_concurrency)
@@ -325,7 +325,7 @@ async def post_memory_search(request: Request, body: MemorySearchRequest) -> Mem
     # Both phases are native async I/O — httpx.AsyncClient for the embed,
     # the backend's async client for the search — so a slow backend
     # can never block the event loop (2026-08-03 freeze mechanism, see
-    # `_search_semaphore` note). The semaphore still caps concurrency so
+    # `build_search_gate` note). The semaphore still caps concurrency so
     # a burst of searches cannot pile up in-flight embedding requests.
     #
     # The deadline wraps the semaphore acquires as well as the two phases: a
@@ -341,7 +341,7 @@ async def post_memory_search(request: Request, body: MemorySearchRequest) -> Mem
     try:
         async with asyncio.timeout(deadline):
             try:
-                async with _bounded_semaphore(_search_semaphore()):
+                async with _bounded_semaphore(request.app.state.memory_search_gate):
                     query_vector = await provider.embed_query_async(body.query)
             except IndexerUnavailable:
                 # The gate was busy (`_bounded_semaphore`'s fast-fail) — a
@@ -362,7 +362,7 @@ async def post_memory_search(request: Request, body: MemorySearchRequest) -> Mem
                 raise IndexerUnavailable(f"embed query failed: {exc}") from exc
 
             try:
-                async with _bounded_semaphore(_search_semaphore()):
+                async with _bounded_semaphore(request.app.state.memory_search_gate):
                     abs_paths = await _backend_topk(
                         request.app.state.db,
                         query_vector,
@@ -441,32 +441,45 @@ def _pool_revision(root: Path) -> str | None:
     return out.stdout.strip() or None
 
 
-# maxsize=4 is headroom for refresh races — consecutive revisions requested
-# around a pull/consolidation (a refresh can advance the pool more than once)
-# must not evict each other and re-run the ~2s build. Not a tuning knob.
-@lru_cache(maxsize=4)
-def _cached_memory_graph(
-    root_str: str,
-    revision: str,  # noqa: ARG001 - the revision keys the lru cache
-) -> MemoryGraphResponse:
-    """The graph for one pool revision, built once (task #4008).
+class MemoryGraphCache:
+    """The graph for the last few pool revisions, built once each (task #4008).
 
     The full walk+parse of a ~2k-note pool costs ~2s and the endpoint used to
-    re-run it on every request; keying on the revision rebuilds after a pull
-    and lets the lru bound drop older revisions. The cached object is returned
-    by reference and is only ever read (pydantic serializes per request).
+    re-run it on every request; keying on the revision rebuilds after a pull.
+    `max_entries=4` is headroom for refresh races — consecutive revisions requested
+    around a pull/consolidation (a refresh can advance the pool more than once)
+    must not evict each other and re-run the build. Not a tuning knob. The cached object
+    is returned by reference and is only ever read (pydantic serializes per request).
     """
-    return _build_memory_graph(Path(root_str))
+
+    def __init__(self, *, max_entries: int = 4) -> None:
+        self._max_entries = max_entries
+        self._graphs: OrderedDict[tuple[str, str], MemoryGraphResponse] = OrderedDict()
+        self._lock = threading.Lock()
+
+    def get(self, root: Path, revision: str) -> MemoryGraphResponse:
+        key = (str(root), revision)
+        with self._lock:
+            cached = self._graphs.get(key)
+            if cached is not None:
+                self._graphs.move_to_end(key)
+                return cached
+            graph = _build_memory_graph(root)
+            self._graphs[key] = graph
+            while len(self._graphs) > self._max_entries:
+                self._graphs.popitem(last=False)
+            return graph
 
 
 @router.get("/api/memory/graph", response_model=MemoryGraphResponse)
-def get_memory_graph() -> MemoryGraphResponse:
+def get_memory_graph(request: Request) -> MemoryGraphResponse:
     """Return concept notes and cross-links from the gateway memory bundle."""
     root = gateway_memory_dir()
     revision = _pool_revision(root)
     if revision is None:
         return _build_memory_graph(root)
-    return _cached_memory_graph(str(root), revision)
+    cache: MemoryGraphCache = request.app.state.memory_graph_cache
+    return cache.get(root, revision)
 
 
 @router.get("/api/memory/note", response_model=MemoryNoteResponse)
