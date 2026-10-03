@@ -25,6 +25,11 @@ _SYN2 = "29991231T235960_synthetic-two"
 SYN_ORPHAN = "20260815T000001_synthetic-orphan"
 
 
+def db_url() -> str:
+    """The throwaway database the migration tests run against."""
+    return settings.data_plane.db_url
+
+
 def _schema_sql_stamped_migration_names() -> list[str]:
     """The applied-set stamps db/schema.sql seeds, in file order.
 

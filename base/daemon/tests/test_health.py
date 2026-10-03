@@ -25,9 +25,9 @@ from typing import cast
 
 import pytest
 
-from base.cluster.authority.api import token_digest
 from base.daemon import health
 from base.daemon.health_schema import DEGRADED, OK, component
+from base.daemon.tests.health_support import token_digest
 from base.paths import ava_home
 
 

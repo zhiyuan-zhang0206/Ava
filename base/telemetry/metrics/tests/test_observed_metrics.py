@@ -13,7 +13,6 @@ import psycopg
 import pytest
 
 from base import telemetry
-from base.config import settings
 from base.telemetry import emitter
 from base.telemetry.metrics import observed_metrics as metrics
 
@@ -118,7 +117,9 @@ def test_malformed_duration_cannot_poison_numeric_sums(bad: Any) -> None:
         metrics.observe_event(_event("turn_end", duration_seconds=bad, ok=True))
 
 
-def test_sequential_and_concurrent_replay_add_each_fact_once(db_conn: psycopg.Connection) -> None:
+def test_sequential_and_concurrent_replay_add_each_fact_once(
+    db_conn: psycopg.Connection, db_url: str
+) -> None:
     _agent(db_conn)
     facts = [
         metrics.MetricObservation(
@@ -143,7 +144,7 @@ def test_sequential_and_concurrent_replay_add_each_fact_once(db_conn: psycopg.Co
     barrier = Barrier(2)
 
     def replay() -> int:
-        with psycopg.connect(settings.data_plane.db_url) as connection:
+        with psycopg.connect(db_url) as connection:
             barrier.wait(timeout=10)
             return metrics.write_observations(facts, db=connection)
 

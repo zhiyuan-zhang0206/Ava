@@ -4,6 +4,5 @@
     "test_maintenance_cold.py",
 ]
 "tests.path_scoped.ava_tests" = [
-    "test_migration_reset.py",
     "test_migrations.py",
 ]
