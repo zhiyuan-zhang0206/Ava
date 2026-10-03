@@ -2,16 +2,14 @@
 
 The storage lives in the standalone `services/memory_search/` process
 (loopback HTTP on 19531), so the indexer daemon (write path) and the
-gateway (read path) both talk to it exactly like they talk to the milvus
-daemon — one process owns the in-memory matrix + npz, no cross-process
-shared state.
+gateway (read path) both talk to it over HTTP — one process owns the
+in-memory matrix + npz, no cross-process shared state.
 
 `connect()` opens the sync client the daemon's batched writes use and
 probes the service (a real GET /meta — the retry loop in
 `services.memory_indexer.daemon` calls connect() until the service is up).
 The gateway's `search_topk_async` opens a per-call async client bounded by
-the caller's deadline — the same per-request lifecycle as the milvus
-backend.
+the caller's deadline.
 """
 
 from __future__ import annotations
@@ -160,8 +158,7 @@ class NumPyBackend:
         self, query_vector: np.ndarray, k: int, *, timeout: float
     ) -> list[str]:
         """Async twin of `search_topk` — a per-call async client bounded by
-        the caller's deadline, closed in `finally` (same lifecycle as the
-        milvus backend's async path)."""
+        the caller's deadline, closed in `finally`."""
         async with httpx.AsyncClient(base_url=self._uri, timeout=timeout) as client:
             resp = await client.post(
                 "/search",

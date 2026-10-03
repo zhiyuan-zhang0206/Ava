@@ -1,7 +1,7 @@
 """ava_memory — ops service declarations (the plugin's `build_services()` hook).
 
 The memory indexer is the pool's search side: it watches the gateway's
-consolidated checkout and keeps the Milvus index current, which is what makes
+consolidated checkout and keeps the memory search index current, which is what makes
 `ava.memory.search` — and therefore passive recall — return anything. It is
 declared here rather than hardcoded into `ops/roster/__init__.py` because the pool is this
 plugin's, end to end: disable ava_memory and there is no pool to index, no
@@ -58,7 +58,7 @@ def _memory_indexer_gate() -> str | None:
 def services() -> tuple[ServiceSpec, ...]:
     """The ops services the memory plugin contributes to the roster.
 
-    The gateway-side indexing daemon. Ordering against milvus (which it
+    The gateway-side indexing daemon. Ordering against memory-search (which it
     cold-start-connects to) is preserved by `ops.spec.plugin_services()` folding plugin
     services onto the tail of the roster, well after the gateway group.
     """
@@ -68,7 +68,7 @@ def services() -> tuple[ServiceSpec, ...]:
             module="services.memory_indexer.daemon",
             capabilities=_GATEWAY,
             # The pool is a markdown checkout on disk and the default index backends
-            # (numpy / Milvus) never open the main DB (which is also why it is the one
+            # (numpy) never open the main DB (which is also why it is the one
             # daemon that skips `assert_schema_current`). So a pg outage or a schema
             # mismatch is not its concern and the watchdog keeps reviving it. The
             # selectable pgvector backend does dial it, so the launcher still

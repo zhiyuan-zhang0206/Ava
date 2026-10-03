@@ -51,7 +51,7 @@ class ConfigFieldView(BaseModel):
     # "agent" | "ops" | "gateway" | "all" | "schedule" | "" — which process
     # must restart after a change. "gateway" covers the gateway process plus
     # the gateway-profile daemons that consume the field (im_bridge /
-    # memory_indexer / memory_search / milvus / ...) — an `ava restart`
+    # memory_indexer / memory_search / ...) — an `ava restart`
     # bounces all of them; "schedule" = the gateway-hosted schedule runner.
     restart_required: str
     writable: bool

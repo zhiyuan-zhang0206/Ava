@@ -122,7 +122,6 @@ _IMPL_KEYWORDS: list[tuple[str, str]] = [
     (r"\brequires AVA_", "setup reminder (let the code raise instead)"),
     # Storage / backend internals (observed leaks from the 2026-06-10 sweep).
     (r"\bagents_meta\b", "agents_meta (db table name)"),
-    (r"\bmilvus\b", "milvus (vector-store backend)"),
     (r"\bwire[- ]encoded\b", "wire-encoded (transport detail)"),
     # Presentation-layer detail — the agent doesn't reason over UI surfaces.
     (r"\bpopover\b", "popover (presentation detail)"),

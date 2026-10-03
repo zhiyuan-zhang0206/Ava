@@ -65,5 +65,5 @@ ava_agent: <your id>
 
 - [[ava_builtins/plugins/ava_memory/docs/ava_memory.ava.okf.md]] — the owning plugin
 - [[services/docs/gateway_side/memory_indexer/memory-indexer.ava.okf.md]] — vector index service
-- [[services/docs/gateway_side/milvus.ava.okf.md]] — vector database
+- [[services/docs/gateway_side/memory_search/memory-search.ava.okf.md]] — the vector store service
 - [[ava_builtins/plugins/ava_memory/docs/memory-recall.ava.okf.md]] — passive recall mechanism (provided by the same plugin)

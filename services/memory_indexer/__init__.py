@@ -10,6 +10,6 @@ Layout:
 - `daemon.py` — entry, `watchdog` Observer + event queue + cold-start scan
 - `embeddings/` — provider contract (`base.py`), Gemini adapter (`gemini.py`),
   factory switch (`factory.py`, `AVA_EMBEDDING_BACKEND`)
-- `backends/` — storage backends (milvus / numpy / pgvector) behind the
+- `backends/` — storage backends (numpy / pgvector) behind the
   `MemorySearchBackend` protocol + factory switch `AVA_MEMORY_SEARCH_BACKEND`
 """

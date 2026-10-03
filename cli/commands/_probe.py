@@ -103,7 +103,7 @@ def _binds_a_daemon_health_port(spec: ServiceSpec) -> bool:
     `health_name` (its URL is built from the same `ServiceEndpoints` row the
     daemon passes to `start_health_server`, so the URL probed and the port bound
     cannot disagree), and the gate declares `home_healthz` for its entry port. The
-    gateway (`/api/health`), the browser (CDP `/json/version`), milvus (gRPC) and
+    gateway (`/api/health`), the browser (CDP `/json/version`) and
     the frontend declare neither: none of them serves a `/healthz` whose body
     names its home.
     """

@@ -23,7 +23,6 @@ Source of truth = services in `build_services()` of `ops/spec.py` whose `Service
 | ttl-reaper | Wall-clock deadline enforcement: expired pages / persistent shells / browser sessions / notices / impersonation leases, lifecycle-pointer scans, fire-log prune | [[ttl_reaper.ava.okf.md]] |
 | schedule-manager | Keeps one resident session alive per enabled schedule (reconcile + crash backoff/breaker, API sync requests) | [[schedule_manager.ava.okf.md]] |
 | events-maintenance | unified `events` stream maintenance (immutable-Loki class resolution + day-grain rollup) | [[events_maintenance.ava.okf.md]] |
-| milvus | Vector database (memory-indexer backend) | [[milvus.ava.okf.md]] |
 | memory-indexer | memory pool vector index | [[memory_indexer.ava.okf.md]] |
 | labeler | agent auto-naming | [[labeler.ava.okf.md]] |
 | pg-backup | Daily local Postgres backup (scheduler daemon, ServiceSpec service) | [[services/gateway_side/backup/docs/backup.ava.okf.md]] |

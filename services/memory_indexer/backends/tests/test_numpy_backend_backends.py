@@ -30,16 +30,6 @@ def test_probe_numpy_unreachable_is_actionable(monkeypatch: pytest.MonkeyPatch) 
     assert "AVA_MEMORY_SEARCH_BACKEND=numpy" in (result.message or "")
 
 
-def test_probe_milvus_unreachable_is_actionable(monkeypatch: pytest.MonkeyPatch) -> None:
-    from base.config import settings
-
-    monkeypatch.setattr(settings.services, "milvus_uri", f"http://127.0.0.1:{_free_port()}")
-    result = probe.probe_backend("milvus", Database.from_settings())
-    assert not result.fatal
-    assert "milvus is not reachable" in (result.message or "")
-    assert "AVA_MEMORY_SEARCH_BACKEND=numpy" in (result.message or "")
-
-
 def test_probe_unknown_backend_is_fatal() -> None:
     result = probe.probe_backend("qdrant", Database.from_settings())
     assert result.fatal

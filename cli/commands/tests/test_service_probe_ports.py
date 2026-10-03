@@ -1,6 +1,6 @@
 """Tests that build_services() derives probe URLs/ports from settings.
 
-Verifies that watchdog probe URLs follow the endpoint table and that milvus
+Verifies that watchdog probe URLs follow the endpoint table and that memory-search
 tcp_port + frontend curl_url derive from settings rather than being
 hardcoded literals.
 """
@@ -31,11 +31,11 @@ def test_daemon_probe_url_follows_health_port(monkeypatch: pytest.MonkeyPatch) -
     assert "18003" in spec.curl_url
 
 
-def test_milvus_tcp_port_follows_settings(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Patching settings.services.milvus_port must be reflected in milvus spec's tcp_port."""
-    monkeypatch.setattr(repo.settings.services, "milvus_port", 29530)
-    spec = _spec_by_session(repo.build_services(), "milvus")
-    assert spec.tcp_port == 29530
+def test_memory_search_tcp_port_follows_settings(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Patching settings.services.memory_search_port must be reflected in the memory-search spec's tcp_port."""
+    monkeypatch.setattr(repo.settings.services, "memory_search_port", 29531)
+    spec = _spec_by_session(repo.build_services(), "memory-search")
+    assert spec.tcp_port == 29531
 
 
 def test_frontend_curl_url_follows_app_port(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -108,7 +108,6 @@ def test_all_services_present(monkeypatch: pytest.MonkeyPatch) -> None:
         "delivery-watchdog",
         "events-maintenance",
         "task-maintenance",
-        "milvus",
         "memory-search",
         "memory-indexer",
         "frontend",

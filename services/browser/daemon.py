@@ -133,7 +133,7 @@ def main() -> None:
     if local_state_warning is not None:
         logger.warning("ava-browser: Local State validation warning: {}", local_state_warning)
     # Redirect stdout/stderr to browser.log before execvp so a Chrome crash is
-    # postmortem-able (same blind-spot fix as services/milvus/daemon.py).
+    # postmortem-able.
     log_fd = os.open(str(logs_dir() / "browser.log"), os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o644)
     os.dup2(log_fd, 1)
     os.dup2(log_fd, 2)

@@ -121,7 +121,7 @@ def _prepare_cold_start(
 
         prepare_gateway_schema()
     else:
-        print("\n→ local services: skipped (agent-runner uses central node's DB/Redis/Milvus)")
+        print("\n→ local services: skipped (agent-runner uses central node's DB/Redis)")
 
     rc = _prepare_start_schema()
     if rc:

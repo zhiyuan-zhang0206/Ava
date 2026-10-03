@@ -73,7 +73,7 @@ owner-only unix socket (`peer`), acting as the owner for every schema object.
 No application process ever logs in as it.
 
 A **unit** is one install of Ava under its own `$AVA_HOME`, and `AVA_HOME`
-locates the unit's `.env`, logs, memory pool, milvus data, pidfiles, etc., all of
+locates the unit's `.env`, logs, memory pool, pidfiles, etc., all of
 which derive from it. The home is `AVA_HOME` when set, else `~/.ava`
 (`base/host/env/dotenv_boot.py:resolve_ava_home` — see "How a unit finds its home"
 below), read whenever it is needed:
@@ -81,10 +81,10 @@ below), read whenever it is needed:
 A machine carries a **capability set** — `gateway`, `agent-runner`, or both:
 
 - **gateway** capability: owns the HTTP gateway + the data plane (Postgres /
-  Redis / Milvus) + the gateway daemons for its cluster.
+  Redis) + the gateway daemons for its cluster.
 - **agent-runner** capability: hosts agents and the ops server, using agent-host
   through agent-host scheduling; its
-  DB/Redis/Milvus URLs point at a gateway node when the host carries no
+  DB/Redis URLs point at a gateway node when the host carries no
   `gateway` capability of its own.
 
 A **single-box** deployment carries gateway and runner capabilities in one
@@ -171,9 +171,9 @@ in the repository do not establish a cluster runtime dependency.
 
 **Ports** come from one fixed table (`base/host/env/port_table.py`: gateway 8000,
 frontend 3000, pg 5433, redis 6380, pgbouncer 6433, daemon healthz ports in
-8103-8116, milvus 19530). A new home records the table in its start intent at birth, and
+8103-8116, memory-search 19531). A new home records the table in its start intent at birth, and
 every later read is `rec.ports[...]` off that record; a unit whose `.env` names no
-port binds the same numbers. Health probe URLs + daemon/milvus/frontend ports
+port binds the same numbers. Health probe URLs + daemon/memory-search/frontend ports
 derive from settings. The table is closed: a record with more or fewer slots is
 refused at start. Tests never use these numbers (`base/cluster/tests/test_fixed_ports.py`).
 
@@ -634,8 +634,7 @@ body's name, home and pid are this unit's own daemon.
 | `schedule-manager` (gateway only) | `.venv/bin/python -m services.schedule_manager.daemon` (two resident loops under one `TaskGroup`; a loop that raises ends the process and root restarts it, the schedule sessions survive it. **`reconcile`**, every 5 s: desired (enabled `schedules` rows) against actual (live `ava-schedule-<id>` PTY sessions) — launches the missing ones under the crash backoff (`launch_count` / `next_launch_at` on the row, a launch claimed with one conditional UPDATE) and the breaker (5 launches, then `status='error'`), reaps the unwanted, closes orphaned run rows, and raises the two-hour no-session alert once per outage (`not_live_since` / `stall_alerted_at`). **`requests`**, every second: consumes `schedule_sync_requests` rows the API leaves on start / stop / restart / script edit / delete (kill, relaunch if enabled, clear the backoff), staying queued during a maintenance hold. Seeds the built-in schedules at start (`AVA_PROVISION_BUILTIN_SCHEDULES`). Refuses to start from a checkout that does not own the home) | roster identity probe (`/healthz` :8122) |
 | `task-maintenance` (gateway only; **registered by the `ava_fleet` plugin**, not core — see `ava_builtins/plugins/ava_fleet/services.py`) | `.venv/bin/python -m ava_builtins.plugins.ava_fleet.task_maintenance.daemon` (every `AVA_TASK_MAINTENANCE_INTERVAL_SECONDS`, default 5 min, reminds owners of overdue in-progress tasks past their `remind_interval_seconds` window via a `chat` inbound; after `AVA_TASK_ESCALATE_N` (default 3) unanswered reminders, notifies the parent task's owner. Cluster-wide, runs once on the gateway. Discovered whenever the `ava_fleet` plugin code is present; gate its cluster-level on/off with `AVA_TASK_MAINTENANCE_ENABLED`) | roster identity probe (`/healthz` :8108) |
 | `events-maintenance` (gateway only) | `.venv/bin/python -m services.events_maintenance.daemon` (every `AVA_EVENTS_MAINTENANCE_INTERVAL_SECONDS`, default 1h. Each pass recomputes the most recent closed UTC days (`RECOMPUTE_DAYS`) of the Since-Birth day-grain rollups — `agent_metrics_daily` / `agent_model_tokens_daily` (the durable token+cost ledger) — from `telemetry_events` as one idempotent full-day overwrite keyed on the PK, guarded so a gap in the record never lowers a stored ledger day (see `services/events_maintenance/rollup.py`). Today is served live by the readers. Cluster-wide, runs once on the gateway — it owns the data plane. The rollup, JSONL replay, blob vacuum and hourly checkpoint size sample are unconditional — the PG `events` archive slices (partition rolling, retention, index governance) were removed with the task #1281/#1823 cleanup. The current baseline omits that archive. The checkpoint trim opt-in was retired on 2026-09-30 under the never-delete ruling; its reaper implementation remains unscheduled pending separate retirement. A third loop samples `max(agents.id)` once a minute for the `agent_registry` growth gauge; a fourth, only on a unit holding `GRAFANA_ADMIN_PASSWORD`, reconciles stored Grafana alert rows against Grafana's active Alertmanager view every five minutes; the loops share one `TaskGroup`) | roster identity probe (`/healthz` :8109) |
-| `milvus`                 | `.venv/bin/python -m services.milvus.daemon` (`milvus-lite server` gRPC :19530, data dir `~/.ava/milvus-data/`) | `services.healthchecks.milvus` (TCP probe :19530) |
-| `memory-indexer`         | `.venv/bin/python -m services.memory_indexer.daemon` (watchdog fs watch `~/.ava/memory/` + Gemini Embedding 2 → milvus collection) | roster identity probe (`/healthz` :8105) |
+| `memory-indexer`         | `.venv/bin/python -m services.memory_indexer.daemon` (watchdog fs watch `~/.ava/memory/` + Gemini Embedding 2 → the selected memory search backend) | roster identity probe (`/healthz` :8105) |
 | `memory-search`          | `.venv/bin/python -m services.memory_search.daemon` (uvicorn on 127.0.0.1:19531 serving the exact-search store — in-memory matrix + npz persistence; the gateway and the indexer call it over HTTP when `AVA_MEMORY_SEARCH_BACKEND=numpy`) | `services.healthchecks.memory_search` (real POST /search probe :19531) |
 | `frontend`               | `cd ui/web && NEXT_PUBLIC_GATEWAY_PORT=<AVA_GATEWAY_PORT> npm run build && npm run start -- -p <app_port>` (Next.js prod build, **loopback-only bind** (`next start -H 127.0.0.1`); off-box browsers reach it only through the fleet UI gate on the entry port `:3000` — see Private-network deployment. The build-time port is injected from `AVA_GATEWAY_PORT` so the browser dials the gateway on the right port even when it is not the default 8000) | `services.healthchecks.frontend` (curl) |
 | `pg-backup` (gateway only) | `.venv/bin/python -m services.backup_scheduler.daemon` (cluster-clock daily dump schedule with bounded retry and owned, cancellable job processes; after the Sunday 03:00 successful dump, runs one isolated logical restore drill; `/healthz` reports last-success age) | roster identity probe (`/healthz` :8116) |
@@ -1410,6 +1409,34 @@ on disk, a `REPLICATION` role and the `replication` rows it needed in
 `pg_hba.conf` (rewritten on every start, so the rows disappear by themselves),
 and the remote objects and lifecycle rule of the retired physical chain.
 
+### Release steps: retiring the `milvus` port slot (one-time)
+
+The release that deletes the milvus memory-search backend drops the `milvus` slot (19530)
+from the fixed port table, so every gateway home's start intent must lose that key before
+any command of the new code (see the rule above). A runner-only home has no reservation
+and needs nothing. The step is idempotent (it pops a key only when present).
+
+1. **Between `down` and `up`, on every gateway home**, drop the slot. The file is compact
+   JSON with sorted keys, mode 0600:
+
+   ```bash
+   python3 - <<'EOF'
+   import json, os, pathlib
+   home = pathlib.Path(os.environ.get("AVA_HOME") or pathlib.Path.home() / ".ava")
+   path = home / "start-intent.json"
+   data = json.loads(path.read_text())
+   data["record"]["ports"].pop("milvus", None)
+   staged = path.with_name(path.name + ".staged")
+   staged.write_text(json.dumps(data, sort_keys=True) + "\n")
+   staged.chmod(0o600)
+   staged.replace(path)
+   EOF
+   ```
+2. **Nothing else is required.** A home's `.env` keeps `AVA_MILVUS_PORT` / `AVA_MILVUS_URI`;
+   every settings model ignores a key it does not declare, so they are inert. A
+   `~/.ava/milvus-data/` directory, if the home ever ran milvus, is dead data and may be
+   deleted.
+
 ### WAL-G archiving
 
 WAL archiving ships every completed WAL segment, encrypted, to an OSS prefix
@@ -2114,7 +2141,6 @@ Where to look when something went wrong on a host:
 | what did daemon X do | `$AVA_HOME/logs/<name>.log` (JSONL, rotated 100MB / 7 days) |
 | what did the cluster do, without ssh | `GET /api/cluster/admin/events` over the private network |
 | why did a daemon vanish | its log file: every daemon wraps `asyncio.run(main())` and logs the traceback before re-raising |
-| what did milvus say | its log file only — it is a C++ binary with no PG sink |
 | an agent's exec subprocesses | `$AVA_HOME/logs/agent-{N}.log` (every exec subprocess of the agent appends) |
 | raw session stdout (gateway / shells / daemons / schedules) | Loki (the LGTM backend): shell logs → `filelog/sessions`; gateway/daemon/schedule logs → `filelog/services`. Banner-only agent main stdout is excluded. All filelog receivers derive Loki `service_name` from the filename and persist offsets. Loki retains 84 hours; scheduled local cleanup uses the family tiers below. See `deploy/lgtm/README.md`. |
 

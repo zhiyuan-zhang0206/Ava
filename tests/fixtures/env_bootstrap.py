@@ -542,7 +542,7 @@ settings.general.machine_serve_gateway = None
 #
 # Redirecting AVA_HOME is not enough. Every service port falls back to a FIXED
 # default when nothing overrides it — the fixed port table
-# (base/host/env/port_table.py: gateway 8000, frontend 3000, milvus, every
+# (base/host/env/port_table.py: gateway 8000, frontend 3000, every
 # daemon's health port) — and those are the ports the operator's prod cluster on
 # this same box is already bound to. So a test that starts a daemon binds prod's
 # port, and a test that runs a healthcheck probes (or respawns!) prod's service.
@@ -595,20 +595,18 @@ def _pin_setting(field: str, value: object) -> None:
 # session's table slots) can be the same number: separate `bind(0)` calls release
 # each port at once and the kernel may return it again.
 _HEALTH_PORT_FIELDS = tuple(_HEALTH_PORT_OVERRIDES.values())
-_ports = iter(_distinct_free_ports(len(_HEALTH_PORT_FIELDS) + 8 + len(FIXED_PORTS)))
+_ports = iter(_distinct_free_ports(len(_HEALTH_PORT_FIELDS) + 7 + len(FIXED_PORTS)))
 for _health_port_field in _HEALTH_PORT_FIELDS:
     _pin_setting(_health_port_field, next(_ports))
 
 _pin_setting("gateway_health_url", f"http://127.0.0.1:{next(_ports)}/api/health")
 _pin_setting("frontend_healthcheck_url", f"http://127.0.0.1:{next(_ports)}")
-_pin_setting("milvus_port", next(_ports))
 # The rest of the settings that default to a table port. The permissions helper
 # port is pinned in the singleton only: its env key is popped above on purpose,
 # and a set key would read as a helper spawn context in every child.
 _pin_setting("gateway_port", next(_ports))
 _pin_setting("browser_cdp_port", next(_ports))
 _pin_setting("grafana_port", next(_ports))
-_pin_setting("milvus_uri", f"http://127.0.0.1:{settings.services.milvus_port}")
 _pin_setting("memory_search_port", next(_ports))
 _pin_setting("memory_search_uri", f"http://127.0.0.1:{settings.services.memory_search_port}")
 set_field("permissions_helper_port", next(_ports))

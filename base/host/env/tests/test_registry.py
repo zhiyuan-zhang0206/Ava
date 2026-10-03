@@ -208,8 +208,6 @@ class TestConsumptionMatrixDeclarations:
             "AVA_GATEWAY_HEALTH_URL",
             "AVA_FRONTEND_HEALTHCHECK_URL",
             "AVA_APP_PORT",
-            "AVA_MILVUS_PORT",
-            "AVA_MILVUS_URI",
             "AVA_MEMORY_SEARCH_PORT",
             "AVA_MEMORY_SEARCH_URI",
             "AVA_BROWSER_CDP_PORT",

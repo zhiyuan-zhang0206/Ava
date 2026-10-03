@@ -37,10 +37,8 @@ stderr, a rotated JSONL file and the unified event pipeline, and how every sink 
 
 The sinks produce two places to look — the file `$AVA_HOME/logs/<name>.log` and
 the unified event stream (Loki, which the Stats Dashboard and
-`GET /api/cluster/admin/events` read) — carrying the same lines. Two exceptions:
+`GET /api/cluster/admin/events` read) — carrying the same lines. One exception:
 
-- **milvus** has no event pipeline: it is `execvp`ed into a C++ binary that cannot honor
-  loguru wiring, so its daemon `dup2`s the log fd over stdout/stderr before exec.
 - **the CLI** opens sinks only for `cli.main._CLI_LOG_NAMES`; `ava status`
   opens none. CLI `print()` output remains stdout/stderr and belongs to its
   launch owner's log.

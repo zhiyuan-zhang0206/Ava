@@ -18,7 +18,7 @@ from base.host.env.dotenv_boot import resolve_ava_home
 def _unit_home() -> Path:
     """Default data-root for path fields whose default_factory runs at
     sub-model construction: the process's home (`resolve_ava_home`), so pidfiles /
-    memory / milvus-data / logs default under THIS unit's home."""
+    memory / logs default under THIS unit's home."""
     return resolve_ava_home()
 
 

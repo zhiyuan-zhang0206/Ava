@@ -240,8 +240,6 @@ _DERIVED_FIELDS = frozenset(
         "gateway_health_url",
         "frontend_healthcheck_url",
         "app_port",
-        "milvus_port",
-        "milvus_uri",
         "memory_search_port",
         "memory_search_uri",
         "browser_cdp_port",

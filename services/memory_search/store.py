@@ -201,7 +201,7 @@ class MemoryStore:
         chunk_idx: int = 0,
     ) -> None:
         """Write / update one chunk row; re-upserting the same triple
-        overwrites in place — identical semantics to the milvus backend."""
+        overwrites in place."""
         self.upsert_many([(path, mtime, content_hash, embedding, kind, chunk_idx)])
 
     def upsert_many(self, rows: Sequence[tuple[str, float, str, np.ndarray, str, int]]) -> None:
@@ -297,8 +297,7 @@ class MemoryStore:
 
     def all_meta(self) -> dict[str, tuple[float, str, str]]:
         """Per-path (mtime, content_hash, provider_fingerprint) — one entry
-        per **file**, not per chunk (aggregation keeps the max mtime; same
-        contract as milvus). The fingerprint is the reconcile key's third
+        per **file**, not per chunk (aggregation keeps the max mtime). The fingerprint is the reconcile key's third
         element."""
         meta: dict[str, tuple[float, str, str]] = {}
         for path, mtime, hash_, fingerprint in zip(
@@ -313,8 +312,8 @@ class MemoryStore:
         """Exact cosine top-k **paths**, aggregated over chunk rows.
 
         One matrix product over every row (microseconds at pool scale), then
-        per path keep the best (maximum) cosine — the same best-similarity,
-        most-similar-first contract as the milvus backend. Returns fewer than k
+        per path keep the best (maximum) cosine — most-similar-first.
+        Returns fewer than k
         when the store has fewer distinct paths; empty when the store is empty.
         """
         query = query_vector.astype(np.float32).reshape(-1)

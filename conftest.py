@@ -36,7 +36,6 @@ pytest_plugins = [
     "tests.fixtures.provisioning",
     "tests.fixtures.guards",
     "tests.fixtures.units",
-    "tests.fixtures.milvus",
     "tests.fixtures.log_capture",
     "tests.fixtures.retry_waits",
     # Directory-level fixtures that follow their tests (`PATH_SCOPES`), not a conftest.

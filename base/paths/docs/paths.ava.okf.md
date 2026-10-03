@@ -38,7 +38,6 @@ $AVA_HOME/
 ├── backups/db/                 # daily pg_dump --format=custom, UTC-stamped, newest 7 kept
 ├── backups/env/                # .env snapshot taken before each config write
 ├── memory/                     # the memory pool git repo
-├── milvus-data/                # milvus-lite data dir
 ├── workspaces/<agent_id>/      # per-agent working dir
 ├── chrome-profile/             # the shared headed Chrome's dedicated profile
 ├── plugins_config.json         # per-machine plugin enable state

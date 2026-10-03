@@ -31,7 +31,7 @@ ProcessProfile = Literal["gateway", "agent", "runner"]
 
 PROCESS_PROFILES: dict[ProcessProfile, frozenset[str]] = {
     # gateway HTTP + gateway-side daemons (im_bridge / heartbeat / labeler /
-    # events_maintenance / memory_indexer / milvus / delivery_watchdog).
+    # events_maintenance / memory_indexer / delivery_watchdog).
     # lm/telegram/feishu are real gateway-side reads (routers read llm_model;
     # im_bridge reads telegram/feishu) — capability says agent-runner, the
     # consumption matrix says gateway. Consumption wins. observability: the

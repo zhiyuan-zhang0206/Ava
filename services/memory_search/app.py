@@ -1,9 +1,8 @@
 """The memory search HTTP API — FastAPI over the in-process MemoryStore.
 
 Endpoints mirror the backend protocol one-to-one (upsert / upsert_batch /
-delete / meta / search), so `backends.numpy.NumPyBackend` is a thin HTTP client and the
-indexer daemon + gateway treat this service exactly like the milvus
-daemon. Every mutation persists the npz before responding, so a kill
+delete / meta / search), so `backends.numpy.NumPyBackend` is a thin HTTP client (the indexer daemon
+and the gateway talk to it over HTTP). Every mutation persists the npz before responding, so a kill
 -after-ack never loses a row.
 
 `GET /stats` is the one non-protocol endpoint: current chunk rows plus the
@@ -13,8 +12,8 @@ numbers every 60s and emits them as a `memory_search_stats` telemetry
 event, so they reach Prometheus through the existing OTLP path under this
 process's own job label (the `service_started` series rides the same path).
 
-Binds loopback only (the daemon passes host="127.0.0.1") — like milvus,
-this is a strictly local service; no LAN port is opened.
+Binds loopback only (the daemon passes host="127.0.0.1") — a strictly local
+service; no LAN port is opened.
 """
 
 import asyncio
