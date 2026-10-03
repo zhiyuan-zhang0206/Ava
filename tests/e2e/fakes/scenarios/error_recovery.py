@@ -1,7 +1,7 @@
 """Error-recovery scenario — LLM fails permanently, then recovers on the next turn.
 
 turn 1: the fake raises FatalProviderError (a provider rejection class that is
-        EXCLUDED from the llm node retry policy — agent/graph/_build.py
+        EXCLUDED from the llm node retry policy — agent/graph/llm/_retry.py
         `_should_retry` returns False for it). The agent loop aborts the turn,
         emits one SSE `error` event (the blocked-provider copy: "The agent is
         blocked; heartbeat check-ins will not re-run this request..."), and

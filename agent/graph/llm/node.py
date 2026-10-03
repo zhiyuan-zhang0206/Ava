@@ -44,6 +44,7 @@ system prompt + lazy SDK overview capture live in the parent package's
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import time
 from datetime import UTC, datetime
@@ -51,6 +52,7 @@ from typing import Any, Literal, NoReturn, cast
 
 from langchain_core.messages import AIMessage, AIMessageChunk
 from langchain_core.runnables import RunnableConfig
+from langgraph.errors import GraphBubbleUp
 from langgraph.runtime import Runtime
 from langgraph.types import Command
 
@@ -85,6 +87,7 @@ from base.lm.usage import CACHE_MECHANISM_MIXED, CACHE_SCOPE_EXPLICIT_BLOCK
 from base.log import logger
 
 from ._chunk import _assemble_final_message
+from ._retry import RETRY_REMAINING_ATTR, Attempt, retry_wait
 from ._stream import _stream_with_cache_retry
 
 # llm_node normal → BEFORE_EXEC; cancel / no-tool-call halt → AFTER_EXEC
@@ -101,37 +104,21 @@ reasoning content with zero output tokens cannot bypass the bound. The budget
 resets on the first turn that produces text or a tool call; process lifecycle
 resets it naturally on restart.
 """
-_RETRY_REMAINING_ATTR = "_ava_retry_budget_remaining_seconds"
-
-
-def _retry_elapsed_seconds(runtime: Runtime[AvaContext]) -> tuple[int, float] | None:
-    """Return this node's retry attempt and cumulative elapsed time when retried."""
-    execution_info = runtime.execution_info
-    if execution_info is None or execution_info.node_first_attempt_time is None:
-        return None
-    return (
-        execution_info.node_attempt,
-        max(0.0, time.time() - execution_info.node_first_attempt_time),
-    )
 
 
 def _log_llm_retry_duration(
-    runtime: Runtime[AvaContext],
+    attempt: Attempt,
     *,
     outcome: Literal["succeeded", "attempts_exhausted", "budget_exhausted"],
 ) -> None:
     """Emit the final wall-clock duration for a retried LLM node."""
-    timing = _retry_elapsed_seconds(runtime)
-    if timing is None:
-        return
-    attempt, duration_seconds = timing
-    if attempt < 2:
+    if attempt.number < 2:
         return
     logger.info(
         "LLM retry sequence {outcome} after {duration_seconds:.2f}s",
         event="llm_retry",
         outcome=outcome,
-        duration_seconds=duration_seconds,
+        duration_seconds=attempt.elapsed_seconds(),
     )
 
 
@@ -230,15 +217,48 @@ async def llm_node(
     runtime: Runtime[AvaContext],
     config: RunnableConfig,
 ) -> Command[LlmGoto]:
-    """Invoke LLM + streaming token publish + RAII cancel. See module docstring for details.
+    """Invoke the LLM, retrying a failed try on the schedule `_retry.retry_wait` decides.
 
-    `try / except / else` pattern (vs previous try/finally): finally under
-    async + langgraph retry boundary may have sys.exc_info() already handled
-    by the retry runner, so it cannot get the active exception → traceback in
-    events.payload becomes "NoneType: None\\n" (167/168 latent bug). Inside
-    the except block, sys.exc_info() is 100% the currently raising exception;
-    `logger.opt(exception=True)` is required to actually capture traceback
-    into the record.
+    The node retries itself rather than through a graph-level policy: the host's one graph
+    serves every agent, and only the node knows whose model and id the schedule is for.
+    """
+    agent_id = agent_id_from_config(config)
+    model = runtime.context.require_agent().brain.llm_model
+    first_started_at = time.time()
+    failed = 0
+    while True:
+        try:
+            return await llm_attempt(state, runtime, config, Attempt(failed + 1, first_started_at))
+        except GraphBubbleUp:
+            raise
+        except Exception as exc:
+            failed += 1
+            wait = retry_wait(exc, failed, model=model, agent_id=agent_id)
+            if wait is None:
+                raise
+            await asyncio.sleep(wait)
+            logger.info(
+                "Retrying the llm node after {wait:.2f}s (failed try {failed}): {error}",
+                wait=wait,
+                failed=failed,
+                error=f"{type(exc).__name__}: {exc}",
+            )
+
+
+async def llm_attempt(
+    state: _state.AgentState,
+    runtime: Runtime[AvaContext],
+    config: RunnableConfig,
+    attempt: Attempt,
+) -> Command[LlmGoto]:
+    """One try of the llm node: invoke LLM + streaming token publish + RAII cancel. See module
+    docstring for details.
+
+    `try / except / else` pattern (vs previous try/finally): finally under an async retry
+    boundary may have sys.exc_info() already handled by the retry runner, so it cannot get the
+    active exception → traceback in events.payload becomes "NoneType: None\\n" (167/168 latent
+    bug). Inside the except block, sys.exc_info() is 100% the currently raising exception;
+    `logger.opt(exception=True)` is required to actually capture traceback into the record.
     """
     turn_start = time.monotonic()
     agent_id = agent_id_from_config(config)
@@ -252,17 +272,15 @@ async def llm_node(
         agent_id=agent_id,
     ):
         try:
-            timing = _retry_elapsed_seconds(runtime)
             if (
-                timing is not None
-                and timing[1] >= settings.lm.llm_retry_max_total_seconds
+                attempt.elapsed_seconds() >= settings.lm.llm_retry_max_total_seconds
                 # The transient-retry budget is sized for seconds-scale
                 # backoffs; while a delayed stall sequence is active its own
-                # schedule (streak cap) owns the bound — see _build.
+                # schedule (streak cap) owns the bound — see _retry.
                 and not _stall_pair_streak_active(str(agent_id))
             ):
-                _log_llm_retry_duration(runtime, outcome="budget_exhausted")
-                _raise_retry_budget_exhausted(timing[0])
+                _log_llm_retry_duration(attempt, outcome="budget_exhausted")
+                _raise_retry_budget_exhausted(attempt.number)
             result = await _llm_node_impl(state, runtime, config)
         except BaseException as exc:
             # A settled (failed) attempt is real activity: mark the turn clock
@@ -273,16 +291,12 @@ async def llm_node(
             # the silence would include the whole stalled attempt on top of
             # the sleep and could cross the guard's bound.
             mark_turn_progress(agent_id)
-            timing = _retry_elapsed_seconds(runtime)
-            if (
-                timing is not None
-                and isinstance(exc, Exception)
-                and not isinstance(exc, LLMStreamStallPairError)
-            ):
-                attempt, duration_seconds = timing
-                remaining_seconds = settings.lm.llm_retry_max_total_seconds - duration_seconds
+            if isinstance(exc, Exception) and not isinstance(exc, LLMStreamStallPairError):
+                remaining_seconds = (
+                    settings.lm.llm_retry_max_total_seconds - attempt.elapsed_seconds()
+                )
                 if remaining_seconds <= 0.0 and not isinstance(exc, LLMRetryBudgetExceededError):
-                    _log_llm_retry_duration(runtime, outcome="budget_exhausted")
+                    _log_llm_retry_duration(attempt, outcome="budget_exhausted")
                 elif not isinstance(exc, (FatalLLMStreamError, FatalProviderError)):
                     from base.lm.registry import resolve_setting
 
@@ -290,29 +304,25 @@ async def llm_node(
                         "llm_retry_max_attempts",
                         model=runtime.context.require_agent().brain.llm_model,
                     )
-                    if attempt >= max_attempts:
-                        _log_llm_retry_duration(runtime, outcome="attempts_exhausted")
-                # `_build._build_llm_retry` consumes this transient attribute
-                # synchronously before it decides and schedules the next retry.
+                    if attempt.number >= max_attempts:
+                        _log_llm_retry_duration(attempt, outcome="attempts_exhausted")
+                # `_retry.retry_wait` reads this attribute to clip the next wait to the budget.
                 with contextlib.suppress(Exception):
-                    setattr(exc, _RETRY_REMAINING_ATTR, remaining_seconds)
+                    setattr(exc, RETRY_REMAINING_ATTR, remaining_seconds)
             logger.opt(exception=True).warning(
                 "turn ended in {duration_seconds:.2f}s ok=False — _llm_node_impl raised",
                 event="turn_end",
                 duration_seconds=time.monotonic() - turn_start,
                 ok=False,
             )
-            # Do not publish Error here — this except is wrapped by langgraph retry
-            # and runs on every failed attempt; sending the frontend N "errors" then
+            # Do not publish Error here — this except runs on every failed attempt; sending the frontend N "errors" then
             # succeeding on retry would contradict. The Error event is published
             # once by outer `agent/turn/runloop.py:_invoke_graph_with_lifecycle_logging`
             # after retries are exhausted (Cancelled is still published by
             # _llm_node_impl itself).
             raise
         else:
-            timing = _retry_elapsed_seconds(runtime)
-            if timing is not None and timing[0] >= 2:
-                _log_llm_retry_duration(runtime, outcome="succeeded")
+            _log_llm_retry_duration(attempt, outcome="succeeded")
             logger.info(
                 "turn ended in {duration_seconds:.2f}s ok=True",
                 event="turn_end",

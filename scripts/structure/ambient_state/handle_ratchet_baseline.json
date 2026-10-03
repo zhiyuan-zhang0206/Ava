@@ -3,8 +3,7 @@
     "shim": 3
   },
   "agent/graph": {
-    "shim": 3,
-    "turn-settings-read": 2
+    "shim": 3
   },
   "agent/ownership": {
     "bus-built": 3

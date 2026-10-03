@@ -17,17 +17,17 @@ shape — an `APIStatusError` carrying an int `status_code`, and
 Three classes, fail-fast:
 
 - `TRANSIENT`  — retry in-turn: 429 rate limit, 5xx server, 408/409/425, and
-  transport (connection / timeout) errors. The tuned LangGraph `RetryPolicy`
-  (`agent/graph/_build.py`) already retries these; classification only labels
+  transport (connection / timeout) errors. The llm node's tuned retry loop
+  (`agent/graph/llm/_retry.py`) already retries these; classification only labels
   them so the postmortem can tell an expected retry from a surprise.
 - `PERMANENT`  — retrying the identical request cannot flip it: 400 (bad request
   / context length / malformed / schema), 401 auth, 402 billing, 403 forbidden,
   404 unknown model, 422 schema. The LLM node raises `FatalProviderError` (which
-  the `RetryPolicy` excludes) so the agent idles — stays alive — instead of
+  the retry loop excludes) so the agent idles — stays alive — instead of
   burning the full backoff budget and dying.
 - `UNKNOWN`    — an exception (or status) we do not recognize. Never guessed into
   either bucket: it propagates through the node's normal path (retried like a
-  transient by the `RetryPolicy`, then surfaced if it persists) and is logged as
+  transient by the retry loop, then surfaced if it persists) and is logged as
   `unknown` so a postmortem can spot a gap to close here.
 
 Crossing all three, `ErrorClassification.billing` answers a different question —
@@ -45,7 +45,7 @@ from base.log import logger
 
 
 class ErrorClass(enum.Enum):
-    TRANSIENT = "transient"  # retryable in-turn -> falls through to the RetryPolicy
+    TRANSIENT = "transient"  # retryable in-turn -> falls through to the retry loop
     PERMANENT = "permanent"  # deterministic within the turn -> FatalProviderError, idle
     UNKNOWN = "unknown"  # unrecognized -> propagate (retried, then surfaced); do not guess
 
@@ -268,7 +268,7 @@ class ErrorClassification(NamedTuple):
         400 gate: the `context_length_exceeded` TYPE alone counts regardless
         of status — it is the one spelling that says overflow explicitly
         (some providers use it without the generic wording). A 429 carrying
-        it is still TRANSIENT (the RetryPolicy retries it; the breaker only
+        it is still TRANSIENT (the retry loop retries it; the breaker only
         fires on PERMANENT-class rejections), so the flag is informational
         there — the gate's purpose is only to keep a rate-limit 429 that
         happens to mention "tokens" from being misread as overflow.
