@@ -167,10 +167,14 @@ class CompactionCompleted(TypedDict):
 
 EVENTS: dict[str, EventSpec] = {
     # turn lifecycle
-    "llm_usage": telemetry_event("llm_usage", "LLM call metering", payload=LlmUsage),
-    "turn_end": telemetry_event("turn_end", "one turn finished", payload=TurnEnd),
+    "llm_usage": telemetry_event("llm_usage", "LLM call metering", payload=LlmUsage, persist=True),
+    "turn_end": telemetry_event("turn_end", "one turn finished", payload=TurnEnd, persist=True),
     "llm_turn_aborted": telemetry_event(
-        "llm_turn_aborted", "turn aborted after retries", family=LLM_ERROR_FAMILY, tier="anomaly"
+        "llm_turn_aborted",
+        "turn aborted after retries",
+        family=LLM_ERROR_FAMILY,
+        tier="anomaly",
+        persist=True,
     ),
     "recovery_breaker_halt": telemetry_event(
         "recovery_breaker_halt",
@@ -187,6 +191,7 @@ EVENTS: dict[str, EventSpec] = {
         payload=LlmProviderError,
         family=LLM_ERROR_FAMILY,
         tier="anomaly",
+        persist=True,
     ),
     "stream_stalled_retry": telemetry_event(
         "stream_stalled_retry",
@@ -195,6 +200,7 @@ EVENTS: dict[str, EventSpec] = {
         payload=StreamStalledRetry,
         family=LLM_ERROR_FAMILY,
         tier="anomaly",
+        persist=True,
     ),
     # Excluded from LLM_ERROR_FAMILY (task #3884, reaffirmed 2026-09-18):
     # each pair co-emits 1:1 with stream_stalled_retry, so family sums would
@@ -206,12 +212,14 @@ EVENTS: dict[str, EventSpec] = {
         "the call early; retried on the delayed stall schedule",
         payload=StreamStallPairTerminated,
         tier="anomaly",
+        persist=True,
     ),
     "stream_overloaded_retry": telemetry_event(
         "stream_overloaded_retry",
         "stream overloaded, retried",
         family=LLM_ERROR_FAMILY,
         tier="anomaly",
+        persist=True,
     ),
     "thinking_block_sanitized": telemetry_event(
         "thinking_block_sanitized", "thinking block sanitized", tier="noise"
@@ -225,7 +233,7 @@ EVENTS: dict[str, EventSpec] = {
     ),
     # compact / checkpoint / memory housekeeping
     "compact_request": telemetry_event("compact_request", "compact requested", tier="noise"),
-    "auto_compact": telemetry_event("auto_compact", "auto-compact", tier="noise"),
+    "auto_compact": telemetry_event("auto_compact", "auto-compact", tier="noise", persist=True),
     "compact_reminder": telemetry_event("compact_reminder", "compact reminder", tier="noise"),
     # heartbeat circuit breaker (task #1928)
     "circuit_breaker_open": telemetry_event(
