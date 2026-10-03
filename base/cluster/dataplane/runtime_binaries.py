@@ -69,6 +69,18 @@ def _platform_key() -> str:
     raise RuntimeError(f"no vendored Postgres available for {system}")
 
 
+def vendored_pg_supported() -> bool:
+    """Whether this platform has a pinned vendored Postgres artifact. Where it does,
+    the vendored tree is THE server (`ensure_pg_runtime` downloads it when the pinned
+    version is absent); where it does not (e.g. linux/arm64) an installed PostgreSQL 17
+    is the only option."""
+    try:
+        _platform_key()
+    except RuntimeError:
+        return False
+    return True
+
+
 def runtime_root() -> Path:
     """Vendored binaries root, `$AVA_HOME/runtime`: the host runs one cluster, so
     the home is the place a download is kept."""
