@@ -2,7 +2,7 @@
 
 The 2026-09-10 agent-host incident: a hand-placed external plugin whose
 `plugin.py` used `from . import refresh` was exec'd by the host-boot loader
-(`ava.sdk_surface.plugin_loader.scan_and_load`) under a top-level module name, raised
+(the host-boot loader) under a top-level module name, raised
 `ImportError: attempted relative import with no known parent package`, and took
 the whole agent host down on every restart — even with the plugin disabled via
 `ava plugins disable` (the boot loader ignored the enable config).
@@ -11,9 +11,8 @@ These lock the contract that came out of it (user ruling 2026-09-11):
 
 - disabled = never imported, on every production load path;
 - a broken plugin is contained (skipped, loud report), the rest still load;
-- both production loaders — host boot (`load_process_extensions`) and graph
-  build (`load_extensions`) — agree on the plugin's module identity
-  (`plugins.<name>.plugin`) and on package-relative sibling imports;
+- the plugin's module identity (`plugins.<name>.plugin`) is stable across loads and
+  package-relative sibling imports resolve;
 - the incident's restart loop cannot reproduce.
 """
 
@@ -81,16 +80,9 @@ def test_boot_loader_never_imports_a_disabled_plugin(loguru_records: list[dict[s
     _write_plugin(paths.plugins_dir(), "good", "LOADED = True\n")
     write_local({"plugins": {"codex_usage": {"enabled": False}, "good": {"enabled": True}}})
 
-    from agent.process_boot import load_process_extensions
-
-    load_process_extensions()  # must not raise: the disabled plugin is never imported
-
-    assert "plugins.codex_usage.plugin" not in sys.modules
-    assert "plugins.good.plugin" in sys.modules
-
     from agent.extensions import load_extensions
 
-    load_extensions()  # graph build agrees on the same set
+    load_extensions()  # must not raise: the disabled plugin is never imported
 
     assert "plugins.codex_usage.plugin" not in sys.modules
     assert "plugins.good.plugin" in sys.modules
@@ -116,9 +108,9 @@ def test_boot_loader_contains_broken_plugins_and_keeps_going(
         }
     )
 
-    from agent.process_boot import load_process_extensions
+    from agent.extensions import load_extensions
 
-    load_process_extensions()  # must not raise
+    load_extensions()  # must not raise
 
     assert "plugins.good.plugin" in sys.modules
     for broken in ("broken_relative", "broken_syntax", "broken_raise"):
@@ -131,10 +123,9 @@ def test_boot_loader_contains_broken_plugins_and_keeps_going(
     ]
 
 
-def test_both_loaders_agree_on_module_identity_and_relative_imports() -> None:
-    """Loader parity: the boot loader execs `plugin.py` under the same dotted
-    name the graph loader uses, so a package-relative sibling import resolves
-    on both paths and both see one module object (reload-in-place)."""
+def test_a_package_relative_sibling_import_resolves_and_a_reload_keeps_the_module() -> None:
+    """The loader execs `plugin.py` under its dotted name, so a package-relative sibling import
+    resolves, and a second load re-executes the same module object (reload-in-place)."""
     _write_plugin(
         paths.plugins_dir(),
         "codex_usage",
@@ -143,17 +134,15 @@ def test_both_loaders_agree_on_module_identity_and_relative_imports() -> None:
     )
     write_local({"plugins": {"codex_usage": {"enabled": True}}})
 
-    from agent.process_boot import load_process_extensions
-
-    load_process_extensions()
-    boot_module = sys.modules["plugins.codex_usage.plugin"]
-    assert boot_module.MARK == "x"
-
     from agent.extensions import load_extensions
 
     load_extensions()
+    first = sys.modules["plugins.codex_usage.plugin"]
+    assert first.MARK == "x"
 
-    assert sys.modules["plugins.codex_usage.plugin"] is boot_module
+    load_extensions()
+
+    assert sys.modules["plugins.codex_usage.plugin"] is first
 
 
 def test_host_boot_restart_loop_survives_a_broken_plugin(
@@ -165,10 +154,10 @@ def test_host_boot_restart_loop_survives_a_broken_plugin(
     _write_plugin(paths.plugins_dir(), "codex_usage", "from . import refresh\n")
     write_local({"plugins": {"codex_usage": {"enabled": True}}})
 
-    from agent.process_boot import load_process_extensions
+    from agent.extensions import load_extensions
 
     for _ in range(3):
-        load_process_extensions()  # each call stands in for one host boot
+        load_extensions()  # each call stands in for one host boot
 
     assert "plugins.codex_usage.plugin" not in sys.modules
     reports = [

@@ -8,7 +8,7 @@ pure `contribute()` that returns the `PluginContributions` fields it owns (`regi
   `agent.graph.*`, or LangChain chain), because every process that runs agent code loads it.
 - ``agent_runtime.py`` — optional sibling file: the plugin's **agent runtime** (hooks, state, system
   prompt sections, context notes). Imported on the full path only (the agent process:
-  `load_agent_faces()` after the host boot's `scan_and_load`, and `load_extensions()` at host boot). An
+  `load_extensions()` at host boot, and `load_agent_faces()` for a child upgrading to the full load). An
   exec / watcher / schedule child never imports it — its boot stays off the graph and LM stacks.
 
 Entry points:
@@ -18,8 +18,8 @@ Entry points:
   what they declare, install its SDK surface into `ava`, return the admitted registry (plus the enable
   config). The host builds the graph, the checkpoint serde and its turns from that one registry.
 - ``load_extensions(surface=True)`` — surfaces only (child contexts); no uninstall.
-- ``load_agent_faces()`` — runtime faces only, for a process that already loaded the surfaces (host boot
-  after `scan_and_load`; a child upgrading to the full load because its request carries a state snapshot).
+- ``load_agent_faces()`` — runtime faces only, for a process that already loaded the surfaces (a child upgrading to the full
+  load because its request carries a state snapshot).
 
 `registry.py` builds the `ExtensionRegistry` from the loaded faces; `catalog.py` reads back what the
 loaded plugins declare (`ava plugins inspect`) and runs this loader in the calling process. This module

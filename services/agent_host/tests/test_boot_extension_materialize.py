@@ -97,7 +97,7 @@ def test_the_hosted_daemon_lands_them_once_per_process() -> None:
 
     src = inspect.getsource(run)
     assert src.index("init_process_scope()") < src.index("land_cluster_extensions(db)")
-    assert src.index("land_cluster_extensions(db)") < src.index("load_process_extensions()")
+    assert "load_process_extensions" not in src, "the plugin load is `load_extensions` alone"
     assert src.count("land_cluster_extensions(db)") == 1, (
         "once per process — a second call would re-hash every skill tree for no gain"
     )
