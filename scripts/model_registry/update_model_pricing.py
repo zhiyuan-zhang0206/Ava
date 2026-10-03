@@ -128,6 +128,83 @@ def _usd(cell: str) -> Decimal:
     return value
 
 
+def _peak_windows(page_text: str) -> tuple[tuple[str, str], ...]:
+    peak_hour_matches = _PEAK_HOURS.findall(page_text)
+    if len(peak_hour_matches) != 1:
+        raise ValueError("DeepSeek must publish exactly one recognized peak-hour statement")
+    clocks = peak_hour_matches[0]
+    return tuple((f"{clocks[index]}:00", f"{clocks[index + 1]}:00") for index in range(0, 4, 2))
+
+
+def _model_ids(rows: list[list[str]]) -> list[str]:
+    model_row = next((row for row in rows if row and row[0] == "MODEL"), None)
+    if model_row is None or len(model_row) < 3:
+        raise ValueError("DeepSeek MODEL row is missing or incomplete")
+    models = [_MODEL_LABEL_FOOTNOTE.sub("", cell) for cell in model_row[1:]]
+    if not all(models):
+        raise ValueError("DeepSeek MODEL row contains an empty model id")
+    if len(models) != len(set(models)):
+        raise ValueError("DeepSeek MODEL row contains duplicate model ids")
+    return models
+
+
+def _meter_cells(
+    rows: list[list[str]], index: int, model_count: int
+) -> tuple[str, list[str], list[str]] | None:
+    """The meter label plus off-peak and peak price cells of a meter row, or None for other rows."""
+    row = rows[index]
+    known_meters = [label for label in _METERS if label in row]
+    token_cells = [cell for cell in row if "TOKEN" in cell.upper()]
+    if token_cells and len(known_meters) != 1:
+        raise ValueError(f"unknown DeepSeek pricing meter: {token_cells!r}")
+    if not known_meters:
+        return None
+    meter_label = known_meters[0]
+    if "OFF-PEAK" not in row:
+        raise ValueError(f"{meter_label} row has no OFF-PEAK band")
+    if index + 1 >= len(rows) or not rows[index + 1] or rows[index + 1][0] != "PEAK":
+        raise ValueError(f"{meter_label} row has no following PEAK band")
+    off_peak_cells = row[-model_count:]
+    peak_cells = rows[index + 1][-model_count:]
+    if len(off_peak_cells) != model_count or len(peak_cells) != model_count:
+        raise ValueError(f"{meter_label} price coverage does not match MODEL row")
+    return meter_label, off_peak_cells, peak_cells
+
+
+def _read_meter_rows(
+    rows: list[list[str]], models: list[str]
+) -> dict[str, dict[str, dict[str, Decimal]]]:
+    """Collect per-model peak/off-peak rates from each meter row and its following PEAK row."""
+    bands: dict[str, dict[str, dict[str, Decimal]]] = {
+        model: {"peak": {}, "off_peak": {}} for model in models
+    }
+    for index in range(len(rows)):
+        cells = _meter_cells(rows, index, len(models))
+        if cells is None:
+            continue
+        meter_label, off_peak_cells, peak_cells = cells
+        meter = _METERS[meter_label]
+        for model, off_peak_cell, peak_cell in zip(models, off_peak_cells, peak_cells, strict=True):
+            if meter in bands[model]["off_peak"] or meter in bands[model]["peak"]:
+                raise ValueError(f"DeepSeek {model} contains duplicate {meter.upper()} pricing")
+            bands[model]["off_peak"][meter] = _usd(off_peak_cell)
+            bands[model]["peak"][meter] = _usd(peak_cell)
+    return bands
+
+
+def _model_prices(model: str, model_bands: dict[str, dict[str, Decimal]]) -> DeepSeekPrices:
+    for band_name in ("peak", "off_peak"):
+        missing = set(Rates._fields) - model_bands[band_name].keys()
+        if missing:
+            labels = ", ".join(sorted(name.upper() for name in missing))
+            raise ValueError(f"DeepSeek {model} is missing {labels} pricing")
+    peak = Rates(**model_bands["peak"])
+    off_peak = Rates(**model_bands["off_peak"])
+    if any(off * 2 != on for off, on in zip(off_peak, peak, strict=True)):
+        raise ValueError(f"DeepSeek {model} off-peak prices are not half of peak prices")
+    return DeepSeekPrices(peak=peak, off_peak=off_peak)
+
+
 def parse_deepseek_pricing(html: str) -> DeepSeekCatalog:
     """Parse DeepSeek's official pricing table into exact USD/M rates.
 
@@ -138,66 +215,14 @@ def parse_deepseek_pricing(html: str) -> DeepSeekCatalog:
     before any value is returned.
     """
     soup = BeautifulSoup(html, "lxml")
-    page_text = soup.get_text(" ", strip=True)
-    peak_hour_matches = _PEAK_HOURS.findall(page_text)
-    if len(peak_hour_matches) != 1:
-        raise ValueError("DeepSeek must publish exactly one recognized peak-hour statement")
-    clocks = peak_hour_matches[0]
-    peak_windows = tuple(
-        (f"{clocks[index]}:00", f"{clocks[index + 1]}:00") for index in range(0, 4, 2)
-    )
+    peak_windows = _peak_windows(soup.get_text(" ", strip=True))
     rows = [
         [cell.get_text(" ", strip=True) for cell in row.select("th,td")]
         for row in soup.select("table tr")
     ]
-    model_row = next((row for row in rows if row and row[0] == "MODEL"), None)
-    if model_row is None or len(model_row) < 3:
-        raise ValueError("DeepSeek MODEL row is missing or incomplete")
-    models = [_MODEL_LABEL_FOOTNOTE.sub("", cell) for cell in model_row[1:]]
-    if not all(models):
-        raise ValueError("DeepSeek MODEL row contains an empty model id")
-    if len(models) != len(set(models)):
-        raise ValueError("DeepSeek MODEL row contains duplicate model ids")
-
-    bands: dict[str, dict[str, dict[str, Decimal]]] = {
-        model: {"peak": {}, "off_peak": {}} for model in models
-    }
-    for index, row in enumerate(rows):
-        known_meters = [label for label in _METERS if label in row]
-        token_cells = [cell for cell in row if "TOKEN" in cell.upper()]
-        if token_cells and len(known_meters) != 1:
-            raise ValueError(f"unknown DeepSeek pricing meter: {token_cells!r}")
-        if not known_meters:
-            continue
-        meter_label = known_meters[0]
-        if "OFF-PEAK" not in row:
-            raise ValueError(f"{meter_label} row has no OFF-PEAK band")
-        if index + 1 >= len(rows) or not rows[index + 1] or rows[index + 1][0] != "PEAK":
-            raise ValueError(f"{meter_label} row has no following PEAK band")
-
-        off_peak_cells = row[-len(models) :]
-        peak_cells = rows[index + 1][-len(models) :]
-        if len(off_peak_cells) != len(models) or len(peak_cells) != len(models):
-            raise ValueError(f"{meter_label} price coverage does not match MODEL row")
-        meter = _METERS[meter_label]
-        for model, off_peak_cell, peak_cell in zip(models, off_peak_cells, peak_cells, strict=True):
-            if meter in bands[model]["off_peak"] or meter in bands[model]["peak"]:
-                raise ValueError(f"DeepSeek {model} contains duplicate {meter.upper()} pricing")
-            bands[model]["off_peak"][meter] = _usd(off_peak_cell)
-            bands[model]["peak"][meter] = _usd(peak_cell)
-
-    parsed: dict[str, DeepSeekPrices] = {}
-    for model, model_bands in bands.items():
-        for band_name in ("peak", "off_peak"):
-            missing = set(Rates._fields) - model_bands[band_name].keys()
-            if missing:
-                labels = ", ".join(sorted(name.upper() for name in missing))
-                raise ValueError(f"DeepSeek {model} is missing {labels} pricing")
-        peak = Rates(**model_bands["peak"])
-        off_peak = Rates(**model_bands["off_peak"])
-        if any(off * 2 != on for off, on in zip(off_peak, peak, strict=True)):
-            raise ValueError(f"DeepSeek {model} off-peak prices are not half of peak prices")
-        parsed[model] = DeepSeekPrices(peak=peak, off_peak=off_peak)
+    models = _model_ids(rows)
+    bands = _read_meter_rows(rows, models)
+    parsed = {model: _model_prices(model, model_bands) for model, model_bands in bands.items()}
     return DeepSeekCatalog(models=parsed, peak_windows=peak_windows)
 
 
