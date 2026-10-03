@@ -59,9 +59,8 @@ tags:
   last tick and drill and never fails
   ([[services/gateway_side/walg/docs/walg.ava.okf.md|WAL-G]],
   [[services/gateway_side/walg/docs/walg-restore.ava.okf.md|restore and drill]]).
-- `ava mcp ...`: isolated environments at `$AVA_HOME/mcps/`. `ava mcp serve`
-  runs the other direction and exposes the cluster control plane as an MCP
-  server ([[ava/mcps/docs/mcps.ava.okf.md|MCP]]).
+- `ava mcp ...`: isolated environments at `$AVA_HOME/mcps/`
+  ([[ava/mcps/docs/mcps.ava.okf.md|MCP]]).
 - `ava plugins ...`
 - `ava skill install/update/upgrade/enable/disable/register/scan/trust`
 - `ava presets ls/get/create/update/delete`

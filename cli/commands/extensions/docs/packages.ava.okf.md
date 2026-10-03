@@ -1,7 +1,7 @@
 ---
 type: doc
 title: Package Commands (plugins / skill / mcp / packages)
-description: The operator surface for installing external skills, Claude Code plugins, and MCP servers on one machine — `cli/commands/extensions/plugins.py`, `skill.py`, `mcp.py`, `packages.py` (update policy + channels) — plus `ava mcp serve` (`cli/mcp_server.py`), which points the other way and exposes this cluster AS an MCP server. Installs are always local to the host the command runs on.
+description: The operator surface for installing external skills, Claude Code plugins, and MCP servers on one machine — `cli/commands/extensions/plugins.py`, `skill.py`, `mcp.py`, `packages.py` (update policy + channels). Installs are always local to the host the command runs on.
 tags:
 - cli
 - tool
@@ -92,17 +92,6 @@ ava mcp list (ls) | remove <name> | enable <name> | disable <name>
 
 `--arg` values starting with `-` need the `--arg=-y` form, or use `--json`.
 
-```bash
-ava mcp serve                                 # run THIS cluster as an MCP server (stdio)
-```
-
-## The two directions of `ava mcp`
-
-Every verb above configures a server an Ava **agent connects out to**. `serve`
-is the inverse — an MCP server whose tools are this cluster's own control plane,
-so an external agent (Claude Code, Codex) drives the fleet. It shares nothing
-with the machinery below: no registry, no merge layers, no venv.
-[[mcp_server.ava.okf.md|Detail]].
 
 ## MCP merge layers
 

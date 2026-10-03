@@ -24,15 +24,13 @@ routers call** (`_spawn_preflight_blocking` + `forward_spawn_to_remote`,
 `post_agent_terminate`, `deliver_chat_inbound`, `load_checkpoint_messages`,
 `agent_roster`, `agent_snapshot`, `get_cluster_status`) — no business logic of its own, no
 self-HTTP round-trip (2026-06-07 CLI↔gateway boundary decision). The tool
-surface and result shapes match the existing stdio `ava mcp serve`, which this
-endpoint replaces over time.
+surface and result shapes are the ones external MCP clients drive.
 
 ## Mechanics
 
 - **Flag-gated, additive**: `settings.gateway.mcp_endpoint_enabled`
   (AVA_MCP_ENDPOINT_ENABLED), default off. Off, `/mcp` answers 404 via the
-  `mcp_gateway` ASGI wrapper; the existing mcp-daemon path and `ava mcp serve`
-  are untouched either way.
+  `mcp_gateway` ASGI wrapper; the existing mcp-daemon path is untouched either way.
 - **Mount**: `app.mount("/mcp", mcp_gateway(app))` — the wrapper reads
   `app.state.mcp_manager`, set by the gateway lifespan, which builds a fresh
   `StreamableHTTPSessionManager` per lifespan entry and enters
@@ -57,9 +55,9 @@ endpoint replaces over time.
   traversal are explicit, with at most 200 rows per call. `get_agent` remains
   the full single-agent diagnostic view.
 - **Advertised contract**: `base/api_contracts/mcp_tool_contract.py` owns the
-  common instructions, seven tool description bodies, and message projection.
-  The gateway appends its `caller_protocol` / `idempotency_key` guidance to
-  `send_message`; local tool signatures still generate the input schemas.
+  the advertised instructions, the seven tool descriptions (including the
+  `caller_protocol` / `idempotency_key` guidance on `send_message`), and message
+  projection; local tool signatures still generate the input schemas.
 - **Audit**: a `_AuditMiddleware` on the MCPServer records every `tools/call`
   as a `mcp_tool_call` event with client id/name and outcome. Each argument is
   represented only by its JSON type, character size, and SHA-256; raw values

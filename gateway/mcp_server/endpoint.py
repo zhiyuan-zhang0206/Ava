@@ -9,10 +9,10 @@ import for co-located calls, HTTP only to cross a machine).
 
 Flag-gated and additive: `settings.gateway.mcp_endpoint_enabled`
 (AVA_MCP_ENDPOINT_ENABLED), default off. While off, /mcp answers 404 and
-nothing else changes — the existing mcp-daemon path and `ava mcp serve`
-(stdio) are untouched either way. While on, /mcp always requires its own
-revocable client token, including on a no-secret cluster; cluster cookies and
-the cluster-secret Bearer are deliberately not MCP credentials.
+nothing else changes — the existing mcp-daemon path is untouched either way.
+While on, /mcp always requires its own revocable client token, including on a
+no-secret cluster; cluster cookies and the cluster-secret Bearer are deliberately
+not MCP credentials.
 
 Transport: stateless Streamable HTTP (2026-07-28 protocol revision) — one
 fresh transport per POST, no server-side session state, no idle reaping.
@@ -243,7 +243,7 @@ def _register_read_tools(
 
     typed_server = cast(MCPServer, server)
 
-    @typed_server.tool(description=tool_description("list_agents", "gateway"))
+    @typed_server.tool(description=tool_description("list_agents"))
     async def list_agents(
         scope: Literal["live", "terminated", "all"] = "live",
         query: Annotated[str, Field(max_length=200)] = "",
@@ -260,14 +260,14 @@ def _register_read_tools(
         )
         return page.model_dump(mode="json")
 
-    @typed_server.tool(description=tool_description("get_agent", "gateway"))
+    @typed_server.tool(description=tool_description("get_agent"))
     async def get_agent(agent_id: int) -> dict[str, Any]:
         snap = await asyncio.to_thread(_select_one_blocking, pool, agent_id)
         if snap is None:
             raise ToolError(f"agent {agent_id} does not exist")
         return AgentRow.model_validate(snap.model_dump()).model_dump(mode="json")
 
-    @typed_server.tool(description=tool_description("cluster_status", "gateway"))
+    @typed_server.tool(description=tool_description("cluster_status"))
     async def cluster_status() -> dict[str, Any]:
         from gateway.cluster.router import cluster_status_snapshot
 
@@ -355,7 +355,7 @@ def _register_fleet_tools(
 
     typed_server = cast(MCPServer, server)
 
-    @typed_server.tool(description=tool_description("spawn_agent", "gateway"))
+    @typed_server.tool(description=tool_description("spawn_agent"))
     async def spawn_agent(
         prompt: str,
         label: str | None = None,
@@ -379,9 +379,8 @@ def _register_fleet_tools(
         try:
             spawned = await _agents_router.create_and_launch_agent(body, target, pool, db, bus)
         except AvaAgentError as exc:
-            # The old stdio serve forwarded the gateway's `detail` verbatim;
-            # in-process the same business errors are AvaAgentError instances —
-            # surface their message as a tool error, not a protocol error.
+            # Business errors are AvaAgentError instances — surface their
+            # message as a tool error, not a protocol error.
             from base.agents import AgentLaunchFailed
 
             if isinstance(exc, AgentLaunchFailed):
@@ -392,7 +391,7 @@ def _register_fleet_tools(
             raise ToolError(str(exc)) from exc
         return spawned.model_dump(mode="json")
 
-    @typed_server.tool(description=tool_description("send_message", "gateway"))
+    @typed_server.tool(description=tool_description("send_message"))
     async def send_message(
         agent_id: int,
         content: str,
@@ -410,7 +409,7 @@ def _register_fleet_tools(
             idempotency_key=idempotency_key,
         )
 
-    @typed_server.tool(description=tool_description("get_messages", "gateway"))
+    @typed_server.tool(description=tool_description("get_messages"))
     async def get_messages(agent_id: int, limit: int = _DEFAULT_MESSAGE_LIMIT) -> dict[str, Any]:
         from base.db import agent_exists
 
@@ -430,7 +429,7 @@ def _register_fleet_tools(
             "total": len(messages),
         }
 
-    @typed_server.tool(description=tool_description("terminate_agent", "gateway"))
+    @typed_server.tool(description=tool_description("terminate_agent"))
     async def terminate_agent(
         agent_id: int,
         *,
@@ -458,9 +457,7 @@ def _build_server(pool: Any, db: Database, bus: EventBus):  # noqa: ANN202 — i
     """
     from mcp.server.mcpserver import MCPServer
 
-    server = MCPServer(
-        "ava", instructions=server_instructions("gateway"), middleware=[_AuditMiddleware()]
-    )
+    server = MCPServer("ava", instructions=server_instructions(), middleware=[_AuditMiddleware()])
     _register_read_tools(server, pool, db)
     _register_fleet_tools(server, pool, db, bus)
     return server
