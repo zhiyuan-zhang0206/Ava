@@ -77,8 +77,6 @@ export const GROUP_ENV_VARS: Record<string, string[]> = {
     "AVA_EXEC_OUTPUT_ACCUMULATION_MAX_CHARS",
     "AVA_SYNTAX_FIX_RUFF_FORMAT",
     "AVA_MCP_CONNECT_TIMEOUT_SECONDS",
-    "AVA_MCP_DAEMON_START_TIMEOUT_SECONDS",
-    "AVA_MCP_DAEMON_STOP_TIMEOUT_SECONDS",
     "AVA_SECURITY_SCAN_ENABLED",
   ],
   "config-memory": [
@@ -109,8 +107,6 @@ export const GROUP_ENV_VARS: Record<string, string[]> = {
     "AVA_HEARTBEAT_IDLE_THRESHOLD_SECONDS",
   ],
   "config-daemon-tasks": [
-    "AVA_AUTO_RESURRECT_ENABLED",
-    "AVA_AUTO_RESURRECT_BACKOFF_SECONDS",
     "AVA_TASK_MAINTENANCE_ENABLED",
     "AVA_TASK_MAINTENANCE_INTERVAL_SECONDS",
     "AVA_TASK_REMINDER_BACKOFF_SECONDS",
@@ -173,7 +169,6 @@ export const GROUP_ENV_VARS: Record<string, string[]> = {
   ],
   "config-observability": [
     "AVA_TRACE_ENABLED",
-    "AVA_TRACE_TAGS",
     "AVA_TRACE_RETENTION_DAYS",
     "AVA_TELEMETRY_OTLP_ENABLED",
     "AVA_TELEMETRY_OTLP_ENDPOINT",
@@ -218,7 +213,7 @@ export const GROUP_ENV_VARS: Record<string, string[]> = {
 
 // Fields deliberately absent from the panel even though the backend serves
 // them. Admission criterion is editorial, not structural: a field belongs
-// here only if a human should NOT reach for the panel to change it. Three
+// here only if a human should NOT reach for the panel to change it. Two
 // buckets today:
 //   - AVA_CLUSTER_SECRET: the gateway's human bearer. The backend serves it
 //     read-only (no config write may choose it); it rotates only through
@@ -227,9 +222,6 @@ export const GROUP_ENV_VARS: Record<string, string[]> = {
 //   - AVA_GATEWAY_MAX_RETRIES / AVA_GATEWAY_RETRY_DELAY_SECONDS: SDK→gateway
 //     transport micro-tuning with no operator-facing consequence. For a genuine
 //     need, ask the Ava Guide agent — it edits .env via the `ava` CLI.
-//   - AVA_CONTAINER_EXEC / AVA_OUTPUT_DIR: eval-harness plumbing, set by the eval
-//     driver (evals/driver_container.py, evals/__main__.py), never by an operator
-//     — agent-scoped read-only env reads, not cluster config.
 // Hiding a WRITABLE field is safe: it still rides in raw_overrides at its own
 // current value (or the unchanged-sentinel for a secret), which the merge-patch
 // PUT re-applies idempotently — hiding neither drops nor changes it.
@@ -241,8 +233,6 @@ export const HIDDEN_ENV_VARS = new Set<string>([
   "AVA_CLUSTER_SECRET",
   "AVA_GATEWAY_MAX_RETRIES",
   "AVA_GATEWAY_RETRY_DELAY_SECONDS",
-  "AVA_CONTAINER_EXEC",
-  "AVA_OUTPUT_DIR",
 ]);
 
 // A field not in the static map is grouped by its backend domain group. Every

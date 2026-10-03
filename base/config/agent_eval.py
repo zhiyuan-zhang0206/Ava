@@ -4,7 +4,6 @@ Container-mode flags (in-container mount + output dir) and the security-scan gat
 
 from __future__ import annotations
 
-from pathlib import Path
 from typing import Annotated
 
 from pydantic import Field, field_validator
@@ -42,30 +41,6 @@ class AgentEvalSettings(EnvSettings):
             "per_agent": True,
             "lifecycle": "frozen",
             "restart_required": "agent",
-            "writable": False,
-            "sensitive": False,
-            "scope": "agent",
-        },
-    )
-
-    eval_output_dir: Path = Field(
-        default=Path("/workspace"),
-        alias="AVA_OUTPUT_DIR",
-        description="Directory inside the eval container for writing result.json.",
-        json_schema_extra={
-            "restart_required": "",
-            "writable": False,
-            "sensitive": False,
-            "scope": "agent",
-        },
-    )
-
-    eval_container_exec: bool = Field(
-        default=False,
-        alias="AVA_CONTAINER_EXEC",
-        description="Whether the process runs inside the eval container. True switches ctx_builder to the in-container mount and defers check to the host judge.",
-        json_schema_extra={
-            "restart_required": "",
             "writable": False,
             "sensitive": False,
             "scope": "agent",

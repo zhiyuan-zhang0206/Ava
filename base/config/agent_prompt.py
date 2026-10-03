@@ -543,30 +543,12 @@ class AgentPromptSettings(EnvSettings):
         },
     )
 
-    pilot_scope: Annotated[list[str], NoDecode] = Field(
-        default_factory=lambda: ["all"],
-        alias="AVA_REDUCE_CONTEXT_SWITCH_PILOT_SCOPE",
-        description=(
-            "Rollout scope of the reduce-context-switch default: 'all' (default — "
-            "the whole fleet) or a comma-separated list of agent ids — the pilot "
-            "starts with the lines (owner dimension) that receive the most "
-            "interruptions. Consumed by the rollout process, not enforced in code."
-        ),
-        json_schema_extra={
-            "restart_required": "agent",
-            "writable": True,
-            "sensitive": False,
-            "scope": "cluster-pinned",
-        },
-    )
-
     @field_validator(
         "sdk_disable",
         "sdk_expand_in_system_prompt",
         "skills_to_inject_into_system_prompt",
         "skills_to_expand_at_start",
         "system_prompt_extra",
-        "pilot_scope",
         mode="before",
     )
     @classmethod

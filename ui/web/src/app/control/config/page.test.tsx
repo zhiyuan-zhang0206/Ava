@@ -452,27 +452,27 @@ describe("ConfigPage render", () => {
     expect(screen.queryByText("AVA_LOG_LEVEL")).toBeNull();
   });
 
-  it("HIDDEN_ENV_VARS: eval-harness plumbing is dropped from the panel", async () => {
-    // AVA_CONTAINER_EXEC / AVA_OUTPUT_DIR are eval-driver-set, and their env vars
-    // are in HIDDEN_ENV_VARS — they must not render even though the backend serves
-    // them in the field list (matching keys on env_var, not the python name).
-    const viewWithEvalField: ConfigView = {
+  it("HIDDEN_ENV_VARS: transport micro-tuning is dropped from the panel", async () => {
+    // AVA_GATEWAY_MAX_RETRIES is in HIDDEN_ENV_VARS — it must not render even
+    // though the backend serves it in the field list (matching keys on env_var,
+    // not the python name).
+    const viewWithHiddenField: ConfigView = {
       ...VIEW,
       fields: [
         ...VIEW.fields,
         {
-          name: "eval_container_exec",
-          field_type: "bool",
-          current_value: false,
-          default_value: false,
-          description: "Whether the process runs inside the eval container.",
-          group: "Agent",
+          name: "gateway_max_retries",
+          field_type: "int",
+          current_value: 3,
+          default_value: 3,
+          description: "SDK to gateway transport retry count.",
+          group: "Gateway",
           capability: "agent-runner",
           scope: "agent",
           restart_required: "",
           writable: false,
           sensitive: false,
-          env_var: "AVA_CONTAINER_EXEC",
+          env_var: "AVA_GATEWAY_MAX_RETRIES",
           remote_writable: false,
           per_agent: false,
           can_enable: null,
@@ -480,10 +480,10 @@ describe("ConfigPage render", () => {
         },
       ],
     };
-    vi.spyOn(api, "getConfig").mockResolvedValue(viewWithEvalField);
+    vi.spyOn(api, "getConfig").mockResolvedValue(viewWithHiddenField);
     await renderSettled();
-    expect(screen.queryByText("CONTAINER EXEC")).toBeNull();
-    expect(screen.queryByTitle("AVA_CONTAINER_EXEC")).toBeNull();
+    expect(screen.queryByText("GATEWAY MAX RETRIES")).toBeNull();
+    expect(screen.queryByTitle("AVA_GATEWAY_MAX_RETRIES")).toBeNull();
   });
 
   it("field appears under its display-group header", async () => {
