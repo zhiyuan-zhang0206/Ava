@@ -38,8 +38,9 @@ from psycopg import Cursor
 from psycopg_pool import ConnectionPool
 
 from base.agents.tasks.priority import Priority
-from base.packages.plugins import data_registry, enable_config
+from base.packages.plugins import data_registry
 from base.packages.plugins.inspector import InspectWidgetSpec
+from gateway.inspect._plugin_faces import enabled_face_files
 from gateway.inspect.schemas import InspectWidgetResult, InspectWidgetTask
 
 # The shipped-plugin inspector directory — every builtin plugin dir with an
@@ -50,22 +51,8 @@ _PLUGINS_DIR = Path(__file__).resolve().parents[2] / "ava_builtins" / "plugins"
 
 def _enabled_inspector_modules() -> list[Path]:
     """``inspector.py`` of every ENABLED builtin plugin, sorted — the import
-    set of one registry build, and the enabled-set the caller filters the
-    process registry against."""
-    if not _PLUGINS_DIR.is_dir():
-        return []
-    installed = enable_config.installed_plugin_dirs()
-    config = enable_config.load_for_runtime(set(installed))
-    modules: list[Path] = []
-    for plugin_dir in sorted(_PLUGINS_DIR.iterdir()):
-        module = plugin_dir / "inspector.py"
-        if not module.is_file():
-            continue
-        entry = config.plugins.get(plugin_dir.name)
-        if entry is None or not entry.enabled:
-            continue
-        modules.append(module)
-    return modules
+    set of one registry build."""
+    return enabled_face_files(_PLUGINS_DIR, "inspector.py")
 
 
 def _load_inspect_widgets(modules: Sequence[Path] | None = None) -> list[InspectWidgetSpec]:
