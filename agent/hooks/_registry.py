@@ -39,14 +39,9 @@ the protocol simple.
 
 No priority, no timeout, no try-except isolation — hooks that raise blow up (fail-fast).
 
-State type hint key design (`state: _state.AgentState` + `from __future__ import
-annotations`): see `agent/graph/exec/node.py` module docstring last paragraph —
-the `run` returned by `make_hook_runner` is a LangGraph-registered node;
-like claim/llm/exec, it relies on the first-param type hint to determine
-what state schema LangGraph passes the hook. Directly importing `AgentState`
-captures the BaseAgentState alias and makes the hook receive a state without
-plugin fields; using module attribute + deferred annotation evaluation picks
-up the dynamic class rebound by build_agent_state.
+State type hint (`state: _state.AgentState`): static only; see `agent/graph/exec/node.py` — the
+`run` returned by `make_hook_runner` is a registered node, and the graph build gives it the plugin-aware
+state class.
 """
 
 from __future__ import annotations

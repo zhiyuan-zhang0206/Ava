@@ -36,21 +36,10 @@ Core mechanisms:
     `match`, illegal state combinations are unrepresentable. Ordinary
     exception tracebacks are already in the stream output.
 
-State type hint key design (`state: _state.AgentState` + `from __future__ import
-annotations`): LangGraph 1.x narrows the state schema by the node function's
-first parameter type hint — `from agent.state import AgentState` statically
-captures the alias (at module load time = BaseAgentState); after build_graph,
-`agent.state.AgentState` is rebound to the dynamic subclass with plugin
-fields, but this module's `AgentState` name is already snapshotted, and
-LangGraph sees BaseAgentState with only 2 channels and drops all plugin
-fields. Changed to `from agent import state as _state` + use
-`_state.AgentState` to do module-attribute dynamic lookup; combined with
-future annotations to defer annotation resolution to get_type_hints()
-evaluation time, by which build_agent_state has rebound and we get the
-dynamic AgentState. Pyright statically still sees `_state.AgentState` as
-`BaseAgentState` (`agent/state.py` end has `AgentState = BaseAgentState`
-alias), so `state.messages` / `state.halted` still type-check; plugin fields
-are accessed dynamically (consistent with existing convention).
+State type hint (`state: _state.AgentState`): the annotation is static only, the base schema, so
+`state.messages` / `state.halted` type-check; plugin fields are accessed dynamically. The state a
+node receives is the class `build_graph` registers it with (`input_schema=`, which carries the
+plugins' channels), not what the annotation names.
 """
 
 from __future__ import annotations

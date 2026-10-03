@@ -24,12 +24,8 @@ node `asyncio.wait` races the streaming task vs `cancel_event.wait()`. On
 context exit the watcher is cancelled. A missed signal is not lost — it stays a
 pending row the claim node dispatches next pass.
 
-State type hint key design (`state: _state.AgentState` + `from __future__ import
-annotations`): see `agent/graph/exec/node.py` module docstring last paragraph — in
-short, LangGraph narrows channels by the node's first param type hint;
-directly importing `AgentState` captures the BaseAgentState alias and drops
-all plugin fields; using module attribute + deferred annotation evaluation
-picks up the dynamic class rebound by build_agent_state.
+State type hint (`state: _state.AgentState`): static only; see `agent/graph/exec/node.py` — the
+graph build, not the annotation, decides which state class a node receives.
 Module layout (Task #1004 >800-line split): streaming consumption, the cancel
 race, chunk assembly + final-message validation, and the error taxonomy /
 consecutive-error tracking live in the sibling modules ``_stream.py`` /

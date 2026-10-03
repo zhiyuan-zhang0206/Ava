@@ -65,8 +65,6 @@ async def _prepare_graph(
     dict[str, Any],
     list[Any],
 ]:
-    # `build_agent_state` rebinds `agent.state.AgentState`; the monkeypatch restores it after the test.
-    monkeypatch.setattr(states, "AgentState", states.AgentState)
     registry = ExtensionRegistry((("handoff", PluginContributions(state=(HandoffState,))),))
     state_cls = states.build_agent_state(registry)
     agent_id = create_agent(db_conn)
@@ -246,7 +244,7 @@ async def test_consent_exec_inbox_release_and_resume(
             database,
             requested["id"],
             attested_caller(requested),
-            encode_plugin_delta({"handoff__total": 7}),
+            encode_plugin_delta({"handoff__total": 7}, graph.builder.state_schema),
             expected_version=0,
         )
         if finish == "release":

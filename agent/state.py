@@ -53,7 +53,6 @@ Usage (in a plugin's agent_runtime.py):
         return PluginContributions(state=(MyPluginState,))
 """
 
-import sys
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from types import SimpleNamespace
@@ -621,10 +620,10 @@ def build_agent_state(extensions: ExtensionRegistry) -> type[BaseAgentState]:
     (__eq__); create_model would rebuild FieldInfo and != would treat them
     as different types.
 
-    The new class's `__module__` is set to this module, and the name is
-    bound back to sys.modules so Pydantic's `model_rebuild()` or
-    `get_type_hints()` can find the "AgentState" name in this module
-    (Pydantic indexes by `<module>.<qualname>`).
+    The new class's `__module__` is set to this module so Pydantic resolves its forward references
+    there. Nothing is bound into the module: the graph runs on the class this returns
+    (`build_graph` hands it to every node as its `input_schema`), and a consumer outside the graph
+    takes the class it needs from its own caller.
 
     The AgentState class has `__getattr__`: `state.<plugin_name>` returns a
     SimpleNamespace view (auto-strips `<plugin>__` prefix). Lets agents
@@ -674,13 +673,11 @@ def build_agent_state(extensions: ExtensionRegistry) -> type[BaseAgentState]:
 
     cls = type("AgentState", (BaseAgentState,), namespace)
     cls.__module__ = __name__
-    sys.modules[__name__].__dict__["AgentState"] = cls
     return cls
 
 
-# ── Backwards compat: AgentState = BaseAgentState (used in static contexts / type annotations) ──
-# After build_agent_state() is called, this is overwritten by the real
-# subclass; at module load time it is an alias.
+# Static name for annotations and tests: the base schema. The class a graph runs on, with the
+# plugins' fields, is what `build_agent_state(registry)` returns.
 AgentState = BaseAgentState
 
 
@@ -702,9 +699,9 @@ def checkpoint_msgpack_allowlist(
     schema being stable and importable is not enough, the type must be named
     in the allowlist.
 
-    The dynamic `AgentState` subclass is listed by the name `build_agent_state`
-    binds into this module ("AgentState"); the module-level alias has the same
-    name so the entry is correct regardless of build order. Plugin classes
+    The dynamic `AgentState` subclass is listed by the name it carries ("AgentState" in this
+    module), which the module-level alias shares, so the entry is correct regardless of build
+    order. Plugin classes
     declared in `PluginContributions.state` are included automatically — a
     plugin field holding a BaseModel instance crosses the checkpointer as that
     class and would otherwise be blocked (degraded to a plain dict) the moment
@@ -720,10 +717,12 @@ def checkpoint_msgpack_allowlist(
 
 
 def process_state_classes() -> frozenset[type[BaseModel]]:
-    """The plugin state classes this process's `AgentState` was built from (none before
-    `build_agent_state` ran, or when no plugin declares state) — for a serializer that runs in a
-    process holding no registry of its own (the exec IPC, an external attachment)."""
-    return getattr(AgentState, "__plugin_state_classes__", frozenset())
+    """The plugin state classes the `agent_runtime` faces loaded into this process declare, for a
+    serializer that runs in a process holding no registry of its own (the exec IPC, an external
+    attachment). Read off the loaded faces, so none before they load."""
+    from agent.extensions.registry import loaded_state_classes
+
+    return loaded_state_classes()
 
 
 def build_checkpoint_serde(

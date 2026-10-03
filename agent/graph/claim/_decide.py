@@ -6,8 +6,7 @@ the ``halted`` formula appears exactly once. Chain: cancel path → veto
 re-entry → idle-restart gate → compact path → normal fallthrough (with the
 END snapshot flag).
 
-State typing follows the agent/graph/exec/node.py module-docstring pattern
-(``_state.AgentState`` + deferred annotations) — see node.py docstring.
+State typing follows `agent/graph/exec/node.py` (``_state.AgentState``, static only).
 """
 
 from __future__ import annotations

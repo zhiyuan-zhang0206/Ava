@@ -81,7 +81,6 @@ def attached_runtime(
         """Accept the `surface` kwarg attach passes (ignored)."""
 
     monkeypatch.setattr(ava, "ensure_plugins_loaded", loader_stub)
-    monkeypatch.setattr(state_module, "AgentState", ExampleState)
     monkeypatch.setattr(external, "machine_name", lambda: "local-runner")
 
     def load(_agent_id: int) -> tuple[ExampleState, dict[str, Any], None]:
@@ -219,7 +218,7 @@ def test_plugin_updates_journal_once_and_next_attachment_sees_them(
         handle.update({"seen": {"two"}})
         assert handle.read().seen == {"native", "one", "two"}
     assert len(staged) == 1
-    assert decode_plugin_delta(staged[0]) == {"sample__seen": {"one", "two"}}
+    assert decode_plugin_delta(staged[0], ExampleState) == {"sample__seen": {"one", "two"}}
     with external.attach("lease"):
         assert handle.read().seen == {"native", "one", "two"}
     assert len(staged) == 1
@@ -592,7 +591,7 @@ def test_receipted_journal_entries_are_not_replayed(
     snapshot.impersonation_applied = {"lease_id": "lease", "version": 1}
     lease["delta_version"] = 1
     lease["plugin_delta"] = [
-        encode_plugin_delta({"messages": [RemoveMessage(id="already-removed")]})
+        encode_plugin_delta({"messages": [RemoveMessage(id="already-removed")]}, ExampleState)
     ]
     with external.attach("lease"):
         assert ava.state.messages == []
@@ -616,7 +615,7 @@ def test_delta_codec_preserves_sets_and_message_objects(
         "sample__seen": {"a", "b"},
         "messages": [HumanMessage(content="note", id="note"), RemoveMessage(id="old")],
     }
-    decoded = decode_plugin_delta(encode_plugin_delta(delta))
+    decoded = decode_plugin_delta(encode_plugin_delta(delta, ExampleState), ExampleState)
     assert decoded == delta
     assert isinstance(decoded["sample__seen"], set)
     assert isinstance(decoded["messages"][1], RemoveMessage)
@@ -626,7 +625,7 @@ def test_delta_codec_rejects_framework_state_injection(
     attached_runtime: tuple[dict[str, Any], Any, list[dict[str, Any]]],
 ) -> None:
     with pytest.raises(ValueError, match="framework core"):
-        encode_plugin_delta({"halted": False})
+        encode_plugin_delta({"halted": False}, ExampleState)
 
 
 @pytest.mark.parametrize("boundary", ["encode", "decode", "apply"])
@@ -650,14 +649,15 @@ def test_external_delta_rejects_full_history_reset_before_any_mutation(
     delta = {"sample__seen": {"must-not-apply"}, "messages": messages}
     with pytest.raises(ValueError, match=r"REMOVE_ALL.*native compaction"):
         if boundary == "encode":
-            encode_plugin_delta(delta)
+            encode_plugin_delta(delta, ExampleState)
         elif boundary == "decode":
             # A persisted envelope must pass the same check before native replay.
             import base64
 
             encoding, payload = state._serializer().dumps_typed(delta)
             decode_plugin_delta(
-                {"encoding": encoding, "data": base64.b64encode(payload).decode("ascii")}
+                {"encoding": encoding, "data": base64.b64encode(payload).decode("ascii")},
+                ExampleState,
             )
         else:
             apply_plugin_delta(snapshot, delta)
@@ -676,7 +676,7 @@ def test_external_attachment_appends_messages_without_replacing_native_history(
         handle.update({"messages": [appended_message]})
         assert handle.read().messages == [native_message, appended_message]
     assert len(staged) == 1
-    assert decode_plugin_delta(staged[0]) == {"messages": [appended_message]}
+    assert decode_plugin_delta(staged[0], ExampleState) == {"messages": [appended_message]}
     assert snapshot.messages == [native_message]
     with external.attach("lease"):
         assert handle.read().messages == [native_message, appended_message]

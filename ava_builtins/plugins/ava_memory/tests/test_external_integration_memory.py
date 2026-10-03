@@ -39,7 +39,6 @@ class IntegrationPlugin(BaseModel):
 def native_checkpoint(
     db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
 ) -> tuple[RuntimeIncarnation, state_module.PluginStateHandle[IntegrationPlugin]]:
-    monkeypatch.setattr(state_module, "AgentState", state_module.AgentState)
     monkeypatch.setattr(agent_identity, "_external_identity", None)
     monkeypatch.setattr(agent_identity, "_agent_id", None)
     monkeypatch.setattr(ava, "state", None)

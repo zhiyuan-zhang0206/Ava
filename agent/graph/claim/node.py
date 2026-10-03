@@ -32,12 +32,8 @@ requests and circuit-breaker rescue.
 Deps injected via `runtime.context: AvaContext` (see agent/graph/_context.py).
 agent_id read from RunnableConfig (LangGraph checkpointer standard).
 
-State type hint key design (`state: _state.AgentState` + `from __future__ import
-annotations`): see `agent/graph/exec/node.py` module docstring last paragraph —
-LangGraph narrows channels by the node's first param type hint; directly
-importing `AgentState` captures the BaseAgentState alias and loses all plugin
-fields; using the module attribute + deferred annotation evaluation picks up
-the dynamic class rebound by build_agent_state.
+State type hint (`state: _state.AgentState`): static only; see `agent/graph/exec/node.py` — the
+graph build, not the annotation, decides which state class a node receives.
 
 Refactored (2026-08): _Routing + resolve_routing, _BatchState + per-kind
 handlers, _Outcome + decide extracted; display logic moved to _present.py;

@@ -116,11 +116,16 @@ def build_graph(
     container Nodes accept a default_next parameter (NodeName or callable
     based on state) + decide based on update["goto"] override.
 
+    Every node gets `input_schema=state_cls` (the class `build_agent_state` returns): LangGraph would
+    otherwise narrow a node's state to the class its first parameter is annotated with, and that
+    annotation is the static base class, which carries none of the plugins' channels.
+
     type: ignore[arg-type] — langgraph add_node stub narrows action to the
     single-arg StateNode protocol, but runtime accepts the (state, runtime,
     config) multi-arg signature. Functionally correct, just stub doesn't narrow.
     """
-    g = StateGraph(build_agent_state(extensions), context_schema=AvaContext)
+    state_cls = build_agent_state(extensions)
+    g = StateGraph(state_cls, context_schema=AvaContext)
     g.add_node(  # type: ignore[arg-type]
         AFTER_INIT,
         protect_native_hooks(
@@ -128,9 +133,12 @@ def build_graph(
                 "after_init", default_next=INIT_CONTEXT, hooks=_hooks_at("after_init", extensions)
             )
         ),
+        input_schema=state_cls,
     )
-    g.add_node(INIT_CONTEXT, protect_native_hooks(init_context_node))  # type: ignore[arg-type]
-    g.add_node(CLAIM, claim_node)  # type: ignore[arg-type]
+    g.add_node(  # type: ignore[arg-type]
+        INIT_CONTEXT, protect_native_hooks(init_context_node), input_schema=state_cls
+    )
+    g.add_node(CLAIM, claim_node, input_schema=state_cls)  # type: ignore[arg-type]
     g.add_node(  # type: ignore[arg-type]
         BEFORE_LLM,
         protect_native_hooks(
@@ -138,8 +146,9 @@ def build_graph(
                 "before_llm", default_next=LLM, hooks=_hooks_at("before_llm", extensions)
             )
         ),
+        input_schema=state_cls,
     )
-    g.add_node(LLM, llm_node)  # type: ignore[arg-type]
+    g.add_node(LLM, llm_node, input_schema=state_cls)  # type: ignore[arg-type]
     g.add_node(  # type: ignore[arg-type]
         BEFORE_EXEC,
         protect_native_hooks(
@@ -147,8 +156,9 @@ def build_graph(
                 "before_exec", default_next=EXEC, hooks=_hooks_at("before_exec", extensions)
             )
         ),
+        input_schema=state_cls,
     )
-    g.add_node(EXEC, protect_native_hooks(exec_node))  # type: ignore[arg-type]
+    g.add_node(EXEC, protect_native_hooks(exec_node), input_schema=state_cls)  # type: ignore[arg-type]
     g.add_node(  # type: ignore[arg-type]
         AFTER_EXEC,
         protect_native_hooks(
@@ -158,6 +168,7 @@ def build_graph(
                 hooks=_hooks_at("after_exec", extensions),
             )
         ),
+        input_schema=state_cls,
     )
     g.add_edge(START, AFTER_INIT)
     if checkpointer is None:
