@@ -8,7 +8,7 @@ import psutil
 import pytest
 
 from base.sessions.pty import cli
-from base.sessions.pty._paths import record_path, socket_path, transcript_path
+from base.sessions.pty.paths import record_path, socket_path, transcript_path
 from base.sessions.record import SessionRecord
 
 
@@ -69,7 +69,7 @@ def test_sweep_defers_while_record_lock_is_held(
     survives one scan), and the next scan sweeps it once the lock is free."""
     from base.native_process.os_platform import file_lock
     from base.sessions.pty import records as records_module
-    from base.sessions.pty._paths import records_lock_path
+    from base.sessions.pty.paths import records_lock_path
 
     name = "ava-test-locked-sweep"
     record = SessionRecord(
@@ -116,7 +116,7 @@ def test_sweep_cannot_unlink_a_record_written_under_the_lock(  # noqa: PLR0915 -
 
     from base.native_process.os_platform import file_lock
     from base.sessions.pty import records as records_module
-    from base.sessions.pty._paths import records_lock_path, write_record
+    from base.sessions.pty.paths import records_lock_path, write_record
 
     name = "ava-test-sweep-race"
     old_pid, fresh_pid = 1001, 1002
@@ -219,7 +219,7 @@ def test_bring_up_defers_while_record_lock_is_held(
     outside the lock."""
     from base.native_process.os_platform import file_lock
     from base.sessions.pty import launch as launch_module
-    from base.sessions.pty._paths import records_lock_path
+    from base.sessions.pty.paths import records_lock_path
 
     entered: list[object] = []
 

@@ -29,6 +29,7 @@ def test_probe_set_agent_runner_membership() -> None:
         "browser-mcp",
         "mcp-daemon",
         "computer-mcp",
+        "pty-sessions",
         "otel-collector",
         "loki",
         "prometheus",

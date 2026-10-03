@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import tempfile
 from dataclasses import asdict
 from pathlib import Path
@@ -80,6 +81,43 @@ def socket_path(name: str) -> Path:
         return natural
     digest = hashlib.sha1(f"{run_dir()}\0{name}".encode(), usedforsecurity=False).hexdigest()[:12]
     return Path(tempfile.gettempdir()) / f"ava-pty-{digest}.sock"
+
+
+def service_socket_path() -> Path:
+    """The pty-sessions service's unix socket; ``$AVA_HOME/run/pty-sessions.sock``.
+
+    A path over the sun_path bound falls back to ``/tmp/ava-pty-<uid>/<digest>.sock``,
+    keyed by the home. The directory is fixed rather than ``tempfile.gettempdir()``
+    because the service (launched by root) and its clients (agent processes with
+    their own TMPDIR) must compute the same path; the service creates the directory
+    owner-only (`fallback_dir`).
+    """
+    from base.paths import run_dir
+
+    natural = run_dir() / "pty-sessions.sock"
+    if len(str(natural)) <= SUN_PATH_MAX:
+        return natural
+    digest = hashlib.sha1(f"{run_dir()}\0pty-sessions".encode(), usedforsecurity=False).hexdigest()
+    return fallback_dir() / f"{digest[:12]}.sock"
+
+
+def fallback_dir() -> Path:
+    """Where a socket too long for its home lives: ``/tmp/ava-pty-<uid>`` (owner-only)."""
+    return Path("/tmp") / f"ava-pty-{os.getuid()}"  # noqa: S108 — a fixed, uid-keyed, owner-only directory: every process of the user must compute the same path
+
+
+def lock_path() -> Path:
+    """The service's instance lock (``run/pty-sessions.lock``), held while it runs."""
+    from base.paths import run_dir
+
+    return run_dir() / "pty-sessions.lock"
+
+
+def ledger_path() -> Path:
+    """The service's own ledger of live shell identities (``run/pty-sessions.json``)."""
+    from base.paths import run_dir
+
+    return run_dir() / "pty-sessions.json"
 
 
 def transcript_path(name: str) -> Path:

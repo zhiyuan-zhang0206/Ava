@@ -35,9 +35,9 @@ from base.sessions.backend import PtySessionBackend
 from base.sessions.pty import allocation_freeze, orphan_reaper
 from base.sessions.pty import cli as pty_cli
 from base.sessions.pty import host as pty_host
-from base.sessions.pty._paths import host_identity, record_path, socket_path
 from base.sessions.pty.cli import write_env_file
 from base.sessions.pty.host import PtySession
+from base.sessions.pty.paths import host_identity, record_path, socket_path
 from base.sessions.pty.tests.job_wait import wait_for_job
 from base.sessions.record import SessionRecord
 

@@ -37,6 +37,7 @@ _GATEWAY_SESSIONS = {
     "memory-indexer",
     "frontend",
     "otel-collector",
+    "pty-sessions",
     "pg-backup",
     "ttl-reaper",
     "schedule-manager",
@@ -53,6 +54,7 @@ _AGENT_RUNNER_SESSIONS = {
     "mcp-daemon",
     "computer-mcp",
     "otel-collector",
+    "pty-sessions",
 }
 
 

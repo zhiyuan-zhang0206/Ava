@@ -76,7 +76,10 @@ from base.native_process import pid_starttime_ticks
 from base.native_process.os_platform import LockTimeoutError
 from base.native_process.ownership import OwnedProcess, stable_create_time
 from base.paths import run_dir
-from base.sessions.pty._paths import (
+from base.sessions.pty.allocation_freeze import locked_freeze_state, state_path
+from base.sessions.pty.keys import keys_to_bytes
+from base.sessions.pty.orphan_reaper import _reap_orphaned_hosts
+from base.sessions.pty.paths import (
     CAPTURE_MAX_LINES,
     host_identity,
     host_log_path,
@@ -85,8 +88,6 @@ from base.sessions.pty._paths import (
     socket_path,
     transcript_path,
 )
-from base.sessions.pty.allocation_freeze import locked_freeze_state, state_path
-from base.sessions.pty.orphan_reaper import _reap_orphaned_hosts
 from base.sessions.pty.records import (
     _CREATE_TIME_TOLERANCE_S,
     _record_alive,
@@ -98,95 +99,6 @@ from base.sessions.pty.records import (
 )
 from base.sessions.pty.session_tree import TreeKill, kill_host_tree, kill_session_tree
 from base.sessions.record import SessionRecord
-
-# ---------------------------------------------------------------------------
-# Key translation — the classic send-keys vocabulary (prototype _KEYMAP, with
-# the canonical names added: BSpace/DC/IC/PPage/NPage/BTab, M-<x>,
-# C-Space/C-/).
-# ---------------------------------------------------------------------------
-
-_KEYMAP = {
-    "Enter": b"\r",
-    "Space": b" ",
-    "Tab": b"\t",
-    "BTab": b"\x1b[Z",
-    "Escape": b"\x1b",
-    "Esc": b"\x1b",
-    "Backspace": b"\x7f",
-    "BSpace": b"\x7f",
-    "Delete": b"\x1b[3~",
-    "DC": b"\x1b[3~",
-    "Insert": b"\x1b[2~",
-    "IC": b"\x1b[2~",
-    "Up": b"\x1b[A",
-    "Down": b"\x1b[B",
-    "Right": b"\x1b[C",
-    "Left": b"\x1b[D",
-    "Home": b"\x1b[H",
-    "End": b"\x1b[F",
-    "PageUp": b"\x1b[5~",
-    "PPage": b"\x1b[5~",
-    "PageDown": b"\x1b[6~",
-    "NPage": b"\x1b[6~",
-    "S-Up": b"\x1b[1;2A",
-    "S-Down": b"\x1b[1;2B",
-    "S-Right": b"\x1b[1;2C",
-    "S-Left": b"\x1b[1;2D",
-    "F1": b"\x1bOP",
-    "F2": b"\x1bOQ",
-    "F3": b"\x1bOR",
-    "F4": b"\x1bOS",
-    "F5": b"\x1b[15~",
-    "F6": b"\x1b[17~",
-    "F7": b"\x1b[18~",
-    "F8": b"\x1b[19~",
-    "F9": b"\x1b[20~",
-    "F10": b"\x1b[21~",
-    "F11": b"\x1b[23~",
-    "F12": b"\x1b[24~",
-}
-
-# C-<x> for every printable control char spelled that way (C-a .. C-z,
-# C-@ C-[ C-] C-^ C-_ C-?); the rest are explicit below.
-_CTRL_RE = re.compile(r"^C-([a-zA-Z@\[\]^_?])$")
-_META_RE = re.compile(r"^M-(.)$")
-_CTRL_EXTRA = {
-    "C-Space": b"\x00",
-    "C-@": b"\x00",
-    "C-/": b"\x1f",
-    "C-\\": b"\x1c",
-}
-
-
-def keys_to_bytes(keys: tuple[str, ...]) -> bytes:
-    """Translate screen send-keys key names to the bytes to write to the pty.
-
-    screen semantics: a single character is typed literally; a known key name
-    (C-c, Up, Escape, ...) translates to its control/escape bytes; an
-    unknown name is typed as literal text (the screen treats unrecognized keys as
-    strings of characters).
-    """
-    out = b""
-    for key in keys:
-        if len(key) == 1:
-            out += key.encode("utf-8")
-            continue
-        if key in _CTRL_EXTRA:
-            out += _CTRL_EXTRA[key]
-            continue
-        m = _CTRL_RE.match(key)
-        if m:
-            ch = m.group(1)
-            code = ord(ch.upper()) - ord("@") if ch != "?" else 0x7F
-            out += bytes([code])
-            continue
-        m = _META_RE.match(key)
-        if m:
-            out += b"\x1b" + m.group(1).encode("utf-8")
-            continue
-        out += _KEYMAP.get(key, key.encode("utf-8"))
-    return out
-
 
 # ---------------------------------------------------------------------------
 # Envfile mechanism (0600 file, values never on argv — issue #974).

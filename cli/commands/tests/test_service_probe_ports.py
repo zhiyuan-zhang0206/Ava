@@ -115,6 +115,7 @@ def test_all_services_present(monkeypatch: pytest.MonkeyPatch) -> None:
         "browser",
         "browser-mcp",
         "mcp-daemon",
+        "pty-sessions",
         "computer-mcp",
         "page-server",
         "pg-backup",

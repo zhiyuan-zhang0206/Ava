@@ -31,7 +31,7 @@ from base.native_process.os_platform import IS_WINDOWS
 from base.native_process.ownership import OwnedProcess, stable_create_time
 from base.sessions.pty import cli as pty_cli
 from base.sessions.pty import session_tree
-from base.sessions.pty._paths import host_identity, record_path, socket_path
+from base.sessions.pty.paths import host_identity, record_path, socket_path
 from base.sessions.pty.tests.test_pty_sessions_cli import (
     REPO,
     _has,
