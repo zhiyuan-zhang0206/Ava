@@ -12,8 +12,7 @@
     "services/browser/page_lifecycle.py::ambient-container:_AGENT_LAST_USE": 1,
     "services/browser/page_lifecycle.py::ambient-container:_PAGE_TTL_DEADLINES": 1,
     "services/browser/page_lifecycle.py::ambient-instance:_GENERATIONS": 1,
-    "services/browser/session.py::ambient-container:_last_injected_cookie": 1,
-    "services/browser/session.py::ambient-instance:_CDP_IDS": 1
+    "services/browser/session.py::ambient-container:_last_injected_cookie": 1
   },
   "complexity": {
     "services/browser/mcp_daemon.py::ChromeMcpDaemon._affinity_call": 16,

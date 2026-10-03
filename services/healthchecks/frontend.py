@@ -29,9 +29,6 @@ def _app_url() -> str:
     return f"http://localhost:{_app_port()}"
 
 
-_FRONTEND_URL = _app_url()
-
-
 def _expected_owner() -> OwnedProcess | None:
     return owned_process("frontend")
 
@@ -40,7 +37,7 @@ def _http_ok() -> bool:
     """curl -fs probe; `-f` makes non-2xx exit non-zero, `-s` is silent."""
     try:
         result = subprocess.run(
-            ["curl", "-fs", "-o", "/dev/null", _FRONTEND_URL],
+            ["curl", "-fs", "-o", "/dev/null", _app_url()],
             capture_output=True,
             timeout=5,
             check=False,

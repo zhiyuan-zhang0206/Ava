@@ -8,6 +8,7 @@ refresh loop) as implemented by ``services.browser.gateway_session``.
 from __future__ import annotations
 
 import asyncio
+import itertools
 import json
 import time
 from typing import Any
@@ -193,7 +194,7 @@ async def test_inject_raises_when_browser_rejects_cookie(monkeypatch: pytest.Mon
 async def test_cdp_call_raises_on_protocol_error() -> None:
     ws = FakeWS([{"id": 1, "error": {"code": -32601, "message": "not found"}}])
     with pytest.raises(RuntimeError, match=r"CDP Network\.setCookie failed"):
-        await sess._cdp_call(ws, "Network.setCookie", {})
+        await sess._cdp_call(ws, itertools.count(1), "Network.setCookie", {})
 
 
 async def test_inject_raises_when_chrome_unreachable(monkeypatch: pytest.MonkeyPatch) -> None:
