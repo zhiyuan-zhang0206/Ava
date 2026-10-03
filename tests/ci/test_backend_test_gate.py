@@ -108,6 +108,13 @@ def test_the_composite_expects_secrets_only_from_this_repositorys_own_runs() -> 
     assert _ACTION["runs"]["steps"][0]["env"]["PYTEST_OUTCOME"] == "${{ inputs.pytest-outcome }}"
 
 
+def test_a_dependabot_run_never_counts_as_able_to_have_secrets() -> None:
+    # A Dependabot-triggered run is same-repo yet gets no secrets (GitHub withholds
+    # them from dependabot[bot]); it must take the no-secrets path and judge pytest.
+    env = _ACTION["runs"]["steps"][0]["env"]["CAN_HAVE_SECRETS"]
+    assert "&& github.actor != 'dependabot[bot]'" in env
+
+
 # ── the composite action's script ───────────────────────────────────────────
 
 
