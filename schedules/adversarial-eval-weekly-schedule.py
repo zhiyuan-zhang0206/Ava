@@ -34,11 +34,6 @@ from schedules.adversarial_eval_cases import (
 from schedules.agent_status_guard import ensure_agent_status_members
 from schedules.catchup import catch_up, cluster_timezone, fire_slot_once
 
-ensure_agent_status_members(
-    S,
-    {"IDLING", "TERMINATED"},
-    schedule_name="adversarial-eval-weekly",
-)
 
 CRON = "0 4 * * 3"
 OWNER_LABEL = "adversarial-eval-owner"
@@ -509,4 +504,9 @@ def main() -> None:
 
 
 if __name__ == "__main__":
+    ensure_agent_status_members(
+        S,
+        {"IDLING", "TERMINATED"},
+        schedule_name="adversarial-eval-weekly",
+    )
     main()

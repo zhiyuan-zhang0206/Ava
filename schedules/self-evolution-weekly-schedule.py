@@ -17,11 +17,6 @@ from schedules.agent_status_guard import ensure_agent_status_members
 from schedules.catchup import catch_up, cluster_timezone, fire_slot_once
 from base.daemon.schedules.watcher import next_fire
 
-ensure_agent_status_members(
-    S,
-    {"TERMINATED"},
-    schedule_name="self-evolution-weekly",
-)
 
 # ── Configuration ──────────────────────────────────────────────────────────
 
@@ -229,4 +224,9 @@ def _main_loop() -> None:
 
 
 if __name__ == "__main__":
+    ensure_agent_status_members(
+        S,
+        {"TERMINATED"},
+        schedule_name="self-evolution-weekly",
+    )
     _main_loop()

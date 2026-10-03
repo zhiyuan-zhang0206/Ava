@@ -30,11 +30,6 @@ from base.host.env.dotenv_boot import resolve_ava_home
 from base.paths import ava_home
 from base.daemon.schedules.watcher import next_fire
 
-ensure_agent_status_members(
-    S,
-    {"IDLING", "RUNNING", "TERMINATED"},
-    schedule_name="debt-sweep-daily",
-)
 
 CRON = "30 6 * * *"
 _REPO_ROOT = Path(base.__file__).resolve().parents[1]
@@ -307,4 +302,9 @@ def main(argv: Sequence[str] | None = None) -> None:
 
 
 if __name__ == "__main__":
+    ensure_agent_status_members(
+        S,
+        {"IDLING", "RUNNING", "TERMINATED"},
+        schedule_name="debt-sweep-daily",
+    )
     main()

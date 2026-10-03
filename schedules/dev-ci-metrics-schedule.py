@@ -16,7 +16,6 @@ from schedules.agent_status_guard import ensure_agent_status_members
 from schedules.catchup import claimed_slot, cluster_timezone
 from schedules.daily_host import report_agent, run_daily_loop
 
-ensure_agent_status_members(S, {"IDLING", "RUNNING", "TERMINATED"}, schedule_name="dev-ci-metrics")
 
 CRON = "20 6 * * *"
 _REPORT_AGENT_ENV = "AVA_CI_METRICS_REPORT_AGENT"
@@ -94,4 +93,7 @@ def _main_loop() -> None:
 
 
 if __name__ == "__main__":
+    ensure_agent_status_members(
+        S, {"IDLING", "RUNNING", "TERMINATED"}, schedule_name="dev-ci-metrics"
+    )
     _main_loop()
