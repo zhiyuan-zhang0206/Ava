@@ -7,7 +7,9 @@ maintenance pass scans the last seven days of the supported event families, keep
 observation is missing, and writes them through the same reduction the live projection uses
 (`observe_row`), so a recovered row and a live one are the same observation. The frozen archive
 owns the timestamps up to its last row, so rows at or before `ARCHIVE_FREEZE_AT` are left alone.
-A scan means the table was traversed, not that upstream collection was lossless.
+A scan means the table was traversed, not that upstream collection was lossless. `node_exit`
+rows are not stored in `telemetry_events`, so activity observations come from the live
+projection only and are not recoverable here.
 """
 
 from __future__ import annotations
@@ -29,7 +31,7 @@ from base.telemetry.metrics.observed_metrics import (
 _WINDOW = timedelta(days=7)
 _PAGE_LIMIT = 5000
 _PASS_SECONDS = 120.0
-_EVENT_NAMES = ["llm_usage", "turn_end", "exec", "node_exit", *EXEC_FAILURE_EVENTS]
+_EVENT_NAMES = ["llm_usage", "turn_end", "exec", *EXEC_FAILURE_EVENTS]
 
 # Event ids in the observation table are the unsigned stream id; the table stores it signed.
 _UNSIGNED_UID = (
