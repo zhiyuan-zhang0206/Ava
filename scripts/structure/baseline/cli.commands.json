@@ -45,8 +45,7 @@
     "cli/commands/observability/tests/test_converge_otel_collector.py": 1249
   },
   "nesting": {
-    "cli/commands/lifecycle/tests/test_gateway_consumer_guard.py::_kind_closure": 6,
-    "cli/commands/observability/trace.py::_post_line": 6
+    "cli/commands/lifecycle/tests/test_gateway_consumer_guard.py::_kind_closure": 6
   },
   "patch_targets": {
     "cli/commands/converge/tests/test_converge_firewall.py::base.host.macos_firewall._VERIFY_RETRY_S": 2,
