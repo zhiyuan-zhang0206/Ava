@@ -51,6 +51,10 @@ class Cluster:
         self.fail: dict[tuple[str, str], int] = {}
         self.stop_failures: dict[str, str] = {}
         self.output = ""
+        self.stored_schedules: tuple[int, list[str]] = (
+            0,
+            [],
+        )  # (VERIFY_RC, lines) of NEW's verify on the gateway's table
         self.roster_lag = 0  # roster reads that still show every machine offline (heartbeat)
         self.roster_reads = 0
         self.now = 0.0  # a fake clock: `fleet_update.time` is patched to this object
@@ -130,6 +134,8 @@ class Cluster:
             assert stdin == fleet_update._GATEWAY_PROGRAM
             emit(self._roster_json())
             return 0
+        if "verify" in command:
+            return self._verify(alias, command, emit)
         kinds = {
             "git fetch": "fetch",
             "stop -y": "stop",
@@ -143,6 +149,28 @@ class Cluster:
         if kind == "refresh":
             emit("  summary: applied 2, conflict 1")
         return self._effect(kind, alias, host, command)
+
+    def _verify(self, alias: str, command: str, emit: Callable[[str], None]) -> int:
+        """The drift checks: NEW's verify before any stop, then `schedules verify` / `plugins verify`."""
+        kind = (
+            "pre-verify"
+            if "pre-update-verify" in command
+            else "schedules-verify"
+            if "schedules verify" in command
+            else "plugins-verify"
+        )
+        self.effects.append((kind, alias))
+        if kind == "pre-verify":
+            assert alias == "gw" and self.new in command
+            assert all(h["up"] for h in self.hosts.values()), "checked after a service stopped"
+            code, lines = self.stored_schedules
+            for line in [*lines, f"VERIFY_RC={code}"]:
+                emit(line)
+            return 0
+        assert kind != "schedules-verify" or "--no-notify" in command  # attended: no alert funnel
+        if rc := self.fail.get((kind, alias), 0):
+            emit(f"RED the {kind} detail from {alias}")
+        return rc
 
 
 @pytest.fixture
@@ -184,6 +212,118 @@ def test_runners_stop_first_and_start_last(env: tuple[Cluster, Callable[..., int
     assert [a for k, a in cluster.effects if k in ("start", "oneshot")] == ["gw", "mac", "lin"]
     assert kinds[-6:] == ["smoke"] * 3 + ["refresh"] * 3
     assert [a for k, a in cluster.effects if k == "refresh"] == ["gw", "mac", "lin"]
+
+
+def test_drift_checks_run_before_any_agent_smoke(env: tuple[Cluster, Callable[..., int]]) -> None:
+    """The gateway's in-store schedule scripts are checked once (the DB lives there); every host's
+    plugins are checked; all of it before an agent is spawned onto the new code."""
+    cluster, run = env
+    assert run("down") == 0
+    assert run("up") == 0
+    assert [a for k, a in cluster.effects if k == "schedules-verify"] == ["gw"]
+    assert [a for k, a in cluster.effects if k == "plugins-verify"] == ["gw", "mac", "lin"]
+    kinds = [kind for kind, _ in cluster.effects]
+    assert max(i for i, k in enumerate(kinds) if k.endswith("-verify")) < kinds.index("smoke")
+
+
+@pytest.mark.parametrize(
+    ("failing", "detail"),
+    [
+        (("schedules-verify", "gw"), "RED the schedules-verify detail from gw"),
+        (("plugins-verify", "mac"), "RED the plugins-verify detail from mac"),
+    ],
+)
+def test_a_red_drift_check_fails_up_with_its_detail(
+    env: tuple[Cluster, Callable[..., int]],
+    capsys: pytest.CaptureFixture[str],
+    failing: tuple[str, str],
+    detail: str,
+) -> None:
+    cluster, run = env
+    assert run("down") == 0
+    cluster.fail[failing] = 1
+    assert run("up") == 1
+    out = capsys.readouterr().out
+    assert detail in out and "FAILED: drift check failed" in out
+    assert {k for k, _ in cluster.effects} & {"smoke", "refresh"} == set()
+    # Every check ran: a red does not hide the next host's.
+    assert [a for k, a in cluster.effects if k == "plugins-verify"] == ["gw", "mac", "lin"]
+
+
+def test_every_red_drift_check_is_reported_not_only_the_first(
+    env: tuple[Cluster, Callable[..., int]], capsys: pytest.CaptureFixture[str]
+) -> None:
+    cluster, run = env
+    assert run("down") == 0
+    cluster.fail[("schedules-verify", "gw")] = 1
+    cluster.fail[("plugins-verify", "lin")] = 1
+    assert run("up") == 1
+    failed_line = next(
+        line for line in capsys.readouterr().out.splitlines() if "drift check failed" in line
+    )
+    assert "schedules verify" in failed_line and "plugins verify" in failed_line
+    assert "gw:" in failed_line and "lin:" in failed_line
+
+
+_RED_ROW = (
+    "RED id=12 name=hierarchy-worker missing=call-signature:L42 catch_up(): "
+    "missing a required argument: 'triggers'"
+)
+
+
+def test_stored_schedules_are_checked_against_new_before_anything_stops(
+    env: tuple[Cluster, Callable[..., int]],
+) -> None:
+    cluster, run = env
+    assert run("down") == 0
+    kinds = [kind for kind, _ in cluster.effects]
+    assert kinds.count("pre-verify") == 1
+    assert kinds.index("pre-verify") < kinds.index("stop")
+
+
+def test_a_red_stored_schedule_refuses_down_before_any_stop(
+    env: tuple[Cluster, Callable[..., int]], capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Tonight's shape: a stored script calling `catch_up()` the old way. The refusal lists the
+    row and leaves the cluster running."""
+    cluster, run = env
+    cluster.stored_schedules = (1, ["RESULT ts=t checked=13 green=12 red=1 rc=1", _RED_ROW])
+    assert run("down") == 2
+    out = capsys.readouterr().out
+    assert _RED_ROW in out and "--allow-red-schedules" in out and "would crash-loop" in out
+    assert {k for k, _ in cluster.effects} & {"stop", "switch"} == set()
+
+
+def test_allow_red_schedules_proceeds_and_still_lists_the_rows(
+    env: tuple[Cluster, Callable[..., int]], capsys: pytest.CaptureFixture[str]
+) -> None:
+    cluster, run = env
+    cluster.stored_schedules = (1, [_RED_ROW])
+    assert run("down", "--allow-red-schedules") == 0
+    out = capsys.readouterr().out
+    assert "WARNING: stored schedule scripts red" in out and _RED_ROW in out
+    assert [a for k, a in cluster.effects if k == "stop"] == ["mac", "lin", "gw"]
+
+
+def test_a_check_that_could_not_run_refuses_like_a_red(
+    env: tuple[Cluster, Callable[..., int]], capsys: pytest.CaptureFixture[str]
+) -> None:
+    cluster, run = env
+    cluster.stored_schedules = (2, ["TOOL-ERROR OperationalError: connection refused"])
+    assert run("down") == 2
+    out = capsys.readouterr().out
+    assert "unevaluable (check exited 2)" in out and "connection refused" in out
+    assert {k for k, _ in cluster.effects} & {"stop", "switch"} == set()
+
+
+def test_the_dry_run_of_down_reports_a_red_without_changing_anything(
+    env: tuple[Cluster, Callable[..., int]], capsys: pytest.CaptureFixture[str]
+) -> None:
+    cluster, run = env
+    cluster.stored_schedules = (1, [_RED_ROW])
+    assert run("down", "--dry-run") == 2
+    assert _RED_ROW in capsys.readouterr().out
+    assert [k for k, _ in cluster.effects] == ["pre-verify"]
 
 
 def test_macos_start_is_a_gui_one_shot() -> None:
@@ -243,7 +383,7 @@ def test_the_first_failure_stops_the_half(
     cluster, run = env
     cluster.fail[("stop", "mac")] = 1
     assert run("down") == 1
-    assert [k for k, _ in cluster.effects if k != "fetch"] == ["stop"]
+    assert [k for k, _ in cluster.effects if k not in ("fetch", "pre-verify")] == ["stop"]
     assert _STOP_RETRY in capsys.readouterr().out
 
 
@@ -396,7 +536,8 @@ def test_dry_run_changes_nothing(env: tuple[Cluster, Callable[..., int]]) -> Non
     cluster, run = env
     assert run("down", "--dry-run") == 0
     assert run("up", "--dry-run") == 0
-    assert cluster.effects == []
+    # Only the read-only stored-schedule check runs (a throwaway worktree, no service touched).
+    assert [k for k, _ in cluster.effects] == ["pre-verify"]
 
 
 def test_the_log_carries_no_secret(

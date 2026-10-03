@@ -66,7 +66,9 @@ tags:
 - `ava presets ls/get/create/update/delete`
 - `ava schedules ls/get/create/update/delete/provision/start/stop/restart/logs/runs`:
   provision creates the built-in schedules from `schedules/manifest.json` and
-  also runs at gateway boot.
+  also runs at every schedule-manager start;
+  it creates missing rows and resyncs a built-in row whose script differs from the template.
+  `ava schedules verify` binds each stored script's calls into repo code as well as its imports.
 - `ava trace ship`
 - `ava lgtm on/off/status`: observability-stack toggle on this host, represented
   by its marker and native lifecycle.

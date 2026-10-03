@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "policy": "Built-in schedules ship with Ava. Product schedules (adversarial evaluation, self-evolution, memory) are created enabled by default; cluster-operator schedules are created but disabled. provision_builtin_schedules() (gateway boot + `ava schedules provision`) creates missing built-ins keyed by name and never modifies existing rows.",
+  "policy": "Built-in schedules ship with Ava. Product schedules (adversarial evaluation, self-evolution, memory) are created enabled by default; cluster-operator schedules are created but disabled. provision_builtin_schedules() (schedule-manager start + `ava schedules provision`) creates missing built-ins keyed by name and resyncs the script/command of existing ones to the template here; their enabled state and description are never modified.",
   "builtin_schedules": [
     {
       "name": "c9-daily-report",

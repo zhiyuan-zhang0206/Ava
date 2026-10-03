@@ -1,4 +1,4 @@
-"""`ava schedules verify` — the dry-import sweep over every in-store schedule script."""
+"""`ava schedules verify` — the dry-import + call-signature sweep over every in-store schedule script."""
 
 from __future__ import annotations
 
@@ -15,34 +15,6 @@ import httpx
 
 from cli.commands.management.schedules import _TIMEOUT_S, _gateway_base, _headers
 
-# One dry-import child, run as `python -c` per script: it compile()s the script
-# and executes ONLY the top-level import statements, so a moved module path
-# (the #2678 / R3 Wave-2 drift class) fails without the body ever running.
-_VERIFY_CHILD = r"""import ast, sys
-src = sys.stdin.read()
-try:
-    compile(src, "<schedule>", "exec")
-    tree = ast.parse(src)
-except SyntaxError as exc:
-    print("CHILD-COMPILE-ERROR:%s:%s" % (exc.lineno, exc.msg))
-    sys.exit(3)
-segments = []
-for node in tree.body:
-    if isinstance(node, (ast.Import, ast.ImportFrom)):
-        segment = ast.get_source_segment(src, node)
-        if segment:
-            segments.append(segment)
-try:
-    exec(compile("\n".join(segments), "<imports-only>", "exec"), {"__name__": "dryimport"})
-except ModuleNotFoundError as exc:
-    print("CHILD-MODULE:%s" % exc.name)
-    sys.exit(4)
-except Exception as exc:
-    print("CHILD-EXC:%s:%s" % (type(exc).__name__, str(exc)[:120].replace("\n", " ")))
-    sys.exit(5)
-print("CHILD-OK")
-"""
-
 # One child's budget. task #3696 exception inventory: a self-imposed guard on a
 # single check child — a healthy top-level import set takes seconds, so a child
 # still running at 90s is wedged and must not park the sweep behind it.
@@ -58,18 +30,28 @@ _VERIFY_ALERTNAME = "schedule dry-import"
 _VERIFY_ALERT_ATTEMPTS = 2
 
 
-def _check_script(script: str) -> str | None:
-    """Dry-import one in-store script; None = clean, else the RED detail.
+# The child's last stdout line -> the RED detail (prefix added to the line's remainder).
+_CHILD_VERDICTS = (
+    ("CHILD-COMPILE-ERROR:", "compile-error:"),
+    ("CHILD-MODULE:", ""),
+    ("CHILD-EXC:", ""),
+    ("CHILD-SIG:", "call-signature:"),
+)
 
-    Runs with this CLI's interpreter from the repo root: every sanctioned `ava`
-    invocation is the checkout's own venv — the same `.venv/bin/python` the
-    ScheduleManager launches the runner with.
+
+def _check_script(script: str) -> str | None:
+    """Dry-import one in-store script and bind its repo-API call sites; None = clean, else the
+    RED detail (`<module>` / `compile-error:<l>:<m>` / `<Exc>:<msg>` / `call-signature:<l> <call>: <why>`).
+
+    Runs the check child (`schedule_verify_child`) with this CLI's interpreter from the repo
+    root: every sanctioned `ava` invocation is the checkout's own venv — the same
+    `.venv/bin/python` the ScheduleManager launches the runner with.
     """
     from base.paths import repo_root
 
     try:
         proc = subprocess.run(
-            [sys.executable, "-c", _VERIFY_CHILD],
+            [sys.executable, "-m", "cli.commands.management.schedule_verify_child"],
             check=False,
             input=script,
             cwd=str(repo_root()),
@@ -86,12 +68,9 @@ def _check_script(script: str) -> str | None:
     last = lines[-1] if lines else ""
     if last == "CHILD-OK":
         return None
-    if last.startswith("CHILD-COMPILE-ERROR:"):
-        return "compile-error:" + last[len("CHILD-COMPILE-ERROR:") :]
-    if last.startswith("CHILD-MODULE:"):
-        return last[len("CHILD-MODULE:") :]
-    if last.startswith("CHILD-EXC:"):
-        return last[len("CHILD-EXC:") :]
+    for verdict, prefix in _CHILD_VERDICTS:
+        if last.startswith(verdict):
+            return prefix + last[len(verdict) :]
     tail = ((proc.stderr or "").strip().splitlines() or [""])[-1][:140]
     return f"tool-error:{tail or f'rc={proc.returncode}'}"
 
@@ -120,7 +99,7 @@ class VerifyPorts:
 
 
 def _verify_sweep(*, notify: bool, ports: VerifyPorts) -> int:
-    """Run the dry-import sweep over every in-store script. Returns the exit code."""
+    """Run the dry-import and call-signature sweep over every in-store script. Returns the exit code."""
     from base.clock import Clock
 
     stamp = datetime.now(Clock.from_settings().zone()).isoformat(timespec="seconds")
@@ -171,14 +150,16 @@ def _verify_file(path: str) -> int:
 def cmd_schedules_verify(
     *, check_file: str | None = None, notify: bool = True, ports: VerifyPorts | None = None
 ) -> int:
-    """`ava schedules verify [--check-file PATH] [--no-notify]` — the dry-import sweep.
+    """`ava schedules verify [--check-file PATH] [--no-notify]` — the dry-import and call-signature sweep.
 
     Read-only one-shot check of every in-store script (stopped rows included):
-    py_compile plus a top-level-imports-only execution in this checkout's
-    runner venv — nothing is started, stopped, or written. Catches the drift
-    class where a repo module move leaves DB-embedded scripts stale and the
-    next (re)start crash-loops (task #4800: #2678, the 2026-09-25 R3 Wave-2
-    regression). Line contract: one `RESULT ts=... checked=... green=... red=...
+    py_compile, a top-level-imports-only execution in this checkout's runner
+    venv, and a `inspect.signature().bind` of every call the script makes into
+    repo code — nothing is started, stopped, or written. Catches the drift
+    classes where a repo module move (task #4800: #2678, the 2026-09-25 R3
+    Wave-2 regression) or a changed signature (2026-10-03: `catch_up()` gained
+    a required `db`) leaves a DB-embedded script stale and the next (re)start
+    crash-loops. Line contract: one `RESULT ts=... checked=... green=... red=...
     rc=...` line, one `RED id=... name=... missing=...` per red, `TOOL-ERROR
     ...` on rc=2; exit codes 0 all clean / 1 red / 2 tool error. `--check-file`
     checks one file off-DB (the falsification hook); a non-clean sweep alerts

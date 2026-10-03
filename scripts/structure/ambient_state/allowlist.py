@@ -57,6 +57,10 @@ SINK_FACADES: dict[str, str] = {
         "the loguru sink facade: import-time reset and extra binding of the loguru global, "
         "the sample counter and the Postgres sink handle; read only by the log pipeline itself"
     ),
+    "base/packages/plugins/load_report.py": (
+        "the plugin load-failure reporter: the list `collecting()` diverts reports into is "
+        "written by collecting() and read only by the reporter itself"
+    ),
     "base/telemetry/emitter.py": (
         "the telemetry event pipeline: its state, failure counters and exit hook are written by "
         "emitters and read only by the pipeline itself"

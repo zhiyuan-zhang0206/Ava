@@ -72,20 +72,30 @@ def _is_running() -> bool:
 
 
 async def provision_builtins(pool: ConnectionPool[Any]) -> None:
-    """Seed missing built-in schedules when requested; never edit existing rows."""
+    """Seed missing built-in schedules and resync drifted ones when requested.
+
+    Runs before the first reconcile, so a built-in launches on the checkout's template, not on
+    the snapshot its row was created with. Only ``script`` / ``command`` of an existing row move."""
     if not settings.gateway.provision_builtin_schedules:
         return
-    from base.daemon.schedules.builtin_schedules import provision_builtin_schedules
+    from base.daemon.schedules.builtin_schedules import (
+        ProvisionResult,
+        provision_builtin_schedules,
+    )
 
-    def provision() -> list[str]:
+    def provision() -> ProvisionResult:
         # Pool acquisition and provisioning both block; keep them off the event loop.
         with pool.connection() as conn:
             return provision_builtin_schedules(conn)
 
     try:
-        created = await asyncio.to_thread(provision)
-        if created:
-            _log.info("provisioned built-in schedules: %s", ", ".join(created))
+        result = await asyncio.to_thread(provision)
+        if result.created:
+            _log.info("provisioned built-in schedules: %s", ", ".join(result.created))
+        if result.resynced:
+            _log.info(
+                "resynced built-in schedule scripts to the checkout: %s", ", ".join(result.resynced)
+            )
     except Exception:
         _log.warning("built-in schedule provisioning failed", exc_info=True)
 
