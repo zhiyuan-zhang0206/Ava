@@ -38,6 +38,27 @@ def collect():
     return files
 
 
+def _subdir_lines(dir_rel, dirs):
+    lines = []
+    for d in dirs:
+        n = len(
+            [f for f in collect() if f.startswith((dir_rel + "/" if dir_rel else "") + d + "/")]
+        )
+        lines.append(f"* [{d}/]({d}/) - {n} notes")
+    return lines or ["*(none)*"]
+
+
+def _note_lines(dir_rel, mds):
+    lines = []
+    for md in mds:
+        rel = (dir_rel + "/" if dir_rel else "") + md
+        fm = frontmatter(rel)
+        t = str(fm.get("title") or md[:-3])
+        d = str(fm.get("description") or "").replace("\n", " ")
+        lines.append(f"* [{t}]({md}) - {d}")
+    return lines or ["*(none)*"]
+
+
 def write_index(dir_rel):
     '""OKF spec §8: index.md enumerates the directory\'s contents (no frontmatter).""'
     dpath = os.path.join(_pool(), dir_rel) if dir_rel else _pool()
@@ -46,27 +67,10 @@ def write_index(dir_rel):
     mds = [e for e in entries if e.endswith(".md") and e not in RESERVED]
 
     title = "(root)" if not dir_rel else dir_rel + "/"
-    lines = [f"# {title}", ""]
-    lines.append("## Subdirectories")
-    lines.append("")
-    for d in dirs:
-        n = len(
-            [f for f in collect() if f.startswith((dir_rel + "/" if dir_rel else "") + d + "/")]
-        )
-        lines.append(f"* [{d}/]({d}/) - {n} notes")
-    if not dirs:
-        lines.append("*(none)*")
-    lines.append("")
-    lines.append("## Notes")
-    lines.append("")
-    for md in mds:
-        rel = (dir_rel + "/" if dir_rel else "") + md
-        fm = frontmatter(rel)
-        t = str(fm.get("title") or md[:-3])
-        d = str(fm.get("description") or "").replace("\n", " ")
-        lines.append(f"* [{t}]({md}) - {d}")
-    if not mds:
-        lines.append("*(none)*")
+    lines = [f"# {title}", "", "## Subdirectories", ""]
+    lines.extend(_subdir_lines(dir_rel, dirs))
+    lines.extend(["", "## Notes", ""])
+    lines.extend(_note_lines(dir_rel, mds))
     lines.append("")
 
     target = os.path.join(dpath, "index.md") if dir_rel else os.path.join(_pool(), "index.md")

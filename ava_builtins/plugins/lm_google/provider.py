@@ -27,6 +27,70 @@ from base.lm.stop import StopSpec
 _GEMINI_EFFORT_LEVELS = ("minimal", "low", "medium", "high")
 
 
+def _thinking_level(ctx: BuildContext, *, thinking_disabled: bool) -> str | None:
+    """The `thinking_level` for this request, by path: media knob, disabled, or resolved effort."""
+    thinking_level: str | None = None
+    if ctx.media_thinking_level is not None:
+        # Media path — the caller owns the Gemini vocabulary mapping
+        # (ava/understand.py), including the `max` → configured-knob
+        # special case; the resolved-effort path is skipped entirely so a
+        # global AVA_REASONING_EFFORT cannot silently override the media
+        # knob (historic behavior).
+        return ctx.media_thinking_level
+    if thinking_disabled:
+        # thinking_level is a Gemini 3.x vocabulary; older models
+        # (gemini-2.5-*) reject it with a 400 on every call (issue #190), so
+        # "disabled" is only expressible where the model declares the
+        # vocabulary. Elsewhere it is a no-op — no thinking parameters on the
+        # wire, exactly what the issue measured as working — plus a warning
+        # so the operator knows the request was not honored.
+        spec = ctx.spec
+        if spec is not None and spec.effort_levels is not None:
+            thinking_level = spec.effort_levels[0] if spec.effort_levels else "minimal"
+        else:
+            logger.warning(
+                f"{ctx.model} does not support the thinking_level vocabulary; "
+                f"thinking={{'type': 'disabled'}} ignored (issue #190)"
+            )
+    if ctx.resolved_effort and not thinking_disabled:
+        # A declared model vocabulary is authoritative: 3.8 Flash does not
+        # accept `minimal`, even though the Gemini-wide fallback includes it.
+        spec = ctx.spec
+        levels = (
+            spec.effort_levels
+            if spec is not None and spec.effort_levels
+            else (ctx.effort_levels if ctx.effort_levels is not None else _GEMINI_EFFORT_LEVELS)
+        )
+        thinking_level = clamp_effort(
+            ctx.resolved_effort,
+            levels,
+            target="gemini",
+        )
+    return thinking_level
+
+
+def _media_resolution(setting: str | None) -> Any | None:
+    """Map the low/medium/high media-resolution setting onto Google's MediaResolution enum."""
+    # Media-resolution mapping (ava.understand's media path). The enum import
+    # is lazy like the model class itself so the google-genai SDK binding
+    # stays inside this provider branch.
+    if setting is None:
+        return None
+    from google.genai.types import MediaResolution
+
+    resolutions = {
+        "low": MediaResolution.MEDIA_RESOLUTION_LOW,
+        "medium": MediaResolution.MEDIA_RESOLUTION_MEDIUM,
+        "high": MediaResolution.MEDIA_RESOLUTION_HIGH,
+    }
+    try:
+        return resolutions[setting]
+    except KeyError:
+        raise ValueError(
+            f"media_resolution must be one of {sorted(resolutions)}, got {setting!r}"
+        ) from None
+
+
 def build(ctx: BuildContext) -> BaseChatModel:
     """gemini-* branch: ChatGoogleGenerativeAI. include_thoughts surfaces
     the thinking summary as canonical thinking blocks; thinking depth
@@ -66,43 +130,7 @@ def build(ctx: BuildContext) -> BaseChatModel:
     # unset effort leaves thinking_level None → the model default
     # (3.8/3.5 Flash medium, 3.1 Pro high).
     thinking_disabled = ctx.thinking is not None and ctx.thinking.get("type") == "disabled"
-    thinking_level: str | None = None
-    if ctx.media_thinking_level is not None:
-        # Media path — the caller owns the Gemini vocabulary mapping
-        # (ava/understand.py), including the `max` → configured-knob
-        # special case; the resolved-effort path is skipped entirely so a
-        # global AVA_REASONING_EFFORT cannot silently override the media
-        # knob (historic behavior).
-        thinking_level = ctx.media_thinking_level
-    elif thinking_disabled:
-        # thinking_level is a Gemini 3.x vocabulary; older models
-        # (gemini-2.5-*) reject it with a 400 on every call (issue #190), so
-        # "disabled" is only expressible where the model declares the
-        # vocabulary. Elsewhere it is a no-op — no thinking parameters on the
-        # wire, exactly what the issue measured as working — plus a warning
-        # so the operator knows the request was not honored.
-        spec = ctx.spec
-        if spec is not None and spec.effort_levels is not None:
-            thinking_level = spec.effort_levels[0] if spec.effort_levels else "minimal"
-        else:
-            logger.warning(
-                f"{ctx.model} does not support the thinking_level vocabulary; "
-                f"thinking={{'type': 'disabled'}} ignored (issue #190)"
-            )
-    elif ctx.resolved_effort:
-        # A declared model vocabulary is authoritative: 3.8 Flash does not
-        # accept `minimal`, even though the Gemini-wide fallback includes it.
-        spec = ctx.spec
-        levels = (
-            spec.effort_levels
-            if spec is not None and spec.effort_levels
-            else (ctx.effort_levels if ctx.effort_levels is not None else _GEMINI_EFFORT_LEVELS)
-        )
-        thinking_level = clamp_effort(
-            ctx.resolved_effort,
-            levels,
-            target="gemini",
-        )
+    thinking_level = _thinking_level(ctx, thinking_disabled=thinking_disabled)
     # include_thoughts only on the vocabulary-supporting path: passing it to a
     # model that rejects thinking parameters would 400 exactly like
     # thinking_level (issue #190). Unsupported models keep the SDK default;
@@ -116,25 +144,7 @@ def build(ctx: BuildContext) -> BaseChatModel:
         include_thoughts = None
     else:
         include_thoughts = not thinking_disabled
-    # Media-resolution mapping (ava.understand's media path). The enum import
-    # is lazy like the model class itself so the google-genai SDK binding
-    # stays inside this provider branch.
-    media_resolution_value: Any | None = None
-    if ctx.media_resolution is not None:
-        from google.genai.types import MediaResolution
-
-        resolutions = {
-            "low": MediaResolution.MEDIA_RESOLUTION_LOW,
-            "medium": MediaResolution.MEDIA_RESOLUTION_MEDIUM,
-            "high": MediaResolution.MEDIA_RESOLUTION_HIGH,
-        }
-        try:
-            media_resolution_value = resolutions[ctx.media_resolution]
-        except KeyError:
-            raise ValueError(
-                f"media_resolution must be one of {sorted(resolutions)}, "
-                f"got {ctx.media_resolution!r}"
-            ) from None
+    media_resolution_value = _media_resolution(ctx.media_resolution)
     kwargs: dict[str, Any] = {
         "model": ctx.model,  # type: ignore[call-arg]
         "google_api_key": api_key,

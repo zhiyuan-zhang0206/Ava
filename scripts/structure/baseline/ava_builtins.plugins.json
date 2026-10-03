@@ -34,34 +34,22 @@
     "ava_builtins/plugins/lm_zhipu/provider.py::import-time-call:base.lm.provider_api.register": 1
   },
   "complexity": {
-    "ava_builtins/plugins/ava_fleet/task_registry.py::record_task_usage": 15,
     "ava_builtins/plugins/ava_fleet/tests/test_ava_fleet_plugin.py::test_notify_inserts_fyi_and_snapshot_counts_unread": 20,
-    "ava_builtins/plugins/ava_memory/inherit.py::inherited_memory_note": 20,
-    "ava_builtins/plugins/ava_memory/sdk.py::_insert_dir_pointer": 18,
-    "ava_builtins/plugins/ava_memory/skills/scripts/gen_indexes.py::write_index": 20,
-    "ava_builtins/plugins/ava_memory/template/validate.py::validate_file": 36,
-    "ava_builtins/plugins/ava_memory/template/validate.py::validate_indexes": 20,
-    "ava_builtins/plugins/ava_memory/template/validate.py::validate_pointers": 27,
-    "ava_builtins/plugins/ava_memory/template/validate.py::validate_project_home": 27,
-    "ava_builtins/plugins/ava_memory/template/validate.py::validate_type_tag": 22,
-    "ava_builtins/plugins/ava_sdk_reminder/agent_runtime.py::_SdkReminderAfterExecHook.__call__": 23,
     "ava_builtins/plugins/ava_syntax_fix/tests/test_syntax_fix_helpers.py::_legacy_fix_bracket_matching": 16,
     "ava_builtins/plugins/ava_syntax_fix/tests/test_syntax_fix_helpers.py::_legacy_fix_escape_inner_quotes": 16,
     "ava_builtins/plugins/ava_syntax_fix/tests/test_syntax_fix_helpers.py::_legacy_fix_nested_triple_quote": 16,
     "ava_builtins/plugins/ava_syntax_fix/tests/test_syntax_fix_helpers.py::_legacy_fix_string_newlines": 19,
-    "ava_builtins/plugins/ava_syntax_fix/tests/test_syntax_fix_helpers.py::_legacy_fix_unterminated_to_triple": 16,
-    "ava_builtins/plugins/lm_google/gemini_cache.py::get_or_create_cache": 16,
-    "ava_builtins/plugins/lm_google/provider.py::build": 18
+    "ava_builtins/plugins/ava_syntax_fix/tests/test_syntax_fix_helpers.py::_legacy_fix_unterminated_to_triple": 16
   },
   "files": {
-    "ava_builtins/plugins/ava_code/tests/test_ava_code_plugin.py": 1599,
-    "ava_builtins/plugins/ava_fleet/tests/test_ava_fleet_plugin.py": 882,
+    "ava_builtins/plugins/ava_code/tests/test_ava_code_plugin.py": 1598,
+    "ava_builtins/plugins/ava_fleet/tests/test_ava_fleet_plugin.py": 881,
     "ava_builtins/plugins/ava_fleet/tests/test_task_maintenance_daemon.py": 804,
     "ava_builtins/plugins/ava_fleet/tests/test_task_registry.py": 2338,
-    "ava_builtins/plugins/ava_syntax_fix/tests/test_syntax_fix.py": 1677,
+    "ava_builtins/plugins/ava_syntax_fix/tests/test_syntax_fix.py": 1672,
     "ava_builtins/plugins/ava_syntax_fix/tests/test_syntax_fix_helpers.py": 860,
     "ava_builtins/plugins/tests/test_ava_memory_write.py": 1181,
-    "ava_builtins/plugins/tests/test_ava_sdk_reminder_plugin.py": 1088
+    "ava_builtins/plugins/tests/test_ava_sdk_reminder_plugin.py": 1087
   },
   "nesting": {
     "ava_builtins/plugins/ava_syntax_fix/tests/test_syntax_fix_helpers.py::_legacy_fix_string_newlines": 6
