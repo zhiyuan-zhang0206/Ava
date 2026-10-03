@@ -22,6 +22,8 @@ import sys
 from pathlib import Path
 from types import ModuleType
 
+from base.packages.plugins import load_report
+
 
 def _plugin_module_dotted(pkg: str, name: str, module: str = "plugin") -> str:
     """The one spelling of a plugin module's dotted name — the identity both
@@ -130,7 +132,12 @@ def load_plugin_module(
 
 
 def safe_load_plugin_module(
-    plugin_py: Path, *, name: str, pkg: str, module: str = "plugin"
+    plugin_py: Path,
+    *,
+    name: str,
+    pkg: str,
+    module: str = "plugin",
+    report: load_report.Reporter | None = None,
 ) -> ModuleType | None:
     """`load_plugin_module` with the fail-soft contract: a plugin failure never
     escapes this boundary.
@@ -143,6 +150,8 @@ def safe_load_plugin_module(
     ``SystemExit`` still propagate: cancellation is not a plugin failure
     (2026-08-28 ava_ledger / 2026-09-10 agent-host incidents; user ruling
     2026-09-11).
+
+    ``report`` replaces the canonical reporter for this call (default: the canonical one).
 
     Returns:
         The executed module, or ``None`` when the plugin failed to load.
@@ -157,7 +166,5 @@ def safe_load_plugin_module(
         raise
     except BaseException as exc:
         sys.modules.pop(_plugin_module_dotted(pkg, name, module), None)
-        from base.packages.plugins import load_report
-
-        load_report.report_plugin_load_failure(name, exc)
+        load_report.reporter(report)(name, exc)
         return None

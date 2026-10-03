@@ -14,29 +14,15 @@ this function, and only an attribute-level call observes the substitution.
 from __future__ import annotations
 
 import contextlib
-from collections.abc import Generator
+from collections.abc import Callable
+
+Reporter = Callable[[str, BaseException], None]
 
 
-class _Diversion:
-    """The list `collecting()` is filling, or None. Process-wide: the one user is a one-shot CLI."""
-
-    def __init__(self) -> None:
-        self.sink: list[tuple[str, BaseException]] | None = None
-
-
-_DIVERSION = _Diversion()
-
-
-@contextlib.contextmanager
-def collecting() -> Generator[list[tuple[str, BaseException]]]:
-    """Divert every report into the yielded list: a read-only check (`ava plugins verify`) that
-    wants the contained failures as data, with no log noise and no telemetry event."""
-    failures: list[tuple[str, BaseException]] = []
-    _DIVERSION.sink = failures
-    try:
-        yield failures
-    finally:
-        _DIVERSION.sink = None
+def reporter(report: Reporter | None) -> Reporter:
+    """The reporter a load site calls: the caller's own (a read-only check that wants the failures
+    as values, e.g. `ava plugins verify`), else the canonical one below, looked up at call time."""
+    return report if report is not None else report_plugin_load_failure
 
 
 def report_plugin_load_failure(name: str, exc: BaseException) -> None:
@@ -45,9 +31,6 @@ def report_plugin_load_failure(name: str, exc: BaseException) -> None:
     Never raises by itself — the failure already happened, and containment is
     the point.
     """
-    if _DIVERSION.sink is not None:
-        _DIVERSION.sink.append((name, exc))
-        return
     from base.log import logger
     from base.telemetry import emit
 
