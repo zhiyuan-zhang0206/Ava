@@ -81,7 +81,6 @@ from agent.turn.runloop import (
 )
 from agent.turn.trace_checkpoint import attach_trace_checkpoint_ref
 from base.agents.context import AvaContext
-from base.agents.context.slices import AgentSlices
 from base.agents.history.delta_read_compat import recovery_reconstruction_scope
 from base.cluster.machine import machine_name
 from base.config import settings
@@ -91,6 +90,7 @@ from base.deploy.maintenance import admission
 from base.events.live.announce import publish_agent_updated
 from base.events.live.bus import EventBus
 from base.events.live.publisher import AgentEventPublisher
+from base.host.env.agent_slices import AgentSlices
 from base.log import logger
 from base.native_process.runtime_incarnation import RuntimeIncarnation, current_incarnation
 from base.native_process.turn_identity import bind_turn_identity
@@ -647,7 +647,9 @@ class AgentHost:
         """
         tags = ["ava", f"agent-{agent_id}", "hosted"]
         metadata: dict[str, object] = {"agent_id": agent_id, "hosted": True}
-        config: RunnableConfig = graph_config(agent_id, tags, metadata)
+        config: RunnableConfig = graph_config(
+            agent_id, tags, metadata, ctx.require_agent().kernel.checkpoint_interval
+        )
         turn = 0
         pending_failure: PendingTurnFailure | None = None
         while True:

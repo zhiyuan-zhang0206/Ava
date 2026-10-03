@@ -15,8 +15,8 @@ from types import ModuleType, SimpleNamespace
 from typing import Any
 
 from agent.hooks.history_dump import workspace_section_hint
-from base.agents.context.slices import AgentSlices
 from base.config import settings
+from base.host.env.agent_slices import AgentSlices
 from base.packages.plugins import activation, contributions
 from base.packages.plugins.context import current_plugin_name
 from base.paths import workspace_dir
@@ -186,7 +186,7 @@ def _sdk_expand_section(slices: AgentSlices) -> str:
     pieces: list[str] = []
     seen_targets: set[int] = set()
     # Text-only models drop media-gated members (`ava.self.attach`; ruling 2026-08-28).
-    hidden: frozenset[str] = ava.attachment_transport.media_gated_members()
+    hidden: frozenset[str] = ava.attachment_transport.media_gated_members(slices.brain.llm_model)
     _hidden_token = discovery.hidden_surface_members.set(hidden)
     # Render classes compactly in the system prompt: show name + docstring +
     # field annotations + enum values, skip methods and nested classes. Fields
@@ -765,14 +765,14 @@ tool calls. Before using any `ava.*` function, you must explicitly `import ava` 
         contribution = section_fn(slices)
         if contribution:
             parts.append(contribution)
-            # Activation telemetry (philosophy §6): a plugin section that
-            # rendered text is prompt real estate the plugin is spending. Length
-            # + digest identify *which* variant landed without storing the text;
-            # this runs at spawn/compact only, so there is no per-turn cost.
+            # Activation telemetry (philosophy §6): a plugin section that rendered text is prompt
+            # real estate the plugin is spending. Length + digest identify *which* variant landed
+            # without storing the text; this runs at spawn/compact only, so no per-turn cost.
             activation.record(
                 _SECTION_PLUGIN.get(section_fn),
                 "systemPromptSections",
                 section_fn.__name__,
+                model=slices.brain.llm_model,
                 detail=(
                     f"chars={len(contribution)} "
                     f"sha={hashlib.sha256(contribution.encode()).hexdigest()[:12]}"

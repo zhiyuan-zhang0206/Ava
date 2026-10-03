@@ -14,9 +14,9 @@ from __future__ import annotations
 import pytest
 
 from agent.graph.context_notes import RANK_CLUSTER_MEMORY, RANK_TIMEZONE, timezone_note
-from base.agents.context.slices import AgentSlices
 from base.agents.messages.kwargs import NoteTag
 from base.config import settings
+from base.host.env.agent_slices import AgentSlices
 
 
 @pytest.fixture(autouse=True)

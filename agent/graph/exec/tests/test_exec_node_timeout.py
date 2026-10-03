@@ -19,7 +19,7 @@ from agent.graph.exec.node import _exec_node_impl
 from agent.state import AgentState
 from agent.tests._fakes import make_fake_ops_pool
 from base.agents.context import AvaContext
-from base.agents.context.slices import AgentSlices
+from base.host.env.agent_slices import AgentSlices
 
 _CONFIG: RunnableConfig = {"configurable": {"thread_id": "7"}}
 

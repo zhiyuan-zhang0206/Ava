@@ -25,7 +25,7 @@ from psycopg_pool import AsyncConnectionPool
 from typing_extensions import TypedDict
 
 from agent.messages.guard import guarded_delta_reducer
-from agent.startup import wrap_saver_writes_with_nstep_interval
+from agent.startup import CHECKPOINT_INTERVAL_KEY, wrap_saver_writes_with_nstep_interval
 from base.config.agent_runtime import AgentRuntimeSettings
 
 
@@ -87,10 +87,15 @@ def _stored_thread_ids(saver: _StubSaver) -> list[str]:
 
 
 async def _aput(
-    saver: _StubSaver, step: int, source: str = "update", thread_id: str = "default"
+    saver: _StubSaver,
+    step: int,
+    source: str = "update",
+    thread_id: str = "default",
+    interval: int | None = None,
 ) -> dict[str, object]:
+    carried = {} if interval is None else {CHECKPOINT_INTERVAL_KEY: interval}
     return await saver.aput(
-        {"configurable": {"thread_id": thread_id}, "input_step": step},
+        {"configurable": {"thread_id": thread_id, **carried}, "input_step": step},
         {"checkpoint_id": str(step), "channel_versions": {"messages": f"v{step}"}},
         {"source": source, "step": step},
         {"channel": step},
@@ -231,6 +236,34 @@ async def test_interval_keeps_real_graph_parents_and_write_targets_persisted() -
     assert write_ids <= checkpoint_ids
 
 
+async def test_a_real_graph_run_carries_its_interval_to_every_write_and_not_into_metadata() -> None:
+    """The interval named in the invoke config reaches the saver through LangGraph's own config
+    plumbing (the default here is 1, so only the carried 4 throttles) and stays out of the
+    stored checkpoint metadata."""
+    from langgraph.graph import END, START, StateGraph
+
+    def increment(state: _GraphState) -> dict[str, int]:
+        return {"count": state["count"] + 1}
+
+    def route(state: _GraphState) -> str:
+        return "increment" if state["count"] < 8 else END
+
+    saver = InMemorySaver()
+    _wrap(cast(_StubSaver, saver), lambda: 1)
+    graph = StateGraph(_GraphState)
+    graph.add_node("increment", increment)  # pyright: ignore[reportUnknownMemberType]
+    graph.add_edge(START, "increment")
+    graph.add_conditional_edges("increment", route)
+    compiled = graph.compile(checkpointer=saver)  # pyright: ignore[reportUnknownMemberType]
+
+    config = {"configurable": {"thread_id": "carried", CHECKPOINT_INTERVAL_KEY: 4}}
+    await compiled.ainvoke({"count": 0}, config)  # pyright: ignore[reportUnknownMemberType, reportArgumentType]
+
+    stored = saver.storage["carried"][""]
+    assert 0 < len(stored) < 8
+    assert all(CHECKPOINT_INTERVAL_KEY not in metadata for _c, metadata, _p in stored.values())
+
+
 async def test_interval_one_is_pure_passthrough() -> None:
     saver = _StubSaver()
     _wrap(saver, interval=1)
@@ -336,21 +369,23 @@ async def test_interval_keeps_skipped_tails_isolated_by_thread() -> None:
     assert _stored_thread_ids(saver) == ["agent-a", "agent-b"]
 
 
-async def test_callable_interval_uses_the_current_turn_config() -> None:
-    """A shared saver resolves each hosted agent's own interval."""
-    current_interval = [4]
+async def test_a_write_carries_its_own_interval_over_the_default() -> None:
+    """A shared saver resolves each hosted agent's own interval from the turn's config; the
+    wrapper's (callable) default serves a write whose config names none."""
+    default = [4]
     saver = _StubSaver()
-    _wrap(saver, lambda: current_interval[0])
+    _wrap(saver, lambda: default[0])
 
     await _aput(saver, 1, thread_id="agent-a")
-    current_interval[0] = 1
-    await _aput(saver, 1, thread_id="agent-b")
+    await _aput(saver, 1, thread_id="agent-b", interval=1)
+    default[0] = 1
+    await _aput(saver, 1, thread_id="agent-c")
 
-    assert _stored_thread_ids(saver) == ["agent-b"]
+    assert _stored_thread_ids(saver) == ["agent-b", "agent-c"]
 
     await saver._ava_nstep_flush("agent-a")
 
-    assert _stored_thread_ids(saver) == ["agent-b", "agent-a"]
+    assert _stored_thread_ids(saver) == ["agent-b", "agent-c", "agent-a"]
 
 
 def test_checkpoint_interval_config_is_per_agent_and_defaults_to_four() -> None:

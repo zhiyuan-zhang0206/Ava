@@ -13,12 +13,17 @@ live cluster default for an unpinned field, exactly as `turn_settings` does: a c
 change reaches the agent's next turn, and a turn sees one value of each field throughout.
 
 List-valued settings are frozen into tuples.
+
+This module sits beside the config index rather than in `base.agents.context` because importing it
+pulls nothing heavy: the exec child and the SDK, which keep psycopg / redis out of their start,
+build the slices too.
 """
 
 from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass, fields
+from types import MappingProxyType
 from typing import Any, Literal, cast
 
 from base.host.env.config_lite_table import FIELD_DOMAINS
@@ -114,6 +119,15 @@ def _value(pins: Mapping[str, Any], name: str) -> Any:
     return tuple(cast("list[Any]", value)) if isinstance(value, list) else value
 
 
+def agent_setting(name: str, pins: Mapping[str, Any] | None = None) -> Any:
+    """One per-agent setting: the pin when `pins` holds one, else the live default.
+
+    For a process that needs a handful of fields and must not read the rest (the exec child boots
+    on the lite config index, and reading a field outside it upgrades the whole config).
+    """
+    return _value(pins or {}, name)
+
+
 def _kwargs(slice_type: type, pins: Mapping[str, Any]) -> dict[str, Any]:
     return {f.name: _value(pins, f.name) for f in fields(slice_type)}
 
@@ -130,6 +144,8 @@ class AgentSlices:
     llm_policy: LlmCallPolicy
     sandbox: Sandbox
     kernel: AgentKernel
+    # The agent's pins, for the settings no slice names (`read`).
+    pins: Mapping[str, Any]
 
     @classmethod
     def resolve(cls, pins: Mapping[str, Any] | None = None) -> AgentSlices:
@@ -145,4 +161,13 @@ class AgentSlices:
             llm_policy=LlmCallPolicy(**_kwargs(LlmCallPolicy, pins)),
             sandbox=Sandbox(**_kwargs(Sandbox, pins)),
             kernel=AgentKernel(**_kwargs(AgentKernel, pins)),
+            pins=MappingProxyType(dict(pins)),
         )
+
+    def read(self, domain: str, field: str) -> Any:
+        """The raw value of any core setting for this agent: its pin, else the live default."""
+        if field in self.pins:
+            return self.pins[field]
+        from base.config import settings
+
+        return getattr(getattr(settings, domain), field)

@@ -20,8 +20,8 @@ from agent.graph.system_prompt import (
     _invest_in_the_future_section,
     build_system_prompt,
 )
-from base.agents.context.slices import AgentSlices
 from base.config import settings
+from base.host.env.agent_slices import AgentSlices
 
 
 @pytest.mark.parametrize(
@@ -682,7 +682,9 @@ def test_plugin_prompt_section_records_an_activation(monkeypatch: pytest.MonkeyP
 
     recorded: list[tuple[str, str, str, str]] = []
 
-    def spy(plugin: str | None, surface: str, identifier: str, *, detail: str = "") -> None:
+    def spy(
+        plugin: str | None, surface: str, identifier: str, *, detail: str = "", model: str = ""
+    ) -> None:
         if plugin is not None:
             recorded.append((plugin, surface, identifier, detail))
 

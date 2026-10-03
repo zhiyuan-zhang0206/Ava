@@ -20,7 +20,7 @@ The system prompt carried in every LLM call, built **once per context window** �
 - Injects the skill and MCP server index — **once**. `# Capabilities` is the sole index; the expanded SDK reference's `*` skips `ava.skills` / `ava.mcps` (`_CAPABILITY_SURFACES`) so it renders call contracts only, never a second capability listing
 
 ### Plugin Registration (`register_system_prompt_section`)
-- Signature `(slices: AgentSlices) -> str` — the agent's per-turn configuration (`base/agents/context/slices.py`); returning `""` means no contribution
+- Signature `(slices: AgentSlices) -> str` — the agent's per-turn configuration (`base/host/env/agent_slices.py`); returning `""` means no contribution
 - Runs in registration order—order is priority
 - Framework's built-in sections are grouped: SDK detail → Conversation → Conduct → Capabilities
 

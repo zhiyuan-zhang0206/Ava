@@ -30,8 +30,8 @@ import ava.skills as skills_mod
 from agent.graph.capabilities import _disabled_by_sdk_config, capabilities_section
 from agent.graph.system_prompt import _delegation_check_section, build_system_prompt
 from ava.sdk_surface import sdk_disable
-from base.agents.context.slices import AgentSlices
 from base.config import FIELD_INFOS, settings
+from base.host.env.agent_slices import AgentSlices
 from base.paths import skills_dir
 from base.telemetry import audit_events
 

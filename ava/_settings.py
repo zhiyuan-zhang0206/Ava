@@ -100,9 +100,36 @@ class _LazyConnection:
         return repr(self._conn)
 
 
-def _connect_db() -> "psycopg.Connection":  # noqa: F821  # pyright: ignore[reportUndefinedVariable]
-    from base.db import connect
+# The SDK's composition root: the handles and the agent configuration every `ava.*` function of
+# this process works with. `ava.*` is a namespace of free functions the agent's code calls inside
+# its exec child (or a script one launched), so nothing can pass them a handle; they ask here. The exec child's settings
+# carry its agent's overlay (applied at boot), so `agent_setting` reads that agent's. Nothing
+# is cached: each call builds from the settings as they are now. All import lazily — `import ava`
+# must not pull the psycopg / redis / live-events stacks into every exec child (task #3816).
 
+
+def database() -> "Database":  # noqa: F821  # pyright: ignore[reportUndefinedVariable]
+    """The cluster database, as this process's settings name it."""
+    from base.db import Database
+
+    return Database.from_settings()
+
+
+def bus() -> "EventBus":  # noqa: F821  # pyright: ignore[reportUndefinedVariable]
+    """The live event bus, as this process's settings name it."""
+    from base.events.live.bus import EventBus
+
+    return EventBus.from_settings()
+
+
+def agent_setting(name: str) -> Any:
+    """One per-agent setting of this process's agent (the settings carry the overlay)."""
+    from base.host.env.agent_slices import agent_setting
+
+    return agent_setting(name)
+
+
+def _connect_db() -> "psycopg.Connection":  # noqa: F821  # pyright: ignore[reportUndefinedVariable]
     if not settings.data_plane.db_url:
         raise RuntimeError("AVA_DB_URL not set — ava DB ops should not be called in container mode")
     # autocommit=True: every op at the SDK layer is a single-statement
@@ -125,7 +152,7 @@ def _connect_db() -> "psycopg.Connection":  # noqa: F821  # pyright: ignore[repo
     # and every (re)connect scrubs the pooled session back to baseline, so
     # another client's session-level SET (2026-09-02 P0 read-only pollution)
     # cannot break this connection's writes.
-    return connect(autocommit=True)
+    return database().connect(autocommit=True)
 
 
 def _connect_redis() -> "redis.Redis":  # noqa: F821  # pyright: ignore[reportUndefinedVariable]

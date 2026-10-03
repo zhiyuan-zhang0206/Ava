@@ -18,8 +18,8 @@ from agent.graph.claim.node import _claim_node_impl
 from agent.nodes import CLAIM
 from agent.state import AttachEntry, AttachState, BaseAgentState
 from base.agents.context import AvaContext
-from base.agents.context.slices import AgentSlices
 from base.agents.messages.kwargs import AvaMsgType
+from base.host.env.agent_slices import AgentSlices
 
 
 def _write_png(path: Path) -> None:

@@ -13,9 +13,9 @@ from agent.graph.exec._stream import ExecOutputChunkPublisher
 from agent.graph.exec.node import _run_agent_code
 from agent.state import AgentState
 from base.agents.context import AvaContext
-from base.agents.context.slices import AgentSlices
 from base.config import settings
 from base.config.turn_view import bind_agent_config, resolve_agent_config_pins
+from base.host.env.agent_slices import AgentSlices
 from base.native_process.turn_identity import bind_turn_identity
 from base.packages.plugins.config_view import bind_agent_plugin_config
 

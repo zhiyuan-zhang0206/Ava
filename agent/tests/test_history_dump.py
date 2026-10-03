@@ -46,9 +46,9 @@ from agent.hooks.compact import auto_compact_for_llm, compose_summary_message
 from agent.messages import NoteTag, system_note_message
 from agent.state import AgentState
 from base.agents.context import AvaContext
-from base.agents.context.slices import AgentSlices
 from base.config import settings
 from base.config.agent_compaction import AgentCompactionSettings
+from base.host.env.agent_slices import AgentSlices
 from base.lm.context_budget import ContextBudget
 from tests.fixtures.units import spawn_agent
 

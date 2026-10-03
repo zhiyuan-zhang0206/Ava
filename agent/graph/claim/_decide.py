@@ -167,9 +167,7 @@ async def decide(
         )
         compact_run_id = emit_compact_started(ctx.event_publisher, agent_id, mode="auto")
         try:
-            summary = await emergency_compact_summary(
-                state.messages, ctx.llm, ctx.require_agent().brain.llm_model
-            )
+            summary = await emergency_compact_summary(state.messages, ctx.llm, ctx.require_agent())
         except CompactionFailedError:
             # Transient failures exhausted — the fallback rescue did not
             # happen either; close the live block before the turn aborts.

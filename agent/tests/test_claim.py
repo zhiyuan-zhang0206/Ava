@@ -34,7 +34,7 @@ from agent.state import AgentState
 from agent.tests.claim_status_support import _compact_tail
 from agent.tests.claim_status_support import running_agent as running_agent
 from agent.tests.claim_support import _config, _fake_llm, _insert_inbound_kind, _make_runtime
-from base.agents.context.slices import AgentSlices
+from base.host.env.agent_slices import AgentSlices
 from tests.fixtures.units import spawn_agent
 
 # Almost all claim tests are short-path dispatch: the inbound is INSERTed before

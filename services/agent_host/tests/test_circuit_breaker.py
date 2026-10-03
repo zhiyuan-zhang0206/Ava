@@ -41,9 +41,9 @@ from agent.tests.claim_status_support import _compact_tail, _pair_compact_cycles
 from agent.tests.claim_support import _config, _fake_llm, _insert_inbound_kind, _make_runtime
 from agent.turn.runloop import _handle_fatal_llm_error
 from base.agents.context import AvaContext
-from base.agents.context.slices import AgentSlices
 from base.config import settings
 from base.events.live.publisher import AgentEventPublisher
+from base.host.env.agent_slices import AgentSlices
 from tests.fixtures.units import spawn_agent
 
 # A summary long enough to clear COMPACT_MIN_SUMMARY_CHARS.
@@ -557,7 +557,7 @@ async def test_emergency_compact_summary_uses_real_summary() -> None:
     """The compaction call succeeds → its summary is used (the no-LLM fallback
     only fires when the request cannot go out)."""
     msgs: list[AnyMessage] = [SystemMessage(content="<sys>"), HumanMessage(content="hi")]
-    summary = await emergency_compact_summary(msgs, _fake_llm(_LONG_SUMMARY), "deepseek-flash")
+    summary = await emergency_compact_summary(msgs, _fake_llm(_LONG_SUMMARY), AgentSlices.resolve())
     assert summary == _LONG_SUMMARY
 
 
@@ -574,7 +574,7 @@ async def test_emergency_compact_summary_falls_back_on_permanent_rejection() -> 
         )
     )
 
-    summary = await emergency_compact_summary(msgs, llm, "deepseek-flash")
+    summary = await emergency_compact_summary(msgs, llm, AgentSlices.resolve())
     assert _EMERGENCY_COMPACT_MARKER in summary
     assert llm.bind_tools.return_value.ainvoke.await_count == 1, (
         "a permanent rejection must not be retried — the request cannot succeed"
@@ -596,7 +596,7 @@ async def test_emergency_compact_summary_preserves_last_prior_summary() -> None:
     llm = MagicMock()
     llm.bind_tools.return_value.ainvoke = AsyncMock(side_effect=_FakeProviderStatusError(400))
 
-    summary = await emergency_compact_summary(msgs, llm, "deepseek-flash")
+    summary = await emergency_compact_summary(msgs, llm, AgentSlices.resolve())
     assert prior in summary
     assert _EMERGENCY_COMPACT_MARKER in summary
 
@@ -610,7 +610,7 @@ async def test_emergency_compact_summary_raises_on_transient_exhaustion() -> Non
     llm.bind_tools.return_value.ainvoke = AsyncMock(side_effect=RuntimeError("provider 502"))
 
     with pytest.raises(CompactionFailedError, match="no usable summary"):
-        await emergency_compact_summary(msgs, llm, "deepseek-flash")
+        await emergency_compact_summary(msgs, llm, AgentSlices.resolve())
     assert llm.bind_tools.return_value.ainvoke.await_count == COMPACT_MAX_ATTEMPTS
 
 

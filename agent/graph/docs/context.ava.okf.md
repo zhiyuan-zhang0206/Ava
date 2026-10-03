@@ -13,7 +13,7 @@ Ava agent's dependency injection container. `AvaContext` is a dataclass that car
 
 ## Core Responsibilities
 
-- **Dependency aggregation (handles)**: `ops_pool` (DB connection pool), `llm` (ChatModel instance), `event_publisher`, and the cluster `db` / `bus` handles; plus `agent`, the agent's per-turn configuration (`base.agents.context.slices.AgentSlices`, resolved by the host when the turn starts). MCP daemon ownership is host-scoped, outside the turn context.
+- **Dependency aggregation (handles)**: `ops_pool` (DB connection pool), `llm` (ChatModel instance), `event_publisher`, and the cluster `db` / `bus` handles; plus `agent`, the agent's per-turn configuration (`base.host.env.agent_slices.AgentSlices`, resolved by the host when the turn starts). MCP daemon ownership is host-scoped, outside the turn context.
 - **Decoupling graph build**: `build_graph()` does not accept these dependencies; the caller passes them via `graph.ainvoke(..., context=AvaContext(...))`
 - **Cross-node access**: Node functions access dependencies via `runtime.context.X`
 

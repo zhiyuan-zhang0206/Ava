@@ -5,7 +5,7 @@ Owned as its own module (like `capabilities.py`) because the section list in
 registers the section explicitly so the render order stays its reading order.
 """
 
-from base.agents.context.slices import AgentSlices
+from base.host.env.agent_slices import AgentSlices
 
 
 def _codeact_section(slices: AgentSlices) -> str:

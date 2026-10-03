@@ -34,8 +34,8 @@ from agent.graph.llm_errors import (
     _parse_provider_error_type,
 )
 from agent.llm.cache import prepare_invocation
-from base.agents.context.slices import AgentSlices
 from base.config import settings
+from base.host.env.agent_slices import AgentSlices
 from base.log import logger
 
 
@@ -374,7 +374,7 @@ async def _stream_with_cache_retry(
     # to the provider, not about retry attempts.
     async def _run() -> None:
         call_started = time.monotonic()
-        invocation = await prepare_invocation(llm, messages)
+        invocation = await prepare_invocation(llm, messages, agent.llm_policy)
         # Cache provenance for the usage event: only the attempt that actually
         # succeeded counts (a stale-cache retry runs on the plain path).
         handler.used_explicit_cache = invocation.cache_ref is not None
@@ -410,7 +410,7 @@ async def _stream_with_cache_retry(
             # text) or stall code deltas (concatenated args JSON fails to parse).
             # Reset to a fresh-stream state; msg_idx / agent_id survive by design.
             handler.reset()
-            plain = await prepare_invocation(llm, messages)
+            plain = await prepare_invocation(llm, messages, agent.llm_policy)
             handler.used_explicit_cache = plain.cache_ref is not None  # plain path: always False
             first_ts, last_ts = await _consume_llm(
                 plain.runnable,  # pyright: ignore[reportUnknownMemberType, reportUnknownArgumentType]

@@ -48,7 +48,6 @@ from __future__ import annotations
 
 import contextlib
 
-from base.config.turn_view import turn_settings
 from base.log import logger
 from base.packages.plugins.contributions import SurfaceId
 
@@ -62,6 +61,7 @@ def record(
     identifier: str,
     *,
     detail: str = "",
+    model: str,
 ) -> None:
     """Record one activation of `plugin`'s contribution at `surface`/`identifier`.
 
@@ -70,6 +70,9 @@ def record(
     import, and nothing is recorded. `surface` and `identifier` must be spelled
     the way the matching `plugin_contributions.Contribution` spells them — that
     is what makes the ledger and these events joinable.
+
+    `model` is the model in force for the agent (the event carries it so obsolescence is a per-model
+    query); the caller reads it from the agent's slices.
 
     `detail` is one line of specifics about *this* firing (the state keys a hook
     wrote, how many times a wrapper called `inner`, a section's length) — free
@@ -87,10 +90,10 @@ def record(
     # may fail because telemetry did. `Exception` only, so a cancel/timeout
     # injection still propagates.
     with contextlib.suppress(Exception):
-        emit(plugin, surface, identifier, detail)
+        emit(plugin, surface, identifier, detail, model)
 
 
-def emit(plugin: str, surface: SurfaceId, identifier: str, detail: str) -> None:
+def emit(plugin: str, surface: SurfaceId, identifier: str, detail: str, model: str) -> None:
     """Write one `plugin_activation` event. Raises on a broken sink — `record`
     is the guarded entry point every production caller uses."""
 
@@ -100,5 +103,5 @@ def emit(plugin: str, surface: SurfaceId, identifier: str, detail: str) -> None:
         surface=surface,
         identifier=identifier,
         detail=detail,
-        model=turn_settings.lm.llm_model,
+        model=model,
     ).info("plugin_activation")

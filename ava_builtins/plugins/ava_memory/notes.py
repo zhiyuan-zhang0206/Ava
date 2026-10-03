@@ -30,8 +30,8 @@ from pathlib import Path
 from langchain_core.messages import HumanMessage
 
 from agent.messages import NoteTag, system_note_message
-from base.agents.context.slices import AgentSlices
 from base.config import settings
+from base.host.env.agent_slices import AgentSlices
 from base.log import logger
 from base.paths import memory_dir, workspace_dir
 

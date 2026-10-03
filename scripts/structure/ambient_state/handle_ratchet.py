@@ -9,7 +9,7 @@ governed yet: they still dial through the process-default shim (`connect` / `poo
 `async_pool` / `direct_db_url` / a pool-less `write_transaction`) or build their own
 `Database.from_settings()`; the same holds for an `EventBus.from_settings()` built outside
 `BUS_PACKAGES`. The per-agent settings a turn reads come from the `AgentSlices` on
-`AvaContext` (`base/agents/context/slices.py`), not from the context-bound `turn_settings`
+`AvaContext` (`base/host/env/agent_slices.py`), not from the context-bound `turn_settings`
 proxy; the sites that still read the proxy are counted the same way. This lint counts those
 sites per package, freezes the counts in
 `handle_ratchet_baseline.json`, and lets them only fall:

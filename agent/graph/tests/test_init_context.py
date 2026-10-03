@@ -21,9 +21,9 @@ from psycopg_pool import AsyncConnectionPool
 from agent.graph._init_context import init_context_node
 from agent.state import AgentState, ContextReset
 from base.agents.context import AvaContext
-from base.agents.context.slices import AgentSlices
 from base.config import settings
 from base.db import create_agent
+from base.host.env.agent_slices import AgentSlices
 from base.paths import skills_dir
 
 

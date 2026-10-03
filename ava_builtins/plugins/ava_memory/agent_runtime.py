@@ -28,8 +28,8 @@ from agent.hooks.compact import auto_compact_will_fire
 from agent.messages import tail_has_recallable_inbound
 from agent.state import AgentState, MemoryState
 from base.agents.context import AvaContext
-from base.agents.context.slices import AgentSlices
 from base.config import settings
+from base.host.env.agent_slices import AgentSlices
 from base.log import logger
 
 from .inherit import inherited_memory_note

@@ -14,7 +14,7 @@ import pytest
 
 from agent.graph.context_notes import _CONTEXT_NOTES, _FRAMEWORK_NOTE_COUNT, context_notes
 from agent.state import clear_plugin_registrations
-from base.agents.context.slices import AgentSlices
+from base.host.env.agent_slices import AgentSlices
 
 
 @pytest.fixture(autouse=True)

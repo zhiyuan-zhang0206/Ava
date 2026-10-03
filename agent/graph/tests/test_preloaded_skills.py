@@ -21,9 +21,9 @@ import pytest
 import ava.skills as skills_mod
 from agent.graph.capabilities import resolve_prompt_skills
 from agent.graph.context_notes import preloaded_skills_note
-from base.agents.context.slices import AgentSlices
 from base.agents.messages.kwargs import NoteTag
 from base.config import settings
+from base.host.env.agent_slices import AgentSlices
 from base.paths import skills_dir
 
 
