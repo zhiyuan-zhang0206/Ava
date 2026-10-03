@@ -15,7 +15,6 @@ classifiers = [
 ]
 requires-python = ">=3.12"
 dependencies = [
-    "argon2-cffi>=23.1.0",
     "psycopg[binary]>=3.2",
     "psycopg-pool>=3.2",
     "psutil>=7.1.0",
@@ -57,7 +56,6 @@ dependencies = [
     "opentelemetry-sdk>=1.30",
     "opentelemetry-exporter-otlp-proto-http>=1.30",
     "yt-dlp>=2026.3.17",
-    "browser-cookie3>=0.20.1",
     "pyyaml>=6.0.3",
     "httpx[socks]>=0.28",
     "feedparser>=6.0.12",

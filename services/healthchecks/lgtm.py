@@ -81,12 +81,6 @@ def probe_backend(name: str) -> DaemonProbe:
     return probe_endpoint(name, port, partial(_protocol_readiness, name))
 
 
-def probe_statuses() -> list[tuple[str, bool]]:
-    from base.telemetry.lgtm_local import BACKENDS
-
-    return [(name, probe_backend(name).alive) for name in BACKENDS]
-
-
 def write_path_probe() -> tuple[bool, str]:
     """Send one unique OTLP log and verify that Loki made it queryable."""
     now_ns = time.time_ns()

@@ -28,7 +28,7 @@ SELECTED replaces the backend pytest fan-out, and only in enforce mode.
 | --- | --- | --- |
 | 1 | Not a pull_request, or head ref begins trunk-merge/ or trunk-temp/ | FULL (queue-or-non-pr) |
 | 2 | Every path is a documentation path | SKIP |
-| 3 | A path is under base/, ava/, agent/, ava_builtins/, db/, migrations/, or evals/ and is not inside a `tests/` directory | FULL (the report names the forced root) |
+| 3 | A path is under base/, ava/, agent/, ava_builtins/, db/, or migrations/ and is not inside a `tests/` directory | FULL (the report names the forced root) |
 | 4 | A path is pyproject.toml, .test_durations, or any conftest.py | FULL |
 | 5 | A path is under tests/e2e/ | FULL |
 | 6 | A path is neither a current collectable backend test, a direct-map source key, nor documentation | FULL (unmapped) |
@@ -76,7 +76,7 @@ modules are omitted.
 Only importer files named test_*.py or *_test.py outside tests/e2e/ are
 collectable. Test helpers are still inspected but do not add selected tests.
 Resolution considers these source roots: agent, ava, cli, gateway, ops,
-services, base, ava_builtins, evals, ui, scripts, and schedules.
+services, base, ava_builtins, ui, scripts, and schedules.
 
 This is intentionally a direct static map, not a coverage claim. About 280 of
 roughly 970 source files have no static test reachability, including

@@ -89,12 +89,11 @@ from scripts.structure import import_cache, lint_common, placement_evidence
 # First-party code tops that take part in placement (import-linter roots + scripts).
 CODE_TOPS = (*lint_common.FRAMEWORK_DIRS, "scripts")
 # Further first-party tops a test may patch into; they take no part in placement.
-PATCH_TOPS = (*CODE_TOPS, "schedules", "commands", "demos", "evals")
+PATCH_TOPS = (*CODE_TOPS, "schedules", "commands", "demos")
 _ARTIFACT_TOPS = (
     "schedules",
     "commands",
     "demos",
-    "evals",
     "db",
     "deploy",
     "ui",
@@ -114,7 +113,6 @@ _ROOT_FILES = (
     "uv.lock",
     ".pre-commit-config.yaml",
     "AGENTS.md",
-    "docker-compose.yml",
     ".gitleaks.toml",
     "CHANGELOG.md",
     ".test_durations",

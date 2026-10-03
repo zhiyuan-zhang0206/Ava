@@ -11,9 +11,9 @@ tags:
 # Path Lock Discipline
 
 - **`.env` rewrites are serialized across processes — at every door.** There are
-  four: `runtime_config.write_fields` (the config panel / ops `config_write`),
-  `dotenv_file.upsert_env` (first-start identity and development converge),
-  `dotenv_file.remove_env`, and `runtime_config.rename_env_keys`. Each holds `base/native_process/os_platform.py:file_lock` on the sibling `.env.lock`
+  three: `runtime_config.write_fields` (the config panel / ops `config_write`),
+  `dotenv_file.upsert_env` (first-start identity and development converge), and
+  `dotenv_file.remove_env`. Each holds `base/native_process/os_platform.py:file_lock` on the sibling `.env.lock`
   (`dotenv_file.env_lock_path`) for its whole read-modify-write, with a bounded wait —
   `LockTimeoutError` on expiry rather than writing unsynchronized. Locking one door
   orders nothing: the interleave that matters is converge's `upsert_env` against the

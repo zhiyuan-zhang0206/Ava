@@ -387,39 +387,3 @@ def test_replayed_turns_with_missing_duration_cannot_replace_historical_histogra
     assert result.stats is not None
     assert result.stats.turn_p50_seconds == 3
     assert result.metadata.turns.duration_precision == "one_second_buckets"
-
-
-def test_unaddressable_archive_precision_is_retained_and_reported(
-    db_conn: psycopg.Connection,
-) -> None:
-    end = datetime.now(UTC)
-    start = end - timedelta(days=10)
-    aid = _agent(db_conn, start)
-    db_conn.execute(
-        "INSERT INTO agent_archive_stats(agent_id,turn_distribution) VALUES (%s,'[[1.125,2]]')",
-        (aid,),
-    )
-    result = _read(db_conn, aid, start, end, collection=end)
-    assert result.stats is None
-    assert result.metadata.turns.availability == "unavailable"
-    assert result.metadata.turns.retained_unapplied_sources == ["historical_archive_distribution"]
-    assert db_conn.execute(
-        "SELECT turn_distribution FROM agent_archive_stats WHERE agent_id=%s", (aid,)
-    ).fetchone() == ([[1.125, 2]],)
-
-
-def test_missing_duration_reason_survives_retained_archive_notice(
-    db_conn: psycopg.Connection,
-) -> None:
-    end = datetime.now(UTC)
-    start = end - timedelta(hours=1)
-    aid = _agent(db_conn, start)
-    db_conn.execute(
-        "INSERT INTO agent_archive_stats(agent_id,turn_distribution) VALUES (%s,'[[1.125,2]]')",
-        (aid,),
-    )
-    write_observations([MetricObservation(1, aid, start, "turn", turn_total=1)], db=db_conn)
-    result = _read(db_conn, aid, start, end, collection=end)
-    assert result.metadata.turns.reason == "missing_turn_durations"
-    assert result.metadata.turns.duration_precision is None
-    assert result.metadata.turns.retained_unapplied_sources == ["historical_archive_distribution"]

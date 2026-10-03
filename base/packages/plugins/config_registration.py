@@ -328,11 +328,6 @@ def process_plugin_config(plugin: str) -> BaseModel:
     return _PLUGIN_CONFIGS[plugin]
 
 
-def all_plugin_config_classes() -> dict[str, type[BaseModel]]:
-    """Shallow copy of all registered Config classes — used by `ava plugins update`."""
-    return dict(_PLUGIN_CONFIG_CLASSES)
-
-
 def _schema_extra(info: FieldInfo) -> dict[str, Any]:
     """Collapse pydantic's `FieldInfo.json_schema_extra` (typed as
     dict | callable | None, its dict branch partially Unknown) to a plain

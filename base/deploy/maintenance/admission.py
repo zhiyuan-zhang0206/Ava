@@ -116,13 +116,6 @@ def in_stop_leg() -> bool:
     return current.maintenance.phase in _STOP_LEG_PHASES
 
 
-def require_released(action: str) -> None:
-    if held():
-        raise RuntimeError(
-            f"{action} cannot override maintenance; run ava start to resume this unit first"
-        )
-
-
 def start_authorized() -> bool:
     current = snapshot()
     return current is not None and _authorized_start.get() == (current.holder, current.acquired_at)

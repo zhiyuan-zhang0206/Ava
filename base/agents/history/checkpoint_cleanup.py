@@ -333,37 +333,6 @@ async def _enqueue_compact_job(
         _enqueue_failed(agent_id, exc)
 
 
-def mark_compact_boundary_sync(
-    pool: ConnectionPool,
-    thread_id: str,
-    *,
-    checkpoint_ns: str = "",
-) -> None:
-    """Synchronous twin of `mark_compact_boundary` (gateway-side maintenance)."""
-    with write_transaction(pool) as conn, conn.cursor() as cur:
-        cur.execute(_MARK_BOUNDARY_SQL, (thread_id, checkpoint_ns, thread_id, checkpoint_ns))
-        row = cur.fetchone()
-    _enqueue_compact_job_sync(pool, thread_id, row[0] if row is not None else None)
-
-
-def _enqueue_compact_job_sync(pool: ConnectionPool, thread_id: str, boundary: str | None) -> None:
-    """Best-effort twin of `_enqueue_compact_job` over the sync pool."""
-    agent_id = _compact_agent_id(thread_id)
-    if agent_id is None or boundary is None or not settings.daemon.hierarchy_worker_enabled:
-        return
-    try:
-        with write_transaction(pool) as conn, conn.cursor() as cur:
-            cur.execute(_ENQUEUE_COMPACT_JOB_SQL, (agent_id, boundary))
-    except Exception as exc:
-        logger.warning(
-            "hierarchy enqueue failed for agent {agent} (boundary {boundary}): {error!r}",
-            agent=agent_id,
-            boundary=boundary,
-            error=exc,
-        )
-        _enqueue_failed(agent_id, exc)
-
-
 async def count_checkpoints(
     pool: AsyncConnectionPool,
     thread_id: str,

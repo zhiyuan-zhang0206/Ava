@@ -462,11 +462,10 @@ pure filtering burden for metrics/rollup. **Governance**: downgrade the DB sink
   **merged**: the label display name is unified as `llm_provider_error`, one event
   name.
 
-### 7.4 [P2] Historical event_names with no producer
+### 7.4 [Resolved] Historical event_names with no producer
 
 `report_activity` (5,274 rows) and `report_breached` (14 rows) have no producer left
-in code, but the schema comment and the self-evolution collector still reference
-them. Confirm keep/retire when the unified model lands.
+in code; both are declared `retired`. Only pre-retirement rows carry them.
 
 ### 7.5 [Resolved] skill_invoked parse/injection noise
 

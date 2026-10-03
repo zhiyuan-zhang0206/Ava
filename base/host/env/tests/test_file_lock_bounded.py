@@ -154,13 +154,13 @@ def _recorded_lock(monkeypatch: pytest.MonkeyPatch, module: object, taken: list[
 def test_every_env_write_door_takes_the_lock(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """All FOUR doors, not just the one this started with.
+    """All THREE doors, not just the one this started with.
 
     The first version of this change locked `write_fields` alone and claimed the
     CLI-converge / gateway-PUT / ops-daemon race was closed. It was not: converge
-    writes `.env` through `upsert_env` on **every `ava start`**, `remove_env` and
-    `rename_env_keys` are two more rewrites. First start uses the same
-    upsert_env writer. A lock on one door orders nothing.
+    writes `.env` through `upsert_env` on **every `ava start`**, and `remove_env`
+    is another rewrite. First start uses the same upsert_env writer. A lock on
+    one door orders nothing.
     """
     import base.host.env.dotenv_file as dotenv_file_mod
     import base.host.env.runtime_config as rc
@@ -177,9 +177,8 @@ def test_every_env_write_door_takes_the_lock(
     rc.write_fields({}, set())
     dotenv_file_mod.upsert_env(env, {"AVA_NEW": "2"})
     dotenv_file_mod.remove_env(env, {"AVA_OLD"})
-    rc.rename_env_keys(env, {"AVA_NEW": "AVA_RENAMED"})
 
-    assert len(taken) == 4, f"a door wrote .env without the lock: {taken}"
+    assert len(taken) == 3, f"a door wrote .env without the lock: {taken}"
     assert set(taken) == {expected}
 
 
@@ -196,7 +195,6 @@ def test_the_write_doors_are_leaves(tmp_path: Path) -> None:
     doors = {
         "upsert_env": dotenv_file_mod.upsert_env,
         "remove_env": dotenv_file_mod.remove_env,
-        "rename_env_keys": rc.rename_env_keys,
         "write_fields": rc.write_fields,
     }
     for name, fn in doors.items():

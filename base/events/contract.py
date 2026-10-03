@@ -19,7 +19,7 @@ and the ops grid constants.
 
 from __future__ import annotations
 
-from typing import LiteralString, get_type_hints
+from typing import get_type_hints
 
 from base.events.loader import load_events
 from base.events.vocabulary import LLM_ERROR_FAMILY as LLM_ERROR_FAMILY
@@ -123,14 +123,3 @@ PLUGIN_ACTIVATION_KEYS = _sql_keys("plugin_activation")
 def registered_payload_keys() -> frozenset[str]:
     """Every declared attribute key — the SQL-key lint's registration surface."""
     return frozenset(k for spec in EVENTS.values() for k in payload_keys(spec.name))
-
-
-def sql_join(*parts: str) -> LiteralString:
-    """Join static SQL fragments into one query (``LiteralString``).
-
-    Direct ``cur.execute`` read sites build through this helper so ruff's
-    S608 heuristic does not misread a registry constant as user input, and
-    psycopg's injection guard stays intact. Parts must be literals or
-    registry-derived constants — never request-path values.
-    """
-    return "".join(parts)  # type: ignore[return-value]

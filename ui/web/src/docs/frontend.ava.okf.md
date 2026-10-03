@@ -8,7 +8,7 @@ tags:
 
 # Frontend UI
 
-Ava's web user interface — Next.js 16 (App Router) + React 19 + Tailwind CSS 4 + shadcn/ui (Radix). Runs on port 3000, browser **directly connects** to Gateway API (`<host>:8000`, `credentials: include` with session cookie), does not go through Next.js rewrites proxy (Turbopack dev proxy buffers SSE). Stack policy: `conventions/frontend-stack.md` (shadcn/Radix/Tailwind mainstream only).
+Ava's web user interface — Next.js 16 (App Router) + React 19 + Tailwind CSS 4 + shadcn/ui (Radix). Runs on port 3000, browser **directly connects** to Gateway API (`<host>:8000`, `credentials: include` with session cookie), does not go through Next.js rewrites proxy (Turbopack dev proxy buffers SSE).
 
 ## Tech stack
 

@@ -217,18 +217,6 @@ def _decode(row: tuple[Any, ...] | None) -> LifecycleIntent | None:
     return LifecycleIntent(*row[1:7])
 
 
-def accept_lifecycle_command(
-    conn: psycopg.Connection, target: RuntimeIncarnation
-) -> LifecycleIntent | None:
-    """Caller retains its ownership/absence proof lock through this write."""
-    if conn.info.transaction_status != TransactionStatus.INTRANS:
-        raise RuntimeError("lifecycle acceptance requires an explicit transaction")
-    _settle_superseded_by_resurrect(conn, target.agent_id)
-    return _decode(
-        conn.execute(_ACCEPT, (target.agent_id, target.generation, target.owner)).fetchone()
-    )
-
-
 async def accept_lifecycle_command_async(
     conn: psycopg.AsyncConnection, target: RuntimeIncarnation
 ) -> LifecycleIntent | None:

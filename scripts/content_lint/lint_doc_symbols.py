@@ -109,8 +109,8 @@ _DUNDER = re.compile(r"^__[a-z_]+__$")
 # sibling local lints.
 _EXEMPT: set[str] = {
     "git",  # the clone URL's `.../ava.git` (install / dev-setup / windows-setup)
-    "fleet",  # localStorage key prefix "ava.fleet.*" (conventions/frontend-stack.md), not an SDK member
-    "active",  # localStorage key prefix "ava.active.*" (same doc), not an SDK member
+    "fleet",  # localStorage key prefix "ava.fleet.*", not an SDK member
+    "active",  # localStorage key prefix "ava.active.*", not an SDK member
     # The OTel root-span attribute keys "ava.checkpoint_id" / "ava.turn"
     # (base/telemetry/tracing.py) — span attribute names, not SDK members.
     "checkpoint_id",
