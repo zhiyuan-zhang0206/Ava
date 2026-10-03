@@ -170,6 +170,102 @@ _RESTART_REQUIRED_PROFILE = {
 }
 
 
+def _validate_field(name: str, attr: str, extra: dict[str, Any], default_capability: str) -> str:
+    """Fail fast on one field's ownership metadata; returns its validated capability."""
+    scope = extra.get("scope")
+    # The field's capability is its explicit override or the domain default;
+    # a bad override can never load (same fail-fast posture as scope).
+    capability = extra.get("capability", default_capability)
+    if capability not in _ALLOWED_CAPABILITIES:
+        raise RuntimeError(
+            f"config field {name!r} ({attr}) has capability={capability!r}; must be "
+            f"one of {sorted(_ALLOWED_CAPABILITIES)} — it names the config-panel "
+            f"section the field renders under"
+        )
+    if scope not in _ALLOWED_SCOPES:
+        raise RuntimeError(
+            f"config field {name!r} ({attr}) has scope={scope!r}; must be one of "
+            f"{sorted(_ALLOWED_SCOPES)} — scope drives BOOTSTRAP_FIELDS distribution + "
+            f".env write routing"
+        )
+    _validate_scope_rules(name, extra, scope)
+    _validate_lifecycle(name, attr, extra)
+    _validate_restart_required(name, attr, extra)
+    return capability
+
+
+def _validate_scope_rules(name: str, extra: dict[str, Any], scope: object) -> None:
+    if scope == "host" and not isinstance(extra.get("remote_writable"), bool):
+        raise RuntimeError(
+            f"host-scope field {name!r} must declare remote_writable: bool "
+            f"(got {extra.get('remote_writable')!r})"
+        )
+    if scope != "host" and extra.get("remote_writable") is True:
+        raise RuntimeError(
+            f"non-host field {name!r} sets remote_writable=True — only host-scope "
+            f"fields are remote-writable"
+        )
+    if scope == "cluster-default" and extra.get("per_agent") is not True:
+        raise RuntimeError(
+            f"cluster-default field {name!r} must be per_agent=True (the per-agent override gate)"
+        )
+
+
+def _validate_lifecycle(name: str, attr: str, extra: dict[str, Any]) -> None:
+    lifecycle = extra.get("lifecycle")
+    if extra.get("per_agent") is True:
+        if lifecycle not in _ALLOWED_LIFECYCLES:
+            raise RuntimeError(
+                f"per-agent field {name!r} ({attr}) has lifecycle={lifecycle!r}; must be "
+                f"one of {sorted(_ALLOWED_LIFECYCLES)} — 'frozen' is stamped into "
+                f"agents_meta.birth_config at spawn and replayed for the agent's life, "
+                f"'live' is re-read from cluster config at every process start. There is "
+                f"no default: the choice is a semantic ruling about whether the field is "
+                f"the agent's identity material or an operational knob."
+            )
+    elif lifecycle is not None:
+        raise RuntimeError(
+            f"field {name!r} ({attr}) declares lifecycle={lifecycle!r} but is not "
+            f"per_agent=True — the lifecycle axis only applies to fields that HAVE a "
+            f"per-agent instance to freeze; cluster-scope config is read live by "
+            f"whatever process next starts"
+        )
+
+
+def _validate_restart_required(name: str, attr: str, extra: dict[str, Any]) -> None:
+    restart_required = extra.get("restart_required", "")
+    if restart_required not in _ALLOWED_RESTART_REQUIRED:
+        raise RuntimeError(
+            f"config field {name!r} ({attr}) has restart_required={restart_required!r}; "
+            f"must be one of {sorted(_ALLOWED_RESTART_REQUIRED)} — it names the process "
+            f"the operator must restart after a change, and the panel/CLI prompt from it"
+        )
+    # Cross-check against the consumption matrix: restart_required names a
+    # process kind, so that kind's config profile must contain the field's
+    # domain (the profile sets ARE the consumption matrix — verified
+    # bidirectionally by cli/commands/lifecycle/tests/test_gateway_consumer_guard.py). A
+    # field only a gateway daemon reads marked "agent" would have the
+    # operator restart the wrong process and the change silently not take
+    # effect (the telegram/feishu/im_* 11-field bug this check seals, lost
+    # in the main rebuild and re-landed by #1226). "schedule" / "all" / ""
+    # carry no constraint.
+    profile_kind = _RESTART_REQUIRED_PROFILE.get(restart_required)
+    if profile_kind is not None:
+        from base.config.profiles import PROCESS_PROFILES
+
+        profile = PROCESS_PROFILES[profile_kind]  # type: ignore[index]
+        if attr not in profile:
+            raise RuntimeError(
+                f"field {name!r} ({attr}) declares restart_required={restart_required!r} "
+                f"but its domain is not in the {profile_kind!r} process profile "
+                f"({sorted(profile)}) — the named process kind "
+                f"does not consume this field, so the operator would restart the wrong "
+                f"process and the change would silently not take effect. Point it at "
+                f"the kind that actually reads it (the im_bridge-consumed telegram/feishu/"
+                f"im_* fields are 'gateway'), or use 'all' or 'schedule'."
+            )
+
+
 @lru_cache(maxsize=1)
 def _build_registry() -> dict[str, _FieldRef]:
     """Walk the sub-models into a flat name->owner registry, failing fast on an
@@ -203,86 +299,7 @@ def _build_registry() -> dict[str, _FieldRef]:
                     f"requires globally-unique field names"
                 )
             extra = schema_extra(info)
-            scope = extra.get("scope")
-            # The field's capability is its explicit override or the domain default;
-            # a bad override can never load (same fail-fast posture as scope).
-            capability = extra.get("capability", default_capability)
-            if capability not in _ALLOWED_CAPABILITIES:
-                raise RuntimeError(
-                    f"config field {name!r} ({attr}) has capability={capability!r}; must be "
-                    f"one of {sorted(_ALLOWED_CAPABILITIES)} — it names the config-panel "
-                    f"section the field renders under"
-                )
-            if scope not in _ALLOWED_SCOPES:
-                raise RuntimeError(
-                    f"config field {name!r} ({attr}) has scope={scope!r}; must be one of "
-                    f"{sorted(_ALLOWED_SCOPES)} — scope drives BOOTSTRAP_FIELDS distribution + "
-                    f".env write routing"
-                )
-            if scope == "host" and not isinstance(extra.get("remote_writable"), bool):
-                raise RuntimeError(
-                    f"host-scope field {name!r} must declare remote_writable: bool "
-                    f"(got {extra.get('remote_writable')!r})"
-                )
-            if scope != "host" and extra.get("remote_writable") is True:
-                raise RuntimeError(
-                    f"non-host field {name!r} sets remote_writable=True — only host-scope "
-                    f"fields are remote-writable"
-                )
-            if scope == "cluster-default" and extra.get("per_agent") is not True:
-                raise RuntimeError(
-                    f"cluster-default field {name!r} must be per_agent=True (the per-agent "
-                    f"override gate)"
-                )
-            lifecycle = extra.get("lifecycle")
-            if extra.get("per_agent") is True:
-                if lifecycle not in _ALLOWED_LIFECYCLES:
-                    raise RuntimeError(
-                        f"per-agent field {name!r} ({attr}) has lifecycle={lifecycle!r}; must be "
-                        f"one of {sorted(_ALLOWED_LIFECYCLES)} — 'frozen' is stamped into "
-                        f"agents_meta.birth_config at spawn and replayed for the agent's life, "
-                        f"'live' is re-read from cluster config at every process start. There is "
-                        f"no default: the choice is a semantic ruling about whether the field is "
-                        f"the agent's identity material or an operational knob."
-                    )
-            elif lifecycle is not None:
-                raise RuntimeError(
-                    f"field {name!r} ({attr}) declares lifecycle={lifecycle!r} but is not "
-                    f"per_agent=True — the lifecycle axis only applies to fields that HAVE a "
-                    f"per-agent instance to freeze; cluster-scope config is read live by "
-                    f"whatever process next starts"
-                )
-            restart_required = extra.get("restart_required", "")
-            if restart_required not in _ALLOWED_RESTART_REQUIRED:
-                raise RuntimeError(
-                    f"config field {name!r} ({attr}) has restart_required={restart_required!r}; "
-                    f"must be one of {sorted(_ALLOWED_RESTART_REQUIRED)} — it names the process "
-                    f"the operator must restart after a change, and the panel/CLI prompt from it"
-                )
-            # Cross-check against the consumption matrix: restart_required names a
-            # process kind, so that kind's config profile must contain the field's
-            # domain (the profile sets ARE the consumption matrix — verified
-            # bidirectionally by cli/commands/lifecycle/tests/test_gateway_consumer_guard.py). A
-            # field only a gateway daemon reads marked "agent" would have the
-            # operator restart the wrong process and the change silently not take
-            # effect (the telegram/feishu/im_* 11-field bug this check seals, lost
-            # in the main rebuild and re-landed by #1226). "schedule" / "all" / ""
-            # carry no constraint.
-            profile_kind = _RESTART_REQUIRED_PROFILE.get(restart_required)
-            if profile_kind is not None:
-                from base.config.profiles import PROCESS_PROFILES
-
-                profile = PROCESS_PROFILES[profile_kind]  # type: ignore[index]
-                if attr not in profile:
-                    raise RuntimeError(
-                        f"field {name!r} ({attr}) declares restart_required={restart_required!r} "
-                        f"but its domain is not in the {profile_kind!r} process profile "
-                        f"({sorted(profile)}) — the named process kind "
-                        f"does not consume this field, so the operator would restart the wrong "
-                        f"process and the change would silently not take effect. Point it at "
-                        f"the kind that actually reads it (the im_bridge-consumed telegram/feishu/"
-                        f"im_* fields are 'gateway'), or use 'all' or 'schedule'."
-                    )
+            capability = _validate_field(name, attr, extra, default_capability)
             reg[name] = _FieldRef(
                 name=name,
                 domain=attr,
