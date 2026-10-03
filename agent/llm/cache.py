@@ -29,7 +29,7 @@ from langchain_core.runnables import Runnable
 from loguru import logger
 
 from agent.llm import execute_code
-from base.agents.context.slices import LlmCallPolicy
+from base.host.env.agent_slices import LlmCallPolicy
 
 
 class CacheRef(Protocol):

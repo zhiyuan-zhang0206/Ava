@@ -10,11 +10,11 @@ from psycopg_pool import AsyncConnectionPool
 
 from agent.db import claim_inbound_batch
 from agent.ownership.hosted import admit_hosted_runtime, apply_hosted_lifecycle
-from base.agents.context.slices import AgentSlices
 from base.cluster.machine import machine_name
 from base.db import Database
 from base.deploy.maintenance import admission, cohort, pause_owner
 from base.events.live.bus import EventBus
+from base.host.env.agent_slices import AgentSlices
 from base.native_process.turn_identity import bind_turn_identity
 from services.agent_host.host import AgentHost
 from services.agent_host.runtime import TurnOutcome

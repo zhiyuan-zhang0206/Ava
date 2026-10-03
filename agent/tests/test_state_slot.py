@@ -53,8 +53,8 @@ from agent.state import (
     register_plugin_state,
 )
 from base.agents.context import AvaContext
-from base.agents.context.slices import AgentSlices
 from base.config.turn_view import bind_agent_config
+from base.host.env.agent_slices import AgentSlices
 from base.packages.plugins.context import PluginContext
 
 assert (

@@ -15,7 +15,7 @@ from agent.state import CircuitState
 from agent.turn.runloop import _handle_fatal_llm_error
 from base import telemetry
 from base.agents.context import AvaContext
-from base.agents.context.slices import AgentSlices
+from base.host.env.agent_slices import AgentSlices
 from tests.fixtures.units import spawn_agent
 
 

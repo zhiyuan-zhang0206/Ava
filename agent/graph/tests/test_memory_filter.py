@@ -15,7 +15,7 @@ import pytest
 from langchain_core.messages import AIMessage
 
 from agent.graph._memory_filter import Candidate, filter_candidates
-from base.agents.context.slices import AgentSlices
+from base.host.env.agent_slices import AgentSlices
 
 
 def _candidates(*paths: str) -> list[Candidate]:

@@ -33,7 +33,7 @@ from agent.graph.system_prompt import register_system_prompt_section
 from agent.hooks import Hook, register_after_exec, register_after_init
 from agent.messages import NoteTag, system_note_message
 from agent.state import AgentState, register_plugin_state
-from base.agents.context.slices import AgentSlices
+from base.host.env.agent_slices import AgentSlices
 from base.log import logger
 from base.paths import workspace_dir
 

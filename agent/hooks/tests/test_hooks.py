@@ -24,7 +24,7 @@ from agent.hooks import (
 from agent.state import AgentState
 from agent.tests._fakes import make_fake_ops_pool
 from base.agents.context import AvaContext
-from base.agents.context.slices import AgentSlices
+from base.host.env.agent_slices import AgentSlices
 from base.packages.plugins import activation, contributions
 from base.packages.plugins.context import PluginContext
 

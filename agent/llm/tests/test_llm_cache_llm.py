@@ -10,7 +10,7 @@ from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
 from agent.llm.cache import ainvoke_with_cache_retry
-from base.agents.context.slices import AgentSlices
+from base.host.env.agent_slices import AgentSlices
 
 _SYSTEM = SystemMessage(content="You are a test agent. " * 100)
 

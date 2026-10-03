@@ -11,8 +11,8 @@ in `plugin.py` and loads in agent-launched children too (task #3633).
 from __future__ import annotations
 
 from agent.graph.system_prompt import register_system_prompt_section
-from base.agents.context.slices import AgentSlices
 from base.config import settings
+from base.host.env.agent_slices import AgentSlices
 
 
 @register_system_prompt_section

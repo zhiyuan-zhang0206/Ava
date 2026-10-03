@@ -37,9 +37,9 @@ from typing import Any
 from langchain_core.messages import HumanMessage
 
 from agent.messages import NoteTag, system_note_message
-from base.agents.context.slices import AgentSlices
 from base.clock import Clock
 from base.config import settings
+from base.host.env.agent_slices import AgentSlices
 from base.log import logger
 from base.packages.plugins import contributions
 from base.paths import workspace_dir

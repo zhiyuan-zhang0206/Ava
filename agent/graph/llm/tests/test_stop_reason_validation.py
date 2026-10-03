@@ -32,7 +32,7 @@ from agent.graph.llm_errors import (
     LLMStreamTruncatedError,
     LLMStreamUnexpectedStopReasonError,
 )
-from base.agents.context.slices import AgentSlices
+from base.host.env.agent_slices import AgentSlices
 from base.lm.plugin_providers import ensure_provider_plugins_loaded
 
 ensure_provider_plugins_loaded()

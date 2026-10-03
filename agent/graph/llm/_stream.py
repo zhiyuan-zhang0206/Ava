@@ -34,8 +34,8 @@ from agent.graph.llm_errors import (
     _parse_provider_error_type,
 )
 from agent.llm.cache import prepare_invocation
-from base.agents.context.slices import AgentSlices
 from base.config import settings
+from base.host.env.agent_slices import AgentSlices
 from base.log import logger
 
 

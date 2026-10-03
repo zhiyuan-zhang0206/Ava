@@ -32,12 +32,12 @@ from agent.nodes import BEFORE_LLM, CLAIM, END
 from agent.state_channels import CIRCUIT_REASON_CONTEXT_OVERFLOW
 from ava.security import SecurityFindingEntry, scan_inbound_content
 from base.agents.context import AvaContext
-from base.agents.context.slices import AgentSlices
 from base.agents.messages.inbound import InboundKind
 from base.agents.messages.kwargs import AvaMsgType, read_ava_kwargs
 from base.clock import Clock
 from base.config import settings
 from base.events.live.projection import Cancelled
+from base.host.env.agent_slices import AgentSlices
 from base.log import logger
 
 from ._routing import _ROUTING_KINDS, ClaimGoto, _Routing

@@ -20,11 +20,11 @@ from agent.ownership.hosted import (
 from agent.ownership.tests.test_lifecycle_intent import _command
 from agent.tests.test_inbound_ownership import _admit, _agent
 from base.agents.context import AvaContext
-from base.agents.context.slices import AgentSlices
 from base.agents.incarnation.hosted_force import recover_orphaned_hosted_forces
 from base.config import settings
 from base.db import Database
 from base.events.live.bus import EventBus
+from base.host.env.agent_slices import AgentSlices
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from base.native_process.turn_identity import bind_turn_identity
 from ops.lifecycle.termination import _force_terminate_transaction

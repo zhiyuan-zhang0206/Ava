@@ -23,11 +23,11 @@ from psycopg_pool import AsyncConnectionPool
 
 from agent.tests.test_inbound_ownership import _admit, _agent
 from base.agents.context import AvaContext
-from base.agents.context.slices import AgentSlices
 from base.agents.impersonation import ImpersonationError
 from base.agents.incarnation.hosted_force import install_hosted_force
 from base.db import Database
 from base.events.live.bus import EventBus
+from base.host.env.agent_slices import AgentSlices
 from base.native_process.turn_identity import bind_turn_identity
 from services.agent_host.host import AgentHost
 from services.agent_host.settlement import close_hosted_turn

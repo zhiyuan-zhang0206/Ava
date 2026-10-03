@@ -33,8 +33,8 @@ from agent.graph._base_prompt import _capture_ava_overview, _get_ava_overview
 from agent.state import AgentState
 from agent.tests._fakes import make_fake_ops_pool
 from base.agents.context import AvaContext
-from base.agents.context.slices import AgentSlices, LlmCallPolicy
 from base.events.live.projection import EVENT_ADAPTER, Cancelled
+from base.host.env.agent_slices import AgentSlices, LlmCallPolicy
 
 _CONFIG: RunnableConfig = {"configurable": {"thread_id": "7"}}
 

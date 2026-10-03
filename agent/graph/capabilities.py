@@ -16,7 +16,7 @@ import logging
 from collections.abc import Sequence
 from typing import Any, NamedTuple
 
-from base.agents.context.slices import AgentSlices, Prompt
+from base.host.env.agent_slices import AgentSlices, Prompt
 from base.lm.registry import resolve_setting
 from base.packages.skills.names import match_key
 

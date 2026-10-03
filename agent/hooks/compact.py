@@ -62,10 +62,10 @@ from agent.messages import (
 from agent.nodes import CLAIM, INIT_CONTEXT
 from agent.state import AgentState, CompactState, ContextReset
 from base.agents.context import AvaContext, agent_id_from_config
-from base.agents.context.slices import AgentSlices
 from base.agents.history.checkpoint_cleanup import mark_compact_boundary
 from base.agents.messages.kwargs import AvaMsgType, read_ava_kwargs
 from base.events.live.projection import Cancelled, CompactDone
+from base.host.env.agent_slices import AgentSlices
 from base.lm.context_budget import latest_input_tokens, resolve_context_budget
 from base.log import logger
 from base.telemetry.audit_events import prepare_event_log, record_audit_reported_async

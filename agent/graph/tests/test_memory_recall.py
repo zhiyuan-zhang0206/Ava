@@ -15,7 +15,7 @@ import agent.graph.memory_recall as recall
 from agent.messages import inbound_message
 from ava.gateway_client import MemorySearchResult
 from base.agents import IndexerUnavailable
-from base.agents.context.slices import AgentSlices
+from base.host.env.agent_slices import AgentSlices
 
 
 @pytest.fixture

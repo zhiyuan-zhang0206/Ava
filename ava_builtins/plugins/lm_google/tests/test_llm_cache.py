@@ -12,7 +12,7 @@ from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from agent.llm.cache import ainvoke_with_cache_retry, prepare_invocation
 from ava_builtins.plugins.lm_google import gemini_cache
 from ava_builtins.plugins.lm_google.gemini_cache import CacheRef
-from base.agents.context.slices import AgentSlices
+from base.host.env.agent_slices import AgentSlices
 
 _SYSTEM = SystemMessage(content="You are a test agent. " * 100)
 _CONVO = [HumanMessage(content="hi"), AIMessage(content="hello")]

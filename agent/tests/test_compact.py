@@ -47,7 +47,7 @@ from agent.llm import execute_code
 from agent.messages import inbound_message
 from agent.state import AgentState, CompactState
 from base.agents.context import AvaContext
-from base.agents.context.slices import AgentSlices
+from base.host.env.agent_slices import AgentSlices
 from base.lm.context_budget import ContextBudget
 from tests.fixtures.units import spawn_agent
 

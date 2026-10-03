@@ -16,8 +16,8 @@ from __future__ import annotations
 
 from typing import Any, cast
 
-from base.agents.context.slices import AgentSlices, LlmCallPolicy
 from base.config import settings
+from base.host.env.agent_slices import AgentSlices, LlmCallPolicy
 from base.lm.errors import ErrorClass, classify_error, emit_provider_error
 
 

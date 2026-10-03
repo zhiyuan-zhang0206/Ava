@@ -45,9 +45,9 @@ from agent.graph.exec.node import (
 from agent.state import AgentState
 from agent.tests._fakes import make_fake_ops_pool
 from base.agents.context import AvaContext
-from base.agents.context.slices import AgentSlices
 from base.db import create_agent
 from base.events.live.projection import EVENT_ADAPTER, Cancelled
+from base.host.env.agent_slices import AgentSlices
 
 # Most tests here drive exec_node/llm_node with mocked _run_in_subprocess / a
 # fake cancel_event, so they are deterministic and run in the parallel pool.

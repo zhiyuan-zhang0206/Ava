@@ -67,7 +67,7 @@ from typing import Any
 from langchain_core.language_models.chat_models import BaseChatModel
 from loguru import logger
 
-from base.agents.context.slices import LlmCallPolicy
+from base.host.env.agent_slices import LlmCallPolicy
 
 # Cache lifetime. 3600s is also the API default; stated explicitly so the
 # refresh arithmetic has one source. Storage bills per token-hour, so a

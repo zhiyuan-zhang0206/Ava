@@ -24,8 +24,8 @@ from agent.hooks.compact import auto_compact_will_fire
 from agent.messages import NoteTag, system_note_message, tail_has_agent_inbound
 from agent.state import AgentState, register_plugin_state
 from base.agents.context import AvaContext
-from base.agents.context.slices import Cadence
 from base.agents.messages.kwargs import message_content
+from base.host.env.agent_slices import Cadence
 from base.log import logger
 
 from ._state import (

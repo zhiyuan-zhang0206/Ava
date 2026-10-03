@@ -18,10 +18,10 @@ from psycopg_pool import AsyncConnectionPool
 
 from agent.db import has_pending_interrupt, pending_interrupt_reason
 from agent.graph.interrupt import subscribe_interrupt
-from base.agents.context.slices import AgentSlices
 from base.agents.messages.inbound import InterruptReason
 from base.cluster.machine import machine_name
 from base.db import create_agent
+from base.host.env.agent_slices import AgentSlices
 
 # The watcher polls on a 2s cadence; the initial SELECT is immediate. Generous
 # windows vs flake; the poll-interval tests are serial (flaky-marked) because

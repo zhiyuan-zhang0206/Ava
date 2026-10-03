@@ -15,11 +15,11 @@ import ava
 from agent import state as state_module
 from ava import agent_identity, external
 from base.agents import impersonation as leases
-from base.agents.context.slices import AgentSlices
 from base.agents.messages.caller_identity import CallerIdentity
 from base.cluster.machine import machine_name
 from base.config import settings
 from base.db import create_agent
+from base.host.env.agent_slices import AgentSlices
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from base.packages.plugins.context import PluginContext
 from tests.impersonation_support import attested_caller, recorded_tree
