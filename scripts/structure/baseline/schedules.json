@@ -1,14 +1,6 @@
 {
   "ambient_state": {
-    "schedules/adversarial-eval-weekly-schedule.py::import-time-call:schedules.agent_status_guard.ensure_agent_status_members": 1,
     "schedules/adversarial-eval-weekly-schedule.py::thread:start_scenario_server": 1,
-    "schedules/c9-daily-report-schedule.py::import-time-call:schedules.agent_status_guard.ensure_agent_status_members": 1,
-    "schedules/catchup.py::contextvar:_claimed_slot": 1,
-    "schedules/debt-sweep-daily-schedule.py::import-time-call:schedules.agent_status_guard.ensure_agent_status_members": 1,
-    "schedules/dev-ci-metrics-schedule.py::import-time-call:schedules.agent_status_guard.ensure_agent_status_members": 1,
-    "schedules/memory-steward-schedule.py::import-time-call:schedules.agent_status_guard.ensure_agent_status_members": 1,
-    "schedules/model-update-tracker-schedule.py::import-time-call:schedules.agent_status_guard.ensure_agent_status_members": 1,
-    "schedules/self-evolution-daily-schedule.py::import-time-call:schedules.agent_status_guard.ensure_agent_status_members": 1,
-    "schedules/self-evolution-weekly-schedule.py::import-time-call:schedules.agent_status_guard.ensure_agent_status_members": 1
+    "schedules/catchup.py::contextvar:_claimed_slot": 1
   }
 }
