@@ -200,6 +200,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     app.state.telemetry_staleness = TelemetryStaleness()
     app.state.status_cache = StatusCache()
     app.state.db_pool = app.state.db.pool(max_size=8)
+    app.state.idempotency = idempotency.IdempotencyService(
+        idempotency.IdempotencyStore(app.state.db_pool)
+    )
     # The control plane must never queue behind the saturated data-plane pool.
     # Audit P0-2 follows the 2026-08-23 watchdog misjudgment chain: health and
     # recovery reads need their own short, small reservation.
