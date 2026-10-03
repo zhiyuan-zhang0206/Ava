@@ -14,7 +14,7 @@ the direct IP entry remains available for an incremental operator cutover.
 
 Replacing Uvicorn, combining the event protocols, and electing a cross-window
 SSE leader were not selected: each couples a browser transport fix to a larger
-runtime or event-state change. The existing Tailscale daemon can provide a
+runtime or event-state change. The existing private-network overlay daemon can provide a
 persistent private HTTPS proxy and certificate renewal without adding a new
 application dependency. Certificate enablement and the actual browser rollout
 remain deployment operations, not side effects of setting the origin.

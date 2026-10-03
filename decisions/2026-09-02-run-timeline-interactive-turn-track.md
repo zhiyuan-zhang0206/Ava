@@ -66,4 +66,4 @@ is used for text.
 ## Supersedes
 
 - The UI panel and default-request choices recorded in
-  [`docs/history/2026-08-29/run-level-timeline.md`](../docs/history/2026-08-29/run-level-timeline.md).
+  [`decisions/2026-08-29-run-level-timeline.md`](2026-08-29-run-level-timeline.md).

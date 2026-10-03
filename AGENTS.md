@@ -53,7 +53,7 @@ clusters share no data plane. The data plane is **swappable**: URLs naming a
 foreign host (another machine or a SaaS provider) make the cluster treat it as
 remote-managed — local instance bring-up/stop/ACL/pooler management are skipped
 and degrade to reachability probes (see
-`docs/history/2026-08-28/connection-layer-swappable.md`). Postgres
+`decisions/2026-08-28-connection-layer-swappable.md`). Postgres
 and Redis run as native processes (no Docker); `gateway` is POSIX-only, so a
 Windows unit carries `agent-runner` only
 ([setup](conventions/windows-setup.md)). Rationale + the remaining slice:

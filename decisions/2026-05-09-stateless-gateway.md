@@ -52,4 +52,4 @@ session into its own detached host process, so a dying backend now takes
 down exactly one session, and cluster updates take down none.*
 
 Forward link (2026-08-22): the launch-orphan state is now unclaimed idling; see
-[agent status model](../docs/history/2026-08-22/agent-status-model.md).
+[agent status model](2026-08-22-agent-status-model.md).

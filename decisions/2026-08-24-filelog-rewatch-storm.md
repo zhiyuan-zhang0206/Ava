@@ -22,4 +22,4 @@ OTLP. This change incorporates the final receiver split coordinated with
 #3279.
 
 Update: the broad seven-day PTY-startup deletion path was superseded by the
-explicit, active-handle-safe policy in [log-retention-cli](log-retention-cli.md).
+explicit, active-handle-safe policy in [log-retention-cli](2026-08-24-log-retention-cli.md).

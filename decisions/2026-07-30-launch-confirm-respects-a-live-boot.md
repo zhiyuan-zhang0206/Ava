@@ -86,4 +86,4 @@ extension.
 
 Forward link (2026-08-22): launch confirmation now observes pid claim rather
 than a historical status transition; see
-[agent status model](../docs/history/2026-08-22/agent-status-model.md).
+[agent status model](2026-08-22-agent-status-model.md).
