@@ -51,7 +51,7 @@ def _launch_layout() -> dict[str, Path]:
     return {"reference_dir": reference}
 
 
-def main() -> int:
+def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Launch, inspect, or stop Codex sessions (a supervised worker or a takeover)."
     )
@@ -104,7 +104,10 @@ def main() -> int:
         help="Takeover briefing text, inlined verbatim into the launch message. "
         "Required with --impersonate-self; a takeover reads no files.",
     )
-    args = parser.parse_args()
+    return parser
+
+
+def _validate_args(parser: argparse.ArgumentParser, args: argparse.Namespace) -> None:
     if args.impersonate_self:
         from ava.agent_identity import require_agent_id
 
@@ -122,6 +125,12 @@ def main() -> int:
             parser.error("--impersonation-name requires --impersonate-self")
         if args.brief is not None:
             parser.error("--brief requires --impersonate-self")
+
+
+def main() -> int:
+    parser = _build_parser()
+    args = parser.parse_args()
+    _validate_args(parser, args)
 
     workspace = Path(args.workspace).expanduser().resolve()
     if not args.status and not args.cancel_generation:

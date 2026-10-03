@@ -103,7 +103,7 @@ def _relay_options(
     return not args.no_relay_resident, plugin_dir
 
 
-def main() -> int:
+def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Pre-trust a workspace and launch Claude Code in a persistent shell session."
     )
@@ -177,7 +177,10 @@ def main() -> int:
         help="Override the relay plugin directory loaded into the takeover "
         "(default: the ava-relay directory beside this launcher).",
     )
-    args = parser.parse_args()
+    return parser
+
+
+def _validate_args(parser: argparse.ArgumentParser, args: argparse.Namespace) -> None:
     if args.impersonate_self:
         from ava.agent_identity import require_agent_id
 
@@ -195,6 +198,12 @@ def main() -> int:
             parser.error("--impersonation-name requires --impersonate-self")
         if args.brief is not None:
             parser.error("--brief requires --impersonate-self")
+
+
+def main() -> int:
+    parser = _build_parser()
+    args = parser.parse_args()
+    _validate_args(parser, args)
 
     workspace = Path(args.workspace).expanduser().resolve()
     if not args.status and not args.cancel_generation:

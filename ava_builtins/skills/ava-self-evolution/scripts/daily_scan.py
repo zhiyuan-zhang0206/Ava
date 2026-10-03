@@ -176,6 +176,112 @@ def alert_exit(
     return 2 if any(r["label"] != "ok" for r in records) else 0
 
 
+class _Totals(NamedTuple):
+    """The headline counters of one scan window."""
+
+    by_label: Counter[str]
+    corrections: int
+    peer: int
+    breached: int
+    execfail: int
+
+    @classmethod
+    def of(cls, records: list[dict[str, Any]]) -> _Totals:
+        return cls(
+            Counter(r["label"] for r in records),
+            sum(len(r["corrections"]) for r in records),
+            sum(len(r["peer_feedback"]) for r in records),
+            sum(1 for r in records if r["breached"]),
+            sum(1 for r in records if r["exec_failed"]),
+        )
+
+
+def _builtin_help_line(records: list[dict[str, Any]]) -> str:
+    calls = sum(r.get("builtin_help_calls", 0) for r in records)
+    agents = sum(bool(r.get("builtin_help_calls", 0)) for r in records)
+    on_ava = sum(r.get("builtin_help_on_ava", 0) for r in records)
+    return f"builtin help(): {calls} calls across {agents} agents ({on_ava} on ava.* targets)"
+
+
+def _subprocess_line(records: list[dict[str, Any]]) -> str:
+    calls = sum(r.get("subprocess_calls", 0) for r in records)
+    line = f"subprocess calls: {calls}"
+    if any("tools_called" in r for r in records):
+        shell_run_calls = sum(
+            r["tools_called"].get("ava.shell.run", 0) for r in records if "tools_called" in r
+        )
+        line += f" (shell.run {shell_run_calls})"
+    return line
+
+
+def _header_lines(
+    records: list[dict[str, Any]], path: Path, days: int, totals: _Totals
+) -> list[str]:
+    skill_counts = Counter(
+        skill for r in records if "skills_touched" in r for skill in r["skills_touched"]
+    )
+    top_skills = (
+        ", ".join(f"{skill} {count}" for skill, count in skill_counts.most_common(5)) or "none"
+    )
+    orchestration_counts = ", ".join(
+        f"{skill} {skill_counts[skill]}" for skill in ORCHESTRATION_SKILLS
+    )
+    return [
+        f"self-evolution daily scan — {datetime.now(UTC).strftime('%Y-%m-%dT%H:%M:%SZ')}",
+        f"window: {days} day(s) | runs: {len(records)} (ok {totals.by_label['ok']} / fumbled {totals.by_label['fumbled']} / failed {totals.by_label['failed']})"
+        f" | corrections {totals.corrections} | peer feedback {totals.peer} | breached {totals.breached} | exec-fail runs {totals.execfail}",
+        _builtin_help_line(records),
+        _subprocess_line(records),
+        f"dataset: {path}",
+        "skills loaded:",
+        f"  top 5: {top_skills}",
+        f"  orchestration: {orchestration_counts}",
+    ]
+
+
+def _no_runs_line(records: list[dict[str, Any]], counts: dict[str, int] | None) -> str:
+    if _is_test_only_window(records, counts):
+        # _is_test_only_window only returns True when `counts` is truthy —
+        # pyright cannot see that cross-function invariant.
+        return (
+            "0 production runs — all "
+            f"{counts['excluded_test']} window agent(s) were TEST- spawns "  # pyright: ignore[reportOptionalSubscript]
+            "(excluded by design); nothing to act on"
+        )
+    return "ALERT — 0 runs collected: data source outage or collector failure"
+
+
+def _bad_run_lines(
+    records: list[dict[str, Any]], *, report_path: Path | None, compact_bad: bool
+) -> list[str]:
+    bad = [r for r in records if r["label"] != "ok"]
+    if not bad:
+        return []
+    sorted_bad = sorted(bad, key=lambda r: r["agent_id"])
+    rich_lines: list[str] = []
+    for rec in sorted_bad:
+        task = (rec["task_prompt"] or "").strip().replace("\n", " ")
+        if len(task) > 120:
+            task = task[:117] + "..."
+        line = f"  #{rec['agent_id']} {rec['label']} — {', '.join(_why(rec))}"
+        if task:
+            line += f" | task: {task}"
+        rich_lines.append(line)
+    head = f"ALERT — {len(bad)} run(s) worth mining:"
+    # Compaction needs a stored report: the closing pointer keeps the
+    # dropped task text one hop away and survives tail truncation.
+    if (
+        compact_bad
+        and report_path is not None
+        and sum(len(line) for line in rich_lines) > BAD_LIST_MAX_CHARS
+    ):
+        return [
+            f"{head} (compact; details in report)",
+            *(_compact_bad_line(rec) for rec in sorted_bad),
+        ]
+    return [head, *rich_lines]
+
+
 def render(
     records: list[dict[str, Any]],
     path: Path,
@@ -190,84 +296,17 @@ def render(
     may replace an oversized bad list (> BAD_LIST_MAX_CHARS chars) with one
     counter line per run, but only when `report_path` is set: without a
     stored report the rich lines are the only copy of the details."""
-    counts_by_label = Counter(r["label"] for r in records)
-    skill_counts = Counter(
-        skill for r in records if "skills_touched" in r for skill in r["skills_touched"]
-    )
-    corrections = sum(len(r["corrections"]) for r in records)
-    peer = sum(len(r["peer_feedback"]) for r in records)
-    breached = sum(1 for r in records if r["breached"])
-    execfail = sum(1 for r in records if r["exec_failed"])
-    builtin_help_calls = sum(r.get("builtin_help_calls", 0) for r in records)
-    builtin_help_agents = sum(bool(r.get("builtin_help_calls", 0)) for r in records)
-    builtin_help_on_ava = sum(r.get("builtin_help_on_ava", 0) for r in records)
-    subprocess_calls = sum(r.get("subprocess_calls", 0) for r in records)
-    shell_run_calls = sum(
-        r["tools_called"].get("ava.shell.run", 0) for r in records if "tools_called" in r
-    )
-    subprocess_line = f"subprocess calls: {subprocess_calls}"
-    if any("tools_called" in r for r in records):
-        subprocess_line += f" (shell.run {shell_run_calls})"
-    top_skills = (
-        ", ".join(f"{skill} {count}" for skill, count in skill_counts.most_common(5)) or "none"
-    )
-    orchestration_counts = ", ".join(
-        f"{skill} {skill_counts[skill]}" for skill in ORCHESTRATION_SKILLS
-    )
-    lines = [
-        f"self-evolution daily scan — {datetime.now(UTC).strftime('%Y-%m-%dT%H:%M:%SZ')}",
-        f"window: {days} day(s) | runs: {len(records)} (ok {counts_by_label['ok']} / fumbled {counts_by_label['fumbled']} / failed {counts_by_label['failed']})"
-        f" | corrections {corrections} | peer feedback {peer} | breached {breached} | exec-fail runs {execfail}",
-        f"builtin help(): {builtin_help_calls} calls across {builtin_help_agents} agents "
-        f"({builtin_help_on_ava} on ava.* targets)",
-        subprocess_line,
-        f"dataset: {path}",
-        "skills loaded:",
-        f"  top 5: {top_skills}",
-        f"  orchestration: {orchestration_counts}",
-    ]
+    totals = _Totals.of(records)
+    lines = _header_lines(records, path, days, totals)
     if not records:
-        if _is_test_only_window(records, counts):
-            # _is_test_only_window only returns True when `counts` is truthy —
-            # pyright cannot see that cross-function invariant.
-            lines.append(
-                "0 production runs — all "
-                f"{counts['excluded_test']} window agent(s) were TEST- spawns "  # pyright: ignore[reportOptionalSubscript]
-                "(excluded by design); nothing to act on"
-            )
-        else:
-            lines.append("ALERT — 0 runs collected: data source outage or collector failure")
-    bad = [r for r in records if r["label"] != "ok"]
-    if bad:
-        sorted_bad = sorted(bad, key=lambda r: r["agent_id"])
-        rich_lines: list[str] = []
-        for rec in sorted_bad:
-            task = (rec["task_prompt"] or "").strip().replace("\n", " ")
-            if len(task) > 120:
-                task = task[:117] + "..."
-            line = f"  #{rec['agent_id']} {rec['label']} — {', '.join(_why(rec))}"
-            if task:
-                line += f" | task: {task}"
-            rich_lines.append(line)
-        head = f"ALERT — {len(bad)} run(s) worth mining:"
-        # Compaction needs a stored report: the closing pointer keeps the
-        # dropped task text one hop away and survives tail truncation.
-        if (
-            compact_bad
-            and report_path is not None
-            and sum(len(line) for line in rich_lines) > BAD_LIST_MAX_CHARS
-        ):
-            lines.append(f"{head} (compact; details in report)")
-            lines.extend(_compact_bad_line(rec) for rec in sorted_bad)
-        else:
-            lines.append(head)
-            lines.extend(rich_lines)
+        lines.append(_no_runs_line(records, counts))
+    lines.extend(_bad_run_lines(records, report_path=report_path, compact_bad=compact_bad))
     if report_path is not None:
         lines.append(
-            f"summary: {len(records)} runs (ok {counts_by_label['ok']} / "
-            f"fumbled {counts_by_label['fumbled']} / failed {counts_by_label['failed']})"
-            f" | corrections {corrections} | peer {peer} | breached {breached} "
-            f"| exec-fail runs {execfail}"
+            f"summary: {len(records)} runs (ok {totals.by_label['ok']} / "
+            f"fumbled {totals.by_label['fumbled']} / failed {totals.by_label['failed']})"
+            f" | corrections {totals.corrections} | peer {totals.peer} | breached {totals.breached} "
+            f"| exec-fail runs {totals.execfail}"
         )
         lines.append(f"full report: {report_path}")
     return "\n".join(lines)
