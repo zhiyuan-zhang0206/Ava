@@ -203,7 +203,7 @@ class ServiceSettings(ServiceHealthPortFields, _ServiceRuntimeSettings):
     im_disabled_adapters: Annotated[list[str], NoDecode] = Field(
         default=[],
         alias="AVA_IM_DISABLED_ADAPTERS",
-        description="Comma-separated IM adapter names to skip at daemon load (code stays; e.g. 'weixin,feishu' — user ruling 2026-08-06 keeps only Telegram live).",
+        description="Comma-separated IM adapter names to skip at daemon load (code stays; e.g. 'weixin' — WeChat iLink production-disabled since 2026-08-06; Feishu re-enabled 2026-09).",
         json_schema_extra={
             "restart_required": "gateway",
             "writable": True,
