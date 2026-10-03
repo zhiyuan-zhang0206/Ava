@@ -12,14 +12,14 @@ import re as _re
 import socket as _socket
 import time as _time
 import urllib.request as _urlopen
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
 import ava
-import ava.agent_identity
 from ava import gateway_client
+from ava._settings import page_host
 from ava.sdk_surface.validation import coerce_str, coerce_typed
-from base.cluster.machine import reachable_host
 
 _NAME_RE = _re.compile(r"^[a-zA-Z0-9_-]+$")
 
@@ -115,12 +115,6 @@ def _probe_page_health(host: str, port: int) -> str | None:
         return None
 
 
-def _page_is_serving(host: str, port: int) -> bool:
-    """Whether an HTTP server answers on (host, port) — the daemon's server
-    (any token; identity is the daemon's concern, not the caller's)."""
-    return _probe_page_health(host, port) is not None
-
-
 def _port_is_bindable(host: str, port: int) -> bool:
     """Whether a page server could bind (host, port) right now.
 
@@ -137,117 +131,145 @@ def _port_is_bindable(host: str, port: int) -> bool:
     return True
 
 
-def _answers_as_page_server(host: str, port: int) -> bool:
-    """Whether (host, port) answers /health like this platform's page servers.
+@dataclass(frozen=True)
+class PageHost:
+    """What a page call runs against: this machine's page host, the agent it acts for and how
+    it probes ports.
 
-    A page server answers `ok:<token>` (services/page_server/server.py); any
-    other occupant — a dev server, a database, a foreign HTTP service —
-    answers differently or not at all.
+    Built per call by `ava._settings.page_host()` from this process's settings and agent
+    identity; the module functions below delegate to it. A test builds one with the probes it
+    needs.
     """
-    body = _probe_page_health(host, port)
-    return body is not None and body.startswith("ok:")
 
+    host: str
+    agent_id: int
+    ready_timeout_s: float = _SERVE_READY_TIMEOUT_S
+    health: Callable[[str, int], str | None] = _probe_page_health
+    bindable: Callable[[str, int], bool] = _port_is_bindable
 
-def _own_open_page_on_port(port: int) -> bool:
-    """Whether this agent's current page row claims `port`.
+    def _page_is_serving(self, port: int) -> bool:
+        """Whether an HTTP server answers on (host, port) — the daemon's server
+        (any token; identity is the daemon's concern, not the caller's)."""
+        return self.health(self.host, port) is not None
 
-    Best-effort read used only by the occupied-port guard: the agent's own
-    page (whose server may still be exiting, or slow to answer) is replaced
-    by registration, so it must not read as a foreign occupant. A gateway
-    failure degrades to False — the registration call right after is the
-    authority on conflicts.
-    """
-    try:
-        pages = gateway_client.list_open_pages(ava.agent_identity.require_agent_id())
-    except Exception:
+    def _answers_as_page_server(self, port: int) -> bool:
+        """Whether (host, port) answers /health like this platform's page servers.
+
+        A page server answers `ok:<token>` (services/page_server/server.py); any
+        other occupant — a dev server, a database, a foreign HTTP service —
+        answers differently or not at all.
+        """
+        body = self.health(self.host, port)
+        return body is not None and body.startswith("ok:")
+
+    def _own_open_page_on_port(self, port: int) -> bool:
+        """Whether this agent's current page row claims `port`.
+
+        Best-effort read used only by the occupied-port guard: the agent's own
+        page (whose server may still be exiting, or slow to answer) is replaced
+        by registration, so it must not read as a foreign occupant. A gateway
+        failure degrades to False — the registration call right after is the
+        authority on conflicts.
+        """
+        try:
+            pages = gateway_client.list_open_pages(self.agent_id)
+        except Exception:
+            return False
+        return any(int(page["port"]) == port for page in pages)
+
+    def reject_foreign_port_occupant(self, port: int) -> None:
+        """Fail fast when the port is held by a process that is not a page server.
+
+        serve() is about to have the page-server daemon bind this port; a foreign
+        process can never be displaced (the daemon backs off and retries
+        forever), so letting it through means a silent `_SERVE_READY_TIMEOUT_S`
+        wait followed by a misleading "daemon down" error. Page-server occupants
+        — this agent's own page being replaced, or another agent's page — pass
+        through to the gateway's live-port conflict check, the only party that
+        knows which page owns the port.
+
+        Raises:
+            PageError: the port is occupied by a non-page-server process.
+        """
+        if self.bindable(self.host, port):
+            return
+        if self._answers_as_page_server(port):
+            return
+        if self._own_open_page_on_port(port):
+            return
+        raise PageError(
+            f"port {port} is already in use on {self.host} by a process that is not a page "
+            "server — choose a different free port (ava.ui.serve never allocates one)"
+        )
+
+    def wait_until_serving(self, port: int) -> bool:
+        """Poll until the page server answers on (host, port) or the ready timeout passes."""
+        deadline = _time.monotonic() + self.ready_timeout_s
+        while _time.monotonic() < deadline:
+            if self._page_is_serving(port):
+                return True
+            _time.sleep(0.2)
         return False
-    return any(int(page["port"]) == port for page in pages)
 
+    def register(
+        self,
+        name: str,
+        port: int,
+        title: str | None,
+        serve_dir: str | None,
+        *,
+        ttl: float | None = None,
+    ) -> Page:
+        """Gateway registration shared by show() and serve().
 
-def _reject_foreign_port_occupant(port: int) -> None:
-    """Fail fast when the port is held by a process that is not a page server.
+        The gateway owns replacement (one page per agent — any existing page is
+        closed as part of registering the new one) and the port rules: a port
+        another live page holds is refused with 409, and the refusal leaves this
+        agent's current page untouched. `serve_dir` is the served directory the
+        page_server daemon reads — only serve() sets it.
+        """
+        _validate_name(name)
+        try:
+            if ttl is None:
+                row = gateway_client.register_page(
+                    self.agent_id,
+                    name=name,
+                    port=port,
+                    host=self.host,
+                    title=title,
+                    serve_dir=serve_dir,
+                )
+            else:
+                row = gateway_client.register_page(
+                    self.agent_id,
+                    name=name,
+                    port=port,
+                    host=self.host,
+                    title=title,
+                    serve_dir=serve_dir,
+                    ttl_seconds=int(ttl),
+                )
+        except Exception as exc:
+            # 409 is the gateway's refusal: the agent is terminated, or another
+            # live page holds (host, port). The wire body's `detail` names the
+            # reason — raise it as the SDK's own error instead of a raw HTTP error.
+            response = getattr(exc, "response", None)
+            detail = _error_detail(exc) if getattr(response, "status_code", None) == 409 else None
+            if detail is not None:
+                raise PageError(detail) from exc
+            raise
+        return _row_to_page(row)
 
-    serve() is about to have the page-server daemon bind this port; a foreign
-    process can never be displaced (the daemon backs off and retries
-    forever), so letting it through means a silent `_SERVE_READY_TIMEOUT_S`
-    wait followed by a misleading "daemon down" error. Page-server occupants
-    — this agent's own page being replaced, or another agent's page — pass
-    through to the gateway's live-port conflict check, the only party that
-    knows which page owns the port.
-
-    Raises:
-        PageError: the port is occupied by a non-page-server process.
-    """
-    host = reachable_host()
-    if _port_is_bindable(host, port):
-        return
-    if _answers_as_page_server(host, port):
-        return
-    if _own_open_page_on_port(port):
-        return
-    raise PageError(
-        f"port {port} is already in use on {host} by a process that is not a page "
-        "server — choose a different free port (ava.ui.serve never allocates one)"
-    )
-
-
-def _wait_until_serving(host: str, port: int, *, timeout: float) -> bool:
-    """Poll until the page server answers on (host, port) or timeout passes."""
-    deadline = _time.monotonic() + timeout
-    while _time.monotonic() < deadline:
-        if _page_is_serving(host, port):
-            return True
-        _time.sleep(0.2)
-    return False
-
-
-def _register_page(
-    name: str,
-    port: int,
-    title: str | None,
-    serve_dir: str | None,
-    *,
-    ttl: float | None = None,
-) -> Page:
-    """Gateway registration shared by show() and serve().
-
-    The gateway owns replacement (one page per agent — any existing page is
-    closed as part of registering the new one) and the port rules: a port
-    another live page holds is refused with 409, and the refusal leaves this
-    agent's current page untouched. `serve_dir` is the served directory the
-    page_server daemon reads — only serve() sets it.
-    """
-    _validate_name(name)
-    try:
-        if ttl is None:
-            row = gateway_client.register_page(
-                ava.agent_identity.require_agent_id(),
-                name=name,
-                port=port,
-                host=reachable_host(),
-                title=title,
-                serve_dir=serve_dir,
-            )
-        else:
-            row = gateway_client.register_page(
-                ava.agent_identity.require_agent_id(),
-                name=name,
-                port=port,
-                host=reachable_host(),
-                title=title,
-                serve_dir=serve_dir,
-                ttl_seconds=int(ttl),
-            )
-    except Exception as exc:
-        # 409 is the gateway's refusal: the agent is terminated, or another
-        # live page holds (host, port). The wire body's `detail` names the
-        # reason — raise it as the SDK's own error instead of a raw HTTP error.
-        response = getattr(exc, "response", None)
-        detail = _error_detail(exc) if getattr(response, "status_code", None) == 409 else None
-        if detail is not None:
-            raise PageError(detail) from exc
-        raise
-    return _row_to_page(row)
+    def close(self, name: str) -> None:
+        try:
+            gateway_client.close_page(self.agent_id, name)
+        except Exception as e:
+            # Gateway returns 404 -> httpx.HTTPStatusError. Translate to PageClosed
+            # so callers can distinguish "already gone" from real errors.
+            msg = str(e)
+            if "404" in msg:
+                raise PageClosed(f"no open page {name!r} for agent {self.agent_id}") from e
+            raise
 
 
 def _error_detail(exc: Exception) -> str | None:
@@ -293,7 +315,7 @@ def show(
     port = _coerce_page_port(port)
     title = coerce_str(title, "title", allow_none=True)
     ttl = coerce_typed(ttl, "ttl", (int, float), allow_none=True)
-    return _register_page(name, port, title, serve_dir=None, ttl=_validate_ttl(ttl))
+    return page_host().register(name, port, title, serve_dir=None, ttl=_validate_ttl(ttl))
 
 
 def serve(
@@ -332,15 +354,16 @@ def serve(
     ttl = _validate_ttl(ttl)
     _validate_name(name)
 
-    _reject_foreign_port_occupant(port)
+    host = page_host()
+    host.reject_foreign_port_occupant(port)
 
-    page = _register_page(name, port, title, serve_dir=str(Path(dir).resolve()), ttl=ttl)
+    page = host.register(name, port, title, serve_dir=str(Path(dir).resolve()), ttl=ttl)
 
     # The daemon reconciles on a ~2s poll; wait for the server it spawns.
-    if not _wait_until_serving(reachable_host(), port, timeout=_SERVE_READY_TIMEOUT_S):
+    if not host.wait_until_serving(port):
         raise PageError(
             f"page server for {name!r} on port {port} did not come up within "
-            f"{_SERVE_READY_TIMEOUT_S:.0f}s — is the page-server daemon running? "
+            f"{host.ready_timeout_s:.0f}s — is the page-server daemon running? "
             "(the page row is registered; the daemon will keep retrying)"
         )
     return page
@@ -356,17 +379,7 @@ def close(name: str) -> None:
     name = coerce_str(name, "name")
     _validate_name(name)
 
-    try:
-        gateway_client.close_page(ava.agent_identity.require_agent_id(), name)
-    except Exception as e:
-        # Gateway returns 404 -> httpx.HTTPStatusError. Translate to PageClosed
-        # so callers can distinguish "already gone" from real errors.
-        msg = str(e)
-        if "404" in msg:
-            raise PageClosed(
-                f"no open page {name!r} for agent {ava.agent_identity.agent_id()}"
-            ) from e
-        raise
+    page_host().close(name)
 
 
 def __getattr__(name: str) -> object:

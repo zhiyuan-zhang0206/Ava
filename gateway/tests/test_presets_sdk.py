@@ -14,6 +14,8 @@ from typing import Any, cast
 import pytest
 from fastapi.testclient import TestClient
 
+from ava.gateway_client.transport import use_client
+
 
 @pytest.fixture(autouse=True)
 def _sdk_via_testclient(monkeypatch: pytest.MonkeyPatch):
@@ -24,8 +26,7 @@ def _sdk_via_testclient(monkeypatch: pytest.MonkeyPatch):
     """
     from gateway.app import app
 
-    with TestClient(app, base_url="http://test-gateway") as tc:
-        monkeypatch.setattr("ava.gateway_client.transport._client", tc)
+    with TestClient(app, base_url="http://test-gateway") as tc, use_client(tc):
         yield
 
 

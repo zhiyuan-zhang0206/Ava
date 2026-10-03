@@ -27,6 +27,7 @@ from fastapi.testclient import TestClient
 import ava
 from ava import gateway_client
 from ava.agents import AgentNotFound, AgentStatus, ForkSourceEmpty, TerminateResult
+from ava.gateway_client.transport import use_client
 
 
 def _spawn_agent() -> int:
@@ -112,8 +113,7 @@ def _sdk_via_inprocess_gateway(monkeypatch: pytest.MonkeyPatch):
     ):
         monkeypatch.setattr(_settings.lm, _attr, SecretStr("sk-test"))
 
-    with TestClient(app, base_url="http://test-gateway") as tc:
-        monkeypatch.setattr("ava.gateway_client.transport._client", tc)
+    with TestClient(app, base_url="http://test-gateway") as tc, use_client(tc):
         monkeypatch.setattr(_agents_router, "forward_spawn_to_remote", _in_process_forward)
         monkeypatch.setattr(_agents_forward_router, "enqueue_lifecycle", _in_process_lifecycle)
         monkeypatch.setattr(_machines, "lookup_role", _lookup_role)
