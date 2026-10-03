@@ -10,14 +10,16 @@ import socket
 import subprocess
 import sys
 import time
-from collections.abc import Callable, Generator
+from collections.abc import Callable, Generator, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 
 import psutil
+import pytest
 
 from base.sessions.posixproc import _group_empty
+from base.sessions.pty import client as pty_client
 
 
 def listener_evidence(port: int, phase: str) -> dict[str, object]:
@@ -571,6 +573,40 @@ def fixture_entrypoint() -> None:
     start_serving.recovery_permitted = fixture_recovery
     sys.argv = [module, *arguments]
     runpy.run_module(module, run_name="__main__", alter_sys=True)
+
+
+@pytest.fixture
+def pty_sessions_proc() -> Iterator[None]:
+    """The machine's pty-sessions service, which holds every agent shell a scenario opens.
+
+    A real `ava start` runs it as a roster unit; here it is a direct process under the
+    suite's AVA_HOME, stopped (sessions closed) with the test.
+    """
+    log_path = (
+        Path(__file__).resolve().parents[2] / "tmp" / "e2e-logs" / f"pty-sessions-{os.getpid()}.log"
+    )
+    with managed_proc(
+        [sys.executable, "-m", "services.pty_sessions.daemon"],
+        env=os.environ.copy(),
+        label="pty-sessions",
+        log_path=str(log_path),
+    ) as proc:
+        deadline = time.monotonic() + 30.0
+        while True:
+            if proc.poll() is not None:
+                raise RuntimeError(
+                    f"pty-sessions exited early; log tail:\n{proc_log_tail(str(log_path))}"
+                )
+            try:
+                pty_client.request("ping")
+                break
+            except pty_client.ServiceUnavailableError:
+                if time.monotonic() >= deadline:
+                    raise RuntimeError(
+                        f"pty-sessions never answered; log tail:\n{proc_log_tail(str(log_path))}"
+                    ) from None
+                time.sleep(0.1)
+        yield
 
 
 if __name__ == "__main__":

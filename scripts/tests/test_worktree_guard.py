@@ -2,60 +2,15 @@
 
 from __future__ import annotations
 
-import contextlib
 import json
 import os
-import socket
 import subprocess
 import sys
-import threading
 import time
 from pathlib import Path
-from typing import Any
 
-from base.sessions.pty import protocol
-from base.sessions.pty.paths import fallback_dir, service_socket_path
-
-
-class _FakeService:
-    """A stand-in pty-sessions service: answers every request with a fixed session list.
-
-    Bound at the path the guard computes for the home's run directory, before the
-    guard is run, so the home is already in the state the guard must leave it in.
-    """
-
-    def __init__(self, path: Path, sessions: list[dict[str, Any]]) -> None:
-        if path.parent == fallback_dir():
-            path.parent.mkdir(mode=0o700, exist_ok=True)
-        path.unlink(missing_ok=True)
-        self._path = path
-        self._sessions = sessions
-        self._server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-        self._server.bind(str(path))
-        self._server.listen(8)
-        self._thread = threading.Thread(target=self._serve, daemon=True)
-        self._thread.start()
-
-    def _serve(self) -> None:
-        while True:
-            try:
-                conn, _ = self._server.accept()
-            except OSError:
-                return
-            with conn:
-                line = protocol.read_line(conn)
-                if line is None:
-                    continue
-                request = protocol.decode_object(line)
-                conn.sendall(
-                    protocol.encode(protocol.ok(request["id"], {"sessions": self._sessions}))
-                )
-
-    def close(self) -> None:
-        self._server.close()
-        self._thread.join(timeout=5)
-        with contextlib.suppress(OSError):
-            self._path.unlink()
+from base.sessions.pty.paths import service_socket_path
+from tests.path_scoped.pty_service import FakePtyService
 
 
 def _run_guard(target: Path) -> subprocess.CompletedProcess[str]:
@@ -243,7 +198,7 @@ def test_the_guard_reads_the_real_home_and_dials_and_writes_nothing(tmp_path: Pa
     (home / "run").mkdir(parents=True)
     target = tmp_path / "worktrees" / "wt-under-test"
     target.mkdir(parents=True)
-    service = _FakeService(
+    service = FakePtyService(
         service_socket_path(home / "run"),
         [
             {

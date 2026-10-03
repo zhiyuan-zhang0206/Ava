@@ -45,7 +45,7 @@ def session_tree_kill(pid: int) -> None:
 def _session(leaders: list[subprocess.Popen[bytes]], *, busy: bool) -> closure.Target:
     # A busy shell ignores the hangup and the job inherits both ignored dispositions, so
     # only the SIGKILL leg (here simulated) can end them.
-    script = "trap '' HUP TERM; sleep 300 & wait" if busy else "sleep 300"
+    script = "trap '' HUP TERM; sleep 300 & wait" if busy else "exec sleep 300"
     leader = subprocess.Popen(  # noqa: S603 — a bystander session leader
         ["/bin/sh", "-c", script], start_new_session=True
     )
