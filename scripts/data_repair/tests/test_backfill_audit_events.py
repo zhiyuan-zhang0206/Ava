@@ -8,12 +8,14 @@ apply is one transaction, and a dry-run writes nothing.
 
 from __future__ import annotations
 
+import argparse
 import json
 import uuid
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
+import httpx
 import psycopg
 import pytest
 
@@ -157,7 +159,7 @@ def test_main_dry_run_prints_the_reconciliation_and_writes_nothing(
 ) -> None:
     marker = uuid.uuid4().hex
 
-    def canned(_dirs: list[Path], _until: datetime) -> list[tuple[str, Any]]:
+    def canned(_dirs: list[Path], _until: datetime, *, page: int) -> list[tuple[str, Any]]:
         return [_stream("loki-live", _row(source=marker), Skipped("bad-level"))]
 
     monkeypatch.setattr(backfill, "sources", canned)
@@ -176,7 +178,7 @@ def test_main_apply_writes_and_reports(
 ) -> None:
     marker = uuid.uuid4().hex
 
-    def canned(_dirs: list[Path], _until: datetime) -> list[tuple[str, Any]]:
+    def canned(_dirs: list[Path], _until: datetime, *, page: int) -> list[tuple[str, Any]]:
         return [_stream("loki-live", _row(source=marker))]
 
     monkeypatch.setattr(backfill, "sources", canned)
@@ -219,3 +221,94 @@ def test_jsonl_mirrors_yield_audit_rows_only_and_report_unparsable_lines(tmp_pat
 
     assert sorted(row.event_uid for row in rows if isinstance(row, AuditRow)) == [11, 14]
     assert [row.reason for row in rows if isinstance(row, Skipped)] == ["unparsable-line"]
+
+
+def _refused_413() -> httpx.HTTPStatusError:
+    request = httpx.Request("GET", "http://loki.test/loki/api/v1/query_range")
+    return httpx.HTTPStatusError(
+        "response too large", request=request, response=httpx.Response(413, request=request)
+    )
+
+
+def test_loki_windows_splits_a_window_loki_refuses_as_too_large() -> None:
+    start = _TS
+    end = start + timedelta(days=1)
+    calls: list[tuple[datetime, datetime, int]] = []
+
+    def query(lo: datetime, hi: datetime, limit: int) -> tuple[list[dict[str, Any]], bool]:
+        calls.append((lo, hi, limit))
+        if (lo, hi) == (start, end):
+            raise _refused_413()
+        return ([{"half_start": lo.isoformat()}], False)
+
+    rows = list(backfill._loki_windows(start, end, query, page=12_345))
+
+    assert [row["half_start"] for row in rows] == [
+        start.isoformat(),
+        (start + timedelta(hours=12)).isoformat(),
+    ]
+    assert calls == [
+        (start, end, 12_345),
+        (start, start + timedelta(hours=12), 12_345),
+        (start + timedelta(hours=12), end, 12_345),
+    ]
+
+
+def test_loki_windows_reraises_a_refusal_that_cannot_be_split_further() -> None:
+    start = _TS
+
+    def query(lo: datetime, hi: datetime, limit: int) -> tuple[list[dict[str, Any]], bool]:
+        raise _refused_413()
+
+    with pytest.raises(httpx.HTTPStatusError):
+        list(backfill._loki_windows(start, start + timedelta(microseconds=1), query))
+
+
+def test_loki_windows_retries_a_transient_transport_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    start = _TS
+    attempts = 0
+    sleeps: list[float] = []
+
+    def query(lo: datetime, hi: datetime, limit: int) -> tuple[list[dict[str, Any]], bool]:
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            raise httpx.ConnectError("connection reset")
+        return ([{"ok": True}], False)
+
+    monkeypatch.setattr(backfill.time, "sleep", sleeps.append)
+    rows = list(backfill._loki_windows(start, start + timedelta(hours=1), query))
+
+    assert rows == [{"ok": True}]
+    assert attempts == 2
+    assert sleeps == [1.0]
+
+
+def test_read_loki_live_reads_with_the_configured_page(monkeypatch: pytest.MonkeyPatch) -> None:
+    seen: list[int] = []
+
+    def fake_query(*, archive: bool) -> backfill.LokiQuery:
+        def query(lo: datetime, hi: datetime, limit: int) -> tuple[list[dict[str, Any]], bool]:
+            seen.append(limit)
+            return ([], False)
+
+        return query
+
+    monkeypatch.setattr(backfill, "_loki_query", fake_query)
+    rows = list(backfill.read_loki_live(datetime(2026, 8, 14, tzinfo=UTC), page=1234))
+
+    assert rows == []
+    assert seen == [1234]
+
+
+@pytest.mark.parametrize(("value", "expected"), [("1", 1), ("20000", 20_000), ("50000", 50_000)])
+def test_loki_page_accepts_sizes_up_to_the_loki_line_cap(value: str, expected: int) -> None:
+    assert backfill._page_size(value) == expected
+
+
+@pytest.mark.parametrize("value", ["0", "-1", "50001", "not-a-number"])
+def test_loki_page_rejects_sizes_outside_one_to_the_cap(value: str) -> None:
+    with pytest.raises(argparse.ArgumentTypeError):
+        backfill._page_size(value)

@@ -30,15 +30,18 @@ transaction, so a failure leaves the table as it was.
 Run it with the cluster environment of the gateway host (Loki URL and database
 URL come from the settings). `--jsonl DIR` may be given several times: the JSONL
 mirrors live on the machine that emitted the events, so a directory per machine
-is how the 3.5 to 7 day window Loki already expired is recovered. Rows older than
-the table's first live write that no source holds (the non-lineage audit rows
-between 2026-08-13 and the oldest 84 hours) are gone and are not recoverable.
+is how the 3.5 to 7 day window Loki already expired is recovered. A window Loki
+refuses as too large (HTTP 413) is re-read in halves; `--loki-page` bounds the
+page size. Rows older than the table's first live write that no source holds
+(the non-lineage audit rows between 2026-08-13 and the oldest 84 hours) are gone
+and are not recoverable.
 """
 
 from __future__ import annotations
 
 import argparse
 import json
+import time
 from collections import Counter
 from collections.abc import Callable, Iterable, Iterator
 from dataclasses import dataclass
@@ -46,15 +49,26 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, cast
 
+import httpx
+
 from base.db import connect
 from base.db.transaction import write_transaction
 from base.telemetry.loki_index_labels import ARCHIVE_FLOOR_AT, ARCHIVE_FREEZE_AT
 
 _LEVELS = frozenset({"debug", "info", "warning", "error", "critical"})
 _LOKI_WINDOW = timedelta(days=1)
-# Loki's per-query line cap is 50001 (limits_config.max_entries_limit_per_query); a window that
-# returns a full page is split in two until every page is complete.
-_LOKI_PAGE = 50_000
+# Loki's per-query line cap is 50001 (limits_config.max_entries_limit_per_query) and the client
+# asks with one extra line for has_more, so 50000 is the largest page it can request. The default
+# sits lower: at the stock page the dense telemetry stream returned a 114.7 MB response that Loki
+# refused with HTTP 413 (2026-10-03 backfill), so 20000 keeps a page under the response ceiling.
+_LOKI_PAGE = 20_000
+_MAX_LOKI_PAGE = 50_000
+# Transient transport failures retry with this backoff; a long pass should not restart over one
+# blip. A refusal (HTTP 413) is not transient — its window is split instead.
+_TRANSIENT_RETRY_SLEEPS_S = (1.0, 4.0)
+# Loki answers a response past its message ceiling with HTTP 413 (the 114.7 MB response above);
+# half the window is half the response, so a refusal is split like a full page.
+_RESPONSE_TOO_LARGE = 413
 _INSERT_BATCH = 1_000
 _PREVIEW = 8
 
@@ -123,6 +137,16 @@ def _timestamp(raw: Any) -> datetime:
     return ts.astimezone(UTC) if ts.tzinfo is not None else ts.replace(tzinfo=UTC)
 
 
+def _page_size(value: str) -> int:
+    try:
+        page = int(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(f"not an integer: {value!r}") from exc
+    if not 1 <= page <= _MAX_LOKI_PAGE:
+        raise argparse.ArgumentTypeError(f"page size must be within 1..{_MAX_LOKI_PAGE}")
+    return page
+
+
 def normalize(raw: dict[str, Any], *, imported_from: str) -> AuditRow:
     """Map one stream row (Loki reader dict or JSONL mirror line) to an `AuditRow`.
 
@@ -164,11 +188,14 @@ def normalize(raw: dict[str, Any], *, imported_from: str) -> AuditRow:
 LokiQuery = Callable[[datetime, datetime, int], tuple[list[dict[str, Any]], bool]]
 
 
-def _loki_windows(start: datetime, end: datetime, query: LokiQuery) -> Iterator[dict[str, Any]]:
+def _loki_windows(
+    start: datetime, end: datetime, query: LokiQuery, *, page: int = _LOKI_PAGE
+) -> Iterator[dict[str, Any]]:
     """Every row of [start, end] from `query(from, to, limit)`, splitting any full page.
 
     Windows of a day are read newest-agnostic (forward); a window whose page is full is bisected
-    until each part is complete, so no row is dropped by the page cap.
+    until each part is complete, so no row is dropped by the page cap. A window Loki refuses as
+    too large (HTTP 413) is split the same way, since half the window is half the response.
     """
     stack: list[tuple[datetime, datetime]] = []
     cursor = start
@@ -178,7 +205,15 @@ def _loki_windows(start: datetime, end: datetime, query: LokiQuery) -> Iterator[
     stack.reverse()
     while stack:
         lo, hi = stack.pop()
-        rows, has_more = query(lo, hi, _LOKI_PAGE)
+        try:
+            rows, has_more = _read_page(query, lo, hi, page=page)
+        except httpx.HTTPStatusError as exc:
+            if exc.response.status_code == _RESPONSE_TOO_LARGE:
+                middle = lo + (hi - lo) / 2
+                if lo < middle < hi:
+                    stack.extend([(middle, hi), (lo, middle)])
+                    continue
+            raise
         middle = lo + (hi - lo) / 2
         if has_more and lo < middle < hi:
             stack.extend([(middle, hi), (lo, middle)])
@@ -186,6 +221,29 @@ def _loki_windows(start: datetime, end: datetime, query: LokiQuery) -> Iterator[
         if has_more:
             raise RuntimeError(f"Loki window {lo.isoformat()}..{hi.isoformat()} cannot be split")
         yield from rows
+
+
+def _read_page(
+    query: LokiQuery, lo: datetime, hi: datetime, *, page: int
+) -> tuple[list[dict[str, Any]], bool]:
+    """One page read; transient transport failures retry with a bounded backoff.
+
+    The pass reads the whole held history in one run; failing it over a single suspended
+    connection would re-read every source on the re-run, so a few retries are cheaper. A 413 is
+    not transient — it says this window is too large to read at this page, and the caller splits
+    it.
+    """
+    for sleep_s in (*_TRANSIENT_RETRY_SLEEPS_S, None):
+        try:
+            return query(lo, hi, page)
+        except httpx.HTTPStatusError as exc:
+            if sleep_s is None or exc.response.status_code < 500:
+                raise
+        except (httpx.TimeoutException, httpx.TransportError):
+            if sleep_s is None:
+                raise
+        time.sleep(sleep_s)
+    raise AssertionError("unreachable")
 
 
 def _loki_query(*, archive: bool) -> LokiQuery:
@@ -199,20 +257,20 @@ def _loki_query(*, archive: bool) -> LokiQuery:
     return query
 
 
-def read_loki_archive(until: datetime) -> Iterator[AuditRow | Skipped]:
+def read_loki_archive(until: datetime, *, page: int = _LOKI_PAGE) -> Iterator[AuditRow | Skipped]:
     """Pre-cutover rows from the Loki archive stream."""
     end = min(ARCHIVE_FREEZE_AT, until)
-    for raw in _loki_windows(ARCHIVE_FLOOR_AT, end, _loki_query(archive=True)):
+    for raw in _loki_windows(ARCHIVE_FLOOR_AT, end, _loki_query(archive=True), page=page):
         yield _row_or_skip(raw, "loki-archive")
 
 
-def read_loki_live(until: datetime) -> Iterator[AuditRow | Skipped]:
+def read_loki_live(until: datetime, *, page: int = _LOKI_PAGE) -> Iterator[AuditRow | Skipped]:
     """Rows of the live stream: lineage names since the cutover, every name for ~84 hours.
 
     The window opens at the archive's freeze point and runs to `until`, so the permanent
     lineage rows and the recent rows of every other audit name come from one read.
     """
-    for raw in _loki_windows(ARCHIVE_FREEZE_AT, until, _loki_query(archive=False)):
+    for raw in _loki_windows(ARCHIVE_FREEZE_AT, until, _loki_query(archive=False), page=page):
         yield _row_or_skip(raw, "loki-live")
 
 
@@ -249,12 +307,12 @@ def _row_or_skip(raw: dict[str, Any], imported_from: str) -> AuditRow | Skipped:
 
 
 def sources(
-    jsonl_dirs: list[Path], until: datetime
+    jsonl_dirs: list[Path], until: datetime, *, page: int = _LOKI_PAGE
 ) -> list[tuple[str, Iterator[AuditRow | Skipped]]]:
     """The sources in precedence order: when two hold an event, the first one's row is kept."""
     return [
-        ("loki-archive", read_loki_archive(until)),
-        ("loki-live", read_loki_live(until)),
+        ("loki-archive", read_loki_archive(until, page=page)),
+        ("loki-live", read_loki_live(until, page=page)),
         ("jsonl", read_jsonl(jsonl_dirs, until)),
     ]
 
@@ -364,6 +422,13 @@ def main(argv: list[str] | None = None) -> int:
         default=None,
         help="ISO-8601 upper bound (default: now); rows after it are left to the live path",
     )
+    parser.add_argument(
+        "--loki-page",
+        type=_page_size,
+        default=_LOKI_PAGE,
+        metavar="N",
+        help=f"Loki lines per page, 1..{_MAX_LOKI_PAGE} (default: {_LOKI_PAGE})",
+    )
     args = parser.parse_args(argv)
     until = args.until or datetime.now(UTC)
     missing = [str(path) for path in args.jsonl if not path.is_dir()]
@@ -371,14 +436,14 @@ def main(argv: list[str] | None = None) -> int:
         print(f"error: --jsonl directory not found: {', '.join(missing)}")
         return 1
 
-    found = plan(sources(args.jsonl, until))
+    found = plan(sources(args.jsonl, until, page=args.loki_page))
     with connect() as conn:
         present = _already_present(conn, found.uids)
     print(render(found, present))
     if not args.apply:
         print("\ndry-run: nothing written (pass --apply to write)")
         return 0
-    inserted, skipped_existing = apply(sources(args.jsonl, until))
+    inserted, skipped_existing = apply(sources(args.jsonl, until, page=args.loki_page))
     print(f"\ninserted {inserted} rows ({skipped_existing} already present)")
     return 0
 
