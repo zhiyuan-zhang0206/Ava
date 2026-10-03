@@ -27,7 +27,7 @@ from base.agents.incarnation.exec_owner_protocol import (
     read_owner_bytes,
     read_owner_context,
 )
-from base.agents.incarnation.resources import ResourceProcess
+from base.agents.incarnation.resources import ExecAllocation, ResourceProcess
 from base.native_process.exec_domain import KILL_GRACE_S, ExecProcessDomain
 
 
@@ -91,14 +91,82 @@ def _relay(root: subprocess.Popen[bytes], failures: list[BaseException]) -> None
         root.stdout.close()
 
 
-def run(context_path: Path) -> None:  # noqa: PLR0915 -- one native owner retains cleanup ordering.
-    context = read_owner_context(context_path)
-    allocation = context.allocation
+_Reason = Literal["completed", "host_eof", "cancel", "timeout"]
+
+
+def _deadlines(allocation: ExecAllocation) -> tuple[float, float]:
+    """`(exec deadline, close deadline)` on the monotonic clock; refuses an expired allocation."""
     remaining = (allocation.deadline - datetime.now(UTC)).total_seconds()
     if remaining <= 0:
         raise RuntimeError("exec owner allocation expired before spawn")
     deadline = time.monotonic() + remaining
-    close_deadline = deadline + KILL_GRACE_S
+    return deadline, deadline + KILL_GRACE_S
+
+
+def _forward_permit(root: subprocess.Popen[bytes], raw: bytes) -> None:
+    if root.stdin is None:
+        raise RuntimeError("owner root has no permit pipe")
+    root.stdin.write(raw)
+    root.stdin.flush()
+    root.stdin.close()
+
+
+def _control_loop(
+    root: subprocess.Popen[bytes],
+    root_identity: psutil.Process,
+    control: ControlPipe,
+    allocation: ExecAllocation,
+    deadline: float,
+) -> _Reason:
+    """Relay the one permit and watch for cancel / host EOF / deadline until the root ends."""
+    permitted = False
+    # Keep the root unreaped to pin its process group.
+    while not _ended(root_identity):
+        if time.monotonic() >= deadline:
+            return "timeout"
+        raw = control.read()
+        if raw is None:
+            time.sleep(min(0.05, max(0.001, deadline - time.monotonic())))
+            continue
+        if not raw:
+            return "host_eof"
+        message = OwnerControl.model_validate_json(raw)
+        if (message.request, message.domain) != (allocation.request, allocation.domain):
+            raise RuntimeError("owner control belongs to another allocation")
+        if message.action == "cancel":
+            return "cancel"
+        if permitted:
+            raise RuntimeError("exec permit cannot be replayed")
+        _forward_permit(root, raw)
+        permitted = True
+    return "completed"
+
+
+def _close_after_failure(
+    original: BaseException,
+    root: subprocess.Popen[bytes],
+    domain: ExecProcessDomain,
+    close_deadline: float,
+    *,
+    attached: bool,
+    close_attempted: bool,
+) -> None:
+    """Best-effort closure of a failed owner; unresolved cleanup is recorded on `original`."""
+    try:
+        if attached and not close_attempted:
+            domain.close_confirmed(close_deadline)
+            root.wait(timeout=max(0.001, close_deadline - time.monotonic()))
+        elif not attached:
+            root.kill()
+            root.wait(timeout=max(0.001, close_deadline - time.monotonic()))
+    except BaseException as cleanup:
+        original.add_note(f"owner cleanup unresolved: {type(cleanup).__name__}: {cleanup}")
+
+
+def run(context_path: Path) -> None:
+    context = read_owner_context(context_path)
+    allocation = context.allocation
+    deadline, close_deadline = _deadlines(allocation)
     if (
         hashlib.sha256(read_owner_bytes(context.request_path, 64 * 1024 * 1024)).hexdigest()
         != allocation.request_digest
@@ -127,7 +195,6 @@ def run(context_path: Path) -> None:  # noqa: PLR0915 -- one native owner retain
     )
     reader_failures: list[BaseException] = []
     reader = threading.Thread(target=_relay, args=(root, reader_failures), daemon=True)
-    reason: Literal["completed", "host_eof", "cancel", "timeout"] = "completed"
     attached = False
     close_attempted = False
     try:
@@ -142,33 +209,7 @@ def run(context_path: Path) -> None:  # noqa: PLR0915 -- one native owner retain
         )
         reader.start()
         publish_owner_message(context_path.with_suffix(".ready"), OwnerReady(allocation=allocation))
-        permitted = False
-        # Keep the root unreaped to pin its process group.
-        while not _ended(root_identity):
-            if time.monotonic() >= deadline:
-                reason = "timeout"
-                break
-            raw = control.read()
-            if raw is None:
-                time.sleep(min(0.05, max(0.001, deadline - time.monotonic())))
-                continue
-            if not raw:
-                reason = "host_eof"
-                break
-            message = OwnerControl.model_validate_json(raw)
-            if (message.request, message.domain) != (allocation.request, allocation.domain):
-                raise RuntimeError("owner control belongs to another allocation")  # noqa: TRY301 -- same owned cleanup boundary.
-            if message.action == "cancel":
-                reason = "cancel"
-                break
-            if permitted:
-                raise RuntimeError("exec permit cannot be replayed")  # noqa: TRY301 -- same owned cleanup boundary.
-            if root.stdin is None:
-                raise RuntimeError("owner root has no permit pipe")  # noqa: TRY301 -- cleanup must still run.
-            root.stdin.write(raw)
-            root.stdin.flush()
-            root.stdin.close()
-            permitted = True
+        reason = _control_loop(root, root_identity, control, allocation, deadline)
         close_attempted = True
         domain.close_confirmed(close_deadline)
         code = root.wait(timeout=max(0.001, close_deadline - time.monotonic()))
@@ -185,16 +226,14 @@ def run(context_path: Path) -> None:  # noqa: PLR0915 -- one native owner retain
             ),
         )
     except BaseException as original:
-        try:
-            if attached and not close_attempted:
-                close_attempted = True
-                domain.close_confirmed(close_deadline)
-                root.wait(timeout=max(0.001, close_deadline - time.monotonic()))
-            elif not attached:
-                root.kill()
-                root.wait(timeout=max(0.001, close_deadline - time.monotonic()))
-        except BaseException as cleanup:
-            original.add_note(f"owner cleanup unresolved: {type(cleanup).__name__}: {cleanup}")
+        _close_after_failure(
+            original,
+            root,
+            domain,
+            close_deadline,
+            attached=attached,
+            close_attempted=close_attempted,
+        )
         raise
     finally:
         # Never turn failed cleanup into a terminal receipt.

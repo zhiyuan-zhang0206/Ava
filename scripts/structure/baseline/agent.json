@@ -11,11 +11,5 @@
     "agent/impersonation.py::ambient-container:_relay_children": 1,
     "agent/impersonation.py::import-time-read:_PROCESS_STARTED_MONOTONIC": 1,
     "agent/impersonation.py::import-time-read:_PROCESS_STARTED_WALL": 1
-  },
-  "complexity": {
-    "agent/exec_domain_owner.py::run": 28,
-    "agent/impersonation.py::establish_relay": 16,
-    "agent/impersonation.py::settle_checkpoint": 15,
-    "agent/impersonation.py::supervise_relay": 21
   }
 }

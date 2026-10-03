@@ -151,43 +151,42 @@ async def flush_checkpoint(checkpointer: object, agent_id: int) -> None:
         await flush(str(agent_id))
 
 
-async def settle_checkpoint(
+async def _activate_accepted(
     graph: CompiledStateGraph[
         _state.BaseAgentState, AvaContext, _state.BaseAgentState, _state.BaseAgentState
     ],
+    session: dict[str, Any],
+    incarnation: RuntimeIncarnation,
+) -> dict[str, Any] | None:
+    """Activate an accepted lease; None when the relay gate failed and native control resumes."""
+    from base.agents.impersonation import activate
+
+    # Continuations and managed exec resources must settle before activation.
+    if not hosted_resources_settled():
+        raise RuntimeError("cannot activate impersonation with unresolved native exec resources")
+    if session["automatic"]:
+        from agent.impersonation_handoff import ensure_start_marker
+
+        await ensure_start_marker(graph, session)
+    # The bound relay must be live before the takeover stands. On failure
+    # the lease is rolled back to 'rejected' with a loud reason and the
+    # native agent resumes — no silent half-takeover.
+    if not await asyncio.to_thread(establish_relay, session, incarnation):
+        return None
+    return await asyncio.to_thread(activate, session["id"], incarnation)
+
+
+async def _apply_plugin_deltas(
+    graph: CompiledStateGraph[
+        _state.BaseAgentState, AvaContext, _state.BaseAgentState, _state.BaseAgentState
+    ],
+    session: dict[str, Any],
     agent_id: int,
-    *,
-    activate_accepted: bool = True,
-) -> bool:
-    """After invocation+flush, activate; apply terminal deltas exactly once."""
-    session = await native_status(agent_id)
-    if session is None or session["status"] == "requested":
-        return False
-    incarnation = current_incarnation(agent_id)
-    assert incarnation is not None  # noqa: S101 — native_status requires it
-    from base.agents.impersonation import activate, mark_plugin_applied
-
-    if session["status"] == "accepted":
-        if not activate_accepted:
-            return False
-        # Continuations and managed exec resources must settle before activation.
-        if not hosted_resources_settled():
-            raise RuntimeError(
-                "cannot activate impersonation with unresolved native exec resources"
-            )
-        if session["automatic"]:
-            from agent.impersonation_handoff import ensure_start_marker
-
-            await ensure_start_marker(graph, session)
-        # The bound relay must be live before the takeover stands. On failure
-        # the lease is rolled back to 'rejected' with a loud reason and the
-        # native agent resumes — no silent half-takeover.
-        if not await asyncio.to_thread(establish_relay, session, incarnation):
-            return False
-        session = await asyncio.to_thread(activate, session["id"], incarnation)
-    if session["status"] == "active":
-        return True
+    incarnation: RuntimeIncarnation,
+) -> None:
+    """Apply each unapplied plugin delta exactly once, recording its receipt."""
     from ava.external.state import decode_plugin_delta
+    from base.agents.impersonation import mark_plugin_applied
 
     config: RunnableConfig = {"configurable": {"thread_id": str(agent_id)}}
     snapshot = await graph.aget_state(config)
@@ -203,6 +202,32 @@ async def settle_checkpoint(
             await flush_checkpoint(graph.checkpointer, agent_id)  # pyright: ignore[reportUnknownMemberType, reportUnknownArgumentType]
             receipt = expected
         await asyncio.to_thread(mark_plugin_applied, session["id"], version, incarnation)
+
+
+async def settle_checkpoint(
+    graph: CompiledStateGraph[
+        _state.BaseAgentState, AvaContext, _state.BaseAgentState, _state.BaseAgentState
+    ],
+    agent_id: int,
+    *,
+    activate_accepted: bool = True,
+) -> bool:
+    """After invocation+flush, activate; apply terminal deltas exactly once."""
+    session = await native_status(agent_id)
+    if session is None or session["status"] == "requested":
+        return False
+    incarnation = current_incarnation(agent_id)
+    assert incarnation is not None  # noqa: S101 — native_status requires it
+    if session["status"] == "accepted":
+        if not activate_accepted:
+            return False
+        activated = await _activate_accepted(graph, session, incarnation)
+        if activated is None:
+            return False
+        session = activated
+    if session["status"] == "active":
+        return True
+    await _apply_plugin_deltas(graph, session, agent_id, incarnation)
     if session["automatic"] and session["handoff_applied_at"] is None:
         from agent.impersonation_handoff import deliver_handoff
         from base.agents.impersonation import aborted_detail
@@ -351,45 +376,52 @@ def establish_relay(session: dict[str, Any], incarnation: RuntimeIncarnation) ->
     control resumes. A lease that is no longer 'accepted' returns False without
     a transition — someone else already ended it.
     """
+    from base.agents.impersonation import SESSION_RELAY_PROVIDERS, fail_acceptance
+
+    provider = session["relay_provider"]
+    if provider in SESSION_RELAY_PROVIDERS:
+        return _await_session_relay(session, incarnation)
+    if provider != "codex":
+        # Defensive: accept() already rejects leases without a relay binding.
+        return _roll_back_relay_failure(
+            session, incarnation, fail_acceptance, "request has no relay binding"
+        )
+    return _establish_codex_relay(session, incarnation)
+
+
+def _await_session_relay(session: dict[str, Any], incarnation: RuntimeIncarnation) -> bool:
+    """claude / dsh: the relay runs in the controller's own session; require a fresh heartbeat."""
+    from base.agents.impersonation import fail_acceptance
+
+    if session["automatic"]:
+        from base.agents.impersonation import native_status as read_status
+
+        deadline = time.monotonic() + _RELAY_READY_TIMEOUT_S
+        while not _heartbeat_fresh(session["relay_heartbeat_at"]) and time.monotonic() < deadline:
+            time.sleep(_RELAY_READY_POLL_S)
+            latest = read_status(incarnation.agent_id, incarnation)
+            if latest is None or latest["id"] != session["id"] or latest["status"] != "accepted":
+                return False
+            session = latest
+    if _heartbeat_fresh(session["relay_heartbeat_at"]):
+        return True
+    return _roll_back_relay_failure(
+        session,
+        incarnation,
+        fail_acceptance,
+        "the controller relay is not running (no fresh heartbeat)",
+    )
+
+
+def _establish_codex_relay(session: dict[str, Any], incarnation: RuntimeIncarnation) -> bool:
+    """codex: provision the scoped credential, spawn the relay here, wait for its first heartbeat."""
     from base.agents.impersonation import (
-        SESSION_RELAY_PROVIDERS,
         ImpersonationError,
         fail_acceptance,
         provision_relay,
         relay_get,
     )
 
-    provider = session["relay_provider"]
-    if provider in SESSION_RELAY_PROVIDERS:
-        if session["automatic"]:
-            from base.agents.impersonation import native_status as read_status
-
-            deadline = time.monotonic() + _RELAY_READY_TIMEOUT_S
-            while (
-                not _heartbeat_fresh(session["relay_heartbeat_at"]) and time.monotonic() < deadline
-            ):
-                time.sleep(_RELAY_READY_POLL_S)
-                latest = read_status(incarnation.agent_id, incarnation)
-                if (
-                    latest is None
-                    or latest["id"] != session["id"]
-                    or latest["status"] != "accepted"
-                ):
-                    return False
-                session = latest
-        if _heartbeat_fresh(session["relay_heartbeat_at"]):
-            return True
-        return _roll_back_relay_failure(
-            session,
-            incarnation,
-            fail_acceptance,
-            "the controller relay is not running (no fresh heartbeat)",
-        )
-    if provider != "codex":
-        # Defensive: accept() already rejects leases without a relay binding.
-        return _roll_back_relay_failure(
-            session, incarnation, fail_acceptance, "request has no relay binding"
-        )
     relay_token = secrets.token_urlsafe(32)
     try:
         provision_relay(session["id"], incarnation, relay_token)
@@ -535,12 +567,6 @@ async def supervise_relay(session: dict[str, Any] | None, agent_id: int) -> None
     Only a stale heartbeat escalates: at most one provision write, one relay
     spawn, and the rate-limited failure stamp.
     """
-    from base.agents.impersonation import (
-        ImpersonationError,
-        provision_relay,
-        record_relay_failure,
-    )
-
     child = _relay_children.get(agent_id)
     if session is None or session["status"] not in ("requested", "accepted", "active"):
         # Native control returned (release/expiry): the relay self-exits on
@@ -551,25 +577,36 @@ async def supervise_relay(session: dict[str, Any] | None, agent_id: int) -> None
         return
     if session["status"] != "active":
         return
-
-    # Component A: the executor's recorded process chain.
-    states = _provider_anchor_states(session.get("process_metadata"))
-    if states:
-        if "alive" in states:
-            _anchor_obscured.pop(agent_id, None)
-        elif set(states) <= {"dead", "reused"} or _anchor_obscured.get(agent_id) == session["id"]:
-            _anchor_obscured.pop(agent_id, None)
-            await _abort_for_death(session, agent_id, "executor", "the executor process is gone")
-            return
-        else:
-            # Unreadable or unknown anchors: one more pass before the verdict.
-            _anchor_obscured[agent_id] = session["id"]
-            return
-
+    if await _executor_verdict_stops(session, agent_id):
+        return
     if _heartbeat_fresh(session["relay_heartbeat_at"]):
         return
+    await _handle_stale_relay(session, agent_id, child)
 
-    # Component B: the bound relay.
+
+async def _executor_verdict_stops(session: dict[str, Any], agent_id: int) -> bool:
+    """Component A: the executor's recorded process chain. True when supervision ends here."""
+    states = _provider_anchor_states(session.get("process_metadata"))
+    if not states:
+        return False
+    if "alive" in states:
+        _anchor_obscured.pop(agent_id, None)
+        return False
+    if set(states) <= {"dead", "reused"} or _anchor_obscured.get(agent_id) == session["id"]:
+        _anchor_obscured.pop(agent_id, None)
+        await _abort_for_death(session, agent_id, "executor", "the executor process is gone")
+        return True
+    # Unreadable or unknown anchors: one more pass before the verdict.
+    _anchor_obscured[agent_id] = session["id"]
+    return True
+
+
+async def _handle_stale_relay(
+    session: dict[str, Any], agent_id: int, child: _RelayChild | None
+) -> None:
+    """Component B: the bound relay stopped heartbeating -- stop the lease or re-provision."""
+    from base.agents.impersonation import record_relay_failure
+
     if session["relay_provider"] != "codex":
         # A controller-session relay (claude / dsh) cannot be re-provisioned from
         # here and has no native-side mint record to read: a stale heartbeat
@@ -609,10 +646,21 @@ async def supervise_relay(session: dict[str, Any] | None, agent_id: int) -> None
         # this process started: the loss is not restart-shaped -- stop.
         await _abort_for_death(session, agent_id, "relay", "the bound relay stopped heartbeating")
         return
-    # Carve-out: this process never minted the relay, an earlier incarnation
-    # did, the loss predates our boot and we are inside the fresh-start window:
-    # re-provision (which also revokes any lingering credential and stamps the
-    # new mint mark in the same transaction).
+    await _reprovision_relay(session, agent_id, incarnation)
+
+
+async def _reprovision_relay(
+    session: dict[str, Any], agent_id: int, incarnation: RuntimeIncarnation
+) -> None:
+    """Carve-out: this process never minted the relay, an earlier incarnation did, the loss
+    predates our boot and we are inside the fresh-start window: re-provision (which also
+    revokes any lingering credential and stamps the new mint mark in the same transaction)."""
+    from base.agents.impersonation import (
+        ImpersonationError,
+        provision_relay,
+        record_relay_failure,
+    )
+
     token = secrets.token_urlsafe(32)
     try:
         await asyncio.to_thread(provision_relay, session["id"], incarnation, token)
