@@ -43,7 +43,7 @@ capability.
 | Loki | native, `ava-root` service | 3.7.6 / `GOMEMLIMIT=2GiB` | 3100 | log backend, filesystem storage, 84h retention |
 | Prometheus | native, `ava-root` service | 3.13.2 / `GOMEMLIMIT=1GiB` | 9090 | metrics and OTLP receiver |
 | Tempo | remote per cluster config | native backend on the station host; compose copy is the rollback asset | configured by `AVA_TELEMETRY_TEMPO_ENDPOINT` | trace backend |
-| Grafana | native, `ava-root` service | 13.1.3 | 3003 | anonymous read-only UI |
+| Grafana | native, `ava-root` service | 13.2.3 | 3003 | anonymous read-only UI |
 
 The pinned release assets and SHA256 values live in
 [`native/versions.yml`](native/versions.yml). Converge verifies an archive
