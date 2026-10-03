@@ -30,6 +30,7 @@ from base.agents import (
     InvalidModelConfig,
     SpawnTargetNotAgentRunner,
 )
+from base.agents.impersonation_manifest import record_central_event
 from base.agents.labels import publish_label_updated, spawn_prompt_with_label
 from base.agents.observation import roster
 from base.agents.observation import snapshot as snapshot_module
@@ -172,7 +173,11 @@ def get_agent_roster(request: Request) -> roster.AgentRoster:
 def _patch_label_blocking(
     pool: ConnectionPool, agent_id: int, new_label: str | None, source: str
 ) -> None:
-    """Sync label UPDATE + 404 guard + audit fact in one transaction — via to_thread."""
+    """Sync label UPDATE + 404 guard + audit fact in one transaction — via to_thread.
+
+    A change the agent made itself is attributed to the agent (`agent:<id>`), which lets
+    `record_central_event` append it to the agent's open impersonation lease log in the same
+    transaction; an operator's change is not a borrowed actor's and stays out of it."""
     with write_transaction(pool) as conn:
         with conn.cursor() as cur:
             cur.execute(
@@ -183,11 +188,14 @@ def _patch_label_blocking(
                 raise HTTPException(status_code=404, detail=f"agent {agent_id} not found")
         label_event = record_audit(
             conn,
-            prepare_event_log(
-                event_type="label_change",
-                agent_id=agent_id,
-                source=source,
-                payload={"new_label": new_label},
+            record_central_event(
+                conn,
+                prepare_event_log(
+                    event_type="label_change",
+                    agent_id=agent_id,
+                    source=f"agent:{agent_id}" if source == "self" else source,
+                    payload={"new_label": new_label},
+                ),
             ),
         )
     telemetry.emit_prepared(label_event)

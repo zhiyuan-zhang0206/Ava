@@ -489,7 +489,7 @@ class TestPatchThread:
         with TestClient(app) as client:
             resp = client.patch(f"/api/agents/{tid}", json={"label": "lead", "source": "self"})
         assert resp.status_code == 204
-        assert _label_audit(db_conn, tid) == [("self", {"new_label": "lead"})]
+        assert _label_audit(db_conn, tid) == [(f"agent:{tid}", {"new_label": "lead"})]
 
     def test_patch_whose_audit_fact_cannot_be_recorded_does_not_set_the_label(
         self, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch

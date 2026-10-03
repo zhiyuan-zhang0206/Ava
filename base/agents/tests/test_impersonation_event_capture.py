@@ -151,6 +151,31 @@ def test_central_events_belong_to_the_asserted_actor_not_the_recipient(
     assert _rows(db_conn, lease["id"], capture.CENTRAL_SOURCE) == 1
 
 
+def test_a_label_the_agent_sets_while_borrowed_lands_in_its_lease_log(
+    db_conn: psycopg.Connection[Any], owner: RuntimeIncarnation, lease: dict[str, Any]
+) -> None:
+    from fastapi.testclient import TestClient
+
+    from gateway.app import app
+
+    with TestClient(app) as client:
+        by_agent = client.patch(
+            f"/api/agents/{owner.agent_id}", json={"label": "borrowed", "source": "self"}
+        )
+        by_operator = client.patch(f"/api/agents/{owner.agent_id}", json={"label": "by operator"})
+    assert (by_agent.status_code, by_operator.status_code) == (204, 204)
+
+    assert _rows(db_conn, lease["id"], capture.CENTRAL_SOURCE) == 1
+    audited = db_conn.execute(
+        "SELECT source, attributes FROM audit_events "
+        "WHERE agent_id=%s AND event_name='label_change' ORDER BY id",
+        (owner.agent_id,),
+    ).fetchall()
+    assert [source for source, _ in audited] == [f"agent:{owner.agent_id}", "user"]
+    assert audited[0][1]["impersonation_session"] == f"{owner.agent_id}:0"
+    assert "impersonation_session" not in audited[1][1]
+
+
 def test_a_service_owned_central_event_is_recorded_in_both_logs_before_it_is_emitted(
     db_conn: psycopg.Connection[Any],
     owner: RuntimeIncarnation,
