@@ -12,9 +12,9 @@ _CT = TypeVar("_CT", bound=psycopg.AsyncConnection[Any])
 
 @contextmanager
 def write_transaction(
-    pool: ConnectionPool | None = None, *, timeout: float | None = None
+    pool: ConnectionPool, *, timeout: float | None = None
 ) -> Generator[psycopg.Connection, None, None]:
-    """Open one transaction explicitly allowed to write.
+    """Open one transaction explicitly allowed to write, on a connection of `pool`.
 
     The session may default to read-only without this client asking: a pooler
     that does not track `default_transaction_read_only` per client (PgBouncer
@@ -24,13 +24,7 @@ def write_transaction(
     statement before DML, pinning the borrowed backend until the context
     commits or rolls back. Pool connections must not use autocommit.
     """
-    if pool is None:
-        from base.db import connect
-
-        connection = connect()
-    else:
-        connection = pool.connection(timeout=timeout)
-    with connection as conn:
+    with pool.connection(timeout=timeout) as conn:
         conn.execute("SET TRANSACTION READ WRITE")
         yield conn
 

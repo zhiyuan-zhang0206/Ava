@@ -320,8 +320,9 @@ and the clock; the endpoint table is indexed by service name, a daemon taking on
 - **Done, the database** (`base/db`): `DbConfig` (`config.py`) is built from the live settings in
   one place; `Database` (`handle.py`) binds one config to `connect`, `pool`, `async_pool`,
   `direct_url` and `write_transaction`, and a root builds it with `Database.from_settings()`. The
-  module-level `base.db.connect()` / `pool()` / `async_pool()` / `direct_db_url()` and a
-  `write_transaction()` without a pool remain as a shim that builds the same dial at each call.
+  module-level `base.db.connect()` / `pool()` / `async_pool()` / `direct_db_url()` remain as a shim
+  that builds the same dial at each call; `base.db.transaction.write_transaction` takes the pool
+  it borrows from.
 - **Held by a rule, package by package**: the `ambient-db` rule of the ambient-state gate bans the
   shim in the packages listed in `DB_HANDLE_PACKAGES` (`scripts/structure/ambient_state/
   allowlist.py`), and bans `Database.from_settings()` outside the roots named there. Listed so far:

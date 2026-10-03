@@ -1,8 +1,5 @@
 {
   "ava_builtins/plugins": {
     "bus-built": 1
-  },
-  "base/db": {
-    "shim": 1
   }
 }

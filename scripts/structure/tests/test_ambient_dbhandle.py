@@ -37,7 +37,6 @@ def _sites(source: str, rel: str = f"{_PACKAGE}/core.py") -> dict[str, int]:
         ("import base.db", "base.db.pool()", "pool"),
         ("import base.db as dbm", "dbm.connect(direct=True)", "connect"),
         ("from base import db", "db.direct_db_url()", "direct_db_url"),
-        ("from base.db import write_transaction", "write_transaction()", "write_transaction"),
         ("from base.db import Database", "Database.from_settings()", "Database.from_settings"),
     ],
 )
@@ -46,19 +45,6 @@ def test_ambient_dials_in_a_governed_package_are_sites(
 ) -> None:
     source = f"{imports}\n\n\ndef f():\n    return {call}\n"
     assert _sites(source) == {f"ambient-db:{expected}": 1}
-
-
-def test_a_write_transaction_with_a_pool_is_not_ambient() -> None:
-    source = """
-        from base.db.transaction import write_transaction
-
-        def f(pool):
-            with write_transaction(pool) as c:
-                pass
-            with write_transaction(pool=pool) as c:
-                pass
-    """
-    assert _sites(source) == {}
 
 
 def test_calls_on_a_handle_are_not_sites() -> None:
