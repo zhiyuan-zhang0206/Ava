@@ -37,8 +37,7 @@ def test_records_an_attributed_firing(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_unattributed_firing_records_nothing(monkeypatch: pytest.MonkeyPatch) -> None:
     """`plugin=None` is a framework registration or a test's direct call — the
-    same gate `plugin_contributions.record` applies to the ledger, so the two
-    stay parallel and the framework never shows up as a plugin."""
+    gate that keeps the framework from ever showing up as a plugin."""
     emitted = _spy_emit(monkeypatch)
 
     activation.record(None, "hooks", "before_llm", detail="wrote messages", model="m")

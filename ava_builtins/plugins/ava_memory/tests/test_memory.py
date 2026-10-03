@@ -7,15 +7,16 @@ Data-plane behaviour unit tests live in `gateway/routers/tests/test_memory_searc
 only tests the SDK ↔ gateway wire and PATH prefix conversion.
 """
 
-import importlib
-import sys
+from collections.abc import Callable, Iterator
 from pathlib import Path
 from typing import Any
 
 import pytest
 
 import ava
-from base.packages.plugins.context import PluginContext
+from ava.sdk_surface import install
+from ava_builtins.plugins.ava_memory import plugin as memory_plugin
+from base.packages.plugins.extensions import ExtensionRegistry, PluginContributions, SdkWrap
 
 # ── Plugin simulation: wrap search() with the real implementation ───────
 # In the agent process the ava_memory plugin wraps search() at startup.
@@ -23,28 +24,24 @@ from base.packages.plugins.context import PluginContext
 
 
 @pytest.fixture(autouse=True)
-def _wrap_memory_search(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Install the ava_memory plugin's search() wrapper so tests exercise the
-    real search path instead of the RuntimeError stub."""
-
-    # ava.memory is registered by the ava_memory native plugin (#830), not by
-    # core. Under pytest-xdist a worker where a prior test cleared plugin
-    # namespaces (clear_registered_namespaces) has no ava.memory, so the wrap
-    # below errors at setup — (re)load the plugin to register the namespace.
-    # sys.modules.pop forces module re-execution (register_namespace runs at
-    # import) when it was imported before the clear.
-    if not hasattr(ava, "memory"):
-        sys.modules.pop("ava_builtins.plugins.ava_memory.plugin", None)
-        with PluginContext("ava_memory"):
-            importlib.import_module("ava_builtins.plugins.ava_memory.plugin")
-
+def _wrap_memory_search() -> Iterator[None]:
+    """Install the ava_memory SDK surface with the search() wrapper the plugin
+    declares in the agent process, so tests exercise the real search path instead
+    of the RuntimeError stub."""
     from ava import gateway_client as _client
 
-    def _wrapper(inner, query: str, k: int = 5, *, timeout: float | None = None):
+    def _wrapper(
+        inner: Callable[..., Any], query: str, k: int = 5, *, timeout: float | None = None
+    ) -> list[tuple[Path, str, list[str]]]:
         results = _client.memory_search(query, k, timeout=timeout)
         return [(ava.memory.PATH / r.path, r.description, list(r.tags)) for r in results]
 
-    ava.extend.wrap("memory.search", _wrapper)
+    declared = memory_plugin.contribute().merged(
+        PluginContributions(sdk_wraps=(SdkWrap("memory.search", _wrapper),))
+    )
+    install.install(ExtensionRegistry((("ava_memory", declared),)))
+    yield
+    install.uninstall()
 
 
 # ── PATH constant ────────────────────────────────────────────────────────

@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 
 import ava.skills as skills_mod
-from ava.tests._skills_helpers import _clear_skill_sources as _clear_skill_sources
+from ava.sdk_surface import skill_sources
 from ava.tests._skills_helpers import _overlay_all_enabled as _overlay_all_enabled
 from ava.tests._skills_helpers import _write_skill
 from ava.tests._skills_helpers import fake_skills_dir as fake_skills_dir
@@ -176,14 +176,11 @@ def test_mount_hash_dedup_same_content_across_mount_calls_in_scan_tree(
     # Override the SKILL.md in fake_skills_dir to have exact same content
     (fake_skills_dir / "dup-skill" / "SKILL.md").write_text(content, encoding="utf-8")
 
-    skills_mod.register_skill_source(lambda: [provider_root])
-    try:
+    with skill_sources.scoped(lambda: [provider_root]):
         names = skills_mod.names()
         # Only one "dup-skill" — hash dedup prevented the provider duplicate
         dup_count = sum(1 for s in names if s["name"] == "dup-skill")
         assert dup_count == 1
-    finally:
-        skills_mod.clear_skill_sources()
 
 
 # ─── auto-promote: same-named child becomes root skill ─────────────────────
@@ -435,12 +432,9 @@ def test_a_provider_root_may_still_override_a_same_named_skill(
     project = tmp_path / "project-skills"
     project.mkdir()
     _write_skill(project, "tdd", "name: tdd\ndescription: project-local")
-    skills_mod.register_skill_source(lambda: [project])
-    try:
+    with skill_sources.scoped(lambda: [project]):
         (skill,) = skills_mod.names()
         assert skill["description"] == "project-local"
-    finally:
-        skills_mod.clear_skill_sources()
 
 
 # ─── SkillIndexBuilder: merged single traversal (regressions) ─────────────

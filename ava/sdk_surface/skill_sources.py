@@ -1,13 +1,12 @@
 """Plugin-contributed skill-root providers — framework-internal registry.
 
-A plugin registers a callable returning skill-root directories computed at scan
-time (used for project-local skills whose location depends on runtime cwd). The
-agent-facing `ava.skills.register_skill_source` is the registration entry point;
-the scanner (`ava.skills`) reads the registered roots; the kernel's plugin
-reload (`agent.state.clear_plugin_registrations`) clears them between reloads.
+A plugin declares (`PluginContributions.skill_sources`) a callable returning skill-root directories
+computed at scan time (used for project-local skills whose location depends on runtime cwd).
+`ava.sdk_surface.install` adds them and undoes them on reload; the scanner (`ava.skills`) reads the
+installed roots.
 
-The registry lives here, off the agent-facing `ava.skills` module, so the kernel
-can clear it and the scanner can read it without either reaching through
+The list lives here, off the agent-facing `ava.skills` module, so the installer
+can write it and the scanner can read it without either reaching through
 `ava.skills` — which `AVA_SDK_DISABLE` may replace with a stub (a hermetic
 bench that scopes the skills surface out). Per-process state: each agent is its
 own process.
@@ -18,31 +17,37 @@ This module is framework-internal: not agent-facing, never in the
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Generator
+from contextlib import contextmanager
 from pathlib import Path
 
 _PROVIDERS: list[Callable[[], list[Path]]] = []
 
 
-def register(provider: Callable[[], list[Path]]) -> None:
-    """Append a skill-root provider. Called via `ava.skills.register_skill_source`."""
+def add(provider: Callable[[], list[Path]]) -> Callable[[], None]:
+    """Append a skill-root provider; returns the undo. Called by `ava.sdk_surface.install` for a
+    plugin's declared `skill_sources`."""
     _PROVIDERS.append(provider)
-    # Attribution for `ava plugins inspect`; lazy import keeps this leaf free of
-    # an ava -> shared load-order dependency, and it is a no-op outside a plugin
-    # import.
-    from base.packages.plugins import contributions
 
-    contributions.record(
-        "skillSources",
-        getattr(provider, "__name__", repr(provider)),
-        detail=getattr(provider, "__module__", "?"),
-    )
+    def undo() -> None:
+        _PROVIDERS.remove(provider)
+
+    return undo
 
 
-def clear() -> None:
-    """Drop all registered providers, so the next plugin load re-registers from
-    empty state. Called by `agent.state.clear_plugin_registrations`."""
-    _PROVIDERS.clear()
+@contextmanager
+def scoped(provider: Callable[[], list[Path]]) -> Generator[None]:
+    """Hold `provider` for the duration of a `with` block and take back only that one.
+
+    For a framework caller that needs a request-scoped skill root (the ops runner's per-agent
+    command view): the installed plugin providers stay in place, and the scoped one never outlives
+    the call even when it raises.
+    """
+    undo = add(provider)
+    try:
+        yield
+    finally:
+        undo()
 
 
 def roots() -> list[Path]:

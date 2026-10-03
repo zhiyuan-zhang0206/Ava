@@ -450,10 +450,10 @@ def test_dangling_config_entry_reported_and_skipped(
 
     events = _capture_plugin_load_events(monkeypatch)
 
-    config = _loader.load_extensions()  # must not raise
+    loaded = _loader.load_extensions()  # must not raise
 
     assert "plugins.audit.plugin" in sys.modules
-    assert "vanished" not in config.plugins
+    assert "vanished" not in loaded.config.plugins
     attrs = [a for n, a in events if n == "plugin_load_failed"]
     assert [a["plugin"] for a in attrs] == ["vanished"]
 

@@ -27,15 +27,12 @@ is a different module and gets a fresh object, so the dead file's globals
 never leak into the live one.
 
 ## What a reload does not undo
-Reload is not a lifecycle. `clear_plugin_registrations()` at the top of the
-full load clears the registries still filled at import (namespaces, skill sources,
-plugin configs, flags, the attribution ledger) and
-`ava.sdk_surface.wraps.clear_wraps` restores every wrapped target to its captured
-original, so registration starts from a pristine core each time. The surface
-form never resets: a child loads once, and importing `agent.state` for the
-reset would defeat the split (task #3633). Hooks, state, prompt sections and
-notes are not registries at all: they are `PluginContributions` values, and
-`build_registry()` makes a new one on demand. Nothing in the host swaps a registry
+Reload is not a lifecycle. The full load starts with `ava.sdk_surface.install.uninstall()`,
+which takes the metering recorder off and undoes every namespace, member, wrap layer, skill
+source, flag and config of the previous install (newest first), so installation starts from
+a pristine core each time. The surface form never uninstalls: a child loads once.
+Hooks, state, prompt sections and notes are not process-global at all: they are
+`PluginContributions` values, and `build_registry()` makes a new one on demand. Nothing in the host swaps a registry
 in place, though: the graph is compiled once from the registry the daemon builds at
 boot, so a changed plugin set takes effect on the next host start. Anything a
 plugin allocated at import time (a connection, a thread, a file handle) is

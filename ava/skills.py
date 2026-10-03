@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import sys
 import types
-from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, TypedDict
 
@@ -42,7 +41,7 @@ _recorded_skill_invocations: set[tuple[int, str]] = set()
 # is a leaf node, and the folders above it (under its mount point) are its
 # namespace path. Mount points:
 #   - ~/.ava/skills/                          → tree root (install-registry gated)
-#   - provider roots (register_skill_source)  → tree root (runtime, project-local)
+#   - provider roots (a plugin's declared skill_sources)  → tree root (runtime, project-local)
 #
 # `~/.ava/skills/` is THE load dir: repo skills (`<repo>/ava_builtins/skills/*`) and plugin
 # skills (`<repo>/ava_builtins/plugins/<p>/skills/*`, `~/.ava/plugins/<p>/skills/*`) are
@@ -136,28 +135,9 @@ def target(skill: Skill) -> str:
     return ".".join(match_key(seg) for seg in (*skill["namespace"], skill["name"]))
 
 
-# Plugin-contributed skill-root providers. The registry storage lives in
-# `ava.sdk_surface.skill_sources` (framework-internal) so the kernel's plugin reload can
-# clear it without importing this disable-able `ava.skills` module; the
-# functions here are the agent/plugin-facing client over it.
-
-
-def register_skill_source(provider: Callable[[], list[Path]]) -> None:
-    """Plugin extension point: contribute skill roots resolved at scan time.
-
-    `provider()` returns a list of directories; each is mounted at the tree root
-    (bare-named) exactly like `<repo>/ava_builtins/skills/`. It is called on every skill scan,
-    so a provider may return cwd-dependent roots that change as the agent moves
-    between projects. Provider roots are scanned last, so a project-local skill
-    overrides a same-named built-in one.
-    """
-    skill_sources.register(provider)
-
-
-def clear_skill_sources() -> None:
-    """Drop all registered skill-source providers, so the next plugin load
-    re-registers from empty state."""
-    skill_sources.clear()
+# Plugin-contributed skill-root providers: the installed list lives in
+# `ava.sdk_surface.skill_sources` (framework-internal, written only by `ava.sdk_surface.install`), off
+# this disable-able `ava.skills` module.
 
 
 def _provider_roots() -> list[Path]:

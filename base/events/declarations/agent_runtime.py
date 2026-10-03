@@ -20,8 +20,8 @@ class PluginActivation(TypedDict):
     """`plugin_activation` payload — base/packages/plugins/activation.py.
 
     ``plugin`` / ``surface`` / ``identifier`` are the same triple
-    ``base.packages.plugins.contributions.Contribution`` stores, so the registration
-    ledger and these runtime records join on three strings. ``detail`` is free
+    ``base.packages.plugins.contributions.Contribution`` stores, so the declared
+    contributions and these runtime records join on three strings. ``detail`` is free
     text about the one firing; ``model`` is the model in force, which is what
     makes philosophy §6's per-model obsolescence gauge answerable."""
 

@@ -22,7 +22,7 @@ from base.packages.plugins.config_registration import (
     _PLUGIN_CONFIG_CLASSES,
     _PLUGIN_CONFIGS,
     all_plugin_configs,
-    clear_plugin_configs,
+    bind_plugin_config,
     get_plugin_config,
     process_plugin_config,
 )
@@ -41,15 +41,17 @@ class _BetaConfig(BaseModel):
 
 
 @pytest.fixture
-def two_plugins():
+def two_plugins(unit_home):
     """A registry holding exactly two plugins, restored afterwards."""
     snap_classes = dict(_PLUGIN_CONFIG_CLASSES)
     snap_configs = dict(_PLUGIN_CONFIGS)
-    clear_plugin_configs()
-    _PLUGIN_CONFIG_CLASSES.update({"alpha": _AlphaConfig, "beta": _BetaConfig})
-    _PLUGIN_CONFIGS.update({"alpha": _AlphaConfig(), "beta": _BetaConfig()})
+    _PLUGIN_CONFIG_CLASSES.clear()
+    _PLUGIN_CONFIGS.clear()
+    bind_plugin_config("alpha", _AlphaConfig)
+    bind_plugin_config("beta", _BetaConfig)
     yield
-    clear_plugin_configs()
+    _PLUGIN_CONFIG_CLASSES.clear()
+    _PLUGIN_CONFIGS.clear()
     _PLUGIN_CONFIG_CLASSES.update(snap_classes)
     _PLUGIN_CONFIGS.update(snap_configs)
 
@@ -96,7 +98,7 @@ class TestOverrideResolution:
         assert get_plugin_config("alpha", slices) is get_plugin_config("alpha", slices)
 
     def test_memoized_instance_follows_a_rebound_class(self, two_plugins) -> None:
-        """`clear_plugin_configs` + re-register (the test/plugin-reload path)
+        """an uninstall + reinstall (the plugin-reload path)
         swaps the class behind a plugin name; a stale cached instance of the
         old class must not survive it."""
         slices = _slices({"alpha": {"marker": "agent-marker"}})

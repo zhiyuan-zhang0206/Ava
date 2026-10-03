@@ -44,7 +44,7 @@ _LEAKS_FILE = f"{_TESTS}/test_known_leaks.py"
 LEAKERS = {
     "test_leaker_setattr_getattr_served_name": "module-attr",
     "test_leaker_delenv_raising_false": "env",
-    "test_leaker_register_namespace": "module-attr",
+    "test_leaker_install_namespace": "module-attr",
     "test_leaker_cwd": "cwd",
     "test_leaker_signal_handler": "signal",
 }

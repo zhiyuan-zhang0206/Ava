@@ -77,13 +77,19 @@ __description__ = "Shared memory pool: ava.memory SDK surface (PATH + search + w
 # `agent/extensions/__init__.py`).
 
 
-import ava as _ava
+from base.packages.plugins.extensions import PluginContributions, SdkNamespace
 
 from . import sdk as _memory_sdk
 
-# ── ava.memory namespace registration ──────────────────────────────────
+# ── ava.memory namespace declaration ──────────────────────────────────
 # The SDK surface (PATH / search / write) lives in `sdk.py` — a real module
-# that IS the `ava.memory` namespace. register_namespace puts the same object
+# that IS the `ava.memory` namespace. the SDK install puts the same object
 # on the package (attribute access) and in sys.modules under `ava.memory`
 # (`import ava.memory`), so both spellings resolve identically.
-_ava.register_namespace("memory", _memory_sdk)
+
+
+def contribute() -> PluginContributions:
+    """What this plugin declares for the SDK surface."""
+    return PluginContributions(
+        sdk_namespaces=(SdkNamespace("memory", _memory_sdk, expand=False),),
+    )

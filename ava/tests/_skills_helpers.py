@@ -1,11 +1,9 @@
 """Shared fixtures and helpers for the ava.skills test files; split from ava/tests/test_skills.py (task #4922)."""
 
-from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
 
-import ava.skills as skills_mod
 from base.packages.extensions import install_registry
 from base.paths import skills_dir
 
@@ -37,12 +35,3 @@ def _write_skill(root: Path, dirname: str, frontmatter: str, body: str = "") -> 
     skill_dir = root / dirname
     skill_dir.mkdir()
     (skill_dir / "SKILL.md").write_text(f"---\n{frontmatter}\n---\n\n{body}", encoding="utf-8")
-
-
-@pytest.fixture(autouse=True)
-def _clear_skill_sources() -> Iterator[None]:
-    """Provider registry is a module global; clear before and after each test
-    so registrations don't leak across tests."""
-    skills_mod.clear_skill_sources()
-    yield
-    skills_mod.clear_skill_sources()

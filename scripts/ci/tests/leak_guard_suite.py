@@ -32,12 +32,12 @@ def agent_id() -> int | None:
 """,
     # A plugin namespace module (stand-in for `ava_builtins.plugins.ava_code._code_namespace`).
     "leakdemo/nsmod.py": '"""A namespace module."""\n',
-    # Stand-in for `ava.sdk_surface.plugins.register_namespace`: it marks the module object.
+    # Stand-in for `ava.sdk_surface.plugins.install_namespace`: it marks the module object.
     "leakdemo/registry.py": """
 from types import ModuleType
 
 
-def register_namespace(module: ModuleType, name: str) -> None:
+def install_namespace(module: ModuleType, name: str) -> None:
     module._qualname = f"leakdemo.{name}"  # type: ignore[attr-defined]
 """,
     # Stand-in for `ava.self`: AGENT_ID is served by the module `__getattr__`, never stored.
@@ -164,8 +164,8 @@ def test_victim_expects_unset_port() -> None:
 
 
 # ---- class 3: code under test marks a module object and nothing takes the mark off
-def test_leaker_register_namespace() -> None:
-    registry.register_namespace(nsmod, "code")
+def test_leaker_install_namespace() -> None:
+    registry.install_namespace(nsmod, "code")
     assert nsmod._qualname == "leakdemo.code"  # type: ignore[attr-defined]
 
 
@@ -192,7 +192,7 @@ def test_clean_setenv_empty_before_delenv(monkeypatch: pytest.MonkeyPatch) -> No
 
 def test_clean_preregistered_module_attr(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(nsmod, "_qualname", "placeholder", raising=False)
-    registry.register_namespace(nsmod, "code")
+    registry.install_namespace(nsmod, "code")
 
 
 # ---- class 4: the identity slot assigned bare, the pattern 300+ test sites use (undone by identity_restore)

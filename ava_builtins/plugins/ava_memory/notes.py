@@ -19,7 +19,7 @@ framework's ordered context-note registry (`agent.graph.context_notes`), which
 `init_context` lays down whenever a window is established. Registration lives
 there because `plugin.py` is re-executed on every plugin (re)load, while an
 import of this module hits the sys.modules cache — decorators here would not
-re-run after `clear_plugin_registrations` truncated the plugin tail.
+re-run on a reload.
 """
 
 from __future__ import annotations

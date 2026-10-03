@@ -3,7 +3,6 @@ with per-compaction cadence; agent-reply hints on agent-sourced inbound.
 """
 
 import inspect
-import sys
 from collections.abc import Iterator
 from typing import Any, cast
 
@@ -19,7 +18,8 @@ from langchain_core.runnables import RunnableConfig
 from langgraph.runtime import Runtime
 
 from agent.messages import inbound_message, tail_has_agent_inbound
-from agent.state import CompactState, build_agent_state, clear_plugin_registrations
+from agent.state import CompactState, build_agent_state
+from ava.sdk_surface import install
 from ava_builtins.plugins.ava_sdk_reminder._state import (
     AGENT_REPLY_CATEGORY,
     CATEGORIES,
@@ -49,33 +49,15 @@ def _pin_compact_budget(
 
 
 @pytest.fixture
-def _loaded() -> Iterator[Any]:
-    """Import the ava_sdk_reminder agent-runtime face fresh.
+def _loaded() -> Any:
+    """The ava_sdk_reminder agent-runtime face.
     Compact is now a core capability (Issue #1284) — its state fields live
     directly on BaseAgentState (nested compact/memory, etc.) and its config comes
     from base.config.settings. No separate plugin module to load.
-    Teardown unloads the module so it does not leak into other tests.
     """
-    from base.packages.plugins.config_registration import bind_from_disk
-    from base.packages.plugins.context import PluginContext
+    from ava_builtins.plugins.ava_sdk_reminder import agent_runtime as _plugin
 
-    clear_plugin_registrations()
-    for name in list(sys.modules):
-        if name.startswith("ava_builtins.plugins.ava_sdk_reminder"):
-            del sys.modules[name]
-
-    with PluginContext("ava_sdk_reminder"):
-        # The state class + hooks live in the agent-runtime face (task #3633).
-        from ava_builtins.plugins.ava_sdk_reminder import agent_runtime as _plugin
-
-    bind_from_disk()
-
-    yield _plugin
-
-    clear_plugin_registrations()
-    for name in list(sys.modules):
-        if name.startswith("ava_builtins.plugins.ava_sdk_reminder"):
-            del sys.modules[name]
+    return _plugin
 
 
 def _state(messages: list[AnyMessage], **fields: Any):
@@ -201,24 +183,17 @@ def test_categories_cover_all_hints():
 
 @pytest.fixture
 def _load_ava_code_plugin() -> Iterator[None]:
-    """Load plugins.ava_code so `ava.shell.run` carries the same wrap the agent
-    runtime installs — the drift guard below reads the agent-facing signature +
-    docstring off that live object. Teardown clears registrations (wraps
+    """Install plugins.ava_code's SDK surface so `ava.shell.run` carries the same
+    wrap the agent runtime installs — the drift guard below reads the agent-facing
+    signature + docstring off that live object. Teardown uninstalls (wraps
     included) so nothing leaks into the next test."""
-    from importlib import import_module
+    from ava_builtins.plugins.ava_code import plugin
 
-    from base.packages.plugins.context import PluginContext
-
-    clear_plugin_registrations()
-    for name in list(sys.modules):
-        if name.startswith("ava_builtins.plugins.ava_code"):
-            del sys.modules[name]
-    with PluginContext("ava_code"):
-        import_module("ava_builtins.plugins.ava_code.plugin")
+    install.install(ExtensionRegistry((("ava_code", plugin.contribute()),)))
 
     yield
 
-    clear_plugin_registrations()
+    install.uninstall()
 
 
 def test_shell_hint_embeds_live_shell_run_contract(_load_ava_code_plugin: None):

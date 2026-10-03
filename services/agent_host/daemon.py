@@ -315,18 +315,16 @@ def _background_loops() -> dict[str, Coroutine[object, object, None]]:
 
 
 def _load_plugin_registry() -> ExtensionRegistry:
-    """The full plugin load, then the registry of what the plugins declare.
+    """The full plugin load: the registry of the plugins admitted and declared.
 
-    One value handed to the checkpoint serde (state classes), the graph (hooks, state fields) and
+    The load also installs the plugins' SDK surface into this process's `ava`. One value handed to the checkpoint serde (state classes), the graph (hooks, state fields) and
     the host (prompt sections, notes), so all three see the same plugin set. A plugin changed after
     this point takes effect on the next host start (`_plugins_fingerprint`): the graph is compiled
     once and cannot take a new registry.
     """
     from agent.extensions import load_extensions
-    from agent.extensions.registry import build_registry
 
-    load_extensions()
-    return build_registry()
+    return load_extensions().registry
 
 
 async def _build_checkpointer(

@@ -19,8 +19,8 @@ All drive the same primitives (`ava/sdk_surface/plugin_loader.py`), so a plugin 
 module name, `__package__`, `sys.modules` identity, and containment whichever
 production path imports it (issue #2161 — before unification the boot loader
 exec'd plugins under a top-level name and relative imports crashed the agent
-host). Each import runs inside `with PluginContext(name):`, which attributes
-the `register_*` calls it triggers.
+host). Importing a plugin registers nothing: its faces export `contribute()`, and the
+loader builds the registry and installs the SDK surface afterwards.
 
 The name given to `importlib.util.spec_from_file_location` is **dotted**
 (`ava_builtins.plugins.<name>.plugin` built-in, `plugins.<name>.plugin`
@@ -29,7 +29,7 @@ external), so importlib sets `__package__` and a `from . import x` inside
 is built-in; anything else is external.
 
 Load order is the `config.plugins` dict order (alphabetical), one by one —
-**no dependency declaration, no topological sort**. Configs are bound uniformly by `bind_from_disk()`
+**no dependency declaration, no topological sort**. Configs are bound by the SDK install (`bind_plugin_config`)
 only after every import has completed, so a hook firing later always finds
 `ava._settings.plugins.<n>` populated.
 
@@ -118,4 +118,4 @@ In full: [[okf/plugins/module-loading/reload-semantics.ava.okf.md]].
 ## Key Dependencies
 - [[okf/plugins/plugins.ava.okf.md]] — the injection surfaces the import registers into
 - [[agent/graph/docs/graph.ava.okf.md]] — `build_graph()` calls the loader (`agent.extensions.load_extensions`) before wiring nodes
-- [[extensions.ava.okf.md]] — the `ava.extend.wrap` layer a reload re-installs from a pristine core
+- [[extensions.ava.okf.md]] — the `SdkWrap` layers a reload re-installs from a pristine core

@@ -162,7 +162,7 @@ _PLUGIN_MODULE_DOCSTRING_EXEMPT: frozenset[str] = frozenset(
 
 
 def _registered_namespace_files(plugin_py: Path, tree: ast.Module) -> set[Path]:
-    """The module files a plugin registers as `ava.X` namespaces."""
+    """The module files a plugin declares as `ava.X` namespaces (`SdkNamespace`)."""
     files: set[Path] = set()
     # Track `from . import <name> as <alias>` to resolve module references.
     imported_modules: dict[str, str] = {}
@@ -170,12 +170,12 @@ def _registered_namespace_files(plugin_py: Path, tree: ast.Module) -> set[Path]:
         if isinstance(node, ast.ImportFrom) and node.level == 1:
             for alias in node.names:
                 imported_modules[alias.asname or alias.name] = alias.name
-    # Find `ava.register_namespace("X", <expr>)` calls.
+    # Find `SdkNamespace("X", <expr>)` declarations.
     for node in ast.walk(tree):
         if (
             isinstance(node, ast.Call)
-            and isinstance(node.func, ast.Attribute)
-            and node.func.attr == "register_namespace"
+            and isinstance(node.func, ast.Name)
+            and node.func.id == "SdkNamespace"
             and len(node.args) >= 2
             and isinstance(node.args[1], ast.Name)
         ):
@@ -188,10 +188,10 @@ def _registered_namespace_files(plugin_py: Path, tree: ast.Module) -> set[Path]:
 
 
 def _discover_plugin_namespace_modules(repo_root: Path) -> set[Path]:
-    """Find plugin module files registered as `ava.X` namespaces.
+    """Find plugin module files declared as `ava.X` namespaces.
 
-    Scans every `plugins/*/plugin.py` for `ava.register_namespace("X", <module>)`
-    calls and returns the set of `<module>` file paths. Those modules are
+    Scans every `plugins/*/plugin.py` for `SdkNamespace("X", <module>)` declarations
+    and returns the set of `<module>` file paths. Those modules are
     agent-facing (their docstrings + public function docstrings land in
     `help(ava.X)`); other helper files in the same plugin dir aren't.
     """
@@ -413,19 +413,19 @@ def _agent_visible_names(tree: ast.Module) -> set[str] | None:
 def _wrap_targets(tree: ast.Module) -> set[str]:
     """Find wrapper functions that take over public SDK entries at module top level.
 
-    Two shapes: the registration primitive `ava.extend.wrap("files.read",
-    _wrapped_read)` (the current form) and a legacy bare `ava.X.Y = _wrapped`
+    Two shapes: the declaration `SdkWrap("files.read", _wrapped_read)` (the current
+    form, anywhere in the module) and a legacy bare `ava.X.Y = _wrapped`
     reassignment. Either way the wrapper's docstring becomes the docstring of
     the SDK name it replaces, so it's agent-visible even when underscore-prefixed.
     """
     targets: set[str] = set()
-    for node in tree.body:
-        # `ava.extend.wrap("target", <name>)` — wrapper is the 2nd positional arg
-        if isinstance(node, ast.Expr) and isinstance(node.value, ast.Call):
-            wrapper = _extend_wrap_wrapper(node.value)
+    # `SdkWrap("target", <name>)` — wrapper is the 2nd positional arg
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call):
+            wrapper = _sdk_wrap_wrapper(node)
             if wrapper is not None:
                 targets.add(wrapper)
-            continue
+    for node in tree.body:
         # Legacy `ava.X.Y = <name>` reassignment
         if (
             isinstance(node, ast.Assign)
@@ -436,16 +436,11 @@ def _wrap_targets(tree: ast.Module) -> set[str]:
     return targets
 
 
-def _extend_wrap_wrapper(call: ast.Call) -> str | None:
-    """The wrapper name of an `ava.extend.wrap("target", <name>)` call."""
-    func = call.func
+def _sdk_wrap_wrapper(call: ast.Call) -> str | None:
+    """The wrapper name of a `SdkWrap("target", <name>)` declaration."""
     if (
-        isinstance(func, ast.Attribute)
-        and func.attr == "wrap"
-        and isinstance(func.value, ast.Attribute)
-        and func.value.attr == "extend"
-        and isinstance(func.value.value, ast.Name)
-        and func.value.value.id == "ava"
+        isinstance(call.func, ast.Name)
+        and call.func.id == "SdkWrap"
         and len(call.args) >= 2
         and isinstance(call.args[1], ast.Name)
     ):

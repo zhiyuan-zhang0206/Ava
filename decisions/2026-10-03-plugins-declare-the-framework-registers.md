@@ -52,8 +52,16 @@ This is done one surface family at a time, each its own change:
   `inspector.py`, each exporting `contribute()`), and a process builds a data registry
   (`base/packages/plugins/data_registry.py`) from the faces it loads. A face is gated on its own manifest key
   (`metrics`, `inspectWidgets`).
-- **C**: SDK namespaces, members, wraps, skill sources, plugin configs and providers. Until then
-  `clear_plugin_registrations` remains, covering exactly those registries, and is deleted with C.
+- **C**: the SDK surface (`ava.*` namespaces, members, expansions, wraps, skill sources) plus plugin
+  config and core flags. `plugin.py` exports `contribute()`; `ava/sdk_surface/install.py:install(registry)`
+  is the one writer of the `ava` module (a singleton that agent code reaches by attribute access, so it
+  cannot be passed as a value): per plugin it applies the declaration and rolls the plugin back whole if
+  any piece fails, then installs the SDK-usage recorder last so it stays outermost over every wrap layer;
+  `uninstall()` takes the recorder off first and undoes newest-first. The plugin-side `register_*` /
+  `extend.wrap` / `declare_flags` entry points, the `PluginContext` ContextVar, the attribution ledger and
+  `clear_plugin_registrations` are deleted. The installation is recorded on the `ava` module object, not in a
+  module global. Providers (`provider.py`) follow in their own change under the same declaration + gate shape;
+  the model catalog stays a process-level singleton with one writer.
 
 ## Reload
 

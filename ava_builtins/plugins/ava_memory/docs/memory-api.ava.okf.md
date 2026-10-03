@@ -1,7 +1,7 @@
 ---
 type: doc
 title: ava.memory — Long-term Memory Pool (Plugin Provided)
-description: '`ava.memory` is registered by the `ava_memory` plugin via `register_namespace`. Disabling the plugin → the entire `ava.memory` becomes unavailable. Provides `PATH` (shared memory pool root directory), `search()` (semantic search), and `write()` (cwd-independent indexed memory authoring).'
+description: '`ava.memory` is declared by the `ava_memory` plugin as an `SdkNamespace`. Disabling the plugin → the entire `ava.memory` becomes unavailable. Provides `PATH` (shared memory pool root directory), `search()` (semantic search), and `write()` (cwd-independent indexed memory authoring).'
 tags:
 - plugin
 - memory

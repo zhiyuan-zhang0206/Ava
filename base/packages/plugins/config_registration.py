@@ -1,8 +1,8 @@
-"""Plugin config whole-class registration — disk image model, frozen, immutable.
+"""Plugin config — a declared Pydantic class bound once from its disk image, frozen, immutable.
 
-Symmetric with whole-class state registration (`agent/state.py`): plugin writes
-a Pydantic BaseModel, framework handles namespace isolation + disk persistence.
-Differences:
+Symmetric with whole-class state declaration (`agent/state.py`): a plugin writes a Pydantic BaseModel
+and declares it (`PluginContributions.config`, from its `plugin.py` `contribute()`); the framework
+handles namespace isolation + disk persistence. Differences:
 
 - State is runtime mutable, written via LangGraph reducer; Config is a boot
   snapshot, frozen, immutable after instantiation.
@@ -11,33 +11,29 @@ Differences:
 - State persists to LangGraph checkpoint; Config persists to
   `~/.ava/configs/<plugin>/config.json` (full image, not partial overlay).
 
-Two-phase design:
-
-1. `register_plugin_config(Cls)` — called at the top of plugin's `default_config.py`,
-   only adds cls to `_PLUGIN_CONFIG_CLASSES[plugin]`, does not read disk.
-2. `bind_from_disk()` — framework `load_extensions` calls once after all
-   plugin default_config.py imports complete; for each registered cls reads
-   `~/.ava/configs/<plugin>/config.json`, validates against cls schema, then
-   instantiates and stores into `_PLUGIN_CONFIGS[plugin]`.
-
-Mismatch raises `SchemaDriftError`, guiding the user to run `ava plugins update`
-(reconciles the disk image to the current schema — adds new defaults, drops
-removed fields — fully automatic; also run by the `ava start` converge step).
+`ava.sdk_surface.install` binds each declared class through `bind_plugin_config(plugin, cls)`, which
+reads `~/.ava/configs/<plugin>/config.json`, validates it against the class schema, instantiates it and
+stores it for `ava._settings.plugins.<plugin>` (the returned undo drops it on uninstall); a missing
+image is written with the defaults first. Mismatch raises `SchemaDriftError`, guiding the user to run
+`ava plugins update` (reconciles the disk image to the current schema — adds new defaults, drops
+removed fields — fully automatic; also run by the `ava start` converge step). The install treats a
+bind failure as a load failure of that plugin.
 
 Field metadata `json_schema_extra={"per_agent": True}` marks "can be overridden
-by per-agent CLI overlay" (used in PR-E; current PR-D only stores metadata).
+by per-agent CLI overlay".
 
-Usage (`ava_builtins/plugins/<name>/default_config.py`):
+Declaration (`ava_builtins/plugins/<name>/plugin.py`, with the class in `default_config.py`):
 
     from pydantic import BaseModel, ConfigDict, Field
-    from base.packages.plugins.config_registration import register_plugin_config
+    from base.packages.plugins.extensions import PluginContributions
 
     class MyConfig(BaseModel):
         model_config = ConfigDict(frozen=True)
         threshold: int = Field(default=100)
         marker: str = Field(default=".git", json_schema_extra={"per_agent": True})
 
-    register_plugin_config(MyConfig)
+    def contribute() -> PluginContributions:
+        return PluginContributions(config=MyConfig)
 """
 
 import json
@@ -51,23 +47,15 @@ from pydantic.fields import FieldInfo
 
 from base import paths
 from base.host.env.agent_slices import AgentSlices
-from base.packages.plugins import contributions
-from base.packages.plugins.context import current_plugin_name
 
 
 class PluginConfigError(Exception):
     """Root of plugin config register / bind failures. Plugin author / CLI use this for coarse catch."""
 
 
-class NoPluginContext(PluginConfigError):  # noqa: N818 — parallel to PluginContext naming on the state side (NoPluginContext / DuplicateRegistration / InvalidConfigData), subclass names are short and readable + parent already has Error suffix
-    """`register_plugin_config` called outside PluginContext — framework
-    `load_extensions` wraps imports with `with PluginContext(name):`,
-    plugin authors just call it at the top of default_config.py."""
-
-
 class DuplicateRegistration(PluginConfigError):  # noqa: N818
-    """Same plugin name registered Config twice — duplicate import or multiple
-    register calls inside the same default_config.py."""
+    """A plugin's Config is bound twice in one install — a second `bind_plugin_config` for the
+    same plugin."""
 
 
 class SchemaDriftError(PluginConfigError):
@@ -86,83 +74,44 @@ class InvalidConfigOverlay(PluginConfigError):  # noqa: N818
     Nothing was spawned or queued — fix the dict and call again."""
 
 
-# Two-layer dict (the state side now carries its tables on the AgentState class):
-#   _PLUGIN_CONFIG_CLASSES: plugin → Cls (filled on register, read on bind)
-#   _PLUGIN_CONFIGS:       plugin → instance (filled on bind, agent reads via
-#                          `ava._settings.plugins.<n>`)
+# Two-layer dict, written only by `bind_plugin_config` (the installer):
+#   _PLUGIN_CONFIG_CLASSES: plugin → Cls
+#   _PLUGIN_CONFIGS:       plugin → instance (agent reads via `ava._settings.plugins.<n>`)
 
 _PLUGIN_CONFIG_CLASSES: dict[str, type[BaseModel]] = {}
 _PLUGIN_CONFIGS: dict[str, BaseModel] = {}
 
 
-def register_plugin_config(cls: type[BaseModel]) -> None:
-    """Whole-class register plugin config — only adds cls to registry, does not read disk.
+def bind_plugin_config(plugin: str, cls: type[BaseModel]) -> Callable[[], None]:
+    """Bind `plugin`'s declared Config class from its disk image; returns the undo.
 
-    Must be called inside PluginContext (framework `load_extensions` wraps
-    imports with `with PluginContext(name):`). Plugin author does not pass
-    plugin name; framework reads it from ContextVar.
-
-    Instantiation happens in `bind_from_disk()` phase (`load_extensions` calls
-    once after all plugin default_config.py imports are done).
-
-    Args:
-        cls: Pydantic BaseModel subclass. Recommend `model_config = ConfigDict(frozen=True)`
-            so the agent physically cannot write; fields can be marked
-            `json_schema_extra={"per_agent": True}` to allow per-agent CLI
-            overlay (PR-E).
+    Reads the disk image (a missing one is written with the defaults), validates it against `cls`,
+    instantiates it and stores both for the readers. Only the installer calls this.
 
     Raises:
         TypeError: cls is not a BaseModel subclass — typo (passed dataclass / plain class).
-        NoPluginContext: called outside PluginContext.
-        DuplicateRegistration: same plugin name already registered — duplicate
-            import or wrong default_config.py.
-    """
-    if not (isinstance(cls, type) and issubclass(cls, BaseModel)):
-        raise TypeError(
-            f"register_plugin_config expects BaseModel subclass, got {cls!r} — "
-            f"plugin author writes `class FooConfig(BaseModel): ...` then registers."
-        )
-
-    plugin = current_plugin_name()
-    if plugin is None:
-        raise NoPluginContext(
-            f"register_plugin_config({cls.__name__}) must be called inside PluginContext — "
-            f"framework `load_extensions` already wraps, just call at the top of "
-            f"default_config.py."
-        )
-
-    if plugin in _PLUGIN_CONFIG_CLASSES:
-        raise DuplicateRegistration(
-            f"plugin {plugin!r} already registered config ({_PLUGIN_CONFIG_CLASSES[plugin].__name__}) — "
-            f"duplicate import or multiple register calls in the same default_config.py?"
-        )
-
-    _PLUGIN_CONFIG_CLASSES[plugin] = cls
-    contributions.record(
-        "config", cls.__name__, detail=f"fields: {', '.join(cls.model_fields) or '<none>'}"
-    )
-
-
-def bind_from_disk() -> None:
-    """For all registered plugin Configs: read disk image, validate schema, instantiate.
-
-    Framework `load_extensions` calls once after all plugin imports complete.
-    `ava plugins update` command does **not** call this (it goes through
-    `merge_disk_image_schema`).
-
-    Missing disk image **automatically** writes default + instantiates — first
-    boot / freshly installed plugin lazy bootstrap is handled transparently by
-    the framework, no need for user to explicitly run `ava plugins update`.
-    Schema drift / JSON malformed raises (guides manual update).
-
-    Raises:
+        DuplicateRegistration: this plugin already has a bound config.
         SchemaDriftError: disk image field set inconsistent with cls (plugin upgraded schema).
         InvalidConfigData: disk image JSON parse failure / Pydantic validation failure.
     """
-    for plugin, cls in _PLUGIN_CONFIG_CLASSES.items():
-        if plugin in _PLUGIN_CONFIGS:
-            continue  # Already bound (test fixture / load_extensions called multiple times)
-        _PLUGIN_CONFIGS[plugin] = _instantiate_from_disk(plugin, cls)
+    if not (isinstance(cls, type) and issubclass(cls, BaseModel)):
+        raise TypeError(
+            f"plugin {plugin!r} declared config {cls!r}, which is not a BaseModel subclass — "
+            f"write `class FooConfig(BaseModel): ...` and declare it in `PluginContributions.config`."
+        )
+    if plugin in _PLUGIN_CONFIG_CLASSES:
+        raise DuplicateRegistration(
+            f"plugin {plugin!r} already has a bound config ({_PLUGIN_CONFIG_CLASSES[plugin].__name__})"
+        )
+    instance = _instantiate_from_disk(plugin, cls)
+    _PLUGIN_CONFIG_CLASSES[plugin] = cls
+    _PLUGIN_CONFIGS[plugin] = instance
+
+    def undo() -> None:
+        _PLUGIN_CONFIG_CLASSES.pop(plugin, None)
+        _PLUGIN_CONFIGS.pop(plugin, None)
+
+    return undo
 
 
 def _instantiate_from_disk(plugin: str, cls: type[BaseModel]) -> BaseModel:
@@ -300,7 +249,7 @@ def get_plugin_config[T: BaseModel](plugin: str, slices: AgentSlices, cls: type[
 def get_plugin_config(
     plugin: str, slices: AgentSlices, cls: type[BaseModel] | None = None
 ) -> BaseModel:
-    """Read plugin config instance — already bind_from_disk — for the agent whose `slices` are given.
+    """Read plugin config instance — already bound by the install — for the agent whose `slices` are given.
 
     Pass `cls` to let pyright narrow the return type (e.g. `get_plugin_config("ava_compact",
     slices, CompactConfig).auto_compact_tokens`). Runtime does not validate cls matches
@@ -310,7 +259,7 @@ def get_plugin_config(
     (`base/packages/plugins/config_view.py`); a hook reads `runtime.context.require_agent()`.
 
     Raises:
-        KeyError: plugin has no register_plugin_config or bind hasn't run — typo / wrong ordering.
+        KeyError: plugin declares no config or it is not installed yet — typo / wrong ordering.
     """
     _ = cls
     return slices.plugin_config(plugin)
@@ -593,7 +542,7 @@ def apply_config_overlay(
     Framework keys (e.g. `llm_model`) need to be applied **before** the process
     reads them — an embedding driver can build the LLM client off
     `settings.lm.llm_model` early. Plugin keys must be applied **after**
-    `bind_from_disk()` populates `_PLUGIN_CONFIGS`. The two phases are
+    `bind_plugin_config()` populates `_PLUGIN_CONFIGS`. The two phases are
     different stages of the boot sequence, so the caller splits the overlay
     into two calls with `scope="framework"` (early) and `scope="plugin"`
     (late). `scope="all"` keeps the single-call behavior for callers that
@@ -717,14 +666,3 @@ def is_per_agent_field(plugin: str, field: str) -> bool:
     if info is None:
         return False
     return bool(_schema_extra(info).get("per_agent", False))
-
-
-def clear_plugin_configs() -> None:
-    """Reset the registry — called by `agent.state.clear_plugin_registrations` (single
-    cross-module cleanup point, same semantics as state / hook / system_prompt_section).
-
-    Tests fixture call this in setup/teardown; framework `load_extensions` also
-    calls on each entry to avoid accumulating ghost entries across multiple reloads.
-    """
-    _PLUGIN_CONFIG_CLASSES.clear()
-    _PLUGIN_CONFIGS.clear()

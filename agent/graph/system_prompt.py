@@ -82,7 +82,7 @@ def _discover_all_namespaces(sdk_disable: Sequence[str]) -> list[str]:
 
 
 def effective_sdk_expand(sdk_disable: Sequence[str]) -> list[str]:
-    """The merged expand list: plugin-registered paths (`ava.register_sdk_expand`)
+    """The merged expand list: plugin-declared paths (`sdk_namespaces(expand=True)` / `sdk_expansions`)
     first, then the configured framework list, deduped keep-first. Plugins lead
     because a plugin promotes its own highest-frequency surface (ava_code's cwd
     heads the coding namespaces); the framework default cannot name plugin
@@ -102,7 +102,7 @@ def effective_sdk_expand(sdk_disable: Sequence[str]) -> list[str]:
     that renders it.
     The literal `"*"` never reaches the returned list — it is resolved here,
     so every downstream consumer sees concrete paths only."""
-    from ava.sdk_surface import plugins
+    from ava.sdk_surface import install
 
     configured: list[str] = []
     for entry in settings.agent.sdk_expand_in_system_prompt:
@@ -111,7 +111,7 @@ def effective_sdk_expand(sdk_disable: Sequence[str]) -> list[str]:
         else:
             configured.append(entry)
 
-    merged = [*plugins.REGISTERED_SDK_EXPANSIONS, *configured]
+    merged = [*install.expansions(), *configured]
     seen: set[str] = set()
     resolved: list[str] = []
     for path in merged:
@@ -188,7 +188,7 @@ def _sdk_expand_section(slices: AgentSlices) -> str:
                 logging.getLogger(__name__).warning(
                     "sdk_expand_in_system_prompt: %r resolves to an already-expanded "
                     "namespace; rendering once. The expand list should be deduped, so a "
-                    "duplicate points at a polluted list (a stray register_sdk_expand or "
+                    "duplicate points at a polluted list (a stray plugin sdk expansion or "
                     "cross-test global-state leak). effective list was %r",
                     path,
                     wanted,

@@ -20,6 +20,11 @@ frozen declaration.
   `PluginStateHandle(cls, plugin)`.
 - `metrics` / `inspect_widgets` — `MetricSpec` / `InspectWidgetSpec`, declared by the plugin's `metrics.py` /
   `inspector.py` instead (see below).
+- The SDK surface, declared by `plugin.py`: `sdk_namespaces` (`SdkNamespace(name, module, expand)`), `sdk_members`
+  (`SdkMember(namespace, name, fn)` on an existing namespace), `sdk_expansions` (dotted paths promoted into the
+  prompt's expanded SDK reference), `sdk_wraps` (`SdkWrap(target, wrapper)`), `skill_sources`, `config` (one frozen
+  BaseModel bound from `~/.ava/configs/<plugin>/config.json`, schema drift points at `ava plugins update`) and `flags`
+  (`<domain>.<field>` core settings the plugin may read through `read_flag`).
 
 `agent/extensions/registry.py:build_registry()` calls `contribute()` on every enabled plugin's loaded face, in plugin name
 order, and returns an `ExtensionRegistry` — plugin name beside its contributions, so attribution is the entry,
@@ -34,8 +39,18 @@ serde (state classes), `build_graph(checkpointer, extensions)` (hooks, state fie
 once, so a changed plugin set takes effect on the next host start (the plugin directory watchdog); there is no
 in-process swap.
 `build_system_prompt(extensions, slices)`, `context_notes(extensions, slices)` and `fork_notes(extensions, slices)`
-read it. The attribution catalog (`ava plugins inspect`) merges `registry.records(plugin)` with the ledger of
-the surfaces still registered at import, and compares both with the `ava-plugin.json` contribution keys.
+read it. The attribution catalog (`ava plugins inspect`) reads each plugin's declaration records and compares them with the `ava-plugin.json` contribution keys.
+
+## The SDK install
+
+`ava` is a singleton module that agent code reaches by attribute access, so it cannot be passed around as a value; its
+writes are concentrated in `ava/sdk_surface/install.py:install(registry)`, the only place that mutates it. Per plugin, in
+registry (plugin name) order: namespaces, members, expansions, wraps (a target may be a namespace or member just added),
+skill sources, flags, config. A plugin whose declaration cannot be applied (a conflicting or disabled namespace name, a wrap
+target that does not resolve, a config that does not bind) is rolled back whole, reported as a load failure and absent from
+the registry `install` returns. The SDK-usage recorder (`metering`) is installed last so it sits outermost over every wrap
+layer, and `uninstall()` takes it off first and undoes every layer newest-first. A second `install` without `uninstall` is
+an error; a reload is a new registry and a new install, and nothing triggers one at runtime.
 
 ## Faces and registries
 
