@@ -25,6 +25,7 @@ from langchain_core.messages import (
 )
 from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
 
+from base.agents.history.checkpoint import FullHistory, single_segment_history
 from base.agents.history.checkpoint_serde import STATIC_CHECKPOINT_MSGPACK_TYPES
 from base.agents.history.hierarchy import pipeline as pipeline_module
 from base.agents.history.hierarchy.blocks import fold_blocks
@@ -50,6 +51,17 @@ from base.db import Database
 
 def _db() -> Database:
     return Database.from_settings()
+
+
+def _patch_history_loader(
+    monkeypatch: pytest.MonkeyPatch, loader: Callable[[Database, int], list[BaseMessage]]
+) -> None:
+    """Serve `loader`'s list to the pipeline as a one-snapshot history."""
+
+    def load(database: Database, agent_id: int) -> FullHistory:
+        return single_segment_history(loader(database, agent_id))
+
+    monkeypatch.setattr(pipeline_module, "load_checkpoint_history_full", load)
 
 
 MODEL = "deepseek-v4-flash"
@@ -286,7 +298,7 @@ def test_rebuilt_prefix_is_byte_identical_to_the_agent_head(
     def fake_loader(_database: Database, agent_id: int) -> list[BaseMessage]:
         return list(restored)
 
-    monkeypatch.setattr(pipeline_module, "load_checkpoint_messages_full", fake_loader)
+    _patch_history_loader(monkeypatch, fake_loader)
 
     tool = object()
     fake = FakeLLM(_fitting_responder)
@@ -442,7 +454,7 @@ def test_build_agent_tree_same_input_same_tree(monkeypatch: pytest.MonkeyPatch) 
     def fake_loader(_database: Database, agent_id: int) -> list[BaseMessage]:
         return list(msgs)
 
-    monkeypatch.setattr(pipeline_module, "load_checkpoint_messages_full", fake_loader)
+    _patch_history_loader(monkeypatch, fake_loader)
 
     first = build_agent_tree(_db(), 7, llm=FakeLLM(_fitting_responder), model=MODEL)
     second = build_agent_tree(_db(), 7, llm=FakeLLM(_fitting_responder), model=MODEL)
@@ -468,7 +480,7 @@ def test_growth_replays_sealed_batches_and_recuts_only_the_tail(
     def fake_loader(_database: Database, agent_id: int) -> list[BaseMessage]:
         return list(msgs)
 
-    monkeypatch.setattr(pipeline_module, "load_checkpoint_messages_full", fake_loader)
+    _patch_history_loader(monkeypatch, fake_loader)
 
     first = build_agent_tree(_db(), 7, llm=FakeLLM(_fitting_responder), model=MODEL)
     msgs.extend(inbound(f"tail {i}") for i in range(10, 17))
@@ -495,7 +507,7 @@ def test_tail_seal_swap_converges_and_a_second_seal_generates_nothing(
     def fake_loader(_database: Database, agent_id: int) -> list[BaseMessage]:
         return list(msgs)
 
-    monkeypatch.setattr(pipeline_module, "load_checkpoint_messages_full", fake_loader)
+    _patch_history_loader(monkeypatch, fake_loader)
 
     # Path 1: the compact-driven pass (tail pending), then the tail pass.
     compact_pass = build_agent_tree(
@@ -534,7 +546,7 @@ def test_growth_after_a_tail_seal_replays_compacts_and_recuts_the_tail(
     def fake_loader(_database: Database, agent_id: int) -> list[BaseMessage]:
         return list(msgs)
 
-    monkeypatch.setattr(pipeline_module, "load_checkpoint_messages_full", fake_loader)
+    _patch_history_loader(monkeypatch, fake_loader)
 
     first = build_agent_tree(_db(), 7, llm=FakeLLM(_fitting_responder), model=MODEL)
     msgs.extend(inbound(f"tail {i}") for i in range(10, 17))
@@ -677,7 +689,7 @@ def test_regen_cap_halts_between_chunks_and_marks_the_stop(
     def fake_loader(_database: Database, agent_id: int) -> list[BaseMessage]:
         return list(msgs)
 
-    monkeypatch.setattr(pipeline_module, "load_checkpoint_messages_full", fake_loader)
+    _patch_history_loader(monkeypatch, fake_loader)
 
     fake = FakeLLM(_fitting_responder)
     tree = build_agent_tree(_db(), 7, llm=fake, model=MODEL, max_concurrent=1, max_generated=2)
@@ -699,7 +711,7 @@ def test_regen_cap_boundary_equality_stops_at_the_chunk(
     def fake_loader(_database: Database, agent_id: int) -> list[BaseMessage]:
         return list(msgs)
 
-    monkeypatch.setattr(pipeline_module, "load_checkpoint_messages_full", fake_loader)
+    _patch_history_loader(monkeypatch, fake_loader)
 
     fake = FakeLLM(_fitting_responder)
     tree = build_agent_tree(_db(), 7, llm=fake, model=MODEL, max_concurrent=1, max_generated=4)

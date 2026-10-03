@@ -40,7 +40,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Generator
 from contextlib import contextmanager
-from typing import Any, cast
+from typing import Any, NamedTuple, cast
 
 from langchain_core.messages import BaseMessage, SystemMessage
 from langchain_core.runnables import RunnableConfig
@@ -345,14 +345,55 @@ def load_checkpoint_messages_segment(
     return messages[1:]
 
 
+class FullHistory(NamedTuple):
+    """The stitched history plus where each compaction segment sits in it.
+
+    A segment is what one stored snapshot held: the agent's own request head
+    at that time (its SystemMessage, then the conversation). The stitched
+    `messages` list drops the repeated SystemMessage at every join, so a
+    consumer that needs the request the agent really sent at some position
+    (the hierarchy worker's cache-parity prefix) re-attaches the segment's own
+    head to the segment's body.
+
+    `segment_heads[k]` is segment k's leading SystemMessage (None when the
+    snapshot had none); `segment_starts[k]` is the index in `messages` of
+    segment k's first body message, so the body is
+    `messages[segment_starts[k]:segment_starts[k + 1]]`.
+    """
+
+    messages: list[BaseMessage]
+    segment_heads: tuple[SystemMessage | None, ...]
+    segment_starts: tuple[int, ...]
+
+
 def load_checkpoint_messages_full(db: Database, agent_id: int) -> list[BaseMessage]:
+    """Reconstruct one agent's full history across compaction segments.
+
+    See `load_checkpoint_history_full`; this is its message list alone.
+
+    Raises:
+        CheckpointReadError: the store read or blob deserialize failed.
+    """
+    return load_checkpoint_history_full(db, agent_id).messages
+
+
+def single_segment_history(messages: list[BaseMessage]) -> FullHistory:
+    """A history that is one snapshot: its head (if a SystemMessage) and body."""
+    if not messages:
+        return FullHistory([], (), ())
+    head = messages[0] if isinstance(messages[0], SystemMessage) else None
+    return FullHistory(messages, (head,), (1 if head is not None else 0,))
+
+
+def load_checkpoint_history_full(db: Database, agent_id: int) -> FullHistory:
     """Reconstruct one agent's full history across compaction segments.
 
     With no retained compaction boundary, returns the latest messages snapshot
     unchanged. Otherwise, the oldest boundary is the initial segment; each
     following boundary and the latest snapshot can repeat the system prompt,
     which is dropped at the join. Every other message, including compaction
-    summaries and framework session notes, remains in the conversation.
+    summaries and framework session notes, remains in the conversation. The
+    result also records each segment's own head and body start (`FullHistory`).
 
     Raises:
         CheckpointReadError: the store read or blob deserialize failed.
@@ -367,7 +408,7 @@ def load_checkpoint_messages_full(db: Database, agent_id: int) -> list[BaseMessa
             saver = PostgresSaver(conn=cast(Connection[DictRow], conn), serde=serde)
             latest_tuple = saver.get_tuple(config)
             if latest_tuple is None:
-                return []
+                return FullHistory([], (), ())
             reconstruct_delta_messages(saver, latest_tuple)
             latest = latest_tuple.checkpoint
             boundaries = cast(
@@ -380,7 +421,7 @@ def load_checkpoint_messages_full(db: Database, agent_id: int) -> list[BaseMessa
                 ).fetchall(),
             )
             if not boundaries:
-                return latest["channel_values"].get("messages", [])
+                return single_segment_history(latest["channel_values"].get("messages", []))
 
             segments: list[list[BaseMessage]] = []
             for boundary in boundaries:
@@ -404,17 +445,26 @@ def load_checkpoint_messages_full(db: Database, agent_id: int) -> list[BaseMessa
 
     if len(segments) != len(boundaries):
         raise CheckpointReadError(f"compaction boundary disappeared for agent {agent_id}")
-    full_history = list(segments[0])
+    first = single_segment_history(list(segments[0]))
+    full_history = first.messages
+    # An empty first snapshot still occupies segment 0 (an empty body).
+    heads = list(first.segment_heads) or [None]
+    starts = list(first.segment_starts) or [0]
     latest_is_boundary = any(str(row["checkpoint_id"]) == str(latest["id"]) for row in boundaries)
     following_segments = segments[1:]
     if not latest_is_boundary:
         following_segments = [*following_segments, latest["channel_values"].get("messages", [])]
     for segment in following_segments:
         remainder = segment
-        if remainder and isinstance(remainder[0], SystemMessage):
+        head: SystemMessage | None = None
+        first_message = remainder[0] if remainder else None
+        if isinstance(first_message, SystemMessage):
+            head = first_message
             remainder = remainder[1:]
+        heads.append(head)
+        starts.append(len(full_history))
         full_history.extend(remainder)
-    return full_history
+    return FullHistory(full_history, tuple(heads), tuple(starts))
 
 
 def load_checkpoint_messages_by_trace(
