@@ -8,8 +8,7 @@ by event id, so a row the live writer already stored is skipped and a pass can b
 
 The position is saved with the rows in one transaction, in `agent_metric_file_cursors` under a
 `telemetry_events:` key. A partial final line is left for the next pass. Only this machine's
-mirror is read; another machine's mirror is replayed by running this on that machine or by
-`scripts/data_repair/backfill_telemetry_events.py`.
+mirror is read; another machine's mirror is replayed by running this on that machine.
 """
 
 from __future__ import annotations

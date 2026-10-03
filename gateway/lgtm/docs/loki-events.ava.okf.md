@@ -16,8 +16,8 @@ Loki holds an observation copy of the telemetry and log stream (the write side,
 `base/telemetry/otlp/telemetry_otlp.py`, [[base/telemetry/otlp/docs/telemetry-otlp/telemetry-otlp.ava.okf.md|OTLP exporter]],
 ships every event as an OTLP log whose line body is the full event JSON). The
 record of events is Postgres (`telemetry_events`, `audit_events`); the gateway
-reads no Loki aggregate. The one remaining reader is `query_events()`, the
-live-Loki source of `scripts/data_repair/backfill_telemetry_events.py`. Loki is a droppable projection for Grafana.
+reads no Loki aggregate. `query_events()` is the live-Loki row read; no production
+caller remains. Loki is a droppable projection for Grafana.
 
 ## Core responsibilities
 
