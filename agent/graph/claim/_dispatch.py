@@ -18,13 +18,13 @@ from langgraph.graph.message import REMOVE_ALL_MESSAGES
 
 from agent import state as _state
 from agent.db import ClaimedInbound
+from agent.graph import context_notes
 from agent.graph._chat_inbound import build_chat_inbound
-from agent.graph.context_notes import fork_notes
+from agent.hooks import compact
 from agent.hooks.compact import (
     COMPACT_MAX_ATTEMPTS,
     CompactionFailedError,
     conversation_messages,
-    generate_summary,
 )
 from agent.hooks.compact_events import emit_compact_finished, emit_compact_started
 from agent.messages import NoteTag, security_note_message, system_note_message
@@ -289,7 +289,7 @@ async def _handle_compact_request(
     summary = ""
     for attempt in range(1, COMPACT_MAX_ATTEMPTS + 1):
         try:
-            summary = await generate_summary(state.messages, ctx.llm, ctx.require_agent())
+            summary = await compact.generate_summary(state.messages, ctx.llm, ctx.require_agent())
             break
         except Exception as e:
             last_error = e
@@ -551,7 +551,7 @@ async def _handle_fork(
             created_at=datetime.now(UTC),
         )
     )
-    st.new_msgs.extend(fork_notes(slices))
+    st.new_msgs.extend(context_notes.fork_notes(slices))
     # Tail-graft skill additions (decisions/2026-09-10-preset-in-config-overlay-
     # fork-cache): skills the fork's config added to
     # skills_to_inject_into_system_prompt (minus what the expand list already

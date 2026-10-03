@@ -38,7 +38,7 @@ from base.events.declarations.gateway import FleetGraphStaleReason
 from base.events.live.bus import EventBus
 from base.log import logger
 from gateway.events import audit_rows
-from gateway.lgtm import telemetry_staleness
+from gateway.lgtm.telemetry_staleness import TelemetryStaleness
 from gateway.routers._fleet_tokens import AgentTokens, agent_tokens
 from gateway.schemas.fleet_graph import FleetGraphEdge, FleetGraphNode, FleetGraphResponse
 from gateway.schemas.stats import StatsWindowHours, window_delta
@@ -119,13 +119,14 @@ def _finalize_graph_response(
     pool: Any,
     *,
     bus: EventBus,
+    staleness: TelemetryStaleness,
     key: str,
     nodes: list[FleetGraphNode],
     edges: list[FleetGraphEdge],
 ) -> FleetGraphResponse:
     """Cache a successful graph while reporting heartbeat health separately."""
     try:
-        telemetry_stale = telemetry_staleness.check_and_report(pool)
+        telemetry_stale = staleness.check_and_report(pool)
     except Exception as exc:
         logger.debug("fleet_graph telemetry staleness guard failed open: {}", exc)
         telemetry_stale = False
@@ -380,6 +381,7 @@ def get_fleet_graph(
     return _finalize_graph_response(
         request.app.state.db_pool,
         bus=bus,
+        staleness=request.app.state.telemetry_staleness,
         key=key,
         nodes=nodes,
         edges=pg_data.edges,

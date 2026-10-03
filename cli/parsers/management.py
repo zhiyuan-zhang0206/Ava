@@ -171,7 +171,7 @@ def _h_schedules_provision(args: argparse.Namespace) -> int:
 
 
 def _h_schedules_verify(args: argparse.Namespace) -> int:
-    from cli.commands.management.schedules import h_schedules_verify
+    from cli.commands.management.schedules_verify import h_schedules_verify
 
     return h_schedules_verify(args)
 

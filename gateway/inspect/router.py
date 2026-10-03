@@ -131,14 +131,16 @@ async def _probe_agent_shells(
 # in-flight requests share a read; completed values are not kept behind a TTL.
 _INSPECT_RESPONSE_TIMEOUT_S = 15.0
 _InspectKey = tuple[int, int | None]
-_inspect_query_cache = InspectQueryCache[_InspectKey, _metrics.MetricsSnapshot](
-    max_entries=32,
-    max_inflight=32,
-    max_concurrent_loads=4,
-)
+InspectCache = InspectQueryCache[_InspectKey, _metrics.MetricsSnapshot]
+
+
+def build_query_cache() -> InspectCache:
+    """The inspector's query admission cache; the app lifespan builds one per process."""
+    return InspectCache(max_entries=32, max_inflight=32, max_concurrent_loads=4)
 
 
 async def _inspect_rows_cached_async(
+    cache: InspectCache,
     pool: ConnectionPool[Any],
     bus: EventBus,
     agent_id: int,
@@ -148,7 +150,7 @@ async def _inspect_rows_cached_async(
 ) -> _metrics.MetricsSnapshot:
     key = (agent_id, None if hours is None else int(hours))
     try:
-        return await _inspect_query_cache.get_or_load_async(
+        return await cache.get_or_load_async(
             key,
             lambda: _metrics.inspect_snapshot(pool, bus, agent_id, hours, spawned_at=spawned_at),
             ttl_s=0,
@@ -156,11 +158,6 @@ async def _inspect_rows_cached_async(
         )
     except InspectCacheFullError as exc:
         raise HTTPException(status_code=503, detail="inspect query queue is full") from exc
-
-
-def cache_clear() -> None:
-    """Reset request admission between isolated tests."""
-    _inspect_query_cache.clear()
 
 
 @router.get("/api/agents/{agent_id}/inspect/live", response_model=AgentInspectLive)
@@ -224,6 +221,7 @@ async def get_agent_inspect_statistics(
         spawned_at = await asyncio.to_thread(_statistics_spawned_at, pool, agent_id)
         aggregates = await asyncio.wait_for(
             _inspect_rows_cached_async(
+                request.app.state.inspect_query_cache,
                 pool,
                 request.app.state.bus,
                 agent_id,

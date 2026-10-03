@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import time
 
 import psycopg
 from fastapi import Request
@@ -14,8 +13,6 @@ from base.cluster.machine import machine_name
 from base.daemon.health_schema import DEGRADED, OK, component, render
 from base.native_process import loaded_commit
 from base.paths import ava_home
-
-_STARTED_AT = time.time()
 
 
 def get_health(request: Request) -> dict[str, object] | JSONResponse:
@@ -47,7 +44,7 @@ def get_health(request: Request) -> dict[str, object] | JSONResponse:
         "name": "gateway",
         "home": str(ava_home()),
         "machine": machine_name(),
-        "started_at": _STARTED_AT,
+        "started_at": request.app.state.started_at,
         "sha": loaded_commit.get(),
         "liveness": OK,
     }

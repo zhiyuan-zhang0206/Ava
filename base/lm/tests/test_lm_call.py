@@ -100,7 +100,7 @@ def test_invoke_text_emits_chat_billing_span_from_llm_model_name(
 
     tracer = _Tracer()
     monkeypatch.setattr("base.config.settings.observability.trace_enabled", True)
-    monkeypatch.setitem(tracing_mod._state, "initialized", True)
+    monkeypatch.setattr(tracing_mod, "is_initialized", lambda: True)
     monkeypatch.setattr(otel_trace, "get_tracer", lambda _name: tracer)  # pyright: ignore[reportUnknownArgumentType]
     llm = _FakeLLM(
         AIMessage(

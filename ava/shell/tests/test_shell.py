@@ -267,19 +267,20 @@ def test_new_rejects_invalid_name(_agent_row: int) -> None:
         shell.sessions.new(name="page-preview", ttl=120)
 
 
-def test_resolve_does_not_conflate_id_prefixes(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_resolve_does_not_conflate_id_prefixes() -> None:
     # `shell-1` must not match `shell-12-<name>`: the suffix match requires a
     # dash right after the full id.
+    from types import SimpleNamespace
+
     from ava.shell import sessions
 
-    prefix = sessions._shell_prefix()
-    monkeypatch.setattr(
-        sessions,
-        "_own_sessions",
-        lambda: [f"{prefix}12-watcher", f"{prefix}1"],
+    handle = sessions.ShellSessions(
+        backend=SimpleNamespace(list_sessions=list), database=None, agent_id=7
     )
-    assert sessions._resolve(1) == f"{prefix}1"
-    assert sessions._resolve(12) == f"{prefix}12-watcher"
+    prefix = handle._shell_prefix()
+    handle._backend = SimpleNamespace(list_sessions=lambda: [f"{prefix}12-watcher", f"{prefix}1"])
+    assert handle.resolve(1) == f"{prefix}1"
+    assert handle.resolve(12) == f"{prefix}12-watcher"
 
 
 def test_operations_reject_foreign_id(_agent_row: int) -> None:
@@ -481,7 +482,7 @@ def test_kill_reaps_session_and_foreground_child(_agent_row: int) -> None:
     sid = shell.sessions.new("test-tree", ttl=120)
     try:
         _ready(sid)
-        full = _sessions._resolve(sid)
+        full = _sessions._handle().resolve(sid)
         rec = json.loads((run_dir() / "pty" / f"{full}.json").read_text())
         shell_pid = int(rec["pid"])
         assert psutil.pid_exists(shell_pid)

@@ -14,6 +14,7 @@ from base.daemon.tests.fakes import pin_endpoints
 from base.db import Database
 from cli.commands._repo import _register_machine_or_die
 from cli.commands._setup import SetupValues
+from cli.tests._commands_helpers import _assert_named_commands_parse
 from cli.tests._commands_helpers import _fake_session_backends as _fake_session_backends
 from cli.tests._commands_helpers import _hermetic_gateway_base as _hermetic_gateway_base
 
@@ -217,19 +218,6 @@ def test_register_agent_runner_loopback_host_exits_nonzero(monkeypatch: pytest.M
 
 
 # ─── remediation hints name commands that exist ──────────────────────────────
-
-
-def _assert_named_commands_parse(text: str) -> None:
-    """Every backticked `ava ...` command in an operator hint parses; none is a
-    bare `ava cluster update`, which requires a prepared release request."""
-    import re
-
-    from cli.parsers import build_parser
-
-    parser = build_parser()
-    for command in re.findall(r"`(ava [^`]+)`", text):
-        parser.parse_args(command.split()[1:])  # SystemExit(2) fails the test
-    assert "ava cluster update" not in text
 
 
 def test_register_schema_behind_hint_names_working_commands(

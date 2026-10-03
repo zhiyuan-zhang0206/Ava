@@ -92,8 +92,6 @@ _STALL_ALERT_AFTER_S = SCHEDULE_STALL_ALERT_AFTER_S
 # relative `.venv/bin/python` resolves into this checkout's venv.
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
-_SCHEDULE_PREFIX = session_name("schedule-")  # ava-schedule-
-
 
 class _Enabled(NamedTuple):
     """One enabled schedule as the reconcile reads it: its status and the
@@ -286,7 +284,8 @@ class ScheduleManager:
         live: set[int] = set()
         backend = get_shell_backend()
         generation = current_generation()
-        names = backend.list_sessions(prefix=_SCHEDULE_PREFIX)
+        prefix = session_name("schedule-")  # ava-schedule-
+        names = backend.list_sessions(prefix=prefix)
         home = ava_home()
         _log.debug(
             "schedule session scan backend=%s settings_home=%s record_dir=%s names=%s",
@@ -296,7 +295,7 @@ class ScheduleManager:
             names,
         )
         for name in names:
-            tail = name.removeprefix(_SCHEDULE_PREFIX)
+            tail = name.removeprefix(prefix)
             if tail.isdigit():
                 schedule_id = int(tail)
                 if backend.session_generation(name) == generation:

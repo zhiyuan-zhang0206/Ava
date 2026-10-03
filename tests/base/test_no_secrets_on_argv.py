@@ -214,16 +214,13 @@ def test_agent_shell_session(
     cluster-scope secrets — the shell's children re-source them at their own
     boot), so the secret values appear NOWHERE in this launch path.
     """
-    from ava.shell import sessions
+    from ava.shell.sessions import ShellSessions
+    from ava.shell.tests.support import FakeDatabase
+    from base.sessions.backend import get_shell_backend
 
-    monkeypatch.setattr(sessions, "_next_session_index_from_db", lambda: 3)
-    monkeypatch.setattr(sessions, "_shell_prefix", lambda: "ava-agent-1-shell-")
-
-    def _noop_record_ttl(_sid: int, _ttl: float) -> None:
-        return None
-
-    monkeypatch.setattr(sessions, "_record_ttl", _noop_record_ttl)
-    sessions.create_session("probe", ttl=120)
+    ShellSessions(
+        backend=get_shell_backend(), database=FakeDatabase(next_index=3), agent_id=1
+    ).create("probe", ttl=120)
     launches = [
         a for a in captured_argv if a[:3] == [sys.executable, "-m", "base.sessions.pty.cli"]
     ]

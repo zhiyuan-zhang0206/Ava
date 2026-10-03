@@ -8,7 +8,6 @@ that async fan-out path and only validate the SystemStatus.cluster data pipeline
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Iterator
 from pathlib import Path
 
 import psycopg
@@ -17,6 +16,7 @@ from fastapi.testclient import TestClient
 
 from gateway.app import app
 from gateway.cluster import status as status_router
+from gateway.cluster.status import StatusCache
 from ops import cluster_rpc
 
 _OPS_URL = "http://wsl:18121"
@@ -26,13 +26,6 @@ class _RemoteProbeResults(dict[str, tuple[bool, bool | None]]):
     def __init__(self) -> None:
         super().__init__()
         self.calls: list[str] = []
-
-
-@pytest.fixture(autouse=True)
-def _clear_status_cache() -> Iterator[None]:
-    status_router.cache_clear()
-    yield
-    status_router.cache_clear()
 
 
 @pytest.fixture(autouse=True)
@@ -302,7 +295,7 @@ class TestClusterPanel:
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         _ = fake_flag, stub_machine_identity
-        monkeypatch.setattr(status_router, "_STATUS_CACHE_TTL_S", 0.0)
+        monkeypatch.setattr("gateway.app.StatusCache", lambda: StatusCache(ttl_s=0.0))
         _insert_machine(db_conn, "wsl-test", None, "agent-runner")
         stub_remote_probe["wsl-test"] = (True, False)
 

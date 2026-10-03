@@ -1,8 +1,6 @@
 {
   "ambient_state": {
-    "gateway/cluster/_health.py::import-time-read:_STARTED_AT": 1,
-    "gateway/cluster/roster_probe.py::ambient-container:_identity_mismatch_active": 1,
-    "gateway/cluster/status.py::global-rebind:_status_cache": 2
+    "gateway/cluster/roster_probe.py::ambient-container:_identity_mismatch_active": 1
   },
   "private_imports": {
     "gateway/cluster/machine_pause.py::ops.lifecycle._force_mark_terminated": 1,

@@ -85,12 +85,13 @@ from gateway.auth import rejection_log
 from gateway.auth import router as auth_router
 from gateway.auth.cors import cors_allowed_origins
 from gateway.auth.rejection_log import log_auth401_rejection
-from gateway.auth.session_store import touch_session
+from gateway.auth.session_store import SessionStore, touch_session
 from gateway.cluster import bootstrap as bootstrap_router
 from gateway.cluster import machine_pause as machine_pause_router
 from gateway.cluster import ops_monitor as ops_monitor_router
 from gateway.cluster import router as cluster_router
 from gateway.cluster import status as status_router
+from gateway.cluster.status import StatusCache
 from gateway.events import agent_events as agent_events_router
 from gateway.events import computer_traces as computer_traces_router
 from gateway.events import metrics as metrics_router
@@ -103,6 +104,7 @@ from gateway.extensions import plugin_ui as plugin_ui_router
 from gateway.extensions import skills as skills_router
 from gateway.extensions import ui_contributions as ui_contributions_router
 from gateway.inspect import router as inspect_router
+from gateway.lgtm.telemetry_staleness import TelemetryStaleness
 from gateway.mcp_server import endpoint as mcp_server_endpoint
 from gateway.mcp_server import router as mcp_server_router
 from gateway.middleware import idempotency, latency, pause_policy, runtime_metrics
@@ -193,9 +195,20 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     # gateway process and serves every request, so a connection idle across a host
     # sleep or a network change comes back on a dead TCP flow and, unbounded, parks
     # the request handler on the OS TCP-retransmit timeout.
+    app.state.started_at = time.time()
     app.state.db = Database.from_settings()
     app.state.bus = EventBus.from_settings()
+    app.state.telemetry_staleness = TelemetryStaleness()
+    app.state.status_cache = StatusCache()
+    app.state.inspect_query_cache = inspect_router.build_query_cache()
+    app.state.upload_locks = uploads_router.AgentUploadLocks()
+    app.state.memory_search_gate = memory_router.build_search_gate()
+    app.state.memory_graph_cache = memory_router.MemoryGraphCache()
     app.state.db_pool = app.state.db.pool(max_size=8)
+    app.state.sessions = SessionStore(app.state.db_pool)
+    app.state.idempotency = idempotency.IdempotencyService(
+        idempotency.IdempotencyStore(app.state.db_pool)
+    )
     # The control plane must never queue behind the saturated data-plane pool.
     # Audit P0-2 follows the 2026-08-23 watchdog misjudgment chain: health and
     # recovery reads need their own short, small reservation.
@@ -390,7 +403,7 @@ async def _cookie_session(request: Request, secret: str) -> tuple[str, str] | No
     if not cookie_token:
         return None
     fact = await asyncio.to_thread(
-        current_session_fact, request.app.state.db_pool, cookie_token, secret
+        current_session_fact, request.app.state.sessions, cookie_token, secret
     )
     return None if fact is None else (cookie_token, fact)
 
