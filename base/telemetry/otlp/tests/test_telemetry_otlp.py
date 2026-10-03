@@ -833,7 +833,9 @@ def test_pipeline_exports_to_otlp(otlp_backend) -> None:
     assert metrics["ava_llm_usage_latency"].data.data_points[0].sum == 1.5
 
 
-def test_pipeline_mirror_survives_otlp_failure(monkeypatch, tmp_path: Path) -> None:
+def test_pipeline_mirror_survives_otlp_failure(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     """A broken OTLP backend never blocks the drain — the JSONL mirror still
     holds the batch (the PG copy is gone, task #1197)."""
 
