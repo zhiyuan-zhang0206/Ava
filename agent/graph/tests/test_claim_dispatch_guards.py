@@ -14,7 +14,8 @@ from agent.tests.claim_support import (
     _insert_inbound_kind,
     _make_runtime,
 )
-from base.db import insert_inbound_message
+from base.db import Database, insert_inbound_message
+from base.events.live.bus import EventBus
 from tests.fixtures.units import spawn_agent
 
 
@@ -32,7 +33,7 @@ async def test_claim_unknown_kind_raises(
 
     tid = spawn_agent()
 
-    async def fake_claim(_db, _tid, *, lifecycle_only=False):
+    async def fake_claim(_db: object, _tid, *, lifecycle_only=False):
         assert not lifecycle_only
         return [ClaimedInbound(id=99, agent_id=tid, content="x", kind="bogus", source="system")]
 
@@ -49,7 +50,11 @@ async def test_claim_unknown_kind_raises(
 
 
 async def test_claim_terminate_vetoed_by_pending_inbound_after_claim(
-    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool, monkeypatch: pytest.MonkeyPatch
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    monkeypatch: pytest.MonkeyPatch,
+    database: Database,
+    event_bus: EventBus,
 ):
     """The other half of the race: the batch (terminate alone) is claimed, but a
     message lands in the queue before the exit is committed. The claim node's
@@ -63,7 +68,9 @@ async def test_claim_terminate_vetoed_by_pending_inbound_after_claim(
 
     tid = spawn_agent()
     terminate_id = _insert_inbound_kind(db_conn, tid, "", "terminate", source="self")
-    chat_id = insert_inbound_message(db_conn, tid, "message after the claim", source="user")
+    chat_id = insert_inbound_message(
+        db_conn, tid, "message after the claim", source="user", bus=event_bus, database=database
+    )
     await _await_inbound_visible(aops_pool, chat_id)
 
     async def fake_claim(_pool, _agent_id, *, lifecycle_only=False):
@@ -117,6 +124,8 @@ async def test_claim_same_batch_newer_chat_vetoes_the_terminate(
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     monkeypatch: pytest.MonkeyPatch,
+    database: Database,
+    event_bus: EventBus,
 ):
     """Veto half 1: a same-batch chat newer than the terminate keeps the agent
     alive."""
@@ -124,7 +133,9 @@ async def test_claim_same_batch_newer_chat_vetoes_the_terminate(
 
     tid = spawn_agent()
     terminate_id = _insert_inbound_kind(db_conn, tid, "", "terminate", source="user")
-    chat_id = insert_inbound_message(db_conn, tid, "message in the batch", source="user")
+    chat_id = insert_inbound_message(
+        db_conn, tid, "message in the batch", source="user", bus=event_bus, database=database
+    )
     await _await_inbound_visible(aops_pool, chat_id)
 
     async def fake_claim(_pool, _agent_id, *, lifecycle_only=False):

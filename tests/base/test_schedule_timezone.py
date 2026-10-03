@@ -61,7 +61,7 @@ def _tree(filename: str) -> ast.Module:
 
 def _timezone_arguments(tree: ast.Module) -> list[str]:
     """Every timezone a template hands on: a `timezone=` keyword, an argument of
-    `ZoneInfo(...)`, or the second argument of `run_daily_loop(cron, tz, fire)`."""
+    `ZoneInfo(...)`, or the second argument of `run_daily_loop(db, cron, tz, fire)`."""
     found: list[str] = []
     for node in ast.walk(tree):
         if not isinstance(node, ast.Call):
@@ -70,8 +70,8 @@ def _timezone_arguments(tree: ast.Module) -> list[str]:
         callee = ast.unparse(node.func)
         if callee == "ZoneInfo" and node.args:
             found.append(ast.unparse(node.args[0]))
-        if callee == "run_daily_loop" and len(node.args) > 1:
-            found.append(ast.unparse(node.args[1]))
+        if callee == "run_daily_loop" and len(node.args) > 2:
+            found.append(ast.unparse(node.args[2]))
     return found
 
 

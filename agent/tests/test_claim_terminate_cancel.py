@@ -20,7 +20,8 @@ from agent.tests.claim_support import (
     _make_runtime,
 )
 from base.config import settings
-from base.db import insert_inbound_message
+from base.db import Database, insert_inbound_message
+from base.events.live.bus import EventBus
 from tests.fixtures.units import spawn_agent
 from tests.path_scoped.agent_tests import _fresh_snapshot_cursor as _fresh_snapshot_cursor
 from tests.path_scoped.agent_tests import (
@@ -142,13 +143,18 @@ async def test_claim_hosted_never_enters_idling_status(
 
 
 async def test_claim_hosted_still_dispatches_an_available_batch(
-    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    database: Database,
+    event_bus: EventBus,
 ):
     """Hosted mode changes only the empty-batch branch. When the first SELECT
     finds work, dispatch is byte-for-byte the process path — the turn runs, and
     `turn_idle` is NOT set (the host must re-invoke, not end the task)."""
     tid = spawn_agent()
-    insert_inbound_message(db_conn, tid, "hello", kind="chat", source="user")
+    insert_inbound_message(
+        db_conn, tid, "hello", kind="chat", source="user", bus=event_bus, database=database
+    )
 
     cmd = await claim_node(
         AgentState(messages=[SystemMessage(content="sys")], halted=True, turn_active=False),
@@ -192,7 +198,10 @@ async def test_claim_cancel_kind_halts_to_idle_without_marker(
 
 
 async def test_claim_cancel_with_chat_cobatch_wakes_to_process_chat(
-    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    database: Database,
+    event_bus: EventBus,
 ):
     """User sends a chat, then clicks Stop while the agent's code is executing;
     both land pending and are claimed in one batch (the interrupt aborts the
@@ -206,7 +215,9 @@ async def test_claim_cancel_with_chat_cobatch_wakes_to_process_chat(
     tid = spawn_agent()
     # chat first (older id), then cancel — the real sequence: message queued,
     # then Stop pressed mid-execution.
-    insert_inbound_message(db_conn, tid, "please also do X", source="user")
+    insert_inbound_message(
+        db_conn, tid, "please also do X", source="user", bus=event_bus, database=database
+    )
     cancel_id = _insert_inbound_kind(db_conn, tid, "", "cancel", source="user")
     await _await_inbound_visible(aops_pool, cancel_id)
     pub = MagicMock()
@@ -234,7 +245,10 @@ async def test_claim_cancel_with_chat_cobatch_wakes_to_process_chat(
 
 
 async def test_claim_cancel_before_chat_cobatch_wakes_to_process_chat(
-    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    database: Database,
+    event_bus: EventBus,
 ):
     """Same as above but the cancel is the OLDER row (user clicks Stop, then
     sends a new message while both are still pending). The wake decision is
@@ -243,7 +257,9 @@ async def test_claim_cancel_before_chat_cobatch_wakes_to_process_chat(
     tid = spawn_agent()
     # cancel first (older id), then chat
     _insert_inbound_kind(db_conn, tid, "", "cancel", source="user")
-    chat_id = insert_inbound_message(db_conn, tid, "new instruction", source="user")
+    chat_id = insert_inbound_message(
+        db_conn, tid, "new instruction", source="user", bus=event_bus, database=database
+    )
     await _await_inbound_visible(aops_pool, chat_id)
 
     cmd = await claim_node(
@@ -338,11 +354,22 @@ async def test_claim_terminate_self_renders_by_yourself(
 
 
 async def test_claim_self_terminate_retains_peer_chat_for_successor(
-    running_agent: Callable[[], int], db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool
+    running_agent: Callable[[], int],
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    database: Database,
+    event_bus: EventBus,
 ):
     """Accepting self termination never acknowledges an unseen peer message."""
     tid = running_agent()
-    insert_inbound_message(db_conn, tid, "peer message during suicide", source="agent:1")
+    insert_inbound_message(
+        db_conn,
+        tid,
+        "peer message during suicide",
+        source="agent:1",
+        bus=event_bus,
+        database=database,
+    )
     terminate_id = _insert_inbound_kind(db_conn, tid, "", "terminate", source="self")
     await _await_inbound_visible(aops_pool, terminate_id)
 
@@ -365,11 +392,17 @@ async def test_claim_self_terminate_retains_peer_chat_for_successor(
 
 
 async def test_claim_self_terminate_retains_older_user_chat(
-    running_agent: Callable[[], int], db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool
+    running_agent: Callable[[], int],
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    database: Database,
+    event_bus: EventBus,
 ):
     """An older user chat remains durable without vetoing the accepted command."""
     tid = running_agent()
-    chat_id = insert_inbound_message(db_conn, tid, "queued before the suicide", source="user")
+    chat_id = insert_inbound_message(
+        db_conn, tid, "queued before the suicide", source="user", bus=event_bus, database=database
+    )
     await _await_inbound_visible(aops_pool, chat_id)
     _insert_inbound_kind(db_conn, tid, "", "terminate", source="self")
 
@@ -390,12 +423,18 @@ async def test_claim_self_terminate_retains_older_user_chat(
 
 
 async def test_claim_external_terminate_retains_newer_chat(
-    running_agent: Callable[[], int], db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool
+    running_agent: Callable[[], int],
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    database: Database,
+    event_bus: EventBus,
 ):
     """Newer chat does not replace an accepted lifecycle command or get lost."""
     tid = running_agent()
     _insert_inbound_kind(db_conn, tid, "", "terminate", source="user")
-    chat_id = insert_inbound_message(db_conn, tid, "message after the kill", source="user")
+    chat_id = insert_inbound_message(
+        db_conn, tid, "message after the kill", source="user", bus=event_bus, database=database
+    )
     await _await_inbound_visible(aops_pool, chat_id)
 
     cmd = await claim_node(
@@ -415,7 +454,11 @@ async def test_claim_external_terminate_retains_newer_chat(
 
 
 async def test_claim_external_terminate_with_older_chat_still_dies(
-    running_agent: Callable[[], int], db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool
+    running_agent: Callable[[], int],
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    database: Database,
+    event_bus: EventBus,
 ):
     """Regression guard: a deliberate external kill is NOT vetoed by chats that
     predate it — the actor decided with the pending queue visible, so the
@@ -423,7 +466,9 @@ async def test_claim_external_terminate_with_older_chat_still_dies(
     pre-death chat is committed to history as before; it is visible after a
     resurrect."""
     tid = running_agent()
-    chat_id = insert_inbound_message(db_conn, tid, "old message before the kill", source="user")
+    chat_id = insert_inbound_message(
+        db_conn, tid, "old message before the kill", source="user", bus=event_bus, database=database
+    )
     await _await_inbound_visible(aops_pool, chat_id)
     _insert_inbound_kind(db_conn, tid, "", "terminate", source="user")
 

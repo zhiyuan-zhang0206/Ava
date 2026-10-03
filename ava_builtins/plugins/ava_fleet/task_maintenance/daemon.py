@@ -49,7 +49,6 @@ from pathlib import Path
 import psycopg
 from psycopg_pool import ConnectionPool
 
-import base.db
 from base import telemetry
 from base.config import settings
 from base.daemon.endpoints import ServiceEndpoint, ServiceEndpoints
@@ -59,7 +58,7 @@ from base.daemon.health import (
     stop_health_server,
 )
 from base.daemon.shutdown import install_graceful_shutdown
-from base.db import Database
+from base.db import Database, publish_inbound_wake
 from base.db.transaction import write_transaction
 from base.events.live.announce import publish_agent_updated_sync
 from base.events.live.bus import EventBus
@@ -83,6 +82,8 @@ _LIVENESS_BEAT_STEP_S = 30.0
 
 def deliver_message(
     pool: ConnectionPool,
+    db: Database,
+    bus: EventBus,
     agent_id: int,
     message: str,
     *,
@@ -115,10 +116,10 @@ def deliver_message(
                 "UPDATE agent_tasks SET escalated_at = now() WHERE id = ANY(%s)",
                 (escalate_task_ids,),
             )
-    publish_agent_updated_sync(EventBus.from_settings(), agent_id)
+    publish_agent_updated_sync(bus, agent_id)
     # The connection context commits before the best-effort wake. A missing
     # subscriber is expected for a terminated agent and does not resurrect it.
-    base.db.publish_inbound_wake(agent_id, str(inbound_id))
+    publish_inbound_wake(db, bus, agent_id, str(inbound_id))
 
 
 # ── Reminder pass ──────────────────────────────────────────────────────────────
@@ -198,7 +199,9 @@ def _reminder_digest_message(tasks: list[tuple[int, str, int, int, str]]) -> str
     return "\n".join(lines)
 
 
-def _run_reminders(pool: ConnectionPool, backoff_seconds: float) -> int:
+def _run_reminders(
+    pool: ConnectionPool, db: Database, bus: EventBus, backoff_seconds: float
+) -> int:
     """Deliver one overdue-task digest per owner. Returns fully recorded digests."""
     with pool.connection() as conn, conn.cursor() as cur:
         cur.execute(_REMINDER_SQL, (backoff_seconds,))
@@ -239,7 +242,7 @@ def _run_reminders(pool: ConnectionPool, backoff_seconds: float) -> int:
         task_ids = [task_id for task_id, *_ in tasks]
         try:
             # Deliver before counters, so a failed digest leaves every task eligible.
-            deliver_message(pool, owner, _reminder_digest_message(tasks))
+            deliver_message(pool, db, bus, owner, _reminder_digest_message(tasks))
         except Exception as exc:
             _log.error(
                 "[task-maintenance] reminder digest for owner %s (tasks %s) failed: %r",
@@ -301,7 +304,7 @@ _ESCALATE_SQL = """
 
 
 def _escalate_to_user_queue(
-    pool: ConnectionPool, task_id: int, owner: int, priority: str, title: str
+    bus: EventBus, pool: ConnectionPool, task_id: int, owner: int, priority: str, title: str
 ) -> bool:
     """Surface a stalled top-level task in the human queue by posting a
     require_response notice on the stalled owner agent.
@@ -346,7 +349,7 @@ def _escalate_to_user_queue(
             ),
         )
     # Reconcile the notice queue only after the escalation has committed.
-    publish_agent_updated_sync(EventBus.from_settings(), owner)
+    publish_agent_updated_sync(bus, owner)
     return True
 
 
@@ -358,7 +361,7 @@ def _delegator_digest_message(tasks: list[tuple[int, str, int, int]]) -> str:
     return "\n".join(lines)
 
 
-def _run_escalate(pool: ConnectionPool, escalate_n: int) -> int:
+def _run_escalate(pool: ConnectionPool, db: Database, bus: EventBus, escalate_n: int) -> int:
     """Escalate unresponsive subtask owners.
 
     A delegated subtask (its parent has an owner) escalates to that parent
@@ -395,7 +398,7 @@ def _run_escalate(pool: ConnectionPool, escalate_n: int) -> int:
                 # open, so >= never double-posts.
                 if reminder_count < escalate_n:
                     continue
-                if _escalate_to_user_queue(pool, task_id, owner, priority, title):
+                if _escalate_to_user_queue(bus, pool, task_id, owner, priority, title):
                     telemetry.emit(
                         "telemetry",
                         "task_escalation",
@@ -427,6 +430,8 @@ def _run_escalate(pool: ConnectionPool, escalate_n: int) -> int:
         try:
             deliver_message(
                 pool,
+                db,
+                bus,
                 delegator,
                 _delegator_digest_message(tasks),
                 escalate_task_ids=task_ids,
@@ -491,7 +496,9 @@ async def _sleep_with_liveness(liveness: Liveness, total_s: float) -> None:
         remaining -= step
 
 
-async def _dispatch_loop(pool: ConnectionPool, liveness: Liveness) -> None:
+async def _dispatch_loop(
+    pool: ConnectionPool, db: Database, bus: EventBus, liveness: Liveness
+) -> None:
     interval = settings.daemon.task_maintenance_interval_seconds
     backoff_seconds = settings.daemon.task_reminder_backoff_seconds
     escalate_n = settings.daemon.task_escalate_n
@@ -504,8 +511,8 @@ async def _dispatch_loop(pool: ConnectionPool, liveness: Liveness) -> None:
     )
     while True:
         try:
-            _run_reminders(pool, backoff_seconds)
-            _run_escalate(pool, escalate_n)
+            _run_reminders(pool, db, bus, backoff_seconds)
+            _run_escalate(pool, db, bus, escalate_n)
         except asyncio.CancelledError:
             raise
         except psycopg.ProgrammingError:
@@ -542,9 +549,10 @@ async def run() -> None:
     health = await start_health_server("task_maintenance", endpoint.health_port, liveness=liveness)
     _log.info("[task-maintenance] healthz listening on :%s", endpoint.health_port)
 
-    pool = Database.from_settings().pool()
+    db = Database.from_settings()
+    pool = db.pool()
     try:
-        await _dispatch_loop(pool, liveness)
+        await _dispatch_loop(pool, db, EventBus.from_settings(), liveness)
     finally:
         pool.close()
         await stop_health_server(health)

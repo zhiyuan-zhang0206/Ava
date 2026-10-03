@@ -24,10 +24,12 @@ import types
 
 import pytest
 
+from base.db import Database
+from base.events.live.bus import EventBus
 from tests.fixtures.guards import _stub_everywhere
 
 
-def _stub(*args: object, **kwargs: object) -> None:
+def _stub(_db: Database, _bus: EventBus, *args: object, **kwargs: object) -> None:
     del args, kwargs
 
 

@@ -84,7 +84,7 @@ def test_notices_are_written_once_in_the_terminals_phase_before_the_data_plane_s
     events: list[str] = []
 
     def write(
-        batch: Sequence[pty_close_notices.ClosureNotice], *, direct: bool
+        _db: object, _bus: object, batch: Sequence[pty_close_notices.ClosureNotice], *, direct: bool
     ) -> list[tuple[pty_close_notices.ClosureNotice, Exception]]:
         events.append(f"write:{len(batch)}:direct={direct}")
         return []
@@ -154,7 +154,7 @@ def test_an_unwritable_notice_is_loud_and_does_not_fail_the_stop(
     _stop_env(monkeypatch, home, terminal)
 
     def unreachable(
-        batch: Sequence[pty_close_notices.ClosureNotice], *, direct: bool
+        _db: object, _bus: object, batch: Sequence[pty_close_notices.ClosureNotice], *, direct: bool
     ) -> list[tuple[pty_close_notices.ClosureNotice, Exception]]:
         del direct
         return [(notice, ConnectionError("connection refused")) for notice in batch]

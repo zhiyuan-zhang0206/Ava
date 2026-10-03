@@ -28,7 +28,8 @@ from base.agents.context import AvaContext
 from base.agents.history.delta_read_compat import wrap_saver_reads_with_delta_reconstruction
 from base.agents.messages.caller_identity import CallerIdentity
 from base.cluster.machine import machine_name
-from base.db import create_agent, insert_inbound_message
+from base.db import Database, create_agent, insert_inbound_message
+from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from base.native_process.turn_identity import bind_turn_identity
@@ -36,7 +37,7 @@ from base.packages.plugins.extensions import ExtensionRegistry, PluginContributi
 from tests.impersonation_support import attested_caller, recorded_tree
 
 
-def _relay_ready(*_args: object) -> bool:
+def _relay_ready(_db: object, _bus: object, *_args: object) -> bool:
     return True
 
 
@@ -75,10 +76,12 @@ async def _prepare_graph(
     )
     db_conn.commit()
     owner = await admit_hosted_runtime(
-        aops_pool, agent_id, machine, uuid4(), expected_from="idling"
+        aops_pool, agent_id, machine, uuid4(), expected_from="idling", db=Database.from_settings()
     )
     assert owner is not None
     requested = leases.request(
+        Database.from_settings(),
+        EventBus.from_settings(),
         agent_id,
         caller=CallerIdentity(kind="external_agent", subject="codex"),
         process_metadata=recorded_tree(),
@@ -142,7 +145,13 @@ async def _prepare_graph(
     builder.add_node("after_exec", after_exec, destinations=("claim",))
     builder.add_edge(START, "claim")
     graph = builder.compile(checkpointer=saver)
-    ctx = AvaContext(ops_pool=aops_pool, event_publisher=MagicMock(), agent=AgentSlices.resolve())
+    ctx = AvaContext(
+        ops_pool=aops_pool,
+        event_publisher=MagicMock(),
+        agent=AgentSlices.resolve(),
+        db=Database.from_settings(),
+        bus=EventBus.from_settings(),
+    )
     config: RunnableConfig = {"configurable": {"thread_id": str(agent_id)}, "recursion_limit": 100}
     reset: dict[str, Any] = {
         "turn_active": False,
@@ -160,6 +169,8 @@ async def test_consent_exec_inbox_release_and_resume(
     aops_pool: AsyncConnectionPool[Any],
     monkeypatch: pytest.MonkeyPatch,
     finish: str,
+    database: Database,
+    event_bus: EventBus,
 ) -> None:
     graph, saver, ctx, config, reset, owner, requested, model_calls = await _prepare_graph(
         db_conn, aops_pool, monkeypatch
@@ -171,7 +182,7 @@ async def test_consent_exec_inbox_release_and_resume(
     # recorded controller tree is synthetic (its pids are not live processes),
     # so pin the supervisor's liveness view (task #3998).
 
-    def relay_ready(_session: Any, _incarnation: Any) -> bool:
+    def relay_ready(_db: object, _bus: object, _session: Any, _incarnation: Any) -> bool:
         return True
 
     monkeypatch.setattr(impersonation, "establish_relay", relay_ready)
@@ -179,12 +190,16 @@ async def test_consent_exec_inbox_release_and_resume(
     with bind_turn_identity(agent_id, incarnation=owner):
         first = await graph.ainvoke(reset, config, context=ctx)
         assert first["turn_idle"]
-        assert leases.get(requested["id"], attested_caller(requested))["status"] == "accepted"
+        assert (
+            leases.get(database, event_bus, requested["id"], attested_caller(requested))["status"]
+            == "accepted"
+        )
         # Merely returning from exec/graph has NOT issued the external lease.
         await flush_checkpoint(saver, agent_id)
-        assert await settle_checkpoint(graph, agent_id)
+        assert await settle_checkpoint(graph, database, event_bus, agent_id)
         assert (
-            leases.require_active(requested["id"], attested_caller(requested))["status"] == "active"
+            leases.require_active(database, requested["id"], attested_caller(requested))["status"]
+            == "active"
         )
         # The stubbed establishment writes no heartbeat; keep it fresh so the
         # held pass stays a no-op while this flow runs (task #3998).
@@ -201,14 +216,24 @@ async def test_consent_exec_inbox_release_and_resume(
         )
 
         first_peer = insert_inbound_message(
-            db_conn, agent_id, "Peer message acknowledged", source="agent:99"
+            db_conn,
+            agent_id,
+            "Peer message acknowledged",
+            source="agent:99",
+            bus=event_bus,
+            database=database,
         )
         second_peer = insert_inbound_message(
-            db_conn, agent_id, "Peer message still pending", source="agent:99"
+            db_conn,
+            agent_id,
+            "Peer message still pending",
+            source="agent:99",
+            bus=event_bus,
+            database=database,
         )
-        inbox = leases.inbox(requested["id"], attested_caller(requested))
+        inbox = leases.inbox(database, requested["id"], attested_caller(requested))
         assert {row["id"] for row in inbox} == {first_peer, second_peer}
-        leases.ack(requested["id"], attested_caller(requested), [first_peer])
+        leases.ack(database, event_bus, requested["id"], attested_caller(requested), [first_peer])
         await graph.ainvoke(reset, config, context=ctx)
         await flush_checkpoint(saver, agent_id)
         assert len(model_calls) == 1
@@ -218,13 +243,20 @@ async def test_consent_exec_inbox_release_and_resume(
         db_conn.commit()
 
         leases.merge_plugin_delta(
+            database,
             requested["id"],
             attested_caller(requested),
             encode_plugin_delta({"handoff__total": 7}),
             expected_version=0,
         )
         if finish == "release":
-            leases.release(requested["id"], attested_caller(requested), "External work complete")
+            leases.release(
+                database,
+                event_bus,
+                requested["id"],
+                attested_caller(requested),
+                "External work complete",
+            )
         else:
             db_conn.execute(
                 "UPDATE agent_impersonations SET expires_at=clock_timestamp()-interval '1 second' WHERE id=%s",
@@ -232,8 +264,8 @@ async def test_consent_exec_inbox_release_and_resume(
             )
             db_conn.commit()
             with pytest.raises(leases.ImpersonationError, match="expired"):
-                leases.require_active(requested["id"], attested_caller(requested))
-        assert not await settle_checkpoint(graph, agent_id)
+                leases.require_active(database, requested["id"], attested_caller(requested))
+        assert not await settle_checkpoint(graph, database, event_bus, agent_id)
         resumed = await graph.ainvoke(reset, config, context=ctx)
         await flush_checkpoint(saver, agent_id)
         assert resumed["handoff__total"] == 7
@@ -243,7 +275,7 @@ async def test_consent_exec_inbox_release_and_resume(
         assert "Peer message still pending" in transcript
         assert "Peer message acknowledged" not in transcript
         # A second resume-boundary pass cannot double an additive reducer.
-        assert not await settle_checkpoint(graph, agent_id)
+        assert not await settle_checkpoint(graph, database, event_bus, agent_id)
         assert (await graph.aget_state(config)).values["handoff__total"] == 7
 
 
@@ -252,6 +284,8 @@ async def test_automatic_takeover_handoff_precedes_queued_input(
     aops_pool: AsyncConnectionPool[Any],
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
+    database: Database,
+    event_bus: EventBus,
 ) -> None:
     import json
     from pathlib import Path
@@ -273,27 +307,46 @@ async def test_automatic_takeover_handoff_precedes_queued_input(
     with bind_turn_identity(owner.agent_id, incarnation=owner):
         await graph.ainvoke(reset, config, context=ctx)
         assert not model_calls  # No native model acceptance turn.
-        assert leases.get(requested["id"], attested_caller(requested))["status"] == "accepted"
+        assert (
+            leases.get(database, event_bus, requested["id"], attested_caller(requested))["status"]
+            == "accepted"
+        )
         await flush_checkpoint(saver, owner.agent_id)
-        assert await settle_checkpoint(graph, owner.agent_id)
+        assert await settle_checkpoint(graph, database, event_bus, owner.agent_id)
         inbound_id = insert_inbound_message(
-            db_conn, owner.agent_id, "During takeover", source="user"
+            db_conn,
+            owner.agent_id,
+            "During takeover",
+            source="user",
+            bus=event_bus,
+            database=database,
         )
         db_conn.commit()
-        leases.inbox(requested["id"], attested_caller(requested))
-        leases.ack(requested["id"], attested_caller(requested), [inbound_id])
+        leases.inbox(database, requested["id"], attested_caller(requested))
+        leases.ack(database, event_bus, requested["id"], attested_caller(requested), [inbound_id])
         history.say(
-            requested["id"], attested_caller(requested), "Work completed", message_key="result"
+            database,
+            event_bus,
+            requested["id"],
+            attested_caller(requested),
+            "Work completed",
+            message_key="result",
         )
         leases.release(
-            requested["id"], attested_caller(requested), "Fixed login and verified the result."
+            database,
+            event_bus,
+            requested["id"],
+            attested_caller(requested),
+            "Fixed login and verified the result.",
         )
-        later = insert_inbound_message(db_conn, owner.agent_id, "Next task", source="user")
+        later = insert_inbound_message(
+            db_conn, owner.agent_id, "Next task", source="user", bus=event_bus, database=database
+        )
         db_conn.commit()
         await graph.ainvoke(reset, config, context=ctx)
         assert not model_calls
         await flush_checkpoint(saver, owner.agent_id)
-        assert not await settle_checkpoint(graph, owner.agent_id)
+        assert not await settle_checkpoint(graph, database, event_bus, owner.agent_id)
         snapshot = await graph.aget_state(config)
         last = snapshot.values["messages"][-1]
         assert last.additional_kwargs["ava_note_tag"] == "impersonation"
@@ -309,7 +362,7 @@ async def test_automatic_takeover_handoff_precedes_queued_input(
             "SELECT status FROM inbound_messages WHERE id=%s", (later,)
         ).fetchone() == ("pending",)
         # Repeated settlement must not duplicate the first resumed input.
-        assert not await settle_checkpoint(graph, owner.agent_id)
+        assert not await settle_checkpoint(graph, database, event_bus, owner.agent_id)
         await graph.ainvoke(reset, config, context=ctx)
         assert len(model_calls) == 1
         messages = model_calls[0].messages
@@ -324,6 +377,8 @@ async def test_accepted_session_repairs_missing_start_checkpoint(
     db_conn: psycopg.Connection[Any],
     aops_pool: AsyncConnectionPool[Any],
     monkeypatch: pytest.MonkeyPatch,
+    database: Database,
+    event_bus: EventBus,
 ) -> None:
     graph, saver, _ctx, config, _reset, owner, requested, calls = await _prepare_graph(
         db_conn,
@@ -333,15 +388,25 @@ async def test_accepted_session_repairs_missing_start_checkpoint(
     )
     monkeypatch.setattr(impersonation, "establish_relay", _relay_ready)
     # Emulate a committed acceptance followed by a crash before claim's update.
-    leases.accept(requested["id"], owner.agent_id, owner, "Saved request, lost checkpoint")
+    leases.accept(
+        database,
+        event_bus,
+        requested["id"],
+        owner.agent_id,
+        owner,
+        "Saved request, lost checkpoint",
+    )
     with bind_turn_identity(owner.agent_id, incarnation=owner):
-        assert await settle_checkpoint(graph, owner.agent_id)
+        assert await settle_checkpoint(graph, database, event_bus, owner.agent_id)
     assert not calls
     durable = await saver.aget_tuple(config)
     assert durable is not None
     messages = durable.checkpoint["channel_values"]["messages"]
     assert [m.id for m in messages] == [f"impersonation-start:{owner.agent_id}:0"]
-    assert leases.get(requested["id"], attested_caller(requested))["status"] == "active"
+    assert (
+        leases.get(database, event_bus, requested["id"], attested_caller(requested))["status"]
+        == "active"
+    )
 
 
 async def test_handoff_checkpoint_failure_keeps_gate_and_retry_flushes_receipt(
@@ -349,6 +414,8 @@ async def test_handoff_checkpoint_failure_keeps_gate_and_retry_flushes_receipt(
     aops_pool: AsyncConnectionPool[Any],
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
+    database: Database,
+    event_bus: EventBus,
 ) -> None:
     from agent.impersonation_handoff import deliver_handoff
     from base.agents.impersonation import history as history
@@ -368,20 +435,26 @@ async def test_handoff_checkpoint_failure_keeps_gate_and_retry_flushes_receipt(
     with bind_turn_identity(owner.agent_id, incarnation=owner):
         await graph.ainvoke(reset, config, context=ctx)
         await flush_checkpoint(saver, owner.agent_id)
-        assert await settle_checkpoint(graph, owner.agent_id)
-        leases.release(requested["id"], attested_caller(requested), "Done; please continue")
-        lease = history.resolve(owner.agent_id, 0)
+        assert await settle_checkpoint(graph, database, event_bus, owner.agent_id)
+        leases.release(
+            database,
+            event_bus,
+            requested["id"],
+            attested_caller(requested),
+            "Done; please continue",
+        )
+        lease = history.resolve(database, owner.agent_id, 0)
 
         async def failed_flush(*_: object) -> None:
             raise OSError("checkpoint temporarily unavailable")
 
         monkeypatch.setattr(impersonation, "flush_checkpoint", failed_flush)
         with pytest.raises(OSError, match="checkpoint temporarily"):
-            await deliver_handoff(graph, lease, owner)
-        assert history.resolve(owner.agent_id, 0)["handoff_applied_at"] is None
+            await deliver_handoff(graph, database, event_bus, lease, owner)
+        assert history.resolve(database, owner.agent_id, 0)["handoff_applied_at"] is None
         assert not calls
         monkeypatch.setattr(impersonation, "flush_checkpoint", flush_checkpoint)
-        await deliver_handoff(graph, lease, owner)
+        await deliver_handoff(graph, database, event_bus, lease, owner)
         durable = await saver.aget_tuple(config)
         assert durable is not None
         notes = [
@@ -390,7 +463,7 @@ async def test_handoff_checkpoint_failure_keeps_gate_and_retry_flushes_receipt(
             if m.id == f"impersonation-handoff:{owner.agent_id}:0"
         ]
         assert len(notes) == 1
-        assert history.resolve(owner.agent_id, 0)["handoff_applied_at"] is not None
+        assert history.resolve(database, owner.agent_id, 0)["handoff_applied_at"] is not None
 
 
 async def test_handoff_of_a_released_log_native_lease_is_already_complete(
@@ -398,6 +471,8 @@ async def test_handoff_of_a_released_log_native_lease_is_already_complete(
     aops_pool: AsyncConnectionPool[Any],
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
+    database: Database,
+    event_bus: EventBus,
 ) -> None:
     """With every source sealed at release, the event log is complete before delivery."""
     from agent.impersonation_handoff import deliver_handoff
@@ -415,12 +490,18 @@ async def test_handoff_of_a_released_log_native_lease_is_already_complete(
     with bind_turn_identity(owner.agent_id, incarnation=owner):
         await graph.ainvoke(reset, config, context=ctx)
         await flush_checkpoint(saver, owner.agent_id)
-        assert await settle_checkpoint(graph, owner.agent_id)
-        leases.release(requested["id"], attested_caller(requested), "Done; please continue")
-        lease = history.resolve(owner.agent_id, 0)
-        await deliver_handoff(graph, lease, owner)
+        assert await settle_checkpoint(graph, database, event_bus, owner.agent_id)
+        leases.release(
+            database,
+            event_bus,
+            requested["id"],
+            attested_caller(requested),
+            "Done; please continue",
+        )
+        lease = history.resolve(database, owner.agent_id, 0)
+        await deliver_handoff(graph, database, event_bus, lease, owner)
 
-        landed = history.resolve(owner.agent_id, 0)
+        landed = history.resolve(database, owner.agent_id, 0)
         assert landed["handoff_path"] is not None
         assert landed["handoff_applied_at"] is not None
         assert landed["events_completed_at"] is not None
@@ -446,6 +527,8 @@ async def test_end_note_resumes_an_empty_queue(
     aops_pool: AsyncConnectionPool[Any],
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
+    database: Database,
+    event_bus: EventBus,
 ) -> None:
     """A release with nothing queued must still run the end note's first turn.
 
@@ -467,7 +550,7 @@ async def test_end_note_resumes_an_empty_queue(
     monkeypatch.setattr(history, "workspace_dir", workspace_for_agent)
     wakes: list[tuple[int, str]] = []
 
-    def record_wake(agent_id: int, payload: str) -> bool:
+    def record_wake(_db: object, _bus: object, agent_id: int, payload: str) -> bool:
         wakes.append((agent_id, payload))
         return True
 
@@ -476,9 +559,15 @@ async def test_end_note_resumes_an_empty_queue(
         await graph.ainvoke(reset, config, context=ctx)
         assert not model_calls  # No native model acceptance turn.
         await flush_checkpoint(saver, owner.agent_id)
-        assert await settle_checkpoint(graph, owner.agent_id)
-        leases.release(requested["id"], attested_caller(requested), "External work complete")
-        assert not await settle_checkpoint(graph, owner.agent_id)
+        assert await settle_checkpoint(graph, database, event_bus, owner.agent_id)
+        leases.release(
+            database,
+            event_bus,
+            requested["id"],
+            attested_caller(requested),
+            "External work complete",
+        )
+        assert not await settle_checkpoint(graph, database, event_bus, owner.agent_id)
         assert not model_calls
         assert wakes == [(owner.agent_id, "impersonation")]
 
@@ -502,6 +591,8 @@ async def test_aborted_takeover_resumes_the_native_with_the_death_cause(
     aops_pool: AsyncConnectionPool[Any],
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
+    database: Database,
+    event_bus: EventBus,
 ) -> None:
     """Task #3998 end to end: the supervisor stops an automatic takeover whose
     relay handle vanished outside the fresh-start window, and the resume chain
@@ -519,7 +610,7 @@ async def test_aborted_takeover_resumes_the_native_with_the_death_cause(
     monkeypatch.setattr(history, "workspace_dir", workspace_for_agent)
     wakes: list[tuple[int, str]] = []
 
-    def record_wake(agent_id: int, payload: str) -> bool:
+    def record_wake(_db: object, _bus: object, agent_id: int, payload: str) -> bool:
         wakes.append((agent_id, payload))
         return True
 
@@ -527,7 +618,7 @@ async def test_aborted_takeover_resumes_the_native_with_the_death_cause(
     with bind_turn_identity(owner.agent_id, incarnation=owner):
         await graph.ainvoke(reset, config, context=ctx)
         await flush_checkpoint(saver, owner.agent_id)
-        assert await settle_checkpoint(graph, owner.agent_id)
+        assert await settle_checkpoint(graph, database, event_bus, owner.agent_id)
         assert not model_calls
         if cause == "relay_death":
             # A lost relay outside the fresh-start window stops the takeover.
@@ -537,9 +628,9 @@ async def test_aborted_takeover_resumes_the_native_with_the_death_cause(
             monkeypatch.setattr(
                 impersonation, "_PROCESS_STARTED_MONOTONIC", impersonation.time.monotonic() - 1000.0
             )
-            session = leases.native_status(owner.agent_id, owner)
+            session = leases.native_status(database, event_bus, owner.agent_id, owner)
             assert session is not None
-            await impersonation.supervise_relay(session, owner.agent_id)
+            await impersonation.supervise_relay(database, event_bus, session, owner.agent_id)
             detail = "the bound relay stopped heartbeating"
         else:
             row = db_conn.execute(
@@ -555,7 +646,7 @@ async def test_aborted_takeover_resumes_the_native_with_the_death_cause(
             )
             db_conn.commit()
             detail = f"the executor did not ACK message {row[0]} after 2 delivery attempts (180s per ACK window)"
-        died = leases.get(requested["id"], attested_caller(requested))
+        died = leases.get(database, event_bus, requested["id"], attested_caller(requested))
         assert died["status"] == "expired"
         assert died["rejection_reason"] == f"aborted: {detail}"
         # The graph boundary pass observes the terminal lease; the resume chain
@@ -563,7 +654,7 @@ async def test_aborted_takeover_resumes_the_native_with_the_death_cause(
         await graph.ainvoke(reset, config, context=ctx)
         assert not model_calls
         await flush_checkpoint(saver, owner.agent_id)
-        assert not await settle_checkpoint(graph, owner.agent_id)
+        assert not await settle_checkpoint(graph, database, event_bus, owner.agent_id)
         assert wakes == [(owner.agent_id, "impersonation")]
         resumed = await graph.ainvoke(reset, config, context=ctx)
         await flush_checkpoint(saver, owner.agent_id)

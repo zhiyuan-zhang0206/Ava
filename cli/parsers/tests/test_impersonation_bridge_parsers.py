@@ -142,7 +142,7 @@ class Listener:
 def _serve_inbox(monkeypatch: pytest.MonkeyPatch, inbox: Inbox) -> None:
     """Serve the fake inbox through the public relay calls `cmd_relay` reads it with."""
 
-    def lease(*_args: object) -> dict[str, Any]:
+    def lease(_db: object, _bus: object, *_args: object) -> dict[str, Any]:
         return {
             "session_id": 0,
             "id": str(LEASE_ID),
@@ -155,7 +155,7 @@ def _serve_inbox(monkeypatch: pytest.MonkeyPatch, inbox: Inbox) -> None:
             "start_message": inbox.start_message,
         }
 
-    def rows(*_args: object) -> list[dict[str, Any]]:
+    def rows(_db: object, *_args: object) -> list[dict[str, Any]]:
         return [
             {
                 "id": i,
@@ -171,7 +171,7 @@ def _serve_inbox(monkeypatch: pytest.MonkeyPatch, inbox: Inbox) -> None:
     monkeypatch.setattr("base.agents.impersonation.relay_get", lease)
     monkeypatch.setattr("base.agents.impersonation.relay_inbox", rows)
 
-    def beat(*_args: object) -> None:
+    def beat(_db: object, *_args: object) -> None:
         return None
 
     monkeypatch.setattr("base.agents.impersonation.relay_heartbeat", beat)
@@ -209,7 +209,9 @@ def test_command_passes_remote_to_steer(monkeypatch: pytest.MonkeyPatch) -> None
     def make_listener(*_args: object) -> Listener:
         return listener
 
-    def reserve(_lease: str, _token: str, ids: list[int]) -> frozenset[int]:
+    def reserve(
+        _db: object, _bus: object, _lease: str, _token: str, ids: list[int]
+    ) -> frozenset[int]:
         for i in ids:
             inbox.messages[i] = replace(inbox.messages[i], delivery_attempts=1, delivery_due=False)
         return frozenset(ids)
@@ -260,7 +262,9 @@ def test_codex_relay_caps_content_and_preserves_inbox_on_steer_failure(
     def make_listener(*_args: object) -> Listener:
         return listener
 
-    def reserve(_lease: str, _token: str, ids: list[int]) -> frozenset[int]:
+    def reserve(
+        _db: object, _bus: object, _lease: str, _token: str, ids: list[int]
+    ) -> frozenset[int]:
         for i in ids:
             inbox.messages[i] = replace(inbox.messages[i], delivery_attempts=1, delivery_due=False)
         return frozenset(ids)

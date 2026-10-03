@@ -24,7 +24,6 @@ from base.agents.history.checkpoint import (
 from base.agents.messages.chat_delivery import ClientMessageConflictError
 from base.agents.messages.inbound import InboundKind
 from base.agents.messages.inbound_images import inbound_image_urls
-from base.agents.messages.inbound_provenance import InboundProvenance
 from base.agents.observation import snapshot
 from base.agents.uploads import image_mime_for, parse_upload_url, resolve_upload_path
 from base.config import settings
@@ -35,8 +34,7 @@ from base.daemon.schedules.completion_notices import (
     delivery_required_for_agent,
     policy_for_agent,
 )
-from base.db import agent_exists, insert_inbound_message, list_pending_inbounds
-from base.db.transaction import write_transaction
+from base.db import agent_exists, list_pending_inbounds
 from gateway.agents.delivery import deliver_chat_inbound, reconcile_chat_delivery
 from gateway.agents.eval_guard import caller_eval_isolation, deny_isolated_result_read
 from gateway.agents.inbound_provenance import request_inbound_provenance
@@ -54,6 +52,7 @@ from gateway.agents.schemas import (
     TokenUsageResponse,
     TraceCheckpointMessagesResponse,
 )
+from gateway.agents.system_note import _system_note_blocking as _system_note_blocking
 from ops import lifecycle as _ops
 from ops.agents import get_agent_status
 from ops.rpc_schemas import AgentMessageIn, ContentBlock, ImageUrlContentBlock, TextContentBlock
@@ -256,7 +255,7 @@ async def post_agent_message(
     # `/agents/{id}/messages`). After INSERT, SELECT once more to get the
     # true "delivery time" status — see docstring. Off the event loop:
     # get_agent_status opens a fresh DB connection.
-    await asyncio.to_thread(get_agent_status, agent_id)
+    await asyncio.to_thread(get_agent_status, request.app.state.db, agent_id)
     if idempotency_key is not None:
         # Resolve a committed receipt before consulting mutable delivery
         # prerequisites. The original upload can disappear or the agent's model
@@ -295,7 +294,7 @@ async def post_agent_message(
             request.app.state.db_pool,
         ):
             return AgentMessageEnqueued(
-                status=await asyncio.to_thread(get_agent_status, agent_id),
+                status=await asyncio.to_thread(get_agent_status, request.app.state.db, agent_id),
                 inbound_id=None,
             )
     text, payload = _prepare_message_content(request, agent_id, body.content)
@@ -314,48 +313,6 @@ async def post_agent_message(
     except ClientMessageConflictError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     return AgentMessageEnqueued(status=delivery.status, inbound_id=delivery.inbound_id)
-
-
-def _system_note_blocking(
-    pool: ConnectionPool,
-    agent_id: int,
-    content: str,
-    source: str,
-    note_tag: str,
-    task_id: int | None,
-    provenance: InboundProvenance | None = None,
-) -> int:
-    """Sync system-note INSERT — via to_thread (pool work off the event loop)."""
-    with write_transaction(pool) as conn:
-        if task_id is not None:
-            with conn.cursor() as cur:
-                # Keep ownership stable until insert_inbound_message() commits below:
-                # a reassignment must not land between attribution validation and
-                # queueing the task-tagged note.
-                cur.execute("SELECT owner FROM agent_tasks WHERE id = %s FOR UPDATE", (task_id,))
-                row = cur.fetchone()
-            if row is None:
-                raise HTTPException(status_code=422, detail=f"task_id {task_id} does not exist")
-            if row[0] != agent_id:
-                raise HTTPException(
-                    status_code=422,
-                    detail=f"task_id {task_id} is not owned by agent {agent_id}",
-                )
-        payload: dict[str, object] = {
-            "note_tag": note_tag,
-            **({"task_id": task_id} if task_id is not None else {}),
-        }
-        # No `provenance` keyword at all when there is none (the insert's own default applies).
-        extra = {} if provenance is None else {"provenance": provenance}
-        return insert_inbound_message(
-            conn,
-            agent_id,
-            content=content,
-            source=source,
-            kind=InboundKind.SYSTEM_NOTE.value,
-            payload=payload,
-            **extra,
-        )
 
 
 @router.post("/api/agents/{agent_id}/system-note", status_code=201)
@@ -389,9 +346,11 @@ async def post_agent_system_note(
                 "to a file and send the file path instead"
             ),
         )
-    await asyncio.to_thread(get_agent_status, agent_id)
+    await asyncio.to_thread(get_agent_status, request.app.state.db, agent_id)
     inbound_id = await asyncio.to_thread(
         _system_note_blocking,
+        request.app.state.db,
+        request.app.state.bus,
         request.app.state.db_pool,
         agent_id,
         body.content,
@@ -408,12 +367,13 @@ async def post_agent_system_note(
     if body.resurrect:
         status = await _ops.resurrect_if_terminated(
             request.app.state.db,
+            request.app.state.bus,
             agent_id,
             trigger_inbound_id=inbound_id,
             trigger_inbound_kind=note_kind,
         )
     else:
-        status = await asyncio.to_thread(get_agent_status, agent_id)
+        status = await asyncio.to_thread(get_agent_status, request.app.state.db, agent_id)
     return AgentMessageEnqueued(status=status, inbound_id=inbound_id)
 
 
@@ -434,7 +394,7 @@ async def reconcile_agent_message(
                 "to a file and send the file path instead"
             ),
         )
-    await asyncio.to_thread(get_agent_status, agent_id)
+    await asyncio.to_thread(get_agent_status, request.app.state.db, agent_id)
     text, payload = _normalize_message_content(body.content)
     try:
         delivery = await reconcile_chat_delivery(

@@ -11,6 +11,8 @@ from langgraph.runtime import Runtime
 from psycopg_pool import AsyncConnectionPool
 
 from base.agents.context import AvaContext
+from base.db import Database
+from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices
 from base.packages.plugins.extensions import EMPTY, ExtensionRegistry
 
@@ -45,6 +47,8 @@ def _make_runtime(
         event_publisher=event_publisher if event_publisher is not None else MagicMock(),
         agent=AgentSlices.resolve(),
         extensions=extensions,
+        db=Database.from_settings(),
+        bus=EventBus.from_settings(),
     )
     return Runtime(context=ctx)
 

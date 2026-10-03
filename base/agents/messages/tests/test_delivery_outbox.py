@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from unittest.mock import Mock
@@ -230,12 +230,15 @@ def test_split_content_matches_the_route_normalization() -> None:
 
 
 def test_flush_delivers_and_retires(
-    journal: Path, db_conn: psycopg.Connection, pool: ConnectionPool
+    journal: Path,
+    db_conn: psycopg.Connection,
+    pool: ConnectionPool,
+    publish_wake: Callable[[int, str], bool],
 ) -> None:
     agent_id = _agent(db_conn)
     path = _record(agent_id=agent_id, key="key-1", now=_NOW)
     assert path is not None
-    report = outbox.flush(pool, now=_NOW + timedelta(seconds=31))
+    report = outbox.flush(pool, publish_wake, now=_NOW + timedelta(seconds=31))
     assert report.delivered == 1 and report.deferred == 0
     assert not path.exists()
     rows = _inbounds(db_conn, agent_id)
@@ -247,7 +250,10 @@ def test_flush_delivers_and_retires(
 
 
 def test_flush_announces_each_record_to_a_progress_hook(
-    journal: Path, db_conn: psycopg.Connection, pool: ConnectionPool
+    journal: Path,
+    db_conn: psycopg.Connection,
+    pool: ConnectionPool,
+    publish_wake: Callable[[int, str], bool],
 ) -> None:
     """A caller that tracks a long pass (the ops server's liveness) hears about every
     record, delivered or deferred, before it is handled."""
@@ -257,7 +263,7 @@ def test_flush_announces_each_record_to_a_progress_hook(
     announced: list[int] = []
 
     report = outbox.flush(
-        pool, now=_NOW + timedelta(seconds=31), on_record=lambda: announced.append(1)
+        pool, publish_wake, now=_NOW + timedelta(seconds=31), on_record=lambda: announced.append(1)
     )
 
     assert report.delivered == 2
@@ -268,6 +274,7 @@ def test_flush_replays_hourly_completion_through_the_policy_boundary(
     journal: Path,
     db_conn: psycopg.Connection,
     pool: ConnectionPool,
+    publish_wake: Callable[[int, str], bool],
 ) -> None:
     """A gateway outage cannot bypass hourly suppression on the outbox replay."""
     agent_id = _agent(db_conn)
@@ -287,7 +294,7 @@ def test_flush_replays_hourly_completion_through_the_policy_boundary(
     )
     assert path is not None
 
-    report = outbox.flush(pool, now=_NOW + timedelta(seconds=31))
+    report = outbox.flush(pool, publish_wake, now=_NOW + timedelta(seconds=31))
 
     assert report.delivered == 0 and report.buffered == 1
     assert not path.exists()
@@ -305,6 +312,7 @@ def test_flush_replay_after_interrupted_retire_is_exactly_once(
     db_conn: psycopg.Connection,
     pool: ConnectionPool,
     monkeypatch: pytest.MonkeyPatch,
+    publish_wake: Callable[[int, str], bool],
 ) -> None:
     """A crash between the commit and the record deletion (simulated by a
     failing unlink) must not produce a second inbound on replay."""
@@ -319,25 +327,28 @@ def test_flush_replay_after_interrupted_retire_is_exactly_once(
         real_unlink(self, missing_ok=missing_ok)
 
     monkeypatch.setattr(Path, "unlink", _fail_unlink)
-    assert outbox.flush(pool, now=_NOW + timedelta(seconds=31)).delivered == 1
+    assert outbox.flush(pool, publish_wake, now=_NOW + timedelta(seconds=31)).delivered == 1
     assert path.exists()
     monkeypatch.setattr(Path, "unlink", real_unlink)
-    report = outbox.flush(pool, now=_NOW + timedelta(seconds=62))
+    report = outbox.flush(pool, publish_wake, now=_NOW + timedelta(seconds=62))
     assert report.delivered == 1
     assert not path.exists()
     assert len(_inbounds(db_conn, agent_id)) == 1
 
 
 def test_flush_defers_until_due_then_delivers(
-    journal: Path, db_conn: psycopg.Connection, pool: ConnectionPool
+    journal: Path,
+    db_conn: psycopg.Connection,
+    pool: ConnectionPool,
+    publish_wake: Callable[[int, str], bool],
 ) -> None:
     agent_id = _agent(db_conn)
     path = _record(agent_id=agent_id, now=_NOW)
     assert path is not None
-    report = outbox.flush(pool, now=_NOW + timedelta(seconds=5))
+    report = outbox.flush(pool, publish_wake, now=_NOW + timedelta(seconds=5))
     assert report.deferred == 1 and report.delivered == 0
     assert path.exists() and _inbounds(db_conn, agent_id) == []
-    assert outbox.flush(pool, now=_NOW + timedelta(seconds=31)).delivered == 1
+    assert outbox.flush(pool, publish_wake, now=_NOW + timedelta(seconds=31)).delivered == 1
 
 
 def test_flush_failed_attempt_backs_off(
@@ -345,25 +356,26 @@ def test_flush_failed_attempt_backs_off(
     db_conn: psycopg.Connection,
     pool: ConnectionPool,
     monkeypatch: pytest.MonkeyPatch,
+    publish_wake: Callable[[int, str], bool],
 ) -> None:
     agent_id = _agent(db_conn)
     path = _record(agent_id=agent_id, now=_NOW)
     assert path is not None
     attempts: list[datetime] = []
 
-    def _boom(_pool: object, entry: outbox.OutboxEntry, _timeout: float) -> int:
+    def _boom(_pool: object, _wake: object, entry: outbox.OutboxEntry, _timeout: float) -> int:
         attempts.append(_NOW)
         raise RuntimeError("data plane down")
 
     monkeypatch.setattr(outbox, "_deliver", _boom)
-    first = outbox.flush(pool, now=_NOW + timedelta(seconds=31))
+    first = outbox.flush(pool, publish_wake, now=_NOW + timedelta(seconds=31))
     assert first.deferred == 1 and len(attempts) == 1
     entry = outbox._read(path)
     assert entry is not None and entry.flush_attempts == 1 and entry.last_flush_at is not None
     # steps[1] = 60s: 10 seconds later the next attempt is not yet due.
-    assert outbox.flush(pool, now=_NOW + timedelta(seconds=41)).deferred == 1
+    assert outbox.flush(pool, publish_wake, now=_NOW + timedelta(seconds=41)).deferred == 1
     assert len(attempts) == 1
-    assert outbox.flush(pool, now=_NOW + timedelta(seconds=92)).deferred == 1
+    assert outbox.flush(pool, publish_wake, now=_NOW + timedelta(seconds=92)).deferred == 1
     assert len(attempts) == 2
 
 
@@ -372,6 +384,7 @@ def test_flush_abandons_at_budget_after_the_failed_attempt(
     db_conn: psycopg.Connection,
     pool: ConnectionPool,
     monkeypatch: pytest.MonkeyPatch,
+    publish_wake: Callable[[int, str], bool],
 ) -> None:
     """Past the budget the entry still gets its attempt; it is the FAILED
     attempt that abandons — with the attempt recorded on the record."""
@@ -379,11 +392,11 @@ def test_flush_abandons_at_budget_after_the_failed_attempt(
     path = _record(agent_id=agent_id, now=_NOW)
     assert path is not None
 
-    def _boom(_pool: object, entry: outbox.OutboxEntry, _timeout: float) -> int:
+    def _boom(_pool: object, _wake: object, entry: outbox.OutboxEntry, _timeout: float) -> int:
         raise RuntimeError("data plane down")
 
     monkeypatch.setattr(outbox, "_deliver", _boom)
-    report = outbox.flush(pool, now=_NOW + timedelta(seconds=43201))
+    report = outbox.flush(pool, publish_wake, now=_NOW + timedelta(seconds=43201))
     assert report.abandoned == 1 and report.delivered == 0
     entry = outbox._read(path)
     assert entry is not None
@@ -392,18 +405,21 @@ def test_flush_abandons_at_budget_after_the_failed_attempt(
     assert entry.flush_attempts == 1
     assert _inbounds(db_conn, agent_id) == []
     # An abandoned record is terminal — later passes leave it alone.
-    assert outbox.flush(pool, now=_NOW + timedelta(seconds=50000)).touched == 0
+    assert outbox.flush(pool, publish_wake, now=_NOW + timedelta(seconds=50000)).touched == 0
 
 
 def test_flush_delivers_stale_entry_when_the_final_attempt_succeeds(
-    journal: Path, db_conn: psycopg.Connection, pool: ConnectionPool
+    journal: Path,
+    db_conn: psycopg.Connection,
+    pool: ConnectionPool,
+    publish_wake: Callable[[int, str], bool],
 ) -> None:
     """A flusher stalled across the budget still gives the message its chance
     once services return: the attempt runs before the budget decision, and a
     success at any age delivers."""
     agent_id = _agent(db_conn)
     _record(agent_id=agent_id, now=_NOW)
-    report = outbox.flush(pool, now=_NOW + timedelta(seconds=43201))
+    report = outbox.flush(pool, publish_wake, now=_NOW + timedelta(seconds=43201))
     assert report.delivered == 1 and report.abandoned == 0
     assert len(_inbounds(db_conn, agent_id)) == 1
 
@@ -413,6 +429,7 @@ def test_flush_past_budget_not_due_defers_until_the_attempt(
     db_conn: psycopg.Connection,
     pool: ConnectionPool,
     monkeypatch: pytest.MonkeyPatch,
+    publish_wake: Callable[[int, str], bool],
 ) -> None:
     """Past the budget, an entry not yet due waits for its next due attempt
     instead of being abandoned — the decision needs the attempt's outcome."""
@@ -421,19 +438,19 @@ def test_flush_past_budget_not_due_defers_until_the_attempt(
     assert path is not None
     _patch_limits(monkeypatch, budget_seconds=100.0)
 
-    def _boom(_pool: object, entry: outbox.OutboxEntry, _timeout: float) -> int:
+    def _boom(_pool: object, _wake: object, entry: outbox.OutboxEntry, _timeout: float) -> int:
         raise RuntimeError("data plane down")
 
     monkeypatch.setattr(outbox, "_deliver", _boom)
     # Attempt 1 at +31 (next due +91), attempt 2 at +95 (next due +395).
-    assert outbox.flush(pool, now=_NOW + timedelta(seconds=31)).deferred == 1
-    assert outbox.flush(pool, now=_NOW + timedelta(seconds=95)).deferred == 1
+    assert outbox.flush(pool, publish_wake, now=_NOW + timedelta(seconds=31)).deferred == 1
+    assert outbox.flush(pool, publish_wake, now=_NOW + timedelta(seconds=95)).deferred == 1
     # +150 is past the 100 s budget but not due: deferred, still pending.
-    assert outbox.flush(pool, now=_NOW + timedelta(seconds=150)).deferred == 1
+    assert outbox.flush(pool, publish_wake, now=_NOW + timedelta(seconds=150)).deferred == 1
     entry = outbox._read(path)
     assert entry is not None and entry.state == "pending" and entry.flush_attempts == 2
     # The attempt owed at +395 runs and, failing past the budget, abandons.
-    assert outbox.flush(pool, now=_NOW + timedelta(seconds=396)).abandoned == 1
+    assert outbox.flush(pool, publish_wake, now=_NOW + timedelta(seconds=396)).abandoned == 1
     entry = outbox._read(path)
     assert entry is not None
     assert entry.abandon_reason == "budget" and entry.flush_attempts == 3
@@ -441,7 +458,10 @@ def test_flush_past_budget_not_due_defers_until_the_attempt(
 
 
 def test_flush_expires_abandoned_records_after_retention(
-    journal: Path, db_conn: psycopg.Connection, pool: ConnectionPool
+    journal: Path,
+    db_conn: psycopg.Connection,
+    pool: ConnectionPool,
+    publish_wake: Callable[[int, str], bool],
 ) -> None:
     """The inspection window is bounded: an abandoned record past its
     retention is pruned by the next pass, without being re-attempted."""
@@ -451,13 +471,16 @@ def test_flush_expires_abandoned_records_after_retention(
     entry = outbox._read(path)
     assert entry is not None
     outbox._abandon(path, entry, "budget", _NOW)
-    report = outbox.flush(pool, now=_NOW + timedelta(days=31))
+    report = outbox.flush(pool, publish_wake, now=_NOW + timedelta(days=31))
     assert report.expired == 1 and not path.exists()
-    assert outbox.flush(pool, now=_NOW + timedelta(days=32)).expired == 0
+    assert outbox.flush(pool, publish_wake, now=_NOW + timedelta(days=32)).expired == 0
 
 
 def test_flush_keeps_abandoned_records_inside_retention(
-    journal: Path, db_conn: psycopg.Connection, pool: ConnectionPool
+    journal: Path,
+    db_conn: psycopg.Connection,
+    pool: ConnectionPool,
+    publish_wake: Callable[[int, str], bool],
 ) -> None:
     agent_id = _agent(db_conn)
     path = _record(agent_id=agent_id, now=_NOW)
@@ -465,7 +488,7 @@ def test_flush_keeps_abandoned_records_inside_retention(
     entry = outbox._read(path)
     assert entry is not None
     outbox._abandon(path, entry, "budget", _NOW)
-    assert outbox.flush(pool, now=_NOW + timedelta(days=29)).expired == 0
+    assert outbox.flush(pool, publish_wake, now=_NOW + timedelta(days=29)).expired == 0
     assert path.exists()
 
 
@@ -474,6 +497,7 @@ def test_flush_disabled_keeps_expired_records(
     db_conn: psycopg.Connection,
     pool: ConnectionPool,
     monkeypatch: pytest.MonkeyPatch,
+    publish_wake: Callable[[int, str], bool],
 ) -> None:
     """The kill switch is inert, never destructive: no expiry while off."""
     agent_id = _agent(db_conn)
@@ -483,12 +507,15 @@ def test_flush_disabled_keeps_expired_records(
     assert entry is not None
     outbox._abandon(path, entry, "budget", _NOW)
     _patch_limits(monkeypatch, enabled=False)
-    report = outbox.flush(pool, now=_NOW + timedelta(days=31))
+    report = outbox.flush(pool, publish_wake, now=_NOW + timedelta(days=31))
     assert report.expired == 0 and path.exists()
 
 
 def test_flush_retention_boundary_is_inclusive(
-    journal: Path, db_conn: psycopg.Connection, pool: ConnectionPool
+    journal: Path,
+    db_conn: psycopg.Connection,
+    pool: ConnectionPool,
+    publish_wake: Callable[[int, str], bool],
 ) -> None:
     """The window closes exactly at the threshold (>=): one second short the
     records stay, the exact 30 days expire them."""
@@ -500,18 +527,21 @@ def test_flush_retention_boundary_is_inclusive(
         entry = outbox._read(path)
         assert entry is not None
         outbox._abandon(path, entry, "budget", _NOW)
-    report = outbox.flush(pool, now=_NOW + timedelta(days=30) - timedelta(seconds=1))
+    report = outbox.flush(pool, publish_wake, now=_NOW + timedelta(days=30) - timedelta(seconds=1))
     assert report.expired == 0 and first.exists() and second.exists()
-    report = outbox.flush(pool, now=_NOW + timedelta(days=30))
+    report = outbox.flush(pool, publish_wake, now=_NOW + timedelta(days=30))
     assert report.expired == 2 and not first.exists() and not second.exists()
 
 
 def test_flush_abandons_missing_agent(
-    journal: Path, db_conn: psycopg.Connection, pool: ConnectionPool
+    journal: Path,
+    db_conn: psycopg.Connection,
+    pool: ConnectionPool,
+    publish_wake: Callable[[int, str], bool],
 ) -> None:
     path = _record(agent_id=10_000_000, now=_NOW)
     assert path is not None
-    report = outbox.flush(pool, now=_NOW + timedelta(seconds=31))
+    report = outbox.flush(pool, publish_wake, now=_NOW + timedelta(seconds=31))
     assert report.abandoned == 1
     entry = outbox._read(path)
     assert entry is not None and entry.abandon_reason == "agent_missing"
@@ -524,6 +554,7 @@ def test_flush_abandons_caller_protocol_carrying_the_refusal_detail(
     db_conn: psycopg.Connection,
     pool: ConnectionPool,
     monkeypatch: pytest.MonkeyPatch,
+    publish_wake: Callable[[int, str], bool],
 ) -> None:
     """A gate refusal keeps its stable code AND carries the readable refusal
     text (task #4095): the record explains itself without a log dig."""
@@ -532,7 +563,7 @@ def test_flush_abandons_caller_protocol_carrying_the_refusal_detail(
     agent_id = _agent(db_conn)
     path = _record(agent_id=agent_id, source="external_agent:codex:run-42", now=_NOW)
     assert path is not None
-    report = outbox.flush(pool, now=_NOW + timedelta(seconds=31))
+    report = outbox.flush(pool, publish_wake, now=_NOW + timedelta(seconds=31))
     assert report.abandoned == 1
     entry = outbox._read(path)
     assert entry is not None
@@ -547,7 +578,10 @@ def test_flush_abandons_caller_protocol_carrying_the_refusal_detail(
 
 
 def test_flush_abandons_key_conflict_carrying_the_conflict_detail(
-    journal: Path, db_conn: psycopg.Connection, pool: ConnectionPool
+    journal: Path,
+    db_conn: psycopg.Connection,
+    pool: ConnectionPool,
+    publish_wake: Callable[[int, str], bool],
 ) -> None:
     """The conflict message (which field diverged) reaches the record too."""
     agent_id = _agent(db_conn)
@@ -558,10 +592,11 @@ def test_flush_abandons_key_conflict_carrying_the_conflict_detail(
         source="user",
         payload=None,
         client_message_id="key-1",
+        publish_wake=publish_wake,
     )
     path = _record(agent_id=agent_id, key="key-1", now=_NOW)
     assert path is not None
-    report = outbox.flush(pool, now=_NOW + timedelta(seconds=31))
+    report = outbox.flush(pool, publish_wake, now=_NOW + timedelta(seconds=31))
     assert report.abandoned == 1
     entry = outbox._read(path)
     assert entry is not None
@@ -571,14 +606,17 @@ def test_flush_abandons_key_conflict_carrying_the_conflict_detail(
 
 
 def test_flush_delivers_to_terminated_owner(
-    journal: Path, db_conn: psycopg.Connection, pool: ConnectionPool
+    journal: Path,
+    db_conn: psycopg.Connection,
+    pool: ConnectionPool,
+    publish_wake: Callable[[int, str], bool],
 ) -> None:
     """A late chat must land for a terminated owner too — the delivery
     watchdog's resurrect retry is the piece that wakes it, so unlike a closure
     notice this path must not drop the row."""
     agent_id = _agent(db_conn, status="terminated")
     _record(agent_id=agent_id, now=_NOW)
-    assert outbox.flush(pool, now=_NOW + timedelta(seconds=31)).delivered == 1
+    assert outbox.flush(pool, publish_wake, now=_NOW + timedelta(seconds=31)).delivered == 1
     assert len(_inbounds(db_conn, agent_id)) == 1
 
 
@@ -587,21 +625,24 @@ def test_flush_disabled_touches_nothing(
     db_conn: psycopg.Connection,
     pool: ConnectionPool,
     monkeypatch: pytest.MonkeyPatch,
+    publish_wake: Callable[[int, str], bool],
 ) -> None:
     agent_id = _agent(db_conn)
     path = _record(agent_id=agent_id, now=_NOW)
     assert path is not None
     _patch_limits(monkeypatch, enabled=False)
-    report = outbox.flush(pool, now=_NOW + timedelta(seconds=31))
+    report = outbox.flush(pool, publish_wake, now=_NOW + timedelta(seconds=31))
     assert report.deferred == 1
     assert path.exists() and _inbounds(db_conn, agent_id) == []
 
 
-def test_flush_keeps_unreadable_record(journal: Path, pool: ConnectionPool) -> None:
+def test_flush_keeps_unreadable_record(
+    journal: Path, pool: ConnectionPool, publish_wake: Callable[[int, str], bool]
+) -> None:
     outbox.journal_dir().mkdir(parents=True, exist_ok=True)
     bad = outbox.journal_dir() / "7_deadbeefdeadbeef_1.json"
     bad.write_text("{not json", encoding="utf-8")
-    report = outbox.flush(pool)
+    report = outbox.flush(pool, publish_wake)
     assert report.unreadable == 1
     assert bad.exists()
 
@@ -628,7 +669,10 @@ def test_read_treats_corrupt_timestamps_as_unreadable(
 
 
 def test_flush_continues_past_a_corrupt_timestamp_record(
-    journal: Path, db_conn: psycopg.Connection, pool: ConnectionPool
+    journal: Path,
+    db_conn: psycopg.Connection,
+    pool: ConnectionPool,
+    publish_wake: Callable[[int, str], bool],
 ) -> None:
     """One corrupt record must never wedge the pass — the N1 vector was the
     abandoned_at read in the retention predicate: the healthy record still
@@ -643,7 +687,7 @@ def test_flush_continues_past_a_corrupt_timestamp_record(
     raw = json.loads(corrupt.read_text())
     raw["abandoned_at"] = "garbage"
     corrupt.write_text(json.dumps(raw))
-    report = outbox.flush(pool, now=_NOW + timedelta(seconds=31))
+    report = outbox.flush(pool, publish_wake, now=_NOW + timedelta(seconds=31))
     assert report.delivered == 1 and report.unreadable == 1
     assert not good.exists() and corrupt.exists()
 

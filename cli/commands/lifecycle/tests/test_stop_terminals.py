@@ -82,7 +82,7 @@ def written(monkeypatch: pytest.MonkeyPatch) -> list[pty_close_notices.ClosureNo
     notices: list[pty_close_notices.ClosureNotice] = []
 
     def record(
-        batch: Sequence[pty_close_notices.ClosureNotice], *, direct: bool
+        _db: object, _bus: object, batch: Sequence[pty_close_notices.ClosureNotice], *, direct: bool
     ) -> list[tuple[pty_close_notices.ClosureNotice, Exception]]:
         del direct
         notices.extend(batch)
@@ -581,7 +581,7 @@ def test_incomplete_stop_still_records_the_sessions_it_closed(
     assert [notice.name for notice in written] == [closed], "the closed session's notice was lost"
     assert "survivors" not in written[0].as_dict(), "nothing of the closed session survived"
 
-    def still_drained(_timeout: float, **_kw: object) -> None:
+    def still_drained(_db: object, _bus: object, _timeout: float, **_kw: object) -> None:
         """The retry re-enters the held stop; the drain stand-in only opens a fresh hold."""
 
     monkeypatch.setattr(command, "pause_agents", still_drained)
@@ -708,7 +708,7 @@ def test_stop_keeps_hold_when_a_process_outlives_the_kill(
     assert [notice.name for notice in written] == [name]
     assert written[0].survivors == ((jobs[0].pid, jobs[0].name()),)
 
-    def still_drained(_timeout: float, **_kw: object) -> None:
+    def still_drained(_db: object, _bus: object, _timeout: float, **_kw: object) -> None:
         """The retry re-enters the held stop; the drain stand-in only opens a fresh hold."""
 
     monkeypatch.setattr(command, "pause_agents", still_drained)

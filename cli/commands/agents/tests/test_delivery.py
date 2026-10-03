@@ -12,7 +12,8 @@ from base.agents import impersonation as leases
 from base.agents.impersonation import delivery as delivery
 from base.agents.messages.caller_identity import CallerIdentity
 from base.cluster.machine import machine_name
-from base.db import create_agent, insert_inbound_message
+from base.db import Database, create_agent, insert_inbound_message
+from base.events.live.bus import EventBus
 from base.events.live.tests.fakes import recording
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from tests.impersonation_support import attested_caller, recorded_tree
@@ -26,6 +27,8 @@ def active(
     request: pytest.FixtureRequest,
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
+    database: Database,
+    event_bus: EventBus,
 ) -> ActiveSession:
     from base.host.env import runtime_config
 
@@ -45,6 +48,8 @@ def active(
     )
     db_conn.commit()
     lease = leases.request(
+        database,
+        event_bus,
         agent_id,
         caller=CallerIdentity(kind="external_agent", subject="codex", instance="test"),
         ttl_seconds=3600,
@@ -53,18 +58,32 @@ def active(
         process_metadata=recorded_tree(),
     )
     assert (lease["ack_window_seconds"], lease["max_delivery_attempts"]) == (window, attempts)
-    leases.accept(lease["id"], agent_id, owner, "Process and ACK the test message")
-    leases.activate(lease["id"], owner)
+    leases.accept(
+        database, event_bus, lease["id"], agent_id, owner, "Process and ACK the test message"
+    )
+    leases.activate(database, event_bus, lease["id"], owner)
     message_id = insert_inbound_message(
-        db_conn, agent_id, "Unprocessed user input", "user", kind="chat"
+        db_conn,
+        agent_id,
+        "Unprocessed user input",
+        "user",
+        kind="chat",
+        bus=event_bus,
+        database=database,
     )
     db_conn.commit()
-    leases.relay_inbox(lease["id"], lease["relay_token"])
+    leases.relay_inbox(database, lease["id"], lease["relay_token"])
     return lease, owner, message_id
 
 
 def reserve(lease: dict[str, Any], message_id: int) -> frozenset[int]:
-    return delivery.reserve_delivery(lease["id"], lease["relay_token"], [message_id])
+    return delivery.reserve_delivery(
+        Database.from_settings(),
+        EventBus.from_settings(),
+        lease["id"],
+        lease["relay_token"],
+        [message_id],
+    )
 
 
 def elapse(db_conn: psycopg.Connection, lease: dict[str, Any], seconds: int = 181) -> None:
@@ -77,21 +96,27 @@ def elapse(db_conn: psycopg.Connection, lease: dict[str, Any], seconds: int = 18
 
 
 def test_two_attempts_each_get_a_full_window_then_native_observes_expiry(
-    db_conn: psycopg.Connection, active: ActiveSession
+    db_conn: psycopg.Connection, active: ActiveSession, database: Database, event_bus: EventBus
 ) -> None:
     lease, owner, mid = active
     assert (lease["ack_window_seconds"], lease["max_delivery_attempts"]) == (180, 2)
     assert reserve(lease, mid) == {mid}
     assert reserve(lease, mid) == set()  # no early retry
     elapse(db_conn, lease)
-    assert leases.relay_get(lease["id"], lease["relay_token"])["status"] == "active"
+    assert (
+        leases.relay_get(database, event_bus, lease["id"], lease["relay_token"])["status"]
+        == "active"
+    )
     assert reserve(lease, mid) == {mid}
     elapse(db_conn, lease, 179)
-    assert leases.relay_get(lease["id"], lease["relay_token"])["status"] == "active"
+    assert (
+        leases.relay_get(database, event_bus, lease["id"], lease["relay_token"])["status"]
+        == "active"
+    )
     assert reserve(lease, mid) == set()
     elapse(db_conn, lease)
     # The native reconciler also enforces the budget without a live relay.
-    ended = leases.native_status(owner.agent_id, owner)
+    ended = leases.native_status(database, event_bus, owner.agent_id, owner)
     assert ended is not None
     assert ended["status"] == "expired"
     assert f"did not ACK message {mid} after 2 delivery attempts" in ended["rejection_reason"]
@@ -121,7 +146,7 @@ def test_delivery_reservation_that_expires_lease_refreshes_roster(
     timelines: list[int] = []
     rosters: list[int] = []
 
-    def record_wake(agent_id: int, _reason: str) -> None:
+    def record_wake(_db: object, _bus: object, agent_id: int, _reason: str) -> None:
         wakes.append(agent_id)
 
     monkeypatch.setattr(delivery, "publish_inbound_wake", record_wake)
@@ -134,87 +159,101 @@ def test_delivery_reservation_that_expires_lease_refreshes_roster(
 
 
 def test_ack_in_final_window_prevents_expiry(
-    db_conn: psycopg.Connection, active: ActiveSession
+    db_conn: psycopg.Connection, active: ActiveSession, database: Database, event_bus: EventBus
 ) -> None:
     lease, _, mid = active
     reserve(lease, mid)
     elapse(db_conn, lease)
     reserve(lease, mid)
-    leases.ack(lease["id"], attested_caller(lease), [mid])
+    leases.ack(database, event_bus, lease["id"], attested_caller(lease), [mid])
     elapse(db_conn, lease)
-    assert leases.relay_get(lease["id"], lease["relay_token"])["status"] == "active"
+    assert (
+        leases.relay_get(database, event_bus, lease["id"], lease["relay_token"])["status"]
+        == "active"
+    )
     assert reserve(lease, mid) == set()
 
 
 def test_rotating_relay_does_not_reset_budget(
-    db_conn: psycopg.Connection, active: ActiveSession
+    db_conn: psycopg.Connection, active: ActiveSession, database: Database, event_bus: EventBus
 ) -> None:
     lease, owner, mid = active
     reserve(lease, mid)
     elapse(db_conn, lease)
     reserve(lease, mid)
-    leases.provision_relay(lease["id"], owner, "replacement")
+    leases.provision_relay(database, lease["id"], owner, "replacement")
     with pytest.raises(leases.ImpersonationError, match="Invalid relay token"):
         reserve(lease, mid)
     lease["relay_token"] = "replacement"  # noqa: S105 — test-only scoped credential
-    rows = leases.relay_inbox(lease["id"], "replacement")
+    rows = leases.relay_inbox(database, lease["id"], "replacement")
     assert rows[0]["delivery_attempts"] == 2
     assert rows[0]["delivery_due"] is False
     elapse(db_conn, lease)
     assert reserve(lease, mid) == set()
-    assert leases.relay_get(lease["id"], "replacement")["status"] == "expired"
+    assert leases.relay_get(database, event_bus, lease["id"], "replacement")["status"] == "expired"
 
 
 def test_concurrent_relays_only_reserve_once(
-    db_conn: psycopg.Connection, active: ActiveSession
+    db_conn: psycopg.Connection, active: ActiveSession, database: Database
 ) -> None:
     lease, _, mid = active
     with ThreadPoolExecutor(2) as pool:
         futures = [pool.submit(reserve, lease, mid) for _ in range(2)]
     assert sorted(len(f.result()) for f in futures) == [0, 1]
-    assert leases.relay_inbox(lease["id"], lease["relay_token"])[0]["delivery_attempts"] == 1
+    assert (
+        leases.relay_inbox(database, lease["id"], lease["relay_token"])[0]["delivery_attempts"] == 1
+    )
 
 
 def test_ack_after_read_before_reservation_cannot_be_pushed(
-    db_conn: psycopg.Connection, active: ActiveSession
+    db_conn: psycopg.Connection, active: ActiveSession, database: Database, event_bus: EventBus
 ) -> None:
     lease, _, mid = active
-    leases.ack(lease["id"], attested_caller(lease), [mid])
+    leases.ack(database, event_bus, lease["id"], attested_caller(lease), [mid])
     assert reserve(lease, mid) == set()
 
 
 def test_release_wins_timeout_race_without_being_overwritten(
-    db_conn: psycopg.Connection, active: ActiveSession
+    db_conn: psycopg.Connection, active: ActiveSession, database: Database, event_bus: EventBus
 ) -> None:
     lease, _, mid = active
     reserve(lease, mid)
     elapse(db_conn, lease)
     reserve(lease, mid)
-    leases.release(lease["id"], attested_caller(lease), "Returning control")
+    leases.release(database, event_bus, lease["id"], attested_caller(lease), "Returning control")
     elapse(db_conn, lease)
     assert reserve(lease, mid) == set()
-    assert leases.relay_get(lease["id"], lease["relay_token"])["status"] == "released"
+    assert (
+        leases.relay_get(database, event_bus, lease["id"], lease["relay_token"])["status"]
+        == "released"
+    )
 
 
 def test_exhausted_message_outside_page_still_ends_lease(
-    db_conn: psycopg.Connection, active: ActiveSession
+    db_conn: psycopg.Connection, active: ActiveSession, database: Database, event_bus: EventBus
 ) -> None:
     lease, _, first = active
     other = insert_inbound_message(
-        db_conn, lease["agent_id"], "Second message", "user", kind="chat"
+        db_conn,
+        lease["agent_id"],
+        "Second message",
+        "user",
+        kind="chat",
+        bus=event_bus,
+        database=database,
     )
     db_conn.commit()
-    leases.relay_inbox(lease["id"], lease["relay_token"])
+    leases.relay_inbox(database, lease["id"], lease["relay_token"])
     reserve(lease, other)
     elapse(db_conn, lease)
     reserve(lease, other)
-    rows = leases.relay_inbox(lease["id"], lease["relay_token"], limit=1)
+    rows = leases.relay_inbox(database, lease["id"], lease["relay_token"], limit=1)
     assert [row["id"] for row in rows] == [first]
     # Fresh input and ACK of another message cannot forgive the exhausted one.
     reserve(lease, first)
-    leases.ack(lease["id"], attested_caller(lease), [first])
+    leases.ack(database, event_bus, lease["id"], attested_caller(lease), [first])
     elapse(db_conn, lease)
-    ended = leases.relay_get(lease["id"], lease["relay_token"])
+    ended = leases.relay_get(database, event_bus, lease["id"], lease["relay_token"])
     assert ended["status"] == "expired"
     assert f"message {other}" in ended["rejection_reason"]
 
@@ -227,6 +266,8 @@ async def test_real_relay_uses_snapshotted_config_across_restart(
     monkeypatch: pytest.MonkeyPatch,
     crash_after_first_submission: bool,
     tmp_path: Path,
+    database: Database,
+    event_bus: EventBus,
 ) -> None:
     from uuid import UUID
 
@@ -242,7 +283,9 @@ async def test_real_relay_uses_snapshotted_config_across_restart(
     monkeypatch.setattr(relay, "_MIN_EMIT_INTERVAL_SECONDS", 0)
 
     async def read() -> relay.InboxSnapshot:
-        return relay._read_inbox(owner.agent_id, UUID(lease["id"]), lease["relay_token"])
+        return relay._read_inbox(
+            database, event_bus, owner.agent_id, UUID(lease["id"]), lease["relay_token"]
+        )
 
     claims = 0
 
@@ -250,7 +293,9 @@ async def test_real_relay_uses_snapshotted_config_across_restart(
         nonlocal claims
         claims += 1
         assert claims <= attempts + 2  # bound regressions that repeatedly refuse a due attempt
-        return delivery.reserve_delivery(lease["id"], lease["relay_token"], ids)
+        return delivery.reserve_delivery(
+            database, event_bus, lease["id"], lease["relay_token"], ids
+        )
 
     class ClockListener:
         closed = False
@@ -263,8 +308,13 @@ async def test_real_relay_uses_snapshotted_config_across_restart(
             self.waits += 1
             assert self.waits <= attempts  # ignore-config regressions must fail, not hang
             elapse(db_conn, lease, window - 1)
-            assert not leases.relay_inbox(lease["id"], lease["relay_token"])[0]["delivery_due"]
-            assert leases.relay_get(lease["id"], lease["relay_token"])["status"] == "active"
+            assert not leases.relay_inbox(database, lease["id"], lease["relay_token"])[0][
+                "delivery_due"
+            ]
+            assert (
+                leases.relay_get(database, event_bus, lease["id"], lease["relay_token"])["status"]
+                == "active"
+            )
             elapse(db_conn, lease, window + 1)
 
         async def close(self) -> None:
@@ -289,7 +339,10 @@ async def test_real_relay_uses_snapshotted_config_across_restart(
                 debounce=0,
             )
         assert first_listener.closed
-        assert leases.relay_inbox(lease["id"], lease["relay_token"])[0]["delivery_attempts"] == 1
+        assert (
+            leases.relay_inbox(database, lease["id"], lease["relay_token"])[0]["delivery_attempts"]
+            == 1
+        )
 
     listener = ClockListener()
     await relay.relay_inbox(

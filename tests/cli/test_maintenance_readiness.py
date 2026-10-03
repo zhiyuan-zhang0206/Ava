@@ -5,6 +5,7 @@ from fastapi.testclient import TestClient
 
 import cli.commands._probe as _probe_commands
 import cli.commands.lifecycle.start as _start_commands
+from base.db import Database
 from base.deploy.lifecycle import start_serving
 from base.deploy.maintenance import admission
 from base.deploy.state import host_deploy_state
@@ -22,6 +23,7 @@ pytestmark = pytest.mark.real_service_readiness_gate
 @pytest.mark.usefixtures("held")
 def test_start_measures_real_health_then_resumes_without_early_business_admission(
     monkeypatch: pytest.MonkeyPatch,
+    database: Database,
 ) -> None:
 
     _roster(monkeypatch, (("gateway", None),))
@@ -47,5 +49,5 @@ def test_start_measures_real_health_then_resumes_without_early_business_admissio
     assert measurements and set(measurements) == {200}
     assert start_serving.is_serving()
     assert not admission.held()
-    posture = host_deploy_state.read()
+    posture = host_deploy_state.read(database)
     assert posture is not None and posture.posture == "idle"

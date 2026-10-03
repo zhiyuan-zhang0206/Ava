@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+from collections.abc import Callable
 
 import psycopg
 import pytest
@@ -12,7 +13,8 @@ from starlette.requests import Request
 from base.agents.messages.chat_delivery import insert_chat_inbound_once
 from base.agents.messages.inbound_provenance import InboundProvenance, source_assertion_match
 from base.config import settings
-from base.db import create_agent, insert_inbound_message
+from base.db import Database, create_agent, insert_inbound_message
+from base.events.live.bus import EventBus
 from gateway.agents.inbound_provenance import request_inbound_provenance
 from gateway.app import app
 
@@ -147,6 +149,7 @@ def test_assertion_match_three_state_is_persisted_without_rejection(
     source: str,
     verified_by: str,
     expected: bool | None,
+    publish_wake: Callable[[int, str], bool],
 ) -> None:
     agent_id = _seed_live_agent(db_conn)
     content = f"message from {source} via {verified_by}"
@@ -162,6 +165,7 @@ def test_assertion_match_three_state_is_persisted_without_rejection(
             source_verified_by=verified_by,
             source_transport="http",
         ),
+        publish_wake=publish_wake,
     )
 
     assert receipt.inserted is True
@@ -176,6 +180,7 @@ def test_assertion_match_three_state_is_persisted_without_rejection(
 
 def test_provenance_change_does_not_reject_an_idempotent_retry(
     db_conn: psycopg.Connection,
+    publish_wake: Callable[[int, str], bool],
 ) -> None:
     agent_id = _seed_live_agent(db_conn)
     first = insert_chat_inbound_once(
@@ -189,6 +194,7 @@ def test_provenance_change_does_not_reject_an_idempotent_retry(
             source_verified_by="agent_token:7",
             source_transport="http",
         ),
+        publish_wake=publish_wake,
     )
     retried = insert_chat_inbound_once(
         db_conn,
@@ -201,6 +207,7 @@ def test_provenance_change_does_not_reject_an_idempotent_retry(
             source_verified_by="agent_token:8",
             source_transport="ops",
         ),
+        publish_wake=publish_wake,
     )
 
     assert retried.inbound_id == first.inbound_id
@@ -215,9 +222,13 @@ def test_provenance_change_does_not_reject_an_idempotent_retry(
 
 def test_legacy_shared_writer_leaves_provenance_columns_null(
     db_conn: psycopg.Connection,
+    database: Database,
+    event_bus: EventBus,
 ) -> None:
     agent_id = _seed_live_agent(db_conn)
 
-    insert_inbound_message(db_conn, agent_id, "legacy inbound", source="user")
+    insert_inbound_message(
+        db_conn, agent_id, "legacy inbound", source="user", bus=event_bus, database=database
+    )
 
     assert _stored_provenance(db_conn, agent_id)[1:] == (None, None, None, None)

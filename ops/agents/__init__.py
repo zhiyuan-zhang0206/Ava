@@ -19,8 +19,8 @@ admission binds the next turn to the host owner and a new generation.
 
 from __future__ import annotations
 
-import base.db
 from base.agents import AgentNotFound, AgentStatus
+from base.db import Database
 from ops.agents.spawn import (
     _SPAWNER_AGENT_RE as _SPAWNER_AGENT_RE,
 )
@@ -38,13 +38,13 @@ from ops.agents.wake import (
 )
 
 
-def get_agent_status(agent_id: int) -> AgentStatus:
+def get_agent_status(db: Database, agent_id: int) -> AgentStatus:
     """Look up the agent's current status.
 
     Raises:
         AgentNotFound: agent_id does not exist in agents_meta.
     """
-    with base.db.connect() as conn, conn.cursor() as cur:
+    with db.connect() as conn, conn.cursor() as cur:
         cur.execute("SELECT status FROM agents_meta WHERE id = %s", (agent_id,))
         row = cur.fetchone()
     if row is None:
@@ -52,14 +52,14 @@ def get_agent_status(agent_id: int) -> AgentStatus:
     return AgentStatus(row[0])
 
 
-def get_agent_machine(agent_id: int) -> str:
+def get_agent_machine(db: Database, agent_id: int) -> str:
     """Look up the agent's home machine (`agents_meta.machine`) — the host its
     process must run on (the boot placement gate rejects any other host).
 
     Raises:
         AgentNotFound: agent_id does not exist in agents_meta.
     """
-    with base.db.connect() as conn, conn.cursor() as cur:
+    with db.connect() as conn, conn.cursor() as cur:
         cur.execute("SELECT machine FROM agents_meta WHERE id = %s", (agent_id,))
         row = cur.fetchone()
     if row is None:

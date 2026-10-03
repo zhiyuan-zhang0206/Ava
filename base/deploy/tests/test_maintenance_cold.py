@@ -8,20 +8,25 @@ import psycopg
 import pytest
 
 from base.cluster.machine import machine_name
-from base.db import insert_inbound_message
+from base.db import Database, insert_inbound_message
 from base.deploy.maintenance import cohort, pause_owner
+from base.events.live.bus import EventBus
 from tests.agent.test_maintenance import WHEN, _agent
 from tests.agent.test_maintenance import isolate as isolate
 
 
 @pytest.mark.parametrize("observed", [False, True])
 def test_cold_hosted_restart_tails_and_claimed_chat_are_preserved(
-    db_conn: psycopg.Connection[Any], observed: bool
+    db_conn: psycopg.Connection[Any], observed: bool, database: Database, event_bus: EventBus
 ) -> None:
     agent = _agent(db_conn)
     owner, generation = uuid4(), uuid4()
-    chat = insert_inbound_message(db_conn, agent, "unfinished action", "user")
-    restart = insert_inbound_message(db_conn, agent, "", "system:update", kind="restart")
+    chat = insert_inbound_message(
+        db_conn, agent, "unfinished action", "user", bus=event_bus, database=database
+    )
+    restart = insert_inbound_message(
+        db_conn, agent, "", "system:update", kind="restart", bus=event_bus, database=database
+    )
     db_conn.execute("UPDATE inbound_messages SET status='claimed' WHERE id=%s", (chat,))
     db_conn.execute(
         "UPDATE inbound_messages SET status=%s,applied_at=clock_timestamp(),observed_at=%s,"
@@ -45,7 +50,11 @@ def test_cold_hosted_restart_tails_and_claimed_chat_are_preserved(
     pause_owner.begin_maintenance("cold", WHEN)
     with pytest.raises(RuntimeError):
         cohort.prepare(
-            db_conn, machine=machine_name(), host_owner=None, holder="cold", acquired_at=WHEN
+            db_conn,
+            machine=machine_name(),
+            host_owner=None,
+            holder="cold",
+            acquired_at=WHEN,
         )
     db_conn.rollback()
     held = cohort.prepare(

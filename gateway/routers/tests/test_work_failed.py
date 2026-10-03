@@ -227,6 +227,7 @@ def test_terminated_author_successfully_resurrected_is_final_target(
 
     async def _resurrect(
         _db: object,
+        _bus: object,
         agent_id: int,
         **kwargs: object,
     ) -> AgentStatus:

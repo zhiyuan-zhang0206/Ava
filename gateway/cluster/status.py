@@ -34,6 +34,7 @@ from base.cluster.machine import (
     machine_name,
 )
 from base.daemon.endpoints import ServiceEndpoints
+from base.db import Database
 from base.deploy.git.cluster_drift import prod_source_head_sha
 from base.host.resource_sample import ResourceSample
 from base.packages.plugins import stats
@@ -424,6 +425,7 @@ def _local_resource_sample() -> ResourceSample | None:
 
 
 def _local_machine_status_blocking(
+    db: Database,
     name: str,
     url: str | None,
     role: list[str],
@@ -439,7 +441,7 @@ def _local_machine_status_blocking(
     the psutil resource snapshot must not run on the event loop."""
     from base.native_process import loaded_commit as _process_sha
 
-    paused = cluster_is_paused()
+    paused = cluster_is_paused(db)
     return MachineStatus(
         name=name,
         serve_gateway="gateway" in role,
@@ -457,12 +459,13 @@ def _local_machine_status_blocking(
         is_staging=is_staging,
         head_sha=prod_source_head_sha(),
         running_sha=_process_sha.get(),
-        schema_mismatch=schema_mismatch_status(),
+        schema_mismatch=schema_mismatch_status(db),
         resource=_local_resource_sample(),
     )
 
 
 async def gather_cluster_status(
+    db: Database,
     rows: list[tuple[str, str | None, list[str], datetime, str | None, datetime | None, bool]],
     local_name: str,
     *,
@@ -501,6 +504,7 @@ async def gather_cluster_status(
             machines.append(
                 await asyncio.to_thread(
                     _local_machine_status_blocking,
+                    db,
                     name,
                     url,
                     role,
@@ -544,7 +548,7 @@ async def gather_cluster_status(
     return sorted(machines, key=lambda m: m.name)
 
 
-def _get_cluster_status(cur: Cursor) -> ClusterPanel:
+def _get_cluster_status(db: Database, cur: Cursor) -> ClusterPanel:
     """Assemble the cluster sub-section: SELECT the machines table (paused rows
     excluded — the cluster panel shows only active members; `ava cluster resume`
     brings a row back) and render each machine from the heartbeat liveness
@@ -570,7 +574,9 @@ def _get_cluster_status(cur: Cursor) -> ClusterPanel:
     local_name = machine_name()
     snapshots = read_all(cur)
     machines = (
-        asyncio.run(gather_cluster_status(rows, local_name, snapshots=snapshots)) if rows else []
+        asyncio.run(gather_cluster_status(db, rows, local_name, snapshots=snapshots))
+        if rows
+        else []
     )
 
     return ClusterPanel(
@@ -578,7 +584,7 @@ def _get_cluster_status(cur: Cursor) -> ClusterPanel:
         current_serve_gateway=is_gateway(),
         current_serve_agent_runner=is_agent_runner(),
         current_serve_observability_station=is_observability_station(),
-        current_paused=cluster_is_paused(),
+        current_paused=cluster_is_paused(db),
         machines=machines,
     )
 
@@ -610,7 +616,7 @@ def _compute_system_status(request: Request) -> SystemStatus:
     # Cluster
     try:
         with request.app.state.db_pool.connection() as conn, conn.cursor() as cur:
-            cluster = _get_cluster_status(cur)
+            cluster = _get_cluster_status(request.app.state.db, cur)
     except Exception:
         _log.exception("GET /api/status: cluster query failed")
         # Fallback: at least surface this host's name/role so the frontend
@@ -621,7 +627,7 @@ def _compute_system_status(request: Request) -> SystemStatus:
                 current_serve_gateway=is_gateway(),
                 current_serve_agent_runner=is_agent_runner(),
                 current_serve_observability_station=is_observability_station(),
-                current_paused=cluster_is_paused(),
+                current_paused=cluster_is_paused(request.app.state.db),
                 machines=[],
             )
         except Exception:

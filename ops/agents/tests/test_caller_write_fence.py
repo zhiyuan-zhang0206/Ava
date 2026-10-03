@@ -33,22 +33,26 @@ def test_manual_new_source_rejected_before_dispatch(
         schema.model_validate(other | {field: source})
 
 
-def test_direct_resurrection_rejects_before_transaction(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_direct_resurrection_rejects_before_transaction() -> None:
     from unittest.mock import Mock
 
+    from base.db import Database
+    from base.events.live.bus import EventBus
     from ops.agents.wake import _prepare_resurrect_attempt
 
-    transaction = Mock(side_effect=AssertionError("must not reach database"))
-    monkeypatch.setattr("ops.agents.wake.write_transaction", transaction)
+    db = Mock(spec=Database)
+    db.write_transaction.side_effect = AssertionError("must not reach database")
     with pytest.raises(ValueError, match="target runtime protocol"):
         _prepare_resurrect_attempt(
+            db,
+            Mock(spec=EventBus),
             42,
             resurrected_by="external_agent:codex",
             prompt="hello",
             trigger_inbound_id=None,
             trigger_inbound_kind=None,
         )
-    transaction.assert_not_called()
+    db.write_transaction.assert_not_called()
 
 
 @pytest.mark.parametrize("schema", [TerminateAgentRequest, RestartAgentRequest])

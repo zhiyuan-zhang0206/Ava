@@ -22,7 +22,8 @@ import pytest
 from psycopg_pool import AsyncConnectionPool
 
 from agent import db as agent_db
-from base.db import agent_exists, create_agent, list_agents
+from base.db import Database, agent_exists, create_agent, list_agents
+from base.events.live.bus import EventBus
 from tests.fixtures.units import spawn_agent
 
 # Redis pub/sub wake-latency discrimination, used by the tests that prove a wake
@@ -91,6 +92,8 @@ class TestFatalProviderReport:
         db_conn: psycopg.Connection,
         aops_pool: AsyncConnectionPool,
         monkeypatch: pytest.MonkeyPatch,
+        database: Database,
+        event_bus: EventBus,
     ) -> None:
         root = create_agent(db_conn)
         folded_parent = create_agent(db_conn)
@@ -115,7 +118,7 @@ class TestFatalProviderReport:
             )
         db_conn.commit()
 
-        def _no_wake(*_args: object) -> None:
+        def _no_wake(_db: object, _bus: object, *_args: object) -> None:
             return None
 
         monkeypatch.setattr(agent_db, "publish_inbound_wake", _no_wake)
@@ -129,6 +132,8 @@ class TestFatalProviderReport:
             status=400,
             reason="test-reason",
             occurred_at=datetime.now(UTC),
+            bus=event_bus,
+            db=database,
         )
 
         assert recipient == root

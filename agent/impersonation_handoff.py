@@ -9,8 +9,8 @@ from langchain_core.messages import HumanMessage
 from agent.messages import system_note_message
 from base.agents.impersonation.history import export_handoff, metadata
 from base.agents.messages.kwargs import NoteTag
-from base.db import publish_inbound_wake
-from base.db.transaction import write_transaction
+from base.db import Database, publish_inbound_wake
+from base.events.live.bus import EventBus
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 
 
@@ -57,12 +57,14 @@ def resume_note_pending(state: Any) -> bool:
     return getattr(messages[-1], "id", None) == f"impersonation-handoff:{receipt}"
 
 
-def _save_document(session: dict[str, Any], incarnation: RuntimeIncarnation) -> tuple[str, str]:
+def _save_document(
+    db: Database, session: dict[str, Any], incarnation: RuntimeIncarnation
+) -> tuple[str, str]:
     from psycopg.types.json import Jsonb
 
     from base.agents.impersonation import OPEN, lock_lease, require_native
 
-    with write_transaction() as conn:
+    with db.write_transaction() as conn:
         require_native(conn, incarnation)
         lease = lock_lease(conn, session["id"])
         if lease["status"] in OPEN:
@@ -81,10 +83,10 @@ def _save_document(session: dict[str, Any], incarnation: RuntimeIncarnation) -> 
     return summary, path
 
 
-def _receipt(session: dict[str, Any], incarnation: RuntimeIncarnation) -> None:
+def _receipt(db: Database, session: dict[str, Any], incarnation: RuntimeIncarnation) -> None:
     from base.agents.impersonation import lock_lease, require_native
 
-    with write_transaction() as conn:
+    with db.write_transaction() as conn:
         require_native(conn, incarnation)
         lease = lock_lease(conn, session["id"])
         # These messages have now been delivered in the durable end-of-session note
@@ -105,6 +107,8 @@ def _receipt(session: dict[str, Any], incarnation: RuntimeIncarnation) -> None:
 
 async def deliver_handoff(
     graph: Any,
+    db: Database,
+    bus: EventBus,
     session: dict[str, Any],
     incarnation: RuntimeIncarnation,
     *,
@@ -129,7 +133,7 @@ async def deliver_handoff(
     from agent.impersonation import flush_checkpoint
 
     # Keep the truthful pending record while the durable native handoff proceeds.
-    summary, path = await asyncio.to_thread(_save_document, session, incarnation)
+    summary, path = await asyncio.to_thread(_save_document, db, session, incarnation)
     config = {"configurable": {"thread_id": str(incarnation.agent_id)}}
     snapshot = await graph.aget_state(config)
     receipt = f"{session['agent_id']}:{session['session_id']}"
@@ -163,8 +167,8 @@ async def deliver_handoff(
             },
         )
     await flush_checkpoint(graph.checkpointer, incarnation.agent_id)
-    await asyncio.to_thread(_receipt, session, incarnation)
+    await asyncio.to_thread(_receipt, db, session, incarnation)
     # The receipt opens the claim gate; this wake drives the note's first turn when
     # nothing else is queued (and re-drives it if this turn ends before that
     # invocation). Best-effort: the host latches wakes per agent.
-    publish_inbound_wake(session["agent_id"], "impersonation")
+    publish_inbound_wake(db, bus, session["agent_id"], "impersonation")

@@ -8,6 +8,8 @@ import psycopg
 import pytest
 from fastapi.testclient import TestClient
 
+from base.db import Database
+from base.events.live.bus import EventBus
 from gateway.app import app
 from gateway.tests.test_agents_endpoints import _inbound_rows
 
@@ -205,7 +207,10 @@ def test_admission_winning_dispatch_failure_returns_accepted_receipt(
 
 
 def test_first_prompt_insert_failure_rolls_back_agent_row(
-    monkeypatch: pytest.MonkeyPatch, db_conn: psycopg.Connection
+    monkeypatch: pytest.MonkeyPatch,
+    db_conn: psycopg.Connection,
+    database: Database,
+    event_bus: EventBus,
 ) -> None:
     from base.cluster.machine import machine_name
     from ops.agents import spawn
@@ -219,7 +224,9 @@ def test_first_prompt_insert_failure_rolls_back_agent_row(
 
     monkeypatch.setattr(spawn, "insert_spawn_prompt_in_transaction", _fail_insert)
     with pytest.raises(RuntimeError, match="prompt insert refused"):
-        spawn.create_agent_row(machine=machine_name(), prompt="Work", prompt_source="user")
+        spawn.create_agent_row(
+            database, event_bus, machine=machine_name(), prompt="Work", prompt_source="user"
+        )
     with db_conn.cursor() as cur:
         cur.execute("SELECT count(*) FROM agents_meta")
         assert cur.fetchone() == before

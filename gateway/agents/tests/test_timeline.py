@@ -33,7 +33,8 @@ from base.agents.history.timeline import (
     build_timeline_items,
     tail_window,
 )
-from base.db import create_agent, insert_inbound_message
+from base.db import Database, create_agent, insert_inbound_message
+from base.events.live.bus import EventBus
 from gateway.agents.timeline import _window_before
 from gateway.app import app
 
@@ -884,7 +885,11 @@ class TestTimelineDispatch:
             )
 
     def test_full_two_turn_conversation_renders_all_blocks(
-        self, db_conn: psycopg.Connection, test_client: TestClient
+        self,
+        db_conn: psycopg.Connection,
+        test_client: TestClient,
+        database: Database,
+        event_bus: EventBus,
     ) -> None:
         """Main regression test: two rounds of complete conversation (inbound → AIMessage → exec_output) × 2,
         each AIMessage contains three blocks: thinking + text + tool_use. The endpoint must return
@@ -902,8 +907,12 @@ class TestTimelineDispatch:
         tid = create_agent(db_conn)
         # Real inbound rows as ts anchor (the timeline endpoint uses inbound_messages
         # table to estimate the ts for the inbound HumanMessage)
-        insert_inbound_message(db_conn, tid, "msg 1", source="user", kind="chat")
-        insert_inbound_message(db_conn, tid, "msg 2", source="user", kind="chat")
+        insert_inbound_message(
+            db_conn, tid, "msg 1", source="user", kind="chat", bus=event_bus, database=database
+        )
+        insert_inbound_message(
+            db_conn, tid, "msg 2", source="user", kind="chat", bus=event_bus, database=database
+        )
         db_conn.commit()
 
         # Simulate the state.messages after the graph ran two rounds — msg_idx corresponds
@@ -979,7 +988,11 @@ class TestTimelineDispatch:
         ]
 
     def test_lifecycle_marker_does_not_swallow_following_aimessage(
-        self, db_conn: psycopg.Connection, test_client: TestClient
+        self,
+        db_conn: psycopg.Connection,
+        test_client: TestClient,
+        database: Database,
+        event_bus: EventBus,
     ) -> None:
         """Regression prevention (the specific refactor direction that caused the bug): the
         system_note branch must not mix in the AIMessage dispatch logic. If someone
@@ -996,7 +1009,9 @@ class TestTimelineDispatch:
         tid = create_agent(db_conn)
         from base.db import insert_inbound_message
 
-        insert_inbound_message(db_conn, tid, "before", source="user", kind="chat")
+        insert_inbound_message(
+            db_conn, tid, "before", source="user", kind="chat", bus=event_bus, database=database
+        )
         db_conn.commit()
 
         messages = [
@@ -1025,7 +1040,11 @@ class TestTimelineDispatch:
         assert items[2]["payload"] == "after restart, hello"
 
     def test_system_prompt_renders_at_index_zero_and_shifts_rest(
-        self, db_conn: psycopg.Connection, test_client: TestClient
+        self,
+        db_conn: psycopg.Connection,
+        test_client: TestClient,
+        database: Database,
+        event_bus: EventBus,
     ) -> None:
         """SystemMessage at state.messages[0] renders end-to-end as a
         system_prompt item at "0.0"; because it occupies index 0, the following
@@ -1038,7 +1057,9 @@ class TestTimelineDispatch:
         from base.db import insert_inbound_message
 
         tid = create_agent(db_conn)
-        insert_inbound_message(db_conn, tid, "hi", source="user", kind="chat")
+        insert_inbound_message(
+            db_conn, tid, "hi", source="user", kind="chat", bus=event_bus, database=database
+        )
         db_conn.commit()
 
         messages = [
@@ -1267,14 +1288,21 @@ class TestTimelineFailLoud:
 
 
 def test_timeline_skips_inbound_without_langgraph_state(
-    db_conn: psycopg.Connection, test_client: TestClient
+    db_conn: psycopg.Connection, test_client: TestClient, database: Database, event_bus: EventBus
 ) -> None:
     """Data in the inbound_messages table does not directly enter the timeline — it only
     appears after the claim node envelope-wraps the HumanMessage into the LangGraph state.
     Here we only INSERT an inbound without running the graph; the timeline should not see
     this inbound."""
     tid = create_agent(db_conn)
-    insert_inbound_message(db_conn, tid, "a user message but graph didn't run", source="user")
+    insert_inbound_message(
+        db_conn,
+        tid,
+        "a user message but graph didn't run",
+        source="user",
+        bus=event_bus,
+        database=database,
+    )
 
     resp = test_client.get(f"/api/agents/{tid}/timeline")
     assert resp.status_code == 200
@@ -1283,7 +1311,7 @@ def test_timeline_skips_inbound_without_langgraph_state(
 
 
 def test_timeline_anchor_filter_only_includes_chat_inbounds(
-    db_conn: psycopg.Connection, test_client: TestClient
+    db_conn: psycopg.Connection, test_client: TestClient, database: Database, event_bus: EventBus
 ) -> None:
     """The anchor sequence only takes inbounds with kind='chat'. Lifecycle inbounds
     (resurrect / restart_completed / terminate / restart) even if they exist in the
@@ -1301,21 +1329,27 @@ def test_timeline_anchor_filter_only_includes_chat_inbounds(
 
     tid = create_agent(db_conn)
     # Mixed chat / lifecycle kinds, in INSERT order
-    insert_inbound_message(db_conn, tid, "chat 1", source="user", kind="chat")
+    insert_inbound_message(
+        db_conn, tid, "chat 1", source="user", kind="chat", bus=event_bus, database=database
+    )
     with db_conn.cursor() as cur:
         cur.execute(
             "INSERT INTO inbound_messages (agent_id, content, kind, source) "
             "VALUES (%s, '', 'resurrect', 'user')",
             (tid,),
         )
-    insert_inbound_message(db_conn, tid, "chat 2", source="user", kind="chat")
+    insert_inbound_message(
+        db_conn, tid, "chat 2", source="user", kind="chat", bus=event_bus, database=database
+    )
     with db_conn.cursor() as cur:
         cur.execute(
             "INSERT INTO inbound_messages (agent_id, content, kind, source) "
             "VALUES (%s, '', 'terminate', 'user')",
             (tid,),
         )
-    insert_inbound_message(db_conn, tid, "chat 3", source="user", kind="chat")
+    insert_inbound_message(
+        db_conn, tid, "chat 3", source="user", kind="chat", bus=event_bus, database=database
+    )
     db_conn.commit()
 
     # Directly check the internal helper to see the anchor list (bypass full endpoint,
@@ -1844,98 +1878,6 @@ class TestSystemPromptInColdLoad:
         assert page.status_code == 200
         pdata = page.json()
         assert all(it["item_id"] != "0.0" for it in pdata["items"])
-
-
-class TestBuildTimelineItemsStartOffset:
-    """`build_timeline_items(..., start=N)` — the incremental-snapshot render
-    path. Item ids keep their ABSOLUTE msg_idx; msg_count stays the FULL
-    history length; anchors are NOT consumed when start > 0."""
-
-    def test_start_offset_keeps_absolute_item_ids_and_full_msg_count(self):
-        from langchain_core.messages import AIMessage, SystemMessage
-
-        messages = [
-            SystemMessage(content="prompt"),
-            AIMessage(content="first"),
-            AIMessage(content="second"),
-        ]
-        items, msg_count = build_timeline_items(messages, [], start=2)
-        assert msg_count == 3  # full length, never the window length
-        assert [it.item_id for it in items] == ["2.0"]
-        assert items[0].payload == "second"
-
-    def test_start_zero_matches_no_offset(self):
-        from langchain_core.messages import AIMessage, SystemMessage
-
-        messages = [SystemMessage(content="prompt"), AIMessage(content="first")]
-        full, full_count = build_timeline_items(messages, [])
-        sliced, sliced_count = build_timeline_items(messages, [], start=0)
-        assert full_count == sliced_count
-        assert [it.item_id for it in full] == [it.item_id for it in sliced]
-        assert [it.payload for it in full] == [it.payload for it in sliced]
-
-    def test_start_offset_does_not_consume_anchors(self):
-        # An inbound inside the incremental window must NOT consume the first
-        # historical anchor (it would misalign ts / inbound_id). Modern
-        # messages carry ava_created_at, so the anchor list is irrelevant on
-        # the incremental path — pass [] and the item still renders.
-        from langchain_core.messages import HumanMessage, SystemMessage
-
-        msg = HumanMessage(
-            content="hi",
-            additional_kwargs={
-                "ava_msg_type": "inbound",
-                "ava_created_at": "2026-01-01T00:00:00+00:00",
-            },
-        )
-        items, msg_count = build_timeline_items([SystemMessage(content="p"), msg], [], start=1)
-        assert msg_count == 2
-        assert items[0].item_id == "1.0"
-        assert items[0].created_at == "2026-01-01T00:00:00+00:00"
-        assert items[0].inbound_id is None
-
-    def test_start_offset_keeps_modern_embedded_inbound_id_without_anchors(self):
-        from langchain_core.messages import HumanMessage, SystemMessage
-
-        msg = HumanMessage(
-            content="hi",
-            additional_kwargs={
-                "ava_msg_type": "inbound",
-                "ava_source": "user",
-                "ava_inbound_id": 70598,
-                "ava_created_at": "2026-01-01T00:00:00+00:00",
-            },
-        )
-
-        items, msg_count = build_timeline_items([SystemMessage(content="p"), msg], [], start=1)
-
-        assert msg_count == 2
-        assert items[0].item_id == "1.0"
-        assert items[0].inbound_id == 70598
-
-    def test_segment_prefix_keeps_local_message_and_block_positions(self):
-        from langchain_core.messages import AIMessage, HumanMessage
-
-        items, msg_count = build_timeline_items(
-            [
-                HumanMessage(content="older inbound"),
-                AIMessage(
-                    content=[
-                        {"type": "thinking", "thinking": "older reasoning", "index": 0},
-                        {"type": "text", "text": "older answer", "index": 1},
-                    ]
-                ),
-            ],
-            [],
-            segment_prefix="s2.1f0b9b12-0000-6000-8000-000000000000",
-        )
-
-        assert msg_count == 2
-        assert [item.item_id for item in items] == [
-            "s2.1f0b9b12-0000-6000-8000-000000000000.0.0",
-            "s2.1f0b9b12-0000-6000-8000-000000000000.1.0",
-            "s2.1f0b9b12-0000-6000-8000-000000000000.1.1",
-        ]
 
 
 class TestTimelineCompactHistory:

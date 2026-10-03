@@ -19,6 +19,7 @@ import pytest
 
 from agent.process_boot import land_cluster_extensions
 from base import db, paths
+from base.db import Database
 from base.packages.extensions import registry as reg
 
 _SKILL_MD = """---
@@ -39,7 +40,7 @@ def _write_skill(root: Path, name: str) -> Path:
 
 
 def test_boot_lands_a_skill_this_machine_never_installed(
-    tmp_path: Path, unit_home: Path, db_conn: psycopg.Connection
+    tmp_path: Path, unit_home: Path, db_conn: psycopg.Connection, database: Database
 ) -> None:
     """The offline window, closed with no operator in the loop.
 
@@ -56,7 +57,7 @@ def test_boot_lands_a_skill_this_machine_never_installed(
         "this machine must start without it, or the test proves nothing"
     )
 
-    land_cluster_extensions()
+    land_cluster_extensions(database)
 
     assert (paths.skills_dir() / "boot-demo" / "SKILL.md").read_text(encoding="utf-8") == (
         src / "SKILL.md"
@@ -64,7 +65,7 @@ def test_boot_lands_a_skill_this_machine_never_installed(
 
 
 def test_an_unreadable_registry_does_not_stop_the_boot(
-    unit_home: Path, monkeypatch: pytest.MonkeyPatch
+    unit_home: Path, monkeypatch: pytest.MonkeyPatch, database: Database
 ) -> None:
     """Boot fails fast on what an agent cannot work without. A skills directory
     that is one install behind is not that: the lag is recoverable, the next
@@ -80,7 +81,7 @@ def test_an_unreadable_registry_does_not_stop_the_boot(
 
     monkeypatch.setattr(db, "connect", _refuse)
 
-    land_cluster_extensions()  # must not raise
+    land_cluster_extensions(database)  # must not raise
 
     assert not (unit_home / "skills").exists()
 
@@ -95,8 +96,8 @@ def test_the_hosted_daemon_lands_them_once_per_process() -> None:
     from services.agent_host.daemon import run
 
     src = inspect.getsource(run)
-    assert src.index("init_process_scope()") < src.index("land_cluster_extensions()")
-    assert src.index("land_cluster_extensions()") < src.index("load_process_extensions()")
-    assert src.count("land_cluster_extensions()") == 1, (
+    assert src.index("init_process_scope()") < src.index("land_cluster_extensions(db)")
+    assert src.index("land_cluster_extensions(db)") < src.index("load_process_extensions()")
+    assert src.count("land_cluster_extensions(db)") == 1, (
         "once per process — a second call would re-hash every skill tree for no gain"
     )

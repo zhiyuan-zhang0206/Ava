@@ -27,6 +27,8 @@ import base.events.live.redis_listener
 from base.agents.impersonation import RELAY_HEARTBEAT_SECONDS
 from base.agents.impersonation.delivery import reserve_delivery
 from base.config import settings
+from base.db import Database
+from base.events.live.bus import EventBus
 from cli.commands.agents.codex_app_server import live_submit, require_control_endpoint
 
 _CATCHUP_SECONDS = 30.0
@@ -248,10 +250,12 @@ def host_emitter(
     raise ValueError(f"Unknown relay provider: {provider}")
 
 
-def _read_inbox(agent_id: int, lease_id: UUID, token: str) -> InboxSnapshot:
+def _read_inbox(
+    db: Database, bus: EventBus, agent_id: int, lease_id: UUID, token: str
+) -> InboxSnapshot:
     from base.agents import impersonation
 
-    lease = _Lease.model_validate(impersonation.relay_get(str(lease_id), token))
+    lease = _Lease.model_validate(impersonation.relay_get(db, bus, str(lease_id), token))
     if lease.agent_id != agent_id or lease.id != lease_id:
         raise ValueError("The impersonation lease does not belong to the requested agent")
     if lease.status != "active":
@@ -260,9 +264,9 @@ def _read_inbox(agent_id: int, lease_id: UUID, token: str) -> InboxSnapshot:
         )
     try:
         # relay_inbox validates same-machine active authority in its own transaction.
-        rows = impersonation.relay_inbox(str(lease_id), token)
+        rows = impersonation.relay_inbox(db, str(lease_id), token)
     except impersonation.ImpersonationError:
-        latest = _Lease.model_validate(impersonation.relay_get(str(lease_id), token))
+        latest = _Lease.model_validate(impersonation.relay_get(db, bus, str(lease_id), token))
         if latest.status in _TERMINAL:
             return InboxSnapshot(
                 frozenset(),
@@ -523,24 +527,24 @@ async def relay_inbox(
     ).run()
 
 
-def _write_heartbeat(lease_id: UUID, token: str) -> bool:
+def _write_heartbeat(db: Database, lease_id: UUID, token: str) -> bool:
     """One durable liveness beat; False means the lease ended or the relay
     credential was revoked — the heartbeat loop stops silently."""
     from base.agents import impersonation
 
     try:
-        impersonation.relay_heartbeat(str(lease_id), token)
+        impersonation.relay_heartbeat(db, str(lease_id), token)
     except impersonation.ImpersonationError:
         return False
     return True
 
 
 async def _heartbeat_loop(
-    lease_id: UUID, token: str, *, interval: float = RELAY_HEARTBEAT_SECONDS
+    db: Database, lease_id: UUID, token: str, *, interval: float = RELAY_HEARTBEAT_SECONDS
 ) -> None:
     while True:
         await asyncio.sleep(interval)
-        if not await asyncio.to_thread(_write_heartbeat, lease_id, token):
+        if not await asyncio.to_thread(_write_heartbeat, db, lease_id, token):
             return
 
 
@@ -557,31 +561,33 @@ def cmd_relay(args: argparse.Namespace) -> int:
         from base.agents.impersonation import relay_get
         from base.agents.impersonation.history import resolve
 
+        db = Database.from_settings()
+        bus = EventBus.from_settings()
         if args.lease_id is None:
-            lease_id = UUID(str(resolve(args.agent_id, args.session_id)["id"]))
+            lease_id = UUID(str(resolve(db, args.agent_id, args.session_id)["id"]))
         else:
             lease_id = UUID(args.lease_id)
         if args.token_stdin:
             token = impersonation.relay_token_from_stdin()
         else:
             token = impersonation.relay_token_from_env()
-        session_id = relay_get(str(lease_id), token)["session_id"]
+        session_id = relay_get(db, bus, str(lease_id), token)["session_id"]
         emit = host_emitter(args.provider, args.thread_id, codex_remote=args.codex_remote)
         max_chars = _PUSH_MAX_CHARS
 
         async def run() -> None:
             async def read_inbox() -> InboxSnapshot:
-                return await asyncio.to_thread(_read_inbox, args.agent_id, lease_id, token)
+                return await asyncio.to_thread(_read_inbox, db, bus, args.agent_id, lease_id, token)
 
             async def reserve(ids: list[int]) -> frozenset[int]:
-                return await asyncio.to_thread(reserve_delivery, str(lease_id), token, ids)
+                return await asyncio.to_thread(reserve_delivery, db, bus, str(lease_id), token, ids)
 
-            if not await asyncio.to_thread(_write_heartbeat, lease_id, token):
+            if not await asyncio.to_thread(_write_heartbeat, db, lease_id, token):
                 # Termination can win between startup's lease read and beat.
                 # Terminal metadata is readable; ordinary inbox authority stays closed.
                 _ended(await read_inbox(), args.agent_id, session_id, emit)
                 return
-            heartbeat = asyncio.create_task(_heartbeat_loop(lease_id, token))
+            heartbeat = asyncio.create_task(_heartbeat_loop(db, lease_id, token))
             try:
                 listener = base.events.live.redis_listener.RedisInboundListener(
                     settings.data_plane.redis_url, args.agent_id

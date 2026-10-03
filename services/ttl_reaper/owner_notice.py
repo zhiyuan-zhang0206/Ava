@@ -7,7 +7,8 @@ from contextlib import suppress
 import psycopg
 
 from base.agents.messages.inbound_provenance import InboundProvenance
-from base.db import insert_inbound_message, publish_inbound_wake
+from base.db import Database, insert_inbound_message, publish_inbound_wake
+from base.events.live.bus import EventBus
 
 # Batch ceiling per pass: the tables are small by design; the cap keeps a
 # backlog (e.g. after a long outage) from turning one pass into a multi-minute
@@ -21,6 +22,8 @@ _NOTIFIABLE_STATUSES = ("running", "idling")
 
 def notify_owner(
     conn: psycopg.Connection,
+    db: Database,
+    bus: EventBus,
     agent_id: int,
     content: str,
     *,
@@ -42,6 +45,8 @@ def notify_owner(
         content,
         source=source,
         provenance=InboundProvenance(source_verified_by=None, source_transport="ops"),
+        database=db,
+        bus=bus,
     )
     with suppress(Exception):
-        publish_inbound_wake(agent_id, str(inbound_id))
+        publish_inbound_wake(db, bus, agent_id, str(inbound_id))

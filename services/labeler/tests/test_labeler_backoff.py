@@ -15,6 +15,7 @@ import pytest
 from base.config import settings
 from base.daemon.health import Liveness
 from base.db import create_agent, pool
+from base.events.live.bus import EventBus
 from services.labeler import daemon
 from services.labeler.tests.slices import labeler_db
 
@@ -146,7 +147,9 @@ def _seed_chat(db: psycopg.Connection, tid: int) -> None:
 
 @pytest.mark.asyncio
 async def test_dispatch_loop_uses_labeler_model_not_main_model(
-    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+    db_conn: psycopg.Connection,
+    monkeypatch: pytest.MonkeyPatch,
+    event_bus: EventBus,
 ) -> None:
     """The root builds the slice from settings.lm.labeler_model (its own knob), not
     settings.lm.llm_model (the main reasoning model). Pin the two to different
@@ -163,7 +166,7 @@ async def test_dispatch_loop_uses_labeler_model_not_main_model(
 
     captured: list[str] = []
 
-    async def _capture(_tid: int, _prompt: str, cfg: Any, _db: object) -> None:
+    async def _capture(_tid: int, _prompt: str, cfg: Any, _db: object, _bus: EventBus) -> None:
         captured.append(cfg.labeler_model)
         # Break the otherwise-infinite poll loop after the first dispatch.
         raise asyncio.CancelledError
@@ -174,7 +177,7 @@ async def test_dispatch_loop_uses_labeler_model_not_main_model(
     try:
         with pytest.raises(asyncio.CancelledError):
             await daemon._dispatch_loop(
-                p, labeler_db(), Liveness(daemon._LIVENESS_TIMEOUT_S), config
+                p, labeler_db(), event_bus, Liveness(daemon._LIVENESS_TIMEOUT_S), config
             )
     finally:
         p.close()
@@ -266,7 +269,9 @@ def test_select_unlabeled_prompts_from_task_system_note(db_conn: psycopg.Connect
 
 @pytest.mark.asyncio
 async def test_dispatch_loop_backs_off_on_llm_failure(
-    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+    db_conn: psycopg.Connection,
+    monkeypatch: pytest.MonkeyPatch,
+    event_bus: EventBus,
 ) -> None:
     """Regression (audit round 2, P1): generate_label_async swallows LLM
     failures (returns False), so the daemon's old except-keyed backoff was
@@ -292,7 +297,11 @@ async def test_dispatch_loop_backs_off_on_llm_failure(
     p = pool()
     task = asyncio.create_task(
         daemon._dispatch_loop(
-            p, labeler_db(), Liveness(daemon._LIVENESS_TIMEOUT_S), daemon.labeler_config()
+            p,
+            labeler_db(),
+            event_bus,
+            Liveness(daemon._LIVENESS_TIMEOUT_S),
+            daemon.labeler_config(),
         )
     )
     try:

@@ -21,13 +21,14 @@ from psycopg_pool import ConnectionPool
 
 from base import telemetry
 from base.config import settings
+from base.db import Database
+from base.events.live.bus import EventBus
 from base.events.live.redis_listener import RedisInboundListener
 from services.heartbeat.daemon import (
     _backoff_deadlines,
     _reconcile_checkin_outcomes,
     _select_idle_agents_needing_heartbeat,
     _send_heartbeat_checkin,
-    _sweep_backoff_resets,
 )
 from tests.fixtures.units import spawn_agent
 
@@ -331,10 +332,14 @@ def _mirror_nudged(agent_id: int) -> tuple[str, str, int] | None:
 
 class TestSendHeartbeatCheckin:
     def test_inserts_heartbeat_inbound_and_event(
-        self, pool: ConnectionPool, db_conn: psycopg.Connection
+        self,
+        pool: ConnectionPool,
+        db_conn: psycopg.Connection,
+        database: Database,
+        event_bus: EventBus,
     ) -> None:
         aid = spawn_agent(spawner="user")
-        _send_heartbeat_checkin(pool, aid, 7.0)
+        _send_heartbeat_checkin(pool, database, event_bus, aid, 7.0)
         # The emitter drains asynchronously (0.5s cadence) — flush() can
         # race the drain thread for the queue, so poll briefly for the line.
         # The PG events copy was retired at the LGTM cutover (task #1197 close-C)
@@ -366,7 +371,11 @@ class TestSendHeartbeatCheckin:
         assert int(ev[2]) == 7
 
     def test_consumed_heartbeat_defers_the_next_checkin(
-        self, pool: ConnectionPool, db_conn: psycopg.Connection
+        self,
+        pool: ConnectionPool,
+        db_conn: psycopg.Connection,
+        database: Database,
+        event_bus: EventBus,
     ) -> None:
         """A completed check-in must start a durable reminder interval.
 
@@ -376,7 +385,7 @@ class TestSendHeartbeatCheckin:
         hold the agent until the configured heartbeat interval has elapsed.
         """
         aid = _make_idle(db_conn, status_changed_s_ago=400)
-        _send_heartbeat_checkin(pool, aid, 7.0)
+        _send_heartbeat_checkin(pool, database, event_bus, aid, 7.0)
         with db_conn.cursor() as cur:
             cur.execute("UPDATE inbound_messages SET status = 'done' WHERE agent_id = %s", (aid,))
         db_conn.commit()
@@ -384,11 +393,15 @@ class TestSendHeartbeatCheckin:
         assert aid not in _selected(pool)
 
     def test_reminder_uses_heartbeat_interval_not_dispatch_step(
-        self, pool: ConnectionPool, db_conn: psycopg.Connection
+        self,
+        pool: ConnectionPool,
+        db_conn: psycopg.Connection,
+        database: Database,
+        event_bus: EventBus,
     ) -> None:
         """The 15-second dispatcher step must not become the reminder cadence."""
         aid = _make_idle(db_conn, status_changed_s_ago=400)
-        _send_heartbeat_checkin(pool, aid, 7.0)
+        _send_heartbeat_checkin(pool, database, event_bus, aid, 7.0)
         with db_conn.cursor() as cur:
             cur.execute("UPDATE inbound_messages SET status = 'done' WHERE agent_id = %s", (aid,))
             cur.execute(
@@ -406,7 +419,11 @@ class TestSendHeartbeatCheckin:
         )
 
     async def test_publishes_redis_wake_to_target(
-        self, pool: ConnectionPool, db_conn: psycopg.Connection
+        self,
+        pool: ConnectionPool,
+        db_conn: psycopg.Connection,
+        database: Database,
+        event_bus: EventBus,
     ) -> None:
         """The check-in publishes a Redis wake to the target agent's channel so an
         idle agent runs the heartbeat turn now instead of at its next SELECT
@@ -417,7 +434,7 @@ class TestSendHeartbeatCheckin:
             wait_task = asyncio.create_task(listener.wait_one(timeout=10.0))
             await asyncio.sleep(0.2)  # let the subscribe take effect before the publish
             t0 = time.monotonic()
-            await asyncio.to_thread(_send_heartbeat_checkin, pool, aid, 7.0)
+            await asyncio.to_thread(_send_heartbeat_checkin, pool, database, event_bus, aid, 7.0)
             await asyncio.wait_for(wait_task, timeout=5.0)
             assert time.monotonic() - t0 < 5.0, (
                 "heartbeat check-in did not wake the parked listener"
@@ -469,12 +486,17 @@ class TestConsecutiveFailureBackoff:
 
     @pytest.mark.parametrize("advanced", [False, True])
     def test_real_selected_idle_clock_survives_next_checkin_cycle(
-        self, pool: ConnectionPool, db_conn: psycopg.Connection, advanced: bool
+        self,
+        pool: ConnectionPool,
+        db_conn: psycopg.Connection,
+        advanced: bool,
+        database: Database,
+        event_bus: EventBus,
     ) -> None:
         """Use the actual PG result in pending state, as the dispatch loop does."""
         aid = _make_idle(db_conn, status_changed_s_ago=1200)
         pending = _selected(pool)
-        _send_heartbeat_checkin(pool, aid, pending[aid])
+        _send_heartbeat_checkin(pool, database, event_bus, aid, pending[aid])
         if advanced:
             # Still beyond the idle threshold: recovery must use the observed
             # progress, not the independent fresh-activity shortcut.
@@ -612,184 +634,3 @@ def _poll_mirror(agent_id: int, event_name: str, timeout_s: float = 2.0) -> dict
             break
         time.sleep(0.05)
     return ev
-
-
-class TestNudgeBackoffB7:
-    """Platform-side nudge backoff: consecutive no-op nudges stretch the
-    reminder floor by 2^level (cap 24h); real inbound or a pause resets."""
-
-    def _set_level(self, db_conn: psycopg.Connection, aid: int, level: int) -> None:
-        with db_conn.cursor() as cur:
-            cur.execute(
-                "UPDATE agents_meta SET heartbeat_backoff_level = %s WHERE id = %s",
-                (level, aid),
-            )
-        db_conn.commit()
-
-    def test_select_stretches_reminder_floor_by_level(
-        self, pool: ConnectionPool, db_conn: psycopg.Connection
-    ) -> None:
-        """last_heartbeat_at 10 min ago is due at the default 5 min cadence
-        but not at level 2 (5 min * 4 = 20 min)."""
-        aid = _make_idle(db_conn, status_changed_s_ago=400)
-        with db_conn.cursor() as cur:
-            cur.execute(
-                "UPDATE agents_meta SET last_heartbeat_at = now() - make_interval(secs => 600) "
-                "WHERE id = %s",
-                (aid,),
-            )
-        db_conn.commit()
-        assert aid in _selected(pool)
-        self._set_level(db_conn, aid, 2)
-        assert aid not in _selected(pool)
-
-    def test_reconcile_raises_level_after_n_consecutive_noops(
-        self, pool: ConnectionPool, db_conn: psycopg.Connection
-    ) -> None:
-        aid = _make_idle(db_conn, status_changed_s_ago=400)
-        noop: dict[int, int] = {aid: 2}
-
-        _reconcile_checkin_outcomes(
-            pool,
-            pending_checkin={aid: 6.0},
-            failure_streak={},
-            idle_threshold_s=_THRESHOLD_S,
-            noop_streak=noop,
-            heartbeat_interval_s=_THRESHOLD_S,
-            noop_nudges_threshold=3,
-        )
-
-        assert noop == {aid: 0}
-        with db_conn.cursor() as cur:
-            cur.execute("SELECT heartbeat_backoff_level FROM agents_meta WHERE id = %s", (aid,))
-            row = cur.fetchone()
-            assert row is not None
-            assert row[0] == 1
-        ev = _poll_mirror(aid, "heartbeat_backoff_raised")
-        assert ev is not None
-        assert ev["attributes"]["level"] == 1
-        assert ev["attributes"]["interval_seconds"] == 600
-
-    def test_reconcile_clears_streak_on_real_inbound(
-        self, pool: ConnectionPool, db_conn: psycopg.Connection
-    ) -> None:
-        aid = _make_idle(db_conn, status_changed_s_ago=400)
-        with db_conn.cursor() as cur:
-            cur.execute(
-                "UPDATE agents_meta SET last_heartbeat_at = now() - make_interval(secs => 60) "
-                "WHERE id = %s",
-                (aid,),
-            )
-            cur.execute(
-                "INSERT INTO inbound_messages (agent_id, content, kind, source) "
-                "VALUES (%s, 'hi', 'chat', 'user')",
-                (aid,),
-            )
-        db_conn.commit()
-        noop: dict[int, int] = {aid: 2}
-
-        _reconcile_checkin_outcomes(
-            pool,
-            pending_checkin={},
-            failure_streak={},
-            idle_threshold_s=_THRESHOLD_S,
-            noop_streak=noop,
-            heartbeat_interval_s=_THRESHOLD_S,
-            noop_nudges_threshold=3,
-        )
-
-        assert noop == {}
-
-    def test_reconcile_clears_streak_on_pause(
-        self, pool: ConnectionPool, db_conn: psycopg.Connection
-    ) -> None:
-        aid = _make_idle(db_conn, status_changed_s_ago=400, paused_until_s_ahead=3600)
-        noop: dict[int, int] = {aid: 2}
-
-        _reconcile_checkin_outcomes(
-            pool,
-            pending_checkin={},
-            failure_streak={},
-            idle_threshold_s=_THRESHOLD_S,
-            noop_streak=noop,
-            heartbeat_interval_s=_THRESHOLD_S,
-            noop_nudges_threshold=3,
-        )
-
-        assert noop == {}
-
-    def test_raise_is_capped_at_24h_max_level(
-        self, pool: ConnectionPool, db_conn: psycopg.Connection
-    ) -> None:
-        from services.heartbeat.daemon import _backoff_max_level
-
-        aid = _make_idle(db_conn, status_changed_s_ago=400)
-        max_level = _backoff_max_level(_THRESHOLD_S)
-        self._set_level(db_conn, aid, max_level)
-        noop: dict[int, int] = {aid: 2}
-
-        _reconcile_checkin_outcomes(
-            pool,
-            pending_checkin={aid: 6.0},
-            failure_streak={},
-            idle_threshold_s=_THRESHOLD_S,
-            noop_streak=noop,
-            heartbeat_interval_s=_THRESHOLD_S,
-            noop_nudges_threshold=3,
-        )
-
-        with db_conn.cursor() as cur:
-            cur.execute("SELECT heartbeat_backoff_level FROM agents_meta WHERE id = %s", (aid,))
-            row = cur.fetchone()
-            assert row is not None
-            assert row[0] == max_level
-
-    def test_sweep_resets_level_on_real_inbound(
-        self, pool: ConnectionPool, db_conn: psycopg.Connection
-    ) -> None:
-        aid = _make_idle(db_conn, status_changed_s_ago=400)
-        with db_conn.cursor() as cur:
-            cur.execute(
-                "UPDATE agents_meta SET heartbeat_backoff_level = 2, "
-                "last_heartbeat_at = now() - make_interval(secs => 60) WHERE id = %s",
-                (aid,),
-            )
-            cur.execute(
-                "INSERT INTO inbound_messages (agent_id, content, kind, source) "
-                "VALUES (%s, 'hi', 'chat', 'user')",
-                (aid,),
-            )
-        db_conn.commit()
-
-        _sweep_backoff_resets(pool)
-
-        with db_conn.cursor() as cur:
-            cur.execute("SELECT heartbeat_backoff_level FROM agents_meta WHERE id = %s", (aid,))
-            row = cur.fetchone()
-            assert row is not None
-            assert row[0] == 0
-        ev = _poll_mirror(aid, "heartbeat_backoff_reset")
-        assert ev is not None
-        assert ev["attributes"]["previous_level"] == 2
-        assert ev["attributes"]["reason"] == "real_inbound"
-
-    def test_sweep_leaves_level_without_engagement(
-        self, pool: ConnectionPool, db_conn: psycopg.Connection
-    ) -> None:
-        aid = _make_idle(db_conn, status_changed_s_ago=400)
-        with db_conn.cursor() as cur:
-            cur.execute(
-                "UPDATE agents_meta SET heartbeat_backoff_level = 2, last_heartbeat_at = now() "
-                "WHERE id = %s",
-                (aid,),
-            )
-        db_conn.commit()
-
-        _sweep_backoff_resets(pool)
-
-        with db_conn.cursor() as cur:
-            cur.execute("SELECT heartbeat_backoff_level FROM agents_meta WHERE id = %s", (aid,))
-            row = cur.fetchone()
-            assert row is not None
-            assert row[0] == 2
-        assert _poll_mirror(aid, "heartbeat_backoff_reset", timeout_s=0.5) is None

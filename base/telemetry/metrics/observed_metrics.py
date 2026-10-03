@@ -24,6 +24,7 @@ import psycopg
 from psycopg.types.json import Jsonb
 from psycopg_pool import ConnectionPool
 
+from base.db import Database
 from base.telemetry import Event, event_row
 from base.telemetry.metrics.aggregate_sql import EXEC_FAILURE_EVENTS
 
@@ -249,14 +250,12 @@ _pool: ConnectionPool | None = None
 _pool_lock = Lock()
 
 
-def _projection_pool() -> ConnectionPool:
+def _projection_pool(db: Database) -> ConnectionPool:
     """One lazily opened, bounded pool owned by this process's drain thread."""
     global _pool  # noqa: PLW0603
     with _pool_lock:
         if _pool is None:
-            from base.db import pool
-
-            _pool = pool(min_size=0, max_size=1, timeout=0.1)
+            _pool = db.pool(min_size=0, max_size=1, timeout=0.1)
         return _pool
 
 
@@ -270,24 +269,16 @@ def close_projection() -> None:
 
 
 def write_observations(
-    observations: Sequence[MetricObservation], *, db: psycopg.Connection[Any] | None = None
+    observations: Sequence[MetricObservation], *, db: psycopg.Connection[Any]
 ) -> int:
     """Atomically store novel facts and day sums; return number newly inserted.
 
-    The optional connection belongs to replay/tests; its caller owns commit.
-    The live emitter uses a separate pool and a short transaction deadline.
-    Exceptions propagate here so replay never records a failed scan as success;
-    only the emitter adapter below suppresses them.
+    The connection belongs to the caller, who owns commit (replay, tests, and the live
+    emitter's pooled transaction below). Exceptions propagate here so replay never records
+    a failed scan as success; only the emitter adapter below suppresses them.
     """
     if not observations:
         return 0
-    if db is None:
-        from base.db.transaction import write_transaction
-
-        with write_transaction(_projection_pool(), timeout=0.1) as connection:
-            connection.execute("SET LOCAL statement_timeout = '500ms'")
-            connection.execute("SET LOCAL lock_timeout = '100ms'")
-            return write_observations(observations, db=connection)
     rows: list[dict[str, Any]] = []
     for observation in observations:
         row = asdict(observation)
@@ -300,10 +291,22 @@ def write_observations(
     return int(result[0])
 
 
+def _write_projected(database: Database, observations: Sequence[MetricObservation]) -> int:
+    """The live emitter's write: a separate bounded pool and a short transaction deadline."""
+    if not observations:
+        return 0
+    from base.db.transaction import write_transaction
+
+    with write_transaction(_projection_pool(database), timeout=0.1) as connection:
+        connection.execute("SET LOCAL statement_timeout = '500ms'")
+        connection.execute("SET LOCAL lock_timeout = '100ms'")
+        return write_observations(observations, db=connection)
+
+
 _failures = 0
 
 
-def project_events(events: Sequence[Event]) -> None:
+def project_events(database: Database, events: Sequence[Event]) -> None:
     """Best-effort emitter sink; diagnostics must never reenter the emitter."""
     global _failures  # noqa: PLW0603
     from base.telemetry import report_no_pipeline
@@ -323,7 +326,7 @@ def project_events(events: Sequence[Event]) -> None:
             n=rejected,
         )
     try:
-        write_observations(observations)
+        _write_projected(database, observations)
     except Exception as exc:
         _failures += 1
         if _failures == 1 or _failures % 50 == 0:

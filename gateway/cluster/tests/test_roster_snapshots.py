@@ -17,6 +17,7 @@ from psycopg.types.json import Jsonb
 import gateway.cluster.status as status_mod
 from base.api_contracts.status import MachineStatus
 from base.config import settings
+from base.db import Database
 from gateway.app import app
 from gateway.cluster import snapshots
 from gateway.cluster.snapshots import Snapshot
@@ -76,7 +77,9 @@ def no_dial(monkeypatch: pytest.MonkeyPatch) -> list[str]:
 
 
 def _gather(rows: list[_ROW], snaps: dict[str, Snapshot] | None) -> list[MachineStatus]:
-    return asyncio.run(status_mod.gather_cluster_status(rows, "gateway", snapshots=snaps))
+    return asyncio.run(
+        status_mod.gather_cluster_status(Database.from_settings(), rows, "gateway", snapshots=snaps)
+    )
 
 
 # --- the snapshot's own verdicts ----------------------------------------------

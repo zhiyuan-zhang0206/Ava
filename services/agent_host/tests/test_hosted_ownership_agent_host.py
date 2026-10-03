@@ -101,16 +101,18 @@ async def test_host_refuses_a_turn_owned_by_another_live_instance(
     aops_pool: AsyncConnectionPool,
     monkeypatch: pytest.MonkeyPatch,
     status: str,
+    database: Database,
+    event_bus: EventBus,
 ) -> None:
     from services.agent_host.host import AgentHost
 
     agent_id = _agent(db_conn)
     original = await admit_hosted_runtime(
-        aops_pool, agent_id, "host-test", uuid4(), expected_from="idling"
+        aops_pool, agent_id, "host-test", uuid4(), expected_from="idling", db=database
     )
     assert original is not None
     if status == "idling":
-        assert await settle_hosted_runtime(aops_pool, original)
+        assert await settle_hosted_runtime(aops_pool, original, bus=event_bus)
     host = AgentHost(
         pool=aops_pool,
         checkpointer=Mock(),

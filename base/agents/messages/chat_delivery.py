@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import contextlib
 import json
+from collections.abc import Callable
 from dataclasses import dataclass
 
 import psycopg
@@ -24,7 +25,7 @@ from base.agents.messages.inbound_provenance import (
     content_sha256,
     source_assertion_match,
 )
-from base.db import fetch_one, publish_inbound_wake
+from base.db import fetch_one
 
 
 class ClientMessageConflictError(ValueError):
@@ -123,8 +124,12 @@ def insert_chat_inbound_once(
     payload: dict[str, object] | None,
     client_message_id: str | None,
     provenance: InboundProvenance | None = None,
+    publish_wake: Callable[[int, str], bool],
 ) -> ChatInboundReceipt:
-    """Insert one logical chat, or return its existing same-key inbound id."""
+    """Insert one logical chat, or return its existing same-key inbound id.
+
+    `publish_wake(agent_id, payload)` is the best-effort wake for a newly inserted inbound
+    (`base.db.publish_inbound_wake` bound to the caller's handles)."""
     with db.transaction():
         require_caller_protocol(db, agent_id, source)
         receipt, prepared_event = _insert_chat_inbound_once(
@@ -140,7 +145,7 @@ def insert_chat_inbound_once(
     if prepared_event is not None:
         telemetry.emit_prepared(prepared_event)
     if receipt.inserted:
-        publish_inbound_wake(agent_id, str(receipt.inbound_id))
+        publish_wake(agent_id, str(receipt.inbound_id))
     return receipt
 
 

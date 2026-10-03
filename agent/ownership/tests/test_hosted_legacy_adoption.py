@@ -33,7 +33,7 @@ from psycopg_pool import AsyncConnectionPool
 
 from agent.ownership.hosted import admit_hosted_runtime
 from base.agents.incarnation.host_process_evidence import LocalHostEvidence, local_host_evidence
-from base.db import create_agent
+from base.db import Database, create_agent
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from base.paths import ava_home, exec_run_dir
 
@@ -72,7 +72,7 @@ async def _admit(
     pool: AsyncConnectionPool, agent_id: int, owner: UUID, *, expected_from: str = "idling"
 ) -> RuntimeIncarnation | None:
     return await admit_hosted_runtime(
-        pool, agent_id, "host-test", owner, expected_from=expected_from
+        pool, agent_id, "host-test", owner, expected_from=expected_from, db=Database.from_settings()
     )
 
 

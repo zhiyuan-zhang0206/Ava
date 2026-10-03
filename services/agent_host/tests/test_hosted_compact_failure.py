@@ -89,6 +89,8 @@ async def test_compaction_failure_is_visible_durable_and_recovers_on_new_inbound
     aops_pool: AsyncConnectionPool[Any],
     monkeypatch: pytest.MonkeyPatch,
     interval: int,
+    database: Database,
+    event_bus: EventBus,
 ) -> None:
     agent = _agent(db_conn)
     summary = AsyncMock(side_effect=RuntimeError("compaction provider unavailable"))
@@ -109,7 +111,12 @@ async def test_compaction_failure_is_visible_durable_and_recovers_on_new_inbound
     channel = f"{settings.data_plane.events_channel}:compact-proof:{agent}"
     publisher = AgentEventPublisher(redis, channel, agent_id=agent)
     ctx = AvaContext(
-        ops_pool=aops_pool, event_publisher=publisher, llm=MagicMock(), agent=AgentSlices.resolve()
+        ops_pool=aops_pool,
+        event_publisher=publisher,
+        llm=MagicMock(),
+        agent=AgentSlices.resolve(),
+        db=Database.from_settings(),
+        bus=EventBus.from_settings(),
     )
     host = AgentHost(
         pool=aops_pool,
@@ -151,7 +158,14 @@ async def test_compaction_failure_is_visible_durable_and_recovers_on_new_inbound
                 "SELECT status FROM agents_meta WHERE id=%s", (agent,)
             ).fetchone() == ("idling",)
 
-            insert_inbound_message(db_conn, agent, "Continue without compacting", "user")
+            insert_inbound_message(
+                db_conn,
+                agent,
+                "Continue without compacting",
+                "user",
+                bus=event_bus,
+                database=database,
+            )
             await asyncio.wait_for(host.run_turn(agent), 5)
             assert replies == ["continued"]
             assert summary.await_count == COMPACT_MAX_ATTEMPTS

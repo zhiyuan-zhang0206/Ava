@@ -135,6 +135,9 @@ def _validate_mcp_identity_arguments(tool: str, args: dict[str, Any]) -> None:
 class _AuditMiddleware:
     """Record client identity, outcome, and redacted args for every tools/call."""
 
+    def __init__(self, db: Database) -> None:
+        self._db = db
+
     async def __call__(
         self,
         ctx: ServerRequestContext[Any, Any],  # noqa: F821  # pyright: ignore[reportUndefinedVariable]
@@ -170,12 +173,14 @@ class _AuditMiddleware:
             result = await typed_call_next(typed_ctx)
         except Exception as exc:
             await _record_tool_call(
+                self._db,
                 caller,
                 payload | {"outcome": "error", "error": type(exc).__name__},
             )
             raise
         is_error = _tool_result_is_error(result)
         await _record_tool_call(
+            self._db,
             caller,
             payload
             | (
@@ -187,7 +192,7 @@ class _AuditMiddleware:
         return result
 
 
-async def _record_tool_call(caller: CallerIdentity, payload: dict[str, Any]) -> None:
+async def _record_tool_call(db: Database, caller: CallerIdentity, payload: dict[str, Any]) -> None:
     """Record one MCP tool call in `audit_events`.
 
     The tool has already run, so a failed audit write must not turn it into a
@@ -199,7 +204,7 @@ async def _record_tool_call(caller: CallerIdentity, payload: dict[str, Any]) -> 
     event = prepare_event_log(
         event_type="mcp_tool_call", agent_id=None, source=caller.source(), payload=payload
     )
-    await asyncio.to_thread(record_audit_reported, event)
+    await asyncio.to_thread(record_audit_reported, db, event)
 
 
 def _select_directory_blocking(
@@ -316,7 +321,7 @@ async def _mcp_deliver_send_message(
     # Existence check first (raises AgentNotFound, like the REST route);
     # deliver_chat_inbound then auto-resurrects a terminated target.
     try:
-        await asyncio.to_thread(get_agent_status, agent_id)
+        await asyncio.to_thread(get_agent_status, db, agent_id)
         delivery = await deliver_chat_inbound(
             pool,
             db,
@@ -457,7 +462,7 @@ def _build_server(pool: Any, db: Database, bus: EventBus):  # noqa: ANN202 — i
     """
     from mcp.server.mcpserver import MCPServer
 
-    server = MCPServer("ava", instructions=server_instructions(), middleware=[_AuditMiddleware()])
+    server = MCPServer("ava", instructions=server_instructions(), middleware=[_AuditMiddleware(db)])
     _register_read_tools(server, pool, db)
     _register_fleet_tools(server, pool, db, bus)
     return server

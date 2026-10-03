@@ -146,7 +146,7 @@ def _rejection_reason(label: str, max_chars: int) -> str | None:
 
 
 async def generate_label_async(
-    agent_id: int, prompt: str, config: LabelerConfig, db: Database
+    agent_id: int, prompt: str, config: LabelerConfig, db: Database, bus: EventBus
 ) -> bool | None:
     """Generate a label via the LLM, CAS-write to DB, publish the event.
 
@@ -250,7 +250,7 @@ async def generate_label_async(
         rowcount = cur.rowcount
         conn.commit()
     if rowcount == 1:
-        await publish_label_updated(EventBus.from_settings(), agent_id, label)
+        await publish_label_updated(bus, agent_id, label)
         logger.info(
             "label generated for agent {agent_id}: {label!r}",
             event="label_generated",

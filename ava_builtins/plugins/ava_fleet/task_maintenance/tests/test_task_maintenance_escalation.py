@@ -24,6 +24,8 @@ from psycopg_pool import ConnectionPool
 from ava_builtins.plugins.ava_fleet.task_maintenance import daemon
 from ava_builtins.plugins.ava_fleet.task_maintenance.daemon import _run_escalate
 from base.config import settings
+from base.db import Database
+from base.events.live.bus import EventBus
 from gateway.app import app
 
 _TASK_TITLE = count(1)
@@ -123,7 +125,7 @@ def _escalated_at(db: psycopg.Connection, tid: int) -> Any:
 
 
 def test_delegator_escalation_at_most_once_per_overdue_window(
-    pool: ConnectionPool, db_conn: psycopg.Connection
+    pool: ConnectionPool, db_conn: psycopg.Connection, database: Database, event_bus: EventBus
 ) -> None:
     """Two sweeps inside one stalled window deliver one digest: the first
     stamps `escalated_at`, so the second re-selects the task and skips it.
@@ -131,14 +133,18 @@ def test_delegator_escalation_at_most_once_per_overdue_window(
     reminder_count sat at the threshold — reminder delivery is backoff-gated
     for up to 24h.)"""
     parent_owner, _owner, tid = _stalled_subtask(db_conn)
-    assert _run_escalate(pool, 3) == 1
-    assert _run_escalate(pool, 3) == 0
+    assert _run_escalate(pool, database, event_bus, 3) == 1
+    assert _run_escalate(pool, database, event_bus, 3) == 0
     assert len(_inbound_messages(db_conn, parent_owner)) == 1
     assert _escalated_at(db_conn, tid) is not None
 
 
 def test_delegator_escalation_retries_after_delivery_failure(
-    pool: ConnectionPool, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+    pool: ConnectionPool,
+    db_conn: psycopg.Connection,
+    monkeypatch: pytest.MonkeyPatch,
+    database: Database,
+    event_bus: EventBus,
 ) -> None:
     """A failed digest leaves no marker (no message landed), so the next sweep
     retries; once it lands, later sweeps stay quiet."""
@@ -148,6 +154,8 @@ def test_delegator_escalation_retries_after_delivery_failure(
 
     def _flaky(
         pool_: ConnectionPool,
+        db_: Database,
+        bus_: EventBus,
         agent_id: int,
         message: str,
         *,
@@ -156,27 +164,27 @@ def test_delegator_escalation_retries_after_delivery_failure(
         attempts["n"] += 1
         if attempts["n"] == 1:
             raise psycopg.OperationalError("db blip")
-        real(pool_, agent_id, message, escalate_task_ids=escalate_task_ids)
+        real(pool_, db_, bus_, agent_id, message, escalate_task_ids=escalate_task_ids)
 
     monkeypatch.setattr(daemon, "deliver_message", _flaky)
-    assert _run_escalate(pool, 3) == 0  # delivery failed: nothing was sent
+    assert _run_escalate(pool, database, event_bus, 3) == 0  # delivery failed: nothing was sent
     assert _inbound_messages(db_conn, parent_owner) == []
     assert _escalated_at(db_conn, tid) is None
-    assert _run_escalate(pool, 3) == 1  # retried and delivered
+    assert _run_escalate(pool, database, event_bus, 3) == 1  # retried and delivered
     assert len(_inbound_messages(db_conn, parent_owner)) == 1
-    assert _run_escalate(pool, 3) == 0  # marker holds: no third send
+    assert _run_escalate(pool, database, event_bus, 3) == 0  # marker holds: no third send
     assert len(_inbound_messages(db_conn, parent_owner)) == 1
 
 
 def test_delegator_escalation_rearms_after_owner_update(
-    pool: ConnectionPool, db_conn: psycopg.Connection
+    pool: ConnectionPool, db_conn: psycopg.Connection, database: Database, event_bus: EventBus
 ) -> None:
     """Any update() clears the marker with the reminder counters; after the
     owner re-engages and a later window re-crosses the threshold, the delegator
     is told again."""
     parent_owner, _owner, tid = _stalled_subtask(db_conn)
-    assert _run_escalate(pool, 3) == 1
-    assert _run_escalate(pool, 3) == 0
+    assert _run_escalate(pool, database, event_bus, 3) == 1
+    assert _run_escalate(pool, database, event_bus, 3) == 0
     # The owner updates the task: both update() paths reset the bookkeeping
     # (test_update_resets_reminder_count / the gateway PATCH test below cover
     # the real paths; mirror their write here).
@@ -194,7 +202,7 @@ def test_delegator_escalation_rearms_after_owner_update(
             (tid,),
         )
     db_conn.commit()
-    assert _run_escalate(pool, 3) == 1
+    assert _run_escalate(pool, database, event_bus, 3) == 1
     assert len(_inbound_messages(db_conn, parent_owner)) == 2
 
 

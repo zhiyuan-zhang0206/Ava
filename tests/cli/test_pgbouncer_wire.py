@@ -25,7 +25,7 @@ import signal
 import subprocess
 import tempfile
 import time
-from collections.abc import Generator
+from collections.abc import Callable, Generator
 from pathlib import Path
 
 import psycopg
@@ -35,6 +35,8 @@ from psycopg.conninfo import conninfo_to_dict, make_conninfo
 from psycopg_pool import AsyncConnectionPool, ConnectionPool
 
 from base.cluster.authority import POOLER_ADMIN
+from base.db import Database
+from base.events.live.bus import EventBus
 from cli.commands.data_plane.pgbouncer import pgbouncer_bin
 from tests._containers import _free_port, _wait_port, postgres
 
@@ -241,6 +243,7 @@ def _insert_agent(pg_url: str) -> int:
 
 def test_write_transaction_overrides_a_read_only_default_on_connect(
     monkeypatch: pytest.MonkeyPatch,
+    database: Database,
 ) -> None:
     """Rule A writes (`set_posture`'s upsert, opened by `write_transaction()` on its
     own dial) land in sessions that default to read-only."""
@@ -249,7 +252,7 @@ def test_write_transaction_overrides_a_read_only_default_on_connect(
 
     with postgres() as pg_url, _read_only_default_pooler(pg_url, pool_size=1) as pooled:
         monkeypatch.setattr(config.settings.data_plane, "db_url", pooled)
-        host_deploy_state.set_posture("paused")
+        host_deploy_state.set_posture(Database.from_settings(), "paused")
 
         with psycopg.connect(pg_url) as verify:
             row = verify.execute("SELECT posture FROM host_deploy_state").fetchone()
@@ -274,6 +277,8 @@ def test_schedule_provision_overrides_a_read_only_default(
 
 def test_write_transaction_overrides_a_read_only_default_on_pool_borrow(
     monkeypatch: pytest.MonkeyPatch,
+    database: Database,
+    event_bus: EventBus,
 ) -> None:
     """Rule B's pool-borrow DELETE declares its transaction writable first."""
     from base import config
@@ -291,7 +296,7 @@ def test_write_transaction_overrides_a_read_only_default_on_pool_borrow(
             )
         db_pool = pool(min_size=1, max_size=2)
         try:
-            delete_shell_row(db_pool, agent_id, 7, interrupted=False)
+            delete_shell_row(db_pool, database, event_bus, agent_id, 7, interrupted=False)
         finally:
             db_pool.close()
 
@@ -578,6 +583,7 @@ def test_pooled_borrow_scrubs_a_poisoned_backend(
 
 def test_message_insert_and_schedule_stop_survive_a_poisoned_backend(
     monkeypatch: pytest.MonkeyPatch,
+    publish_wake: Callable[[int, str], bool],
 ) -> None:
     """P0 batch-5 regression: the agent message INSERT and the schedule stop
     UPDATE — the two API writes the user saw 500 — succeed when pgbouncer hands
@@ -592,12 +598,8 @@ def test_message_insert_and_schedule_stop_survive_a_poisoned_backend(
     with postgres() as pg_url, _pgbouncer_in_front(pg_url, pool_size=1) as pooled:
         monkeypatch.setattr(config.settings.data_plane, "db_url", pooled)
 
-        # The inbound wake publish needs Redis, which this harness does not run;
-        # the regression target is the durable DB write, so stub the wake out.
-        def _no_wake(*_args: object, **_kwargs: object) -> None:
-            return None
-
-        monkeypatch.setattr("base.agents.messages.chat_delivery.publish_inbound_wake", _no_wake)
+        # The inbound wake publish needs Redis, which this harness does not run; it never
+        # raises, and the regression target is the durable DB write.
         with psycopg.connect(pg_url, autocommit=True) as admin:
             row = admin.execute(
                 "INSERT INTO agents (label) VALUES ('poison-probe-agent') RETURNING id"
@@ -625,6 +627,7 @@ def test_message_insert_and_schedule_stop_survive_a_poisoned_backend(
                     source="user",
                     payload=None,
                     client_message_id=None,
+                    publish_wake=publish_wake,
                 )
                 assert receipt.inserted
             # schedule stop UPDATE (POST /api/schedules/{id}/stop durable half:

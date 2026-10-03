@@ -19,6 +19,7 @@ from base.db import Database
 from base.deploy.lifecycle import start_serving
 from base.deploy.maintenance import admission, cohort, hold_driver, pause_owner
 from base.deploy.maintenance.state import MaintenanceHold
+from base.events.live.bus import EventBus
 from cli.commands.lifecycle._pause_resume import exclusive_resources
 from cli.commands.lifecycle.service_stop import (
     deadline_after,
@@ -67,7 +68,7 @@ def stop(
 
     if hold.phase == "drained":
         admission.set_phase(holder, at, "stopping")
-    set_posture("paused")
+    set_posture(Database.from_settings(), "paused")
     ops_quiescent(remaining(deadline))
     stopped = stop_services(remaining(deadline), keep_terminals=keep_terminals)
     remaining(deadline)
@@ -115,7 +116,7 @@ def resume(holder: str, at: datetime, *, cancel: bool) -> None:
     # Preserve the hold if dependency/posture restoration fails. A crash after
     # its release is recovered by existing durable restart-pointer scanning.
     with admission.authorized_start(holder, at):
-        unpause_local_cluster()
+        unpause_local_cluster(Database.from_settings(), EventBus.from_settings())
 
 
 @exclusive_resources
@@ -157,7 +158,7 @@ def _repair(holder: str, at: datetime, *, operator: str | None) -> None:
     # Preserve the hold if dependency/posture restoration fails. The repaired
     # journal stays; a partial release is completed by resume --cancel.
     with admission.authorized_start(holder, at):
-        unpause_local_cluster()
+        unpause_local_cluster(Database.from_settings(), EventBus.from_settings())
     print(
         f"Repaired {len(hold.failures)} failed receipt(s) "
         f"({sorted(hold.failures)}); hold released. "
@@ -276,9 +277,11 @@ def run(args: argparse.Namespace) -> int:
     with contextlib.suppress(Exception):
         pause_owner.refresh_driver(args.operation, at, driver=driver)
     if verb == "prepare":
-        prepare(args.operation, at, driver=driver)
+        prepare(
+            Database.from_settings(), EventBus.from_settings(), args.operation, at, driver=driver
+        )
     elif verb == "drain":
-        drain(args.operation, at, args.timeout)
+        drain(Database.from_settings(), args.operation, at, args.timeout)
     elif verb == "stop":
         stop(
             args.operation,

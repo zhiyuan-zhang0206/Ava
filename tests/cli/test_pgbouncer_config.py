@@ -112,9 +112,9 @@ def test_backup_defaults_to_a_direct_dump_source() -> None:
     in tests/lifecycle/db_authority/test_backup_owner.py)."""
     from services import backup
 
-    assert "dump_source()" in inspect.getsource(backup._run_backup)
+    assert "dump_source(db)" in inspect.getsource(backup._run_backup)
     src = inspect.getsource(backup.dump_source)
-    assert "direct_db_url()" in src
+    assert "db.direct_url()" in src
     assert "local_owner_authority()" in src
     assert ".pooled_db_url" not in src
 

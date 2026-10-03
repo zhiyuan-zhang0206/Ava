@@ -48,6 +48,8 @@ from agent.state import AgentState
 from base.agents.context import AvaContext
 from base.config import settings
 from base.config.agent_compaction import AgentCompactionSettings
+from base.db import Database
+from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices
 from base.lm.context_budget import ContextBudget
 from tests.fixtures.units import spawn_agent
@@ -176,7 +178,12 @@ _LONG_SUMMARY = "## Requests\nfollow the template. " * 60
 def _runtime_with_llm(llm: Any) -> Runtime[AvaContext]:
     return Runtime(
         context=AvaContext(
-            ops_pool=None, llm=llm, event_publisher=MagicMock(), agent=AgentSlices.resolve()
+            ops_pool=None,
+            llm=llm,
+            event_publisher=MagicMock(),
+            agent=AgentSlices.resolve(),
+            db=Database.from_settings(),
+            bus=EventBus.from_settings(),
         )
     )
 
@@ -205,6 +212,8 @@ def _make_runtime(
         llm=llm if llm is not None else _fake_llm("synthetic summary"),
         event_publisher=MagicMock(),
         agent=AgentSlices.resolve(),
+        db=Database.from_settings(),
+        bus=EventBus.from_settings(),
     )
     return Runtime(context=ctx)
 

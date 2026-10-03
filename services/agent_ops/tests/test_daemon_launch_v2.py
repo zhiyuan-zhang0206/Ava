@@ -14,7 +14,9 @@ async def test_versioned_launch_dispatch(monkeypatch: pytest.MonkeyPatch) -> Non
     monkeypatch.setattr(daemon, "_db_pool", pool)
     seen: list[tuple[int, object]] = []
 
-    async def _launch(body: LaunchAgentRequest, received_pool: object) -> SpawnedAgent:
+    async def _launch(
+        _db: object, _bus: object, body: LaunchAgentRequest, received_pool: object
+    ) -> SpawnedAgent:
         seen.append((body.agent_id, received_pool))
         return SpawnedAgent(id=body.agent_id)
 

@@ -8,7 +8,8 @@ import psycopg
 import pytest
 
 from base import db
-from base.db import create_agent, insert_spawn_prompt_in_transaction
+from base.db import Database, create_agent, insert_spawn_prompt_in_transaction
+from base.events.live.bus import EventBus
 from base.telemetry import Event
 
 
@@ -28,22 +29,31 @@ def _refuse(_conn: psycopg.Connection, _event: Event) -> Event:
     raise RuntimeError("audit write failed")
 
 
-def test_an_inbound_and_its_audit_fact_commit_together(db_conn: psycopg.Connection) -> None:
+def test_an_inbound_and_its_audit_fact_commit_together(
+    db_conn: psycopg.Connection, database: Database, event_bus: EventBus
+) -> None:
     agent_id = create_agent(db_conn)
 
-    inbound_id = db.insert_inbound_message(db_conn, agent_id, "", source="user", kind="restart")
+    inbound_id = db.insert_inbound_message(
+        db_conn, agent_id, "", source="user", kind="restart", bus=event_bus, database=database
+    )
 
     assert _audit(db_conn, agent_id, "restart") == [("user", None, {"inbound_id": inbound_id})]
 
 
 def test_an_inbound_whose_audit_fact_cannot_be_recorded_is_not_written(
-    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+    db_conn: psycopg.Connection,
+    monkeypatch: pytest.MonkeyPatch,
+    database: Database,
+    event_bus: EventBus,
 ) -> None:
     agent_id = create_agent(db_conn)
     monkeypatch.setattr("base.telemetry.audit_events.record_audit", _refuse)
 
     with pytest.raises(RuntimeError, match="audit write failed"):
-        db.insert_inbound_message(db_conn, agent_id, "", source="user", kind="restart")
+        db.insert_inbound_message(
+            db_conn, agent_id, "", source="user", kind="restart", bus=event_bus, database=database
+        )
     db_conn.rollback()
 
     count = db_conn.execute(
@@ -54,7 +64,10 @@ def test_an_inbound_whose_audit_fact_cannot_be_recorded_is_not_written(
 
 
 def test_a_compact_request_is_recorded_before_it_is_emitted(
-    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+    db_conn: psycopg.Connection,
+    monkeypatch: pytest.MonkeyPatch,
+    database: Database,
+    event_bus: EventBus,
 ) -> None:
     agent_id = create_agent(db_conn)
     seen_at_emit: list[int] = []
@@ -64,7 +77,7 @@ def test_a_compact_request_is_recorded_before_it_is_emitted(
 
     monkeypatch.setattr(db, "_emit_prepared_event", emit)
 
-    db.insert_compact_request_inbound(db_conn, agent_id)
+    db.insert_compact_request_inbound(db_conn, agent_id, bus=event_bus, database=database)
 
     assert seen_at_emit == [1]
     assert _audit(db_conn, agent_id, "compact") == [("user", None, {"compact_kind": "request"})]

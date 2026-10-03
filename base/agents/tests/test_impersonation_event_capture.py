@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 from collections.abc import Iterator
 from datetime import UTC, datetime
 from typing import Any
@@ -32,7 +33,8 @@ from base.agents.impersonation_manifest import (
 from base.agents.messages.caller_identity import CallerIdentity
 from base.cluster.machine import machine_name
 from base.config import settings
-from base.db import create_agent
+from base.db import Database, create_agent
+from base.events.live.bus import EventBus
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from base.telemetry import Event
 from base.telemetry.audit_events import audit_event_uid, prepare_event_log
@@ -97,8 +99,12 @@ def _send_event(actor_id: int, target_id: int) -> Event:
 
 
 def _open(lease: dict[str, Any], agent_id: int, key: str) -> LocalParticipant:
-    participant = LocalParticipant(str(lease["id"]), agent_id, lease["session_id"], key)
-    assert open_local_participant(participant.lease_id, agent_id=agent_id, source_key=key)
+    participant = LocalParticipant(
+        str(lease["id"]), agent_id, lease["session_id"], key, Database.from_settings()
+    )
+    assert open_local_participant(
+        Database.from_settings(), participant.lease_id, agent_id=agent_id, source_key=key
+    )
     return participant
 
 
@@ -150,6 +156,7 @@ def test_a_service_owned_central_event_is_recorded_in_both_logs_before_it_is_emi
     owner: RuntimeIncarnation,
     lease: dict[str, Any],
     monkeypatch: pytest.MonkeyPatch,
+    database: Database,
 ) -> None:
     recipient = _owner(db_conn)
     seen_at_emit: list[tuple[int, int]] = []
@@ -165,15 +172,20 @@ def test_a_service_owned_central_event_is_recorded_in_both_logs_before_it_is_emi
 
     monkeypatch.setattr(telemetry, "emit_prepared", emit)
 
-    emit_recorded_central_event(_send_event(owner.agent_id, recipient.agent_id))
+    emit_recorded_central_event(database, _send_event(owner.agent_id, recipient.agent_id))
 
     assert seen_at_emit == [(1, 1)]
 
 
 def test_manual_leases_keep_no_event_log_and_protocol_less_leases_stay_legacy(
-    db_conn: psycopg.Connection[Any], owner: RuntimeIncarnation
+    db_conn: psycopg.Connection[Any],
+    owner: RuntimeIncarnation,
+    database: Database,
+    event_bus: EventBus,
 ) -> None:
     manual = leases.request(
+        database,
+        event_bus,
         owner.agent_id,
         caller=CallerIdentity(kind="external_agent", subject="manual-capture"),
         relay_provider="codex",
@@ -188,7 +200,7 @@ def test_manual_leases_keep_no_event_log_and_protocol_less_leases_stay_legacy(
     ).fetchone()
     assert row == (None,)
     document = history.build_document(
-        history.resolve(owner.agent_id, manual["session_id"]),
+        history.resolve(database, owner.agent_id, manual["session_id"]),
         history.entries(str(manual["id"]), db_conn),
     )
     assert document["statistics"]["event_delivery"]["pending_reason"] == "manual"
@@ -216,7 +228,11 @@ def test_a_held_sdk_call_keeps_its_admission_and_seals_its_source_when_it_drains
 
 
 def test_a_direct_audit_event_after_close_refuses_and_fails_the_source(
-    db_conn: psycopg.Connection[Any], owner: RuntimeIncarnation, lease: dict[str, Any]
+    db_conn: psycopg.Connection[Any],
+    owner: RuntimeIncarnation,
+    lease: dict[str, Any],
+    database: Database,
+    event_bus: EventBus,
 ) -> None:
     participant = _open(lease, owner.agent_id, "closed-direct")
     bind_local_participant(participant)
@@ -228,10 +244,16 @@ def test_a_direct_audit_event_after_close_refuses_and_fails_the_source(
         with pytest.raises(RuntimeError, match="Failed local impersonation event receipt"):
             seal_local_participant(participant)
         with pytest.raises(leases.ImpersonationError, match="Cannot release until every"):
-            leases.release(participant.lease_id, attested_caller(lease), "Direct audit refused")
+            leases.release(
+                database,
+                event_bus,
+                participant.lease_id,
+                attested_caller(lease),
+                "Direct audit refused",
+            )
     finally:
         unbind_local_participant(participant)
-    assert history.resolve(owner.agent_id, 0)["events_completed_at"] is None
+    assert history.resolve(database, owner.agent_id, 0)["events_completed_at"] is None
     assert db_conn.execute(
         "SELECT 1 FROM alerts WHERE labels->>'lease_id'=%s "
         "AND alertname='ImpersonationEventCaptureFailed'",
@@ -244,6 +266,7 @@ def test_a_transient_failure_stays_sticky_until_the_failed_source_persists(
     owner: RuntimeIncarnation,
     lease: dict[str, Any],
     monkeypatch: pytest.MonkeyPatch,
+    database: Database,
 ) -> None:
     """Neither a failed writer nor a failed alert can turn a lost event into a seal."""
     participant = _open(lease, owner.agent_id, "sticky")
@@ -276,7 +299,7 @@ def test_a_transient_failure_stays_sticky_until_the_failed_source_persists(
     finally:
         unbind_local_participant(participant)
     assert _state(db_conn, participant) == ("failed",)
-    assert pending_reason(history.resolve(owner.agent_id, 0)) == "capture_failed"
+    assert pending_reason(history.resolve(database, owner.agent_id, 0)) == "capture_failed"
 
 
 @pytest.fixture
@@ -312,6 +335,7 @@ def restricted_source(
             "'events_completed_at', 'UPDATE')"
         ).fetchone() == (False,)
     monkeypatch.setattr(settings.data_plane, "db_url", runner_url)
+    participant = dataclasses.replace(participant, db=Database.from_settings())
     try:
         yield participant
     finally:
@@ -349,6 +373,7 @@ def test_a_runner_failure_is_recorded_once_the_narrow_lock_is_available(
     owner: RuntimeIncarnation,
     restricted_source: LocalParticipant,
     monkeypatch: pytest.MonkeyPatch,
+    database: Database,
 ) -> None:
     participant = restricted_source
 
@@ -372,7 +397,7 @@ def test_a_runner_failure_is_recorded_once_the_narrow_lock_is_available(
         "WHERE lease_id=%s AND source_key=%s",
         (participant.lease_id, participant.source_key),
     ).fetchone() == ("failed", "capture_failed")
-    assert pending_reason(history.resolve(owner.agent_id, 0)) == "capture_failed"
+    assert pending_reason(history.resolve(database, owner.agent_id, 0)) == "capture_failed"
 
 
 def test_a_runner_completes_a_log_whose_source_seals_after_the_lease_ended(
@@ -380,6 +405,8 @@ def test_a_runner_completes_a_log_whose_source_seals_after_the_lease_ended(
     owner: RuntimeIncarnation,
     lease: dict[str, Any],
     restricted_source: LocalParticipant,
+    database: Database,
+    event_bus: EventBus,
 ) -> None:
     participant = restricted_source
     _restore_door(db_conn)
@@ -389,7 +416,10 @@ def test_a_runner_completes_a_log_whose_source_seals_after_the_lease_ended(
         (participant.lease_id,),
     )
     db_conn.commit()
-    assert leases.get(participant.lease_id, attested_caller(lease))["status"] == "expired"
-    assert history.resolve(owner.agent_id, 0)["events_completed_at"] is None
+    assert (
+        leases.get(database, event_bus, participant.lease_id, attested_caller(lease))["status"]
+        == "expired"
+    )
+    assert history.resolve(database, owner.agent_id, 0)["events_completed_at"] is None
     seal_local_participant(participant)
-    assert history.resolve(owner.agent_id, 0)["events_completed_at"] is not None
+    assert history.resolve(database, owner.agent_id, 0)["events_completed_at"] is not None

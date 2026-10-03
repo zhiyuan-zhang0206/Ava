@@ -5,10 +5,13 @@ from typing import Any
 from base.agents import impersonation as control
 from base.agents.impersonation.history import public_session, resolve
 from base.agents.messages.caller_identity import CallerIdentity
-from base.db import connect
+from base.db import Database
+from base.events.live.bus import EventBus
 
 
 def request(
+    db: Database,
+    bus: EventBus,
     agent_id: int,
     *,
     name: str,
@@ -29,6 +32,8 @@ def request(
     always hint immediately (validated 0..300; task #3696 exception inventory).
     """
     result = control.request(
+        db,
+        bus,
         agent_id,
         caller=CallerIdentity(kind="external_agent", subject=provider),
         name=name,
@@ -48,7 +53,7 @@ def request(
 
 
 def list_sessions(
-    agent_id: int, *, before: int | None = None, limit: int = 100
+    db: Database, agent_id: int, *, before: int | None = None, limit: int = 100
 ) -> list[dict[str, Any]]:
     """Page permanent history newest first; IDs are never reused.
 
@@ -59,7 +64,7 @@ def list_sessions(
 
     if not 1 <= limit <= 1000:
         raise ValueError("limit must be from 1 through 1000")
-    with connect() as conn, conn.cursor(row_factory=dict_row) as cur:
+    with db.connect() as conn, conn.cursor(row_factory=dict_row) as cur:
         cur.execute(
             "SELECT * FROM agent_impersonations WHERE agent_id=%s "
             "AND (%s::bigint IS NULL OR session_id<%s) ORDER BY session_id DESC LIMIT %s",
@@ -68,6 +73,6 @@ def list_sessions(
         return [public_session(row) for row in cur.fetchall()]
 
 
-def private_id(agent_id: int, session_id: int) -> str:
+def private_id(db: Database, agent_id: int, session_id: int) -> str:
     """Resolve one exact agent/session pair; no global integer lookup."""
-    return str(resolve(agent_id, session_id)["id"])
+    return str(resolve(db, agent_id, session_id)["id"])

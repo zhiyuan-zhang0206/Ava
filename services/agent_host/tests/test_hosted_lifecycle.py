@@ -33,7 +33,11 @@ from services.agent_host.host import AgentHost, kill_terminating_agent_shells
 
 @pytest.mark.parametrize("kind", ["restart", "terminate"])
 async def test_hosted_applies_only_after_continuation_returns(
-    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool, kind: str
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    kind: str,
+    database: Database,
+    event_bus: EventBus,
 ) -> None:
     agent_id = _agent(db_conn)
     old = await _admit(aops_pool, agent_id)
@@ -67,7 +71,13 @@ async def test_hosted_applies_only_after_continuation_returns(
         ).fetchone() == ("claimed",)
         task = asyncio.create_task(
             host._invoke_until_done(
-                agent_id, AvaContext(ops_pool=aops_pool, agent=AgentSlices.resolve())
+                agent_id,
+                AvaContext(
+                    ops_pool=aops_pool,
+                    agent=AgentSlices.resolve(),
+                    db=Database.from_settings(),
+                    bus=EventBus.from_settings(),
+                ),
             )
         )
         await asyncio.wait_for(entered.wait(), 2)
@@ -92,9 +102,9 @@ async def test_hosted_applies_only_after_continuation_returns(
         assert record[0] == "done" and record[2] is not None
     else:
         assert record[0] == "claimed" and record[2] is None
-        assert not await settle_hosted_runtime(aops_pool, old)
+        assert not await settle_hosted_runtime(aops_pool, old, bus=event_bus)
         new = await admit_hosted_runtime(
-            aops_pool, agent_id, "claim-test", uuid4(), expected_from="idling"
+            aops_pool, agent_id, "claim-test", uuid4(), expected_from="idling", db=database
         )
         assert new is not None and new.generation != old.generation
         assert db_conn.execute(
@@ -111,6 +121,7 @@ async def test_hosted_terminate_crash_has_no_applied_unobserved_gap(
     aops_pool: AsyncConnectionPool,
     monkeypatch: pytest.MonkeyPatch,
     crash: str,
+    event_bus: EventBus,
 ) -> None:
     agent_id = _agent(db_conn)
     owner = await _admit(aops_pool, agent_id)
@@ -159,7 +170,13 @@ async def test_hosted_terminate_crash_has_no_applied_unobserved_gap(
                 patch.setattr("services.agent_host.host.apply_hosted_lifecycle", fail_after_commit)
             with pytest.raises(RuntimeError, match="injected"):
                 await host._invoke_until_done(
-                    agent_id, AvaContext(ops_pool=aops_pool, agent=AgentSlices.resolve())
+                    agent_id,
+                    AvaContext(
+                        ops_pool=aops_pool,
+                        agent=AgentSlices.resolve(),
+                        db=Database.from_settings(),
+                        bus=EventBus.from_settings(),
+                    ),
                 )
         state = db_conn.execute(
             "SELECT status,applied_at IS NOT NULL,observed_at IS NOT NULL "
@@ -173,7 +190,13 @@ async def test_hosted_terminate_crash_has_no_applied_unobserved_gap(
         if crash != "after_commit":
             # Same admitted continuation can retry; cache absence is not a new owner.
             assert await host._invoke_until_done(
-                agent_id, AvaContext(ops_pool=aops_pool, agent=AgentSlices.resolve())
+                agent_id,
+                AvaContext(
+                    ops_pool=aops_pool,
+                    agent=AgentSlices.resolve(),
+                    db=Database.from_settings(),
+                    bus=EventBus.from_settings(),
+                ),
             )
     assert db_conn.execute(
         "SELECT lifecycle_command_id,status FROM agents_meta WHERE id=%s", (agent_id,)
@@ -184,14 +207,14 @@ async def test_hosted_terminate_crash_has_no_applied_unobserved_gap(
 
 
 async def test_existing_pg_backstop_finds_accepted_command_without_pending_rows(
-    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool
+    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool, event_bus: EventBus
 ) -> None:
     agent_id = _agent(db_conn)
     owner = await _admit(aops_pool, agent_id)
     inbound = _command(db_conn, agent_id, "restart")
     with bind_turn_identity(agent_id, incarnation=owner):
         assert [row.id for row in await claim_inbound_batch(aops_pool, agent_id)] == [inbound]
-    assert await settle_hosted_runtime(aops_pool, owner)
+    assert await settle_hosted_runtime(aops_pool, owner, bus=event_bus)
     host = AgentHost(
         pool=aops_pool,
         checkpointer=Mock(),
@@ -259,7 +282,13 @@ async def _run_terminating_turn(aops_pool: AsyncConnectionPool, agent_id: int) -
     )
     host._runtimes[agent_id] = Mock()
     assert await host._invoke_until_done(
-        agent_id, AvaContext(ops_pool=aops_pool, agent=AgentSlices.resolve())
+        agent_id,
+        AvaContext(
+            ops_pool=aops_pool,
+            agent=AgentSlices.resolve(),
+            db=Database.from_settings(),
+            bus=EventBus.from_settings(),
+        ),
     )
 
 
@@ -352,6 +381,7 @@ async def test_force_settlement_sweeps_requested_shell_sessions_again(
     aops_pool: AsyncConnectionPool,
     monkeypatch: pytest.MonkeyPatch,
     requested: bool,
+    database: Database,
 ) -> None:
     """A step still draining past a force's kill may create a shell; the live
     host sweeps again when it observes the force quiescent, before recording
@@ -367,7 +397,7 @@ async def test_force_settlement_sweeps_requested_shell_sessions_again(
         db=Database.from_settings(),
     )
     await admit_hosted_runtime(
-        aops_pool, agent_id, "claim-test", host._owner, expected_from="idling"
+        aops_pool, agent_id, "claim-test", host._owner, expected_from="idling", db=database
     )
     with ConnectionPool[psycopg.Connection](settings.data_plane.db_url) as pool:
         _, _, _, command = await asyncio.to_thread(
@@ -390,6 +420,7 @@ async def test_boot_recovery_sweeps_a_requested_force_shell_kill(
     aops_pool: AsyncConnectionPool,
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
+    database: Database,
 ) -> None:
     agent_id = _agent(db_conn)
     old = AgentHost(
@@ -401,7 +432,7 @@ async def test_boot_recovery_sweeps_a_requested_force_shell_kill(
         db=Database.from_settings(),
     )
     await admit_hosted_runtime(
-        aops_pool, agent_id, "claim-test", old._owner, expected_from="idling"
+        aops_pool, agent_id, "claim-test", old._owner, expected_from="idling", db=database
     )
     with ConnectionPool[psycopg.Connection](settings.data_plane.db_url) as pool:
         _, _, _, command = await asyncio.to_thread(

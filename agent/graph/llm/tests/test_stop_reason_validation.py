@@ -33,6 +33,8 @@ from agent.graph.llm_errors import (
     LLMStreamTruncatedError,
     LLMStreamUnexpectedStopReasonError,
 )
+from base.db import Database
+from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices
 from base.lm.plugin_providers import ensure_provider_plugins_loaded
 
@@ -295,7 +297,12 @@ async def test_llm_node_validator_wired(
     pub = MagicMock()
     ops_db = make_fake_ops_pool()
     ctx = AvaContext(
-        ops_pool=ops_db, llm=fake_llm, event_publisher=pub, agent=AgentSlices.resolve()
+        ops_pool=ops_db,
+        llm=fake_llm,
+        event_publisher=pub,
+        agent=AgentSlices.resolve(),
+        db=Database.from_settings(),
+        bus=EventBus.from_settings(),
     )
     runtime: Runtime[AvaContext] = Runtime(context=ctx)
     config: RunnableConfig = {"configurable": {"thread_id": "7"}}

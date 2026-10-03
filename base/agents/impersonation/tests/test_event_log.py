@@ -28,7 +28,8 @@ from base.agents.impersonation_manifest import (
     unbind_local_participant,
 )
 from base.cluster.machine import machine_name
-from base.db import create_agent
+from base.db import Database, create_agent
+from base.events.live.bus import EventBus
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from base.telemetry import Event
 from base.telemetry.audit_events import prepare_event_log
@@ -103,12 +104,24 @@ def _expire(db_conn: psycopg.Connection[Any], lease: dict[str, Any]) -> None:
         (lease["id"],),
     )
     db_conn.commit()
-    assert leases.get(str(lease["id"]), attested_caller(lease))["status"] == "expired"
+    assert (
+        leases.get(
+            Database.from_settings(),
+            EventBus.from_settings(),
+            str(lease["id"]),
+            attested_caller(lease),
+        )["status"]
+        == "expired"
+    )
 
 
 def _participant(owner: RuntimeIncarnation, lease: dict[str, Any], key: str) -> LocalParticipant:
-    participant = LocalParticipant(str(lease["id"]), owner.agent_id, lease["session_id"], key)
-    assert open_local_participant(participant.lease_id, agent_id=owner.agent_id, source_key=key)
+    participant = LocalParticipant(
+        str(lease["id"]), owner.agent_id, lease["session_id"], key, Database.from_settings()
+    )
+    assert open_local_participant(
+        Database.from_settings(), participant.lease_id, agent_id=owner.agent_id, source_key=key
+    )
     return participant
 
 
@@ -126,7 +139,11 @@ def test_new_automatic_lease_is_log_native(lease: dict[str, Any]) -> None:
 
 
 def test_central_event_commits_with_its_transaction_and_survives_a_lost_emit(
-    db_conn: psycopg.Connection[Any], owner: RuntimeIncarnation, lease: dict[str, Any]
+    db_conn: psycopg.Connection[Any],
+    owner: RuntimeIncarnation,
+    lease: dict[str, Any],
+    database: Database,
+    event_bus: EventBus,
 ) -> None:
     event = _central_event(db_conn, owner.agent_id)
     with db_conn.transaction(force_rollback=True):
@@ -140,8 +157,10 @@ def test_central_event_commits_with_its_transaction_and_survives_a_lost_emit(
     assert tagged.attributes["impersonation_session"] == f"{owner.agent_id}:0"
     assert _rows(db_conn, lease["id"], event_log.CENTRAL_SOURCE) == 1
 
-    leases.release(str(lease["id"]), attested_caller(lease), "Central work only")
-    ended = history.resolve(owner.agent_id, 0)
+    leases.release(
+        database, event_bus, str(lease["id"]), attested_caller(lease), "Central work only"
+    )
+    ended = history.resolve(database, owner.agent_id, 0)
     assert ended["events_completed_at"] is not None
     assert pending_reason(ended) is None
     document = history.build_document(ended, history.entries(str(ended["id"]), db_conn))
@@ -203,11 +222,17 @@ def test_resolving_a_reference_without_its_audit_row_fails_loudly(
 
 
 def test_central_append_stops_once_admission_closes(
-    db_conn: psycopg.Connection[Any], owner: RuntimeIncarnation, lease: dict[str, Any]
+    db_conn: psycopg.Connection[Any],
+    owner: RuntimeIncarnation,
+    lease: dict[str, Any],
+    database: Database,
+    event_bus: EventBus,
 ) -> None:
     participant = _participant(owner, lease, "closing")
     with pytest.raises(leases.ImpersonationError, match="participant seals"):
-        leases.release(participant.lease_id, attested_caller(lease), "Held SDK finally")
+        leases.release(
+            database, event_bus, participant.lease_id, attested_caller(lease), "Held SDK finally"
+        )
     event = _central_event(db_conn, owner.agent_id)
     with db_conn.transaction():
         untagged = record_central_event(db_conn, event)
@@ -223,7 +248,11 @@ def test_central_append_stops_once_admission_closes(
 
 
 def test_local_events_are_recorded_sealed_and_complete_at_release(
-    db_conn: psycopg.Connection[Any], owner: RuntimeIncarnation, lease: dict[str, Any]
+    db_conn: psycopg.Connection[Any],
+    owner: RuntimeIncarnation,
+    lease: dict[str, Any],
+    database: Database,
+    event_bus: EventBus,
 ) -> None:
     participant = _participant(owner, lease, "local-happy")
     first, second = _sdk_event(owner.agent_id, "one"), _sdk_event(owner.agent_id, "two")
@@ -236,8 +265,8 @@ def test_local_events_are_recorded_sealed_and_complete_at_release(
         (lease["id"],),
     ).fetchone() == ("sealed", 2)
 
-    leases.release(participant.lease_id, attested_caller(lease), "Local work")
-    ended = history.resolve(owner.agent_id, 0)
+    leases.release(database, event_bus, participant.lease_id, attested_caller(lease), "Local work")
+    ended = history.resolve(database, owner.agent_id, 0)
     assert ended["events_completed_at"] is not None
     document = history.build_document(ended, history.entries(str(ended["id"]), db_conn))
     assert document["statistics"]["event_delivery"]["sdk_calls"]["consumed_event_count"] == 2
@@ -245,27 +274,36 @@ def test_local_events_are_recorded_sealed_and_complete_at_release(
 
 
 def test_release_waits_for_an_open_source(
-    db_conn: psycopg.Connection[Any], owner: RuntimeIncarnation, lease: dict[str, Any]
+    db_conn: psycopg.Connection[Any],
+    owner: RuntimeIncarnation,
+    lease: dict[str, Any],
+    database: Database,
+    event_bus: EventBus,
 ) -> None:
     participant = _participant(owner, lease, "still-open")
     with pytest.raises(leases.ImpersonationError, match="participant seals"):
-        leases.release(participant.lease_id, attested_caller(lease), "Too early")
-    assert history.resolve(owner.agent_id, 0)["status"] == "active"
+        leases.release(
+            database, event_bus, participant.lease_id, attested_caller(lease), "Too early"
+        )
+    assert history.resolve(database, owner.agent_id, 0)["status"] == "active"
 
 
 def test_expiry_with_an_open_source_stays_pending_until_it_seals(
-    db_conn: psycopg.Connection[Any], owner: RuntimeIncarnation, lease: dict[str, Any]
+    db_conn: psycopg.Connection[Any],
+    owner: RuntimeIncarnation,
+    lease: dict[str, Any],
+    database: Database,
 ) -> None:
     participant = _participant(owner, lease, "late-seal")
     _expire(db_conn, lease)
-    ended = history.resolve(owner.agent_id, 0)
+    ended = history.resolve(database, owner.agent_id, 0)
     assert ended["events_completed_at"] is None
     assert pending_reason(ended) == "awaiting_participant_seal"
 
     _capture(participant, [_sdk_event(owner.agent_id, "after-expiry")])
     assert _rows(db_conn, lease["id"], "late-seal") == 1
     seal_local_participant(participant)
-    done = history.resolve(owner.agent_id, 0)
+    done = history.resolve(database, owner.agent_id, 0)
     assert done["events_completed_at"] is not None
     assert pending_reason(done) is None
 
@@ -301,6 +339,8 @@ def test_a_capture_failure_keeps_the_lease_pending_for_good(
     owner: RuntimeIncarnation,
     lease: dict[str, Any],
     monkeypatch: pytest.MonkeyPatch,
+    database: Database,
+    event_bus: EventBus,
 ) -> None:
     monkeypatch.setattr(event_log, "MAX_LOG_ENTRIES", 1)
     participant = _participant(owner, lease, "capped")
@@ -311,9 +351,11 @@ def test_a_capture_failure_keeps_the_lease_pending_for_good(
         (lease["id"],),
     ).fetchone() == ("failed",)
     with pytest.raises(leases.ImpersonationError, match="participant seals"):
-        leases.release(participant.lease_id, attested_caller(lease), "Capture failed")
+        leases.release(
+            database, event_bus, participant.lease_id, attested_caller(lease), "Capture failed"
+        )
     _expire(db_conn, lease)
-    ended = history.resolve(owner.agent_id, 0)
+    ended = history.resolve(database, owner.agent_id, 0)
     assert ended["events_completed_at"] is None
     assert pending_reason(ended) == "capture_failed"
 
@@ -348,7 +390,10 @@ def test_an_ended_lease_with_an_open_source_alerts_by_state_and_resolves_on_seal
 
 
 def test_agent_termination_completes_a_fully_sealed_lease(
-    db_conn: psycopg.Connection[Any], owner: RuntimeIncarnation, lease: dict[str, Any]
+    db_conn: psycopg.Connection[Any],
+    owner: RuntimeIncarnation,
+    lease: dict[str, Any],
+    database: Database,
 ) -> None:
     participant = _participant(owner, lease, "terminated")
     _capture(participant, [_sdk_event(owner.agent_id, "before-termination")])
@@ -356,13 +401,17 @@ def test_agent_termination_completes_a_fully_sealed_lease(
     # SQL ends the lease, then closes admission: the close must finish the lease too.
     db_conn.execute("UPDATE agents_meta SET status='terminated' WHERE id=%s", (owner.agent_id,))
     db_conn.commit()
-    ended = history.resolve(owner.agent_id, 0)
+    ended = history.resolve(database, owner.agent_id, 0)
     assert ended["status"] == "expired"
     assert ended["events_completed_at"] is not None
 
 
 def test_the_handoff_lists_events_in_call_order_not_write_order(
-    db_conn: psycopg.Connection[Any], owner: RuntimeIncarnation, lease: dict[str, Any]
+    db_conn: psycopg.Connection[Any],
+    owner: RuntimeIncarnation,
+    lease: dict[str, Any],
+    database: Database,
+    event_bus: EventBus,
 ) -> None:
     participant = _participant(owner, lease, "call-order")
     first = datetime.now(UTC)
@@ -372,9 +421,11 @@ def test_the_handoff_lists_events_in_call_order_not_write_order(
     ]
     _capture(participant, list(reversed(calls)))
     seal_local_participant(participant)
-    leases.release(participant.lease_id, attested_caller(lease), "Three calls in order")
+    leases.release(
+        database, event_bus, participant.lease_id, attested_caller(lease), "Three calls in order"
+    )
     document = history.build_document(
-        history.resolve(owner.agent_id, 0), history.entries(participant.lease_id, db_conn)
+        history.resolve(database, owner.agent_id, 0), history.entries(participant.lease_id, db_conn)
     )
     assert [row["payload"]["attributes"]["fn"] for row in document["sdk_events"]] == [
         "agents.list_agents",
@@ -389,6 +440,7 @@ def test_a_late_seal_rewrites_the_already_delivered_handoff_file(
     lease: dict[str, Any],
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
+    database: Database,
 ) -> None:
     from psycopg.types.json import Jsonb
 
@@ -398,7 +450,7 @@ def test_a_late_seal_rewrites_the_already_delivered_handoff_file(
     monkeypatch.setattr(history, "workspace_dir", workspace_for_agent)
     participant = _participant(owner, lease, "late-export")
     _expire(db_conn, lease)
-    ended = history.resolve(owner.agent_id, 0)
+    ended = history.resolve(database, owner.agent_id, 0)
     document, path = history.export_handoff(ended, db_conn)
     assert document["statistics"]["event_delivery"]["state"] == "pending"
     db_conn.execute(

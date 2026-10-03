@@ -212,7 +212,9 @@ class TestOwner:
         db_conn.commit()
         resurrection_calls: list[tuple[int, str]] = []
 
-        async def _record_resurrection(_db: object, agent_id: int, **kw: Any) -> AgentStatus:
+        async def _record_resurrection(
+            _db: object, _bus: object, agent_id: int, **kw: Any
+        ) -> AgentStatus:
             assert kw["trigger_inbound_id"] > 0
             resurrection_calls.append((agent_id, kw["trigger_inbound_kind"]))
             return cast("AgentStatus", "idling")

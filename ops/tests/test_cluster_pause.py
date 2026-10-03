@@ -15,9 +15,10 @@ import psycopg
 import pytest
 
 from base.cluster.machine import machine_name
-from base.db import create_agent, insert_inbound_message
+from base.db import Database, create_agent, insert_inbound_message
 from base.deploy.maintenance import admission, pause_owner
 from base.deploy.state.host_deploy_state import HostDeployState
+from base.events.live.bus import EventBus
 from ops import agent_pause, cluster_pause
 from ops.cluster_pause import unpause_local_cluster as _real_unpause_local_cluster
 
@@ -26,7 +27,9 @@ from ops.cluster_pause import unpause_local_cluster as _real_unpause_local_clust
 def posture(monkeypatch: pytest.MonkeyPatch) -> list[str]:
     """Record every `set_posture` call so the pairing is observable without a DB."""
     calls: list[str] = []
-    monkeypatch.setattr("base.deploy.state.host_deploy_state.set_posture", calls.append)
+    monkeypatch.setattr(
+        "base.deploy.state.host_deploy_state.set_posture", lambda _db, value: calls.append(value)
+    )
     return calls
 
 
@@ -70,37 +73,39 @@ def _state(posture: str) -> HostDeployState:
 
 def test_is_paused_judges_a_pre_read_state_without_another_db_read(
     monkeypatch: pytest.MonkeyPatch,
+    database: Database,
 ) -> None:
-    def _unexpected_read() -> HostDeployState | None:
+    def _unexpected_read(_db: object) -> HostDeployState | None:
         raise AssertionError("is_paused re-read host deploy state")
 
     monkeypatch.setattr("base.deploy.state.host_deploy_state.read", _unexpected_read)
 
-    assert cluster_pause.is_paused(_state("paused")) is True
-    assert cluster_pause.is_paused(_state("idle")) is False
-    assert cluster_pause.is_paused(None) is False
+    assert cluster_pause.is_paused(database, _state("paused")) is True
+    assert cluster_pause.is_paused(database, _state("idle")) is False
+    assert cluster_pause.is_paused(database, None) is False
 
 
 def test_is_paused_without_an_argument_still_reads_fresh(
     monkeypatch: pytest.MonkeyPatch,
+    database: Database,
 ) -> None:
     reads = 0
 
-    def _read() -> HostDeployState:
+    def _read(_db: object) -> HostDeployState:
         nonlocal reads
         reads += 1
         return _state("paused")
 
     monkeypatch.setattr("base.deploy.state.host_deploy_state.read", _read)
 
-    assert cluster_pause.is_paused() is True
+    assert cluster_pause.is_paused(database) is True
     assert reads == 1
 
 
 def test_pause_holds_admission_without_closing_dependencies(
-    posture: list[str], local_runtime: _StubBackend
+    posture: list[str], local_runtime: _StubBackend, database: Database, event_bus: EventBus
 ) -> None:
-    agent_pause.pause_agents()
+    agent_pause.pause_agents(database, event_bus)
     current = admission.snapshot()
     assert current is not None and current.maintenance is not None
     assert current.maintenance.phase == "drained"
@@ -108,36 +113,46 @@ def test_pause_holds_admission_without_closing_dependencies(
     assert local_runtime.has_answer and local_runtime.killed == []
 
 
-def test_unpause_writes_idle_posture(posture: list[str]) -> None:
-    agent_pause.pause_agents()
+def test_unpause_writes_idle_posture(
+    posture: list[str], database: Database, event_bus: EventBus
+) -> None:
+    agent_pause.pause_agents(database, event_bus)
 
-    cluster_pause.unpause_local_cluster()
+    cluster_pause.unpause_local_cluster(database, event_bus)
 
     assert posture == ["idle"]
     assert not admission.held()
 
 
-def test_unpause_without_pause_is_a_noop(posture: list[str]) -> None:
+def test_unpause_without_pause_is_a_noop(
+    posture: list[str], database: Database, event_bus: EventBus
+) -> None:
     """The compensating resume can arrive at a host that never paused (or already
     recovered); writing idle over an idle row is a no-op, never an error."""
-    cluster_pause.unpause_local_cluster()
+    cluster_pause.unpause_local_cluster(database, event_bus)
     assert posture == ["idle"]
 
 
-def test_pause_twice_then_unpause_once_clears(posture: list[str]) -> None:
+def test_pause_twice_then_unpause_once_clears(
+    posture: list[str], database: Database, event_bus: EventBus
+) -> None:
     """Idempotent pause: a second pause (e.g. a repeat Phase-A delivery) must not
     leave the host paused after a single unpause."""
-    agent_pause.pause_agents()
+    agent_pause.pause_agents(database, event_bus)
     first = pause_owner.read()
-    agent_pause.pause_agents()
+    agent_pause.pause_agents(database, event_bus)
     assert pause_owner.read() == first
-    cluster_pause.unpause_local_cluster()
+    cluster_pause.unpause_local_cluster(database, event_bus)
     assert posture == ["idle"]
     assert not admission.held()
 
 
 def test_pause_preserves_unclaimed_work_and_terminated_intent(
-    db_conn: psycopg.Connection, posture: list[str], local_runtime: _StubBackend
+    db_conn: psycopg.Connection,
+    posture: list[str],
+    local_runtime: _StubBackend,
+    database: Database,
+    event_bus: EventBus,
 ) -> None:
     agent, terminated = create_agent(db_conn), create_agent(db_conn)
     db_conn.execute(
@@ -145,9 +160,11 @@ def test_pause_preserves_unclaimed_work_and_terminated_intent(
         (agent, machine_name(), terminated, machine_name()),
     )
     db_conn.commit()
-    message = insert_inbound_message(db_conn, agent, "queued work", "user")
+    message = insert_inbound_message(
+        db_conn, agent, "queued work", "user", bus=event_bus, database=database
+    )
 
-    agent_pause.pause_agents()
+    agent_pause.pause_agents(database, event_bus)
 
     current = admission.snapshot()
     assert current is not None and current.maintenance is not None
@@ -167,6 +184,8 @@ def test_drain_timeout_retains_hold_and_action_dependencies(
     posture: list[str],
     local_runtime: _StubBackend,
     monkeypatch: pytest.MonkeyPatch,
+    database: Database,
+    event_bus: EventBus,
 ) -> None:
     agent = create_agent(db_conn)
     from ops.agent_pause.probe import HostIdentity
@@ -185,7 +204,7 @@ def test_drain_timeout_retains_hold_and_action_dependencies(
     db_conn.commit()
 
     with pytest.raises(TimeoutError, match="without force") as raised:
-        agent_pause.pause_agents(0.01)
+        agent_pause.pause_agents(database, event_bus, 0.01)
 
     current = admission.snapshot()
     assert current is not None and current.maintenance is not None
@@ -208,7 +227,10 @@ def test_drain_timeout_retains_hold_and_action_dependencies(
 
 
 def test_stall_report_names_the_predecessor_owner_fence(
-    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+    db_conn: psycopg.Connection,
+    monkeypatch: pytest.MonkeyPatch,
+    database: Database,
+    event_bus: EventBus,
 ) -> None:
     """An unowned row must be reported as the predecessor's fence, not guessed at.
 
@@ -222,7 +244,9 @@ def test_stall_report_names_the_predecessor_owner_fence(
 
     agent = create_agent(db_conn)
     predecessor, successor, generation = uuid4(), uuid4(), uuid4()
-    command = insert_inbound_message(db_conn, agent, "", "system:maintenance", kind="restart")
+    command = insert_inbound_message(
+        db_conn, agent, "", "system:maintenance", kind="restart", bus=event_bus, database=database
+    )
     db_conn.execute(
         "INSERT INTO agents_meta(id,status,machine,runtime_kind,runtime_owner,"
         "runtime_generation,lease_expires_at) VALUES(%s,'idling',%s,'hosted',"
@@ -233,7 +257,7 @@ def test_stall_report_names_the_predecessor_owner_fence(
     monkeypatch.setattr(agent_pause, "host_running", lambda: True)
     monkeypatch.setattr(agent_pause, "host_identity", lambda: HostIdentity(successor, frozenset()))
 
-    report = _stall_report(MaintenanceHold("draining", {agent: command}), [agent])
+    report = _stall_report(database, MaintenanceHold("draining", {agent: command}), [agent])
 
     assert f"owner={predecessor}" in report
     assert f"not the live boot {successor}" in report
@@ -241,17 +265,17 @@ def test_stall_report_names_the_predecessor_owner_fence(
 
 
 def test_unpause_changes_no_service_sessions(
-    posture: list[str], local_runtime: _StubBackend
+    posture: list[str], local_runtime: _StubBackend, database: Database, event_bus: EventBus
 ) -> None:
     """Service startup belongs to ava start; unpause only releases native admission."""
     local_runtime.has_answer = False
-    cluster_pause.unpause_local_cluster()
+    cluster_pause.unpause_local_cluster(database, event_bus)
     assert posture == ["idle"]
     assert local_runtime.spawned == local_runtime.killed == []
 
 
 def test_unpause_refuses_a_held_unit_whose_services_stopped(
-    monkeypatch: pytest.MonkeyPatch, posture: list[str]
+    monkeypatch: pytest.MonkeyPatch, posture: list[str], database: Database, event_bus: EventBus
 ) -> None:
     """A held unit whose services stopped resumes only after `ava start` passes readiness."""
     from base.deploy.maintenance.state import MaintenanceHold
@@ -262,6 +286,6 @@ def test_unpause_refuses_a_held_unit_whose_services_stopped(
     monkeypatch.setattr("base.deploy.lifecycle.start_serving.is_serving", lambda: False)
 
     with pytest.raises(RuntimeError) as raised:
-        cluster_pause.unpause_local_cluster()
+        cluster_pause.unpause_local_cluster(database, event_bus)
     assert str(raised.value) == "services have stopped; ava start must pass readiness before resume"
     assert posture == []

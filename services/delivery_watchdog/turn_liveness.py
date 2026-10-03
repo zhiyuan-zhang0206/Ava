@@ -189,7 +189,9 @@ def _recovery_trigger(pool: ConnectionPool, agent_id: int) -> int:
     return int(row[0])
 
 
-async def _recover_hosted_turn(pool: ConnectionPool, db: Database, wedge: _HostedTurnWedge) -> None:
+async def _recover_hosted_turn(
+    pool: ConnectionPool, db: Database, bus: EventBus, wedge: _HostedTurnWedge
+) -> None:
     """Record evidence, force-terminate the hosted incarnation together with its
     recovery wake, then resurrect."""
     _log.error(
@@ -226,6 +228,8 @@ async def _recover_hosted_turn(pool: ConnectionPool, db: Database, wedge: _Hoste
         from ops.rpc_schemas import TerminateAgentRequest
 
         await terminate_agent_op(
+            db,
+            bus,
             wedge.agent_id,
             TerminateAgentRequest(force=True, source="system"),
             pool,
@@ -234,6 +238,7 @@ async def _recover_hosted_turn(pool: ConnectionPool, db: Database, wedge: _Hoste
         trigger_id = await asyncio.to_thread(_recovery_trigger, pool, wedge.agent_id)
         status = await resurrect_if_terminated(
             db,
+            bus,
             wedge.agent_id,
             trigger_inbound_id=trigger_id,
             trigger_inbound_kind="chat",
@@ -263,7 +268,7 @@ def hosted_turn_threshold_seconds() -> float:
 
 
 async def _recover_within_deadline(
-    pool: ConnectionPool, db: Database, wedge: _HostedTurnWedge
+    pool: ConnectionPool, db: Database, bus: EventBus, wedge: _HostedTurnWedge
 ) -> None:
     """One recovery under the RPC deadline. A timeout between the terminate's
     commit and the resurrect leaves the committed recovery wake for the
@@ -271,7 +276,7 @@ async def _recover_within_deadline(
     try:
         try:
             async with asyncio.timeout(rounds.rpc_deadline_s()):
-                await _recover_hosted_turn(pool, db, wedge)
+                await _recover_hosted_turn(pool, db, bus, wedge)
         except TimeoutError:
             _log.error(
                 "[delivery] hosted turn recovery for agent %s exceeded %.0fs",
@@ -298,7 +303,7 @@ async def hosted_turn_recovery_round(
     )
     by_agent = {wedge.agent_id: wedge for wedge in wedges}
     await round_loop.fan_out(
-        [functools.partial(_recover_within_deadline, pool, db, by_agent[a]) for a in claimed],
+        [functools.partial(_recover_within_deadline, pool, db, bus, by_agent[a]) for a in claimed],
         concurrency=_HOSTED_TURN_RECOVERY_MAX_CONCURRENCY,
         progress=progress,
     )

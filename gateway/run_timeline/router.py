@@ -625,7 +625,7 @@ def get_run_timeline(
             # the pending-placeholder subtraction reads.
             activity=[(row.start, row.end) for row in aggregate.rows],
         )
-        inbounds = _inbounds_for_window(agent_id, window_start, window_end)
+        inbounds = _inbounds_for_window(db, agent_id, window_start, window_end)
         messages, messages_truncated = strip_read.result()
     return RunTimelineResponse(
         agent_id=agent_id,
@@ -729,7 +729,7 @@ def _narrative_for_window(
 
 
 def _inbounds_for_window(
-    agent_id: int, window_start: datetime, window_end: datetime
+    db: Database, agent_id: int, window_start: datetime, window_end: datetime
 ) -> list[RunTimelineInbound] | None:
     """Chat delivery facts in the window — the compare-view arrow source.
 
@@ -741,7 +741,7 @@ def _inbounds_for_window(
     from base.db import list_chat_inbound_facts
 
     try:
-        facts = list_chat_inbound_facts(agent_id, window_start, window_end)
+        facts = list_chat_inbound_facts(db, agent_id, window_start, window_end)
     except Exception:
         logger.exception("run-timeline inbound read failed for agent {}", agent_id)
         return None

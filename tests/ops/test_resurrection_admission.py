@@ -24,6 +24,7 @@ from base.cluster.machine import machine_name
 from base.config import settings
 from base.db import PG_KEEPALIVE_KWARGS, Database, insert_inbound_message
 from base.deploy.maintenance import cohort, pause_owner
+from base.events.live.bus import EventBus
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from base.native_process.turn_identity import bind_turn_identity
 from ops import cluster_rpc, lifecycle
@@ -39,7 +40,7 @@ from services.agent_host.tests.test_predecessor_closure import _closed_form, _re
 def wakes(monkeypatch: pytest.MonkeyPatch) -> Iterator[list[tuple[int, str]]]:
     captured: list[tuple[int, str]] = []
 
-    def _record(agent_id: int, payload: str) -> None:
+    def _record(_db: object, _bus: object, agent_id: int, payload: str) -> None:
         captured.append((agent_id, payload))
 
     monkeypatch.setattr(wake, "publish_inbound_wake", _record)
@@ -47,7 +48,9 @@ def wakes(monkeypatch: pytest.MonkeyPatch) -> Iterator[list[tuple[int, str]]]:
 
 
 def _terminated(db: psycopg.Connection, resources: object) -> int:
-    aid, _, _, _ = create_agent_row(spawner="user", machine=machine_name())
+    aid, _, _, _ = create_agent_row(
+        Database.from_settings(), EventBus.from_settings(), spawner="user", machine=machine_name()
+    )
     db.execute(
         "UPDATE agents_meta SET status='terminated',termination_source='user',"
         "incarnation_resources=%s WHERE id=%s",
@@ -77,15 +80,23 @@ async def test_never_admitted_birth_resurrects_as_a_fresh_hosted_birth(
     aops_pool: AsyncConnectionPool,
     wakes: list[tuple[int, str]],
     guarded: bool,
+    database: Database,
+    event_bus: EventBus,
 ) -> None:
     """No runtime identity plus the unconsumed fresh-INSERT marker proves no
     predecessor allocation exists: resurrection is a fresh birth."""
     marker = ResourceBirth(birth=uuid4()).model_dump(mode="json")
     aid = _terminated(db_conn, marker)
-    trigger = insert_inbound_message(db_conn, aid, "continue", "user") if guarded else None
+    trigger = (
+        insert_inbound_message(db_conn, aid, "continue", "user", bus=event_bus, database=database)
+        if guarded
+        else None
+    )
     db_conn.commit()
 
     wake.resurrect_agent(
+        database,
+        event_bus,
         aid,
         resurrected_by="system" if guarded else "user",
         trigger_inbound_id=trigger,
@@ -96,7 +107,7 @@ async def test_never_admitted_birth_resurrects_as_a_fresh_hosted_birth(
     assert _resources(db_conn, aid) == marker
     assert wakes == [(aid, "0")]
     incarnation = await admit_hosted_runtime(
-        aops_pool, aid, machine_name(), uuid4(), expected_from="idling"
+        aops_pool, aid, machine_name(), uuid4(), expected_from="idling", db=database
     )
     assert incarnation is not None
     admitted = decode_resources(_resources(db_conn, aid))
@@ -107,20 +118,32 @@ async def test_never_admitted_birth_resurrects_as_a_fresh_hosted_birth(
 @pytest.mark.parametrize("receipt", ["none", "unmarked", "foreign"])
 @pytest.mark.parametrize("trigger", [False, True])
 def test_fresh_birth_transition_reproves_its_evidence_under_the_row_lock(
-    db_conn: psycopg.Connection, trigger: bool, receipt: str
+    db_conn: psycopg.Connection,
+    trigger: bool,
+    receipt: str,
+    database: Database,
+    event_bus: EventBus,
 ) -> None:
     """The final CAS, not only the earlier read, requires the unconsumed marker
     or this agent's own unowned termination receipt."""
     aid = _terminated(db_conn, None)
     named: int | None = None
     if receipt == "unmarked":
-        named = insert_inbound_message(db_conn, aid, "", "user", kind="terminate")
+        named = insert_inbound_message(
+            db_conn, aid, "", "user", kind="terminate", bus=event_bus, database=database
+        )
     elif receipt == "foreign":
-        other, _, _, _ = create_agent_row(spawner="user", machine=machine_name())
+        other, _, _, _ = create_agent_row(
+            database, event_bus, spawner="user", machine=machine_name()
+        )
         db_conn.commit()
         named = _force(other)
         assert _unowned_receipt(db_conn, named)
-    chat = insert_inbound_message(db_conn, aid, "continue", "user") if trigger else None
+    chat = (
+        insert_inbound_message(db_conn, aid, "continue", "user", bus=event_bus, database=database)
+        if trigger
+        else None
+    )
     db_conn.commit()
     with db_conn.cursor() as cur, pytest.raises(ResurrectError, match="0 rows"):
         wake._transition_terminated_to_unclaimed_idling(
@@ -136,7 +159,11 @@ def test_fresh_birth_transition_reproves_its_evidence_under_the_row_lock(
 
 
 def test_retired_resources_require_cutover_before_resurrection(
-    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool, wakes: list[tuple[int, str]]
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    wakes: list[tuple[int, str]],
+    database: Database,
+    event_bus: EventBus,
 ) -> None:
     generation, owner = uuid4(), uuid4()
     before = _retired(generation, owner)
@@ -149,14 +176,18 @@ def test_retired_resources_require_cutover_before_resurrection(
     db_conn.commit()
 
     with pytest.raises(ResurrectRefused, match="runtime_cutover_required"):
-        wake.resurrect_agent(aid, resurrected_by="user")
+        wake.resurrect_agent(database, event_bus, aid, resurrected_by="user")
     assert _status(db_conn, aid) == ("terminated", "hosted")
     assert _resources(db_conn, aid) == before
     assert wakes == []
 
 
 async def test_closed_form_terminated_row_resurrects_through_its_terminate_receipt(
-    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool, wakes: list[tuple[int, str]]
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    wakes: list[tuple[int, str]],
+    database: Database,
+    event_bus: EventBus,
 ) -> None:
     generation, owner = uuid4(), uuid4()
     before = _retired(generation, owner) | {"frozen_by": 1}
@@ -176,9 +207,9 @@ async def test_closed_form_terminated_row_resurrects_through_its_terminate_recei
     db_conn.commit()
     _closed_form(db_conn, aid, before)
 
-    wake.resurrect_agent(aid, resurrected_by="user")
+    wake.resurrect_agent(database, event_bus, aid, resurrected_by="user")
     successor = await admit_hosted_runtime(
-        aops_pool, aid, machine_name(), uuid4(), expected_from="idling"
+        aops_pool, aid, machine_name(), uuid4(), expected_from="idling", db=database
     )
     assert successor is not None
     admitted = decode_resources(_resources(db_conn, aid))
@@ -190,7 +221,14 @@ def _refused_locally(monkeypatch: pytest.MonkeyPatch, db: psycopg.Connection) ->
     """A never-admitted row without the birth marker: unknown, so the real
     in-process op refuses and the chat stays queued."""
     aid = _terminated(db, None)
-    trigger = insert_inbound_message(db, aid, "are you there?", "user")
+    trigger = insert_inbound_message(
+        db,
+        aid,
+        "are you there?",
+        "user",
+        bus=EventBus.from_settings(),
+        database=Database.from_settings(),
+    )
     db.commit()
 
     async def _unreachable(*_a: object, **_kw: object) -> dict[str, Any]:
@@ -202,7 +240,14 @@ def _refused_locally(monkeypatch: pytest.MonkeyPatch, db: psycopg.Connection) ->
 
 def _refused_remotely(monkeypatch: pytest.MonkeyPatch, db: psycopg.Connection) -> tuple[int, int]:
     aid = _terminated(db, None)
-    trigger = insert_inbound_message(db, aid, "are you there?", "user")
+    trigger = insert_inbound_message(
+        db,
+        aid,
+        "are you there?",
+        "user",
+        bus=EventBus.from_settings(),
+        database=Database.from_settings(),
+    )
     db.commit()
 
     async def _failed(*_a: object, **_kw: object) -> dict[str, Any]:
@@ -218,10 +263,15 @@ async def test_auto_resurrect_refusal_is_a_warning_naming_the_reason(
     monkeypatch: pytest.MonkeyPatch,
     loguru_records: list[dict[str, Any]],
     arrange: Any,
+    event_bus: EventBus,
 ) -> None:
     aid, trigger = arrange(monkeypatch, db_conn)
     status = await lifecycle.resurrect_if_terminated(
-        Database.from_settings(), aid, trigger_inbound_id=trigger, trigger_inbound_kind="chat"
+        Database.from_settings(),
+        event_bus,
+        aid,
+        trigger_inbound_id=trigger,
+        trigger_inbound_kind="chat",
     )
     assert status is AgentStatus.TERMINATED
     refused = [r for r in loguru_records if r["extra"].get("event") == "auto_resurrect_refused"]
@@ -239,9 +289,13 @@ async def test_other_auto_resurrect_failures_stay_informational(
     db_conn: psycopg.Connection,
     monkeypatch: pytest.MonkeyPatch,
     loguru_records: list[dict[str, Any]],
+    database: Database,
+    event_bus: EventBus,
 ) -> None:
     aid = _terminated(db_conn, None)
-    trigger = insert_inbound_message(db_conn, aid, "hello", "user")
+    trigger = insert_inbound_message(
+        db_conn, aid, "hello", "user", bus=event_bus, database=database
+    )
     db_conn.commit()
 
     async def _failed(*_a: object, **_kw: object) -> dict[str, Any]:
@@ -249,7 +303,11 @@ async def test_other_auto_resurrect_failures_stay_informational(
 
     monkeypatch.setattr(cluster_rpc, "dispatch_to_machine", _failed)
     await lifecycle.resurrect_if_terminated(
-        Database.from_settings(), aid, trigger_inbound_id=trigger, trigger_inbound_kind="chat"
+        Database.from_settings(),
+        event_bus,
+        aid,
+        trigger_inbound_id=trigger,
+        trigger_inbound_kind="chat",
     )
     events = [r["extra"].get("event") for r in loguru_records if r["level"].name == "WARNING"]
     assert "auto_resurrect_refused" not in events
@@ -292,21 +350,27 @@ def _unowned_idle(db: psycopg.Connection, aid: int) -> bool:
 
 def _legacy_row(db: psycopg.Connection) -> int:
     """A row no birth epoch vouches for: only a later lifecycle release can."""
-    aid, _, _, _ = create_agent_row(spawner="user", machine=machine_name())
+    aid, _, _, _ = create_agent_row(
+        Database.from_settings(), EventBus.from_settings(), spawner="user", machine=machine_name()
+    )
     db.execute("UPDATE agents_meta SET last_resurrect_inbound_id=NULL WHERE id=%s", (aid,))
     db.commit()
     return aid
 
 
 async def _admitted(pool: AsyncConnectionPool, aid: int) -> RuntimeIncarnation:
-    owner = await admit_hosted_runtime(pool, aid, machine_name(), uuid4(), expected_from="idling")
+    owner = await admit_hosted_runtime(
+        pool, aid, machine_name(), uuid4(), expected_from="idling", db=Database.from_settings()
+    )
     assert owner is not None
     return owner
 
 
 async def _spawned(db: psycopg.Connection, pool: AsyncConnectionPool) -> int:
     """(a) a new agent never admitted: its birth epoch is its origin."""
-    aid, _, _, _ = create_agent_row(spawner="user", machine=machine_name())
+    aid, _, _, _ = create_agent_row(
+        Database.from_settings(), EventBus.from_settings(), spawner="user", machine=machine_name()
+    )
     return aid
 
 
@@ -319,7 +383,9 @@ async def _resurrected(db: psycopg.Connection, pool: AsyncConnectionPool) -> int
         (aid,),
     )
     db.commit()
-    wake.resurrect_agent(aid, resurrected_by="user")
+    wake.resurrect_agent(
+        Database.from_settings(), EventBus.from_settings(), aid, resurrected_by="user"
+    )
     return aid
 
 
@@ -327,11 +393,19 @@ async def _restarted(db: psycopg.Connection, pool: AsyncConnectionPool) -> int:
     """(c) released by its applied restart, no successor admitted yet."""
     aid = _legacy_row(db)
     owner = await _admitted(pool, aid)
-    insert_inbound_message(db, aid, "", "user", kind="restart")
+    insert_inbound_message(
+        db,
+        aid,
+        "",
+        "user",
+        kind="restart",
+        bus=EventBus.from_settings(),
+        database=Database.from_settings(),
+    )
     db.commit()
     with bind_turn_identity(aid, incarnation=owner):
         await claim_inbound_batch(pool, aid)
-        assert await apply_hosted_lifecycle(pool, owner) == "restart"
+        assert await apply_hosted_lifecycle(pool, owner, bus=EventBus.from_settings()) == "restart"
     return aid
 
 
@@ -343,6 +417,8 @@ async def test_a_row_this_runtime_left_and_ended_unowned_resurrects(
     wakes: list[tuple[int, str]],
     arrange: _Arrange,
     guarded: bool,
+    database: Database,
+    event_bus: EventBus,
 ) -> None:
     """Each way this runtime leaves a row unowned, then a force before the next
     admission: the force records the receipt, the row resurrects as a fresh
@@ -351,11 +427,17 @@ async def test_a_row_this_runtime_left_and_ended_unowned_resurrects(
     assert _unowned_idle(db_conn, aid)
     force = _force(aid)
     assert _unowned_receipt(db_conn, force)
-    trigger = insert_inbound_message(db_conn, aid, "continue", "user") if guarded else None
+    trigger = (
+        insert_inbound_message(db_conn, aid, "continue", "user", bus=event_bus, database=database)
+        if guarded
+        else None
+    )
     db_conn.commit()
     wakes.clear()
 
     wake.resurrect_agent(
+        database,
+        event_bus,
         aid,
         resurrected_by="system" if guarded else "user",
         trigger_inbound_id=trigger,
@@ -368,7 +450,10 @@ async def test_a_row_this_runtime_left_and_ended_unowned_resurrects(
 
 
 async def test_a_managed_row_ended_unowned_keeps_its_predecessor_receipt(
-    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    database: Database,
+    event_bus: EventBus,
 ) -> None:
     """(b) with a recorded resource set: resurrection keeps the closed set, the
     force leaves the terminate receipt alone, and the successor is admitted
@@ -388,10 +473,10 @@ async def test_a_managed_row_ended_unowned_keeps_its_predecessor_receipt(
         (generation, owner, aid),
     )
     db_conn.commit()
-    wake.resurrect_agent(aid, resurrected_by="user")
+    wake.resurrect_agent(database, event_bus, aid, resurrected_by="user")
     assert _unowned_receipt(db_conn, _force(aid))
 
-    wake.resurrect_agent(aid, resurrected_by="user")
+    wake.resurrect_agent(database, event_bus, aid, resurrected_by="user")
 
     successor = await _admitted(aops_pool, aid)
     admitted = decode_resources(_resources(db_conn, aid))
@@ -410,10 +495,14 @@ def _legacy_forced_beside_a_marked_neighbour(db: psycopg.Connection) -> int:
     """As above while another agent carries both facts: a lifecycle release
     (its resurrection) and an unowned termination receipt (the force before
     it). Both facts are per agent, so a neighbour's prove nothing here."""
-    other, _, _, _ = create_agent_row(spawner="user", machine=machine_name())
+    other, _, _, _ = create_agent_row(
+        Database.from_settings(), EventBus.from_settings(), spawner="user", machine=machine_name()
+    )
     db.commit()
     assert _unowned_receipt(db, _force(other))
-    wake.resurrect_agent(other, resurrected_by="user")
+    wake.resurrect_agent(
+        Database.from_settings(), EventBus.from_settings(), other, resurrected_by="user"
+    )
     released = db.execute(
         "SELECT count(*) FROM inbound_messages WHERE agent_id=%s AND kind='resurrect' "
         "AND payload->'lifecycle_release' = 'true'::jsonb",
@@ -435,7 +524,9 @@ def _legacy_termination_swept(db: psycopg.Connection) -> int:
 
 def _partial_identity_forced(db: psycopg.Connection) -> int:
     """A born row whose identity is not empty: a historical process kind."""
-    aid, _, _, _ = create_agent_row(spawner="user", machine=machine_name())
+    aid, _, _, _ = create_agent_row(
+        Database.from_settings(), EventBus.from_settings(), spawner="user", machine=machine_name()
+    )
     db.execute("UPDATE agents_meta SET runtime_kind='process' WHERE id=%s", (aid,))
     db.commit()
     _force(aid)
@@ -444,9 +535,13 @@ def _partial_identity_forced(db: psycopg.Connection) -> int:
 
 def _earlier_life_receipt(db: psycopg.Connection) -> int:
     """A receipt ended an earlier life; this life ended without one."""
-    aid, _, _, _ = create_agent_row(spawner="user", machine=machine_name())
+    aid, _, _, _ = create_agent_row(
+        Database.from_settings(), EventBus.from_settings(), spawner="user", machine=machine_name()
+    )
     _force(aid)
-    wake.resurrect_agent(aid, resurrected_by="user")
+    wake.resurrect_agent(
+        Database.from_settings(), EventBus.from_settings(), aid, resurrected_by="user"
+    )
     db.execute(
         "UPDATE agents_meta SET status='terminated',termination_source='user' WHERE id=%s",
         (aid,),
@@ -469,6 +564,8 @@ def test_an_unowned_end_without_this_lifes_receipt_still_refuses(
     db_conn: psycopg.Connection,
     wakes: list[tuple[int, str]],
     arrange: Callable[[psycopg.Connection], int],
+    database: Database,
+    event_bus: EventBus,
 ) -> None:
     aid = arrange(db_conn)
     receipts = db_conn.execute(
@@ -482,19 +579,22 @@ def test_an_unowned_end_without_this_lifes_receipt_still_refuses(
     wakes.clear()
 
     with pytest.raises(ResurrectRefused, match="runtime_cutover_required"):
-        wake.resurrect_agent(aid, resurrected_by="user")
+        wake.resurrect_agent(database, event_bus, aid, resurrected_by="user")
 
     assert _status(db_conn, aid)[0] == "terminated"
     assert wakes == []
 
 
 async def test_a_force_on_a_live_incarnation_records_no_unowned_receipt(
-    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    database: Database,
+    event_bus: EventBus,
 ) -> None:
     """An idle agent its host still owns: the force targets that incarnation,
     and resurrection waits for the original host to observe it, whatever origin
     the row has."""
-    aid, _, _, _ = create_agent_row(spawner="user", machine=machine_name())
+    aid, _, _, _ = create_agent_row(database, event_bus, spawner="user", machine=machine_name())
     await _admitted(aops_pool, aid)
     db_conn.execute("UPDATE agents_meta SET status='idling' WHERE id=%s", (aid,))
     db_conn.commit()
@@ -503,7 +603,7 @@ async def test_a_force_on_a_live_incarnation_records_no_unowned_receipt(
 
     assert not _unowned_receipt(db_conn, force)
     with pytest.raises(ResurrectSettlementDeferredError):
-        wake.resurrect_agent(aid, resurrected_by="user")
+        wake.resurrect_agent(database, event_bus, aid, resurrected_by="user")
     assert _status(db_conn, aid) == ("terminated", "hosted")
 
 
@@ -512,6 +612,8 @@ async def test_maintenance_parks_a_resurrected_unowned_row_and_ignores_its_recei
     aops_pool: AsyncConnectionPool,
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
+    database: Database,
+    event_bus: EventBus,
 ) -> None:
     """A resurrected row is the unowned idle row it was before the force, which
     the drain parks; a terminated row carrying a receipt is outside its cohort."""
@@ -519,15 +621,19 @@ async def test_maintenance_parks_a_resurrected_unowned_row_and_ignores_its_recei
     monkeypatch.setattr(pause_owner, "lock_path", lambda: tmp_path / "pause.lock")
     resurrected = await _restarted(db_conn, aops_pool)
     _force(resurrected)
-    wake.resurrect_agent(resurrected, resurrected_by="user")
-    ended, _, _, _ = create_agent_row(spawner="user", machine=machine_name())
+    wake.resurrect_agent(database, event_bus, resurrected, resurrected_by="user")
+    ended, _, _, _ = create_agent_row(database, event_bus, spawner="user", machine=machine_name())
     assert _unowned_receipt(db_conn, _force(ended))
     when = datetime(2026, 9, 29, 3, 0, tzinfo=UTC)
     holder = "ops:test:unowned"
     pause_owner.begin_maintenance(holder, when)
 
     hold = cohort.prepare(
-        db_conn, machine=machine_name(), host_owner=None, holder=holder, acquired_at=when
+        db_conn,
+        machine=machine_name(),
+        host_owner=None,
+        holder=holder,
+        acquired_at=when,
     )
 
     assert hold.phase == "draining"

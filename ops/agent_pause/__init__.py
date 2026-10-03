@@ -18,10 +18,11 @@ from uuid import UUID, uuid4
 
 from base.agents.incarnation.resource_admission import DRAINED_RESOURCES
 from base.cluster.machine import machine_name, machine_role
-from base.db import connect, publish_inbound_wake
+from base.db import Database, publish_inbound_wake
 from base.deploy.maintenance import admission, cohort, pause_owner
 from base.deploy.maintenance.hold_driver import HoldDriver
 from base.deploy.maintenance.state import MaintenanceHold
+from base.events.live.bus import EventBus
 from ops.agent_pause.probe import HostIdentity, host_identity, host_running
 
 _log = logging.getLogger(__name__)
@@ -44,9 +45,9 @@ def _hold(holder: str, at: datetime) -> MaintenanceHold:
     return current.maintenance
 
 
-def _wake(hold: MaintenanceHold) -> None:
+def _wake(db: Database, bus: EventBus, hold: MaintenanceHold) -> None:
     for agent in hold.commands:
-        publish_inbound_wake(agent, "maintenance")
+        publish_inbound_wake(db, bus, agent, "maintenance")
 
 
 def _lifecycle_wait_seconds() -> float:
@@ -71,7 +72,9 @@ def _emit_lifecycle_wait(waited: float, outcome: str, agents: tuple[int, ...]) -
     )
 
 
-def prepare(holder: str, at: datetime, *, driver: HoldDriver | None = None) -> None:
+def prepare(
+    db: Database, bus: EventBus, holder: str, at: datetime, *, driver: HoldDriver | None = None
+) -> None:
     """Publish the hold and enqueue restarts.
 
     `driver` is the shepherding identity of an operator-side entry (task
@@ -91,7 +94,7 @@ def prepare(holder: str, at: datetime, *, driver: HoldDriver | None = None) -> N
     # admission fence. First deployment of this protocol needs separate proof.
     pause_owner.begin_maintenance(holder, at, driver=driver)
     if "agent-runner" not in roles:
-        with connect() as conn:
+        with db.connect() as conn:
             row = conn.execute(
                 "SELECT 1 FROM agents_meta WHERE machine=%s AND status<>'terminated' LIMIT 1",
                 (machine_name(),),
@@ -104,14 +107,19 @@ def prepare(holder: str, at: datetime, *, driver: HoldDriver | None = None) -> N
                 holder, at, current, MaintenanceHold("draining"), refresh_driver=driver is not None
             )
         return
-    hold = _prepare_cohort(holder, at, identity, driver=driver)
+    hold = _prepare_cohort(db, holder, at, identity, driver=driver)
     if identity is not None and host_identity().owner != identity.owner:
         raise RuntimeError("agent-host changed boot during preparation; hold retained")
-    _wake(hold)
+    _wake(db, bus, hold)
 
 
 def _prepare_cohort(
-    holder: str, at: datetime, identity: HostIdentity | None, *, driver: HoldDriver | None
+    db: Database,
+    holder: str,
+    at: datetime,
+    identity: HostIdentity | None,
+    *,
+    driver: HoldDriver | None,
 ) -> MaintenanceHold:
     """Prepare the cohort, bounded-waiting out in-flight work it did not author.
 
@@ -128,7 +136,7 @@ def _prepare_cohort(
     # quiesce-exempt: the pause command's own bounded prepare wait; it runs before the window opens
     while True:
         try:
-            with connect() as conn:
+            with db.connect() as conn:
                 hold = cohort.prepare(
                     conn,
                     machine=machine_name(),
@@ -163,7 +171,7 @@ def _prepare_cohort(
         return hold
 
 
-def drain(holder: str, at: datetime, timeout: float) -> None:
+def drain(db: Database, holder: str, at: datetime, timeout: float) -> None:
     if not math.isfinite(timeout) or timeout <= 0:
         raise ValueError("drain timeout must be finite and positive")
     deadline = time.monotonic() + timeout
@@ -181,7 +189,7 @@ def drain(holder: str, at: datetime, timeout: float) -> None:
                 f"{holder} --acquired-at {at.isoformat()}"
             )
         if set(hold.drained) == set(hold.commands):
-            with connect() as conn:
+            with db.connect() as conn:
                 cohort.verify_drained(conn, hold)
             # Wait out the host's still-registering turns.
             if "agent-runner" in machine_role() and host_running() and host_identity().active:
@@ -200,12 +208,12 @@ def drain(holder: str, at: datetime, timeout: float) -> None:
         if remaining <= 0:
             raise TimeoutError(
                 "drain timed out without force; hold retained for agents "
-                f"{pending}\n{_stall_report(hold, pending)}"
+                f"{pending}\n{_stall_report(db, hold, pending)}"
             )
         time.sleep(min(0.2, remaining))
 
 
-def _stall_report(hold: MaintenanceHold, pending: list[int]) -> str:
+def _stall_report(db: Database, hold: MaintenanceHold, pending: list[int]) -> str:
     """One line per unfinished agent: delivery state, row fences and host view.
 
     A bare agent list leaves a consuming agent indistinguishable from one
@@ -228,7 +236,7 @@ def _stall_report(hold: MaintenanceHold, pending: list[int]) -> str:
         notes.append(f"host identity unavailable: {exc}")
     commands = {agent: hold.commands[agent] for agent in pending}
     try:
-        with connect() as conn:
+        with db.connect() as conn:
             raw_rows = conn.execute(
                 "SELECT m.status, m.runtime_kind, m.runtime_owner, "  # noqa: S608 -- constant SQL fragment
                 "m.lease_expires_at IS NOT NULL AND m.lease_expires_at > clock_timestamp(), "
@@ -295,7 +303,11 @@ def _stall_line(
 
 
 def pause_agents(
-    timeout: float = PAUSE_TIMEOUT_SECONDS, *, driver: HoldDriver | None = None
+    db: Database,
+    bus: EventBus,
+    timeout: float = PAUSE_TIMEOUT_SECONDS,
+    *,
+    driver: HoldDriver | None = None,
 ) -> None:
     """Idempotently drain this unit, leaving persistent terminals untouched.
 
@@ -320,13 +332,13 @@ def pause_agents(
         or current.maintenance is None
         or current.maintenance.phase == "preparing"
     ):
-        prepare(holder, at, driver=driver)
+        prepare(db, bus, holder, at, driver=driver)
     hold = _hold(holder, at)
     if hold.phase in ("preparing", "draining", "drained"):
-        drain(holder, at, timeout)
+        drain(db, holder, at, timeout)
 
 
-def resume_agents() -> None:
+def resume_agents(db: Database, bus: EventBus) -> None:
     """Release the current local admission hold after start or an aborted drain."""
     current = admission.snapshot()
     if current is None:
@@ -342,4 +354,4 @@ def resume_agents() -> None:
     pause_owner.change_maintenance(
         current.holder, current.acquired_at, current.maintenance, current.maintenance, resumed=True
     )
-    _wake(current.maintenance)
+    _wake(db, bus, current.maintenance)

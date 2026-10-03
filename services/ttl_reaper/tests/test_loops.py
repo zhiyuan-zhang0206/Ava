@@ -201,32 +201,35 @@ def _count_slow_phases(monkeypatch: pytest.MonkeyPatch) -> dict[str, int]:
 
 
 async def test_slow_phases_run_once_per_cadence_not_once_per_round(
-    db_conn: psycopg.Connection, pool: ConnectionPool, monkeypatch: pytest.MonkeyPatch
+    db_conn: psycopg.Connection,
+    pool: ConnectionPool,
+    monkeypatch: pytest.MonkeyPatch,
+    database: Database,
 ) -> None:
     monkeypatch.setattr(settings.daemon, "schedule_fire_log_cleanup_interval_seconds", 86400.0)
     calls = _count_slow_phases(monkeypatch)
 
-    await sweep.sweep_round(pool, EventBus.from_settings(), _progress())
-    await sweep.sweep_round(pool, EventBus.from_settings(), _progress())
+    await sweep.sweep_round(pool, database, EventBus.from_settings(), _progress())
+    await sweep.sweep_round(pool, database, EventBus.from_settings(), _progress())
     assert calls == {"prune": 1, "torn": 1, "settle": 1}
 
     # Two hours on: the hourly phases are due again, the daily prune is not.
     _backdate(db_conn, cadence.TORN_POINTER_SCAN, 7200.0)
     _backdate(db_conn, cadence.ABSENT_FENCE_SETTLE, 7200.0)
     _backdate(db_conn, cadence.FIRE_LOG_PRUNE, 7200.0)
-    await sweep.sweep_round(pool, EventBus.from_settings(), _progress())
+    await sweep.sweep_round(pool, database, EventBus.from_settings(), _progress())
     assert calls == {"prune": 1, "torn": 2, "settle": 2}
 
 
 async def test_a_restarted_sweep_does_not_rerun_phases_it_already_ran(
-    pool: ConnectionPool, monkeypatch: pytest.MonkeyPatch
+    pool: ConnectionPool, monkeypatch: pytest.MonkeyPatch, database: Database
 ) -> None:
     calls = _count_slow_phases(monkeypatch)
-    await sweep.sweep_round(pool, EventBus.from_settings(), _progress())
+    await sweep.sweep_round(pool, database, EventBus.from_settings(), _progress())
     assert calls == {"prune": 1, "torn": 1, "settle": 1}
 
     # A new process: nothing in memory, the clocks are the table's.
-    await sweep.sweep_round(pool, EventBus.from_settings(), _progress())
+    await sweep.sweep_round(pool, database, EventBus.from_settings(), _progress())
     assert calls == {"prune": 1, "torn": 1, "settle": 1}
 
 
@@ -238,7 +241,9 @@ async def test_the_remote_round_reaps_shells_then_redelivers_work_failures(
 ) -> None:
     order: list[str] = []
 
-    async def reap(_pool: object, _db: object, _progress: object) -> list[tuple[int, int]]:
+    async def reap(
+        _pool: object, _db: object, _bus: EventBus, _progress: object
+    ) -> list[tuple[int, int]]:
         order.append("shells")
         return []
 
@@ -273,6 +278,7 @@ def _rows(*placements: tuple[str, int]) -> list[dict[str, object]]:
 
 async def test_machines_are_reclaimed_concurrently_and_one_machines_rows_in_order(
     monkeypatch: pytest.MonkeyPatch,
+    event_bus: EventBus,
 ) -> None:
     """A slow machine holds up only its own rows: while machine `slow` is wedged
     in a dispatch, machine `fast` finishes both of its rows."""
@@ -281,7 +287,7 @@ async def test_machines_are_reclaimed_concurrently_and_one_machines_rows_in_orde
     finished: list[tuple[str, int]] = []
 
     async def reclaim(
-        _pool: object, _db: object, machine: str, row: dict[str, Any]
+        _pool: object, _db: object, _bus: EventBus, machine: str, row: dict[str, Any]
     ) -> tuple[int, int] | None:
         started.append((machine, row["session_id"]))
         if machine == "slow":
@@ -297,7 +303,7 @@ async def test_machines_are_reclaimed_concurrently_and_one_machines_rows_in_orde
 
     faked_pool = cast(ConnectionPool, None)  # every pool consumer above is faked
     task = asyncio.create_task(
-        shells.reap_expired_shells(faked_pool, Database.from_settings(), _progress())
+        shells.reap_expired_shells(faked_pool, Database.from_settings(), event_bus, _progress())
     )
     for _ in range(100):
         if [m for m, _ in finished].count("fast") == 2:
@@ -343,7 +349,7 @@ def test_the_dispatch_deadline_covers_the_clients_full_retry_budget(
 
 
 def _sweep_loop(pool: ConnectionPool, progress: LoopProgress) -> Coroutine[Any, Any, None]:
-    return sweep.sweep_loop(pool, EventBus.from_settings(), progress)
+    return sweep.sweep_loop(pool, Database.from_settings(), EventBus.from_settings(), progress)
 
 
 def _remote_loop(pool: ConnectionPool, progress: LoopProgress) -> Coroutine[Any, Any, None]:

@@ -684,7 +684,8 @@ async def run() -> None:
     reconcile_progress = liveness.register("reconcile", _LIVENESS_TIMEOUT_S)
     dead_pages_progress = liveness.register("dead_show_pages", _DEAD_PAGES_LIVENESS_TIMEOUT_S)
     health = await start_health_server("page_server", _endpoint().health_port, liveness=liveness)
-    pool = Database.from_settings().pool()
+    db = Database.from_settings()
+    pool = db.pool()
     config, bus = page_server_config(), EventBus.from_settings()
     try:
         # One TaskGroup owns the resident loops, each with its own progress tracker so
@@ -693,7 +694,9 @@ async def run() -> None:
         async with asyncio.TaskGroup() as loops:
             loops.create_task(_reconcile_loop(pool, reconcile_progress, config, bus))
             loops.create_task(
-                dead_pages.dead_pages_loop(pool, reachable_host(), dead_pages_progress, config, bus)
+                dead_pages.dead_pages_loop(
+                    pool, db, reachable_host(), dead_pages_progress, config, bus
+                )
             )
     finally:
         await stop_health_server(health)

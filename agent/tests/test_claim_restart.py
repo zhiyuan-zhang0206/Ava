@@ -20,7 +20,8 @@ from agent.tests.claim_support import (
     _insert_inbound_kind,
     _make_runtime,
 )
-from base.db import insert_inbound_message
+from base.db import Database, insert_inbound_message
+from base.events.live.bus import EventBus
 from tests.fixtures.units import spawn_agent
 from tests.path_scoped.agent_tests import _fresh_snapshot_cursor as _fresh_snapshot_cursor
 from tests.path_scoped.agent_tests import (
@@ -224,12 +225,16 @@ async def test_claim_restart_system_update_after_self_update_wakes(
 
 
 async def test_claim_restart_preserves_chat_for_successor(
-    running_agent: Callable[[], int], db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool
+    running_agent: Callable[[], int],
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    database: Database,
+    event_bus: EventBus,
 ):
     """Only the accepted lifecycle command dispatches; chat remains durable pending work."""
     tid = running_agent()
     _set_agent_status(db_conn, tid, "running")
-    insert_inbound_message(db_conn, tid, "hello", source="user")
+    insert_inbound_message(db_conn, tid, "hello", source="user", bus=event_bus, database=database)
     _insert_inbound_kind(db_conn, tid, "", "restart", source="system:update")
 
     cmd = await claim_node(
@@ -316,13 +321,18 @@ async def test_claim_restart_completed_while_idle_stays_silent(
 
 
 async def test_claim_restart_completed_with_chat_cobatch_wakes(
-    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    database: Database,
+    event_bus: EventBus,
 ):
     """halted=True but batch has chat in addition to restart_completed (user message that arrived
     during agent downtime window) → wakes normally to before_llm, must not silently swallow the chat."""
     tid = spawn_agent()
     _insert_inbound_kind(db_conn, tid, "", "restart_completed", source="system:update")
-    insert_inbound_message(db_conn, tid, "are you back?", source="user")
+    insert_inbound_message(
+        db_conn, tid, "are you back?", source="user", bus=event_bus, database=database
+    )
 
     cmd = await claim_node(
         AgentState(messages=[SystemMessage(content="sys")], halted=True),

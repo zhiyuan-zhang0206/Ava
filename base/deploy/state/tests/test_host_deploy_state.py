@@ -39,48 +39,48 @@ def _machine() -> str:
     return machine_name()
 
 
-def test_no_row_reads_as_none() -> None:
-    assert hds.read() is None
+def test_no_row_reads_as_none(database: Database) -> None:
+    assert hds.read(database) is None
 
 
 def test_read_uses_the_callers_connection(
-    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch, database: Database
 ) -> None:
     """A bundled snapshot can read the row without opening or owning another connection."""
-    hds.set_posture("paused")
+    hds.set_posture(database, "paused")
 
     def _fresh_connect(**_kwargs: object) -> object:
         raise AssertionError("read opened a fresh connection")
 
     monkeypatch.setattr("base.db.connect", _fresh_connect)
 
-    state = hds.read(conn=db_conn)
+    state = hds.read(database, conn=db_conn)
 
     assert state is not None
     assert state.posture == "paused"
 
 
 @pytest.mark.parametrize("posture", ["bogus", "converging"])
-def test_invalid_posture_is_rejected(posture: str) -> None:
+def test_invalid_posture_is_rejected(posture: str, database: Database) -> None:
     with pytest.raises(ValueError, match="invalid posture"):
-        hds.set_posture(posture)
+        hds.set_posture(database, posture)
 
 
-def test_posture_round_trips_and_stamps_the_database_clock() -> None:
-    hds.set_posture("paused")
-    paused = hds.read()
+def test_posture_round_trips_and_stamps_the_database_clock(database: Database) -> None:
+    hds.set_posture(database, "paused")
+    paused = hds.read(database)
     assert paused is not None
     assert paused.posture == "paused"
     assert paused.updated_at <= paused.db_now
 
-    hds.set_posture("idle")
-    idle = hds.read()
+    hds.set_posture(database, "idle")
+    idle = hds.read(database)
     assert idle is not None
     assert idle.posture == "idle"
     assert idle.updated_at >= paused.updated_at
 
 
-def test_read_all_returns_every_machines_row() -> None:
-    hds.set_posture("paused")
+def test_read_all_returns_every_machines_row(database: Database) -> None:
+    hds.set_posture(database, "paused")
     rows = hds.read_all(_db())
     assert rows[_machine()].posture == "paused"

@@ -4,11 +4,14 @@ from __future__ import annotations
 
 import pytest
 
+from base.db import Database
 from base.deploy.maintenance.tests.test_admission import isolate as isolate
 from ops import cluster
 
 
-def test_cluster_status_op_returns_snapshot(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_cluster_status_op_returns_snapshot(
+    monkeypatch: pytest.MonkeyPatch, database: Database
+) -> None:
     from ops.cluster_status import ClusterStatus
 
     snap = ClusterStatus(
@@ -17,12 +20,12 @@ def test_cluster_status_op_returns_snapshot(monkeypatch: pytest.MonkeyPatch) -> 
     expected_pool = object()
     seen: list[object] = []
 
-    def _snapshot(pool: object | None = None) -> ClusterStatus:
+    def _snapshot(_db: Database, pool: object | None = None) -> ClusterStatus:
         assert pool is expected_pool
         seen.append(pool)
         return snap
 
     monkeypatch.setattr(cluster, "status_snapshot", _snapshot)
 
-    assert cluster.cluster_status_op(expected_pool) is snap
+    assert cluster.cluster_status_op(database, expected_pool) is snap
     assert seen == [expected_pool]

@@ -34,7 +34,9 @@ from psycopg_pool import ConnectionPool
 import base.db
 from base import telemetry
 from base.agents.observation.evidence import MACHINE_OFFLINE_AFTER_FAILURES
+from base.db import Database
 from base.db.transaction import write_transaction
+from base.events.live.bus import EventBus
 
 _log = logging.getLogger("services.delivery_watchdog.dispatch_guard")
 
@@ -104,6 +106,8 @@ def select_pending_for_dispatch(
 
 def dispatch_wakes(
     pool: ConnectionPool,
+    db: Database,
+    bus: EventBus,
     dispatch_threshold_s: float,
     max_dispatch_count: int,
     backoff_steps: list[float],
@@ -125,7 +129,7 @@ def dispatch_wakes(
         # publish_inbound_wake never raises; it reports delivery through its
         # return value. Only a wake that actually reached Redis advances the
         # counter — a Redis outage must not burn a row's dispatch budget.
-        if base.db.publish_inbound_wake(agent_id, str(inbound_id)):
+        if base.db.publish_inbound_wake(db, bus, agent_id, str(inbound_id)):
             dispatched_ids.append(inbound_id)
 
     if dispatched_ids:

@@ -31,7 +31,7 @@ from psycopg_pool import ConnectionPool
 from base.agents import page_recovery
 from base.daemon import round_loop
 from base.daemon.loop_health import LoopProgress
-from base.db import publish_inbound_wake
+from base.db import Database, publish_inbound_wake
 from base.db.transaction import write_transaction
 from base.deploy.maintenance import admission
 from base.events.live.bus import EventBus
@@ -105,7 +105,7 @@ def close_dead_show_pages(pool: ConnectionPool, agent_id: int, names: list[str])
 
 
 async def dead_pages_round(
-    pool: ConnectionPool, host: str, progress: LoopProgress, bus: EventBus
+    pool: ConnectionPool, db: Database, host: str, progress: LoopProgress, bus: EventBus
 ) -> None:
     """Probe every open show page of this host and close the dead ones."""
     if admission.quiesced():
@@ -139,12 +139,13 @@ async def dead_pages_round(
         if notified:
             # Wake the agent so the notice is claimed promptly (its claim loop's
             # SELECT recheck delivers it within its timeout regardless).
-            await asyncio.to_thread(publish_inbound_wake, agent_id, "0")
+            await asyncio.to_thread(publish_inbound_wake, db, bus, agent_id, "0")
         progress.beat()
 
 
 async def dead_pages_loop(
     pool: ConnectionPool,
+    db: Database,
     host: str,
     progress: LoopProgress,
     config: PageServerConfig,
@@ -155,6 +156,6 @@ async def dead_pages_loop(
     interval_s = float(config.heartbeat_interval_seconds)
 
     async def one_round() -> None:
-        await dead_pages_round(pool, host, progress, bus)
+        await dead_pages_round(pool, db, host, progress, bus)
 
     await round_loop.run_rounds("dead-show-pages", progress, interval_s, one_round)

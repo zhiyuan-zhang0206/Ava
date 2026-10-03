@@ -15,6 +15,8 @@ from agent.state import AgentState
 from base.agents.context import AvaContext
 from base.config import settings
 from base.config.agent_pins import resolve_agent_config_pins
+from base.db import Database
+from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices
 from base.native_process.turn_identity import bind_turn_identity
 
@@ -69,7 +71,11 @@ async def test_concurrent_turn_configs_reach_real_children_without_cross_talk(
     async def execute(agent_id: int, slices: AgentSlices | None = None) -> list[object]:
         result, *_ = await _run_agent_code(
             AgentState(),
-            AvaContext(agent=slices or AgentSlices.resolve()),
+            AvaContext(
+                agent=slices or AgentSlices.resolve(),
+                db=Database.from_settings(),
+                bus=EventBus.from_settings(),
+            ),
             agent_id,
             code,
             ExecOutputChunkPublisher(MagicMock(), agent_id, str(agent_id)),

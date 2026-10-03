@@ -1,5 +1,6 @@
 """Regressions found by independent review of permanent impersonation history."""
 
+from collections.abc import Callable
 from typing import Any
 from uuid import uuid4
 
@@ -11,13 +12,14 @@ from base.agents.impersonation import history as history
 from base.agents.impersonation import sessions as sessions
 from base.agents.messages.chat_delivery import insert_chat_inbound_once
 from base.cluster.machine import machine_name
-from base.db import create_agent
+from base.db import Database, create_agent
+from base.events.live.bus import EventBus
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from tests.impersonation_support import attested_caller, recorded_tree
 
 
 @pytest.fixture
-def session(db_conn: psycopg.Connection) -> dict[str, Any]:
+def session(db_conn: psycopg.Connection, database: Database, event_bus: EventBus) -> dict[str, Any]:
     agent_id = create_agent(db_conn)
     owner = RuntimeIncarnation(agent_id, uuid4(), uuid4())
     db_conn.execute(
@@ -28,6 +30,8 @@ def session(db_conn: psycopg.Connection) -> dict[str, Any]:
     )
     db_conn.commit()
     requested = sessions.request(
+        database,
+        event_bus,
         agent_id,
         name="Review regressions",
         executor_name="Codex reviewer",
@@ -35,14 +39,16 @@ def session(db_conn: psycopg.Connection) -> dict[str, Any]:
         thread_id=str(uuid4()),
         process_metadata=recorded_tree(),
     )
-    lease = history.resolve(agent_id, requested["session_id"])
-    leases.accept(str(lease["id"]), agent_id, owner, "Check the history contract")
-    leases.activate(str(lease["id"]), owner)
-    return history.resolve(agent_id, requested["session_id"])
+    lease = history.resolve(database, agent_id, requested["session_id"])
+    leases.accept(
+        database, event_bus, str(lease["id"]), agent_id, owner, "Check the history contract"
+    )
+    leases.activate(database, event_bus, str(lease["id"]), owner)
+    return history.resolve(database, agent_id, requested["session_id"])
 
 
 def test_idempotent_inbound_retry_preserves_one_real_message(
-    db_conn: psycopg.Connection, session: dict[str, Any]
+    db_conn: psycopg.Connection, session: dict[str, Any], publish_wake: Callable[[int, str], bool]
 ) -> None:
     arguments: dict[str, Any] = {
         "agent_id": session["agent_id"],
@@ -51,8 +57,8 @@ def test_idempotent_inbound_retry_preserves_one_real_message(
         "payload": None,
         "client_message_id": "impersonation-review-retry",
     }
-    first = insert_chat_inbound_once(db_conn, **arguments)
-    retried = insert_chat_inbound_once(db_conn, **arguments)
+    first = insert_chat_inbound_once(db_conn, **arguments, publish_wake=publish_wake)
+    retried = insert_chat_inbound_once(db_conn, **arguments, publish_wake=publish_wake)
     assert first.inserted
     assert not retried.inserted
     assert retried.inbound_id == first.inbound_id
@@ -67,7 +73,13 @@ def test_idempotent_inbound_retry_preserves_one_real_message(
 
 
 @pytest.fixture
-def peer_chats(db_conn: psycopg.Connection, session: dict[str, Any]) -> int:
+def peer_chats(
+    db_conn: psycopg.Connection,
+    session: dict[str, Any],
+    database: Database,
+    event_bus: EventBus,
+    publish_wake: Callable[[int, str], bool],
+) -> int:
     """Send real chats through the chat emitter; return the executor's recipient."""
     recipient = create_agent(db_conn)
     incoming_sender = create_agent(db_conn)
@@ -84,8 +96,11 @@ def peer_chats(db_conn: psycopg.Connection, session: dict[str, Any]) -> int:
             source=f"agent:{sender}",
             payload=None,
             client_message_id=str(uuid4()),
+            publish_wake=publish_wake,
         )
-    leases.release(str(session["id"]), attested_caller(session), "Sent the peer update")
+    leases.release(
+        database, event_bus, str(session["id"]), attested_caller(session), "Sent the peer update"
+    )
     return recipient
 
 
@@ -104,12 +119,12 @@ def test_only_the_executors_outgoing_peer_operations_enter_the_lease_log(
 
 
 def test_recipient_statistics_follow_real_chat_event_direction(
-    db_conn: psycopg.Connection, session: dict[str, Any], peer_chats: int
+    db_conn: psycopg.Connection, session: dict[str, Any], peer_chats: int, database: Database
 ) -> None:
     # Both incoming and outgoing peer messages belong to the conversation;
     # only the outgoing message is evidence of a recipient of this executor.
     document = history.build_document(
-        history.resolve(session["agent_id"], session["session_id"]),
+        history.resolve(database, session["agent_id"], session["session_id"]),
         history.entries(str(session["id"]), db_conn),
     )
     assert document["statistics"]["message_recipients"] == {str(peer_chats): 1}

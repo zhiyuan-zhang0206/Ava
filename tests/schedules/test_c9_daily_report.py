@@ -16,6 +16,7 @@ import psycopg
 import pytest
 
 from base.config import settings
+from base.db import Database
 from schedules.catchup import catch_up, claimed_slot, fire_slot_once
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -186,7 +187,7 @@ def test_summarize_splits_attribution_and_meters_minutes() -> None:
 
 
 def test_fire_reconciles_the_claimed_slot_window_and_emits(
-    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch, database: Database
 ) -> None:
     """_fire derives its window from the CLAIMED slot (the fire_slot_once
     binding), not from the wall clock — the layer QA's simulation flagged."""
@@ -205,7 +206,7 @@ def test_fire_reconciles_the_claimed_slot_window_and_emits(
     monkeypatch.setenv("AVA_SCHEDULE_ID", str(schedule_id))
 
     try:
-        assert fire_slot_once(slot, None, fire=module._fire)
+        assert fire_slot_once(database, slot, None, fire=module._fire)
     finally:
         sys.modules.pop("accounting", None)
 
@@ -221,7 +222,7 @@ def test_fire_reconciles_the_claimed_slot_window_and_emits(
 
 
 def test_catch_up_boot_with_two_missed_slots_reconciles_each_own_window(
-    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch, database: Database
 ) -> None:
     """QA regression (2026-09-07): a boot that missed two 05:00 slots must
     reconcile each slot's own day — gapless windows, one event per day."""
@@ -239,6 +240,7 @@ def test_catch_up_boot_with_two_missed_slots_reconciles_each_own_window(
 
     try:
         fired_slots = catch_up(
+            database,
             [(module.CRON, None)],
             timezone="UTC",
             fire=module._fire,
@@ -263,7 +265,7 @@ def test_catch_up_boot_with_two_missed_slots_reconciles_each_own_window(
 
 
 def test_fire_reports_failure_without_raising(
-    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch, database: Database
 ) -> None:
     module = _load_schedule_module()
     accounting = _FakeAccounting(module)
@@ -281,14 +283,16 @@ def test_fire_reports_failure_without_raising(
     monkeypatch.setenv("AVA_SCHEDULE_ID", str(schedule_id))
 
     try:
-        assert fire_slot_once(slot, None, fire=module._fire)
+        assert fire_slot_once(database, slot, None, fire=module._fire)
     finally:
         sys.modules.pop("accounting", None)
 
     assert len(failures) == 1
     assert "RuntimeError" in failures[0]
     assert "gh api down" in failures[0]
-    assert not fire_slot_once(slot, None, fire=lambda _payload: pytest.fail("unexpected retry"))
+    assert not fire_slot_once(
+        database, slot, None, fire=lambda _payload: pytest.fail("unexpected retry")
+    )
     assert len(failures) == 1
 
 

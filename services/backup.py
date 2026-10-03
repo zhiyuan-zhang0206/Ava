@@ -55,7 +55,7 @@ from psycopg.conninfo import conninfo_to_dict, make_conninfo
 from base.clock import Clock
 from base.cluster.dataplane.pg_tools import pg_tool
 from base.config import settings
-from base.db import connect, connect_url, direct_db_url
+from base.db import Database, connect_url
 from base.db.pg_admin import local_owner_authority
 from base.host.private_storage import ensure_private_dir, ensure_private_file
 from base.native_process.os_platform import LockTimeoutError, file_lock
@@ -164,7 +164,7 @@ def _prune(directory: Path) -> list[Path]:
     return removed
 
 
-def dump_source() -> str:
+def dump_source(db: Database) -> str:
     """The dial `pg_dump` reads this cluster's whole database through.
 
     A locally owned plane dumps as the administrator acting as the schema owner
@@ -172,12 +172,12 @@ def dump_source() -> str:
     custody-checked against this home's postmaster, and independent of the
     write generation, so a dump never needs, and never dies with, a delivered
     login. A remote-managed plane's provider URL
-    (`direct_db_url`) is its only authority; `_passwordless_conninfo` keeps its
+    (`Database.direct_url`) is its only authority; `_passwordless_conninfo` keeps its
     password off argv. Both bypass PgBouncer: pg_dump holds one snapshot across
     many statements, which a transaction pooler cannot keep.
     """
     if settings.data_plane.is_remote:
-        return direct_db_url()
+        return db.direct_url()
     return local_owner_authority().verified_conninfo()
 
 
@@ -361,6 +361,7 @@ def _narrated_wait(
 def run_backup(
     now: datetime | None = None,
     *,
+    db: Database,
     db_url: str | None = None,
     timeout_s: float = _DUMP_TIMEOUT_S,
     publish: bool = True,
@@ -391,6 +392,7 @@ def run_backup(
             sweep_closed_partials(ensure_private_dir(swept))
         target = _run_backup(
             now,
+            db=db,
             directory=directory,
             db_url=db_url,
             timeout_s=timeout_s,
@@ -424,7 +426,7 @@ def prune_after_publish(target: Path) -> None:
     _log_written(target, removed)
 
 
-def _db_size_breakdown(db_url: str | None = None) -> str:
+def _db_size_breakdown(db: Database, db_url: str | None = None) -> str:
     """One-line DB composition for the backup log: total, the LangGraph
     checkpoint tables, and everything else.
 
@@ -438,7 +440,7 @@ def _db_size_breakdown(db_url: str | None = None) -> str:
         with (
             connect_url(db_url, autocommit=True, connect_timeout=_BREAKDOWN_CONNECT_TIMEOUT_S)
             if db_url is not None
-            else connect(direct=True, autocommit=True)
+            else db.connect(direct=True, autocommit=True)
         ) as conn:
             row = conn.execute(
                 """
@@ -451,10 +453,10 @@ def _db_size_breakdown(db_url: str | None = None) -> str:
     except Exception:
         return "unavailable"
     assert row is not None  # noqa: S101 — aggregate over fixed tables always returns one row
-    db, blobs, checkpoints, writes = (int(v) for v in row)
+    total, blobs, checkpoints, writes = (int(v) for v in row)
     checkpoint = blobs + checkpoints + writes
-    rest = max(db - checkpoint, 0)
-    return f"db={_mb(db)}MiB checkpoint={_mb(checkpoint)}MiB rest={_mb(rest)}MiB"
+    rest = max(total - checkpoint, 0)
+    return f"db={_mb(total)}MiB checkpoint={_mb(checkpoint)}MiB rest={_mb(rest)}MiB"
 
 
 def _mb(b: int) -> int:
@@ -473,6 +475,7 @@ def _log_written(target: Path, removed: list[Path]) -> None:
 def _run_backup(
     now: datetime | None = None,
     *,
+    db: Database,
     db_url: str | None = None,
     timeout_s: float = _DUMP_TIMEOUT_S,
     directory: Path,
@@ -488,11 +491,11 @@ def _run_backup(
     anything: `pg_dump` and the encryption pass (see `_run_with_progress`).
     """
     now = _require_aware(now) if now is not None else datetime.now(UTC)
-    db_url = db_url if db_url is not None else dump_source()
+    db_url = db_url if db_url is not None else dump_source(db)
     directory = ensure_private_dir(directory)
     db_conninfo, password = _passwordless_conninfo(db_url)
     dbname = cast(str, conninfo_to_dict(db_url)["dbname"])
-    _log.info("[backup] db composition: %s", _db_size_breakdown(db_url))
+    _log.info("[backup] db composition: %s", _db_size_breakdown(db, db_url))
     target = _available_target(directory, dbname, now)
     stem = target.name.removesuffix(".dump.enc")
     dump_partial = directory / f"{stem}.dump.partial"

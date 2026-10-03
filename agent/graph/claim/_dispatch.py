@@ -355,7 +355,13 @@ async def _handle_heartbeat(
     assert ctx.ops_pool is not None, "_handle_heartbeat requires ctx.ops_pool"  # noqa: S101
     from agent.startup import reconcile_open_pages
 
-    await reconcile_open_pages(ctx.ops_pool, agent_id, event_publisher=ctx.event_publisher)
+    await reconcile_open_pages(
+        ctx.ops_pool,
+        agent_id,
+        db=ctx.require_db(),
+        bus=ctx.require_bus(),
+        event_publisher=ctx.event_publisher,
+    )
 
     circuit = state.circuit
     if circuit.open:

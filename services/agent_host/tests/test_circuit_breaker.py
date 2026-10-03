@@ -42,6 +42,8 @@ from agent.tests.claim_support import _config, _fake_llm, _insert_inbound_kind, 
 from agent.turn.runloop import _handle_fatal_llm_error
 from base.agents.context import AvaContext
 from base.config import settings
+from base.db import Database
+from base.events.live.bus import EventBus
 from base.events.live.publisher import AgentEventPublisher
 from base.host.env.agent_slices import AgentSlices
 from tests.fixtures.units import spawn_agent
@@ -91,7 +93,12 @@ def _breaker_ctx() -> AvaContext:
     """An AvaContext for `_handle_fatal_llm_error` — no ops_pool, so the
     best-effort event-log write is skipped (unit tests have no DB)."""
     return AvaContext(
-        ops_pool=None, llm=MagicMock(), event_publisher=MagicMock(), agent=AgentSlices.resolve()
+        ops_pool=None,
+        llm=MagicMock(),
+        event_publisher=MagicMock(),
+        agent=AgentSlices.resolve(),
+        db=Database.from_settings(),
+        bus=EventBus.from_settings(),
     )
 
 
@@ -151,6 +158,8 @@ async def test_fatal_provider_error_emits_blocked_recovery_details() -> None:
         llm=MagicMock(),
         event_publisher=cast(AgentEventPublisher, publisher),
         agent=AgentSlices.resolve(),
+        db=Database.from_settings(),
+        bus=EventBus.from_settings(),
     )
     exc = FatalProviderError(
         "provider permanently rejected (HTTP 400): Content Exists Risk",
@@ -221,6 +230,8 @@ async def test_permanent_provider_error_reports_metadata_to_nearest_alive_ancest
             llm=MagicMock(),
             event_publisher=MagicMock(),
             agent=AgentSlices.resolve(),
+            db=Database.from_settings(),
+            bus=EventBus.from_settings(),
         ),
         agent_id=child_id,
         occurred_at=occurred_at,
@@ -277,6 +288,8 @@ async def test_context_overflow_self_recovery_does_not_report_to_an_ancestor(
             llm=MagicMock(),
             event_publisher=MagicMock(),
             agent=AgentSlices.resolve(),
+            db=Database.from_settings(),
+            bus=EventBus.from_settings(),
         ),
         agent_id=child_id,
     )
@@ -700,6 +713,8 @@ async def _reject_turn(
             llm=MagicMock(),
             event_publisher=cast(AgentEventPublisher, publisher),
             agent=AgentSlices.resolve(),
+            db=Database.from_settings(),
+            bus=EventBus.from_settings(),
         ),
         agent_id=agent_id,
         occurred_at=datetime(2026, 9, 16, 6, 0, tzinfo=UTC),
@@ -816,6 +831,8 @@ async def test_completed_turn_resets_the_streak_and_clears_the_marker(
             llm=MagicMock(),
             event_publisher=MagicMock(),
             agent=AgentSlices.resolve(),
+            db=Database.from_settings(),
+            bus=EventBus.from_settings(),
         ),
         child_id,
         "done",

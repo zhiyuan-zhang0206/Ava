@@ -89,7 +89,7 @@ def resolve_target() -> _StationTarget | None:
     if not base:
         return None
     try:
-        target = resolve_station_target(base)
+        target = resolve_station_target(Database.from_settings(), base)
     except Exception:
         logger.bind(_no_emitter=True, component="station-healthcheck").exception(
             "station probe: cannot read the advertised station address — skipping this round (fail-open)"

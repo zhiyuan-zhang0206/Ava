@@ -16,7 +16,7 @@ from agent.graph.claim._batch import _defer_chats_to_pending
 from agent.ownership.hosted import admit_hosted_runtime
 from agent.ownership.inbound import RuntimeOwnershipLostError, lock_inbound_owner
 from base.config import settings
-from base.db import create_agent
+from base.db import Database, create_agent
 from base.db.transaction import async_write_transaction
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from base.native_process.turn_identity import bind_turn_identity
@@ -46,7 +46,7 @@ def _insert(conn: psycopg.Connection, agent_id: int) -> int:
 
 async def _admit(pool: AsyncConnectionPool, agent_id: int) -> RuntimeIncarnation:
     owner = await admit_hosted_runtime(
-        pool, agent_id, "claim-test", uuid4(), expected_from="idling"
+        pool, agent_id, "claim-test", uuid4(), expected_from="idling", db=Database.from_settings()
     )
     assert owner is not None
     return owner
@@ -163,6 +163,7 @@ async def test_two_owners_compete_only_current_owner_claims(
 async def test_expired_owner_zero_claim_then_takeover(
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
+    database: Database,
 ) -> None:
     agent_id = _agent(db_conn)
     old = await _admit(aops_pool, agent_id)
@@ -175,7 +176,7 @@ async def test_expired_owner_zero_claim_then_takeover(
     with bind_turn_identity(agent_id, incarnation=old), pytest.raises(RuntimeOwnershipLostError):
         await claim_inbound_batch(aops_pool, agent_id)
     new = await admit_hosted_runtime(
-        aops_pool, agent_id, "claim-test", uuid4(), expected_from="running"
+        aops_pool, agent_id, "claim-test", uuid4(), expected_from="running", db=database
     )
     assert new is not None
     with bind_turn_identity(agent_id, incarnation=new):

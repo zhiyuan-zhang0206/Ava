@@ -13,10 +13,12 @@ import psycopg
 from fastapi.testclient import TestClient
 
 from base.db import (
+    Database,
     insert_compact_request_inbound,
     insert_inbound_message,
     list_pending_inbounds,
 )
+from base.events.live.bus import EventBus
 from gateway.app import app
 
 
@@ -40,17 +42,27 @@ def _set_status(db_conn: psycopg.Connection, inbound_id: int, status: str) -> No
     db_conn.commit()
 
 
-def test_pending_returns_only_pending_chat_oldest_first(db_conn: psycopg.Connection) -> None:
+def test_pending_returns_only_pending_chat_oldest_first(
+    db_conn: psycopg.Connection, database: Database, event_bus: EventBus
+) -> None:
     tid = _seed_agent(db_conn)
-    first = insert_inbound_message(db_conn, tid, "first", source="user")
-    second = insert_inbound_message(db_conn, tid, "second", source="agent:3")
+    first = insert_inbound_message(
+        db_conn, tid, "first", source="user", bus=event_bus, database=database
+    )
+    second = insert_inbound_message(
+        db_conn, tid, "second", source="agent:3", bus=event_bus, database=database
+    )
     # claimed + done chat are excluded (they're in the timeline now)
-    claimed = insert_inbound_message(db_conn, tid, "being processed", source="user")
+    claimed = insert_inbound_message(
+        db_conn, tid, "being processed", source="user", bus=event_bus, database=database
+    )
     _set_status(db_conn, claimed, "claimed")
-    done = insert_inbound_message(db_conn, tid, "already handled", source="user")
+    done = insert_inbound_message(
+        db_conn, tid, "already handled", source="user", bus=event_bus, database=database
+    )
     _set_status(db_conn, done, "done")
     # non-chat control kind (compact_request) is excluded even while pending
-    insert_compact_request_inbound(db_conn, tid)
+    insert_compact_request_inbound(db_conn, tid, bus=event_bus, database=database)
 
     with TestClient(app) as client:
         resp = client.get(f"/api/agents/{tid}/pending")
@@ -78,11 +90,13 @@ def test_pending_nonexistent_agent_returns_empty(db_conn: psycopg.Connection) ->
     assert resp.json() == []
 
 
-def test_list_pending_inbounds_helper_scopes_by_agent(db_conn: psycopg.Connection) -> None:
+def test_list_pending_inbounds_helper_scopes_by_agent(
+    db_conn: psycopg.Connection, database: Database, event_bus: EventBus
+) -> None:
     a = _seed_agent(db_conn)
     b = _seed_agent(db_conn)
-    insert_inbound_message(db_conn, a, "for a", source="user")
-    insert_inbound_message(db_conn, b, "for b", source="user")
+    insert_inbound_message(db_conn, a, "for a", source="user", bus=event_bus, database=database)
+    insert_inbound_message(db_conn, b, "for b", source="user", bus=event_bus, database=database)
     rows = list_pending_inbounds(db_conn, a)
     assert [r.content for r in rows] == ["for a"]
 
@@ -99,13 +113,23 @@ def _multimodal_payload(urls: list[str]) -> dict[str, object]:
     }
 
 
-def test_pending_multimodal_message_carries_image_urls(db_conn: psycopg.Connection) -> None:
+def test_pending_multimodal_message_carries_image_urls(
+    db_conn: psycopg.Connection, database: Database, event_bus: EventBus
+) -> None:
     tid = _seed_agent(db_conn)
     url = f"/api/agents/{tid}/uploads/shot.png"
     insert_inbound_message(
-        db_conn, tid, "look at this", source="user", payload=_multimodal_payload([url])
+        db_conn,
+        tid,
+        "look at this",
+        source="user",
+        payload=_multimodal_payload([url]),
+        bus=event_bus,
+        database=database,
     )
-    insert_inbound_message(db_conn, tid, "plain text", source="user")
+    insert_inbound_message(
+        db_conn, tid, "plain text", source="user", bus=event_bus, database=database
+    )
 
     with TestClient(app) as client:
         resp = client.get(f"/api/agents/{tid}/pending")
@@ -115,7 +139,9 @@ def test_pending_multimodal_message_carries_image_urls(db_conn: psycopg.Connecti
     assert [it["images"] for it in items] == [[url], None]
 
 
-def test_pending_keeps_only_renderable_image_refs(db_conn: psycopg.Connection) -> None:
+def test_pending_keeps_only_renderable_image_refs(
+    db_conn: psycopg.Connection, database: Database, event_bus: EventBus
+) -> None:
     """The same gate POST /messages applies at write time (_validate_image_ref):
     one of this agent's uploads carrying a recognized image suffix. Another
     agent's upload, a non-image suffix, and a non-upload url are all not
@@ -130,7 +156,15 @@ def test_pending_keeps_only_renderable_image_refs(db_conn: psycopg.Connection) -
             "https://example.com/shot.png",
         ]
     )
-    insert_inbound_message(db_conn, tid, "look at this", source="user", payload=payload)
+    insert_inbound_message(
+        db_conn,
+        tid,
+        "look at this",
+        source="user",
+        payload=payload,
+        bus=event_bus,
+        database=database,
+    )
 
     with TestClient(app) as client:
         resp = client.get(f"/api/agents/{tid}/pending")
@@ -139,7 +173,9 @@ def test_pending_keeps_only_renderable_image_refs(db_conn: psycopg.Connection) -
     assert resp.json()[0]["images"] == [url]
 
 
-def test_pending_tolerates_malformed_content_blocks(db_conn: psycopg.Connection) -> None:
+def test_pending_tolerates_malformed_content_blocks(
+    db_conn: psycopg.Connection, database: Database, event_bus: EventBus
+) -> None:
     """A payload shaped differently than today's writer degrades to "no
     images" instead of failing the whole queue read."""
     tid = _seed_agent(db_conn)
@@ -151,7 +187,9 @@ def test_pending_tolerates_malformed_content_blocks(db_conn: psycopg.Connection)
             {"type": "text", "text": "hi"},
         ]
     }
-    insert_inbound_message(db_conn, tid, "hi", source="user", payload=payload)
+    insert_inbound_message(
+        db_conn, tid, "hi", source="user", payload=payload, bus=event_bus, database=database
+    )
 
     with TestClient(app) as client:
         resp = client.get(f"/api/agents/{tid}/pending")
@@ -177,6 +215,8 @@ def _active_lease(db_conn: psycopg.Connection, agent_id: int) -> str:
 
 def test_active_takeover_hides_transcribed_chat_from_the_strip(
     db_conn: psycopg.Connection,
+    database: Database,
+    event_bus: EventBus,
 ) -> None:
     """#3683: a chat the takeover trail has transcribed must not show in both
     the timeline and the strip. The inbound trigger stamps the session trail
@@ -184,7 +224,9 @@ def test_active_takeover_hides_transcribed_chat_from_the_strip(
     stays pending for the ACK/release machinery."""
     tid = _seed_agent(db_conn)
     _active_lease(db_conn, tid)
-    mid = insert_inbound_message(db_conn, tid, "absorbed by the takeover", source="user")
+    mid = insert_inbound_message(
+        db_conn, tid, "absorbed by the takeover", source="user", bus=event_bus, database=database
+    )
     trail = db_conn.execute(
         "SELECT count(*) FROM agent_impersonation_entries "
         "WHERE kind = 'message' AND event_key = 'inbound:' || %s::text",
@@ -203,13 +245,17 @@ def test_active_takeover_hides_transcribed_chat_from_the_strip(
 
 def test_relay_read_hides_while_live_and_reappears_after_release(
     db_conn: psycopg.Connection,
+    database: Database,
+    event_bus: EventBus,
 ) -> None:
     """J1 evidence alone (read by the relay, no trail) hides the row while
     the lease is live; a release that never ACKed must surface it again for
     the native agent — delivery evidence counts only while the lease is
     alive."""
     tid = _seed_agent(db_conn)
-    mid = insert_inbound_message(db_conn, tid, "read before activation", source="user")
+    mid = insert_inbound_message(
+        db_conn, tid, "read before activation", source="user", bus=event_bus, database=database
+    )
     lease_id = _active_lease(db_conn, tid)
     db_conn.execute(
         "INSERT INTO agent_impersonation_messages(lease_id, inbound_id) VALUES (%s, %s)",
@@ -232,14 +278,18 @@ def test_relay_read_hides_while_live_and_reappears_after_release(
     assert [it["id"] for it in items] == [mid]
 
 
-def test_lapsed_lease_does_not_hide(db_conn: psycopg.Connection) -> None:
+def test_lapsed_lease_does_not_hide(
+    db_conn: psycopg.Connection, database: Database, event_bus: EventBus
+) -> None:
     """Delivery authority dies with the lease deadline: an active-status row
     past its expiry must not hide anything (the predicate requires
     expires_at > now()). Read through the helper — the app-level reaper
     reaps a lapsed lease and posts its terminal note, which would race this
     assertion."""
     tid = _seed_agent(db_conn)
-    mid = insert_inbound_message(db_conn, tid, "late again", source="user")
+    mid = insert_inbound_message(
+        db_conn, tid, "late again", source="user", bus=event_bus, database=database
+    )
     lease_id = _active_lease(db_conn, tid)
     db_conn.execute(
         "INSERT INTO agent_impersonation_messages(lease_id, inbound_id) VALUES (%s, %s)",
@@ -258,12 +308,16 @@ def test_lapsed_lease_does_not_hide(db_conn: psycopg.Connection) -> None:
 
 def test_acked_message_stays_out_of_the_strip_after_release(
     db_conn: psycopg.Connection,
+    database: Database,
+    event_bus: EventBus,
 ) -> None:
     """ACK is `done`: excluded as an ordinary settled row, before and after
     the session ends."""
     tid = _seed_agent(db_conn)
     lease_id = _active_lease(db_conn, tid)
-    mid = insert_inbound_message(db_conn, tid, "handled", source="user")
+    mid = insert_inbound_message(
+        db_conn, tid, "handled", source="user", bus=event_bus, database=database
+    )
     db_conn.execute(
         "INSERT INTO agent_impersonation_messages(lease_id, inbound_id) VALUES (%s, %s)",
         (lease_id, mid),

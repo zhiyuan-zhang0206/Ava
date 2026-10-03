@@ -90,7 +90,7 @@ def drained() -> None:
 def dependencies(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(_root_driver_commands, "stop_root_service_tree", lambda **_kwargs: 0)  # pyright: ignore[reportUnknownArgumentType] — untyped test double
     monkeypatch.setattr(_root_driver_commands, "_root_tree_plan", lambda _preserve: [])  # pyright: ignore[reportUnknownArgumentType] — untyped test double
-    monkeypatch.setattr(command, "pause_agents", lambda _timeout, **_kw: drained())  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(command, "pause_agents", lambda _db, _bus, _timeout, **_kw: drained())  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(command, "machine_role", lambda: frozenset({"agent-runner"}))
     monkeypatch.setattr(
         command,
@@ -102,4 +102,4 @@ def dependencies(monkeypatch: pytest.MonkeyPatch) -> None:
     )
     monkeypatch.setattr(command, "ops_quiescent", lambda _timeout: None)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr("base.host.proc.hosting_supervised_session", lambda: None)
-    monkeypatch.setattr("base.deploy.state.host_deploy_state.set_posture", lambda _value: None)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr("base.deploy.state.host_deploy_state.set_posture", lambda _db, _value: None)  # pyright: ignore[reportUnknownArgumentType]

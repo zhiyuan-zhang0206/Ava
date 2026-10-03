@@ -19,7 +19,12 @@ from tests.fixtures.units import spawn_agent
 def _breaker_ctx() -> AvaContext:
     """An AvaContext whose event-log write is skipped (no ops_pool)."""
     return AvaContext(
-        ops_pool=None, llm=MagicMock(), event_publisher=MagicMock(), agent=AgentSlices.resolve()
+        ops_pool=None,
+        llm=MagicMock(),
+        event_publisher=MagicMock(),
+        agent=AgentSlices.resolve(),
+        db=Database.from_settings(),
+        bus=EventBus.from_settings(),
     )
 
 

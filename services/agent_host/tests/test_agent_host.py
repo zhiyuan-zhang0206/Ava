@@ -303,8 +303,7 @@ _Build = Callable[..., "tuple[AgentHost, _FakeGraph, _FakePool]"]
 
 
 def _stub_host_transitions(
-    monkeypatch: pytest.MonkeyPatch,
-    flip: Callable[..., Awaitable[bool]],
+    monkeypatch: pytest.MonkeyPatch, flip: Callable[..., Awaitable[bool]]
 ) -> list[int]:
     import services.agent_host.host as host_mod
     from base.native_process.runtime_incarnation import RuntimeIncarnation
@@ -312,23 +311,14 @@ def _stub_host_transitions(
     stamps: list[int] = []
 
     async def admit(
-        pool: object,
-        agent_id: int,
-        _machine: str,
-        owner: UUID,
-        *,
-        expected_from: str,
+        pool: object, agent_id: int, _machine: str, owner: UUID, *, expected_from: str, db: object
     ) -> RuntimeIncarnation | None:
         if not await flip(pool, agent_id, "running", expected_from=expected_from):
             return None
         return RuntimeIncarnation(agent_id, uuid4(), owner)
 
     async def settle_and_stamp(
-        pool: object,
-        incarnation: RuntimeIncarnation,
-        *,
-        exited: bool,
-        crashed: bool,
+        pool: object, incarnation: RuntimeIncarnation, *, bus: object, exited: bool, crashed: bool
     ) -> TurnSettlement:
         if crashed:
             stamps.append(incarnation.agent_id)
@@ -407,11 +397,7 @@ def wired(monkeypatch: pytest.MonkeyPatch, host_plugin: None) -> _Build:
     ) -> tuple[AgentHost, _FakeGraph, _FakePool]:
         graph = _FakeGraph(results or {})
         pool = _FakePool(rows)
-        host = _host(
-            pool=pool,
-            checkpointer=object(),
-            graph=graph,
-        )
+        host = _host(pool=pool, checkpointer=object(), graph=graph)
         return host, graph, pool
 
     return _build
@@ -426,11 +412,7 @@ class TestPendingInboundBackstop:
         fresh pending inbound wakes its agent; database timestamps identify backlog, while current turn progress must
         independently authorize cancellation."""
         pool = _PendingScanPool([(17, True, False), (23, False, True)])
-        host = _host(
-            pool=pool,
-            checkpointer=object(),
-            graph=object(),
-        )
+        host = _host(pool=pool, checkpointer=object(), graph=object())
 
         candidates = await host.pending_inbound_wakes(180.0)
 
@@ -513,6 +495,7 @@ class TestPoolIsolation:
             owner: UUID,
             *,
             expected_from: str,
+            db: object,
         ) -> RuntimeIncarnation:
             assert expected_from == "idling"
             calls.append(("admit", pool))
@@ -522,6 +505,7 @@ class TestPoolIsolation:
             pool: object,
             incarnation: RuntimeIncarnation,
             *,
+            bus: object,
             exited: bool,
             crashed: bool,
         ) -> TurnSettlement:
@@ -550,11 +534,7 @@ class TestPoolIsolation:
         assert turn_pool.reads == 0
         assert control_pool.reads == 1
         assert graph.observations[-1].ops_pool is turn_pool
-        assert calls == [
-            ("admit", control_pool),
-            ("settle", control_pool),
-            ("force", control_pool),
-        ]
+        assert calls == [("admit", control_pool), ("settle", control_pool), ("force", control_pool)]
 
 
 class TestSettlementReconciles:
@@ -578,7 +558,7 @@ class TestSettlementReconciles:
         host, _, _ = wired({1: _Row()})
 
         async def settle_and_stamp(
-            _pool: object, _incarnation: object, *, exited: bool, crashed: bool
+            _pool: object, _incarnation: object, *, bus: object, exited: bool, crashed: bool
         ) -> TurnSettlement:
             order.append("settle")
             return TurnSettlement(
@@ -888,13 +868,15 @@ class TestTurnLoop:
         async def _renew(pool: object, machine: str, owner: UUID) -> None:
             calls.append("renew")
 
-        async def _reap(pool: object, machine: str, owner: UUID) -> list[ReapedCorpse]:
+        async def _reap(
+            pool: object, machine: str, owner: UUID, *, bus: object
+        ) -> list[ReapedCorpse]:
             calls.append("reap")
             return [ReapedCorpse(7, 101), ReapedCorpse(9, None)]
 
         recovered: list[list[ReapedCorpse]] = []
 
-        async def _recover(_db: object, reaped: list[ReapedCorpse]) -> None:
+        async def _recover(_db: object, _bus: EventBus, reaped: list[ReapedCorpse]) -> None:
             calls.append("recover")
             recovered.append(list(reaped))
 
@@ -919,7 +901,7 @@ class TestTurnLoop:
         async def _renew(pool: object, machine: str, owner: UUID) -> None:
             renewed.append("renew")
 
-        async def _reap(pool: object, machine: str, owner: UUID) -> list[int]:
+        async def _reap(pool: object, machine: str, owner: UUID, *, bus: object) -> list[int]:
             raise RuntimeError("reap exploded")
 
         monkeypatch.setattr(host_mod, "renew_hosted_owner", _renew)

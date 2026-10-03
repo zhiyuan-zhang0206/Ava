@@ -16,6 +16,8 @@ from agent.graph.tool_calls import normalize_tool_calls
 from agent.state import AgentState
 from agent.tests._fakes import make_fake_ops_pool
 from base.agents.context import AvaContext
+from base.db import Database
+from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices
 
 
@@ -57,7 +59,11 @@ async def test_calls_execute_separately_without_rewriting_assistant(
     monkeypatch.setattr("agent.graph.exec.node._run_agent_code", run)
     runtime = Runtime(
         context=AvaContext(
-            ops_pool=make_fake_ops_pool(), event_publisher=MagicMock(), agent=AgentSlices.resolve()
+            ops_pool=make_fake_ops_pool(),
+            event_publisher=MagicMock(),
+            agent=AgentSlices.resolve(),
+            db=Database.from_settings(),
+            bus=EventBus.from_settings(),
         )
     )
     command = await _run_calls(
@@ -95,6 +101,8 @@ def _runtime() -> Runtime[AvaContext]:
             ops_pool=make_fake_ops_pool(),
             event_publisher=MagicMock(),
             agent=AgentSlices.resolve(),
+            db=Database.from_settings(),
+            bus=EventBus.from_settings(),
         )
     )
 

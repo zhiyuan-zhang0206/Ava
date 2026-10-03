@@ -17,6 +17,7 @@ from psycopg_pool import ConnectionPool
 from base.clock.tests.fakes import fix_zone
 from base.daemon.loop_health import LoopProgress
 from base.db import Database, create_agent
+from base.events.live.bus import EventBus
 from ops.rpc_schemas import ShellKillResult
 from services.ttl_reaper import shells
 from services.ttl_reaper.shells import _claim_shell_row_still_expired, reap_expired_shells
@@ -27,7 +28,9 @@ def _progress() -> LoopProgress:
 
 
 async def _reap(pool: ConnectionPool) -> list[tuple[int, int]]:
-    return await reap_expired_shells(pool, Database.from_settings(), _progress())
+    return await reap_expired_shells(
+        pool, Database.from_settings(), EventBus.from_settings(), _progress()
+    )
 
 
 @pytest.fixture()

@@ -9,13 +9,13 @@ Read failures propagate: a failed read must never degrade into a wake the
 policy forbids.
 """
 
-import base.db
 from base.agents import AgentNotFound
 from base.agents.incarnation.lifecycle_acceptance import is_system_notice_source
+from base.db import Database
 
 
-def wake_suppression_active(agent_id: int) -> bool:
-    with base.db.connect() as conn:
+def wake_suppression_active(db: Database, agent_id: int) -> bool:
+    with db.connect() as conn:
         row = conn.execute(
             "SELECT wake_suppressed_until >= now() FROM agents_meta WHERE id=%s",
             (agent_id,),
@@ -25,7 +25,7 @@ def wake_suppression_active(agent_id: int) -> bool:
     return row[0] is True
 
 
-def recovery_halted(agent_id: int) -> bool:
+def recovery_halted(db: Database, agent_id: int) -> bool:
     """Whether the recovery circuit breaker is tripped for `agent_id`.
 
     The durable gate is `permanent_reject_streak` (>= the halt threshold after
@@ -34,7 +34,7 @@ def recovery_halted(agent_id: int) -> bool:
     until-human halt (task #3617)."""
     from base.agents.recovery_breaker import HALT_AFTER_CONSECUTIVE_PERMANENT_REJECTS
 
-    with base.db.connect() as conn:
+    with db.connect() as conn:
         row = conn.execute(
             "SELECT permanent_reject_streak >= %s FROM agents_meta WHERE id=%s",
             (HALT_AFTER_CONSECUTIVE_PERMANENT_REJECTS, agent_id),
@@ -44,7 +44,9 @@ def recovery_halted(agent_id: int) -> bool:
     return row[0] is True
 
 
-def system_notice_source_of_trigger(agent_id: int, trigger_inbound_id: int) -> str | None:
+def system_notice_source_of_trigger(
+    db: Database, agent_id: int, trigger_inbound_id: int
+) -> str | None:
     """The trigger's `source` when it is a system-family chat notice — those
     never resurrect their owner (user ruling 2026-08-27; task #3687) — else
     None.
@@ -60,7 +62,7 @@ def system_notice_source_of_trigger(agent_id: int, trigger_inbound_id: int) -> s
     not be silently swallowed into a "skip" (the suppression / breaker checks
     above fail loudly the same way).
     """
-    with base.db.connect() as conn:
+    with db.connect() as conn:
         row = conn.execute(
             "SELECT kind, source, payload FROM inbound_messages WHERE id=%s AND agent_id=%s",
             (trigger_inbound_id, agent_id),
@@ -73,7 +75,7 @@ def system_notice_source_of_trigger(agent_id: int, trigger_inbound_id: int) -> s
     return None
 
 
-def recovery_halt_reason(agent_id: int) -> str | None:
+def recovery_halt_reason(db: Database, agent_id: int) -> str | None:
     """Why automatic recovery is halted for `agent_id`, else None — the
     reason-resolution sibling of `recovery_halted` for the stalled-harvest
     requester (task #3618).
@@ -89,7 +91,7 @@ def recovery_halt_reason(agent_id: int) -> str | None:
         SUPPRESS_REASON_PERMANENT_REJECT,
     )
 
-    with base.db.connect() as conn:
+    with db.connect() as conn:
         row = conn.execute(
             "SELECT permanent_reject_streak >= %s, wake_suppress_reason, "
             "(wake_suppressed_until IS NOT NULL AND wake_suppressed_until >= now()) "
@@ -106,8 +108,8 @@ def recovery_halt_reason(agent_id: int) -> str | None:
     return None
 
 
-def clear_wake_suppression(agent_id: int) -> None:
-    with base.db.connect() as conn:
+def clear_wake_suppression(db: Database, agent_id: int) -> None:
+    with db.connect() as conn:
         conn.execute(
             "UPDATE agents_meta SET wake_suppressed_until=NULL, wake_suppress_reason=NULL "
             "WHERE id=%s AND wake_suppressed_until IS NOT NULL",

@@ -27,6 +27,7 @@ from agent.ownership.inbound import RuntimeOwnershipLostError
 from agent.startup import reconcile_claimed_inbounds_at_startup
 from base.config import settings
 from base.db import Database
+from base.events.live.bus import EventBus
 from base.log import logger
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from base.native_process.turn_identity import bind_turn_identity, hosted_resources_settled
@@ -46,6 +47,7 @@ async def close_hosted_turn(
     pool: AsyncConnectionPool,
     control_pool: AsyncConnectionPool,
     db: Database,
+    bus: EventBus,
     checkpointer: AsyncPostgresSaver,
     incarnation: RuntimeIncarnation,
     outcome: TurnOutcome,
@@ -58,7 +60,7 @@ async def close_hosted_turn(
     (its lease fence), and the reap terminates that incarnation — so the reap
     runs last, after them."""
     settlement = await settle_and_stamp_turn(
-        control_pool, incarnation, exited=outcome.exited, crashed=outcome.crashed
+        control_pool, incarnation, bus=bus, exited=outcome.exited, crashed=outcome.crashed
     )
     if outcome.aborted:
         await reconcile_inbounds_after_abort(pool, checkpointer, incarnation)
@@ -68,12 +70,13 @@ async def close_hosted_turn(
         # owns its claimed rows.
         await reconcile_inbounds_after_turn(pool, checkpointer, incarnation)
     if outcome.crashed:
-        await prompt_reap_after_recrash(control_pool, db, incarnation, settlement)
+        await prompt_reap_after_recrash(control_pool, db, bus, incarnation, settlement)
 
 
 async def prompt_reap_after_recrash(
     pool: AsyncConnectionPool,
     db: Database,
+    bus: EventBus,
     incarnation: RuntimeIncarnation,
     settlement: TurnSettlement,
 ) -> None:
@@ -116,7 +119,7 @@ async def prompt_reap_after_recrash(
             reason="settle_incomplete",
         )
         return
-    reaped = await reap_recrashed_corpse(pool, incarnation)
+    reaped = await reap_recrashed_corpse(pool, incarnation, bus=bus)
     if not reaped:
         logger.info(
             "recrash prompt reap skipped: the row moved on since the crash",
@@ -125,7 +128,7 @@ async def prompt_reap_after_recrash(
             reason="row_moved_on",
         )
         return
-    await recover_reaped_corpses(db, reaped)
+    await recover_reaped_corpses(db, bus, reaped)
 
 
 async def reconcile_inbounds_after_abort(

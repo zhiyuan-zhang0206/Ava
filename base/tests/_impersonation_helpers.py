@@ -10,7 +10,8 @@ import psycopg
 from base.agents import impersonation as leases
 from base.agents.messages.caller_identity import CallerIdentity
 from base.cluster.machine import machine_name
-from base.db import create_agent
+from base.db import Database, create_agent
+from base.events.live.bus import EventBus
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from tests.impersonation_support import recorded_tree
 
@@ -29,7 +30,9 @@ def _agent(conn: psycopg.Connection) -> RuntimeIncarnation:
 
 
 def _status(owner: RuntimeIncarnation) -> dict[str, Any]:
-    result = leases.native_status(owner.agent_id, owner)
+    result = leases.native_status(
+        Database.from_settings(), EventBus.from_settings(), owner.agent_id, owner
+    )
     assert result is not None
     return result
 
@@ -41,6 +44,8 @@ def _request(
     if provider == "codex":
         kwargs["relay_thread_id"] = thread or str(uuid4())
     return leases.request(
+        Database.from_settings(),
+        EventBus.from_settings(),
         owner.agent_id,
         caller=CallerIdentity(kind="external_agent", subject="codex", instance="test"),
         ttl_seconds=300,
@@ -53,6 +58,13 @@ def _request(
 
 def _active(owner: RuntimeIncarnation) -> dict[str, Any]:
     lease = _request(owner)
-    leases.accept(lease["id"], owner.agent_id, owner, "Handoff brief")
-    leases.activate(lease["id"], owner)
+    leases.accept(
+        Database.from_settings(),
+        EventBus.from_settings(),
+        lease["id"],
+        owner.agent_id,
+        owner,
+        "Handoff brief",
+    )
+    leases.activate(Database.from_settings(), EventBus.from_settings(), lease["id"], owner)
     return lease

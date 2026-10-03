@@ -21,7 +21,9 @@ import pytest
 from fastapi.testclient import TestClient
 
 import ava
+from base.db import Database
 from base.deploy.lifecycle.start_serving import RootBirth
+from base.events.live.bus import EventBus
 
 # ── Two-unit fixtures: model "a gateway unit" and "a runner unit" explicitly ──
 #
@@ -243,10 +245,16 @@ def spawn_agent(
     from base.db import publish_inbound_wake
     from ops.agents.spawn import create_agent_row
 
+    db, bus = Database.from_settings(), EventBus.from_settings()
     agent_id, _, _prompt_id, _attempt_id = create_agent_row(
-        spawner=spawner, machine=machine_name(), config=config, **kw
+        db,
+        bus,
+        spawner=spawner,
+        machine=machine_name(),
+        config=config,
+        **kw,
     )
-    publish_inbound_wake(agent_id, "0")
+    publish_inbound_wake(db, bus, agent_id, "0")
     return agent_id
 
 

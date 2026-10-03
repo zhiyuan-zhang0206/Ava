@@ -286,7 +286,7 @@ def test_building_the_prompt_records_no_skill_attribution(
 
     writes: list[dict[str, Any]] = []
 
-    def _record(events: list[Any]) -> None:
+    def _record(_db: object, events: list[Any]) -> None:
         writes.append({"events": events})
 
     # Stub the ONE write path — every skill_invoked row goes through the

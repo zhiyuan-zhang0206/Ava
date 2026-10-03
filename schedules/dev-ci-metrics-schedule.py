@@ -13,6 +13,7 @@ import ava
 import base
 from ava.agents import AgentStatus as S
 from schedules.agent_status_guard import ensure_agent_status_members
+from base.db import Database
 from schedules.catchup import claimed_slot, cluster_timezone
 from schedules.daily_host import report_agent, run_daily_loop
 
@@ -89,7 +90,8 @@ def _fire(_payload: None) -> None:
 
 
 def _main_loop() -> None:
-    run_daily_loop(CRON, cluster_timezone(), _fire)
+    db = Database.from_settings()
+    run_daily_loop(db, CRON, cluster_timezone(), _fire)
 
 
 if __name__ == "__main__":

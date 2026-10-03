@@ -383,7 +383,9 @@ def _maybe_sweep_stale_inbounds(
     return now_mono
 
 
-async def _scan_loop(pool: ConnectionPool, progress: LoopProgress) -> None:
+async def _scan_loop(
+    pool: ConnectionPool, db: Database, bus: EventBus, progress: LoopProgress
+) -> None:
     """Scan loop: every interval, (1) re-publish lost wakes for stale pending
     rows of idling owners, (2) WARNING each chat inbound stalled past the alert
     threshold, once per row while it stays pending, (3) sweep stale inbounds
@@ -439,6 +441,8 @@ async def _scan_loop(pool: ConnectionPool, progress: LoopProgress) -> None:
             prev_alerted = set(alerted)
             dispatched = dispatch_wakes(
                 pool,
+                db,
+                bus,
                 dispatch_threshold,
                 max_dispatch_count,
                 dispatch_backoff_steps,
@@ -502,11 +506,12 @@ async def _run_loops(
     harvest = liveness.register("harvest", rounds.loop_liveness_timeout_s())
     hosted_turn = liveness.register("hosted_turn", rounds.loop_liveness_timeout_s())
     async with asyncio.TaskGroup() as loops:
-        loops.create_task(_scan_loop(pool, scan))
+        loops.create_task(_scan_loop(pool, db, bus, scan))
         loops.create_task(
             resurrect_retry.resurrect_loop(
                 pool,
                 db,
+                bus,
                 resurrect,
                 interval,
                 settings.daemon.delivery_watchdog_max_resurrect_per_tick,
@@ -515,7 +520,12 @@ async def _run_loops(
         )
         loops.create_task(
             stall_recovery.stall_recovery_loop(
-                pool, db, harvest, interval, settings.daemon.delivery_watchdog_threshold_seconds
+                pool,
+                db,
+                bus,
+                harvest,
+                interval,
+                settings.daemon.delivery_watchdog_threshold_seconds,
             )
         )
         loops.create_task(

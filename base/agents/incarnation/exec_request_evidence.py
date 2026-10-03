@@ -62,7 +62,7 @@ from base.agents.incarnation.resources import (
     ResourceEvidenceError,
     decode_resources,
 )
-from base.db.transaction import write_transaction
+from base.db import Database
 from base.log import logger
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from base.paths import exec_run_dir, quarantined_exec_requests_dir
@@ -621,9 +621,9 @@ def _write_receipt(
     path.write_text(json.dumps(receipt, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
 
-def _row_identity(agent_id: int) -> tuple[RuntimeIncarnation | None, object]:
+def _row_identity(db: Database, agent_id: int) -> tuple[RuntimeIncarnation | None, object]:
     """The row's current incarnation and stored resources, for the CLI."""
-    with write_transaction() as conn:
+    with db.write_transaction() as conn:
         row = conn.execute(
             "SELECT runtime_generation,runtime_owner,incarnation_resources FROM agents_meta "
             "WHERE id=%s",
@@ -660,7 +660,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         help="quarantine a live or unattributable entry too, after manual review",
     )
     args = parser.parse_args(argv)
-    incumbent, resources = _row_identity(args.agent)
+    incumbent, resources = _row_identity(Database.from_settings(), args.agent)
     entries = survey(args.agent, incumbent=incumbent, resources=resources)
     if not args.quarantine:
         _report(args.agent, entries)

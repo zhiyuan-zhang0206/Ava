@@ -19,7 +19,8 @@ from base.agents.impersonation._store import (
     token_hash,
 )
 from base.agents.messages.caller_identity import caller_payload
-from base.db.transaction import write_transaction
+from base.db import Database
+from base.events.live.bus import EventBus
 from base.log import logger
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 
@@ -28,25 +29,27 @@ RELAY_HEARTBEAT_STALE_SECONDS = 45.0
 _RELAY_FAILURE_STAMP_SECONDS = 600
 
 
-def relay_get(lease_id: str, relay_token: str) -> dict[str, Any]:
+def relay_get(db: Database, bus: EventBus, lease_id: str, relay_token: str) -> dict[str, Any]:
     """Lease reads for the bound relay process, under its scoped credential."""
     from base.agents.impersonation import wake_agent
 
-    with write_transaction() as conn:
+    with db.write_transaction() as conn:
         lease = lock_lease(conn, lease_id)
         authenticate_relay(lease, relay_token)
         was_open = lease["status"] in OPEN
         result = public(expire(conn, lease))
     if was_open and result["status"] == "expired":
-        wake_agent(lease["agent_id"], roster_changed=True)
+        wake_agent(db, bus, lease["agent_id"], roster_changed=True)
     return result
 
 
-def relay_inbox(lease_id: str, relay_token: str, *, limit: int = 100) -> list[dict[str, Any]]:
+def relay_inbox(
+    db: Database, lease_id: str, relay_token: str, *, limit: int = 100
+) -> list[dict[str, Any]]:
     """Read the relay's bounded inbox page and durable attempt state."""
     if not 1 <= limit <= 1000:
         raise ValueError("Inbox limit must be from 1 through 1000")
-    with write_transaction() as conn:
+    with db.write_transaction() as conn:
         lease = lock_lease(conn, lease_id)
         require_relay_active_locked(conn, lease, relay_token)
         with conn.cursor(row_factory=dict_row) as cur:
@@ -72,9 +75,9 @@ def relay_inbox(lease_id: str, relay_token: str, *, limit: int = 100) -> list[di
     return messages
 
 
-def relay_heartbeat(lease_id: str, relay_token: str) -> None:
+def relay_heartbeat(db: Database, lease_id: str, relay_token: str) -> None:
     """Fresh liveness evidence from the bound relay, while the lease is open."""
-    with write_transaction() as conn:
+    with db.write_transaction() as conn:
         lease = lock_lease(conn, lease_id)
         authenticate_relay(lease, relay_token)
         if lease["status"] not in OPEN:
@@ -86,7 +89,7 @@ def relay_heartbeat(lease_id: str, relay_token: str) -> None:
 
 
 def provision_relay(
-    lease_id: str, incarnation: RuntimeIncarnation, relay_token: str
+    db: Database, lease_id: str, incarnation: RuntimeIncarnation, relay_token: str
 ) -> dict[str, Any]:
     """Mint or re-mint the scoped relay credential on the lease row.
 
@@ -98,7 +101,7 @@ def provision_relay(
     transaction; the supervisor reads it after a restart to tell an earlier
     incarnation's mint from "never minted".
     """
-    with write_transaction() as conn:
+    with db.write_transaction() as conn:
         require_native(conn, incarnation)
         lease = lock_lease(conn, lease_id)
         if lease["agent_id"] != incarnation.agent_id or lease["status"] not in (
@@ -120,7 +123,9 @@ def provision_relay(
         return public(lock_lease(conn, lease_id))
 
 
-def fail_acceptance(lease_id: str, incarnation: RuntimeIncarnation, reason: str) -> dict[str, Any]:
+def fail_acceptance(
+    db: Database, bus: EventBus, lease_id: str, incarnation: RuntimeIncarnation, reason: str
+) -> dict[str, Any]:
     """Relay establishment failed: the takeover does not stand.
 
     Terminal 'rejected' carries the reason; a system note tells the native
@@ -131,7 +136,7 @@ def fail_acceptance(lease_id: str, incarnation: RuntimeIncarnation, reason: str)
 
     if not reason.strip():
         raise ValueError("A nonempty failure reason is required")
-    with write_transaction() as conn:
+    with db.write_transaction() as conn:
         require_native(conn, incarnation)
         lease = lock_lease(conn, lease_id)
         if lease["agent_id"] != incarnation.agent_id or lease["status"] != "accepted":
@@ -162,7 +167,7 @@ def fail_acceptance(lease_id: str, incarnation: RuntimeIncarnation, reason: str)
             (reason, lease_id),
         )
         result = public(lock_lease(conn, lease_id))
-    wake_agent(lease["agent_id"], roster_changed=True)
+    wake_agent(db, bus, lease["agent_id"], roster_changed=True)
     logger.error(
         "impersonation relay establishment failed; takeover rolled back",
         agent_id=lease["agent_id"],
@@ -172,9 +177,9 @@ def fail_acceptance(lease_id: str, incarnation: RuntimeIncarnation, reason: str)
     return result
 
 
-def record_relay_failure(lease_id: str, incarnation: RuntimeIncarnation) -> bool:
+def record_relay_failure(db: Database, lease_id: str, incarnation: RuntimeIncarnation) -> bool:
     """Rate-limited durable stamp that relay supervision noticed a stale relay."""
-    with write_transaction() as conn:
+    with db.write_transaction() as conn:
         require_native(conn, incarnation)
         lease = lock_lease(conn, lease_id)
         if lease["agent_id"] != incarnation.agent_id or lease["status"] != "active":
@@ -199,7 +204,7 @@ def aborted_detail(reason: object) -> str | None:
 
 
 def abort_lease(
-    lease_id: str, incarnation: RuntimeIncarnation, detail: str
+    db: Database, bus: EventBus, lease_id: str, incarnation: RuntimeIncarnation, detail: str
 ) -> dict[str, Any] | None:
     """Stop a takeover whose core component died (task #3998), like a TTL expiry.
 
@@ -223,7 +228,7 @@ def abort_lease(
     if not detail:
         raise ValueError("A nonempty abort detail is required")
     reason = f"{_ABORTED_REASON_PREFIX}{detail}"
-    with write_transaction() as conn:
+    with db.write_transaction() as conn:
         require_native(conn, incarnation)
         lease = lock_lease(conn, lease_id)
         if lease["agent_id"] != incarnation.agent_id:
@@ -251,5 +256,5 @@ def abort_lease(
             cur.execute("SELECT * FROM agent_impersonations WHERE id=%s", (lease_id,))
             ended = cur.fetchone()
             assert ended is not None  # noqa: S101 — locked overhead row exists
-    wake_agent(lease["agent_id"], roster_changed=True)
+    wake_agent(db, bus, lease["agent_id"], roster_changed=True)
     return public(ended)

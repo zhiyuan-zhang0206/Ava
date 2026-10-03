@@ -19,6 +19,8 @@ import pytest
 
 from base.agents.birth_config import set_cluster_default_model
 from base.config import frozen_field_names
+from base.db import Database
+from base.events.live.bus import EventBus
 from ops.agents.spawn import create_agent_row
 
 
@@ -35,7 +37,12 @@ def _spawn_agent(
     from base.cluster.machine import machine_name
 
     agent_id, _birth_config, _prompt_id, _attempt_id = create_agent_row(
-        spawner=spawner, machine=machine_name(), config=config, **kw
+        Database.from_settings(),
+        EventBus.from_settings(),
+        spawner=spawner,
+        machine=machine_name(),
+        config=config,
+        **kw,
     )
     return agent_id
 
@@ -103,7 +110,9 @@ class TestSpawnStamping:
 class TestReplayOnWake:
     """Resurrection preserves the birth configuration for hosted successor admission."""
 
-    def test_resurrect_replays_the_stamp(self, db_conn: psycopg.Connection) -> None:
+    def test_resurrect_replays_the_stamp(
+        self, db_conn: psycopg.Connection, database: Database, event_bus: EventBus
+    ) -> None:
         from ops.agents.wake import resurrect_agent
 
         agent_id = _spawn_agent(spawner="test")
@@ -117,7 +126,7 @@ class TestReplayOnWake:
                 (agent_id,),
             )
         db_conn.commit()
-        resurrect_agent(agent_id, resurrected_by="user")
+        resurrect_agent(database, event_bus, agent_id, resurrected_by="user")
         assert _birth_config(db_conn, agent_id) == stamp
 
 

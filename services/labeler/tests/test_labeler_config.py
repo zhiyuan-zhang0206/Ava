@@ -41,7 +41,9 @@ def test_run_hands_the_slice_to_the_dispatch_loop(monkeypatch: pytest.MonkeyPatc
         def close(self) -> None:
             pass
 
-    async def fake_dispatch(_pool: object, _db: object, _liveness: object, config: object) -> None:
+    async def fake_dispatch(
+        _pool: object, _db: object, _bus: object, _liveness: object, config: object
+    ) -> None:
         received.append(config)
 
     monkeypatch.setattr(daemon, "_is_running", lambda: False)

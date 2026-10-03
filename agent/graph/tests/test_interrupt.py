@@ -20,7 +20,8 @@ from agent.db import has_pending_interrupt, pending_interrupt_reason
 from agent.graph.interrupt import subscribe_interrupt
 from base.agents.messages.inbound import InterruptReason
 from base.cluster.machine import machine_name
-from base.db import create_agent
+from base.db import Database, create_agent
+from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices
 from base.packages.plugins.extensions import ExtensionRegistry
 
@@ -428,7 +429,12 @@ async def test_auto_compaction_cancels_at_llm_node_without_replacing_context(
     publisher, model = MagicMock(), MagicMock()
     runtime = Runtime(
         context=AvaContext(
-            ops_pool=aops_pool, llm=model, event_publisher=publisher, agent=AgentSlices.resolve()
+            ops_pool=aops_pool,
+            llm=model,
+            event_publisher=publisher,
+            agent=AgentSlices.resolve(),
+            db=Database.from_settings(),
+            bus=EventBus.from_settings(),
         )
     )
     invocation = asyncio.create_task(
@@ -538,7 +544,12 @@ async def test_compaction_returns_through_claim_then_generates_before_compacting
     config: RunnableConfig = {"configurable": {"thread_id": str(tid)}}
     runtime = Runtime(
         context=AvaContext(
-            ops_pool=aops_pool, llm=model, event_publisher=publisher, agent=AgentSlices.resolve()
+            ops_pool=aops_pool,
+            llm=model,
+            event_publisher=publisher,
+            agent=AgentSlices.resolve(),
+            db=Database.from_settings(),
+            bus=EventBus.from_settings(),
         )
     )
     state = AgentState(messages=[HumanMessage(content="old work " * 100)], halted=False)

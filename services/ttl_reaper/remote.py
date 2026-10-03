@@ -34,7 +34,7 @@ async def remote_round(
     pool: ConnectionPool, db: Database, bus: EventBus, progress: LoopProgress
 ) -> None:
     """One pass: reclaim expired shells, then redeliver stale work failures."""
-    reaped = await shells.reap_expired_shells(pool, db, progress)
+    reaped = await shells.reap_expired_shells(pool, db, bus, progress)
     progress.beat()
     failures = await work_failed_router.reconcile_stale_work_failures(
         pool, db, bus, on_event=progress.beat

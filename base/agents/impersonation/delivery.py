@@ -13,8 +13,7 @@ from base.agents.impersonation._store import (
     lock_lease,
     require_relay_active_locked,
 )
-from base.db import publish_inbound_wake
-from base.db.transaction import write_transaction
+from base.db import Database, publish_inbound_wake
 from base.events.live.announce import (
     publish_agent_updated_sync,
     publish_impersonation_changed_sync,
@@ -22,7 +21,9 @@ from base.events.live.announce import (
 from base.events.live.bus import EventBus
 
 
-def reserve_delivery(lease_id: str, relay_token: str, message_ids: list[int]) -> frozenset[int]:
+def reserve_delivery(
+    db: Database, bus: EventBus, lease_id: str, relay_token: str, message_ids: list[int]
+) -> frozenset[int]:
     """Claim due, previously read pending rows before one host submission.
 
     The agent/lease lock serializes with ACK, release, and other relay sends.
@@ -31,7 +32,7 @@ def reserve_delivery(lease_id: str, relay_token: str, message_ids: list[int]) ->
     cannot spend an early retry or exceed the lease budget. A rotated credential
     cannot reserve; the new relay retains the previous relay's attempt count.
     """
-    with write_transaction() as conn:
+    with db.write_transaction() as conn:
         lease = lock_lease(conn, lease_id)
         authenticate_relay(lease, relay_token)
         was_open = lease["status"] in OPEN
@@ -57,7 +58,7 @@ def reserve_delivery(lease_id: str, relay_token: str, message_ids: list[int]) ->
                 ),
             ).fetchall()
     if was_open and lease["status"] == "expired":
-        publish_inbound_wake(lease["agent_id"], "impersonation-expired")
-        publish_impersonation_changed_sync(EventBus.from_settings(), lease["agent_id"])
-        publish_agent_updated_sync(EventBus.from_settings(), lease["agent_id"])
+        publish_inbound_wake(db, bus, lease["agent_id"], "impersonation-expired")
+        publish_impersonation_changed_sync(bus, lease["agent_id"])
+        publish_agent_updated_sync(bus, lease["agent_id"])
     return frozenset(row[0] for row in rows)

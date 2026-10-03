@@ -25,6 +25,7 @@ import pytest
 from dotenv import dotenv_values
 
 from base.config import settings
+from base.db import Database
 from scripts.data_plane_ops import rotate_cluster_secret as rotate
 from services import backup
 from services.gateway_side.backup import passphrase
@@ -119,7 +120,9 @@ def _fake_pg_dump(real: Callable[..., Any]) -> Callable[..., Any]:
 
 
 @pytest.fixture
-def backups(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Callable[[], Path]:
+def backups(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, database: Database
+) -> Callable[[], Path]:
     """Take one logical backup of this process's home through `run_backup`
     (real openssl encryption)."""
     directory = tmp_path / "backups-db"
@@ -130,7 +133,9 @@ def backups(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Callable[[], Pat
     def take() -> Path:
         now = datetime(2026, 9, 27, 3, next(stamps), tzinfo=UTC)
         staging = directory / f"stage-{now.minute}"
-        return backup.run_backup(now, db_url="dbname=ava", publish=False, staging=staging)
+        return backup.run_backup(
+            now, db_url="dbname=ava", publish=False, staging=staging, db=database
+        )
 
     return take
 

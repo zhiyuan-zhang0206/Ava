@@ -13,8 +13,9 @@ from base.agents.incarnation.lifecycle_acceptance import (
     KILL_ALL_SHELL_SESSIONS,
 )
 from base.agents.messages.envelope import validate_writable_source
-from base.db import publish_inbound_wake
+from base.db import Database, publish_inbound_wake
 from base.db.transaction import write_transaction
+from base.events.live.bus import EventBus
 from base.log import logger
 from base.telemetry.audit_events import prepare_event_log, record_audit
 from ops.lifecycle.events import publish_page_closed as publish_page_closed
@@ -187,6 +188,8 @@ def _stage_termination_event(
 
 
 def _enqueue_termination_inbounds(
+    db: Database,
+    bus: EventBus,
     agent_id: int,
     db_pool: ConnectionPool,
     *,
@@ -228,7 +231,7 @@ def _enqueue_termination_inbounds(
             kill_all_shell_sessions=kill_all_shell_sessions,
         )
     telemetry.emit_prepared(prepared_event)
-    _publish_force_terminate_inbound(agent_id, terminate_id, source)
+    _publish_force_terminate_inbound(db, bus, agent_id, terminate_id, source)
     return terminate_id
 
 
@@ -308,12 +311,16 @@ def _force_terminate_transaction(
     return old_status, pid, page_names, terminate_inbound_id
 
 
-def _publish_force_terminate_inbound(agent_id: int, inbound_id: int, _source: str) -> None:
+def _publish_force_terminate_inbound(
+    db: Database, bus: EventBus, agent_id: int, inbound_id: int, _source: str
+) -> None:
     """Publish the non-transactional wake after the fenced audit commit."""
-    publish_inbound_wake(agent_id, str(inbound_id))
+    publish_inbound_wake(db, bus, agent_id, str(inbound_id))
 
 
 def force_mark_terminated(
+    db: Database,
+    bus: EventBus,
     agent_id: int,
     db_pool: ConnectionPool,
     *,
@@ -327,5 +334,5 @@ def force_mark_terminated(
         source=source,
         message=message,
     )
-    _publish_force_terminate_inbound(agent_id, inbound_id, source)
+    _publish_force_terminate_inbound(db, bus, agent_id, inbound_id, source)
     return page_names

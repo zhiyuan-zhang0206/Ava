@@ -53,7 +53,7 @@ def test_unregistered_station_uses_remote_port_projection(monkeypatch: pytest.Mo
 
 
 def test_runner_does_not_discover_station(monkeypatch: pytest.MonkeyPatch) -> None:
-    def fail_discovery(base: str) -> None:
+    def fail_discovery(_db: object, base: str) -> None:
         pytest.fail("pure runners must use their published gateway relay")
 
     monkeypatch.setattr("base.telemetry.station_endpoint.resolve_station_target", fail_discovery)

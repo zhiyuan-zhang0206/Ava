@@ -20,7 +20,8 @@ from psycopg_pool import ConnectionPool
 
 from base import telemetry
 from base.config import settings
-from base.db import insert_inbound_message
+from base.db import Database, insert_inbound_message
+from base.events.live.bus import EventBus
 from services.delivery_watchdog.daemon import (
     dispatch_wakes,
     select_pending_for_dispatch,
@@ -57,7 +58,14 @@ def _make_idling_agent(db: psycopg.Connection) -> int:
 def _insert_old_inbound(db: psycopg.Connection, agent_id: int, *, age_s: float) -> int:
     """Insert a chat inbound backdated `age_s` (timestamp-only UPDATE — the
     inbound table has no triggers on created_at). Returns the inbound id."""
-    iid = insert_inbound_message(db, agent_id, "stale", source="user")
+    iid = insert_inbound_message(
+        db,
+        agent_id,
+        "stale",
+        source="user",
+        bus=EventBus.from_settings(),
+        database=Database.from_settings(),
+    )
     with db.cursor() as cur:
         cur.execute(
             "UPDATE inbound_messages SET created_at = now() - make_interval(secs => %s) "
@@ -211,6 +219,8 @@ class TestSelectPendingForDispatch:
     def _dispatch(pool: ConnectionPool) -> int:
         return dispatch_wakes(
             pool,
+            Database.from_settings(),
+            EventBus.from_settings(),
             _DISPATCH_THRESHOLD_S,
             _MAX_DISPATCH_COUNT,
             _DISPATCH_BACKOFF_STEPS_S,
@@ -227,7 +237,7 @@ class TestSelectPendingForDispatch:
         iid = _insert_old_inbound(db_conn, aid, age_s=_DISPATCH_THRESHOLD_S + 1)
         publishes: list[tuple[int, str]] = []
 
-        def record_publish(agent_id: int, payload: str) -> bool:
+        def record_publish(_db: object, _bus: object, agent_id: int, payload: str) -> bool:
             publishes.append((agent_id, payload))
             return True
 
@@ -261,7 +271,7 @@ class TestSelectPendingForDispatch:
         iid = _insert_old_inbound(db_conn, aid, age_s=_DISPATCH_THRESHOLD_S + 1)
         publishes: list[tuple[int, str]] = []
 
-        def record_publish(agent_id: int, payload: str) -> bool:
+        def record_publish(_db: object, _bus: object, agent_id: int, payload: str) -> bool:
             publishes.append((agent_id, payload))
             return True
 

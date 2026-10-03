@@ -14,9 +14,11 @@ import psutil
 
 from base.agents.exit_codes import SERVICES_NOT_READY_EXIT_CODE
 from base.cluster.machine import MachineRoles, machine_role
+from base.db import Database
 from base.deploy.lifecycle import start_serving
 from base.deploy.lifecycle.status_journal import begin, finish, phase, status_path
 from base.deploy.maintenance import admission
+from base.events.live.bus import EventBus
 from base.native_process.ownership import retain_processes
 from cli.commands._repo import _repo_root, build_services, session_name
 from cli.commands.lifecycle.service_stop import (
@@ -379,7 +381,16 @@ def _drain_and_stop(
     from base.deploy.maintenance.hold_driver import mint_driver
     from cli.commands.lifecycle.stop import _announce_stopping
 
-    _timed_phase(phases, "drain", lambda: pause_agents(remaining(deadline), driver=mint_driver()))
+    _timed_phase(
+        phases,
+        "drain",
+        lambda: pause_agents(
+            Database.from_settings(),
+            EventBus.from_settings(),
+            remaining(deadline),
+            driver=mint_driver(),
+        ),
+    )
     start_serving.clear_serving()
     if announce:
         _announce_stopping()
@@ -392,7 +403,7 @@ def _drain_and_stop(
 
         # A failed posture write leaves the drained phase retryable. The
         # stopped phase never dials a data plane that is already offline.
-        set_posture("paused")
+        set_posture(Database.from_settings(), "paused")
         admission.set_phase(current.holder, current.acquired_at, "stopping")
     _timed_phase(phases, "quiesce", lambda: ops_quiescent(remaining(deadline)))
     _timed_phase(

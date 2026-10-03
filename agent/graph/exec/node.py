@@ -197,6 +197,7 @@ async def _run_agent_code(
     async with subscribe_interrupt(ctx.ops_pool, agent_id) as cancel_event:
         outcome = await _exec_with_node_shield(
             _run_in_subprocess(
+                ctx.require_db(),
                 code,
                 int(agent_id),
                 cancel_event,

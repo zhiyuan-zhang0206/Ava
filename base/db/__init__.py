@@ -38,7 +38,7 @@ from base.db.connections import connect_url as connect_url
 from base.db.connections import direct_db_url as direct_db_url
 from base.db.connections import pool as pool
 from base.db.handle import Database as Database
-from base.db.transaction import write_transaction
+from base.events.live.bus import EventBus
 from base.log import logger
 from base.telemetry import Event
 
@@ -68,6 +68,7 @@ class ChatInboundFact(NamedTuple):
 
 
 def list_chat_inbound_facts(
+    db: Database,
     agent_id: int,
     from_: datetime,
     to: datetime,
@@ -79,7 +80,7 @@ def list_chat_inbound_facts(
     needs identity, source and time only. Callers state the window (no default;
     task #3696 posture).
     """
-    db_pool = pool(autocommit=True)
+    db_pool = db.pool(autocommit=True)
     try:
         with db_pool.connection() as conn, conn.cursor() as cur:
             cur.execute(
@@ -150,7 +151,7 @@ def list_agents(db: psycopg.Connection) -> list[tuple[int, str | None]]:
         return cur.fetchall()
 
 
-def publish_inbound_wake(agent_id: int, payload: str) -> bool:
+def publish_inbound_wake(db: Database, bus: EventBus, agent_id: int, payload: str) -> bool:
     """Best-effort Redis publish to wake an idle agent — the fast path paired
     with the claim loop's SELECT recheck. Also SETEXes the agent's wake key
     (`base.cluster.wake_key`) as a durable breadcrumb so a wake lost to a
@@ -178,12 +179,11 @@ def publish_inbound_wake(agent_id: int, payload: str) -> bool:
     # lazy-imported to keep this module importable without the lease layer.
     from base.agents.impersonation import relay_liveness_alert
     from base.cluster import WAKE_KEY_TTL_S, inbound_channel, wake_key
-    from base.events.live.bus import EventBus
 
-    relay_liveness_alert(agent_id)
+    relay_liveness_alert(db, agent_id)
     channel = inbound_channel(agent_id)
     try:
-        r = EventBus.from_settings().sync_redis()
+        r = bus.sync_redis()
         try:
             # redis-py types publish()'s **kwargs as Unknown, so the bound
             # method reads as partially-unknown; the call itself is fully typed.
@@ -272,6 +272,9 @@ def insert_inbound_message(
     kind: str = "chat",
     payload: dict[str, object] | None = None,
     provenance: InboundProvenance | None = None,
+    *,
+    database: Database,
+    bus: EventBus,
 ) -> int:
     """UI / gateway call: INSERT one inbound; the agent's claim node
     fetches and dispatches.
@@ -349,7 +352,7 @@ def insert_inbound_message(
     # `<prefix>:inbound:{agent_id}` (inbound_channel) via RedisInboundListener.
     # Fire-and-forget: the agent's defensive SELECT recheck catches inbound
     # within timeout_s regardless — but a NOPERM is logged, not swallowed.
-    publish_inbound_wake(agent_id, str(new_id))
+    publish_inbound_wake(database, bus, agent_id, str(new_id))
     return new_id
 
 
@@ -393,12 +396,14 @@ def insert_spawn_prompt_in_transaction(
     return inbound_id, record_audit(cur.connection, record_central_event(cur.connection, event))
 
 
-def announce_spawn_prompt(agent_id: int, inbound_id: int, event: Event | None) -> None:
+def announce_spawn_prompt(
+    db: Database, bus: EventBus, agent_id: int, inbound_id: int, event: Event | None
+) -> None:
     """Emit the recorded chat audit event and the wake hint after the prompt commits."""
     try:
         _emit_prepared_event(event)
     finally:
-        publish_inbound_wake(agent_id, str(inbound_id))
+        publish_inbound_wake(db, bus, agent_id, str(inbound_id))
 
 
 def _emit_prepared_event(event: Event | None) -> None:
@@ -521,7 +526,12 @@ NOTICE_FYI_TTL_DAYS = 30
 
 
 def signal_live_agents_restart(
-    source: str, *, exclude_agent_ids: Collection[int] = (), machine: str | None = None
+    db: Database,
+    bus: EventBus,
+    source: str,
+    *,
+    exclude_agent_ids: Collection[int] = (),
+    machine: str | None = None,
 ) -> list[int]:
     """Bulk-INSERT one kind='restart' inbound per live agent, wake each over Redis; return ids.
 
@@ -548,7 +558,7 @@ def signal_live_agents_restart(
             mid-quiesce, or one whose spawn completed mid-quiesce.
         machine: restrict to agents running on this machine (None = all).
     """
-    with write_transaction() as conn, conn.cursor() as cur:
+    with db.write_transaction() as conn, conn.cursor() as cur:
         cur.execute(
             "INSERT INTO inbound_messages (agent_id, content, kind, source) "  # noqa: S608 — ALIVE_SQL is a module constant
             "SELECT id, '', 'restart', %s FROM agents_meta "
@@ -564,17 +574,17 @@ def signal_live_agents_restart(
     # by the agent's SELECT recheck. restart carries no user-facing inbound id,
     # so "0" (mirroring insert_compact_request_inbound).
     for aid in ids:
-        publish_inbound_wake(aid, "0")
+        publish_inbound_wake(db, bus, aid, "0")
     return ids
 
 
-def list_live_agent_ids(machine: str | None = None) -> list[int]:
+def list_live_agent_ids(db: Database, machine: str | None = None) -> list[int]:
     """IDs of agents currently holding a process (status running/idling).
 
     `machine` restricts to one host's agents (the per-host quiesce); None
     returns the whole cluster (the rollout's stop-the-world).
     """
-    with connect() as conn, conn.cursor() as cur:
+    with db.connect() as conn, conn.cursor() as cur:
         cur.execute(
             "SELECT id FROM agents_meta "  # noqa: S608 — ALIVE_SQL is a module constant
             f"WHERE {ALIVE_SQL} AND (%s::text IS NULL OR machine = %s)",
@@ -635,7 +645,9 @@ def list_pending_inbounds(db: psycopg.Connection, agent_id: int) -> list[Inbound
         return [InboundRow(*row) for row in cur.fetchall()]
 
 
-def insert_compact_request_inbound(db: psycopg.Connection, agent_id: int) -> int:
+def insert_compact_request_inbound(
+    db: psycopg.Connection, agent_id: int, *, database: Database, bus: EventBus
+) -> int:
     """UI / admin call: insert one kind='compact_request' inbound —
     the claim Node, on receiving, runs the backend Compaction LLM to
     generate a summary that replaces messages.
@@ -671,7 +683,7 @@ def insert_compact_request_inbound(db: psycopg.Connection, agent_id: int) -> int
     _emit_prepared_event(compact_event)
     # Publish to Redis for agent wake-up (see insert_inbound_message + the
     # publish_inbound_wake docstring).
-    publish_inbound_wake(agent_id, str(inbound_id))
+    publish_inbound_wake(database, bus, agent_id, str(inbound_id))
     return inbound_id
 
 
