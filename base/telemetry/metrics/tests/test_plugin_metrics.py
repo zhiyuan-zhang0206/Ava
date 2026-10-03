@@ -1,7 +1,7 @@
-"""SQL safety validation + registration for plugin metrics (W13).
+"""SQL safety validation + admission for plugin metrics (W13).
 
-Covers what ``register_metric`` enforces at import time: name uniqueness and
-query safety per dialect — the static-SQL whitelist (single SELECT over
+Covers what the data registry enforces when it admits a plugin's declared metrics: name
+uniqueness and query safety per dialect — the static-SQL whitelist (single SELECT over
 `events` / `agents_meta`, function / operator whitelist, no macros /
 placeholders — task #180 PR C) and the LogQL contract
 (``base/telemetry/metrics/logql.py``).
@@ -13,18 +13,16 @@ from typing import Any
 import pytest
 from pydantic import ValidationError
 
-from base.packages.plugins.context import PluginContext
+from base.packages.plugins.data_registry import DeclaredFace, build_data_registry
+from base.packages.plugins.extensions import PluginContributions
 from base.telemetry.metrics.plugin_metrics import (
-    DuplicateMetric,
     InvalidMetricQuery,
     MetricSpec,
-    NoPluginContext,
-    clear_registry,
-    register_metric,
     render_query,
     render_targets,
     render_title,
     validate_metric_sql,
+    validate_spec_sql,
 )
 
 # ── SQL safety: accepted templates ────────────────────────────────────────────
@@ -220,11 +218,9 @@ def test_render_targets_renders_query_and_targets() -> None:
     ]
 
 
-def test_register_validates_all_targets() -> None:
-    from base.packages.plugins.context import PluginContext
-
-    with pytest.raises(InvalidMetricQuery, match="not on the whitelist"), PluginContext("t"):
-        register_metric(
+def test_validate_spec_sql_checks_all_targets() -> None:
+    with pytest.raises(InvalidMetricQuery, match="not on the whitelist"):
+        validate_spec_sql(
             MetricSpec(
                 name="bad_target",
                 title="Bad",
@@ -236,14 +232,7 @@ def test_register_validates_all_targets() -> None:
         )
 
 
-# ── registration ──────────────────────────────────────────────────────────────────────
-
-
-@pytest.fixture(autouse=True)
-def _clean_registry():
-    clear_registry()
-    yield
-    clear_registry()
+# ── admission ─────────────────────────────────────────────────────────────────────────
 
 
 def _spec(**overrides: Any) -> MetricSpec:
@@ -259,32 +248,51 @@ def _spec(**overrides: Any) -> MetricSpec:
     return MetricSpec(**base)  # type: ignore[arg-type]
 
 
-def test_register_fills_plugin_from_context() -> None:
-    with PluginContext("ava_demo"):
-        registered = register_metric(_spec())
-    assert registered.plugin == "ava_demo"
-    assert registered_metrics_names() == ["test_metric"]
+def _admit(*faces: tuple[str, list[MetricSpec]]) -> tuple[list[MetricSpec], list[str]]:
+    """(admitted specs, refused plugin names) of a data registry built from `(plugin, specs)`."""
+    registry, refused = build_data_registry(
+        [DeclaredFace(plugin, PluginContributions(metrics=tuple(specs))) for plugin, specs in faces]
+    )
+    return list(registry.metrics()), refused
 
 
-def registered_metrics_names() -> list[str]:
-    from base.telemetry.metrics.plugin_metrics import registered_metrics
-
-    return [m.name for m in registered_metrics()]
-
-
-def test_register_outside_context_raises() -> None:
-    with pytest.raises(NoPluginContext):
-        register_metric(_spec())
+def test_admission_fills_plugin_from_the_registry_entry() -> None:
+    admitted, refused = _admit(("ava_demo", [_spec()]))
+    assert refused == []
+    assert [(m.name, m.plugin) for m in admitted] == [("test_metric", "ava_demo")]
 
 
-def test_register_duplicate_name_rejected() -> None:
-    with PluginContext("ava_demo"):
-        register_metric(_spec(name="dup"))
-        with pytest.raises(DuplicateMetric):
-            register_metric(_spec(name="dup"))
+def test_admission_overrides_the_plugin_a_spec_claims() -> None:
+    admitted, _ = _admit(("ava_demo", [_spec(plugin="someone_else")]))
+    assert [m.plugin for m in admitted] == ["ava_demo"]
 
 
-def test_register_bad_event_name_rejected() -> None:
+def test_a_second_plugin_claiming_a_metric_name_is_refused() -> None:
+    admitted, refused = _admit(
+        ("ava_demo", [_spec(name="dup")]), ("ava_other", [_spec(name="dup"), _spec(name="own")])
+    )
+    assert refused == ["ava_other"]
+    assert [(m.name, m.plugin) for m in admitted] == [("dup", "ava_demo")]
+
+
+def test_duplicate_name_within_one_plugin_is_refused() -> None:
+    admitted, refused = _admit(("ava_demo", [_spec(name="dup"), _spec(name="dup")]))
+    assert refused == ["ava_demo"]
+    assert admitted == []
+
+
+def test_a_refused_plugin_leaves_no_metrics_and_spares_the_others() -> None:
+    bad = _spec(name="bad_target", targets=["SELECT pg_sleep(1)"])
+    admitted, refused = _admit(
+        ("ava_good", [_spec(name="good")]),
+        ("ava_bad", [_spec(name="first_ok"), bad]),
+        ("ava_after", [_spec(name="after")]),
+    )
+    assert refused == ["ava_bad"]
+    assert [m.name for m in admitted] == ["good", "after"]
+
+
+def test_spec_bad_event_name_rejected() -> None:
     with pytest.raises(ValidationError):
         _spec(event_name="TurnEnd")  # uppercase — must be ^[a-z][a-z0-9_-]*$
     with pytest.raises(ValidationError):
@@ -293,44 +301,43 @@ def test_register_bad_event_name_rejected() -> None:
         _spec(event_name="turn-end!")
 
 
-def test_register_hyphenated_event_name_accepted() -> None:
+def test_admission_hyphenated_event_name_accepted() -> None:
     # The live event vocabulary carries hyphens (e.g. recall-filter), so the
     # event_name charset allows them; SQL templates are static now, so a
     # hyphenated event name cannot broaden the SQL surface at all.
-    with PluginContext("ava_demo"):
-        ok = register_metric(_spec(event_name="recall-filter"))
+    admitted, refused = _admit(("ava_demo", [_spec(event_name="recall-filter")]))
+    assert refused == []
+    (ok,) = admitted
     assert ok.event_name == "recall-filter"
     assert "event_name = 'turn_end'" in render_query(ok)
 
 
-def test_register_bad_category_rejected() -> None:
+def test_spec_bad_category_rejected() -> None:
     with pytest.raises(ValidationError):
         _spec(category="metrics")  # not audit|telemetry|log
 
 
-def test_register_rejects_template_placeholders() -> None:
+def test_admission_rejects_template_placeholders() -> None:
     # The template era is over (task #180 PR C): any SQL template carrying
-    # {event_name}/{category}/{{agent_id}} placeholders is rejected at
-    # register time — the live event stream is read through LogQL, and the
+    # {event_name}/{category}/{{agent_id}} placeholders is refused at
+    # admission — the live event stream is read through LogQL, and the
     # {{agent_id}} ↔ grafana surface rule died with the placeholders.
-    with (
-        pytest.raises(InvalidMetricQuery, match="template placeholders"),
-        PluginContext("ava_demo"),
-    ):
-        register_metric(
-            _spec(
-                query="SELECT count(*) FROM events WHERE event_name = {event_name} "
-                "AND category = {category} AND {{agent_id}}"
-            )
-        )
+    spec = _spec(
+        query="SELECT count(*) FROM events WHERE event_name = {event_name} "
+        "AND category = {category} AND {{agent_id}}"
+    )
+    with pytest.raises(InvalidMetricQuery, match="template placeholders"):
+        validate_spec_sql(spec)
+    admitted, refused = _admit(("ava_demo", [spec]))
+    assert (admitted, refused) == ([], ["ava_demo"])
 
 
-def test_register_duplicate_output_surface_rejected() -> None:
+def test_spec_duplicate_output_surface_rejected() -> None:
     with pytest.raises(ValidationError):
         _spec(output=["grafana", "grafana"])
 
 
-def test_register_empty_output_rejected() -> None:
+def test_spec_empty_output_rejected() -> None:
     with pytest.raises(ValidationError):
         _spec(output=[])
 
@@ -341,8 +348,7 @@ def test_register_empty_output_rejected() -> None:
 def test_render_static_sql_passes_through() -> None:
     # Static SQL renders verbatim — placeholders were retired with the
     # template cutover (task #180 PR C).
-    with PluginContext("ava_demo"):
-        spec = register_metric(_spec())
+    (spec,) = _admit(("ava_demo", [_spec()]))[0]
     assert render_query(spec) == _spec().query
 
 

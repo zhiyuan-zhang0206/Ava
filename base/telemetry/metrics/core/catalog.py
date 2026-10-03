@@ -6,11 +6,11 @@ Two-tier metric architecture since 2026-08-06 (user ruling):
   errors / turn health / exec outcomes / SDK usage, plus the hand-written
   ops-dashboard panels migrated into registry form. Each definition module returns its
   specs from ``core_metrics()`` and ``collect_core_metrics`` runs the SAME template safety validation
-  as plugin metrics but never requires a PluginContext: core metrics are
+  as plugin metrics but is not admitted through a plugin entry: core metrics are
   repo code, not plugin code.
 - **Plugin metrics** (``base/telemetry/metrics/plugin_metrics.py``): metrics contributed by
   first-party business plugins (ava_fleet / ava_memory / ava_syntax_fix) or
-  external plugins, registered under their plugin name.
+  external plugins, declared under their plugin name (`PluginContributions.metrics`).
 
 The dashboards (``deploy/lgtm/config/grafana/provisioning/dashboards/
 ava-ops-main.json``) carry the **core section first** — row header ``core``,

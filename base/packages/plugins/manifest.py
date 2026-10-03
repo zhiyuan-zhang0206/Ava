@@ -190,6 +190,8 @@ CONTRIBUTION_KEYS = {
     "sdkNamespaces",
     "sdkWraps",
     "systemPromptSections",
+    "metrics",
+    "inspectWidgets",
     "opsServices",
     "config",
     "skills",

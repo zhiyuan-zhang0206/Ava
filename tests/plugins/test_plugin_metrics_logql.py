@@ -10,39 +10,26 @@ JSON panel drifting from its spec fails here.
 
 from __future__ import annotations
 
-import importlib
 import json
-import sys
 from pathlib import Path
 
-from base.packages.plugins.context import PluginContext
 from base.telemetry.metrics.core import catalog
+from base.telemetry.metrics.grafana_dashboard_supply import load_repo_plugin_specs
 from base.telemetry.metrics.plugin_metrics import (
     MetricSpec,
-    clear_registry,
-    registered_metrics,
     render_query,
     render_targets,
     render_title,
 )
 
-_PLUGINS = ("ava_fleet", "ava_memory", "ava_syntax_fix")
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
-def _load_all() -> None:
-    """Register every shipped plugin metric exactly once, reloading modules
-    that an earlier test already imported so the registry state is exact
-    regardless of what ran before."""
-    clear_registry()
-    for name in _PLUGINS:
-        mod_name = f"ava_builtins.plugins.{name}.metrics"
-        mod = sys.modules.get(mod_name)
-        with PluginContext(name):
-            if mod is None:
-                importlib.import_module(mod_name)
-            else:
-                importlib.reload(mod)
+def registered_metrics() -> list[MetricSpec]:
+    """Every shipped plugin's declared metrics, admitted through the data registry."""
+    result = load_repo_plugin_specs()
+    assert result.failed == []
+    return result.specs
 
 
 def _load_core() -> list[MetricSpec]:
@@ -51,7 +38,6 @@ def _load_core() -> list[MetricSpec]:
 
 
 def test_shipped_plugin_metrics_are_logql() -> None:
-    _load_all()
     specs = registered_metrics()
     assert len(specs) == 11
     names = {spec.name for spec in specs}
@@ -66,7 +52,6 @@ def test_shipped_plugin_metrics_are_logql() -> None:
 
 
 def test_rendered_queries_target_the_event_stream() -> None:
-    _load_all()
     for spec in registered_metrics():
         for template in render_targets(spec):
             assert 'service_name="unknown_service"' in template, (
@@ -90,7 +75,6 @@ def test_rendered_queries_target_the_event_stream() -> None:
 
 
 def test_agent_placeholder_renders_per_agent() -> None:
-    _load_all()
     for spec in registered_metrics():
         rendered = render_query(spec)
         if "{{agent_id}}" in rendered:
@@ -104,7 +88,6 @@ def test_dashboard_json_matches_registrations() -> None:
     """The merged dashboard mirrors the registered grafana specs panel for
     panel: same Loki datasource, the rendered expr verbatim, instant queries
     for stat panels and range queries for the rest."""
-    _load_all()
     specs = [s for s in registered_metrics() if "grafana" in s.output]
     path = _REPO_ROOT / "deploy/lgtm/config/grafana/provisioning/dashboards/ava-ops-main.json"
     data = json.loads(path.read_text())
@@ -124,7 +107,6 @@ def test_plugin_panels_live_under_their_plugin_rows() -> None:
     panels must resolve to the section titled with that plugin, so a panel
     drifting into another section — or a plugin row being renamed or dropped —
     fails here."""
-    _load_all()
     specs = [s for s in registered_metrics() if "grafana" in s.output]
     path = _REPO_ROOT / "deploy/lgtm/config/grafana/provisioning/dashboards/ava-ops-main.json"
     data = json.loads(path.read_text())

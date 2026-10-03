@@ -1,7 +1,7 @@
-"""ava_memory Grafana + inspector metrics — registered at import time.
+"""ava_memory Grafana + inspector metrics — declared, not registered.
 
-Plugin loading imports this module inside a ``PluginContext`` to collect the
-registrations below; the plugin name comes from the context. Query templates target the unified event stream in Loki
+The processes that serve metrics import this module and take its ``contribute()``
+declaration; the plugin name comes from the registry entry. Query templates target the unified event stream in Loki
 (task #180: the PG ``events`` table was frozen at the LGTM cutover and
 dropped with the archive cleanup — every metric reads the event stream
 through LogQL, the same read the core panels use, task #1280).
@@ -37,8 +37,9 @@ the empty-recall share, reported as its inverse framing (the hit-rate proxy).
 """
 
 from base.events.contract import PASSIVE_RECALL_KEYS, RECALL_FILTER_KEYS
+from base.packages.plugins.extensions import PluginContributions
 from base.telemetry.metrics.logql import CATEGORY_WITH_LEGACY_LOG, event_count
-from base.telemetry.metrics.plugin_metrics import MetricSpec, ThresholdStep, register_metric
+from base.telemetry.metrics.plugin_metrics import MetricSpec, ThresholdStep
 
 # Attribute labels are derived from the payload-key contract (a renamed
 # payload key fails loudly here instead of silently NULLing out) — the same
@@ -47,7 +48,19 @@ _RECALL_ATTR = {k: f"attributes_{k}" for k in RECALL_FILTER_KEYS}
 _PASSIVE_RECALL_ATTR = {k: f"attributes_{k}" for k in PASSIVE_RECALL_KEYS}
 
 
-register_metric(
+def _passive_recall_average_ms(field: str) -> str:
+    """Average one recall leg's successful duration in a five-minute bucket."""
+    attr = _PASSIVE_RECALL_ATTR[field]
+    successful = f'{CATEGORY_WITH_LEGACY_LOG} | level="info" | {attr}!=""'
+    numerator = (
+        f'sum(sum_over_time({{service_name="unknown_service", event_name={{event_name}}}} | json | '
+        f"{successful} | unwrap {attr} [5m]))"
+    )
+    denominator = event_count(successful, "5m", matchers="event_name={event_name}")
+    return f"{numerator} / {denominator}"
+
+
+METRICS: tuple[MetricSpec, ...] = (
     MetricSpec(
         name="ava_memory_recall_filter_runs",
         title="Memory recall filter runs",
@@ -69,23 +82,7 @@ register_metric(
         target_names=["runs"],
         output=["grafana"],
         order=0,
-    )
-)
-
-
-def _passive_recall_average_ms(field: str) -> str:
-    """Average one recall leg's successful duration in a five-minute bucket."""
-    attr = _PASSIVE_RECALL_ATTR[field]
-    successful = f'{CATEGORY_WITH_LEGACY_LOG} | level="info" | {attr}!=""'
-    numerator = (
-        f'sum(sum_over_time({{service_name="unknown_service", event_name={{event_name}}}} | json | '
-        f"{successful} | unwrap {attr} [5m]))"
-    )
-    denominator = event_count(successful, "5m", matchers="event_name={event_name}")
-    return f"{numerator} / {denominator}"
-
-
-register_metric(
+    ),
     MetricSpec(
         name="ava_memory_recall_search_latency_ms",
         title="Memory recall search latency",
@@ -102,10 +99,7 @@ register_metric(
         target_names=["avg search ms"],
         output=["grafana", "inspector"],
         order=4,
-    )
-)
-
-register_metric(
+    ),
     MetricSpec(
         name="ava_memory_recall_filter_latency_ms",
         title="Memory recall filter latency",
@@ -122,10 +116,7 @@ register_metric(
         target_names=["avg filter ms"],
         output=["grafana", "inspector"],
         order=5,
-    )
-)
-
-register_metric(
+    ),
     MetricSpec(
         name="ava_memory_recall_filter_empty_rate",
         title="Empty recall ratio",
@@ -156,10 +147,7 @@ register_metric(
         target_names=["empty %"],
         output=["grafana", "inspector"],
         order=1,
-    )
-)
-
-register_metric(
+    ),
     MetricSpec(
         name="ava_memory_recall_filter_anomaly_rate",
         title="Recall filter error ratio",
@@ -185,10 +173,7 @@ register_metric(
         target_names=["anomaly %"],
         output=["grafana"],
         order=2,
-    )
-)
-
-register_metric(
+    ),
     MetricSpec(
         name="ava_memory_recall_filter_failures",
         title="Recall filter failures",
@@ -211,10 +196,7 @@ register_metric(
         target_names=["failures"],
         output=["grafana"],
         order=3,
-    )
-)
-
-register_metric(
+    ),
     MetricSpec(
         name="ava_memory_recall_filter_agent_runs",
         title="Agent recall filter runs",
@@ -236,5 +218,10 @@ register_metric(
         query_type="logql",
         target_names=["runs"],
         output=["inspector"],
-    )
+    ),
 )
+
+
+def contribute() -> PluginContributions:
+    """What this plugin declares for the metric surfaces (Grafana dashboard, agent inspector)."""
+    return PluginContributions(metrics=METRICS)

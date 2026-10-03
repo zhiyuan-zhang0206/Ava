@@ -6,7 +6,6 @@
     "base/packages/plugins/contributions.py::ambient-container:_CONTRIBUTIONS": 1,
     "base/packages/plugins/enable_config.py::ambient-container:_dangling_reported": 1,
     "base/packages/plugins/flags.py::ambient-container:_PLUGIN_FLAGS": 1,
-    "base/packages/plugins/inspector.py::ambient-container:_REGISTRY": 1,
     "base/packages/skills/index.py::ambient-container:_CACHE": 1
   },
   "complexity": {

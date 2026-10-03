@@ -1,7 +1,7 @@
-"""ava_fleet Grafana + inspector metrics — registered at import time.
+"""ava_fleet Grafana + inspector metrics — declared, not registered.
 
-``base/telemetry/metrics/grafana_dashboard_supply`` imports this module (inside a
-PluginContext) to collect the registrations for the rendered Ava Ops
+``base/telemetry/metrics/grafana_dashboard_supply`` imports this module and takes its
+``contribute()`` declaration for the rendered Ava Ops
 dashboard (``ava lgtm render``, task #3697). Two metrics:
 
 - ``ava_fleet_task_done_rate`` — dual-surface (grafana + inspector): a
@@ -32,8 +32,9 @@ the category predicate is exact (no ``|log`` alternative).
 """
 
 from base.events.contract import TASK_UPDATE_KEYS
+from base.packages.plugins.extensions import PluginContributions
 from base.telemetry.metrics.logql import event_count
-from base.telemetry.metrics.plugin_metrics import MetricSpec, register_metric
+from base.telemetry.metrics.plugin_metrics import MetricSpec
 
 # Attribute labels are derived from the payload-key contract (a renamed
 # payload key fails loudly here instead of silently NULLing out) — the same
@@ -41,7 +42,7 @@ from base.telemetry.metrics.plugin_metrics import MetricSpec, register_metric
 _TASK_ATTR = {k: f"attributes_{k}" for k in TASK_UPDATE_KEYS}
 
 
-register_metric(
+METRICS: tuple[MetricSpec, ...] = (
     MetricSpec(
         name="ava_fleet_task_done_rate",
         title="Task completion rate",
@@ -73,10 +74,7 @@ register_metric(
         query_type="logql",
         target_names=["done %"],
         output=["grafana", "inspector"],
-    )
-)
-
-register_metric(
+    ),
     MetricSpec(
         name="ava_fleet_agent_task_done_rate",
         title="Agent task completion rate",
@@ -108,5 +106,10 @@ register_metric(
         query_type="logql",
         target_names=["done %"],
         output=["inspector"],
-    )
+    ),
 )
+
+
+def contribute() -> PluginContributions:
+    """What this plugin declares for the metric surfaces (Grafana dashboard, agent inspector)."""
+    return PluginContributions(metrics=METRICS)
