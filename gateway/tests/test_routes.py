@@ -20,6 +20,7 @@ import psycopg
 import pytest
 from fastapi.testclient import TestClient
 
+from base.db import Database
 from base.packages.plugins import stats
 from base.telemetry.observability import cluster_label
 from gateway.app import app
@@ -476,13 +477,14 @@ def test_dashboard_invalid_hours_422(db_conn: psycopg.Connection, bad: str) -> N
 # ── plugin stat values (task #2911) ────────────────────────────────────
 
 
-def test_dashboard_carries_plugin_stat_values_unwindowed() -> None:
+def test_dashboard_carries_plugin_stat_values_unwindowed(database: Database) -> None:
     """The runtime half of collected plugin cards rides this response: every
     row, its status, and its freshness metadata. Not windowed — the plugin's
     value is a point-in-time fact and the window selector must not pretend to
     aggregate it. Declarations are joined by the console from
     /api/ui/contributions on (plugin, id)."""
     stats.upsert(
+        database,
         plugin="codex_usage",
         id="codex-zhang0206",
         value="6%",
@@ -491,6 +493,7 @@ def test_dashboard_carries_plugin_stat_values_unwindowed() -> None:
         updated_by="macmini",
     )
     stats.upsert(
+        database,
         plugin="codex_usage",
         id="codex-wuji",
         value="!",

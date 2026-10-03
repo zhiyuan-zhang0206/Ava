@@ -14,7 +14,7 @@ import pytest
 from psycopg_pool import ConnectionPool
 
 from base.config import settings
-from base.db import pool
+from base.db import Database, pool
 from base.packages.plugins import stats
 
 
@@ -28,8 +28,9 @@ def stat_pool() -> Iterator[ConnectionPool]:
         p.close()
 
 
-def test_upsert_and_read_round_trip(stat_pool: ConnectionPool) -> None:
+def test_upsert_and_read_round_trip(stat_pool: ConnectionPool, database: Database) -> None:
     stats.upsert(
+        database,
         plugin="codex_usage",
         id="codex-zhang0206",
         value="6%",
@@ -52,20 +53,20 @@ def test_upsert_and_read_round_trip(stat_pool: ConnectionPool) -> None:
     assert abs((datetime.now(UTC) - row.updated_at).total_seconds()) < 60
 
 
-def test_last_write_wins_on_the_card_key(stat_pool: ConnectionPool) -> None:
+def test_last_write_wins_on_the_card_key(stat_pool: ConnectionPool, database: Database) -> None:
     """One row per card: the second write replaces value/detail/status in place."""
-    stats.upsert(plugin="p", id="c", value="1%", status="ok")
-    stats.upsert(plugin="p", id="c", value="2%", detail="retry", status="error")
+    stats.upsert(database, plugin="p", id="c", value="1%", status="ok")
+    stats.upsert(database, plugin="p", id="c", value="2%", detail="retry", status="error")
     rows = stats.read_all(stat_pool)
     assert [(r.plugin, r.id, r.value, r.detail, r.status) for r in rows] == [
         ("p", "c", "2%", "retry", "error")
     ]
 
 
-def test_read_all_orders_by_plugin_then_id(stat_pool: ConnectionPool) -> None:
-    stats.upsert(plugin="b", id="z", value="1")
-    stats.upsert(plugin="a", id="y", value="2")
-    stats.upsert(plugin="a", id="x", value="3")
+def test_read_all_orders_by_plugin_then_id(stat_pool: ConnectionPool, database: Database) -> None:
+    stats.upsert(database, plugin="b", id="z", value="1")
+    stats.upsert(database, plugin="a", id="y", value="2")
+    stats.upsert(database, plugin="a", id="x", value="3")
     assert [(r.plugin, r.id) for r in stats.read_all(stat_pool)] == [
         ("a", "x"),
         ("a", "y"),
@@ -73,37 +74,39 @@ def test_read_all_orders_by_plugin_then_id(stat_pool: ConnectionPool) -> None:
     ]
 
 
-def test_null_detail_stays_null(stat_pool: ConnectionPool) -> None:
-    stats.upsert(plugin="p", id="c", value="42")
+def test_null_detail_stays_null(stat_pool: ConnectionPool, database: Database) -> None:
+    stats.upsert(database, plugin="p", id="c", value="42")
     assert stats.read_all(stat_pool)[0].detail is None
 
 
 def test_writer_validation_refuses_what_the_panel_cannot_render(
     db_conn: psycopg.Connection,
+    database: Database,
 ) -> None:
     with pytest.raises(ValueError, match="non-empty string"):
-        stats.upsert(plugin="p", id="c", value="  ")
+        stats.upsert(database, plugin="p", id="c", value="  ")
     with pytest.raises(ValueError, match="exceeds"):
-        stats.upsert(plugin="p", id="c", value="x" * (stats.MAX_VALUE_CHARS + 1))
+        stats.upsert(database, plugin="p", id="c", value="x" * (stats.MAX_VALUE_CHARS + 1))
     with pytest.raises(ValueError, match="exceeds"):
         stats.upsert(
+            database,
             plugin="p",
             id="c",
             value="ok",
             detail="y" * (settings.display.plugin_stats_max_detail_chars + 1),
         )
     with pytest.raises(ValueError, match="not one of"):
-        stats.upsert(plugin="p", id="c", value="ok", status="empty")
+        stats.upsert(database, plugin="p", id="c", value="ok", status="empty")
     with pytest.raises(ValueError, match="non-empty string"):
-        stats.upsert(plugin="", id="c", value="ok")
+        stats.upsert(database, plugin="", id="c", value="ok")
 
 
 def test_detail_cap_follows_config(
-    monkeypatch: pytest.MonkeyPatch, db_conn: psycopg.Connection
+    monkeypatch: pytest.MonkeyPatch, db_conn: psycopg.Connection, database: Database
 ) -> None:
     """The detail cap is cluster config, resolved per call: a shortened cap
     rejects what the default would accept (task #3696)."""
     monkeypatch.setattr(settings.display, "plugin_stats_max_detail_chars", 10)
-    stats.upsert(plugin="p", id="c", value="ok", detail="y" * 10)
+    stats.upsert(database, plugin="p", id="c", value="ok", detail="y" * 10)
     with pytest.raises(ValueError, match="exceeds"):
-        stats.upsert(plugin="p", id="c", value="ok", detail="y" * 11)
+        stats.upsert(database, plugin="p", id="c", value="ok", detail="y" * 11)
