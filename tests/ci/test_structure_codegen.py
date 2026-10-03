@@ -320,13 +320,97 @@ def test_node_npm_and_codegen_share_one_condition() -> None:
 
 def test_structure_guard_pins_the_merge_refs_base_not_the_event_field() -> None:
     """#4903: base.sha can lag the merge ref's actual base (a stale branch's
-    sync point), which hard-fails the guard once a baseline section retires;
-    the step resolves HEAD^1 and keeps base.sha only as a fallback."""
+    sync point), which hard-fails the guard once a baseline section retires.
+    The depth-1 checkout carries no parent objects, so the step deepens the
+    merge commit before resolving; resolution uses --verify because plain
+    rev-parse echoes its own argument on failure (the literal string reached
+    the fetch as an invalid refspec in run 37081265642). base.sha stays only
+    as the fallback for a checkout that is not a merge ref."""
     script = STEPS["Fetch base revision for structure guard"]["run"]
-    assert "git rev-parse HEAD^1" in script
-    assert script.index("HEAD^1") < script.index("base.sha")
-    assert 'git fetch --depth=1 origin "$base"' in script
+    deepen = 'git fetch --depth=2 origin "$(git rev-parse HEAD)"'
+    resolve = "git rev-parse --verify --quiet 'HEAD^1^{commit}'"
+    fallback = 'base="${{ github.event.pull_request.base.sha }}"'
+    base_fetch = 'git fetch --depth=1 origin "$base"'
+    for needle in (deepen, resolve, fallback, base_fetch):
+        assert needle in script
+    assert (
+        script.index(deepen)
+        < script.index(resolve)
+        < script.index(fallback)
+        < script.index(base_fetch)
+    )
+    assert "git rev-parse --verify --quiet HEAD^2" in script
     assert "LINT_STRUCTURE_BASELINE_BASE" in script
+
+
+def test_shallow_checkout_needs_the_deepen_before_resolving_head_parent(
+    tmp_path: Path,
+) -> None:
+    """The mechanism the guard step relies on (run 37081265642): with the
+    parent objects absent, plain rev-parse exits non-zero yet echoes the
+    literal "HEAD^1" — --verify stays silent instead — and one depth-2
+    re-fetch of the merge commit makes HEAD^1 the true base again."""
+    source = tmp_path / "source"
+    source.mkdir()
+
+    def git(*args: str, cwd: Path = source) -> str:
+        return subprocess.run(  # noqa: S603 — fixed git argv over the test's own fixture
+            ["git", *args], cwd=cwd, check=True, capture_output=True, text=True
+        ).stdout.strip()
+
+    git("init", "-q", "-b", "main")
+    git("config", "user.email", "structure-guard@example.invalid")
+    git("config", "user.name", "structure-guard")
+    # The fixture server models GitHub, which serves fetch-by-SHA requests.
+    git("config", "uploadpack.allowAnySHA1InWant", "true")
+    (source / "a").write_text("a\n")
+    git("add", "a")
+    git("commit", "-qm", "base one")
+    git("checkout", "-qb", "feature")
+    (source / "b").write_text("b\n")
+    git("add", "b")
+    git("commit", "-qm", "feature head")
+    git("checkout", "-q", "main")
+    (source / "m").write_text("m\n")
+    git("add", "m")
+    git("commit", "-qm", "base two")
+    git("merge", "-q", "--no-ff", "feature", "-m", "merge feature")
+    base = git("rev-parse", "HEAD^1")
+
+    checkout = tmp_path / "checkout"
+    subprocess.run(  # noqa: S603 — fixed git argv over the test's own fixture
+        ["git", "clone", "-q", "--depth=1", source.as_uri(), str(checkout)],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    literal = subprocess.run(
+        ["git", "rev-parse", "HEAD^1"],
+        cwd=checkout,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert literal.returncode != 0
+    assert literal.stdout.strip() == "HEAD^1"
+    silent = subprocess.run(
+        ["git", "rev-parse", "--verify", "--quiet", "HEAD^1^{commit}"],
+        cwd=checkout,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert silent.returncode != 0
+    assert silent.stdout.strip() == ""
+    merge = git("rev-parse", "HEAD", cwd=checkout)
+    subprocess.run(  # noqa: S603 — fixed git argv over the test's own fixture
+        ["git", "fetch", "-q", "--depth=2", "origin", merge],
+        cwd=checkout,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    assert git("rev-parse", "HEAD^1", cwd=checkout) == base
 
 
 def test_every_codegen_input_family_selects_freshness() -> None:
