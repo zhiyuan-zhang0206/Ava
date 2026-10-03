@@ -458,10 +458,9 @@ def test_sweep_raises_a_stat_failure_other_than_not_found(
 def test_collect_from_mirror_returns_records_counts_missing_without_writing(
     backfill_mod: Any, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """The daily scan's automatic fallback consumes collect_from_mirror()
-    directly: it must hand back (records, counts, missing_days) — counts feed
-    the daily sentinel — pass include_test through, and write NOTHING (the
-    scan owns the daily/<week>.jsonl write)."""
+    """collect_from_mirror() must hand back (records, counts, missing_days) —
+    counts feed the daily sentinel — pass include_test through, and write
+    NOTHING (backfill() owns the daily/<week>.jsonl write)."""
     now = datetime.now(UTC)
     logs = tmp_path / "logs"
     logs.mkdir()

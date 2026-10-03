@@ -55,10 +55,6 @@ from base.cluster.machine import gateway_auth_headers
 from base.config import settings
 from base.host.net.resilience import ExponentialBackoff, Policy, http_classifier, retry
 from base.paths import ava_home
-from base.telemetry.observability import (
-    ObservabilityReadUnavailable,
-    observability_refusal_detail,
-)
 
 # Task-origin inbound sources — capture every real task prompt, whether from
 # the user ("user") or a spawner / peer agent ("agent:<id>"). System and
@@ -90,9 +86,6 @@ def _events_page(
     Runs on `_EVENTS_RETRY_POLICY`: a transient failure (502/503/504 or a
     transport error) is retried inside the wait budget; a spent budget
     raises the diagnostics-carrying error, any other status fails fast.
-    The cluster-without-observability refusal is neither: it raises
-    `ObservabilityReadUnavailable` on the first reply (no retry), because
-    the state is configuration and callers hold a local fallback.
     """
     params: dict[str, Any] = {
         "category": category,
@@ -111,14 +104,6 @@ def _events_page(
             headers=gateway_auth_headers(),
             timeout=_HTTP_TIMEOUT_S,
         )
-        refusal = observability_refusal_detail(resp)
-        if refusal is not None:
-            # The cluster has no observability (policy, not outage) — fail fast
-            # rather than spend the retry budget on a state retrying cannot
-            # clear; callers may fall back to the local mirror. Raised
-            # response-less on purpose: the retry classifier sees no HTTP
-            # status on this exception and never retries it.
-            raise ObservabilityReadUnavailable(refusal)
         resp.raise_for_status()
         payload = resp.json()
         return payload.get("items", []), payload.get("meta", {})

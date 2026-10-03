@@ -40,7 +40,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, NamedTuple
 
-# `collect`/`mirror_backfill` are siblings in this skill's own scripts/ dir,
+# `collect` is a sibling in this skill's own scripts/ dir,
 # not an importable package (PYTHONSAFEPATH=1 keeps a script's own directory
 # off sys.path) — restore it for the sibling import. Structure Rule 6
 # recognizes this exact __file__-derived, within-skill shape as the endorsed
@@ -48,7 +48,6 @@ from typing import Any, NamedTuple
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import collect
-import mirror_backfill
 
 from base.paths import ava_home
 
@@ -121,21 +120,11 @@ def _compact_bad_line(rec: dict[str, Any]) -> str:
 
 
 class ScanResult(NamedTuple):
-    """One scan's output, carrying its own provenance.
-
-    `source_note` is None on the normal (gateway) path and names the fallback
-    source otherwise — it must travel with the records so the report and the
-    schedule's wake message cannot present mirror data as the live read.
-    `missing_days` names mirror days absent from a fallback window (empty
-    otherwise); a non-empty value forces the ALERT exit — a partial window
-    must not read as "nothing to act on".
-    """
+    """One scan's output."""
 
     records: list[dict[str, Any]]
     path: Path
     counts: dict[str, int]
-    source_note: str | None = None
-    missing_days: tuple[str, ...] = ()
 
 
 def scan(days: int, week: str | None = None, *, include_test: bool = False) -> ScanResult:
@@ -149,37 +138,16 @@ def scan(days: int, week: str | None = None, *, include_test: bool = False) -> S
     from collect.collect_with_counts) — the empty-dataset sentinel keys on
     it to tell a TEST-only window from a broken data source.
 
-    Source: the gateway's /api/events (Loki-backed) normally. When the
-    gateway refuses with the no-observability code — a cluster without an
-    observability stack, a policy state rather than an outage — the window
-    is collected from the local event mirror instead (mirror_backfill,
-    loudly marked in `source_note`); a transient /api/events failure still
-    fails the scan, as before."""
+    Source: the gateway's /api/events; a failed read fails the scan."""
     week = week or datetime.now(UTC).date().isoformat()
-    source_note: str | None = None
-    missing_days: list[str] = []
-    try:
-        records, counts = collect.collect_with_counts(days, week, include_test=include_test)
-    except collect.ObservabilityReadUnavailable as exc:
-        print(
-            f"[{datetime.now(UTC).isoformat()}] gateway observability reads unavailable "
-            f"({exc}) — collecting from the local event mirror"
-        )
-        records, counts, missing_days = mirror_backfill.collect_from_mirror(
-            days, week, include_test=include_test
-        )
-        source_note = "local event mirror (no observability on this cluster)"
-        if missing_days:
-            source_note += (
-                f"; mirror file missing for {', '.join(missing_days)} — window may be partial"
-            )
+    records, counts = collect.collect_with_counts(days, week, include_test=include_test)
     out_dir = ava_home() / "self_evolution" / "daily"
     out_dir.mkdir(parents=True, exist_ok=True)
     path = out_dir / f"{week}.jsonl"
     with path.open("w", encoding="utf-8") as f:
         for rec in records:
             f.write(json.dumps(rec, ensure_ascii=False, default=str) + "\n")
-    return ScanResult(records, path, counts, source_note, tuple(missing_days))
+    return ScanResult(records, path, counts)
 
 
 def _is_test_only_window(records: list[dict[str, Any]], counts: dict[str, int] | None) -> bool:
@@ -193,8 +161,6 @@ def _is_test_only_window(records: list[dict[str, Any]], counts: dict[str, int] |
 def alert_exit(
     records: list[dict[str, Any]],
     counts: dict[str, int] | None = None,
-    *,
-    missing_days: tuple[str, ...] = (),
 ) -> int:
     """0 when nothing is worth acting on, 2 (ALERT) when any run is bad —
     or when no runs were collected at all: an empty dataset means the data
@@ -204,14 +170,7 @@ def alert_exit(
     `counts` (collect.collect_with_counts) refines the sentinel: an empty
     dataset whose every pre-filter run was a TEST- spawn is the filter
     working as designed, not a source outage, and exits 0 (QA review of
-    PR #698, 2026-08-29). Without counts the legacy sentinel applies.
-
-    `missing_days` (a fallback window whose mirror file(s) are absent)
-    alerts regardless of the runs the window did produce: the gap itself is
-    an unexplained window that could hide bad runs (mirror_backfill's iron
-    rule — a partial window must not silently become a partial dataset)."""
-    if missing_days:
-        return 2
+    PR #698, 2026-08-29). Without counts the legacy sentinel applies."""
     if not records:
         return 0 if _is_test_only_window(records, counts) else 2
     return 2 if any(r["label"] != "ok" for r in records) else 0
@@ -225,15 +184,12 @@ def render(
     *,
     report_path: Path | None = None,
     compact_bad: bool = False,
-    source_note: str | None = None,
 ) -> str:
     """Render the scan report. With `report_path` set the output closes with
     a summary line and a pointer to the persisted full report. `compact_bad`
     may replace an oversized bad list (> BAD_LIST_MAX_CHARS chars) with one
     counter line per run, but only when `report_path` is set: without a
-    stored report the rich lines are the only copy of the details.
-    `source_note` (fallback provenance) lands just before the closing block —
-    the stable tail — so the schedule's crop cannot sever it."""
+    stored report the rich lines are the only copy of the details."""
     counts_by_label = Counter(r["label"] for r in records)
     skill_counts = Counter(
         skill for r in records if "skills_touched" in r for skill in r["skills_touched"]
@@ -306,8 +262,6 @@ def render(
         else:
             lines.append(head)
             lines.extend(rich_lines)
-    if source_note:
-        lines.append(f"source: {source_note}")
     if report_path is not None:
         lines.append(
             f"summary: {len(records)} runs (ok {counts_by_label['ok']} / "
@@ -336,9 +290,7 @@ def main() -> None:
         print("error: --days must be >= 1", file=sys.stderr)
         raise SystemExit(1)
     result = scan(args.days, include_test=args.include_test)
-    full = render(
-        result.records, result.path, args.days, result.counts, source_note=result.source_note
-    )
+    full = render(result.records, result.path, args.days, result.counts)
     report_path = result.path.with_suffix(".report.txt")
     try:
         # Publish atomically (tmp + rename): a reader never sees a partial
@@ -356,10 +308,9 @@ def main() -> None:
         result.counts,
         report_path=report_path,
         compact_bad=True,
-        source_note=result.source_note,
     )
     print(out)
-    raise SystemExit(alert_exit(result.records, result.counts, missing_days=result.missing_days))
+    raise SystemExit(alert_exit(result.records, result.counts))
 
 
 if __name__ == "__main__":

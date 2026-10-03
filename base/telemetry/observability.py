@@ -2,7 +2,7 @@
 
 import os
 from pathlib import Path
-from typing import Literal, cast
+from typing import Literal
 
 ObservabilityEndpointVariable = Literal[
     "AVA_TELEMETRY_OTLP_ENDPOINT",
@@ -137,57 +137,3 @@ def collector_allowed_for_home(home: Path | None) -> bool:
     return home_is_observability_station(home) or endpoint_override_is_explicit(
         "AVA_TELEMETRY_OTLP_ENDPOINT"
     )
-
-
-# ── The read-boundary refusal (no observability on this cluster) ────────────
-# A gateway that is not the observability station and has no explicit
-# AVA_TELEMETRY_LOKI_URL refused observability reads outright: the wire answer
-# was a 503 problem+json whose ``code`` is this constant. Current gateways no
-# longer read Loki and never answer it; the reader classification stays for a
-# unit still running an older gateway. It is a configuration state, not a transient
-# failure — retrying cannot clear it — so readers branch on it and take a local
-# fallback where one exists (the events JSONL mirror for the self-evolution
-# scans). One constant + one predicate, so every reader classifies the same
-# wire shape.
-
-OBSERVABILITY_READ_UNAVAILABLE_CODE = "observability_read_unavailable"
-
-
-class ObservabilityReadUnavailable(RuntimeError):  # noqa: N818
-    """A reader's view of the no-observability refusal above.
-
-    Raised by readers (e.g. the self-evolution collect path) so callers can
-    distinguish "this cluster deliberately has no observability stack" from an
-    outage: the former has a local fallback (the event mirror), the latter
-    must stay loud.
-    """
-
-
-def observability_refusal_detail(response: object) -> str | None:
-    """The refusal detail when ``response`` is the no-observability 503, else None.
-
-    Duck-typed over any response carrying ``status_code`` + ``json()`` (httpx
-    and test doubles) so this module stays import-light. Narrow on purpose:
-    only the exact problem code counts — every other status/body keeps its
-    normal path, so a transient outage (or a proxy's HTML 503) is never
-    mistaken for the policy state. A body that does not parse is not the
-    refusal either; the caller's normal error path reports it.
-    """
-    if getattr(response, "status_code", None) != 503:
-        return None
-    json_fn = getattr(response, "json", None)
-    if not callable(json_fn):
-        return None
-    try:
-        body = json_fn()
-    except ValueError:
-        return None
-    if not isinstance(body, dict):
-        return None
-    payload = cast("dict[str, object]", body)
-    if payload.get("code") != OBSERVABILITY_READ_UNAVAILABLE_CODE:
-        return None
-    detail = payload.get("detail")
-    if isinstance(detail, str) and detail:
-        return detail
-    return "observability reads unavailable for this cluster"
