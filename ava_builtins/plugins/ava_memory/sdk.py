@@ -285,21 +285,7 @@ def _insert_dir_pointer(lines: list[str], pointer: str, filename: str) -> str:
         if target is not None and lines[index].lstrip().startswith(("*", "-")):
             entries.append((index, target.group(1)))
     if not entries:
-        placeholder = next(
-            (
-                index
-                for index in range(notes_start + 1, section_end)
-                if lines[index].strip() == "*(none)*"
-            ),
-            None,
-        )
-        if placeholder is not None:
-            lines[placeholder] = pointer
-        else:
-            insert_at = notes_start + 1
-            while insert_at < section_end and not lines[insert_at].strip():
-                insert_at += 1
-            lines.insert(insert_at, pointer)
+        _insert_into_empty_notes(lines, pointer, notes_start, section_end)
         return "\n".join(lines) + "\n"
     insert_at = entries[-1][0] + 1
     for index, target_name in entries:
@@ -308,6 +294,27 @@ def _insert_dir_pointer(lines: list[str], pointer: str, filename: str) -> str:
             break
     lines.insert(insert_at, pointer)
     return "\n".join(lines) + "\n"
+
+
+def _insert_into_empty_notes(
+    lines: list[str], pointer: str, notes_start: int, section_end: int
+) -> None:
+    """A `## Notes` section with no entries: replace its `*(none)*` placeholder or insert first."""
+    placeholder = next(
+        (
+            index
+            for index in range(notes_start + 1, section_end)
+            if lines[index].strip() == "*(none)*"
+        ),
+        None,
+    )
+    if placeholder is not None:
+        lines[placeholder] = pointer
+        return
+    insert_at = notes_start + 1
+    while insert_at < section_end and not lines[insert_at].strip():
+        insert_at += 1
+    lines.insert(insert_at, pointer)
 
 
 def _upsert_subdir_index(root: Path, relative_path: str, title: str, description: str) -> None:

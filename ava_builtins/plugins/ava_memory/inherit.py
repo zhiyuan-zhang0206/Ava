@@ -214,6 +214,63 @@ def _section(block: _InheritedBlock, text: str) -> str:
     return f"## ancestor #{block.ancestor_id}{label} — memory/{block.entry_path.name}\n\n{text}"
 
 
+def _group_blocks(
+    blocks: list[_InheritedBlock], block_cap: int
+) -> list[tuple[_InheritedBlock, str]]:
+    """Per-block guardrail first, then group consecutive blocks of one entry
+    into a single section (multiple fences in one file stay one section)."""
+    grouped: list[tuple[_InheritedBlock, str]] = []
+    for block in blocks:
+        text = block.text
+        if block_cap > 0 and len(text) > block_cap:
+            logger.warning(
+                "[inherited-memory] block in {} is {} chars — truncated to {}",
+                block.entry_path,
+                len(text),
+                block_cap,
+            )
+            text = (
+                f"{text[:block_cap].rstrip()}\n"
+                f"{_BLOCK_TRUNCATION.format(cap=block_cap, path=block.entry_path)}"
+            )
+        if (
+            grouped
+            and grouped[-1][0].ancestor_id == block.ancestor_id
+            and grouped[-1][0].entry_path == block.entry_path
+        ):
+            prior_block, prior_text = grouped[-1]
+            grouped[-1] = (prior_block, f"{prior_text}\n\n{text}")
+        else:
+            grouped.append((block, text))
+    return grouped
+
+
+def _fit_sections(
+    grouped: list[tuple[_InheritedBlock, str]], total_cap: int
+) -> tuple[list[str], bool]:
+    """Total guardrail: sections enter whole until the budget is reached; the
+    crossing section is clipped to the remainder, and the rest are omitted
+    behind one visible marker (`cutoff`)."""
+    sections: list[str] = []
+    used = 0
+    cutoff = False
+    for block, text in grouped:
+        if total_cap > 0 and used + len(text) > total_cap:
+            remaining = max(total_cap - used, 0)
+            logger.warning(
+                "[inherited-memory] total budget of {} chars reached at {} — truncated",
+                total_cap,
+                block.entry_path,
+            )
+            if remaining > 0:
+                sections.append(_section(block, text[:remaining].rstrip()))
+            cutoff = True
+            break
+        used += len(text)
+        sections.append(_section(block, text))
+    return sections, cutoff
+
+
 def inherited_memory_note(slices: AgentSlices) -> HumanMessage | None:
     """The `inheritable` blocks read from the agent's birth chain.
 
@@ -244,52 +301,8 @@ def inherited_memory_note(slices: AgentSlices) -> HumanMessage | None:
     block_cap = settings.agent.memory_inherit_max_block_chars
     total_cap = settings.agent.memory_inherit_max_total_chars
 
-    # Per-block guardrail first, then group consecutive blocks of one entry
-    # into a single section (multiple fences in one file stay one section).
-    grouped: list[tuple[_InheritedBlock, str]] = []
-    for block in blocks:
-        text = block.text
-        if block_cap > 0 and len(text) > block_cap:
-            logger.warning(
-                "[inherited-memory] block in {} is {} chars — truncated to {}",
-                block.entry_path,
-                len(text),
-                block_cap,
-            )
-            text = (
-                f"{text[:block_cap].rstrip()}\n"
-                f"{_BLOCK_TRUNCATION.format(cap=block_cap, path=block.entry_path)}"
-            )
-        if (
-            grouped
-            and grouped[-1][0].ancestor_id == block.ancestor_id
-            and grouped[-1][0].entry_path == block.entry_path
-        ):
-            prior_block, prior_text = grouped[-1]
-            grouped[-1] = (prior_block, f"{prior_text}\n\n{text}")
-        else:
-            grouped.append((block, text))
-
-    # Total guardrail: sections enter whole until the budget is reached; the
-    # crossing section is clipped to the remainder, and the rest are omitted
-    # behind one visible marker.
-    sections: list[str] = []
-    used = 0
-    cutoff = False
-    for block, text in grouped:
-        if total_cap > 0 and used + len(text) > total_cap:
-            remaining = max(total_cap - used, 0)
-            logger.warning(
-                "[inherited-memory] total budget of {} chars reached at {} — truncated",
-                total_cap,
-                block.entry_path,
-            )
-            if remaining > 0:
-                sections.append(_section(block, text[:remaining].rstrip()))
-            cutoff = True
-            break
-        used += len(text)
-        sections.append(_section(block, text))
+    grouped = _group_blocks(blocks, block_cap)
+    sections, cutoff = _fit_sections(grouped, total_cap)
 
     body = "\n\n".join(sections)
     if cutoff:
