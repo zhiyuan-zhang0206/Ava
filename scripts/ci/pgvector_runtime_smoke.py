@@ -36,12 +36,12 @@ from base.cluster.dataplane.pg_tools import throwaway_postgres
 def _assert_platform_supported() -> None:
     system = platform.system()
     machine = platform.machine()
-    supported = (system == "Darwin" and machine in ("arm64", "x86_64", "amd64")) or (
+    supported = (system == "Darwin" and machine == "arm64") or (
         system == "Linux" and machine in ("x86_64", "amd64")
     )
     if not supported:
         raise RuntimeError(
-            f"no pinned pgvector artifact for {system}/{machine} (linux/arm64 is out of matrix)"
+            f"no pinned pgvector artifact for {system}/{machine} (linux/arm64 and darwin/x86_64 are out of matrix)"
         )
 
 
