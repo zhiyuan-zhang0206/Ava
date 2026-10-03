@@ -402,7 +402,7 @@ async def test_auto_compaction_cancels_at_llm_node_without_replacing_context(
     tid = create_agent(db_conn)
     monkeypatch.setattr("agent.graph.interrupt._INTERRUPT_POLL_S", 0.01)
 
-    def small_budget(_model: str) -> ContextBudget:
+    def small_budget(_model: str, _overrides: object = None) -> ContextBudget:
         return ContextBudget(
             max_context_tokens=10_000, soft_compact_tokens=1, hard_compact_tokens=1
         )
@@ -500,7 +500,7 @@ async def test_compaction_returns_through_claim_then_generates_before_compacting
     from base.lm.context_budget import ContextBudget
     from tests.fixtures.units import spawn_agent
 
-    def small_budget(_model: str) -> ContextBudget:
+    def small_budget(_model: str, _overrides: object = None) -> ContextBudget:
         return ContextBudget(10_000, 1, 1)
 
     def apply(state: AgentState, command: Command[Any]) -> AgentState:
@@ -554,13 +554,13 @@ async def test_compaction_returns_through_claim_then_generates_before_compacting
     state = state.model_copy(
         update={"messages": serde.loads_typed(serde.dumps_typed(state.messages))}
     )
-    assert not auto_compact_will_fire(state, "deepseek-flash")
+    assert not auto_compact_will_fire(state, runtime.context.require_agent())
     _insert(db_conn, tid, "cancel")
     cancelled = await claim_node(state, runtime, config)
     assert cancelled.goto == "claim"
     state = apply(state, cancelled)
     assert state.halted
-    assert not auto_compact_will_fire(state, "deepseek-flash")
+    assert not auto_compact_will_fire(state, runtime.context.require_agent())
     model.astream.assert_not_called()
 
     db_conn.execute(
@@ -571,7 +571,7 @@ async def test_compaction_returns_through_claim_then_generates_before_compacting
     resumed = await claim_node(state, runtime, config)
     assert resumed.goto == "before_llm"
     state = apply(state, resumed)
-    assert not auto_compact_will_fire(state, "deepseek-flash")
+    assert not auto_compact_will_fire(state, runtime.context.require_agent())
     assert await _compact_reminder(state, runtime, config) is None
     generated = await llm_node(state, runtime, config)
     assert generated.goto == "after_exec"
@@ -581,5 +581,5 @@ async def test_compaction_returns_through_claim_then_generates_before_compacting
     summary.assert_awaited_once()
     model.astream.assert_called_once()
     assert auto_compact_will_fire(
-        state, "deepseek-flash"
+        state, runtime.context.require_agent()
     )  # A committed ordinary result re-arms the threshold.

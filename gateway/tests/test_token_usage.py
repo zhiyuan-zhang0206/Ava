@@ -160,6 +160,32 @@ def test_per_model_thresholds_scale_to_overlay_model(
     assert body["soft_compact_tokens"] == 60_000  # 0.3 * 200K
 
 
+def test_the_agents_own_compact_thresholds_are_reported(
+    db_conn: psycopg.Connection, test_client: TestClient
+) -> None:
+    """An agent that pins its compaction fractions (in its overlay or its birth config) is
+    shown the thresholds it actually compacts at, not the cluster's."""
+    tid = create_agent(db_conn)
+    with db_conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO agents_meta (id, status, config_overlay, birth_config) "
+            "VALUES (%s, 'running', %s::jsonb, %s::jsonb) "
+            "ON CONFLICT (id) DO UPDATE SET config_overlay = EXCLUDED.config_overlay, "
+            "birth_config = EXCLUDED.birth_config",
+            (
+                tid,
+                '{"llm_model": "claude-haiku-4-5-20251001", "auto_compact_fraction": 0.5}',
+                '{"compact_reminder_fraction": 0.25, "auto_compact_fraction": 0.9}',
+            ),
+        )
+    db_conn.commit()
+
+    body = test_client.get(f"/api/agents/{tid}/token-usage").json()
+    assert body["max_input_tokens"] == 200_000
+    assert body["hard_compact_tokens"] == 100_000  # the overlay's 0.5 over the birth config's 0.9
+    assert body["soft_compact_tokens"] == 50_000  # the birth config's 0.25
+
+
 def test_checkpoint_read_failure_returns_zero(
     db_conn: psycopg.Connection,
     test_client: TestClient,

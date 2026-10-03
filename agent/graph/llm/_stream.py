@@ -99,7 +99,9 @@ async def _consume_llm(
     # Per-model defaults with shared fallback; explicit env values / the
     # per-agent overlay win (a slow provider gets a longer bound without
     # loosening every model's stall detection).
-    stall_segment_timeout = resolve_setting("llm_stream_ttft_timeout_seconds", model=model)
+    stall_segment_timeout = resolve_setting(
+        "llm_stream_ttft_timeout_seconds", model=model, overrides=agent.overrides
+    )
     stream_started = time.monotonic()
     try:
         return await _consume_stream_with_stall_timeout(
@@ -107,9 +109,11 @@ async def _consume_llm(
             chunks=chunks,
             handler=handler,
             ttft_timeout=stall_segment_timeout,
-            total_timeout=resolve_setting("llm_stream_total_timeout_seconds", model=model),
+            total_timeout=resolve_setting(
+                "llm_stream_total_timeout_seconds", model=model, overrides=agent.overrides
+            ),
             inter_chunk_timeout=resolve_setting(
-                "llm_stream_inter_chunk_timeout_seconds", model=model
+                "llm_stream_inter_chunk_timeout_seconds", model=model, overrides=agent.overrides
             ),
         )
     except LLMStreamStallTimeoutError as e:

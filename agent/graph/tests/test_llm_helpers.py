@@ -680,7 +680,7 @@ async def test_llm_node_billing_error_logs_billing_vendor_and_model(
     from base.config import settings
     from base.lm.context_budget import ContextBudget
 
-    def fixture_budget(_model: str) -> ContextBudget:
+    def fixture_budget(_model: str, _overrides: object = None) -> ContextBudget:
         return ContextBudget(10_000, 3_000, 4_000)
 
     monkeypatch.setattr("agent.hooks.compact.resolve_context_budget", fixture_budget)

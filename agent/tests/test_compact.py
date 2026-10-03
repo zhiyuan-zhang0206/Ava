@@ -88,7 +88,7 @@ def _patch_compact_config(
         soft_compact_tokens=compact_reminder_tokens,
         hard_compact_tokens=auto_compact_tokens,
     )
-    monkeypatch.setattr("agent.hooks.compact.resolve_context_budget", lambda _model: budget)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr("agent.hooks.compact.resolve_context_budget", lambda *_: budget)  # pyright: ignore[reportUnknownArgumentType]
 
 
 def _fake_llm(summary_text: str = "fake summary", *, response: AIMessage | None = None) -> Any:

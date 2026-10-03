@@ -52,7 +52,7 @@ class _SilentIdleContinueHook(Hook):
         if not _tail_is_silent_idle(state.messages):
             return None
 
-        if auto_compact_will_fire(state, runtime.context.require_agent().brain.llm_model):
+        if auto_compact_will_fire(state, runtime.context.require_agent()):
             logger.info(
                 "[{label}] {body}",
                 label="silent-idle",

@@ -415,3 +415,40 @@ async def test_entry_retry_budget_skipped_while_delayed_sequence_active(
         # Control: no active streak -> the same elapsed time trips the budget.
         with pytest.raises(LLMRetryBudgetExceededError):
             await _one_try(state, _make_runtime(fake_llm), attempt=2, started_ago=spent)
+
+
+_STREAM_BOUNDS = {
+    "llm_stream_ttft_timeout_seconds": "ttft_timeout",
+    "llm_stream_total_timeout_seconds": "total_timeout",
+    "llm_stream_inter_chunk_timeout_seconds": "inter_chunk_timeout",
+}
+
+
+async def _stream_bounds(
+    monkeypatch: pytest.MonkeyPatch, agent: AgentSlices
+) -> dict[str, float | None]:
+    """The bounds `_consume_llm` hands the stream consumer for `agent`."""
+    import agent.graph.llm._stream as stream_module
+
+    seen: dict[str, float | None] = {}
+
+    async def _capture(*_args: object, **kwargs: Any) -> AIMessage:
+        seen.update({k: kwargs[k] for k in _STREAM_BOUNDS.values()})
+        return AIMessage(content="ok")
+
+    monkeypatch.setattr(stream_module, "_consume_stream_with_stall_timeout", _capture)
+    await _consume_llm(MagicMock(), [], chunks=[], handler=MagicMock(), agent=agent)
+    return seen
+
+
+@pytest.mark.parametrize("setting", sorted(_STREAM_BOUNDS))
+async def test_an_agents_stream_bound_is_the_one_the_stream_runs_under(
+    setting: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    pinned = await _stream_bounds(monkeypatch, AgentSlices.resolve({setting: 4.25}))
+    assert pinned[_STREAM_BOUNDS[setting]] == 4.25
+    unpinned = await _stream_bounds(monkeypatch, AgentSlices.resolve())
+    for other in _STREAM_BOUNDS.values():
+        if other != _STREAM_BOUNDS[setting]:
+            assert pinned[other] == unpinned[other]
+    assert unpinned[_STREAM_BOUNDS[setting]] != 4.25

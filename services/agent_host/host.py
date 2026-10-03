@@ -364,9 +364,7 @@ class AgentHost:
                 ):
                     await publish_agent_updated(self._bus, agent_id)
                     slices = AgentSlices.resolve(pins, plugin_pins)
-                    runtime = await self._runtime_for(
-                        agent_id, stored.fingerprint, slices.brain.llm_model
-                    )
+                    runtime = await self._runtime_for(agent_id, stored.fingerprint, slices)
                     outcome = await self._drive_turns(agent_id, runtime, slices)
             except asyncio.CancelledError:
                 # A cancelled turn (stale-turn scan, force terminate, shutdown)
@@ -497,10 +495,12 @@ class AgentHost:
         self._in_flight.discard(agent_id)
         self._evict()
 
-    async def _runtime_for(self, agent_id: int, fingerprint: str, llm_model: str) -> _AgentRuntime:
+    async def _runtime_for(
+        self, agent_id: int, fingerprint: str, slices: AgentSlices
+    ) -> _AgentRuntime:
         """This agent's prepared runtime, building it when absent or stale.
 
-        A cold build prepares `llm_model`, the agent's model for this turn.
+        A cold build prepares the agent's model for this turn, from its `slices`.
         """
         cached = self._runtimes.get(agent_id)
         if cached is not None and cached.fingerprint == fingerprint:
@@ -512,7 +512,7 @@ class AgentHost:
         reason = "cold" if cached is None else "config_changed"
         self.stats.cache_misses += 1
         started = time.monotonic()
-        runtime = await self._build_runtime(agent_id, fingerprint, llm_model)
+        runtime = await self._build_runtime(agent_id, fingerprint, slices)
         self._runtimes[agent_id] = runtime
         self._runtimes.move_to_end(agent_id)
         logger.info(
@@ -526,12 +526,12 @@ class AgentHost:
         return runtime
 
     async def _build_runtime(
-        self, agent_id: int, fingerprint: str, llm_model: str
+        self, agent_id: int, fingerprint: str, slices: AgentSlices
     ) -> _AgentRuntime:
         """Repair checkpoint/inbound state, then prepare the model."""
         await reconcile_claimed_inbounds_at_startup(self._pool, self._checkpointer, agent_id)
         await repair_dangling_tool_use_at_startup(self._graph, agent_id)
-        llm = await boot_agent_scope(agent_id, llm_model)
+        llm = await boot_agent_scope(agent_id, slices.brain.llm_model, slices.overrides)
         return _AgentRuntime(fingerprint=fingerprint, llm=llm)
 
     def _evict(self) -> None:
