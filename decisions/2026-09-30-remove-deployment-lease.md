@@ -110,3 +110,7 @@ later migration.
 - The lease and updater-lease columns of `deployment_state` and
   `host_deploy_state` stay in the schema, unread and unwritten, until the storage
   cleanup migration.
+
+Forward link (2026-10-03): the stranded-pause exits are now `ava maintenance cancel` and
+`repair`; `resume --cancel` was renamed. See
+[the manual maintenance verbs deletion](2026-10-03-delete-manual-maintenance-verbs.md).

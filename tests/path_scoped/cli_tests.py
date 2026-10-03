@@ -110,7 +110,7 @@ def _isolate_local_pause_journal(tmp_path: pathlib.Path, monkeypatch: pytest.Mon
 def cli_log_sinks(monkeypatch: pytest.MonkeyPatch) -> list[str]:
     """In-process dispatch opens no real loguru sinks; the names asked for are recorded.
 
-    `ava start`, `restart`, `maintenance start` and `lgtm on|off` open the
+    `ava start`, `restart` and `lgtm on|off` open the
     service sink set (`cli.main._init_cli_logging`). A real one here would
     outlive its test: a stderr sink bound to that test's captured stream, a
     file sink in the session home and the process-wide init guard latched.

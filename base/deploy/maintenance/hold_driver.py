@@ -1,8 +1,8 @@
 """The shepherd identity a maintenance hold is bound to (task #3270).
 
 A maintenance hold -- the `pause_owner` journal's maintenance payload -- is
-taken by an operator-side ladder that may span several `ava maintenance`
-commands (`prepare` -> `drain` -> ... -> `resume`) or a script driving the CLI.
+taken by an operator-side `ava stop` / `ava restart`, or by a script driving
+the CLI.
 The hold must be released, or loudly escalated, when the process shepherding
 that ladder exits or dies, and it must NOT be judged abandoned while a live
 shepherd remains. This module records and judges that shepherd.
@@ -264,7 +264,7 @@ def mint_driver() -> HoldDriver:
     """Record the shepherding identity of the CALLING process, best-effort.
 
     Called by the operator-side entrypoints that take or advance a maintenance
-    hold (`ava maintenance ...` verbs, the local stop flow). Nothing here
+    hold (the local stop flow). Nothing here
     raises: an unreadable environment mints an empty identity, which readers
     treat as missing evidence -- loud, never a release license.
     """

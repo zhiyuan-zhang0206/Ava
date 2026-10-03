@@ -510,31 +510,6 @@ def close_terminals(
     )
 
 
-def stop_services(
-    timeout: float, *, keep_terminals: bool = False, selected: frozenset[str] | None = None
-) -> list[str]:
-    """Ask the sole root owner to stop drained services without force escalation."""
-    from cli.commands.lifecycle.root_driver import root_tree_selection, stop_root_service_tree
-
-    deadline = deadline_after(timeout)
-    if not keep_terminals:
-        require_no_terminals()
-    names = root_tree_selection()
-    selected_names = sorted(names if selected is None else names.keys() & selected)
-    if selected is not None and not selected_names:
-        return []
-    preserve = frozenset(unit for name, unit in names.items() if name not in selected_names)
-    stop_root_service_tree(
-        preserve=preserve,
-        timeout_s=remaining(deadline),
-        force=False,
-        selected=None if selected is None else frozenset(names[name] for name in selected_names),
-    )
-    if not keep_terminals:
-        require_no_terminals()
-    return selected_names
-
-
 def report_postgres_stop_escalation(
     escalation: owned_postgres.Escalation, notes: list[str] | None = None
 ) -> None:

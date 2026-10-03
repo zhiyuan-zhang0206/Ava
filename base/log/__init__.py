@@ -492,7 +492,7 @@ def init_cli_process(*, name: str) -> None:
     + unified event pipeline (agent_id NULL).
 
     The CLI's verbs are the keys of ``cli.main._CLI_LOG_NAMES`` (``start``,
-    ``restart``, ``maintenance start``, ``lgtm on|off``), which also name each
+    ``restart``, ``lgtm on|off``), which also name each
     one's file; ``cli.main`` calls this before dispatch. Every other verb
     (``ava status`` etc.) opens no sink — its output already lands on the
     caller's terminal, and the extra sinks would clutter ``logs/`` and the

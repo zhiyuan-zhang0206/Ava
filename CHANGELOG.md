@@ -8,6 +8,11 @@ and the matching GitHub Releases.
 ## [Unreleased]
 
 ### Removed
+- `ava maintenance prepare`, `drain`, `stop`, `start`, `resume` and `stop-data-plane`, with
+  `--keep-terminals` and `--gateway-last`: the same kernel as `ava stop` and `ava start`, taken
+  one step at a time, with no caller. `ava maintenance` keeps `status`, `repair` and `cancel`
+  (formerly `resume --cancel`)
+  ([decision](decisions/2026-10-03-delete-manual-maintenance-verbs.md)).
 - `ava pause`: a stop that kept the data plane, browser, helper and persistent shells.
   `ava stop --keep-infra --keep-service NAME` names the retained services, and `ava
   restart` keeps the data plane, browser, helper and shells as before
@@ -36,7 +41,7 @@ and the matching GitHub Releases.
   recover`, the roster's `deploy_hold` field and banner, and the lease readers in
   the deploy window, heartbeat, log sink, package refresh and `ava stop`. A
   stranded pause is read with `ava maintenance status` and ended with
-  `ava maintenance resume --cancel` or `repair`; an unreadable journal is removed
+  `ava maintenance cancel` or `repair`; an unreadable journal is removed
   by hand ([decision](decisions/2026-09-30-remove-deployment-lease.md)).
 
 ### Changed

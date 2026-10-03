@@ -21,7 +21,7 @@ def admission(kind: str) -> Generator[None]:
         and current.maintenance is not None
         and current.maintenance.phase in ("stopping", "stopped", "starting", "ready")
     ):
-        raise RuntimeError("unit is stopping or held for explicit maintenance resume")
+        raise RuntimeError("unit is stopping or held until `ava start` releases it")
     token = object()
     _requests.add(token)
     try:

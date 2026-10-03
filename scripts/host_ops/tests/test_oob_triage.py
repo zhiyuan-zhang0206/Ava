@@ -127,14 +127,14 @@ def test_orphaned_stop_class_hold_renders_the_start_command() -> None:
     assert result.command == "ssh wsl 'cd ~/.ava/source && .venv/bin/ava start'"
 
 
-def test_orphaned_pre_stop_hold_renders_the_resume_cancel_command() -> None:
+def test_orphaned_pre_stop_hold_renders_the_cancel_command() -> None:
     module = _triage_module()
     result = module.classify_status(_status_payload(phase="draining"), host="wsl")
     assert result.classification == "orphaned"
     assert result.command == (
-        "ssh wsl 'cd ~/.ava/source && .venv/bin/ava maintenance resume"
+        "ssh wsl 'cd ~/.ava/source && .venv/bin/ava maintenance cancel"
         " --operation local-pause:wsl:1137224:aaa93de5-0a30-4536-bdb6-b185ff515605"
-        " --acquired-at 2026-09-17T00:42:14.184784+00:00 --cancel'"
+        " --acquired-at 2026-09-17T00:42:14.184784+00:00'"
     )
 
 

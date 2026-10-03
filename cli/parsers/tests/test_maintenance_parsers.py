@@ -11,42 +11,28 @@ from tests.agent.test_maintenance import WHEN
 from tests.agent.test_maintenance import isolate as isolate
 
 
-def test_real_parser_exposes_host_local_maintenance() -> None:
+def test_maintenance_exposes_only_the_hold_exits() -> None:
     from cli.parsers import build_parser
 
     parser = build_parser()
-    parsed = parser.parse_args(
-        [
-            "maintenance",
-            "drain",
-            "--operation",
-            "local",
-            "--acquired-at",
-            WHEN.isoformat(),
-            "--timeout",
-            "3",
-        ]
-    )
-    assert parsed.maintenance_cmd == "drain"
-    assert parsed.operation == "local"
-    assert parsed.timeout == 3
+    for verb in ("prepare", "drain", "stop", "start", "resume", "stop-data-plane"):
+        with pytest.raises(SystemExit):
+            parser.parse_args(["maintenance", verb])
 
 
-@pytest.mark.parametrize("verb", ["stop", "stop-data-plane"])
-@pytest.mark.parametrize("keep", [False, True])
-def test_keep_terminals_is_explicit_at_both_stop_entrypoints(
-    verb: str, keep: bool, monkeypatch: pytest.MonkeyPatch
+def test_real_parser_dispatches_cancel_to_the_named_generation(
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from cli.parsers import build_parser
 
     action = MagicMock()
-    monkeypatch.setattr(command, "stop" if verb == "stop" else "_stop_data", action)
+    monkeypatch.setattr(command, "cancel", action)
     args = build_parser().parse_args(
-        ["maintenance", verb, "--operation", "local", "--acquired-at", WHEN.isoformat()]
-        + (["--keep-terminals"] if keep else [])
+        ["maintenance", "cancel", "--operation", "local", "--acquired-at", WHEN.isoformat()]
     )
+    assert args.maintenance_cmd == "cancel"
     assert command.run(args) == 0
-    action.assert_called_once_with("local", WHEN, 300, gateway_last=False, keep_terminals=keep)
+    action.assert_called_once_with("local", WHEN)
 
 
 def test_real_parser_exposes_repair_with_operator() -> None:
@@ -134,21 +120,21 @@ def test_operation_and_acquired_at_are_gated_at_parse_time(
 
     with pytest.raises(SystemExit) as raised:
         build_parser().parse_args(
-            ["maintenance", "prepare", "--operation", "op", "--acquired-at", "soon"]
+            ["maintenance", "cancel", "--operation", "op", "--acquired-at", "soon"]
         )
     assert raised.value.code == 2
     assert "argument --acquired-at:" in capsys.readouterr().err
 
     with pytest.raises(SystemExit) as raised:
         build_parser().parse_args(
-            ["maintenance", "prepare", "--operation", "op", "--acquired-at", "2026-09-20 03:00:00"]
+            ["maintenance", "cancel", "--operation", "op", "--acquired-at", "2026-09-20 03:00:00"]
         )
     assert raised.value.code == 2
     assert "UTC offset" in capsys.readouterr().err
 
     with pytest.raises(SystemExit) as raised:
         build_parser().parse_args(
-            ["maintenance", "prepare", "--operation", "  ", "--acquired-at", WHEN.isoformat()]
+            ["maintenance", "cancel", "--operation", "  ", "--acquired-at", WHEN.isoformat()]
         )
     assert raised.value.code == 2
     assert "argument --operation:" in capsys.readouterr().err

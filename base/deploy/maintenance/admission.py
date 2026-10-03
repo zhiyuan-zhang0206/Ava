@@ -253,11 +253,12 @@ def repair(
     hold = current.maintenance
     if not hold.failures:
         raise RuntimeError(
-            "no failed receipts to repair; resume --cancel abandons a failure-free drain"
+            "no failed receipts to repair; `ava maintenance cancel` abandons a failure-free drain"
         )
     if hold.phase not in ("preparing", "draining", "drained"):
         raise RuntimeError(
-            "repair cannot bypass a started stop; complete maintenance stop/start/resume"
+            "repair cannot bypass a started stop; re-run `ava stop`, or `ava start` "
+            "to bring the unit back and release the hold"
         )
     updated = replace(
         hold,
