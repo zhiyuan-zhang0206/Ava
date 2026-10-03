@@ -253,23 +253,11 @@ class _ServiceRuntimeSettings(EnvSettings):
         },
     )
 
-    milvus_uri: str = Field(
-        default="http://127.0.0.1:19530",
-        alias="AVA_MILVUS_URI",
-        description="Milvus standalone server URI — memory_indexer / ava.memory.search both connect via this.",
-        json_schema_extra={
-            "restart_required": "gateway",
-            "writable": False,
-            "sensitive": False,
-            "scope": "cluster-pinned",
-        },
-    )
-
     memory_search_backend: str = Field(
         default="numpy",
         alias="AVA_MEMORY_SEARCH_BACKEND",
         description=(
-            "Storage backend for the memory embedding index — 'milvus' | "
+            "Storage backend for the memory embedding index — "
             "'numpy' (default; the local exact-search service) | 'pgvector' (the cluster "
             "Postgres as vector store — the vendored runtime injects the pinned "
             "pgvector files and `ava start` pre-creates the extension, so it works "
@@ -312,7 +300,7 @@ class _ServiceRuntimeSettings(EnvSettings):
         alias="AVA_MEMORY_SEARCH_DEADLINE_SECONDS",
         description=(
             "Wall-clock budget for one POST /api/memory/search, covering the embed and "
-            "the milvus round-trip. Must stay below the SDK's gateway HTTP timeout, or "
+            "the memory-search service round-trip. Must stay below the SDK's gateway HTTP timeout, or "
             "the caller reads out first and the server-side deadline never bites. Also "
             "the anchor of the SDK client's per-attempt timeout (deadline + 3s) and of "
             "memory_search_acquire_timeout_seconds, which must stay below this for the "
@@ -406,35 +394,10 @@ class _ServiceRuntimeSettings(EnvSettings):
         },
     )
 
-    milvus_port: int = Field(
-        default=19530,
-        alias="AVA_MILVUS_PORT",
-        description="Milvus standalone server gRPC port.",
-        json_schema_extra={
-            "restart_required": "",
-            "writable": False,
-            "sensitive": False,
-            "scope": "cluster-pinned",
-        },
-    )
-
-    milvus_data_dir: Path = Field(
-        default_factory=lambda: _unit_home() / "milvus-data",
-        alias="AVA_MILVUS_DATA_DIR",
-        description="Milvus on-disk data directory.",
-        json_schema_extra={
-            "restart_required": "",
-            "writable": False,
-            "sensitive": False,
-            "scope": "host",
-            "remote_writable": False,
-        },
-    )
-
     memory_search_port: int = Field(
         default=19531,
         alias="AVA_MEMORY_SEARCH_PORT",
-        description="Memory search service HTTP port (one past milvus's 19530).",
+        description="Memory search service HTTP port.",
         json_schema_extra={
             "restart_required": "",
             "writable": False,

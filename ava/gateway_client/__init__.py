@@ -108,7 +108,7 @@ class MemorySearchResult(NamedTuple):
 def memory_search(query: str, k: int, *, timeout: float | None = None) -> list[MemorySearchResult]:
     """POST /api/memory/search → list of `MemorySearchResult`.
 
-    Gateway-side primary directly calls embedder + milvus; secondary
+    Gateway-side primary directly calls embedder + the memory-search service; secondary
     forwards to primary. Returns relative paths with frontmatter
     descriptions extracted server-side, so callers do not need to
     re-read every file to get a summary.

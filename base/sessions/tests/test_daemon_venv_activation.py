@@ -2,8 +2,7 @@
 
 Daemons launch as `.venv/bin/python -m X` (an absolute-ish path that does not
 consult PATH), but several shell out to a bare binary that DOES:
-`services.milvus.daemon` execvp's `milvus-lite`, and daemons that run `ava` /
-`python` rely on PATH. `base.sessions.env_forwarding.venv_activation_prefix` prepends the
+daemons that run `ava` / `python` rely on PATH. `base.sessions.env_forwarding.venv_activation_prefix` prepends the
 venv bin onto PATH *inside* the session command, because the two things that
 otherwise carry it do not survive:
 

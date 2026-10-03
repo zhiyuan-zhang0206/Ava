@@ -31,7 +31,6 @@ file to this directory and no row to this table.
 | `lgtm.py` | Read-only diagnostic helper | Native backend protocol helpers and Loki write/read round trip |
 | `mcp_daemon.py` | Service protocol probe | Shared MCP protocol ping |
 | `memory_search.py` | Service protocol probe | Real exact-search POST |
-| `milvus.py` | Service protocol probe | Milvus collection-list RPC |
 | `otel_collector.py` | Service protocol probe | OTLP request accepted and both listeners in captured root lineage |
 | `owned_service.py` | Read-only diagnostic helper | Generic TCP protocol and connected Unix-peer ownership envelope |
 | `permissions_helper.py` | Read-only diagnostic helper | Parent helper ping and launchd failure classification |

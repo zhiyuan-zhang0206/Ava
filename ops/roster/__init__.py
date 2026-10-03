@@ -227,21 +227,7 @@ def build_services() -> tuple[ServiceSpec, ...]:
             capabilities=_GATEWAY,
             requires_db=True,  # assert_schema_current at boot; every decision is a DB read
         ),
-        # milvus before memory-indexer: memory-indexer cold-start connects to milvus.
-        # Gated by _gate_reason to the milvus memory-search backend — numpy
-        # (default) / pgvector hosts do not launch the ~1GB milvus-lite server.
-        ServiceSpec(
-            session="milvus",
-            cmd=".venv/bin/python -m services.milvus.daemon",
-            capabilities=_GATEWAY,
-            # A separate vector store — supervises the milvus-lite binary and never
-            # opens a Postgres connection, so a pg outage is not its business.
-            requires_db=False,
-            tcp_port=settings.services.milvus_port,
-            identity_probe=partial(probe_owned_service, "milvus"),
-            healthcheck_module="services.healthchecks.milvus",
-        ),
-        # memory-search before memory-indexer too: the indexer's cold-start
+        # memory-search before memory-indexer: the indexer's cold-start
         # connects to whichever backend the switch names, so the storage
         # services must come up first.
         ServiceSpec(
@@ -249,7 +235,7 @@ def build_services() -> tuple[ServiceSpec, ...]:
             cmd=".venv/bin/python -m services.memory_search.daemon",
             capabilities=_GATEWAY,
             # The numpy backend's store: in-memory matrix + npz, no Postgres —
-            # a pg outage is not its business (same as milvus).
+            # a pg outage is not its business.
             requires_db=False,
             tcp_port=settings.services.memory_search_port,
             identity_probe=partial(probe_owned_service, "memory-search"),

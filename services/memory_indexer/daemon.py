@@ -237,7 +237,7 @@ def _process_paths(
 
     Sync function — the caller uses ``asyncio.to_thread`` so the event
     loop is not blocked from serving the health probe (`/healthz`).
-    Backends must be cross-thread safe (the milvus gRPC client is).
+    Backends must be cross-thread safe (the HTTP client and the pgvector pool are).
     """
     liveness.beat()
     root = _memory_root().resolve()
@@ -585,7 +585,7 @@ async def _connect_backend_with_retry(
     probe_message: str | None = None,
 ) -> MemorySearchBackend:
     """Connect to the configured backend at daemon startup — `ava start`
-    spawns the storage service (e.g. the milvus session) and the
+    spawns the storage service (the memory-search session) and the
     memory_indexer session in order; server initialization takes a few
     seconds, and within that race window connect may hit connection
     refused. This function retries every 2s up to deadline to give the

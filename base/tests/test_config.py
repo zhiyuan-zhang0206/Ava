@@ -1432,9 +1432,7 @@ def test_memory_backend_switch_fields_require_gateway_restart() -> None:
     profile, so the metadata must name "gateway" — an `ava restart` bounces
     the gateway process AND every gateway-profile daemon. A "" here told the
     panel/CLI "no restart required" and a backend switch silently stayed
-    unapplied until a manual kickstart (Task #2224). milvus_uri is the same
-    bug class: memory_indexer's milvus backend, the milvus healthcheck and
-    the gateway search path all read it.
+    unapplied until a manual kickstart (Task #2224).
     """
     from base.config.profiles import PROCESS_PROFILES
     from base.config.services import ServiceSettings
@@ -1443,7 +1441,7 @@ def test_memory_backend_switch_fields_require_gateway_restart() -> None:
     # honest value — the consumption matrix, kept in sync with the profile set.
     assert "services" in PROCESS_PROFILES["gateway"]
 
-    for name in ("milvus_uri", "memory_search_backend"):
+    for name in ("memory_search_backend",):
         field = ServiceSettings.model_fields[name]
         extra = field.json_schema_extra
         assert isinstance(extra, dict)

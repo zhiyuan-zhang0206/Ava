@@ -1,9 +1,7 @@
 """MemoryStore unit tests — the numpy backend's storage core.
 
-Pure in-memory/npz logic, no HTTP: upsert/delete/meta/search semantics must
-match the milvus backend's contract exactly (same row vocabulary, same
-path aggregation, same ordering), because the whole point of the numpy
-backend is to be the exact reconciliation baseline.
+Pure in-memory/npz logic, no HTTP: upsert/delete/meta/search semantics: one
+row vocabulary, per-path aggregation, exact cosine ordering.
 """
 
 from __future__ import annotations
@@ -229,8 +227,7 @@ def test_delete_stale_rows_noop_for_unknown_path(tmp_path: Path) -> None:
 
 
 def test_search_topk_exact_cosine_order_and_aggregation(tmp_path: Path) -> None:
-    """Best chunk per path wins; ordering is cosine-descending — the exact
-    counterpart of milvus's raw-similarity contract."""
+    """Best chunk per path wins; ordering is cosine-descending."""
     ones = np.ones(_DIM, dtype=np.float32)
     store = _store(tmp_path)
     store.upsert("/a.md", 1.0, "ha", ones, kind="body", chunk_idx=0)

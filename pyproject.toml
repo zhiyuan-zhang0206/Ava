@@ -39,14 +39,6 @@ dependencies = [
     "google-genai>=2.0",
     "watchdog>=6.0.0",
     "numpy>=2.4.4",
-    "pymilvus[milvus-lite]>=3.0.0",
-    # 3.1+ returns COSINE "distance" as raw similarity (Milvus server/Zilliz);
-    # Lite 3.0 was the 1 - similarity outlier, so the backend ranks similarity descending
-    # after task #3164. Keep 3.2.x off while upstream #369 remains open.
-    "milvus-lite==3.1.1; sys_platform != 'win32'",  # mirrors pymilvus's extra marker
-    # It rode in transitively via pymilvus until pymilvus 3.0.1 dropped the
-    # requirement; declared explicitly so the lock always carries exactly one wheel.
-    "setuptools>=82",
     "pyte>=0.8.0",  # terminal emulation screen model for PTY sessions (S6 step 2)
     "traceloop-sdk>=0.61",
     # Imported directly: base/telemetry/tracing.py (span exporter, OTLP protobuf encode)
@@ -1202,11 +1194,6 @@ reportUnknownArgumentType = "error"
 
 [[tool.pyright.executionEnvironments]]
 root = "services/memory_search/tests"
-reportUnknownMemberType = "error"
-reportUnknownArgumentType = "error"
-
-[[tool.pyright.executionEnvironments]]
-root = "services/milvus/tests"
 reportUnknownMemberType = "error"
 reportUnknownArgumentType = "error"
 

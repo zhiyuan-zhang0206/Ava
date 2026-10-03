@@ -13,7 +13,7 @@ from ops.roster.service_spec import ServiceSpec
 
 def test_probe_set_gateway_classifies_signal_types() -> None:
     views = {v.session: v for v in observe.probe_set(frozenset({"gateway"}))}
-    for name in ("gateway", "frontend", "milvus"):
+    for name in ("gateway", "frontend", "memory-search"):
         assert views[name].kind == "identity"
     assert "gateway-watchdog" not in views
     assert views["gateway"].healthcheck_module == "services.healthchecks.gateway"

@@ -79,12 +79,12 @@ def test_default_run_connects_both_backends_readonly(monkeypatch: pytest.MonkeyP
     """The normal comparison path cannot obtain a write-capable backend."""
     backends = [_FakeBackend(), _FakeBackend()]
     calls = _patch_reconcile_dependencies(monkeypatch, backends)
-    monkeypatch.setattr(sys, "argv", ["memory_search_reconcile", "--a", "milvus", "--b", "numpy"])
+    monkeypatch.setattr(sys, "argv", ["memory_search_reconcile", "--a", "numpy", "--b", "pgvector"])
 
     assert reconcile.main() == 0
     assert calls == [
-        ("milvus", 8, "test:provider:dim=8", True),
         ("numpy", 8, "test:provider:dim=8", True),
+        ("pgvector", 8, "test:provider:dim=8", True),
     ]
 
 
@@ -95,7 +95,7 @@ def test_allow_write_without_exact_confirmation_never_connects_writable(
     backends = [_FakeBackend(), _FakeBackend()]
     calls = _patch_reconcile_dependencies(monkeypatch, backends)
     monkeypatch.setattr(
-        sys, "argv", ["memory_search_reconcile", "--a", "milvus", "--b", "numpy", "--allow-write"]
+        sys, "argv", ["memory_search_reconcile", "--a", "numpy", "--b", "pgvector", "--allow-write"]
     )
     monkeypatch.setattr(reconcile.sys, "stdin", _TTYStdin())
     monkeypatch.setattr(reconcile.builtins, "input", _confirmation_with_space)
@@ -111,7 +111,7 @@ def test_allow_write_requires_a_terminal(monkeypatch: pytest.MonkeyPatch) -> Non
     monkeypatch.setattr(
         sys,
         "argv",
-        ["memory_search_reconcile", "--a", "milvus", "--b", "numpy", "--allow-write"],
+        ["memory_search_reconcile", "--a", "numpy", "--b", "pgvector", "--allow-write"],
     )
     monkeypatch.setattr(reconcile.sys, "stdin", io.StringIO("yes\n"))
 
@@ -128,7 +128,7 @@ def test_allow_write_with_exact_confirmation_connects_writable_and_runs_comparis
     backends = [backend_a, backend_b]
     calls = _patch_reconcile_dependencies(monkeypatch, backends)
     monkeypatch.setattr(
-        sys, "argv", ["memory_search_reconcile", "--a", "milvus", "--b", "numpy", "--allow-write"]
+        sys, "argv", ["memory_search_reconcile", "--a", "numpy", "--b", "pgvector", "--allow-write"]
     )
     monkeypatch.setattr(reconcile.sys, "stdin", _TTYStdin())
     monkeypatch.setattr(reconcile.builtins, "input", _exact_confirmation)
@@ -143,11 +143,11 @@ def test_writable_connection_failure_is_reported_without_traceback(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """Any writable connection failure is reported after both backends close."""
-    backend_a = _FakeBackend(ValueError("Milvus unavailable"))
+    backend_a = _FakeBackend(ValueError("numpy unavailable"))
     backend_b = _FakeBackend()
     calls = _patch_reconcile_dependencies(monkeypatch, [backend_a, backend_b])
     monkeypatch.setattr(
-        sys, "argv", ["memory_search_reconcile", "--a", "milvus", "--b", "numpy", "--allow-write"]
+        sys, "argv", ["memory_search_reconcile", "--a", "numpy", "--b", "pgvector", "--allow-write"]
     )
     monkeypatch.setattr(reconcile.sys, "stdin", _TTYStdin())
     monkeypatch.setattr(reconcile.builtins, "input", _exact_confirmation)
@@ -156,7 +156,7 @@ def test_writable_connection_failure_is_reported_without_traceback(
 
     err = capsys.readouterr().err
     assert "backend connection failed" in err
-    assert "Milvus unavailable" in err
+    assert "numpy unavailable" in err
     assert "Traceback" not in err
     assert [call[-1] for call in calls] == [False, False]
     assert backend_a.closed and backend_b.closed
@@ -166,9 +166,9 @@ def test_readonly_connection_mismatch_is_reported_without_traceback(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """Storage validation failures tell the operator who owns repair."""
-    backends = [_FakeBackend(RuntimeError("Milvus collection schema mismatch")), _FakeBackend()]
+    backends = [_FakeBackend(RuntimeError("pgvector table schema mismatch")), _FakeBackend()]
     _patch_reconcile_dependencies(monkeypatch, backends)
-    monkeypatch.setattr(sys, "argv", ["memory_search_reconcile", "--a", "milvus", "--b", "numpy"])
+    monkeypatch.setattr(sys, "argv", ["memory_search_reconcile", "--a", "numpy", "--b", "pgvector"])
 
     assert reconcile.main() == 1
 

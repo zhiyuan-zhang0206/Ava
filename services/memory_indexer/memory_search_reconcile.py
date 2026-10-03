@@ -3,18 +3,17 @@
 The pilot tool for the backend switch: run the SAME query texts through
 two backends and compare their path orderings. Sample queries come from
 the memory pool's frontmatter descriptions; each is embedded once and
-searched on both sides. Exact backends (numpy / pgvector) agree with each
-other; an approximate one (milvus) may legitimately reorder near-ties —
-the diff makes exactly that visible.
+searched on both sides. Both backends (numpy / pgvector) are exact, so
+their orderings should agree; the diff makes any disagreement visible.
 
 Runs on the gateway box: needs GEMINI_API_KEY (embedding) and both
-backends' services up (milvus daemon / memory_search daemon / cluster PG).
+backends' services up (memory_search daemon / cluster PG).
 It opens both backends read-only by default: the indexer daemon's cold-start
 reconcile is the only normal writer. `--allow-write` is an intentional
 operator escape hatch that requires a second confirmation before connecting.
 
 Usage:
-    .venv/bin/python -m services.memory_indexer.memory_search_reconcile --a milvus --b numpy --limit 50 --k 10
+    .venv/bin/python -m services.memory_indexer.memory_search_reconcile --a numpy --b pgvector --limit 50 --k 10
 """
 
 from __future__ import annotations
@@ -90,8 +89,8 @@ def _connect_backends(
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--a", required=True, help="first backend name (e.g. milvus)")
-    parser.add_argument("--b", required=True, help="second backend name (e.g. numpy)")
+    parser.add_argument("--a", required=True, help="first backend name (e.g. numpy)")
+    parser.add_argument("--b", required=True, help="second backend name (e.g. pgvector)")
     parser.add_argument("--limit", type=int, default=50, help="max sample queries")
     parser.add_argument("--k", type=int, default=10, help="top-k per query")
     parser.add_argument(

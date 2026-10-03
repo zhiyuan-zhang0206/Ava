@@ -131,10 +131,6 @@ def _observe(service: str) -> DaemonProbe:
     }
     if service in sockets:
         return _owned_ping(lambda: owned_process(service), sockets[service]())
-    if service == "milvus":
-        from services.healthchecks.milvus import _is_alive
-
-        return probe_endpoint(service, settings.services.milvus_port, _is_alive)
     if service == "memory-search":
         from services.healthchecks.memory_search import _probe
 

@@ -131,7 +131,7 @@ def test_unobservable_root_is_unavailable(monkeypatch: pytest.MonkeyPatch) -> No
 
     monkeypatch.setattr(probe, "owned_process", unavailable)
     monkeypatch.setattr(probe, "listener_pids", _fake_listener_pids)
-    assert probe.probe("milvus").verdict.value == "unavailable"
+    assert probe.probe("memory-search").verdict.value == "unavailable"
 
 
 def test_first_start_does_not_require_a_root_before_an_endpoint_exists(

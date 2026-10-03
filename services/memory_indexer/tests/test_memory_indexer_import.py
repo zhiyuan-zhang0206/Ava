@@ -11,7 +11,6 @@ from pathlib import Path
 _REPO_ROOT = Path(__file__).parents[3]
 _BACKEND_PREFIX = "services.memory_indexer.backends."
 _CONCRETE_BACKENDS = {
-    f"{_BACKEND_PREFIX}milvus",
     f"{_BACKEND_PREFIX}numpy",
     f"{_BACKEND_PREFIX}pgvector",
 }

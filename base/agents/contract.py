@@ -325,7 +325,7 @@ class MachinePaused(AvaAgentError):  # noqa: N818 — state description, same st
 # Cluster routing (multihost): SDK calls from an agent-runner target the
 # gateway directly (no local gateway on agent-runner); transport-layer
 # unreachability surfaces as CrossMachineGatewayUnavailable. IndexerUnavailable
-# is the gateway *backend* (gemini embedding / milvus) being truly unreachable.
+# is the gateway *backend* (gemini embedding / memory-search service) being truly unreachable.
 # Kept as a comment, not docstring — the docstring renders into every agent's
 # SDK docs, where this cross-machine routing note would be noise.
 class IndexerUnavailable(AvaAgentError):  # noqa: N818

@@ -262,8 +262,8 @@ the failure shape**: it stays green while the thing behind the port is
 unusable, so nobody restarts it. A process-liveness probe must scope its claim
 to liveness — the daemon keepalive checks do, via identity-verified `/healthz`
 plus a `Liveness` beat that certifies the work loop is still ticking, not that
-the subsystem's work succeeds. The audit found one violation (`milvus`'s bare
-TCP connect, now a real `list_collections` RPC); the roster carries a
+the subsystem's work succeeds. The audit found one violation (a bare
+TCP connect, since replaced by a real RPC); the roster carries a
 "what it certifies" column per check (`services/healthchecks/docs/check-roster/check-roster.ava.okf.md`)
 and `scripts/content_lint/lint_doc_roster.py` pins roster, module directory, and ServiceSpec
 registrations together so the drift the audit found cannot silently return.

@@ -326,7 +326,7 @@ def _guard_process_exec(monkeypatch: pytest.MonkeyPatch) -> None:
     thin wrappers that call the module-global `execv`/`execvp`. Real in-process
     exec is never intended from a test: the production call sites are either a
     dedicated `__main__` that runs in a subprocess (`base._reparent`,
-    `services.browser.daemon`, `services.milvus.daemon`) or a CLI re-exec. Tests
+    `services.browser.daemon`) or a CLI re-exec. Tests
     that assert an exec *would* have happened patch `os.exec*` themselves
     inside the test body — last-write-wins over this default, restored LIFO at
     teardown.

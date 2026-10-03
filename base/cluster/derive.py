@@ -360,8 +360,6 @@ def derive_env(
         "AVA_GATEWAY_HEALTH_URL": f"http://localhost:{p['gateway']}/api/health",
         "AVA_FRONTEND_HEALTHCHECK_URL": f"http://localhost:{p['frontend']}",
         "AVA_APP_PORT": str(p["app"]),
-        "AVA_MILVUS_PORT": str(p["milvus"]),
-        "AVA_MILVUS_URI": f"http://127.0.0.1:{p['milvus']}",
         "AVA_MEMORY_SEARCH_PORT": str(p["memory_search"]),
         "AVA_MEMORY_SEARCH_URI": f"http://127.0.0.1:{p['memory_search']}",
         "AVA_BROWSER_CDP_PORT": str(p["browser"]),

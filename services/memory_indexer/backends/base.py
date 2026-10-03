@@ -51,11 +51,10 @@ def content_hash(text: str) -> str:
 def pk_of(path: str, kind: str, chunk_idx: int) -> str:
     """The single row key encoding (path, kind, chunk_idx).
 
-    milvus-lite 3.x allows only one primary-key field, so the triple folds
+    Backends key rows by one primary-key field, so the triple folds
     into a VARCHAR key joined with a unit separator — deterministic and
     reversible, unlike a hash. All chunk rows of one path share the `path`
-    prefix, which is what delete-by-path keys on. Backends whose storage
-    keys on the triple reuse it for the same reason.
+    prefix, which is what delete-by-path keys on.
     """
     return f"{path}{_SEP}{kind}{_SEP}{chunk_idx}"
 
@@ -71,7 +70,7 @@ class MemorySearchBackend(Protocol):
     owns construction; callers only `connect` / use / `close`.
     """
 
-    name: str  # "milvus" | "numpy" | "pgvector"
+    name: str  # "numpy" | "pgvector"
 
     # Lifecycle (factory hands out instances; callers only use them).
     def connect(self) -> None: ...

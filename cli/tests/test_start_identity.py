@@ -269,6 +269,38 @@ def test_the_runbook_step_drops_the_retired_port_slots_idempotently(
         assert not set(retired) & set(read["record"]["ports"])
 
 
+def test_the_runbook_step_drops_the_milvus_port_slot_idempotently(
+    inputs: identity.IdentityInput,
+) -> None:
+    """A gateway home born before the milvus slot was retired is refused by new code,
+    the slot named, until the runbook's rollout step has run; the step, run verbatim
+    from the runbook, makes the intent readable again, leaves it private and does
+    nothing the second time."""
+    identity.prepare_identity(inputs)
+    path = inputs.home / identity.INTENT_NAME
+    data = json.loads(path.read_text())
+    data["record"]["ports"]["milvus"] = 19530
+    path.write_text(json.dumps(data, sort_keys=True) + "\n")
+    path.chmod(0o600)
+    with pytest.raises(RuntimeError, match=r"unexpected \['milvus'\]"):
+        identity.read_intent(inputs.home)
+
+    runbook = (Path(__file__).resolve().parents[2] / "conventions" / "runbook.md").read_text()
+    blocks = re.findall(r"```bash\n(.*?)\n\s*```", runbook, flags=re.DOTALL)
+    (step,) = [b for b in blocks if "start-intent.json" in b and 'pop("milvus"' in b]
+    for _ in range(2):  # the second run changes nothing
+        subprocess.run(  # noqa: S603 — the runbook's own snippet
+            ["bash", "-c", textwrap.dedent(step)],
+            env={"PATH": os.environ["PATH"], "AVA_HOME": str(inputs.home)},
+            check=True,
+            capture_output=True,
+        )
+        assert path.stat().st_mode & 0o777 == 0o600
+        assert not list(inputs.home.glob("start-intent.json.*"))
+        read = identity.read_intent(inputs.home)
+        assert read is not None and "milvus" not in read["record"]["ports"]
+
+
 def test_configured_home_missing_its_intent_is_not_reborn(inputs: identity.IdentityInput) -> None:
     identity.prepare_identity(inputs)
     (inputs.home / identity.INTENT_NAME).unlink()
