@@ -400,3 +400,11 @@ def test_pgvector_platform_key_out_of_matrix(monkeypatch: pytest.MonkeyPatch) ->
     monkeypatch.setattr("platform.machine", lambda: "aarch64")
     with pytest.raises(RuntimeError, match="linux/aarch64"):
         rb._pgvector_platform_key()
+
+
+def test_intel_macos_has_no_pinned_pgvector_artifact(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("platform.system", lambda: "Darwin")
+    monkeypatch.setattr("platform.machine", lambda: "x86_64")
+    with pytest.raises(RuntimeError, match=r"no vendored pgvector available for darwin/x86_64"):
+        rb._pgvector_platform_key()
+    assert set(rb._PGVECTOR_ARTIFACTS) == {"linux-x86_64", "darwin-arm64"}

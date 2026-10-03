@@ -218,7 +218,7 @@ def _extract_pg(jar_bytes: bytes, target: Path) -> None:
 # The pinned pgvector version. A PG major bump must re-pin these artifacts
 # (pgvector builds are per-major: PGDG ships postgresql-<major>-pgvector,
 # Homebrew bottles carry per-major dirs).
-_PGVECTOR_VERSION = "0.8.6"
+_PGVECTOR_VERSION = "0.8.7"
 _PGVECTOR_SQL = f"vector--{_PGVECTOR_VERSION}.sql"
 
 # platform key -> (download URL, pinned sha256 of the whole artifact).
@@ -228,35 +228,29 @@ _PGVECTOR_SQL = f"vector--{_PGVECTOR_VERSION}.sql"
 _PGVECTOR_ARTIFACTS: dict[str, tuple[str, str]] = {
     "linux-x86_64": (
         "https://apt.postgresql.org/pub/repos/apt/pool/main/p/pgvector/"
-        "postgresql-17-pgvector_0.8.6-1.pgdg12+1_amd64.deb",
-        "76e6d5752dd2073f79b7b8d59c6d9a17996baf180aed3bfcbd38f6078b565295",
+        "postgresql-17-pgvector_0.8.7-1.pgdg12+1_amd64.deb",
+        "acb5569b6a5bb71d5968205a4da15911ff3b2a15a57a2a9d765560882f53e3ea",
     ),
     # The zonky darwin jar is a universal binary, but pgvector bottles are
-    # per-arch, so macOS splits on the machine arch.
+    # per-arch, so macOS splits on the machine arch. Homebrew publishes no
+    # Intel (x86_64) bottle for 0.8.7, so Intel macOS has no entry.
     "darwin-arm64": (
         "https://ghcr.io/v2/homebrew/core/pgvector/blobs/"
-        "sha256:4163c0f061e78cb15e459d4c39979ec97037f45a7818f3d937008863f93358ba",
-        "4163c0f061e78cb15e459d4c39979ec97037f45a7818f3d937008863f93358ba",
-    ),
-    "darwin-x86_64": (
-        "https://ghcr.io/v2/homebrew/core/pgvector/blobs/"
-        "sha256:a85fa44ed8ce583beff8e90c57cb87941b194814aa282714575be616ee113df2",
-        "a85fa44ed8ce583beff8e90c57cb87941b194814aa282714575be616ee113df2",
+        "sha256:326bc17440a773b75b054d83d7905b46b370b1a1b6543fff077186b5a632253b",
+        "326bc17440a773b75b054d83d7905b46b370b1a1b6543fff077186b5a632253b",
     ),
 }
 
 
 def _pgvector_platform_key() -> str:
-    """The pgvector artifact key. linux/arm64 is deliberately out of matrix
-    (the PG pin table does not cover it either) — it raises instead of
-    pretending support."""
+    """The pgvector artifact key. linux/arm64 and darwin/x86_64 are deliberately
+    out of matrix (no pinned artifact: PGDG pins linux/amd64 only, Homebrew
+    ships no Intel bottle for 0.8.7) — they raise instead of pretending support."""
     system = platform.system()
     if system == "Darwin":
         machine = platform.machine()
         if machine == "arm64":
             return "darwin-arm64"
-        if machine in ("x86_64", "amd64"):
-            return "darwin-x86_64"
         raise RuntimeError(f"no vendored pgvector available for darwin/{machine}")
     if system == "Linux":
         machine = platform.machine()
