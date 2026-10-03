@@ -160,7 +160,7 @@ def register_installed(
 
     `content_hash` / `installed_hash` record the tree hash of what was just
     written (R5): the later `upgrade` path compares the on-disk tree against
-    `installed_hash` to detect local edits before overwriting. (`content_hash`
+    `installed_hash` to report local edits before replacing the copy. (`content_hash`
     is written too so converge's copy-change detection agrees on first sight;
     on installed-plugin rows converge then re-owns `content_hash` for the
     load-dir skills copy.)

@@ -57,19 +57,19 @@ def _h_plugins_inspect(args: argparse.Namespace) -> int:
 def _h_plugins_upgrade(args: argparse.Namespace) -> int:
     from cli.commands.extensions.plugins import cmd_plugins_upgrade
 
-    return cmd_plugins_upgrade(args.name, force=args.force)
+    return cmd_plugins_upgrade(args.name)
 
 
 def _h_skill_update(args: argparse.Namespace) -> int:
     from cli.commands.extensions.skill import cmd_skill_update
 
-    return cmd_skill_update(args.names, force=args.force)
+    return cmd_skill_update(args.names)
 
 
 def _h_skill_upgrade(args: argparse.Namespace) -> int:
     from cli.commands.extensions.skill import cmd_skill_upgrade
 
-    return cmd_skill_upgrade(args.name, force=args.force)
+    return cmd_skill_upgrade(args.name)
 
 
 def _h_plugins_enable(args: argparse.Namespace) -> int:
@@ -193,11 +193,6 @@ def _add_plugins_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]
         "upgrade", help="re-fetch an installed plugin from its recorded source"
     )
     plugins_upgrade_p.add_argument("name", help="installed package name")
-    plugins_upgrade_p.add_argument(
-        "--force",
-        action="store_true",
-        help="overwrite a locally modified copy instead of refusing",
-    )
     plugins_upgrade_p.set_defaults(func=_h_plugins_upgrade)
 
     plugins_enable_p = plugins_sub.add_parser("enable", help="enable a plugin (local config)")
@@ -255,34 +250,24 @@ def _add_skill_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) 
 
     # `ava skill update [name ...]` — the explicit update for repo-native
     # skills (R5): converge only lands missing copies; updating an existing
-    # copy is this command. Conflict on local edits; `--force` overwrites.
+    # copy is this command. A differing local copy is replaced (and reported).
     skill_update_p = skill_sub.add_parser(
         "update",
-        help="update repo-native skills from this checkout (conflict on local edits; --force overwrites)",
+        help="update repo-native skills from this checkout (replaces differing local copies)",
     )
     skill_update_p.add_argument(
         "names", nargs="*", help="skill names to update (default: all repo-native skills)"
     )
-    skill_update_p.add_argument(
-        "--force",
-        action="store_true",
-        help="overwrite locally modified copies with the repo version",
-    )
     skill_update_p.set_defaults(func=_h_skill_update)
 
     # `ava skill upgrade <name>` — re-fetch a user-installed skill from its
-    # recorded git source (a private skills repo etc.). Conflict on local
-    # edits; `--force` overwrites.
+    # recorded git source (a private skills repo etc.). A differing local
+    # copy is replaced (and reported).
     skill_upgrade_p = skill_sub.add_parser(
         "upgrade",
-        help="re-fetch an installed skill from its recorded git source (conflict on local edits; --force overwrites)",
+        help="re-fetch an installed skill from its recorded git source (replaces differing local copies)",
     )
     skill_upgrade_p.add_argument("name", help="installed skill package name")
-    skill_upgrade_p.add_argument(
-        "--force",
-        action="store_true",
-        help="overwrite a locally modified copy instead of refusing",
-    )
     skill_upgrade_p.set_defaults(func=_h_skill_upgrade)
 
     skill_enable_p = skill_sub.add_parser(

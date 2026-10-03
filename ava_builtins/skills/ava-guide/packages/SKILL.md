@@ -86,9 +86,9 @@ The recommended workflow:
    ava skill upgrade <name>                        # re-fetch from the recorded source
    ```
 
-   A locally edited load-dir copy blocks `upgrade` with a conflict — re-run
-   with `--force` to overwrite your edits (mirrors `git pull` vs
-   `reset --hard`).
+   A locally edited load-dir copy is replaced by `upgrade`; the replacement
+   is reported (a load-dir copy is derived state — edit the source, not the
+   copy).
 
 Rules that keep the model clean:
 
@@ -150,7 +150,7 @@ ava plugins install https://github.com/anthropics/claude-plugins-public --path p
 
 ```bash
 ava plugins installed                 # each installed package: name, enabled state, source
-ava plugins upgrade <name> [--force]  # re-fetch from recorded source at pinned ref
+ava plugins upgrade <name>            # re-fetch from recorded source at pinned ref
 ava plugins uninstall <name>          # delete installed copy + registry entry
 ```
 
@@ -158,14 +158,15 @@ Skill packages use the same machinery with their own verbs:
 
 ```bash
 ava skill install <src> [--path <subdir>] [--ref <ref>]  # user install (Mode 2)
-ava skill update [name ...] [--force]   # repo-native skills: sync from this checkout
-ava skill upgrade <name> [--force]      # user-installed skill: re-fetch recorded source
+ava skill update [name ...]    # repo-native skills: sync from this checkout
+ava skill upgrade <name>       # user-installed skill: re-fetch recorded source
 ava skill register <name>               # Mode-1 untracked skill: make it load
 ```
 
-**Every update path shares one conflict contract** (R5): a locally edited copy
-refuses to be overwritten; `--force` is the explicit override. A skill with no
-recorded source (Mode 1) reports "not updatable" instead of guessing.
+**Every update path replaces a differing local copy and reports it** — a
+load-dir copy is derived state, never a hand-maintained surface; the CLI names
+the files that differed. A skill with no recorded source (Mode 1) reports
+"not updatable" instead of guessing.
 
 ## Enable / Disable
 

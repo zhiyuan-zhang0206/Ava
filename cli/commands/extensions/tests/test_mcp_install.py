@@ -421,7 +421,7 @@ def test_upgrade_dead_source_reports_and_fails(unit_home: Path, tmp_path: Path) 
     pkg = _make_mcp_package(tmp_path, "orphan", module="orphan_mcp")
     assert cmd_mcp_install(str(pkg), None, None) == 0
     shutil.rmtree(pkg)  # the source dir vanishes (like a deleted worktree)
-    assert cmd_mcp_upgrade("orphan", force=True) == 1
+    assert cmd_mcp_upgrade("orphan") == 1
 
 
 def test_mcp_list_flags_dead_source(unit_home: Path, tmp_path: Path, capsys) -> None:
