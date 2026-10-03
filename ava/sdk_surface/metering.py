@@ -176,7 +176,7 @@ def install() -> None:
     """Wrap every public ``ava.*`` callable with the recording proxy. Idempotent.
 
     Called from ``load_extensions`` after plugins load, so plugin namespaces /
-    members / ``ava.extend.wrap`` layers are all present and get metered too (the
+    members / declared wrap layers are all present and get metered too (the
     recorder sits outermost of any plugin wrap). Re-running only wraps targets whose
     current top callable is not already a recorder, so it is safe to call on every
     plugin reload — a newly plugin-wrapped target gets a fresh outermost recorder.
