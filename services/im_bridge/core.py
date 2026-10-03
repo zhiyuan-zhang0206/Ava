@@ -658,24 +658,35 @@ class IMBridgeCore(SpawnMenuMixin):
         items: list[dict[str, Any]],
         watermark: PushWatermark | None,
     ) -> None:
-        """A non-empty batch entirely behind the watermark: nothing new (the
-        re-observed tail — the watermark item itself is the batch max), or an
-        item_id renumbering rollback the old code skipped in silence — a
-        compact truncated the session, so the live ids restarted below a
-        watermark written in the old numbering (2026-10-03: both affected
-        pushes stranded for hours with zero log lines). The rollback
-        signature is the observed max lying STRICTLY behind the watermark's
-        item_id; equality is the benign tail re-observation and stays quiet
-        (a `<=` rule would re-log and re-reset on every reconnect). On a
-        rollback: name it, skip the triggering batch — never replay it, the
-        log line is the evidence — reset the watermark to the observed max,
-        and resume from the next item. One reset per rollback: afterwards the
-        observed max IS the watermark, so the same batch observed again stays
-        quiet."""
+        """A non-empty batch entirely at or behind the watermark: nothing
+        new, or an item_id renumbering rollback. The check runs ONLY when a
+        stamp cannot decide: when both the watermark and the batch max carry
+        a readable created_at and the max is not after it (a stamped item
+        after the watermark would have been fresh), the batch is simply old
+        content in a compact-renumbered session — a compact wiping the ids is
+        not an incident, so this stays quiet (review 2026-10-03: judging by
+        item_id alone fired one spurious ERROR + reset per compact per chat
+        while snapshots carried only the wiped tail). For a legacy watermark
+        without a stamp — or a batch max without one — the numbering check
+        stands: the observed max lying STRICTLY behind the watermark's
+        item_id is a rollback (2026-10-03: both affected pushes stranded for
+        hours with zero log lines). On a rollback: name it, skip the
+        triggering batch — never replay it, the log line is the evidence —
+        reset the watermark to the observed max, and resume from the next
+        item. One reset per rollback: afterwards the observed max IS the
+        watermark, so the same batch observed again stays quiet."""
 
         if watermark is None:
             return
         observed_max = items[-1]  # sorted by item_id: the batch's maximum
+        observed_stamp = _parse_stamp(observed_max.get("created_at"))
+        watermark_stamp = _parse_stamp(watermark.created_at)
+        if (
+            observed_stamp is not None
+            and watermark_stamp is not None
+            and observed_stamp <= watermark_stamp
+        ):
+            return
         observed_id = str(observed_max["item_id"])
         if _item_key(observed_id) >= _item_key(watermark.item_id):
             return
