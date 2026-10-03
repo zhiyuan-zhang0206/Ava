@@ -17,7 +17,10 @@ its own child process — and runs the reconcile scan only when
 `hierarchy_fallback_scan_seconds` has elapsed (the first tick after a
 process start always scans), tracking work in `hierarchy_jobs` +
 `hierarchy_worker_state`. A master switch (`hierarchy_worker_enabled`,
-shipped off) gates both the enqueue and the tick.
+shipped off) gates both the enqueue and the tick; a rollout allowlist
+(`hierarchy_worker_agents`, comma-separated ids, empty = every agent) narrows
+the served agents — an unlisted agent is not enqueued, scanned, baselined or
+claimed, so listing it later starts it as a first-sight agent.
 
 - **Triggers** (task #4674): the compact-boundary event is the trigger —
   `mark_compact_boundary` best-effort enqueues one job per new boundary; a

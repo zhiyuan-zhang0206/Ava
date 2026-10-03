@@ -14,7 +14,10 @@ from base.config.base import EnvSettings
 from base.config.billing_recovery_fields import BillingRecoveryFields
 from base.config.delivery_outbox_fields import DeliveryOutboxFields
 from base.config.delivery_watchdog_fields import DeliveryWatchdogFields, InboundReconcileFields
-from base.config.hierarchy_worker_fields import HierarchyWorkerFields
+from base.config.hierarchy_worker_fields import (
+    HierarchyWorkerFields,
+    parse_hierarchy_worker_agents,
+)
 
 
 class DaemonSettings(
@@ -686,6 +689,12 @@ class DaemonSettings(
                 "leave kill margin)"
             )
         return self
+
+    @field_validator("hierarchy_worker_agents")
+    @classmethod
+    def _validate_hierarchy_worker_agents(cls, value: str) -> str:
+        parse_hierarchy_worker_agents(value)
+        return value
 
     @field_validator("delivery_watchdog_dispatch_backoff_steps_s", mode="before")
     @classmethod

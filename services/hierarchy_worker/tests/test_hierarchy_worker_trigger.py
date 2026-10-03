@@ -135,7 +135,7 @@ def test_run_tick_drains_back_to_back_and_scans_once_per_window(
         scanned.append(len(scanned))
         return ScanOutcome()
 
-    def fake_claim(conn: object) -> runner.ClaimedJob | None:
+    def fake_claim(conn: object, **_kw: object) -> runner.ClaimedJob | None:
         return jobs.pop(0) if jobs else None
 
     _armed_tick(monkeypatch)
@@ -356,7 +356,7 @@ def test_run_tick_stops_while_the_breaker_is_tripped(monkeypatch: pytest.MonkeyP
 
     _armed_tick(monkeypatch)
     monkeypatch.setattr(runner, "_regen_budget_check", lambda _conn, _config: True)
-    monkeypatch.setattr(runner, "claim_next", lambda _conn: claims.append("claim"))
+    monkeypatch.setattr(runner, "claim_next", lambda _conn, **_kw: claims.append("claim"))
 
     runner.run_tick(hierarchy_config(), fake_database(_fake_connect))
     assert claims == []
