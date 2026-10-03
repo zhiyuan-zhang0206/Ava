@@ -224,7 +224,7 @@ def _pin_compact_ceiling(monkeypatch: pytest.MonkeyPatch, *, hard_tokens: int) -
 
     monkeypatch.setattr(
         "agent.hooks.compact.resolve_context_budget",
-        lambda _model: ContextBudget(  # pyright: ignore[reportUnknownArgumentType]
+        lambda *_: ContextBudget(  # pyright: ignore[reportUnknownArgumentType]
             max_context_tokens=1_000_000,
             soft_compact_tokens=hard_tokens,
             hard_compact_tokens=hard_tokens,

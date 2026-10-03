@@ -58,6 +58,7 @@ if TYPE_CHECKING:
     # does not use the type).
     from langchain_core.language_models.chat_models import BaseChatModel
 
+from base.host.env.agent_slices import ModelOverrides
 from base.lm._providers import ThinkingConfig
 from base.lm.pricing import register_plugin_price
 from base.lm.registry import ModelSpec, register_models
@@ -134,6 +135,8 @@ class BuildContext:
     media_resolution: str | None = None
     media_thinking_level: str | None = None
     base_url: str | None = None
+    # The agent's explicit tuning values; a builder resolves its per-agent settings through them.
+    overrides: ModelOverrides | None = None
 
 
 def _empty_file_size_limits() -> dict[str, int]:

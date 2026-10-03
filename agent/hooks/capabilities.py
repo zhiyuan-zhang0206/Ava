@@ -68,7 +68,7 @@ class _NewlyInstalledSkillsHook(Hook):
             # the host filesystem gained mid-run is exactly what that excludes.
             return None
 
-        if auto_compact_will_fire(state, runtime.context.require_agent().brain.llm_model):
+        if auto_compact_will_fire(state, runtime.context.require_agent()):
             # Not politeness — the only safe move. Compaction writes
             # `RemoveMessage(REMOVE_ALL)` on this same `messages` channel and
             # detours to `init_context`, whose sole trigger is an EMPTY channel.

@@ -136,7 +136,9 @@ def build(ctx: BuildContext) -> BaseChatModel:
     extended_thinking = claude_extended_thinking_kwarg(
         ctx.model,
         thinking=thinking,
-        budget_tokens=resolve_setting("claude_thinking_budget_tokens", model=ctx.model),
+        budget_tokens=resolve_setting(
+            "claude_thinking_budget_tokens", model=ctx.model, overrides=ctx.overrides
+        ),
         reasoning_effort=effort,
     )
     if extended_thinking is not None:

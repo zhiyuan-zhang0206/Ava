@@ -16,7 +16,7 @@ from typing import Any
 
 import ava
 from ava.sdk_surface import plugin_loader, sdk_disable
-from base.host.env.agent_slices import agent_setting
+from base.host.env.agent_slices import ModelOverrides, agent_setting
 from base.log import logger
 from base.paths import workspace_dir
 
@@ -190,7 +190,7 @@ def load_process_extensions() -> None:
 # Return type is Any on purpose: the chat-model class must stay out of module
 # scope (the exec child imports this module for the SDK helpers), and Pyright
 # cannot resolve an annotation the module never imports.
-async def boot_agent_scope(agent_id: int, llm_model: str) -> Any:
+async def boot_agent_scope(agent_id: int, llm_model: str, overrides: ModelOverrides) -> Any:
     """Agent-scope boot: workspace pre-create, screen-capture notice, chat model.
 
     Everything here is a fact about ONE agent, so the hosted runner runs it per
@@ -202,7 +202,8 @@ async def boot_agent_scope(agent_id: int, llm_model: str) -> Any:
     base for `ava.files` / `ava.shell.run`, so it must exist even when the prompt
     section advertising it is off (bench runners).
 
-    The chat model is built for `llm_model`, the agent's model for the turn.
+    The chat model is built for `llm_model`, the agent's model for the turn, with the
+    agent's `overrides` (reasoning effort, thinking budget).
 
     Building it eagerly is safe even though the trace init is still in flight:
     traceloop's LangChain wrap injects its callback handler into every
@@ -223,4 +224,4 @@ async def boot_agent_scope(agent_id: int, llm_model: str) -> Any:
     await notify_desktop_permissions_at_startup()
     from base.lm.factory import build_chat_model
 
-    return build_chat_model(llm_model)
+    return build_chat_model(llm_model, overrides=overrides)
