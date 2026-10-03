@@ -24,6 +24,12 @@ from base import telemetry
 from base.telemetry import Event as TelemetryEvent
 from base.telemetry.otlp import telemetry_otlp
 
+# Load-proof handshake windows: close()'s telemetry tail can take seconds on a
+# loaded runner, so a fixed 2s window read a slow close as a revoked call
+# (2026-10-03 shard-10 flap, run 37082059707). Generous but still bounded, so a
+# genuinely stuck close fails clearly instead of hanging.
+_HANDSHAKE_BOUND_S = 30.0
+
 
 def _union(left: set[str], right: set[str]) -> set[str]:
     return left | right
@@ -402,7 +408,7 @@ def test_close_does_not_revoke_an_sdk_call_admitted_before_the_fence(
     def held_send(agent_id: int, *, content: str, source: str) -> None:
         del source
         entered.set()
-        assert release.wait(2), "close did not release the pre-close SDK call"
+        assert release.wait(_HANDSHAKE_BOUND_S), "close did not release the pre-close SDK call"
         delivered.append((agent_id, content))
 
     monkeypatch.setattr(gateway_client, "send_message", held_send)
@@ -413,10 +419,10 @@ def test_close_does_not_revoke_an_sdk_call_admitted_before_the_fence(
     monkeypatch.setattr(manifest, "seal_local_participant", skip_seal)
     worker = Thread(target=lambda: ava.agents.send_message(99, "already admitted"))
     worker.start()
-    assert entered.wait(2), "SDK call did not reach its gateway boundary"
+    assert entered.wait(_HANDSHAKE_BOUND_S), "SDK call did not reach its gateway boundary"
     attachment.close()
     release.set()
-    worker.join(2)
+    worker.join(_HANDSHAKE_BOUND_S)
     assert not worker.is_alive()
     assert delivered == [(99, "already admitted")]
 
@@ -474,7 +480,7 @@ def test_close_waits_for_a_dequeued_otlp_record_before_force_flush(
 
     def pause_after_dequeue(event: TelemetryEvent) -> None:
         paused.set()
-        assert release.wait(2), "close did not release the paused OTLP worker"
+        assert release.wait(_HANDSHAKE_BOUND_S), "close did not release the paused OTLP worker"
         original_emit(event)
 
     monkeypatch.setattr(backend, "_emit_log", pause_after_dequeue)
@@ -497,7 +503,7 @@ def test_close_waits_for_a_dequeued_otlp_record_before_force_flush(
             )
         ]
     )
-    assert paused.wait(2), "OTLP worker did not dequeue the tail record"
+    assert paused.wait(_HANDSHAKE_BOUND_S), "OTLP worker did not dequeue the tail record"
     attachment = external.attach("lease")
     timer = Timer(0.1, release.set)
     timer.daemon = True
