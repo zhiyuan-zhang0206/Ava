@@ -56,7 +56,7 @@ rejects a loopback non-runner URL on a secret-bearing cluster.
 A home born before the data plane always authenticated has empty Redis
 credentials, a LOGIN schema owner, a LOGIN `ava_runner`, trust `pg_hba` lines
 and no database authority ledger. `ava start` refuses it before any native
-effect, and `scripts/rotate_data_plane_secrets.py` refuses it too; nothing
+effect, and `scripts/data_plane_ops/rotate_data_plane_secrets.py` refuses it too; nothing
 converts it. Re-birth it as a new home.
 
 Verify that a home carries no retired credential key without printing

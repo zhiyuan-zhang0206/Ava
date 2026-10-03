@@ -572,7 +572,7 @@ def ensure_cluster_storage(
             "      set AVA_DB_CAPABILITY_KEY from a non-echoing prompt, then run:\n"
             "      ava init --serve-agent-runner --no-serve-gateway --gateway-url <url> --machine-name <name> \\\n"
             "                 --machine-host <this-host-private-ip> --db-capability <bundle>, then ava start\n"
-            "    What a gateway would additionally require: future/infra/windows-gateway.md",
+            "    What a gateway would additionally require: gateway/windows-gateway.md",
             file=sys.stderr,
         )
         return 1
