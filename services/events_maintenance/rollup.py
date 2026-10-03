@@ -35,6 +35,7 @@ import psycopg
 
 from base.events.contract import LLM_USAGE_KEYS, TURN_END_KEYS
 from base.telemetry.event_sql import numeric
+from base.telemetry.metrics.aggregate_sql import EXEC_FAILURE_EVENTS
 
 # Late writes arrive up to the mirror's seven-day retention after the event; one more day of
 # margin covers a replay that straddles midnight.
@@ -91,9 +92,7 @@ _METRICS_SQL = f"""
         SELECT agent_id, event_name, {_num(TURN_END_KEYS["duration_seconds"], "float8")} AS dur, {TURN_END_KEYS["ok"]} AS ok
         FROM telemetry_events
         WHERE ts >= %(start)s AND ts < %(end)s AND agent_id IS NOT NULL
-          AND (event_name IN ('turn_end', 'exec')
-               OR (starts_with(event_name, 'exec_') AND length(event_name) > 5)
-               OR starts_with(event_name, 'exec('))
+          AND (event_name IN ('turn_end', 'exec') OR event_name = ANY(%(fail)s))
     ), turn AS (
         SELECT agent_id, count(*) AS turn_total, count(*) FILTER (WHERE ok = 'true') AS turn_ok,
                COALESCE(sum(dur), 0) AS dsum, min(dur) AS dmin, max(dur) AS dmax
@@ -137,7 +136,12 @@ _METRICS_SQL = f"""
 def roll_day(conn: psycopg.Connection, day: date) -> tuple[int, int]:
     """Recompute one closed UTC day; returns `(metrics_rows, tokens_rows)` written."""
     start = datetime(day.year, day.month, day.day, tzinfo=UTC)
-    params = {"day": day, "start": start, "end": start + timedelta(days=1)}
+    params = {
+        "day": day,
+        "start": start,
+        "end": start + timedelta(days=1),
+        "fail": EXEC_FAILURE_EVENTS,
+    }
     with conn.transaction():
         tokens = conn.execute(_TOKENS_SQL, params).rowcount  # type: ignore[arg-type]
         metrics = conn.execute(_METRICS_SQL, params).rowcount  # type: ignore[arg-type]
