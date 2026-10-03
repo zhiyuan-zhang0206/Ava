@@ -66,11 +66,17 @@ claimed, so listing it later starts it as a first-sight agent.
   generated-node budget (`hierarchy_regen_daily_budget_nodes`) — crossing it
   trips `hierarchy_worker_breaker` and claiming stops until an operator
   resets it (`reset_at` + `reset_note`), re-arming only after a cooled
-  window. First builds and tail seals are exempt from the per-job thresholds.
+  window. First builds and tail seals are exempt from the per-job thresholds,
+  and first builds are not counted by the breaker: their own 24h budget
+  (`hierarchy_first_build_daily_budget_nodes`) paces the fleet's one-time
+  full-window wave by deferral — past it the claim parks first-build jobs and
+  takes everything else, and they resume as earlier jobs age out of the window
+  (no trip, no operator reset; the check is at claim time, so one first build
+  may overshoot by its own tree).
 - **Knobs** (`settings.daemon.hierarchy_*`, each with its written reason):
   job budget, hard deadline, retry base/cap, generation concurrency, the
   master switch and reconcile cadence, the regen alert / halt / daily-budget
-  thresholds and the low-reuse ratio (task #4674), and the child-kill /
+  thresholds and the first-build budget and the low-reuse ratio (task #4674), and the child-kill /
   stale-row graces; the generation model is the target agent's own effective
   model (`base.agents.observation.snapshot.agent_effective_model` — overlay over
   the birth stamp over the fleet default, the agent host's own resolution), with `settings.lm.hierarchy_model` as the last-resort

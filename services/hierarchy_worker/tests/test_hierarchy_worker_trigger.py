@@ -113,6 +113,7 @@ def _armed_tick(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(settings.daemon, "hierarchy_worker_enabled", True)
     monkeypatch.setattr(runner, "_fallback_scanned_at", None)
     monkeypatch.setattr(runner, "_regen_budget_check", lambda _conn, _config: False)
+    monkeypatch.setattr(runner, "_first_builds_deferred", lambda _conn, _config: False)
 
 
 # ---- the tick: drain semantics, scan cadence, switch ----
