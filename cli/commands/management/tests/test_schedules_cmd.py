@@ -617,7 +617,7 @@ def test_provision_creates_builtins(
 
     # Second run: idempotent, nothing created.
     assert _sched.cmd_schedules_provision() == 0
-    assert "(all built-in schedules already present)" in capsys.readouterr().out
+    assert "(all built-in schedules already present and current)" in capsys.readouterr().out
 
 
 # ── parse-layer gates (task #4092, batch B4) ──

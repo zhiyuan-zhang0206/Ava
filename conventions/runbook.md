@@ -496,11 +496,14 @@ the separate `app` slot. Root starts and stops it with the application tree;
 planned downtime includes the entry listener. Its dedicated `/__ava/healthz`
 protocol plus captured root listener ownership provide readiness independently of
 gateway/app availability. See [Fleet UI Gate](../services/gate/docs/gate.ava.okf.md).
-**A rollout does not update built-in schedule scripts.** The `schedules` table is
-authoritative and boot-time provisioning only inserts rows that are missing, so a changed
-template in `schedules/` reaches a running cluster only through an explicit
-`ava schedules update <name> --script-file <template>` (which relaunches an enabled
-schedule on the spot) — see [`schedules/README.md`](../schedules/README.md).
+**A built-in schedule follows its template in `schedules/`.** The `schedule-manager`'s
+start provisions the manifest: it creates missing rows and rewrites a differing `script` /
+`command` to the template (a `schedule_versions` row `builtin-resync <hash>` keeps the old
+text; `enabled` and the description are never touched; a live session is relaunched through
+the usual sync request) — see [`schedules/README.md`](../schedules/README.md). **Schedules
+an agent created are not in the manifest** and stay as written in the table, so a library
+change reaches them only as a crash loop at their next launch; `ava schedules verify` and
+the `fleet_update` gates below are what catch that.
 Persistent `ava-schedule-<id>` terminals survive pause and update with their
 currently loaded runner code and script text. Adopt changed runner code through
 an explicit schedule restart at its work boundary, or a full stop/start.
@@ -512,12 +515,12 @@ never updates them (above), and a stale copy only surfaces at its next fire
 (crash-loop auto-pause once it cannot stay up, or a failure that folds
 into an unrelated exit code — 2026-10-01: a moved `scripts/` target read as
 "new candidates"). Before trusting `schedules`,
-verify and redeploy: run a full dry-import sweep over every in-store copy
-(py_compile + top-level imports only — never a real fire; it does not
-execute run-time paths, so after a file move check the copies' referenced
-paths directly) and redeploy drifted
-copies through the same `ava schedules update <name> --script-file <template>`
-path. Tooling lives on the host that runs the weekly sweep (`~/.ava/sched-dry-import/run_dry.sh`;
+verify and redeploy: run `ava schedules verify` over every in-store copy
+(py_compile, top-level imports only, and a `signature.bind` of each call the script
+makes into repo code — never a real fire; it does not execute run-time paths, so after a
+file move check the copies' referenced paths directly) and redeploy drifted
+copies through `ava schedules update <name> --script-file <file>`
+(a built-in is resynced from its template by the next provision). Tooling lives on the host that runs the weekly sweep (`~/.ava/sched-dry-import/run_dry.sh`;
 the weekly `sched-dry-import-weekly` backstop schedule red-reports to its
 operator).
 On agent-runners it also runs capability preflights: a headed Chrome (when the browser
@@ -1248,7 +1251,15 @@ itself (its own public key in its own `authorized_keys`):
   disagree on HEAD, when `.python-version` changes without
   `--allow-python-change`, or when it runs inside an Ava agent's shell. It
   prints `git diff --stat OLD..NEW` over migrations, helper sources and locks,
-  fetches NEW on every host, runs `ava stop -y --timeout 600` on each runner and
+  fetches NEW on every host, then — still before anything stops, and also under
+  `--dry-run` — runs NEW's `ava schedules verify` against the running gateway's
+  schedule table (every stored script, agent-written ones included) from a
+  throwaway worktree of NEW at `$HOME/.ava/pre-update-verify` on the host's current
+  interpreter. A red row (a moved module, a call that no longer binds), or a check that
+  could not run, refuses with exit 2, the rows listed and nothing stopped; fix the
+  scripts and rerun, or pass `--allow-red-schedules` to proceed (the rows then
+  crash-loop after `up` until fixed). A host that has not fetched NEW (a dry run does
+  not fetch) is reported as not checked. Then it runs `ava stop -y --timeout 600` on each runner and
   then the gateway (each must leave phase `stopped` with no failures), then on
   every host checks out NEW detached, repairs legacy read-only venv
   directories, runs `uv sync --frozen` and requires a clean tree.
@@ -1271,6 +1282,11 @@ itself (its own public key in its own `authorized_keys`):
   name it reports itself (`machine_name()`), not by its SSH alias; a name with no
   row fails the half. Roster machines that are not listed (a laptop that is off) are
   reported with their online flag and commits and never fail `up` (see the last bullet for their old processes). Then
+  two read-only drift checks run, each to the end before `up` fails with the details in the
+  log: `ava schedules verify --no-notify` on the gateway (the stored schedule scripts, as
+  above) and `ava plugins verify` on every listed host (each enabled plugin loads as an
+  agent boot loads it; the loader skips a broken plugin, so this is what turns that into
+  a failure — 2026-10-03: out-of-repo plugins calling deleted hook APIs). Then
   the gateway smoke-tests each listed agent-runner with a real agent, reading its own
   address and bearer in place; last, each host runs `ava packages refresh`
   (skills follow their channel; `ava skill update` is retired) and its summary

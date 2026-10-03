@@ -1,9 +1,11 @@
 """Update a networked source-mode cluster over SSH, in two attended, idempotent halves.
 
-`down --new SHA`: preflight; stop each runner, then the gateway; switch every
+`down --new SHA`: preflight; check the gateway's stored schedule scripts against NEW's code (a red
+refuses, `--allow-red-schedules` overrides); stop each runner, then the gateway; switch every
 checkout to NEW. `up`: start the gateway, then each runner (macOS as a one-time
 GUI-session LaunchAgent: helper signing needs the login keychain); check holds
-and the listed machines' roster rows; smoke-test each listed agent-runner; refresh skills.
+and the listed machines' roster rows; check for drift (the gateway's in-store schedule scripts, every
+host's plugins); smoke-test each listed agent-runner; refresh skills.
 After a failure, fix the cause and rerun the whole half. See conventions/runbook.md#updating-a-networked-cluster-in-source-mode.
 """
 
@@ -91,6 +93,21 @@ finally:
     print(json.dumps(out))
 sys.exit(0 if out["completed"] and out["terminate"] < 300 else 2)
 """
+
+
+# Before anything stops: NEW's `ava schedules verify` against the running gateway's schedule table
+# (read-only; every stored script, agent-written ones included). NEW's source comes from a throwaway
+# worktree and runs on the host's current interpreter (cwd wins sys.path, so NEW's modules are the
+# ones imported); no service is touched. `VERIFY_RC` is the verdict, so a crashed check (new
+# dependency missing, DB unreachable) is told apart from a red.
+_PRE_VERIFY = """{home}
+W="$H/pre-update-verify"; trap 'git -C "$S" worktree remove --force "$W" >/dev/null 2>&1' EXIT
+git -C "$S" worktree remove --force "$W" >/dev/null 2>&1; rm -rf "$W"; git -C "$S" worktree prune
+git cat-file -e "{new}^{{commit}}" || {{ echo "SKIPPED: {new} is not fetched on this host (a dry run does not fetch)"; exit 0; }}
+git -C "$S" worktree add -q "$W" {new} || {{ echo "VERIFY_RC=2"; exit 0; }}
+cd "$W" && AVA_HOME="$H" AVA_CONFIG_FETCH=skip "$S/.venv/bin/python" -c \\
+  'import sys; from cli.commands.management.schedules_verify import cmd_schedules_verify as v; sys.exit(v(notify=False))'
+echo "VERIFY_RC=$?"; exit 0"""
 
 
 class FailedError(RuntimeError):
@@ -197,6 +214,33 @@ def _preflight(s: Session, args: argparse.Namespace, new: str) -> list[str]:
     return reasons
 
 
+def _stored_schedules(s: Session, args: argparse.Namespace, new: str) -> None:
+    """Refuse to stop a cluster whose stored schedule scripts NEW's code cannot run.
+
+    A schedule script lives in the database, not the checkout: a library change (a moved module, a
+    changed signature) leaves it crash-looping the moment `up` starts the schedule-manager, and the
+    gateway's own `ava schedules verify` only exists after that start. Run NEW's verify first."""
+    out = s.run(args.gateway, _PRE_VERIFY.format(home=_HOME, new=new), effect=False)
+    lines = out.splitlines()
+    if any(line.startswith("SKIPPED") for line in lines):
+        s.say("stored schedule scripts: not checked (see above)")
+        return
+    code = next((line.partition("=")[2] for line in lines if line.startswith("VERIFY_RC=")), "?")
+    if code == "0":
+        return
+    reds = [line for line in lines if line.startswith(("RED ", "TOOL-ERROR"))]
+    what = "red" if code == "1" else f"unevaluable (check exited {code})"
+    detail = "\n  ".join(reds) or "no RED line: see the output above"
+    if args.allow_red_schedules:
+        s.say(f"WARNING: stored schedule scripts {what} under {new[:12]}, continuing:\n  {detail}")
+        return
+    raise FailedError(
+        f"refused: stored schedule scripts are {what} under {new[:12]} and would crash-loop after "
+        f"`up`:\n  {detail}\nFix them (`ava schedules update <id> --script-file ...` on the gateway) "
+        "and rerun `down`, or pass --allow-red-schedules to proceed anyway."
+    )
+
+
 def down(s: Session, args: argparse.Namespace) -> None:
     new = _git("rev-parse", "--verify", f"{args.new}^{{commit}}").stdout.strip()
     if not new:
@@ -206,6 +250,7 @@ def down(s: Session, args: argparse.Namespace) -> None:
     everyone = [args.gateway, *args.runner]
     for alias in everyone:  # before any stop: a missing NEW must not strand a stopped cluster
         s.run(alias, f'{_HOME}; git cat-file -e "{new}^{{commit}}" || git fetch -q origin {new}')
+    _stored_schedules(s, args, new)
     for alias in [*args.runner, args.gateway]:
         try:
             s.run(alias, f"{_HOME}; {_AVA} stop -y --timeout {args.stop_timeout}")
@@ -314,6 +359,26 @@ def _refresh(s: Session, args: argparse.Namespace) -> None:
             s.say(f"packages refresh [{alias}] {out.splitlines()[-1].strip()}")
 
 
+def _drift_checks(s: Session, args: argparse.Namespace) -> None:
+    """Library changes that stale what lives outside the checkout, found before an agent runs on it.
+
+    `ava schedules verify` on the gateway (the in-store schedule scripts: imports resolve and every
+    call into repo code still binds) and `ava plugins verify` on every host (each enabled plugin
+    loads; the agent loader contains a broken one, so only this surfaces it). Both read-only.
+    Every check runs; each one's detail is in the log above, and any red fails `up`."""
+    checks = [(args.gateway, "schedules verify --no-notify")]
+    checks += [(alias, "plugins verify") for alias in [args.gateway, *args.runner]]
+    failed: list[str] = []
+    for alias, verb in checks:
+        try:
+            # effect=True so a dry run lists the check without running it.
+            s.run(alias, f"{_HOME}; {_AVA} {verb}", effect=True)
+        except FailedError as exc:
+            failed.append(f"`ava {verb}` {exc}")
+    if failed:
+        raise FailedError("drift check failed: " + "; ".join(failed))
+
+
 def up(s: Session, args: argparse.Namespace) -> None:
     for alias in [args.gateway, *args.runner]:
         macos = s.os[alias] == "Darwin"
@@ -322,10 +387,12 @@ def up(s: Session, args: argparse.Namespace) -> None:
             raise FailedError(f"{alias}: start left maintenance {hold}")
     program = f"{_PYTHON} -"
     if s.dry_run:
+        _drift_checks(s, args)
         s.run(args.gateway, f"{program} smoke MACHINE {args.smoke_timeout}  # each agent-runner")
         _refresh(s, args)
         return
     rows, commit = _roster(s, args, program)
+    _drift_checks(s, args)
     for name in [row["name"] for row in rows if row["serve_agent_runner"]]:
         smoke = f"{program} smoke {shlex.quote(name)} {args.smoke_timeout}"
         s.run(args.gateway, smoke, stdin=_GATEWAY_PROGRAM)
@@ -346,6 +413,11 @@ def main(argv: list[str] | None = None) -> int:
             p.add_argument("--new", required=True, help="commit to switch every host to")
             p.add_argument("--allow-python-change", action="store_true")
             p.add_argument("--stop-timeout", type=int, default=600)
+            p.add_argument(
+                "--allow-red-schedules",
+                action="store_true",
+                help="proceed although stored schedule scripts fail NEW's `ava schedules verify`",
+            )
         else:
             p.add_argument("--start-timeout", type=int, default=1800)
             p.add_argument("--smoke-timeout", type=int, default=300)

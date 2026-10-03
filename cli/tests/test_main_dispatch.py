@@ -122,6 +122,7 @@ _HANDLERS: tuple[tuple[list[str], object, str], ...] = (
     (["firewall", "sync"], _host, "_h_firewall_sync"),
     (["cluster", "status"], _cluster, "_h_cluster_status"),
     (["plugins", "update"], _plugins, "_h_plugins_update"),
+    (["plugins", "verify"], _plugins, "_h_plugins_verify"),
     (["agents", "ls"], _agents, "_h_agents_ls"),
     (["agents", "cancel", "1"], _agents, "_h_agents_cancel"),
     (["agents", "restart", "1"], _agents, "_h_agents_restart"),
