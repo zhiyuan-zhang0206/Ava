@@ -67,8 +67,9 @@ def test_health_payload_carries_the_full_identity_set() -> None:
 
 
 def test_health_process_birth_is_stable_between_requests() -> None:
-    first = _health()["started_at"]
-    second = _health()["started_at"]
+    with TestClient(app) as client:
+        first = client.get("/api/health").json()["started_at"]
+        second = client.get("/api/health").json()["started_at"]
     assert isinstance(first, float)
     assert second == first
 
