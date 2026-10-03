@@ -296,6 +296,40 @@ class ChromeMcpDaemon:
             page_lifecycle.set_agent_page(agent_id, updated, self.generation)
             return result
 
+    async def _repin(self, current_page: int | None) -> int | None:
+        """Re-pin to this connection's page so the call lands on the right tab.
+
+        If the page vanished (closed underneath / crashed), re-pin errors: drop to the
+        no-current path rather than hit the global selection.
+        """
+        if current_page is None:
+            return None
+        repin = await self._call("select_page", {"pageId": current_page})
+        if repin.is_error:
+            logger.warning(
+                f"[browser-mcp] re-pin to page {current_page} failed "
+                f"({_text_of(repin)!r}); dropping affinity"
+            )
+            return None
+        return current_page
+
+    async def _bootstrap_page(
+        self, name: str, args: dict[str, Any], *, verify_after: bool
+    ) -> tuple[types.CallToolResult, int | None]:
+        """No tab of our own to act on. navigate_page can bootstrap one; anything else fails
+        fast instead of touching another client's tab."""
+        if name == "navigate_page" and isinstance(args.get("url"), str):
+            result = await self._call("new_page", args)
+            if not result.is_error:
+                # The auto-created page gets its TTL deadline like an
+                # explicit new_page (the two creation paths are the
+                # whole coverage of the TTL registry).
+                register_created_page(_selected_id(result), self.generation)
+                if verify_after:
+                    _spawn_verify()
+            return result, (_selected_id(result) or None)
+        return _no_page_result(), None
+
     async def _affinity_call(
         self, name: str, args: dict[str, Any], current_page: int | None
     ) -> tuple[types.CallToolResult, int | None]:
@@ -306,31 +340,9 @@ class ChromeMcpDaemon:
         verify_after = _navigates_to_gateway(name, args)
 
         if page_scoped:
-            # Re-pin to this connection's page so the call lands on the right tab.
-            # If the page vanished (closed underneath / crashed), re-pin errors:
-            # drop to the no-current path rather than hit the global selection.
-            if current_page is not None:
-                repin = await self._call("select_page", {"pageId": current_page})
-                if repin.is_error:
-                    logger.warning(
-                        f"[browser-mcp] re-pin to page {current_page} failed "
-                        f"({_text_of(repin)!r}); dropping affinity"
-                    )
-                    current_page = None
+            current_page = await self._repin(current_page)
             if current_page is None:
-                # No tab of our own to act on. navigate_page can bootstrap one;
-                # anything else fails fast instead of touching another client's tab.
-                if name == "navigate_page" and isinstance(args.get("url"), str):
-                    result = await self._call("new_page", args)
-                    if not result.is_error:
-                        # The auto-created page gets its TTL deadline like an
-                        # explicit new_page (the two creation paths are the
-                        # whole coverage of the TTL registry).
-                        register_created_page(_selected_id(result), self.generation)
-                    if verify_after and not result.is_error:
-                        _spawn_verify()
-                    return result, (_selected_id(result) or current_page)
-                return _no_page_result(), current_page
+                return await self._bootstrap_page(name, args, verify_after=verify_after)
 
         result = await self._call(name, args)
         if verify_after and not result.is_error:
@@ -365,6 +377,89 @@ class ChromeMcpDaemon:
         return current_page
 
 
+_ConnPage = tuple[int, int] | None  # (page, generation)
+
+
+async def _call_tool_response(
+    daemon: ChromeMcpDaemon, req: Request, req_id: Any, conn_page: _ConnPage
+) -> tuple[Response, _ConnPage]:
+    """Serve a `call_tool` request; the response and the connection's page afterwards."""
+    tool = req.get("tool")
+    if not tool:
+        # Missing/empty tool name: reject at the protocol edge
+        # instead of forwarding a nameless call the upstream
+        # would reject with a less legible error.
+        return {
+            "id": req_id,
+            "ok": False,
+            "error": "call_tool requires a non-empty 'tool' name",
+        }, conn_page
+    agent_id = req.get("agent_id")
+    # bool is an int subclass — reject it so a JSON
+    # `true` can never alias another agent's slot.
+    if isinstance(agent_id, int) and not isinstance(agent_id, bool):
+        result = await daemon.call_tool_for_agent(tool, req.get("args") or {}, agent_id)
+    else:
+        result, conn_page = await page_lifecycle.forward_legacy_call(
+            daemon, tool, req.get("args") or {}, conn_page
+        )
+    return {"id": req_id, "ok": True, "result": result.model_dump(mode="json")}, conn_page
+
+
+async def _respond(
+    daemon: ChromeMcpDaemon, req: Request, req_id: Any, method: Any, conn_page: _ConnPage
+) -> tuple[Response, _ConnPage]:
+    """Serve one request on a live daemon; one bad call must not drop the whole connection."""
+    try:
+        if method == "list_tools":
+            return {"id": req_id, "ok": True, "result": await daemon.list_tools()}, conn_page
+        if method == "call_tool":
+            return await _call_tool_response(daemon, req, req_id, conn_page)
+        if method == "release_agent_page":
+            return await handle_release_agent_page(daemon, req, req_id), conn_page
+        return {"id": req_id, "ok": False, "error": f"Unknown method: {method}"}, conn_page
+    except Exception as e:
+        return {"id": req_id, "ok": False, "error": f"{type(e).__name__}: {e}"}, conn_page
+
+
+async def _serve_line(
+    line: bytes,
+    writer: asyncio.StreamWriter,
+    daemon_ref: list[ChromeMcpDaemon | None],
+    conn_page: _ConnPage,
+) -> _ConnPage:
+    """Parse, serve and answer one request line; the connection's page afterwards."""
+    try:
+        req: Request = json.loads(line)
+    except json.JSONDecodeError as e:
+        _write(writer, {"id": None, "ok": False, "error": f"JSON parse error: {e}"})
+        await writer.drain()
+        return conn_page
+
+    req_id, method = req.get("id"), req.get("method")
+
+    # ping is lock-free and must succeed even during reconnection:
+    # the healthcheck probes the daemon process itself (not the
+    # upstream), so a reconnect window should never trigger a
+    # false-positive death and unnecessary respawn.
+    if method == "ping":
+        _write(writer, {"id": req_id, "ok": True, "result": None})
+        await writer.drain()
+        return conn_page
+
+    daemon = daemon_ref[0]
+    if daemon is None or daemon.dead.is_set():
+        # Daemon is reconnecting — tell the client to retry.
+        _write(writer, {"id": req_id, "ok": False, "error": _UPSTREAM_DOWN_MSG})
+        await writer.drain()
+        return conn_page
+
+    resp, conn_page = await _respond(daemon, req, req_id, method, conn_page)
+    _write(writer, resp)
+    await writer.drain()
+    return conn_page
+
+
 async def _handle_client(
     reader: asyncio.StreamReader,
     writer: asyncio.StreamWriter,
@@ -376,82 +471,11 @@ async def _handle_client(
     ``(page, generation)`` (see ``forward_legacy_call``). `daemon_ref` is a
     mutable cell so the handler always sees the current daemon across
     reconnects; when None (reconnecting), it returns a transient error."""
-    conn_page: tuple[int, int] | None = None  # (page, generation)
+    conn_page: _ConnPage = None
     try:
         with suppress(ConnectionResetError, BrokenPipeError):
             while line := await reader.readline():
-                try:
-                    req: Request = json.loads(line)
-                except json.JSONDecodeError as e:
-                    _write(writer, {"id": None, "ok": False, "error": f"JSON parse error: {e}"})
-                    await writer.drain()
-                    continue
-
-                req_id, method = req.get("id"), req.get("method")
-
-                # ping is lock-free and must succeed even during reconnection:
-                # the healthcheck probes the daemon process itself (not the
-                # upstream), so a reconnect window should never trigger a
-                # false-positive death and unnecessary respawn.
-                if method == "ping":
-                    _write(writer, {"id": req_id, "ok": True, "result": None})
-                    await writer.drain()
-                    continue
-
-                daemon = daemon_ref[0]
-                if daemon is None or daemon.dead.is_set():
-                    # Daemon is reconnecting — tell the client to retry.
-                    _write(
-                        writer,
-                        {
-                            "id": req_id,
-                            "ok": False,
-                            "error": _UPSTREAM_DOWN_MSG,
-                        },
-                    )
-                    await writer.drain()
-                    continue
-
-                try:
-                    resp: Response
-                    if method == "list_tools":
-                        resp = {"id": req_id, "ok": True, "result": await daemon.list_tools()}
-                    elif method == "call_tool":
-                        tool = req.get("tool")
-                        if not tool:
-                            # Missing/empty tool name: reject at the protocol edge
-                            # instead of forwarding a nameless call the upstream
-                            # would reject with a less legible error.
-                            resp = {
-                                "id": req_id,
-                                "ok": False,
-                                "error": "call_tool requires a non-empty 'tool' name",
-                            }
-                        else:
-                            agent_id = req.get("agent_id")
-                            # bool is an int subclass — reject it so a JSON
-                            # `true` can never alias another agent's slot.
-                            if isinstance(agent_id, int) and not isinstance(agent_id, bool):
-                                result = await daemon.call_tool_for_agent(
-                                    tool, req.get("args") or {}, agent_id
-                                )
-                            else:
-                                result, conn_page = await page_lifecycle.forward_legacy_call(
-                                    daemon, tool, req.get("args") or {}, conn_page
-                                )
-                            resp = {
-                                "id": req_id,
-                                "ok": True,
-                                "result": result.model_dump(mode="json"),
-                            }
-                    elif method == "release_agent_page":
-                        resp = await handle_release_agent_page(daemon, req, req_id)
-                    else:
-                        resp = {"id": req_id, "ok": False, "error": f"Unknown method: {method}"}
-                except Exception as e:  # one bad call must not drop the whole connection
-                    resp = {"id": req_id, "ok": False, "error": f"{type(e).__name__}: {e}"}
-                _write(writer, resp)
-                await writer.drain()
+                conn_page = await _serve_line(line, writer, daemon_ref, conn_page)
     finally:
         writer.close()
         with suppress(Exception):

@@ -3,6 +3,6 @@
     "services/delivery_watchdog/tests/test_delivery_watchdog.py::TestDispatchBackoffAndPoison.test_dispatch_cap_poisons_once_and_emits_event": 15
   },
   "files": {
-    "services/delivery_watchdog/tests/test_delivery_watchdog.py": 1733
+    "services/delivery_watchdog/tests/test_delivery_watchdog.py": 1681
   }
 }

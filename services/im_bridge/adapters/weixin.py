@@ -297,6 +297,19 @@ def _get_str(data: dict[str, Any] | None, key: str) -> str:
     return str(data.get(key) or "")
 
 
+def _dm_text(message: dict[str, Any], account_id: str) -> tuple[str, str] | None:
+    """`(text, sender_id)` of a deliverable DM; None for self, group, bot or empty messages."""
+    sender_id = str(message.get("from_user_id") or "").strip()
+    if not sender_id or sender_id == account_id:
+        return None
+    if message.get("room_id") or message.get("chat_room_id"):
+        return None  # iLink bots are DM-only; group events are not surfaced
+    if message.get("message_type") == MSG_TYPE_BOT:
+        return None
+    text = _extract_text(message.get("item_list") or [])
+    return (text, sender_id) if text else None
+
+
 class WeixinAdapter(IMAdapter):
     """iLink personal-bot adapter — DM-only, text-only, QR-login credentials.
 
@@ -478,16 +491,10 @@ class WeixinAdapter(IMAdapter):
 
     async def _handle_message(self, message: dict[str, Any]) -> None:
         """Normalize one iLink message into the core; capture context_token."""
-        sender_id = str(message.get("from_user_id") or "").strip()
-        if not sender_id or sender_id == self._account_id:
+        text_sender = _dm_text(message, self._account_id)
+        if text_sender is None:
             return
-        if message.get("room_id") or message.get("chat_room_id"):
-            return  # iLink bots are DM-only; group events are not surfaced
-        if message.get("message_type") == MSG_TYPE_BOT:
-            return
-        text = _extract_text(message.get("item_list") or [])
-        if not text:
-            return
+        text, sender_id = text_sender
         message_id = str(message.get("message_id") or "").strip()
         keys = [k for k in (message_id, _content_key(sender_id, text)) if k]
         if any(self._is_duplicate(k) for k in keys):
@@ -639,134 +646,6 @@ class WeixinAdapter(IMAdapter):
         return resp.json()
 
 
-async def _qr_get(
-    client: httpx.AsyncClient, base_url: str, endpoint: str, query: str
-) -> dict[str, Any] | None:
-    """GET an iLink QR endpoint; None on any transient error (caller retries)."""
-    try:
-        resp = await client.get(
-            f"{base_url.rstrip('/')}/{endpoint}?{query}", headers=_get_headers()
-        )
-    except httpx.HTTPError as exc:
-        logger.warning("weixin: {} failed: {}", endpoint, type(exc).__name__)
-        return None
-    if resp.status_code != 200:
-        logger.warning("weixin: {} failed: HTTP {}", endpoint, resp.status_code)
-        return None
-    return resp.json()
-
-
-def _show_qr(qrcode_value: str, qrcode_url: str) -> None:
-    """Print the scannable URL, plus a best-effort terminal QR render."""
-    logger.info("Scan the QR code below with WeChat: {}", qrcode_url or qrcode_value)
-    try:
-        import qrcode  # optional dependency
-
-        qr = qrcode.QRCode()
-        qr.add_data(qrcode_url or qrcode_value)
-        qr.make(fit=True)
-        qr.print_ascii(invert=True)
-    except Exception:
-        logger.info("(terminal QR rendering unavailable — open the link above to scan)")
-
-
-async def _refresh_qr(
-    client: httpx.AsyncClient, base_url: str, refresh_count: int
-) -> tuple[str, str] | None:
-    """Fetch a fresh QR after the previous one expired; None on failure."""
-    logger.info("QR code expired, refreshing… ({}/3)", refresh_count)
-    qr = await _qr_get(client, base_url, EP_GET_BOT_QR, "bot_type=3")
-    qrcode_value = _get_str(qr, "qrcode")
-    qrcode_url = _get_str(qr, "qrcode_img_content")
-    if not qrcode_value:
-        return None
-    _show_qr(qrcode_value, qrcode_url)
-    return qrcode_value, qrcode_url
-
-
-def _confirmed_credentials(status: dict[str, Any]) -> dict[str, Any] | None:
-    """Validate a "confirmed" status payload; persist and return credentials."""
-    account_id = _get_str(status, "ilink_bot_id")
-    bot_token = _get_str(status, "bot_token")
-    bot_base_url = _get_str(status, "baseurl") or ILINK_BASE_URL
-    user_id = _get_str(status, "ilink_user_id")
-    if not account_id or not bot_token:
-        logger.error("weixin: QR confirmed but credential payload incomplete")
-        return None
-    save_account(
-        account_id=account_id,
-        bot_token=bot_token,
-        user_id=user_id,
-        base_url=bot_base_url,
-    )
-    logger.info("WeChat connected, account_id={}", account_id)
-    return {
-        "account_id": account_id,
-        "bot_token": bot_token,
-        "base_url": bot_base_url,
-        "user_id": user_id,
-    }
-
-
-async def qr_login(
-    *,
-    timeout_seconds: int = 480,
-    client: httpx.AsyncClient | None = None,
-) -> dict[str, Any] | None:
-    """Run the interactive iLink QR login; persist credentials on success."""
-    owns_client = client is None
-    if client is None:
-        client = httpx.AsyncClient(timeout=httpx.Timeout(QR_POLL_TIMEOUT_SECONDS))
-    try:
-        base_url = ILINK_BASE_URL
-        qr = await _qr_get(client, base_url, EP_GET_BOT_QR, "bot_type=3")
-        qrcode_value = _get_str(qr, "qrcode")
-        qrcode_url = _get_str(qr, "qrcode_img_content")
-        if not qrcode_value:
-            logger.error("weixin: QR response missing qrcode")
-            return None
-        _show_qr(qrcode_value, qrcode_url)
-        deadline = time.monotonic() + timeout_seconds
-        refresh_count = 0
-        last_state = ""
-        while time.monotonic() < deadline:
-            status = await _qr_get(client, base_url, EP_GET_QR_STATUS, f"qrcode={qrcode_value}")
-            if status is None:
-                await asyncio.sleep(1)
-                continue
-            state = str(status.get("status") or "wait")
-            if state != last_state:
-                if state == "wait":
-                    logger.info("Waiting for scan…")
-                elif state == "scaned":
-                    logger.info("Scanned — confirm it in WeChat…")
-                elif state == "scaned_but_redirect":
-                    redirect_host = str(status.get("redirect_host") or "")
-                    if redirect_host:
-                        base_url = f"https://{redirect_host}"
-                elif state == "expired":
-                    refresh_count += 1
-                    if refresh_count > 3:
-                        logger.warning("QR code expired repeatedly — re-run login.")
-                        return None
-                    refreshed = await _refresh_qr(client, base_url, refresh_count)
-                    if refreshed is None:
-                        return None
-                    qrcode_value, qrcode_url = refreshed
-                last_state = state
-            if state == "confirmed":
-                creds = _confirmed_credentials(status)
-                if creds is None:
-                    return None
-                return creds
-            await asyncio.sleep(1)
-        logger.warning("WeChat login timed out.")
-        return None
-    finally:
-        if owns_client:
-            await client.aclose()
-
-
 def main(argv: list[str] | None = None) -> int:
     """CLI entry: ``python -m services.im_bridge.adapters.weixin --login``."""
     parser = argparse.ArgumentParser(
@@ -780,6 +659,8 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
     if args.login:
+        from services.im_bridge.adapters.weixin_login import qr_login
+
         creds = asyncio.run(qr_login())
         return 0 if creds else 1
     parser.print_help()

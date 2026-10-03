@@ -245,6 +245,27 @@ def _consider(
     return cursor.rowcount
 
 
+def _tail_eligible(
+    conn: Connection,
+    agent_id: int,
+    newest: str,
+    seal: str | None,
+    now: datetime,
+    idle_window: timedelta,
+    config: HierarchyWorkerConfig,
+) -> bool:
+    """The idle, delta, baseline / live-job and pacing gates for one agent's tail seal."""
+    stamp = _checkpoint_time(newest)
+    if stamp is None or now - stamp < idle_window:
+        return False
+    if seal is not None and newest <= seal:
+        # The delta gate: nothing written since the last tail seal.
+        return False
+    if not _has_clean_baseline(conn, agent_id) or _live_job(conn, agent_id):
+        return False
+    return _tail_due_by_history(conn, agent_id, now, config)
+
+
 def _scan_tails(conn: Connection, state: dict[int, str], config: HierarchyWorkerConfig) -> int:
     """Enqueue tail-seal jobs for idle agents (task #3981 C). Returns the count.
 
@@ -276,16 +297,9 @@ def _scan_tails(conn: Connection, state: dict[int, str], config: HierarchyWorker
             # coverage to continue.
             continue
         newest = latest[agent_id]
-        stamp = _checkpoint_time(newest)
-        if stamp is None or now - stamp < idle_window:
-            continue
-        seal = seals.get(agent_id)
-        if seal is not None and newest <= seal:
-            # The delta gate: nothing written since the last tail seal.
-            continue
-        if not _has_clean_baseline(conn, agent_id) or _live_job(conn, agent_id):
-            continue
-        if not _tail_due_by_history(conn, agent_id, now, config):
+        if not _tail_eligible(
+            conn, agent_id, newest, seals.get(agent_id), now, idle_window, config
+        ):
             continue
         cursor = conn.execute(
             "INSERT INTO hierarchy_jobs (agent_id, kind, trigger_boundary, status, include_tail)"
