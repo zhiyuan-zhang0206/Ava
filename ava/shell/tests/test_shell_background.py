@@ -248,9 +248,9 @@ def test_run_background_e2e_notice_log_and_close(
     # Default keep=False: the session closes unconditionally after the notice
     # (delivery is best-effort; a failed send must not leave the shell behind).
     deadline = time.time() + 10
-    while time.time() < deadline and handle.session_id in ava.shell.list():
+    while time.time() < deadline and handle.session_id in ava.shell.sessions.list():
         time.sleep(0.3)
-    assert handle.session_id not in ava.shell.list()
+    assert handle.session_id not in ava.shell.sessions.list()
 
 
 @pytest.mark.flaky  # real pty session + signal delivery polling (15s deadline)
@@ -279,9 +279,9 @@ def test_run_background_failure_notify_reports_sigkill(
     assert "exited with code 137" in argv_file.read_text()
 
     deadline = time.time() + 10
-    while time.time() < deadline and handle.session_id in ava.shell.list():
+    while time.time() < deadline and handle.session_id in ava.shell.sessions.list():
         time.sleep(0.3)
-    assert handle.session_id not in ava.shell.list()
+    assert handle.session_id not in ava.shell.sessions.list()
 
 
 @pytest.mark.flaky  # real pty session + time.sleep polling (15s deadline)
@@ -307,9 +307,9 @@ def test_failed_cmd_closes_session_even_when_notice_fails(
 
     # Command failed AND the notice failed — the session must still close.
     deadline = time.time() + 15
-    while time.time() < deadline and handle.session_id in ava.shell.list():
+    while time.time() < deadline and handle.session_id in ava.shell.sessions.list():
         time.sleep(0.3)
-    assert handle.session_id not in ava.shell.list()
+    assert handle.session_id not in ava.shell.sessions.list()
 
 
 @pytest.mark.flaky  # real pty session + time.sleep polling (15s deadline)
@@ -331,6 +331,6 @@ def test_run_background_keep_leaves_session(
             time.sleep(0.3)
         assert argv_file.exists(), "completion notice never fired"
         time.sleep(0.5)  # give a hypothetical exit a beat to happen — it must not
-        assert handle.session_id in ava.shell.list()
+        assert handle.session_id in ava.shell.sessions.list()
     finally:
-        ava.shell.kill(handle.session_id)
+        ava.shell.sessions.kill(handle.session_id)
