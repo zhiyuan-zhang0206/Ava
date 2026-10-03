@@ -58,6 +58,11 @@ class EventSpec:
     ``site`` is the producer evidence ``tests/test_lint_event_kinds.py`` accepts
     for the name, so the exemption lives with the declaration. ``retired``: a
     historical name kept readable for existing rows; it must have no producer.
+
+    ``persist``: the event is kept in ``telemetry_events``. Set it on every event a Postgres
+    reader queries by name or prefix; an event nobody reads by name is not stored (it stays in
+    the JSONL mirror and Loki), unless its level is warning or higher or its name is
+    unregistered. ``base.telemetry.event_store.is_persisted`` is the one judgment.
     """
 
     name: str
@@ -70,6 +75,7 @@ class EventSpec:
     doc: str = ""
     site: str = ""
     retired: bool = False
+    persist: bool = False
 
 
 def audit_event(
@@ -124,6 +130,7 @@ def telemetry_event(
     tier: EventTier = "observation",
     site: str = "",
     retired: bool = False,
+    persist: bool = False,
 ) -> EventSpec:
     return EventSpec(
         name=name,
@@ -135,4 +142,5 @@ def telemetry_event(
         doc=doc,
         site=site,
         retired=retired,
+        persist=persist,
     )
