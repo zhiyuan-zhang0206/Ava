@@ -981,12 +981,11 @@ def _stub_search_backend(
 
     # A fresh semaphore per test. asyncio.Semaphore binds itself to the event
     # loop of its first *contended* acquire and rejects every other loop after
-    # that, and pytest-asyncio hands each test its own loop — so sharing the
-    # module-level cached object across two contended tests would fail on the
-    # second. The handler reads it through `_search_semaphore()`, so the stub
-    # replaces that accessor with one returning a single fresh instance.
+    # that, and pytest-asyncio hands each test its own loop — so sharing one
+    # across two contended tests would fail on the second. The handler reads it
+    # from `app.state.memory_search_gate`, so the stub installs a fresh instance there.
     fresh = asyncio.Semaphore(permits)
-    monkeypatch.setattr(_gw_memory, "_search_semaphore", lambda: fresh)
+    monkeypatch.setattr(app.state, "memory_search_gate", fresh, raising=False)
     monkeypatch.setattr(settings.services, "memory_search_deadline_seconds", _TEST_DEADLINE_S)
 
     class _StubBackend:
@@ -1257,11 +1256,7 @@ def test_semaphore_sized_from_setting(monkeypatch: pytest.MonkeyPatch) -> None:
     from base.config import settings
 
     monkeypatch.setattr(settings.services, "memory_search_max_concurrency", 7)
-    _gw_memory._search_semaphore.cache_clear()
-    try:
-        assert _gw_memory._search_semaphore()._value == 7
-    finally:
-        _gw_memory._search_semaphore.cache_clear()
+    assert _gw_memory.build_search_gate()._value == 7
 
 
 class TestMemoryNoteEndpoint:
