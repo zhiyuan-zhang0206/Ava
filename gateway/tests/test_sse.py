@@ -6,7 +6,7 @@ Directly `asyncio.run` call `event_stream()` async generator, using fake Request
 (only needs `await is_disconnected() → False/True`), real Redis publish
 real parsing, finer granularity.
 
-Redis uses the docker compose one; Redis no separate db, channel name isolation (settings.data_plane.events_channel
+Redis uses the session's instance; Redis no separate db, channel name isolation (settings.data_plane.events_channel
 won't collide with running dev Ava Server — although test messages may leak into dev UI, dev
 tailer filters by agent_id, test agent_ids are all newly created in tests).
 """
