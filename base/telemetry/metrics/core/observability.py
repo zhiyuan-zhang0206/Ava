@@ -303,9 +303,12 @@ def core_metrics() -> list[MetricSpec]:
             unit="percent",
             panel="timeseries",
             query_type="logql",
+            # avg() collapses the per-event label explosion (trace/span/agent
+            # labels) into one series: unwrapped, the panel renders dozens of
+            # one-point lines — sparse near-empty (task #4204).
             query=(
-                '100 * avg_over_time({service_name="unknown_service", event_name={event_name}} | json | '
-                "category={category} | unwrap attributes_summary_history_ratio [$__interval])"
+                'avg(100 * avg_over_time({service_name="unknown_service", event_name={event_name}} | json | '
+                "category={category} | unwrap attributes_summary_history_ratio [$__interval]))"
             ),
             target_names=["summary/history %"],
             output=["grafana"],
@@ -517,6 +520,8 @@ def core_metrics() -> list[MetricSpec]:
             section="Fleet",
             order=0,
             target_names=["{{source}}"],
+            # Rotate the crowded labels on the half-width Fleet pair (task #4204).
+            options={"xTickLabelRotation": -45},
         )
     )
 
@@ -545,6 +550,8 @@ def core_metrics() -> list[MetricSpec]:
             section="Fleet",
             order=1,
             target_names=["{{event_name}}"],
+            # Rotate the crowded labels on the half-width Fleet pair (task #4204).
+            options={"xTickLabelRotation": -45},
         )
     )
 

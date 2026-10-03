@@ -260,6 +260,7 @@ def test_compaction_panels_measure_applied_ratio_and_frequency() -> None:
     rate = rendered["ava_obs_compaction_rate"][0]
 
     assert "unwrap attributes_summary_history_ratio" in ratio
+    assert ratio.startswith("avg(100 * avg_over_time(")
     assert "100 * avg_over_time" in ratio
     assert 'event_name="compaction_completed"' in ratio
     assert 'event_name="compaction_completed"' in rate

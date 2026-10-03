@@ -3521,7 +3521,7 @@
      "sort": "desc"
     },
     "orientation": "auto",
-    "xTickLabelRotation": 0,
+    "xTickLabelRotation": -45,
     "xTickLabelSpacing": 100,
     "xField": "Time"
    },
@@ -3596,7 +3596,7 @@
      "sort": "desc"
     },
     "orientation": "auto",
-    "xTickLabelRotation": 0,
+    "xTickLabelRotation": -45,
     "xTickLabelSpacing": 100,
     "xField": "Time"
    },
@@ -5845,7 +5845,7 @@
       "uid": "loki"
      },
      "editorMode": "code",
-     "expr": "100 * avg_over_time({service_name=\"unknown_service\", event_name=\"compaction_completed\"} | json | category=\"telemetry\" | unwrap attributes_summary_history_ratio [$__interval])",
+     "expr": "avg(100 * avg_over_time({service_name=\"unknown_service\", event_name=\"compaction_completed\"} | json | category=\"telemetry\" | unwrap attributes_summary_history_ratio [$__interval]))",
      "refId": "A",
      "queryType": "range",
      "legendFormat": "summary/history %"
