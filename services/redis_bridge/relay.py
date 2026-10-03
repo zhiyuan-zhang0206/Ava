@@ -19,8 +19,6 @@ _BUFFER_SIZE = 65536
 _INITIAL_REBIND_DELAY_S = 1.0
 _MAX_REBIND_DELAY_S = 30.0
 
-_sleep = time.sleep
-
 
 def _log(message: str) -> None:
     sys.stdout.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')} {message}\n")
@@ -92,6 +90,7 @@ def serve_forever(
     backend_address: tuple[str, int],
     *,
     open_listener: Callable[[tuple[str, int]], socket.socket] = _open_listener,
+    sleep: Callable[[float], None] = time.sleep,
 ) -> None:
     """Serve connections, rebuilding the listener after every socket failure.
 
@@ -130,7 +129,7 @@ def serve_forever(
             if listener is not None:
                 with suppress(OSError):
                     listener.close()
-        _sleep(delay_s)
+        sleep(delay_s)
         delay_s = min(delay_s * 2.0, _MAX_REBIND_DELAY_S)
 
 

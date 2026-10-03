@@ -59,7 +59,7 @@ def _ttl(value: int) -> int:
     return value
 
 
-def _wake(agent_id: int, *, roster_changed: bool = False) -> None:
+def wake_agent(agent_id: int, *, roster_changed: bool = False) -> None:
     publish_inbound_wake(agent_id, "impersonation")
     publish_impersonation_changed_sync(EventBus.from_settings(), agent_id)
     if roster_changed:
@@ -162,7 +162,7 @@ def request(
             ),
         )
         result = public(lock_lease(conn, str(lease_id)))
-    _wake(agent_id, roster_changed=True)
+    wake_agent(agent_id, roster_changed=True)
     if relay_token is not None:
         return result | {"relay_token": relay_token}
     return result
@@ -180,7 +180,7 @@ def get(lease_id: str, caller: object) -> dict[str, Any]:
         was_open = lease["status"] in OPEN
         result = public(expire(conn, lease))
     if was_open and result["status"] == "expired":
-        _wake(lease["agent_id"], roster_changed=True)
+        wake_agent(lease["agent_id"], roster_changed=True)
     return result
 
 
@@ -244,7 +244,7 @@ def accept(
             (incarnation.generation, incarnation.owner, start_message, lease_id),
         )
         result = public(lock_lease(conn, lease_id))
-    _wake(agent_id)
+    wake_agent(agent_id)
     return result
 
 
@@ -266,7 +266,7 @@ def reject(
             (reason, lease_id),
         )
         result = public(lock_lease(conn, lease_id))
-    _wake(agent_id, roster_changed=True)
+    wake_agent(agent_id, roster_changed=True)
     return result
 
 
@@ -302,7 +302,7 @@ def activate(lease_id: str, incarnation: RuntimeIncarnation) -> dict[str, Any]:
             )
             result = public(lock_lease(conn, lease_id))
             capture_pending(conn, result)
-    _wake(incarnation.agent_id, roster_changed=was_open and result["status"] == "expired")
+    wake_agent(incarnation.agent_id, roster_changed=was_open and result["status"] == "expired")
     return result
 
 
@@ -389,7 +389,7 @@ def native_status(agent_id: int, incarnation: RuntimeIncarnation) -> dict[str, A
             )
         result = public(lease)
     if was_open and result["status"] == "expired":
-        _wake(agent_id, roster_changed=True)
+        wake_agent(agent_id, roster_changed=True)
     return result
 
 
@@ -405,7 +405,7 @@ def renew(lease_id: str, caller: object, *, ttl_seconds: int | None = None) -> d
             (ttl, ttl, lease_id),
         )
         result = public(lock_lease(conn, lease_id))
-    _wake(lease["agent_id"])
+    wake_agent(lease["agent_id"])
     return result
 
 
@@ -456,7 +456,7 @@ def release(lease_id: str, caller: object, summary: str) -> dict[str, Any]:
         )
         dismiss_reminders(conn, lease)
         result = public(lock_lease(conn, lease_id))
-    _wake(lease["agent_id"], roster_changed=True)
+    wake_agent(lease["agent_id"], roster_changed=True)
     return result
 
 
@@ -526,7 +526,7 @@ def ack(lease_id: str, caller: object, message_ids: list[int]) -> None:
     # Consuming a page exposes previously hidden pending IDs to the relay.
     # Publish after real progress so its next page does not wait for DB catchup.
     if acknowledged:
-        _wake(lease["agent_id"])
+        wake_agent(lease["agent_id"])
 
 
 def merge_plugin_delta(

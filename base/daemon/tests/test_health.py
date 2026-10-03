@@ -871,3 +871,22 @@ def test_health_port_warns_once_on_windows_8106(
     assert len(warnings) == 1  # pyright: ignore[reportUnknownArgumentType]
     assert "8106" in warnings[0].getMessage()  # pyright: ignore[reportUnknownMemberType]
     assert "iphlpsvc" in warnings[0].getMessage()  # pyright: ignore[reportUnknownMemberType]
+
+
+def test_probe_fails_closed_on_any_unexpected_exception(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Fail CLOSED — reporting alive on an unreadable probe would make the
+    watchdog skip a genuinely dead gateway forever."""
+    monkeypatch.setattr(
+        health,
+        "_probe_home",
+        lambda *_a, **_kw: (_ for _ in ()).throw(RuntimeError("unpredicted")),  # pyright: ignore[reportUnknownArgumentType]
+    )
+    assert health.probe_home("http://gateway.example/api/health").alive is False
+
+
+def test_probe_passes_through_a_normal_verdict(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The wrapper adds a floor, not a behaviour change."""
+    monkeypatch.setattr(health, "_probe_home", lambda *_a, **_kw: health.DaemonProbe.up("home /x"))  # pyright: ignore[reportUnknownArgumentType]
+    probe = health.probe_home("http://gateway.example/api/health")
+    assert probe.alive is True
+    assert probe.detail == "home /x"

@@ -1,5 +1,0 @@
-{
-  "patch_targets": {
-    "ops/roster/tests/test_spec_roster.py::base.daemon.health._probe_daemon": 2
-  }
-}
