@@ -293,26 +293,8 @@ def _bucket_minutes(template: str) -> int:
 # ── SQL safety validation ─────────────────────────────────────────────────────
 
 
-def validate_metric_sql(sql: str) -> None:
-    """Validate one static metric query against the read-only whitelist.
-
-    Task #180 (PR C): the SQL template era is over — the live event stream is
-    read through LogQL (task #1280), so Grafana time macros and the
-    ``{event_name}`` / ``{category}`` / ``{{{{agent_id}}}}`` placeholders are
-    rejected outright. What remains is the static-read guardrail: a single
-    SELECT over ``events`` (the retired archive — deliberate archive reads
-    only) or ``agents_meta`` (live), whitelisted functions / columns /
-    operators, no comments / multi-statement / DML / information functions.
-
-    Rejects: multi-statement input (``;`` outside the trailing position),
-    comments (``--`` / ``/* */``), any FROM target other than ``events`` /
-    ``agents_meta``, Grafana macros, template placeholders, unknown
-    identifiers / functions / operators, and any character the tokenizer
-    does not recognize (e.g. dollar-quoted strings).
-
-    Raises:
-        InvalidMetricQuery: with a concrete reason for plugin authors.
-    """
+def _single_statement_body(sql: str) -> str:
+    """`sql` minus its trailing `;`, after the single-statement / comment / no-template checks."""
     # 1. Single-statement / comment / no-template checks on a string with
     #    quoted literals blanked out (so 'a;b' or "--" inside a string does
     #    not trip them).
@@ -339,8 +321,11 @@ def validate_metric_sql(sql: str) -> None:
             "{event_name}/{category}/{{agent_id}} were retired with the "
             f"events-table cutover (task #180): {sql!r}"
         )
+    return body
 
-    # 2. Tokenize; every character must belong to a recognized token.
+
+def _tokenize_metric_sql(sql: str, body: str) -> list[tuple[str, str]]:
+    """Tokenize; every character must belong to a recognized token."""
     tokens: list[tuple[str, str]] = []  # (kind, value)
     pos = 0
     for m in _TOKEN_RE.finditer(body):
@@ -359,7 +344,10 @@ def validate_metric_sql(sql: str) -> None:
         raise InvalidMetricQuery(
             f"unrecognized trailing character(s) {body[pos:]!r} in metric query template: {sql!r}"
         )
+    return tokens
 
+
+def _require_select(tokens: list[tuple[str, str]], sql: str) -> None:
     # 3. Must start with SELECT — case-insensitive, like every other keyword
     #    check in this module (the whitelists all upper-compare), so a plugin
     #    author writing `select ...` or `Select ...` is not rejected.
@@ -369,16 +357,11 @@ def validate_metric_sql(sql: str) -> None:
             f"{tokens[0] if tokens else '(empty)'}: {sql!r}"
         )
 
-    # 4. Every FROM clause must reference only the `events` table (or a
-    #    subquery, whose inner FROM clauses are checked recursively). Comma-
-    #    separated table lists are walked item by item; a bare word right
-    #    after a table/subquery is treated as its alias (harmless — the
-    #    identifier whitelist below still applies to everything else).
-    #    FROM aliases are exempted from the function-call check below (an
-    #    alias column list `AS g(time)` must not read as a call `g(...)`).
-    from_alias_positions = _check_from_clauses(tokens, sql)
 
-    # 5. Classify every remaining token against the whitelists.
+def _classify_tokens(
+    tokens: list[tuple[str, str]], sql: str, from_alias_positions: set[int]
+) -> None:
+    """Classify every remaining token against the whitelists."""
     for i, (kind, value) in enumerate(tokens):
         if kind in ("num", "str"):
             continue
@@ -395,26 +378,69 @@ def validate_metric_sql(sql: str) -> None:
                 raise InvalidMetricQuery(f"operator {value!r} is not on the whitelist: {sql!r}")
             continue
         assert kind == "word"  # noqa: S101
-        upper = value.upper()
-        if upper in _SQL_DENIED_KEYWORDS:
-            raise InvalidMetricQuery(
-                f"keyword {value!r} is not allowed in metric query templates "
-                f"(denied set: {sorted(_SQL_DENIED_KEYWORDS)}): {sql!r}"
-            )
-        if upper in _SQL_KEYWORDS or upper in _SQL_FUNCTIONS or value in _SQL_COLUMNS:
-            continue
-        # A bare word that is not whitelisted is only allowed as a column
-        # reference / alias WITHOUT a call — a following `(` means a function
-        # invocation, and only the whitelisted functions may be called
-        # (version(), pg_sleep(), now(), ... are rejected here). Column/alias
-        # names resolve against the locked `events` table at query time, so a
-        # misspelled one fails the query itself, never executes anything.
-        if i + 1 < len(tokens) and tokens[i + 1] == ("op", "(") and i not in from_alias_positions:
-            raise InvalidMetricQuery(
-                f"function call {value!r}(...) is not on the whitelist — only "
-                f"{sorted(_SQL_FUNCTIONS)} may be called: {sql!r}"
-            )
-        continue
+        _check_word(tokens, i, sql, from_alias_positions)
+
+
+def _check_word(
+    tokens: list[tuple[str, str]], i: int, sql: str, from_alias_positions: set[int]
+) -> None:
+    """One bare word: a denied keyword raises; an unlisted word may only be a column / alias."""
+    value = tokens[i][1]
+    upper = value.upper()
+    if upper in _SQL_DENIED_KEYWORDS:
+        raise InvalidMetricQuery(
+            f"keyword {value!r} is not allowed in metric query templates "
+            f"(denied set: {sorted(_SQL_DENIED_KEYWORDS)}): {sql!r}"
+        )
+    if upper in _SQL_KEYWORDS or upper in _SQL_FUNCTIONS or value in _SQL_COLUMNS:
+        return
+    # A bare word that is not whitelisted is only allowed as a column
+    # reference / alias WITHOUT a call — a following `(` means a function
+    # invocation, and only the whitelisted functions may be called
+    # (version(), pg_sleep(), now(), ... are rejected here). Column/alias
+    # names resolve against the locked `events` table at query time, so a
+    # misspelled one fails the query itself, never executes anything.
+    if i + 1 < len(tokens) and tokens[i + 1] == ("op", "(") and i not in from_alias_positions:
+        raise InvalidMetricQuery(
+            f"function call {value!r}(...) is not on the whitelist — only "
+            f"{sorted(_SQL_FUNCTIONS)} may be called: {sql!r}"
+        )
+
+
+def validate_metric_sql(sql: str) -> None:
+    """Validate one static metric query against the read-only whitelist.
+
+    Task #180 (PR C): the SQL template era is over — the live event stream is
+    read through LogQL (task #1280), so Grafana time macros and the
+    ``{event_name}`` / ``{category}`` / ``{{{{agent_id}}}}`` placeholders are
+    rejected outright. What remains is the static-read guardrail: a single
+    SELECT over ``events`` (the retired archive — deliberate archive reads
+    only) or ``agents_meta`` (live), whitelisted functions / columns /
+    operators, no comments / multi-statement / DML / information functions.
+
+    Rejects: multi-statement input (``;`` outside the trailing position),
+    comments (``--`` / ``/* */``), any FROM target other than ``events`` /
+    ``agents_meta``, Grafana macros, template placeholders, unknown
+    identifiers / functions / operators, and any character the tokenizer
+    does not recognize (e.g. dollar-quoted strings).
+
+    Raises:
+        InvalidMetricQuery: with a concrete reason for plugin authors.
+    """
+    body = _single_statement_body(sql)
+    tokens = _tokenize_metric_sql(sql, body)
+    _require_select(tokens, sql)
+
+    # 4. Every FROM clause must reference only the `events` table (or a
+    #    subquery, whose inner FROM clauses are checked recursively). Comma-
+    #    separated table lists are walked item by item; a bare word right
+    #    after a table/subquery is treated as its alias (harmless — the
+    #    identifier whitelist below still applies to everything else).
+    #    FROM aliases are exempted from the function-call check below (an
+    #    alias column list `AS g(time)` must not read as a call `g(...)`).
+    from_alias_positions = _check_from_clauses(tokens, sql)
+
+    _classify_tokens(tokens, sql, from_alias_positions)
 
 
 # ── registry ──────────────────────────────────────────────────────────────────
