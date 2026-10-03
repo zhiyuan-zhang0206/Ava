@@ -46,7 +46,7 @@ jobs:
           systemctl --version
       - name: Root lifetime and independent data sibling
         run: uv run pytest --noconftest services/ava_root/tests/test_ava_root_daemon.py::test_native_systemd_root_lifetime -q --junitxml=root-lifetime.xml
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         if: always()
         with:
           name: native-root-lifetime
