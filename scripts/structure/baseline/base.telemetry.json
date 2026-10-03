@@ -8,13 +8,13 @@
   },
   "complexity": {
     "base/telemetry/metrics/core/tests/test_core_observability.py::test_pack_registers_all_metrics": 16,
-    "base/telemetry/metrics/tests/test_metrics_aggregate_equivalence.py::test_equivalence_full_thread": 24,
+    "base/telemetry/metrics/tests/test_metrics_aggregate_equivalence.py::test_equivalence_full_thread": 22,
     "base/telemetry/otlp/tests/test_telemetry_otlp.py::test_log_mapping_full_record_shape": 18,
     "base/telemetry/otlp/tests/test_telemetry_otlp.py::test_metric_mapping_int_counter_float_histogram": 17,
     "base/telemetry/tests/test_tracing.py::test_turn_span_exports_root_at_start_not_at_end": 17
   },
   "files": {
-    "base/telemetry/otlp/tests/test_telemetry_otlp.py": 1169,
+    "base/telemetry/otlp/tests/test_telemetry_otlp.py": 1024,
     "base/telemetry/tests/test_tracing.py": 1724
   },
   "nesting": {

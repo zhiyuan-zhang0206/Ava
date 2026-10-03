@@ -1,13 +1,5 @@
 {
   "complexity": {
-    "scripts/ci/accounting.py::_run_entry": 22,
-    "scripts/ci/accounting.py::main": 15,
-    "scripts/ci/coverage_gates.py::check": 16,
-    "scripts/ci/runs_export.py::attribute_runs": 17,
-    "scripts/ci/runs_export.py::daily_aggregates": 64,
-    "scripts/ci/runs_export.py::workflow_aggregates": 27,
-    "scripts/ci/test_selector.py::select_tests": 27,
     "scripts/ci/two_section_chain_smoke/cli.py::main": 61
-  },
-  "files": {}
+  }
 }
