@@ -1,8 +1,5 @@
 {
   "ambient_state": {
     "agent/db/__init__.py::ambient-container:_borrow_spans": 1
-  },
-  "complexity": {
-    "agent/db/__init__.py::claim_inbound_batch": 15
   }
 }

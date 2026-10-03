@@ -239,6 +239,60 @@ async def enqueue_fatal_provider_report_to_nearest_alive_ancestor(
     return ancestor_id
 
 
+async def _claim_lifecycle_command(
+    conn: psycopg.AsyncConnection[Any], cur: psycopg.AsyncCursor[Any], agent_id: int
+) -> list[ClaimedInbound] | None:
+    """Accept the agent's owned restart/terminate command; None when there is none."""
+    from agent.ownership.lifecycle_intent import (
+        accept_lifecycle_intent,
+        settle_superseded_intent,
+    )
+    from base.native_process.runtime_incarnation import current_incarnation
+
+    command = await accept_lifecycle_intent(conn, agent_id)
+    token = current_incarnation(agent_id)
+    if (
+        command is not None
+        and token is not None
+        and (command.generation != token.generation or command.owner != token.owner)
+    ):
+        if not await settle_superseded_intent(conn, command):
+            raise RuntimeError("replacement cannot execute or settle the prior lifecycle target")
+        command = await accept_lifecycle_intent(conn, agent_id)
+    if command is not None:
+        if token is None or (command.generation, command.owner) != (
+            token.generation,
+            token.owner,
+        ):
+            raise RuntimeError("lifecycle dispatch target is not the current incarnation")
+        await cur.execute(
+            "SELECT i.id,i.agent_id,i.content,i.kind,i.source,i.payload,"
+            "i.created_at,i.claimed_at FROM inbound_messages i JOIN agents_meta m "
+            "ON m.id=i.agent_id AND m.lifecycle_command_id=i.id "
+            "WHERE i.id=%s AND m.id=%s AND i.status='claimed' "
+            "AND i.kind IN ('restart','terminate') "
+            "AND i.target_generation=m.runtime_generation "
+            "AND i.target_owner=m.runtime_owner "
+            "AND m.runtime_generation=%s AND m.runtime_owner=%s",
+            (command.id, agent_id, token.generation, token.owner),
+        )
+        row = await cur.fetchone()
+        if row is None:
+            raise RuntimeError("accepted lifecycle command disappeared")
+        return [ClaimedInbound.from_row(row)._replace(durable_lifecycle=True)]
+    return None
+
+
+async def _refuse_unadmitted_lifecycle(cur: psycopg.AsyncCursor[Any], agent_id: int) -> None:
+    await cur.execute(
+        "SELECT id FROM inbound_messages WHERE agent_id=%s AND status='pending' "
+        "AND kind IN ('restart','terminate') ORDER BY id LIMIT 1 FOR UPDATE",
+        (agent_id,),
+    )
+    if await cur.fetchone() is not None:
+        raise RuntimeError("lifecycle claim requires an admitted runtime incarnation")
+
+
 async def claim_inbound_batch(
     pool: AsyncConnectionPool,
     agent_id: int,
@@ -272,53 +326,11 @@ async def claim_inbound_batch(
         runtime = await cur.fetchone()
         runtime_owned = runtime in (("process",), ("hosted",))
         if runtime_owned:
-            from agent.ownership.lifecycle_intent import (
-                accept_lifecycle_intent,
-                settle_superseded_intent,
-            )
-            from base.native_process.runtime_incarnation import current_incarnation
-
-            command = await accept_lifecycle_intent(conn, agent_id)
-            token = current_incarnation(agent_id)
-            if (
-                command is not None
-                and token is not None
-                and (command.generation != token.generation or command.owner != token.owner)
-            ):
-                if not await settle_superseded_intent(conn, command):
-                    raise RuntimeError(
-                        "replacement cannot execute or settle the prior lifecycle target"
-                    )
-                command = await accept_lifecycle_intent(conn, agent_id)
-            if command is not None:
-                if token is None or (command.generation, command.owner) != (
-                    token.generation,
-                    token.owner,
-                ):
-                    raise RuntimeError("lifecycle dispatch target is not the current incarnation")
-                await cur.execute(
-                    "SELECT i.id,i.agent_id,i.content,i.kind,i.source,i.payload,"
-                    "i.created_at,i.claimed_at FROM inbound_messages i JOIN agents_meta m "
-                    "ON m.id=i.agent_id AND m.lifecycle_command_id=i.id "
-                    "WHERE i.id=%s AND m.id=%s AND i.status='claimed' "
-                    "AND i.kind IN ('restart','terminate') "
-                    "AND i.target_generation=m.runtime_generation "
-                    "AND i.target_owner=m.runtime_owner "
-                    "AND m.runtime_generation=%s AND m.runtime_owner=%s",
-                    (command.id, agent_id, token.generation, token.owner),
-                )
-                row = await cur.fetchone()
-                if row is None:
-                    raise RuntimeError("accepted lifecycle command disappeared")
-                return [ClaimedInbound.from_row(row)._replace(durable_lifecycle=True)]
+            accepted = await _claim_lifecycle_command(conn, cur, agent_id)
+            if accepted is not None:
+                return accepted
         else:
-            await cur.execute(
-                "SELECT id FROM inbound_messages WHERE agent_id=%s AND status='pending' "
-                "AND kind IN ('restart','terminate') ORDER BY id LIMIT 1 FOR UPDATE",
-                (agent_id,),
-            )
-            if await cur.fetchone() is not None:
-                raise RuntimeError("lifecycle claim requires an admitted runtime incarnation")
+            await _refuse_unadmitted_lifecycle(cur, agent_id)
         if lifecycle_only:
             # Accepted intents returned above. A held native runtime has no
             # authority to acknowledge ordinary input in the generic batch.
