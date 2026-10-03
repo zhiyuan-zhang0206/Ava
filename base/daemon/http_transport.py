@@ -60,6 +60,49 @@ def _build_response(status: int, body: bytes, content_type: str) -> bytes:
     )
 
 
+async def _routed_response(
+    reader: asyncio.StreamReader,
+    header_lines: list[bytes],
+    method: str,
+    path: str,
+    *,
+    routes: Mapping[tuple[str, str], RouteHandler],
+    health_response: Callable[[], tuple[int, bytes]],
+    auth_digests: frozenset[str] | None,
+) -> bytes:
+    """Read the capped POST body and answer the request from health, the routes, or 404."""
+    content_length = _content_length(header_lines)
+    if content_length > _MAX_BODY_BYTES:
+        return _build_response(
+            400,
+            json.dumps({"error": f"body too large: {content_length} > {_MAX_BODY_BYTES}"}).encode(),
+            "application/json",
+        )
+    body_bytes = b""
+    if content_length > 0:
+        body_bytes = await asyncio.wait_for(reader.readexactly(content_length), timeout=10.0)
+
+    if method == "GET" and path == "/healthz":
+        status, healthz_body = health_response()
+        return _build_response(status, healthz_body, "application/json")
+    if (method, path) not in routes:
+        return _build_response(404, b"", "text/plain")
+    if auth_digests is not None and not verify_bearer_digest(
+        _header_value(header_lines, b"authorization"), auth_digests
+    ):
+        return _build_response(
+            401, json.dumps({"error": "unauthorized"}).encode(), "application/json"
+        )
+    try:
+        status, resp_body, ctype = await routes[(method, path)](body_bytes)
+        return _build_response(status, resp_body, ctype)
+    except Exception as exc:
+        _log.exception("[http_transport] route %s %s handler raised", method, path)
+        return _build_response(
+            500, json.dumps({"error": type(exc).__name__}).encode(), "application/json"
+        )
+
+
 async def start_daemon_http(
     *,
     host: str,
@@ -88,52 +131,15 @@ async def start_daemon_http(
                 parts = request_line.split(" ")
                 method = parts[0] if parts else ""
                 path = parts[1] if len(parts) > 1 else ""
-
-                # POST body — read Content-Length-specified bytes, with a cap.
-                body_bytes = b""
-                content_length = _content_length(header_lines)
-                if content_length > _MAX_BODY_BYTES:
-                    response = _build_response(
-                        400,
-                        json.dumps(
-                            {"error": f"body too large: {content_length} > {_MAX_BODY_BYTES}"}
-                        ).encode(),
-                        "application/json",
-                    )
-                else:
-                    if content_length > 0:
-                        body_bytes = await asyncio.wait_for(
-                            reader.readexactly(content_length), timeout=10.0
-                        )
-
-                    if method == "GET" and path == "/healthz":
-                        status, healthz_body = health_response()
-                        response = _build_response(status, healthz_body, "application/json")
-                    elif (method, path) in routes:
-                        if auth_digests is not None and not verify_bearer_digest(
-                            _header_value(header_lines, b"authorization"), auth_digests
-                        ):
-                            response = _build_response(
-                                401,
-                                json.dumps({"error": "unauthorized"}).encode(),
-                                "application/json",
-                            )
-                        else:
-                            try:
-                                status, resp_body, ctype = await routes[(method, path)](body_bytes)
-                                response = _build_response(status, resp_body, ctype)
-                            except Exception as exc:
-                                _log.exception(
-                                    "[http_transport] route %s %s handler raised", method, path
-                                )
-                                response = _build_response(
-                                    500,
-                                    json.dumps({"error": type(exc).__name__}).encode(),
-                                    "application/json",
-                                )
-                    else:
-                        response = _build_response(404, b"", "text/plain")
-
+                response = await _routed_response(
+                    reader,
+                    header_lines,
+                    method,
+                    path,
+                    routes=routes,
+                    health_response=health_response,
+                    auth_digests=auth_digests,
+                )
                 writer.write(response)
                 await writer.drain()
         finally:
