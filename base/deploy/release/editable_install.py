@@ -517,6 +517,41 @@ def _stderr_tail(stderr: str | bytes | None) -> str:
     return stderr[-1000:].strip()
 
 
+def _run_import_probe(interpreter: Path) -> subprocess.CompletedProcess[str] | str:
+    """The import probe's result, or the gate's failure line when it could not run."""
+    env = {
+        key: value for key, value in os.environ.items() if key not in {"VIRTUAL_ENV", "PYTHONPATH"}
+    }
+    try:
+        return subprocess.run(  # noqa: S603 — checkout venv interpreter, never user input
+            [str(interpreter), "-I", "-c", _IMPORT_GATE_CODE],
+            cwd=tempfile.gettempdir(),
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=_IMPORT_GATE_TIMEOUT_S,
+            check=False,
+        )
+    except subprocess.TimeoutExpired as exc:
+        return (
+            "editable import gate failed "
+            f"(rc=timeout; stderr={_stderr_tail(exc.stderr)!r}; path='')"
+        )
+    except OSError as exc:
+        return f"editable import gate failed (rc=spawn-error; stderr={str(exc)!r}; path='')"
+
+
+def _resolved_absolute(path_text: str) -> Path | None:
+    """`path_text` resolved, or None when it is not an absolute, resolvable path."""
+    try:
+        reported_path = Path(path_text)
+        if not reported_path.is_absolute():
+            return None
+        return reported_path.resolve(strict=False)
+    except (OSError, ValueError):
+        return None
+
+
 def editable_import_gate(
     source_root: Path,
     *,
@@ -533,26 +568,9 @@ def editable_import_gate(
     interpreter = venv_python(resolved_source)
     if interpreter is None:
         return ("venv python missing",)
-    env = {
-        key: value for key, value in os.environ.items() if key not in {"VIRTUAL_ENV", "PYTHONPATH"}
-    }
-    try:
-        result = subprocess.run(  # noqa: S603 — checkout venv interpreter, never user input
-            [str(interpreter), "-I", "-c", _IMPORT_GATE_CODE],
-            cwd=tempfile.gettempdir(),
-            env=env,
-            capture_output=True,
-            text=True,
-            timeout=_IMPORT_GATE_TIMEOUT_S,
-            check=False,
-        )
-    except subprocess.TimeoutExpired as exc:
-        return (
-            "editable import gate failed "
-            f"(rc=timeout; stderr={_stderr_tail(exc.stderr)!r}; path='')",
-        )
-    except OSError as exc:
-        return (f"editable import gate failed (rc=spawn-error; stderr={str(exc)!r}; path='')",)
+    result = _run_import_probe(interpreter)
+    if isinstance(result, str):
+        return (result,)
 
     output_lines = result.stdout.splitlines()
     path_text = output_lines[0].strip() if len(output_lines) == 1 else result.stdout.strip()
@@ -561,12 +579,8 @@ def editable_import_gate(
     )
     if result.returncode != 0 or len(output_lines) != 1 or not path_text:
         return (f"editable import gate failed ({diagnostic})",)
-    try:
-        reported_path = Path(path_text)
-        if not reported_path.is_absolute():
-            return (f"editable import gate failed ({diagnostic})",)
-        imported_path = reported_path.resolve(strict=False)
-    except (OSError, ValueError):
+    imported_path = _resolved_absolute(path_text)
+    if imported_path is None:
         return (f"editable import gate failed ({diagnostic})",)
     allowed_source_roots = (
         resolved_source,

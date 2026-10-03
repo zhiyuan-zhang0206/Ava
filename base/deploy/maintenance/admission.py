@@ -7,7 +7,7 @@ remain available while an already admitted model/action finishes; this gate only
 controls new work.
 """
 
-from collections.abc import Generator
+from collections.abc import Callable, Generator
 from contextlib import contextmanager
 from contextvars import ContextVar  # noqa: TID251
 
@@ -157,28 +157,35 @@ def pending_command(agent_id: int) -> int | None:
     return hold.commands.get(agent_id) or None
 
 
-def record_drained(agent_id: int, command_id: int, *, failure: str | None = None) -> None:
-    """Record only after the host's actual continuation and cleanup returned.
+def _drain_update(
+    hold: MaintenanceHold, agent_id: int, command_id: int, failure: str | None
+) -> MaintenanceHold | None:
+    """The hold after recording one agent's drain (or failure); None when already recorded."""
+    if failure is not None:
+        return replace(hold, failures={**hold.failures, agent_id: failure})
+    if hold.commands.get(agent_id) != command_id:
+        raise RuntimeError("drained command does not belong to this maintenance cohort")
+    if agent_id in hold.failures:
+        raise RuntimeError("failed continuation cannot certify a maintenance drain")
+    if agent_id in hold.drained:
+        return None
+    return replace(hold, drained=tuple(sorted((*hold.drained, agent_id))))
 
-    Compare-and-swap retries only contention between independently finishing
-    cohort agents. It never retries an execution or checkpoint write.
+
+def _change_with_retry(update: Callable[[MaintenanceHold], MaintenanceHold | None]) -> None:
+    """Compare-and-swap the maintenance hold with `update(hold)`; None from `update` is a no-op.
+
+    Retries only contention: a lost swap where the unit is still held by the
+    same generation and the hold moved.
     """
     while True:
         current = snapshot()
         if current is None or current.maintenance is None:
             return
         hold = current.maintenance
-        if failure is None and hold.commands.get(agent_id) != command_id:
-            raise RuntimeError("drained command does not belong to this maintenance cohort")
-        if failure is None and agent_id in hold.failures:
-            raise RuntimeError("failed continuation cannot certify a maintenance drain")
-        if failure is None and agent_id in hold.drained:
+        updated = update(hold)
+        if updated is None:
             return
-        updated = (
-            replace(hold, drained=tuple(sorted((*hold.drained, agent_id))))
-            if failure is None
-            else replace(hold, failures={**hold.failures, agent_id: failure})
-        )
         assert current.holder is not None and current.acquired_at is not None  # noqa: S101
         try:
             pause_owner.change_maintenance(
@@ -195,6 +202,15 @@ def record_drained(agent_id: int, command_id: int, *, failure: str | None = None
                 raise
         else:
             return
+
+
+def record_drained(agent_id: int, command_id: int, *, failure: str | None = None) -> None:
+    """Record only after the host's actual continuation and cleanup returned.
+
+    Compare-and-swap retries only contention between independently finishing
+    cohort agents. It never retries an execution or checkpoint write.
+    """
+    _change_with_retry(lambda hold: _drain_update(hold, agent_id, command_id, failure))
 
 
 def record_undelivered(agent_id: int, category: str) -> None:
@@ -207,30 +223,13 @@ def record_undelivered(agent_id: int, category: str) -> None:
     before the restart claim) on the next wake, so the drain still certifies
     only through a genuinely completed continuation.
     """
-    while True:
-        current = snapshot()
-        if current is None or current.maintenance is None:
-            return
-        hold = current.maintenance
-        if agent_id in hold.undelivered:
-            return
-        updated = replace(hold, undelivered={**hold.undelivered, agent_id: category})
-        assert current.holder is not None and current.acquired_at is not None  # noqa: S101
-        try:
-            pause_owner.change_maintenance(
-                current.holder,
-                current.acquired_at,
-                hold,
-                updated,
-            )
-        except RuntimeError:
-            newer = snapshot()
-            if newer is None or not newer.matches(current.holder, current.acquired_at):
-                raise
-            if newer.maintenance == hold:
-                raise
-        else:
-            return
+    _change_with_retry(
+        lambda hold: (
+            None
+            if agent_id in hold.undelivered
+            else replace(hold, undelivered={**hold.undelivered, agent_id: category})
+        )
+    )
 
 
 def repair(

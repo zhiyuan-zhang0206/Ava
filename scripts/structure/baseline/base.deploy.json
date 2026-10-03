@@ -3,19 +3,6 @@
     "base/deploy/git/source_tree_guard.py::import-time-call:base.deploy.git.source_tree_guard._validate_whitelist": 1,
     "base/deploy/maintenance/admission.py::contextvar:_authorized_start": 1
   },
-  "complexity": {
-    "base/deploy/git/memory_repo.py::init": 15,
-    "base/deploy/git/worktree_guard.py::find_live_anchors": 17,
-    "base/deploy/lifecycle/status_journal.py::read": 17,
-    "base/deploy/maintenance/admission.py::record_drained": 17,
-    "base/deploy/maintenance/cohort.py::_classify": 20,
-    "base/deploy/maintenance/cohort.py::_refuse_inflight_lifecycle": 18,
-    "base/deploy/maintenance/cold.py::require_no_consumers": 18,
-    "base/deploy/maintenance/cold.py::require_persisted_end": 17,
-    "base/deploy/maintenance/state.py::MaintenanceHold.decode": 15,
-    "base/deploy/release/editable_install.py::editable_import_gate": 15,
-    "base/deploy/schema/migrations.py::apply_pending_migrations": 15
-  },
   "files": {
     "base/deploy/release/tests/test_editable_install.py": 883
   }
