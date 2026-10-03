@@ -27,7 +27,6 @@ _FORCED_FULL_ROOTS = (
     "ava_builtins/",
     "db/",
     "migrations/",
-    "evals/",
 )
 _SOURCE_ROOTS = frozenset(
     {
@@ -39,7 +38,6 @@ _SOURCE_ROOTS = frozenset(
         "services",
         "base",
         "ava_builtins",
-        "evals",
         "ui",
         "scripts",
         "schedules",

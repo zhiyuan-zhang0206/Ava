@@ -60,14 +60,14 @@ caller's thread. PgBouncer's `SHOW CLIENTS` lists these names.
   `connect_url` targets. They carry no name and read no minimum.
 - The `ava` CLI: `cli/main.py` calls `code_version.exempt_from_db_gate()` first,
   because `ava stop` writes to drain agents and a stale host must still run it. It
-  is the only caller (guarded by `tests/cli/test_main_db_gate_exemption.py`), and
+  is the only caller (guarded by `tests/cli/test_main_dispatch_contract.py`), and
   it dials as `ava:cli` without resolving a version. Services start with
   `python -m <module>`, so all of them are gated.
 - A process that predates the gate, and one that holds a single raw connection
   forever.
 
-Tests: `tests/base/test_code_version.py` (the count, on real repositories),
-`tests/base/test_code_version_gate.py` (the read schedule, the verdict and exit,
+Tests: `base/native_process/tests/test_loaded_commit.py` (the count, on real repositories),
+`base/tests/test_connect_helpers.py` (the read schedule, the verdict and exit,
 the restore against a fake and a real Postgres, the raise, the migration pair),
 `tests/cli/test_pgbouncer_wire.py` (the name in a real PgBouncer's client list).
 

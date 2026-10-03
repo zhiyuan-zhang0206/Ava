@@ -43,7 +43,7 @@ Launch is **relative path direct launch** for the declared command, never `uv ru
 
 ## Gating / Lifecycle
 - Gated together with the browser service (`AVA_BROWSER_ENABLED` + display / Chrome / npx capability) — see [[browser.ava.okf.md|Browser service]].
-- **POSIX-only**, on top of that: the wrapper→daemon leg is a Unix socket, so the `.mcp.json` declares `requires: {display, unix_socket}` and the daemon's own gate (`ops/spec.py:_gate_reason` → `browser_mcp_incapability()`) adds the AF_UNIX prong. A Windows agent-runner therefore runs `browser` (a headed Chrome, reachable over CDP) but neither `browser-mcp` nor this MCP entry. Porting the transport: `future/infra/windows-browser-mcp.md`.
+- **POSIX-only**, on top of that: the wrapper→daemon leg is a Unix socket, so the `.mcp.json` declares `requires: {display, unix_socket}` and the daemon's own gate (`ops/spec.py:_gate_reason` → `browser_mcp_incapability()`) adds the AF_UNIX prong. A Windows agent-runner therefore runs `browser` (a headed Chrome, reachable over CDP) but neither `browser-mcp` nor this MCP entry.
 - Daemon is kept alive by the agent-runner watchdog every 60s (healthcheck `browser_mcp.py`, Unix socket ping, deliberately not doing upstream roundtrips to avoid killing on slow operations); when upstream dies, daemon auto-reconnects and lets clients retry, rather than exiting.
 
 ## Key Dependencies
