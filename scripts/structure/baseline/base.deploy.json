@@ -17,9 +17,7 @@
     "base/deploy/schema/migrations.py::apply_pending_migrations": 15
   },
   "files": {
+    "base/deploy/git/tests/test_memory_repo.py": 846,
     "base/deploy/release/tests/test_editable_install.py": 883
-  },
-  "patch_targets": {
-    "base/deploy/tests/test_migration_reset.py::base.deploy.schema.migrations._squash_history": 2
   }
 }

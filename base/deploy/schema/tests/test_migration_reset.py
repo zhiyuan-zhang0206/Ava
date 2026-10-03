@@ -8,7 +8,6 @@ from typing import Any
 import psycopg
 import pytest
 
-from base.config import settings
 from base.deploy.schema.migrations import (
     _BASELINE_NAME,
     apply_pending_migrations,
@@ -17,6 +16,7 @@ from base.deploy.tests.migration_support import (
     _SYN,
     SYN_ORPHAN,
     _init_repo,
+    db_url,
 )
 from base.deploy.tests.migration_support import (
     _reset_schema_migrations_state as _reset_schema_migrations_state,
@@ -34,16 +34,16 @@ def test_apply_pending_squashes_orphaned_applied_names(
     orphan = "20260815T000001_synthetic-orphan"
     _init_repo(tmp_path)  # migrations/ = tmp_path, git-tracked anchor applies
     monkeypatch.setattr("base.deploy.schema.migrations.MIGRATIONS_DIR", tmp_path)
-    with psycopg.connect(settings.data_plane.db_url, autocommit=True) as c:
+    with psycopg.connect(db_url(), autocommit=True) as c:
         c.execute("INSERT INTO schema_migrations (name) VALUES (%s)", (orphan,))
     try:
-        with psycopg.connect(settings.data_plane.db_url) as fresh:
+        with psycopg.connect(db_url()) as fresh:
             assert apply_pending_migrations(fresh) == []
-        with psycopg.connect(settings.data_plane.db_url, autocommit=True) as v, v.cursor() as cur:
+        with psycopg.connect(db_url(), autocommit=True) as v, v.cursor() as cur:
             cur.execute("SELECT name FROM schema_migrations ORDER BY name")
             assert cur.fetchall() == [(_BASELINE_NAME,)]
     finally:
-        with psycopg.connect(settings.data_plane.db_url, autocommit=True) as c:
+        with psycopg.connect(db_url(), autocommit=True) as c:
             c.execute("DELETE FROM schema_migrations WHERE name = %s", (orphan,))
 
 
@@ -58,19 +58,19 @@ def test_apply_pending_squash_then_apply_pending(
     (tmp_path / f"{_SYN}.sql").write_text("CREATE TABLE syn_squash_t (id int);")
     _init_repo(tmp_path)
     monkeypatch.setattr("base.deploy.schema.migrations.MIGRATIONS_DIR", tmp_path)
-    with psycopg.connect(settings.data_plane.db_url, autocommit=True) as c:
+    with psycopg.connect(db_url(), autocommit=True) as c:
         c.execute("INSERT INTO schema_migrations (name) VALUES (%s)", (orphan,))
     try:
-        with psycopg.connect(settings.data_plane.db_url) as fresh:
+        with psycopg.connect(db_url()) as fresh:
             assert apply_pending_migrations(fresh) == [_SYN]
-        with psycopg.connect(settings.data_plane.db_url, autocommit=True) as v, v.cursor() as cur:
+        with psycopg.connect(db_url(), autocommit=True) as v, v.cursor() as cur:
             cur.execute("SELECT name FROM schema_migrations ORDER BY name")
             assert cur.fetchall() == [(_BASELINE_NAME,), (_SYN,)]
             cur.execute("SELECT to_regclass('syn_squash_t')")
             row = cur.fetchone()
             assert row is not None and row[0] is not None
     finally:
-        with psycopg.connect(settings.data_plane.db_url, autocommit=True) as c:
+        with psycopg.connect(db_url(), autocommit=True) as c:
             c.execute("DROP TABLE IF EXISTS syn_squash_t")
             c.execute("DELETE FROM schema_migrations WHERE name = %s", (orphan,))
 
@@ -85,16 +85,16 @@ def test_squash_does_not_touch_baseline_or_pending(
     (tmp_path / f"{_SYN}.sql").write_text("CREATE TABLE syn_keep_t (id int);")
     _init_repo(tmp_path)
     monkeypatch.setattr("base.deploy.schema.migrations.MIGRATIONS_DIR", tmp_path)
-    with psycopg.connect(settings.data_plane.db_url, autocommit=True) as c:
+    with psycopg.connect(db_url(), autocommit=True) as c:
         c.execute("INSERT INTO schema_migrations (name) VALUES (%s)", (_SYN,))
     try:
-        with psycopg.connect(settings.data_plane.db_url) as fresh:
+        with psycopg.connect(db_url()) as fresh:
             assert apply_pending_migrations(fresh) == []  # _SYN applied; nothing pending
-        with psycopg.connect(settings.data_plane.db_url, autocommit=True) as v, v.cursor() as cur:
+        with psycopg.connect(db_url(), autocommit=True) as v, v.cursor() as cur:
             cur.execute("SELECT name FROM schema_migrations ORDER BY name")
             assert cur.fetchall() == [(_BASELINE_NAME,), (_SYN,)]
     finally:
-        with psycopg.connect(settings.data_plane.db_url, autocommit=True) as c:
+        with psycopg.connect(db_url(), autocommit=True) as c:
             c.execute("DROP TABLE IF EXISTS syn_keep_t")
             c.execute("DELETE FROM schema_migrations WHERE name = %s", (_SYN,))
 
@@ -108,7 +108,7 @@ def test_squash_authority_checked_even_without_pending(
     orphan = "20260815T000001_synthetic-orphan"
     _init_repo(tmp_path)
     monkeypatch.setattr("base.deploy.schema.migrations.MIGRATIONS_DIR", tmp_path)
-    with psycopg.connect(settings.data_plane.db_url, autocommit=True) as c:
+    with psycopg.connect(db_url(), autocommit=True) as c:
         c.execute("INSERT INTO schema_migrations (name) VALUES (%s)", (orphan,))
         # Give the DB a gateway identity so _assert_migration_authority has
         # something to refuse: without any machine_units rows the authority
@@ -124,7 +124,7 @@ def test_squash_authority_checked_even_without_pending(
         monkeypatch.setenv("AVA_HOME", str(tmp_path / "not-the-gateways-home"))
         from base.deploy.schema.migrations import MigrationAuthorityMismatch
 
-        with psycopg.connect(settings.data_plane.db_url) as fresh:
+        with psycopg.connect(db_url()) as fresh:
             try:
                 apply_pending_migrations(fresh)
             except MigrationAuthorityMismatch:
@@ -132,7 +132,7 @@ def test_squash_authority_checked_even_without_pending(
             else:
                 raise AssertionError("squash without authority must be refused")
     finally:
-        with psycopg.connect(settings.data_plane.db_url, autocommit=True) as c:
+        with psycopg.connect(db_url(), autocommit=True) as c:
             c.execute("DELETE FROM schema_migrations WHERE name = %s", (orphan,))
             c.execute("DELETE FROM machine_units WHERE machine_name = 'real-gateway'")
 
@@ -149,16 +149,16 @@ def test_squash_logs_the_converged_names(
     orphan = "20260815T000001_synthetic-orphan"
     _init_repo(tmp_path)
     monkeypatch.setattr("base.deploy.schema.migrations.MIGRATIONS_DIR", tmp_path)
-    with psycopg.connect(settings.data_plane.db_url, autocommit=True) as c:
+    with psycopg.connect(db_url(), autocommit=True) as c:
         c.execute("INSERT INTO schema_migrations (name) VALUES (%s)", (orphan,))
     try:
-        with psycopg.connect(settings.data_plane.db_url) as fresh:
+        with psycopg.connect(db_url()) as fresh:
             apply_pending_migrations(fresh)
         assert any("squash" in r["message"] and orphan in r["message"] for r in loguru_records), (
             "the squash must be loud"
         )
     finally:
-        with psycopg.connect(settings.data_plane.db_url, autocommit=True) as c:
+        with psycopg.connect(db_url(), autocommit=True) as c:
             c.execute("DELETE FROM schema_migrations WHERE name = %s", (orphan,))
 
 
@@ -174,22 +174,22 @@ def test_squash_refuses_partial_pre_reset_history(
     partial = sorted(_V010_PRE_RESET_SET)[:24]  # the 8/1-cluster shape
     _init_repo(tmp_path)
     monkeypatch.setattr("base.deploy.schema.migrations.MIGRATIONS_DIR", tmp_path)
-    with psycopg.connect(settings.data_plane.db_url, autocommit=True) as c:
+    with psycopg.connect(db_url(), autocommit=True) as c:
         for name in partial:
             c.execute("INSERT INTO schema_migrations (name) VALUES (%s)", (name,))
     try:
         with (
-            psycopg.connect(settings.data_plane.db_url) as fresh,
+            psycopg.connect(db_url()) as fresh,
             pytest.raises(MigrationHistoryGap),
         ):
             apply_pending_migrations(fresh)
         # nothing was deleted by the refusal
-        with psycopg.connect(settings.data_plane.db_url, autocommit=True) as v, v.cursor() as cur:
+        with psycopg.connect(db_url(), autocommit=True) as v, v.cursor() as cur:
             cur.execute("SELECT COUNT(*) FROM schema_migrations")
             surviving = cur.fetchone()
             assert surviving is not None and surviving[0] == 1 + len(partial)
     finally:
-        with psycopg.connect(settings.data_plane.db_url, autocommit=True) as c:
+        with psycopg.connect(db_url(), autocommit=True) as c:
             for name in partial:
                 c.execute("DELETE FROM schema_migrations WHERE name = %s", (name,))
 
@@ -205,17 +205,17 @@ def test_squash_converges_full_pre_reset_history(
     all_names = sorted(_V010_PRE_RESET_SET)
     _init_repo(tmp_path)
     monkeypatch.setattr("base.deploy.schema.migrations.MIGRATIONS_DIR", tmp_path)
-    with psycopg.connect(settings.data_plane.db_url, autocommit=True) as c:
+    with psycopg.connect(db_url(), autocommit=True) as c:
         for name in all_names:
             c.execute("INSERT INTO schema_migrations (name) VALUES (%s)", (name,))
     try:
-        with psycopg.connect(settings.data_plane.db_url) as fresh:
+        with psycopg.connect(db_url()) as fresh:
             assert apply_pending_migrations(fresh) == []
-        with psycopg.connect(settings.data_plane.db_url, autocommit=True) as v, v.cursor() as cur:
+        with psycopg.connect(db_url(), autocommit=True) as v, v.cursor() as cur:
             cur.execute("SELECT name FROM schema_migrations ORDER BY name")
             assert cur.fetchall() == [(_BASELINE_NAME,)]
     finally:
-        with psycopg.connect(settings.data_plane.db_url, autocommit=True) as c:
+        with psycopg.connect(db_url(), autocommit=True) as c:
             for name in all_names:
                 c.execute("DELETE FROM schema_migrations WHERE name = %s", (name,))
 
@@ -229,16 +229,16 @@ def test_squash_ignores_pre_reset_names_outside_the_frozen_set(
     _ = db_conn
     _init_repo(tmp_path)
     monkeypatch.setattr("base.deploy.schema.migrations.MIGRATIONS_DIR", tmp_path)
-    with psycopg.connect(settings.data_plane.db_url, autocommit=True) as c:
+    with psycopg.connect(db_url(), autocommit=True) as c:
         c.execute("INSERT INTO schema_migrations (name) VALUES (%s)", (SYN_ORPHAN,))
     try:
-        with psycopg.connect(settings.data_plane.db_url) as fresh:
+        with psycopg.connect(db_url()) as fresh:
             assert apply_pending_migrations(fresh) == []
-        with psycopg.connect(settings.data_plane.db_url, autocommit=True) as v, v.cursor() as cur:
+        with psycopg.connect(db_url(), autocommit=True) as v, v.cursor() as cur:
             cur.execute("SELECT name FROM schema_migrations ORDER BY name")
             assert cur.fetchall() == [(_BASELINE_NAME,)]
     finally:
-        with psycopg.connect(settings.data_plane.db_url, autocommit=True) as c:
+        with psycopg.connect(db_url(), autocommit=True) as c:
             c.execute("DELETE FROM schema_migrations WHERE name = %s", (SYN_ORPHAN,))
 
 
@@ -253,7 +253,7 @@ def test_current_reset_refuses_missing_history_without_mutation(
     assert len(_PRE_RESET_SET) == 101
     before = {_BASELINE_NAME, *sorted(_PRE_RESET_SET)[:applied_count]}
     _set_table_to(db_conn, "set", before)
-    with psycopg.connect(settings.data_plane.db_url) as conn:
+    with psycopg.connect(db_url()) as conn:
         with pytest.raises(MigrationHistoryGap, match="2026-09-23"):
             apply_pending_migrations(conn)
         assert applied_migration_names(conn) == before
@@ -279,7 +279,7 @@ def test_current_reset_converges_complete_history(
         set(_schema_sql_stamped_migration_names()) - {_RESET_ANCHOR}
     )
     _set_table_to(db_conn, "set", predecessor)
-    with psycopg.connect(settings.data_plane.db_url) as conn:
+    with psycopg.connect(db_url()) as conn:
         applied = apply_pending_migrations(conn)
         assert _RESET_ANCHOR in applied
         check_schema_version(conn)
@@ -296,7 +296,7 @@ def test_integer_history_is_refused_without_conversion(
     from base.deploy.tests.migration_support import _set_table_to
 
     _set_table_to(db_conn, "legacy", range(1, 82))
-    with psycopg.connect(settings.data_plane.db_url) as conn:
+    with psycopg.connect(db_url()) as conn:
         with pytest.raises(MigrationLayoutError, match="matching release"):
             (apply_pending_migrations if apply else check_schema_version)(conn)
         assert conn.execute(
@@ -325,7 +325,7 @@ def test_reset_anchor_and_history_deletion_roll_back_together(
     monkeypatch.setattr(migrations, "_squash_history", interrupted)
     # Autocommit removes any incidental outer transaction: the reset itself
     # must own its atomicity even when no caller transaction can rescue it.
-    with psycopg.connect(settings.data_plane.db_url, autocommit=True) as conn:
+    with psycopg.connect(db_url(), autocommit=True) as conn:
         with pytest.raises(RuntimeError, match="interrupted"):
             migrations.apply_pending_migrations(conn)
         assert migrations.applied_migration_names(conn) == predecessor
@@ -347,7 +347,7 @@ def test_failed_reset_anchor_preserves_history_for_retry(
     monkeypatch.setattr(migrations, "MIGRATIONS_DIR", tmp_path)
     predecessor = {_BASELINE_NAME, *_PRE_RESET_SET}
     _set_table_to(db_conn, "set", predecessor)
-    with psycopg.connect(settings.data_plane.db_url, autocommit=True) as conn:
+    with psycopg.connect(db_url(), autocommit=True) as conn:
         with pytest.raises(migrations.MigrationFailed, match="division by zero"):
             migrations.apply_pending_migrations(conn)
         assert migrations.applied_migration_names(conn) == predecessor
