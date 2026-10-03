@@ -51,4 +51,4 @@ requests one-hour buckets up front for server-selected or six-hour-and-larger
 windows, while preserving turn detail for narrower explicit windows.
 
 Superseded for the frontend presentation and default request by
-[`decisions/2026-09-02-run-timeline-interactive-turn-track.md`](../../../decisions/2026-09-02-run-timeline-interactive-turn-track.md).
+[`decisions/2026-09-02-run-timeline-interactive-turn-track.md`](2026-09-02-run-timeline-interactive-turn-track.md).

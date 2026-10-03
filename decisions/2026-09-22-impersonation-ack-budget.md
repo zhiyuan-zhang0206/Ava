@@ -19,5 +19,5 @@ Existing rows start at zero on upgrade: historical pushes were not durably
 counted, so reconstructing them would be guesswork. Rollback refuses while a
 live lease has reserved attempts, preventing a rollback/re-upgrade budget reset.
 
-Update: [Configurable delivery policy](impersonation-delivery-config.md) supersedes
+Update: [Configurable delivery policy](2026-09-22-impersonation-delivery-config.md) supersedes
 the fixed five-minute default for new requests; durable reservation semantics remain.

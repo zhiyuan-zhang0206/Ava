@@ -191,7 +191,7 @@ The "What it deletes" list above describes the end state, now reached in slices 
 On macOS, the `com.ava.redis-bridge` relay (`/usr/bin/python3
 $AVA_HOME/redis-bridge/relay.py`, per host) is
 the off-loopback Redis inbound mechanism: macOS Redis binds loopback-only
-(see `docs/history/2026-08-24/redis-loopback-only.md`), and the bridge
+(see `decisions/2026-08-24-redis-loopback-only.md`), and the bridge
 forwards the host's private-network address + Redis port to `127.0.0.1`, so a
 split deployment's runners reach the gateway's Redis over the tailnet without
 Redis ever listening off-loopback. Authenticated Linux gateways bind Redis directly

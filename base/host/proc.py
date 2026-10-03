@@ -136,7 +136,7 @@ def hosting_exec_domain() -> str | None:
     refused too — deliberately, because the leg is still tied to an ephemeral
     call, not only to the kill that call performs. The env marker is not usable
     for this: `cli.main` clears `AVA_PROCESS_PROFILE` before any dispatch
-    (`docs/history/2026-08-24/cli-full-settings-profile.md`) and session shells
+    (`decisions/2026-08-24-cli-full-settings-profile.md`) and session shells
     carry the exec request/result files and agent id as well, so only the
     session's identity discriminates (see `hosting_supervised_session` for the
     hosted-service half of the same refusal).

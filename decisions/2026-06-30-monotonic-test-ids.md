@@ -70,4 +70,4 @@ reused-id-collision theory is confirmed).
   `docs/current/test-isolation.md` (since removed).
 
 Forward link (2026-08-22): the status literals in this incident narrative are
-historical; see [agent status model](../docs/history/2026-08-22/agent-status-model.md).
+historical; see [agent status model](2026-08-22-agent-status-model.md).

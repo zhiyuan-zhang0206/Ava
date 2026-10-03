@@ -26,7 +26,7 @@ Runs the full doc tree on every commit and in CI (any PR touching a tracked
 stale from a move anywhere else). ~0.1s over ~430 docs, so `--all-files` on
 every job is free.
 
-Four doc trees get exemptions, not a blanket skip:
+Three doc trees get exemptions, not a blanket skip:
 
 - `decisions/` is skipped entirely (flags and links both). A decision
   record legitimately names the flag it removed or the file it deleted (see
@@ -38,8 +38,6 @@ Four doc trees get exemptions, not a blanket skip:
   of the fix. Because nothing checks those links, the template requires
   unreachable anchors to be labelled (`(pre-cutover)`, `(summarized)`) in the
   prose.
-- `docs/history/` is skipped entirely: dated snapshots are point-in-time
-  records like `decisions/`.
 - `future/` skips CLI-flag checks only — a plan may propose a flag that
   does not exist yet — but its relative links resolve like any other doc's. A
   link to a file that exists-but-moved is rot, not a plan (issue #1045: two
@@ -515,8 +513,7 @@ def main() -> int:
         # it deleted; a postmortem names the code path as it stood during the
         # incident). Fully exempt: neither axis describes what IS true now, and a
         # CLI rename must not force history to be re-written to satisfy the linter.
-        # docs/history/<date>/ holds dated snapshots of the same kind.
-        if rel.parts[0] in ("decisions", "postmortems") or rel.parts[:2] == ("docs", "history"):
+        if rel.parts[0] in ("decisions", "postmortems"):
             continue
         # future/ — plans. A flag it proposes may not exist yet (skip_flags),
         # but a link it names must resolve UNLESS marked `(planned)`

@@ -19,7 +19,7 @@ the invalid singleton.
 ## Rationale
 
 The candidate-validation boundary recorded in
-[`config-candidate-validation.md`](config-candidate-validation.md) rejects
+[`2026-09-01-config-candidate-validation.md`](2026-09-01-config-candidate-validation.md) rejects
 cross-field-invalid writes before persistence. Its intended recovery use was
 blocked because importing the config CLI built `Settings()` first; an incomplete
 OSS restore-proof transition consequently prevented the CLI from reaching the
