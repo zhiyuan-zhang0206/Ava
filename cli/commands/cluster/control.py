@@ -17,6 +17,30 @@ from base.api_contracts.status import MachineStatus
 from base.cluster.machine import format_capabilities
 
 _CLUSTER_STATUS_PROBE_TIMEOUT_S = 8.0
+# `ava cluster status` reads the *fresh* roster, whose server-side fan-out
+# probes every agent-runner in parallel, each bounded by the gateway's
+# `status_probe_timeout_seconds`. A black-holed machine rides that probe to its
+# full bound before the gateway can answer — measured 8.12s of wall against the
+# 8.0s default — so a client read budget pinned at the probe budget alone
+# collides with it exactly when a machine is down (#4900). This margin covers
+# transport/serialization overhead and load jitter; with the default budget a
+# silent gateway still reports within 12s.
+_ROSTER_READ_MARGIN_S = 4.0
+
+
+def _roster_read_timeout_s() -> float:
+    """Client read budget for the fresh roster: the gateway's per-machine probe
+    budget + `_ROSTER_READ_MARGIN_S`.
+
+    Derived, not fixed, and read at call time: a later change to the
+    `status_probe_timeout_seconds` pin cannot silently re-create the collision
+    (#4900).
+    """
+    from base.config import settings
+
+    return settings.gateway.status_probe_timeout_seconds + _ROSTER_READ_MARGIN_S
+
+
 # Roster `role` column width: the widest label format_capabilities emits is
 # "gateway + agent-runner + observability-station" (44 chars).
 _ROLE_COL_W = 44
@@ -152,9 +176,14 @@ def cmd_cluster_status() -> int:
 
     The transport failures get one-line stderr verdicts and a nonzero exit
     instead of an unhandled traceback — the unreachable-machine case is the
-    exact situation an operator runs this command for, and a roster probe of a
-    down machine can push the gateway's own response past this client's
-    timeout budget (#219).
+    exact situation an operator runs this command for.
+
+    The read budget is derived, not fixed (#4900): a black-holed machine makes
+    the gateway's fresh read ride that machine's probe up to its
+    `status_probe_timeout_seconds` bound, so the client budget is that setting
+    plus a margin (`_roster_read_timeout_s`). A fixed budget set to the probe
+    budget alone collides with it exactly when a machine is down (the #219
+    incident shape).
     """
     from base.cluster.machine import (
         GatewayApiBaseMissing,
@@ -172,15 +201,16 @@ def cmd_cluster_status() -> int:
         # that cannot resolve the gateway URL must still say why.
         print(f"✗ cannot resolve gateway URL: {exc}", file=sys.stderr)
         return 1
+    read_timeout_s = _roster_read_timeout_s()
     try:
-        resp = dial_get(
-            url, timeout=_CLUSTER_STATUS_PROBE_TIMEOUT_S, headers=gateway_auth_headers()
-        )
+        resp = dial_get(url, timeout=read_timeout_s, headers=gateway_auth_headers())
     except httpx.TimeoutException as exc:
         print(
-            f"✗ gateway at {url} did not respond within "
-            f"{_CLUSTER_STATUS_PROBE_TIMEOUT_S:g}s — an unreachable machine's roster "
-            f"probe shares the same budget: {exc}",
+            f"✗ gateway at {url} did not respond within {read_timeout_s:g}s — the "
+            f"fresh read waits out a black-holed machine's probe, bounded by the "
+            f"gateway's status_probe_timeout_seconds, and this budget adds "
+            f"{_ROSTER_READ_MARGIN_S:g}s of slack on top; silence past it is the "
+            f"gateway itself not answering: {exc}",
             file=sys.stderr,
         )
         return 1
