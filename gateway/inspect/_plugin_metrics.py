@@ -128,8 +128,7 @@ def _load_plugin_metrics() -> list[MetricSpec]:
         except BaseException as exc:
             load_report.report_plugin_load_failure(name, exc)
             drop_plugin_metrics(name)
-    catalog.collect_core_metrics()
-    return registered_metrics() + catalog.registered_core_metrics()
+    return registered_metrics() + catalog.collect_core_metrics()
 
 
 def _render_metric_query(spec: MetricSpec, agent_id: int | None) -> str:

@@ -62,7 +62,7 @@ class TestResurrectRouting:
         with TestClient(app) as client:
             agent_id = client.post("/api/agents", json={}).json()["id"]
             _set_agent_machine(db_conn, agent_id, "remote-mac")
-            monkeypatch.setattr(lifecycle_module, "_forward_to_home_machine", _capture_forward)  # pyright: ignore[reportUnknownArgumentType]
+            monkeypatch.setattr(lifecycle_module, "forward_to_home_machine", _capture_forward)  # pyright: ignore[reportUnknownArgumentType]
             resp = client.post(
                 f"/api/agents/{agent_id}/resurrect",
                 json={"resurrected_by": "user", "prompt": "hello"},
@@ -92,7 +92,7 @@ class TestResurrectRouting:
         with TestClient(app) as client:
             agent_id = client.post("/api/agents", json={}).json()["id"]
             _set_agent_machine(db_conn, agent_id, "remote-mac")
-            monkeypatch.setattr(lifecycle_module, "_forward_to_home_machine", _capture_forward)  # pyright: ignore[reportUnknownArgumentType]
+            monkeypatch.setattr(lifecycle_module, "forward_to_home_machine", _capture_forward)  # pyright: ignore[reportUnknownArgumentType]
             resp = client.post(f"/api/agents/{agent_id}/resurrect")
         assert resp.status_code == 200
         assert resp.json() == {"status": "spawned"}
@@ -113,7 +113,7 @@ class TestResurrectRouting:
         with TestClient(app) as client:
             agent_id = client.post("/api/agents", json={}).json()["id"]
             _set_agent_machine(db_conn, agent_id, "remote-mac")
-            monkeypatch.setattr(lifecycle_module, "_forward_to_home_machine", _forward_raises)
+            monkeypatch.setattr(lifecycle_module, "forward_to_home_machine", _forward_raises)
             resp = client.post(f"/api/agents/{agent_id}/resurrect")
         assert resp.status_code == 404
         assert resp.json()["reason"] == "machine_not_registered"
@@ -132,7 +132,7 @@ class TestResurrectRouting:
         with TestClient(app) as client:
             agent_id = client.post("/api/agents", json={}).json()["id"]
             _set_agent_machine(db_conn, agent_id, "remote-mac")
-            monkeypatch.setattr(lifecycle_module, "_forward_to_home_machine", _forward_raises)
+            monkeypatch.setattr(lifecycle_module, "forward_to_home_machine", _forward_raises)
             resp = client.post(f"/api/agents/{agent_id}/resurrect")
         assert resp.status_code == 502
         assert resp.json()["reason"] == "cross_machine_gateway_unavailable"

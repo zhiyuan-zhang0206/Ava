@@ -365,7 +365,7 @@ async def resurrect_if_terminated(
     gate and crash-loops (agent 1513 incident). A local-homed agent resurrects
     in-process; a remote-homed one is forwarded as a 'lifecycle' op to its home
     machine's ops server, the same dispatch the gateway's /resurrect route uses
-    (`_forward_to_home_machine`). An unreachable home machine skips the
+    (`forward_to_home_machine`). An unreachable home machine skips the
     resurrect with an INFO record — the queued inbound is picked up when the machine
     is back (next delivery re-triggers this, or a manual resurrect).
 

@@ -1,11 +1,9 @@
 {
-  "complexity": {},
   "files": {
     "tests/gateway/test_alerts_api.py": 1014,
     "tests/gateway/test_cluster_endpoints.py": 1200
   },
   "patch_targets": {
-    "tests/gateway/test_alerts_api.py::gateway.alerts.router._notify_im": 10,
     "tests/gateway/test_cluster_endpoints.py::ops.cluster_status._supervisor_online": 1
   }
 }

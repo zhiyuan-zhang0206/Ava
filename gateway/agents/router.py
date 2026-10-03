@@ -41,7 +41,7 @@ from base.events.live.announce import publish_agent_updated_sync
 from base.events.live.bus import EventBus
 from base.log import logger
 from gateway.agents import forward
-from gateway.agents.forward import _forward_spawn_to_remote
+from gateway.agents.forward import forward_spawn_to_remote
 from gateway.agents.schemas import AgentRow, LabelPatchRequest
 from gateway.inspect import neighbors
 from gateway.inspect.schemas import BornChainResponse, BornChainRow
@@ -537,7 +537,7 @@ async def _dispatch_committed_launch(
     if attempt_id is None:
         raise RuntimeError("committed launch is missing its attempt ID")
     try:
-        spawned = await _forward_spawn_to_remote(db, target, launch)
+        spawned = await forward_spawn_to_remote(db, target, launch)
         _require_matching_launch_receipt(spawned, launch.agent_id, target)
     except Exception as exc:
         reason = (

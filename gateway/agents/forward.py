@@ -8,7 +8,7 @@ endpoint-private routing logic, shared by `router.py` (spawn),
 (guide / packages / schedules), so they live in their own module — the ops
 server never sees them (forwarding never recurses inside an op, see
 ops/lifecycle/__init__.py), and tests get one stable patch point
-(monkeypatch `enqueue_lifecycle` / `_forward_spawn_to_remote` here). Same
+(monkeypatch `enqueue_lifecycle` / `forward_spawn_to_remote` here). Same
 intent, just relocated from the old app.py to here.
 """
 
@@ -77,7 +77,7 @@ def _raise_proxied_wire_error_from_payload(payload: dict[str, object]) -> None:
     raise CrossMachineGatewayUnavailable(f"target machine reported failure via queue: {payload!r}")
 
 
-async def _forward_to_home_machine(agent_id: int, path: str, json_body: dict) -> dict:
+async def forward_to_home_machine(agent_id: int, path: str, json_body: dict) -> dict:
     """Lifecycle operations (resurrect / force-terminate / etc.) must run on
     the agent's home machine (`agents_meta.machine`) — they mutate physical
     host state (session / OS process); not doing them on the home
@@ -141,7 +141,7 @@ async def enqueue_lifecycle(db: Database, target: str, path: str, json_body: dic
         raise  # unreachable — _raise_proxied_wire_error_from_payload must raise
 
 
-async def _forward_spawn_to_remote(
+async def forward_spawn_to_remote(
     db: Database, target: str, body: LaunchAgentRequest
 ) -> SpawnedAgent:
     """POST a versioned launch op to the target machine's ops server.
