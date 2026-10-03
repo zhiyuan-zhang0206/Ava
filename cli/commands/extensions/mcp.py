@@ -401,7 +401,7 @@ def _register_mcp(
 
     `content_hash` / `installed_hash` record the tree hash of what was just
     written (R5): the later `upgrade` path compares the on-disk tree against
-    `installed_hash` to detect local edits before overwriting.
+    `installed_hash` to report local edits before replacing the copy.
     """
     from datetime import UTC, datetime
 
@@ -693,13 +693,12 @@ def cmd_mcp_uninstall(name: str) -> int:
     return 0
 
 
-def cmd_mcp_upgrade(name: str, *, force: bool = False) -> int:
-    """`ava mcp upgrade <name> [--force]` — re-fetch an installed MCP package
+def cmd_mcp_upgrade(name: str) -> int:
+    """`ava mcp upgrade <name>` — re-fetch an installed MCP package
     from its source.
 
     A locally edited copy (content differs from what the last install/upgrade
-    wrote) aborts with a conflict unless `--force` is given — the R5 conflict
-    contract, mirroring `git pull` (force = reset --hard).
+    wrote) is replaced, and the replacement is reported.
     """
     from base import paths
     from base.packages.extensions import install_registry
@@ -715,13 +714,11 @@ def cmd_mcp_upgrade(name: str, *, force: bool = False) -> int:
         return 1
 
     dest = paths.mcps_dir() / name
-    if dest.exists() and not force and install_registry.copy_changed(dest, pkg.installed_hash):
+    if dest.exists() and install_registry.copy_changed(dest, pkg.installed_hash):
         print(
-            f"[ava mcp upgrade] '{name}' was modified locally; refusing to overwrite. "
-            f"Re-run with --force to replace your changes with the fetched source.",
-            file=sys.stderr,
+            f"[ava mcp upgrade] note: '{name}' was modified locally; "
+            "replacing it with the fetched source."
         )
-        return 1
 
     acq = _acquire_or_report(pkg.source, pkg.ref, "upgrade")
     if acq is None:

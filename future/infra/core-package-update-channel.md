@@ -52,8 +52,8 @@ Source of requirements: the user's 2026-09-11 request (task #2915).
 | Piece | What exists | Where |
 |---|---|---|
 | Single skills load dir | `$AVA_HOME/skills/`; converge syncs repo built-ins + plugin-carried skills into it; user installs land directly | `cli/commands/extensions/skills_sync.py`, `okf/skills/load-directory-sync.ava.okf.md` |
-| Install registry (per machine) | origin (`repo`/`plugin`/`user`), trust tier, `content_hash` / `installed_hash` (R5 edit guards), `enabled`, schema `version` field as a migration anchor | `base/packages/extensions/install_registry.py` |
-| Explicit update verbs | `ava skill update [name...] [--force]` (repo-native), `ava skill upgrade <name>` (git-sourced), `ava plugins upgrade <name> [--force]`, `ava mcp upgrade` — all with the R5 conflict contract and staged/atomic replacement | `cli/commands/extensions/skill.py`, `plugins.py`, `mcp.py` |
+| Install registry (per machine) | origin (`repo`/`plugin`/`user`), trust tier, `content_hash` / `installed_hash` (R5 edit detection), `enabled`, schema `version` field as a migration anchor | `base/packages/extensions/install_registry.py` |
+| Explicit update verbs | `ava skill update [name...]` (repo-native), `ava skill upgrade <name>` (git-sourced), `ava plugins upgrade <name>`, `ava mcp upgrade` — a differing local copy is replaced (reported), with staged/atomic replacement | `cli/commands/extensions/skill.py`, `plugins.py`, `mcp.py` |
 | Atomic apply patterns | stage `.<name>.new` → move `.trash`; `_atomic_plugin_replace`; dot-prefixed residue ignored by discovery | `cli/commands/extensions/skills_sync.py`, `plugins.py`, `base/packages/plugins/enable_config.py` |
 | Supply-chain gate | `base/packages/skills/scan.py` on every ingest (critical → refuse, `--accept-risk` recorded, trust never auto-promoted) | `base/packages/skills/scan.py`, `base/packages/extensions/install_registry.py` |
 | Manifest + host-compat gate | `ava-plugin.json` validator, range algebra, `engines.ava` vs the checkout's `pyproject.toml` version | `base/packages/plugins/manifest.py`, `conventions/plugin-spec-v2.md` |
@@ -102,13 +102,13 @@ Comparison axes: coupling boundary / versioning / update atomicity / failure & r
 - **Versioning**: content rides the repo's ref (main today; a dedicated content ref/tag train can be added later without changing the mechanism). Per-package applied revision + hash recorded in the registry; `engines.ava` gates plugins; skills are fail-soft.
 - **Update atomicity**: `git fetch` (objects only — never touches the checkout tree) + `git archive <rev> -- <paths> | tar` into a per-package staging dir + staged swap. Per-package atomic; optionally group-atomic.
 - **Failure & rollback**: keep the previous tree + applied revision; re-apply the previous revision to roll back; git history is the source of truth for "what did we run last week".
-- **Migration cost**: smallest — reuses the existing discovery, scan and land code paths (the load-dir sync contracts, the conflict harness, plugin atomic replace). New pieces: the channel fetcher, policy fields, the executor, and (P2) the plugin root materialization.
+- **Migration cost**: smallest — reuses the existing discovery, scan and land code paths (the load-dir sync contracts, plugin atomic replace). New pieces: the channel fetcher, policy fields, the executor, and (P2) the plugin root materialization.
 - **Risks**: content may run ahead of the installed code (accepted and bounded below); no separate content release train until one is added.
 
 ### D. Hybrid — C for delivery now, B-shaped abstraction, one policy plane for all package kinds
 
 - Core channel = C (fetch repo content paths, apply from a data dir).
-- Third-party git packages = the existing per-package flow, extended with the same policy/executor (`auto`/`notify`/`off` + interval), reusing `acquire_source` + conflict guards.
+- Third-party git packages = the existing per-package flow, extended with the same policy/executor (`auto`/`notify`/`off` + interval), reusing `acquire_source` + the scan and replace path.
 - The channel source is a configurable value, so a future move of core content to its own repo (B) — or a lock-pinned seed — is a source swap, not a rewrite.
 - **Verdict: recommended.**
 
@@ -396,7 +396,7 @@ Each phase is independently landable and reversible; nothing in P0/P1 changes co
 ## Appendix A — current-state evidence (for reviewers)
 
 - Load dir sync + R5 bootstrap-only: `cli/commands/extensions/skills_sync.py` docstring; `okf/skills/load-directory-sync.ava.okf.md`.
-- Explicit update verbs + conflicts: `cli/commands/extensions/skill.py` (`cmd_skill_update` L423+, `cmd_skill_upgrade` L510+), `cli/commands/extensions/plugins.py` (`cmd_plugins_upgrade` L390+), `cli/commands/extensions/mcp.py`.
+- Explicit update verbs (they replace and report a differing copy): `cli/commands/extensions/skill.py` (`cmd_skill_update` L423+, `cmd_skill_upgrade` L510+), `cli/commands/extensions/plugins.py` (`cmd_plugins_upgrade` L390+), `cli/commands/extensions/mcp.py`.
 - Builtin skill sync (bootstrap-only, missing copies): `cli/commands/converge/host.py:_converge_skills_step` -> `cli/commands/extensions/skills_sync.py:converge_skills` (superseded the pre-unified-lifecycle updater's `_update_local`/`_update_agent_runner` rollout legs).
 - Registry model: `base/packages/extensions/install_registry.py` (`InstalledPackage`, `Registry.version`, `tree_hash`, `copy_changed`).
 - Plugin discovery + loaders: `base/packages/plugins/enable_config.py:discover_plugins`, `agent/extensions/__init__.py:load_extensions`, `base/lm/plugin_providers.py`; roots: `base/paths/__init__.py:repo_plugins_dir/plugins_dir`, `base/deploy/release/runtime_interpreter.py:external_plugin_read_root`.

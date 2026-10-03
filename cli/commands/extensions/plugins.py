@@ -403,13 +403,12 @@ def cmd_plugins_installed() -> int:
     return 0
 
 
-def cmd_plugins_upgrade(name: str, *, force: bool = False) -> int:
-    """`ava plugins upgrade <name> [--force]` — re-fetch an installed package
+def cmd_plugins_upgrade(name: str) -> int:
+    """`ava plugins upgrade <name>` — re-fetch an installed package
     from its source.
 
     A locally edited copy (content differs from what the last install/upgrade
-    wrote) aborts with a conflict unless `--force` is given — the R5 conflict
-    contract, mirroring `git pull` (force = reset --hard).
+    wrote) is replaced, and the replacement is reported.
     """
     from base import paths
     from base.packages.extensions import install_registry
@@ -429,13 +428,11 @@ def cmd_plugins_upgrade(name: str, *, force: bool = False) -> int:
         return 1
 
     dest = _install_dest(pkg.type, name)
-    if dest.exists() and not force and install_registry.copy_changed(dest, pkg.installed_hash):
+    if dest.exists() and install_registry.copy_changed(dest, pkg.installed_hash):
         print(
-            f"[ava plugins upgrade] '{name}' was modified locally; refusing to overwrite. "
-            f"Re-run with --force to replace your changes with the fetched source.",
-            file=sys.stderr,
+            f"[ava plugins upgrade] note: '{name}' was modified locally; "
+            "replacing it with the fetched source."
         )
-        return 1
 
     try:
         cloned = clone_git(pkg.source, pkg.ref)

@@ -353,13 +353,12 @@ def _adopt_user_residue(
     src_hash: str,
     skip: frozenset[tuple[str, ...]],
     *,
-    force: bool,
     landed: list[str],
     updated: list[str],
     unchanged: list[str],
-    conflicts: list[str],
+    replaced: list[str],
 ) -> None:
-    """Hand-installed residue of a repo skill: adopt it, overwrite it (force) or flag a conflict."""
+    """Hand-installed residue of a repo skill: adopt it, or converge it to the source."""
     from base.packages.extensions.install_registry import tree_hash
 
     # Hand-installed residue of this repo skill (the pre-converge way
@@ -387,13 +386,11 @@ def _adopt_user_residue(
         entry.content_hash = src_hash
         entry.updated_at = now
         unchanged.append(s.name)
-    elif force:
-        updated.append(_land_repo_copy(s, skills_root, registry, now, overwrite=True))
     else:
-        conflicts.append(
-            f"'{s.name}': local copy differs from the repo source (and the "
-            f"source changed) — re-run with --force to adopt the repo version"
+        replaced.append(
+            f"'{s.name}': local copy differed from the repo source; repo version landed"
         )
+        updated.append(_land_repo_copy(s, skills_root, registry, now, overwrite=True))
     return
 
 
@@ -407,10 +404,9 @@ def _update_tracked(
     src_hash: str,
     skip: frozenset[tuple[str, ...]],
     *,
-    force: bool,
     updated: list[str],
     unchanged: list[str],
-    conflicts: list[str],
+    replaced: list[str],
 ) -> None:
     """Tracked repo-native (or builtin-plugin) entry: the update path."""
     from base.packages.extensions.install_registry import tree_hash
@@ -422,14 +418,11 @@ def _update_tracked(
         if entry.origin_path != str(s.src):
             entry.origin_path, entry.updated_at = str(s.src), now
         unchanged.append(s.name)
-    elif dest_hash == entry.content_hash or force:
-        updated.append(_land_repo_copy(s, skills_root, registry, now, overwrite=True))
-    else:
-        conflicts.append(
-            f"'{s.name}': modified locally (content differs from the last synced "
-            f"version) and the source changed — re-run with --force to overwrite "
-            f"your edits with the repo version"
-        )
+        return
+    if dest_hash != entry.content_hash:
+        names = reg.differing_paths(dest, s.src, skip_subtrees=skip)
+        replaced.append(f"'{s.name}': local copy differed; replaced (differs: {names})")
+    updated.append(_land_repo_copy(s, skills_root, registry, now, overwrite=True))
 
 
 def _update_one(
@@ -438,15 +431,14 @@ def _update_one(
     registry: reg.Registry,
     now: str,
     *,
-    force: bool,
     landed: list[str],
     updated: list[str],
     unchanged: list[str],
-    conflicts: list[str],
+    replaced: list[str],
     skipped: list[str],
 ) -> None:
     """Bring one repo-native skill in line with its source (the per-package
-    update/conflict/force decision table of `cmd_skill_update`)."""
+    update decision table of `cmd_skill_update`)."""
     from base.packages.extensions.install_registry import tree_hash
 
     dest = skills_root / s.name
@@ -476,11 +468,10 @@ def _update_one(
                 dest,
                 src_hash,
                 skip,
-                force=force,
                 landed=landed,
                 updated=updated,
                 unchanged=unchanged,
-                conflicts=conflicts,
+                replaced=replaced,
             )
             return
         # A genuinely third-party or hand-registered package: converge shadows
@@ -515,10 +506,9 @@ def _update_one(
         dest,
         src_hash,
         skip,
-        force=force,
         updated=updated,
         unchanged=unchanged,
-        conflicts=conflicts,
+        replaced=replaced,
     )
 
 
@@ -542,11 +532,10 @@ def _selected_sources(repo: Path, names: list[str] | None) -> list[_Source]:
 def _report_update(
     skills_root: Path,
     *,
-    force: bool,
     landed: list[str],
     updated: list[str],
     unchanged: list[str],
-    conflicts: list[str],
+    replaced: list[str],
     skipped: list[str],
 ) -> int:
     if skipped:
@@ -560,23 +549,15 @@ def _report_update(
         print(f"[ava skill update] updated '{name}'")
     for name in unchanged:
         print(f"[ava skill update] '{name}' up to date")
-    for c in conflicts:
-        print(f"[ava skill update] conflict: {c}", file=sys.stderr)
-    if conflicts and not force:
-        print(
-            "  NONE were overwritten; re-run with --force to replace local edits.",
-            file=sys.stderr,
-        )
-        return 1
+    for note in replaced:
+        print(f"[ava skill update] note: {note}")
     print("  active on the next skill scan; no restart needed.")
     return 0
 
 
-def cmd_skill_update(
-    names: list[str] | None, *, force: bool = False, repo: Path | None = None
-) -> int:
-    """`ava skill update [name ...] [--force]` — bring repo-native skills (from
-    this checkout) into the load dir.
+def cmd_skill_update(names: list[str] | None, *, repo: Path | None = None) -> int:
+    """`ava skill update [name ...]` — bring repo-native skills (from this
+    checkout) into the load dir.
 
     The explicit update for repo-native skills (R5 ruling: converge only lands
     missing copies, never updates). Per package:
@@ -585,11 +566,11 @@ def cmd_skill_update(
     - copy matches source    -> nothing to do
     - copy matches registry  -> updated to the source
       content_hash (no local edits)
-    - copy differs from the  -> conflict: abort that package with the local
-      recorded hash           edit surfaced; `--force` overwrites it
+    - copy differs from the  -> converged to the source and reported (a
+      recorded hash            differing local copy is never kept)
     - user-origin residue of a repo skill (installed by hand from the
       project skill dirs before converge knew the source) -> adopted as repo
-      when content matches, conflict/force otherwise
+      when content matches, converged (and reported) otherwise
 
     `repo` is the checkout whose sources to sync from (tests inject a
     synthetic tree; default = this checkout).
@@ -615,7 +596,7 @@ def cmd_skill_update(
     landed: list[str] = []
     updated: list[str] = []
     unchanged: list[str] = []
-    conflicts: list[str] = []
+    replaced: list[str] = []
     skipped: list[str] = []
     with reg.mutate() as registry:
         for s in sources:
@@ -624,32 +605,29 @@ def cmd_skill_update(
                 skills_root,
                 registry,
                 now,
-                force=force,
                 landed=landed,
                 updated=updated,
                 unchanged=unchanged,
-                conflicts=conflicts,
+                replaced=replaced,
                 skipped=skipped,
             )
     return _report_update(
         skills_root,
-        force=force,
         landed=landed,
         updated=updated,
         unchanged=unchanged,
-        conflicts=conflicts,
+        replaced=replaced,
         skipped=skipped,
     )
 
 
-def cmd_skill_upgrade(name: str, *, force: bool = False) -> int:
-    """`ava skill upgrade <name> [--force]` — re-fetch an installed skill package
+def cmd_skill_upgrade(name: str) -> int:
+    """`ava skill upgrade <name>` — re-fetch an installed skill package
     from its recorded git source (a private skills repo and other user
     installs).
 
     A locally edited copy (content differs from what the last install/upgrade
-    wrote) aborts with a conflict unless `--force` is given — the R5 conflict
-    contract, mirroring `git pull`.
+    wrote) is replaced, and the replacement is reported.
     """
     import shutil
     import subprocess
@@ -676,13 +654,11 @@ def cmd_skill_upgrade(name: str, *, force: bool = False) -> int:
         return 1
 
     dest = paths.skills_dir() / name
-    if dest.exists() and not force and install_registry.copy_changed(dest, pkg.installed_hash):
+    if dest.exists() and install_registry.copy_changed(dest, pkg.installed_hash):
         print(
-            f"[ava skill upgrade] '{name}' was modified locally; refusing to overwrite. "
-            f"Re-run with --force to replace your changes with the fetched source.",
-            file=sys.stderr,
+            f"[ava skill upgrade] note: '{name}' was modified locally; "
+            "replacing it with the fetched source."
         )
-        return 1
 
     try:
         acquired = acquire_source(pkg.source, pkg.ref)

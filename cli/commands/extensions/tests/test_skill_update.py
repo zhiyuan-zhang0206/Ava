@@ -2,8 +2,8 @@
 
 Repo-native skills update via `skill update` (converge only lands missing
 copies); user-installed skills with a recorded git source update via
-`skill upgrade`. Both share the conflict contract: a locally edited copy
-refuses unless `--force`.
+`skill upgrade`. Both share one contract: a locally edited copy is replaced,
+and the replacement is reported (local copies are never hand-edited).
 """
 
 import os
@@ -85,7 +85,7 @@ def test_update_unknown_name_errors(unit_home: Path, repo: Path, capsys) -> None
     assert "'nope' is not a repo-native skill" in err
 
 
-# ─── skill update: source change / conflict / force ─────────────────────────
+# ─── skill update: source change / local edits ──────────────────────────────
 
 
 def test_update_propagates_source_change(unit_home: Path, repo: Path) -> None:
@@ -99,7 +99,7 @@ def test_update_propagates_source_change(unit_home: Path, repo: Path) -> None:
     assert "# v2" in body
 
 
-def test_update_conflict_on_local_edit_refuses(unit_home: Path, repo: Path, capsys) -> None:
+def test_update_replaces_a_local_edit_and_reports(unit_home: Path, repo: Path, capsys) -> None:
     assert cmd_skill_update(None, repo=repo) == 0
     _set_mode_off("builtin-a")
     copy = unit_home / "skills" / "builtin-a" / "SKILL.md"
@@ -107,39 +107,27 @@ def test_update_conflict_on_local_edit_refuses(unit_home: Path, repo: Path, caps
     (repo / "ava_builtins" / "skills" / "builtin-a" / "SKILL.md").write_text(
         "---\nname: builtin-a\ndescription: v2\n---\n", encoding="utf-8"
     )
-    rc = cmd_skill_update(None, repo=repo)
-    assert rc == 1
-    err = capsys.readouterr().err  # pyright: ignore[reportUnknownMemberType]
-    assert "conflict" in err and "--force" in err
-    assert "hands off" in copy.read_text(encoding="utf-8")
-
-
-def test_update_force_overwrites_local_edit(unit_home: Path, repo: Path) -> None:
     assert cmd_skill_update(None, repo=repo) == 0
-    _set_mode_off("builtin-a")
-    copy = unit_home / "skills" / "builtin-a" / "SKILL.md"
-    copy.write_text("---\nname: builtin-a\ndescription: MINE\n---\n\nhands off\n", encoding="utf-8")
-    (repo / "ava_builtins" / "skills" / "builtin-a" / "SKILL.md").write_text(
-        "---\nname: builtin-a\ndescription: v2\n---\n", encoding="utf-8"
-    )
-    assert cmd_skill_update(None, repo=repo, force=True) == 0
+    out = capsys.readouterr().out  # pyright: ignore[reportUnknownMemberType]
+    assert "note:" in out and "local copy differed" in out
     body = copy.read_text(encoding="utf-8")
     assert "hands off" not in body and "v2" in body
 
 
-def test_update_local_edit_without_source_change_reports_conflict(
+def test_update_restores_a_local_edit_without_a_source_change(
     unit_home: Path, repo: Path, capsys
 ) -> None:
-    """Local edits alone (no upstream change) still surface — --force restores."""
+    """Local edits alone (no upstream change) are converged too: the source
+    tree is restored and the replacement is reported."""
     assert cmd_skill_update(None, repo=repo) == 0
     _set_mode_off("builtin-a")
     copy = unit_home / "skills" / "builtin-a" / "SKILL.md"
     copy.write_text("---\nname: builtin-a\ndescription: MINE\n---\n\nhands off\n", encoding="utf-8")
-    rc = cmd_skill_update(None, repo=repo)
-    assert rc == 1
-    assert "conflict" in capsys.readouterr().err  # pyright: ignore[reportUnknownMemberType]
-    assert cmd_skill_update(None, repo=repo, force=True) == 0
-    assert "hands off" not in copy.read_text(encoding="utf-8")
+    assert cmd_skill_update(None, repo=repo) == 0
+    out = capsys.readouterr().out  # pyright: ignore[reportUnknownMemberType]
+    assert "note:" in out and "local copy differed" in out
+    body = copy.read_text(encoding="utf-8")
+    assert "hands off" not in body and "description: d" in body
 
 
 # ─── skill update: adoption of hand-installed .agents residue ───────────────
@@ -165,18 +153,16 @@ def test_update_adopts_matching_user_residue(unit_home: Path, repo: Path) -> Non
     assert (unit_home / "skills" / "builtin-a" / "SKILL.md").exists()
 
 
-def test_update_conflicts_on_diverged_user_residue(unit_home: Path, repo: Path, capsys) -> None:
+def test_update_converges_a_diverged_user_residue(unit_home: Path, repo: Path, capsys) -> None:
     _write_skill(unit_home / "skills", "builtin-a", body="# user hacked\n")
     reg.register(
         reg.InstalledPackage(
             name="builtin-a", type="skill", source=".agents/skills/builtin-a", origin="user"
         )
     )
-    rc = cmd_skill_update(None, repo=repo)
-    assert rc == 1
-    assert "--force" in capsys.readouterr().err  # pyright: ignore[reportUnknownMemberType]
-    # --force adopts the repo version
-    assert cmd_skill_update(None, repo=repo, force=True) == 0
+    assert cmd_skill_update(None, repo=repo) == 0
+    out = capsys.readouterr().out  # pyright: ignore[reportUnknownMemberType]
+    assert "note:" in out and "local copy differed" in out
     assert _entry("builtin-a").origin == "repo"
     body = (unit_home / "skills" / "builtin-a" / "SKILL.md").read_text(encoding="utf-8")
     assert "user hacked" not in body
@@ -274,7 +260,7 @@ def test_upgrade_local_source_is_copied_never_moved(unit_home: Path, tmp_path: P
     assert "# v2" in body
 
 
-def test_upgrade_conflict_refuses_then_force(unit_home: Path, tmp_path: Path, capsys) -> None:
+def test_upgrade_replaces_a_local_edit(unit_home: Path, tmp_path: Path, capsys) -> None:
     url = _skill_git_repo(tmp_path)
     _install_skill(url)
     copy = unit_home / "skills" / "ext-skill" / "SKILL.md"
@@ -286,12 +272,11 @@ def test_upgrade_conflict_refuses_then_force(unit_home: Path, tmp_path: Path, ca
     _git(r, "add", ".")
     _git(r, "commit", "-qm", "v2")
 
-    assert cmd_skill_upgrade("ext-skill") == 1
-    assert "modified locally" in capsys.readouterr().err  # pyright: ignore[reportUnknownMemberType]
-    assert "# hacked" in copy.read_text(encoding="utf-8")
-
-    assert cmd_skill_upgrade("ext-skill", force=True) == 0
-    assert "# hacked" not in copy.read_text(encoding="utf-8")
+    assert cmd_skill_upgrade("ext-skill") == 0
+    out = capsys.readouterr().out  # pyright: ignore[reportUnknownMemberType]
+    assert "modified locally" in out
+    body = copy.read_text(encoding="utf-8")
+    assert "# hacked" not in body and "# v2" in body
 
 
 # ─── worktree source bound (audit round 2, skills-plugins #3) ───────────────

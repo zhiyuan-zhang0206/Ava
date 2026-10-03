@@ -20,7 +20,7 @@ duplicate `type="skill"` row is created for it.
 **Bootstrap-only for repo-native sources (R5 design, task #1013)**: converge
 lands a repo-native package only when its load-dir copy is absent; it NEVER
 updates an existing copy (updates are the explicit `ava skill update` command,
-which owns the conflict/`--force` semantics). Installed-plugin skills keep the
+which replaces a differing local copy). Installed-plugin skills keep the
 older sync behavior (updated on source change, user edits protected).
 
 Converge-managed copies are derived state: the registry's `content_hash`
@@ -284,7 +284,7 @@ def _sync_bootstrap_only(
     """A repo-native (bootstrap-only) source whose copy already exists."""
     # Repo-native sources are bootstrap-only (R5): an existing copy is
     # never touched here — updates are the explicit `ava skill update`
-    # (which owns conflict detection + --force). The one exception is the
+    # (which replaces a differing local copy). The one exception is the
     # lost-registry-row self-heal (#974): a source-identical copy is
     # adopted back; a differing registry-less copy stays an untracked
     # warning (it may be a deliberate edit — adopting it would let a later
