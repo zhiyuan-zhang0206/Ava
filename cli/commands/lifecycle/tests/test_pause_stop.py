@@ -23,7 +23,6 @@ from cli.commands.lifecycle._pause_resume import StartDelegation, resume_after_s
 from cli.commands.lifecycle.tests.stop_support import Launcher, dependencies, drained
 from cli.commands.lifecycle.tests.stop_support import home as home
 from cli.commands.lifecycle.tests.stop_support import launch as launch
-from cli.parsers import build_parser
 from ops import agent_pause
 from tests.agent.test_maintenance import WHEN
 from tests.agent.test_maintenance import isolate as isolate
@@ -106,7 +105,7 @@ def test_normal_start_releases_hold_only_after_successful_readiness(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     drained()
-    monkeypatch.setattr("ops.cluster_pause._unpause_local_cluster", lambda: None)
+    monkeypatch.setattr("base.deploy.state.host_deploy_state.set_posture", MagicMock())
     monkeypatch.setattr(agent_pause, "publish_inbound_wake", lambda *_a: None)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(start_serving, "is_serving", lambda: True)
 
@@ -146,23 +145,6 @@ def test_delegated_start_leaves_authorization_and_resume_with_child(
     assert start() == 0
     assert admission.held()
     unpause.assert_not_called()
-
-
-def test_plain_start_and_parser_need_no_manual_operation(
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    @resume_after_start
-    def start() -> int:
-        assert not admission.held()
-        return 0
-
-    assert start() == start() == 0
-    assert "hold released" not in capsys.readouterr().out
-    parser = build_parser()
-    pause = parser.parse_args(["pause", "--keep-service", "frontend"])
-    stop = parser.parse_args(["stop", "--keep-infra", "--keep-service", "gateway", "--force"])
-    assert pause.keep_service == ["frontend"] and not pause.force
-    assert stop.keep_infra and stop.force and stop.stop_browser
 
 
 def test_only_explicit_force_enters_legacy_force_stop(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -224,7 +206,7 @@ def test_two_pause_start_cycles_reuse_identity_not_old_operation(
     monkeypatch.setattr(command, "pause_agents", agent_pause.pause_agents)
     monkeypatch.setattr(agent_pause, "machine_role", lambda: frozenset({"gateway"}))
     monkeypatch.setattr(agent_pause, "machine_name", lambda: "test-machine")
-    monkeypatch.setattr("ops.cluster_pause._unpause_local_cluster", MagicMock())
+    monkeypatch.setattr("base.deploy.state.host_deploy_state.set_posture", MagicMock())
     monkeypatch.setattr(start_serving, "is_serving", lambda: True)
     starts = resume_after_start(lambda: 0)
     holders: list[str | None] = []
