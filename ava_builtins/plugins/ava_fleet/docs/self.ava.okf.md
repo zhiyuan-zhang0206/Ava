@@ -45,8 +45,9 @@ agents (table)
 ## Dependencies
 
 - `ava.gateway_client.patch_label` → `PATCH /api/agents/{id}`: the gateway writes the label and
-  the sticky bit, records the `label_change` audit fact in the same transaction, and publishes
-  `label_updated` so the fleet monitoring view refreshes
+  the sticky bit, records the `label_change` audit fact in the same transaction (attributed to
+  `agent:<id>`, so a label set while a lease borrows the agent also lands in the lease's event
+  log), and publishes `label_updated` so the fleet monitoring view refreshes
 
 ## Relationship to Other Subsystems
 
