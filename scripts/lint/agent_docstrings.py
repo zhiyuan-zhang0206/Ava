@@ -6,7 +6,7 @@ declares `__all_for_ava__`, or the module of a namespace listed in
 namespace and every `plugin.py`. Agent visibility is that whitelist, never the
 `_` prefix, so a framework module with a public name stays out of scope. These
 docstrings are concatenated into the LLM system prompt via `ava.help()` and
-`register_system_prompt_section`; violations land in the agent's context
+the plugin-declared system prompt sections; violations land in the agent's context
 window verbatim.
 
 ## What gets banned

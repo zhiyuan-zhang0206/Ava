@@ -96,6 +96,7 @@ from base.log import logger
 from base.native_process.runtime_incarnation import RuntimeIncarnation, current_incarnation
 from base.native_process.turn_identity import bind_turn_identity
 from base.packages.plugins.config_view import resolve_agent_plugin_pins
+from base.packages.plugins.extensions import EMPTY, ExtensionRegistry
 from base.telemetry.tracing import turn_span
 from services.agent_host import maintenance as maintenance_receipts
 from services.agent_host.admission import TurnAdmission
@@ -170,9 +171,11 @@ class AgentHost:
         machine: str | None = None,
         bus: EventBus,
         db: Database,
+        extensions: ExtensionRegistry = EMPTY,
     ) -> None:
         self._bus = bus
         self._db = db
+        self._extensions = extensions
         self._pool = pool
         self._control_pool = control_pool if control_pool is not None else pool
         self._checkpointer = checkpointer
@@ -629,6 +632,7 @@ class AgentHost:
             db=self._db,
             bus=self._bus,
             agent=slices,
+            extensions=self._extensions,
             # The dispatcher owns subscriptions; an empty claim ends this task.
         )
         try:

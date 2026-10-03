@@ -37,7 +37,6 @@ __description__ = "registers one of nearly everything"
 from pydantic import BaseModel
 
 import ava
-from agent.graph.system_prompt import register_system_prompt_section
 from agent.hooks import Hook, register_before_llm
 from agent.state import register_plugin_state
 
@@ -57,11 +56,6 @@ class _DemoHook(Hook):
 register_before_llm(_DemoHook())
 
 
-@register_system_prompt_section
-def demo_section(_slices: object) -> str:
-    return "## Demo"
-
-
 def _passthrough(inner, *args, **kwargs):
     return inner(*args, **kwargs)
 
@@ -69,11 +63,27 @@ def _passthrough(inner, *args, **kwargs):
 ava.extend.wrap("files.read", _passthrough)
 '''
 
+_DEMO_RUNTIME = """
+from base.packages.plugins.extensions import PluginContributions
 
-def _write_plugin(name: str, body: str, *, manifest: str | None = None) -> Path:
+
+def demo_section(_slices: object) -> str:
+    return "## Demo"
+
+
+def contribute() -> PluginContributions:
+    return PluginContributions(system_prompt_sections=(demo_section,))
+"""
+
+
+def _write_plugin(
+    name: str, body: str, *, manifest: str | None = None, runtime: str | None = None
+) -> Path:
     plugin_dir = paths.repo_plugins_dir() / name
     plugin_dir.mkdir(parents=True, exist_ok=True)
     (plugin_dir / "plugin.py").write_text(body)
+    if runtime is not None:
+        (plugin_dir / "agent_runtime.py").write_text(runtime)
     if manifest is not None:
         (plugin_dir / "ava-plugin.json").write_text(manifest)
     return plugin_dir
@@ -98,7 +108,7 @@ def test_every_surface_entry_point_resolves():
 def test_registrations_are_attributed_to_the_importing_plugin():
     """Every surface a plugin touched shows up under its name, keyed the way the
     manifest declares it."""
-    _write_plugin("demo", _DEMO_PLUGIN)
+    _write_plugin("demo", _DEMO_PLUGIN, runtime=_DEMO_RUNTIME)
     _enable(demo=True)
 
     catalog = catalog_mod.build_catalog()
@@ -123,7 +133,7 @@ def test_registrations_are_attributed_to_the_importing_plugin():
 def test_a_disabled_plugin_reports_no_registrations():
     """A disabled plugin is never imported, so the honest answer is its
     enable-state and nothing else — not a guess read off its source."""
-    _write_plugin("demo", _DEMO_PLUGIN)
+    _write_plugin("demo", _DEMO_PLUGIN, runtime=_DEMO_RUNTIME)
     _enable(demo=False)
 
     view = catalog_mod.build_catalog().plugin("demo")
@@ -134,8 +144,9 @@ def test_a_disabled_plugin_reports_no_registrations():
 
 def test_a_reload_does_not_accumulate_contributions():
     """`clear_plugin_registrations` clears the ledger with the registries it
-    shadows, so a second load reports one contribution per surface, not two."""
-    _write_plugin("demo", _DEMO_PLUGIN)
+    shadows and the registry is built anew, so a second load reports one contribution per
+    surface, not two."""
+    _write_plugin("demo", _DEMO_PLUGIN, runtime=_DEMO_RUNTIME)
     _enable(demo=True)
 
     first = catalog_mod.build_catalog().plugin("demo").contributions
@@ -177,7 +188,6 @@ _DECLARED_PLUGIN = """
 __description__ = "declares more than it registers"
 
 import ava
-from agent.graph.system_prompt import register_system_prompt_section
 from agent.hooks import Hook, register_before_llm
 
 
@@ -189,11 +199,6 @@ class _DeclaredHook(Hook):
 register_before_llm(_DeclaredHook())
 
 
-@register_system_prompt_section
-def demo_section(_slices: object) -> str:
-    return "## Declared"
-
-
 def _passthrough(inner, *args, **kwargs):
     return inner(*args, **kwargs)
 
@@ -201,11 +206,23 @@ def _passthrough(inner, *args, **kwargs):
 ava.extend.wrap("files.write", _passthrough)
 """
 
+_DECLARED_RUNTIME = """
+from base.packages.plugins.extensions import PluginContributions
+
+
+def demo_section(_slices: object) -> str:
+    return "## Declared"
+
+
+def contribute() -> PluginContributions:
+    return PluginContributions(system_prompt_sections=(demo_section,))
+"""
+
 
 def test_declared_vs_registered_reports_both_directions():
     """A declared surface nobody registered, and a registration nobody
     declared — the two halves of the S3 gate, reported rather than enforced."""
-    _write_plugin("declared", _DECLARED_PLUGIN, manifest=_MANIFEST)
+    _write_plugin("declared", _DECLARED_PLUGIN, manifest=_MANIFEST, runtime=_DECLARED_RUNTIME)
     _enable(declared=True)
 
     view = catalog_mod.build_catalog().plugin("declared")
@@ -223,7 +240,7 @@ def test_declared_vs_registered_reports_both_directions():
 def test_a_plugin_without_a_manifest_has_no_diff():
     """No manifest means nothing was declared — which is not the same as
     agreement, so the diff is empty rather than all-ok."""
-    _write_plugin("demo", _DEMO_PLUGIN)
+    _write_plugin("demo", _DEMO_PLUGIN, runtime=_DEMO_RUNTIME)
     _enable(demo=True)
 
     view = catalog_mod.build_catalog().plugin("demo")
@@ -247,7 +264,7 @@ def test_install_time_manifest_keys_have_no_runtime_registry():
 
 
 def test_unknown_plugin_fails_fast_and_names_the_installed_ones():
-    _write_plugin("demo", _DEMO_PLUGIN)
+    _write_plugin("demo", _DEMO_PLUGIN, runtime=_DEMO_RUNTIME)
     _enable(demo=True)
     catalog = catalog_mod.build_catalog()
 

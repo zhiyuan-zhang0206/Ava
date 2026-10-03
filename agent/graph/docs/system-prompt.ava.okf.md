@@ -1,7 +1,7 @@
 ---
 type: doc
 title: System Prompt — System Prompt
-description: "The system prompt built once per context window. Constructed by `build_system_prompt()` in registration order: base guidance → SDK overview → behavior conventions → capability index."
+description: "The system prompt built once per context window. Constructed by `build_system_prompt(extensions, slices)` in order: base guidance → SDK overview → behavior conventions → capability index → plugin sections."
 tags: []
 ---
 
@@ -16,12 +16,13 @@ The system prompt carried in every LLM call, built **once per context window** �
 ### build_system_prompt (`agent/graph/system_prompt.py:build_system_prompt`)
 - The base is the `_BASE_SYSTEM_PROMPT` constant in `agent/graph/_base_prompt.py` (the `{_AVA_OVERVIEW}` placeholder injects the SDK overview)—**it never reads `AGENTS.md` at runtime** (that file is for coding agents)
 - Appends SDK documentation (the output of `ava.help(ava)`)
-- Runs all registered section functions in fixed order
+- Runs `FRAMEWORK_SECTIONS` in fixed order, then the registry's plugin sections
 - Injects the skill and MCP server index — **once**. `# Capabilities` is the sole index; the expanded SDK reference's `*` skips `ava.skills` / `ava.mcps` (`_CAPABILITY_SURFACES`) so it renders call contracts only, never a second capability listing
 
-### Plugin Registration (`register_system_prompt_section`)
-- Signature `(slices: AgentSlices) -> str` — the agent's per-turn configuration (`base/host/env/agent_slices.py`); returning `""` means no contribution
-- Runs in registration order—order is priority
+### Plugin Declaration (`PluginContributions.system_prompt_sections`)
+- A plugin declares sections in `contribute()`; the `ExtensionRegistry` reaches this build as `AvaContext.extensions` ([[okf/plugins/declared-contributions.ava.okf.md]])
+- Signature `(slices: AgentSlices) -> str`; `""` means no contribution
+- Declaration order (plugins by name) is priority
 - Framework's built-in sections are grouped: SDK detail → Conversation → Conduct → Capabilities
 
 ### Framework Built-in Sections
@@ -61,8 +62,8 @@ The system prompt carried in every LLM call, built **once per context window** �
 
 ## Entry Points
 
-- `agent/graph/system_prompt.py:build_system_prompt(slices)` — Build the complete prompt
-- `agent/graph/system_prompt.py:register_system_prompt_section(fn)` — Plugin registration
+- `agent/graph/system_prompt.py:build_system_prompt(extensions, slices)` — Build the complete prompt
+- `base/packages/plugins/extensions.py:PluginContributions` — what a plugin's `contribute()` declares
 - `agent/graph/capabilities.py:capabilities_section(slices)` / `resolve_prompt_skills()` — the `# Capabilities` index and the name→skill resolver it shares with the preloaded-skills note
 - `agent/graph/capabilities.py:indexed_skills(prompt)` / `index_drift(known, prompt)` — what the index covers right now, and the diff against a snapshot of it
 - `agent/hooks/capabilities.py:register_capabilities_hooks()` — the `before_llm` hook that names skills installed since the index was built

@@ -49,6 +49,7 @@ from agent.state import AgentState, CompactState
 from base.agents.context import AvaContext
 from base.host.env.agent_slices import AgentSlices
 from base.lm.context_budget import ContextBudget
+from base.packages.plugins.extensions import EMPTY
 from tests.fixtures.units import spawn_agent
 
 
@@ -780,7 +781,7 @@ def test_compact_contract_lives_in_docstring_and_reaches_prompt(_ava_compact_loa
 
     # The contract must actually reach the prompt — otherwise the short triggers
     # below point at something the agent / forced-compact model never sees.
-    system_prompt = build_system_prompt(AgentSlices.resolve())
+    system_prompt = build_system_prompt(EMPTY, AgentSlices.resolve())
     for section in _COMPACT_SECTIONS:
         assert section in system_prompt, f"section {section!r} not rendered into the system prompt"
 
@@ -1077,8 +1078,6 @@ def _insert_compact_summary(db: psycopg.Connection, tid: int, content: str) -> N
 
 
 def _make_runtime(ops_pool=None, llm=None):
-    from unittest.mock import AsyncMock
-
     if ops_pool is None:
         ops_pool = AsyncMock()
     if llm is None:

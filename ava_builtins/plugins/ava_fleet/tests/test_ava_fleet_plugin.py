@@ -25,9 +25,11 @@ import ava
 import ava.agents
 from agent.graph.system_prompt import build_system_prompt
 from agent.state import clear_plugin_registrations
+from ava_builtins.plugins.ava_fleet.tests.registry_support import fleet_registry
 from base.agents.observation.snapshot import select_one
 from base.host.env.agent_slices import AgentSlices
 from base.packages.plugins.context import PluginContext
+from base.packages.plugins.extensions import EMPTY
 
 
 def _seed_agent(db: psycopg.Connection) -> int:
@@ -102,13 +104,13 @@ def test_member_torn_down_on_clear(_load_activity_plugin: None):
 
 
 def test_plugin_registers_prompt_section(_load_activity_plugin: None):
-    prompt = build_system_prompt(AgentSlices.resolve())
+    prompt = build_system_prompt(fleet_registry(), AgentSlices.resolve())
     assert "ava.self.set_label" in prompt
 
 
 def test_prompt_assigns_shared_milestone_reporting(_load_activity_plugin: None):
     """The rendered prompt carries the reporting contract with the plugin."""
-    prompt = build_system_prompt(AgentSlices.resolve())
+    prompt = build_system_prompt(fleet_registry(), AgentSlices.resolve())
 
     assert prompt.count("One reporter per milestone") == 1
     assert "single reporter and action owner" in prompt
@@ -224,16 +226,14 @@ def test_reduce_context_switch_reaches_the_prompt(
 ):
     """End to end: the toggle gates the section's presence in the assembled
     system prompt."""
-    from agent.graph.system_prompt import build_system_prompt
     from base.config import settings
 
+    section, slices = "## Reduce context switch for the human", AgentSlices.resolve()
     monkeypatch.setattr(settings.agent, "reduce_context_switch", True)
-    assert "## Reduce context switch for the human" in build_system_prompt(AgentSlices.resolve())
+    assert section in build_system_prompt(fleet_registry(), slices)
 
     monkeypatch.setattr(settings.agent, "reduce_context_switch", False)
-    assert "## Reduce context switch for the human" not in build_system_prompt(
-        AgentSlices.resolve()
-    )
+    assert section not in build_system_prompt(fleet_registry(), slices)
 
 
 def test_prompt_section_task_conversion_contract(_load_activity_plugin: None):
@@ -289,7 +289,7 @@ def test_task_conversion_absent_when_plugin_disabled():
     clear_plugin_registrations()
     ava.clear_registered_namespaces()
 
-    prompt = build_system_prompt(AgentSlices.resolve())
+    prompt = build_system_prompt(EMPTY, AgentSlices.resolve())
 
     assert "## Fleet task interaction" not in prompt
     assert "create directly with `ava.tasks.create`" not in prompt

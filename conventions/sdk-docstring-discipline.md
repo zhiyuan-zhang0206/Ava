@@ -17,7 +17,7 @@ Specific coverage (**all mandatory**):
   (plugin `_*.py` private modules count too — as long as the namespace exports them to the agent, they're covered)
 - docstrings of callables hung on an existing namespace via `register_namespace_member(namespace, name, fn)`
   (e.g. `ava.self.set_label`) — equally agent-facing, rendered under `help(ava.<namespace>)`
-- strings returned by plugins via `register_system_prompt_section(fn)` (including stdout captured from
+- strings returned by the section functions a plugin declares in `contribute()` (including stdout captured from
   `ava.help(...)` calls inside `fn` — if upstream docstrings are sloppy, they bring violations into the prompt)
 - docstrings of wraps / overrides (`ava.files.read = _wrapped_read` style replacements of original SDK
   functions: the wrap function's docstring carries **exactly the same contract**: English,
@@ -70,7 +70,7 @@ Writing rules alone doesn't work; rely on mechanism:
 
 - `scripts/lint/agent_docstrings.py` runs in pre-commit — scans
   `ava/*.py` and `plugins/*/*.py` for module / public function /
-  `register_namespace`-bound module / `register_system_prompt_section`-
+  `register_namespace`-bound module / declared-system-prompt-section
   return-string-producer; matching CJK characters (`[\u4e00-\u9fff]`) or known impl-detail
   keywords (`state_handle` / `LangGraph` / `POSIX` / `PR #...` etc.)
   fails immediately. When a new violation pattern is found, **add it to the lint blacklist** so the discipline accumulates.

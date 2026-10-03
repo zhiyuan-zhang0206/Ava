@@ -121,7 +121,7 @@ def test_get_ava_overview_advertises_registered_plugin_namespace() -> None:
     """A plugin-registered namespace **does** appear in the overview index.
 
     The namespace itself must be discoverable at the top level even if the
-    plugin adds no `register_system_prompt_section` of its own — otherwise a
+    plugin adds no declared system prompt section of its own — otherwise a
     top-level namespace would silently vanish and the agent couldn't find it.
     The plugin promotes its *members* in a section; the overview lists the
     *namespace*.

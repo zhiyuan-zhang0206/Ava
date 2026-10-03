@@ -22,6 +22,7 @@ from base.agents.messages.inbound import InterruptReason
 from base.cluster.machine import machine_name
 from base.db import create_agent
 from base.host.env.agent_slices import AgentSlices
+from base.packages.plugins.extensions import ExtensionRegistry
 
 # The watcher polls on a 2s cadence; the initial SELECT is immediate. Generous
 # windows vs flake; the poll-interval tests are serial (flaky-marked) because
@@ -512,10 +513,10 @@ async def test_compaction_returns_through_claim_then_generates_before_compacting
 
     monkeypatch.setattr("agent.hooks.compact.resolve_context_budget", small_budget)
 
-    def standing_head(_slices: AgentSlices) -> str:
+    def standing_head(_extensions: ExtensionRegistry, _slices: AgentSlices) -> str:
         return "standing head"
 
-    def no_notes(_slices: AgentSlices) -> list[Any]:
+    def no_notes(_extensions: ExtensionRegistry, _slices: AgentSlices) -> list[Any]:
         return []
 
     monkeypatch.setattr("agent.graph._init_context.build_system_prompt", standing_head)

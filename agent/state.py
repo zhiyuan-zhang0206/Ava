@@ -639,7 +639,7 @@ def clear_plugin_registrations() -> None:
     """Reset all plugin-registered state fields — called by
     `load_extensions` on entry to ensure that multiple reloads (test
     fixture / dev hot-reload) don't accumulate ghost state from previous
-    registrations. Also clears system prompt sections, context notes, hook
+    registrations. Also clears hook
     registrations, SDK namespaces, plugin configs, plugin flag declarations
     (cross-module imports), and the attribution ledger those registrations write
     to at the same point.
@@ -654,16 +654,10 @@ def clear_plugin_registrations() -> None:
     import ava
     import ava.sdk_surface.skill_sources
     import ava.sdk_surface.wraps
-    from agent.graph.context_notes import clear_plugin_context_notes
-    from agent.graph.system_prompt import clear_plugin_system_prompt_sections
     from agent.hooks import clear_hooks
     from base.packages.plugins.config_registration import clear_plugin_configs
     from base.packages.plugins.flags import clear_plugin_flags
 
-    # Keep the framework-owned sections / context notes (registered once at
-    # module import); drop only the plugin-contributed tails.
-    clear_plugin_system_prompt_sections()
-    clear_plugin_context_notes()
     clear_hooks()
     clear_plugin_configs()
     clear_plugin_flags()

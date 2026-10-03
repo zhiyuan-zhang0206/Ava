@@ -56,6 +56,7 @@ from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from psycopg.rows import DictRow
 from psycopg_pool import AsyncConnectionPool
 
+from agent.extensions import build_registry
 from agent.ownership.hosted import settle_stale_running_rows
 from agent.turn.progress import turn_progress_age_s, turn_progress_snapshot
 from base import paths
@@ -457,6 +458,7 @@ async def run() -> None:
             machine=local_machine,
             bus=bus,
             db=db,
+            extensions=build_registry(),
         )
         # The clock reader is injected, not imported by the scheduler: it owns no
         # pool, and this keeps the uncancellable-turn report able to say how long

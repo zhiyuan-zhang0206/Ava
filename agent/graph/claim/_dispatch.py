@@ -39,6 +39,7 @@ from base.config import settings
 from base.events.live.projection import Cancelled
 from base.host.env.agent_slices import AgentSlices
 from base.log import logger
+from base.packages.plugins.extensions import ExtensionRegistry
 
 from ._routing import _ROUTING_KINDS, ClaimGoto, _Routing
 
@@ -526,6 +527,7 @@ async def _handle_fork(
     st: _BatchState,
     state: _state.AgentState,
     slices: AgentSlices,
+    extensions: ExtensionRegistry,
 ) -> None:
     """FORK: rebuild the head (drop source-identity notes), append marker, graft own notes.
 
@@ -551,7 +553,7 @@ async def _handle_fork(
             created_at=datetime.now(UTC),
         )
     )
-    st.new_msgs.extend(context_notes.fork_notes(slices))
+    st.new_msgs.extend(context_notes.fork_notes(extensions, slices))
     # Tail-graft skill additions (decisions/2026-09-10-preset-in-config-overlay-
     # fork-cache): skills the fork's config added to
     # skills_to_inject_into_system_prompt (minus what the expand list already
@@ -619,7 +621,7 @@ async def dispatch_batch(
             if item.id == latest_resurrect_id:
                 await _handle_resurrect(item, st)
         elif kind == InboundKind.FORK:
-            await _handle_fork(agent_id, item, st, state, ctx.require_agent())
+            await _handle_fork(agent_id, item, st, state, ctx.require_agent(), ctx.extensions)
         elif kind == InboundKind.REMINDER:
             # Lease-expiry reminders are dismissed in the lease's release/expiry
             # transaction, so one reaching the claim node means that invariant

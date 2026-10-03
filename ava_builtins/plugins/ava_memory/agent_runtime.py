@@ -19,10 +19,8 @@ from agent.graph.context_notes import (
     RANK_CLUSTER_MEMORY,
     RANK_INHERITED_MEMORY,
     RANK_PER_AGENT_MEMORY,
-    register_context_note,
 )
 from agent.graph.memory_recall import passive_memory_recall
-from agent.graph.system_prompt import register_system_prompt_section
 from agent.hooks import Hook, register_before_llm
 from agent.hooks.compact import auto_compact_will_fire
 from agent.messages import tail_has_recallable_inbound
@@ -31,19 +29,16 @@ from base.agents.context import AvaContext
 from base.config import settings
 from base.host.env.agent_slices import AgentSlices
 from base.log import logger
+from base.packages.plugins.extensions import ContextNote, PluginContributions
 
 from .inherit import inherited_memory_note
 from .notes import memory_index_note, per_agent_memory_note
 
-# The two memory indexes join the framework's ordered context-note registry, so
-# `init_context` lays them down whenever a window is established. The ranks pin
-# them into the reading order the framework documents (see the rank scale in
-# `context_notes.py`): the shared index right after the exec-timeout note, the
-# per-agent index right after the agent-id note. Registered here rather than by
-# a decorator in notes.py: this module is re-executed on every plugin (re)load,
-# while importing notes.py hits the sys.modules cache — so decorators there
-# would not survive a clear_plugin_registrations cycle. Disabling this plugin
-# means neither is ever registered, and a window is laid down with no memory
+# The two memory indexes are declared in `contribute()` below, so `init_context` lays them down
+# with the framework's notes whenever a window is established. The ranks pin them into the
+# reading order the framework documents (see the rank scale in `context_notes.py`): the shared
+# index right after the exec-timeout note, the per-agent index right after the agent-id note.
+# Disabling this plugin means neither is ever declared, and a window is laid down with no memory
 # notes in it — matching an agent that has no memory stores.
 # The shared index is NOT `on_fork`: the pool is cluster-wide, so the copy
 # a fork inherits with the source's history is the same content the graft would
@@ -54,9 +49,6 @@ from .notes import memory_index_note, per_agent_memory_note
 # copy before grafting the new agent's own. The inherited-memory note is
 # `on_fork` for the same reason: the source's history carries the blocks read
 # from the SOURCE's chain, which is not the new agent's chain.
-register_context_note(rank=RANK_CLUSTER_MEMORY)(memory_index_note)
-register_context_note(on_fork=True, rank=RANK_PER_AGENT_MEMORY)(per_agent_memory_note)
-register_context_note(on_fork=True, rank=RANK_INHERITED_MEMORY)(inherited_memory_note)
 
 
 # ── Memory discipline (system prompt section) ──────────────────────────
@@ -165,7 +157,6 @@ stale — fix it at the source. A checked-in doc the code contradicts is worth
 reporting, not silently working around."""
 
 
-@register_system_prompt_section
 def memory_discipline_section(slices: AgentSlices) -> str:
     """Toggle via settings.agent.prompt_memory_behavior_enabled (env
     AVA_SYSTEM_PROMPT_MEMORY, default on). Empty when both stores are switched
@@ -259,3 +250,15 @@ class _PassiveMemoryRecallHook(Hook):
 
 passive_memory_recall_before_llm = _PassiveMemoryRecallHook()
 register_before_llm(passive_memory_recall_before_llm)
+
+
+def contribute() -> PluginContributions:
+    """What this plugin declares for the agent runtime."""
+    return PluginContributions(
+        system_prompt_sections=(memory_discipline_section,),
+        context_notes=(
+            ContextNote(memory_index_note, rank=RANK_CLUSTER_MEMORY),
+            ContextNote(per_agent_memory_note, on_fork=True, rank=RANK_PER_AGENT_MEMORY),
+            ContextNote(inherited_memory_note, on_fork=True, rank=RANK_INHERITED_MEMORY),
+        ),
+    )

@@ -24,6 +24,12 @@ from base.agents.context import AvaContext
 from base.config import settings
 from base.db import create_agent
 from base.host.env.agent_slices import AgentSlices
+from base.packages.plugins.extensions import (
+    EMPTY,
+    ContextNote,
+    ExtensionRegistry,
+    PluginContributions,
+)
 from base.paths import skills_dir
 
 
@@ -31,7 +37,9 @@ def _config(tid: int) -> RunnableConfig:
     return {"configurable": {"thread_id": str(tid)}}
 
 
-def _runtime(ops_pool: AsyncConnectionPool | None) -> Runtime[AvaContext]:
+def _runtime(
+    ops_pool: AsyncConnectionPool | None, extensions: ExtensionRegistry = EMPTY
+) -> Runtime[AvaContext]:
     """`ops_pool=None` takes the container path."""
     return Runtime(
         context=AvaContext(
@@ -39,6 +47,7 @@ def _runtime(ops_pool: AsyncConnectionPool | None) -> Runtime[AvaContext]:
             llm=AsyncMock(),
             event_publisher=MagicMock(),
             agent=AgentSlices.resolve(),
+            extensions=extensions,
         )
     )
 
@@ -55,7 +64,7 @@ def _fake_notes(monkeypatch: pytest.MonkeyPatch, *tags: str) -> list[HumanMessag
     depend on which layers happen to be enabled in the test environment."""
     notes = [_note(t) for t in tags]
 
-    def fake_notes(_slices: AgentSlices) -> list[HumanMessage]:
+    def fake_notes(_extensions: ExtensionRegistry, _slices: AgentSlices) -> list[HumanMessage]:
         return list(notes)
 
     monkeypatch.setattr("agent.graph._init_context.context_notes", fake_notes)
@@ -88,6 +97,42 @@ async def test_empty_window_lays_down_system_prompt_then_notes(
     assert str(msgs[0].content) != ""  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
     assert msgs[1:] == notes
     assert cmd.goto == "claim"
+
+
+async def test_a_plugin_declaration_reaches_the_head_through_the_context_registry(
+    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool
+) -> None:
+    """A plugin's declared section and note are laid down because the turn's context carries its
+    registry — and are absent from a context that carries none."""
+    tid = create_agent(db_conn)
+
+    def plugin_section(_slices: AgentSlices) -> str:
+        return "## Declared by a plugin"
+
+    def plugin_note(_slices: AgentSlices) -> HumanMessage:
+        return _note("declared")
+
+    registry = ExtensionRegistry(
+        (
+            (
+                "demo",
+                PluginContributions(
+                    system_prompt_sections=(plugin_section,),
+                    context_notes=(ContextNote(plugin_note),),
+                ),
+            ),
+        )
+    )
+
+    with_plugin = await init_context_node(AgentState(), _runtime(aops_pool, registry), _config(tid))
+    without = await init_context_node(AgentState(), _runtime(aops_pool), _config(tid))
+
+    declared: list[AnyMessage] = with_plugin.update["messages"]  # type: ignore[index]
+    bare: list[AnyMessage] = without.update["messages"]  # type: ignore[index]
+    assert "## Declared by a plugin" in str(declared[0].content)  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
+    assert "declared" in _tags(declared)  # pyright: ignore[reportUnknownArgumentType]
+    assert "## Declared by a plugin" not in str(bare[0].content)  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
+    assert "declared" not in _tags(bare)  # pyright: ignore[reportUnknownArgumentType]
 
 
 async def test_intact_window_is_a_pass_through(
