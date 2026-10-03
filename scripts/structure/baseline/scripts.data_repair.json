@@ -1,8 +1,0 @@
-{
-  "complexity": {
-    "scripts/data_repair/migrate_skill_identity.py::main": 23
-  },
-  "patch_targets": {
-    "scripts/data_repair/tests/test_migrate_skill_identity.py::base.packages.extensions.install_registry._REGISTRY_LOCK_TIMEOUT_S": 1
-  }
-}
