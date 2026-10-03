@@ -19,10 +19,11 @@ from base.lm.provider_api import (
     PriceRates,
     PriceTier,
     ProviderBinding,
-    register,
+    ProviderContribution,
     require_key,
 )
 from base.lm.registry import ModelSpec, ModelTuning
+from base.packages.plugins.extensions import PluginContributions
 
 _QWEN_EFFORT_LEVELS = ("none", "high")
 
@@ -106,8 +107,8 @@ def build(ctx: BuildContext) -> BaseChatModel:
     )
 
 
-register(
-    ProviderBinding(
+PROVIDER = ProviderContribution(
+    binding=ProviderBinding(
         prefix="qwen3.8-",
         provider_key="qwen",
         display_name="Alibaba",
@@ -267,3 +268,8 @@ register(
         ),
     },
 )
+
+
+def contribute() -> PluginContributions:
+    """What this plugin declares: its model provider."""
+    return PluginContributions(providers=(PROVIDER,))

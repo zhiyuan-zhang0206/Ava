@@ -1,12 +1,14 @@
-"""Provider plugin contract — what a plugin's ``provider.py`` registers against.
+"""Provider plugin contract — what a plugin's ``provider.py`` declares.
 
 A provider plugin makes one more vendor's models *nameable*. It never decides
 which model an agent runs on — no routing, no fallback, no per-turn hook
 (``base/lm/model-providers-as-plugins.md``,
-``decisions/2026-07-29-no-runtime-model-routing.md``). Registration happens
-once per process, before the first build / spawn validation / model list
-(``base/lm/plugin_providers.py`` loads every enabled plugin's
-``provider.py``); the prefix map is flat — a duplicate prefix, or one that
+``decisions/2026-07-29-no-runtime-model-routing.md``). A ``provider.py`` registers nothing: it
+exports ``contribute()`` returning a ``PluginContributions`` whose ``providers`` hold one
+``ProviderContribution`` each (the binding, the model rows and the prices). The one writer of the
+process's model catalog is ``base/lm/plugin_providers.py``, which loads every enabled plugin's
+``provider.py`` once per process, before the first build / spawn validation / model list, and
+installs each declaration through ``install_provider``; the prefix map is flat — a duplicate prefix, or one that
 nests inside another (``foo-`` vs ``foo-bar-``), fails fast at registration.
 Core registers no providers; enabled plugins are the sole source of bindings,
 chat-model rows, provider vocabularies, media fallbacks, keys, and live prices.
@@ -217,8 +219,6 @@ class _ProviderRegistry:
 
 REGISTRY = _ProviderRegistry()
 
-_CURRENT_PLUGIN: str | None = None
-
 
 def _check_prefix(
     prefix: str,
@@ -282,7 +282,7 @@ def require_key(key_env: str) -> str:
 
 
 class ProviderRegistrationError(ValueError):
-    """A `register()` call violated the provider-registration contract — a
+    """An `install_provider()` call violated the provider-registration contract — a
     duplicate or nested prefix, a model/binding mismatch, an unpriced spawnable
     model, malformed price data.
 
@@ -294,24 +294,31 @@ class ProviderRegistrationError(ValueError):
     """
 
 
-def register(
-    binding: ProviderBinding,
-    *,
-    models: Mapping[str, ModelSpec],
-    pricing: Mapping[str, PriceRates],
-) -> None:
-    """The one entry point a provider.py calls. Order matters: models validate
-    before prices mutate runtime state, then the stop vocabulary and binding
-    land.
+@dataclass(frozen=True)
+class ProviderContribution:
+    """What one provider plugin declares: the dispatch binding, the chat-model rows it owns and
+    their live prices. A `provider.py` returns these from `contribute()`
+    (`PluginContributions.providers`); `install_provider` is the only thing that acts on them."""
 
-    A contract violation raises `ProviderRegistrationError` (a ValueError):
-    registration is fail-fast, not best-effort, and the loader propagates this
-    class instead of containing it — the flat maps cannot pick a winner
-    between two claimants. An arbitrary exception from the module around this
-    call is the loader's business, not this function's.
+    binding: ProviderBinding
+    models: Mapping[str, ModelSpec]
+    pricing: Mapping[str, PriceRates]
+
+
+def install_provider(plugin: str, contribution: ProviderContribution) -> None:
+    """Install one declared provider into the process's model catalog. Order matters: models
+    validate before prices mutate runtime state, then the stop vocabulary and binding land.
+
+    Only `base/lm/plugin_providers.py` calls this. A contract violation raises
+    `ProviderRegistrationError` (a ValueError): installation is fail-fast, not best-effort, and
+    the loader propagates this class instead of containing it — the flat maps cannot pick a winner
+    between two claimants. An arbitrary exception from the module around this call is the
+    loader's business, not this function's.
     """
     try:
-        _register_contract(binding, models=models, pricing=pricing)
+        _register_contract(
+            plugin, contribution.binding, models=contribution.models, pricing=contribution.pricing
+        )
     except (KeyboardInterrupt, SystemExit):
         raise
     except ProviderRegistrationError:
@@ -321,13 +328,13 @@ def register(
 
 
 def _register_contract(
+    plugin: str,
     binding: ProviderBinding,
     *,
     models: Mapping[str, ModelSpec],
     pricing: Mapping[str, PriceRates],
 ) -> None:
-    """The registration sequence `register()` guards — see its docstring."""
-    plugin = _CURRENT_PLUGIN or "<unknown>"
+    """The installation sequence `install_provider()` guards — see its docstring."""
     REGISTRY.ensure_available(binding, plugin=plugin)
     provider = binding.provider_key or binding.prefix.rstrip("-")
 

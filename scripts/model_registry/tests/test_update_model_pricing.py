@@ -43,10 +43,16 @@ _DEEPSEEK_TABLE = """
 </main></html>
 """
 
-_PLUGIN_SOURCE = """from base.lm.provider_api import PricePeriod, PriceRates, PriceTier, PriceWindow, register
+_PLUGIN_SOURCE = """from base.lm.provider_api import (
+    PricePeriod,
+    PriceRates,
+    PriceTier,
+    PriceWindow,
+    ProviderContribution,
+)
 
-register(
-    None,
+PROVIDER = ProviderContribution(
+    binding=None,
     models={"fixture-model": None},
     pricing={
         "fixture-model": PriceRates(

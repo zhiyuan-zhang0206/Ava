@@ -23,11 +23,12 @@ from base.lm.provider_api import (
     PriceRates,
     PriceTier,
     ProviderBinding,
-    register,
+    ProviderContribution,
     require_key,
 )
 from base.lm.registry import ModelSpec, ModelTuning
 from base.lm.stop import StopSpec
+from base.packages.plugins.extensions import PluginContributions
 
 _KIMI_EFFORT_LEVELS = ("low", "high", "max")
 
@@ -76,8 +77,8 @@ def build(ctx: BuildContext) -> BaseChatModel:
     )
 
 
-register(
-    ProviderBinding(
+PROVIDER = ProviderContribution(
+    binding=ProviderBinding(
         prefix="kimi-",
         display_name="Moonshot",
         key_env="MOONSHOT_API_KEY",
@@ -152,3 +153,8 @@ register(
         ),
     },
 )
+
+
+def contribute() -> PluginContributions:
+    """What this plugin declares: its model provider."""
+    return PluginContributions(providers=(PROVIDER,))
