@@ -16,6 +16,9 @@ on:
 permissions:
   contents: read
 
+env:
+  UV_FROZEN: "1"
+
 concurrency:
   group: visual-baselines-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'push' }}

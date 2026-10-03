@@ -82,6 +82,8 @@ env:
   # restore that behavior; all routing below derives from this one value.
   # See conventions/test-selection.md.
   TEST_SELECTION_MODE: "enforce"
+  # uv reads UV_FROZEN=1 as --frozen: CI never rewrites uv.lock; a stale lock fails the run.
+  UV_FROZEN: "1"
 
 concurrency:
   # Reruns retain the original ref/SHA. Isolate immutable heads so a stale
@@ -397,6 +399,9 @@ jobs:
 
       - name: Install Python deps
         uses: ./.github/actions/uv-sync
+
+      - name: Verify uv.lock is fresh
+        run: uv lock --check
 
       - name: Vendored Postgres runtime (production's server build)
         uses: ./.github/actions/vendor-pg-runtime

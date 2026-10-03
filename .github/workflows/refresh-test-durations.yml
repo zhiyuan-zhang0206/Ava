@@ -22,6 +22,9 @@ permissions:
   contents: write
   pull-requests: write
 
+env:
+  UV_FROZEN: "1"
+
 concurrency:
   group: refresh-test-durations
   cancel-in-progress: false
