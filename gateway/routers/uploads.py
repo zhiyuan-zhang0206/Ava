@@ -55,37 +55,47 @@ from gateway.schemas.uploads import UploadedBatch, UploadedFile
 
 _log = logging.getLogger(__name__)
 
-# Cache idle locks only. A held lock or one with queued waiters remains until a
-# later lookup can evict it safely, so two uploads for one agent never split
-# across mutexes.
-_AGENT_LOCK_CACHE_MAX_ENTRIES = 4096
-_agent_locks: OrderedDict[int, asyncio.Lock] = OrderedDict()
-_locks_guard = asyncio.Lock()
-
 router = APIRouter()
 
 type _UploadBatchItem = tuple[str, bytes, str]
 
 
-async def _agent_lock(agent_id: int) -> asyncio.Lock:
-    """Return the stable in-process lock serializing one agent's uploads."""
-    async with _locks_guard:
-        lock = _agent_locks.get(agent_id)
-        if lock is None:
-            while len(_agent_locks) >= _AGENT_LOCK_CACHE_MAX_ENTRIES:
-                for stale_agent_id, stale_lock in _agent_locks.items():
-                    waiters = stale_lock._waiters
-                    if stale_lock.locked() or waiters:
-                        continue
-                    del _agent_locks[stale_agent_id]
-                    break
-                else:
-                    break
-            lock = asyncio.Lock()
-            _agent_locks[agent_id] = lock
-        else:
-            _agent_locks.move_to_end(agent_id)
-        return lock
+class AgentUploadLocks:
+    """The stable in-process lock serializing one agent's uploads, one set per gateway process.
+
+    Built by the app lifespan. Only idle locks are evicted: a held lock or one with queued
+    waiters stays until a later lookup can evict it safely, so two uploads for one agent never
+    split across mutexes.
+    """
+
+    def __init__(self, *, max_entries: int = 4096) -> None:
+        self._max_entries = max_entries
+        self._locks: OrderedDict[int, asyncio.Lock] = OrderedDict()
+        self._guard = asyncio.Lock()
+
+    @property
+    def agent_ids(self) -> list[int]:
+        """The agents that currently have a cached lock, least recently used first."""
+        return list(self._locks)
+
+    async def lock_for(self, agent_id: int) -> asyncio.Lock:
+        async with self._guard:
+            lock = self._locks.get(agent_id)
+            if lock is None:
+                while len(self._locks) >= self._max_entries:
+                    for stale_agent_id, stale_lock in self._locks.items():
+                        waiters = stale_lock._waiters
+                        if stale_lock.locked() or waiters:
+                            continue
+                        del self._locks[stale_agent_id]
+                        break
+                    else:
+                        break
+                lock = asyncio.Lock()
+                self._locks[agent_id] = lock
+            else:
+                self._locks.move_to_end(agent_id)
+            return lock
 
 
 def _sweep_stale_upload_temps(temp_dir: Path) -> None:
@@ -220,7 +230,8 @@ async def upload_files(
 
     dest_dir = ensure_private_dir(agent_upload_dir(agent_id))
 
-    lock = await _agent_lock(agent_id)
+    upload_locks: AgentUploadLocks = request.app.state.upload_locks
+    lock = await upload_locks.lock_for(agent_id)
     async with lock:
         temp_dir = dest_dir / ".tmp"
         await asyncio.to_thread(_sweep_stale_upload_temps, temp_dir)

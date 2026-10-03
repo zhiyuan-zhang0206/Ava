@@ -194,7 +194,7 @@ async def test_generate_summary_emits_agent_billing_span(
 
     monkeypatch.setattr("base.lm.billing.vendor_of_model", vendor_of_model)
     monkeypatch.setattr("base.config.settings.observability.trace_enabled", True)
-    monkeypatch.setitem(tracing_mod._state, "initialized", True)
+    monkeypatch.setattr(tracing_mod, "is_initialized", lambda: True)
     monkeypatch.setattr(otel_trace, "get_tracer", lambda _name: tracer)  # pyright: ignore[reportUnknownArgumentType]
     response = AIMessage(
         content="a complete summary",

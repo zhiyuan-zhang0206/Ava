@@ -49,18 +49,6 @@ def _event(i: int, category: str = "log") -> telemetry.Event:
     )
 
 
-@pytest.fixture
-def tuned(monkeypatch: pytest.MonkeyPatch):
-    """Shrink the batching constants so tests stay fast."""
-
-    def _apply(batch: int = 10, interval: float = 0.05, maxsize: int = 100) -> None:
-        monkeypatch.setattr(emitter, "_BATCH_SIZE", batch)
-        monkeypatch.setattr(emitter, "_FLUSH_INTERVAL_S", interval)
-        monkeypatch.setattr(emitter, "_QUEUE_MAXSIZE", maxsize)
-
-    return _apply
-
-
 def test_sync_flushes_batch_held_by_drain_thread() -> None:
     """sync() must land a batch the drain thread already dequeued.
 
@@ -126,12 +114,11 @@ def _make_sink(
 # --- the regression: write amplification ---
 
 
-def test_many_records_cost_few_writes(tuned: Any) -> None:
+def test_many_records_cost_few_writes() -> None:
     """100 records must not become 100 round-trips.
 
     This is the assertion whose absence let the batching be deleted unnoticed.
     """
-    tuned(batch=10, interval=0.05)
     rec = _Recorder()
     sink = _make_sink(rec, batch=10, interval=0.05, maxsize=100)
     try:
@@ -149,9 +136,8 @@ def test_many_records_cost_few_writes(tuned: Any) -> None:
     assert len(rec.batches) <= 20, f"expected batched writes, got {len(rec.batches)}"
 
 
-def test_single_record_still_lands_within_the_interval(tuned: Any) -> None:
+def test_single_record_still_lands_within_the_interval() -> None:
     """Batching must not hold a lone record hostage waiting for a full batch."""
-    tuned(batch=10, interval=0.05)
     rec = _Recorder()
     sink = _make_sink(rec, batch=10, interval=0.05, maxsize=100)
     try:
@@ -162,9 +148,8 @@ def test_single_record_still_lands_within_the_interval(tuned: Any) -> None:
     assert [m.event_name for b in rec.batches for m in b] == ["kind-1"]
 
 
-def test_stop_flushes_what_is_buffered(tuned: Any) -> None:
+def test_stop_flushes_what_is_buffered() -> None:
     """A partial batch pending at teardown must not be dropped."""
-    tuned(batch=1000, interval=60.0)  # neither trigger can fire on its own
     rec = _Recorder()
     sink = _make_sink(rec, batch=1000, interval=60.0, maxsize=100)
     for i in range(5):
@@ -177,15 +162,12 @@ def test_stop_flushes_what_is_buffered(tuned: Any) -> None:
 # --- bounded queue ---
 
 
-def test_queue_is_bounded_and_counts_what_it_sheds(
-    tuned: Any, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_queue_is_bounded_and_counts_what_it_sheds(monkeypatch: pytest.MonkeyPatch) -> None:
     """A producer outrunning the drain thread sheds records, not memory.
 
     The drain thread is stalled so the queue genuinely fills; before this bound
     existed the same burst grew the agent process's heap without limit.
     """
-    tuned(batch=10, interval=0.05, maxsize=20)
     blocked = _Recorder()
 
     def _stalled(batch: list[Any]) -> None:
@@ -216,8 +198,7 @@ def test_queue_is_bounded_and_counts_what_it_sheds(
     assert sink._queue.qsize() <= 20, "queue grew past its bound"
 
 
-def test_nothing_is_dropped_when_the_drain_keeps_up(tuned: Any) -> None:
-    tuned(batch=10, interval=0.05, maxsize=1000)
+def test_nothing_is_dropped_when_the_drain_keeps_up() -> None:
     rec = _Recorder()
     sink = _make_sink(rec, batch=10, interval=0.05, maxsize=1000)
     try:

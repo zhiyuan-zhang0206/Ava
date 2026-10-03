@@ -234,10 +234,6 @@ ALLOWED: dict[str, tuple[Category, str]] = {
         "integration",
         "a real PgBouncer in front of a throwaway Postgres, exercised through the cli, the gateway and the ttl reaper: spans base, cli, gateway, services.ttl_reaper, no one of which may import all the others",
     ),
-    "tests/cli/test_schedules_cmd.py": (
-        "integration",
-        "each `ava schedules` verb against the gateway's /api/schedules routes: spans base, cli, gateway, no one of which may import all the others",
-    ),
     "tests/gateway/test_alerts_api.py": (
         "integration",
         "/api/alerts through the gateway app with the cli and ops alert writers: spans base, cli, gateway, ops, no one of which may import all the others",

@@ -431,6 +431,7 @@ check-typed-exception = true
 # ops CLI runs cron / curl — all hardcoded commands + static args;
 # S603 (subprocess untrusted input) is meaningless.
 "cli/commands/*.py" = ["S603"]
+"services/permissions_helper/tests/test_helper_retirement.py" = ["S603"]
 "services/healthchecks/*.py" = ["S603"]
 # ava_syntax_fix uses fullwidth chars in docstrings as examples of what the fixer targets,
 # and carries Chinese notes from data analysis of real error corpora.

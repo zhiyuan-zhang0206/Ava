@@ -144,7 +144,7 @@ def test_unpause_releases_undelivered_receipts(monkeypatch: pytest.MonkeyPatch) 
 
     from ops.cluster_pause import unpause_local_cluster
 
-    monkeypatch.setattr("ops.cluster_pause._unpause_local_cluster", MagicMock())
+    monkeypatch.setattr("base.deploy.state.host_deploy_state.set_posture", MagicMock())
     monkeypatch.setattr("ops.agent_pause.publish_inbound_wake", MagicMock())
     _hold_with(undelivered={7: "PoolTimeout"})
     unpause_local_cluster()

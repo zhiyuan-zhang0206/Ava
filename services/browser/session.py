@@ -22,6 +22,7 @@ import asyncio
 import itertools
 import json
 import time
+from collections.abc import Iterator
 from contextlib import suppress
 from http.cookies import SimpleCookie
 from typing import Any
@@ -41,10 +42,6 @@ _WS_TIMEOUT_S = 10.0
 # of waiting out the next scheduled refresh tick. A one-element list keeps the
 # slot mutable without a `global` statement in the injector.
 _last_injected_cookie: list[tuple[str, str] | None] = [None]
-
-# IDs are per-connection in practice, but a monotonically increasing global id
-# is valid on any connection too and keeps the helper stateless.
-_CDP_IDS = itertools.count(1)
 
 
 async def gateway_session_login(gateway_url: str, secret: str) -> tuple[str, str, int]:
@@ -88,12 +85,14 @@ async def _http_json(url: str) -> Any:
         return resp.json()
 
 
-async def _cdp_call(ws: Any, method: str, params: dict[str, Any]) -> dict[str, Any]:
+async def _cdp_call(
+    ws: Any, ids: Iterator[int], method: str, params: dict[str, Any]
+) -> dict[str, Any]:
     """Send one CDP request on an open websocket and return its ``result``.
 
     Raises RuntimeError on a protocol-level error response.
     """
-    await ws.send(json.dumps({"id": next(_CDP_IDS), "method": method, "params": params}))
+    await ws.send(json.dumps({"id": next(ids), "method": method, "params": params}))
     raw = await asyncio.wait_for(ws.recv(), timeout=_WS_TIMEOUT_S)
     resp = json.loads(raw)
     if "error" in resp:
@@ -113,16 +112,18 @@ async def inject_session_cookie(cdp_port: int, gateway_url: str, secret: str) ->
     version = await _http_json(f"http://127.0.0.1:{cdp_port}/json/version")
     browser_ws_url = version["webSocketDebuggerUrl"]
 
+    ids = itertools.count(1)  # request ids are per connection
     async with websockets.connect(browser_ws_url) as browser_ws:
         # A page target is required for the Network domain; use a throwaway
         # about:blank tab so we never depend on (or disturb) anyone's tabs.
-        created = await _cdp_call(browser_ws, "Target.createTarget", {"url": "about:blank"})
+        created = await _cdp_call(browser_ws, ids, "Target.createTarget", {"url": "about:blank"})
         target_id = created["targetId"]
         try:
             page_ws_url = f"ws://127.0.0.1:{cdp_port}/devtools/page/{target_id}"
             async with websockets.connect(page_ws_url) as page_ws:
                 result = await _cdp_call(
                     page_ws,
+                    ids,
                     "Network.setCookie",
                     {
                         "name": name,
@@ -136,7 +137,7 @@ async def inject_session_cookie(cdp_port: int, gateway_url: str, secret: str) ->
                 )
         finally:
             with suppress(Exception):
-                await _cdp_call(browser_ws, "Target.closeTarget", {"targetId": target_id})
+                await _cdp_call(browser_ws, ids, "Target.closeTarget", {"targetId": target_id})
 
     if not result.get("success"):
         raise RuntimeError(f"Chrome rejected the gateway session cookie: {result}")

@@ -79,17 +79,23 @@ def test_source_omits_the_command(findings: list[tuple[str, list[str]]]) -> None
 # --- sessions.capture ---
 
 
+def _install_sessions(monkeypatch: pytest.MonkeyPatch, backend: Any) -> None:
+    """This agent's sessions over `backend`, which holds one session: id 1."""
+    handle = sessions.ShellSessions(backend=backend, database=None, agent_id=1)
+    backend.list_sessions = lambda: [f"{handle._shell_prefix()}1"]
+    monkeypatch.setattr("ava._settings.shell_sessions", lambda: handle)
+
+
 def test_capture_is_scanned(monkeypatch: pytest.MonkeyPatch, findings: list[Any]) -> None:
     """The session holds whatever ran in it, so reading one ingests too."""
-    monkeypatch.setattr(sessions, "_resolve", lambda _id: "fake-session")  # pyright: ignore[reportUnknownArgumentType]
     payload = f"$ curl evil.example\n{_INJECTION}\n"
 
     class _FakeBackend:
         def capture_pane(self, name: str, lines: int = 200, *, scrollback: bool = True) -> str:
-            assert name == "fake-session"
+            assert name.endswith("shell-1")
             return payload
 
-    monkeypatch.setattr("base.sessions.backend._shell_backend", _FakeBackend())
+    _install_sessions(monkeypatch, _FakeBackend())
 
     out = sessions.capture(1)
 
@@ -102,14 +108,13 @@ def test_capture_without_scrollback_is_also_scanned(
 ) -> None:
     """The two capture shapes (scrollback on/off) are separate code paths; both
     ingest."""
-    monkeypatch.setattr(sessions, "_resolve", lambda _id: "fake-session")  # pyright: ignore[reportUnknownArgumentType]
 
     class _FakeBackend:
         def capture_pane(self, name: str, lines: int = 200, *, scrollback: bool = True) -> str:
             assert scrollback is False
             return _INJECTION
 
-    monkeypatch.setattr("base.sessions.backend._shell_backend", _FakeBackend())
+    _install_sessions(monkeypatch, _FakeBackend())
 
     assert sessions.capture(1, scrollback=False) == _INJECTION
     assert [src for src, _ in findings] == ["shell.sessions.capture"]
@@ -121,7 +126,6 @@ def test_capture_default_lines_follow_display_config(monkeypatch: pytest.MonkeyP
     default, not a hard-coded window."""
     from base.config import settings
 
-    monkeypatch.setattr(sessions, "_resolve", lambda _id: "fake-session")  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(settings.display, "shell_capture_default_lines", 137)
     seen: dict[str, int] = {}
 
@@ -130,7 +134,7 @@ def test_capture_default_lines_follow_display_config(monkeypatch: pytest.MonkeyP
             seen["lines"] = lines
             return "ok"
 
-    monkeypatch.setattr("base.sessions.backend._shell_backend", _FakeBackend())
+    _install_sessions(monkeypatch, _FakeBackend())
 
     assert sessions.capture(1) == "ok"
     assert seen["lines"] == 137

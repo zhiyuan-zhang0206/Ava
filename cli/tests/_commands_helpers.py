@@ -191,3 +191,16 @@ class _FakeResponse:
 def _patch_gateway_http(monkeypatch: pytest.MonkeyPatch) -> None:
     """Stub gateway URL/headers resolution so the HTTP helpers don't hit settings."""
     monkeypatch.setattr("base.cluster.machine.gateway_api_base", lambda: "http://gw:8000")
+
+
+def _assert_named_commands_parse(text: str) -> None:
+    """Every backticked `ava ...` command in an operator hint parses; none is a
+    bare `ava cluster update`, which requires a prepared release request."""
+    import re
+
+    from cli.parsers import build_parser
+
+    parser = build_parser()
+    for command in re.findall(r"`(ava [^`]+)`", text):
+        parser.parse_args(command.split()[1:])  # SystemExit(2) fails the test
+    assert "ava cluster update" not in text

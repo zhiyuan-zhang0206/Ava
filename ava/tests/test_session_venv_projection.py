@@ -10,6 +10,7 @@ from pathlib import Path
 import pytest
 
 from ava.shell import sessions
+from ava.shell.tests.support import FakeDatabase
 from base.host.env import bootstrap, dotenv_boot
 
 
@@ -31,6 +32,10 @@ class _CapturingBackend:
         return True
 
 
+def _handle(backend: _CapturingBackend) -> sessions.ShellSessions:
+    return sessions.ShellSessions(backend=backend, database=FakeDatabase(), agent_id=42)
+
+
 def test_create_session_activates_only_checkout_cwds(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -47,9 +52,7 @@ def test_create_session_activates_only_checkout_cwds(
     outside.mkdir()
     backend = _CapturingBackend()
     activations: list[bool] = []
-    monkeypatch.setattr(sessions, "_next_session_index_from_db", lambda: 1)
-    monkeypatch.setattr(sessions, "_shell_prefix", lambda: "session-")
-    monkeypatch.setattr(sessions, "get_shell_backend", lambda: backend)
+    handle = _handle(backend)
     monkeypatch.setattr(sessions, "repo_root", lambda: checkout)
 
     def forward(*, activate_venv: bool = True) -> dict[str, str]:
@@ -58,15 +61,10 @@ def test_create_session_activates_only_checkout_cwds(
 
     monkeypatch.setattr(sessions, "forward_env_dict", forward)
 
-    # TTL registration needs the gateway DB — not this test's concern.
-    def _noop_record_ttl(_sid: int, _ttl: float) -> None:
-        return None
-
-    monkeypatch.setattr(sessions, "_record_ttl", _noop_record_ttl)
-    sessions.create_session("inside", cwd=str(inside), ttl=120)
-    sessions.create_session("sibling", cwd=str(sibling_worktree), ttl=120)
-    sessions.create_session("claude-sibling", cwd=str(claude_sibling_worktree), ttl=120)
-    sessions.create_session("outside", cwd=str(outside), ttl=120)
+    handle.create("inside", cwd=str(inside), ttl=120)
+    handle.create("sibling", cwd=str(sibling_worktree), ttl=120)
+    handle.create("claude-sibling", cwd=str(claude_sibling_worktree), ttl=120)
+    handle.create("outside", cwd=str(outside), ttl=120)
 
     assert activations == [True, False, False, False]
     assert backend.environments[0]["VIRTUAL_ENV"] == "/venv"
@@ -91,19 +89,14 @@ def test_watcher_override_reaches_backend_without_changing_generic_sessions(
     monkeypatch.setitem(os.environ, "AVA_CLUSTER_SECRET", "test-secret")
     monkeypatch.setenv("AVA_HOME", str(Path.home() / ".ava"))
     monkeypatch.setattr(watcher, "_agent_id", lambda: 42)
-    monkeypatch.setattr(sessions, "_next_session_index_from_db", lambda: 1)
-    monkeypatch.setattr(sessions, "_shell_prefix", lambda: "session-")
 
     def workspace_for_test(_agent_id: int) -> Path:
         return tmp_path
 
-    def record_no_ttl(_sid: int, _ttl: float) -> None:
-        return None
-
     monkeypatch.setattr(sessions, "workspace_dir", workspace_for_test)
     monkeypatch.setattr(sessions, "repo_root", lambda: tmp_path / "checkout")
-    monkeypatch.setattr(sessions, "_record_ttl", record_no_ttl)
     backend = _CapturingBackend()
+    monkeypatch.setattr("ava._settings.shell_sessions", lambda: _handle(backend))
 
     class _CapturedSessionError(RuntimeError):
         pass
@@ -115,7 +108,6 @@ def test_watcher_override_reaches_backend_without_changing_generic_sessions(
         raise _CapturedSessionError
 
     monkeypatch.setattr(backend, "new_session", capture_then_stop)
-    monkeypatch.setattr(sessions, "get_shell_backend", lambda: backend)
 
     with pytest.raises(_CapturedSessionError):
         watcher.launch("pass", "10s", name="env-probe")

@@ -139,7 +139,7 @@ def test_codex_supervisor_uses_projected_session_environment(
     unit_home: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The runner's real sessions.new path must remove an inherited foreign venv."""
-    from ava.shell import sessions
+    from ava.shell.tests.support import FakeDatabase
     from base.sessions.backend import PtySessionBackend
 
     owner = _owner(unit_home)
@@ -151,18 +151,12 @@ def test_codex_supervisor_uses_projected_session_environment(
     monkeypatch.setenv("HOME", str(unit_home))
     monkeypatch.setenv("VIRTUAL_ENV", str(unit_home / "foreign" / ".venv"))
     monkeypatch.setattr(codex.ava.agent_identity, "_agent_id", 41)
-    monkeypatch.setattr(sessions, "_next_session_index_from_db", lambda: 7)
-    monkeypatch.setattr(sessions, "_shell_prefix", lambda: "ava-agent-41-shell-")
+    monkeypatch.setattr("ava._settings.database", lambda: FakeDatabase(next_index=7))
 
     def workspace_for_owner(_agent_id: int) -> Path:
         return workspace
 
-    def record_no_ttl(_sid: int, _ttl: float) -> None:
-        return None
-
-    monkeypatch.setattr(sessions, "workspace_dir", workspace_for_owner)
-    monkeypatch.setattr(sessions, "get_shell_backend", lambda: backend)
-    monkeypatch.setattr(sessions, "_record_ttl", record_no_ttl)
+    monkeypatch.setattr("ava.shell.sessions.workspace_dir", workspace_for_owner)
 
     # Execute a probe in place of the long-running supervisor; session birth,
     # envfile transport, host fork, and shell command delivery remain real.

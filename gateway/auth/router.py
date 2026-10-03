@@ -25,10 +25,8 @@ from base.config import settings
 from gateway.auth.cors import session_cookie_secure
 from gateway.auth.request_principal import current_session_fact, login_mint, session_mints
 from gateway.auth.session_store import (
-    create_session,
     list_sessions,
     minted_session_id,
-    revoke_session,
     session_ids_with_suffix,
     session_mint,
 )
@@ -120,8 +118,7 @@ async def login(body: LoginRequest, request: Request) -> JSONResponse:
     session_id = minted_session_id(mint)
     ttl_seconds = settings.gateway.session_ttl_seconds
     await asyncio.to_thread(
-        create_session,
-        request.app.state.db_pool,
+        request.app.state.sessions.create,
         session_id,
         ttl_seconds,
         request.headers.get("user-agent", ""),
@@ -140,7 +137,7 @@ async def logout(request: Request) -> JSONResponse:
     """Revoke and clear the current session cookie; repeated calls are safe."""
     session_id = request.cookies.get(cookie_name())
     if session_id:
-        await asyncio.to_thread(revoke_session, request.app.state.db_pool, session_id)
+        await asyncio.to_thread(request.app.state.sessions.revoke, session_id)
     return JSONResponse(
         content={"ok": True},
         headers=clear_cookie_header(),
@@ -166,7 +163,7 @@ async def check(request: Request) -> JSONResponse:
     token = request.cookies.get(cookie_name())
     fact = await asyncio.to_thread(
         current_session_fact,
-        request.app.state.db_pool,
+        request.app.state.sessions,
         token,
         settings.data_plane.cluster_secret,
     )
@@ -232,7 +229,7 @@ async def revoke_other_session(session_id: str, request: Request) -> JSONRespons
             detail="current session must be revoked via logout",
         )
     pool = request.app.state.db_pool
-    revoked = await asyncio.to_thread(revoke_session, pool, session_id)
+    revoked = await asyncio.to_thread(request.app.state.sessions.revoke, session_id)
     if not revoked and len(session_id) == 8:
         # The masked suffix from the list — nothing else falls back here. The
         # current session is excluded: its only revocation path is logout, and
@@ -248,7 +245,7 @@ async def revoke_other_session(session_id: str, request: Request) -> JSONRespons
                 detail="session suffix is ambiguous",
             )
         if len(matches) == 1:
-            revoked = await asyncio.to_thread(revoke_session, pool, matches[0])
+            revoked = await asyncio.to_thread(request.app.state.sessions.revoke, matches[0])
     if not revoked:
         raise HTTPException(status_code=404, detail="session not found")
     return JSONResponse(content={"ok": True})

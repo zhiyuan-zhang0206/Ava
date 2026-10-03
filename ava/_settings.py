@@ -124,6 +124,28 @@ def bus() -> "EventBus":  # noqa: F821  # pyright: ignore[reportUndefinedVariabl
     return EventBus.from_settings()
 
 
+def shell_sessions() -> "ShellSessions":  # noqa: F821  # pyright: ignore[reportUndefinedVariable]
+    """This agent's persistent shell sessions, on the shell backend and the cluster database.
+
+    Raises RuntimeError when this process has no agent identity: shell sessions are an agent's,
+    so a standalone script that imports ava gets an explicit refusal, never another agent's or
+    a global's sessions."""
+    import ava.agent_identity
+    from ava.shell.sessions import ShellSessions
+    from base.sessions.backend import get_shell_backend
+
+    agent_id = ava.agent_identity.agent_id()
+    if agent_id is None:
+        raise RuntimeError(
+            "Cannot use shell sessions: this process has no agent identity. "
+            "ava.shell.sessions requires an agent process or a background "
+            "script launched by one (which receives the identity via "
+            "ava.agent_identity.establish). Running a standalone script that imports ava "
+            "does not set an agent identity."
+        )
+    return ShellSessions(backend=get_shell_backend(), database=database(), agent_id=agent_id)
+
+
 def _attached() -> tuple[Mapping[str, Any], Any] | None:
     """The pins and plugin-config view of the agent this process attached to (`ava.external`:
     one attachment per process), if any."""

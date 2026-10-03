@@ -28,9 +28,5 @@
   "files": {
     "base/lm/tests/test_llm_factory.py": 1689,
     "base/lm/tests/test_provider_plugins.py": 949
-  },
-  "patch_targets": {
-    "base/lm/tests/test_lm_billing.py::base.telemetry.tracing._state": 1,
-    "base/lm/tests/test_lm_call.py::base.telemetry.tracing._state": 1
   }
 }

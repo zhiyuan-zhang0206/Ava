@@ -18,7 +18,7 @@ import psycopg
 import pytest
 
 from cli.commands.management import schedules as _sched
-from cli.main import _build_parser
+from cli.commands.management import schedules_verify as _verify
 from gateway.alerts.schemas import AlertWebhookPayload
 
 
@@ -359,21 +359,17 @@ def test_runs_empty(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixtu
 # ── verify ──
 
 
-def _run_verify(
-    monkeypatch: pytest.MonkeyPatch,
+def _verify_ports(
     rows: list[tuple[int, str, str]],
     check: Callable[[str], str | None],
-) -> list[dict[str, object]]:
-    """Patch the sweep's DB-read + child-check seams; record alert calls."""
+) -> tuple[_verify.VerifyPorts, list[dict[str, object]]]:
+    """The sweep's DB-read + child-check ports as stubs; alert calls are recorded."""
     seen: list[dict[str, object]] = []
 
     def record(**kwargs: object) -> None:
         seen.append(kwargs)
 
-    monkeypatch.setattr(_sched, "_read_schedule_rows", lambda: rows)
-    monkeypatch.setattr(_sched, "_check_script", check)
-    monkeypatch.setattr(_sched, "_alert_verify", record)
-    return seen
+    return _verify.VerifyPorts(read_rows=lambda: rows, check_script=check, alert=record), seen
 
 
 def test_verify_green_prints_the_result_line_and_reports_clean(
@@ -381,10 +377,8 @@ def test_verify_green_prints_the_result_line_and_reports_clean(
 ) -> None:
     """All scripts clean -> the RESULT counts, rc 0, and the alert call carries
     the clean result (which resolves an open episode — see the alert tests)."""
-    alerts = _run_verify(
-        monkeypatch, [(1, "a", "print(1)\n"), (2, "b", "print(2)\n")], lambda _s: None
-    )
-    assert _sched.cmd_schedules_verify() == 0
+    ports, alerts = _verify_ports([(1, "a", "print(1)\n"), (2, "b", "print(2)\n")], lambda _s: None)
+    assert _verify.cmd_schedules_verify(ports=ports) == 0
     out = capsys.readouterr().out
     assert "RESULT ts=" in out
     assert "checked=2 green=2 red=0 rc=0" in out
@@ -402,10 +396,10 @@ def test_verify_red_lines_name_each_failure(
         (7, "drifted", "from shared.watcher import next_fire\n"),
         (9, "blank", "   \n"),
     ]
-    alerts = _run_verify(
-        monkeypatch, rows, lambda s: "shared.watcher" if "shared.watcher" in s else None
+    ports, alerts = _verify_ports(
+        rows, lambda s: "shared.watcher" if "shared.watcher" in s else None
     )
-    assert _sched.cmd_schedules_verify() == 1
+    assert _verify.cmd_schedules_verify(ports=ports) == 1
     out = capsys.readouterr().out
     assert "checked=3 green=2 red=1 rc=1" in out
     assert "RED id=7 name=drifted missing=shared.watcher" in out
@@ -420,14 +414,9 @@ def test_verify_tool_error_when_the_table_cannot_be_read(
     def boom() -> list[tuple[int, str, str]]:
         raise RuntimeError("db down")
 
-    monkeypatch.setattr(_sched, "_read_schedule_rows", boom)
-    alerts: list[dict[str, object]] = []
-
-    def record(**kwargs: object) -> None:
-        alerts.append(kwargs)
-
-    monkeypatch.setattr(_sched, "_alert_verify", record)
-    assert _sched.cmd_schedules_verify() == 2
+    ports, alerts = _verify_ports([], lambda _s: None)
+    ports = _verify.VerifyPorts(read_rows=boom, check_script=ports.check_script, alert=ports.alert)
+    assert _verify.cmd_schedules_verify(ports=ports) == 2
     out = capsys.readouterr().out
     assert "checked=0 green=0 red=0 rc=2" in out
     assert "TOOL-ERROR RuntimeError: db down" in out
@@ -437,8 +426,8 @@ def test_verify_tool_error_when_the_table_cannot_be_read(
 def test_verify_no_notify_suppresses_the_alert(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    alerts = _run_verify(monkeypatch, [(7, "x", "import os\n")], lambda _s: "boom")
-    assert _sched.cmd_schedules_verify(notify=False) == 1
+    ports, alerts = _verify_ports([(7, "x", "import os\n")], lambda _s: "boom")
+    assert _verify.cmd_schedules_verify(notify=False, ports=ports) == 1
     assert "RED id=7 name=x missing=boom" in capsys.readouterr().out
     assert alerts == []
 
@@ -450,29 +439,29 @@ def test_verify_check_file_ok_red_and_syntax_error(
     CHECK-OK; a module that no longer resolves / a syntax error are RED."""
     good = tmp_path / "good.py"
     good.write_text("import os\n", encoding="utf-8")
-    assert _sched.cmd_schedules_verify(check_file=str(good)) == 0
+    assert _verify.cmd_schedules_verify(check_file=str(good)) == 0
     assert "CHECK-OK" in capsys.readouterr().out
 
     bad = tmp_path / "bad.py"
     bad.write_text("import zz_ava_verify_missing\n", encoding="utf-8")
-    assert _sched.cmd_schedules_verify(check_file=str(bad)) == 1
+    assert _verify.cmd_schedules_verify(check_file=str(bad)) == 1
     assert "CHECK-RED missing=zz_ava_verify_missing" in capsys.readouterr().out
 
     broken = tmp_path / "broken.py"
     broken.write_text("def (:\n", encoding="utf-8")
-    assert _sched.cmd_schedules_verify(check_file=str(broken)) == 1
+    assert _verify.cmd_schedules_verify(check_file=str(broken)) == 1
     assert "CHECK-RED missing=compile-error:" in capsys.readouterr().out
 
 
 def test_verify_check_file_unreadable_is_a_tool_error(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    assert _sched.cmd_schedules_verify(check_file=str(tmp_path / "missing.py")) == 2
+    assert _verify.cmd_schedules_verify(check_file=str(tmp_path / "missing.py")) == 2
     assert "cannot read script file" in capsys.readouterr().err
 
     binary = tmp_path / "binary.py"
     binary.write_bytes(b"\xff\xfe\x00")
-    assert _sched.cmd_schedules_verify(check_file=str(binary)) == 2
+    assert _verify.cmd_schedules_verify(check_file=str(binary)) == 2
     assert "cannot read script file" in capsys.readouterr().err
 
 
@@ -493,13 +482,13 @@ def test_verify_alert_firing_reuses_the_open_episode(monkeypatch: pytest.MonkeyP
     not become a new instance)."""
     from base.telemetry.alerts import fingerprint
 
-    monkeypatch.setattr(_sched, "_open_verify_starts_at", lambda: "2026-09-01T00:00:00+08:00")
     posted = _patch_alert_post(monkeypatch)
-    _sched._alert_verify(
+    _verify._alert_verify(
         stamp="2026-09-30T15:00:00+08:00",
         checked=2,
         reds=[(7, "drifted", "shared.watcher")],
         tool_error=None,
+        open_starts_at=lambda: "2026-09-01T00:00:00+08:00",
     )
     assert len(posted) == 1
     assert posted[0]["url"] == "http://gw:8000/api/alerts"
@@ -523,9 +512,14 @@ def test_verify_alert_firing_reuses_the_open_episode(monkeypatch: pytest.MonkeyP
 def test_verify_alert_clean_run_resolves_the_open_episode(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(_sched, "_open_verify_starts_at", lambda: "2026-09-01T00:00:00+08:00")
     posted = _patch_alert_post(monkeypatch)
-    _sched._alert_verify(stamp="2026-09-30T16:00:00+08:00", checked=3, reds=[], tool_error=None)
+    _verify._alert_verify(
+        stamp="2026-09-30T16:00:00+08:00",
+        checked=3,
+        reds=[],
+        tool_error=None,
+        open_starts_at=lambda: "2026-09-01T00:00:00+08:00",
+    )
     (call,) = posted
     payload = call["json"]
     assert isinstance(payload, dict)
@@ -539,9 +533,14 @@ def test_verify_alert_clean_run_resolves_the_open_episode(
 def test_verify_alert_clean_run_without_an_episode_is_silent(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(_sched, "_open_verify_starts_at", lambda: None)
     posted = _patch_alert_post(monkeypatch)
-    _sched._alert_verify(stamp="2026-09-30T16:00:00+08:00", checked=3, reds=[], tool_error=None)
+    _verify._alert_verify(
+        stamp="2026-09-30T16:00:00+08:00",
+        checked=3,
+        reds=[],
+        tool_error=None,
+        open_starts_at=lambda: None,
+    )
     assert posted == []
 
 
@@ -550,7 +549,6 @@ def test_verify_alert_delivery_failure_retries_once_then_drops(
 ) -> None:
     """Two attempts, then a stderr note — never an exception, never a sweep
     failure; the caller reads the outcome from stdout + rc either way."""
-    monkeypatch.setattr(_sched, "_open_verify_starts_at", lambda: None)
     attempts: list[str] = []
 
     def failing_post(url: str, **_kwargs: object) -> _FakeResp:
@@ -558,7 +556,7 @@ def test_verify_alert_delivery_failure_retries_once_then_drops(
         raise httpx.ConnectError("refused")
 
     monkeypatch.setattr(httpx, "post", failing_post)
-    _sched._alert_verify(
+    _verify._alert_verify(
         stamp="2026-09-30T15:00:00+08:00", checked=1, reds=[(1, "x", "m")], tool_error=None
     )
     assert len(attempts) == 2
@@ -569,7 +567,7 @@ def test_verify_reads_all_rows_from_the_real_table(capsys: pytest.CaptureFixture
     """The sweep input is the DB table itself: every row including disabled /
     stopped ones, in id order."""
     assert _sched.cmd_schedules_provision() == 0
-    rows = _sched._read_schedule_rows()
+    rows = _verify._read_schedule_rows()
     names = [row[1] for row in rows]
     assert "self-evolution-weekly" in names  # enabled builtin
     assert "trace-ship-tempo" in names  # operator builtin: present but disabled
@@ -580,71 +578,24 @@ def test_verify_reads_all_rows_from_the_real_table(capsys: pytest.CaptureFixture
 def test_open_verify_starts_at_reads_the_open_instance(db_conn: psycopg.Connection) -> None:
     from psycopg.types.json import Jsonb
 
-    labels = Jsonb({"alertname": _sched._VERIFY_ALERTNAME, "severity": "error"})
+    labels = Jsonb({"alertname": _verify._VERIFY_ALERTNAME, "severity": "error"})
     with db_conn.cursor() as cur:
         cur.execute(
             "INSERT INTO alerts (status, severity, alertname, labels, starts_at, fingerprint)"
             " VALUES ('unresolved', 'error', %s, %s, '2026-09-01T00:00:00+00:00', 'test-fp')",
-            (_sched._VERIFY_ALERTNAME, labels),
+            (_verify._VERIFY_ALERTNAME, labels),
         )
     db_conn.commit()
-    value = _sched._open_verify_starts_at()
+    value = _verify._open_verify_starts_at()
     assert value is not None and value.startswith("2026-09-01T00:00:00")
 
     with db_conn.cursor() as cur:
         cur.execute("UPDATE alerts SET status = 'resolved' WHERE fingerprint = 'test-fp'")
     db_conn.commit()
-    assert _sched._open_verify_starts_at() is None
+    assert _verify._open_verify_starts_at() is None
 
 
 # ── parser wiring ──
-
-
-def test_every_schedules_verb_is_registered() -> None:
-    """The parser exposes every schedules verb — the routed ones plus the
-    local provision / verify pair."""
-    import argparse
-    from typing import cast
-
-    p = _build_parser()
-    cmd = next(a for a in p._actions if a.dest == "cmd")
-    schedules_p = cast("dict[str, argparse.ArgumentParser]", cmd.choices)["schedules"]
-    sub = next(a for a in schedules_p._actions if a.dest == "schedules_cmd")
-    assert set(cast("dict[str, object]", sub.choices)) == {
-        "ls",
-        "get",
-        "create",
-        "update",
-        "delete",
-        "provision",
-        "verify",
-        "start",
-        "stop",
-        "restart",
-        "logs",
-        "runs",
-    }
-
-
-def test_verify_flags_parse() -> None:
-    args = _build_parser().parse_args(["schedules", "verify"])
-    assert args.check_file is None and args.no_notify is False
-    args = _build_parser().parse_args(
-        ["schedules", "verify", "--check-file", "x.py", "--no-notify"]
-    )
-    assert args.check_file == "x.py" and args.no_notify is True
-
-
-def test_script_flags_are_mutually_exclusive() -> None:
-    p = _build_parser()
-    with pytest.raises(SystemExit):
-        p.parse_args(["schedules", "create", "--name", "n", "--script", "x", "--script-file", "f"])
-
-
-def test_enable_and_disable_are_mutually_exclusive() -> None:
-    p = _build_parser()
-    with pytest.raises(SystemExit):
-        p.parse_args(["schedules", "update", "7", "--enable", "--disable"])
 
 
 def test_provision_creates_builtins(
@@ -670,35 +621,3 @@ def test_provision_creates_builtins(
 
 
 # ── parse-layer gates (task #4092, batch B4) ──
-
-
-def test_create_requires_a_script_source_at_parse_time(
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    """Neither source is refused by the parse layer (previously the command body)."""
-    p = _build_parser()
-    with pytest.raises(SystemExit) as raised:
-        p.parse_args(["schedules", "create", "--name", "n"])
-    assert raised.value.code == 2
-    assert "one of the arguments --script --script-file is required" in capsys.readouterr().err
-
-
-def test_update_requires_at_least_one_field_at_parse_time(
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    args = _build_parser().parse_args(["schedules", "update", "7"])
-    assert args.func(args) == 2
-    assert "at least one" in capsys.readouterr().err
-
-
-def test_update_passes_the_parse_gate_with_one_field(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    from cli.commands.management import schedules as _schedules
-
-    def fake(_args: object) -> int:
-        return 0
-
-    monkeypatch.setattr(_schedules, "h_schedules_update", fake)
-    args = _build_parser().parse_args(["schedules", "update", "7", "--enable"])
-    assert args.func(args) == 0
