@@ -773,7 +773,7 @@ def test_wait_merge_trunk_submits_and_lands_when_green(no_sleep, poll, monkeypat
     monkeypatch.setenv("TRUNK_API_TOKEN", "test-token")
     monkeypatch.setattr(ci_utils.subprocess, "run", _gh_runner(gh_calls))
     monkeypatch.setattr(
-        ci_utils.urllib.request,
+        urllib.request,
         "urlopen",
         _urlopen_sequence(
             [
@@ -814,7 +814,7 @@ def test_wait_merge_trunk_failed_state_prints_full_payload(
     monkeypatch.setenv("TRUNK_API_TOKEN", "test-token")
     monkeypatch.setattr(ci_utils.subprocess, "run", _gh_runner([]))
     monkeypatch.setattr(
-        ci_utils.urllib.request,
+        urllib.request,
         "urlopen",
         _urlopen_sequence(
             [
@@ -838,7 +838,7 @@ def test_wait_merge_trunk_submit_failure_exits_four(no_sleep, poll, monkeypatch,
     monkeypatch.setenv("TRUNK_API_TOKEN", "test-token")
     monkeypatch.setattr(ci_utils.subprocess, "run", _gh_runner([]))
     monkeypatch.setattr(
-        ci_utils.urllib.request,
+        urllib.request,
         "urlopen",
         _urlopen_sequence(
             [
@@ -1098,7 +1098,7 @@ def test_queue_status_prints_state_and_items(monkeypatch, capsys) -> None:
     monkeypatch.setenv("TRUNK_API_TOKEN", "test-token")
     requests: list[urllib.request.Request] = []
     monkeypatch.setattr(
-        ci_utils.urllib.request,
+        urllib.request,
         "urlopen",
         _urlopen_sequence(
             [
@@ -1144,7 +1144,7 @@ def test_queue_status_prints_state_and_items(monkeypatch, capsys) -> None:
 def test_queue_status_empty_queue(monkeypatch, capsys) -> None:
     monkeypatch.setenv("TRUNK_API_TOKEN", "test-token")
     monkeypatch.setattr(
-        ci_utils.urllib.request,
+        urllib.request,
         "urlopen",
         _urlopen_sequence([_TrunkResponse({"state": "running", "enqueuedPullRequests": []})], []),
     )
@@ -1155,7 +1155,7 @@ def test_queue_status_empty_queue(monkeypatch, capsys) -> None:
 def test_queue_status_json_prints_raw_payload(monkeypatch, capsys) -> None:
     monkeypatch.setenv("TRUNK_API_TOKEN", "test-token")
     monkeypatch.setattr(
-        ci_utils.urllib.request,
+        urllib.request,
         "urlopen",
         _urlopen_sequence([_TrunkResponse({"state": "running", "enqueuedPullRequests": []})], []),
     )
@@ -1167,7 +1167,7 @@ def test_queue_status_json_prints_raw_payload(monkeypatch, capsys) -> None:
 def test_queue_status_api_error_exits_three(monkeypatch, capsys) -> None:
     monkeypatch.setenv("TRUNK_API_TOKEN", "test-token")
     monkeypatch.setattr(
-        ci_utils.urllib.request,
+        urllib.request,
         "urlopen",
         _urlopen_sequence([urllib.error.URLError("network down")], []),
     )
@@ -1185,7 +1185,7 @@ def test_evict_success_exits_zero(monkeypatch, capsys) -> None:
     monkeypatch.setenv("TRUNK_API_TOKEN", "test-token")
     requests: list[urllib.request.Request] = []
     monkeypatch.setattr(
-        ci_utils.urllib.request,
+        urllib.request,
         "urlopen",
         _urlopen_sequence([_TrunkResponse({})], requests),
     )
@@ -1213,7 +1213,7 @@ def test_evict_not_in_queue_exits_one(monkeypatch, capsys) -> None:
             None,
         )
     )
-    monkeypatch.setattr(ci_utils.urllib.request, "urlopen", _urlopen_sequence(responses, []))
+    monkeypatch.setattr(urllib.request, "urlopen", _urlopen_sequence(responses, []))
     assert ci_utils.main(["1877", "--evict"]) == 1
     assert "not in the Trunk merge queue" in capsys.readouterr().err
 
@@ -1221,7 +1221,7 @@ def test_evict_not_in_queue_exits_one(monkeypatch, capsys) -> None:
 def test_evict_api_error_exits_four(monkeypatch, capsys) -> None:
     monkeypatch.setenv("TRUNK_API_TOKEN", "test-token")
     monkeypatch.setattr(
-        ci_utils.urllib.request,
+        urllib.request,
         "urlopen",
         _urlopen_sequence([urllib.error.URLError("network down")], []),
     )
@@ -1434,7 +1434,7 @@ def test_diagnose_known_flake_matches_quarantined(diag_gh, monkeypatch, capsys) 
     check = "backend shard (4/16)"
     monkeypatch.setenv("TRUNK_API_TOKEN", "test-token")
     monkeypatch.setattr(
-        ci_utils.urllib.request,
+        urllib.request,
         "urlopen",
         _urlopen_sequence(
             [

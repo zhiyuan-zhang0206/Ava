@@ -1,17 +1,11 @@
 {
   "complexity": {
-    "scripts/ci_utils.py::_diagnose_pr": 27,
-    "scripts/ci_utils.py::_limbo_runs": 16,
-    "scripts/ci_utils.py::_wait_for_verdict": 23,
-    "scripts/ci_utils.py::check_ci": 18,
-    "scripts/pr_flow_export.py::collect_records": 18,
-    "scripts/pr_flow_export.py::compute_days": 15,
     "scripts/tcc-onboard-helper-grants.py::main": 45
   },
   "directories": {
     "scripts": 31
   },
   "files": {
-    "scripts/ci_utils.py": 2013
+    "scripts/ci_utils.py": 1561
   }
 }

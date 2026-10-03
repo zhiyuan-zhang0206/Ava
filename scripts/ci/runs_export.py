@@ -29,7 +29,7 @@ import subprocess
 import sys
 import time
 from collections import defaultdict
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 from datetime import time as day_time
@@ -376,6 +376,32 @@ def _runs_in_days(
     return result
 
 
+def _candidate_prs(
+    run: dict[str, Any],
+    by_number: dict[int, dict[str, Any]],
+    by_branch: dict[str, list[dict[str, Any]]],
+) -> list[dict[str, Any]]:
+    """The PRs a run may belong to: the trunk-merge synthetic branch's real PR, else its branch's."""
+    synthetic = trunk_merge_pr_number(run.get("head_branch"))
+    if synthetic is not None and synthetic in by_number:
+        return [by_number[synthetic]]
+    if isinstance(run.get("head_branch"), str):
+        return by_branch[run["head_branch"]]
+    return []
+
+
+def _attributed_pr(candidates: list[dict[str, Any]], created: datetime) -> dict[str, Any] | None:
+    """The latest-opened candidate whose branch life (with slack) contains the run's creation."""
+    valid = [
+        (opened, pr)
+        for pr in candidates
+        if (opened := parse_timestamp(pr.get("created_at"))) is not None
+        and (completed := _completed_at(pr)) is not None
+        and opened - timedelta(hours=2) <= created <= completed + timedelta(hours=1)
+    ]
+    return max(valid, key=lambda pair: pair[0])[1] if valid else None
+
+
 def attribute_runs(runs: Iterable[dict[str, Any]], prs: Iterable[dict[str, Any]]) -> dict[int, int]:
     """Return one best closed-PR attribution per run id, based on branch life."""
     by_number: dict[int, dict[str, Any]] = {}
@@ -393,27 +419,8 @@ def attribute_runs(runs: Iterable[dict[str, Any]], prs: Iterable[dict[str, Any]]
         created = parse_timestamp(run.get("created_at"))
         if not isinstance(identifier, int) or created is None:
             continue
-        candidates: list[dict[str, Any]] = []
-        synthetic = trunk_merge_pr_number(run.get("head_branch"))
-        if synthetic is not None and synthetic in by_number:
-            candidates = [by_number[synthetic]]
-        elif isinstance(run.get("head_branch"), str):
-            candidates = by_branch[run["head_branch"]]
-        valid = []
-        for pr in candidates:
-            opened = parse_timestamp(pr.get("created_at"))
-            completed = _completed_at(pr)
-            if opened is None or completed is None:
-                continue
-            if opened - timedelta(hours=2) <= created <= completed + timedelta(hours=1):
-                valid.append(pr)
-        if valid:
-            selected = max(
-                valid,
-                key=lambda pr: (
-                    parse_timestamp(pr.get("created_at")) or datetime.min.replace(tzinfo=UTC)
-                ),
-            )
+        selected = _attributed_pr(_candidate_prs(run, by_number, by_branch), created)
+        if selected is not None:
             attributed[identifier] = int(selected["number"])
     return attributed
 
@@ -451,6 +458,115 @@ def _flags(run: dict[str, Any], superseded: set[int], abandoned_shas: set[str]) 
     }
 
 
+def _abandoned_shas(prs: list[dict[str, Any]]) -> set[str]:
+    return {
+        str(pr["head_sha"])
+        for pr in prs
+        if pr.get("merged_at") is None and isinstance(pr.get("head_sha"), str)
+    }
+
+
+_DAY_FLAG_COUNTS = (
+    "instant_skip",
+    "watchdog",
+    "proof",
+    "superseded",
+    "superseded_zero",
+    "failed",
+    "retried_failed",
+    "self_healed",
+    "abandoned",
+    "zombie",
+)
+
+
+def _day_counts(
+    group: list[dict[str, Any]], flags: dict[int, dict[str, bool]], prs_completed: int
+) -> dict[str, Any]:
+    counts: dict[str, Any] = {
+        f"{name}_runs": sum(value[name] for value in flags.values()) for name in _DAY_FLAG_COUNTS
+    }
+    counts["runs"] = len(group)
+    counts["cancelled_runs"] = sum(run.get("conclusion") == "cancelled" for run in group)
+    counts["prs_completed"] = prs_completed
+    return counts
+
+
+def _day_shares(group: list[dict[str, Any]], flags: dict[int, dict[str, bool]]) -> dict[str, float]:
+    white = sum(
+        value["instant_skip"] or value["superseded"] or value["abandoned"]
+        for value in flags.values()
+    )
+    retried = sum(int(run.get("run_attempt") or 0) >= 2 for run in group)
+    noise = sum(value["watchdog"] or value["proof"] for value in flags.values())
+    return {
+        "white_run_share": round(white / len(group), 3),
+        "retry_share": round(retried / len(group), 3),
+        "noise_run_share": round(noise / len(group), 3),
+    }
+
+
+def _pr_figures(
+    pr_runs: list[dict[str, Any]], superseded: set[int], abandoned_shas: set[str]
+) -> tuple[float, int, bool]:
+    """One PR's wall minutes, executed-run count, and whether it passed first time."""
+    flagged = [(run, _flags(run, superseded, abandoned_shas)) for run in pr_runs]
+    ran = [
+        (run, f) for run, f in flagged if not (f["zombie"] or f["instant_skip"] or f["watchdog"])
+    ]
+    duration = sum((wall_seconds(run) or 0) / 60 for run, _ in ran)
+    executed = [run for run, f in ran if not f["proof"]]
+    first_pass = not any(
+        is_failed(run) or int(run.get("run_attempt") or 0) >= 2 for run in executed
+    )
+    return duration, len(executed), first_pass
+
+
+def _per_pr_stats(
+    per_pr: dict[int, list[dict[str, Any]]], superseded: set[int], abandoned_shas: set[str]
+) -> dict[str, Any]:
+    """Duration, run-count and first-pass statistics over one day's completed PRs."""
+    figures = [_pr_figures(pr_runs, superseded, abandoned_shas) for pr_runs in per_pr.values()]
+    durations = [duration for duration, _, _ in figures]
+    run_counts = [float(len(pr_runs)) for pr_runs in per_pr.values()]
+    executed = [float(count) for _, count, _ in figures]
+    return {
+        "per_pr_duration_median_minutes": percentile(durations, 0.5),
+        "per_pr_duration_p90_minutes": percentile(durations, 0.9),
+        "per_pr_runs_median": percentile(run_counts, 0.5),
+        "per_pr_runs_p90": percentile(run_counts, 0.9),
+        "per_pr_runs_executed_median": percentile(executed, 0.5),
+        "first_pass_pr_share": round(sum(first for _, _, first in figures) / len(per_pr), 3),
+    }
+
+
+def _by_day(
+    items: list[dict[str, Any]],
+    stamp: Callable[[dict[str, Any]], datetime | None],
+    days: list[date],
+    tz: ZoneInfo,
+) -> dict[date, list[dict[str, Any]]]:
+    grouped: dict[date, list[dict[str, Any]]] = {day: [] for day in days}
+    for item in items:
+        moment = stamp(item)
+        if moment is not None and (day := moment.astimezone(tz).date()) in grouped:
+            grouped[day].append(item)
+    return grouped
+
+
+def _runs_per_completed_pr(
+    completed_prs: list[dict[str, Any]],
+    run_pr: dict[int, int],
+    runs_by_id: dict[int, dict[str, Any]],
+) -> dict[int, list[dict[str, Any]]]:
+    numbers = {int(pr["number"]) for pr in completed_prs if isinstance(pr.get("number"), int)}
+    per_pr: dict[int, list[dict[str, Any]]] = defaultdict(list)
+    for identifier, number in run_pr.items():
+        if number in numbers and identifier in runs_by_id:
+            per_pr[number].append(runs_by_id[identifier])
+    return per_pr
+
+
 def daily_aggregates(
     runs: list[dict[str, Any]],
     prs: list[dict[str, Any]],
@@ -458,104 +574,23 @@ def daily_aggregates(
     tz: ZoneInfo,
 ) -> dict[str, dict[str, Any]]:
     """Compute day-labelled count, share, and per-completed-PR absolute state."""
-    by_day: dict[date, list[dict[str, Any]]] = {day: [] for day in days}
-    wanted = set(days)
-    for run in runs:
-        created = parse_timestamp(run.get("created_at"))
-        if created is not None and (stamped := created.astimezone(tz).date()) in wanted:
-            by_day[stamped].append(run)
-    abandoned_shas = {
-        str(pr["head_sha"])
-        for pr in prs
-        if pr.get("merged_at") is None and isinstance(pr.get("head_sha"), str)
-    }
+    by_day = _by_day(runs, lambda run: parse_timestamp(run.get("created_at")), days, tz)
+    prs_by_day = _by_day(prs, _completed_at, days, tz)
+    abandoned_shas = _abandoned_shas(prs)
     superseded = superseded_ids(runs)
     run_pr = attribute_runs(runs, prs)
     runs_by_id = {int(run["id"]): run for run in runs}
-    prs_by_day: dict[date, list[dict[str, Any]]] = {day: [] for day in days}
-    for pr in prs:
-        completed = _completed_at(pr)
-        if completed is not None and (stamped := completed.astimezone(tz).date()) in wanted:
-            prs_by_day[stamped].append(pr)
     result: dict[str, dict[str, Any]] = {}
     for day in days:
         group = by_day[day]
         flags = {int(run["id"]): _flags(run, superseded, abandoned_shas) for run in group}
-        entry: dict[str, Any] = {
-            "runs": len(group),
-            "instant_skip_runs": sum(value["instant_skip"] for value in flags.values()),
-            "watchdog_runs": sum(value["watchdog"] for value in flags.values()),
-            "proof_runs": sum(value["proof"] for value in flags.values()),
-            "cancelled_runs": sum(run.get("conclusion") == "cancelled" for run in group),
-            "superseded_runs": sum(value["superseded"] for value in flags.values()),
-            "superseded_zero_runs": sum(value["superseded_zero"] for value in flags.values()),
-            "failed_runs": sum(value["failed"] for value in flags.values()),
-            "retried_failed_runs": sum(value["retried_failed"] for value in flags.values()),
-            "self_healed_runs": sum(value["self_healed"] for value in flags.values()),
-            "abandoned_runs": sum(value["abandoned"] for value in flags.values()),
-            "zombie_runs": sum(value["zombie"] for value in flags.values()),
-            "prs_completed": len(prs_by_day[day]),
-        }
+        entry = _day_counts(group, flags, len(prs_by_day[day]))
         if group:
-            white = sum(
-                value["instant_skip"]
-                or (not value["instant_skip"] and value["superseded"])
-                or (not value["instant_skip"] and not value["superseded"] and value["abandoned"])
-                for value in flags.values()
-            )
-            entry["white_run_share"] = round(white / len(group), 3)
-            entry["retry_share"] = round(
-                sum(int(run.get("run_attempt") or 0) >= 2 for run in group) / len(group), 3
-            )
-            entry["noise_run_share"] = round(
-                sum(value["watchdog"] or value["proof"] for value in flags.values()) / len(group),
-                3,
-            )
-        completed_numbers = {
-            int(pr["number"]) for pr in prs_by_day[day] if isinstance(pr.get("number"), int)
-        }
-        per_pr: dict[int, list[dict[str, Any]]] = defaultdict(list)
-        for identifier, number in run_pr.items():
-            if number in completed_numbers and identifier in runs_by_id:
-                per_pr[number].append(runs_by_id[identifier])
+            entry.update(_day_shares(group, flags))
+        per_pr = _runs_per_completed_pr(prs_by_day[day], run_pr, runs_by_id)
         entry["prs_with_runs"] = len(per_pr)
         if per_pr:
-            durations: list[float] = []
-            run_counts: list[float] = []
-            executed_counts: list[float] = []
-            first_passes = 0
-            for pr_runs in per_pr.values():
-                pr_flags = {
-                    int(run["id"]): _flags(run, superseded, abandoned_shas) for run in pr_runs
-                }
-                duration = sum(
-                    (wall_seconds(run) or 0) / 60
-                    for run in pr_runs
-                    if not pr_flags[int(run["id"])]["zombie"]
-                    and not pr_flags[int(run["id"])]["instant_skip"]
-                    and not pr_flags[int(run["id"])]["watchdog"]
-                )
-                durations.append(duration)
-                run_counts.append(float(len(pr_runs)))
-                executed = [
-                    run
-                    for run in pr_runs
-                    if not pr_flags[int(run["id"])]["zombie"]
-                    and not pr_flags[int(run["id"])]["instant_skip"]
-                    and not pr_flags[int(run["id"])]["watchdog"]
-                    and not pr_flags[int(run["id"])]["proof"]
-                ]
-                executed_counts.append(float(len(executed)))
-                if not any(
-                    is_failed(run) or int(run.get("run_attempt") or 0) >= 2 for run in executed
-                ):
-                    first_passes += 1
-            entry["per_pr_duration_median_minutes"] = percentile(durations, 0.5)
-            entry["per_pr_duration_p90_minutes"] = percentile(durations, 0.9)
-            entry["per_pr_runs_median"] = percentile(run_counts, 0.5)
-            entry["per_pr_runs_p90"] = percentile(run_counts, 0.9)
-            entry["per_pr_runs_executed_median"] = percentile(executed_counts, 0.5)
-            entry["first_pass_pr_share"] = round(first_passes / len(per_pr), 3)
+            entry.update(_per_pr_stats(per_pr, superseded, abandoned_shas))
         result[day.isoformat()] = {key: value for key, value in entry.items() if value is not None}
     return result
 
@@ -564,11 +599,7 @@ def workflow_aggregates(
     runs: list[dict[str, Any]], prs: list[dict[str, Any]]
 ) -> dict[str, dict[str, Any]]:
     """Compute trailing-window workflow fragility stats and execution percentiles."""
-    abandoned_shas = {
-        str(pr["head_sha"])
-        for pr in prs
-        if pr.get("merged_at") is None and isinstance(pr.get("head_sha"), str)
-    }
+    abandoned_shas = _abandoned_shas(prs)
     superseded = superseded_ids(runs)
     run_pr = attribute_runs(runs, prs)
     completed_with_runs = set(run_pr.values())
@@ -579,33 +610,41 @@ def workflow_aggregates(
     for workflow, group in grouped.items():
         flags = [_flags(run, superseded, abandoned_shas) for run in group]
         appeared = {run_pr[int(run["id"])] for run in group if int(run["id"]) in run_pr}
-        entry: dict[str, Any] = {
-            "runs": len(group),
-            "failed_runs": sum(value["failed"] for value in flags),
-            "self_healed_runs": sum(value["self_healed"] for value in flags),
-            "retried_failed_runs": sum(value["retried_failed"] for value in flags),
-            "cancelled_runs": sum(run.get("conclusion") == "cancelled" for run in group),
-            "superseded_runs": sum(value["superseded"] for value in flags),
-            "instant_skip_runs": sum(value["instant_skip"] for value in flags),
-            "prs_appeared_on": len(appeared),
-        }
-        if completed_with_runs:
-            entry["pr_appearance_share"] = round(len(appeared) / len(completed_with_runs), 3)
-        if group:
-            entry["retry_share"] = round(
-                sum(int(run.get("run_attempt") or 0) >= 2 for run in group) / len(group), 3
-            )
-        execution = [
-            wall
-            for run in group
-            if not is_zombie(run)
-            if (wall := wall_seconds(run)) is not None and wall > _INSTANT_SKIP_SECONDS
-        ]
-        if execution:
-            entry["exec_median_seconds"] = percentile(execution, 0.5)
-            entry["exec_p90_seconds"] = percentile(execution, 0.9)
+        entry = _workflow_entry(group, flags, appeared, completed_with_runs)
         result[workflow] = {key: value for key, value in entry.items() if value is not None}
     return result
+
+
+_WORKFLOW_FLAG_COUNTS = ("failed", "self_healed", "retried_failed", "superseded", "instant_skip")
+
+
+def _workflow_entry(
+    group: list[dict[str, Any]],
+    flags: list[dict[str, bool]],
+    appeared: set[int],
+    completed_with_runs: set[int],
+) -> dict[str, Any]:
+    entry: dict[str, Any] = {
+        f"{name}_runs": sum(value[name] for value in flags) for name in _WORKFLOW_FLAG_COUNTS
+    }
+    entry["runs"] = len(group)
+    entry["cancelled_runs"] = sum(run.get("conclusion") == "cancelled" for run in group)
+    entry["prs_appeared_on"] = len(appeared)
+    if completed_with_runs:
+        entry["pr_appearance_share"] = round(len(appeared) / len(completed_with_runs), 3)
+    if group:
+        retried = sum(int(run.get("run_attempt") or 0) >= 2 for run in group)
+        entry["retry_share"] = round(retried / len(group), 3)
+    execution = [
+        wall
+        for run in group
+        if not is_zombie(run)
+        if (wall := wall_seconds(run)) is not None and wall > _INSTANT_SKIP_SECONDS
+    ]
+    if execution:
+        entry["exec_median_seconds"] = percentile(execution, 0.5)
+        entry["exec_p90_seconds"] = percentile(execution, 0.9)
+    return entry
 
 
 def collect_repo(

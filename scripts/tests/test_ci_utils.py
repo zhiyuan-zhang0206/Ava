@@ -114,7 +114,7 @@ def test_trunk_queue_submits_and_reports_merged(
     monkeypatch.setattr(ci_utils, "check_ci", _all_green)
     monkeypatch.setattr(ci_utils.subprocess, "run", _gh_runner(gh_calls))
     monkeypatch.setattr(
-        ci_utils.urllib.request,
+        urllib.request,
         "urlopen",
         _urlopen_sequence(
             [
@@ -162,7 +162,7 @@ def test_trunk_queue_reports_failed_state(
 ) -> None:
     requests: list[urllib.request.Request] = []
     monkeypatch.setattr(
-        ci_utils.urllib.request,
+        urllib.request,
         "urlopen",
         _urlopen_sequence([_TrunkResponse({"state": "failed", "reason": "red CI"})], requests),
     )
@@ -185,7 +185,7 @@ def test_trunk_queue_times_out_while_pending(
 ) -> None:
     requests: list[urllib.request.Request] = []
     monkeypatch.setattr(
-        ci_utils.urllib.request,
+        urllib.request,
         "urlopen",
         _urlopen_sequence([_TrunkResponse({"state": "testing"})], requests),
     )
@@ -207,7 +207,7 @@ def test_trunk_queue_stops_after_consecutive_status_errors(
 ) -> None:
     requests: list[urllib.request.Request] = []
     monkeypatch.setattr(
-        ci_utils.urllib.request,
+        urllib.request,
         "urlopen",
         _urlopen_sequence(
             [urllib.error.URLError("offline")] * ci_utils.MAX_CONSECUTIVE_ERRORS,
@@ -234,7 +234,7 @@ def test_trunk_submit_retries_once_after_an_http_error(
 ) -> None:
     requests: list[urllib.request.Request] = []
     monkeypatch.setattr(
-        ci_utils.urllib.request,
+        urllib.request,
         "urlopen",
         _urlopen_sequence(
             [_TrunkResponse({}, status=503), _TrunkResponse({"accepted": True})], requests
@@ -259,7 +259,7 @@ def test_trunk_submit_returns_enqueue_error_after_second_http_error(
 ) -> None:
     requests: list[urllib.request.Request] = []
     monkeypatch.setattr(
-        ci_utils.urllib.request,
+        urllib.request,
         "urlopen",
         _urlopen_sequence([_TrunkResponse({}, status=500)] * 2, requests),
     )
@@ -367,7 +367,7 @@ def test_trunk_flow_submits_without_reading_pr_labels(
     monkeypatch.setattr(ci_utils, "check_ci", _all_green)
     monkeypatch.setattr(ci_utils.subprocess, "run", _gh_runner(gh_calls))
     monkeypatch.setattr(
-        ci_utils.urllib.request,
+        urllib.request,
         "urlopen",
         _urlopen_sequence(
             [_TrunkResponse({"accepted": True}), _TrunkResponse({"state": "merged"})], requests
@@ -428,7 +428,7 @@ def test_trunk_submit_resumes_watch_on_real_http_409_error(
         _TrunkResponse({"state": "merged"}),
     ]
     monkeypatch.setattr(
-        ci_utils.urllib.request,
+        urllib.request,
         "urlopen",
         _urlopen_sequence(responses, requests),
     )
@@ -457,7 +457,7 @@ def test_trunk_watch_keeps_polling_through_testing_state(
     non-terminal (observed live 2026-09-03) — the watcher must keep polling."""
     requests: list[urllib.request.Request] = []
     monkeypatch.setattr(
-        ci_utils.urllib.request,
+        urllib.request,
         "urlopen",
         _urlopen_sequence(
             [
@@ -493,7 +493,7 @@ def test_trunk_flow_resumes_watch_when_submit_reports_already_queued(
     monkeypatch.setattr(ci_utils, "check_ci", _all_green)
     monkeypatch.setattr(ci_utils.subprocess, "run", _gh_runner(gh_calls))
     monkeypatch.setattr(
-        ci_utils.urllib.request,
+        urllib.request,
         "urlopen",
         _urlopen_sequence(
             [_TrunkResponse({}, status=409), _TrunkResponse({"state": "merged"})], requests
@@ -535,7 +535,7 @@ def test_trunk_submit_accepts_plain_text_ok_body(
     monkeypatch.setattr(ci_utils, "check_ci", _all_green)
     monkeypatch.setattr(ci_utils.subprocess, "run", _gh_runner(gh_calls))
     monkeypatch.setattr(
-        ci_utils.urllib.request,
+        urllib.request,
         "urlopen",
         _urlopen_sequence(
             [
@@ -596,7 +596,7 @@ def test_trunk_flow_warns_but_submits_when_base_lags_main(
         _trunk_runner(base_sha="a" * 40, main_sha="b" * 40, calls=calls),
     )
     monkeypatch.setattr(
-        ci_utils.urllib.request,
+        urllib.request,
         "urlopen",
         _urlopen_sequence(
             [_TrunkResponse({"accepted": True}), _TrunkResponse({"state": "merged"})], requests
@@ -631,7 +631,7 @@ def test_trunk_flow_refuses_when_require_fresh_base_and_stale(
         _trunk_runner(base_sha="a" * 40, main_sha="b" * 40, calls=calls),
     )
     monkeypatch.setattr(
-        ci_utils.urllib.request,
+        urllib.request,
         "urlopen",
         _urlopen_sequence(
             [_TrunkResponse({"accepted": True}), _TrunkResponse({"state": "merged"})], requests
@@ -666,7 +666,7 @@ def test_trunk_flow_skips_warning_when_base_is_current_main(
         _trunk_runner(base_sha="a" * 40, main_sha="a" * 40, calls=calls),
     )
     monkeypatch.setattr(
-        ci_utils.urllib.request,
+        urllib.request,
         "urlopen",
         _urlopen_sequence(
             [_TrunkResponse({"accepted": True}), _TrunkResponse({"state": "merged"})], requests
@@ -700,7 +700,7 @@ def test_trunk_flow_degrades_when_freshness_reads_fail(
         _trunk_runner(base_sha=None, main_sha=None, calls=calls),
     )
     monkeypatch.setattr(
-        ci_utils.urllib.request,
+        urllib.request,
         "urlopen",
         _urlopen_sequence(
             [_TrunkResponse({"accepted": True}), _TrunkResponse({"state": "merged"})], requests
@@ -734,7 +734,7 @@ def test_trunk_flow_warns_distinctly_when_require_mode_cannot_verify_freshness(
         _trunk_runner(base_sha=None, main_sha=None, calls=calls),
     )
     monkeypatch.setattr(
-        ci_utils.urllib.request,
+        urllib.request,
         "urlopen",
         _urlopen_sequence(
             [_TrunkResponse({"accepted": True}), _TrunkResponse({"state": "merged"})], requests
