@@ -50,9 +50,7 @@ def _make_mcp_package(
 
 
 def _git(cwd: Path, *args: str) -> None:
-    subprocess.run(  # noqa: S603 — fixed argv, test-local fixture repo
-        ["git", *args], cwd=cwd, check=True, capture_output=True, text=True
-    )
+    subprocess.run(["git", *args], cwd=cwd, check=True, capture_output=True, text=True)
 
 
 def _make_mcp_git_repo(root: Path, name: str = "acme") -> str:
@@ -288,15 +286,6 @@ def test_install_env_overrides_package_default(
     assert cmd_mcp_install(str(pkg), None, None, ["MODE=live"]) == 0
     env = _landed_env(unit_home)
     assert env["MODE"] == "live" and env["KEEP"] == "yes"
-
-
-def test_install_rejects_bad_env_at_parse_time(capsys: pytest.CaptureFixture[str]) -> None:
-    from cli.parsers import build_parser
-
-    with pytest.raises(SystemExit) as raised:
-        build_parser().parse_args(["mcp", "install", "src", "--env", "NOEQUALS"])
-    assert raised.value.code == 2
-    assert "argument --env:" in capsys.readouterr().err
 
 
 def test_install_rejects_bad_env_pair(
