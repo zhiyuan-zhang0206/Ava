@@ -28,7 +28,7 @@ import pytest
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
-from base.telemetry.metrics.plugin_metrics import MetricSpec, registered_metrics
+from base.telemetry.metrics.plugin_metrics import MetricSpec
 from gateway.app import app
 from gateway.inspect import _plugin_metrics
 from gateway.inspect._plugin_metrics import (
@@ -464,25 +464,10 @@ def test_metrics_logql_macro_translation_unit() -> None:
 
 
 def test_in_process_loader_imports_shipped_metrics() -> None:
-    """The loader imports every shipped plugin metrics.py under its plugin
-    context plus the core definition modules — plugin metrics first, then
-    core, the old snapshot's two-section order. No file involved."""
-    from base.packages.plugins.context import PluginContext
-    from base.telemetry.metrics.plugin_metrics import clear_registry
-
-    # Re-run the registrations fresh — earlier tests in the session may have
-    # cleared or reloaded the process-global registries (a module already in
-    # sys.modules must be reloaded, a fresh one only imported once).
-
-    clear_registry()
-    for name in ("ava_fleet", "ava_memory", "ava_syntax_fix"):
-        mod_name = f"ava_builtins.plugins.{name}.metrics"
-        mod = sys.modules.get(mod_name)
-        with PluginContext(name):
-            if mod is None:
-                importlib.import_module(mod_name)
-            else:
-                importlib.reload(mod)
+    """The loader imports every shipped plugin metrics.py, admits its
+    `contribute()` declaration into a data registry plus the core definition
+    modules — plugin metrics first, then core, the old snapshot's two-section
+    order. No file involved."""
     specs = _plugin_metrics._load_plugin_metrics()
 
     plugin_specs = [s for s in specs if s.plugin != "core"]
@@ -493,41 +478,92 @@ def test_in_process_loader_imports_shipped_metrics() -> None:
     # core section follows, plugin section first (old snapshot order)
     assert [s.plugin for s in specs].index("core") == len(plugin_specs)
     assert len(core_specs) >= 16
-    # a second call is the same objects (module cache, no re-registration)
+    # a second call rebuilds the same registry (no process-global state to double up)
     assert _plugin_metrics._load_plugin_metrics() == specs
 
 
-def test_in_process_loader_drops_partial_registrations_and_recovers(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, loguru_records: list[dict[str, Any]]
-) -> None:
-    """A metrics.py that raises after registering leaves nothing behind: the
-    loader drops the dying attempt's entries, so retrying a fixed file on the
-    next call registers cleanly instead of dying on DuplicateMetric
-    (fail-soft, user ruling 2026-09-11)."""
-    plugin_dir = tmp_path / "drop_partial"
+def _fixture_plugin(
+    root: Path, name: str, *, metric: str = "", raises: bool = False, query: str = _STAT_QUERY
+) -> Path:
+    """Write `<root>/<name>/metrics.py` declaring one inspector metric (and
+    optionally raising on import); returns the file."""
+    plugin_dir = root / name
     plugin_dir.mkdir()
     (plugin_dir / "__init__.py").write_text("", encoding="utf-8")
     metrics_py = plugin_dir / "metrics.py"
-    source = (
-        "from base.telemetry.metrics.plugin_metrics import MetricSpec, register_metric\n"
-        "register_metric(MetricSpec(name='drop_partial_one', title='Drop partial one', "
-        "event_name='task_update', category='audit', output=['inspector'], "
-        f"query={_STAT_QUERY!r}))\n"
+    metrics_py.write_text(
+        _fixture_metrics_source(metric or f"{name}_one", query, raises=raises), encoding="utf-8"
     )
-    metrics_py.write_text(source + "raise RuntimeError('metrics boom')\n", encoding="utf-8")
+    return metrics_py
 
+
+def _fixture_metrics_source(metric: str, query: str, *, raises: bool = False) -> str:
+    source = (
+        "from base.packages.plugins.extensions import PluginContributions\n"
+        "from base.telemetry.metrics.plugin_metrics import MetricSpec\n"
+        f"METRICS = (MetricSpec(name={metric!r}, title='Fixture', "
+        f"event_name='task_update', category='audit', output=['inspector'], query={query!r}),)\n"
+        "def contribute():\n"
+        "    return PluginContributions(metrics=METRICS)\n"
+    )
+    return ("raise RuntimeError('metrics boom')\n" if raises else "") + source
+
+
+@pytest.fixture
+def fixture_plugins_dir(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, request: pytest.FixtureRequest
+) -> Path:
+    """Point the loader at `tmp_path` as the shipped-plugins directory (the
+    fixture plugins are the only ones it sees besides the core metrics)."""
     monkeypatch.setattr(_plugin_metrics, "_PLUGINS_DIR", tmp_path)
     shipped_path = importlib.import_module("ava_builtins.plugins").__path__
     monkeypatch.setattr("ava_builtins.plugins.__path__", [*shipped_path, str(tmp_path)])
 
+    def _forget_fixture_modules() -> None:
+        for module_name in [m for m in sys.modules if m.startswith("ava_builtins.plugins.fx_")]:
+            del sys.modules[module_name]
+
+    request.addfinalizer(_forget_fixture_modules)
+    return tmp_path
+
+
+def test_in_process_loader_skips_a_failing_module_and_recovers(
+    fixture_plugins_dir: Path, loguru_records: list[dict[str, Any]]
+) -> None:
+    """A metrics.py that raises is reported and contributes nothing, while the
+    rest still load; a declaration is admitted whole or not at all, so
+    retrying the fixed file on the next call registers cleanly (fail-soft,
+    user ruling 2026-09-11)."""
+    metrics_py = _fixture_plugin(fixture_plugins_dir, "fx_drop_partial", raises=True)
+
     _plugin_metrics._load_plugin_metrics()  # must not raise
-    assert [s for s in registered_metrics() if s.plugin == "drop_partial"] == []
+    specs = _plugin_metrics._load_plugin_metrics()
+    assert [s for s in specs if s.plugin == "fx_drop_partial"] == []
+    assert {s.plugin for s in specs if s.plugin != "core"} == set()
     assert any(
-        "drop_partial" in r["message"] and "failed to load" in r["message"] for r in loguru_records
+        "fx_drop_partial" in r["message"] and "failed to load" in r["message"]
+        for r in loguru_records
     )
 
-    metrics_py.write_text(source, encoding="utf-8")
+    metrics_py.write_text(
+        _fixture_metrics_source("fx_drop_partial_one", _STAT_QUERY), encoding="utf-8"
+    )
     specs = _plugin_metrics._load_plugin_metrics()
-    assert [(s.plugin, s.name) for s in specs if s.plugin == "drop_partial"] == [
-        ("drop_partial", "drop_partial_one")
+    assert [(s.plugin, s.name) for s in specs if s.plugin == "fx_drop_partial"] == [
+        ("fx_drop_partial", "fx_drop_partial_one")
     ]
+
+
+def test_in_process_loader_refuses_a_plugin_claiming_a_taken_metric_name(
+    fixture_plugins_dir: Path,
+) -> None:
+    """Metric names are global: a plugin declaring a name another plugin
+    already holds is refused whole — none of its metrics serve and the first
+    claimant is untouched."""
+    _fixture_plugin(fixture_plugins_dir, "fx_first", metric="fx_shared_name")
+    # Plugins load in sorted order, so `fx_first` is the first claimant.
+    _fixture_plugin(fixture_plugins_dir, "fx_thief", metric="fx_shared_name")
+
+    specs = _plugin_metrics._load_plugin_metrics()
+    assert [s.plugin for s in specs if s.name == "fx_shared_name"] == ["fx_first"]
+    assert [s for s in specs if s.plugin == "fx_thief"] == []

@@ -10,19 +10,20 @@ Two output surfaces (user-approved design, 2026-08-04, event-system W13):
   JSON stays the deployment source, and
   ``tests/plugins/test_grafana_dashboard_render.py`` locks the render against
   it.
-- ``inspector`` (W13b): the gateway builds the registry in process (imports
-  every plugin's ``metrics.py`` under its PluginContext + the core definition
+- ``inspector`` (W13b): the gateway builds the registry in process (loads
+  every plugin's ``metrics.py`` declaration + the core definition
   modules — task #180 PR D) and serves per-agent panels under
   ``/api/agents/{id}/inspect/metrics``. Query templates may carry the
   ``{{agent_id}}`` placeholder, which the gateway renders per dialect
   (``agent_id="<n>"`` for LogQL, ``agent_id = <n>`` for SQL).
 
-Registration mirrors the plugin state/config pattern: the plugin calls
-``register_metric(MetricSpec(...))`` at import time inside ``PluginContext``
-(the framework ``load_extensions`` wrap) and the plugin name is auto-filled.
-The registry is process-local.
+A plugin declares its metrics as data: its ``metrics.py`` exports ``contribute()``, a pure
+function returning a ``PluginContributions`` with ``metrics``. The data registry
+(``base/packages/plugins/data_registry.py``) validates each spec (query safety below, name
+uniqueness across plugins) and fills ``plugin`` from the registry entry; nothing is registered
+process-wide.
 
-SQL safety (enforced at register time, task #180 PR C): a metric query must
+SQL safety (enforced when the data registry admits a plugin, task #180 PR C): a metric query must
 be a static single SELECT over ``events`` (the retired archive) or
 ``agents_meta`` (live), built from a whitelist of keywords, aggregate
 functions, operators and literals — no DML/DDL, no information/``pg_*``
@@ -46,7 +47,6 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from base.packages.plugins.context import current_plugin_name
 from base.telemetry.metrics.plugin_metrics_sql import (
     _DOUBLE_QUOTED_OK,
     _QUOTED_RE,
@@ -73,14 +73,8 @@ _TRAILING_DIVISOR = re.compile(r"/\s*\d+\s*$")
 # ── errors ────────────────────────────────────────────────────────────────────
 
 
-class NoPluginContext(PluginMetricError):  # noqa: N818 — parallel to config_registration's NoPluginContext
-    """``register_metric`` called outside PluginContext — the framework wraps
-    plugin imports, so this is a plugin authoring bug (or a test calling
-    register directly)."""
-
-
 class DuplicateMetric(PluginMetricError):  # noqa: N818
-    """Two metrics registered under the same ``name`` — names are global
+    """Two metrics declared under the same ``name`` — names are global
     (across every plugin), so the author should prefix with the plugin."""
 
 
@@ -153,7 +147,7 @@ class MetricSpec(BaseModel):
         output: which surfaces consume this metric — ``grafana`` (dashboard
             JSON, this wave), ``inspector`` (per-agent panels, reserved).
             A query carrying ``{{agent_id}}`` must NOT include ``grafana``.
-        plugin: filled by ``register_metric`` from PluginContext — never set
+        plugin: filled by the data registry from the declaring plugin's entry — never set
             it yourself.
     """
 
@@ -208,7 +202,7 @@ class MetricSpec(BaseModel):
     thresholds: list[ThresholdStep] | None = None
     time_basis: TimeBasis | None = None
     output: list[OutputSurface] = ["grafana"]
-    plugin: str = ""  # auto-filled at register time
+    plugin: str = ""  # filled when the data registry admits the declaration
 
     @field_validator("output")
     @classmethod
@@ -417,48 +411,10 @@ def validate_metric_sql(sql: str) -> None:
         continue
 
 
-# ── registry ──────────────────────────────────────────────────────────────────
-
-_REGISTRY: dict[str, MetricSpec] = {}
-
-
-def register_metric(spec: MetricSpec) -> MetricSpec:
-    """Register one metric — must run inside PluginContext (the framework
-    wraps plugin imports).
-
-    Validation at register time: name uniqueness across all plugins and
-    query safety (``validate_metric_sql`` / ``validate_spec_logql``, by
-    dialect). The ``plugin`` field is auto-filled from the context,
-    overriding whatever the author passed.
-
-    Raises:
-        NoPluginContext: called outside ``with PluginContext(...)``.
-        DuplicateMetric: ``spec.name`` already registered.
-        InvalidMetricQuery: a query template failed validation.
-    """
-    plugin = current_plugin_name()
-    if plugin is None:
-        raise NoPluginContext(
-            "register_metric() must be called inside PluginContext — the "
-            "framework `load_extensions` already wraps plugin imports; the "
-            "generator wraps metrics-module imports with the plugin name."
-        )
-    if spec.name in _REGISTRY:
-        raise DuplicateMetric(
-            f"metric {spec.name!r} already registered (by plugin "
-            f"{_REGISTRY[spec.name].plugin!r}) — names are global, prefix with "
-            f"the plugin name."
-        )
-    validate_spec_sql(spec)
-    filled = spec.model_copy(update={"plugin": plugin})
-    _REGISTRY[spec.name] = filled
-    return filled
-
-
 def validate_spec_sql(spec: MetricSpec) -> None:
     """Validate every query template on a spec (``query`` + ``targets``) —
     the static-SQL whitelist, LogQL contract, or PromQL sanity check, by dialect. Shared by
-    ``register_metric`` and ``validate_core_metric`` (Task #882) — core
+    ``build_data_registry`` and ``validate_core_metric`` (Task #882) — core
     metrics go through the same safety checks as plugin metrics. SQL
     templates carry no placeholders anymore (task #180 PR C), so the old
     ``{{agent_id}}`` ↔ grafana rule is subsumed by the placeholder
@@ -495,34 +451,6 @@ def _validate_promql(template: str) -> None:
         for token in ("{event_name}", "{category}", "{category_re}", "{{agent_id}}")
     ):
         raise InvalidMetricQuery("PromQL metric must not contain metric-template placeholders")
-
-
-def registered_metrics() -> list[MetricSpec]:
-    """All registered metrics, in registration order (grouped by plugin for
-    the generator's row layout)."""
-    return list(_REGISTRY.values())
-
-
-def clear_registry() -> None:
-    """Drop every registration — test fixtures (parallel to
-    ``agent.state.clear_plugin_registrations``)."""
-    _REGISTRY.clear()
-
-
-def drop_plugin_metrics(plugin: str) -> list[str]:
-    """Drop every registration made by ``plugin``; return the dropped names.
-
-    The in-process metrics loader (`gateway/inspect/_plugin_metrics.py`) calls
-    this after a failed ``metrics.py`` import: registration is not
-    transactional, so without the cleanup a module that raised mid-way would
-    leave its partial entries serving while every retry of the fixed file
-    died on ``DuplicateMetric`` — the plugin stuck on the failed path until
-    process restart.
-    """
-    dropped = [name for name, spec in _REGISTRY.items() if spec.plugin == plugin]
-    for name in dropped:
-        del _REGISTRY[name]
-    return dropped
 
 
 # ── rendering + export ────────────────────────────────────────────────────────

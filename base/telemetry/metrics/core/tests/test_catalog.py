@@ -12,16 +12,8 @@ from base.telemetry.metrics.plugin_metrics import (
     DuplicateMetric,
     InvalidMetricQuery,
     MetricSpec,
-    clear_registry,
     render_query,
 )
-
-
-@pytest.fixture(autouse=True)
-def _clean():
-    clear_registry()
-    yield
-    clear_registry()
 
 
 def _spec(name: str = "core_test", **overrides) -> MetricSpec:
@@ -53,7 +45,7 @@ def test_collect_core_metrics_rejects_duplicates(monkeypatch: pytest.MonkeyPatch
 
 
 def test_validate_core_metric_validates_sql_like_plugins() -> None:
-    # unknown function -> rejected at register time (same validator as plugins)
+    # unknown function -> rejected at admission time (same validator as plugins)
     with pytest.raises(InvalidMetricQuery, match="not on the whitelist"):
         catalog.validate_core_metric(_spec(name="core_bad", query="SELECT version() FROM events"))
     # multi-target specs are validated per target

@@ -54,6 +54,8 @@ SurfaceId = Literal[
     "state",
     "contextNotes",
     "skillSources",
+    "metrics",
+    "inspectWidgets",
 ]
 
 

@@ -35,15 +35,15 @@ their lifecycle is managed separately. Launch time never synthesizes a deadline.
 
 ## Plugin metric surface (`/inspect/metrics`, W13b)
 
-Builds the metric registry in process — shipped plugin `metrics.py` modules +
-core definitions — renders `output`-inspector templates per agent, re-validates
+Builds the metric registry in process — shipped plugin `metrics.py` declarations
+(`contribute()`, admitted into a data registry) + core definitions — renders `output`-inspector templates per agent, re-validates
 the rendered query, evaluates LogQL templates on `telemetry_events` / `audit_events` (`gateway/inspect/_event_metrics.py`) and SQL read-only over Postgres —
 see `base/telemetry/metrics/plugin_metrics.py` + the `deploy/lgtm` dashboards README.
 
 ## Plugin inspector-widget surface (`/inspect/widgets`, task #2909)
 
 Builds the widget registry in process — ENABLED builtin plugins' `inspector.py`
-modules under their `PluginContext` — and resolves each widget's payload
+declarations (`contribute()`, admitted into a data registry) — and resolves each widget's payload
 server-side: a `taskList` lists the agent's active tasks (owner-scoped,
 priority-ordered (P0 first, ties by id), complete; each row carries the
 task's id, title, and its P0..P3 priority — tasks #3819/#3866). A widget with
@@ -51,5 +51,5 @@ nothing to show leaves the payload
 entirely — see `base/packages/plugins/inspector.py`. An `inspector.py` that
 fails to import is skipped with a loud report (loguru ERROR + the
 `plugin_load_failed` event) and the remaining widgets still serve — fail-soft
-per the plugin-load contract (user ruling 2026-09-11); registrations from the
-failed import are dropped so the next request retries clean.
+per the plugin-load contract (user ruling 2026-09-11); a declaration is admitted
+whole or not at all, so the next request retries clean.

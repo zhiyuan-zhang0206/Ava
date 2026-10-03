@@ -154,6 +154,27 @@ SURFACES: tuple[Surface, ...] = (
         ),
     ),
     Surface(
+        id="metrics",
+        entry_points=("base.packages.plugins.extensions:PluginContributions",),
+        manifest_key="metrics",
+        protocol="MetricSpec",
+        note=(
+            "`metrics` of what the plugin's `metrics.py` `contribute()` returns: a query over the "
+            "event stream rendered on the Grafana dashboard and/or the agent inspector; names are "
+            "global across plugins and every query is validated before the plugin is admitted"
+        ),
+    ),
+    Surface(
+        id="inspectWidgets",
+        entry_points=("base.packages.plugins.extensions:PluginContributions",),
+        manifest_key="inspectWidgets",
+        protocol="InspectWidgetSpec",
+        note=(
+            "`inspect_widgets` of what the plugin's `inspector.py` `contribute()` returns: a "
+            "closed-set widget the console renders in the agent inspector from kernel-resolved data"
+        ),
+    ),
+    Surface(
         id="skillSources",
         entry_points=("ava.skills:register_skill_source",),
         manifest_key=None,
@@ -317,6 +338,7 @@ def build_catalog() -> Catalog:
 
     config = load_extensions()
     declared = {name: contributions for name, _dir, contributions in declarations()}
+    data_records = _data_records()
     discovered = enable_config.installed_plugin_dirs()
     repo_plugins = _repo_plugins_dir()
 
@@ -337,11 +359,40 @@ def build_catalog() -> Catalog:
                 contributions=(
                     *contribution_ledger.contributions_of(name),
                     *(declared[name].as_records(name) if name in declared else ()),
+                    *data_records.get(name, ()),
                 ),
                 manifest=load_manifest(directory),
             )
         )
     return Catalog(surfaces=SURFACES, plugins=tuple(views))
+
+
+def _data_records() -> dict[str, tuple[Contribution, ...]]:
+    """What each enabled plugin's data faces (`metrics.py`, `inspector.py`) declare, as records.
+
+    Loaded here only to be described — the processes that serve these surfaces (the gateway, the
+    Grafana supply) load them on their own, into their own registries.
+    """
+    from agent.extensions import _enabled_plugin_dirs, _pkg_of
+    from ava.sdk_surface.plugin_loader import safe_load_plugin_module
+    from base.packages.plugins import data_registry
+
+    records: dict[str, tuple[Contribution, ...]] = {}
+    for name, directory in _enabled_plugin_dirs():
+        found: list[Contribution] = []
+        for face in ("metrics", "inspector"):
+            path = directory / f"{face}.py"
+            if not path.is_file():
+                continue
+            module = safe_load_plugin_module(path, name=name, pkg=_pkg_of(directory), module=face)
+            if module is None:
+                continue
+            declared = data_registry.load_declaration(name, lambda module=module: module)
+            if declared is not None:
+                found.extend(declared.contributions.as_records(name))
+        if found:
+            records[name] = tuple(found)
+    return records
 
 
 def _repo_plugins_dir() -> Path:

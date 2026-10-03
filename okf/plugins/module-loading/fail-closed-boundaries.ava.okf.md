@@ -25,4 +25,4 @@ continuing would guess at the operator's intent:
 
 Unloadable `metrics.py`, `inspector.py`, `setup.py`, `plugin.py`, `services.py`
 or `default_config.py` code is contained loudly (skipped and reported) at
-runtime; no pre-flight rejects a plugin before it ships.
+runtime; no pre-flight rejects a plugin before it ships. A data face (`metrics.py`, `inspector.py`) is admitted whole or not at all, so a failed one leaves no partial registration.

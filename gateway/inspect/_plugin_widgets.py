@@ -4,17 +4,15 @@ Not a router: ``gateway/inspect/router.py`` mounts the single endpoint
 ``GET /api/agents/{id}/inspect/widgets`` and delegates the blocking work here
 (kept as its own module so agent_inspect stays under the per-file line budget).
 The extension surface of the inspector panel: a plugin embeds widgets for
-every agent from its own Python half (``register_inspect_widget`` at
-``inspector.py`` import — see ``base/packages/plugins/inspector.py``).
+every agent from its own Python half (``contribute()`` in ``inspector.py`` —
+see ``base/packages/plugins/inspector.py``).
 
 The registry is built **in process** like the plugin-metric one (task #180
-PR D): the shipped builtin plugins' ``inspector.py`` modules are imported
-under their plugin context, module caching makes repeated loads free, and no
+PR D): the enabled builtin plugins' ``inspector.py`` declarations are admitted
+into a data registry per request, module caching makes the imports free, and no
 snapshot file exists to go stale. The enable-state is consulted per request
 (``plugins_config``), so ``ava plugins disable`` takes effect without a
-gateway restart — a plugin disabled after its module was imported has its
-widgets filtered out here even though its registration objects remain in the
-process registry.
+gateway restart.
 
 Resolution happens server-side because the payloads are *data*, not routes:
 a ``taskList`` widget lists the agent's active tasks (owned by the agent, not
@@ -22,7 +20,7 @@ done/cancelled, priority-ordered — P0 first, ties by task id — complete).
 A widget with an empty payload drops
 out of the response entirely (the panel's empty-section rule). Import errors are fail-soft (the plugin-load contract —
 2026-08-28 ava_ledger incident, restated for plugins 2026-09-11): a plugin
-whose ``inspector.py`` fails to import, or whose registration raises, is
+whose ``inspector.py`` fails to import, or whose declaration is refused, is
 reported loudly and skipped, and the endpoint keeps serving the remaining
 plugins' widgets; an unknown agent is a 404 like the rest of the /inspect
 family.
@@ -31,7 +29,7 @@ family.
 from __future__ import annotations
 
 import importlib
-import sys
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
@@ -40,13 +38,8 @@ from psycopg import Cursor
 from psycopg_pool import ConnectionPool
 
 from base.agents.tasks.priority import Priority
-from base.packages.plugins import enable_config, load_report
-from base.packages.plugins.context import PluginContext
-from base.packages.plugins.inspector import (
-    InspectWidgetSpec,
-    drop_plugin_inspect_widgets,
-    registered_inspect_widgets,
-)
+from base.packages.plugins import data_registry, enable_config
+from base.packages.plugins.inspector import InspectWidgetSpec
 from gateway.inspect.schemas import InspectWidgetResult, InspectWidgetTask
 
 # The shipped-plugin inspector directory — every builtin plugin dir with an
@@ -75,36 +68,28 @@ def _enabled_inspector_modules() -> list[Path]:
     return modules
 
 
-def _load_inspect_widgets() -> list[InspectWidgetSpec]:
-    """The in-process widget registry, restricted to the plugins enabled right
-    now. Importing a module is cached; a plugin disabled since its first
-    import is filtered out by the enabled-set check rather than unregistered.
+def _load_inspect_widgets(modules: Sequence[Path] | None = None) -> list[InspectWidgetSpec]:
+    """The widget registry of the plugins enabled right now: each enabled
+    builtin plugin's ``inspector.py`` declaration, admitted into a data registry
+    (``modules`` names the ``inspector.py`` files to load instead of the enabled set).
 
     Fail-soft per plugin (user ruling 2026-09-11): a plugin whose
-    ``inspector.py`` fails to import, or whose registration raises, is
-    reported loudly and skipped — the remaining widgets still serve. The
-    half-executed module is dropped from ``sys.modules`` and its partial
-    registrations are dropped too (``drop_plugin_inspect_widgets`` — a module
-    can raise mid-registration), so a fixed file is picked up cleanly on a
-    later request."""
-    modules = _enabled_inspector_modules()
-    enabled: set[str] = set()
-    for module in modules:
-        plugin = module.parent.name
-        module_name = f"ava_builtins.plugins.{plugin}.inspector"
-        try:
-            with PluginContext(plugin):
-                importlib.import_module(module_name)
-        except (KeyboardInterrupt, SystemExit):
-            sys.modules.pop(module_name, None)
-            raise
-        except BaseException as exc:
-            sys.modules.pop(module_name, None)
-            load_report.report_plugin_load_failure(plugin, exc)
-            drop_plugin_inspect_widgets(plugin)
-            continue
-        enabled.add(plugin)
-    return [spec for spec in registered_inspect_widgets() if spec.plugin in enabled]
+    ``inspector.py`` fails to import, or whose declaration is refused, is
+    reported loudly and skipped — the remaining widgets still serve. A
+    declaration is admitted whole or not at all, so a fixed file is picked up
+    cleanly on a later request."""
+    declared = [
+        data_registry.load_declaration(
+            module.parent.name,
+            lambda name=module.parent.name: importlib.import_module(
+                f"ava_builtins.plugins.{name}.inspector"
+            ),
+            (module.parent, data_registry.WIDGETS_KEY),
+        )
+        for module in (_enabled_inspector_modules() if modules is None else modules)
+    ]
+    registry, _refused = data_registry.build_data_registry(declared)
+    return list(registry.inspect_widgets())
 
 
 def _resolve_tasks(cur: Cursor[Any], agent_id: int) -> list[InspectWidgetTask]:

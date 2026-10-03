@@ -1,6 +1,6 @@
 """ava_fleet inspector widgets — the fleet's embed in the Inspector Panel.
 
-Registers the fleet plugin's per-agent task list (task #2909; reshaped for
+Declares the fleet plugin's per-agent task list (task #2909; reshaped for
 task #3216, user request 2026-09-12): the inspector shows the agent's active
 tasks as a section, each row jumping to the task in the
 fleet task view.
@@ -13,12 +13,18 @@ next (user ruling 2026-09-18, task #3903; the order scale and the built-in
 sections' keys are documented in ``conventions/plugin-spec-v2.md``).
 """
 
-from base.packages.plugins.inspector import InspectWidgetSpec, register_inspect_widget
+from base.packages.plugins.extensions import PluginContributions
+from base.packages.plugins.inspector import InspectWidgetSpec
 
-register_inspect_widget(
+WIDGETS: tuple[InspectWidgetSpec, ...] = (
     InspectWidgetSpec(
         id="today-tasks",
         kind="taskList",
         order=150,
-    )
+    ),
 )
+
+
+def contribute() -> PluginContributions:
+    """What this plugin declares for the inspector panel."""
+    return PluginContributions(inspect_widgets=WIDGETS)

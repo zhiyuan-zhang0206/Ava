@@ -43,7 +43,6 @@ engine on the fixture's full 97-entry geometry.
 
 from __future__ import annotations
 
-import importlib
 import json
 import subprocess
 import sys
@@ -53,7 +52,6 @@ from typing import Any, cast
 import psycopg
 import pytest
 
-from base.packages.plugins.context import PluginContext
 from base.telemetry.metrics.core import catalog
 from base.telemetry.metrics.grafana_dashboard import (
     _CORE_SECTIONS_PREFIX,
@@ -64,15 +62,11 @@ from base.telemetry.metrics.grafana_dashboard import (
     render_to_json,
 )
 from base.telemetry.metrics.grafana_dashboard_supply import (
+    collect_plugin_specs,
     load_installed_plugin_specs,
     load_repo_plugin_specs,
 )
-from base.telemetry.metrics.plugin_metrics import (
-    MetricSpec,
-    clear_registry,
-    registered_metrics,
-    render_title,
-)
+from base.telemetry.metrics.plugin_metrics import MetricSpec, render_title
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _DASHBOARD_FILE = (
@@ -88,20 +82,11 @@ _S2_PENDING: set[str] = set()
 
 
 def _load_world() -> tuple[list[MetricSpec], list[MetricSpec], dict[str, Any]]:
-    """Register the shipped plugin + core metrics from fresh modules and
-    render — the registry-hygiene pattern the existing sync-lock test uses."""
-    clear_registry()
-    for name in _PLUGINS:
-        module_name = f"ava_builtins.plugins.{name}.metrics"
-        module = sys.modules.get(module_name)
-        with PluginContext(name):
-            if module is None:
-                importlib.import_module(module_name)
-            else:
-                importlib.reload(module)
+    """Admit the shipped plugin declarations + core metrics and render."""
+    plugins = load_repo_plugin_specs()
+    assert plugins.failed == []
     core_specs = catalog.collect_core_metrics()
-    plugin_specs = registered_metrics()
-    return core_specs, plugin_specs, render_dashboard(core_specs, plugin_specs)
+    return core_specs, plugins.specs, render_dashboard(core_specs, plugins.specs)
 
 
 @pytest.fixture(scope="module")
@@ -414,17 +399,35 @@ def test_render_is_deterministic_and_environment_independent(
 
 # ── plugin suppliers ──────────────────────────────────────────────────────────
 
+_LOGQL = 'sum(count_over_time({service_name="unknown_service"} | json [$__range]))'
+
+
+def _metrics_module_source(name: str, title: str) -> str:
+    """A plugin `metrics.py` declaring one LogQL metric called `name`."""
+    return (
+        "from base.packages.plugins.extensions import PluginContributions\n"
+        "from base.telemetry.metrics.plugin_metrics import MetricSpec\n"
+        f"METRICS = (MetricSpec(name={name!r}, title={title!r}, event_name='x', "
+        f"category='telemetry', query={_LOGQL!r}, query_type='logql', target_names=['a']),)\n"
+        "def contribute():\n"
+        "    return PluginContributions(metrics=METRICS)\n"
+    )
+
+
+def _install_plugin(conn: psycopg.Connection, tmp_path: Path, name: str, source: str) -> None:
+    """Enable an installed plugin row whose blob is a tree holding one `metrics.py`."""
+    from base.packages.extensions import registry as registry
+
+    tree = tmp_path / name
+    tree.mkdir()
+    (tree / "metrics.py").write_text(source)
+    digest = registry.put_blob(conn, registry.pack_tree(tree), name=name)
+    registry.upsert(conn, name=name, kind="plugin", source="test", content_hash=digest)
+
 
 def test_repo_supplier_loads_the_shipped_plugins() -> None:
-    """The checkout supplier imports each shipped plugin's metrics.py under
-    its plugin context and reports the grafana spec set."""
-    clear_registry()
-    for name in _PLUGINS:
-        # The loader caches its file-location imports under these synthetic
-        # names; without dropping them a re-load returns the cached module and
-        # leaves the just-cleared registry empty (order-dependent with any
-        # earlier render-path test in the same session).
-        sys.modules.pop(f"ava_repo_plugins.{name}.metrics", None)
+    """The checkout supplier imports each shipped plugin's metrics.py, admits its
+    `contribute()` declaration and reports the grafana spec set."""
     result = load_repo_plugin_specs()
     assert result.loaded == list(_PLUGINS)
     assert result.failed == []
@@ -437,24 +440,23 @@ def test_repo_supplier_reports_a_broken_plugin_loudly(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     """A metrics.py that raises is skipped with a report; the rest still
-    load — fail-soft, never a half-imported plugin left registered."""
+    load — fail-soft, a declaration is admitted whole or not at all."""
     plugins_dir = tmp_path / "plugins"
     (plugins_dir / "good_one").mkdir(parents=True)
     (plugins_dir / "good_one" / "metrics.py").write_text(
-        "from base.telemetry.metrics.plugin_metrics import MetricSpec, register_metric\n"
-        "register_metric(MetricSpec(name='good_one_calls', title='Good', event_name='x', "
-        "category='telemetry', query='sum(count_over_time({service_name=\"unknown_service\"} | "
-        "json [$__range]))', query_type='logql', target_names=['a']))\n"
+        _metrics_module_source("good_one_calls", "Good")
     )
     (plugins_dir / "broken_one").mkdir()
     (plugins_dir / "broken_one" / "metrics.py").write_text("raise RuntimeError('boom')\n")
     import base.telemetry.metrics.grafana_dashboard_supply as supply
 
-    monkeypatch.setattr(supply, "_REPO_PLUGINS_DIR", plugins_dir)
     for name in ("good_one", "broken_one"):
         sys.modules.pop(f"ava_repo_plugins.{name}.metrics", None)
-    clear_registry()
-    result = supply.load_repo_plugin_specs()
+    try:
+        result = supply.load_repo_plugin_specs(plugins_dir)
+    finally:
+        for name in ("good_one", "broken_one"):
+            sys.modules.pop(f"ava_repo_plugins.{name}.metrics", None)
     assert result.loaded == ["good_one"]
     assert result.failed == ["broken_one"]
     assert [spec.name for spec in result.specs] == ["good_one_calls"]
@@ -466,27 +468,46 @@ def test_installed_supplier_loads_a_registry_row(
     """An enabled installed plugin row renders from its blob: register a tree
     with a metrics.py, load it through the supplier, and — after S3's
     ordering — see it in the render."""
-    from base.packages.extensions import registry as registry
-
-    tree = tmp_path / "installed_plugin"
-    tree.mkdir()
-    (tree / "metrics.py").write_text(
-        "from base.telemetry.metrics.plugin_metrics import MetricSpec, register_metric\n"
-        "register_metric(MetricSpec(name='installed_demo_calls', title='Installed demo', "
-        "event_name='x', category='telemetry', query='sum(count_over_time("
-        "{service_name=\"unknown_service\"} | json [$__range]))', query_type='logql', "
-        "target_names=['a']))\n"
-    )
     with db_conn.transaction(force_rollback=True):
-        digest = registry.put_blob(db_conn, registry.pack_tree(tree), name="installed_demo")
-        registry.upsert(
+        _install_plugin(
             db_conn,
-            name="installed_demo",
-            kind="plugin",
-            source="test",
-            content_hash=digest,
+            tmp_path,
+            "installed_demo",
+            _metrics_module_source("installed_demo_calls", "Installed demo"),
         )
         result = load_installed_plugin_specs(db_conn)
     assert result.failed == []
     assert [spec.name for spec in result.specs] == ["installed_demo_calls"]
     assert result.specs[0].plugin == "installed_demo"
+
+
+def test_collect_refuses_an_installed_plugin_claiming_a_repo_metric_name(
+    db_conn: psycopg.Connection, tmp_path: Path
+) -> None:
+    """Repo and installed declarations share one data registry: a metric name a
+    repo plugin already holds is refused for the installed plugin, which is
+    reported in `failed` and leaves none of its metrics behind; the repo
+    plugin keeps its spec and another installed plugin is unaffected."""
+    repo_specs = load_repo_plugin_specs().specs
+    taken = repo_specs[0]
+    with db_conn.transaction(force_rollback=True):
+        _install_plugin(
+            db_conn,
+            tmp_path,
+            "installed_thief",
+            _metrics_module_source(taken.name, "Stolen"),
+        )
+        _install_plugin(
+            db_conn,
+            tmp_path,
+            "installed_fine",
+            _metrics_module_source("installed_fine_calls", "Fine"),
+        )
+        result = collect_plugin_specs(db_conn)
+    assert result.failed == ["installed_thief"]
+    assert "installed_thief" not in result.loaded
+    assert "installed_fine" in result.loaded
+    by_name = {spec.name: spec for spec in result.specs}
+    assert by_name[taken.name].plugin == taken.plugin
+    assert by_name["installed_fine_calls"].plugin == "installed_fine"
+    assert {spec.plugin for spec in result.specs} == {*_PLUGINS, "installed_fine"}

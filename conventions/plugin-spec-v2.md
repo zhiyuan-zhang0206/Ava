@@ -130,7 +130,7 @@ Example (the shape `ava_code` would declare):
 | Lane | Mechanism | For |
 |---|---|---|
 | Declarative | `contributions.ui` in the manifest (`agentInspect` proxied sections, `nav`, `themes`) — data the console reads itself; there is no registration side | plugin-*served* content, links, skins |
-| Runtime registry | `register_inspect_widget()` at `inspector.py` import (`base/packages/plugins/inspector.py`) — the gateway imports each ENABLED builtin plugin's `inspector.py` under its `PluginContext` and serves `GET /api/agents/{id}/inspect/widgets`; the console renders closed-set widget kinds from the resolved payload | host-rendered widgets whose payload is per-agent data (an agent's active tasks), where no static declaration can name the rows |
+| Runtime registry | `inspect_widgets` of the `contribute()` in `inspector.py` (`base/packages/plugins/inspector.py`, admitted by `base/packages/plugins/data_registry.py`) — the gateway loads each ENABLED builtin plugin's `inspector.py` declaration and serves `GET /api/agents/{id}/inspect/widgets`; the console renders closed-set widget kinds from the resolved payload | host-rendered widgets whose payload is per-agent data (an agent's active tasks), where no static declaration can name the rows |
 
 The inspector-widget registry resolves each widget's payload server-side —
 the console never receives a row it cannot address — and a widget with no

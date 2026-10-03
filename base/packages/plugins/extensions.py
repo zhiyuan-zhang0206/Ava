@@ -24,6 +24,8 @@ from pydantic import BaseModel
 
 from base.host.env.agent_slices import AgentSlices
 from base.packages.plugins.contributions import Contribution
+from base.packages.plugins.inspector import InspectWidgetSpec
+from base.telemetry.metrics.plugin_metrics import MetricSpec
 
 NoteBuilder = Callable[[AgentSlices], HumanMessage | None]
 SectionFn = Callable[[AgentSlices], str]
@@ -85,6 +87,11 @@ class PluginContributions:
     # Pydantic models whose fields become LangGraph channels `<plugin>__<field>`; a plugin reads
     # and writes them through its own `PluginStateHandle(cls, plugin)`.
     state: tuple[type[BaseModel], ...] = ()
+    # Data surfaces read by processes that load no agent runtime (the gateway, the Grafana supply):
+    # a plugin's `metrics.py` / `inspector.py` face declares these, and `base.packages.plugins.data_registry`
+    # validates them and fills each spec's `plugin`.
+    metrics: tuple[MetricSpec, ...] = ()
+    inspect_widgets: tuple[InspectWidgetSpec, ...] = ()
 
     def hooks(self, point: HookPoint) -> tuple[GraphHook, ...]:
         return getattr(self, point)
@@ -117,7 +124,12 @@ class PluginContributions:
             for cls in self.state
             for name in cls.model_fields
         )
-        return (*sections, *notes, *hooks, *state)
+        metrics = (Contribution("metrics", spec.name, plugin, spec.title) for spec in self.metrics)
+        widgets = (
+            Contribution("inspectWidgets", spec.id, plugin, spec.kind)
+            for spec in self.inspect_widgets
+        )
+        return (*sections, *notes, *hooks, *state, *metrics, *widgets)
 
 
 @dataclass(frozen=True)
@@ -150,6 +162,16 @@ class ExtensionRegistry:
         for plugin, contributions in self.plugins:
             for cls in contributions.state:
                 yield plugin, cls
+
+    def metrics(self) -> Iterator[MetricSpec]:
+        """Every plugin's metric specs, in load order, then declaration order."""
+        for _plugin, contributions in self.plugins:
+            yield from contributions.metrics
+
+    def inspect_widgets(self) -> Iterator[InspectWidgetSpec]:
+        """Every plugin's inspector widget specs, in load order, then declaration order."""
+        for _plugin, contributions in self.plugins:
+            yield from contributions.inspect_widgets
 
     def records(self, plugin: str) -> tuple[Contribution, ...]:
         """One plugin's contributions as attribution records."""
