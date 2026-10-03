@@ -2,7 +2,7 @@
 
 The gateway exposes the cluster control plane as a standard MCP server over
 [Streamable HTTP] at `/mcp` (design task #1212 step 1; implementation
-[`gateway/mcp_server/endpoint.py`](../../gateway/mcp_server/docs/mcp-endpoint.ava.okf.md)). Any MCP
+[`gateway/mcp_server/endpoint.py`](../gateway/mcp_server/docs/mcp-endpoint.ava.okf.md)). Any MCP
 client — Claude Code, Codex, anything speaking the protocol — drives the fleet
 through it: the same seven control tools the stdio `ava mcp serve` offered
 (list_agents / get_agent / spawn_agent / send_message / get_messages /
