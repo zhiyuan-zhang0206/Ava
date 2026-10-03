@@ -45,7 +45,7 @@ accept different lifecycle states.
 | `terminate()` | finishes native control | retained, terminal | retained |
 | `restart()` | completes, then new admission | retained | retained |
 | `resurrect()` | scheduled for terminated identity | retained | retained |
-| cluster `pause` / update | drains native controls | retained, resumable | retained |
+| `ava restart` / update | drains native controls | retained, resumable | retained |
 | full cluster `stop` | drains then stops host | retained, resumable | closed |
 
 Related: [[../lifecycle.ava.okf.md]] and [[base/deploy/maintenance/docs/maintenance.ava.okf.md]].

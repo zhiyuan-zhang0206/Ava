@@ -1108,18 +1108,17 @@ effects. Repeated start checks the same identity and selected service roster.
 ```bash
 ava start
 ava status
-ava pause
 ava stop -y
 ava restart
 ava cluster status
 ava cluster destroy [--drop-db]
 ```
 
-`pause` retains infrastructure, browser and persistent PTYs. Full `stop` closes
-those resources; `--keep-infra` and repeated `--keep-service` preserve explicitly
-selected resources. `restart` is the ordinary local pause/start path. Destroy
-decommissions this host's cluster: it stops it, retires the host's native jobs
-(launchd, crontab, the Linux boot unit, the permissions helper) and marks the home
+Full `stop` closes infrastructure, browser and persistent PTYs; `--keep-infra` and
+repeated `--keep-service` preserve explicitly selected resources. `restart` is the
+ordinary local stop/start path and keeps infrastructure, browser and persistent
+PTYs. Destroy decommissions this host's cluster: it stops it, retires the host's
+native jobs (launchd, crontab, the Linux boot unit, the permissions helper) and marks the home
 detached, so `ava start` refuses it until `destroy-intent.json` is deleted by hand;
 `--drop-db` additionally removes the data directories (`pg/`, `redis/`). It acts on
 this process's home, `~/.ava` included, and asks you to type the home path at a
@@ -1213,12 +1212,12 @@ load-bearing:
   this: a prod cluster with it off silently loses its health probe,
   daily log maintenance, and its ability to come back after a reboot.
 
-`ava pause`, `ava stop`, restart and update use the native maintenance primitives.
-Pause retains infrastructure and persistent PTYs; default stop closes those local
+`ava stop`, restart and update use the native maintenance primitives.
+Restart retains infrastructure and persistent PTYs; default stop closes those local
 resources. Durable agent identity and work remain on disk.
 A stop timeout is a failure; force escalation requires an explicit option.
 Normal `ava start` resumes only after readiness. See the
-[pause/stop procedure](graceful-maintenance.md) for partial stop, coordinated
+[stop procedure](graceful-maintenance.md) for partial stop, coordinated
 multi-machine ordering, failure recovery and the first-deployment limitation.
 
 Stop-class drills and operations: see the executor-cancellation insurance and hold handover section of [graceful maintenance](graceful-maintenance.md).

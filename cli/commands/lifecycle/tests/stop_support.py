@@ -1,4 +1,4 @@
-"""Helpers of the stop and pause-stop tests: a private home, the processes a stop must leave alone, and the stop's collaborators stubbed."""
+"""Helpers of the stop tests: a private home, the processes a stop must leave alone, and the stop's collaborators stubbed."""
 
 from __future__ import annotations
 

@@ -59,3 +59,5 @@ hand-written check, and nothing made the next loop remember it.
   test that a quiesced unit leaves the pool untouched.
 - Event-driven writers (audit-event writers such as `record_audit_standalone`, the IM cursor stores) still touch the
   pool when an event arrives inside the window; they are not loops and are not covered.
+
+Forward link (2026-10-03): `ava pause` was deleted; a stop with a different keep set replaces it. See [delete ava pause](2026-10-03-delete-ava-pause.md).

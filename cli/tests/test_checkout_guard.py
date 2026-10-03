@@ -89,7 +89,6 @@ def test_the_default_home_is_guarded_when_it_has_a_source(
         # Commands that start, stop or reconfigure a home, and one nobody has named yet.
         ["start"],
         ["stop"],
-        ["pause"],
         ["restart"],
         ["converge"],
         ["maintenance", "stop"],

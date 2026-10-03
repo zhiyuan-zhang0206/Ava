@@ -38,7 +38,7 @@ def suite_is_not_inside_an_exec_domain(monkeypatch: pytest.MonkeyPatch) -> None:
     A suite launched from a fleet agent's `execute_code` runs inside the call's
     exec-domain session, so `base.host.proc.hosting_exec_domain` reports it and any
     unrelated test that reaches an in-process lifecycle leg (`ava restart`,
-    pause/stop) would refuse — red on an agent box, green
+    stop) would refuse — red on an agent box, green
     in CI. A pty-session or login-shell run (the fleet's test convention) never
     sees this. The predicate's own membership behaviour is exercised in spawned
     child processes (`base/host/tests/test_proc.py`), whose sessions are built for

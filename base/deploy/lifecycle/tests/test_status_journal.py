@@ -27,13 +27,13 @@ def home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
 
 def test_begin_phase_finish_round_trip(home: Path) -> None:
-    assert journal.begin("pause", deadline=time.monotonic() + 30) is True
+    assert journal.begin("stop", deadline=time.monotonic() + 30) is True
     with journal.phase("drain"):
         pass
     journal.finish(0)
     op = journal.read()
     assert op is not None
-    assert op.operation == "pause"
+    assert op.operation == "stop"
     assert op.complete is True
     assert op.result == {"rc": 0, "error": None}
     assert [p.name for p in op.phases] == ["drain"]
@@ -61,7 +61,7 @@ def test_inner_stop_leg_never_hijacks_the_restart_journal(home: Path) -> None:
     assert journal.begin("restart") is True
     with journal.phase("preflight"):
         pass
-    assert journal.begin("pause") is False  # active journal kept
+    assert journal.begin("stop") is False  # active journal kept
     with journal.phase("stop"), journal.phase("drain"):
         pass
     op = journal.read()
@@ -72,7 +72,7 @@ def test_inner_stop_leg_never_hijacks_the_restart_journal(home: Path) -> None:
 
 
 def test_completed_journal_can_be_replaced(home: Path) -> None:
-    journal.begin("pause")
+    journal.begin("stop")
     journal.finish(0)
     assert journal.begin("restart") is True
     op = journal.read()
@@ -90,19 +90,19 @@ def test_malformed_journal_reads_as_absent(home: Path) -> None:
 
 def test_wrong_shape_journal_reads_as_absent(home: Path) -> None:
     # Parseable JSON with a wrong shape must read as "absent" too: `read()`
-    # sits on the stop/pause/restart path, so a missing pid or a bad field
+    # sits on the stop/restart path, so a missing pid or a bad field
     # type must not raise KeyError/TypeError/ValueError mid-operation.
     path = journal.status_path()
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps([{"operation": "pause"}]))  # not an object
+    path.write_text(json.dumps([{"operation": "stop"}]))  # not an object
     assert journal.read() is None
-    path.write_text(json.dumps({"operation": "pause"}))  # missing pid
+    path.write_text(json.dumps({"operation": "stop"}))  # missing pid
     assert journal.read() is None
-    path.write_text(json.dumps({"operation": "pause", "pid": "x"}))  # bad type
+    path.write_text(json.dumps({"operation": "stop", "pid": "x"}))  # bad type
     assert journal.read() is None
-    path.write_text(json.dumps({"operation": "pause", "pid": 1, "started_at": []}))
+    path.write_text(json.dumps({"operation": "stop", "pid": 1, "started_at": []}))
     assert journal.read() is None
-    path.write_text(json.dumps({"operation": "pause", "pid": 1, "deadline": "soon"}))
+    path.write_text(json.dumps({"operation": "stop", "pid": 1, "deadline": "soon"}))
     assert journal.read() is None
 
 
@@ -140,7 +140,7 @@ def _reaped_pid() -> int:
 
 
 def _op_with_pid(pid: int) -> journal.LifecycleOp:
-    return journal.LifecycleOp(operation="pause", pid=pid, started_at=0.0, deadline=None)
+    return journal.LifecycleOp(operation="stop", pid=pid, started_at=0.0, deadline=None)
 
 
 def test_begin_takes_over_a_dead_writers_journal(home: Path) -> None:
@@ -199,7 +199,7 @@ def test_journal_write_failure_never_breaks_the_operation(
     blocked.write_text("not a directory")
     monkeypatch.setattr(journal, "_path", lambda: blocked / "lifecycle-op.json")
 
-    journal.begin("pause")
+    journal.begin("stop")
     with journal.phase("drain"):
         pass
     journal.finish(0)

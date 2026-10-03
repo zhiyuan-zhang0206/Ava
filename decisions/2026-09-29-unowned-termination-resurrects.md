@@ -121,3 +121,5 @@ hold, the managed-resource predecessor rule and the owner CAS are unchanged.
   on `terminate` rows. Nothing deletes inbound rows today. A future inbound
   retention must keep these rows; otherwise resurrection falls back, closed,
   to refusing the rows they vouched for.
+
+Forward link (2026-10-03): `ava pause` was deleted; a stop with a different keep set replaces it. See [delete ava pause](2026-10-03-delete-ava-pause.md).

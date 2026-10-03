@@ -83,3 +83,5 @@ the hosted world's own machinery.
   resume; a subsequent wave then refuses those rows once (existing
   blocking-residue behavior), and its own failure path's resume settles them —
   self-healing on the retry.
+
+Forward link (2026-10-03): `ava pause` was deleted; a stop with a different keep set replaces it. See [delete ava pause](2026-10-03-delete-ava-pause.md).

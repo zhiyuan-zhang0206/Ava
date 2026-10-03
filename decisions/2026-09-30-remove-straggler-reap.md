@@ -80,3 +80,5 @@ projection) stay; the schema and enum are cleaned up in their own step.
   changed), and one that exists is repaired by hand.
 - The two decisions of 2026-09-19 and 2026-09-20 about the reap stay as the
   record of what it was.
+
+Forward link (2026-10-03): `ava pause` was deleted; a stop with a different keep set replaces it. See [delete ava pause](2026-10-03-delete-ava-pause.md).

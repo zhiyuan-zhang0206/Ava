@@ -18,7 +18,7 @@ Root node of the Ava project's OKF (Open Knowledge Format) knowledge graph. Each
 | [[../agent/docs/agent.ava.okf.md]] | Agent runtime — LangGraph execution graph, state channels, messages, process lifecycle, and infrastructure such as DB / cache / MCP daemon |
 | [[../ava/docs/ava.ava.okf.md]] | SDK surface — `ava.*` single namespace: files / shell / agents / task / memory / skills / mcps / web / self / ui / watcher |
 | [[../gateway/docs/gateway.ava.okf.md]] | Gateway — HTTP API, SSE push, authentication, `/api/agents` derived endpoints, bootstrap handshake |
-| [[../cli/docs/cli.ava.okf.md]] | CLI — cluster lifecycle: start / pause / stop / update / converge, multi-machine deployment orchestration |
+| [[../cli/docs/cli.ava.okf.md]] | CLI — cluster lifecycle: start / stop / restart / update / converge, multi-machine deployment orchestration |
 | [[../ui/web/docs/web.ava.okf.md]] | Frontend Web UI — fleet monitoring, agent management, task tracking |
 | [[../ui/app/docs/app.ava.okf.md]] | Tauri app shell — remote console window plus desktop and Android native behavior |
 | [[../base/docs/base.ava.okf.md]] | Base library — lm provider abstraction, agents-contract wire protocol, migrations, logging, configuration |

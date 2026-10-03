@@ -1,4 +1,4 @@
-"""Shared native pause/stop boundary for operator commands and updates."""
+"""Shared native stop boundary for operator commands and updates."""
 
 from __future__ import annotations
 
@@ -203,7 +203,7 @@ def _report_incomplete(
     else:
         outcome = "Retry the command, or use ava start to resume. "
     print(
-        f"Pause/stop incomplete; services and the data plane were not force-killed: {exc}. "
+        f"Stop incomplete; services and the data plane were not force-killed: {exc}. "
         f"phases: {timing or 'before the first phase'}. "
         f"{outcome}"
         f"Status journal: {status_path()}.",
@@ -329,28 +329,26 @@ def _stop_initialization(
 
 
 def _refuse_hosted_stop(*, keep_terminals: bool) -> None:
-    """A pause/stop run from inside the work it drains strands itself mid-drain."""
+    """A stop run from inside the work it drains strands itself mid-drain."""
     from base.host.proc import hosting_exec_domain, hosting_supervised_session
 
     # An exec-domain leg is SIGKILLed with the call's process group as the tool
     # call returns, mid-drain (the 2026-09-12 stranding shape). Name the one
-    # host that survives per verb: a pause keeps persistent terminals, a stop
-    # closes them.
+    # host that survives, by whether this stop keeps persistent terminals.
     if hosting_exec_domain() is not None:
-        verb = "pause" if keep_terminals else "stop"
         survives = (
-            "a persistent terminal session survives a pause — host it via "
+            "a persistent terminal session survives a stop that keeps terminals — host it via "
             "ava.shell.run_background(...) — or a plain login shell"
             if keep_terminals
             else "a stop closes this unit's persistent terminals too — run it from a "
             "shell no ava session hosts (e.g. a plain login shell)"
         )
         raise RuntimeError(
-            f"{verb} cannot run inside execute_code: the call's teardown SIGKILLs its "
-            f"process group as the call returns, stranding the {verb} mid-drain; {survives}"
+            "stop cannot run inside execute_code: the call's teardown SIGKILLs its "
+            f"process group as the call returns, stranding the stop mid-drain; {survives}"
         )
     if hosting_supervised_session() is not None:
-        raise RuntimeError("pause/stop must run outside the work it drains; use a login shell")
+        raise RuntimeError("stop must run outside the work it drains; use a login shell")
 
 
 @dataclass
@@ -376,8 +374,8 @@ def _drain_and_stop(
     clients: list[str],
 ) -> None:
     """Drain the agents, then stop the selected resources; each phase is timed into `phases`."""
-    # Task #3270: an operator's own stop/pause binds the hold to this
-    # command's shepherding process; daemon-driven pauses stay unbound.
+    # Task #3270: an operator's own stop binds the hold to this
+    # command's shepherding process; daemon-driven holds stay unbound.
     from base.deploy.maintenance.hold_driver import mint_driver
     from cli.commands.lifecycle.stop import _announce_stopping
 
@@ -444,8 +442,8 @@ def stop(
 ) -> int:
     """Drain via normal restart, then stop selected resources.
 
-    Services and the data plane are never forced. Closing terminals (stop, not
-    pause) SIGKILLs what outlives its bounded grace
+    Services and the data plane are never forced. Closing terminals (skipped
+    when `keep_terminals`) SIGKILLs what outlives its bounded grace
     (`service_stop.close_terminals`).
     """
     from cli.commands.lifecycle.stop import _confirm_stop
@@ -455,17 +453,14 @@ def stop(
         preserve_sessions=preserve_sessions, keep_browser=keep_browser, keep_infra=keep_infra
     )
     print(
-        f"[ava {'pause' if keep_terminals else 'stop'}] local services; "
+        "[ava stop] local services; "
         f"terminals={'retained' if keep_terminals else 'closed'}; "
         f"data plane={'retained' if keep_infra else 'stopped on gateway'}"
     )
     if not _confirm_stop(require_confirmation=require_confirmation):
         return 0
     deadline = deadline_after(timeout)
-    owns_journal = begin(
-        "pause" if keep_terminals else "stop",
-        deadline=deadline,
-    )
+    owns_journal = begin("stop", deadline=deadline)
     # Per-phase accounting: a failed stop names each phase and how much of the
     # shared budget it consumed, so the operator sees WHERE the budget went
     # (agent drain vs services vs terminals) — never a bare timeout (#2045).

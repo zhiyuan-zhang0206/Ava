@@ -9,7 +9,7 @@ events end that shell and the coding process in it:
 - the shell's TTL expiring;
 - an explicit kill.
 
-A cluster update and `ava pause` keep persistent shells alive, so after those
+An `ava restart` keeps persistent shells alive, so after one
 the session is usually still running. If it is still listed in
 `ava.shell.sessions.list()`, it is alive: `capture` it and nudge it. Do not
 resume it.

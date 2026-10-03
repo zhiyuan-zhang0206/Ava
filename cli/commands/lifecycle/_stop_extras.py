@@ -2,7 +2,7 @@
 
 Normal stop and destroy share exact-home helper retirement. Start recreates its
 definition, first rebuilding the signed artifact when its sources changed (only
-a retired helper's artifact is replaced). Updates and pause preserve the helper.
+a retired helper's artifact is replaced). Updates and restart preserve the helper.
 """
 
 from __future__ import annotations

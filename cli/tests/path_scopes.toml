@@ -10,7 +10,6 @@
     "test_main_log_init.py",
     "test_mcp_install_parser.py",
     "test_memory_cmd.py",
-    "test_pause_parser.py",
     "test_schedules_parser.py",
     "test_plugin_scaffold.py",
     "test_presets_cmd.py",
@@ -21,4 +20,5 @@
     "test_skill_install.py",
     "test_start_identity.py",
     "test_start_runtime.py",
+    "test_stop_parser.py",
 ]

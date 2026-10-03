@@ -1,6 +1,6 @@
-# Pause, stop, and resume a cluster
+# Stop, restart, and resume a cluster
 
-Use the `ava` belonging to each unit's checkout. `ava pause`, `ava stop`, and
+Use the `ava` belonging to each unit's checkout. `ava stop`, `ava restart`, and
 `ava start` act on **one local home**; they do not stop every machine remotely.
 For a planned cluster outage, coordinate the participating machines through
 SSH or their existing operator entry points. Stop runners before the gateway;
@@ -10,17 +10,17 @@ start the gateway and verify its dependencies before starting runners.
 
 | Command | Native agent execution | Persistent shells and schedules | Local infrastructure and extras |
 | --- | --- | --- | --- |
-| `ava pause` | Drain normally and stop the native services | Retained | Keep PostgreSQL, Redis, PgBouncer, browser, Gate, helper and native LGTM |
 | `ava stop -y` | Same normal drain | Close terminal jobs and shells (HUP/TERM, SIGKILL after a bounded grace) | Stop this home's services, browser, Gate, helper, native LGTM and private data plane |
 | `ava stop -y --keep-infra` | Same normal drain | Close | Keep the private data plane |
 | `ava stop -y --keep-infra --keep-service gateway` | Same normal drain | Close | Also retain the named service; dependent services require `--keep-infra` |
+| `ava restart` | Same normal drain, then `ava start` | Retained | Replace the native services; keep PostgreSQL, Redis, PgBouncer, browser, Gate, helper and native LGTM |
 | `ava start` | Restore normal admission after readiness | Reuse retained sessions; closed sessions are not serialized | Bring up enabled services from the existing home |
 
 `--keep-service` is repeatable and accepts the bare service-roster name. It is
 an invocation's preservation choice, not a permanent disabled-service setting.
-`stop` asks for confirmation unless `-y` is passed; `pause` does not. Both use
-`--timeout 300` by default. A deadline is a failed stop, not permission to kill
-surviving services. Terminals and Postgres are the exceptions: Postgres' fast
+`stop` asks for confirmation unless `-y` is passed; `restart` never asks. `stop`
+uses `--timeout 300` by default, and restart's drain has the same budget. A
+deadline is a failed stop, not permission to kill surviving services. Terminals and Postgres are the exceptions: Postgres' fast
 shutdown that has not finished by the end of its share of the budget (a hung
 archive command) is ended by an immediate shutdown and the leftover descendants
 are SIGKILLed, loudly and without failing the stop
@@ -34,20 +34,20 @@ in the `terminals` phase, before the data plane stops
 explicitly selects force behavior when normal exit cannot complete. Force stops
 the selected service processes without fabricating a restart receipt. Later
 start uses agent-host crash recovery from persisted checkpoints.
-Force does not provide normal pause's seamless continuation or a checkpoint
+Force does not provide normal stop's seamless continuation or a checkpoint
 for interrupted arbitrary code; use normal stop for the planned data-plane move.
 
 A stop retains agent IDs, history, checkpoints, pending messages, workspaces,
 browser profiles and observability data. It does not terminate agent identities
 or destroy the cluster. A full stop closes persistent shells; their running
-processes and shell variables cannot be restored by `start`. Use pause when
-those live sessions must survive. Externally launched tools are not owned by
-one local home.
+processes and shell variables cannot be restored by `start`. No `ava stop` option
+keeps them: `ava restart` and `ava maintenance stop --keep-terminals` do.
+Externally launched tools are not owned by one local home.
 
 Impersonation is a separate agent identity protocol. These commands do not
 request, acquire, renew or release external-agent control leases. Also, the
 legacy `ava cluster pause NAME` is machine membership administration, not this
-local maintenance operation; do not substitute it for `ava pause`.
+local maintenance operation; it stops nothing on this home.
 
 ## What normal drain waits for
 
@@ -168,7 +168,7 @@ for eligibility, stale cutoff, and retry semantics.
 available for an operator who needs to inspect intermediate phases. These are
 local commands using the same journal and native drain, not a second agent
 ownership mechanism. They take a matching `--operation` and timezone-aware
-`--acquired-at`; ordinary pause/stop/start does not need these arguments.
+`--acquired-at`; ordinary stop/restart/start does not need these arguments.
 
 The explicit `maintenance stop` retains the data plane and refuses live
 terminals unless `--keep-terminals` asserts a separately verified work boundary.

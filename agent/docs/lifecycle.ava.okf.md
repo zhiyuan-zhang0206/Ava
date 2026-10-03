@@ -23,7 +23,7 @@ host task remains observable; stopping its whole host affects that runner's
 other turns as well.
 
 Persistent PTY shells are separate resources: native agent restart preserves
-them. Cluster `pause` preserves them; full cluster `stop` closes them while
+them. `ava restart` preserves them; full cluster `stop` closes them while
 retaining durable agent data. Impersonation is an independent identity protocol.
 
 ## Related contracts
@@ -31,4 +31,4 @@ retaining durable agent data. Impersonation is an independent identity protocol.
 - [[process-lifecycle/reentry-paths.ava.okf.md]] — restart and resurrection
 - [[agent/startup/docs/admission.ava.okf.md]] — ownership fencing
 - [[sessions.ava.okf.md]] — persistent shell resources
-- [[base/deploy/maintenance/docs/maintenance.ava.okf.md]] — cluster pause/stop
+- [[base/deploy/maintenance/docs/maintenance.ava.okf.md]] — cluster stop/restart

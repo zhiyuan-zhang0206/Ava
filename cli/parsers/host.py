@@ -1,6 +1,6 @@
 """`ava` host-level lifecycle verbs — argparse builders + their `_h_*` handlers.
 
-`init` / `start` / `pause` / `stop` / `restart` / `status` / `converge` / `firewall` / `trace` /
+`init` / `start` / `stop` / `restart` / `status` / `converge` / `firewall` / `trace` /
 `lgtm` act
 on THIS host (or the unit this checkout owns), as opposed to the cluster-wide
 verbs in ``cli.parsers.cluster``. Handlers stay thin: each lazy-imports its
@@ -34,14 +34,6 @@ def _h_stop(args: argparse.Namespace) -> int:
         preserve_sessions=frozenset(args.keep_service),
         force=args.force,
         timeout=args.timeout,
-    )
-
-
-def _h_pause(args: argparse.Namespace) -> int:
-    from cli.commands.lifecycle.stop import cmd_pause
-
-    return cmd_pause(
-        preserve_sessions=frozenset(args.keep_service), force=args.force, timeout=args.timeout
     )
 
 
@@ -224,12 +216,7 @@ def _add_stop_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -
         default=True,
         help=argparse.SUPPRESS,
     )
-    _add_stop_options(stop_p)
-    stop_p.set_defaults(func=_h_stop)
-
-
-def _add_stop_options(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument(
+    stop_p.add_argument(
         "--keep-service",
         action="append",
         default=[],
@@ -238,32 +225,24 @@ def _add_stop_options(parser: argparse.ArgumentParser) -> None:
     )
     # task #4092 cli-default inventory: bounded graceful drain — "failure never
     # silently forces" makes the default safe, and ops scripts rely on it.
-    parser.add_argument(
+    stop_p.add_argument(
         "--timeout",
         type=float,
         default=300,
         help="total normal drain/stop deadline; failure never silently forces",
     )
-    parser.add_argument(
+    stop_p.add_argument(
         "--force",
         action="store_true",
         help="explicitly permit force-killing work that cannot exit normally",
     )
-
-
-def _add_pause_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
-    parser = sub.add_parser(
-        "pause",
-        help="[host] pause for maintenance; retain data plane, browser and persistent terminals",
-    )
-    _add_stop_options(parser)
-    parser.set_defaults(func=_h_pause)
+    stop_p.set_defaults(func=_h_stop)
 
 
 def _add_restart_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
     restart_p = sub.add_parser(
         "restart",
-        help="[host] normal pause then start, retaining persistent terminals",
+        help="[host] normal stop then start, retaining the data plane, browser and persistent terminals",
     )
     # task #4092 cli-default inventory: "smooth" is the safe default — force
     # must be asked for explicitly.

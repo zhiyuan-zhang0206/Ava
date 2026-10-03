@@ -63,15 +63,15 @@ instead of experimenting on the data plane.
 ava init ...  # once per home: record its identity (see `ava init --help`); starts nothing
 ava start     # provision owned storage on the first start, and wait for the selected
               # root services to become ready.
-ava pause     # normal agent drain; keep infrastructure, browser and persistent PTYs
 ava stop      # normal drain, then full local stop; durable data and agent IDs survive
               # --keep-infra / --keep-service retain resources; --force is explicit
-ava start     # after a pause/stop, restore services and resume after readiness
+ava start     # after a stop, restore services and resume after readiness
+ava restart   # stop then start in one command; keeps private pg+redis, browser and persistent PTYs
 ava status    # check status (includes the pg/redis view)
 ```
 
 For coordinated downtime and recovery, use the shared
-[pause/stop procedure](../../../../conventions/graceful-maintenance.md).
+[stop procedure](../../../../conventions/graceful-maintenance.md).
 
 **Bring-up ordering is strict.** Agent processes are never started directly —
 they are always created through the gateway (`POST /api/agents`, which
