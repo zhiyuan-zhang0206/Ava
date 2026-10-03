@@ -35,8 +35,8 @@ from agent.graph._memory_filter import Candidate, filter_candidates
 from agent.messages import NoteTag, system_note_message
 from ava import gateway_client
 from base.agents import GatewayUnavailable, IndexerUnavailable
-from base.agents.context.slices import AgentSlices
 from base.agents.messages.kwargs import AvaMsgType, read_ava_kwargs
+from base.host.env.agent_slices import AgentSlices
 from base.lm.content import content_blocks
 from base.log import logger
 from base.paths import memory_dir

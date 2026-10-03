@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from base.agents.context.slices import AgentSlices
+from base.host.env.agent_slices import AgentSlices
 
 
 def test_memory_index_note_present(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

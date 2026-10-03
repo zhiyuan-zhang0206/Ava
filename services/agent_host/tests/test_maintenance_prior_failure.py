@@ -15,13 +15,13 @@ from agent import state as states
 from agent.impersonation import flush_checkpoint
 from agent.startup import wrap_saver_writes_with_nstep_interval
 from base.agents.context import AvaContext
-from base.agents.context.slices import AgentSlices
 from base.agents.history.delta_read_compat import wrap_saver_reads_with_delta_reconstruction
 from base.cluster.machine import machine_name
 from base.config import settings
 from base.db import Database, insert_inbound_message
 from base.deploy.maintenance import admission, cohort, pause_owner
 from base.events.live.bus import EventBus
+from base.host.env.agent_slices import AgentSlices
 from services.agent_host import host as host_module
 from services.agent_host import runtime as runtime_module
 from services.agent_host.runtime import TurnOutcome

@@ -20,7 +20,7 @@ from agent.state import (
     build_agent_state,
     clear_plugin_registrations,
 )
-from base.agents.context.slices import AgentSlices
+from base.host.env.agent_slices import AgentSlices
 from base.packages.plugins.context import PluginContext
 
 

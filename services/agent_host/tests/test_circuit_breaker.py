@@ -41,9 +41,9 @@ from agent.tests.claim_status_support import _compact_tail, _pair_compact_cycles
 from agent.tests.claim_support import _config, _fake_llm, _insert_inbound_kind, _make_runtime
 from agent.turn.runloop import _handle_fatal_llm_error
 from base.agents.context import AvaContext
-from base.agents.context.slices import AgentSlices
 from base.config import settings
 from base.events.live.publisher import AgentEventPublisher
+from base.host.env.agent_slices import AgentSlices
 from tests.fixtures.units import spawn_agent
 
 # A summary long enough to clear COMPACT_MIN_SUMMARY_CHARS.

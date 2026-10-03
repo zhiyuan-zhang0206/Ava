@@ -27,8 +27,8 @@ from agent.graph import exec_node, llm_node
 from agent.state import AgentState
 from agent.tests._fakes import make_fake_ops_pool
 from base.agents.context import AvaContext
-from base.agents.context.slices import AgentSlices
 from base.events.live.projection import EVENT_ADAPTER, ExecOutput, ExecStart
+from base.host.env.agent_slices import AgentSlices
 
 
 def _make_runtime(*, llm=None, event_publisher=None) -> Runtime[AvaContext]:

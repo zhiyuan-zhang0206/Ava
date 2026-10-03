@@ -58,8 +58,8 @@ from ava_builtins.plugins.ava_syntax_fix.agent_runtime import (
     syntax_fix_before_exec,
 )
 from base.agents.context import AvaContext
-from base.agents.context.slices import AgentSlices
 from base.config import settings
+from base.host.env.agent_slices import AgentSlices
 
 # --- _fix_chinese_punctuation ---
 

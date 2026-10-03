@@ -10,9 +10,9 @@ from psycopg_pool import AsyncConnectionPool
 from agent.graph.llm_errors import FatalProviderError
 from agent.state import AgentState, CircuitState
 from base.agents.context import AvaContext
-from base.agents.context.slices import AgentSlices
 from base.db import Database
 from base.events.live.bus import EventBus
+from base.host.env.agent_slices import AgentSlices
 from tests.fixtures.units import spawn_agent
 
 

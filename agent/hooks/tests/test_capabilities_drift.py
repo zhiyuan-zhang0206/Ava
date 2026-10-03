@@ -32,9 +32,9 @@ from agent.hooks.capabilities import _newly_installed_skills, register_capabilit
 from agent.state import AgentState, CapabilitiesState
 from base import paths
 from base.agents.context import AvaContext
-from base.agents.context.slices import AgentSlices
 from base.agents.messages.kwargs import NoteTag
 from base.config import settings
+from base.host.env.agent_slices import AgentSlices
 
 _CONFIG = {"configurable": {"thread_id": "1042"}}
 

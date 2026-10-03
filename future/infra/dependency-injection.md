@@ -27,7 +27,7 @@ supplies the package doors and the shrink-only baseline practice the enforcement
 - **`AvaContext`** (`base/agents/context/__init__.py`) is LangGraph's per-run context. The
   host builds one per turn in `services/agent_host/host.py` with the handles (model,
   event publisher, database pool, `Database`, `EventBus`) and the agent's resolved
-  `AgentSlices` (`base/agents/context/slices.py`); graph code is moving from the
+  `AgentSlices` (`base/host/env/agent_slices.py`); graph code is moving from the
   `turn_settings` view to reading `runtime.context.agent`.
 - **One compiled graph** is shared by every agent in a host
   ([agent runtime](../../agent/docs/agent-runtime.ava.okf.md)).

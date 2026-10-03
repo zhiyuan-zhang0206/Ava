@@ -20,9 +20,9 @@ from langchain_core.messages import HumanMessage
 from ava import gateway_client
 from ava_builtins.plugins.ava_memory import inherit
 from base.agents import GatewayUnavailable
-from base.agents.context.slices import AgentSlices
 from base.cluster.machine import machine_name
 from base.config import settings
+from base.host.env.agent_slices import AgentSlices
 from base.paths import ava_home
 
 OPEN = inherit.INHERITABLE_OPEN

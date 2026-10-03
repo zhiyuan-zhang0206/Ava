@@ -17,9 +17,9 @@ from pathlib import Path
 import pytest
 
 from agent.graph.context_notes import _own_label, agent_id_note
-from base.agents.context.slices import AgentSlices
 from base.agents.messages.kwargs import NoteTag
 from base.config import settings
+from base.host.env.agent_slices import AgentSlices
 from base.native_process.turn_identity import bind_turn_identity
 
 

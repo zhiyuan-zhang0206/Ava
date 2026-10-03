@@ -41,8 +41,8 @@ from pathlib import Path
 from langchain_core.messages import AnyMessage, HumanMessage
 
 from agent.messages import NoteTag, system_note_message
-from base.agents.context.slices import HistoryDump
 from base.agents.messages.kwargs import read_ava_kwargs
+from base.host.env.agent_slices import HistoryDump
 from base.log import logger
 from base.paths import workspace_dir
 

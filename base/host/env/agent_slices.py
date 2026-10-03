@@ -13,6 +13,10 @@ live cluster default for an unpinned field, exactly as `turn_settings` does: a c
 change reaches the agent's next turn, and a turn sees one value of each field throughout.
 
 List-valued settings are frozen into tuples.
+
+This module sits beside the config index rather than in `base.agents.context` because importing it
+pulls nothing heavy: the exec child and the SDK, which keep psycopg / redis out of their start,
+build the slices too.
 """
 
 from __future__ import annotations

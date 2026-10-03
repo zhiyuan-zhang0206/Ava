@@ -28,7 +28,7 @@ from agent.graph.llm._stream import _consume_stream_with_stall_timeout, _stream_
 from agent.llm.cache import LlmInvocation
 from ava_builtins.plugins.lm_google import gemini_cache
 from ava_builtins.plugins.lm_google.gemini_cache import CacheRef
-from base.agents.context.slices import AgentSlices
+from base.host.env.agent_slices import AgentSlices
 
 
 class _FakeClock:

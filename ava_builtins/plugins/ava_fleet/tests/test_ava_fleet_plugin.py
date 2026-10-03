@@ -25,8 +25,8 @@ import ava
 import ava.agents
 from agent.graph.system_prompt import build_system_prompt
 from agent.state import clear_plugin_registrations
-from base.agents.context.slices import AgentSlices
 from base.agents.observation.snapshot import select_one
+from base.host.env.agent_slices import AgentSlices
 from base.packages.plugins.context import PluginContext
 
 

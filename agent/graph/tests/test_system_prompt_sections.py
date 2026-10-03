@@ -20,8 +20,8 @@ from agent.graph.system_prompt import (
     _invest_in_the_future_section,
     build_system_prompt,
 )
-from base.agents.context.slices import AgentSlices
 from base.config import settings
+from base.host.env.agent_slices import AgentSlices
 
 
 @pytest.mark.parametrize(

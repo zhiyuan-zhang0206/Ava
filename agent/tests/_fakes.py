@@ -8,7 +8,7 @@ from unittest.mock import AsyncMock, MagicMock
 from langgraph.runtime import Runtime
 
 from base.agents.context import AvaContext
-from base.agents.context.slices import AgentSlices
+from base.host.env.agent_slices import AgentSlices
 
 
 def make_fake_ops_pool() -> AsyncMock:

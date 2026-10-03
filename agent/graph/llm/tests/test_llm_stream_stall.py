@@ -36,8 +36,8 @@ from agent.graph.llm_errors import (
 from agent.state import AgentState
 from agent.tests._fakes import make_fake_ops_pool
 from base.agents.context import AvaContext
-from base.agents.context.slices import AgentSlices
 from base.config import settings
+from base.host.env.agent_slices import AgentSlices
 from base.lm.registry import MODELS, ModelSpec
 from base.native_process.turn_identity import bind_turn_identity
 

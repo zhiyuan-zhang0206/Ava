@@ -38,7 +38,7 @@ Governed: the framework packages plus `schedules/`. Out of scope: tests, `__main
 
 Packages outside `DB_HANDLE_PACKAGES` are not policed per site, but `scripts/structure/ambient_state/handle_ratchet.py` counts their shim dials, self-built `Database.from_settings()` calls and self-built `EventBus.from_settings()` calls (outside `BUS_PACKAGES`) per package and freezes the counts in `scripts/structure/ambient_state/handle_ratchet_baseline.json`. A count above its frozen value fails (new code takes a handle); one below it fails until `--write` lowers the baseline; against the base revision a frozen count only falls. Threading a handle into a package lowers its count; a package at zero can join `DB_HANDLE_PACKAGES`.
 
-The same file counts, per package, the reads of the context-bound `turn_settings` proxy (`turn-settings-read`): a turn's per-agent settings come from the `AgentSlices` on `AvaContext` (`base/agents/context/slices.py`), and the sites that still read the proxy — the exec child and SDK, registered prompt-section and note callables, the checkpoint saver — only fall.
+The same file counts, per package, the reads of the context-bound `turn_settings` proxy (`turn-settings-read`): a turn's per-agent settings come from the `AgentSlices` on `AvaContext` (`base/host/env/agent_slices.py`), and the sites that still read the proxy — the exec child and SDK, registered prompt-section and note callables, the checkpoint saver — only fall.
 
 ## Known gaps
 

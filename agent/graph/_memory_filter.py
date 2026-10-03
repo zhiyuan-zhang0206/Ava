@@ -41,7 +41,7 @@ from dataclasses import dataclass
 
 from langchain_core.messages import HumanMessage
 
-from base.agents.context.slices import MemoryRecall
+from base.host.env.agent_slices import MemoryRecall
 from base.log import logger
 
 _LABEL = "recall-filter"

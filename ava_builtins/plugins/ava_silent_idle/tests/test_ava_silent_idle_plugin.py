@@ -27,7 +27,7 @@ from langgraph.runtime import Runtime
 from agent.messages import NoteTag
 from agent.state import build_agent_state, clear_plugin_registrations
 from base.agents.context import AvaContext
-from base.agents.context.slices import AgentSlices
+from base.host.env.agent_slices import AgentSlices
 
 
 @pytest.fixture

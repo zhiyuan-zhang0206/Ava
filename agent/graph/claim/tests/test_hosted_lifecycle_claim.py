@@ -5,7 +5,7 @@ from langchain_core.messages import HumanMessage
 from agent.db import ClaimedInbound
 from agent.graph.claim._dispatch import _BatchState, _handle_restart
 from base.agents.context import AvaContext
-from base.agents.context.slices import AgentSlices
+from base.host.env.agent_slices import AgentSlices
 
 
 async def test_hosted_restart_marker_does_not_claim_completion() -> None:

@@ -24,8 +24,8 @@ from ava_builtins.plugins.lm_google.gemini_cache import (
     invalidate,
     is_stale_cache_error,
 )
-from base.agents.context.slices import AgentSlices
 from base.config import settings
+from base.host.env.agent_slices import AgentSlices
 
 
 @tool("execute_code", parse_docstring=True)

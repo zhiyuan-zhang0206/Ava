@@ -15,8 +15,8 @@ from types import ModuleType, SimpleNamespace
 from typing import Any
 
 from agent.hooks.history_dump import workspace_section_hint
-from base.agents.context.slices import AgentSlices
 from base.config import settings
+from base.host.env.agent_slices import AgentSlices
 from base.packages.plugins import activation, contributions
 from base.packages.plugins.context import current_plugin_name
 from base.paths import workspace_dir

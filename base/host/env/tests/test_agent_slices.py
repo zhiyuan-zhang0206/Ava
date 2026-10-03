@@ -7,10 +7,10 @@ from typing import Any, cast
 
 import pytest
 
-from base.agents.context.slices import AgentSlices
 from base.config import settings, turn_settings
 from base.config.turn_view import bind_agent_config, resolve_agent_config_pins
 from base.host.env import config_registry
+from base.host.env.agent_slices import AgentSlices
 from base.host.env.config_lite_table import FIELD_DOMAINS
 
 

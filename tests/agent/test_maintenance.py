@@ -23,12 +23,12 @@ from agent.impersonation import protect_native_hooks
 from agent.ownership.hosted import admit_hosted_runtime, settle_hosted_runtime
 from agent.startup import wrap_saver_writes_with_nstep_interval
 from base.agents.context import AvaContext
-from base.agents.context.slices import AgentSlices
 from base.agents.history.delta_read_compat import wrap_saver_reads_with_delta_reconstruction
 from base.cluster.machine import machine_name
 from base.db import Database, create_agent, insert_inbound_message
 from base.deploy.maintenance import admission, cohort, pause_owner
 from base.events.live.bus import EventBus
+from base.host.env.agent_slices import AgentSlices
 from services.agent_host.host import AgentHost
 from services.agent_host.runtime import TurnOutcome
 

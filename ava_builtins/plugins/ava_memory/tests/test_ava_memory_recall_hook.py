@@ -23,7 +23,7 @@ from agent.messages import NoteTag, inbound_message, system_note_message
 from agent.state import build_agent_state, clear_plugin_registrations
 from ava import gateway_client
 from base.agents.context import AvaContext
-from base.agents.context.slices import AgentSlices
+from base.host.env.agent_slices import AgentSlices
 
 
 @pytest.fixture
