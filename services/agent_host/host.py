@@ -2,16 +2,17 @@
 
 The dispatcher owns per-agent single-flight and wake delivery. This driver binds
 an admitted incarnation, resolves its framework/plugin configuration, and invokes
-the graph until idle or native lifecycle return. Contextvars surround invocation
-so every graph node inherits the same identity and configuration; managed exec
-children receive those pins through their existing environment projection.
+the graph until idle or native lifecycle return. The turn's identity is a
+contextvar every graph node inherits; its configuration travels as its `AgentSlices`
+on the graph context, and managed exec children receive the same pins through their
+existing environment projection.
 
 The daemon shares a workload pool, a separate control pool, one checkpointer
 (keyed by thread_id), and one compiled graph. Graph construction loads process-
 global plugin definitions, so compiling a graph per agent would corrupt concurrent
 turns. Chat models and startup reconciliation are cached per agent and invalidated
-by the stored birth/overlay configuration fingerprint. Shared graph retry policy
-still uses cluster-level settings (issue #174).
+by the stored birth/overlay configuration fingerprint. The llm node retries itself on
+its agent's own schedule (`agent/graph/llm/_retry.py`).
 
 Cold admission repairs claimed inbound/checkpoint disagreements and dangling tool
 pairs, and establishes the workspace. A watcher (`ava.watcher.at/cron/launch`) is
@@ -84,16 +85,17 @@ from base.agents.context import AvaContext
 from base.agents.history.delta_read_compat import recovery_reconstruction_scope
 from base.cluster.machine import machine_name
 from base.config import settings
-from base.config.turn_view import bind_agent_config, resolve_agent_config_pins
+from base.config.agent_pins import resolve_agent_config_pins
 from base.db import Database
 from base.deploy.maintenance import admission
 from base.events.live.announce import publish_agent_updated
 from base.events.live.bus import EventBus
 from base.events.live.publisher import AgentEventPublisher
+from base.host.env.agent_slices import AgentSlices
 from base.log import logger
 from base.native_process.runtime_incarnation import RuntimeIncarnation, current_incarnation
 from base.native_process.turn_identity import bind_turn_identity
-from base.packages.plugins.config_view import bind_agent_plugin_config, resolve_agent_plugin_pins
+from base.packages.plugins.config_view import resolve_agent_plugin_pins
 from base.telemetry.tracing import turn_span
 from services.agent_host import maintenance as maintenance_receipts
 from services.agent_host.admission import TurnAdmission
@@ -353,19 +355,19 @@ class AgentHost:
             # cancelled/half-open publish cannot strand a false `running` row.
             self._in_flight.add(agent_id)
             try:
-                # All three binds wrap the whole turn (the exec child gets agent
-                # config via the re-emitted overlay env instead — see the module
-                # docstring); the runtime build is inside them: build_chat_model
-                # reads turn_settings.lm.llm_model, only this agent's while bound.
+                # The identity and the recovery scope wrap the whole turn; the agent's
+                # configuration travels as its slices (the exec child gets it via the
+                # re-emitted overlay env — see the module docstring).
                 with (
                     bind_turn_identity(agent_id, incarnation=incarnation),
-                    bind_agent_config(pins),
-                    bind_agent_plugin_config(plugin_pins),
                     recovery_reconstruction_scope(self._checkpointer, str(agent_id)),
                 ):
                     await publish_agent_updated(self._bus, agent_id)
-                    runtime = await self._runtime_for(agent_id, stored.fingerprint)
-                    outcome = await self._drive_turns(agent_id, runtime)
+                    slices = AgentSlices.resolve(pins, plugin_pins)
+                    runtime = await self._runtime_for(
+                        agent_id, stored.fingerprint, slices.brain.llm_model
+                    )
+                    outcome = await self._drive_turns(agent_id, runtime, slices)
             except asyncio.CancelledError:
                 # A cancelled turn (stale-turn scan, force terminate, shutdown)
                 # must not keep its runtime either: the next wake re-runs the
@@ -495,11 +497,10 @@ class AgentHost:
         self._in_flight.discard(agent_id)
         self._evict()
 
-    async def _runtime_for(self, agent_id: int, fingerprint: str) -> _AgentRuntime:
+    async def _runtime_for(self, agent_id: int, fingerprint: str, llm_model: str) -> _AgentRuntime:
         """This agent's prepared runtime, building it when absent or stale.
 
-        Called with the turn's three binds already in effect, so a cold build
-        reads this agent's config rather than the cluster default.
+        A cold build prepares `llm_model`, the agent's model for this turn.
         """
         cached = self._runtimes.get(agent_id)
         if cached is not None and cached.fingerprint == fingerprint:
@@ -511,7 +512,7 @@ class AgentHost:
         reason = "cold" if cached is None else "config_changed"
         self.stats.cache_misses += 1
         started = time.monotonic()
-        runtime = await self._build_runtime(agent_id, fingerprint)
+        runtime = await self._build_runtime(agent_id, fingerprint, llm_model)
         self._runtimes[agent_id] = runtime
         self._runtimes.move_to_end(agent_id)
         logger.info(
@@ -524,11 +525,13 @@ class AgentHost:
         self._evict()
         return runtime
 
-    async def _build_runtime(self, agent_id: int, fingerprint: str) -> _AgentRuntime:
+    async def _build_runtime(
+        self, agent_id: int, fingerprint: str, llm_model: str
+    ) -> _AgentRuntime:
         """Repair checkpoint/inbound state, then prepare the model."""
         await reconcile_claimed_inbounds_at_startup(self._pool, self._checkpointer, agent_id)
         await repair_dangling_tool_use_at_startup(self._graph, agent_id)
-        llm = await boot_agent_scope(agent_id)
+        llm = await boot_agent_scope(agent_id, llm_model)
         return _AgentRuntime(fingerprint=fingerprint, llm=llm)
 
     def _evict(self) -> None:
@@ -605,7 +608,9 @@ class AgentHost:
 
     # ── the turn loop ────────────────────────────────────────────────────────
 
-    async def _drive_turns(self, agent_id: int, runtime: _AgentRuntime) -> TurnOutcome:
+    async def _drive_turns(
+        self, agent_id: int, runtime: _AgentRuntime, slices: AgentSlices
+    ) -> TurnOutcome:
         """Build this turn task's context and invoke the graph until it is done.
 
         The event publisher is created per turn task rather than cached with the
@@ -621,6 +626,9 @@ class AgentHost:
             ops_pool=self._pool,
             llm=runtime.llm,
             event_publisher=event_publisher,
+            db=self._db,
+            bus=self._bus,
+            agent=slices,
             # The dispatcher owns subscriptions; an empty claim ends this task.
         )
         try:
@@ -638,7 +646,9 @@ class AgentHost:
         """
         tags = ["ava", f"agent-{agent_id}", "hosted"]
         metadata: dict[str, object] = {"agent_id": agent_id, "hosted": True}
-        config: RunnableConfig = graph_config(agent_id, tags, metadata)
+        config: RunnableConfig = graph_config(
+            agent_id, tags, metadata, ctx.require_agent().kernel.checkpoint_interval
+        )
         turn = 0
         pending_failure: PendingTurnFailure | None = None
         while True:

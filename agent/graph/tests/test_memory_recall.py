@@ -15,6 +15,7 @@ import agent.graph.memory_recall as recall
 from agent.messages import inbound_message
 from ava.gateway_client import MemorySearchResult
 from base.agents import IndexerUnavailable
+from base.host.env.agent_slices import AgentSlices
 
 
 @pytest.fixture
@@ -61,7 +62,7 @@ async def test_renders_path_and_description(
         ],
     )
 
-    result = await recall.passive_memory_recall(_conversation())  # pyright: ignore[reportUnknownArgumentType]
+    result = await recall.passive_memory_recall(_conversation(), agent=AgentSlices.resolve())  # pyright: ignore[reportUnknownArgumentType]
 
     assert result is not None
     assert "- a.md: deploy runbook" in result.note.content  # pyright: ignore[reportUnknownMemberType]
@@ -82,7 +83,7 @@ async def test_empty_description_renders_path_only_no_synthesis(
     )
     _set_search(monkeypatch, [MemorySearchResult(path="c.md", description="")])
 
-    result = await recall.passive_memory_recall(_conversation())  # pyright: ignore[reportUnknownArgumentType]
+    result = await recall.passive_memory_recall(_conversation(), agent=AgentSlices.resolve())  # pyright: ignore[reportUnknownArgumentType]
 
     assert result is not None
     content = result.note.content  # pyright: ignore[reportUnknownMemberType]
@@ -102,7 +103,7 @@ async def test_description_is_not_truncated(
     _write_note(memory_root, "a.md", "note a")
     _set_search(monkeypatch, [MemorySearchResult(path="a.md", description=long_desc)])
 
-    result = await recall.passive_memory_recall(_conversation())  # pyright: ignore[reportUnknownArgumentType]
+    result = await recall.passive_memory_recall(_conversation(), agent=AgentSlices.resolve())  # pyright: ignore[reportUnknownArgumentType]
 
     assert result is not None
     assert f"- a.md: {long_desc}" in result.note.content  # pyright: ignore[reportUnknownMemberType]
@@ -122,7 +123,11 @@ async def test_skips_already_injected_paths(
         ],
     )
 
-    result = await recall.passive_memory_recall(_conversation(), injected_paths={"a.md"})  # pyright: ignore[reportUnknownArgumentType]
+    result = await recall.passive_memory_recall(
+        _conversation(),  # pyright: ignore[reportUnknownArgumentType]
+        injected_paths={"a.md"},
+        agent=AgentSlices.resolve(),
+    )
 
     assert result is not None
     assert result.paths == {"b.md"}
@@ -143,7 +148,7 @@ async def test_skips_path_not_synced_to_this_machine(
         ],
     )
 
-    result = await recall.passive_memory_recall(_conversation())  # pyright: ignore[reportUnknownArgumentType]
+    result = await recall.passive_memory_recall(_conversation(), agent=AgentSlices.resolve())  # pyright: ignore[reportUnknownArgumentType]
 
     assert result is not None
     assert result.paths == {"here.md"}
@@ -156,7 +161,11 @@ async def test_returns_none_when_all_matches_already_injected(
     _write_note(memory_root, "a.md", "note a")
     _set_search(monkeypatch, [MemorySearchResult(path="a.md", description="desc a")])
 
-    result = await recall.passive_memory_recall(_conversation(), injected_paths={"a.md"})  # pyright: ignore[reportUnknownArgumentType]
+    result = await recall.passive_memory_recall(
+        _conversation(),  # pyright: ignore[reportUnknownArgumentType]
+        injected_paths={"a.md"},
+        agent=AgentSlices.resolve(),
+    )
 
     assert result is None
 
@@ -196,7 +205,7 @@ async def test_http_error_degrades_to_no_recall_and_logs_error(
     _write_note(memory_root, "a.md", "note a")
     _raise_on_search(monkeypatch, _status_error(500))
 
-    result = await recall.passive_memory_recall(_conversation())  # pyright: ignore[reportUnknownArgumentType]
+    result = await recall.passive_memory_recall(_conversation(), agent=AgentSlices.resolve())  # pyright: ignore[reportUnknownArgumentType]
 
     assert result is None
     errors = [r for r in loguru_records if r["level"].name == "ERROR"]  # pyright: ignore[reportUnknownMemberType]
@@ -214,7 +223,7 @@ async def test_modelled_outage_degrades_without_an_error_log(
     below error — otherwise every gateway bounce reads as a bug."""
     _raise_on_search(monkeypatch, IndexerUnavailable("milvus search failed"))
 
-    result = await recall.passive_memory_recall(_conversation())  # pyright: ignore[reportUnknownArgumentType]
+    result = await recall.passive_memory_recall(_conversation(), agent=AgentSlices.resolve())  # pyright: ignore[reportUnknownArgumentType]
 
     assert result is None
     assert [r for r in loguru_records if r["level"].name == "ERROR"] == []  # pyright: ignore[reportUnknownMemberType]
@@ -229,13 +238,13 @@ async def test_programming_error_in_search_still_propagates(
     _raise_on_search(monkeypatch, TypeError("memory_search() got an unexpected keyword"))
 
     with pytest.raises(TypeError):
-        await recall.passive_memory_recall(_conversation())  # pyright: ignore[reportUnknownArgumentType]
+        await recall.passive_memory_recall(_conversation(), agent=AgentSlices.resolve())  # pyright: ignore[reportUnknownArgumentType]
 
 
 async def test_returns_none_when_disabled(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("base.config.settings.agent.passive_memory_recall_enabled", False)
 
-    result = await recall.passive_memory_recall(_conversation())  # pyright: ignore[reportUnknownArgumentType]
+    result = await recall.passive_memory_recall(_conversation(), agent=AgentSlices.resolve())  # pyright: ignore[reportUnknownArgumentType]
 
     assert result is None
 
@@ -252,7 +261,7 @@ async def test_returns_none_when_eval_isolated(monkeypatch: pytest.MonkeyPatch) 
 
     monkeypatch.setattr(recall.gateway_client, "memory_search", _fake)
 
-    assert await recall.passive_memory_recall(_conversation()) is None  # pyright: ignore[reportUnknownArgumentType]
+    assert await recall.passive_memory_recall(_conversation(), agent=AgentSlices.resolve()) is None  # pyright: ignore[reportUnknownArgumentType]
     assert called is False
 
 
@@ -269,7 +278,7 @@ async def test_returns_none_when_no_query(
 
     monkeypatch.setattr(recall.gateway_client, "memory_search", _fake)
 
-    result = await recall.passive_memory_recall([])
+    result = await recall.passive_memory_recall([], agent=AgentSlices.resolve())
 
     assert result is None
     assert called is False
@@ -297,7 +306,7 @@ async def test_retrieval_default_is_top_100(
 
     monkeypatch.setattr(recall.gateway_client, "memory_search", _search)
 
-    await recall.passive_memory_recall(_conversation())  # pyright: ignore[reportUnknownArgumentType]
+    await recall.passive_memory_recall(_conversation(), agent=AgentSlices.resolve())  # pyright: ignore[reportUnknownArgumentType]
 
     assert asked["k"] == 100
 
@@ -317,7 +326,7 @@ async def test_retrieval_is_wider_than_injection(
 
     monkeypatch.setattr(recall.gateway_client, "memory_search", _search)
 
-    await recall.passive_memory_recall(_conversation())  # pyright: ignore[reportUnknownArgumentType]
+    await recall.passive_memory_recall(_conversation(), agent=AgentSlices.resolve())  # pyright: ignore[reportUnknownArgumentType]
 
     assert asked["k"] == 10
 
@@ -337,12 +346,12 @@ async def test_only_what_the_filter_kept_is_injected(
         ],
     )
 
-    async def _keep_b(_query: str, _candidates: list) -> list[str]:
+    async def _keep_b(_query: str, _candidates: list, _memory: object) -> list[str]:
         return ["b.md"]
 
     monkeypatch.setattr(recall, "filter_candidates", _keep_b)  # pyright: ignore[reportUnknownArgumentType]
 
-    result = await recall.passive_memory_recall(_conversation())  # pyright: ignore[reportUnknownArgumentType]
+    result = await recall.passive_memory_recall(_conversation(), agent=AgentSlices.resolve())  # pyright: ignore[reportUnknownArgumentType]
 
     assert result is not None
     assert result.paths == {"b.md"}
@@ -358,12 +367,12 @@ async def test_nothing_is_injected_when_the_filter_keeps_nothing(
     _write_note(memory_root, "a.md", "body")
     _set_search(monkeypatch, [MemorySearchResult(path="a.md", description="one")])
 
-    async def _keep_none(_query: str, _candidates: list) -> list[str]:
+    async def _keep_none(_query: str, _candidates: list, _memory: object) -> list[str]:
         return []
 
     monkeypatch.setattr(recall, "filter_candidates", _keep_none)  # pyright: ignore[reportUnknownArgumentType]
 
-    assert await recall.passive_memory_recall(_conversation()) is None  # pyright: ignore[reportUnknownArgumentType]
+    assert await recall.passive_memory_recall(_conversation(), agent=AgentSlices.resolve()) is None  # pyright: ignore[reportUnknownArgumentType]
 
 
 async def test_the_filter_sees_the_type_tag_search_returned(
@@ -379,13 +388,13 @@ async def test_the_filter_sees_the_type_tag_search_returned(
     )
     seen: dict[str, list] = {}
 
-    async def _capture(_query: str, candidates: list) -> list[str]:
+    async def _capture(_query: str, candidates: list, _memory: object) -> list[str]:
         seen["candidates"] = candidates
         return []
 
     monkeypatch.setattr(recall, "filter_candidates", _capture)  # pyright: ignore[reportUnknownArgumentType]
 
-    await recall.passive_memory_recall(_conversation())  # pyright: ignore[reportUnknownArgumentType]
+    await recall.passive_memory_recall(_conversation(), agent=AgentSlices.resolve())  # pyright: ignore[reportUnknownArgumentType]
 
     assert seen["candidates"][0].tags == ["type/user", "tech-ops"]  # pyright: ignore[reportUnknownMemberType]
 
@@ -410,14 +419,18 @@ async def test_already_injected_notes_still_reach_the_filter_then_dedup(
     )
     seen: dict[str, list] = {}
 
-    async def _capture(_query: str, candidates: list) -> list[str]:
+    async def _capture(_query: str, candidates: list, _memory: object) -> list[str]:
         seen["candidates"] = candidates
         # filter judges both notes relevant — the already-injected one included
         return [c.path for c in candidates]  # pyright: ignore[reportUnknownMemberType]
 
     monkeypatch.setattr(recall, "filter_candidates", _capture)  # pyright: ignore[reportUnknownArgumentType]
 
-    result = await recall.passive_memory_recall(_conversation(), injected_paths={"a.md"})  # pyright: ignore[reportUnknownArgumentType]
+    result = await recall.passive_memory_recall(
+        _conversation(),  # pyright: ignore[reportUnknownArgumentType]
+        injected_paths={"a.md"},
+        agent=AgentSlices.resolve(),
+    )
 
     # the filter saw both candidates (dedup did not run before it)
     assert [c.path for c in seen["candidates"]] == ["a.md", "b.md"]  # pyright: ignore[reportUnknownMemberType]
@@ -445,11 +458,15 @@ async def test_returns_none_when_everything_the_filter_kept_is_already_injected(
         ],
     )
 
-    async def _keep_a(_query: str, candidates: list) -> list[str]:
+    async def _keep_a(_query: str, candidates: list, _memory: object) -> list[str]:
         return ["a.md"]
 
     monkeypatch.setattr(recall, "filter_candidates", _keep_a)  # pyright: ignore[reportUnknownArgumentType]
 
-    result = await recall.passive_memory_recall(_conversation(), injected_paths={"a.md"})  # pyright: ignore[reportUnknownArgumentType]
+    result = await recall.passive_memory_recall(
+        _conversation(),  # pyright: ignore[reportUnknownArgumentType]
+        injected_paths={"a.md"},
+        agent=AgentSlices.resolve(),
+    )
 
     assert result is None

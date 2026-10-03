@@ -17,7 +17,7 @@ from __future__ import annotations
 from typing import Any, cast
 
 from base.config import settings
-from base.config.turn_view import turn_settings
+from base.host.env.agent_slices import AgentSlices, LlmCallPolicy
 from base.lm.errors import ErrorClass, classify_error, emit_provider_error
 
 
@@ -56,7 +56,7 @@ class LLMStreamStallPairError(LLMStreamStallTimeoutError):
 
     Raised by ``_consume_llm`` in place of the fallback's bare ``TimeoutError``
     so the pair is a first-class ``LLMStreamError``: it is retried on the
-    delayed stall schedule (``_build._build_llm_retry`` — initial
+    delayed stall schedule (``_retry.retry_wait`` — initial
     ``llm_stall_retry_initial_interval_seconds``, doubling, capped at
     ``llm_stall_retry_max_interval_seconds``, up to
     ``llm_stall_retry_max_consecutive`` consecutive pairs, jittered ±
@@ -177,7 +177,7 @@ def _parse_provider_error_type(exc: BaseException) -> str | None:
     return None
 
 
-def _is_fatal_provider_error_type(exc: BaseException) -> bool:
+def _is_fatal_provider_error_type(exc: BaseException, llm_policy: LlmCallPolicy) -> bool:
     """Check whether ``exc`` carries a provider error type configured as fatal.
 
     Returns ``True`` when ``_parse_provider_error_type`` extracts a type
@@ -185,7 +185,7 @@ def _is_fatal_provider_error_type(exc: BaseException) -> bool:
     (comma-separated string parsed into a set). On an empty config string
     the check is a fast no-op.
     """
-    fatal_csv = turn_settings.lm.llm_fatal_provider_error_types
+    fatal_csv = llm_policy.llm_fatal_provider_error_types
     if not fatal_csv:
         return False
     fatal_types = {t.strip() for t in fatal_csv.split(",") if t.strip()}
@@ -193,10 +193,12 @@ def _is_fatal_provider_error_type(exc: BaseException) -> bool:
     return error_type is not None and error_type in fatal_types
 
 
-def _classify_and_log_provider_error(exc: Exception) -> FatalProviderError | None:
+def _classify_and_log_provider_error(
+    exc: Exception, agent: AgentSlices
+) -> FatalProviderError | None:
     """Classify a provider exception, emit the structured postmortem log, and
     return a `FatalProviderError` to raise when the turn must fail fast — else None
-    so the caller re-raises the original for the `RetryPolicy` to retry.
+    so the caller re-raises the original for the node's retry loop to retry.
 
     Two fail-fast triggers fold together here (see `FatalProviderError`): the
     `classify_error` `PERMANENT` class (400/401/402/403/404/422 — deterministic
@@ -216,10 +218,10 @@ def _classify_and_log_provider_error(exc: Exception) -> FatalProviderError | Non
     identify the same account the event does (task #3916).
     """
     classification = classify_error(exc)
-    fatal_type_hit = _is_fatal_provider_error_type(exc)
+    fatal_type_hit = _is_fatal_provider_error_type(exc, agent.llm_policy)
     fatal = classification.error_class is ErrorClass.PERMANENT or fatal_type_hit
     context_overflow = classification.context_overflow
-    model = turn_settings.lm.llm_model
+    model = agent.brain.llm_model
     emit_provider_error(exc, model=model, fatal=fatal, classification=classification)
     if not fatal:
         return None
@@ -416,7 +418,7 @@ def _clear_consecutive_errors(thread_id: str) -> None:
 
 
 # Consecutive two-adjacent-stall terminations, per thread_id. Incremented when
-# `_build._build_llm_retry` grants a delayed retry, reset on a successful
+# `_retry.retry_wait` grants a delayed retry, reset on a successful
 # stream, and popped when the streak exhausts (the next inbound-triggered turn
 # must start with a fresh budget rather than instantly re-tripping the fatal
 # cap — the same convention as `_consecutive_errors` above).

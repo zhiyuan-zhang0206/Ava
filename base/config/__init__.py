@@ -93,12 +93,12 @@ Resolution + stamping mechanics: `base/agents/birth_config.py`.
 
 ## Reading per-agent fields from turn-scoped code
 
-Turn-scoped code (`agent/`, `ava/`, `ava_builtins/`, `base/lm/`) reads
-`per_agent` fields through the per-turn view — `turn_settings.<domain>.<field>`
-(`base/config/turn_view.py`) — never the bare singleton. The view resolves
-the agent's contextvar-bound pins while the singleton holds the cluster
-default. Outside an agent turn the view reads that live default.
-Enforced by `scripts/lint/turn_scoped_config.py`.
+Turn-scoped code (`agent/`, `ava_builtins/`, `base/lm/`) reads `per_agent`
+fields from the agent's slices (`base/host/env/agent_slices.py`, on
+`runtime.context.agent`) — never the bare singleton, which holds the cluster
+default. The exec child and the SDK (`ava/`) run one agent per process, so
+their settings carry that agent's overlay. Enforced by
+`scripts/lint/turn_scoped_config.py`.
 """
 
 from __future__ import annotations
@@ -132,12 +132,6 @@ from base.config.profiles import (
 )
 from base.config.profiles import (
     ProcessProfile as ProcessProfile,
-)
-from base.config.turn_view import (
-    bind_agent_config as bind_agent_config,
-)
-from base.config.turn_view import (
-    turn_settings as turn_settings,
 )
 from base.host.env.bootstrap import (
     CONFIG_FETCH_ENV as CONFIG_FETCH_ENV,

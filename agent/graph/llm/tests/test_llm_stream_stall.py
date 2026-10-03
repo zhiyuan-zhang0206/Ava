@@ -17,16 +17,17 @@ from __future__ import annotations
 import asyncio
 import time
 from collections.abc import AsyncIterator
-from typing import cast
+from typing import Any, cast
 from unittest.mock import MagicMock
 
 import pytest
 from langchain_core.messages import AIMessage, AIMessageChunk, HumanMessage
 from langchain_core.runnables import RunnableConfig
-from langgraph.runtime import ExecutionInfo, Runtime
+from langgraph.runtime import Runtime
 
-from agent.graph import llm_node
+from agent.graph.llm._retry import Attempt
 from agent.graph.llm._stream import _consume_llm, _consume_stream_with_stall_timeout
+from agent.graph.llm.node import llm_attempt
 from agent.graph.llm_errors import (
     LLMRetryBudgetExceededError,
     LLMStreamStallPairError,
@@ -37,10 +38,18 @@ from agent.state import AgentState
 from agent.tests._fakes import make_fake_ops_pool
 from base.agents.context import AvaContext
 from base.config import settings
+from base.host.env.agent_slices import AgentSlices
 from base.lm.registry import MODELS, ModelSpec
 from base.native_process.turn_identity import bind_turn_identity
 
 _CONFIG: RunnableConfig = {"configurable": {"thread_id": "7"}}
+
+
+async def _one_try(
+    state: AgentState, runtime: Runtime[AvaContext], *, attempt: int = 1, started_ago: float = 0.0
+) -> Any:
+    """One try of the llm node (`llm_node` retries around it): a failure surfaces as raised."""
+    return await llm_attempt(state, runtime, _CONFIG, Attempt(attempt, time.time() - started_ago))
 
 
 def _make_runtime(llm: MagicMock) -> Runtime[AvaContext]:
@@ -50,6 +59,7 @@ def _make_runtime(llm: MagicMock) -> Runtime[AvaContext]:
         ops_pool=make_fake_ops_pool(),
         llm=llm,
         event_publisher=MagicMock(),
+        agent=AgentSlices.resolve(),
     )
     return Runtime(context=ctx)
 
@@ -80,7 +90,7 @@ async def test_stall_at_ttft_raises_with_ttft_marker(
     state = AgentState(messages=[HumanMessage(content="hi")], halted=False)
 
     with pytest.raises(LLMStreamStallPairError, match="two adjacent stalls"):
-        await llm_node(state, _make_runtime(fake_llm), _CONFIG)
+        await _one_try(state, _make_runtime(fake_llm))
 
 
 async def test_stall_mid_stream_raises_with_chunk_count(
@@ -111,7 +121,7 @@ async def test_stall_mid_stream_raises_with_chunk_count(
     state = AgentState(messages=[HumanMessage(content="hi")], halted=False)
 
     with pytest.raises(LLMStreamStallPairError, match="two adjacent stalls"):
-        await llm_node(state, _make_runtime(fake_llm), _CONFIG)
+        await _one_try(state, _make_runtime(fake_llm))
 
 
 async def test_normal_stream_completes_no_stall_timeout(
@@ -142,7 +152,7 @@ async def test_normal_stream_completes_no_stall_timeout(
     # No raise — normal stream completed. The specific return value is handled by
     # llm_node's existing path (BEFORE_EXEC); this test only locks "not falsely
     # killed by stall timeout"
-    result = await llm_node(state, _make_runtime(fake_llm), _CONFIG)
+    result = await _one_try(state, _make_runtime(fake_llm))
     assert result is not None
 
 
@@ -182,7 +192,9 @@ async def test_total_timeout_falls_back_while_chunks_keep_arriving(
     fake_llm.ainvoke = _fallback
     chunks: list[AIMessageChunk] = []
 
-    await _consume_llm(fake_llm, [], chunks=chunks, handler=MagicMock())
+    await _consume_llm(
+        fake_llm, [], chunks=chunks, handler=MagicMock(), agent=AgentSlices.resolve()
+    )
 
     assert fallback_called
     assert streamed_chunks <= 20
@@ -279,7 +291,7 @@ async def test_stall_pair_fallback_runs_under_the_stream_segment_bound(
 
     started = time.monotonic()
     with pytest.raises(LLMStreamStallPairError, match="two adjacent stalls"):
-        await llm_node(state, _make_runtime(fake_llm), _CONFIG)
+        await _one_try(state, _make_runtime(fake_llm))
     elapsed = time.monotonic() - started
     # ~2 x 0.1s; the 600s fallback ceiling would make this test hang for 20min.
     assert elapsed < 5.0
@@ -316,7 +328,7 @@ async def test_overload_fallback_timeout_is_not_a_stall_pair(
     state = AgentState(messages=[HumanMessage(content="hi")], halted=False)
 
     with pytest.raises(TimeoutError) as exc_info:
-        await llm_node(state, _make_runtime(fake_llm), _CONFIG)
+        await _one_try(state, _make_runtime(fake_llm))
     assert not isinstance(exc_info.value, LLMStreamStallPairError)
 
 
@@ -353,7 +365,7 @@ async def test_stall_events_carry_provider_health_fields(
     try:
         settings.lm.llm_model = "deepseek-v4-flash"
         with pytest.raises(LLMStreamStallPairError):
-            await llm_node(state, _make_runtime(fake_llm), _CONFIG)
+            await _one_try(state, _make_runtime(fake_llm))
     finally:
         settings.lm.llm_model = original
 
@@ -380,22 +392,6 @@ async def test_entry_retry_budget_skipped_while_delayed_sequence_active(
     node entry (its own streak bounds it); without an active streak the same
     elapsed time still raises LLMRetryBudgetExceededError as before."""
 
-    def _runtime_with_elapsed(llm: MagicMock) -> Runtime[AvaContext]:
-        llm.bind_tools.return_value = llm
-        ctx = AvaContext(
-            ops_pool=make_fake_ops_pool(),
-            llm=llm,
-            event_publisher=MagicMock(),
-        )
-        info = ExecutionInfo(
-            checkpoint_id="",
-            checkpoint_ns="",
-            task_id="",
-            node_attempt=2,
-            node_first_attempt_time=time.time() - (settings.lm.llm_retry_max_total_seconds + 5.0),
-        )
-        return Runtime(context=ctx, execution_info=info)
-
     async def _normal_stream() -> AsyncIterator[AIMessageChunk]:
         yield AIMessageChunk(
             content="ok",
@@ -407,14 +403,15 @@ async def test_entry_retry_budget_skipped_while_delayed_sequence_active(
     fake_llm.astream.return_value = _normal_stream()
     state = AgentState(messages=[HumanMessage(content="hi")], halted=False)
 
+    spent = settings.lm.llm_retry_max_total_seconds + 5.0
     with bind_turn_identity(7):
         _record_stall_pair_streak("7", 1)
         try:
-            result = await llm_node(state, _runtime_with_elapsed(fake_llm), _CONFIG)
+            result = await _one_try(state, _make_runtime(fake_llm), attempt=2, started_ago=spent)
             assert result is not None
         finally:
             _reset_stall_pair_streak("7")
 
         # Control: no active streak -> the same elapsed time trips the budget.
         with pytest.raises(LLMRetryBudgetExceededError):
-            await llm_node(state, _runtime_with_elapsed(fake_llm), _CONFIG)
+            await _one_try(state, _make_runtime(fake_llm), attempt=2, started_ago=spent)

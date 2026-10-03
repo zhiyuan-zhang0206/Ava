@@ -2,7 +2,13 @@
 
 from __future__ import annotations
 
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock
+
+from langgraph.runtime import Runtime
+
+from base.agents.context import AvaContext
+from base.host.env.agent_slices import AgentSlices
 
 
 def make_fake_ops_pool() -> AsyncMock:
@@ -40,3 +46,15 @@ def make_fake_ops_pool() -> AsyncMock:
     # (e.g. assert a completed turn issued the last_active_at UPDATE).
     pool.fake_cursor = cur
     return pool
+
+
+def placeholder_runtime(ops_pool: Any = None) -> Runtime[AvaContext]:
+    """A Runtime whose context holds a mock `ops_pool` / `llm` / `event_publisher` and the
+    live-default agent slices."""
+    ctx = AvaContext(
+        ops_pool=ops_pool or MagicMock(),
+        llm=MagicMock(),
+        event_publisher=MagicMock(),
+        agent=AgentSlices.resolve(),
+    )
+    return Runtime(context=ctx)

@@ -167,9 +167,9 @@ def build() -> FullBundle:
 
 def _facade_exports() -> dict[str, Any]:
     """The names `base.config` gains when a lite process upgrades."""
+    from base.config import agent_pins as _agent_pins
     from base.config import metadata as _metadata
     from base.config import service_read as _service_read
-    from base.config import turn_view as _turn_view
 
     fields = _config_registry.fields()
     return {
@@ -192,7 +192,7 @@ def _facade_exports() -> dict[str, Any]:
         "field_lifecycle": _config_registry.field_lifecycle,
         "frozen_field_names": _config_registry.frozen_field_names,
         "live_field_names": _config_registry.live_field_names,
-        "resolve_agent_config_pins": _turn_view.resolve_agent_config_pins,
+        "resolve_agent_config_pins": _agent_pins.resolve_agent_config_pins,
         # The sub-model classes the facade used to import (tests and the
         # config-service read paths reach them through base.config).
         "AgentSettings": AgentSettings,

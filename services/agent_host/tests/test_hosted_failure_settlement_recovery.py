@@ -29,6 +29,7 @@ from base.agents.history.delta_read_compat import wrap_saver_reads_with_delta_re
 from base.config import settings
 from base.db import Database
 from base.events.live.bus import EventBus
+from base.host.env.agent_slices import AgentSlices
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from base.native_process.turn_identity import bind_turn_identity
 from services.agent_host.host import AgentHost
@@ -112,7 +113,9 @@ async def test_abort_survives_database_loss_before_halted_state_write(
         db=Database.from_settings(),
     )
     publisher = MagicMock()
-    ctx = AvaContext(ops_pool=aops_pool, event_publisher=publisher, llm=MagicMock())
+    ctx = AvaContext(
+        ops_pool=aops_pool, event_publisher=publisher, llm=MagicMock(), agent=AgentSlices.resolve()
+    )
     with bind_turn_identity(agent, incarnation=owner):
         assert not (await host._invoke_until_done(agent, ctx)).exited
     assert outages == 2 and len(model_calls) == (0 if failure == "compaction" else 1)
@@ -159,7 +162,9 @@ async def test_interrupted_abort_preparation_does_not_repeat_notifications(
     model = AsyncMock(side_effect=failure)
     graph, saver, config, history = await _prepare_graph(aops_pool, agent, model)
     publisher = MagicMock()
-    ctx = AvaContext(ops_pool=aops_pool, event_publisher=publisher, llm=MagicMock())
+    ctx = AvaContext(
+        ops_pool=aops_pool, event_publisher=publisher, llm=MagicMock(), agent=AgentSlices.resolve()
+    )
     pending = PendingTurnFailure(failure)
     with bind_turn_identity(agent, incarnation=owner):
         with pytest.raises(FatalProviderError):

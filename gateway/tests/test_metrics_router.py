@@ -26,7 +26,6 @@ _UNITS = {
     "exec",
     "llm_turns",
     "agent_activity",
-    "sdk_usage",
     "plugin_activation",
 }
 

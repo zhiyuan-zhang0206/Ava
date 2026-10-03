@@ -86,13 +86,24 @@ EVENTS: dict[str, EventSpec] = {
         retired=True,
     ),
     "service_started": telemetry_event(
-        "service_started", "gateway/daemon started", payload=ServiceStarted, tier="noise"
+        "service_started",
+        "gateway/daemon started",
+        payload=ServiceStarted,
+        tier="noise",
+        persist=True,
     ),
     "halt": telemetry_event(
-        "halt", "turn stopped (idle/compact/system)", payload=Halt, tier="noise"
+        "halt",
+        "turn stopped (idle/compact/system)",
+        payload=Halt,
+        tier="noise",
+        persist=True,
     ),
     "agent_restarted": telemetry_event(
-        "agent_restarted", "agent restarted (phase2 done)", retired=True
+        "agent_restarted",
+        "agent restarted (phase2 done)",
+        retired=True,
+        persist=True,
     ),
     "restart_handoff_host_unhealthy": telemetry_event(
         "restart_handoff_host_unhealthy",
@@ -106,8 +117,9 @@ EVENTS: dict[str, EventSpec] = {
         "agent_spawned",
         "agent process started",
         payload=AgentSpawned,
+        persist=True,
     ),
-    "agent_resurrected": telemetry_event("agent_resurrected", "agent resurrected"),
+    "agent_resurrected": telemetry_event("agent_resurrected", "agent resurrected", persist=True),
     "billing_resurrect_run": telemetry_event(
         "billing_resurrect_run",
         "billing batch recovery run finished",
@@ -127,7 +139,9 @@ EVENTS: dict[str, EventSpec] = {
         "an automatic resurrect failed for a possibly transient reason; the "
         "triggering inbound stays queued for a later or manual resurrect",
     ),
-    "agent_terminated": telemetry_event("agent_terminated", "agent terminated", retired=True),
+    "agent_terminated": telemetry_event(
+        "agent_terminated", "agent terminated", retired=True, persist=True
+    ),
     "agent_revived": telemetry_event("agent_revived", "agent revived", tier="noise", retired=True),
     "respawn_phase1": telemetry_event(
         "respawn_phase1", "restart phase 1", tier="noise", retired=True
@@ -178,7 +192,11 @@ EVENTS: dict[str, EventSpec] = {
     "launch_retry": telemetry_event("launch_retry", "launch retried", retired=True),
     # agent lifecycle / state
     "idle_wake": telemetry_event(
-        "idle_wake", "agent woken from idle", payload=IdleWake, tier="noise"
+        "idle_wake",
+        "agent woken from idle",
+        payload=IdleWake,
+        tier="noise",
+        persist=True,
     ),
     "wake_degraded": telemetry_event(
         "wake_degraded",

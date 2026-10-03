@@ -78,6 +78,7 @@ EVENTS: dict[str, EventSpec] = {
         payload=DeliveryStalled,
         tier="anomaly",
         site="services/delivery_watchdog/daemon.py:_alert_stalled",
+        persist=True,
     ),
     "delivery_poisoned": telemetry_event(
         "delivery_poisoned",

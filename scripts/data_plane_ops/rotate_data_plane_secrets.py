@@ -8,10 +8,9 @@ that is the separate, emergency-only control-plane bearer rotation.
 
 PostgreSQL has no rotatable password here: the schema owner is NOLOGIN, the
 administrator is the OS user over the owner-only socket, and application
-logins are write generations that rotate with each release transition
-(``base.cluster.authority``). Redis credentials do not rotate per rollout;
-this script is the explicit operator action
-(decisions/2026-09-27-write-generation-rollout-choices.md).
+logins are the home's one write generation (``base.cluster.authority``), which
+nothing rotates. Redis credentials do not rotate per rollout; this script is
+the explicit operator action.
 """
 
 from __future__ import annotations

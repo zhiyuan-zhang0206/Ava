@@ -29,6 +29,7 @@ from base.agents.history.delta_read_compat import wrap_saver_reads_with_delta_re
 from base.agents.messages.caller_identity import CallerIdentity
 from base.cluster.machine import machine_name
 from base.db import create_agent, insert_inbound_message
+from base.host.env.agent_slices import AgentSlices
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from base.native_process.turn_identity import bind_turn_identity
 from base.packages.plugins.context import PluginContext
@@ -149,7 +150,7 @@ async def _prepare_graph(
     builder.add_node("after_exec", after_exec, destinations=("claim",))
     builder.add_edge(START, "claim")
     graph = builder.compile(checkpointer=saver)
-    ctx = AvaContext(ops_pool=aops_pool, event_publisher=MagicMock())
+    ctx = AvaContext(ops_pool=aops_pool, event_publisher=MagicMock(), agent=AgentSlices.resolve())
     config: RunnableConfig = {"configurable": {"thread_id": str(agent_id)}, "recursion_limit": 100}
     reset: dict[str, Any] = {
         "turn_active": False,

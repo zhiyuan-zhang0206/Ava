@@ -22,6 +22,7 @@ from ava_builtins.plugins.ava_memory import inherit
 from base.agents import GatewayUnavailable
 from base.cluster.machine import machine_name
 from base.config import settings
+from base.host.env.agent_slices import AgentSlices
 from base.paths import ava_home
 
 OPEN = inherit.INHERITABLE_OPEN
@@ -171,23 +172,23 @@ def test_disabled_and_empty_chain_yield_no_note(
     chain: _FakeChain, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(settings.agent, "memory_inherit_depth", 0)
-    assert inherit.inherited_memory_note() is None
+    assert inherit.inherited_memory_note(AgentSlices.resolve()) is None
     monkeypatch.setattr(settings.agent, "memory_inherit_depth", 1)
     monkeypatch.setattr(settings.agent, "eval_isolation", True)
-    assert inherit.inherited_memory_note() is None
+    assert inherit.inherited_memory_note(AgentSlices.resolve()) is None
     # Nothing read while the layer is off.
     assert chain.calls == []
 
     monkeypatch.setattr(settings.agent, "eval_isolation", False)
-    assert inherit.inherited_memory_note() is None  # empty chain
+    assert inherit.inherited_memory_note(AgentSlices.resolve()) is None  # empty chain
     chain.rows = [_local_row(600301)]
-    assert inherit.inherited_memory_note() is None  # local ancestor, no store
+    assert inherit.inherited_memory_note(AgentSlices.resolve()) is None  # local ancestor, no store
 
 
 def test_direct_parent_blocks_are_injected(chain: _FakeChain) -> None:
     _write_entry(600311, "family-rules", f"private\n\n{_wrap('Report in Chinese.')}\n")
     chain.rows = [_local_row(600311, label="Parent")]
-    note = inherit.inherited_memory_note()
+    note = inherit.inherited_memory_note(AgentSlices.resolve())
     assert note is not None
     assert _note_tag(note) == "inherited_memory"
     content = _note_text(note)
@@ -206,7 +207,7 @@ def test_blocks_render_nearest_first_with_sorted_entries(
     _write_entry(600322, "grandparent", _wrap("grandparent block"))
     chain.rows = [_local_row(600321, label="Parent"), _local_row(600322, depth=2)]
     monkeypatch.setattr(settings.agent, "memory_inherit_depth", 2)
-    note = inherit.inherited_memory_note()
+    note = inherit.inherited_memory_note(AgentSlices.resolve())
     assert note is not None
     content = _note_text(note)
     # Nearest ancestor first; within one ancestor, sorted file names; both
@@ -222,14 +223,14 @@ def test_depth_slices_the_chain(chain: _FakeChain, monkeypatch: pytest.MonkeyPat
     _write_entry(600332, "grandparent", _wrap("grandparent block"))
     chain.rows = [_local_row(600331), _local_row(600332, depth=2)]
     monkeypatch.setattr(settings.agent, "memory_inherit_depth", 1)
-    note = inherit.inherited_memory_note()
+    note = inherit.inherited_memory_note(AgentSlices.resolve())
     assert note is not None
     content = _note_text(note)
     assert "(depth 1," in content
     assert "parent block" in content and "grandparent block" not in content
 
     monkeypatch.setattr(settings.agent, "memory_inherit_depth", 2)
-    note = inherit.inherited_memory_note()
+    note = inherit.inherited_memory_note(AgentSlices.resolve())
     assert note is not None
     content = _note_text(note)
     assert "parent block" in content and "grandparent block" in content
@@ -241,7 +242,7 @@ def test_remote_ancestors_are_skipped_and_footered(
     _write_entry(600341, "local", _wrap("local block"))
     chain.rows = [_remote_row(600342), _local_row(600341, depth=2)]
     monkeypatch.setattr(settings.agent, "memory_inherit_depth", 2)
-    note = inherit.inherited_memory_note()
+    note = inherit.inherited_memory_note(AgentSlices.resolve())
     assert note is not None
     content = _note_text(note)
     assert "local block" in content
@@ -254,13 +255,13 @@ def test_remote_ancestors_are_skipped_and_footered(
     inherit._CHAIN_CACHE.clear()
     chain.rows = [_remote_row(600343)]
     monkeypatch.setattr(settings.agent, "memory_inherit_depth", 1)
-    assert inherit.inherited_memory_note() is None
+    assert inherit.inherited_memory_note(AgentSlices.resolve()) is None
 
 
 def test_chain_read_failure_degrades_and_is_not_cached(chain: _FakeChain) -> None:
     chain.error = GatewayUnavailable("gateway down")
-    assert inherit.inherited_memory_note() is None
-    assert inherit.inherited_memory_note() is None
+    assert inherit.inherited_memory_note(AgentSlices.resolve()) is None
+    assert inherit.inherited_memory_note(AgentSlices.resolve()) is None
     # A failed read is not a negative cache — the next establishment retries.
     assert len(chain.calls) == 2
 
@@ -271,8 +272,8 @@ def test_chain_read_is_cached_per_process(
     monkeypatch.setattr("ava.agent_identity._agent_id", 1)
     _write_entry(600351, "rules", _wrap("cached block"))
     chain.rows = [_local_row(600351)]
-    assert inherit.inherited_memory_note() is not None
-    assert inherit.inherited_memory_note() is not None
+    assert inherit.inherited_memory_note(AgentSlices.resolve()) is not None
+    assert inherit.inherited_memory_note(AgentSlices.resolve()) is not None
     assert chain.calls == [1]  # the established agent id; read once
 
 
@@ -281,9 +282,9 @@ def test_content_is_deterministic(chain: _FakeChain) -> None:
     prefix-cache stability relies on (no timestamps in the content)."""
     _write_entry(600361, "rules", _wrap("stable block"))
     chain.rows = [_local_row(600361)]
-    first = inherit.inherited_memory_note()
+    first = inherit.inherited_memory_note(AgentSlices.resolve())
     inherit._CHAIN_CACHE.clear()
-    second = inherit.inherited_memory_note()
+    second = inherit.inherited_memory_note(AgentSlices.resolve())
     assert first is not None and second is not None
     assert _note_text(first) == _note_text(second)
 
@@ -294,7 +295,7 @@ def test_block_guardrail_truncates_with_a_visible_marker(
     entry = _write_entry(600371, "big", _wrap("x" * 200))
     chain.rows = [_local_row(600371)]
     monkeypatch.setattr(settings.agent, "memory_inherit_max_block_chars", 50)
-    note = inherit.inherited_memory_note()
+    note = inherit.inherited_memory_note(AgentSlices.resolve())
     assert note is not None
     content = _note_text(note)
     assert "[truncated at 50 chars — full entry: " in content
@@ -309,7 +310,7 @@ def test_total_guardrail_clips_and_omits(
     _write_entry(600381, "two", _wrap("b" * 40))
     chain.rows = [_local_row(600381)]
     monkeypatch.setattr(settings.agent, "memory_inherit_max_total_chars", 60)
-    note = inherit.inherited_memory_note()
+    note = inherit.inherited_memory_note(AgentSlices.resolve())
     assert note is not None
     content = _note_text(note)
     assert "a" * 40 in content  # first section enters whole
@@ -323,7 +324,7 @@ def test_total_guardrail_clips_and_omits(
     inherit._CHAIN_CACHE.clear()
     monkeypatch.setattr(settings.agent, "memory_inherit_max_total_chars", 40)
     monkeypatch.setattr(settings.agent, "memory_inherit_max_block_chars", 0)
-    note = inherit.inherited_memory_note()
+    note = inherit.inherited_memory_note(AgentSlices.resolve())
     assert note is not None
     content = _note_text(note)
     assert "a" * 40 in content
@@ -338,7 +339,7 @@ def test_guardrails_can_be_disabled(chain: _FakeChain, monkeypatch: pytest.Monke
     chain.rows = [_local_row(600391)]
     monkeypatch.setattr(settings.agent, "memory_inherit_max_block_chars", 0)
     monkeypatch.setattr(settings.agent, "memory_inherit_max_total_chars", 0)
-    note = inherit.inherited_memory_note()
+    note = inherit.inherited_memory_note(AgentSlices.resolve())
     assert note is not None
     content = _note_text(note)
     assert "y" * 200 in content
@@ -353,7 +354,7 @@ def test_fork_notes_graft_the_new_agent_s_own_chain(chain: _FakeChain, memory_pl
     chain.rows = [_local_row(600401, label="Fork parent")]
     from agent.graph.context_notes import fork_notes
 
-    notes = fork_notes()
+    notes = fork_notes(AgentSlices.resolve())
     inherited = [n for n in notes if _note_tag(n) == "inherited_memory"]
     assert len(inherited) == 1
     assert "fork chain block" in _note_text(inherited[0])

@@ -31,7 +31,6 @@ from base.events.contract import (
     HALT_KEYS,
     LLM_USAGE_KEYS,
     PLUGIN_ACTIVATION_KEYS,
-    SDK_CALL_KEYS,
     SYNTAX_FIX_KEYS,
     TURN_END_KEYS,
 )
@@ -294,17 +293,6 @@ def read_window(
             "GROUP BY 1",
         ).fetchall()
     }
-    weight = _n(SDK_CALL_KEYS["sample_rate"])
-    sdk_fns = {
-        str(r[0]): int(r[1])
-        for r in scope.run(
-            conn,
-            f"{SDK_CALL_KEYS['fn']}, COALESCE(sum({weight}), 0)::bigint",
-            f"t.event_name = 'sdk_call' AND COALESCE({SDK_CALL_KEYS['fn']}, '') <> '' "
-            f"AND {weight} IS NOT NULL",
-            "GROUP BY 1 ORDER BY 2 DESC, 1",
-        ).fetchall()
-    }
     plugin_acts = {
         (str(r[0]), str(r[1]), str(r[2]), str(r[3])): int(r[4])
         for r in scope.run(
@@ -326,7 +314,6 @@ def read_window(
         "llm_position": _llm_position(scope, conn),
         "fix_events": _fix_events(scope, conn),
         "spawners": spawners,
-        "sdk_fns": sdk_fns,
         "plugin_acts": plugin_acts,
     }
 

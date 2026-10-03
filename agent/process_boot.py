@@ -16,7 +16,7 @@ from typing import Any
 
 import ava
 from ava.sdk_surface import plugin_loader, sdk_disable
-from base.config.turn_view import turn_settings
+from base.host.env.agent_slices import agent_setting
 from base.log import logger
 from base.paths import workspace_dir
 
@@ -31,10 +31,11 @@ def _apply_per_agent_sdk_disable() -> None:
     only genuinely new entries take effect.
     """
 
-    if not turn_settings.agent.sdk_disable:
+    configured = agent_setting("sdk_disable")
+    if not configured:
         return
     env_entries = set(sdk_disable.sdk_disable_entries)
-    new_disable = [e for e in turn_settings.agent.sdk_disable if e not in env_entries]
+    new_disable = [e for e in configured if e not in env_entries]
     if new_disable:
         sdk_disable.apply_sdk_disable(new_disable)
 
@@ -46,10 +47,10 @@ def _apply_per_agent_eval_isolation() -> None:
     must rebind the live `ava.memory` surface rather than affect the plugin's
     import-time default path.
     """
-    if not turn_settings.agent.eval_isolation:
+    if not agent_setting("eval_isolation"):
         return
 
-    allowed_network = set(turn_settings.agent.eval_network_allowlist)
+    allowed_network = set(agent_setting("eval_network_allowlist"))
     disabled = ["agents.get_last_message", "tasks", "mcps", "ui"]
     if "web" not in allowed_network:
         disabled.append("web")
@@ -189,7 +190,7 @@ def load_process_extensions() -> None:
 # Return type is Any on purpose: the chat-model class must stay out of module
 # scope (the exec child imports this module for the SDK helpers), and Pyright
 # cannot resolve an annotation the module never imports.
-async def boot_agent_scope(agent_id: int) -> Any:
+async def boot_agent_scope(agent_id: int, llm_model: str) -> Any:
     """Agent-scope boot: workspace pre-create, screen-capture notice, chat model.
 
     Everything here is a fact about ONE agent, so the hosted runner runs it per
@@ -201,9 +202,7 @@ async def boot_agent_scope(agent_id: int) -> Any:
     base for `ava.files` / `ava.shell.run`, so it must exist even when the prompt
     section advertising it is off (bench runners).
 
-    The chat model is built from `turn_settings.lm.llm_model`, so callers must
-    bind this agent's framework-scope config first through
-    `base.config.turn_view.bind_agent_config`.
+    The chat model is built for `llm_model`, the agent's model for the turn.
 
     Building it eagerly is safe even though the trace init is still in flight:
     traceloop's LangChain wrap injects its callback handler into every
@@ -224,4 +223,4 @@ async def boot_agent_scope(agent_id: int) -> Any:
     await notify_desktop_permissions_at_startup()
     from base.lm.factory import build_chat_model
 
-    return build_chat_model(turn_settings.lm.llm_model)
+    return build_chat_model(llm_model)

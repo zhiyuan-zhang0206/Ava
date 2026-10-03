@@ -25,6 +25,7 @@ from psycopg.types.json import Jsonb
 from psycopg_pool import ConnectionPool
 
 from base.telemetry import Event, event_row
+from base.telemetry.metrics.aggregate_sql import EXEC_FAILURE_EVENTS
 
 
 @dataclass(frozen=True)
@@ -129,7 +130,7 @@ def _supports(name: str, category: str, agent_id: int | None) -> bool:
         return False
     if name in {"llm_usage", "turn_end"}:
         return category in {"telemetry", "log"}
-    return name in {"node_exit", "exec"} or name.startswith(("exec_", "exec("))
+    return name in {"node_exit", "exec", *EXEC_FAILURE_EVENTS}
 
 
 def observe_row(row: Mapping[str, Any]) -> MetricObservation | None:

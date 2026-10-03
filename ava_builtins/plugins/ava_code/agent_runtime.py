@@ -33,7 +33,7 @@ from agent.graph.system_prompt import register_system_prompt_section
 from agent.hooks import Hook, register_after_exec, register_after_init
 from agent.messages import NoteTag, system_note_message
 from agent.state import AgentState, register_plugin_state
-from base.config.turn_view import turn_settings
+from base.host.env.agent_slices import AgentSlices
 from base.log import logger
 from base.paths import workspace_dir
 
@@ -128,7 +128,7 @@ _PROMOTED_MODULES = ("cwd", "files", "shell")
 
 
 @register_system_prompt_section
-def _coding_tools_section() -> str:
+def _coding_tools_section(slices: AgentSlices) -> str:
     """Render the cwd / files / shell modules as Python stubs under `## ava.X`.
 
     A module already expanded by the framework's "Expanded SDK reference"
@@ -139,7 +139,7 @@ def _coding_tools_section() -> str:
     this section reduces to the preamble."""
     from agent.graph.system_prompt import effective_sdk_expand
 
-    expanded = set(effective_sdk_expand())
+    expanded = set(effective_sdk_expand(slices.prompt.sdk_disable))
     pieces: list[str] = []
     for name in _PROMOTED_MODULES:
         if name in expanded:
@@ -181,9 +181,9 @@ def _coding_tools_section() -> str:
 # settings.agent.system_prompt_extra (env AVA_SYSTEM_PROMPT_EXTRA).
 # Empty return when disabled = no contribution.
 @register_system_prompt_section
-def _engineering_workflow_section() -> str:
+def _engineering_workflow_section(slices: AgentSlices) -> str:
     """Loose bug-fix-workflow advice, gated by system_prompt_extra=ava_code_workflow."""
-    if "ava_code_workflow" not in turn_settings.agent.system_prompt_extra:
+    if "ava_code_workflow" not in slices.prompt.system_prompt_extra:
         return ""
     return (
         "## Resolving issues and debugging\n\n"

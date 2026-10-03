@@ -171,9 +171,19 @@ def _checkpoint_thread_id(config: RunnableConfig) -> str:
     return thread_id
 
 
-def _resolve_checkpoint_interval(interval: int | Callable[[], int]) -> int:
-    """Return a validated static or turn-scoped checkpoint interval."""
-    resolved = interval() if callable(interval) else interval
+# The turn's own interval rides the graph's invoke config under this key: LangGraph hands that
+# config to every checkpoint write of the run, and the `__` prefix keeps it out of the
+# checkpoint metadata the saver derives from the config.
+CHECKPOINT_INTERVAL_KEY = "__ava_checkpoint_interval"
+
+
+def _resolve_checkpoint_interval(
+    interval: int | Callable[[], int], config: RunnableConfig | None = None
+) -> int:
+    """Return a validated checkpoint interval: the one the write's config carries, else the
+    wrapper's default."""
+    carried = (config or {}).get("configurable", {}).get(CHECKPOINT_INTERVAL_KEY)
+    resolved = carried if carried is not None else interval() if callable(interval) else interval
     if resolved < 1:
         raise ValueError(f"checkpoint interval must be positive, got {resolved}")
     return resolved
@@ -239,9 +249,10 @@ def wrap_saver_writes_with_nstep_interval(
     skipped update through ``_ava_nstep_flush(thread_id)``; retained and
     flushed checkpoints persist one full snapshot's blobs per channel, so
     every referenced channel value stays readable; a crash may instead replay
-    up to ``interval - 1`` super-steps. A callable resolves an interval in the
-    current turn context, so the hosted runner can share one saver without
-    sharing a throttle between agents.
+    up to ``interval - 1`` super-steps. A turn names its own interval in its invoke
+    config (`CHECKPOINT_INTERVAL_KEY`), so the hosted runner can share one saver
+    without sharing a throttle between agents; ``interval`` (a callable is read per
+    write) is the default for writes whose config names none.
 
     The caller installs loud-failure logging first, so these original methods
     are the logging wrappers: every throttled write that fires, including the
@@ -268,7 +279,7 @@ def wrap_saver_writes_with_nstep_interval(
     ) -> RunnableConfig:
         thread_id = _checkpoint_thread_id(config)
         async with _thread_lock(locks, thread_id):
-            current_interval = _resolve_checkpoint_interval(interval)
+            current_interval = _resolve_checkpoint_interval(interval, config)
             if current_interval == 1:
                 return await orig_aput(config, checkpoint, metadata, new_versions)
 
@@ -321,7 +332,7 @@ def wrap_saver_writes_with_nstep_interval(
     ) -> None:
         thread_id = _checkpoint_thread_id(config)
         async with _thread_lock(locks, thread_id):
-            current_interval = _resolve_checkpoint_interval(interval)
+            current_interval = _resolve_checkpoint_interval(interval, config)
             if current_interval == 1:
                 await orig_aput_writes(config, writes, task_id, task_path)
                 return

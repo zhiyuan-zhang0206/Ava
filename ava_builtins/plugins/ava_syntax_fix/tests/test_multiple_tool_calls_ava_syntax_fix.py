@@ -15,6 +15,7 @@ from agent.state import AgentState
 from agent.tests._fakes import make_fake_ops_pool
 from ava_builtins.plugins.ava_syntax_fix.agent_runtime import syntax_fix_before_exec
 from base.agents.context import AvaContext
+from base.host.env.agent_slices import AgentSlices
 
 
 def _graph(state_cls: type[AgentState], **compile_options: Any) -> Any:
@@ -54,6 +55,7 @@ def _runtime() -> Runtime[AvaContext]:
         context=AvaContext(
             ops_pool=make_fake_ops_pool(),
             event_publisher=MagicMock(),
+            agent=AgentSlices.resolve(),
         )
     )
 
@@ -92,7 +94,7 @@ async def test_unfixable_syntax_does_not_skip_sibling(
 
     state = _state("return", 'print("sibling ran")')
 
-    def unchanged(code: str) -> tuple[str, list[str]]:
+    def unchanged(code: str, *, ruff_format: bool) -> tuple[str, list[str]]:
         return code, []
 
     monkeypatch.setattr(syntax, "_apply_fix_pipeline", unchanged)

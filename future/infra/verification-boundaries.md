@@ -192,7 +192,7 @@ outcome, so a partial result keeps its evidence:
 
 The agent check judges the recorded execution body, never a digit in a timestamp or a
 model reply. Nothing is forwarded to the host. A browser UI check would need Chromium in the image at
-the Playwright version `uv.lock` pins (`uv run playwright install --with-deps chromium`,
+the Playwright version `uv.lock` pins (`uv run playwright install chromium` + `install-deps`,
 as CI does) and a large enough `--shm-size`; it is not built.
 
 ### Run results
@@ -612,7 +612,7 @@ Two parts of `tart_golden.py` ran for real; the part between them did not.
 | Surface | Why macOS | Hosted macOS CI today | Tart VM |
 |---|---|---|---|
 | Helper signed with the stable identity | needs imported-identity codesign; hosted runners cannot (comment in `ci.yml`) | ad-hoc signature only | yes |
-| launchd -> helper -> root -> services ancestry; keeper conflict and restart | launchd | yes (`scripts/ci/two_section_chain_smoke.py --skip-attribution`) | yes, plus tccd attribution |
+| launchd -> helper -> root -> services ancestry; keeper conflict and restart | launchd | yes (`python -m scripts.ci.two_section_chain_smoke --skip-attribution`) | yes, plus tccd attribution |
 | Desktop grants and their attribution | tccd and the consent UI | no | yes |
 | Computer capability (capture, click, type) | grants, GUI session | no | yes |
 | Headed Chrome and browser profile | macOS Chrome, GUI session | no | yes |

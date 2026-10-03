@@ -2686,8 +2686,11 @@ export interface paths {
          *         `turn_end` / `spawn` / `send_message`.
          *       - `agent_id=<n>`: events belonging to that agent; service-level events
          *         (NULL) are excluded when set.
-         *       - `trace_id=<hex>`: one turn's whole call chain — every event that
-         *         shares the id.
+         *       - `trace_id=<hex>`: the events of one turn that share the id and that
+         *         Postgres stores. `telemetry_events` keeps only the events a reader queries
+         *         by name (`persist=True` in the registry) and every event at warning level or
+         *         above, so this is not the whole chain: read the rest from Loki (84-hour
+         *         window) or the JSONL event mirror.
          *       - `machine=<name>`: the host dimension.
          *       - `level=<debug|info|warning|error|critical>`: exact match,
          *         case-insensitive (unknown value 422s).

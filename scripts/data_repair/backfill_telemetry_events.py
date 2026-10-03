@@ -8,6 +8,9 @@ the readers that moved to Postgres see the history. The local mirror of the mach
 events-maintenance daemon is also replayed by that daemon every hour; this script covers the
 other machines' mirrors, the Loki windows, and the archive.
 
+Only the rows the live path stores are inserted (`base.telemetry.event_store.is_persisted`); the
+others are reported as skipped `not-persisted`.
+
 Operator-run at the window where the table starts being written; it is not part of any
 migration. Safe to run while the live write path is on and to re-run:
 
@@ -52,7 +55,7 @@ from typing import Any, cast
 
 from base.db import connect
 from base.db.transaction import write_transaction
-from base.telemetry.event_store import ensure_partitions, insert_rows, stored_row
+from base.telemetry.event_store import ensure_partitions, insert_rows, is_persisted, stored_row
 from base.telemetry.loki_index_labels import ARCHIVE_FLOOR_AT, ARCHIVE_FREEZE_AT
 from base.telemetry.observability import cluster_label
 
@@ -87,7 +90,8 @@ def _timestamp(raw: Any) -> datetime:
 def normalize(raw: dict[str, Any], *, source: str, cluster: str) -> dict[str, Any]:
     """Map one stream row (Loki reader dict or JSONL mirror line) to an insert record.
 
-    Raises `SkippedRowError` for a row the table's constraints would reject.
+    Raises `SkippedRowError` for a row the table's constraints would reject or the store does not
+    keep (`is_persisted`).
     """
     if raw.get("category") not in _CATEGORIES:
         raise SkippedRowError("not-telemetry-or-log")
@@ -96,6 +100,8 @@ def normalize(raw: dict[str, Any], *, source: str, cluster: str) -> dict[str, An
         raise SkippedRowError("no-event-name")
     if str(raw.get("level") or "").lower() not in _LEVELS:
         raise SkippedRowError("bad-level")
+    if not is_persisted(event_name, str(raw["level"])):
+        raise SkippedRowError("not-persisted")
     if not isinstance(raw.get("id"), int):
         raise SkippedRowError("no-id")
     try:

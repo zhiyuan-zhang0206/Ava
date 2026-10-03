@@ -103,6 +103,7 @@ def test_archive_owned_unknown_agent_and_malformed_rows_are_skipped_without_bloc
     _record(db_conn, agent, uid=13, attributes={"cost_usd": "not a price"})
     _record(db_conn, agent, uid=14, name="turn_end", attributes={"ok": True, "duration_seconds": 2})
     _record(db_conn, agent, uid=15, name="log")
+    _record(db_conn, agent, uid=16, name="exec_envelope")  # a wrapper, not an outcome
 
     assert replay.recover_observations(db_conn) == 1
 

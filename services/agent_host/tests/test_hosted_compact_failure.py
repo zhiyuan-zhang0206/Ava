@@ -29,6 +29,7 @@ from base.events.live.bus import EventBus
 from base.events.live.projection import Error
 from base.events.live.publisher import AgentEventPublisher
 from base.events.live.redis_client import open_async_redis
+from base.host.env.agent_slices import AgentSlices
 from services.agent_host.host import AgentHost
 from services.agent_host.runtime import TurnOutcome
 
@@ -107,7 +108,9 @@ async def test_compaction_failure_is_visible_durable_and_recovers_on_new_inbound
     redis = open_async_redis(settings.data_plane.redis_url)
     channel = f"{settings.data_plane.events_channel}:compact-proof:{agent}"
     publisher = AgentEventPublisher(redis, channel, agent_id=agent)
-    ctx = AvaContext(ops_pool=aops_pool, event_publisher=publisher, llm=MagicMock())
+    ctx = AvaContext(
+        ops_pool=aops_pool, event_publisher=publisher, llm=MagicMock(), agent=AgentSlices.resolve()
+    )
     host = AgentHost(
         pool=aops_pool,
         checkpointer=saver,
@@ -119,7 +122,7 @@ async def test_compaction_failure_is_visible_durable_and_recovers_on_new_inbound
     monkeypatch.setattr(host, "_runtime_for", AsyncMock(return_value=object()))
     monkeypatch.setattr("services.agent_host.runtime.validate_model_config", MagicMock())
 
-    async def drive(target: int, _runtime: object) -> TurnOutcome:
+    async def drive(target: int, _runtime: object, _slices: object) -> TurnOutcome:
         return await host._invoke_until_done(target, ctx)
 
     monkeypatch.setattr(host, "_drive_turns", drive)

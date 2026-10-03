@@ -19,6 +19,7 @@ import pytest
 from agent.graph.context_notes import _own_label, agent_id_note
 from base.agents.messages.kwargs import NoteTag
 from base.config import settings
+from base.host.env.agent_slices import AgentSlices
 from base.native_process.turn_identity import bind_turn_identity
 
 
@@ -58,7 +59,7 @@ def _wsl_machine() -> str | None:
 def _content() -> str:
     """The note's body with its `[system]` carrier prefix stripped — the
     assertions are about what the note says, not its framing."""
-    note = agent_id_note()
+    note = agent_id_note(AgentSlices.resolve())
     assert note is not None
     assert note.additional_kwargs["ava_note_tag"] == NoteTag.AGENT_ID  # pyright: ignore[reportUnknownMemberType]
     content = str(note.content)  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
@@ -125,7 +126,7 @@ def test_renders_under_a_hosted_turn_identity(monkeypatch: pytest.MonkeyPatch) -
     monkeypatch.delenv("AVA_AGENT_ID", raising=False)
 
     with bind_turn_identity(31):
-        note = agent_id_note()
+        note = agent_id_note(AgentSlices.resolve())
 
     assert note is not None
     assert "Your Agent ID is 31" in str(note.content)  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
@@ -135,7 +136,7 @@ def test_opts_out_without_any_identity(monkeypatch: pytest.MonkeyPatch) -> None:
     """Snapshot renders / dev REPL: no slot, no turn, no env — decline."""
     monkeypatch.setattr("ava.agent_identity._agent_id", None)
     monkeypatch.delenv("AVA_AGENT_ID", raising=False)
-    assert agent_id_note() is None
+    assert agent_id_note(AgentSlices.resolve()) is None
 
 
 # ── clause readers ──

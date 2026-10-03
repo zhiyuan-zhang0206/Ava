@@ -109,20 +109,29 @@ def cmd_status() -> int:
         print("\nredis bridge (private-network ingress):")
         print_redis_bridge_status()
 
-    # any installed host: warn if the prod source ($AVA_HOME/source) has drifted
-    # off `main`. A source-run home executes that checkout, so it must be
-    # reviewed `main` — a feature branch there means the host runs un-reviewed
-    # code (work in a worktree, never the prod tree).
+    # any installed host: surface the prod source ($AVA_HOME/source) branch state.
+    # A source-run home executes that checkout. Source-mode releases materialize
+    # as a detached HEAD at the released commit (fleet_update switches every
+    # checkout to `--detach NEW`), so a detached tree is the designed steady
+    # state — not drift — and `checkout main` would diverge this host from the
+    # fleet release. A feature branch here means someone developed in the prod
+    # tree instead of a worktree: un-reviewed code on the next restart.
     if roles:
         drift_branch = _detect_prod_source_drift()
-        if drift_branch is not None:
-            where = "a detached HEAD" if drift_branch == "HEAD" else f"branch '{drift_branch}'"
+        if drift_branch == "HEAD":
             print(
-                f"\n⚠ prod source ($AVA_HOME/source) is on {where}, not `main`.\n"
-                f"   A source-run home executes this tree — it must be reviewed `main`; a "
-                f"feature branch here runs un-reviewed code on the next restart.\n"
-                f"   Develop in a worktree, never the prod checkout. Recover: stash / "
-                f"branch any work, then `git -C $AVA_HOME/source checkout main`."
+                "\n· prod source ($AVA_HOME/source) is detached at the released commit "
+                "(source-mode release state — expected; do not `checkout main`, which "
+                "would diverge this host from the fleet release)."
+            )
+        elif drift_branch is not None:
+            print(
+                f"\n⚠ prod source ($AVA_HOME/source) is on branch '{drift_branch}', not "
+                f"`main`. A source-run home executes this tree; a feature branch here runs "
+                f"un-reviewed code on the next restart.\n"
+                f"   Develop in a worktree, never the prod checkout. Recover: stash / branch "
+                f"any work, then restore this tree to the fleet's released commit (ask the "
+                f"operator / re-run the fleet update) — do not `checkout main`."
             )
 
     # The code this home runs: the source checkout, at its current HEAD.

@@ -32,8 +32,8 @@ after every rewrite. `bringup` wires the write generation
 ([[base/cluster/authority/docs/wiring.ava.okf.md|delivery and wiring]]): birth runs
 groups -> monitor -> retire legacy logins -> ledger -> mint generation 0 ->
 pooler serving that pair -> pooled proof of both logins -> activate; an
-ordinary start re-grants the groups after migrations, converges the monitor,
-sweeps stale logins to `NOLOGIN` and holds on any catalog/ledger mismatch
+ordinary start re-grants the groups after migrations, converges the monitor
+and holds on any catalog/ledger mismatch
 before the pooler. `db_delivery` gives
 each launched service its class login.
 

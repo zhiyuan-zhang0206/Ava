@@ -117,10 +117,11 @@ def test_turn_and_exec_counters_use_the_registry_failure_names(db: psycopg.Conne
     _event(db, "turn_end", agent, ok=True)  # no duration: a turn, but not in the histogram
     _event(db, "exec", agent)
     _event(db, "exec", agent)
-    for name in ("exec_failed", "exec_timeout", "exec(failed)", "exec_envelope", "exec("):
+    for name in ("exec_failed", "exec_timeout", "exec(failed)"):
         _event(db, name, agent)
-    _event(db, "exec_", agent)  # nothing after the underscore: not a failure name
-    _event(db, "execute", agent)
+    # Prefix lookalikes that are not outcomes: the envelope and boot events, a bare prefix.
+    for name in ("exec_envelope", "exec_child_boot", "exec(", "exec_", "execute"):
+        _event(db, name, agent)
 
     rollup.roll_day(db, _DAY)
 
@@ -128,7 +129,7 @@ def test_turn_and_exec_counters_use_the_registry_failure_names(db: psycopg.Conne
     assert row is not None
     assert row[:5] == (5, 4, pytest.approx(6.4), 1.5, 3.0)
     assert row[5] == {"1": 2, "3": 1}
-    assert (row[6], row[7]) == (2, 5)
+    assert (row[6], row[7]) == (2, 3)
 
 
 def test_rows_without_an_agent_do_not_count(db: psycopg.Connection) -> None:

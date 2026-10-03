@@ -20,6 +20,7 @@ from agent.state import (
     build_agent_state,
     clear_plugin_registrations,
 )
+from base.host.env.agent_slices import AgentSlices
 from base.packages.plugins.context import PluginContext
 
 
@@ -999,9 +1000,7 @@ def test_set_cwd_non_git_stores_cwd_note(tmp_path: Path):
 # ── coding tools section: dedup vs the framework's expanded-SDK section ─────
 
 
-def test_coding_tools_section_skips_framework_expanded_modules(
-    monkeypatch: pytest.MonkeyPatch,
-):
+def test_coding_tools_section_skips_framework_expanded_modules(monkeypatch: pytest.MonkeyPatch):
     """A module in the effective expand view (settings + plugin registrations)
     is already rendered (full contract) by the framework section — the plugin
     must not promote it a second time. Exact path match: an expand entry for a
@@ -1014,7 +1013,7 @@ def test_coding_tools_section_skips_framework_expanded_modules(
 
     monkeypatch.setattr(settings.agent, "sdk_expand_in_system_prompt", ["files", "shell.sessions"])
     monkeypatch.setattr(plugins, "REGISTERED_SDK_EXPANSIONS", ["cwd"])
-    text = _coding_tools_section()
+    text = _coding_tools_section(AgentSlices.resolve())
     assert "## ava.files" not in text  # expanded by the framework -> skipped
     assert "## ava.shell" in text  # only the child is expanded -> parent stays
     assert "## ava.cwd" not in text  # plugin-registered expand -> skipped too
@@ -1028,7 +1027,7 @@ def test_coding_tools_section_all_expanded_keeps_preamble_only(
     from base.config import settings
 
     monkeypatch.setattr(settings.agent, "sdk_expand_in_system_prompt", ["cwd", "files", "shell"])
-    text = _coding_tools_section()
+    text = _coding_tools_section(AgentSlices.resolve())
     assert text.startswith("# Coding tools")
     assert "Prefer the tools below" in text
     # search steering: rg over recursive grep/find (recursive grep times out on

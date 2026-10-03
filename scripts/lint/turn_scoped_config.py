@@ -11,14 +11,14 @@ In the hosted runner model (future/infra/agent-runner-as-server.md, work item
 b) many agents' turns share one process, so a `per_agent=True` field read
 through the process-global `settings` singleton returns the CLUSTER default —
 silently ignoring the agent's `config_overlay` / `birth_config`. The correct
-read path for turn-scoped code is the per-turn view:
+read path for turn-scoped code is the agent's slices
+(`base/host/env/agent_slices.py`, on `runtime.context.agent`):
 
-    from base.config.turn_view import turn_settings
-    turn_settings.lm.llm_model        # pin-aware: overlay > birth > live default
+    runtime.context.require_agent().brain.llm_model   # pin, else the live default
 
-In process mode the view is byte-for-byte the singleton (boot applied the
-overlay onto it), so the conversion is always safe; in hosted mode it is the
-only correct read.
+The exec child and the SDK run one agent per process, so their settings carry
+that agent's overlay (boot applied it onto the singleton); the SDK reads a
+per-agent setting through `ava._settings.agent_setting`.
 
 ## Rules
 
@@ -26,7 +26,7 @@ only correct read.
 `agent/`, `ava/`, `ava_builtins/`, `base/lm/`, plus the turn-adjacent
 `base` modules listed in _EXTRA_FILES. Any `settings.<domain>.<field>`
 attribute read where `<field>` is a `per_agent=True` field in the config
-registry is an error — the site must read `turn_settings.<domain>.<field>`.
+registry is an error — the site must read the agent's slices (or `agent_setting`).
 
 The per-agent field set is read from the live config registry
 (`base.config.per_agent_field_names`), so declaring a new per-agent field
@@ -36,8 +36,8 @@ auto-extends the ban with no manual list to maintain.
 (`base/packages/plugins/config_registration.py`) is a process-global `plugin -> instance`
 map that boot rebuilds from the agent's overlay, so subscripting it in turn
 code returns whichever agent booted the process. Reads go through
-`base/packages/plugins/config_view.py:turn_plugin_config` (which
-`get_plugin_config` / `ava._settings.plugins` already do). Membership tests
+`get_plugin_config(plugin, slices)` (host side) or
+`process_plugin_config` (this process's own instance; `ava._settings.plugins`). Membership tests
 (`name in _PLUGIN_CONFIGS`) are untouched — they ask whether a plugin is
 registered, which is not per-agent.
 
@@ -83,13 +83,13 @@ _EXTRA_FILES = ("base/packages/plugins/activation.py",)
 
 _ALLOWED_FILES = frozenset(
     {
-        # The view itself falls through to the singleton by design.
-        "base/config/turn_view.py",
+        # The slices resolve a field's live default off the singleton by design.
+        "base/host/env/agent_slices.py",
     }
 )
 
 # The two files that ARE the plugin-config mechanism: the registry owns the
-# process-global map, the view is what turn code reads it through.
+# process-global map, the view layers an agent's overrides over it.
 _PLUGIN_MECHANISM_FILES = frozenset(
     {
         "base/packages/plugins/config_registration.py",
@@ -154,9 +154,9 @@ def main(argv: list[str]) -> int:
         print(
             "plugin config read straight out of the process-global "
             "_PLUGIN_CONFIGS in turn-scoped code — use "
-            "`base.packages.plugins.config_view.turn_plugin_config(<plugin>)` (or "
-            "`get_plugin_config`, which routes through it); in hosted mode the "
-            "map holds whichever agent booted the process:\n",
+            "`get_plugin_config(<plugin>, slices)` (or `process_plugin_config` in the "
+            "exec child); in hosted mode the map holds whichever agent booted the "
+            "process:\n",
             file=sys.stderr,
         )
         for e in plugin_errors:
@@ -164,9 +164,10 @@ def main(argv: list[str]) -> int:
     if errors:
         print(
             "per-agent config read through the bare settings singleton in "
-            "turn-scoped code — use `turn_settings.<domain>.<field>` "
-            "(base/config/turn_view.py); in hosted mode the singleton holds "
-            "the CLUSTER default, not this agent's overlay:\n",
+            "turn-scoped code — read it from the agent's slices "
+            "(base/host/env/agent_slices.py) or `ava._settings.agent_setting`; in "
+            "hosted mode the singleton holds the CLUSTER default, not this agent's "
+            "overlay:\n",
             file=sys.stderr,
         )
         for e in errors:

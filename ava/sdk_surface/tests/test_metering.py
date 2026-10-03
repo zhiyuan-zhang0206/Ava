@@ -1,7 +1,7 @@
 """Unit tests for ava/sdk_surface/metering.py — the per-call SDK usage recorder.
 
 The recorder wraps every public `ava.*` callable to emit one `sdk_call` event per
-top-level invocation (counted by the `sdk_usage` metric). These tests pin the two
+top-level invocation (summed by the Grafana call-frequency ranking). These tests pin the two
 things that make it safe to bolt onto the whole SDK surface: it is byte-for-byte
 transparent to `ava.help` / signatures, and it is a pure side channel over the call
 (records once, at the top level, and never perturbs args / return / exceptions).

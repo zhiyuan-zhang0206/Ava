@@ -10,6 +10,7 @@ from langgraph.graph.state import CompiledStateGraph
 
 from agent.graph.llm_errors import FatalLLMStreamError, FatalProviderError
 from agent.hooks.compact import CompactionFailedError
+from agent.startup import CHECKPOINT_INTERVAL_KEY
 from agent.state import BaseAgentState
 from agent.state_channels import (
     CIRCUIT_REASON_AUTH,
@@ -23,7 +24,6 @@ from agent.state_channels import (
     CircuitState,
 )
 from base.agents.context import AvaContext
-from base.config.turn_view import turn_settings
 from base.events.live.projection import Error
 from base.log import logger
 from base.telemetry.audit_events import prepare_event_log, record_audit_reported_async
@@ -106,7 +106,7 @@ def _provider_recovery(reason: str) -> str:
     return "Choose a different model overlay or resolve the provider policy rejection, then send a new message."
 
 
-def _model_vendor() -> str | None:
+def _model_vendor(ctx: AvaContext) -> str | None:
     """Vendor key of this turn's model — the account a failure bills to.
 
     The classifier stamps the same read onto the ``llm_provider_error`` log's
@@ -118,7 +118,7 @@ def _model_vendor() -> str | None:
     """
     from base.lm.factory import provider_key_of_model
 
-    return provider_key_of_model(turn_settings.lm.llm_model)
+    return provider_key_of_model(ctx.require_agent().brain.llm_model)
 
 
 async def _record_permanent_reject_outcome(
@@ -203,7 +203,7 @@ async def _record_permanent_reject_outcome(
             agent_id,
             error_class=exc.error_class or "permanent",
             provider=exc.provider,
-            vendor=_model_vendor(),
+            vendor=_model_vendor(ctx),
             status=exc.status,
             reason=SUPPRESS_REASON_PERMANENT_REJECT,
             occurred_at=occurred_at if occurred_at is not None else datetime.now(UTC),
@@ -373,7 +373,7 @@ async def _handle_fatal_llm_error(
                     agent_id,
                     error_class=exc.error_class,
                     provider=exc.provider,
-                    vendor=_model_vendor(),
+                    vendor=_model_vendor(ctx),
                     status=exc.status,
                     reason=reason,
                     occurred_at=occurred_at if occurred_at is not None else datetime.now(UTC),
@@ -387,11 +387,13 @@ async def _handle_fatal_llm_error(
     return input_update
 
 
-def graph_config(agent_id: int, tags: list[str], metadata: dict[str, object]) -> RunnableConfig:
-    """LangGraph invoke config: thread_id + infinite recursion limit + the
-    trace fields (run_name / metadata / tags) for backend filtering."""
+def graph_config(
+    agent_id: int, tags: list[str], metadata: dict[str, object], checkpoint_interval: int
+) -> RunnableConfig:
+    """LangGraph invoke config: thread_id + the turn's checkpoint interval + infinite recursion
+    limit + the trace fields (run_name / metadata / tags) for backend filtering."""
     return {
-        "configurable": {"thread_id": str(agent_id)},
+        "configurable": {"thread_id": str(agent_id), CHECKPOINT_INTERVAL_KEY: checkpoint_interval},
         "recursion_limit": _RECURSION_LIMIT_INF,
         "run_name": f"ava-agent-{agent_id}",
         "metadata": metadata,

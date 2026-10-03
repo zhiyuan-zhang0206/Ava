@@ -35,6 +35,7 @@ from base.db import Database, insert_inbound_message
 from base.deploy.maintenance import admission, cohort, pause_owner
 from base.deploy.maintenance.state import MaintenanceHold
 from base.events.live.bus import EventBus
+from base.host.env.agent_slices import AgentSlices
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from base.native_process.turn_identity import bind_turn_identity
 from ops.agents.spawn import create_agent_row
@@ -127,7 +128,9 @@ async def test_original_host_task_resumes_autonomous_work_without_pending_inboun
         )
         with bind_turn_identity(agent, incarnation=incarnation):
             async with control.connection():
-                original = asyncio.create_task(host._invoke_until_done(agent, AvaContext()))
+                original = asyncio.create_task(
+                    host._invoke_until_done(agent, AvaContext(agent=AgentSlices.resolve()))
+                )
                 try:
                     await asyncio.wait_for(recovering.wait(), 3)
                     assert not original.done()

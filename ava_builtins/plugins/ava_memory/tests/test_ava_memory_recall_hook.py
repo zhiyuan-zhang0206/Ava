@@ -23,6 +23,7 @@ from agent.messages import NoteTag, inbound_message, system_note_message
 from agent.state import build_agent_state, clear_plugin_registrations
 from ava import gateway_client
 from base.agents.context import AvaContext
+from base.host.env.agent_slices import AgentSlices
 
 
 @pytest.fixture
@@ -57,7 +58,7 @@ def _hook_env(_loaded: Any, monkeypatch: pytest.MonkeyPatch) -> Any:
     from base.config import settings
 
     monkeypatch.setattr(settings.agent, "passive_memory_recall_enabled", True)
-    monkeypatch.setattr(_loaded, "auto_compact_will_fire", lambda _state: False)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_loaded, "auto_compact_will_fire", lambda _state, _model: False)  # pyright: ignore[reportUnknownArgumentType]
     recall = AsyncMock(
         return_value=PassiveRecall(
             note=system_note_message(content="recalled", tag=NoteTag.MEMORY),
@@ -73,7 +74,12 @@ def _state(messages: list[AnyMessage], **fields: Any):
 
 
 def _runtime() -> Runtime[AvaContext]:
-    ctx = AvaContext(ops_pool=MagicMock(), llm=MagicMock(), event_publisher=MagicMock())
+    ctx = AvaContext(
+        ops_pool=MagicMock(),
+        llm=MagicMock(),
+        event_publisher=MagicMock(),
+        agent=AgentSlices.resolve(),
+    )
     return Runtime(context=ctx)
 
 
@@ -156,7 +162,7 @@ async def test_gateway_error_leaves_the_turn_running(
     from base.config import settings
 
     monkeypatch.setattr(settings.agent, "passive_memory_recall_enabled", True)
-    monkeypatch.setattr(_loaded, "auto_compact_will_fire", lambda _state: False)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_loaded, "auto_compact_will_fire", lambda _state, _model: False)  # pyright: ignore[reportUnknownArgumentType]
 
     request = httpx.Request("POST", "http://gateway.test/api/memory/search")
 
@@ -190,7 +196,7 @@ async def test_recall_deadline_exceeded_skips_recall_this_turn(
 
     monkeypatch.setattr(settings.agent, "passive_memory_recall_enabled", True)
     monkeypatch.setattr(settings.agent, "memory_recall_deadline_seconds", 0.05)
-    monkeypatch.setattr(_loaded, "auto_compact_will_fire", lambda _state: False)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(_loaded, "auto_compact_will_fire", lambda _state, _model: False)  # pyright: ignore[reportUnknownArgumentType]
 
     async def _slow_recall(_messages: Any, **_kwargs: Any) -> PassiveRecall:
         await asyncio.sleep(0.5)

@@ -21,6 +21,7 @@ from agent.graph.interrupt import subscribe_interrupt
 from base.agents.messages.inbound import InterruptReason
 from base.cluster.machine import machine_name
 from base.db import create_agent
+from base.host.env.agent_slices import AgentSlices
 
 # The watcher polls on a 2s cadence; the initial SELECT is immediate. Generous
 # windows vs flake; the poll-interval tests are serial (flaky-marked) because
@@ -409,7 +410,7 @@ async def test_auto_compaction_cancels_at_llm_node_without_replacing_context(
     monkeypatch.setattr("agent.hooks.compact.resolve_context_budget", small_budget)
     started, settled = asyncio.Event(), asyncio.Event()
 
-    async def summarizing(_messages: object, _llm: object) -> str:
+    async def summarizing(_messages: object, _llm: object, _model: str) -> str:
         started.set()
         try:
             await asyncio.Future()
@@ -424,7 +425,11 @@ async def test_auto_compaction_cancels_at_llm_node_without_replacing_context(
         halted=False,
     )
     publisher, model = MagicMock(), MagicMock()
-    runtime = Runtime(context=AvaContext(ops_pool=aops_pool, llm=model, event_publisher=publisher))
+    runtime = Runtime(
+        context=AvaContext(
+            ops_pool=aops_pool, llm=model, event_publisher=publisher, agent=AgentSlices.resolve()
+        )
+    )
     invocation = asyncio.create_task(
         llm_node(state, runtime, {"configurable": {"thread_id": str(tid)}})
     )
@@ -506,8 +511,15 @@ async def test_compaction_returns_through_claim_then_generates_before_compacting
         return state.model_copy(update=update)
 
     monkeypatch.setattr("agent.hooks.compact.resolve_context_budget", small_budget)
-    monkeypatch.setattr("agent.graph._init_context.build_system_prompt", lambda: "standing head")
-    monkeypatch.setattr("agent.graph._init_context.context_notes", list)
+
+    def standing_head(_slices: AgentSlices) -> str:
+        return "standing head"
+
+    def no_notes(_slices: AgentSlices) -> list[Any]:
+        return []
+
+    monkeypatch.setattr("agent.graph._init_context.build_system_prompt", standing_head)
+    monkeypatch.setattr("agent.graph._init_context.context_notes", no_notes)
     summary = AsyncMock(return_value="the retained summary is still above the ceiling " * 30)
     monkeypatch.setattr("agent.hooks.compact.generate_summary", summary)
 
@@ -523,7 +535,11 @@ async def test_compaction_returns_through_claim_then_generates_before_compacting
     model.astream.return_value = ordinary_generation()
     tid = spawn_agent()
     config: RunnableConfig = {"configurable": {"thread_id": str(tid)}}
-    runtime = Runtime(context=AvaContext(ops_pool=aops_pool, llm=model, event_publisher=publisher))
+    runtime = Runtime(
+        context=AvaContext(
+            ops_pool=aops_pool, llm=model, event_publisher=publisher, agent=AgentSlices.resolve()
+        )
+    )
     state = AgentState(messages=[HumanMessage(content="old work " * 100)], halted=False)
     compacted = await llm_node(state, runtime, config)
     assert compacted.goto == "init_context"
@@ -538,13 +554,13 @@ async def test_compaction_returns_through_claim_then_generates_before_compacting
     state = state.model_copy(
         update={"messages": serde.loads_typed(serde.dumps_typed(state.messages))}
     )
-    assert not auto_compact_will_fire(state)
+    assert not auto_compact_will_fire(state, "deepseek-flash")
     _insert(db_conn, tid, "cancel")
     cancelled = await claim_node(state, runtime, config)
     assert cancelled.goto == "claim"
     state = apply(state, cancelled)
     assert state.halted
-    assert not auto_compact_will_fire(state)
+    assert not auto_compact_will_fire(state, "deepseek-flash")
     model.astream.assert_not_called()
 
     db_conn.execute(
@@ -555,7 +571,7 @@ async def test_compaction_returns_through_claim_then_generates_before_compacting
     resumed = await claim_node(state, runtime, config)
     assert resumed.goto == "before_llm"
     state = apply(state, resumed)
-    assert not auto_compact_will_fire(state)
+    assert not auto_compact_will_fire(state, "deepseek-flash")
     assert await _compact_reminder(state, runtime, config) is None
     generated = await llm_node(state, runtime, config)
     assert generated.goto == "after_exec"
@@ -564,4 +580,6 @@ async def test_compaction_returns_through_claim_then_generates_before_compacting
     assert state.compact.version == 1
     summary.assert_awaited_once()
     model.astream.assert_called_once()
-    assert auto_compact_will_fire(state)  # A committed ordinary result re-arms the threshold.
+    assert auto_compact_will_fire(
+        state, "deepseek-flash"
+    )  # A committed ordinary result re-arms the threshold.

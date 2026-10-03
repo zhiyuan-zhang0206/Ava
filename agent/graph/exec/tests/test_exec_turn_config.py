@@ -14,9 +14,9 @@ from agent.graph.exec.node import _run_agent_code
 from agent.state import AgentState
 from base.agents.context import AvaContext
 from base.config import settings
-from base.config.turn_view import bind_agent_config, resolve_agent_config_pins
+from base.config.agent_pins import resolve_agent_config_pins
+from base.host.env.agent_slices import AgentSlices
 from base.native_process.turn_identity import bind_turn_identity
-from base.packages.plugins.config_view import bind_agent_plugin_config
 
 
 def _plugin(unit_home: Path) -> None:
@@ -64,10 +64,10 @@ async def test_concurrent_turn_configs_reach_real_children_without_cross_talk(
         "os.environ.get('AVA_AGENT_CONFIG_OVERLAY', 'GONE')]))\n"
     )
 
-    async def execute(agent_id: int) -> list[object]:
+    async def execute(agent_id: int, slices: AgentSlices | None = None) -> list[object]:
         result, *_ = await _run_agent_code(
             AgentState(),
-            AvaContext(),
+            AvaContext(agent=slices or AgentSlices.resolve()),
             agent_id,
             code,
             ExecOutputChunkPublisher(MagicMock(), agent_id, str(agent_id)),
@@ -85,12 +85,9 @@ async def test_concurrent_turn_configs_reach_real_children_without_cross_talk(
             {"llm_model": model},
             {"llm_model": "deepseek-v4-pro", "llm_stream_ttft_timeout_seconds": timeout},
         )
-        with (
-            bind_turn_identity(agent_id),
-            bind_agent_config(pins),
-            bind_agent_plugin_config({"exec_config_probe": {"exec_probe_marker": marker}}),
-        ):
-            tasks.append(asyncio.create_task(execute(agent_id)))
+        slices = AgentSlices.resolve(pins, {"exec_config_probe": {"exec_probe_marker": marker}})
+        with bind_turn_identity(agent_id):
+            tasks.append(asyncio.create_task(execute(agent_id, slices)))
     assert await asyncio.gather(*tasks) == [
         ["deepseek-v4-pro", 3.0, "agent-a", "GONE"],
         ["deepseek-v4-flash-vision-exp", 7.0, "agent-b", "GONE"],

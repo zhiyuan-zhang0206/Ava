@@ -25,6 +25,7 @@ from ava_builtins.plugins.lm_google.gemini_cache import (
     is_stale_cache_error,
 )
 from base.config import settings
+from base.host.env.agent_slices import AgentSlices
 
 
 @tool("execute_code", parse_docstring=True)
@@ -184,26 +185,45 @@ class TestGetOrCreate:
     async def test_flag_off_returns_none(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr(settings.lm, "gemini_explicit_cache_enabled", False)
         caches = _FakeCaches()
-        assert await get_or_create_cache(_gemini_llm(caches), _BIG_PROMPT, [_fake_tool]) is None
+        assert (
+            await get_or_create_cache(
+                _gemini_llm(caches), _BIG_PROMPT, [_fake_tool], AgentSlices.resolve().llm_policy
+            )
+            is None
+        )
         assert caches.create_calls == 0
 
     async def test_non_gemini_returns_none(self) -> None:
-        assert await get_or_create_cache(_NonGeminiChatModel(), _BIG_PROMPT, [_fake_tool]) is None
+        assert (
+            await get_or_create_cache(
+                _NonGeminiChatModel(), _BIG_PROMPT, [_fake_tool], AgentSlices.resolve().llm_policy
+            )
+            is None
+        )
 
     async def test_short_prompt_skipped(self) -> None:
         caches = _FakeCaches()
-        assert await get_or_create_cache(_gemini_llm(caches), "tiny prompt", [_fake_tool]) is None
+        assert (
+            await get_or_create_cache(
+                _gemini_llm(caches), "tiny prompt", [_fake_tool], AgentSlices.resolve().llm_policy
+            )
+            is None
+        )
         assert caches.create_calls == 0
 
     async def test_create_success_and_memo_hit(self) -> None:
         caches = _FakeCaches()
         llm = _gemini_llm(caches)
-        ref = await get_or_create_cache(llm, _BIG_PROMPT, [_fake_tool])
+        ref = await get_or_create_cache(
+            llm, _BIG_PROMPT, [_fake_tool], AgentSlices.resolve().llm_policy
+        )
         assert ref is not None
         assert ref.name == "cachedContents/fake1"
         assert caches.create_calls == 1
         # second call: memo hit, no new create
-        ref2 = await get_or_create_cache(llm, _BIG_PROMPT, [_fake_tool])
+        ref2 = await get_or_create_cache(
+            llm, _BIG_PROMPT, [_fake_tool], AgentSlices.resolve().llm_policy
+        )
         assert ref2 is not None and ref2.name == ref.name
         assert caches.create_calls == 1
 
@@ -211,17 +231,31 @@ class TestGetOrCreate:
         caches = _FakeCaches()
         caches.create_error = RuntimeError("quota")
         llm = _gemini_llm(caches)
-        assert await get_or_create_cache(llm, _BIG_PROMPT, [_fake_tool]) is None
+        assert (
+            await get_or_create_cache(
+                llm, _BIG_PROMPT, [_fake_tool], AgentSlices.resolve().llm_policy
+            )
+            is None
+        )
         assert caches.create_calls == 1
         # within the negative window no retry hits the wire
-        assert await get_or_create_cache(llm, _BIG_PROMPT, [_fake_tool]) is None
+        assert (
+            await get_or_create_cache(
+                llm, _BIG_PROMPT, [_fake_tool], AgentSlices.resolve().llm_policy
+            )
+            is None
+        )
         assert caches.create_calls == 1
 
     async def test_different_prompt_gets_own_cache(self) -> None:
         caches = _FakeCaches()
         llm = _gemini_llm(caches)
-        ref_a = await get_or_create_cache(llm, _BIG_PROMPT, [_fake_tool])
-        ref_b = await get_or_create_cache(llm, _BIG_PROMPT + "extra", [_fake_tool])
+        ref_a = await get_or_create_cache(
+            llm, _BIG_PROMPT, [_fake_tool], AgentSlices.resolve().llm_policy
+        )
+        ref_b = await get_or_create_cache(
+            llm, _BIG_PROMPT + "extra", [_fake_tool], AgentSlices.resolve().llm_policy
+        )
         assert ref_a is not None and ref_b is not None
         assert ref_a.name != ref_b.name
         assert caches.create_calls == 2
@@ -248,7 +282,9 @@ class TestGetOrCreate:
                 expire_time=datetime.now(UTC) + timedelta(seconds=3000),
             )
         ]
-        ref = await get_or_create_cache(llm, _BIG_PROMPT, [_fake_tool])
+        ref = await get_or_create_cache(
+            llm, _BIG_PROMPT, [_fake_tool], AgentSlices.resolve().llm_policy
+        )
         assert ref is not None and ref.name == "cachedContents/frompeer"
         assert caches.create_calls == 0
 
@@ -273,7 +309,9 @@ class TestGetOrCreate:
                 expire_time=datetime.now(UTC) + timedelta(seconds=60),
             )
         ]
-        ref = await get_or_create_cache(llm, _BIG_PROMPT, [_fake_tool])
+        ref = await get_or_create_cache(
+            llm, _BIG_PROMPT, [_fake_tool], AgentSlices.resolve().llm_policy
+        )
         assert ref is not None and ref.name == "cachedContents/fake1"
         assert caches.create_calls == 1
 
@@ -290,10 +328,20 @@ class TestTimeoutFailOpen:
         self._short_timeout(monkeypatch)
         caches = _HangingCaches(hang_create=True)
         llm = _gemini_llm(caches)
-        assert await get_or_create_cache(llm, _BIG_PROMPT, [_fake_tool]) is None
+        assert (
+            await get_or_create_cache(
+                llm, _BIG_PROMPT, [_fake_tool], AgentSlices.resolve().llm_policy
+            )
+            is None
+        )
         assert caches.create_attempts == 1
         # negative memo applies after a timeout, so no retry hits the wire
-        assert await get_or_create_cache(llm, _BIG_PROMPT, [_fake_tool]) is None
+        assert (
+            await get_or_create_cache(
+                llm, _BIG_PROMPT, [_fake_tool], AgentSlices.resolve().llm_policy
+            )
+            is None
+        )
         assert caches.create_attempts == 1
 
     async def test_list_hang_fails_open_to_create(self, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -302,7 +350,9 @@ class TestTimeoutFailOpen:
         self._short_timeout(monkeypatch)
         caches = _HangingCaches(hang_list=True)
         llm = _gemini_llm(caches)
-        ref = await get_or_create_cache(llm, _BIG_PROMPT, [_fake_tool])
+        ref = await get_or_create_cache(
+            llm, _BIG_PROMPT, [_fake_tool], AgentSlices.resolve().llm_policy
+        )
         assert ref is not None and ref.name == "cachedContents/fake1"
         assert caches.list_attempts == 1
         assert caches.create_calls == 1
@@ -313,10 +363,14 @@ class TestTimeoutFailOpen:
         self._short_timeout(monkeypatch)
         caches = _HangingCaches(hang_update=True)
         llm = _gemini_llm(caches)
-        ref = await get_or_create_cache(llm, _BIG_PROMPT, [_fake_tool])
+        ref = await get_or_create_cache(
+            llm, _BIG_PROMPT, [_fake_tool], AgentSlices.resolve().llm_policy
+        )
         assert ref is not None
         ref.expire_time = datetime.now(UTC) + timedelta(seconds=300)  # below refresh floor
-        ref2 = await get_or_create_cache(llm, _BIG_PROMPT, [_fake_tool])
+        ref2 = await get_or_create_cache(
+            llm, _BIG_PROMPT, [_fake_tool], AgentSlices.resolve().llm_policy
+        )
         assert ref2 is not None and ref2.name == ref.name
         assert caches.update_attempts == 1
 
@@ -325,11 +379,15 @@ class TestRefresh:
     async def test_near_expiry_triggers_ttl_update(self) -> None:
         caches = _FakeCaches()
         llm = _gemini_llm(caches)
-        ref = await get_or_create_cache(llm, _BIG_PROMPT, [_fake_tool])
+        ref = await get_or_create_cache(
+            llm, _BIG_PROMPT, [_fake_tool], AgentSlices.resolve().llm_policy
+        )
         assert ref is not None
         # age the memo entry to < refresh threshold
         ref.expire_time = datetime.now(UTC) + timedelta(seconds=300)
-        ref2 = await get_or_create_cache(llm, _BIG_PROMPT, [_fake_tool])
+        ref2 = await get_or_create_cache(
+            llm, _BIG_PROMPT, [_fake_tool], AgentSlices.resolve().llm_policy
+        )
         assert ref2 is not None
         assert caches.update_calls == [ref.name]
         assert ref.expire_time > datetime.now(UTC) + timedelta(seconds=3000)
@@ -337,9 +395,11 @@ class TestRefresh:
     async def test_fresh_entry_no_update(self) -> None:
         caches = _FakeCaches()
         llm = _gemini_llm(caches)
-        ref = await get_or_create_cache(llm, _BIG_PROMPT, [_fake_tool])
+        ref = await get_or_create_cache(
+            llm, _BIG_PROMPT, [_fake_tool], AgentSlices.resolve().llm_policy
+        )
         assert ref is not None
-        await get_or_create_cache(llm, _BIG_PROMPT, [_fake_tool])
+        await get_or_create_cache(llm, _BIG_PROMPT, [_fake_tool], AgentSlices.resolve().llm_policy)
         assert caches.update_calls == []
 
 
@@ -410,7 +470,11 @@ def test_non_gemini_llm_skips_the_heavy_genai_import(
     monkeypatch.setattr(settings.lm, "gemini_explicit_cache_enabled", True)
     genai_loaded_before = "langchain_google_genai" in sys.modules
 
-    result = asyncio.run(get_or_create_cache(_NonGeminiLLM(), _BIG_PROMPT, [_fake_tool]))
+    result = asyncio.run(
+        get_or_create_cache(
+            _NonGeminiLLM(), _BIG_PROMPT, [_fake_tool], AgentSlices.resolve().llm_policy
+        )
+    )
     assert result is None
 
     if not genai_loaded_before:

@@ -28,6 +28,7 @@ from agent.state import AgentState
 from agent.tests._fakes import make_fake_ops_pool
 from base.agents.context import AvaContext
 from base.events.live.projection import EVENT_ADAPTER, ExecOutput, ExecStart
+from base.host.env.agent_slices import AgentSlices
 
 
 def _make_runtime(*, llm=None, event_publisher=None) -> Runtime[AvaContext]:
@@ -49,6 +50,7 @@ def _make_runtime(*, llm=None, event_publisher=None) -> Runtime[AvaContext]:
         ops_pool=make_fake_ops_pool(),
         llm=llm,  # pyright: ignore[reportUnknownArgumentType]
         event_publisher=event_publisher if event_publisher is not None else MagicMock(),  # pyright: ignore[reportUnknownArgumentType]
+        agent=AgentSlices.resolve(),
     )
     return Runtime(context=ctx)
 
@@ -126,7 +128,9 @@ async def test_llm_node_stamps_last_active_at_with_text(
         ]
     )
     ops_pool = make_fake_ops_pool()
-    ctx = AvaContext(ops_pool=ops_pool, llm=fake_llm, event_publisher=MagicMock())
+    ctx = AvaContext(
+        ops_pool=ops_pool, llm=fake_llm, event_publisher=MagicMock(), agent=AgentSlices.resolve()
+    )
     state = AgentState(messages=[HumanMessage(content="hi")], halted=False)
     await llm_node(state, Runtime(context=ctx), {"configurable": {"thread_id": "7"}})
 
@@ -162,7 +166,9 @@ async def test_llm_node_stamps_last_active_at_on_tool_only_turn(
         ]
     )
     ops_pool = make_fake_ops_pool()
-    ctx = AvaContext(ops_pool=ops_pool, llm=fake_llm, event_publisher=MagicMock())
+    ctx = AvaContext(
+        ops_pool=ops_pool, llm=fake_llm, event_publisher=MagicMock(), agent=AgentSlices.resolve()
+    )
     state = AgentState(messages=[HumanMessage(content="run it")], halted=False)
     await llm_node(state, Runtime(context=ctx), {"configurable": {"thread_id": "7"}})
 

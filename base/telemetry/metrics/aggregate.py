@@ -26,7 +26,6 @@ from base.telemetry.metrics import (
     _render_exec,
     _render_llm_turns,
     _render_plugin_activation,
-    _render_sdk_usage,
     _render_syntax_fix,
     pctiles,
     third_of,
@@ -103,8 +102,6 @@ class EventAggregate:
     spawners: dict[str, int]  # spawner -> count
     lifecycle: dict[str, int]
     idle_halts: int
-    # sdk usage
-    sdk_fns: dict[str, int]
     # plugin activation
     plugin_acts: dict[tuple[str, str, str, str], int]  # (plugin, surface, identifier, model)
 
@@ -197,7 +194,6 @@ def fetch_aggregate(
             for name in LIFECYCLE_EVENTS.values()
         },
         idle_halts=_total(rows, "idle_halts"),
-        sdk_fns=data["sdk_fns"],
         plugin_acts=data["plugin_acts"],
     )
 
@@ -336,19 +332,6 @@ def _sections_from_aggregate(agg: EventAggregate) -> list[MetricSection]:
         "agent_lifetime_s": pctiles(spans),
     }
 
-    # sdk_usage
-    func_counts: Counter[str] = Counter(agg.sdk_fns)
-    ns_counts: Counter[str] = Counter()
-    for fq, cnt in func_counts.items():
-        ns_counts[fq.split(".", 1)[0]] += cnt
-    data_sdk = {
-        "code_blocks": agg.code_blocks,
-        "total_calls": sum(func_counts.values()),
-        "distinct_functions": len(func_counts),
-        "functions": [{"function": f, "count": c} for f, c in func_counts.most_common()],
-        "by_namespace": dict(ns_counts),
-    }
-
     # plugin_activation — philosophy §6's "removable as a gauge, not a vibe".
     # `by_contribution` is keyed the way `ava plugins inspect` spells a
     # registered contribution, so a row with no counterpart here is a
@@ -376,7 +359,6 @@ def _sections_from_aggregate(agg: EventAggregate) -> list[MetricSection]:
         MetricSection("exec", _render_exec(data_exec), data_exec),
         MetricSection("llm_turns", _render_llm_turns(data_llm), data_llm),
         MetricSection("agent_activity", _render_agent_activity(data_activity), data_activity),
-        MetricSection("sdk_usage", _render_sdk_usage(data_sdk), data_sdk),
         MetricSection("plugin_activation", _render_plugin_activation(data_plugin), data_plugin),
     ]
 

@@ -10,8 +10,8 @@ The implemented contracts live in [Agent Runtime](../../agent/docs/agent-runtime
 
 ## Resource boundaries
 
-The host shares its graph and database pools. Agent identity, framework config
-and plugin config are context-bound; model/runtime caching is bounded by size
+The host shares its graph and database pools. Agent identity is context-bound; framework
+config and plugin config travel as the agent's slices; model/runtime caching is bounded by size
 and idle lifetime. Idle ends a task without a model call. Redis wake events are
 multiplexed and durable pending work supplies missed-wake recovery.
 

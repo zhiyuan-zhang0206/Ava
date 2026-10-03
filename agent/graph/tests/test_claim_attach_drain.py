@@ -19,6 +19,7 @@ from agent.nodes import CLAIM
 from agent.state import AttachEntry, AttachState, BaseAgentState
 from base.agents.context import AvaContext
 from base.agents.messages.kwargs import AvaMsgType
+from base.host.env.agent_slices import AgentSlices
 
 
 def _write_png(path: Path) -> None:
@@ -32,6 +33,7 @@ def _context(model_name: str) -> AvaContext:
         ops_pool=MagicMock(),
         llm=cast("BaseChatModel", SimpleNamespace(model_name=model_name)),
         event_publisher=MagicMock(),
+        agent=AgentSlices.resolve(),
     )
 
 

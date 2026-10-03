@@ -24,6 +24,7 @@ from base.agents.incarnation.hosted_force import recover_orphaned_hosted_forces
 from base.config import settings
 from base.db import Database
 from base.events.live.bus import EventBus
+from base.host.env.agent_slices import AgentSlices
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from base.native_process.turn_identity import bind_turn_identity
 from ops.lifecycle.termination import _force_terminate_transaction
@@ -65,7 +66,9 @@ async def test_hosted_applies_only_after_continuation_returns(
             "SELECT status FROM inbound_messages WHERE id=%s", (inbound,)
         ).fetchone() == ("claimed",)
         task = asyncio.create_task(
-            host._invoke_until_done(agent_id, AvaContext(ops_pool=aops_pool))
+            host._invoke_until_done(
+                agent_id, AvaContext(ops_pool=aops_pool, agent=AgentSlices.resolve())
+            )
         )
         await asyncio.wait_for(entered.wait(), 2)
         try:
@@ -155,7 +158,9 @@ async def test_hosted_terminate_crash_has_no_applied_unobserved_gap(
             else:
                 patch.setattr("services.agent_host.host.apply_hosted_lifecycle", fail_after_commit)
             with pytest.raises(RuntimeError, match="injected"):
-                await host._invoke_until_done(agent_id, AvaContext(ops_pool=aops_pool))
+                await host._invoke_until_done(
+                    agent_id, AvaContext(ops_pool=aops_pool, agent=AgentSlices.resolve())
+                )
         state = db_conn.execute(
             "SELECT status,applied_at IS NOT NULL,observed_at IS NOT NULL "
             "FROM inbound_messages WHERE id=%s",
@@ -167,7 +172,9 @@ async def test_hosted_terminate_crash_has_no_applied_unobserved_gap(
         db_conn.commit()
         if crash != "after_commit":
             # Same admitted continuation can retry; cache absence is not a new owner.
-            assert await host._invoke_until_done(agent_id, AvaContext(ops_pool=aops_pool))
+            assert await host._invoke_until_done(
+                agent_id, AvaContext(ops_pool=aops_pool, agent=AgentSlices.resolve())
+            )
     assert db_conn.execute(
         "SELECT lifecycle_command_id,status FROM agents_meta WHERE id=%s", (agent_id,)
     ).fetchone() == (None, "terminated")
@@ -251,7 +258,9 @@ async def _run_terminating_turn(aops_pool: AsyncConnectionPool, agent_id: int) -
         db=Database.from_settings(),
     )
     host._runtimes[agent_id] = Mock()
-    assert await host._invoke_until_done(agent_id, AvaContext(ops_pool=aops_pool))
+    assert await host._invoke_until_done(
+        agent_id, AvaContext(ops_pool=aops_pool, agent=AgentSlices.resolve())
+    )
 
 
 @pytest.mark.parametrize("requested", [True, False])

@@ -17,7 +17,7 @@ the ledger's credential digest:
   (`pooler-admin.json`, created once by birth, never a PostgreSQL
   role). Deterministic bytes, so an unchanged userlist is never restarted.
 - `write_grant`: one class login and API token of the ACTIVE generation (a
-  pending or revoked one is never delivered) for a launch environment;
+  pending one is never delivered) for a launch environment;
   `reference` is the only part a launch digest or journal carries.
 - `consume`: the gateway login (and, while the API is authenticated, the
   gateway API token) for an operator process the launcher did not inject, only
@@ -26,7 +26,7 @@ the ledger's credential digest:
 
 ## Machine API tokens
 
-Each generation's API tokens gate the HTTP API and `/ops`:
+The generation's API tokens gate the HTTP API and `/ops`:
 [[base/cluster/authority/docs/api-tokens.ava.okf.md|Machine API tokens]].
 
 ## Remote agent-runner units
@@ -54,10 +54,9 @@ carries a login to another home:
   `AVA_DB_CAPABILITY_KEY`, popped at once): `open_bundle` refuses anything that
   fails authentication or has expired; the join's bootstrap fetch presents the
   bundle's API token (never the human secret); `install_bundle` requires this machine
-  name and home, the endpoint the gateway serves now, a generation not older
-  than the installed one (an equal number must carry the same credential
-  digest), and a login the cluster accepts (`SELECT 1` through the endpoint, so
-  a revoked generation never installs). It writes `unit.json` (0600) and start
+  name and home, the endpoint the gateway serves now, the installed generation's
+  credential digest, and a login the cluster accepts (`SELECT 1` through the
+  endpoint). It writes `unit.json` (0600) and start
   deletes the bundle. A first join with no
   bundle and no installed capability refuses before identity is persisted.
 - **Deliver**: the unit's root launcher gives every runner-class service
@@ -71,24 +70,21 @@ carries a login to another home:
   runtime; anything else records a refusal naming the issue command, raised at
   the first dial.
 
-A new generation reaches a remote unit only through a new bundle (a join, an
-emergency).
-
 ## Unit bundle exposure
 
-What a bundle carries, who shares it, and how a lost one is contained:
+What a bundle carries and who shares it:
 [unit bundle exposure](unit-bundle.ava.okf.md).
 
 ## Wiring
 
 - **Birth** (`cli/commands/_data_plane.complete_gateway_data_plane`, start
   intent `configured`): `ensure_groups` -> `ensure_monitor` ->
-  `retire_legacy_logins(Birth)` ->
+  `retire_legacy_logins` ->
   `create_ledger` -> `ensure_pooler_admin` -> `mint_generation` -> pooler
   serving the pending pair -> a pooled `SELECT 1` as each login -> `activate`.
   A retry reconciles to the same generation 0.
 - **Ordinary start**: `ensure_groups` after migrations -> `ensure_monitor` ->
-  `sweep` -> `check_invariant` (read-only grantees such as `grafana_ro`); a home
+  `check_invariant` (read-only grantees such as `grafana_ro`); a home
   with no ledger is refused before any native effect.
 - **Launch**: the root launcher delivers `AVA_DB_URL` + `AVA_DB_GENERATION` per
   service class; `base/dotenv_boot` keeps a delivery naming this home's
@@ -96,5 +92,4 @@ What a bundle carries, who shares it, and how a lost one is contained:
   otherwise the first dial raises `NoDatabaseAuthorityError`.
 - **Monitoring** is not delivered: the collector's PostgreSQL receiver
   (`cli/commands/observability/otel_collector.py`) dials the owner-only socket as
-  `ava_monitor` by `peer`, so its rendered config names no credential and a
-  rotation leaves it working.
+  `ava_monitor` by `peer`, so its rendered config names no credential.

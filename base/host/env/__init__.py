@@ -4,7 +4,8 @@ and their audit trail, runtime config access, and the gateway bootstrap fetch.
 
 Members: `registry` (env keys and their projections), `port_table` (the one
 service -> port table), `config_lite_table` (+ the generated
-`config_lite_table.json` beside it), `dotenv_boot` (the single `.env` load every
+`config_lite_table.json` beside it), `agent_slices` (a turn's per-agent
+configuration), `dotenv_boot` (the single `.env` load every
 process entry point imports), `dotenv_file` (locked, idempotent `.env` edits),
 `audit` (owner-only write history), `runtime_config` (the unit's `.env` accessor)
 and `bootstrap` (cluster-common config fetched from the gateway at start).

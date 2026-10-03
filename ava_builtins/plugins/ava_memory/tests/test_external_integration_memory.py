@@ -19,6 +19,7 @@ from base.agents.messages.caller_identity import CallerIdentity
 from base.cluster.machine import machine_name
 from base.config import settings
 from base.db import create_agent
+from base.host.env.agent_slices import AgentSlices
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from base.packages.plugins.context import PluginContext
 from tests.impersonation_support import attested_caller, recorded_tree
@@ -174,7 +175,7 @@ def test_external_memory_rechecks_lease_before_filesystem_effects(
             if operation == "write":
                 sdk.write("expired-note", "Must not be written.")
             else:
-                notes.per_agent_memory_note()
+                notes.per_agent_memory_note(AgentSlices.resolve())
         assert not list(tmp_path.iterdir())
     finally:
         with pytest.raises(leases.ImpersonationError, match="expired"):

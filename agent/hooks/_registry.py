@@ -265,6 +265,7 @@ def make_hook_runner(
                     "hooks",
                     hook_name,
                     detail=f"{hook.name} wrote {','.join(sorted(result))}",  # pyright: ignore[reportUnknownArgumentType]
+                    model=runtime.context.require_agent().brain.llm_model,
                 )
                 for key, value in result.items():
                     if key in update:

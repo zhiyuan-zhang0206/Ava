@@ -102,6 +102,16 @@ def test_turn_and_node_exact_durations_preserve_missing_optional_fields() -> Non
     assert (batched.active_seconds, batched.exec_seconds) == (3.75, 2.5)
 
 
+def test_only_the_registry_failure_names_count_as_exec_failures() -> None:
+    for name in ("exec_failed", "exec(timeout)", "exec_node_timeout"):
+        fact = metrics.observe_event(_event(name))
+        assert fact is not None and (fact.exec_ok, fact.exec_failed) == (0, 1)
+    ok = metrics.observe_event(_event("exec"))
+    assert ok is not None and (ok.exec_ok, ok.exec_failed) == (1, 0)
+    for name in ("exec_envelope", "exec_child_boot", "exec_request_quarantine"):
+        assert metrics.observe_event(_event(name)) is None
+
+
 @pytest.mark.parametrize("bad", [float("nan"), float("inf"), -1, True])
 def test_malformed_duration_cannot_poison_numeric_sums(bad: Any) -> None:
     with pytest.raises(ValueError):

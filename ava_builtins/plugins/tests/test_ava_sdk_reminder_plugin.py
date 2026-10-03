@@ -6,7 +6,6 @@ import inspect
 import sys
 from collections.abc import Iterator
 from typing import Any, cast
-from unittest.mock import MagicMock
 
 import pytest
 from langchain_core.messages import (
@@ -91,18 +90,18 @@ def _state(messages: list[AnyMessage], **fields: Any):
 def _runtime() -> Runtime[AvaContext]:
     # The hooks ignore runtime/config; a placeholder context satisfies the
     # AvaContext invariant.
-    ctx = AvaContext(ops_pool=MagicMock(), llm=MagicMock(), event_publisher=MagicMock())
-    return Runtime(context=ctx)
+    from agent.tests._fakes import placeholder_runtime
+
+    return placeholder_runtime()
 
 
 def _runtime_for_runner() -> Runtime[AvaContext]:
     """Runtime for tests that drive a real make_hook_runner — its node_lifecycle
     wrapper publishes a timeline snapshot through ops_pool, so a DB-shaped fake
     pool (not a bare MagicMock) is needed."""
-    from agent.tests._fakes import make_fake_ops_pool
+    from agent.tests._fakes import make_fake_ops_pool, placeholder_runtime
 
-    ctx = AvaContext(ops_pool=make_fake_ops_pool(), llm=MagicMock(), event_publisher=MagicMock())
-    return Runtime(context=ctx)
+    return placeholder_runtime(make_fake_ops_pool())
 
 
 def _config() -> RunnableConfig:
@@ -900,13 +899,13 @@ async def test_defer_predicate_matches_real_gate(
     # Stub generate_summary so a "would fire" path produces a real replacement
     # dict without invoking a live Compaction LLM. Long enough to clear the
     # auto-compact retry floor on the first attempt.
-    async def _fake_generate_summary(messages, llm):
+    async def _fake_generate_summary(messages, llm, _model):
         return "stub summary " * 100
 
     monkeypatch.setattr(compact_mod, "generate_summary", _fake_generate_summary)  # pyright: ignore[reportUnknownArgumentType]
 
     state = _state(msgs)
-    predicate = auto_compact_will_fire(state)
+    predicate = auto_compact_will_fire(state, "deepseek-flash")
     real = await compact_mod.auto_compact_for_llm(state, _runtime_for_runner(), _config())  # pyright: ignore[reportUnknownMemberType]
     assert predicate is expect_fire
     assert predicate == (real is not None)
@@ -938,7 +937,7 @@ async def test_real_runner_compaction_wins_no_note(
     # Long enough to clear the auto-compact retry floor on the first attempt.
     long_summary = "compacted summary " * 100
 
-    async def _fake_generate_summary(messages, llm):
+    async def _fake_generate_summary(messages, llm, _model):
         return long_summary
 
     monkeypatch.setattr(compact_mod, "generate_summary", _fake_generate_summary)  # pyright: ignore[reportUnknownArgumentType]

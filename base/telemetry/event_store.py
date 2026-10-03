@@ -7,6 +7,10 @@ stays the fallback: a batch that does not land is still in the mirror, which
 `services/events_maintenance/telemetry_replay.py` and
 `scripts/data_repair/backfill_telemetry_events.py` replay by event id.
 
+Only events somebody reads out of this table are stored: `is_persisted` is the one judgment,
+and the live sink, the mirror replay and the backfill script all apply it, so a row the live
+path skipped is not brought back by a replay. The mirror and Loki keep every event.
+
 Failure is loud but never raises into the drain thread. The first failure and every 50th after
 it log an error through `report_no_pipeline` and emit one `telemetry_store_failed` anomaly
 (its counters feed the Prometheus metric an alert can key on). After a failure the writer backs
@@ -28,9 +32,11 @@ from typing import Any, LiteralString, cast
 import psycopg
 from psycopg.types.json import Jsonb
 
+from base.events.contract import EVENTS
 from base.telemetry.emitter import Event, event_row
 
 STORED_CATEGORIES = frozenset({"telemetry", "log"})
+_STORED_LEVELS = frozenset({"warning", "error", "critical"})
 
 # How many months ahead of the current one the writer keeps partitions for.
 PARTITION_MONTHS_AHEAD = 3
@@ -56,6 +62,17 @@ FROM jsonb_to_recordset(%s::jsonb) AS r(
     source text, target_agent_id bigint, attributes jsonb, imported_from text)
 ON CONFLICT (event_uid, ts) DO NOTHING
 """
+
+
+def is_persisted(event_name: str, level: str) -> bool:
+    """Whether a telemetry or log event belongs in `telemetry_events`.
+
+    Yes for an event whose spec says `persist` (a Postgres reader queries it by name), for any
+    event at warning or higher (the resolution counts, the stats and the status page read those
+    by level), and for a name the registry does not know. The rest stays in the mirror and Loki.
+    """
+    spec = EVENTS.get(event_name)
+    return spec is None or spec.persist or level.lower() in _STORED_LEVELS
 
 
 def event_uid(stream_id: int) -> int:
@@ -130,13 +147,15 @@ def _open_pool() -> Any:
 
 
 def store_events(events: Sequence[Event]) -> None:
-    """Emitter sink: append a batch's telemetry and log events to `telemetry_events`.
+    """Emitter sink: append a batch's persisted telemetry and log events to `telemetry_events`.
 
     Never raises: the drain thread must survive a database that does not answer.
     """
     global _failures  # noqa: PLW0603
     records = [
-        stored_row(event_row(event)) for event in events if event.category in STORED_CATEGORIES
+        stored_row(event_row(event))
+        for event in events
+        if event.category in STORED_CATEGORIES and is_persisted(event.event_name, event.level)
     ]
     if not records:
         return
@@ -242,7 +261,9 @@ def jsonl_rows(lines: Sequence[bytes]) -> list[dict[str, Any]]:
     records: list[dict[str, Any]] = []
     for raw in lines:
         row = cast("dict[str, Any]", json.loads(raw))
-        if row["category"] not in STORED_CATEGORIES:
+        if row["category"] not in STORED_CATEGORIES or not is_persisted(
+            row["event_name"], row["level"]
+        ):
             continue
         if "id" not in row:
             stamp = datetime.fromisoformat(row["ts"])

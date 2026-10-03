@@ -1,7 +1,7 @@
 """A remote unit's join: verify its gateway, install or require its database capability.
 
 Settings-free, shared by `ava init` (the unit's first join) and
-`ava cluster db-authority install-unit` (a newer capability on an initialized
+`ava cluster db-authority install-unit` (a fresher capability on an initialized
 unit). `ava start` does neither: a started unit fetches its configuration through
 Settings and probes its gateway itself.
 """

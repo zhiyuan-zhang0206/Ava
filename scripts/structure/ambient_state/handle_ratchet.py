@@ -40,6 +40,7 @@ BASELINE = "scripts/structure/ambient_state/handle_ratchet_baseline.json"
 SHIM = "shim"
 SELF_BUILT = "self-built"
 BUS_BUILT = "bus-built"
+KINDS = (SHIM, SELF_BUILT, BUS_BUILT)
 Counts = dict[str, dict[str, int]]
 Sites = dict[tuple[str, str], list[str]]
 
@@ -95,17 +96,23 @@ def base_counts(repo_root: Path) -> Counts | None:
     return json.loads(shown.stdout) if shown.returncode == 0 else None
 
 
+FIX = {
+    SHIM: "take a `Database` from the composition root instead",
+    SELF_BUILT: "take a `Database` from the composition root instead",
+    BUS_BUILT: "take an `EventBus` from the composition root instead",
+}
+
+
 def errors(sites: Sites, frozen: Counts, base: Counts | None) -> list[str]:
     out: list[str] = []
     current = counts(sites)
     for package in sorted({*current, *frozen}):
-        for kind in (SHIM, SELF_BUILT, BUS_BUILT):
+        for kind in KINDS:
             have = current.get(package, {}).get(kind, 0)
             cap = frozen.get(package, {}).get(kind, 0)
             if have > cap:
                 out += [
-                    f"{where}: `{package}` has {have} {kind} site(s), {cap} frozen — "
-                    "take a `Database` from the composition root instead"
+                    f"{where}: `{package}` has {have} {kind} site(s), {cap} frozen — " + FIX[kind]
                     for where in sites[(package, kind)]
                 ]
             elif have < cap:

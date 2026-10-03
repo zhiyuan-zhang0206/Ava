@@ -82,7 +82,7 @@ _DECLARATIVE = re.compile(
     r"(\.|^)(include_router|add_api_route|add_exception_handler|add_middleware|middleware|mount"
     r"|add_argument|add_parser|set_defaults|add_subparsers|add_typer|command)$"
 )
-_SETTINGS_NAMES = frozenset({"settings", "turn_settings"})
+_SETTINGS_NAMES = frozenset({"settings"})
 _CACHE_DECORATORS = frozenset({"lru_cache", "cache", "alru_cache", "memoize", "cache_result"})
 _LOOP_GETTERS = frozenset({"get_running_loop", "get_event_loop", "new_event_loop"})
 _CLASSVAR = "ClassVar"

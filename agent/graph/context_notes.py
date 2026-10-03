@@ -28,7 +28,7 @@ the inherited history gets *wrong* — see `fork_notes`.
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -39,12 +39,12 @@ from langchain_core.messages import HumanMessage
 from agent.messages import NoteTag, system_note_message
 from base.clock import Clock
 from base.config import settings
-from base.config.turn_view import turn_settings
+from base.host.env.agent_slices import AgentSlices
 from base.log import logger
 from base.packages.plugins import contributions
 from base.paths import workspace_dir
 
-NoteBuilder = Callable[[], HumanMessage | None]
+NoteBuilder = Callable[[AgentSlices], HumanMessage | None]
 
 # The rank scale for the standing head — the reading order, lowest first:
 # the operational constants (exec timeout, then the cluster clock), then the
@@ -118,7 +118,7 @@ def register_context_note(
     return decorate
 
 
-def context_notes() -> list[HumanMessage]:
+def context_notes(slices: AgentSlices) -> list[HumanMessage]:
     """Every registered note in rank order (ties: registration order), skipping
     the ones with nothing to say.
 
@@ -126,18 +126,20 @@ def context_notes() -> list[HumanMessage]:
     indexes) then pick up whatever was written during the window just compacted
     away.
     """
-    built = [(entry.rank, note) for entry in _CONTEXT_NOTES if (note := entry.build()) is not None]
+    built = [
+        (entry.rank, note) for entry in _CONTEXT_NOTES if (note := entry.build(slices)) is not None
+    ]
     return [note for _, note in sorted(built, key=lambda pair: pair[0])]
 
 
-def fork_notes() -> list[HumanMessage]:
+def fork_notes(slices: AgentSlices) -> list[HumanMessage]:
     """The `on_fork` subset, in the same rank order as `context_notes` — what a
     freshly forked agent needs grafted onto the history it inherited from the
     agent it was forked from."""
     built = [
         (entry.rank, note)
         for entry in _CONTEXT_NOTES
-        if entry.on_fork and (note := entry.build()) is not None
+        if entry.on_fork and (note := entry.build(slices)) is not None
     ]
     return [note for _, note in sorted(built, key=lambda pair: pair[0])]
 
@@ -182,7 +184,7 @@ def _format_timeout_display(timeout_s: float) -> str:
 
 
 @register_context_note(rank=RANK_EXEC_TIMEOUT)
-def exec_timeout_note() -> HumanMessage | None:
+def exec_timeout_note(_slices: AgentSlices) -> HumanMessage | None:
     """A context note stating the execute_code hard timeout.
 
     Returns ``None`` when this process has no established agent identity."""
@@ -214,7 +216,7 @@ def _utc_offset(moment: datetime) -> str:
 
 
 @register_context_note(rank=RANK_TIMEZONE)
-def timezone_note() -> HumanMessage | None:
+def timezone_note(_slices: AgentSlices) -> HumanMessage | None:
     """A context note declaring the cluster's timezone once, so the timestamps
     themselves don't have to carry it.
 
@@ -302,7 +304,7 @@ def _workspace_path(agent_id: int) -> str | None:
 
 
 @register_context_note(on_fork=True, rank=RANK_AGENT_ID)
-def agent_id_note() -> HumanMessage | None:
+def agent_id_note(_slices: AgentSlices) -> HumanMessage | None:
     """A context note stating the agent's own identity: id, label, machine,
     workspace path — each clause fail-soft.
 
@@ -349,9 +351,9 @@ _PRELOADED_SKILLS_FRAMING = (
 
 
 @register_context_note(on_fork=True, rank=RANK_PRELOADED_SKILLS)
-def preloaded_skills_note() -> HumanMessage | None:
+def preloaded_skills_note(slices: AgentSlices) -> HumanMessage | None:
     """The full SKILL.md body of every skill named in
-    `turn_settings.agent.skills_to_expand_at_start`, concatenated into one note.
+    `Prompt.skills_to_expand_at_start`, concatenated into one note.
 
     Resolution (wildcard, identifier-then-name, warn-and-skip) is shared with
     the capabilities index via `resolve_prompt_skills`. Returns ``None`` — no
@@ -366,7 +368,8 @@ def preloaded_skills_note() -> HumanMessage | None:
     from agent.graph.capabilities import resolve_prompt_skills
 
     skills = resolve_prompt_skills(
-        turn_settings.agent.skills_to_expand_at_start,
+        slices.prompt.skills_to_expand_at_start,
+        slices.prompt.sdk_disable,
         config_field="skills_to_expand_at_start",
     )
     if not skills:
@@ -423,7 +426,7 @@ def _render_skill_bodies(skills: list[Any], *, label: str) -> tuple[list[str], l
     return sections, injected
 
 
-def fork_tail_skills_note(names: list[str]) -> HumanMessage | None:
+def fork_tail_skills_note(names: list[str], sdk_disable: Sequence[str]) -> HumanMessage | None:
     """The full SKILL.md bodies of the fork's skill ADDITIONS, for grafting at
     the context tail.
 
@@ -438,7 +441,7 @@ def fork_tail_skills_note(names: list[str]) -> HumanMessage | None:
         return None
     from agent.graph.capabilities import resolve_prompt_skills
 
-    skills = resolve_prompt_skills(list(names), config_field="fork_tail_skills")
+    skills = resolve_prompt_skills(names, sdk_disable, config_field="fork_tail_skills")
     rendered = _render_skill_bodies(skills, label="fork-tail-skills")
     if rendered is None:
         return None

@@ -188,7 +188,9 @@ EVENTS: dict[str, EventSpec] = {
         tier="noise",
         site='gateway/routers/frontend_telemetry.py telemetry.emit("telemetry", ...)',
     ),
-    "sse_drop": telemetry_event("sse_drop", "SSE event dropped", payload=SseDrop, tier="anomaly"),
+    "sse_drop": telemetry_event(
+        "sse_drop", "SSE event dropped", payload=SseDrop, tier="anomaly", persist=True
+    ),
     # ava.ui.serve page-restore
     "page_restore_alive": telemetry_event("page_restore_alive", "page restore alive", tier="noise"),
     "page_restore_reserved": telemetry_event(
@@ -214,6 +216,7 @@ EVENTS: dict[str, EventSpec] = {
         payload=GatewayLatency,
         tier="noise",
         site=('gateway/middleware/latency.py:emit_bucket telemetry.emit("telemetry", ...)'),
+        persist=True,
     ),
     "sse": telemetry_event(
         "sse",

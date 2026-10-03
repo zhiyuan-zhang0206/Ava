@@ -17,13 +17,18 @@ from pydantic import BaseModel, Field
 import ava
 from agent import state as state_module
 from ava import agent_identity, external, gateway_client
+from ava._settings import agent_setting
 from ava.external import state
 from ava.external.state import apply_plugin_delta, decode_plugin_delta, encode_plugin_delta
 from base import telemetry
-from base.config.turn_view import bind_agent_config, current_agent_config_pins, turn_settings
-from base.packages.plugins.config_view import bind_agent_plugin_config, current_plugin_config_view
 from base.telemetry import Event as TelemetryEvent
 from base.telemetry.otlp import telemetry_otlp
+
+# Load-proof handshake windows: close()'s telemetry tail can take seconds on a
+# loaded runner, so a fixed 2s window read a slow close as a revoked call
+# (2026-10-03 shard-10 flap, run 37082059707). Generous but still bounded, so a
+# genuinely stuck close fails clearly instead of hanging.
+_HANDSHAKE_BOUND_S = 30.0
 
 
 def _union(left: set[str], right: set[str]) -> set[str]:
@@ -124,7 +129,7 @@ def test_attach_borrows_identity_even_with_explicit_external_profile(
         assert agent_identity.require_agent_id() == 405
         assert agent_identity.require_actor() == "agent:405"
         assert agent_identity.default_actor() == "agent:405"
-        assert turn_settings.lm.llm_model == "external-test"
+        assert agent_setting("llm_model") == "external-test"
     assert agent_identity._external_identity is None
     assert agent_identity._external_agent_id is None
     assert agent_identity.require_actor() == "external_agent:codex"
@@ -235,46 +240,38 @@ def test_failed_context_entry_restores_prior_binding_and_allows_next_attachment(
     prior_update = {"sample__seen": {"pending-before-attachment"}}
     monkeypatch.setattr(ava, "state", prior_state)
     monkeypatch.setattr(ava, "state_update", prior_update)
-    with (
-        bind_agent_config({"llm_model": "prior-model"}),
-        bind_agent_plugin_config({"sample": {"setting": "prior"}}),
-    ):
-        prior_config = current_agent_config_pins()
-        prior_plugin_config = current_plugin_config_view()
-        attachment = external.attach("lease")
-        state_module.PluginStateHandle(ExamplePlugin, "sample").update({"seen": {"unflushed"}})
-        if invalidated == "expiry":
-            lease["status"] = "expired"
-            reason = "expired"
-        else:
-            lease["delta_version"] += 1
-            reason = "another attachment"
-        with pytest.raises(RuntimeError, match=reason), attachment:
-            pytest.fail("an invalid attachment entered its context")
-        assert agent_identity._external_identity is None
-        assert agent_identity._external_agent_id is None
-        assert ava.state is prior_state
-        assert ava.state_update is prior_update
-        assert current_agent_config_pins() is prior_config
-        assert current_plugin_config_view() is prior_plugin_config
-        assert not staged
-        attachment.close()  # Already detached; must not retry the failed lease or flush.
+    attachment = external.attach("lease")
+    state_module.PluginStateHandle(ExamplePlugin, "sample").update({"seen": {"unflushed"}})
+    if invalidated == "expiry":
+        lease["status"] = "expired"
+        reason = "expired"
+    else:
+        lease["delta_version"] += 1
+        reason = "another attachment"
+    with pytest.raises(RuntimeError, match=reason), attachment:
+        pytest.fail("an invalid attachment entered its context")
+    assert agent_identity._external_identity is None
+    assert agent_identity._external_agent_id is None
+    assert ava.state is prior_state
+    assert ava.state_update is prior_update
+    assert external.attached_config() is None
+    assert not staged
+    attachment.close()  # Already detached; must not retry the failed lease or flush.
 
-        next_lease = {**lease, "id": "next", "status": "active", "delta_version": 0}
+    next_lease = {**lease, "id": "next", "status": "active", "delta_version": 0}
 
-        def require_next(lease_id: str, attesting: dict[str, Any]) -> dict[str, Any]:
-            assert lease_id == "next"
-            assert attesting == {"pid": 777}
-            return next_lease
+    def require_next(lease_id: str, attesting: dict[str, Any]) -> dict[str, Any]:
+        assert lease_id == "next"
+        assert attesting == {"pid": 777}
+        return next_lease
 
-        monkeypatch.setattr(external.control, "require_active", require_next)
-        with external.attach("next"):
-            assert agent_identity._external_agent_id == 405
-            assert ava.self.AGENT_ID == 405
-        assert ava.state is prior_state
-        assert ava.state_update is prior_update
-        assert current_agent_config_pins() is prior_config
-        assert current_plugin_config_view() is prior_plugin_config
+    monkeypatch.setattr(external.control, "require_active", require_next)
+    with external.attach("next"):
+        assert agent_identity._external_agent_id == 405
+        assert ava.self.AGENT_ID == 405
+    assert ava.state is prior_state
+    assert ava.state_update is prior_update
+    assert external.attached_config() is None
 
 
 def test_concurrent_constructor_fails_before_lease_lookup(
@@ -332,29 +329,22 @@ def test_constructor_failure_restores_binding_and_allows_next_attachment(
     def fail(*_args: Any) -> Any:
         raise RuntimeError("constructor interrupted")
 
-    with (
-        bind_agent_config({"llm_model": "prior-model"}),
-        bind_agent_plugin_config({"sample": {"setting": "prior"}}),
-    ):
-        prior_config = current_agent_config_pins()
-        prior_plugin_config = current_plugin_config_view()
-        with monkeypatch.context() as failure_patch:
-            if failure_at == "lease":
-                failure_patch.setattr(external.control, "require_active", fail)
-            else:
-                failure_patch.setattr(external, "load_snapshot", fail)
-            with pytest.raises(RuntimeError, match="constructor interrupted"):
-                external.attach("lease")
-        assert agent_identity._external_identity is None
-        assert agent_identity._external_agent_id is None
-        assert ava.state is prior_state
-        assert ava.state_update is prior_update
-        assert current_agent_config_pins() is prior_config
-        assert current_plugin_config_view() is prior_plugin_config
-        assert not staged
-        with external.attach("lease"):
-            assert agent_identity._external_agent_id == 405
-            assert ava.self.AGENT_ID == 405
+    with monkeypatch.context() as failure_patch:
+        if failure_at == "lease":
+            failure_patch.setattr(external.control, "require_active", fail)
+        else:
+            failure_patch.setattr(external, "load_snapshot", fail)
+        with pytest.raises(RuntimeError, match="constructor interrupted"):
+            external.attach("lease")
+    assert agent_identity._external_identity is None
+    assert agent_identity._external_agent_id is None
+    assert ava.state is prior_state
+    assert ava.state_update is prior_update
+    assert external.attached_config() is None
+    assert not staged
+    with external.attach("lease"):
+        assert agent_identity._external_agent_id == 405
+        assert ava.self.AGENT_ID == 405
 
 
 def test_repeated_close_cannot_release_another_attachment(
@@ -418,7 +408,7 @@ def test_close_does_not_revoke_an_sdk_call_admitted_before_the_fence(
     def held_send(agent_id: int, *, content: str, source: str) -> None:
         del source
         entered.set()
-        assert release.wait(2), "close did not release the pre-close SDK call"
+        assert release.wait(_HANDSHAKE_BOUND_S), "close did not release the pre-close SDK call"
         delivered.append((agent_id, content))
 
     monkeypatch.setattr(gateway_client, "send_message", held_send)
@@ -429,10 +419,10 @@ def test_close_does_not_revoke_an_sdk_call_admitted_before_the_fence(
     monkeypatch.setattr(manifest, "seal_local_participant", skip_seal)
     worker = Thread(target=lambda: ava.agents.send_message(99, "already admitted"))
     worker.start()
-    assert entered.wait(2), "SDK call did not reach its gateway boundary"
+    assert entered.wait(_HANDSHAKE_BOUND_S), "SDK call did not reach its gateway boundary"
     attachment.close()
     release.set()
-    worker.join(2)
+    worker.join(_HANDSHAKE_BOUND_S)
     assert not worker.is_alive()
     assert delivered == [(99, "already admitted")]
 
@@ -490,7 +480,7 @@ def test_close_waits_for_a_dequeued_otlp_record_before_force_flush(
 
     def pause_after_dequeue(event: TelemetryEvent) -> None:
         paused.set()
-        assert release.wait(2), "close did not release the paused OTLP worker"
+        assert release.wait(_HANDSHAKE_BOUND_S), "close did not release the paused OTLP worker"
         original_emit(event)
 
     monkeypatch.setattr(backend, "_emit_log", pause_after_dequeue)
@@ -513,7 +503,7 @@ def test_close_waits_for_a_dequeued_otlp_record_before_force_flush(
             )
         ]
     )
-    assert paused.wait(2), "OTLP worker did not dequeue the tail record"
+    assert paused.wait(_HANDSHAKE_BOUND_S), "OTLP worker did not dequeue the tail record"
     attachment = external.attach("lease")
     timer = Timer(0.1, release.set)
     timer.daemon = True

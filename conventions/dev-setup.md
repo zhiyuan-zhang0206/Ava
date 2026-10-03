@@ -59,7 +59,7 @@ bundle) and durably records local identity; the first `ava start` registers this
 host and starts its selected root services.
 Every runner process fetches current connection facts at Settings construction.
 Use bare start thereafter; `ava init` refuses an initialized home. A later bundle
-(after a write-generation rotation) goes to `ava cluster db-authority install-unit
+(a fresh expiry, a rotated telemetry token) goes to `ava cluster db-authority install-unit
 <bundle>` with the unit stopped.
 
 ## Development in a worktree
