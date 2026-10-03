@@ -41,7 +41,7 @@ _recorded_skill_invocations: set[tuple[int, str]] = set()
 # is a leaf node, and the folders above it (under its mount point) are its
 # namespace path. Mount points:
 #   - ~/.ava/skills/                          → tree root (install-registry gated)
-#   - provider roots (register_skill_source)  → tree root (runtime, project-local)
+#   - provider roots (a plugin's declared skill_sources)  → tree root (runtime, project-local)
 #
 # `~/.ava/skills/` is THE load dir: repo skills (`<repo>/ava_builtins/skills/*`) and plugin
 # skills (`<repo>/ava_builtins/plugins/<p>/skills/*`, `~/.ava/plugins/<p>/skills/*`) are
