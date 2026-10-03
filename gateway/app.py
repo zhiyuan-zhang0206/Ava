@@ -103,6 +103,7 @@ from gateway.extensions import plugin_ui as plugin_ui_router
 from gateway.extensions import skills as skills_router
 from gateway.extensions import ui_contributions as ui_contributions_router
 from gateway.inspect import router as inspect_router
+from gateway.lgtm.telemetry_staleness import TelemetryStaleness
 from gateway.mcp_server import endpoint as mcp_server_endpoint
 from gateway.mcp_server import router as mcp_server_router
 from gateway.middleware import idempotency, latency, pause_policy, runtime_metrics
@@ -195,6 +196,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     # the request handler on the OS TCP-retransmit timeout.
     app.state.db = Database.from_settings()
     app.state.bus = EventBus.from_settings()
+    app.state.telemetry_staleness = TelemetryStaleness()
     app.state.db_pool = app.state.db.pool(max_size=8)
     # The control plane must never queue behind the saturated data-plane pool.
     # Audit P0-2 follows the 2026-08-23 watchdog misjudgment chain: health and
