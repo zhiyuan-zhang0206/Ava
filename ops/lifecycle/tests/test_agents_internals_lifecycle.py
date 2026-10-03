@@ -54,7 +54,7 @@ def _spawn_agent(
     (create row + launch) as the two-phase split: `create_agent_row`
     (gateway-side, the main data-plane identity) then `_launch_agent_process`
     (runner-side), with the launch stubbed by the autouse guard. The launch op's
-    prompt-delivery half is covered in ops/tests/test_operations.py."""
+    prompt-delivery half is covered in ops/lifecycle/tests/test_operations.py."""
     agent_id, _birth_config, _prompt_id, _attempt_id = create_agent_row(
         spawner=spawner,
         fork_from=fork_from,
