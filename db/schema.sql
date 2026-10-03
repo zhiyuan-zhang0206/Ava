@@ -144,9 +144,6 @@ CREATE TABLE agents_meta (
     termination_source         TEXT CHECK (termination_source IN ('user', 'exit', 'reaper', 'launch-confirm', 'integrity')),  -- WHO/WHAT terminated the row; meaningful only while status='terminated'. Value set = base.agents.TerminationSource (locked by tests/test_db_check_enum_sync.py); stamped in the SAME statement as the status flip by every terminated-write site (enforced by scripts/lint_termination_source.py). 'user' = force-kill / terminate-of-already-dead (ops_lifecycle._force_mark_terminated); 'exit' = agent's own graceful process-exit finalize (mark_agent_exited_op); 'reaper' = restarter corpse reaper forced it (dead pid / stale unclaimed idling row); 'launch-confirm' = a launch that never confirmed forced it — the launcher's confirm poll timing out (agent_launch) or the child's own early-boot schema/placement gate rejecting the boot before it claimed the row (agent/_starting.py); 'integrity' = the framework found the row's own state self-inconsistent and killed it (historical rows only; no code writes it now), deliberately NOT resurrectable since the row's history is corrupt and a retry loop would bury a one-time fault. CrashResurrectController resurrects ONLY 'reaper' + 'launch-confirm' (involuntary/system-detected + self-healing); 'user'/'exit'/'integrity'/NULL are never auto-resurrected. NULL = pre-column legacy row → conservatively not eligible. Cleared to NULL on the terminated→idling resurrect transition (per-death). CHECK permits NULL.
     last_force_terminate_inbound_id BIGINT,              -- monotonic explicit-kill fence: every force termination (including an already-terminated row) inserts a kind='terminate' inbound under the agents_meta row lock and stores its id here. Pending-work resurrection (chat/compact_request) requires its exact pending inbound id to be greater than this fence, so older work cannot reverse a later kill. No FK on purpose: inbound retention must not erase lifecycle intent. Never cleared; NULL = no force intent recorded.
     last_resurrect_inbound_id  BIGINT,                  -- incarnation-epoch fence: every resurrection inserts its kind='resurrect' inbound under the agents_meta row lock and stores its id here. A lifecycle command (restart/terminate) whose intent predates the fence is superseded by that resurrection - acceptance settles it as superseded (payload names the resurrect) instead of adopting it - so a delayed terminate created before a resurrect can never kill the incarnation the resurrect just admitted (#2158). No FK on purpose: inbound retention must not erase lifecycle intent. Never cleared; NULL = no resurrection recorded.
-    last_resurrect_at          TIMESTAMPTZ,              -- when CrashResurrectController last auto-resurrected this agent; the per-agent backoff clock (pin-heal shape). A crash corpse is skipped until now() - last_resurrect_at exceeds AVA_AUTO_RESURRECT_BACKOFF_SECONDS, so a resurrect that keeps failing (outage / poison message) retries on a fixed cadence instead of a tight loop and self-heals when the cause clears. NULL = never auto-resurrected.
-    last_wedged_check_at       TIMESTAMPTZ,              -- when WedgedAgentController last attempted recovery of this agent; the per-agent backoff clock (same shape as last_resurrect_at). Stamped by the claiming UPDATE in ops/controllers/wedged.py; a wedged candidate is skipped until now() - last_wedged_check_at exceeds the backoff, preventing a poison-message loop from becoming a kill-spawn cycle. NULL = never checked. See the add-last-wedged-check-at migration.
-    last_claim_loop_at         TIMESTAMPTZ,              -- when a process-mode agent last began an idling claim-loop round (agent/db.py:wait_for_inbound). The out-of-process wedged detector treats a non-NULL value stale past the idling threshold as evidence that the fallback SELECT loop stopped advancing even if no inbound has arrived. NULL is unknown (pre-migration / pre-rollout) and is deliberately not considered stale.
     wake_suppressed_until      TIMESTAMPTZ,              -- delivery auto-resurrect and watchdog wake suppression deadline after repeated resurrection failures. New peer/user chats remain pending and become eligible again after expiry. Cleared by a successful resurrection spawn or inbound claim. NULL = not suppressed.
     wake_suppress_reason       TEXT,                     -- operator-readable cause paired with wake_suppressed_until; currently 'resurrect_failed'. Cleared with the deadline on successful recovery.
     lease_expires_at           TIMESTAMPTZ,              -- R1 (Task #1021): the agent-process lease — liveness is a lease-expiry judgment (`lease_expires_at > now()`), status stays lifecycle intent. Written by the agent process at claim/start (now()+lease TTL, agent/db.py / agent/_starting.py), cleared on terminate/resurrect by the ops lifecycle; read by the heartbeat daemon and the reaper (base/db/__init__.py ALIVE_SQL). NULL = row has no lease (pre-R1 legacy, or terminated).
@@ -204,27 +201,6 @@ COMMENT ON COLUMN agents_meta.last_permanent_reject_reason IS
     'with it by the completed-turn UPDATE. The billing batch-recovery entry '
     'reads ''billing'' here (task #3919). NULL = no permanent rejection on '
     'the current streak; never backfilled by guess.';
-
--- ─────────────── agent_activity ───────────────
--- Append-only trail of an agent's self-reported activity. Historical display
--- only: the ava.self.log() SDK verb that wrote it was removed 2026-08-02, so
--- there is no current writer. The agent snapshot derives the "current" activity
--- line from the latest row per agent; the monitoring / fleet view replays the
--- full ordered trail.
-CREATE TABLE agent_activity (
-    id          BIGSERIAL PRIMARY KEY,
-    agent_id    BIGINT NOT NULL REFERENCES agents(id),
-    text        TEXT NOT NULL,
-    created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
-);
-
--- Serves the latest-line lateral lookup in the snapshot query: the
--- (agent_id, created_at DESC, id DESC) shape matches the lateral's
--- ORDER BY exactly (select_all; audit P1-1), and the trail replay reads
--- it backwards. The old (agent_id, created_at DESC) prefix index was
--- dropped with the migration that introduced this one.
-CREATE INDEX agent_activity_agent_id_created_at_id_idx
-    ON agent_activity (agent_id, created_at DESC, id DESC);
 
 -- ─────────────── heartbeat_pause_log ───────────────
 -- Append-only heartbeat-pause trail: one row per ava.self.pause_heartbeat
@@ -665,8 +641,7 @@ CREATE TABLE agent_metric_days (
 CREATE TABLE agent_metric_file_cursors (
     source_key TEXT PRIMARY KEY,
     identity TEXT NOT NULL,
-    position BIGINT NOT NULL CHECK (position >= 0),
-    excluded_archive_rows BIGINT NOT NULL DEFAULT 0 CHECK (excluded_archive_rows >= 0)
+    position BIGINT NOT NULL CHECK (position >= 0)
 );
 
 -- Actual metadata transitions define nonterminated time from this epoch onward.
@@ -1548,8 +1523,6 @@ CREATE UNIQUE INDEX IF NOT EXISTS agent_impersonations_one_open
         OR (automatic AND handoff_applied_at IS NULL);
 CREATE INDEX IF NOT EXISTS agent_impersonations_expiry ON agent_impersonations(expires_at)
     WHERE status IN ('requested', 'accepted', 'active');
-CREATE INDEX IF NOT EXISTS agent_impersonations_retention ON agent_impersonations(ended_at)
-    WHERE status IN ('released', 'rejected', 'expired');
 CREATE INDEX IF NOT EXISTS agent_impersonations_relay_heartbeat
     ON agent_impersonations(agent_id, relay_heartbeat_at)
     WHERE status = 'active';
@@ -1648,7 +1621,6 @@ CREATE TABLE agent_impersonation_entries (
     PRIMARY KEY(lease_id,seq),
     UNIQUE(lease_id,event_key)
 );
-CREATE INDEX agent_impersonation_entries_created ON agent_impersonation_entries(lease_id,created_at,seq);
 CREATE INDEX agent_impersonation_entries_source
     ON agent_impersonation_entries(lease_id, source_key) WHERE source_key IS NOT NULL;
 
