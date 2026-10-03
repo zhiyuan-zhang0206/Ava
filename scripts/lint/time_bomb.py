@@ -78,6 +78,7 @@ from __future__ import annotations
 import ast
 import re
 import sys
+from collections.abc import Callable, Iterator
 from pathlib import Path
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent.parent
@@ -99,6 +100,18 @@ _CLOCK_PARAMS = frozenset(
 # it are independent of the wall-clock relation that makes a fixed-instant
 # window boundary a time bomb.
 _REAL_NOW_ATTRS = frozenset({"now", "utcnow", "today"})
+
+
+def _is_real_now_call(node: ast.AST) -> bool:
+    """`datetime.now()` / `time.time()`-style call on the real clock."""
+    return (
+        isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and isinstance(node.func.value, ast.Name)
+        and node.func.value.id in ("datetime", "time")
+        and node.func.attr in _REAL_NOW_ATTRS
+    )
+
 
 _HTTP_NAMES = frozenset({"client", "session", "httpx", "requests"})
 _HTTP_METHODS = frozenset({"get", "post", "put", "delete", "request", "patch"})
@@ -303,21 +316,14 @@ class _Index:
 
         walk(fn_node)
         for anc in ancestry:
-            if isinstance(anc, ast.If):
-                test: ast.AST | None = anc.test
-            elif isinstance(anc, ast.IfExp):
-                test = anc.test
+            if isinstance(anc, ast.If | ast.IfExp):
+                tests: list[ast.AST] = [anc.test]
             elif isinstance(anc, ast.BoolOp):
-                for value in anc.values:
-                    refs = [n.id for n in ast.walk(value) if isinstance(n, ast.Name)]
-                    if any(r in clock_params for r in refs):
-                        return True
-                test = None
+                tests = list(anc.values)
             else:
-                test = None
-            if test is not None:
-                refs = [n.id for n in ast.walk(test) if isinstance(n, ast.Name)]
-                if any(r in clock_params for r in refs):
+                continue
+            for test in tests:
+                if any(isinstance(n, ast.Name) and n.id in clock_params for n in ast.walk(test)):
                     return True
         return False
 
@@ -349,13 +355,7 @@ class _Index:
             for n in ast.walk(expr):
                 if isinstance(n, ast.Name) and n.id in caller_clock:
                     return True
-                if (
-                    isinstance(n, ast.Call)
-                    and isinstance(n.func, ast.Attribute)
-                    and isinstance(n.func.value, ast.Name)
-                    and n.func.value.id in ("datetime", "time")
-                    and n.func.attr in _REAL_NOW_ATTRS
-                ):
+                if _is_real_now_call(n):
                     return False
             return True
 
@@ -363,6 +363,37 @@ class _Index:
             if all_params[i] in cclock and not pin_safe(call.args[i]):
                 return False
         return all(pin_safe(kw.value) for kw in call.keywords if kw.arg in cclock)
+
+    def _walk_summary(
+        self,
+        mod: str,
+        node: ast.AST,
+        clock: frozenset[str],
+        visited: set[tuple[str, str]],
+        depth: int,
+    ) -> tuple[bool, bool, bool]:
+        """`(uses_real_now, clock_covered, reaches_family)` of one function body."""
+        uses = False
+        covered = True
+        family = mod in self.fixed
+        for sub in ast.walk(node):
+            if _is_real_now_call(sub):
+                uses = True
+                covered = covered and bool(clock) and self._inside_fallback(node, sub, clock)
+            if isinstance(sub, ast.Call):
+                resolved = self._resolve(mod, sub)
+                if resolved is None:
+                    continue
+                cuses, ccovered, cfam = self.summary(*resolved, depth + 1, frozenset(visited))
+                if not cuses:
+                    continue
+                uses = True
+                family = family or cfam
+                if not self._inside_fallback(node, sub, clock) and not (
+                    ccovered and self._call_threaded(sub, resolved, clock)
+                ):
+                    covered = False
+        return uses, covered, family
 
     def summary(
         self, mod: str, name: str, depth: int = 0, seen: frozenset | None = None
@@ -387,33 +418,7 @@ class _Index:
         if key in visited:
             return (False, True, False)
         visited = visited | {key}
-        uses = False
-        covered = True
-        family = mod in self.fixed
-        for sub in ast.walk(node):
-            if (
-                isinstance(sub, ast.Call)
-                and isinstance(sub.func, ast.Attribute)
-                and isinstance(sub.func.value, ast.Name)
-                and sub.func.value.id in ("datetime", "time")
-                and sub.func.attr in _REAL_NOW_ATTRS
-            ):
-                uses = True
-                if not clock or not self._inside_fallback(node, sub, clock):
-                    covered = False
-            if isinstance(sub, ast.Call):
-                resolved = self._resolve(mod, sub)
-                if resolved is None:
-                    continue
-                cmod, cname = resolved
-                cuses, ccovered, cfam = self.summary(cmod, cname, depth + 1, frozenset(visited))
-                if cuses:
-                    uses = True
-                    family = family or cfam
-                    if self._inside_fallback(node, sub, clock):
-                        continue
-                    if not (ccovered and self._call_threaded(sub, (cmod, cname), clock)):
-                        covered = False
+        uses, covered, family = self._walk_summary(mod, node, clock, visited, depth)
         self._summary[key] = (uses, covered, family)
         return (uses, covered, family)
 
@@ -454,6 +459,26 @@ def _lint_source(
     return errors
 
 
+def _unthreaded_calls(
+    index: _Index, mod: str, fn_node: ast.AST, clock: frozenset[str]
+) -> Iterator[tuple[ast.Call, tuple[str, str]]]:
+    """Calls in `fn_node` to real-now fixed-boundary callees that the clock is not threaded into."""
+    for sub in ast.walk(fn_node):
+        if not isinstance(sub, ast.Call):
+            continue
+        resolved = index._resolve(mod, sub)
+        if resolved is None:
+            continue
+        cuses, ccovered, cfam = index.summary(*resolved)
+        if not (cuses and cfam):
+            continue
+        if index._inside_fallback(fn_node, sub, clock):
+            continue
+        if ccovered and index._call_threaded(sub, resolved, clock):
+            continue
+        yield sub, resolved
+
+
 def _lint_source_file(index: _Index, path: Path, rel: str) -> list[str]:
     mod = rel[:-3].replace("/", ".")
     errors: list[str] = []
@@ -466,20 +491,7 @@ def _lint_source_file(index: _Index, path: Path, rel: str) -> list[str]:
         if not (uses and not covered and family):
             continue
         seen: set[tuple[str, str]] = set()
-        for sub in ast.walk(fn_node):
-            if not isinstance(sub, ast.Call):
-                continue
-            resolved = index._resolve(mod, sub)
-            if resolved is None:
-                continue
-            cmod, cname = resolved
-            cuses, ccovered, cfam = index.summary(cmod, cname)
-            if not (cuses and cfam):
-                continue
-            if index._inside_fallback(fn_node, sub, clock):
-                continue
-            if ccovered and index._call_threaded(sub, (cmod, cname), clock):
-                continue
+        for sub, (cmod, cname) in _unthreaded_calls(index, mod, fn_node, clock):
             if (cmod, cname) in seen:
                 continue
             seen.add((cmod, cname))
@@ -537,41 +549,16 @@ def _local_derives(
     fixed: set[str] = set()
     real: set[str] = set()
 
-    def refs_fixed(node: ast.AST) -> bool:
-        for n in ast.walk(node):
-            if isinstance(n, ast.Name) and n.id in (fixed_names | fixed):
-                return True
-            if (
-                isinstance(n, ast.Attribute)
-                and isinstance(n.value, ast.Name)
-                and n.value.id in aliases
-                and n.attr in index.fixed_names(aliases[n.value.id])
-            ):
-                return True
-        return False
-
-    def is_real(node: ast.AST) -> bool:
-        for n in ast.walk(node):
-            if (
-                isinstance(n, ast.Call)
-                and isinstance(n.func, ast.Attribute)
-                and isinstance(n.func.value, ast.Name)
-                and n.func.value.id in ("datetime", "time")
-                and n.func.attr in _REAL_NOW_ATTRS
-            ):
-                return True
-        return False
-
     for sub in ast.walk(function):
         if isinstance(sub, (ast.FunctionDef, ast.AsyncFunctionDef)) and sub is not function:
             continue  # nested helper scopes are not tracked here
         if isinstance(sub, ast.Assign):
             for target in sub.targets:
                 if isinstance(target, ast.Name):
-                    if is_real(sub.value):
+                    if any(_is_real_now_call(n) for n in ast.walk(sub.value)):
                         real.add(target.id)
                         fixed.discard(target.id)
-                    elif refs_fixed(sub.value):
+                    elif _expr_refs_fixed(sub.value, fixed_names, fixed, aliases, index):
                         fixed.add(target.id)
                         real.discard(target.id)
     return fixed, real
@@ -597,6 +584,19 @@ def _expr_refs_fixed(
     return False
 
 
+def _opaque_or_real_now(call: ast.Call) -> str | None:
+    """The taint label of an opaque HTTP call or a real-clock read; None for anything else."""
+    f = call.func
+    if isinstance(f, ast.Name) and f.id == "TestClient":
+        return "TestClient (opaque HTTP)"
+    if isinstance(f, ast.Attribute) and isinstance(f.value, ast.Name):
+        if f.value.id in _HTTP_NAMES and f.attr in _HTTP_METHODS:
+            return f"{f.value.id}.{f.attr} (opaque HTTP)"
+        if _is_real_now_call(call):
+            return f"{f.value.id}.{f.attr}"
+    return None
+
+
 def _tainted(function: ast.AST, index: _Index, mod: str) -> list[str]:
     """Real-now contamination sources in one test function body."""
     taints: list[str] = []
@@ -605,25 +605,9 @@ def _tainted(function: ast.AST, index: _Index, mod: str) -> list[str]:
             continue
         if not isinstance(sub, ast.Call):
             continue
-        f = sub.func
-        if (
-            isinstance(f, ast.Attribute)
-            and isinstance(f.value, ast.Name)
-            and f.value.id in _HTTP_NAMES
-            and f.attr in _HTTP_METHODS
-        ):
-            taints.append(f"{f.value.id}.{f.attr} (opaque HTTP)")
-            continue
-        if isinstance(f, ast.Name) and f.id == "TestClient":
-            taints.append("TestClient (opaque HTTP)")
-            continue
-        if (
-            isinstance(f, ast.Attribute)
-            and isinstance(f.value, ast.Name)
-            and f.value.id in ("datetime", "time")
-            and f.attr in _REAL_NOW_ATTRS
-        ):
-            taints.append(f"{f.value.id}.{f.attr}")
+        opaque = _opaque_or_real_now(sub)
+        if opaque is not None:
+            taints.append(opaque)
             continue
         resolved = index._resolve(mod, sub)
         if resolved is None:
@@ -657,6 +641,39 @@ def _is_calendar_literal(node: ast.AST) -> bool:
     return False
 
 
+def _window_bindings(tree: ast.Module) -> Iterator[tuple[str, int, int | None, ast.AST]]:
+    """`(name, first line, last line, value)` of every calendar literal bound to a window name."""
+    for node in ast.walk(tree):
+        yield from _node_bindings(node)
+
+
+def _node_bindings(node: ast.AST) -> Iterator[tuple[str, int, int | None, ast.AST]]:
+    if isinstance(node, ast.Dict):
+        yield from _dict_bindings(node)
+    elif isinstance(node, ast.keyword):
+        if node.arg in _WINDOW_NAMES and _is_calendar_literal(node.value):
+            yield node.arg, node.value.lineno, node.value.end_lineno, node.value
+    elif (
+        isinstance(node, ast.Assign)
+        and len(node.targets) == 1
+        and isinstance(node.targets[0], ast.Name)
+        and node.targets[0].id in _WINDOW_NAMES
+        and _is_calendar_literal(node.value)
+    ):
+        yield node.targets[0].id, node.targets[0].lineno, node.value.end_lineno, node.value
+
+
+def _dict_bindings(node: ast.Dict) -> Iterator[tuple[str, int, int | None, ast.AST]]:
+    for key, value in zip(node.keys, node.values, strict=True):
+        if (
+            isinstance(key, ast.Constant)
+            and isinstance(key.value, str)
+            and key.value in _WINDOW_NAMES
+            and _is_calendar_literal(value)
+        ):
+            yield key.value, key.lineno, value.end_lineno, value
+
+
 def _lint_fixture_dates(path: Path, tree: ast.Module, lines: list[str]) -> list[str]:
     """A calendar literal bound to a window-shaped name (dict value, keyword
     argument, or plain assignment) must derive from the clock or carry
@@ -678,29 +695,39 @@ def _lint_fixture_dates(path: Path, tree: ast.Module, lines: list[str]) -> list[
             )
         )
 
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Dict):
-            for key, value in zip(node.keys, node.values, strict=True):
-                if (
-                    isinstance(key, ast.Constant)
-                    and isinstance(key.value, str)
-                    and key.value in _WINDOW_NAMES
-                    and _is_calendar_literal(value)
-                ):
-                    check(key.value, key.lineno, value.end_lineno, value)
-        elif isinstance(node, ast.keyword):
-            if node.arg in _WINDOW_NAMES and _is_calendar_literal(node.value):
-                check(node.arg, node.value.lineno, node.value.end_lineno, node.value)
-        elif (
-            isinstance(node, ast.Assign)
-            and len(node.targets) == 1
-            and isinstance(node.targets[0], ast.Name)
-            and node.targets[0].id in _WINDOW_NAMES
-            and _is_calendar_literal(node.value)
-        ):
-            check(node.targets[0].id, node.targets[0].lineno, node.value.end_lineno, node.value)
+    for name, start, end, value in _window_bindings(tree):
+        check(name, start, end, value)
 
     return [message for _, message in sorted(found)]
+
+
+def _equality_errors(
+    path: Path,
+    function: ast.AST,
+    source_lines: list[str],
+    taints: list[str],
+    refs_fixed: Callable[[ast.AST], bool],
+) -> list[str]:
+    """Exact (in)equalities on fixed-instant-derived values inside a tainted test function."""
+    errors: list[str] = []
+    for sub in ast.walk(function):
+        if not (
+            isinstance(sub, ast.Compare)
+            and any(isinstance(op, (ast.Eq, ast.NotEq)) for op in sub.ops)
+        ):
+            continue
+        if not any(refs_fixed(side) for side in [sub.left, *sub.comparators]):
+            continue
+        if any(_OPT_OUT in line for line in source_lines[sub.lineno - 1 : sub.end_lineno]):
+            continue
+        errors.append(
+            f"{path}:{sub.lineno}: time-bomb test: exact equality "
+            "on a value derived from a fixed instant while the "
+            f"derivation can reach the real clock ({'; '.join(taints)}); "
+            "pin the clock (pass now=...), assert with a tolerance, or "
+            f"add '# {_OPT_OUT}: <reason>' to opt out"
+        )
+    return errors
 
 
 def _lint_test_file(index: _Index, path: Path, rel: str) -> list[str]:
@@ -724,24 +751,15 @@ def _lint_test_file(index: _Index, path: Path, rel: str) -> list[str]:
         taints = _tainted(node, index, mod)
         if not taints:
             continue
-        for sub in ast.walk(node):
-            if isinstance(sub, ast.Compare) and any(
-                isinstance(op, (ast.Eq, ast.NotEq)) for op in sub.ops
-            ):
-                sides = [sub.left, *sub.comparators]
-                if any(
-                    _expr_refs_fixed(s, fixed_names, fixed_local, aliases, index) for s in sides
-                ):
-                    lines = source_lines[sub.lineno - 1 : sub.end_lineno]
-                    if any(_OPT_OUT in line for line in lines):
-                        continue
-                    errors.append(
-                        f"{path}:{sub.lineno}: time-bomb test: exact equality "
-                        "on a value derived from a fixed instant while the "
-                        f"derivation can reach the real clock ({'; '.join(taints)}); "
-                        "pin the clock (pass now=...), assert with a tolerance, or "
-                        f"add '# {_OPT_OUT}: <reason>' to opt out"
-                    )
+        errors.extend(
+            _equality_errors(
+                path,
+                node,
+                source_lines,
+                taints,
+                lambda e, fl=fixed_local: _expr_refs_fixed(e, fixed_names, fl, aliases, index),
+            )
+        )
     return errors
 
 

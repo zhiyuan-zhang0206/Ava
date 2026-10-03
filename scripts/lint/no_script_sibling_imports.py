@@ -171,6 +171,22 @@ def _sibling_targets(stmt: ast.Import | ast.ImportFrom, d: Path) -> list[tuple[s
     return out
 
 
+def _nested_blocks(stmt: ast.stmt) -> list[list[ast.stmt]] | None:
+    """The statement lists nested in a compound statement, or None for any other statement."""
+    if isinstance(stmt, (ast.If, ast.For, ast.While)):
+        return [stmt.body, stmt.orelse]
+    if isinstance(stmt, ast.Try):
+        return [
+            stmt.body,
+            *(handler.body for handler in stmt.handlers),
+            stmt.orelse,
+            stmt.finalbody,
+        ]
+    if isinstance(stmt, (ast.With, ast.AsyncWith)):
+        return [stmt.body]
+    return None
+
+
 def _scan_file(path: Path) -> list[str]:
     """Return one error string per unguarded sibling import in a script-mode file."""
     try:
@@ -191,6 +207,23 @@ def _scan_file(path: Path) -> list[str]:
     violations: list[str] = []
     top_guards: list[int] = []
 
+    def check_import(
+        stmt: ast.Import | ast.ImportFrom, fn_guards: list[int], *, in_fn: bool
+    ) -> None:
+        if (isinstance(stmt, ast.ImportFrom) and stmt.level > 0) or id(stmt) in type_checking:
+            return
+        for first, _kind in _sibling_targets(stmt, d):
+            if in_fn:
+                guarded = bool(top_guards) or any(g < stmt.lineno for g in fn_guards)
+            else:
+                guarded = any(g < stmt.lineno for g in top_guards)
+            if not guarded:
+                violations.append(
+                    f"{rel}:{stmt.lineno}: sibling import `{first}` in a script-mode "
+                    "file — PYTHONSAFEPATH=1 keeps the script's own directory off "
+                    f"sys.path. {_fix_hint(rel)}"
+                )
+
     def walk(stmts: list[ast.stmt], fn_guards: list[int], *, in_fn: bool) -> None:
         for stmt in stmts:
             if isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef)):
@@ -199,36 +232,11 @@ def _scan_file(path: Path) -> list[str]:
                 walk(stmt.body, fn_guards, in_fn=in_fn)
             elif _is_sys_path_guard(stmt):
                 (fn_guards if in_fn else top_guards).append(stmt.lineno)
-            elif isinstance(stmt, ast.If):
-                walk(stmt.body, fn_guards, in_fn=in_fn)
-                walk(stmt.orelse, fn_guards, in_fn=in_fn)
-            elif isinstance(stmt, ast.Try):
-                walk(stmt.body, fn_guards, in_fn=in_fn)
-                for handler in stmt.handlers:
-                    walk(handler.body, fn_guards, in_fn=in_fn)
-                walk(stmt.orelse, fn_guards, in_fn=in_fn)
-                walk(stmt.finalbody, fn_guards, in_fn=in_fn)
-            elif isinstance(stmt, (ast.For, ast.While)):
-                walk(stmt.body, fn_guards, in_fn=in_fn)
-                walk(stmt.orelse, fn_guards, in_fn=in_fn)
-            elif isinstance(stmt, (ast.With, ast.AsyncWith)):
-                walk(stmt.body, fn_guards, in_fn=in_fn)
-            elif isinstance(stmt, (ast.Import, ast.ImportFrom)) and not (
-                isinstance(stmt, ast.ImportFrom) and stmt.level > 0
-            ):
-                if id(stmt) in type_checking:
-                    continue
-                for first, _kind in _sibling_targets(stmt, d):
-                    if in_fn:
-                        guarded = bool(top_guards) or any(g < stmt.lineno for g in fn_guards)
-                    else:
-                        guarded = any(g < stmt.lineno for g in top_guards)
-                    if not guarded:
-                        violations.append(
-                            f"{rel}:{stmt.lineno}: sibling import `{first}` in a script-mode "
-                            "file — PYTHONSAFEPATH=1 keeps the script's own directory off "
-                            f"sys.path. {_fix_hint(rel)}"
-                        )
+            elif (blocks := _nested_blocks(stmt)) is not None:
+                for block in blocks:
+                    walk(block, fn_guards, in_fn=in_fn)
+            elif isinstance(stmt, (ast.Import, ast.ImportFrom)):
+                check_import(stmt, fn_guards, in_fn=in_fn)
 
     walk(tree.body, [], in_fn=False)
     return violations

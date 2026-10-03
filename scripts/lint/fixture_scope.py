@@ -96,6 +96,7 @@ from __future__ import annotations
 
 import ast
 import sys
+from collections.abc import Iterator
 from pathlib import Path
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent.parent
@@ -180,6 +181,25 @@ def _root_name(node: ast.expr) -> str | None:
         return None
 
 
+def _bind(node: ast.AST, local: set[str], aliases: set[str], declared_global: set[str]) -> None:
+    """Record what one AST node binds: a local, a global declaration or an alias of a global."""
+    if isinstance(node, ast.Global | ast.Nonlocal):
+        declared_global.update(node.names)
+    elif isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store):
+        local.add(node.id)
+    elif isinstance(node, ast.Import | ast.ImportFrom):
+        for entry in node.names:
+            local.add((entry.asname or entry.name).split(".")[0])
+    elif (
+        isinstance(node, ast.Assign)
+        and _root_name(node.value) in _ALIASABLE_GLOBAL_ROOTS
+        and _dotted(node.value) is not None
+    ):
+        # `env = os.environ` aliases the global; `conn = psycopg.connect(...)`
+        # does not, so only a call-free attribute chain counts.
+        aliases.update(t.id for t in node.targets if isinstance(t, ast.Name))
+
+
 def _bound_names(fn: ast.FunctionDef | ast.AsyncFunctionDef) -> tuple[set[str], set[str]]:
     """Return (locals, aliases_of_globals) for a fixture body.
 
@@ -199,19 +219,7 @@ def _bound_names(fn: ast.FunctionDef | ast.AsyncFunctionDef) -> tuple[set[str], 
     aliases: set[str] = set()
     declared_global: set[str] = set()
     for node in ast.walk(fn):
-        if isinstance(node, ast.Global | ast.Nonlocal):
-            declared_global.update(node.names)
-        elif isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store):
-            local.add(node.id)
-        elif isinstance(node, ast.Import | ast.ImportFrom):
-            for entry in node.names:
-                local.add((entry.asname or entry.name).split(".")[0])
-        elif isinstance(node, ast.Assign) and _root_name(node.value) in _ALIASABLE_GLOBAL_ROOTS:
-            # `env = os.environ` aliases the global; `conn = psycopg.connect(...)`
-            # does not, so only a call-free attribute chain counts.
-            if _dotted(node.value) is None:
-                continue
-            aliases.update(t.id for t in node.targets if isinstance(t, ast.Name))
+        _bind(node, local, aliases, declared_global)
     return local - declared_global - aliases, aliases
 
 
@@ -342,6 +350,38 @@ def findings_in_source(src: str, rel_path: str, *, has_package_init: bool) -> li
     return out
 
 
+def _environ_write_key(node: ast.AST) -> ast.expr | None:
+    """The key expression when `node` writes `os.environ` (subscript store/del or mutating call)."""
+    if (
+        isinstance(node, ast.Subscript)
+        and _dotted(node.value) == "os.environ"
+        and isinstance(node.ctx, ast.Store | ast.Del)
+    ):
+        return node.slice
+    if (
+        isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and _dotted(node.func.value) == "os.environ"
+        and node.func.attr not in _ENVIRON_READ_ONLY
+        and node.args
+    ):
+        return node.args[0]
+    return None
+
+
+def _setup_environ_keys(node: ast.FunctionDef | ast.AsyncFunctionDef) -> Iterator[ast.expr]:
+    """The key expression of every `os.environ` write before the fixture's first `yield`."""
+    yields = [n.lineno for n in ast.walk(node) if isinstance(n, ast.Yield)]
+    teardown_starts = min(yields) if yields else None
+    for inner in ast.walk(node):
+        lineno = getattr(inner, "lineno", 0)
+        if teardown_starts is not None and lineno > teardown_starts:
+            continue
+        key = _environ_write_key(inner)
+        if key is not None:
+            yield key
+
+
 def setup_env_keys(src: str, fixture_name: str) -> tuple[frozenset[str], frozenset[str]]:
     """The `os.environ` keys one named fixture writes during SETUP, as
     (literal_keys, dynamic_exprs).
@@ -369,30 +409,9 @@ def setup_env_keys(src: str, fixture_name: str) -> tuple[frozenset[str], frozens
             dynamic.add(ast.unparse(key))
 
     for node in ast.walk(tree):
-        if not isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
-            continue
-        if node.name != fixture_name:
-            continue
-        yields = [n.lineno for n in ast.walk(node) if isinstance(n, ast.Yield)]
-        teardown_starts = min(yields) if yields else None
-        for inner in ast.walk(node):
-            lineno = getattr(inner, "lineno", 0)
-            if teardown_starts is not None and lineno > teardown_starts:
-                continue
-            if (
-                isinstance(inner, ast.Subscript)
-                and _dotted(inner.value) == "os.environ"
-                and isinstance(inner.ctx, ast.Store | ast.Del)
-            ):
-                _record(inner.slice)
-            elif (
-                isinstance(inner, ast.Call)
-                and isinstance(inner.func, ast.Attribute)
-                and _dotted(inner.func.value) == "os.environ"
-                and inner.func.attr not in _ENVIRON_READ_ONLY
-                and inner.args
-            ):
-                _record(inner.args[0])
+        if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef) and node.name == fixture_name:
+            for key in _setup_environ_keys(node):
+                _record(key)
     return frozenset(literal), frozenset(dynamic)
 
 

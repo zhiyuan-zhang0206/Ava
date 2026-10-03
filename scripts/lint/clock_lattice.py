@@ -200,6 +200,18 @@ _INDEPENDENT_CLOCKS: dict[tuple[str, str], str] = {
 }
 
 
+def _is_unregistered_clock(rel: str, name: str, value: ast.expr | None) -> bool:
+    """A lattice-vocabulary constant outside the family modules, not exempt and not an alias."""
+    if not _CONST_NAME.match(name) or not any(term in name for term in _LATTICE_TERMS):
+        return False
+    if rel in _FAMILY_MODULES:
+        return False  # rule 1: the lattice's homes
+    if (rel, name) in _INDEPENDENT_CLOCKS:
+        return False  # rule 3: explicit exemption
+    # rule 2: alias of a registered clock
+    return not (isinstance(value, ast.Name) and value.id in _registered_clock_names())
+
+
 def _scan_file(path: Path) -> list[str]:
     try:
         rel = path.relative_to(_REPO_ROOT).as_posix()
@@ -215,24 +227,12 @@ def _scan_file(path: Path) -> list[str]:
             continue
         targets = node.targets if isinstance(node, ast.Assign) else [node.target]
         for target in targets:
-            if not isinstance(target, ast.Name) or not _CONST_NAME.match(target.id):
-                continue
-            name = target.id
-            if not any(term in name for term in _LATTICE_TERMS):
-                continue
-            if rel in _FAMILY_MODULES:
-                continue  # rule 1: the lattice's homes
-            if (rel, name) in _INDEPENDENT_CLOCKS:
-                continue  # rule 3: explicit exemption
-            # rule 2: alias of a registered clock
-            value = node.value
-            if isinstance(value, ast.Name) and value.id in _registered_clock_names():
-                continue
-            errors.append(
-                f"{path}:{node.lineno}: {name} — lattice-vocabulary clock outside "
-                "the lattice family modules; define it in base/deploy/timing.py (and "
-                "register it in CLOCKS) or make it an alias of a registered clock"
-            )
+            if isinstance(target, ast.Name) and _is_unregistered_clock(rel, target.id, node.value):
+                errors.append(
+                    f"{path}:{node.lineno}: {target.id} — lattice-vocabulary clock outside "
+                    "the lattice family modules; define it in base/deploy/timing.py (and "
+                    "register it in CLOCKS) or make it an alias of a registered clock"
+                )
     return errors
 
 

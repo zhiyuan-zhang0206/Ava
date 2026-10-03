@@ -48,7 +48,9 @@ from __future__ import annotations
 
 import ast
 import sys
+from collections.abc import Callable
 from pathlib import Path
+from typing import TypeGuard
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(_REPO_ROOT))
@@ -90,6 +92,39 @@ def _attr_path(node: ast.Attribute) -> str:
     return ".".join(reversed(parts))
 
 
+def _assign_violations(
+    node: ast.Assign | ast.AnnAssign, exempt: Callable[[int], bool]
+) -> list[tuple[int, str]]:
+    targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+    out: list[tuple[int, str]] = []
+    for tgt in targets:
+        if (
+            isinstance(tgt, ast.Attribute)
+            and _root_name(tgt) == "ava"
+            and _is_function_style(tgt.attr)
+            and not exempt(node.lineno)
+        ):
+            path_str = _attr_path(tgt)
+            out.append(
+                (
+                    node.lineno,
+                    f"bare `{path_str} = ...` monkey-patches the SDK — use "
+                    f'`ava.extend.wrap("{path_str.removeprefix("ava.")}", wrapper)`',
+                )
+            )
+    return out
+
+
+def _is_ava_setattr(node: ast.AST) -> TypeGuard[ast.Call]:
+    return (
+        isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id == "setattr"
+        and bool(node.args)
+        and _root_name(node.args[0]) == "ava"
+    )
+
+
 def _scan_file(path: Path) -> list[tuple[int, str]]:
     """Return [(lineno, message), ...] for bare ava monkey-patches."""
     try:
@@ -108,32 +143,9 @@ def _scan_file(path: Path) -> list[tuple[int, str]]:
     for node in ast.walk(tree):
         # `ava.x.y = ...` / `ava.x.y: T = ...`
         if isinstance(node, (ast.Assign, ast.AnnAssign)):
-            targets = node.targets if isinstance(node, ast.Assign) else [node.target]
-            lineno = node.lineno
-            for tgt in targets:
-                if (
-                    isinstance(tgt, ast.Attribute)
-                    and _root_name(tgt) == "ava"
-                    and _is_function_style(tgt.attr)
-                    and not exempt(lineno)
-                ):
-                    path_str = _attr_path(tgt)
-                    out.append(
-                        (
-                            lineno,
-                            f"bare `{path_str} = ...` monkey-patches the SDK — use "
-                            f'`ava.extend.wrap("{path_str.removeprefix("ava.")}", wrapper)`',
-                        )
-                    )
+            out.extend(_assign_violations(node, exempt))
         # `setattr(ava.<x>, "name", ...)`
-        elif (
-            isinstance(node, ast.Call)
-            and isinstance(node.func, ast.Name)
-            and node.func.id == "setattr"
-            and node.args
-            and _root_name(node.args[0]) == "ava"
-            and not exempt(node.lineno)
-        ):
+        elif _is_ava_setattr(node) and not exempt(node.lineno):
             out.append(
                 (
                     node.lineno,
