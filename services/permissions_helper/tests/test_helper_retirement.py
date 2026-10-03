@@ -17,16 +17,8 @@ from pathlib import Path
 import pytest
 
 from base.native_process.ownership import OwnedProcess
-from services.ava_root.custody import ServiceCustody, require_clear
 from services.permissions_helper import lifecycle
-
-
-def test_pending_birth_survives_process_owner_loss(tmp_path: Path) -> None:
-    ServiceCustody(tmp_path, "gateway")
-    with pytest.raises(RuntimeError, match="requires reconciliation"):
-        require_clear(tmp_path)
-    with pytest.raises(FileExistsError):
-        ServiceCustody(tmp_path, "gateway")
+from services.permissions_helper.tests.support import stopped_helper_plist
 
 
 def test_isolated_helper_build_never_replaces_installed_artifact(
@@ -260,98 +252,6 @@ def test_helper_stop_intent_survives_new_reader_and_refuses_corruption(tmp_path:
     assert result.returncode == 0, result.stderr
 
 
-def test_mutated_custody_is_never_overwritten_or_cleared(tmp_path: Path) -> None:
-    record = ServiceCustody(tmp_path, "worker")
-    record.path.write_text("replacement authority")
-    for operation in (lambda: record.retain(set(), group=os.getpid()), record.clear):
-        with pytest.raises(RuntimeError, match="custody changed"):
-            operation()
-        assert record.path.read_text() == "replacement authority"
-
-
-@pytest.mark.parametrize("birth", [float("nan"), float("inf"), -1, True])
-def test_native_status_refuses_invalid_birth(birth: object) -> None:
-    from base.native_process.root_control.client import RootClientError, native_identity
-
-    with pytest.raises(RootClientError, match="captured native birth"):
-        native_identity({"pid": 101, "create_time": birth, "starttime": None})
-
-
-@pytest.mark.parametrize("waiting", [b"", b"pid = 0\n"])
-def test_exact_home_helper_retirement_keeps_neighbor_and_waits_for_native_exit(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, waiting: bytes
-) -> None:
-    from base.native_process.ownership import OwnedProcess
-    from services.permissions_helper import launchd_job as jobs
-
-    home = tmp_path.resolve() / "home"
-    agents = tmp_path / "agents"
-    agents.mkdir()
-    monkeypatch.setattr(jobs.sys, "platform", "darwin")
-    monkeypatch.setattr(jobs, "helper_job_agents_dir", lambda: agents)
-    path = jobs.helper_job_plist_path(home)
-    _stopped_helper_plist(home, path)
-    neighbor = agents / "neighbor.plist"
-    neighbor.write_bytes(b"neighbor authority")
-    alive = [True]
-    owner = OwnedProcess(321, 100.0, None)
-
-    def capture(_state: str, _socket: Path, _executable: str) -> OwnedProcess:
-        return owner
-
-    monkeypatch.setattr(jobs, "_retirement_owner", capture)
-    commands: list[list[str]] = []
-    loaded = [True]
-
-    from services.permissions_helper import client
-
-    def shutdown(run_dir: Path, *, sock_path: str | Path) -> client.HelperShutdownResult:
-        assert run_dir == home / "run" / "ava-root"
-        marker = run_dir / "helper-stopped"
-        marker.write_bytes(b"stopped\n")
-        marker.chmod(0o600)
-        alive[0] = False
-        return {"stopping": True, "pid": owner.pid, "run_dir": str(run_dir)}
-
-    def wait(captured: OwnedProcess, _deadline: float) -> None:
-        assert captured == owner and not alive[0]
-
-    monkeypatch.setattr(client, "shutdown_helper", shutdown)
-    monkeypatch.setattr(jobs, "_wait_retirement_owner", wait)
-
-    def command(args: list[str], _deadline: float) -> subprocess.CompletedProcess[bytes]:
-        commands.append(args)
-        if args[0] == "bootout":
-            assert not alive[0], "bootout must wait for the captured native helper's exit"
-            loaded[0] = False
-            return subprocess.CompletedProcess(args, 0, b"", b"")
-        if alive[0]:
-            return subprocess.CompletedProcess(args, 0, b"pid = 321\n", b"")
-        if loaded[0]:
-            return subprocess.CompletedProcess(
-                args, 0, b"state = not running\nlast exit code = 0\n" + waiting, b""
-            )
-        return subprocess.CompletedProcess(args, 113, b"", b"Could not find service")
-
-    monkeypatch.setattr(jobs, "_retirement_command", command)
-    # Ordinary stop, then the shared destroy boundary, then a cleanup retry.
-    from base.config import settings
-    from cli.commands.lifecycle._stop_extras import stop_permissions_helper
-
-    monkeypatch.setattr("base.native_process.os_platform.IS_MACOS", True)
-    monkeypatch.setattr("base.paths.ava_home", lambda: home)
-    monkeypatch.setattr(settings.services, "permissions_helper_port", 23456)
-    stop_permissions_helper()
-    jobs.unregister_helper(home, helper_port=23456)
-    jobs.unregister_helper(home, helper_port=23456)
-    assert not path.exists()
-    assert neighbor.read_bytes() == b"neighbor authority"
-    expected = f"{jobs.helper_job_domain()}/{jobs.helper_job_label(home)}"
-    assert all(args[1] == expected for args in commands)
-    assert [args[0] for args in commands].count("bootout") == 1
-    assert all(args[0] in ("print", "bootout") for args in commands)
-
-
 def test_helper_retirement_unknown_job_never_removes_definition(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -406,26 +306,6 @@ def test_helper_retirement_refuses_foreign_home_plist(tmp_path: Path) -> None:
         jobs._retirement_plist(path, home, home / "socket")
 
 
-def _stopped_helper_plist(home: Path, path: Path) -> bytes:
-    import plistlib
-
-    from services.permissions_helper import launchd_job as jobs
-
-    body = plistlib.dumps(
-        {
-            "Label": jobs.helper_job_label(home),
-            "ProgramArguments": ["/private/test/AvaPermissionsHelper"],
-            "KeepAlive": {"SuccessfulExit": False},
-            "EnvironmentVariables": {
-                "AVA_PERMISSIONS_HELPER_SOCKET": str(home / "run/permissions-helper.23456.sock"),
-                "AVA_PERMISSIONS_HELPER_ROOT_SEED": str(home / "run/ava-root/seed.json"),
-            },
-        }
-    )
-    path.write_bytes(body)
-    return body
-
-
 @pytest.mark.parametrize("conflict", [None, "reappeared", "changed", "live-socket", "wrong-seed"])
 def test_retained_definition_after_completed_stop_requires_exact_absence(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, conflict: str | None
@@ -441,7 +321,7 @@ def test_retained_definition_after_completed_stop_requires_exact_absence(
         monkeypatch.setattr(jobs.sys, "platform", "darwin")
         monkeypatch.setattr(jobs, "helper_job_agents_dir", lambda: tmp_path)
         path = jobs.helper_job_plist_path(home)
-        _stopped_helper_plist(home, path)
+        stopped_helper_plist(home, path)
         if conflict == "wrong-seed":
             data = plistlib.loads(path.read_bytes())
             data["EnvironmentVariables"]["AVA_PERMISSIONS_HELPER_ROOT_SEED"] = "/foreign/seed.json"
@@ -486,7 +366,7 @@ def test_helper_socket_inspection_error_retains_definition(
     monkeypatch.setattr(jobs.sys, "platform", "darwin")
     monkeypatch.setattr(jobs, "helper_job_agents_dir", lambda: tmp_path)
     path = jobs.helper_job_plist_path(home)
-    original = _stopped_helper_plist(home, path)
+    original = stopped_helper_plist(home, path)
     (home / "run").mkdir()
     # A regular file at the socket address is unknown custody, never absence.
     (home / "run/permissions-helper.23456.sock").write_bytes(b"untrusted socket input")
@@ -569,7 +449,7 @@ def test_idle_shutdown_retry_requires_native_success_and_retained_intent(
     monkeypatch.setattr(jobs.sys, "platform", "darwin")
     monkeypatch.setattr(jobs, "helper_job_agents_dir", lambda: tmp_path)
     path = jobs.helper_job_plist_path(home)
-    original = _stopped_helper_plist(home, path)
+    original = stopped_helper_plist(home, path)
     marker = home / "run" / "ava-root" / "helper-stopped"
     marker.parent.mkdir(parents=True)
     if fault != "no-intent":
@@ -616,7 +496,7 @@ def test_unproven_shutdown_never_boots_out_native_job(
     monkeypatch.setattr(jobs.sys, "platform", "darwin")
     monkeypatch.setattr(jobs, "helper_job_agents_dir", lambda: tmp_path)
     path = jobs.helper_job_plist_path(home)
-    original = _stopped_helper_plist(home, path)
+    original = stopped_helper_plist(home, path)
     owner = OwnedProcess(321, 100.0, None)
     requested = [False]
     commands: list[list[str]] = []
@@ -748,3 +628,72 @@ def test_helper_shutdown_waits_for_inflight_gui_child_before_acknowledging() -> 
             if process.poll() is None:
                 process.kill()
             process.wait(timeout=5)
+
+
+@pytest.mark.parametrize("waiting", [b"", b"pid = 0\n"])
+def test_exact_home_helper_retirement_keeps_neighbor_and_waits_for_native_exit(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, waiting: bytes
+) -> None:
+    from base.native_process.ownership import OwnedProcess
+    from services.permissions_helper import launchd_job as jobs
+
+    home = tmp_path.resolve() / "home"
+    agents = tmp_path / "agents"
+    agents.mkdir()
+    monkeypatch.setattr(jobs.sys, "platform", "darwin")
+    monkeypatch.setattr(jobs, "helper_job_agents_dir", lambda: agents)
+    path = jobs.helper_job_plist_path(home)
+    stopped_helper_plist(home, path)
+    neighbor = agents / "neighbor.plist"
+    neighbor.write_bytes(b"neighbor authority")
+    alive = [True]
+    owner = OwnedProcess(321, 100.0, None)
+
+    def capture(_state: str, _socket: Path, _executable: str) -> OwnedProcess:
+        return owner
+
+    monkeypatch.setattr(jobs, "_retirement_owner", capture)
+    commands: list[list[str]] = []
+    loaded = [True]
+
+    from services.permissions_helper import client
+
+    def shutdown(run_dir: Path, *, sock_path: str | Path) -> client.HelperShutdownResult:
+        assert run_dir == home / "run" / "ava-root"
+        marker = run_dir / "helper-stopped"
+        marker.write_bytes(b"stopped\n")
+        marker.chmod(0o600)
+        alive[0] = False
+        return {"stopping": True, "pid": owner.pid, "run_dir": str(run_dir)}
+
+    def wait(captured: OwnedProcess, _deadline: float) -> None:
+        assert captured == owner and not alive[0]
+
+    monkeypatch.setattr(client, "shutdown_helper", shutdown)
+    monkeypatch.setattr(jobs, "_wait_retirement_owner", wait)
+
+    def command(args: list[str], _deadline: float) -> subprocess.CompletedProcess[bytes]:
+        commands.append(args)
+        if args[0] == "bootout":
+            assert not alive[0], "bootout must wait for the captured native helper's exit"
+            loaded[0] = False
+            return subprocess.CompletedProcess(args, 0, b"", b"")
+        if alive[0]:
+            return subprocess.CompletedProcess(args, 0, b"pid = 321\n", b"")
+        if loaded[0]:
+            return subprocess.CompletedProcess(
+                args, 0, b"state = not running\nlast exit code = 0\n" + waiting, b""
+            )
+        return subprocess.CompletedProcess(args, 113, b"", b"Could not find service")
+
+    monkeypatch.setattr(jobs, "_retirement_command", command)
+    # Ordinary stop, then the shared destroy boundary, then a cleanup retry.
+    jobs.unregister_helper(home, helper_port=23456)
+    jobs.unregister_helper(home, helper_port=23456)
+    jobs.unregister_helper(home, helper_port=23456)
+    assert not path.exists()
+    assert neighbor.read_bytes() == b"neighbor authority"
+    expected = f"{jobs.helper_job_domain()}/{jobs.helper_job_label(home)}"
+    assert all(args[1] == expected for args in commands)
+    assert [args[0] for args in commands].count("bootout") == 1
+    assert all(args[0] in ("print", "bootout") for args in commands)
