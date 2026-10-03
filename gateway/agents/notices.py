@@ -1,8 +1,6 @@
 """The ava.ui.notify() agent_notices endpoints (user-facing).
 
 - GET  /api/notices/open     — cross-fleet open FYI notices (require_response false).
-- GET  /api/notices/escalations — open task escalations for operator review.
-- GET  /api/notices/resolved — recently-resolved notices across the fleet (history).
 - POST /api/agents/{id}/notices/{notice_id}/resolve — resolve one open notice.
 
 The unified agent->user queue lives in agent_notices (migration 0053). An agent
@@ -10,8 +8,8 @@ calls ava.ui.notify() to post a notice at one of three rungs (require_response x
 blocking). Notices that need a response ride the agent snapshot inline (a bounded
 worklist); FYI notices (require_response false) stay off the snapshot — the
 snapshot carries only unread_notice_count — so GET /api/notices/open is the FYI
-feed's content source. Both kinds surface in the GET /api/notices/resolved
-history once resolved.
+feed's content source. Both kinds surface in the resolved page of
+GET /api/notices once resolved.
 
 A notice is resolved by the user (answer / dismiss / read) via the POST here, or
 withdrawn by the agent via ava.ui.dismiss_notice(); either sets resolved_at +
@@ -43,7 +41,6 @@ from gateway.agents.delivery import deliver_chat_inbound
 from gateway.agents.inbound_provenance import request_inbound_provenance
 from gateway.agents.schemas import (
     AgentMessageEnqueued,
-    EscalationNoticeItem,
     NoticeCreateIn,
     NoticeEditIn,
     NoticeItem,
@@ -61,14 +58,6 @@ _SELECT = (
     "n.require_response, n.blocking, n.created_at, n.updated_at, "
     "n.resolved_at, n.resolution, n.reply, n.task_id, n.expire_at "
     "FROM agent_notices n JOIN agents t ON t.id = n.agent_id "
-)
-
-_ESCALATIONS_SELECT = (
-    "SELECT n.id, n.title, n.priority, n.created_at, n.task_id, task.title, task.status, "
-    "task.owner, owner.label, task.reminder_count, task.updated_at "
-    "FROM agent_notices n "
-    "JOIN agent_tasks task ON task.id = n.task_id "
-    "LEFT JOIN agents owner ON owner.id = task.owner "
 )
 
 # action -> stored resolution. Explicit map (never inferred from reply presence).
@@ -116,22 +105,6 @@ def _row_to_item(r: tuple[Any, ...]) -> NoticeItem:
     )
 
 
-def _row_to_escalation_item(r: tuple[Any, ...]) -> EscalationNoticeItem:
-    return EscalationNoticeItem(
-        id=r[0],
-        title=r[1],
-        priority=r[2],
-        created_at=r[3],
-        task_id=r[4],
-        task_title=r[5],
-        task_status=r[6],
-        owner_id=r[7],
-        owner_label=r[8],
-        reminder_count=r[9],
-        updated_at=r[10],
-    )
-
-
 def _open_notices_blocking(
     pool: ConnectionPool, limit: int, *, include_awaiting: bool
 ) -> list[tuple[Any, ...]]:
@@ -160,17 +133,6 @@ def _open_notices_blocking(
         cur.execute(
             _SELECT + where + "ORDER BY n.priority ASC, n.created_at DESC, n.id DESC LIMIT %s",
             (NOTICE_FYI_TTL_DAYS, limit),
-        )
-        return cur.fetchall()
-
-
-def _escalation_notices_blocking(pool: ConnectionPool) -> list[tuple[Any, ...]]:
-    """Sync open task-escalations query — via to_thread, without FYI expiry."""
-    with pool.connection() as conn, conn.cursor() as cur:
-        cur.execute(
-            _ESCALATIONS_SELECT
-            + "WHERE n.require_response AND n.task_id IS NOT NULL AND n.resolved_at IS NULL "
-            + "ORDER BY n.priority ASC, n.created_at DESC, n.id DESC"
         )
         return cur.fetchall()
 
@@ -209,17 +171,6 @@ async def get_open_notices(
     return [_row_to_item(r) for r in rows]
 
 
-@router.get("/api/notices/escalations")
-async def get_escalation_notices(request: Request) -> list[EscalationNoticeItem]:
-    """Open task escalations with their task and current-owner review context.
-
-    This is the operator's read-only queue: only response-required notices that
-    name a task are included. Escalations never run the FYI lazy-expiry sweep.
-    """
-    rows = await asyncio.to_thread(_escalation_notices_blocking, request.app.state.db_pool)
-    return [_row_to_escalation_item(r) for r in rows]
-
-
 def _notices_after_blocking(pool: ConnectionPool, after: int, limit: int) -> list[tuple[Any, ...]]:
     """Sync new-open query (both kinds) — via to_thread.
 
@@ -256,47 +207,6 @@ async def get_notices_live(
     return [_row_to_item(r) for r in rows]
 
 
-@router.get("/api/notices/resolved")
-async def get_resolved_notices(
-    request: Request,
-    limit: Annotated[int | None, Query(ge=1, le=_RESOLVED_PAGE_MAX_LIMIT)] = None,
-    require_response: Annotated[bool | None, Query()] = None,
-    before_at: Annotated[datetime | None, Query()] = None,
-    before_id: Annotated[int | None, Query()] = None,
-) -> list[NoticeItem]:
-    """One page of resolved notices across the fleet, newest resolution first.
-
-    Feeds the greyed history beneath each open queue. `require_response` filters to
-    one queue's history (the "needs response" tab passes true, the FYI tab false);
-    omit it for both. Keyset-paginated on (resolved_at, id): pass the last row's
-    (before_at, before_id) for the next page strictly older. Supply both or neither.
-    Omit `limit` for the configured page size (``display.notices_resolved_default_page``,
-    30 out of the box).
-    """
-    if (before_at is None) != (before_id is None):
-        raise HTTPException(
-            status_code=422, detail="before_at and before_id must be supplied together"
-        )
-    if limit is None:
-        limit = settings.display.notices_resolved_default_page
-    where = "WHERE n.resolved_at IS NOT NULL "
-    params: list[object] = []
-    if require_response is not None:
-        where += "AND n.require_response = %s "
-        params.append(require_response)
-    if before_at is not None:
-        where += "AND (n.resolved_at, n.id) < (%s, %s) "
-        params.extend([before_at, before_id])
-    params.append(limit)
-    rows = await asyncio.to_thread(
-        _resolved_notices_blocking,
-        request.app.state.db_pool,
-        _SELECT + where + "ORDER BY n.resolved_at DESC, n.id DESC LIMIT %s",
-        params,
-    )
-    return [_row_to_item(r) for r in rows]
-
-
 @router.get("/api/notices")
 async def get_notices_feed(
     request: Request,
@@ -315,9 +225,9 @@ async def get_notices_feed(
       merged endpoint makes them a first-class pipe so the frontend's Inbox
       no longer merges three sources.
     - `resolved_page` + `next_cursor` — one keyset page of the resolved
-      history (both kinds, newest resolution first), same semantics as
-      GET /api/notices/resolved: pass next_cursor back as before_at /
-      before_id for the next strictly-older page; None means the end.
+      history (both kinds, newest resolution first): pass next_cursor back
+      as before_at / before_id for the next strictly-older page; None means
+      the end.
 
     The standalone endpoints stay for their other consumers (IM bridge,
     CLI). The open sweep (FYI TTL auto-resolve) runs once per call, so the

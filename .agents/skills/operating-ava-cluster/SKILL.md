@@ -188,10 +188,8 @@ code version. After every rollout, verify:
    daemon, the wsl watchdog, and the win browser daemon were all found this
    way).
 2. **mcp-daemon**: exactly ONE `ava.mcps._daemon` per unit
-   (`pgrep -fc "python -m ava(\.mcps\._daemon|\._mcps_daemon)"`; wsl co-located
-   units → 2 total). The second alternative is the pre-rename module name a
-   host on an older release still runs; it goes away with
-   `_LEGACY_DAEMON_MODULE` in `ava/mcps/_daemon.py`.
+   (`pgrep -fc "python -m ava\.mcps\._daemon"`; wsl co-located
+   units → 2 total).
    Ghosts accumulate when a respawn storm relaunches while the old detached
    process survives; a ghost's exit can steal the live socket.
    Healthcheck probe: `.venv/bin/python -m services.healthchecks.mcp_daemon`

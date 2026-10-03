@@ -167,12 +167,11 @@ def _daemon_env(home: Path, bin_dir: Path, chrome: _ChromeFake, mode: str) -> di
             "PATH": f"{bin_dir}:{env['PATH']}",
         }
     )
-    # The suite runs under AVA_RUNNER_MODE=hosted: a hosted runner's Settings
-    # build fetches config from AVA_GATEWAY_URL (a test stub here), which would
-    # kill the daemon before it binds its socket. A plain private unit reads its
-    # own .env only — exactly the production single-box/standalone shape.
+    # A hosted profile's Settings build would fetch config from AVA_GATEWAY_URL
+    # (a test stub here), killing the daemon before it binds its socket; strip
+    # the launcher environment down to a plain private unit that reads its own
+    # .env only — exactly the production single-box/standalone shape.
     for key in (
-        "AVA_RUNNER_MODE",
         "AVA_CONFIG_FETCH",
         "AVA_GATEWAY_URL",
         "AVA_CLUSTER",

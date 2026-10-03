@@ -1,6 +1,6 @@
 """Reach the Chrome that left the supervised process tree.
 
-`ava stop --stop-browser` and `ava cluster destroy` are the two paths that mean
+`ava stop` and `ava cluster destroy` are the two paths that mean
 "this cluster's headed Chrome goes down too", and they say it by killing the
 `ava-browser` session's process tree. That is enough while Chrome is *in* the
 tree. It stops being enough after a `SingletonLock` handoff: Chrome's launched
@@ -157,7 +157,7 @@ def reap_cluster_chrome() -> list[int]:
     Two callers:
 
     - the teardown paths that explicitly asked for the browser down
-      (`ava stop --stop-browser`, `ava cluster destroy`), and only after the
+      (`ava stop`, `ava cluster destroy`), and only after the
       `ava-browser` session and the watchdog are already dead — a live watchdog
       would relaunch Chrome straight back onto the port we just cleared. It does
       not fight the daemon's port guard either: no launch is in flight during a

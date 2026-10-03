@@ -174,9 +174,7 @@ def _add_plugins_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]
     plugins_uninstall_p.add_argument("name", help="installed package name")
     plugins_uninstall_p.set_defaults(func=_h_plugins_uninstall)
 
-    plugins_installed_p = plugins_sub.add_parser(
-        "installed", aliases=["ls"], help="list install-registry entries"
-    )
+    plugins_installed_p = plugins_sub.add_parser("installed", help="list install-registry entries")
     plugins_installed_p.set_defaults(func=_h_plugins_installed)
 
     # `ava plugins inspect [name]` — the read-only catalog: what a plugin CAN

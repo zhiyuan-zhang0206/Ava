@@ -78,7 +78,6 @@ def test_implicit_notice_reads_use_validated_boundary_defaults(
         for path, expected in (
             ("/api/notices/open", open_limit),
             ("/api/notices/live", open_limit),
-            ("/api/notices/resolved", resolved_limit),
         ):
             implicit = client.get(path)
             explicit = client.get(path, params={"limit": expected})

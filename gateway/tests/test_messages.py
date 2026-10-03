@@ -11,6 +11,10 @@ import pytest
 from fastapi.testclient import TestClient
 
 from base.cluster.machine import machine_name
+from base.daemon.schedules.completion_notices import (
+    current_default_completion_notice_policy,
+    policy_for_agent,
+)
 from gateway.app import app
 
 
@@ -55,7 +59,7 @@ def test_post_message_inserts_chat_pending(db_conn: psycopg.Connection) -> None:
 def test_hourly_completion_policy_buffers_success_and_delivers_failure(
     db_conn: psycopg.Connection,
 ) -> None:
-    """The canary assertion path exposes the active policy and durable count."""
+    """The canary assertion path reads the active policy and the durable count."""
     tid = _seed_agent(db_conn)
     with db_conn.cursor() as cur:
         cur.execute(
@@ -63,8 +67,8 @@ def test_hourly_completion_policy_buffers_success_and_delivers_failure(
             ('{"completion_notice_policy": "hourly"}', tid),
         )
     db_conn.commit()
+    policy = policy_for_agent(db_conn, tid, current_default_completion_notice_policy())
     with TestClient(app) as client:
-        policy = client.get(f"/api/agents/{tid}/completion-notice-policy")
         success = client.post(
             f"/api/agents/{tid}/messages",
             json={
@@ -81,7 +85,7 @@ def test_hourly_completion_policy_buffers_success_and_delivers_failure(
                 "completion_notice": {"outcome": "exit", "exit_code": 137},
             },
         )
-    assert policy.json() == {"agent_id": tid, "policy": "hourly"}
+    assert policy == "hourly"
     assert success.status_code == 201 and success.json()["inbound_id"] is None
     assert failure.status_code == 201 and failure.json()["inbound_id"] is not None
     assert len(_pending_rows(db_conn, tid)) == 1

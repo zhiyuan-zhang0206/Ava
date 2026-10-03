@@ -23,7 +23,7 @@ that overruns its declared ceiling is refused like any other, naming the window.
 POSIX units each lead a process group (setpgid; same session and macOS
 responsible process). A stop that finds the leader live is certified only once
 the leader is reaped inside that stop and the kernel reports its group empty
-(`process_group_closure.group_empty`): a child forked during TERM must exit too,
+(`group_closure.group_empty`): a child forked during TERM must exit too,
 or stop refuses with its PID; only force kills it. `setsid()` escapes by
 construction; exec domains keep their own groups.
 Root also keeps its control transport alive after failed ordinary shutdown;

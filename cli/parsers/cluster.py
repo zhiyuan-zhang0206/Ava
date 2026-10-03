@@ -47,20 +47,15 @@ def _h_cluster_health_probe(args: argparse.Namespace) -> int:
     from cli.commands.cluster.health import cmd_health_probe
 
     return cmd_health_probe(
-        agent_min=args.agent_min,
-        crash_loop_max_restarts=args.crash_loop_max_restarts,
-        crash_loop_window_minutes=args.crash_loop_window_minutes,
         check_crash_loops=args.crash_loop_check,
         check_schema=args.schema_check,
     )
 
 
-def _h_cluster_health_probe_register(args: argparse.Namespace) -> int:
+def _h_cluster_health_probe_register(_args: argparse.Namespace) -> int:
     from cli.commands.cluster.cron import cmd_cron_register
 
-    return cmd_cron_register(
-        interval_s=args.interval,
-    )
+    return cmd_cron_register()
 
 
 def _h_cluster_health_probe_unregister(_args: argparse.Namespace) -> int:
@@ -201,26 +196,8 @@ def _add_cluster_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]
         help="[cluster] assess cluster health (exit 0=healthy, 1=unhealthy); designed as a cron job payload",
     )
     # task #4092 cli-default inventory: monitoring contract — this verb is a
-    # cron payload invoked bare; these defaults (agent-min from
-    # AVA_HEALTH_PROBE_AGENT_MIN, itself 1) are what "healthy" means out of the box.
-    cluster_health_probe_p.add_argument(
-        "--agent-min",
-        type=int,
-        default=None,
-        help="minimum running/idling agents for healthy verdict (default: AVA_HEALTH_PROBE_AGENT_MIN, itself 1)",
-    )
-    cluster_health_probe_p.add_argument(
-        "--crash-loop-max-restarts",
-        type=int,
-        default=5,
-        help="max restarts per agent in the window (default: 5)",
-    )
-    cluster_health_probe_p.add_argument(
-        "--crash-loop-window-minutes",
-        type=int,
-        default=10,
-        help="crash-loop detection window in minutes (default: 10)",
-    )
+    # cron payload invoked bare; its defaults (both checks on; the agent floor
+    # from AVA_HEALTH_PROBE_AGENT_MIN) are what "healthy" means out of the box.
     cluster_health_probe_p.add_argument(
         "--no-crash-loop-check",
         action="store_false",
@@ -241,12 +218,6 @@ def _add_cluster_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]
     cluster_health_probe_register_p = cluster_sub.add_parser(
         "health-probe-register",
         help="register the OS-scheduled health probe (launchd on macOS, crontab on Linux)",
-    )
-    cluster_health_probe_register_p.add_argument(
-        "--interval",
-        type=int,
-        default=300,
-        help="seconds between health probe runs (default: 300 = 5 min)",
     )
     cluster_health_probe_register_p.set_defaults(func=_h_cluster_health_probe_register)
 

@@ -46,8 +46,8 @@
 # operator's SRE loop".
 #
 # Index-label selectors (task #1467): since the 2026-08-23 cutover
-# (base/telemetry/loki_index_labels.py, INDEX_LABEL_CUTOVER_AT) the collector promotes
-# event_name/agent_id to stream labels, so event-scoped rules match them
+# the collector promotes event_name/agent_id to stream labels, so
+# event-scoped rules match them
 # inside the stream selector (`{service_name="unknown_service", event_name=...}`)
 # and keep `| json` only for the level/category/attributes filters (those
 # fields are NOT stream labels). Legacy chunks without the index labels

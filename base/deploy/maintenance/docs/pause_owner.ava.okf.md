@@ -24,8 +24,7 @@ removes the file by hand (`rm $AVA_HOME/run/deploy-pause-owner.json`) and runs
 An explicit [maintenance hold](maintenance.ava.okf.md) uses the same journal
 with a typed cohort/progress payload and the recorded shepherding process it
 was taken under (`base/deploy/maintenance/hold_driver.py`). It has no expiry timer and no
-automatic release (see
-[[host_deploy_state/stranded-hold-recovery.ava.okf.md]]); only its exact
+automatic release; only its exact
 operation's `ava start` (or `ava maintenance cancel`) ends it. Ordinary
 compensation and a newer maintenance operation cannot release or overwrite it.
 This is distinct from a retired updater's pause record, which has no exit but

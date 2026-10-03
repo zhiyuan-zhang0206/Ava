@@ -9,10 +9,10 @@ mounted in `gateway/app.py`: `router`, `lifecycle`, `state`, `timeline`,
   - `router.py`            — directory, roster, model catalog, spawn + retry-launch, label patch
   - `lifecycle.py`         — terminate / resurrect / restart / compact / cancel / impersonation expiry
   - `state.py`             — messages, system notes, pending inbound, trace messages, token usage,
-                              context breakdown, completion-notice policy
+                              context breakdown
   - `conversation.py`      — conversation snapshot (timeline + pending + token usage in one read)
   - `timeline.py`          — checkpoint-backed conversation timeline with compact-history paging
-  - `notices.py`           — `ava.ui.notify()` notices: feeds, replies, resolution, escalations
+  - `notices.py`           — `ava.ui.notify()` notices: feeds, replies, resolution
   - `forward.py`           — cross-machine forwarding of lifecycle + spawn to the owning runner
   - `delivery.py`          — shared chat-inbound delivery (also used by tasks, uploads, work_failed,
                               the MCP endpoint and the completion digest)
