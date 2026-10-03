@@ -5,7 +5,9 @@ Loads schedule ``<id>`` from the DB, materializes its script under
 script's ``ava.agents.*`` calls attribute to the schedule instead of failing for
 lack of an agent id), then runs it. A ``.py`` script runs in-process via runpy so
 it shares the bound actor; any other command runs as a subprocess. An uncaught
-crash's traceback is written to ``schedules.last_error``.
+crash's traceback is written to ``schedules.last_error`` (the latest crash) and, truncated
+to its last ``_NOTE_TRACEBACK_MAX`` characters, to the run's ``schedule_runs.note`` (one
+per crash).
 
 Version-controlled schedule templates (manifest + scripts) live in
 ``schedules/`` — provisioned via ``base/daemon/schedules/builtin_schedules.py``.
@@ -188,6 +190,19 @@ def _record_run_end(database: Database, run_id: int | None, *, ok: bool, note: s
             )
     except Exception:
         logger.exception("schedule run-record end failed (run {})", run_id)
+
+
+# A crashed run's note keeps this much of the traceback's END (the exception and the innermost
+# frames): the session's output log is torn down with the session, and `schedules.last_error`
+# holds only the latest crash, so this row is the history of why each run died.
+_NOTE_TRACEBACK_MAX = 3000
+
+
+def _crash_note(exc: BaseException, tb: str) -> str:
+    tail = tb.strip()
+    if len(tail) > _NOTE_TRACEBACK_MAX:
+        tail = "[...truncated]\n" + tail[-_NOTE_TRACEBACK_MAX:]
+    return f"crashed: {type(exc).__name__}\n{tail}"
 
 
 _ORIGINAL_SLEEP = time.sleep
@@ -469,7 +484,7 @@ def _run(database: Database, schedule_id: int) -> int:
         tb = traceback.format_exc()
         _record_error(database, schedule_id, tb)
         logger.error("Schedule runner execution failed: {}", tb)
-        _record_run_end(database, run_id, ok=False, note=f"crashed: {type(exc).__name__}")
+        _record_run_end(database, run_id, ok=False, note=_crash_note(exc, tb))
         return 1
 
 

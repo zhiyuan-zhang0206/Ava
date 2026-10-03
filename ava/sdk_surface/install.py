@@ -93,17 +93,19 @@ def _apply(
     return promoted
 
 
-def _run(undo: list[Callable[[], None]]) -> None:
+def _run(undo: list[Callable[[], None]], report: load_report.Reporter | None = None) -> None:
     """Run undos newest first; one failing does not stop the rest."""
     while undo:
         step = undo.pop()
         try:
             step()
         except Exception as exc:
-            load_report.report_plugin_load_failure("<sdk-surface>", exc)
+            load_report.reporter(report)("<sdk-surface>", exc)
 
 
-def install(registry: ExtensionRegistry) -> ExtensionRegistry:
+def install(
+    registry: ExtensionRegistry, report: load_report.Reporter | None = None
+) -> ExtensionRegistry:
     """Install `registry`'s SDK surface into `ava`; return the registry of the plugins admitted.
 
     Raises:
@@ -125,8 +127,8 @@ def install(registry: ExtensionRegistry) -> ExtensionRegistry:
         try:
             paths = _apply(plugin, contributions, claimed, applied)
         except Exception as exc:
-            _run(applied)
-            load_report.report_plugin_load_failure(plugin, exc)
+            _run(applied, report)
+            load_report.reporter(report)(plugin, exc)
             continue
         namespaces = claimed
         undo.extend(applied)

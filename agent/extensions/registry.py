@@ -59,7 +59,7 @@ def _declared(plugin: str, face: str, contribute: Callable[[], object]) -> Plugi
 
 
 def declarations(
-    faces: Sequence[str] = ALL_FACES,
+    faces: Sequence[str] = ALL_FACES, report: load_report.Reporter | None = None
 ) -> list[tuple[str, Path, PluginContributions]]:
     """(plugin, directory, declaration) for every enabled plugin whose loaded faces declare one, ungated.
 
@@ -68,7 +68,7 @@ def declarations(
     else is reported and the plugin is skipped.
     """
     found: list[tuple[str, Path, PluginContributions]] = []
-    for name, plugin_dir in _enabled_plugin_dirs():
+    for name, plugin_dir in _enabled_plugin_dirs(report):
         merged: PluginContributions | None = None
         try:
             for face in faces:
@@ -79,7 +79,7 @@ def declarations(
                 declared = _declared(name, face, contribute)
                 merged = declared if merged is None else merged.merged(declared)
         except Exception as exc:
-            load_report.report_plugin_load_failure(name, exc)
+            load_report.reporter(report)(name, exc)
             continue
         if merged is not None:
             found.append((name, plugin_dir, merged))
@@ -110,7 +110,9 @@ def loaded_state_classes() -> frozenset[type[BaseModel]]:
     return frozenset(classes)
 
 
-def build_registry(faces: Sequence[str] = ALL_FACES) -> ExtensionRegistry:
+def build_registry(
+    faces: Sequence[str] = ALL_FACES, report: load_report.Reporter | None = None
+) -> ExtensionRegistry:
     """What every enabled plugin declares through `faces`, as a new registry.
 
     Pure: nothing is registered anywhere, so building it again is the whole of a registry reload. Each
@@ -119,7 +121,7 @@ def build_registry(faces: Sequence[str] = ALL_FACES) -> ExtensionRegistry:
     """
     keys = tuple(key for face in faces for key in FACE_KEYS.get(face, ()))
     admitted: list[tuple[str, PluginContributions]] = []
-    for name, plugin_dir, contributions in declarations(faces):
+    for name, plugin_dir, contributions in declarations(faces, report):
         try:
             if contributions.state:
                 from agent.state import plugin_state_schema
@@ -127,7 +129,7 @@ def build_registry(faces: Sequence[str] = ALL_FACES) -> ExtensionRegistry:
                 plugin_state_schema(ExtensionRegistry(((name, contributions),)))
             check_manifest(name, plugin_dir, contributions, keys)
         except Exception as exc:
-            load_report.report_plugin_load_failure(name, exc)
+            load_report.reporter(report)(name, exc)
             continue
         admitted.append((name, contributions))
     return ExtensionRegistry(tuple(admitted))

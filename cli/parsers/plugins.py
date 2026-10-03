@@ -54,6 +54,13 @@ def _h_plugins_inspect(args: argparse.Namespace) -> int:
     return cmd_plugins_inspect(args.name)
 
 
+def _h_plugins_verify(_args: argparse.Namespace) -> int:
+    # Own module for the same reason as `inspect`: it loads the agent layer.
+    from cli.commands.extensions.plugins_inspect import cmd_plugins_verify
+
+    return cmd_plugins_verify()
+
+
 def _h_plugins_upgrade(args: argparse.Namespace) -> int:
     from cli.commands.extensions.plugins import cmd_plugins_upgrade
 
@@ -188,6 +195,14 @@ def _add_plugins_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]
         help="plugin name — omit for the surface reference + one line per plugin",
     )
     plugins_inspect_p.set_defaults(func=_h_plugins_inspect)
+
+    # `ava plugins verify` — load every enabled plugin the way an agent boot does and exit
+    # non-zero when any is skipped (the loader contains failures; this surfaces them).
+    plugins_verify_p = plugins_sub.add_parser(
+        "verify",
+        help="load every enabled plugin as an agent boot does; exit 1 if any fails to load",
+    )
+    plugins_verify_p.set_defaults(func=_h_plugins_verify)
 
     plugins_upgrade_p = plugins_sub.add_parser(
         "upgrade", help="re-fetch an installed plugin from its recorded source"

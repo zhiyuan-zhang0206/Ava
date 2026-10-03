@@ -15,7 +15,20 @@ import psycopg
 import pytest
 from psycopg_pool import ConnectionPool
 
-from base.daemon.schedules.builtin_schedules import load_manifest, provision_builtin_schedules
+from base.daemon.schedules.builtin_schedules import (
+    ProvisionResult,
+    load_manifest,
+    provision_builtin_schedules,
+)
+
+_ENTRY: dict[str, object] = {
+    "name": "prod-a",
+    "class": "product",
+    "default_enabled": True,
+    "script": "a.py",
+    "command": "python a.py",
+    "description": "A",
+}
 
 
 def _manifest(tmp_path: Path, entries: list[dict[str, object]]) -> Path:
@@ -43,6 +56,16 @@ def _row(conn: psycopg.Connection, name: str) -> Any:
             (name,),
         )
         return cur.fetchone()
+
+
+def _versions(conn: psycopg.Connection, name: str) -> list[tuple[str]]:
+    with conn.cursor() as cur:
+        cur.execute(
+            "SELECT v.note FROM schedule_versions v JOIN schedules s ON s.id = v.schedule_id "
+            "WHERE s.name = %s ORDER BY v.id",
+            (name,),
+        )
+        return cur.fetchall()
 
 
 class TestProvision:
@@ -93,7 +116,7 @@ class TestProvision:
         )
         created = provision_builtin_schedules(db_conn, path=path)
         db_conn.commit()
-        assert created == ["prod-a", "op-b"]
+        assert created.created == ["prod-a", "op-b"] and created.resynced == []
         assert _row(db_conn, "prod-a")[1] is True
         assert _row(db_conn, "op-b")[1] is False
         assert _row(db_conn, "op-b")[2] == "print('ok')\n"
@@ -114,20 +137,65 @@ class TestProvision:
                 },
             ],
         )
-        assert provision_builtin_schedules(db_conn, path=path) == ["prod-a"]
+        assert provision_builtin_schedules(db_conn, path=path).created == ["prod-a"]
         db_conn.commit()
+        assert provision_builtin_schedules(db_conn, path=path) == ProvisionResult()
+        db_conn.commit()
+        assert _row(db_conn, "prod-a") == ("prod-a", True, "print('ok')\n", "python a.py")
+        assert _versions(db_conn, "prod-a") == [("initial",)]
 
-        # Operator disabled an existing built-in and edited its script —
-        # provision must leave both alone.
+    def test_a_drifted_builtin_follows_the_template_and_keeps_its_operator_state(
+        self, db_conn: psycopg.Connection, tmp_path: Path
+    ) -> None:
+        """2026-10-03: the DB copy of a built-in is a creation-time snapshot, and a library
+        signature change left thirteen of them crash-looping. Provision now rewrites a differing
+        script/command to the repo template, keeps `enabled` and the description, snapshots a
+        version row, and queues the sync request that relaunches a live session."""
+        path = _manifest(tmp_path, [_ENTRY])
+        provision_builtin_schedules(db_conn, path=path)
+        db_conn.commit()
         with db_conn.cursor() as cur:
             cur.execute(
-                "UPDATE schedules SET enabled = false, script = 'print(2)\n' WHERE name = 'prod-a'"
+                "UPDATE schedules SET enabled = false, description = 'tuned', "
+                "script = 'catch_up([])\n', command = 'python old.py' WHERE name = 'prod-a'"
             )
         db_conn.commit()
 
-        assert provision_builtin_schedules(db_conn, path=path) == []
+        result = provision_builtin_schedules(db_conn, path=path)
         db_conn.commit()
-        assert _row(db_conn, "prod-a") == ("prod-a", False, "print(2)\n", "python a.py")
+
+        assert result == ProvisionResult(created=[], resynced=["prod-a"])
+        assert _row(db_conn, "prod-a") == ("prod-a", False, "print('ok')\n", "python a.py")
+        with db_conn.cursor() as cur:
+            cur.execute("SELECT description FROM schedules WHERE name = 'prod-a'")
+            assert cur.fetchone() == ("tuned",)
+            cur.execute(
+                "SELECT count(*) FROM schedule_sync_requests q JOIN schedules s "
+                "ON s.id = q.schedule_id WHERE s.name = 'prod-a'"
+            )
+            assert cur.fetchone() == (1,)
+        versions = _versions(db_conn, "prod-a")
+        assert versions[0] == ("initial",) and versions[1][0].startswith("builtin-resync ")
+
+        # Converged: the next provision changes nothing and queues nothing new.
+        assert provision_builtin_schedules(db_conn, path=path) == ProvisionResult()
+        db_conn.commit()
+        assert len(_versions(db_conn, "prod-a")) == 2
+
+    def test_a_schedule_outside_the_manifest_is_never_touched(
+        self, db_conn: psycopg.Connection, tmp_path: Path
+    ) -> None:
+        """An agent-created schedule keeps its DB script — provision neither reads nor rewrites it."""
+        path = _manifest(tmp_path, [_ENTRY])
+        with db_conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO schedules (name, description, script, command, enabled) "
+                "VALUES ('agent-made', 'x', 'print(1)\n', 'python x.py', true)"
+            )
+        db_conn.commit()
+        assert provision_builtin_schedules(db_conn, path=path).created == ["prod-a"]
+        db_conn.commit()
+        assert _row(db_conn, "agent-made") == ("agent-made", True, "print(1)\n", "python x.py")
 
     def test_manifest_driven_restore(self, db_conn: psycopg.Connection, tmp_path: Path) -> None:
         """Deleting a built-in makes the next provision recreate it."""
@@ -149,5 +217,5 @@ class TestProvision:
         with db_conn.cursor() as cur:
             cur.execute("DELETE FROM schedules WHERE name = 'prod-a'")
         db_conn.commit()
-        assert provision_builtin_schedules(db_conn, path=path) == ["prod-a"]
+        assert provision_builtin_schedules(db_conn, path=path).created == ["prod-a"]
         db_conn.commit()

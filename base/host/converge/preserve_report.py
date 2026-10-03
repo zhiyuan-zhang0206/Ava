@@ -23,7 +23,7 @@ def report_converge_preserve(*, path: str, key: str, surface: str) -> None:
 
     ``path`` is the destination that was preserved; ``key`` is the render key
     (hash-sidecar key, or the managed name for skills); ``surface`` names the
-    renderer (``lgtm-dashboard``, ``lgtm-provisioning``, ``otel-collector``,
+    renderer (``lgtm-provisioning``, ``otel-collector``,
     ``skills``, ``extensions``).
     """
     from base.telemetry import emit

@@ -14,6 +14,15 @@ this function, and only an attribute-level call observes the substitution.
 from __future__ import annotations
 
 import contextlib
+from collections.abc import Callable
+
+Reporter = Callable[[str, BaseException], None]
+
+
+def reporter(report: Reporter | None) -> Reporter:
+    """The reporter a load site calls: the caller's own (a read-only check that wants the failures
+    as values, e.g. `ava plugins verify`), else the canonical one below, looked up at call time."""
+    return report if report is not None else report_plugin_load_failure
 
 
 def report_plugin_load_failure(name: str, exc: BaseException) -> None:

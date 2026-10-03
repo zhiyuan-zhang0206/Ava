@@ -7,12 +7,26 @@ with a stable token (`surface`, `plugin`, `entry`, `note`, a diff status), one
 fact per line, no boxes and no columns that shift with content width.
 
 The computation lives in `agent.extensions.catalog`; this module only formats it.
+
+`ava plugins verify` (`cmd_plugins_verify`) also lives here — the other read-only query that loads the
+agent layer: it runs the production plugin loader and turns its contained failures into an exit code.
+The loader is fail-soft by design (a plugin that raises on import is skipped with a loud report), so a
+plugin broken by a framework change (2026-10-03: the declarative rework deleted `register_after_exec`
+and its siblings, and out-of-repo plugins under `~/.ava/plugins` that still called them failed to load)
+starts an update looking healthy. Read-only: it imports the enabled plugins' faces (`plugin.py`,
+`default_config.py`, `agent_runtime.py`) and builds the registry as an agent boot does, but starts no
+agent, runs no hook and writes nothing; the failures come back through `load_extensions(report=...)`, so no log or telemetry is emitted.
+Module-level code a plugin runs on import still runs. Scope: the agent-boot load path; a plugin's
+`services.py` / `provider.py` / `metrics.py` load on other paths and are not covered. Line contract:
+`RESULT enabled=N failed=M rc=R`, then `RED plugin=<name> <error> (at <file>:<line>)` per failure; exit
+0 clean / 1 red / 2 the loader itself raised (`TOOL-ERROR ...`).
 """
 
 from __future__ import annotations
 
 import sys
 import textwrap
+import traceback
 
 from agent.extensions.catalog import (
     DECLARATION_ONLY_KEYS,
@@ -217,3 +231,27 @@ def _print_diff(view: PluginView) -> None:
                 "rather than by a register_* call (not comparable here)",
             )
         )
+
+
+def _where(exc: BaseException) -> str:
+    frames = traceback.extract_tb(exc.__traceback__)
+    return f" (at {frames[-1].filename}:{frames[-1].lineno})" if frames else ""
+
+
+def cmd_plugins_verify() -> int:
+    """`ava plugins verify` — load every enabled plugin; exit 1 when any is skipped."""
+    from agent.extensions import load_extensions
+
+    failures: list[tuple[str, BaseException]] = []
+    try:
+        loaded = load_extensions(report=lambda name, exc: failures.append((name, exc)))
+    except Exception as exc:  # the loader itself broke — not a contained plugin failure
+        print("RESULT enabled=0 failed=0 rc=2")
+        print(f"TOOL-ERROR {type(exc).__name__}: {str(exc)[:200]}")
+        return 2
+    enabled = sum(1 for entry in loaded.config.plugins.values() if entry.enabled)
+    rc = 1 if failures else 0
+    print(f"RESULT enabled={enabled} failed={len(failures)} rc={rc}")
+    for name, exc in failures:
+        print(f"RED plugin={name} {type(exc).__name__}: {exc}{_where(exc)}".replace("\n", " "))
+    return rc

@@ -6,13 +6,23 @@ schedules (e.g. trace-ship-tempo) are built in but start disabled. The manifest
 lives at ``<repo>/schedules/manifest.json`` next to the schedule script
 templates — it is the single expression of that policy.
 
-``provision_builtin_schedules()`` creates every manifest schedule missing from
-the ``schedules`` table, with ``enabled`` taken from the manifest's
-``default_enabled``. It is idempotent and non-destructive: an existing row is
-never touched (not even re-enabled), so an operator's edits — script,
-description, enabled — survive every provision. Delete a built-in and the next
-provision brings it back with its default state; stop it (enabled=false) to
-keep it around without running.
+``provision_builtin_schedules()`` does two things per manifest entry:
+
+- **create** the schedule when its row is missing, with ``enabled`` taken from the
+  manifest's ``default_enabled``;
+- **resync** an existing row whose ``script`` / ``command`` differ from the repo
+  template. The checkout is the source of truth for a built-in's code: the DB copy
+  is a snapshot made at creation, and a snapshot goes stale when the library API
+  it calls moves (2026-10-03: ``catch_up()`` gained a required ``db`` and thirteen
+  stale snapshots crash-looped). The resync writes the template into the row,
+  snapshots a ``schedule_versions`` row (note ``builtin-resync <hash>``) and queues
+  a ``schedule_sync_requests`` row so a live session is relaunched onto the new code.
+
+Everything else on an existing row — ``enabled``, ``description``, status — is
+never touched, so stopping a built-in keeps it stopped. Delete a built-in and the
+next provision brings it back with its default state. Agent-created schedules are
+not in the manifest and are never read or written here. Both operations are
+idempotent: a second provision with an unchanged checkout changes nothing.
 
 Called from the gateway lifespan at boot (a fresh install comes up with its
 built-ins) and from ``ava schedules provision`` (manual restore). Both call
@@ -22,8 +32,9 @@ launches any newly created enabled schedule within a poll tick.
 
 from __future__ import annotations
 
+import hashlib
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, cast
 
@@ -116,45 +127,89 @@ def load_manifest(path: Path | None = None) -> list[BuiltinSchedule]:
     return schedules
 
 
-def provision_builtin_schedules(conn: Any, *, path: Path | None = None) -> list[str]:
-    """Create every manifest schedule missing from the ``schedules`` table.
+def _no_names() -> list[str]:
+    return []
 
-    Idempotent: a row whose ``name`` already exists is left untouched (its
-    enabled state, script, and description are never overwritten). New rows are
-    inserted with ``enabled = default_enabled`` per the manifest policy.
+
+@dataclass(frozen=True)
+class ProvisionResult:
+    """What one provision changed, in manifest order."""
+
+    created: list[str] = field(default_factory=_no_names)
+    resynced: list[str] = field(default_factory=_no_names)
+
+
+def _digest(script: str, command: str) -> str:
+    return hashlib.sha256(f"{command}\0{script}".encode()).hexdigest()[:12]
+
+
+def provision_builtin_schedules(conn: Any, *, path: Path | None = None) -> ProvisionResult:
+    """Create the manifest schedules that are missing and resync the ones that drifted.
+
+    Idempotent. A row whose ``name`` exists keeps its ``enabled`` state and
+    description; only its ``script`` and ``command`` follow the repo template, and
+    only when they differ from it (compared by content hash).
 
     Args:
         conn: an open psycopg connection (autocommit or not; the caller owns
             the transaction).
         path: manifest path override (tests inject a fixture manifest).
-
-    Returns:
-        The names of the schedules this call created, in manifest order.
     """
     manifest = load_manifest(path)
     manifest_path = (path or MANIFEST_PATH).parent
-    created: list[str] = []
+    result = ProvisionResult()
     for sched in manifest:
+        # The manifest names a template file; the DB stores the script text
+        # (the runner materializes it to $AVA_HOME/schedules/<id>/).
+        script_text = (manifest_path / sched.script).read_text()
         with conn.cursor() as cur:
-            cur.execute("SELECT 1 FROM schedules WHERE name = %s", (sched.name,))
-            if cur.fetchone() is not None:
-                continue
-            # The manifest names a template file; the DB stores the script text
-            # (the runner materializes it to $AVA_HOME/schedules/<id>/).
-            script_text = (manifest_path / sched.script).read_text()
             cur.execute(
-                "INSERT INTO schedules (name, description, script, command, enabled) "
-                "VALUES (%s, %s, %s, %s, %s) RETURNING id",
-                (sched.name, sched.description, script_text, sched.command, sched.default_enabled),
+                "SELECT id, script, command FROM schedules WHERE name = %s FOR UPDATE",
+                (sched.name,),
             )
-            row = cur.fetchone()
-            assert row is not None  # noqa: S101 — INSERT ... RETURNING always yields a row
-            # Same "initial" version snapshot the API create writes, so a
-            # provisioned built-in carries the same roll-back history shape.
+            existing = cur.fetchone()
+            if existing is None:
+                cur.execute(
+                    "INSERT INTO schedules (name, description, script, command, enabled) "
+                    "VALUES (%s, %s, %s, %s, %s) RETURNING id",
+                    (
+                        sched.name,
+                        sched.description,
+                        script_text,
+                        sched.command,
+                        sched.default_enabled,
+                    ),
+                )
+                row = cur.fetchone()
+                assert row is not None  # noqa: S101 — INSERT ... RETURNING always yields a row
+                # Same "initial" version snapshot the API create writes, so a
+                # provisioned built-in carries the same roll-back history shape.
+                cur.execute(
+                    "INSERT INTO schedule_versions (schedule_id, script, command, note) "
+                    "VALUES (%s, %s, %s, %s)",
+                    (row[0], script_text, sched.command, "initial"),
+                )
+                result.created.append(sched.name)
+                continue
+            schedule_id, current_script, current_command = existing
+            want = _digest(script_text, sched.command)
+            if _digest(current_script or "", current_command or "") == want:
+                continue
+            cur.execute(
+                "UPDATE schedules SET script = %s, command = %s, updated_at = now() WHERE id = %s",
+                (script_text, sched.command, schedule_id),
+            )
             cur.execute(
                 "INSERT INTO schedule_versions (schedule_id, script, command, note) "
                 "VALUES (%s, %s, %s, %s)",
-                (row[0], script_text, sched.command, "initial"),
+                (schedule_id, script_text, sched.command, f"builtin-resync {want}"),
             )
-        created.append(sched.name)
-    return created
+            # Same request the API leaves on a script edit: the schedule-manager
+            # kills a live session and relaunches it (when enabled) on the new code.
+            cur.execute(
+                "INSERT INTO schedule_sync_requests (schedule_id) VALUES (%s) "
+                "ON CONFLICT (schedule_id) DO UPDATE SET requested_at = clock_timestamp()",
+                (schedule_id,),
+            )
+        result.resynced.append(sched.name)
+    return result

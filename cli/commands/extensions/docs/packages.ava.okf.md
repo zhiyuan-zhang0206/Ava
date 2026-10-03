@@ -30,12 +30,20 @@ which is the reason an agent is in the loop at all.
 ava plugins install <git-url> [--path <subdir>] [--ref <tag|commit|branch>] [--accept-risk]
 ava plugins installed | upgrade <name> | uninstall <name>
 ava plugins inspect [<name>]                  # the extension-surface catalog (read-only)
+ava plugins verify                            # load every enabled plugin as an agent boot does; exit 1 if one fails
 ava skill install <src> [--path <subdir>] [--ref <ref>] [--accept-risk]
 ava skill enable <name> | disable <name>      # toggle a tracked package in the scanner
 ava skill register <name> [--accept-risk]     # adopt a hand-copied dir in $AVA_HOME/skills/
 ava skill scan <name-or-path>                 # re-run the supply-chain scan (exit 2 on criticals)
 ava skill trust <name> [--revoke]             # record that a human read it (trust=reviewed)
 ```
+
+## `ava plugins verify` — does every enabled plugin load
+
+Runs the fail-soft loader (`agent.extensions.load_extensions`) and exits 1 when it skipped a plugin:
+`RESULT enabled=N failed=M rc=R`, then `RED plugin=<name> <error> (at <file>:<line>)`. Read-only (no hook
+runs, nothing written, no failure telemetry); covers the agent-boot load path, not a plugin's `services.py`
+or `provider.py`. `python -m cli.fleet_update up` runs it on every host.
 
 ## `ava plugins inspect` — the catalog
 

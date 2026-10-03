@@ -329,7 +329,10 @@ def cmd_schedules_runs(identifier: str, limit: int) -> int:
     for r in rows:
         ok = "-" if r["ok"] is None else ("yes" if r["ok"] else "no")
         agent = "-" if r["agent_id"] is None else str(r["agent_id"])
-        print(f"{r['ran_at']:<28}  {ok:<5}  {agent:<6}  {r['note'] or ''}")
+        head, *rest = (r["note"] or "").splitlines() or [""]
+        print(f"{r['ran_at']:<28}  {ok:<5}  {agent:<6}  {head}")
+        for line in rest:  # a crashed run's traceback follows its first line
+            print(f"    {line}")
     return 0
 
 
@@ -337,25 +340,30 @@ def cmd_schedules_runs(identifier: str, limit: int) -> int:
 
 
 def cmd_schedules_provision() -> int:
-    """`ava schedules provision` — create the built-in schedules missing from
-    this cluster, per schedules/manifest.json (product schedules —
+    """`ava schedules provision` — bring the built-in schedules in line with this
+    checkout's schedules/manifest.json: create the missing ones (product schedules —
     self-evolution, memory — enabled; cluster-operator schedules — e.g.
-    trace-ship-tempo — present but disabled).
+    trace-ship-tempo — present but disabled) and resync the `script` / `command` of
+    existing ones whose DB snapshot differs from the repo template (a live session is
+    relaunched onto it by the schedule-manager; a stopped one picks it up when started).
 
     Unlike the other `ava schedules` verbs this writes the DB directly instead
     of going through the gateway API: it is an initialization/restore action
-    that must also work while the gateway is down (and the gateway itself runs
-    the same provision at every boot). Idempotent — existing schedules (by
-    name) are never modified, so an operator's edits survive a provision."""
+    that must also work while the gateway is down (and the schedule-manager runs
+    the same provision at every start). Idempotent — `enabled` and `description` of an
+    existing schedule are never modified, and a schedule that is not in the manifest
+    (an agent-created one) is never read."""
     from base.daemon.schedules.builtin_schedules import provision_builtin_schedules
     from base.db import Database
 
     with Database.from_settings().write_transaction() as conn:
-        created = provision_builtin_schedules(conn)
-    if created:
-        print(f"provisioned built-in schedules: {', '.join(created)}")
-    else:
-        print("(all built-in schedules already present)")
+        result = provision_builtin_schedules(conn)
+    if result.created:
+        print(f"provisioned built-in schedules: {', '.join(result.created)}")
+    if result.resynced:
+        print(f"resynced built-in schedule scripts to this checkout: {', '.join(result.resynced)}")
+    if not result.created and not result.resynced:
+        print("(all built-in schedules already present and current)")
     return 0
 
 

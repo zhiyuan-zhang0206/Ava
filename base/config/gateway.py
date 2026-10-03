@@ -26,8 +26,9 @@ class GatewaySettings(EnvSettings):
         default=True,
         alias="AVA_PROVISION_BUILTIN_SCHEDULES",
         description=(
-            "Create missing built-in schedules on gateway boot. Disable for an unseeded "
-            "cluster; existing schedules and explicit provisioning remain unchanged."
+            "Create missing built-in schedules, and resync the script of drifted ones to the "
+            "repo template, when the schedule-manager starts. Disable for an unseeded "
+            "cluster; existing schedules stay as they are and explicit provisioning still works."
         ),
         json_schema_extra={
             "restart_required": "gateway",
