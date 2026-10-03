@@ -395,7 +395,7 @@ instead of silently skipping without it). `ava_runner` — the historical runner
 demoted in place — holds exactly the audited runner surface: SELECT on every table (plus
 sequence USAGE), SELECT/UPDATE on `agents_meta` (status/liveness), SELECT/UPDATE/INSERT on
 `inbound_messages` (claim AND the agent-side self-lifecycle inbounds), UPDATE on
-`agents` (`ava.self.set_label`), INSERT/UPDATE/SELECT on `machine_units` + INSERT/UPDATE
+`agents` (unused: labels go through the gateway), INSERT/UPDATE/SELECT on `machine_units` + INSERT/UPDATE
 on `machines` and `host_deploy_state`, INSERT/UPDATE/DELETE on `api_idempotency`,
 INSERT/UPDATE on `agent_tasks`, UPDATE on `agent_pages`, the shell
 TTL rows, and full CRUD on the LangGraph checkpoint tables.

@@ -45,6 +45,18 @@ def _label_user_set(conn: psycopg.Connection, agent_id: int) -> bool:
         return row[0]
 
 
+def _label_audit(conn: psycopg.Connection, agent_id: int) -> list[tuple[str, object]]:
+    with conn.cursor() as cur:
+        cur.execute(
+            "SELECT source, attributes FROM audit_events "
+            "WHERE agent_id=%s AND event_name='label_change' ORDER BY id",
+            (agent_id,),
+        )
+        rows = cur.fetchall()
+    conn.commit()
+    return [(row[0], row[1]) for row in rows]
+
+
 class _FakeLLM:
     """ainvoke returns a fixed content, simulating LLM invocation."""
 
@@ -461,6 +473,46 @@ class TestPatchThread:
             resp = client.patch(f"/api/agents/{tid}", json={"label": ""})
         assert resp.status_code == 204
         assert _label_of(db_conn, tid) is None
+
+    def test_patch_records_the_change_as_a_user_audit_fact(
+        self, db_conn: psycopg.Connection
+    ) -> None:
+        tid = create_agent(db_conn)
+        with TestClient(app) as client:
+            assert client.patch(f"/api/agents/{tid}", json={"label": "ops"}).status_code == 204
+        assert _label_audit(db_conn, tid) == [("user", {"new_label": "ops"})]
+
+    def test_patch_names_the_agent_as_the_source_when_it_sets_its_own_label(
+        self, db_conn: psycopg.Connection
+    ) -> None:
+        tid = create_agent(db_conn)
+        with TestClient(app) as client:
+            resp = client.patch(f"/api/agents/{tid}", json={"label": "lead", "source": "self"})
+        assert resp.status_code == 204
+        assert _label_audit(db_conn, tid) == [("self", {"new_label": "lead"})]
+
+    def test_patch_whose_audit_fact_cannot_be_recorded_does_not_set_the_label(
+        self, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        tid = create_agent(db_conn)
+
+        def refuse(_conn: object, _event: object) -> None:
+            raise RuntimeError("audit write failed")
+
+        monkeypatch.setattr("gateway.agents.router.record_audit", refuse)
+        with TestClient(app, raise_server_exceptions=False) as client:
+            resp = client.patch(f"/api/agents/{tid}", json={"label": "never set"})
+        assert resp.status_code == 500
+        assert _label_of(db_conn, tid) is None
+        assert _label_audit(db_conn, tid) == []
+
+    def test_patch_of_an_unknown_agent_is_404_and_records_nothing(
+        self, db_conn: psycopg.Connection
+    ) -> None:
+        with TestClient(app) as client:
+            resp = client.patch("/api/agents/2147483000", json={"label": "ghost"})
+        assert resp.status_code == 404
+        assert _label_audit(db_conn, 2147483000) == []
 
     def test_patch_strips_whitespace(self, db_conn: psycopg.Connection) -> None:
         tid = create_agent(db_conn)

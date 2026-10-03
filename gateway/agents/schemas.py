@@ -45,10 +45,13 @@ class LabelPatchRequest(BaseModel):
     """PATCH /api/agents/{id} body — manually set / reset agent label.
 
     `label=""` resets back to NULL; the frontend re-displays fallback
-    `#N`. Non-empty strings are stripped; length 1-64 inclusive.
+    `#N`. Non-empty strings are stripped; length 1-64 inclusive. `source` names who
+    changed it in the `label_change` audit fact: the operator by default, `"self"` when
+    the agent sets its own label.
     """
 
     label: Annotated[str, StringConstraints(strip_whitespace=True, max_length=64)]
+    source: Literal["user", "self"] = "user"
 
 
 class CompactEnqueued(BaseModel):
