@@ -16,13 +16,13 @@ Together with SDK wraps (the `ava.extend.wrap` registration primitive in `ava/sd
 ## Core Responsibilities
 
 - **`Hook` base class** (`agent/hooks/_registry.py:Hook`, `ABC`): subclasses override the typed `async def __call__(self, state, runtime, config, /) -> dict | None`. The base locks the signature—under pyright strict, incompatible overrides raise `reportIncompatibleMethodOverride`; not overriding leaves an uninstantiable abstract class. Optional `.name` property (defaults to class name) labels co-write conflict messages.
-- **Hook registration**: `register_before_llm(hook)` / `register_before_exec(hook)` / `register_after_exec(hook)` / `register_after_init(hook)` accept a `Hook` **instance** (not class, not bare function), appending to `HOOKS[hook_name]`
-- **Hook execution**: `make_hook_runner(name, default_next)` creates a node function at graph build time—it snapshots the `HOOKS[hook_name]` list object itself into the closure (so hooks registered later at runtime are also visible to older runners), then loops `await hook(state, runtime, config)`—the instance can be called directly (`Hook.__call__`), which is identical in form to the old bare-function calling style.
-- **Global registry**: `HOOKS: dict[HookName, list[Hook]]`, `HookName = Literal["before_llm", "before_exec", "after_exec", "after_init"]`
+- **Hook declaration**: a plugin's `contribute()` returns `PluginContributions(before_llm=(...), before_exec=(...), after_exec=(...), after_init=(...))` of `Hook` **instances** (not class, not bare function); nothing is registered at import. The framework's own are `agent/hooks/framework.py:framework_hooks()`
+- **Hook execution**: `make_hook_runner(name, default_next, hooks)` creates a node function at graph build time—`hooks` is the `(plugin | None, hook)` sequence the build hands it (plugins' first, then the framework's), fixed for the life of that graph; the runner loops `await hook(state, runtime, config)`—the instance can be called directly (`Hook.__call__`), which is identical in form to the old bare-function calling style.
+- **Hook points**: `HookName = HookPoint = Literal["before_llm", "before_exec", "after_exec", "after_init"]` (`base/packages/plugins/extensions.py`)
 - **Co-write arbitration**: If two hooks within the same run write to the same state key—if that key has a non-trivial reducer in the state schema (e.g. the `messages` channel's guarded reducer), the runner merges both values using the reducer; if no reducer, raises `RuntimeError` fail-loud (refusing silent last-wins, preventing one hook's wholesale replacement from swallowing another hook's appended content)
-- **Instance state**: subclasses carry per-hook state/configuration in `__init__` on `self`—the registry holds instances, not bare functions. Built-in `_CompactReminderHook` / `_RepairDanglingToolPairingHook` are module-level singletons: `register_compact_hooks()` / `register_repair_hooks()` append the same instance at graph build time; identity is stable (tests assert `HOOKS["before_llm"][-1] is _repair_dangling_tool_pairing`).
+- **Instance state**: subclasses carry per-hook state/configuration in `__init__` on `self`—declarations hold instances, not bare functions. Built-in `_CompactReminderHook` / `_RepairDanglingToolPairingHook` are module-level singletons that `framework_hooks()` returns.
 - **Route override**: If the dict returned by a hook contains `"goto": NodeName`, the container node's default route is overridden; other keys are treated as part of `Command(update=...)`
-- **Activation telemetry**: a hook registered by a *plugin* that returns a non-empty dict also emits one `plugin_activation` event naming the keys it wrote (`base/packages/plugins/activation.py`; attribution captured at `_register` into the weak-keyed `_HOOK_PLUGIN`). Framework hooks and `None` returns record nothing, so pure observation stays free. This is the runtime half of the registration ledger and philosophy §6's obsolescence gauge — see [[okf/plugins/plugins.ava.okf.md]]
+- **Activation telemetry**: a hook declared by a *plugin* that returns a non-empty dict also emits one `plugin_activation` event naming the keys it wrote (`base/packages/plugins/activation.py`; attribution is the plugin name paired with the hook in the runner's `hooks`). Framework hooks and `None` returns record nothing, so pure observation stays free. This is the runtime half of the registration ledger and philosophy §6's obsolescence gauge — see [[okf/plugins/plugins.ava.okf.md]]
 
 ## Key Dependencies
 
@@ -32,9 +32,9 @@ Together with SDK wraps (the `ava.extend.wrap` registration primitive in `ava/sd
 ## Entry Points
 
 - `agent/hooks/_registry.py:Hook` — Base class; subclasses override `__call__`
-- `agent/hooks/_registry.py:register_before_llm()` / `register_before_exec()` / `register_after_exec()` / `register_after_init()` — Accept `Hook` instances
+- `agent/hooks/framework.py:framework_hooks()` — The framework's own hooks per edge
 - `agent/hooks/_registry.py:make_hook_runner()` — Called at graph build time
-- `agent/hooks/__init__.py` — Public API re-exports (`Hook`, `HookName`, `HOOKS`, three `register_*`, `make_hook_runner`)
+- `agent/hooks/__init__.py` — Public API re-exports (`Hook`, `HookName`, `make_hook_runner`)
 - `agent/hooks/history_dump.py:dump_history()` — pre-compact JSONL dump of the full conversation, written by both compaction paths (`agent/graph/claim/_decide.py` and `agent/hooks/compact.py`) before the history is wiped
 
 ## Notes

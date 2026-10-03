@@ -258,14 +258,16 @@ class _LazyStateSlot:
         """Resolve the slot once: faces, then decode + validate, then swap."""
         if object.__getattribute__(self, "_real") is not None:
             return
-        # The faces register the plugins' state fields — in place before the
-        # dynamic class is built.
+        # The faces declare the plugins' state fields — loaded before the registry is built, and the
+        # dynamic class is built before the blob is decoded: the decode's allowlist is the class's.
         ava.ensure_plugins_loaded(surface=False)
         payload: RequestPayload = object.__getattribute__(self, "_payload")
-        snapshot = payload.materialize_state()
+        from agent.extensions.registry import build_registry
         from agent.state import build_agent_state
 
-        real = build_agent_state().model_validate(snapshot)
+        state_cls = build_agent_state(build_registry())
+        snapshot = payload.materialize_state()
+        real = state_cls.model_validate(snapshot)
         object.__setattr__(self, "_real", real)
         ava.state = real
 

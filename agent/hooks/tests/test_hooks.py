@@ -1,9 +1,13 @@
-"""agent/hooks registry + runner behavior guard.
+"""agent/hooks runner behavior guard.
 
-Test Hook subclass registration path, runner merge semantics, Command(goto=) routing (including hook override), fail-fast exception propagation. hooks changed from functions to `Hook` subclass instances: registration accepts instance, runner calls with `hook(state, runtime, config)` (instance is callable, call site unchanged). HOOKS is module-level state, conftest fixture snapshots/restores before/after each test to avoid cross-test contamination.
+Test the runner's merge semantics, Command(goto=) routing (including hook override), fail-fast
+exception propagation and activation attribution. A hook is a `Hook` subclass instance; the runner
+is built from `(plugin, hook)` pairs in run order and calls each with `hook(state, runtime,
+config)` (instance is callable). Plugins declare hooks through `PluginContributions`, the framework's
+own come from `framework_hooks()`.
 """
 
-from typing import Any, cast
+from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
@@ -12,33 +16,22 @@ from langchain_core.runnables import RunnableConfig
 from langgraph.runtime import Runtime
 from langgraph.types import Command
 
-from agent.hooks import (
-    HOOKS,
-    Hook,
-    HookName,
-    clear_hooks,
-    make_hook_runner,
-    register_before_exec,
-    register_before_llm,
-)
+from agent.hooks import Hook, make_hook_runner
 from agent.state import AgentState
 from agent.tests._fakes import make_fake_ops_pool
 from base.agents.context import AvaContext
 from base.host.env.agent_slices import AgentSlices
-from base.packages.plugins import activation, contributions
-from base.packages.plugins.context import PluginContext
+from base.packages.plugins import activation
+from base.packages.plugins.extensions import ExtensionRegistry, PluginContributions
 
 
-@pytest.fixture(autouse=True)
-def _isolate_hooks():
-    """Before each test clear HOOKS, restore after — avoid cross-test contamination + not lose production
-    registration (if import chain has register side effects)."""
-    saved = {k: list(v) for k, v in HOOKS.items()}
-    clear_hooks()
-    yield
-    for k, v in saved.items():
-        # cast is because dict.items() degrades key to str
-        HOOKS[cast(HookName, k)][:] = v
+def _runner(*hooks: Hook, plugin: str | None = None, name: str = "before_llm"):
+    """A runner over `hooks`, all attributed to `plugin` (None = framework hooks)."""
+    return make_hook_runner(
+        name,  # pyright: ignore[reportArgumentType]
+        "exec" if name == "before_exec" else "llm",
+        [(plugin, hook) for hook in hooks],
+    )
 
 
 # ── Test hook subclasses ──────────────────────────────────────────────────
@@ -91,21 +84,18 @@ def _empty_config() -> RunnableConfig:
 
 
 async def test_runner_pass_through_when_no_hooks():
-    """No hook registered — runner returns Command(update={}, goto=default_next)."""
-    runner = make_hook_runner("before_llm", default_next="llm")
-    cmd = await runner(_empty_state(), _empty_runtime(), _empty_config())
+    """No hooks — runner returns Command(update={}, goto=default_next)."""
+    cmd = await _runner()(_empty_state(), _empty_runtime(), _empty_config())
     assert isinstance(cmd, Command)
     assert cmd.update == {}
     assert cmd.goto == "llm"
 
 
-async def test_runner_calls_all_hooks_in_register_order():
-    """Multiple hooks registered — run in register order sequentially."""
+async def test_runner_calls_all_hooks_in_given_order():
+    """Multiple hooks — run in the order the runner was handed them, sequentially."""
     calls: list[str] = []
-    register_before_llm(_RecordHook("a", calls))
-    register_before_llm(_RecordHook("b", calls))
+    runner = _runner(_RecordHook("a", calls), _RecordHook("b", calls))
 
-    runner = make_hook_runner("before_llm", default_next="llm")
     await runner(_empty_state(), _empty_runtime(), _empty_config())
     assert calls == ["a", "b"]
 
@@ -121,11 +111,8 @@ async def test_runner_same_key_co_write_raises():
         async def __call__(self, state, runtime, config, /) -> dict | None:
             return {"halted": False}  # same key co-write -> raise
 
-    register_before_llm(_HookFirst())
-    register_before_llm(_HookSecond())
-
     with pytest.raises(RuntimeError, match=r"both wrote key 'halted'") as exc:
-        await make_hook_runner("before_llm", default_next="llm")(
+        await _runner(_HookFirst(), _HookSecond())(
             _empty_state(), _empty_runtime(), _empty_config()
         )
     # Error must name both hooks (class names) to facilitate locating coordination bug
@@ -135,12 +122,12 @@ async def test_runner_same_key_co_write_raises():
 
 async def test_runner_reducer_key_co_write_allowed():
     """Two hooks write same key with reducer (like messages) in one pass — allowed to merge, no raise. add_messages reducer ensures both hooks' messages are appended."""
-    register_before_llm(_ReturnHook({"messages": [HumanMessage(content="from hook a")]}))
-    register_before_llm(_ReturnHook({"messages": [HumanMessage(content="from hook b")]}))
-
-    cmd = await make_hook_runner("before_llm", default_next="llm")(
-        _empty_state(), _empty_runtime(), _empty_config()
+    runner = _runner(
+        _ReturnHook({"messages": [HumanMessage(content="from hook a")]}),
+        _ReturnHook({"messages": [HumanMessage(content="from hook b")]}),
     )
+
+    cmd = await runner(_empty_state(), _empty_runtime(), _empty_config())
     # Both messages should be in the update (reducer merged them)
     assert cmd.update is not None
     msgs = cmd.update.get("messages", [])
@@ -151,57 +138,43 @@ async def test_runner_reducer_key_co_write_allowed():
 
 async def test_runner_no_reducer_key_co_write_still_raises():
     """Key without reducer (like halted) still raises when both hooks write simultaneously — silent clobber protection unchanged."""
-    register_before_llm(_ReturnHook({"halted": True}))
-    register_before_llm(_ReturnHook({"halted": False}))
+    runner = _runner(_ReturnHook({"halted": True}), _ReturnHook({"halted": False}))
 
     with pytest.raises(RuntimeError, match=r"both wrote key 'halted'"):
-        await make_hook_runner("before_llm", default_next="llm")(
-            _empty_state(), _empty_runtime(), _empty_config()
-        )
+        await runner(_empty_state(), _empty_runtime(), _empty_config())
 
 
 async def test_runner_co_write_unknown_key_raises():
     """Key not in state schema (like typo) even if appears in both hooks simultaneously will raise — unknown key has no reducer, co-write is a bug."""
-    register_before_llm(_ReturnHook({"typo_field": 1}))
-    register_before_llm(_ReturnHook({"typo_field": 2}))
+    runner = _runner(_ReturnHook({"typo_field": 1}), _ReturnHook({"typo_field": 2}))
 
     with pytest.raises(RuntimeError, match=r"both wrote key 'typo_field'"):
-        await make_hook_runner("before_llm", default_next="llm")(
-            _empty_state(), _empty_runtime(), _empty_config()
-        )
+        await runner(_empty_state(), _empty_runtime(), _empty_config())
 
 
 async def test_runner_disjoint_keys_merge():
     """Two hooks write disjoint keys — normally merge into one update, no raise."""
-    register_before_llm(_ReturnHook({"halted": True}))
-    register_before_llm(_ReturnHook({"goto": "custom"}))
+    runner = _runner(_ReturnHook({"halted": True}), _ReturnHook({"goto": "custom"}))
 
-    cmd = await make_hook_runner("before_llm", default_next="llm")(
-        _empty_state(), _empty_runtime(), _empty_config()
-    )
+    cmd = await runner(_empty_state(), _empty_runtime(), _empty_config())
     assert cmd.goto == "custom"
     assert cmd.update == {"halted": True}
 
 
 async def test_runner_skips_none_returns():
     """observation hook returns None — runner skips, not merged into update."""
-    register_before_llm(_ReturnHook(None))
-    register_before_llm(_ReturnHook({"halted": True}))
+    runner = _runner(_ReturnHook(None), _ReturnHook({"halted": True}))
 
-    cmd = await make_hook_runner("before_llm", default_next="llm")(
-        _empty_state(), _empty_runtime(), _empty_config()
-    )
+    cmd = await runner(_empty_state(), _empty_runtime(), _empty_config())
     assert cmd.update == {"halted": True}
 
 
 async def test_hook_can_override_goto():
     """hook update sets 'goto' → runner uses it instead of default_next.
     'goto' does not enter update fields (popped), used only for routing."""
-    register_before_llm(_ReturnHook({"goto": "custom_target", "halted": True}))
+    runner = _runner(_ReturnHook({"goto": "custom_target", "halted": True}))
 
-    cmd = await make_hook_runner("before_llm", default_next="llm")(
-        _empty_state(), _empty_runtime(), _empty_config()
-    )
+    cmd = await runner(_empty_state(), _empty_runtime(), _empty_config())
     assert cmd.goto == "custom_target"
     assert cmd.update == {"halted": True}  # goto was popped, only halted remains
 
@@ -213,34 +186,36 @@ async def test_runner_propagates_hook_exceptions():
         async def __call__(self, state, runtime, config, /) -> dict | None:
             raise RuntimeError("plugin bug")
 
-    register_before_llm(_BoomHook())
-
-    runner = make_hook_runner("before_llm", default_next="llm")
+    runner = _runner(_BoomHook())
     with pytest.raises(RuntimeError, match="plugin bug"):
         await runner(_empty_state(), _empty_runtime(), _empty_config())
 
 
-async def test_register_functions_target_correct_lists():
-    """Three register_* each put instance into corresponding list, no cross-connection."""
+def test_registry_routes_each_hook_to_its_declared_point():
+    """A plugin's declared hooks come back at exactly the point they were declared on, tagged with
+    the plugin, and an undeclared point is empty — no cross-connection between points."""
     h1 = _ReturnHook(None)
     h2 = _ReturnHook(None)
-    register_before_llm(h1)
-    register_before_exec(h2)
+    registry = ExtensionRegistry(
+        (("demo", PluginContributions(before_llm=(h1,), before_exec=(h2,))),)
+    )
 
-    assert HOOKS["before_llm"] == [h1]
-    assert HOOKS["before_exec"] == [h2]
-    assert HOOKS["after_exec"] == []
+    assert list(registry.hooks("before_llm")) == [("demo", h1)]
+    assert list(registry.hooks("before_exec")) == [("demo", h2)]
+    assert list(registry.hooks("after_exec")) == []
+    assert list(registry.hooks("after_init")) == []
 
 
-async def test_runner_sees_hooks_registered_after_build():
-    """make_hook_runner snapshots HOOKS list reference at build time — hooks registered later can also run. This decouples plugin load order from graph build."""
-    runner = make_hook_runner("before_llm", default_next="llm")
-
+async def test_runner_is_a_function_of_the_hooks_it_was_built_with():
+    """The hook list is read once, at build: changing the source list afterwards does not change
+    what the already-built runner runs. The registry is a value, not a live global."""
     calls: list[str] = []
-    register_before_llm(_RecordHook("late", calls))
+    source: list[tuple[str | None, Hook]] = [(None, _RecordHook("built", calls))]
+    runner = make_hook_runner("before_llm", "llm", source)
 
+    source.append((None, _RecordHook("late", calls)))
     await runner(_empty_state(), _empty_runtime(), _empty_config())
-    assert calls == ["late"]
+    assert calls == ["built"]
 
 
 async def test_hook_can_read_agent_id_from_config():
@@ -254,9 +229,7 @@ async def test_hook_can_read_agent_id_from_config():
             seen.append(agent_id_from_config(config))
             return None
 
-    register_before_llm(_CaptureTid())
-
-    runner = make_hook_runner("before_llm", default_next="llm")
+    runner = _runner(_CaptureTid())
     await runner(_empty_state(), _empty_runtime(), {"configurable": {"thread_id": "42"}})
     assert seen == [42]
 
@@ -289,42 +262,54 @@ async def test_plugin_hook_state_update_records_activation(
     """A plugin hook that returned a state update acted on the turn — the record
     names the keys it wrote, which is also how the `state` surface is covered
     (plugin state writes travel through hook returns)."""
-    with PluginContext("myplugin"):
-        register_before_llm(_ReturnHook({"halted": True}))
-
-    await make_hook_runner("before_llm", default_next="llm")(
+    await _runner(_ReturnHook({"halted": True}), plugin="myplugin")(
         _empty_state(), _empty_runtime(), _empty_config()
     )
     assert activations == [("myplugin", "hooks", "before_llm", "_ReturnHook wrote halted")]
+
+
+async def test_each_hook_is_attributed_to_the_plugin_it_was_paired_with(
+    activations: list[tuple[str, str, str, str]],
+):
+    """The plugin name rides the `(plugin, hook)` pair, so two plugins' hooks at one edge are
+    attributed separately, and a framework hook (None) between them records nothing."""
+    runner = make_hook_runner(
+        "before_llm",
+        "llm",
+        [
+            ("alpha", _ReturnHook({"goto": "x"})),
+            (None, _ReturnHook({"halted": True})),
+            ("beta", _ReturnHook({"messages": []})),
+        ],
+    )
+
+    await runner(_empty_state(), _empty_runtime(), _empty_config())
+    assert [(plugin, detail) for plugin, _, _, detail in activations] == [
+        ("alpha", "_ReturnHook wrote goto"),
+        ("beta", "_ReturnHook wrote messages"),
+    ]
 
 
 async def test_plugin_hook_returning_none_records_nothing(
     activations: list[tuple[str, str, str, str]],
 ):
     """Pure observation stays free — a None return is not an activation."""
-    with PluginContext("myplugin"):
-        register_before_llm(_ReturnHook(None))
-
-    await make_hook_runner("before_llm", default_next="llm")(
+    await _runner(_ReturnHook(None), plugin="myplugin")(
         _empty_state(), _empty_runtime(), _empty_config()
     )
     assert activations == []
 
 
 async def test_framework_hook_records_nothing(activations: list[tuple[str, str, str, str]]):
-    """Framework hooks register outside a PluginContext, so they are absent from
-    the attribution ledger and from activation telemetry alike."""
-    register_before_llm(_ReturnHook({"halted": True}))
-
-    await make_hook_runner("before_llm", default_next="llm")(
-        _empty_state(), _empty_runtime(), _empty_config()
-    )
+    """Framework hooks carry no plugin name, so they are absent from the attribution
+    ledger and from activation telemetry alike."""
+    await _runner(_ReturnHook({"halted": True}))(_empty_state(), _empty_runtime(), _empty_config())
     assert activations == []
 
 
 async def test_activation_key_matches_the_ledger_entry(monkeypatch: pytest.MonkeyPatch):
     """The whole point of reusing `(plugin, surface, identifier)`: an activation
-    joins onto the `Contribution` the same registration wrote, with no second
+    joins onto the `Contribution` the same declaration yields, with no second
     identifier space to keep in sync."""
     recorded: list[tuple[str, str, str]] = []
 
@@ -335,14 +320,12 @@ async def test_activation_key_matches_the_ledger_entry(monkeypatch: pytest.Monke
             recorded.append((plugin, surface, identifier))
 
     monkeypatch.setattr(activation, "record", spy)
-    before = len(contributions.contributions())
-    with PluginContext("myplugin"):
-        register_before_exec(_ReturnHook({"halted": True}))
-    ledger = contributions.contributions()[before:]
+    hook = _ReturnHook({"halted": True})
+    registry = ExtensionRegistry((("myplugin", PluginContributions(before_exec=(hook,))),))
+    ledger = registry.records("myplugin")
 
-    await make_hook_runner("before_exec", default_next="exec")(
-        _empty_state(), _empty_runtime(), _empty_config()
-    )
+    runner = make_hook_runner("before_exec", "exec", list(registry.hooks("before_exec")))
+    await runner(_empty_state(), _empty_runtime(), _empty_config())
     assert [(c.plugin, c.surface, c.identifier) for c in ledger] == recorded
 
 
@@ -351,12 +334,9 @@ async def test_runner_emits_one_hook_timing_event_per_pass(loguru_records: list[
     durations — the sub-span replacement that makes a slow before_llm /
     before_exec node attributable to its hook from the events alone (the
     node span has no sub-spans and is otherwise a black box)."""
-    register_before_llm(_RecordHook("a", []))
-    register_before_llm(_ReturnHook({"halted": True}))
+    runner = _runner(_RecordHook("a", []), _ReturnHook({"halted": True}))
 
-    await make_hook_runner("before_llm", default_next="llm")(
-        _empty_state(), _empty_runtime(), _empty_config()
-    )
+    await runner(_empty_state(), _empty_runtime(), _empty_config())
 
     timing = [r for r in loguru_records if r["extra"].get("event") == "hook_timing"]
     assert len(timing) == 1
@@ -369,10 +349,8 @@ async def test_runner_emits_one_hook_timing_event_per_pass(loguru_records: list[
 
 
 async def test_runner_skips_hook_timing_on_empty_pass(loguru_records: list[dict[str, Any]]):
-    """No hooks registered → no `hook_timing` event (an empty pass has nothing
+    """No hooks → no `hook_timing` event (an empty pass has nothing
     to attribute; the event would be pure noise)."""
-    await make_hook_runner("before_llm", default_next="llm")(
-        _empty_state(), _empty_runtime(), _empty_config()
-    )
+    await _runner()(_empty_state(), _empty_runtime(), _empty_config())
 
     assert not [r for r in loguru_records if r["extra"].get("event") == "hook_timing"]

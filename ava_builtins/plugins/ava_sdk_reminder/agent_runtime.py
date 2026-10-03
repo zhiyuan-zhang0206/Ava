@@ -19,14 +19,15 @@ from langchain_core.runnables import RunnableConfig
 from langgraph.runtime import Runtime
 
 from agent.graph.tool_calls import first_tool_call_code
-from agent.hooks import Hook, register_after_exec, register_before_llm
+from agent.hooks import Hook
 from agent.hooks.compact import auto_compact_will_fire
 from agent.messages import NoteTag, system_note_message, tail_has_agent_inbound
-from agent.state import AgentState, register_plugin_state
+from agent.state import AgentState
 from base.agents.context import AvaContext
 from base.agents.messages.kwargs import message_content
 from base.host.env.agent_slices import Cadence
 from base.log import logger
+from base.packages.plugins.extensions import PluginContributions
 
 from ._state import (
     AGENT_REPLY_CATEGORY,
@@ -37,10 +38,8 @@ from ._state import (
     mentions_watcher,
 )
 
-register_plugin_state(AvaSdkReminderState)
-
-# Channel keys for this plugin's state fields (prefixed by the framework's
-# register_plugin_state). A hook node reads/writes these directly on `state`
+# Channel keys for this plugin's state fields (prefixed by the framework from the
+# declared state class). A hook node reads/writes these directly on `state`
 # because the in-turn handle (state_handle.read/update) is not wired up here.
 _REMINDED_FIELD = "ava_sdk_reminder__reminded"
 _BOOKMARK_FIELD = "ava_sdk_reminder__last_seen_compact"
@@ -258,7 +257,6 @@ class _SdkReminderAfterExecHook(Hook):
 
 
 sdk_reminder_after_exec = _SdkReminderAfterExecHook()
-register_after_exec(sdk_reminder_after_exec)
 
 
 def _agent_reply_note() -> HumanMessage:
@@ -336,4 +334,12 @@ class _SdkReminderAgentReplyHook(Hook):
 
 
 sdk_reminder_agent_reply_before_llm = _SdkReminderAgentReplyHook()
-register_before_llm(sdk_reminder_agent_reply_before_llm)
+
+
+def contribute() -> PluginContributions:
+    """What this plugin declares for the agent runtime."""
+    return PluginContributions(
+        before_llm=(sdk_reminder_agent_reply_before_llm,),
+        after_exec=(sdk_reminder_after_exec,),
+        state=(AvaSdkReminderState,),
+    )

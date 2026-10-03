@@ -214,19 +214,5 @@ class _RepairDanglingToolPairingHook(Hook):
         return {"messages": repairs, "pending_exec_notes": []}
 
 
-# Module-level singleton — the registered instance. `register_repair_hooks`
-# re-appends this same object on each graph build, so its identity is stable
-# (tests assert `HOOKS["before_llm"][-1] is _repair_dangling_tool_pairing`).
+# Module-level singleton — the instance `framework_hooks()` hands the graph build.
 _repair_dangling_tool_pairing = _RepairDanglingToolPairingHook()
-
-
-def register_repair_hooks() -> None:
-    """Register the built-in dangling-tool-pairing repair before_llm hook.
-
-    Called once at graph build time (from `build_graph`), before
-    `register_compact_hooks` — repair guards the payload every hook after it
-    may feed to an LLM. Unconditional: crash recovery is core, not a plugin.
-    """
-    from agent.hooks import register_before_llm
-
-    register_before_llm(_repair_dangling_tool_pairing)

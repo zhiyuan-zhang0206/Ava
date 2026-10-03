@@ -1,14 +1,12 @@
-"""Graph-edge hook registry — base class + registry for the 3 hook container
-Nodes + runner factory.
+"""Graph-edge hooks — base class + runner factory for the hook container Nodes.
 
 A hook is a subclass of `Hook` (PyTorch `nn.Module` style): override the typed
 `__call__`, and — because the base pins the signature every hook point shares —
-pyright (strict) flags an incompatible override. Plugins attach an *instance* to
-the corresponding list via `register_before_llm` / `register_before_exec` /
-`register_after_exec`; `make_hook_runner(name, default_next)` snapshots this list
-into the closure at graph build time. An instance is callable, so the runner
-invokes each with `hook(state, runtime, config)` exactly as it called the bare
-functions of the earlier design — call sites are unchanged.
+pyright (strict) flags an incompatible override. A plugin declares *instances* in its
+`contribute()` (`PluginContributions.before_llm` / `before_exec` / `after_exec` /
+`after_init`); the framework's own are `agent.hooks.framework.framework_hooks()`.
+`make_hook_runner(name, default_next, hooks)` closes over the list the graph build hands it.
+An instance is callable, so the runner invokes each with `hook(state, runtime, config)`.
 
 Hook signature (aligned with the business node three-arg signature):
 
@@ -54,10 +52,9 @@ up the dynamic class rebound by build_agent_state.
 from __future__ import annotations
 
 import time
-import weakref
 from abc import ABC, abstractmethod
-from collections.abc import Awaitable, Callable
-from typing import Any, Literal
+from collections.abc import Awaitable, Callable, Sequence
+from typing import Any
 
 from langchain_core.runnables import RunnableConfig
 from langgraph.runtime import Runtime
@@ -67,10 +64,10 @@ from agent import state as _state
 from agent.nodes import NodeName
 from base.agents.context import AvaContext, agent_id_from_config
 from base.log import logger
-from base.packages.plugins import activation, contributions
-from base.packages.plugins.context import current_plugin_name
+from base.packages.plugins import activation
+from base.packages.plugins.extensions import GraphHook, HookPoint
 
-HookName = Literal["before_llm", "before_exec", "after_exec", "after_init"]
+HookName = HookPoint
 
 
 class Hook(ABC):
@@ -108,73 +105,18 @@ class Hook(ABC):
         return type(self).__name__
 
 
-# Global registry — `make_hook_runner` snapshots this list into closure at
-# graph build time; hooks registered later at runtime are also seen by old
-# runners (the list is the same object).
-HOOKS: dict[HookName, list[Hook]] = {
-    "before_llm": [],
-    "before_exec": [],
-    "after_exec": [],
-    "after_init": [],
-}
-
-
-# hook instance -> the plugin that registered it, so the runner can attribute a
-# firing without `HOOKS` (or the `Hook` protocol) growing a field. Weak keys:
-# an entry disappears with the hook instance, so a plugin reload that rebuilds
-# its hooks does not accumulate dead attributions. Framework hooks register
-# outside a `PluginContext` and are absent here — which is exactly the gate
-# `plugin_activation.record` applies, so framework hooks stay untelemetered.
-_HOOK_PLUGIN: weakref.WeakKeyDictionary[Hook, str] = weakref.WeakKeyDictionary()
-
-
-def clear_hooks() -> None:
-    """Clear every hook list in `HOOKS`."""
-    for hook_list in HOOKS.values():
-        hook_list.clear()
-
-
-def _register(hook_name: HookName, hook: Hook) -> None:
-    """Append to the hook point's list and attribute the registration to the
-    importing plugin (a no-op outside a `PluginContext`, i.e. for the framework's
-    own hooks) — `HOOKS` holds bare instances, so `ava plugins inspect` reads the
-    attribution off the ledger and the runner reads it off `_HOOK_PLUGIN`."""
-    HOOKS[hook_name].append(hook)
-    contributions.record(
-        "hooks", hook_name, detail=f"{type(hook).__module__}.{type(hook).__qualname__}"
-    )
-    plugin = current_plugin_name()
-    if plugin is not None:
-        _HOOK_PLUGIN[hook] = plugin
-
-
-def register_before_llm(hook: Hook) -> None:
-    """Register a before_llm hook — runs after claim completes, before calling LLM."""
-    _register("before_llm", hook)
-
-
-def register_before_exec(hook: Hook) -> None:
-    """Register a before_exec hook — runs after LLM completes, before subprocess exec."""
-    _register("before_exec", hook)
-
-
-def register_after_exec(hook: Hook) -> None:
-    """Register an after_exec hook — runs after subprocess exec completes, before moving to the next node."""
-    _register("after_exec", hook)
-
-
-def register_after_init(hook: Hook) -> None:
-    """Register an after_init hook — runs once after state is loaded from checkpoint, before claim."""
-    _register("after_init", hook)
-
-
 def make_hook_runner(
     hook_name: HookName,
     default_next: NodeName | Callable[[_state.AgentState], NodeName],
+    hooks: Sequence[tuple[str | None, GraphHook]],
 ) -> Callable[
     [_state.AgentState, Runtime[AvaContext], RunnableConfig], Awaitable[Command[NodeName]]
 ]:
-    """Generate a LangGraph Node function that runs all registered hooks for the given hook_name.
+    """Generate a LangGraph Node function that runs the given hooks at one graph edge.
+
+    `hooks` is `(plugin, hook)` in run order — `plugin` is None for a framework hook, which the
+    activation telemetry then leaves unrecorded. The list is read once, here: the runner is a
+    function of the hooks it was built with.
 
     Routing model: the graph topology only has the START → claim edge;
     everything else relies on each Node returning Command(goto=...) for
@@ -191,7 +133,7 @@ def make_hook_runner(
       only applies after Node return.
 
     Runner behavior:
-    - for-loop runs all hooks in HOOKS[hook_name]; each hook receives
+    - for-loop runs all `hooks`; each hook receives
       (state, runtime, config) three args — `config` is automatically passed
       in by LangGraph when calling the Node
     - Each hook returning dict → merged into update. Two hooks writing the
@@ -219,7 +161,7 @@ def make_hook_runner(
         node_lifecycle,  # local import to avoid top-level cycle (graph→hooks→graph)
     )
 
-    hooks = HOOKS[hook_name]
+    hooks = tuple(hooks)
 
     async def run(
         state: _state.AgentState,
@@ -249,7 +191,7 @@ def make_hook_runner(
             # ate the time without a live debugger (the node span alone is a
             # black box: no sub-spans, no events).
             timings: list[tuple[str, float]] = []
-            for hook in hooks:
+            for plugin, hook in hooks:
                 started = time.monotonic()
                 result = await hook(state, runtime, config)
                 timings.append((hook.name, time.monotonic() - started))
@@ -261,7 +203,7 @@ def make_hook_runner(
                 # and stays free. Plugin state-field writes travel through this
                 # dict, so the `state` surface needs no separate probe.
                 activation.record(
-                    _HOOK_PLUGIN.get(hook),
+                    plugin,
                     "hooks",
                     hook_name,
                     detail=f"{hook.name} wrote {','.join(sorted(result))}",  # pyright: ignore[reportUnknownArgumentType]

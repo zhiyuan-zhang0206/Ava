@@ -14,9 +14,9 @@ BaseAgentState (framework layer, static):
     capabilities     — nested capability-index snapshot (CapabilitiesState, agent/state_channels.py)
     context_reset    — nested pending-context-reset bookkeeping (ContextReset, agent/state_channels.py)
 
-Plugins register an entire BaseModel via `register_plugin_state(Cls)`,
-getting back a `PluginStateHandle[Cls]` for typed read/write; framework
-dispatches by field name:
+A plugin declares an entire BaseModel in its `contribute()` (`PluginContributions.state`) and
+keeps a `PluginStateHandle[Cls]` (built from the class and its plugin name) for typed read/write;
+framework dispatches by field name:
 
 - Field name ∈ BaseAgentState (messages / halted): treated as "plugin
   declares it will modify this base field"; no prefix added; type must
@@ -24,17 +24,17 @@ dispatches by field name:
   Multiple plugins declaring the same base field all modify the same
   channel; reducer naturally merges.
 - Field name ∉ base: auto-prefixed `<plugin>__<field>` into the merged
-  AgentState; plugin-private channel; two plugins with the same name and
-  same type → fail-fast raise forcing rename.
+  AgentState; plugin-private channel.
 
-`build_agent_state()` dynamically creates AgentState (BaseAgentState
-subclass + plugin-contributed fields) at graph build time. All plugin
+`build_agent_state(extensions)` dynamically creates AgentState (BaseAgentState
+subclass + plugin-declared fields) at graph build time. All plugin
 read/write goes through `PluginStateHandle`, not directly touching
 `ava.state` / `ava.state_update` (framework-internal slots).
 
-Usage (in plugin's plugin.py):
+Usage (in a plugin's agent_runtime.py):
 
-    from agent.state import register_plugin_state
+    from agent.state import PluginStateHandle
+    from base.packages.plugins.extensions import PluginContributions
     from pydantic import BaseModel, Field
     from typing import Annotated
 
@@ -45,14 +45,17 @@ Usage (in plugin's plugin.py):
         counter: int = Field(default=0)
         seen: Annotated[set[str], _set_union] = Field(default_factory=set)
 
-    state_handle = register_plugin_state(MyPluginState)
-    # state_handle: PluginStateHandle[MyPluginState]
-    #   .read() -> MyPluginState (typed snapshot, reflects same-turn writes)
-    #   .update({"counter": 1, "seen": {"x"}})  (validated, LangGraph-reducer merged)
+    state_handle = PluginStateHandle(MyPluginState, "my_plugin")
+    # state_handle.read() -> MyPluginState (typed snapshot, reflects same-turn writes)
+    # state_handle.update({"counter": 1, "seen": {"x"}})  (validated, LangGraph-reducer merged)
+
+    def contribute() -> PluginContributions:
+        return PluginContributions(state=(MyPluginState,))
 """
 
 import sys
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
+from dataclasses import dataclass
 from types import SimpleNamespace
 from typing import Annotated, Any
 
@@ -85,7 +88,7 @@ from agent.state_channels import (
 )
 from base.agents.history.checkpoint_serde import STATIC_CHECKPOINT_MSGPACK_TYPES
 from base.packages.plugins import contributions
-from base.packages.plugins.context import current_plugin_name
+from base.packages.plugins.extensions import PLUGIN_WRITABLE_BASE_FIELDS, ExtensionRegistry
 
 AttachEntry = _AttachEntry
 
@@ -173,22 +176,32 @@ class BaseAgentState(BaseModel):
     (see CapabilitiesState)."""
 
 
-# ── BaseAgentState field snapshot (for register_plugin_state field-name dispatch) ──
+# ── BaseAgentState field snapshot (for plugin_state_schema field-name dispatch) ──
 
 _BASE_FIELDS: frozenset[str] = frozenset(BaseAgentState.model_fields.keys())
 
 
-# Two-layer dict:
-#   _EXTRA_FIELDS: prefixed key → (annotation, FieldInfo)
-#       stuffed into build_agent_state() namespace so LangGraph and Pydantic
-#       see all plugin fields
-#   _PLUGIN_NAMESPACE_FIELDS: plugin_name → set[original field name (no prefix)]
-#       lets AgentState.__getattr__ know which prefixed fields belong to which
-#       plugin when returning `state.<plugin>` SimpleNamespace (cross-plugin isolation)
-
+# What a registry's plugin state declarations amount to, built by `plugin_state_schema` and carried by
+# the AgentState class `build_agent_state` makes from it:
+#   extra_fields: prefixed key → (annotation, FieldInfo), stuffed into the class namespace so
+#       LangGraph and Pydantic see all plugin fields
+#   namespace_fields: plugin_name → set[original field name (no prefix)], so AgentState.__getattr__
+#       knows which prefixed fields belong to which plugin when returning `state.<plugin>`
+#       (cross-plugin isolation)
+#   base_declared: core fields some plugin declared in its BaseModel (only `messages`): "plugin
+#       explicitly updates the base channel" is legal, a base-field write without a declaration is
+#       a missing-prefix typo and `_validate_plugin_state_keys` rejects it
+#   classes: the declared BaseModel classes — the msgpack allowlist must cover them
 _StateFieldSpec = tuple[Any, FieldInfo]
-_EXTRA_FIELDS: dict[str, _StateFieldSpec] = {}
-_PLUGIN_NAMESPACE_FIELDS: dict[str, set[str]] = {}
+
+
+@dataclass(frozen=True)
+class PluginStateSchema:
+    extra_fields: dict[str, _StateFieldSpec]
+    namespace_fields: dict[str, set[str]]
+    base_declared: frozenset[str]
+    classes: frozenset[type[BaseModel]]
+
 
 # Core keys a plugin may declare/write: only `messages` (its add_messages
 # reducer defines the merge contract; exec._notes.merge_exec_notes combines a
@@ -197,25 +210,18 @@ _PLUGIN_NAMESPACE_FIELDS: dict[str, set[str]] = {}
 # BaseAgentState field is framework-managed per turn (halted / turn_active /
 # exit_requested / turn_idle / restart_requested / update_initiated / compact / memory / context_reset /
 # capabilities):
-# declaring one is rejected at register_plugin_state, and a direct
+# declaring one is rejected by `plugin_state_schema`, and a direct
 # ava.state_update write to one is rejected by _validate_plugin_state_keys.
-_PLUGIN_WRITABLE_BASE_FIELDS: frozenset[str] = frozenset({"messages"})
-
-# Base fields explicitly declared by some plugin (writing same-named field in
-# BaseModel). Used to distinguish "plugin explicitly updates base channel"
-# (legal — currently only `messages`) vs "plugin missing-prefix typo
-# accidentally stuffing base channel" (rejected): without declaration, writing
-# a base field → _validate_plugin_state_keys rejects as typo.
-_BASE_FIELD_DECLARED: set[str] = set()
+_PLUGIN_WRITABLE_BASE_FIELDS: frozenset[str] = PLUGIN_WRITABLE_BASE_FIELDS
 
 # BaseAgentState built-in fields — plugins can modify exactly one of them:
 # `messages` (only when the plugin declares it in its own BaseModel with the
 # exact BaseAgentState annotation, including the add_messages reducer;
-# register_plugin_state checks). Every other core key (halted / turn_active /
+# plugin_state_schema checks). Every other core key (halted / turn_active /
 # exit_requested / turn_idle / restart_requested / update_initiated / compact / memory / context_reset /
 # capabilities) is framework-managed every turn: declaring one raises at
 # registration, and
-# _BASE_FIELD_DECLARED tracks the declared (messages-only) set so a direct
+# PluginStateSchema.base_declared tracks the declared (messages-only) set so a direct
 # write to any other base channel = plugin missing a prefix typo (writing
 # "compact" instead of "ava_myplugin__compact"), which would silent-clobber
 # this turn's ToolMessage / lifecycle signal / compaction state (Python dict
@@ -235,7 +241,7 @@ def _validate_plugin_state_keys(update: dict[str, Any], state_cls: type[Any]) ->
     2. Key not in state schema → LangGraph reducer silently drops outside
        schema; plugin author typos have no diagnostic pointer
 
-    Explicitly declared base fields (`_BASE_FIELD_DECLARED`) are allowed:
+    Explicitly declared base fields (the class's `__plugin_base_declared__`) are allowed:
     plugin writing via PluginStateHandle.update({"messages": [...]}) to the
     base channel is a legitimate path.
 
@@ -244,14 +250,15 @@ def _validate_plugin_state_keys(update: dict[str, Any], state_cls: type[Any]) ->
     if not update:
         return update
     base_clash = set(update) & _BASE_STATE_FIELDS
-    illegal_base = base_clash - _BASE_FIELD_DECLARED
+    base_declared: frozenset[str] = getattr(state_cls, "__plugin_base_declared__", frozenset())
+    illegal_base = base_clash - base_declared
     if illegal_base:
         raise ValueError(
             f"plugin wrote undeclared base field to ava.state_update: {sorted(illegal_base)} — "
             f"framework core keys are managed by the framework every turn; only "
             f"{sorted(_PLUGIN_WRITABLE_BASE_FIELDS)} is plugin-writable, and only when declared "
             f"in the plugin's own BaseModel with the exact BaseAgentState annotation. "
-            f"Missing prefix typo? Declared: {sorted(_BASE_FIELD_DECLARED) or '<empty>'}"
+            f"Missing prefix typo? Declared: {sorted(base_declared) or '<empty>'}"
         )
     # Legal keys = all field names in the state schema (including base — already validated through illegal_base).
     # Previously used `model_fields - _BASE_STATE_FIELDS` to exclude base; now allowing declared
@@ -261,19 +268,11 @@ def _validate_plugin_state_keys(update: dict[str, Any], state_cls: type[Any]) ->
     if unknown:
         raise ValueError(
             f"plugin wrote unregistered key to ava.state_update: {sorted(unknown)} — "
-            f"fields not declared via register_plugin_state are silently dropped by the "
+            f"fields not declared in a plugin's `state` contribution are silently dropped by the "
             f"LangGraph reducer in Command(update=). Known plugin fields: "
             f"{sorted(known) or '<empty>'}"
         )
     return update
-
-
-# Whole classes registered via register_plugin_state — the msgpack allowlist
-# (checkpoint_msgpack_allowlist) must cover them: a plugin field whose value is
-# a BaseModel instance (rather than a plain set/str/bool) serializes as a
-# pydantic-v2 ext object into the checkpoint and is rejected without an
-# explicit registration.
-_PLUGIN_STATE_CLASSES: set[type[BaseModel]] = set()
 
 
 # LangGraph style: `Annotated[T, reducer_fn]` stuffs reducer into Pydantic
@@ -377,7 +376,7 @@ def _accumulate_delta(acc: Any, new: Any, reducer: Callable[[Any, Any], Any]) ->
 
 
 class PluginStateHandle[T: BaseModel]:
-    """Typed read/write handle for plugin state. Returned by `register_plugin_state`.
+    """Typed read/write handle for plugin state. Built from a declared state class and its plugin's name.
 
     All plugin state operations go through the handle; **do not** directly
     touch `ava.state` / `ava.state_update` (the latter is marked framework-
@@ -397,7 +396,7 @@ class PluginStateHandle[T: BaseModel]:
 
     Base field reuse: if a plugin BaseModel declares a field with the same
     name as one in BaseAgentState (types matching exactly, validated at
-    register_plugin_state entry), the handle routes those fields to the
+    plugin_state_schema), the handle routes those fields to the
     base channel (no prefix). A single update dict can mix base / plugin
     fields; the handle internally dispatches by _BASE_FIELDS.
     """
@@ -409,7 +408,7 @@ class PluginStateHandle[T: BaseModel]:
         #   base field: bare name, shares BaseAgentState channel.
         #   plugin field: <plugin>__<field>; when plugin_name=None, falls back
         #   to bare name (supports test fixtures directly calling PluginStateHandle
-        #   — normal register_plugin_state path always passes name).
+        #   — normal declared-state path always passes name).
         self._channel_keys: dict[str, str] = {}
         for name in cls.model_fields:
             if name in _BASE_FIELDS:
@@ -417,7 +416,7 @@ class PluginStateHandle[T: BaseModel]:
             else:
                 self._channel_keys[name] = f"{plugin_name}__{name}" if plugin_name else name
         # Reducer per field. Base fields must declare exactly as BaseAgentState
-        # (including Annotated reducer; register_plugin_state entry already
+        # (including Annotated reducer; plugin_state_schema already
         # validates), so extracting what the plugin wrote gives the same
         # reducer as base; no need to look up base separately.
         self._reducers: dict[str, Callable[[Any, Any], Any]] = {
@@ -503,22 +502,13 @@ def _annotation_text(annotation: Any) -> str:
     return annotation.__name__ if isinstance(annotation, type) else repr(annotation)
 
 
-def register_plugin_state[T: BaseModel](cls: type[T]) -> PluginStateHandle[T]:
-    """Register plugin state and return a typed read/write handle.
+def plugin_state_schema(extensions: ExtensionRegistry) -> PluginStateSchema:
+    """The state declarations of every plugin in `extensions`, validated.
 
-    In a plugin's `plugin.py`:
-
-        class MyState(BaseModel):
-            counter: int = 0
-            ...
-        state_handle = register_plugin_state(MyState)
-
-    The handle is then used to read/write the plugin's own state (see
-    `PluginStateHandle` docstring). The framework side dispatches to
-    LangGraph channels by field name:
+    A plugin's `PluginContributions.state` classes dispatch by field name:
 
     - Field name ∈ BaseAgentState → no prefix, shares the same channel
-      with base. Only `messages` is plugin-writable (`_PLUGIN_WRITABLE_BASE_FIELDS`);
+      with base. Only `messages` is plugin-writable (`PLUGIN_WRITABLE_BASE_FIELDS`);
       declaring any other core key (halted / update_initiated / compact /
       memory / context_reset / capabilities) raises — those are
       framework-managed every turn. For `messages`, type must match base
@@ -526,139 +516,97 @@ def register_plugin_state[T: BaseModel](cls: type[T]) -> PluginStateHandle[T]:
       spelled either `add_messages` or the guarded wrapper, same contract),
       otherwise raise — "plugin declares it will modify this base field"
       contract; not allowed to silently change types. The declaration is recorded in
-      `_BASE_FIELD_DECLARED` so the framework's state_update key validation
-      lets it through, and the exec node merges the plugin's messages delta
-      with its own ToolMessage delta.
+      `base_declared` so the framework's state_update key validation lets it through, and
+      the exec node merges the plugin's messages delta with its own ToolMessage delta.
     - Field name ∉ base → auto-prefixed `<plugin>__<field>` into the
-      dynamic AgentState; plugin-private channel; two plugins with the
-      same prefixed name and different types → raise.
-
-    Args:
-        cls: ordinary `pydantic.BaseModel` subclass, **not** inheriting
-            BaseAgentState — BaseAgentState field names are automatically
-            detected by dispatching; plugins just write "ordinary BaseModel".
+      dynamic AgentState; plugin-private channel.
 
     Raises:
-        TypeError: cls is not a BaseModel subclass — plugin author misused dataclass / plain class.
-        ValueError: field name ∈ base but annotation doesn't match base (type swap).
-        ValueError: field name ∉ base but another plugin already registered the same prefixed name with conflicting type.
+        TypeError: a declared class is not a BaseModel subclass — plugin author misused dataclass / plain class.
+        ValueError: field name ∈ base but annotation doesn't match base (type swap), or a
+            plugin declares one prefixed field twice with conflicting types.
     """
-    if not (isinstance(cls, type) and issubclass(cls, BaseModel)):
-        raise TypeError(
-            f"register_plugin_state expects BaseModel subclass, got {cls!r} — "
-            f"plugin author writes `class FooState(BaseModel): ...` then registers."
-        )
-
-    current = current_plugin_name()
-
-    _PLUGIN_STATE_CLASSES.add(cls)
-
-    for name, model_field in cls.model_fields.items():
-        # Pydantic v2 splits `Annotated[T, ...metadata]` into
-        # `model_field.annotation` (bare T) + `model_field.metadata`
-        # (Annotated's extras list); we reconstruct the full Annotated to
-        # compare with the original Annotated on BaseAgentState.model_fields
-        # (the channel may be spelled by its delta form or the guarded
-        # reducer; the comparison normalizes the contract spellings — see
-        # _messages_annotation_key).
-        #
-        # Don't read `cls.__annotations__` — under `from __future__ import
-        # annotations`, plugin modules have strings (`"Annotated[set[str],
-        # _my_reducer]"`); Pydantic `__init_subclass__` already
-        # get_type_hints-eval'd strings into real types and stuffed them
-        # into model_field (prerequisite: plugin module registered into
-        # sys.modules so get_type_hints can find globals; see
-        # `agent/graph/_build.py:load_extensions`). Reconstructing from
-        # model_field avoids forward-ref string residuals and avoids
-        # NameErrors during get_type_hints(cls) caused by missing symbols
-        # in intermediate base classes' namespaces.
-        if model_field.metadata:
-            raw_annotation = Annotated[model_field.annotation, *model_field.metadata]
-        else:
-            raw_annotation = model_field.annotation
-
-        if name in _BASE_FIELDS:
-            if name not in _PLUGIN_WRITABLE_BASE_FIELDS:
-                raise ValueError(
-                    f"plugin {current!r} declared core state field {name!r} — only "
-                    f"{sorted(_PLUGIN_WRITABLE_BASE_FIELDS)} is plugin-writable among the "
-                    f"framework core keys; {name!r} is framework-managed every turn "
-                    f"(write a private <plugin>__{name} field or contribute via a hook instead)"
-                )
-            base_raw = BaseAgentState.__annotations__[name]
-            if _messages_annotation_key(raw_annotation) != _messages_annotation_key(base_raw):
-                raise ValueError(
-                    f"plugin {current!r} declared base field '{name}' with type "
-                    f"{raw_annotation!r} differing from BaseAgentState's {base_raw!r} — "
-                    f"declaring a base field is a contract 'plugin will modify this field'; "
-                    f"silent type swaps not allowed."
-                )
-            # Base field shared: BaseAgentState already has the full
-            # definition (including reducer); no need to stuff into
-            # _EXTRA_FIELDS — build_agent_state won't rewrite it.
-            # Recorded in _BASE_FIELD_DECLARED so _validate_plugin_state_keys
-            # treats this base channel as a legal write target (writing base
-            # fields without declaration is still rejected as typo).
-            _BASE_FIELD_DECLARED.add(name)
-            contributions.record(
-                "state", name, detail=f"{cls.__name__}.{name}: base channel, co-written"
+    extra_fields: dict[str, _StateFieldSpec] = {}
+    namespace_fields: dict[str, set[str]] = {}
+    base_declared: set[str] = set()
+    classes: set[type[BaseModel]] = set()
+    for plugin, cls in extensions.state_classes():
+        if not (isinstance(cls, type) and issubclass(cls, BaseModel)):
+            raise TypeError(
+                f"plugin {plugin!r} declared state {cls!r}, which is not a BaseModel subclass — "
+                f"write `class FooState(BaseModel): ...` and declare it in `PluginContributions.state`."
             )
-            continue
+        classes.add(cls)
+        # An empty-field class must still record the plugin, so `state.<plugin>` returns an empty
+        # SimpleNamespace rather than AttributeError ("declared a class but only writes base
+        # fields" gets a consistent view too).
+        namespace_fields.setdefault(plugin, set())
+        for name, model_field in cls.model_fields.items():
+            # Pydantic v2 splits `Annotated[T, ...metadata]` into `model_field.annotation` (bare T)
+            # + `model_field.metadata` (Annotated's extras list); reconstruct the full Annotated to
+            # compare with the original on BaseAgentState.model_fields (the messages channel may be
+            # spelled by its delta form or the guarded reducer; the comparison normalizes the
+            # contract spellings — see _messages_annotation_key). Don't read
+            # `cls.__annotations__`: under `from __future__ import annotations` those are strings,
+            # while Pydantic already evaluated them into model_field.
+            if model_field.metadata:
+                raw_annotation = Annotated[model_field.annotation, *model_field.metadata]
+            else:
+                raw_annotation = model_field.annotation
 
-        prefixed = f"{current}__{name}" if current else name
-        if prefixed in _EXTRA_FIELDS:
-            existing_annotation, _ = _EXTRA_FIELDS[prefixed]
-            if existing_annotation != raw_annotation:
-                raise ValueError(
-                    f"state field {prefixed!r} type conflict: "
-                    f"{existing_annotation!r} vs {raw_annotation!r}"
-                )
-        else:
-            _EXTRA_FIELDS[prefixed] = (raw_annotation, model_field)
-            contributions.record(
-                "state",
-                prefixed,
-                detail=f"{cls.__name__}.{name}: {_annotation_text(raw_annotation)}",
-            )
+            if name in _BASE_FIELDS:
+                if name not in _PLUGIN_WRITABLE_BASE_FIELDS:
+                    raise ValueError(
+                        f"plugin {plugin!r} declared core state field {name!r} — only "
+                        f"{sorted(_PLUGIN_WRITABLE_BASE_FIELDS)} is plugin-writable among the "
+                        f"framework core keys; {name!r} is framework-managed every turn "
+                        f"(write a private <plugin>__{name} field or contribute via a hook instead)"
+                    )
+                base_raw = BaseAgentState.__annotations__[name]
+                if _messages_annotation_key(raw_annotation) != _messages_annotation_key(base_raw):
+                    raise ValueError(
+                        f"plugin {plugin!r} declared base field '{name}' with type "
+                        f"{raw_annotation!r} differing from BaseAgentState's {base_raw!r} — "
+                        f"declaring a base field is a contract 'plugin will modify this field'; "
+                        f"silent type swaps not allowed."
+                    )
+                # Base field shared: BaseAgentState already has the full definition (including
+                # reducer); build_agent_state won't rewrite it.
+                base_declared.add(name)
+                continue
 
-        if current is not None:
-            _PLUGIN_NAMESPACE_FIELDS.setdefault(current, set()).add(name)
-
-    # Same plugin with no fields must also record an empty set — so
-    # `state.<plugin>` returns an empty SimpleNamespace rather than
-    # AttributeError, so the "plugin declared a class but only writes base
-    # fields" case can also use `ava.state.<plugin>` to get a consistent
-    # view (empty, but exists).
-    if current is not None and current not in _PLUGIN_NAMESPACE_FIELDS:
-        _PLUGIN_NAMESPACE_FIELDS[current] = set()
-
-    return PluginStateHandle(cls, current)
+            prefixed = f"{plugin}__{name}"
+            if prefixed in extra_fields:
+                existing_annotation, _ = extra_fields[prefixed]
+                if existing_annotation != raw_annotation:
+                    raise ValueError(
+                        f"state field {prefixed!r} type conflict: "
+                        f"{existing_annotation!r} vs {raw_annotation!r}"
+                    )
+            else:
+                extra_fields[prefixed] = (raw_annotation, model_field)
+            namespace_fields[plugin].add(name)
+    return PluginStateSchema(
+        extra_fields, namespace_fields, frozenset(base_declared), frozenset(classes)
+    )
 
 
 def clear_plugin_registrations() -> None:
-    """Reset all plugin-registered state fields — called by
-    `load_extensions` on entry to ensure that multiple reloads (test
-    fixture / dev hot-reload) don't accumulate ghost state from previous
-    registrations. Also clears hook
-    registrations, SDK namespaces, plugin configs, plugin flag declarations
-    (cross-module imports), and the attribution ledger those registrations write
-    to at the same point.
+    """Reset the plugin registrations still made at import — called by
+    `load_extensions` on entry so repeated loads (test fixture / CLI) don't accumulate ghosts.
 
-    `_BASE_FIELDS` untouched (BaseAgentState is framework-fixed).
+    Covers the SDK surface only: namespaces, wraps, skill sources, plugin configs, flag
+    declarations and the attribution ledger those write to. Hooks, state, system prompt sections
+    and context notes are declared, not registered (`PluginContributions`), so there is nothing of
+    theirs to clear.
     """
-    _EXTRA_FIELDS.clear()
-    _PLUGIN_NAMESPACE_FIELDS.clear()
-    _PLUGIN_STATE_CLASSES.clear()
-    _BASE_FIELD_DECLARED.clear()
     # avoid circular import: lazy import inside the function for cross-module reset points
     import ava
     import ava.sdk_surface.skill_sources
     import ava.sdk_surface.wraps
-    from agent.hooks import clear_hooks
     from base.packages.plugins.config_registration import clear_plugin_configs
     from base.packages.plugins.flags import clear_plugin_flags
 
-    clear_hooks()
     clear_plugin_configs()
     clear_plugin_flags()
     contributions.clear()
@@ -674,21 +622,22 @@ def _plugin_namespace_view(state: BaseAgentState, plugin: str) -> SimpleNamespac
     `__getattr__` entry point uses this; extracted as a helper to let tests
     stub directly.
     """
-    fields = _PLUGIN_NAMESPACE_FIELDS.get(plugin)
+    namespaces: dict[str, set[str]] = getattr(type(state), "__plugin_namespace_fields__", {})
+    fields = namespaces.get(plugin)
     if fields is None:
-        # Plugin hasn't registered state → list known plugin names so typos
+        # Plugin declares no state → list known plugin names so typos
         # are immediately visible. Base fields (messages/halted) don't
         # belong to any plugin; read directly via ava.state.messages.
-        known = sorted(_PLUGIN_NAMESPACE_FIELDS.keys())
+        known = sorted(namespaces)
         raise AttributeError(
-            f"ava.state.{plugin} does not exist — plugin {plugin!r} hasn't called "
-            f"register_plugin_state, or plugin name typo. Known plugins: {known or '<empty>'}"
+            f"ava.state.{plugin} does not exist — plugin {plugin!r} declares no state, "
+            f"or plugin name typo. Known plugins: {known or '<empty>'}"
         )
     prefix = f"{plugin}__"
     return SimpleNamespace(**{name: getattr(state, f"{prefix}{name}") for name in fields})
 
 
-def build_agent_state() -> type[BaseAgentState]:
+def build_agent_state(extensions: ExtensionRegistry) -> type[BaseAgentState]:
     """Build dynamic AgentState: BaseAgentState subclass + all plugin-declared fields.
 
     Uses subclass (rather than `pydantic.create_model`) to guarantee
@@ -707,7 +656,8 @@ def build_agent_state() -> type[BaseAgentState]:
     write `ava.state.ava_code.cwd` rather than `ava.state.ava_code__cwd`;
     plugin-private namespaces also isolated cross-plugin.
     """
-    if not _EXTRA_FIELDS and not _PLUGIN_NAMESPACE_FIELDS:
+    schema = plugin_state_schema(extensions)
+    if not schema.extra_fields and not schema.namespace_fields:
         # Without plugin fields, also can't directly return BaseAgentState
         # — it has no plugin namespace __getattr__; but actually "no
         # plugin" also means no one will use state.<plugin>, so returning
@@ -716,8 +666,15 @@ def build_agent_state() -> type[BaseAgentState]:
         return BaseAgentState
 
     annotations: dict[str, Any] = {}
-    namespace: dict[str, Any] = {"__annotations__": annotations}
-    for name, (annotation, field) in _EXTRA_FIELDS.items():
+    namespace: dict[str, Any] = {
+        "__annotations__": annotations,
+        # The class carries its own schema: the namespace view and the state-key validation read it
+        # off the class, so no module-level table can drift from the class a graph runs on.
+        "__plugin_namespace_fields__": schema.namespace_fields,
+        "__plugin_base_declared__": schema.base_declared,
+        "__plugin_state_classes__": schema.classes,
+    }
+    for name, (annotation, field) in schema.extra_fields.items():
         annotations[name] = annotation
         namespace[name] = field
 
@@ -732,10 +689,8 @@ def build_agent_state() -> type[BaseAgentState]:
         # AttributeError with a "known plugin names" list on unregistered
         # plugin names, making `state.<typo>` typos immediately visible
         # rather than silently returning an empty namespace.
-        # Note: _plugin_namespace_view reads module-level _PLUGIN_NAMESPACE_FIELDS
-        # rather than a build-time snapshot — clear_plugin_registrations
-        # clears it, but after that the graph also rebuilds the AgentState
-        # class, so there's no "old state instance hitting new dict" race.
+        # Note: _plugin_namespace_view reads the schema off the instance's class, so an instance
+        # always sees the plugin set its own class was built from.
         if item.startswith("_"):
             raise AttributeError(item)
         return _plugin_namespace_view(self, item)
@@ -757,7 +712,9 @@ AgentState = BaseAgentState
 # ── Checkpoint msgpack allowlist ──
 
 
-def checkpoint_msgpack_allowlist() -> frozenset[tuple[str, str]]:
+def checkpoint_msgpack_allowlist(
+    plugin_state_classes: Iterable[type[BaseModel]] = (),
+) -> frozenset[tuple[str, str]]:
     """LangGraph checkpoint msgpack allowlist — `(module, name)` pairs the
     framework's checkpoint serde may deserialize.
 
@@ -773,7 +730,7 @@ def checkpoint_msgpack_allowlist() -> frozenset[tuple[str, str]]:
     The dynamic `AgentState` subclass is listed by the name `build_agent_state`
     binds into this module ("AgentState"); the module-level alias has the same
     name so the entry is correct regardless of build order. Plugin classes
-    registered via `register_plugin_state` are included automatically — a
+    declared in `PluginContributions.state` are included automatically — a
     plugin field holding a BaseModel instance crosses the checkpointer as that
     class and would otherwise be blocked (degraded to a plain dict) the moment
     the allowlist replaces the permissive default.
@@ -782,12 +739,23 @@ def checkpoint_msgpack_allowlist() -> frozenset[tuple[str, str]]:
     any embedding checkpoint saver.
     """
     entries: set[tuple[str, str]] = set(STATIC_CHECKPOINT_MSGPACK_TYPES)
-    for cls in _PLUGIN_STATE_CLASSES:
+    for cls in plugin_state_classes:
         entries.add((cls.__module__, cls.__name__))
     return frozenset(entries)
 
 
-def build_checkpoint_serde() -> JsonPlusSerializer:
+def process_state_classes() -> frozenset[type[BaseModel]]:
+    """The plugin state classes this process's `AgentState` was built from (none before
+    `build_agent_state` ran, or when no plugin declares state) — for a serializer that runs in a
+    process holding no registry of its own (the exec IPC, an external attachment)."""
+    return getattr(AgentState, "__plugin_state_classes__", frozenset())
+
+
+def build_checkpoint_serde(
+    plugin_state_classes: Iterable[type[BaseModel]] = (),
+) -> JsonPlusSerializer:
     """JsonPlusSerializer with the framework checkpoint allowlist — pass as
     `serde=` when constructing the hosted LangGraph checkpointer."""
-    return JsonPlusSerializer(allowed_msgpack_modules=checkpoint_msgpack_allowlist())
+    return JsonPlusSerializer(
+        allowed_msgpack_modules=checkpoint_msgpack_allowlist(plugin_state_classes)
+    )

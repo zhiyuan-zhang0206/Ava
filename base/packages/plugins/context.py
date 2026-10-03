@@ -1,12 +1,12 @@
 """Which plugin is currently importing — the ContextVar both plugin
-registries (state fields + config classes) read to auto-attribute a
-registration to its plugin.
+registries (config classes, SDK namespaces and the rest still registered at import) read to
+auto-attribute a registration to its plugin.
 
 `load_extensions` wraps each plugin.py import in `with PluginContext(name):`
-so `register_plugin_state()` / `register_plugin_config()` can attribute the
+so `register_plugin_config()` and the other import-time registrations can attribute the
 registration without the plugin author passing their own name. Lives in
-`base/` (contextvars-only leaf) so both the state registry (agent side) and
-the config registry can read it without an agent <-> shared cycle.
+`base/` (contextvars-only leaf) so the agent-side and base-side registries can both read it
+without an agent <-> shared cycle.
 """
 
 from __future__ import annotations
@@ -23,8 +23,8 @@ _CURRENT_PLUGIN: contextvars.ContextVar[str | None] = contextvars.ContextVar(
 
 
 class PluginContext:
-    """Mark _CURRENT_PLUGIN during plugin.py import so register_plugin_state()
-    auto-prefixes.
+    """Mark _CURRENT_PLUGIN during plugin.py import so import-time registrations
+    attribute to the plugin.
 
     Cross-module public (used by `agent/graph/_build.py:load_extensions`) —
     so no underscore prefix; plugin authors may also explicitly wrap to

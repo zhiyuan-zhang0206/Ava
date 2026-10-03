@@ -25,7 +25,7 @@ class _SyntaxFixHook(Hook):
     ) -> dict | None: ...
 
 syntax_fix_before_exec = _SyntaxFixHook()
-register_before_exec(syntax_fix_before_exec)
+# declared in contribute(): before_exec=(syntax_fix_before_exec,)
 ```
 
 Each `execute_code` call in the last `AIMessage.tool_calls` is repaired independently. IDs and sibling calls are preserved, and only the matching content block is updated.

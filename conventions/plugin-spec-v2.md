@@ -234,7 +234,7 @@ Resource registration replaces "the author remembers to clean up":
   exception recorded, none blocking the rest.
 - Every existing `register_*` call (hook/state/config/namespace/wrap/service/
   metric) already carries plugin attribution — that attribution becomes
-  registration: framework-side cleanup (`clear_plugin_registrations`) merges
+  registration: framework-side cleanup (`clear_plugin_registrations`, now the SDK surface only) merges
   into the same dispose.
 - Optional `async def dispose()` plugin hook. Fixed order: ① plugin
   `dispose()` (framework state still intact) → ② `ctx.effect` table, LIFO →

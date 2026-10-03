@@ -25,7 +25,7 @@ class _SdkReminderAfterExecHook(Hook):
     ) -> dict | None: ...  # return state update dict (not string)
 
 sdk_reminder_after_exec = _SdkReminderAfterExecHook()
-register_after_exec(sdk_reminder_after_exec)
+# declared in contribute(): after_exec=(sdk_reminder_after_exec,)
 ```
 
 Each call in the latest assistant message is matched to its ToolMessage by ID, including batches followed by notes or media. Code is read via the shared `first_tool_call_code` (`agent/graph/tool_calls.py`,
@@ -57,7 +57,7 @@ class _SdkReminderAgentReplyHook(Hook):
     # rather than '@agent in text' — text won't be delivered
 
 sdk_reminder_agent_reply_before_llm = _SdkReminderAgentReplyHook()
-register_before_llm(sdk_reminder_agent_reply_before_llm)
+# declared in contribute(): before_llm=(sdk_reminder_agent_reply_before_llm,)
 ```
 
 ## Key Dependencies
@@ -69,7 +69,7 @@ register_before_llm(sdk_reminder_agent_reply_before_llm)
 ## Configuration
 
 - `AvaSdkReminderState` in `_state.py`: persists the `reminded` set (which categories have been reminded)
-- `register_plugin_state` registers the state, persisted across agent lifecycle
+- `contribute()` declares the state (`state=(AvaSdkReminderState,)`), persisted across agent lifecycle
 - `sdk_code_reminder_cadence`: shared cadence for the four code categories; defaults to `once_per_compaction`, with `every_time` available
 - `sdk_nameerror_hint_enabled`: enables the precise assumed-persistence NameError hint by default; `false` disables it
 - `agent_reply_reminder_cadence`: independent cadence for agent-reply hints with the same values and default

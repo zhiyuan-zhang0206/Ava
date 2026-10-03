@@ -32,7 +32,7 @@ from base.db import create_agent, insert_inbound_message
 from base.host.env.agent_slices import AgentSlices
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from base.native_process.turn_identity import bind_turn_identity
-from base.packages.plugins.context import PluginContext
+from base.packages.plugins.extensions import ExtensionRegistry, PluginContributions
 from tests.impersonation_support import attested_caller, recorded_tree
 
 
@@ -64,18 +64,10 @@ async def _prepare_graph(
     dict[str, Any],
     list[Any],
 ]:
-    empty_plugin_registry: tuple[tuple[str, Any], ...] = (
-        ("_EXTRA_FIELDS", {}),
-        ("_PLUGIN_NAMESPACE_FIELDS", {}),
-        ("_PLUGIN_STATE_CLASSES", set[type[BaseModel]]()),
-        ("_BASE_FIELD_DECLARED", set[str]()),
-    )
-    for name, value in empty_plugin_registry:
-        monkeypatch.setattr(states, name, value)
+    # `build_agent_state` rebinds `agent.state.AgentState`; the monkeypatch restores it after the test.
     monkeypatch.setattr(states, "AgentState", states.AgentState)
-    with PluginContext("handoff"):
-        states.register_plugin_state(HandoffState)
-    state_cls = states.build_agent_state()
+    registry = ExtensionRegistry((("handoff", PluginContributions(state=(HandoffState,))),))
+    state_cls = states.build_agent_state(registry)
     agent_id = create_agent(db_conn)
     machine = machine_name()
     db_conn.execute(

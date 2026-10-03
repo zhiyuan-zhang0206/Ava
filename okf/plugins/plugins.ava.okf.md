@@ -16,7 +16,7 @@ Plugins are Ava's primary extension mechanism—inserting custom behavior into t
 The four hook container nodes (after_init / before_llm / before_exec / after_exec), the `Hook` ABC instance-registration contract, and reducer-aware state merge: [[okf/plugins/graph-edge-hooks.ava.okf.md]].
 
 ### 2. State Field Extension (`agent/state.py`)
-`register_plugin_state(Cls)` — pass a Pydantic `BaseModel` subclass (e.g., `AvaCodeState`, `AvaSdkReminderState`), and its fields are merged into `AgentState`, returning a `PluginStateHandle` for the plugin to `read()` / `update()` within a turn. Fields are isolated with a namespace prefix (`<plugin>__<field>`) and persisted to checkpoints via LangGraph reducers.
+Declare a Pydantic `BaseModel` subclass (e.g., `AvaCodeState`, `AvaSdkReminderState`) in `PluginContributions.state`, and its fields are merged into `AgentState`; the plugin keeps a `PluginStateHandle(Cls, plugin)` to `read()` / `update()` within a turn. Fields are isolated with a namespace prefix (`<plugin>__<field>`) and persisted to checkpoints via LangGraph reducers.
 
 **Core-key contract (writable = private fields + `messages` only).** A plugin's own `BaseModel` fields are always private and plugin-writable. Among the framework core keys (`BaseAgentState` fields: messages / halted / update_initiated / compact / memory / context_reset / capabilities), only **`messages`** may be declared and written — with the exact base annotation (`Annotated[list[AnyMessage], add_messages]`); the exec node merges the plugin's messages delta with its own ToolMessage delta, so both reach the checkpoint. Declaring any other core key raises at registration; writing one via `ava.state_update` raises at turn end. Plugins that want to surface notes do it through the after-exec hook — `ava_code`'s AGENTS.md / security-findings injection (`system_note_message`, `NoteTag`) is the model use case — never by touching core lifecycle keys.
 
@@ -34,13 +34,12 @@ Two-phase design:
 Config instances are frozen (`ConfigDict(frozen=True)`) and cannot be modified by agents. Fields marked `json_schema_extra={"per_agent": True}` allow per-agent CLI overlay.
 
 ## The surface catalog + registration attribution
-Every `register_*` entry point above also writes one record to the attribution
+Every import-time `register_*` entry point above writes one record to the attribution
 ledger (`base/packages/plugins/contributions.py`): which surface, what identifier
-(the hook point, the `ava` namespace, the wrap target, the state channel key —
-spelled as `ava-plugin.json` declares it), and which plugin, read off the
-`PluginContext` the loader opens. Only registrations made inside that context are
-recorded, so the ledger holds plugin contributions alone and
-`clear_plugin_registrations` clears it with the registries it shadows.
+(the `ava` namespace, the wrap target — spelled as `ava-plugin.json` declares it), and
+which plugin, read off the `PluginContext` the loader opens. Declared contributions
+(hooks, state, sections, notes) need no ledger: the registry entry names the plugin. `clear_plugin_registrations` clears the ledger with the
+import-time registries it shadows.
 
 `agent/extensions/catalog.py:SURFACES` is the enumeration of the injection surfaces —
 the ones above, plus SDK wraps (`ava.extend.wrap`, [[extensions.ava.okf.md]]),

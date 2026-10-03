@@ -27,8 +27,8 @@ from agent.graph.capabilities import (
     index_drift,
     indexed_skill_identifiers,
 )
-from agent.hooks._registry import HOOKS
-from agent.hooks.capabilities import _newly_installed_skills, register_capabilities_hooks
+from agent.hooks.capabilities import _newly_installed_skills
+from agent.hooks.framework import framework_hooks
 from agent.state import AgentState, CapabilitiesState
 from base import paths
 from base.agents.context import AvaContext
@@ -333,12 +333,8 @@ async def test_a_stale_config_name_warns_once_not_every_turn(
 # ── registration ──
 
 
-def test_register_capabilities_hooks_registers_before_llm() -> None:
+def test_the_drift_hook_is_a_framework_before_llm_hook_run_last() -> None:
     """Framework-owned and unconditional — the index under-reporting is a
-    correctness problem, not a plugin's optional layer."""
-    before = list(HOOKS["before_llm"])
-    try:
-        register_capabilities_hooks()
-        assert HOOKS["before_llm"][-1] is _newly_installed_skills
-    finally:
-        HOOKS["before_llm"][:] = before
+    correctness problem, not a plugin's optional layer. It runs last at the edge, after repair's
+    guard and compact's possible full replacement."""
+    assert framework_hooks()["before_llm"][-1] is _newly_installed_skills

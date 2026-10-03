@@ -59,6 +59,7 @@ _EXTERNAL_CLI_CHILD = """
 from pathlib import Path
 import ava
 from ava import external
+from agent.extensions.registry import build_registry
 from agent.state import build_agent_state
 
 SAMPLE = {sample!r}
@@ -79,7 +80,7 @@ external.control.require_active = lambda _lease_id, _caller: dict(LEASE)
 external.machine_name = lambda: "external-cli-probe"
 external.process_metadata = lambda: {{"pid": 1}}
 def load_snapshot(_agent_id):
-    state = build_agent_state()()
+    state = build_agent_state(build_registry())()
     state.ava_code__cwd = str(Path(SAMPLE).parent)
     return state, {{}}, None
 

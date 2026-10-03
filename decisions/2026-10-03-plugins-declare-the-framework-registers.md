@@ -36,11 +36,30 @@ migrates in the same change, and external plugins are not carried.
 
 This is done one surface family at a time, each its own change:
 
-- **A (this entry's first change)**: system prompt sections and context notes. The framework's own are
-  `FRAMEWORK_SECTIONS` / `FRAMEWORK_NOTES` constants; `build_system_prompt`, `context_notes` and
-  `fork_notes` take the registry as their first argument.
-- **B**: hooks, state fields, inspector widgets and metrics; deletes `clear_plugin_registrations`.
-- **C**: SDK namespaces, members, wraps and providers.
+- **A**: system prompt sections and context notes. The framework's own are `FRAMEWORK_SECTIONS` /
+  `FRAMEWORK_NOTES` constants; `build_system_prompt`, `context_notes` and `fork_notes` take the
+  registry as their first argument.
+- **B**: graph-edge hooks and plugin state. `PluginContributions` gains `after_init` / `before_llm` /
+  `before_exec` / `after_exec` and `state`. The graph is a function of the registry:
+  `build_graph(checkpointer, extensions)` runs the plugins' hooks, then the framework's own
+  (`framework_hooks()`), and `build_agent_state(extensions)` builds the state class, which carries its own
+  schema instead of reading module tables. `build_registry()` becomes the load-time gate: a plugin whose
+  `ava-plugin.json` and `contribute()` disagree on the `hooks` / `systemPromptSections` keys (either
+  direction), whose state fails validation, or whose `contribute()` is malformed is a load failure of that
+  plugin. Plugin metrics and inspector widgets follow in their own change: their consumers (gateway, Grafana
+  supply) are other processes that never load an agent runtime face.
+- **C**: SDK namespaces, members, wraps, skill sources, plugin configs and providers. Until then
+  `clear_plugin_registrations` remains, covering exactly those registries, and is deleted with C.
+
+## Reload
+
+There is no in-process plugin reload path. The agent host loads plugins once per process; a plugin installed
+or changed afterwards is picked up by a host restart (`services/agent_host/daemon.py` watches the plugin
+directory and exits so the supervisor restarts it), because plugin-spec-v2's dispose contract is
+unimplemented. The graph is compiled once from the registry the daemon builds at boot (its hooks and state
+channels are fixed in the compiled graph), so swapping only the registry the turns read would give prompt
+sections from one plugin set and hooks from another. A registry is a value, so a future reload is "build a
+new registry, build a new graph, swap both", but nothing triggers that today and none is added here.
 
 ## Alternatives rejected
 

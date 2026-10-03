@@ -26,8 +26,9 @@ Usage:
 3. **The shared data plane** — isolated workload/control pools, checkpointer,
    graph. Before the scheduler exists, the control pool recovers any old
    applied hosted force whose durable exec evidence proves resource-free.
-   `build_graph` runs the builtin-plugin load and the state-class build, which
-   is the other half of "once per process".
+   The builtin-plugin load and the plugin registry built from it come first and
+   feed the checkpointer, the graph and the host: the other half of "once per
+   process".
 4. **Healthz**, published only after the above, so a green probe means the host
    can actually take a turn.
 5. **The dispatcher**, last: subscribing before the host can serve would drop
@@ -47,7 +48,7 @@ import logging
 import os
 import signal
 import sys
-from collections.abc import Collection, Coroutine
+from collections.abc import Collection, Coroutine, Iterable
 from pathlib import Path
 from typing import cast
 
@@ -55,8 +56,8 @@ import psycopg
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from psycopg.rows import DictRow
 from psycopg_pool import AsyncConnectionPool
+from pydantic import BaseModel
 
-from agent.extensions.registry import build_registry
 from agent.ownership.hosted import settle_stale_running_rows
 from agent.turn.progress import turn_progress_age_s, turn_progress_snapshot
 from base import paths
@@ -78,6 +79,7 @@ from base.deploy.progress_timeout import AGENT_LEASE_RENEW_INTERVAL_S
 from base.deploy.timing import assert_clock_lattice
 from base.events.live.bus import EventBus
 from base.log import init_gateway_process, logger
+from base.packages.plugins.extensions import ExtensionRegistry
 from base.sessions.helper_chain_guard import parent_chain_intact
 from services.agent_host import boot_defer
 from services.agent_host.dispatcher import InboundWakeDispatcher, TurnScheduler
@@ -312,10 +314,29 @@ def _background_loops() -> dict[str, Coroutine[object, object, None]]:
     }
 
 
+def _load_plugin_registry() -> ExtensionRegistry:
+    """The full plugin load, then the registry of what the plugins declare.
+
+    One value handed to the checkpoint serde (state classes), the graph (hooks, state fields) and
+    the host (prompt sections, notes), so all three see the same plugin set. A plugin changed after
+    this point takes effect on the next host start (`_plugins_fingerprint`): the graph is compiled
+    once and cannot take a new registry.
+    """
+    from agent.extensions import load_extensions
+    from agent.extensions.registry import build_registry
+
+    load_extensions()
+    return build_registry()
+
+
 async def _build_checkpointer(
     pool: AsyncConnectionPool[psycopg.AsyncConnection],
+    plugin_state_classes: Iterable[type[BaseModel]] = (),
 ) -> AsyncPostgresSaver:
     """One saver for the whole host, over the workload pool.
+
+    `plugin_state_classes` are the BaseModels the loaded plugins declare as state: the checkpoint
+    serde must be allowed to decode them.
 
     No `setup()` call: the runner role holds no CREATE on the schema by design
     (task #1236), and the gateway owns langgraph's own migrations. A host booting
@@ -331,7 +352,9 @@ async def _build_checkpointer(
     from base.agents.history.delta_read_compat import wrap_saver_reads_with_delta_reconstruction
 
     saver_pool = cast(AsyncConnectionPool[psycopg.AsyncConnection[DictRow]], pool)
-    checkpointer = PooledPostgresSaver(conn=saver_pool, serde=build_checkpoint_serde())
+    checkpointer = PooledPostgresSaver(
+        conn=saver_pool, serde=build_checkpoint_serde(plugin_state_classes)
+    )
     wrap_saver_writes_with_loud_failure(checkpointer)
     wrap_saver_writes_with_nstep_interval(checkpointer, lambda: settings.agent.checkpoint_interval)
     # Transition layer (tasks #3180/#3181): vanilla-era readers must see
@@ -445,20 +468,21 @@ async def run() -> None:
     try:
         local_machine = machine_name()
         await _open_host_pools(workload_pool, control_pool, local_machine)
-        checkpointer = await _build_checkpointer(workload_pool)
-        # build_graph runs the builtin-plugin load and builds the dynamic state
-        # class — process-global, and the reason there is ONE graph here rather
-        # than one per agent (services/agent_host/host.py explains the cost).
-        graph = build_graph(checkpointer)
+        extensions = _load_plugin_registry()
+        checkpointer = await _build_checkpointer(
+            workload_pool, [cls for _plugin, cls in extensions.state_classes()]
+        )
+        # The dynamic state class the graph builds is process-global, and the reason there is
+        # ONE graph here rather than one per agent (services/agent_host/host.py explains the cost).
         host = AgentHost(
             pool=workload_pool,
             control_pool=control_pool,
             checkpointer=checkpointer,
-            graph=graph,
+            graph=build_graph(checkpointer, extensions),
             machine=local_machine,
             bus=bus,
             db=db,
-            extensions=build_registry(),
+            extensions=extensions,
         )
         # The clock reader is injected, not imported by the scheduler: it owns no
         # pool, and this keeps the uncancellable-turn report able to say how long

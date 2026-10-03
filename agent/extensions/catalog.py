@@ -71,31 +71,28 @@ class Surface:
 SURFACES: tuple[Surface, ...] = (
     Surface(
         id="hooks",
-        entry_points=(
-            "agent.hooks:register_after_init",
-            "agent.hooks:register_before_llm",
-            "agent.hooks:register_before_exec",
-            "agent.hooks:register_after_exec",
-        ),
+        entry_points=("base.packages.plugins.extensions:PluginContributions",),
         manifest_key="hooks",
         protocol="agent.hooks.Hook.__call__"
         "(state: AgentState, runtime: Runtime[AvaContext], config: RunnableConfig, /)"
         " -> dict | None",
         note=(
-            "a Hook instance runs at that graph edge; the returned dict is a state update "
-            "(key 'goto' overrides routing), None is a no-op, and two hooks writing one "
+            "`after_init` / `before_llm` / `before_exec` / `after_exec` of what `contribute()` "
+            "returns: a Hook instance runs at that graph edge; the returned dict is a state "
+            "update (key 'goto' overrides routing), None is a no-op, and two hooks writing one "
             "reducerless key in a pass is a hard error"
         ),
     ),
     Surface(
         id="state",
-        entry_points=("agent.state:register_plugin_state",),
+        entry_points=("base.packages.plugins.extensions:PluginContributions",),
         manifest_key=None,
         protocol=None,
         note=(
-            "fields of the passed BaseModel become LangGraph channels named "
-            "<plugin>__<field>, read/written through the returned handle inside an exec "
-            "turn; 'messages' is the only base channel a plugin may declare"
+            "`state` of what `contribute()` returns: fields of each BaseModel become LangGraph "
+            "channels named <plugin>__<field>, read/written through a "
+            "`PluginStateHandle(cls, plugin)` inside an exec turn; 'messages' is the only base "
+            "channel a plugin may declare"
         ),
     ),
     Surface(
@@ -212,7 +209,7 @@ def _unquoted(annotation: Any) -> Any:
 
 
 def entry_point_signature(entry_point: str) -> str:
-    """`agent.hooks.register_before_llm(hook: Hook) -> None` — rendered from the
+    """`agent.hooks.make_hook_runner(hook_name, default_next, hooks) -> ...` — rendered from the
     live object, so the catalog cannot drift from the code it describes.
 
     Raises:
@@ -316,10 +313,10 @@ def build_catalog() -> Catalog:
     from one that must keep a pristine `ava`.
     """
     from agent.extensions import load_extensions
-    from agent.extensions.registry import build_registry
+    from agent.extensions.registry import declarations
 
     config = load_extensions()
-    registry = build_registry()
+    declared = {name: contributions for name, _dir, contributions in declarations()}
     discovered = enable_config.installed_plugin_dirs()
     repo_plugins = _repo_plugins_dir()
 
@@ -339,7 +336,7 @@ def build_catalog() -> Catalog:
                 description=enable_config.parse_description(directory / "plugin.py"),
                 contributions=(
                     *contribution_ledger.contributions_of(name),
-                    *registry.records(name),
+                    *(declared[name].as_records(name) if name in declared else ()),
                 ),
                 manifest=load_manifest(directory),
             )

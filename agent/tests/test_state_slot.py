@@ -5,7 +5,7 @@ exec in one disposable subprocess: the child rebuilds `ava.state` from the
 request-envelope snapshot. Inside the exec the plugin reads
 ava.state and writes ava.state_update through the SDK; at the end of the turn
 ava.state_update is merged into Command(update=...).
-Commit entry validates keys — must be prefixed fields declared through register_plugin_state,
+Commit entry validates keys — must be prefixed fields declared in a plugin's `state` contribution,
 not base field names, not unregistered typos.
 
 Reading ava.state goes through namespace view: `ava.state.<plugin_name>.<field>` auto
@@ -41,6 +41,7 @@ from langgraph.graph.message import REMOVE_ALL_MESSAGES, add_messages
 from langgraph.runtime import Runtime
 from pydantic import BaseModel, Field
 
+import agent.state as agent_state
 import ava
 from agent.graph.exec.node import _exec_node_impl
 from agent.messages.guard import MessagesMutationError
@@ -48,13 +49,13 @@ from agent.state import (
     AttachEntry,
     AttachState,
     BaseAgentState,
+    PluginStateHandle,
     build_agent_state,
     clear_plugin_registrations,
-    register_plugin_state,
 )
 from base.agents.context import AvaContext
 from base.host.env.agent_slices import AgentSlices
-from base.packages.plugins.context import PluginContext
+from base.packages.plugins.extensions import ExtensionRegistry, PluginContributions
 
 assert (
     asyncio
@@ -62,9 +63,12 @@ assert (
 
 
 @pytest.fixture(autouse=True)
-def _reset_state_slot():
+def _reset_state_slot(monkeypatch: pytest.MonkeyPatch):
     """Before/after each test, force reset slots back to None — do not restore previous (would mask test
-    leaks). Module-level slots should default to None; any leftover value is a bug."""
+    leaks). Module-level slots should default to None; any leftover value is a bug.
+
+    `build_agent_state` rebinds `agent.state.AgentState`; the monkeypatch puts it back after the test."""
+    monkeypatch.setattr(agent_state, "AgentState", BaseAgentState)
     ava.state = None
     ava.state_update = None
     clear_plugin_registrations()
@@ -77,6 +81,13 @@ def _reset_state_slot():
     import ava.security as _security
 
     _security._pending_findings = []
+
+
+def _registry(**plugins: type[BaseModel]) -> ExtensionRegistry:
+    """A registry where each keyword plugin declares the one given state class."""
+    return ExtensionRegistry(
+        tuple((name, PluginContributions(state=(cls,))) for name, cls in plugins.items())
+    )
 
 
 # ── Unit: reducer-delta accumulation (2026-08-08 audit, cc-backend-runtime P1) ──
@@ -96,8 +107,7 @@ def test_handle_update_accumulates_reducer_deltas_within_turn():
     class _PluginState(BaseModel):
         seen: Annotated[set[str], _set_union] = Field(default_factory=set)
 
-    with PluginContext("delta_test"):
-        handle = register_plugin_state(_PluginState)
+    handle = PluginStateHandle(_PluginState, "delta_test")
 
     ava.state = MagicMock()
     ava.state_update = {}
@@ -121,8 +131,7 @@ def test_handle_update_last_value_field_still_collapses_to_latest():
     class _PluginState(BaseModel):
         counter: int = 0
 
-    with PluginContext("delta_test"):
-        handle = register_plugin_state(_PluginState)
+    handle = PluginStateHandle(_PluginState, "delta_test")
 
     ava.state = MagicMock()
     ava.state_update = {}
@@ -152,8 +161,7 @@ def test_handle_update_rejects_targeted_removal_of_checkpoint_message():
     class _PluginState(BaseModel):
         messages: Annotated[list[AnyMessage], add_messages] = Field(default_factory=list)
 
-    with PluginContext("delta_test"):
-        handle = register_plugin_state(_PluginState)
+    handle = PluginStateHandle(_PluginState, "delta_test")
 
     ava.state = MagicMock()
     ava.state_update = {}
@@ -182,8 +190,7 @@ def test_handle_update_remove_all_marker_survives_accumulation():
     class _PluginState(BaseModel):
         messages: Annotated[list[AnyMessage], add_messages] = Field(default_factory=list)
 
-    with PluginContext("delta_test"):
-        handle = register_plugin_state(_PluginState)
+    handle = PluginStateHandle(_PluginState, "delta_test")
 
     ava.state = MagicMock()
     ava.state_update = {}
@@ -211,8 +218,7 @@ def test_handle_update_add_messages_plain_appends_unchanged():
     class _PluginState(BaseModel):
         messages: Annotated[list[AnyMessage], add_messages] = Field(default_factory=list)
 
-    with PluginContext("delta_test"):
-        handle = register_plugin_state(_PluginState)
+    handle = PluginStateHandle(_PluginState, "delta_test")
 
     ava.state = MagicMock()
     ava.state_update = {}
@@ -241,9 +247,9 @@ def test_handle_update_add_messages_plain_appends_unchanged():
         "capabilities",
     ],
 )
-def test_register_plugin_state_rejects_non_messages_core_key(bad_field):
+def test_plugin_state_schema_rejects_non_messages_core_key(bad_field):
     """Declaring any BaseAgentState core key other than `messages` is rejected
-    at registration with a clear error — those fields are framework-managed
+    when the schema is built, with a clear error — those fields are framework-managed
     every turn. Pre-fix this silently registered and let the plugin write
     (and clobber) the core channel."""
 
@@ -252,14 +258,11 @@ def test_register_plugin_state_rejects_non_messages_core_key(bad_field):
     }
     bad_cls = type(f"_BadState_{bad_field}", (BaseModel,), ns)
 
-    with (
-        pytest.raises(ValueError, match=rf"core state field '{bad_field}'"),
-        PluginContext("delta_test"),
-    ):
-        register_plugin_state(bad_cls)
+    with pytest.raises(ValueError, match=rf"core state field '{bad_field}'"):
+        build_agent_state(_registry(delta_test=bad_cls))
 
 
-def test_register_plugin_state_still_allows_messages():
+def test_plugin_state_still_allows_messages():
     """`messages` stays on the writable whitelist (with the exact base
     annotation) — the whitelist shrinks the core surface to one key, it does
     not remove it."""
@@ -267,9 +270,10 @@ def test_register_plugin_state_still_allows_messages():
     class _PluginState(BaseModel):
         messages: Annotated[list[AnyMessage], add_messages] = Field(default_factory=list)
 
-    with PluginContext("delta_test"):
-        handle = register_plugin_state(_PluginState)
+    handle = PluginStateHandle(_PluginState, "delta_test")
     assert handle._channel_keys["messages"] == "messages"
+    state_cls = build_agent_state(_registry(delta_test=_PluginState))
+    assert cast(Any, state_cls).__plugin_base_declared__ == {"messages"}
 
 
 async def test_exec_node_merges_plugin_messages_with_framework_toolmessage(
@@ -288,26 +292,20 @@ async def test_exec_node_merges_plugin_messages_with_framework_toolmessage(
     # exec node's merge.
     class _MessagesPluginState(BaseModel):
         messages: Annotated[list[AnyMessage], add_messages] = Field(default_factory=list)
+        sentinel: bool = False
 
-    with PluginContext("delta_test"):
-        register_plugin_state(_MessagesPluginState)
-
-    class _StateWithPlugin(BaseAgentState):
-        plugin__sentinel: bool = False
+    state_cls = build_agent_state(_registry(delta_test=_MessagesPluginState))
 
     code = (
         "import ava\n"
         "from langchain_core.messages import HumanMessage\n"
         "ava.state_update['messages'] = [HumanMessage(content='plugin note', id='p1')]\n"
     )
-    state = _StateWithPlugin(
-        messages=[_ai_message_with_code(code)],
-        halted=False,
-        plugin__sentinel=True,
-    )
+    plugin_fields: dict[str, Any] = {"delta_test__sentinel": True}
+    state = state_cls(messages=[_ai_message_with_code(code)], halted=False, **plugin_fields)
     runtime, config = _make_runtime_and_config(AsyncMock())
 
-    cmd = await _exec_node_impl(cast(BaseAgentState, state), runtime, config)
+    cmd = await _exec_node_impl(state, runtime, config)
 
     update = cast(dict[str, Any], cmd.update)
     msgs = update["messages"]
@@ -332,13 +330,8 @@ def test_namespace_view_strips_prefix():
     class OtherPlugin(BaseModel):
         data: str = ""
 
-    with PluginContext("ava_code"):
-        register_plugin_state(AvaCode)
-    with PluginContext("other_plugin"):
-        register_plugin_state(OtherPlugin)
-
-    state_cls = build_agent_state()
-    # dynamic AgentState fields (`<plugin>__<field>`) are generated at runtime by register_plugin_state,
+    state_cls = build_agent_state(_registry(ava_code=AvaCode, other_plugin=OtherPlugin))
+    # dynamic AgentState fields (`<plugin>__<field>`) are generated at runtime by build_agent_state,
     # pyright statically sees state_cls as BaseAgentState — use dict[Any, Any] + **spread to bypass
     # pyright keyword-arg check.
     plugin_fields: dict = {
@@ -369,12 +362,7 @@ def test_namespace_view_typo_name_raises_attribute_error():
     class Bar(BaseModel):
         y: str = ""
 
-    with PluginContext("ava_code"):
-        register_plugin_state(Foo)
-    with PluginContext("other"):
-        register_plugin_state(Bar)
-
-    state_cls = build_agent_state()
+    state_cls = build_agent_state(_registry(ava_code=Foo, other=Bar))
     ava.state = state_cls(messages=[], halted=False)
 
     with pytest.raises(AttributeError, match=r"ava_code.*other"):
@@ -388,10 +376,7 @@ def test_namespace_view_mutation_does_not_persist():
     class P(BaseModel):
         counter: int = 0
 
-    with PluginContext("plugin"):
-        register_plugin_state(P)
-
-    state_cls = build_agent_state()
+    state_cls = build_agent_state(_registry(plugin=P))
     plugin_fields: dict = {"plugin__counter": 1}
     ava.state = state_cls(messages=[], halted=False, **plugin_fields)  # pyright: ignore[reportUnknownArgumentType]
 
@@ -751,16 +736,15 @@ def _scan_flagged_code(*sources: str) -> str:
     )
 
 
-def _register_messages_plugin() -> None:
-    """Declare the base `messages` channel for a test plugin, mirroring what
-    ava_code does in production (user ruling 2026-08-11: context notes ride
-    the exec's messages delta)."""
+def _messages_plugin_state_cls() -> type[BaseAgentState]:
+    """The AgentState class of a registry whose test plugin declares the base `messages`
+    channel, mirroring what ava_code does in production (user ruling 2026-08-11: context
+    notes ride the exec's messages delta)."""
 
     class _MessagesPluginState(BaseModel):
         messages: Annotated[list[AnyMessage], add_messages] = Field(default_factory=list)
 
-    with PluginContext("delta_test"):
-        register_plugin_state(_MessagesPluginState)
+    return build_agent_state(_registry(delta_test=_MessagesPluginState))
 
 
 async def test_exec_node_injects_security_finding_after_toolmessage(fake_cancel_event):
@@ -794,7 +778,7 @@ async def test_exec_node_orders_tool_security_then_plugin_notes(fake_cancel_even
     (they annotate the content notes), then the plugin's context notes — the
     tool_use adjacency is preserved and warnings precede the content they
     flag."""
-    _register_messages_plugin()
+    state_cls = _messages_plugin_state_cls()
 
     code = (
         _scan_flagged_code("context-file:/repo/AGENTS.md")
@@ -802,7 +786,7 @@ async def test_exec_node_orders_tool_security_then_plugin_notes(fake_cancel_even
         + "from langchain_core.messages import HumanMessage\n"
         + "ava.state_update['messages'] = [HumanMessage(content='project note', id='p1')]\n"
     )
-    state = BaseAgentState(messages=[_ai_message_with_code(code)], halted=False)
+    state = state_cls(messages=[_ai_message_with_code(code)], halted=False)
     runtime, config = _make_runtime_and_config(AsyncMock())
 
     cmd = await _exec_node_impl(state, runtime, config)
@@ -863,7 +847,7 @@ async def test_exec_node_compact_path_drops_notes_and_findings(fake_cancel_event
     the whole history — so neither plugin notes nor the child's findings may
     leak into the update."""
 
-    _register_messages_plugin()
+    state_cls = _messages_plugin_state_cls()
     # The real exec child rejects attach for a text-only model (user ruling
     # 2026-08-28) — boot it with a media-capable model via the per-agent
     # config map the exec path re-emits into the child env (a bare home's
@@ -879,7 +863,7 @@ async def test_exec_node_compact_path_drops_notes_and_findings(fake_cancel_event
         + "from base.agents.lifecycle import SystemHalt\n"
         + "raise SystemHalt()\n"
     )
-    state = BaseAgentState(
+    state = state_cls(
         messages=[_ai_message_with_code(code)],
         halted=False,
         attach=AttachState(pending=[AttachEntry(path="/previous.png", label=None)]),
