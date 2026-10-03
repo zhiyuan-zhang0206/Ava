@@ -33,8 +33,8 @@ from ._task_update import (
     _nothing_to_update,
     _owner_actually_changed,
     _resolve_create_args,
-    _resolve_update_args,
     _validate_budgets,
+    _validate_status,
     _write_task_update,
 )
 from ._task_update import (
@@ -96,16 +96,6 @@ class Task:
     usd_budget: float | None = None
     token_used: int = 0
     usd_used: float = 0.0
-
-    @property
-    def brief(self) -> str:
-        """Deprecated alias for description."""
-        return self.description
-
-    @property
-    def content(self) -> str | None:
-        """Deprecated alias for results."""
-        return self.results
 
     def __str__(self) -> str:
         owner = f"owner=#{self.owner}" if self.owner is not None else "unowned"
@@ -249,7 +239,7 @@ def _insert_task(
 
 def create(
     title: str,
-    description: str | None = None,
+    description: str,
     *,
     parent: int,
     remind_interval_seconds: int | None = None,
@@ -257,7 +247,6 @@ def create(
     priority: str = _DEFAULT_PRIORITY,
     token_budget: int | None = None,
     usd_budget: float | int | None = None,
-    brief: str | None = None,
 ) -> Task:
     """Args:
     title: unique among in_progress tasks.
@@ -269,10 +258,9 @@ def create(
     priority: "P0" (highest) through "P3" (lowest).
     token_budget: optional positive ceiling for task-tagged LLM tokens.
     usd_budget: optional positive ceiling for task-tagged LLM cost.
-    brief: deprecated alias for description.
     """
     title = coerce_str(title, "title")
-    description = coerce_str(description, "description", allow_none=True)
+    description = coerce_str(description, "description")
     parent = coerce_typed(parent, "parent", int)
     remind_interval_seconds = coerce_typed(
         remind_interval_seconds, "remind_interval_seconds", int, allow_none=True
@@ -281,10 +269,7 @@ def create(
     priority = coerce_str(priority, "priority")
     token_budget = coerce_typed(token_budget, "token_budget", int, allow_none=True)
     usd_budget = coerce_typed(usd_budget, "usd_budget", (int, float), allow_none=True)
-    brief = coerce_str(brief, "brief", allow_none=True)
-    description, remind_interval_seconds, priority = _resolve_create_args(
-        brief, description, remind_interval_seconds, priority
-    )
+    remind_interval_seconds, priority = _resolve_create_args(remind_interval_seconds, priority)
     token_budget, usd_budget = _validate_budgets(token_budget, usd_budget)
     actor = ava.agent_identity.require_agent_id()
     effective_owner = owner if owner is not None else actor
@@ -411,7 +396,6 @@ def update(
     remind_interval_seconds: int | None = _UNSET,  # type: ignore[assignment]
     priority: str | None = None,
     parent_id: int | None = _UNSET,  # type: ignore[assignment]
-    content: str | None = None,
     note: str | None = None,
 ) -> None:
     """Any write resets the reminder clock. Owner changes notify both owners; other
@@ -424,7 +408,6 @@ def update(
         owner: agent id to reassign to; a task always has an owner.
         remind_interval_seconds: None = unchanged; reminders cannot be disabled; capped at 24h.
         parent_id: reparent (explicit None = system root; int = set parent).
-        content: deprecated alias for results.
     """
     task_id = coerce_typed(task_id, "task_id", int)
     status = coerce_str(status, "status", allow_none=True)
@@ -440,9 +423,8 @@ def update(
     priority = coerce_str(priority, "priority", allow_none=True)
     if parent_id is not _UNSET:
         parent_id = coerce_typed(parent_id, "parent_id", int, allow_none=True)
-    content = coerce_str(content, "content", allow_none=True)
     note = coerce_str(note, "note", allow_none=True)
-    status, results = _resolve_update_args(status, content, results)
+    _validate_status(status)
 
     sets, params, payload, owner_changing, changes = _collect_update_fields(
         task_id, status, title, description, results, owner, remind_interval_seconds, priority
