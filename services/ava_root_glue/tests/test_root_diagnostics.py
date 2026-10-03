@@ -235,10 +235,29 @@ def test_helper_diagnostics_are_macos_only(monkeypatch: pytest.MonkeyPatch) -> N
     monkeypatch.setattr(
         probes,
         "settings",
-        SimpleNamespace(services=SimpleNamespace(permissions_helper_enabled=False)),
+        SimpleNamespace(
+            services=SimpleNamespace(
+                permissions_helper_enabled=False,
+                venv_probe_failure_threshold=2,
+            )
+        ),
     )
     names = {check.name for check in probes.build_diagnostics(set())}
     assert names == {"venv", "brew-pin", "permissions-helper"}
+
+
+def test_venv_diagnostic_uses_the_configured_failure_threshold(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(probes, "IS_MACOS", False)
+    monkeypatch.setattr("base.cluster.machine.is_gateway", lambda: False)
+    monkeypatch.setattr(
+        probes,
+        "settings",
+        SimpleNamespace(services=SimpleNamespace(venv_probe_failure_threshold=5)),
+    )
+    check = next(c for c in probes.build_diagnostics(set()) if c.name == "venv")
+    assert check.failure_threshold == 5
 
 
 def test_station_no_credential_is_unknown_and_does_not_send(

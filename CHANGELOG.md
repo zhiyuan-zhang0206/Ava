@@ -36,6 +36,11 @@ and the matching GitHub Releases, cut by `scripts/ci/release_cut.py`.
   by hand ([decision](decisions/2026-09-30-remove-deployment-lease.md)).
 
 ### Changed
+- The venv diagnostic probe reports only after
+  `AVA_VENV_PROBE_FAILURE_THRESHOLD` consecutive failing rounds (default 2)
+  instead of the first: a single 5s subprocess deadline miss under high churn
+  is not damage evidence, and the episode stays quiet until a healthy round
+  re-arms it (task #4712).
 - The bottom-layer package `shared` is now `base` (`base < ava < agent <
   gateway < cli`), with no compatibility aliases: external plugins, schedules
   and skills that import `shared.*` must import `base.*`.
