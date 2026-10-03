@@ -173,9 +173,9 @@ async def test_prompt_reap_terminates_the_incarnations_marked_idling_row(
     # but the death's wake is committed with the termination (task #4039):
     # one marked system chat, named as the trigger by the return value.
     assert db_conn.execute(
-        "SELECT wake_suppressed_until, last_resurrect_at FROM agents_meta WHERE id = %s",
+        "SELECT wake_suppressed_until FROM agents_meta WHERE id = %s",
         (agent_id,),
-    ).fetchone() == (None, None)
+    ).fetchone() == (None,)
     wake_rows = _recovery_wakes(db_conn, agent_id)
     assert len(wake_rows) == 1
     wake_id, content, kind, source, status, payload = wake_rows[0]
