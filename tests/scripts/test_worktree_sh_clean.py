@@ -8,11 +8,13 @@ removal without an explicit --force.
 
 from __future__ import annotations
 
-import json
 import os
 import subprocess
 import sys
 from pathlib import Path
+
+from base.sessions.pty.paths import service_socket_path
+from tests.path_scoped.pty_service import FakePtyService
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -77,14 +79,30 @@ def _plant_usable_python(repo: Path) -> None:
     shim.chmod(0o755)
 
 
-def _fake_home(tmp_path: Path, *, record_cwd: Path | None = None) -> Path:
-    """An $AVA_HOME whose pty records hold one session (the anchor)."""
+def _fake_home(tmp_path: Path) -> Path:
+    """An empty $AVA_HOME: no pty-sessions service listens in it."""
     home = tmp_path / "ava-home"
-    records = home / "run" / "pty"
-    records.mkdir(parents=True)
-    if record_cwd is not None:
-        (records / "1.json").write_text(json.dumps({"cwd": str(record_cwd), "pid": 424242}))
+    (home / "run").mkdir(parents=True)
     return home
+
+
+def _service_anchored_at(home: Path, cwd: Path) -> FakePtyService:
+    """A pty-sessions service in `home` that lists one session started in `cwd` (the anchor)."""
+    return FakePtyService(
+        service_socket_path(home / "run"),
+        [
+            {
+                "name": "1",
+                "pid": 424242,
+                "create_time": 0.0,
+                "starttime": None,
+                "cmd": "/bin/bash -l -i",
+                "cwd": str(cwd),
+                "started_at": 0.0,
+                "generation": None,
+            }
+        ],
+    )
 
 
 def _branch_exists(repo: Path, name: str) -> bool:
@@ -95,23 +113,27 @@ def test_anchored_worktree_is_refused_and_force_overrides(tmp_path: Path) -> Non
     repo = _make_repo(tmp_path)
     target = _add_worktree(repo)
     _plant_usable_python(repo)
-    home = _fake_home(tmp_path, record_cwd=target)
+    home = _fake_home(tmp_path)
+    service = _service_anchored_at(home, target)
 
-    refused = _clean(repo, home, "t1")
+    try:
+        refused = _clean(repo, home, "t1")
 
-    assert refused.returncode == 1
-    assert "REFUSE" in refused.stderr
-    assert "removal refused" in refused.stderr
-    assert "live-anchor check passed" not in refused.stdout
-    assert target.is_dir()
-    assert _branch_exists(repo, "ava-t1")
+        assert refused.returncode == 1
+        assert "REFUSE" in refused.stderr
+        assert "removal refused" in refused.stderr
+        assert "live-anchor check passed" not in refused.stdout
+        assert target.is_dir()
+        assert _branch_exists(repo, "ava-t1")
 
-    forced = _clean(repo, home, "t1", "--force")
+        forced = _clean(repo, home, "t1", "--force")
 
-    assert forced.returncode == 0, forced.stderr
-    assert "removing anyway (--force)" in forced.stderr
-    assert not target.exists()
-    assert not _branch_exists(repo, "ava-t1")
+        assert forced.returncode == 0, forced.stderr
+        assert "removing anyway (--force)" in forced.stderr
+        assert not target.exists()
+        assert not _branch_exists(repo, "ava-t1")
+    finally:
+        service.close()
 
 
 def test_unusable_checker_environment_refuses_and_force_overrides(tmp_path: Path) -> None:

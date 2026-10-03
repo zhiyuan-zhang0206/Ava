@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import os
 import sys
 from collections.abc import Iterator
 from pathlib import Path
@@ -23,6 +22,7 @@ from ops.lifecycle import termination
 from ops.rpc_schemas import TerminateAgentRequest
 from tests.path_scoped.pty_reaper import PtyReaper
 from tests.path_scoped.pty_reaper import pty_reaper as pty_reaper
+from tests.path_scoped.pty_service import pty_service as pty_service
 
 
 @pytest.fixture
@@ -562,6 +562,7 @@ finally:
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="real POSIX PTY sessions")
+@pytest.mark.usefixtures("pty_service")
 @pytest.mark.asyncio
 async def test_kill_terminates_only_the_owners_real_shell_sessions(
     db_conn: psycopg.Connection,
@@ -573,10 +574,11 @@ async def test_kill_terminates_only_the_owners_real_shell_sessions(
     database: Database,
     event_bus: EventBus,
 ) -> None:
-    """End to end on real PTY sessions: `kill --kill-all-shell-sessions`
-    kills the owner's shells and its watcher-shaped running job without
-    letting the job's exit path send its notice, and leaves the owner's
-    `ava.ui.serve` page session and another agent's session running."""
+    """End to end on real PTY sessions held by a real pty-sessions service:
+    `kill --kill-all-shell-sessions` kills the owner's shells and its
+    watcher-shaped running job without letting the job's exit path send its
+    notice, and leaves the owner's `ava.ui.serve` page session and another
+    agent's session running."""
     import shlex
 
     from base.cluster import session_name
@@ -586,9 +588,6 @@ async def test_kill_terminates_only_the_owners_real_shell_sessions(
     from ops.rpc_schemas.terminate import ShellSessionsKill
 
     monkeypatch.setenv("AVA_HOME", str(tmp_path))
-    # The PTY CLI runs as a child process: it resolves its home from the
-    # environment it inherits, not from this process's settings.
-    monkeypatch.setitem(os.environ, "AVA_HOME", str(tmp_path))
     monkeypatch.setenv("HOME", str(tmp_path))
 
     async def _noop_cancel(_aid: int, _command_id: int) -> None:

@@ -123,11 +123,13 @@ def probe_endpoint(
 def _observe(service: str) -> DaemonProbe:
     from base.config import settings
     from base.paths import chrome_mcp_socket, computer_mcp_socket, mcp_daemon_shared_socket
+    from base.sessions.pty.paths import service_socket_path
 
     sockets = {
         "browser-mcp": chrome_mcp_socket,
         "computer-mcp": computer_mcp_socket,
         "mcp-daemon": mcp_daemon_shared_socket,
+        "pty-sessions": service_socket_path,
     }
     if service in sockets:
         return _owned_ping(lambda: owned_process(service), sockets[service]())

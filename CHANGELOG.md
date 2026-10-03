@@ -7,15 +7,25 @@ and the matching GitHub Releases.
 
 ## [Unreleased]
 
+### Changed
+- Agent shells live in one `pty-sessions` roster service per machine instead of one detached
+  host process each. A session outlives an agent, an agent host and a gateway restarting; `ava
+  stop`, `ava restart`, an update, a service crash and a reboot end every session, and `ava stop`
+  and `ava restart` notify the owners of busy ones. A shell's base environment is the service's
+  plus the forwarded env, so a variable only the creating process held is not carried over
+  ([decision](decisions/2026-10-03-pty-sessions-service.md)).
+
 ### Removed
 - `ava maintenance prepare`, `drain`, `stop`, `start`, `resume` and `stop-data-plane`, with
   `--keep-terminals` and `--gateway-last`: the same kernel as `ava stop` and `ava start`, taken
   one step at a time, with no caller. `ava maintenance` keeps `status`, `repair` and `cancel`
   (formerly `resume --cancel`)
   ([decision](decisions/2026-10-03-delete-manual-maintenance-verbs.md)).
+- The per-session pty hosts with their records, orphan reaper, envfile handoff and CLI transport,
+  `ava restart` no longer keeps shells; the generic `--keep-service pty-sessions` does.
 - `ava pause`: a stop that kept the data plane, browser, helper and persistent shells.
   `ava stop --keep-infra --keep-service NAME` names the retained services, and `ava
-  restart` keeps the data plane, browser, helper and shells as before
+  restart` keeps the data plane, browser and helper as before
   ([decision](decisions/2026-10-03-delete-ava-pause.md)).
 - Port-block allocation and the start-time port scan and `.env` drift check:
   every home records one fixed port table (25 slots,

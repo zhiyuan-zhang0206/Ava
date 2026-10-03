@@ -1,15 +1,14 @@
 """Shared fixtures for the ava SDK tests (registered by `tests/fixtures/path_scopes.py`), PTY-backed ones among them (`ava.shell`, `ava.watcher`).
 
-Sessions are pty sessions, each carried by its own detached host process
-(`base.sessions.pty`) under the tmp test home; the `_pty_sessions_env`
-fixture pins the env hosts need and sweeps leaked sessions at session end.
-Parallel xdist workers each use a reserved high-range fake agent-id
-(`_TEST_AGENT_BASE`) for isolation; tests clean up only their own
+Sessions are pty sessions held by a real pty-sessions service under the tmp test
+home (the `pty_service` fixture, imported below), which closes whatever a test
+leaves alive when it ends. Parallel xdist workers each use a reserved high-range
+fake agent-id (`_TEST_AGENT_BASE`) for isolation; tests clean up only their own
 agent-prefixed sessions via prefix-scoped `kill_all`.
 
 Session naming format: `ava-agent-{agent_id}-shell-{session_id}` (no cluster
-segment — the per-home run/pty namespace scopes the sessions, so names are
-deterministic by construction).
+segment — the home's own service scopes the sessions, so names are deterministic
+by construction).
 """
 
 import os
@@ -25,6 +24,9 @@ from ava import shell
 # One definition shared with the gateway and integration modules; imported here so it
 # registers for this module's paths.
 from tests.path_scoped.api_keys import _mock_api_keys as _mock_api_keys
+
+# Registers `pty_service` for the paths this module governs.
+from tests.path_scoped.pty_service import pty_service as pty_service
 
 # Parallel xdist worker isolation: pty session records/sockets live under each
 # worker's own tmp test home, so workers cannot collide; still, each worker uses
@@ -75,28 +77,6 @@ def _ensure_agents_meta_row(agent_id: int | None = None) -> None:
         conn.commit()
 
 
-@pytest.fixture(scope="session")
-def _pty_sessions_env() -> Iterator[None]:
-    """End-of-session sweep for pty-backed tests.
-
-    There is no supervisor daemon to bootstrap (each `new` spawns the
-    session's own detached host, base/sessions/pty; the hosts inherit the
-    suite's `AVA_CONFIG_FETCH=skip` pin from this process's env). The
-    one job left is teardown: kill every session still alive under the tmp
-    test home — hosts are detached to init, so a leaked one would survive
-    the tmp home and keep running (the 2026-07-24 leaked-daemon outage
-    class, now per session instead of per supervisor).
-    """
-    yield
-    from base.sessions.pty import cli as pty_cli
-
-    for name in list(pty_cli.live_sessions()):
-        try:
-            pty_cli.session_request(name, {"op": "kill"})
-        except OSError:
-            pty_cli._kill_by_record(name)
-
-
 @pytest.fixture
 def _isolated_agent(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
     """Give this worker a reserved fake agent-id and clean only its own prefixed sessions.
@@ -105,12 +85,12 @@ def _isolated_agent(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
     the process-global `ava.self.AGENT_ID`, so applying it directory-wide would clobber
     DB tests (`test_core`, `test_self_update`, `test_agents_sdk`) that rely on the
     real `ava.self.AGENT_ID` / a `spawn_agent()`-created row. The pty test modules pull
-    it in via `pytestmark = pytest.mark.usefixtures("_isolated_agent")` (and the
-    `_pty_sessions_env` fixture they also use).
+    it in via `pytestmark = pytest.mark.usefixtures("pty_service", "_isolated_agent")`.
 
-    Each session lives in its own detached host, so cleanup uses prefix-scoped
-    `kill_all` (session kill) — there is no daemon-wide teardown. Cleans before
-    and after each test to guarantee a clean starting state.
+    Cleanup is prefix-scoped `kill_all` (session kill): the worker's fake agent
+    only ever owns its own prefix. Cleans before and after each test to guarantee
+    a clean starting state; `pty_service` must be requested first so it outlives
+    the final cleanup.
 
     The agent-id swap goes through monkeypatch, NOT a manual save/restore:
     a test in the module may itself monkeypatch `_agent_id` (test_watcher's

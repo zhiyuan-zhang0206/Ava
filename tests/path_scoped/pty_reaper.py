@@ -7,7 +7,6 @@ that run real PTY sessions import both names from here.
 from __future__ import annotations
 
 import contextlib
-import json
 import os
 import pathlib
 import time
@@ -17,9 +16,7 @@ import psutil
 import pytest
 
 from base.native_process.ownership import OwnedProcess
-from base.paths import run_dir
-from base.sessions.backend import PtySessionBackend
-from base.sessions.record import SessionRecord
+from base.sessions.pty import client
 
 
 def _running(process: psutil.Process) -> bool:
@@ -57,9 +54,9 @@ class PtyReaper:
     """SIGKILLs every process a test's real PTY sessions created, pass or fail.
 
     Teardown cannot route through the code under test: once a stop HUPs a
-    session's shell, the host ends the session (record and socket gone), and
-    ``kill_session(name)`` no longer reaches a job that ignored the hangup —
-    it lives on as an orphan of init. The processes are pinned instead, as
+    session's shell, the pty-sessions service drops the session, and
+    ``client.kill(name)`` no longer reaches a job that ignored the hangup; it
+    lives on as an orphan of init. The processes are pinned instead, as
     ``psutil.Process`` objects, which refuse to signal a recycled pid.
     """
 
@@ -69,19 +66,14 @@ class PtyReaper:
         self._pinned: list[psutil.Process] = []
 
     def track_session(self, name: str) -> OwnedProcess:
-        """Pin a just-created session's host and shell; return the shell."""
-        path = run_dir() / "pty" / f"{name}.json"
-        record = SessionRecord.read(path)
-        assert record is not None, f"session {name} left no record"
-        raw = json.loads(path.read_text(encoding="utf-8"))
-        host = OwnedProcess(raw["host_pid"], raw["host_create_time"], raw["host_starttime"])
-        shell = OwnedProcess(record.pid, record.create_time, record.starttime)
+        """Pin a just-created session's shell; return its identity."""
+        (info,) = [s for s in client.list_sessions() if s.name == name]
+        shell = OwnedProcess(info.pid, info.create_time, info.starttime)
         self._names.append(name)
-        for identity in (host, shell):
-            # Construct first, then verify: a pid recycled in between fails the check.
-            process = psutil.Process(identity.pid)
-            assert identity.live(), f"session {name}: pid {identity.pid} is not the recorded one"
-            self._pinned.append(process)
+        # Construct first, then verify: a pid recycled in between fails the check.
+        process = psutil.Process(shell.pid)
+        assert shell.live(), f"session {name}: pid {shell.pid} is not the recorded one"
+        self._pinned.append(process)
         return shell
 
     def track(self, *processes: psutil.Process) -> None:
@@ -91,9 +83,8 @@ class PtyReaper:
     def _strays(self) -> list[psutil.Process]:
         """Live processes whose argv names this test's private tmp dir.
 
-        The PTY host carries it on argv, and so does a file-backed job even
-        when no test step captured it. The dir is unique to this test, so a
-        match is this test's process.
+        A file-backed job carries it on argv even when no test step captured
+        it. The dir is unique to this test, so a match is this test's process.
         """
         prefix = self._tmp + os.sep
         return [
@@ -115,9 +106,14 @@ class PtyReaper:
         deadline = time.monotonic() + 10
         while any(_running(process) for process in frozen) and time.monotonic() < deadline:
             time.sleep(0.05)
-        # The listing sweeps the dead sessions' records and sockets (a long
-        # home puts the socket outside tmp_path) and must not list ours.
-        listed = set(PtySessionBackend().list_sessions()) & set(self._names)
+        # The service's listing (empty when it is already down) must stop naming ours: it
+        # drops a session once it sees its shell's end.
+        names = set(self._names)
+        listing_deadline = time.monotonic() + 5
+        listed = {info.name for info in client.list_sessions()} & names
+        while listed and time.monotonic() < listing_deadline:
+            time.sleep(0.05)
+            listed = {info.name for info in client.list_sessions()} & names
         survivors = {process.pid for process in frozen if _running(process)}
         survivors |= {process.pid for process in self._strays()}
         if survivors or listed:
@@ -131,7 +127,7 @@ def pty_reaper(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> Itera
     """Real PTY sessions die with their test; see ``PtyReaper``.
 
     Depends on ``monkeypatch`` only for teardown order: the reap must run
-    while the test's home patches still point the session listing at its home.
+    while the test's home patches still point the service client at its home.
     """
     del monkeypatch
     reaper = PtyReaper(tmp_path)

@@ -115,6 +115,7 @@ def build_services() -> tuple[ServiceSpec, ...]:
     from services.healthchecks.gate import probe as probe_gate
     from services.healthchecks.otel_collector import probe_collector
     from services.healthchecks.owned_service import probe as probe_owned_service
+    from services.pty_sessions import shutdown_budget as pty_sessions_budget
 
     _fe_port = app_port()
     _fe_url = f"http://localhost:{_fe_port}"
@@ -378,6 +379,21 @@ def build_services() -> tuple[ServiceSpec, ...]:
     # route is unavailable; the bounded metrics queue sheds rather than making
     # collector lifecycle depend on the data plane.
     both_services: tuple[ServiceSpec, ...] = (
+        # pty-sessions: every agent shell on this machine, held by ONE ordinary
+        # process (base/sessions/pty). A session outlives an agent, an agent host
+        # or a gateway restarting; it ends with its shell or when this service
+        # stops, which `ava stop` does only after closing the sessions and
+        # writing their owners' notices. A Unix socket and a ledger file are its
+        # whole data plane: no database at boot or runtime. The socket transport
+        # (and pty itself) is why its gate is POSIX-only (see `_gate_reason`).
+        ServiceSpec(
+            session="pty-sessions",
+            cmd=".venv/bin/python -m services.pty_sessions.daemon",
+            capabilities=_BOTH,
+            requires_db=False,
+            identity_probe=partial(probe_owned_service, "pty-sessions"),
+            stop_ceiling_s=pty_sessions_budget.SHUTDOWN_CEILING_S,
+        ),
         ServiceSpec(
             session="otel-collector",
             cmd=shlex.join(

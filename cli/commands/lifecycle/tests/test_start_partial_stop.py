@@ -121,7 +121,6 @@ def test_partial_stop_uses_native_cleanup_without_database_drain(
             keep_infra=False,
             preserve_sessions=frozenset(),
             keep_browser=False,
-            keep_terminals=False,
             announce=False,
             teardown_extras=True,
             timeout=3,

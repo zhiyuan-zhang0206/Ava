@@ -111,3 +111,9 @@ orphaned after the shell is gone), and a closed session's notice is now
 recorded even when another session leaves the stop incomplete.
 
 Forward link (2026-10-03): `ava pause` was deleted; a stop with a different keep set replaces it. See [delete ava pause](2026-10-03-delete-ava-pause.md).
+
+Forward link (2026-10-03): the closure described here is run by the
+[pty-sessions service](2026-10-03-pty-sessions-service.md) on a `close_all` request
+(`base/sessions/pty/closure.py`) instead of by the stop process against each session's host; the
+sequence, grace and notices are unchanged. The "each host's `kill --graceful` op" alternative
+rejected above no longer exists.

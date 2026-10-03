@@ -273,9 +273,9 @@ every descendant inherits it:
 - every other script that imports application code is run on purpose, and follows the
   convention in `conventions/dev-setup.md`: a temporary `AVA_HOME` in a development
   checkout. `scripts/check_worktree_remove.py` is the one tool that must read the real
-  home: it reads this machine's live session records (`$AVA_HOME/run/pty`), so it only
-  skips the gateway config fetch, dials nothing and writes nothing; run it straight from
-  a checkout.
+  home: it asks this machine's pty-sessions service for its live sessions
+  (`$AVA_HOME/run/pty-sessions.sock`), so it only skips the gateway config fetch,
+  creates and writes nothing; run it straight from a checkout.
 
 **Which checkout may operate a home.** A home that carries its own `<home>/source`
 checkout (the production home `~/.ava`; every unit started from source) is operated
@@ -599,12 +599,13 @@ Three operational consequences worth stating here:
 Ava's long-running **daemons** are each kept alive in their own named session — never crammed into one
 session with multiple windows. On POSIX they run as **detached native processes** (double-forked onto init by
 the process supervisor, `base/sessions/posixproc.py`). Agent
-interactive shells / watchers each run in their own detached pty host
-(`base/sessions/pty/` — one `pty.fork()` `bash -l -i` + pyte screen capture +
-byte transcript under `$AVA_HOME/logs/` per host, session ops over the
-session's own socket at `$AVA_HOME/run/pty/<name>.sock`; hosts reparent to
-init at creation, so they are outside the service roster. Pause and update
-preserve them; full stop explicitly closes them).
+interactive shells / watchers all live in the `pty-sessions` roster service
+(`services/pty_sessions/`, client in `base/sessions/pty/` — one `pty.fork()`
+`bash -l -i` + pyte screen capture + byte transcript under `$AVA_HOME/logs/` per
+session, held by one process per machine and served over
+`$AVA_HOME/run/pty-sessions.sock`). Sessions survive agent, agent-host and
+gateway restarts; `ava stop`, `ava restart` and an update close them (the
+service stops with the roster), and `--keep-service pty-sessions` keeps them.
 A host runs the enabled service specs for its capabilities. Agent execution
 always belongs to `agent-host`; each agent is a scheduled turn, not a separate
 OS process. A null per-agent PID is expected. Inspect host membership, claim
@@ -649,6 +650,7 @@ body's name, home and pid are this unit's own daemon.
 | `browser-mcp` (agent-runner only, gated with `browser`) | `.venv/bin/python -m services.browser.mcp_daemon` (one shared `chrome-devtools-mcp` upstream attached to the headed Chrome, multiplexed over a Unix socket `~/.ava/chrome-mcp.<cdp_port>.sock` to every agent's chrome bridge — serial, with per-connection page affinity so one Chrome client is shared instead of one per browser-using agent) | `services.healthchecks.browser_mcp` (Unix-socket `list_tools` probe) |
 | `computer-mcp` (agent-runner only, platform-gated: signed permissions helper enabled + capable, AF_UNIX transport, non-Windows host — Windows is the phase-3 pilot) | `.venv/bin/python -m services.computer.mcp_daemon` (computer-use executor: every desktop action through the signed permissions helper — serialized machine-wide, screen-coordinated (lease + FIFO queue + `release_control`), Vision OCR on snapshots, audited as `computer_action` + `computer_session_start/end` events, served over `~/.ava/run/computer-mcp.sock`) | `services.healthchecks.computer_mcp` (Unix-socket lock-free `ping` probe) |
 | `mcp-daemon` (agent-runner only) | `.venv/bin/python -m ava.mcps._daemon` (ONE shared MCP daemon per machine, serving every agent over `~/.ava/run/mcp_daemon.sock` — sessions isolated per client connection, replacing the old one-daemon-per-agent children) | `services.healthchecks.mcp_daemon` (Unix-socket `ping` probe) |
+| `pty-sessions` (every host; POSIX only) | `.venv/bin/python -m services.pty_sessions.daemon` (every agent interactive shell on the machine: one process holds every pty master and the in-memory session table, serving a JSON-line protocol over `~/.ava/run/pty-sessions.sock`; no database, no plugin. A session outlives an agent, an agent host or a gateway restarting; `ava stop` closes the sessions and writes their owners' notices first, and a stop of the service itself closes what is left. A crash leaves only what the masters' hangup could not reach, swept at the next start from `~/.ava/run/pty-sessions.json`) | roster identity probe (Unix-socket `ping` bound to the root-owned generation) |
 
 The gate preserves the browser `Host` while proxying to the loopback frontend,
 so the frontend CSP derives the same host that its API client uses. A TLS or

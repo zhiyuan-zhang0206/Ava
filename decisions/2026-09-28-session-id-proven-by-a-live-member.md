@@ -161,3 +161,7 @@ session, and whatever outlived the SIGKILL is out of its reach too.
 - **Identity, not pid.** Membership checks compare identities, not pids. A
   parent vouches for a child only while it still is the captured process, and
   a pid the kernel handed on never counts as its dead member.
+
+Forward link (2026-10-03): the PTY host this decision names is the
+[pty-sessions service](2026-10-03-pty-sessions-service.md) now. The kill op and the closure run
+inside it, and the "host's zombie" alternative above would couple a stop to that one process.

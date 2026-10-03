@@ -3,13 +3,13 @@
 A Claude Code or Codex session runs inside one of your persistent shells. Some
 events end that shell and the coding process in it:
 
-- a full `ava stop`;
+- `ava stop` or `ava restart` (updates included);
 - a host reboot;
-- a crash;
+- a crash, including a crash of the pty-sessions service;
 - the shell's TTL expiring;
 - an explicit kill.
 
-An `ava restart` keeps persistent shells alive, so after one
+An agent or gateway restart keeps persistent shells alive, so after one
 the session is usually still running. If it is still listed in
 `ava.shell.sessions.list()`, it is alive: `capture` it and nudge it. Do not
 resume it.

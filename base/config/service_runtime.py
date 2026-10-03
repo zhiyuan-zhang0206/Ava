@@ -131,7 +131,7 @@ class _ServiceRuntimeSettings(EnvSettings):
     permissions_helper_spawn: bool = Field(
         default=False,
         alias="AVA_PERMISSIONS_HELPER_SPAWN",
-        description="Spawn macOS service, agent, and PTY-host processes directly through the permissions helper so they inherit its stable TCC identity.",
+        description="Spawn macOS service, agent, and pty-sessions service processes directly through the permissions helper so they inherit its stable TCC identity.",
         json_schema_extra={
             "capability": "agent-runner",
             "restart_required": "",

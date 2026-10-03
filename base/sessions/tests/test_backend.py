@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import os
 import shlex
 import sys
 import time
@@ -18,6 +17,8 @@ from base.sessions.backend import (
     get_backend,
     get_shell_backend,
 )
+from tests.path_scoped.pty_service import PtyServiceProcess
+from tests.path_scoped.pty_service import pty_service as pty_service
 
 # ---------------------------------------------------------------------------
 # get_backend
@@ -82,24 +83,36 @@ def test_native_proc_dispatches_by_platform():
     ],
 )
 def test_pty_child_virtual_env_projection(
+    pty_service: PtyServiceProcess,
     unit_home: Path,
     monkeypatch: pytest.MonkeyPatch,
     relative_cwd: str,
     projection: str,
     expected_venv: str | None,
 ) -> None:
-    """Read a real shell's child env, including inherited-host contamination."""
+    """Read a real shell's child env from the pty-sessions service, including a
+    service environment that carries a foreign virtualenv.
+
+    The shell's base is the service's environment (its ambient variables reach the
+    shell, its `VIRTUAL_ENV` does not); the virtualenv comes only from the
+    creator's projection or an explicit entry."""
     from base import paths
 
     checkout = unit_home / "checkout"
     cwd = unit_home / relative_cwd
     cwd.mkdir(parents=True)
     monkeypatch.setattr(paths, "repo_root", lambda: checkout)
-    # unit_home pins in-process Settings; subprocesses read the raw env at boot.
-    monkeypatch.setitem(os.environ, "AVA_HOME", str(unit_home))
-    monkeypatch.setenv("HOME", str(unit_home))  # no user login-profile activation
-    monkeypatch.setenv("VIRTUAL_ENV", str(unit_home / "foreign" / ".venv"))
-    monkeypatch.setenv("PTY_AMBIENT_SENTINEL", "preserved")
+    # The service environment is the shell's base: restart the service with an
+    # ambient sentinel and a foreign virtualenv in it.
+    pty_service.stop()
+    service = PtyServiceProcess(
+        unit_home,
+        {
+            "VIRTUAL_ENV": str(unit_home / "foreign" / ".venv"),
+            "PTY_AMBIENT_SENTINEL": "preserved",
+        },
+    )
+    service.start()
     backend = PtySessionBackend()
     name = "ava-test-venv-projection"
     report = unit_home / "child-env.json"
@@ -131,6 +144,7 @@ def test_pty_child_virtual_env_projection(
             assert child_env["AVA_DB_URL"] == "runner-override"
     finally:
         backend.kill_session(name)
+        service.stop()
 
 
 # ---------------------------------------------------------------------------

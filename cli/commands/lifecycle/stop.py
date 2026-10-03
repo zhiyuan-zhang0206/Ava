@@ -2,8 +2,9 @@
 
 Normal paths retain checkpoints and never escalate a service or data-plane
 stop on timeout; a normal stop's terminal closure SIGKILLs what outlives its
-bounded grace. Explicit force uses the separate legacy resource teardown;
-a restart preserves persistent PTYs.
+bounded grace. Explicit force uses the separate legacy resource teardown.
+A stop or restart closes terminals unless `--keep-service pty-sessions` keeps
+the service that holds them.
 """
 
 from __future__ import annotations
@@ -13,8 +14,10 @@ from pathlib import Path
 
 from base.db import Database
 from base.events.live.bus import EventBus
+from base.sessions.pty.paths import SERVICE_UNIT
 from cli.commands._repo import _repo_root, session_name
 from cli.commands.lifecycle._pause_resume import exclusive_resources
+from cli.commands.lifecycle.service_stop import force_close_terminals
 from cli.start_runtime import StartRuntime
 
 # The browser service runs a headed Chrome on a persistent login profile. A
@@ -101,7 +104,7 @@ def _compute_stop_scope(
 def _print_stop_plan(
     service_sessions: list[str],
     *,
-    reap_agents: bool,
+    keep_terminals: bool,
     keep_browser: bool,
     runner_only: bool,
     keep_infra: bool,
@@ -111,7 +114,7 @@ def _print_stop_plan(
 
     print("\nThe following will be stopped:")
     print(f"  service sessions: {', '.join(service_sessions) if service_sessions else '(none)'}")
-    if reap_agents:
+    if not keep_terminals:
         print("  persistent terminals: closed")
     if keep_browser:
         print(f"  browser: kept up ({session_name(_BROWSER_SESSION)}, login session preserved)")
@@ -138,18 +141,6 @@ def _confirm_stop(*, require_confirmation: bool) -> bool:
     return True
 
 
-def _stop_terminals_force() -> None:
-    """Close this unit's persistent shells on an explicit full force stop."""
-    from base.sessions.backend import get_shell_backend
-
-    backend = get_shell_backend()
-    names = backend.list_sessions()
-    for name in names:
-        ok, _ = backend.kill_session(name, graceful=False)
-        if not ok:
-            raise RuntimeError(f"force stop did not close terminal {name}")
-
-
 def _force_stop(
     _repo: Path,  # retained for the common stop call contract
     *,
@@ -157,7 +148,6 @@ def _force_stop(
     keep_infra: bool = False,
     preserve_sessions: frozenset[str] = frozenset(),
     keep_browser: bool = True,
-    reap_agents: bool = False,
     announce: bool = False,
 ) -> int:
     """Explicit force-only resource stop; normal commands use _temporary_stop.
@@ -174,10 +164,12 @@ def _force_stop(
     root_preserve = preserve_sessions | (
         frozenset({_BROWSER_SESSION}) if keep_browser else frozenset[str]()
     )
+    # Keeping the pty-sessions service keeps the terminals it holds.
+    keep_terminals = SERVICE_UNIT in preserve_sessions
     plan_sessions = _root_driver_commands._root_tree_plan(root_preserve)
     _print_stop_plan(
         plan_sessions,
-        reap_agents=reap_agents,
+        keep_terminals=keep_terminals,
         keep_browser=keep_browser,
         runner_only=runner_only,
         keep_infra=keep_infra,
@@ -196,8 +188,11 @@ def _force_stop(
 
     # Explicit force interrupts the host process. Agent metadata/checkpoints
     # remain untouched; the next host uses its existing owner recovery. This
-    # path does not fabricate drain receipts and remains usable offline.
-    _root_driver_commands.stop_root_service_tree(preserve=root_preserve, force=True)
+    # path does not fabricate drain receipts and remains usable offline. The
+    # pty-sessions service outlives this step: it closes the terminals below.
+    _root_driver_commands.stop_root_service_tree(
+        preserve=root_preserve | {SERVICE_UNIT}, force=True
+    )
 
     # 1.4) a teardown that asked for the browser down finishes the job: kill any
     # Chrome still running on THIS cluster's profile. The session kill above
@@ -209,9 +204,11 @@ def _force_stop(
     if not keep_browser:
         _reap_cluster_chrome()
 
-    # Persistent terminals are separate from the hosted service process.
-    if reap_agents:
-        _stop_terminals_force()
+    # Persistent terminals are closed through the service that holds them (from its
+    # ledger when it is not running), then the service itself goes.
+    if not keep_terminals:
+        force_close_terminals()
+        _root_driver_commands.stop_root_service_tree(preserve=root_preserve, force=True)
 
     # 2) stop the data plane (data persists on disk).
     _stop_data_plane(skip_infra=skip_infra, runner_only=runner_only)
@@ -227,7 +224,6 @@ def _do_stop(
     keep_infra: bool = False,
     preserve_sessions: frozenset[str] = frozenset(),
     keep_browser: bool = True,
-    reap_agents: bool = False,
     announce: bool = False,
     teardown_extras: bool = False,
     force: bool = False,
@@ -241,7 +237,6 @@ def _do_stop(
             keep_infra=keep_infra,
             preserve_sessions=preserve_sessions,
             keep_browser=keep_browser,
-            reap_agents=reap_agents,
             announce=announce,
         )
     from cli.commands.lifecycle._temporary_stop import stop
@@ -251,7 +246,6 @@ def _do_stop(
         keep_infra=keep_infra,
         preserve_sessions=preserve_sessions,
         keep_browser=keep_browser,
-        keep_terminals=not reap_agents,
         announce=announce,
         teardown_extras=teardown_extras,
         timeout=timeout,
@@ -274,7 +268,6 @@ def cmd_stop(
         keep_infra=keep_infra,
         preserve_sessions=preserve_sessions,
         keep_browser=not stop_browser,
-        reap_agents=True,
         announce=True,
         teardown_extras=True,
         force=force,
@@ -380,16 +373,15 @@ def _cmd_restart_body(*, mode: str = "smooth", force_reap: bool = False) -> int:
     # An exec-domain restart is SIGKILLed by the execute_code call's own
     # teardown — the call's whole process group, as its turn ends (nohup/& do
     # not leave the group — 2026-09-12: macmini stranded in a local pause).
-    # Refuse before any pause and name the one survivable host: `run_background`,
-    # a persistent shell session no stop leg kills.
+    # Refuse before any pause. The restart closes persistent terminals like a stop,
+    # so no shell session can host it either: a plain login shell does.
     exec_domain = hosting_exec_domain()
     if exec_domain is not None:
         print(
             f"  ✗ refusing restart: this process runs inside an agent execute_code "
             f"exec domain ({exec_domain}) — its process group is SIGKILLed when the "
             "call's turn ends, this restart with it — the host stranded mid-restart. Run "
-            "it via ava.shell.run_background(...) — a persistent shell session that "
-            "survives the restart — or the detached form.",
+            "it from a shell no ava session hosts (e.g. a plain ssh/login shell).",
             file=sys.stderr,
         )
         _release_self_heal_pause()  # same decline contract as the preflight refusal below
@@ -476,17 +468,16 @@ def _cmd_restart_body(*, mode: str = "smooth", force_reap: bool = False) -> int:
     # silently authorizes force.
     _require_restart_runtime(runtime)
 
-    # Restart replaces the application services and keeps everything else: the
-    # private data plane (keep_infra), the browser (keep_browser), persistent
-    # terminals (reap_agents=False skips the stop's terminals phase), and, with
-    # teardown_extras left off, Gate, the permissions helper and native LGTM.
+    # Restart replaces the services, persistent terminals included (they close
+    # as at `ava stop`: the pty-sessions service runs the new code afterwards),
+    # and keeps the private data plane (keep_infra), the browser (keep_browser)
+    # and, with teardown_extras left off, Gate, the permissions helper and native LGTM.
     with status_journal.phase("stop"):
         rc = _do_stop(
             repo,
             require_confirmation=False,
             keep_infra=True,
             keep_browser=True,
-            reap_agents=False,
             teardown_extras=False,
             force=mode == "force" or force_reap,
         )

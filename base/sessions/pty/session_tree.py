@@ -3,10 +3,9 @@
 A session's membership is its shell, every descendant of the shell, and every
 process in the shell's POSIX session (``getsid(pid) == shell pid``) together
 with that process's descendants. Every path that ends a session goes through
-`kill_session_tree`: the host's ``kill`` op, the CLI's record-based kill of a
-wedged host, the lazy sweep of a crashed host's shell, the orphan-host reaper
-(`kill_host_tree`), and the SIGKILL leg of the persistent-terminal closure (a
-normal `ava stop`).
+`kill_session_tree`: the service's ``kill`` op and the SIGKILL leg of the
+persistent-terminal closure (`closure`: a normal `ava stop`, the service's own
+stop, the sweep of a crashed service's leftovers).
 
 Why the POSIX session is the membership test, not process groups or the tty:
 
@@ -21,7 +20,7 @@ Why the POSIX session is the membership test, not process groups or the tty:
 - A process that calls setsid(2) AND has left the shell's tree has left the
   session by the kernel's own definition. That is how Ava launches a sovereign
   process from inside a shell (`base._reparent`: setsid, fork, reparent to
-  init — a new PTY host, the services `ava start` brings up), and no
+  init — the services `ava start` brings up), and no
   birth-identified, name-free fact separates it from any other daemon, so it
   survives the kill. A setsid'd process still inside the tree is covered by
   the descendant walk.
@@ -751,37 +750,3 @@ def _kill_frozen(
     shell = members.get(leader.pid)
     outcome.kill([shell] if shell is not None and shell.identity == leader else [], done, wait_s)
     return outcome.result()
-
-
-def kill_host_tree(host: psutil.Process, *, wait_s: float) -> TreeKill:
-    """Kill a session host after every session its shells lead.
-
-    The host is frozen first so it cannot fork a shell behind the sweep; each
-    direct child (the host's shell, a session leader) is killed with its whole
-    session, then the host itself — also when a session kill raised, so the
-    host is never left stopped. `host` is a pinned handle, so a recycled pid
-    is never signalled.
-    """
-    try:
-        if not _signallable(host.pid) or not host.is_running():
-            return TreeKill((), ())
-        head = [_Member(OwnedProcess.capture(host), host, frozen=False)]
-    except psutil.NoSuchProcess:
-        return TreeKill((), ())
-    _freeze(host)
-    outcome = _Outcome()
-    try:
-        for shell in _child_identities(host):
-            outcome.add(kill_session_tree(shell, wait_s=wait_s))
-    finally:
-        outcome.kill(head, set(), wait_s)
-    return outcome.result()
-
-
-def _child_identities(process: psutil.Process) -> list[OwnedProcess]:
-    identities: list[OwnedProcess] = []
-    with contextlib.suppress(psutil.NoSuchProcess):
-        for child in process.children():
-            with contextlib.suppress(psutil.NoSuchProcess):
-                identities.append(OwnedProcess.capture(child))
-    return identities

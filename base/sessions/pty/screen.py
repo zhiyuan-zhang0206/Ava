@@ -1,7 +1,6 @@
 """PTY screen model — pyte terminal emulation over a raw byte stream.
 
-The pty supervisor's reader thread receives raw bytes from the session's
-master fd; this module turns that stream into the two views the capture
+The pty-sessions service reads raw bytes from the session's master fd; this module turns that stream into the two views the capture
 contract needs, in the shape the classic screen-capture contract defined them:
 
 - **visible screen** (``scrollback=False``): the current screenful, with
@@ -21,7 +20,7 @@ Three jobs sit between the bytes and pyte:
 - **raw byte ring buffer** — the full transcript since spawn (capped), the
   byte-exact record the screen model cannot reconstruct (escape sequences
   consumed, overwritten cells); also the degraded-capture fallback;
-- **thread safety** — the reader thread feeds while the daemon's request
+- **thread safety** — the service's event loop feeds while its request
   threads resize / capture, so every access sits under one lock.
 
 pyte itself is a faithful VT emulator: ANSI color/attribute escapes are
@@ -38,8 +37,8 @@ import threading
 import pyte
 
 # Terminal geometry defaults — match the classic default window size, which is
-# what the PTY-hosted shells have been running at.
-from base.sessions.pty._paths import (  # single definition, stdlib-only home
+# what the sessions' shells have been running at.
+from base.sessions.pty.paths import (  # single definition, stdlib-only home
     DEFAULT_COLS,
     DEFAULT_ROWS,
 )
@@ -89,8 +88,8 @@ def _heal_orphan_stubs(screen: pyte.HistoryScreen) -> None:
 class PtyScreen:
     """The per-session terminal model: pyte screen + scrollback, fed bytes.
 
-    All methods are safe to call from any thread; the reader thread is the
-    sole ``feed()`` caller, resize/capture come from the daemon's request
+    All methods are safe to call from any thread; the event loop is the
+    sole ``feed()`` caller, resize/capture come from the service's request
     threads.
     """
 
@@ -111,7 +110,7 @@ class PtyScreen:
 
     # -- feeding ------------------------------------------------------------
     def feed(self, data: bytes) -> None:
-        """Ingest raw bytes from the master fd (reader thread).
+        """Ingest raw bytes from the master fd (the service's event loop).
 
         Keeps the raw ring buffer, incrementally decodes UTF-8 (a sequence
         split across reads survives), and feeds the decoded text to pyte.

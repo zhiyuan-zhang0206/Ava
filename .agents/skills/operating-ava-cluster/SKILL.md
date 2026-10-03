@@ -147,8 +147,8 @@ from real incidents; the concrete sizes and dates are illustrative.
 - Checks: `schedules` table status; gateway log launch failures; runner
   process alive?; the schedule session's pane output.
 - Causes: the manager asked the wrong session backend — schedule sessions
-  run on `get_shell_backend()` (PTY supervisor) since the migration (step 2:
-  the launch command rides the daemon's `cmd_b64` initial-command mechanism,
+  run on `get_shell_backend()` (the pty-sessions service) since the migration
+  (step 2: the launch command rides the service's initial-command mechanism,
   so a PTY login shell can run a schedule runner); before that they were raw
   orchestration sessions. A backend mismatch (manager on one backend, session
   on the other) makes reconcile relaunch every tick and collide with the live
@@ -157,7 +157,7 @@ from real incidents; the concrete sizes and dates are illustrative.
   crash-looping script tripping the breaker (`error` is terminal — recovery is
   an explicit API restart/start, which relaunches and resets status).
 - Response: clear the stale session (`ava shell kill` the `ava-schedule-N`
-  session, or remove it via the PTY supervisor CLI), `POST
+  session, or close it through the pty-sessions service), `POST
   /api/schedules/{id}/restart`, verify `status='running'` and the next fire
   fires (check the runner's session log for "Firing:" + the downstream
   effect, e.g. the memory-pool commit). If a restart flips back to `error`

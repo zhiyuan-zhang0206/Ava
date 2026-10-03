@@ -35,7 +35,7 @@ generation sweep.
 A corrupt allocation marker fails closed. Never delete it: absence changes the
 current generation to `None`, which can make reconciliation classify every
 generation-bound desired record as superseded. Recover the original generation
-UUID from a known-live PTY session record, rebuild a valid marker with that
-exact UUID, and then permit reconciliation. If no session record establishes
-the UUID, leave allocation fail-closed until an operator makes the boundary
-explicit.
+UUID from a known-live session (the service's `list` reports each session's
+generation), rebuild a valid marker with that exact UUID, and then permit
+reconciliation. If no session establishes the UUID, leave allocation
+fail-closed until an operator makes the boundary explicit.

@@ -138,7 +138,7 @@ ava start     # first start creates the data plane; later ones reconcile the des
 ava stop      # normal agent drain, then full local stop including PTYs/browser/private pg+redis.
               # --keep-infra / --keep-service retain resources; --force is explicit escalation.
               # ava start resumes after readiness; agent identities and durable data survive.
-ava restart   # stop then start in one command; keeps private pg+redis, browser and persistent PTYs.
+ava restart   # stop then start in one command; keeps private pg+redis and the browser, closes terminals.
 ava status    # check status (includes the pg/redis view)
 ava cluster db-authority issue-unit --machine NAME --home UNIT_HOME --out BUNDLE
               # gateway: seal one unit's capability; prints its transport key once

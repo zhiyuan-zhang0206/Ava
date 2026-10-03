@@ -69,3 +69,9 @@ crashing (blast radius: one session), or a machine reboot.
   ceiling (`kern.tty.ptmx_max`) is unchanged and remains the density wall.
 - `has` (record + shell-pid liveness) is now truthful unconditionally — the
   "stays truthful while the daemon restarts" caveat is gone with the daemon.
+
+Forward link (2026-10-03): superseded by
+[agent shells live in one pty-sessions roster service per machine](2026-10-03-pty-sessions-service.md).
+Sessions survive an agent, agent-host or gateway restart and `ava restart`; they no longer try to
+survive a service stop or an update, which `ava stop` had already ended on 2026-09-28. The host
+processes, records, orphan reaper and CLI transport described here are gone.

@@ -1,15 +1,16 @@
-"""ScheduleManager × real PTY supervisor integration (S6 schedule migration).
+"""ScheduleManager x real pty-sessions service integration.
 
-Real session hosts + real DB + real backend + the real `gateway.schedule_runner`
-entrypoint: `_launch` creates a PTY-supervisor session, `_live_ids` /
-`capture_blocking` see it, `_reap` tears it down, reconcile rebuilds after a
-crash, and the breaker trips after repeated crashes.
+A real pty-sessions service + real DB + real backend + the real
+`gateway.schedule_runner` entrypoint: `_launch` creates a session in the service,
+`_live_ids` / `capture_blocking` see it, `_reap` tears it down, reconcile rebuilds
+after a crash, and the breaker trips after repeated crashes.
 
 The schedule commands are deliberately trivial (`sleep 30` for the live
 paths, `false` for the crash paths) — the runner's real script execution and
 status semantics are covered by test_schedule_runner.py.
 """
 
+import contextlib
 import os
 import time
 from collections.abc import Iterator
@@ -23,8 +24,10 @@ from base.cluster import session_name
 from base.deploy.lifecycle.start_serving import RootBirth
 from base.native_process.os_platform import IS_WINDOWS
 from base.sessions.backend import get_shell_backend
+from base.sessions.pty import client
 from gateway.schedules import session_control
 from services.schedule_manager import manager as sm
+from tests.path_scoped.pty_service import PtyServiceProcess
 
 REPO = Path(__file__).resolve().parents[3]
 
@@ -36,13 +39,11 @@ pytestmark = [
 
 @pytest.fixture(scope="module")
 def _pty_home(tmp_path_factory: pytest.TempPathFactory) -> Iterator[str]:
-    """A DEDICATED home for the schedule sessions' records/sockets/hosts.
+    """A DEDICATED home, with its own pty-sessions service, for the schedule sessions.
 
-    There is no daemon to spawn: each schedule launch spawns its own detached
-    session host under this home (the CLI children inherit AVA_HOME from the
-    pinned env). Torn down by killing whatever sessions are still alive under
-    the home — hosts detach to init, so an unkilled one would outlive the
-    test run."""
+    The service is a subprocess pinned to this home; each schedule launch creates a
+    session in it. Torn down by closing every session and stopping the service, so
+    no shell outlives the test run."""
     import os
 
     home = tmp_path_factory.mktemp("pty-sched-home")
@@ -55,16 +56,14 @@ def _pty_home(tmp_path_factory: pytest.TempPathFactory) -> Iterator[str]:
     (home / ".env").write_text(f"AVA_DB_URL={_settings.data_plane.db_url}\n")
     prior_home = os.environ.get("AVA_HOME")
     os.environ["AVA_HOME"] = str(home)
+    service = PtyServiceProcess(home)
     try:
+        service.start()
         yield str(home)
     finally:
-        from base.sessions.pty import cli as pty_cli
-
-        for name in list(pty_cli.live_sessions()):
-            try:
-                pty_cli.session_request(name, {"op": "kill"})
-            except OSError:
-                pty_cli._kill_by_record(name)
+        with contextlib.suppress(client.ServiceUnavailableError, client.ServiceError):
+            client.close_all(grace_s=0.5, kill_s=2.0)
+        service.stop()
         if prior_home is None:
             os.environ.pop("AVA_HOME", None)
         else:
@@ -106,10 +105,8 @@ def _insert_schedule(
 
 @pytest.fixture(autouse=True)
 def _point_backend_home(monkeypatch: pytest.MonkeyPatch, _pty_home: str) -> None:
-    # One variable names the dedicated home for every resolver: the
-    # PtySessionBackend CLI children inherit os.environ, and the backend's
-    # list/started-at enumeration resolves the record dir in-process from the
-    # same variable, so the in-process resolver and the spawned hosts agree.
+    # One variable names the dedicated home for every resolver: the client dials the
+    # service socket under it, so the in-process resolver and the service agree.
     monkeypatch.setitem(os.environ, "AVA_HOME", _pty_home)
 
 
@@ -127,11 +124,11 @@ def _host_is_serving(serving_root: RootBirth, _point_backend_home: None) -> Iter
 
 
 def _dump_logs(home: Path) -> str:
-    """Diagnosis aid for CI-only failures: every session transcript + host log."""
+    """Diagnosis aid for CI-only failures: every session transcript + the service log."""
     diag: list[str] = []
-    logdir = home / "logs"
-    for p in sorted(logdir.glob("*.out.log")) + sorted(logdir.glob("*.host.log")):
-        diag.append(f"--- {p.name} ---\n" + p.read_text()[-1200:])
+    for p in [*sorted((home / "logs").glob("*.out.log")), home / "pty-sessions-service.log"]:
+        if p.exists():
+            diag.append(f"--- {p.name} ---\n" + p.read_text(errors="replace")[-1200:])
     return "\n".join(diag)
 
 
@@ -154,8 +151,8 @@ def test_pty_launch_live_capture(
     pool: ConnectionPool,
     _pty_home: str,
 ) -> None:
-    """_launch through the real PTY backend: session appears in the record
-    namespace, _live_ids sees it, capture returns the runner's output."""
+    """_launch through the real PTY backend: the session is live in the service,
+    _live_ids sees it, capture returns the runner's output."""
     # A real .py script (command must name the script file — a bare command
     # with no extension made the runner execute the script body as .py and
     # crash instantly; round 4 CI, 2893). The print marks real execution so
@@ -172,7 +169,7 @@ def test_pty_launch_live_capture(
     name = session_name(f"schedule-{sid}")
     backend = get_shell_backend()
     assert backend.has_session(name)
-    assert (Path(_pty_home) / "run" / "pty" / f"{name}.json").exists(), "record file missing"
+    assert name in [info.name for info in client.list_sessions()], "service does not list it"
     assert sid in mgr._live_ids()
     # Poll for the runner's output instead of one immediate capture: under a
     # slow CI login shell the launch-to-output window is variable, and a

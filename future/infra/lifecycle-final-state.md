@@ -89,7 +89,7 @@
 | 2 | launchd jobs | 9 classes of scheduled items (autostart/health/watchdog-probe/logs/gate/LGTM/redis-bridge/helper + variants) — carriers differ across machines: health-probe is disabled on macmini (runs via a wsl cron), gate is not loaded on macmini (wsl = systemd), LGTM runs on wsl, redis-bridge is not running (a pre-migration leftover); plus 3 small jobs (caffeinate-display / bwh-sub-server / warn-error-audit) | The lifecycle group is **absorbed**; the permission group stays an **adapter (seeder)**; the independent group all goes into the tree (G6) |
 | 3 | permission adaptation | the whole helper stack (signing / DR / path / protocol / nursery) + status channels | **Absorbed as the root** (the helper is a nine-tenths root form) |
 | 4 | platform branching | the `platform.py` fact source + `sys.platform` hot spots | Converged to the OS edge (closed enumeration I4) |
-| 5 | PTY/process hosting | per-session detached host (sovereign) + `_reparent` | **Full-tree ruling** (E2: semantic exemptions replace structural isolation) |
+| 5 | PTY/process hosting | the `pty-sessions` roster service (holds every shell as its child) + `_reparent` | **Full-tree ruling** (E2: semantic exemptions replace structural isolation) |
 | 6 | runner mode | `AVA_RUNNER_MODE` **retired** (tests assert it); agent-host = the only execution architecture | Retired (historical concepts do not enter the final state) |
 | 7 | remote topology | the machine/role composite model + cluster_rpc; no remote process handles | **Kept** (cross-machine = RPC to the target machine's root) |
 | 8 | upgrade/restart | `ava start` three-way readiness, the stop drain boundary, update orchestration, helper self_upgrade execve | **Absorbed** (the root update protocol) |
@@ -132,7 +132,7 @@ Each (machine × cluster) has one complete **process tree**: a general root supe
 - Boundary discipline: the adapter **does not manage units** and holds no lifecycle logic — it is only responsible for getting "the tree planted".
 
 **3) unit (a tree node)**
-- Types (closed enumeration): service (gateway/page_server/watchdog/agent_host/agent_ops/mcp_daemons…), session host (PTY host, spawned inside the tree by its owning service), turn child processes (agent.exec_child, turn lifetime, parent = agent_host).
+- Types (closed enumeration): service (gateway/page_server/watchdog/agent_host/agent_ops/mcp_daemons…), session shells (held by the pty-sessions service, spawned inside the tree by it), turn child processes (agent.exec_child, turn lifetime, parent = agent_host).
 - Every unit has a declarative manifest; the tree's shape = the direct result of manifests (no implicit members).
 
 ## B2 · Contracts (three, all stable across platforms)
@@ -143,7 +143,7 @@ Each (machine × cluster) has one complete **process tree**: a general root supe
 
 ## B3 · Invariants (semantic expansion)
 - **I1 single root**: one root instance per (machine × cluster); the tree root is unique. (Violation check = a startup mutex + patrol.)
-- **I2 chain integrity**: no process in the tree may reparent (no double-fork/setsid/daemonize; a parent never exits because of a management action); upgrades = exec or subchain replacement. **As-is contrast (#1818 verification)**: **every chain root is detached** (a uniform fact) — existing services' parent chains end at init/the OS domain and are not constrained by any Ava tree (sampling window: macmini/wsl 16:1x–16:32); the two shapes = attached directly to init / wrapped by a PTY host (e.g. wsl `schedule_runner` = pty host→bash→runner; a shape distinction, not a platform difference) — I2 is exactly what the final state must reverse.
+- **I2 chain integrity**: no process in the tree may reparent (no double-fork/setsid/daemonize; a parent never exits because of a management action); upgrades = exec or subchain replacement. **As-is contrast (#1818 verification)**: **every chain root is detached** (a uniform fact) — existing services' parent chains end at init/the OS domain and are not constrained by any Ava tree (sampling window: macmini/wsl 16:1x–16:32); the two shapes = attached directly to init / wrapped by a pty shell (e.g. wsl `schedule_runner` = pty-sessions service→bash→runner; a shape distinction, not a platform difference) — I2 is exactly what the final state must reverse.
 - **I3 attribution inheritance**: on macOS, the whole tree's TCC attribution = root's seeder (the helper); "reseeding" = restarting that subchain through root; no promise to retroactively re-attach existing processes (the OS does not support it).
 - **I4 edge isolation**: the general layer has zero OS-proprietary concepts; platform differences = the closed six-item enumeration (see outline v0.2).
 - **I5 lifecycle completeness**: the four verbs are fully defined on the tree.
@@ -206,7 +206,7 @@ Each (machine × cluster) has one complete **process tree**: a general root supe
 ## E2 · supervisor boundary: tree membership + rulings on the three load-bearing conflicts
 
 **Two cases**:
-- **Case 1 "full tree"**: all long-lived processes (22 service sessions + agent host + **PTY hosts** + watcher sessions) and exec children enter the root tree (full parent chain); lifecycle actions are semanticized per unit type.
+- **Case 1 "full tree"**: all long-lived processes (22 service sessions + agent host + the **pty-sessions service** and its shells + watcher sessions) and exec children enter the root tree (full parent chain); lifecycle actions are semanticized per unit type. (The pty-sessions service, an ordinary roster service holding every shell of a machine, has landed this case for PTY hosting.)
 - **Case 2 "runtime only"**: only services + agent host enter the tree; PTY/exec keep today's independence (detached) — i.e. I2 stays incomplete, accepting that the chain has break points.
 
 **Rulings on the three existing loads (#6124 finding 2)**:

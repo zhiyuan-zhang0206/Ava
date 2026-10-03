@@ -14,9 +14,9 @@ pytestmark = [
     pytest.mark.skipif(IS_WINDOWS, reason="PTY supervisor is POSIX-only"),
     # `_isolated_agent` is opt-in (mutates global ava.self.AGENT_ID); apply it
     # module-wide here since every watcher session test needs the fake-id +
-    # pty cleanup isolation. `_pty_sessions_env` first — the isolation fixture's
+    # pty cleanup isolation. `pty_service` first — the isolation fixture's
     # own kill_all/list calls hit the daemon.
-    pytest.mark.usefixtures("_pty_sessions_env", "_isolated_agent"),
+    pytest.mark.usefixtures("pty_service", "_isolated_agent"),
 ]
 
 

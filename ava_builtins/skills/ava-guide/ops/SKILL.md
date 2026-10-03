@@ -66,7 +66,7 @@ ava start     # provision owned storage on the first start, and wait for the sel
 ava stop      # normal drain, then full local stop; durable data and agent IDs survive
               # --keep-infra / --keep-service retain resources; --force is explicit
 ava start     # after a stop, restore services and resume after readiness
-ava restart   # stop then start in one command; keeps private pg+redis, browser and persistent PTYs
+ava restart   # stop then start in one command; keeps private pg+redis and the browser, closes terminals
 ava status    # check status (includes the pg/redis view)
 ```
 
@@ -197,7 +197,7 @@ When disk pressure comes from dead agents' workspaces, the disposal playbook is 
 Ava's long-running processes (gateway, agent-runners, services, agent shells)
 run as named sessions on the platform session backend — the native process
 supervisor (`base.sessions.posixproc`) and
-per-session detached pty hosts for agents' interactive shells. Key facts:
+the machine's `pty-sessions` service for agents' interactive shells. Key facts:
 
 ### Session naming
 
@@ -209,7 +209,7 @@ per-session detached pty hosts for agents' interactive shells. Key facts:
 ### Per-cluster session records
 
 Each session's record (pid, start time) lives at `<ava_home>/run/sessions/
-<session-name>.json` (agent shells: `<ava_home>/run/pty/`); its combined stdout+stderr goes to
+<session-name>.json` (agent shells live in the `pty-sessions` service's ledger, `<ava_home>/run/pty-sessions.json`); its combined stdout+stderr goes to
 `<ava_home>/logs/<session-name>.out.log`. `ava cluster status` enumerates the
 same sessions. Raw session
 output is queried in Loki, not tailed by a CLI: the collector's
@@ -233,14 +233,16 @@ ports, the gateway URL) for daemon/service sessions; the cluster-scope values
 are NOT forwarded — the child re-sources them at its own boot (fetch on a
 pure runner, own .env on a gateway host). Nothing secret ever rides an argv (issue #974).
 
-### Shell sub-sessions outlive agent processes AND cluster updates
+### Shell sub-sessions outlive agent processes AND cluster restarts
 
 Agent shell sub-sessions are deliberately NOT torn down on agent exit — they
-persist across terminate/restart/update so background work (Claude Code,
-watchers, a long training run) outlives the process that started it. Each
-session runs in its own detached host process, so no service stop, rollout,
-or watchdog respawn can kill it; only its own `kill`, its shell exiting, or a
-machine reboot ends it. Orphan sessions are reclaimed as a periodic
-management task.
+survive agent terminate/restart and gateway and agent-host restarts, so
+background work (Claude Code, watchers, a long training run)
+outlives the process that started it. The machine's `pty-sessions` service holds
+them, so restarting those processes cannot kill them; only
+their own `kill`, their shell exiting, `ava stop` or `ava restart` (updates
+included; they close terminals, `ava stop --force` without notices), a restart
+or crash of the service, or a machine reboot ends them. After a service crash, the next start sweeps leftover shells from the
+service's ledger.
 
 Full detail: `base/sessions/env_forwarding.py`, `base/sessions/backend.py`, `cli/commands/observability/logs.py`.

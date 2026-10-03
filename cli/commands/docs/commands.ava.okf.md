@@ -24,7 +24,7 @@ Each command module is its own door; `cli.parsers` handlers lazy-import
 subpackages hold the domains, each an independent package door:
 
 - `agents/` — lifecycle control, notices, timelines, external-agent
-  impersonation, the pty/computer-use daemons
+  impersonation, the pty allocation freeze and the computer-use daemons
 - `management/` — gateway-managed config, presets, schedules
 - `extensions/` — plugins, skills, packages, MCP servers, memory; owns its
   converge steps (`materialize.py`, `skills_sync.py`, `external_skills.py`)
@@ -51,7 +51,8 @@ the `_`-prefixed steps host commands call (`_probe`, `_setup`, `_repo`,
 are internal steps under public names because other packages reach them.
 
 `stop.py` exposes `stop` through `_temporary_stop`; restart calls the same stop
-kernel with the data plane, browser and persistent terminals kept. `ops.agent_pause` and `ops.agent_pause.probe`
+kernel with the data plane and browser kept; terminals are closed like in any
+stop. `ops.agent_pause` and `ops.agent_pause.probe`
 own prepare/drain and runtime capability checks; `service_stop` and
 `data_plane/maintenance_stop` verify resource exits.
 `data_plane/_pooler_stop.OwnedPooler` owns

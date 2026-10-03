@@ -291,8 +291,9 @@ def _is_launcher_redis_url(value: str | None) -> bool:
 def watcher_runner_env() -> dict[str, str]:
     """Return the launcher's validated data-plane URLs for a watcher session.
 
-    The PTY host inherits the launcher's ambient env, but a watcher must not
-    rely on that inheritance for its runner credentials. Only an agent launch
+    A shell's base env is the pty-sessions service's own env, not the
+    launcher's, and a watcher must not rely on any ambient inheritance for its
+    runner credentials. Only an agent launch
     tree may explicitly forward them. A profile-less process on
     the secured default-home gateway can carry the owner URL after config
     import; refuse that launch before it creates a doomed watcher session.

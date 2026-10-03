@@ -2,8 +2,8 @@
 
 The host runs one cluster, so the marker and its lock live in its ``$AVA_HOME``
 (``pty-allocation-freeze.json`` and ``pty-allocation.lock``). The allocation gate
-affects only absent session -> new detached PTY host; desired-state reconcilers
-reap existing exact sessions that belong to an earlier generation.
+affects only absent session -> new PTY session; desired-state reconcilers reap
+existing exact sessions that belong to an earlier generation.
 
 The marker is an operator capability: only its exact random generation may
 resume allocation. Resuming leaves that UUID as the current session generation,
@@ -160,7 +160,7 @@ def _write_atomic(path: Path, payload: dict[str, object]) -> None:
 def locked_freeze_state() -> Generator[PtyAllocationFreeze]:
     """Hold the host allocation mutex and yield its current marker state.
 
-    ``_op_new`` keeps this lock until its host answers ready. Therefore, after
+    The pty-sessions service's ``new`` keeps this lock until the session is registered. Therefore, after
     ``freeze`` returns, every earlier allocation is fully visible and every
     later absent-to-live transition observes the marker and is refused.
     """

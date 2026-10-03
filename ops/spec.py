@@ -264,6 +264,10 @@ def _core_gate_reason(session: str) -> str | None:
         # the service can never start and the root would judge it dead every
         # round and log a restart failure — a Windows agent-runner, exactly.
         return "no AF_UNIX sockets (mcp-daemon's transport is POSIX-only)"
+    if session == "pty-sessions" and not unix_sockets_available():
+        # The service binds a Unix socket and forks ptys: a host without them
+        # (a Windows unit, which runs no shells) cannot start it.
+        return "no AF_UNIX sockets (pty-sessions' transport is POSIX-only)"
     if session == "computer-mcp":
         return _computer_mcp_gate_reason()
     if session in {"loki", "prometheus", "grafana"}:

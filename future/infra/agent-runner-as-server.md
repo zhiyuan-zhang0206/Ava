@@ -16,8 +16,9 @@ and idle lifetime. Idle ends a task without a model call. Redis wake events are
 multiplexed and durable pending work supplies missed-wake recovery.
 
 `execute_code` remains a disposable subprocess with an owned resource domain.
-Persistent shells have independent PTY hosts and survive restart/update. Full
-stop closes them deliberately. Neither is an alternate agent execution mode.
+Persistent shells are held by the machine's `pty-sessions` service and survive
+agent and agent-host restarts. `ava stop` and `ava restart` close them
+deliberately. Neither is an alternate agent execution mode.
 
 ## Remaining design considerations
 
