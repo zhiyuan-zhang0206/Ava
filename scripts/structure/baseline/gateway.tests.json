@@ -1,4 +1,14 @@
 {
+  "complexity": {
+    "gateway/tests/test_ops_monitor.py::test_ops_monitor_llm_wires_prometheus_and_loki": 16,
+    "gateway/tests/test_routes.py::test_dashboard_shards_long_loki_windows_and_merges_aggregates": 20,
+    "gateway/tests/test_status_cluster.py::TestDetachedRecoveryDial.test_transition_window_simulation": 21
+  },
+  "files": {
+    "gateway/tests/test_agent_inspect.py": 823,
+    "gateway/tests/test_routes.py": 1221,
+    "gateway/tests/test_status_cluster.py": 1156
+  },
   "patch_targets": {
     "gateway/tests/test_agent_inspect.py::gateway.inspect._live": 1,
     "gateway/tests/test_agents_endpoints.py::gateway.routers.memory._backend_topk": 1,

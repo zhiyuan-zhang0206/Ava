@@ -16,6 +16,6 @@
     "ava/mcps/_remote.py::global-rebind:_remote_client": 1
   },
   "files": {
-    "ava/mcps/tests/test_daemon.py": 2104
+    "ava/mcps/tests/test_daemon.py": 2110
   }
 }

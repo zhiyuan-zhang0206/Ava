@@ -22,11 +22,14 @@
     "agent/graph/llm_errors.py::ambient-container:_consecutive_errors": 1,
     "agent/graph/llm_errors.py::ambient-container:_stall_pair_streaks": 1
   },
+  "complexity": {
+    "agent/graph/exec/tests/test_exec_domain_confirmation.py::_exercise_domain": 23
+  },
   "directories": {
     "agent/graph": 24
   },
   "files": {
-    "agent/graph/tests/test_llm_helpers.py": 1128
+    "agent/graph/tests/test_llm_helpers.py": 1146
   },
   "nesting": {
     "agent/graph/exec/tests/test_exec_child_telemetry_delivery.py::_sent_keys": 6
