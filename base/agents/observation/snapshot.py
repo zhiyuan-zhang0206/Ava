@@ -68,7 +68,7 @@ _FULL_COLS = (
     "AND n.created_at > now() - interval '30 days') AS unread_notice_count"
     ", a.config_overlay, mp.last_probe_at, a.lease_expires_at, "
     "mp.agent_host_online, a.last_admission_outcome, a.last_admission_at, "
-    "a.last_launch_failure_reason, a.last_launch_failure_at"
+    "a.last_launch_failure_reason, a.last_launch_failure_at, a.birth_config"
 )
 _FROM = (
     "FROM agents_meta a "
@@ -139,8 +139,9 @@ class AgentSnapshot(BaseModel):
     `notices_awaiting_response` is the agent's open require_response notices,
     oldest first — empty when it is not waiting on the user.
 
-    `supports_vision` describes the effective model: the per-agent
-    `config_overlay.llm_model` when set, otherwise `settings.lm.llm_model`.
+    `supports_vision` describes the effective model, resolved as the agent host
+    resolves it (`_effective_model`: overlay over birth stamp over the live
+    default).
     It uses `base.lm.factory.model_supports_vision`, the same capability
     lookup as the message API's image-content gate.
     """
@@ -174,22 +175,21 @@ class AgentSnapshot(BaseModel):
     heartbeat_paused_until: datetime | None
 
 
-def _effective_model(config_overlay: Any) -> str:
+def _effective_model(config_overlay: Any, birth_config: Any) -> str:
     """The model an agent's own calls run, withdrawal-resolved (task #3212).
 
-    `config_overlay.llm_model` when set, otherwise `settings.lm.llm_model`; a
-    configured withdrawn id is served by its registered fallback. This is the
-    snapshot's capability judgment and reads the overlay only;
-    `agent_effective_model` also reads the birth stamp.
+    The agent host's own resolution: `llm_model` is a birth-frozen field, so the
+    pin is `config_overlay` over `birth_config` (an agent born under an older
+    cluster default keeps its birth model), `settings.lm.llm_model` only when
+    neither pins it, and a withdrawn id is served by its registered fallback.
+    One resolution site for the snapshot's capability judgment and
+    `agent_effective_model`, so the two cannot drift.
     """
+    from base.config.agent_pins import resolve_agent_config_pins
     from base.lm.registry import resolve_available_model
 
-    configured = (
-        config_overlay["llm_model"]
-        if config_overlay and "llm_model" in config_overlay
-        else settings.lm.llm_model
-    )
-    return resolve_available_model(configured)
+    pins = resolve_agent_config_pins(config_overlay, birth_config)
+    return resolve_available_model(pins.get("llm_model") or settings.lm.llm_model)
 
 
 def _row_to_snapshot(row: tuple[Any, ...]) -> AgentSnapshot:
@@ -198,7 +198,7 @@ def _row_to_snapshot(row: tuple[Any, ...]) -> AgentSnapshot:
     # Pydantic does the per-field type coercion / validation; the tuple
     # positions match the SELECT column order above. Capability judgments
     # answer for the model that will run (task #3212).
-    effective_model = _effective_model(row[17])
+    effective_model = _effective_model(row[17], row[25])
     return AgentSnapshot.model_validate(
         {
             "agent_id": row[0],
@@ -256,9 +256,6 @@ def agent_effective_model(db: Database, agent_id: int, *, fallback: str) -> str:
     its provider cache hit rate). A failed agents_meta read logs a warning and
     returns `fallback` — generation must not die on a bookkeeping miss.
     """
-    from base.config.agent_pins import resolve_agent_config_pins
-    from base.lm.registry import resolve_available_model
-
     try:
         with db.connect(autocommit=True) as conn:
             row = conn.execute(
@@ -272,8 +269,7 @@ def agent_effective_model(db: Database, agent_id: int, *, fallback: str) -> str:
             model=fallback,
         )
         return fallback
-    pins = resolve_agent_config_pins(row[0] if row else None, row[1] if row else None)
-    return resolve_available_model(pins.get("llm_model") or settings.lm.llm_model)
+    return _effective_model(row[0] if row else None, row[1] if row else None)
 
 
 class ActivityEntry(BaseModel):
