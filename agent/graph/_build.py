@@ -11,9 +11,8 @@ and passes it in. The graph is a function of that registry: its hooks run in the
 nodes, its state classes shape the dynamic `AgentState`. The loader lives in `agent.extensions`
 (task #3633 moved it off this module so surface-only processes never need the graph kernel); the
 import mechanics and the fail-soft contract live in `ava.sdk_surface.plugin_loader`
-(`load_plugin_module` / `safe_load_plugin_module`), the same primitives
-`ava.sdk_surface.plugin_loader.scan_and_load` uses at host boot, so both production load paths
-agree on module name, package context, `sys.modules` identity, and containment.
+(`load_plugin_module` / `safe_load_plugin_module`): one module name, package context,
+`sys.modules` identity, and containment however many times a plugin loads.
 A repeat load re-executes the module already in `sys.modules` rather than
 binding a new one, so a plugin module's identity is stable for the life of the
 process. Layer A wrap monkey-patches the process's ava module; the exec child
