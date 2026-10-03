@@ -35,6 +35,7 @@ def hierarchy_worker_config() -> HierarchyWorkerConfig:
         hierarchy_regen_alert_nodes_per_job=settings.daemon.hierarchy_regen_alert_nodes_per_job,
         hierarchy_regen_halt_nodes_per_job=settings.daemon.hierarchy_regen_halt_nodes_per_job,
         hierarchy_regen_daily_budget_nodes=settings.daemon.hierarchy_regen_daily_budget_nodes,
+        hierarchy_first_build_daily_budget_nodes=settings.daemon.hierarchy_first_build_daily_budget_nodes,
         hierarchy_regen_min_reuse_ratio=settings.daemon.hierarchy_regen_min_reuse_ratio,
     )
 
