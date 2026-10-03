@@ -1,7 +1,4 @@
 {
-  "ambient_state": {
-    "services/permissions_helper/client.py::ambient-instance:_ids": 1
-  },
   "complexity": {
     "services/permissions_helper/tests/test_permissions_helper.py::_fake_tools.<locals>.run": 22
   },

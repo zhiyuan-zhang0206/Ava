@@ -13,16 +13,13 @@ import json
 import time
 import urllib.error
 import urllib.request
+from collections.abc import Iterator
 from contextlib import suppress
 from typing import Any, NamedTuple, cast
 
 import websockets
 
 from services.browser.probe import cdp_url
-
-# CDP request ids need only be unique per connection, but a global counter is
-# valid anywhere and keeps the helpers stateless.
-_CDP_IDS = itertools.count(1)
 
 
 class _CanaryResult(NamedTuple):
@@ -47,10 +44,10 @@ def _read_json(url: str, timeout_s: float) -> dict[str, Any]:
 
 
 async def _cdp_call(
-    ws: Any, method: str, params: dict[str, Any], timeout_s: float
+    ws: Any, ids: Iterator[int], method: str, params: dict[str, Any], timeout_s: float
 ) -> dict[str, Any]:
     """Send one CDP request and return its ``result``; raises on a protocol error."""
-    await ws.send(json.dumps({"id": next(_CDP_IDS), "method": method, "params": params}))
+    await ws.send(json.dumps({"id": next(ids), "method": method, "params": params}))
     raw = await asyncio.wait_for(ws.recv(), timeout=timeout_s)
     resp = json.loads(raw)
     if "error" in resp:
@@ -70,12 +67,17 @@ async def _canary_async(port: int, url: str, timeout_s: float) -> _CanaryResult:
     if not isinstance(browser_ws_url, str) or not browser_ws_url:
         return _CanaryResult("skip", "CDP /json/version carried no browser websocket")
 
+    ids = itertools.count(1)  # request ids are per connection
     # close_timeout is bounded so a wedged browser cannot stall the round.
     async with websockets.connect(
         browser_ws_url, open_timeout=left(), close_timeout=2.0
     ) as browser_ws:
         created = await _cdp_call(
-            browser_ws, "Target.createTarget", {"url": "about:blank", "background": True}, left()
+            browser_ws,
+            ids,
+            "Target.createTarget",
+            {"url": "about:blank", "background": True},
+            left(),
         )
         target_id = created.get("targetId")
         if not isinstance(target_id, str) or not target_id:
@@ -93,6 +95,7 @@ async def _canary_async(port: int, url: str, timeout_s: float) -> _CanaryResult:
                 try:
                     result = await _cdp_call(
                         page_ws,
+                        ids,
                         "Runtime.evaluate",
                         {"expression": expression, "awaitPromise": True, "returnByValue": True},
                         left(),
@@ -108,7 +111,7 @@ async def _canary_async(port: int, url: str, timeout_s: float) -> _CanaryResult:
         finally:
             # The canary must never become a new occupant.
             with suppress(Exception):
-                await _cdp_call(browser_ws, "Target.closeTarget", {"targetId": target_id}, 2.0)
+                await _cdp_call(browser_ws, ids, "Target.closeTarget", {"targetId": target_id}, 2.0)
 
 
 def canary(port: int, url: str, timeout_s: float) -> _CanaryResult:
