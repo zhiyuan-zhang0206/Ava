@@ -9,9 +9,9 @@ tags: []
 
 Services run in named platform-supervisor sessions. Agent execution belongs to
 one `agent-host` service per runner; an agent has no main-process session.
-Interactive shells and watchers use independent PTY hosts through
-`get_shell_backend()`. Their sockets and records are scoped to the local
-`AVA_HOME`.
+Interactive shells and watchers are held by the machine's `pty-sessions`
+service and reached through `get_shell_backend()`. Its socket and ledger are
+scoped to the local `AVA_HOME`.
 
 ## Names and lifetime
 
@@ -22,9 +22,9 @@ Interactive shells and watchers use independent PTY hosts through
 
 Shell handles are monotonic and never reused after closure. A rebuilt shell
 receives a new handle; an old capture request cannot address its replacement.
-Agent terminate/restart and `ava restart` preserve shells. Full cluster
-stop explicitly closes them; start does not serialize their processes or shell
-variables. Data and profile directories remain on disk.
+Agent terminate/restart and agent-host or gateway restarts preserve shells.
+`ava stop` and `ava restart` explicitly close them; start does not serialize
+their processes or shell variables. Data and profile directories remain on disk.
 
 ## Identity and environment
 
@@ -37,7 +37,10 @@ identity. A bare persistent shell has no agent identity.
 to daemon/session children. Cluster values are loaded from the child's actual
 home/gateway projection. Credentials travel through environment/config channels,
 never command-line arguments. `AVA_AGENT_ID` is not globally inherited by
-unrelated daemon or shell processes.
+unrelated daemon or shell processes. A persistent shell's base environment is
+the `pty-sessions` service's own environment (minus `AVA_PROCESS_PROFILE` and
+`VIRTUAL_ENV`) overlaid with the caller's forwarded env; variables specific to
+the creator, such as `SSH_AUTH_SOCK`, are not carried over.
 
 ## Related contracts
 

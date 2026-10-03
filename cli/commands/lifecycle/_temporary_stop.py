@@ -20,6 +20,7 @@ from base.deploy.lifecycle.status_journal import begin, finish, phase, status_pa
 from base.deploy.maintenance import admission
 from base.events.live.bus import EventBus
 from base.native_process.ownership import retain_processes
+from base.sessions.pty.paths import SERVICE_UNIT
 from cli.commands._repo import _repo_root, build_services, session_name
 from cli.commands.lifecycle.service_stop import (
     OwnedProcess,
@@ -252,8 +253,8 @@ def _stop_plan(
 ) -> tuple[MachineRoles, frozenset[str], frozenset[str]]:
     """Resolve this stop's service selection from the roster and roles.
 
-    Refuses unknown preserved sessions and preserved services that need the
-    data plane while it is being stopped.
+    Refuses unknown preserved sessions and preserved services that need the data
+    plane while it is being stopped.
     """
     roles = machine_role()
     preserved = preserve_sessions | (frozenset({"browser"}) if keep_browser else frozenset[str]())
@@ -328,24 +329,19 @@ def _stop_initialization(
         )
 
 
-def _refuse_hosted_stop(*, keep_terminals: bool) -> None:
+def _refuse_hosted_stop() -> None:
     """A stop run from inside the work it drains strands itself mid-drain."""
     from base.host.proc import hosting_exec_domain, hosting_supervised_session
 
     # An exec-domain leg is SIGKILLed with the call's process group as the tool
-    # call returns, mid-drain (the 2026-09-12 stranding shape). Name the one
-    # host that survives, by whether this stop keeps persistent terminals.
+    # call returns, mid-drain (the 2026-09-12 stranding shape). A stop closes this
+    # unit's persistent terminals too, so no terminal can host it either.
     if hosting_exec_domain() is not None:
-        survives = (
-            "a persistent terminal session survives a stop that keeps terminals — host it via "
-            "ava.shell.run_background(...) — or a plain login shell"
-            if keep_terminals
-            else "a stop closes this unit's persistent terminals too — run it from a "
-            "shell no ava session hosts (e.g. a plain login shell)"
-        )
         raise RuntimeError(
             "stop cannot run inside execute_code: the call's teardown SIGKILLs its "
-            f"process group as the call returns, stranding the stop mid-drain; {survives}"
+            "process group as the call returns, stranding the stop mid-drain; a stop "
+            "closes this unit's persistent terminals too — run it from a shell no ava "
+            "session hosts (e.g. a plain login shell)"
         )
     if hosting_supervised_session() is not None:
         raise RuntimeError("stop must run outside the work it drains; use a login shell")
@@ -367,7 +363,6 @@ def _drain_and_stop(
     preserved: frozenset[str],
     keep_infra: bool,
     keep_browser: bool,
-    keep_terminals: bool,
     announce: bool,
     teardown_extras: bool,
     notes: list[str],
@@ -404,10 +399,13 @@ def _drain_and_stop(
         set_posture(Database.from_settings(), "paused")
         admission.set_phase(current.holder, current.acquired_at, "stopping")
     _timed_phase(phases, "quiesce", lambda: ops_quiescent(remaining(deadline)))
+    # The pty-sessions service outlives the services phase: it closes the terminals
+    # below. Keeping it (`--keep-service pty-sessions`) keeps the terminals it holds.
+    keep_terminals = SERVICE_UNIT in preserved
     _timed_phase(
         phases,
         "services",
-        _services_phase_action(preserved=preserved, deadline=deadline),
+        _services_phase_action(preserved=preserved | {SERVICE_UNIT}, deadline=deadline),
     )
     if not keep_browser and "browser" not in preserved:
         _timed_phase(phases, "browser", lambda: _stop_browser(deadline))
@@ -416,6 +414,12 @@ def _drain_and_stop(
             phases,
             "terminals",
             lambda: close_terminals(deadline, holder, acquired_at, direct_db="gateway" in roles),
+        )
+        # Nothing is left in the service: stop it, and the root with it when nothing else is kept.
+        _timed_phase(
+            phases,
+            "pty-sessions",
+            _services_phase_action(preserved=preserved, deadline=deadline),
         )
     if teardown_extras:
         _timed_phase(phases, "extras", lambda: _stop_extras(deadline))
@@ -435,7 +439,6 @@ def stop(
     keep_infra: bool,
     preserve_sessions: frozenset[str],
     keep_browser: bool,
-    keep_terminals: bool,
     announce: bool,
     teardown_extras: bool,
     timeout: float = PAUSE_TIMEOUT_SECONDS,
@@ -443,18 +446,18 @@ def stop(
     """Drain via normal restart, then stop selected resources.
 
     Services and the data plane are never forced. Closing terminals (skipped
-    when `keep_terminals`) SIGKILLs what outlives its bounded grace
-    (`service_stop.close_terminals`).
+    only when the pty-sessions service itself is kept) SIGKILLs what outlives
+    its bounded grace (`service_stop.close_terminals`).
     """
     from cli.commands.lifecycle.stop import _confirm_stop
 
-    _refuse_hosted_stop(keep_terminals=keep_terminals)
+    _refuse_hosted_stop()
     roles, _selected, preserved = _stop_plan(
         preserve_sessions=preserve_sessions, keep_browser=keep_browser, keep_infra=keep_infra
     )
     print(
         "[ava stop] local services; "
-        f"terminals={'retained' if keep_terminals else 'closed'}; "
+        f"terminals={'retained' if SERVICE_UNIT in preserved else 'closed'}; "
         f"data plane={'retained' if keep_infra else 'stopped on gateway'}"
     )
     if not _confirm_stop(require_confirmation=require_confirmation):
@@ -491,7 +494,6 @@ def stop(
             preserved=preserved,
             keep_infra=keep_infra,
             keep_browser=keep_browser,
-            keep_terminals=keep_terminals,
             announce=announce,
             teardown_extras=teardown_extras,
             notes=notes,

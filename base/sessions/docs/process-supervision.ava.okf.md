@@ -1,7 +1,7 @@
 ---
 type: doc
 title: Process Supervision
-description: Native sessions, PTY-hosted agent shells, start-serving readiness gating, daemon health/liveness, and OS-scheduler-owned watchdog/log maintenance.
+description: Native sessions, agent shells held by the pty-sessions service, start-serving readiness gating, daemon health/liveness, and OS-scheduler-owned watchdog/log maintenance.
 tags:
 - base
 - library
@@ -13,8 +13,8 @@ tags:
 `base/sessions/posixproc.py`, `base/sessions/backend.py`,
 `base/daemon/shutdown.py`, `base/daemon/health.py`,
 `base/deploy/lifecycle/start_serving.py`: services, orchestration sessions and agent
-processes are **native** sessions; agent shells run on per-session **PTY
-hosts** ([[base/sessions/pty/docs/pty_sessions.ava.okf.md]]). Start-serving
+processes are **native** sessions; agent shells are held by the machine's **pty-sessions
+service** ([[base/sessions/pty/docs/pty_sessions.ava.okf.md]]). Start-serving
 gates recovery until readiness passes. Daemon health
 accepts either one `Liveness` heartbeat or a worst-case `LivenessGroup` whose
 per-loop progress snapshots make concurrent-loop failures attributable. OS

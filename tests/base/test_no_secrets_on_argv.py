@@ -10,7 +10,10 @@ argv-carried JSON blob fails here rather than in a `ps` listing.
 
 Coverage is per *launcher*, not per caller: the `ava start` session launch,
 schedule processes, agent shells, and the Redis bring-up each funnel into one
-of the functions below. Agent-host startup also passes its secret-bearing DB
+of the functions below. Schedule and agent-shell sessions are created through the
+pty-sessions service: their environment travels in the request body of its
+owner-only unix socket, so the service process and every shell it spawns carry
+no secret on their argv. Agent-host startup also passes its secret-bearing DB
 projection through the environment.
 """
 
@@ -18,14 +21,17 @@ from __future__ import annotations
 
 import os
 import subprocess
-import sys
 from pathlib import Path
 from typing import Any
 
+import psutil
 import pytest
 
 from base.cluster import ownership, port_preflight
 from base.native_process.os_platform import IS_WINDOWS
+from tests.path_scoped.pty_service import PtyServiceProcess
+from tests.path_scoped.pty_service import pty_service as pty_service
+from tests.path_scoped.pty_shells import output_until, type_line, wait_for
 
 # Values that must never appear in an argv. Shaped like the real thing: the
 # cluster secret, the data-plane URLs that embed it, a provider key.
@@ -55,7 +61,7 @@ pytestmark = pytest.mark.skipif(
 _FAKE_CHILD_PID = 4242
 
 
-@pytest.fixture(autouse=True)
+@pytest.fixture
 def _fake_child_pid_never_resolves(monkeypatch: pytest.MonkeyPatch) -> None:
     """Keep the fabricated child pid from naming a real process.
 
@@ -101,8 +107,11 @@ def secret_env(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.fixture
-def captured_argv(monkeypatch: pytest.MonkeyPatch) -> list[list[str]]:
-    """Every subprocess argv the code under test builds."""
+def captured_argv(
+    monkeypatch: pytest.MonkeyPatch, _fake_child_pid_never_resolves: None
+) -> list[list[str]]:
+    """Every subprocess argv the code under test builds (with the fabricated child pid
+    made unresolvable: the faked reparent helper reports it)."""
     calls: list[list[str]] = []
 
     def fake_run(args: Any, **_kwargs: Any) -> Any:
@@ -159,14 +168,67 @@ def test_launch_record_cannot_reach_a_live_process(
     assert not posixproc.has_session("ava-gateway")
 
 
+@pytest.fixture
+def secrets_in_creator_env(pty_service: PtyServiceProcess, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The creating process holds the secrets (as an agent or gateway does); the
+    already-running service does not, so a secret reaching a shell could only have
+    come through the request."""
+    del pty_service
+    for key, value in _SECRET_ENV.items():
+        if key not in ("AVA_HOME", "PATH"):
+            monkeypatch.setenv(key, value)
+
+
+def _service_tree_argvs(service: PtyServiceProcess) -> list[list[str]]:
+    """The argv of the service process and of every process under it (shells, jobs)."""
+    root = psutil.Process(service.pid)
+    argvs = [root.cmdline()]
+    for child in root.children(recursive=True):
+        try:
+            argvs.append(child.cmdline())
+        except psutil.NoSuchProcess:
+            continue
+    return argvs
+
+
+def _assert_service_tree_clean(service: PtyServiceProcess, *, label: str) -> None:
+    argvs = _service_tree_argvs(service)
+    assert len(argvs) >= 2, f"{label}: expected the service and a shell, saw {argvs!r}"
+    for argv in argvs:
+        _assert_clean(argv, label=label)
+
+
+def _shell_env_report(name: str) -> str:
+    """What a secret-name lookup in the session's shell prints (empty: none is set)."""
+    type_line(
+        name,
+        "printenv AVA_CLUSTER_SECRET AVA_DB_URL AVA_REDIS_URL DEEPSEEK_API_KEY; echo ENVCHECK_DONE",
+    )
+    return output_until(name, "ENVCHECK_DONE")
+
+
 def test_schedule_launch(
-    secret_env: None, captured_argv: list[list[str]], monkeypatch: pytest.MonkeyPatch
+    pty_service: PtyServiceProcess,
+    secrets_in_creator_env: None,
+    unit_home: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A schedule's resident process. The launch is the PTY supervisor CLI
-    `new <name> <cwd> <envfile> [cmd_b64]`: the argv carries the 0600
-    envfile's path and a base64 command — never the env values; the schedule
-    id rides the envfile, not the argv."""
+    """A schedule's resident process. The launch is a `new` request to the pty-sessions
+    service: the env (the schedule id included) rides the request body of its unix
+    socket, the command is typed into the session's shell, and no argv of the service
+    or the shell tree carries a secret; the shell's environment holds the schedule
+    id and none of the secrets."""
+    from services.schedule_manager import manager as sm
     from services.schedule_manager.manager import ScheduleManager
+
+    # The runner is a stub that records its own environment, then stays up: the real
+    # runner would need a database and exit within the test.
+    stub = unit_home / ".venv" / "bin" / "python"
+    stub.parent.mkdir(parents=True)
+    dump = unit_home / "runner-env.txt"
+    stub.write_text(f"#!/bin/sh\nenv > {dump}.tmp && mv {dump}.tmp {dump}\nexec sleep 300\n")
+    stub.chmod(0o755)
+    monkeypatch.setattr(sm, "REPO_ROOT", unit_home)
 
     manager = ScheduleManager(None)  # type: ignore[arg-type] — _launch's pool-touching writes are stubbed below
     monkeypatch.setattr(ScheduleManager, "_set_status", lambda *_a, **_k: True)  # pyright: ignore[reportUnknownArgumentType]
@@ -174,46 +236,27 @@ def test_schedule_launch(
     # way; this test asserts argv cleanliness, not DB behavior.
     monkeypatch.setattr(ScheduleManager, "_close_null_runs", lambda _self, _sid: None)  # pyright: ignore[reportUnknownArgumentType]
     manager._launch(7)
-    launches = [
-        a
-        for a in captured_argv
-        if a[:3] == [sys.executable, "-m", "base.sessions.pty.cli"]
-        and len(a) >= 5
-        and a[4] == "new"
-    ]
-    assert launches, f"no pty CLI new; saw {captured_argv!r}"
-    argv = launches[-1]
-    assert argv[3:5] == ["ava-schedule-7", "new"]  # <name> <op>
-    _assert_clean(argv, label="ScheduleManager._launch")
-    # the envfile is 0600 and carries only the host-scope forward view +
-    # AVA_SCHEDULE_ID — never the secrets
-    envfile = Path(argv[-2])
-    assert envfile.name.endswith(".env.sh")
-    assert (envfile.stat().st_mode & 0o777) == 0o600
-    body = envfile.read_text()
-    for secret in _SECRET_VALUES:
-        assert secret not in body, f"{secret!r} leaked into the schedule envfile"
-    # the schedule id rides the envfile, not the argv
-    assert "AVA_SCHEDULE_ID" not in " ".join(argv)
-    assert "AVA_SCHEDULE_ID=" in body
-    # the command rides base64 — decodes to the runner cmd, no secret material
-    import base64
 
-    cmd = base64.b64decode(argv[-1]).decode()
-    assert "gateway.schedule_runner" in cmd
-    envfile.unlink(missing_ok=True)
+    assert wait_for(dump.exists), f"the runner never started:\n{pty_service.output()}"
+    runner_env = dump.read_text()
+    assert "AVA_SCHEDULE_ID=7\n" in runner_env, "the schedule id rides the request env"
+    for secret in _SECRET_VALUES:
+        assert secret not in runner_env, f"{secret!r} reached the schedule's environment"
+    _assert_service_tree_clean(pty_service, label="ScheduleManager._launch")
+    for argv in _service_tree_argvs(pty_service):
+        assert "AVA_SCHEDULE_ID" not in " ".join(argv), f"schedule id on argv: {argv!r}"
 
 
 def test_agent_shell_session(
-    secret_env: None, captured_argv: list[list[str]], monkeypatch: pytest.MonkeyPatch
+    pty_service: PtyServiceProcess,
+    secrets_in_creator_env: None,
 ) -> None:
-    """An agent's own persistent shell. S6 step 2: the create is the PTY
-    supervisor CLI `new <name> <cwd> <envfile>` — the argv carries the 0600
-    envfile's PATH, never its contents. The envfile itself carries only the
-    host-scope session forward view (the allowlist deliberately drops the
-    cluster-scope secrets — the shell's children re-source them at their own
-    boot), so the secret values appear NOWHERE in this launch path.
-    """
+    """An agent's own persistent shell. The create is a `new` request to the
+    pty-sessions service carrying the host-scope session forward view in its body
+    (the allowlist deliberately drops the cluster-scope secrets: the shell's
+    children re-source them at their own boot), so the secret values appear
+    NOWHERE in this launch path: not on an argv of the service or the shell, not in
+    the shell's environment."""
     from ava.shell.sessions import ShellSessions
     from ava.shell.tests.support import FakeDatabase
     from base.sessions.backend import get_shell_backend
@@ -221,23 +264,13 @@ def test_agent_shell_session(
     ShellSessions(
         backend=get_shell_backend(), database=FakeDatabase(next_index=3), agent_id=1
     ).create("probe", ttl=120)
-    launches = [
-        a for a in captured_argv if a[:3] == [sys.executable, "-m", "base.sessions.pty.cli"]
-    ]
-    assert launches, f"no pty CLI launch; saw {captured_argv!r}"
-    argv = launches[-1]
-    assert argv[3:5] == ["ava-agent-1-shell-3-probe", "new"]  # <name> <op>
-    _assert_clean(argv, label="ava.shell.sessions.create_session")
-    # the envfile is 0600 and holds only the host-scope forward view — the
-    # secrets must not be in it either (they never reach the shell's env)
-    envfile = Path(argv[-1])
-    assert envfile.name.endswith(".env.sh")
-    assert (envfile.stat().st_mode & 0o777) == 0o600
-    body = envfile.read_text()
+    name = "ava-agent-1-shell-3-probe"
+    assert get_shell_backend().has_session(name)
+
+    report = _shell_env_report(name)
     for secret in _SECRET_VALUES:
-        assert secret not in body, f"{secret!r} leaked into the shell envfile"
-    assert "AVA_HOME=" in body and "PATH=" in body
-    envfile.unlink(missing_ok=True)
+        assert secret not in report, f"{secret!r} leaked into the shell's environment"
+    _assert_service_tree_clean(pty_service, label="ava.shell.sessions.create_session")
 
 
 def test_redis_bringup(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

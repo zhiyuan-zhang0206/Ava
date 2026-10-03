@@ -1,8 +1,8 @@
 """ava.shell.run_background + the shared background-notice plumbing
 (ava/shell/background.py).
 
-The e2e tests run through the real PTY supervisor daemon + real bash
-(`_pty_sessions_env` fixture); POSIX-only, skip on Windows."""
+The e2e tests run through a real pty-sessions service + real bash
+(`pty_service` fixture); POSIX-only, skip on Windows."""
 
 import os
 import time
@@ -17,7 +17,7 @@ from base.native_process.os_platform import IS_WINDOWS
 
 pytestmark = [
     pytest.mark.skipif(IS_WINDOWS, reason="PTY supervisor is POSIX-only"),
-    pytest.mark.usefixtures("_pty_sessions_env", "_isolated_agent"),
+    pytest.mark.usefixtures("pty_service", "_isolated_agent"),
 ]
 
 

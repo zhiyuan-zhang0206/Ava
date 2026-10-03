@@ -31,7 +31,6 @@ import psutil
 import psycopg
 from psycopg_pool import ConnectionPool
 
-import base.sessions.pty.cli
 from base.cluster.machine import machine_name, reachable_host
 from base.config import settings
 from base.daemon.endpoints import ServiceEndpoint, ServiceEndpoints
@@ -47,6 +46,7 @@ from base.log import init_gateway_process
 from base.paths import ava_home
 from base.sessions.backend import PtySessionBackend, SessionBackend, get_shell_backend
 from base.sessions.page_session import page_session_name
+from base.sessions.pty import client as pty_client
 from base.sessions.record import SessionRecord
 from services.page_server.config import PageServerConfig
 from services.pidfile import acquire_pidfile, pidfile_holds_daemon, remove_pidfile
@@ -83,7 +83,7 @@ def _pidfile() -> Path:
     return _endpoint().pidfile
 
 
-# A new PTY host needs a short window to finish its interactive-shell startup
+# A new pty session needs a short window to finish its interactive-shell startup
 # and receive its initial command before a health probe can make a decision.
 _SPAWN_VERIFY_TIMEOUT_S = 5.0
 # Cooldown after a failed launch or a foreign port occupant.
@@ -306,28 +306,25 @@ def _page_server_occupants() -> dict[int, tuple[int, str | None]]:
 
 
 def _live_session_records(backend: SessionBackend) -> dict[str, SessionRecord] | None:
-    """One in-process scan of the live pty session records, or None when the
-    backend is not the PTY supervisor (the Windows native backend keeps no
-    pty record store).
+    """One listing of the live pty sessions' records, or None when the backend
+    is not the PTY backend (the Windows native backend keeps no pty records).
 
-    The PTY backend's per-name ``has_session`` costs a subprocess round-trip
-    (~0.25 s each, measured 2026-08-28); a reconcile pass that asked once per
-    managed row serialized dozens of Python startups and stretched the 2 s
-    poll to ~30 s (2026-08-28 incident — serve()'s 15 s wait timed out about
-    half the time). The record scan is the same liveness rule read
-    in-process.
+    A reconcile pass that asked ``has_session`` once per managed row would
+    serialize a round trip per row inside the 2 s poll (the 2026-08-28 incident,
+    when each ask cost a Python startup and serve()'s 15 s wait timed out about
+    half the time); one listing answers every row.
     """
     if not isinstance(backend, PtySessionBackend):
         return None
-    return base.sessions.pty.cli.live_sessions()
+    return pty_client.live_sessions()
 
 
 def _session_is_live(
     backend: SessionBackend, live_names: set[str] | None, session_name: str
 ) -> bool:
-    """Whether a page shell is alive: membership in the pass's in-process
-    record scan when one exists, else the backend's per-name check (the
-    Windows native backend, whose has_session is in-process)."""
+    """Whether a page shell is alive: membership in the pass's one listing when
+    one exists, else the backend's per-name check (the Windows native backend,
+    whose has_session is in-process)."""
     if live_names is not None:
         return session_name in live_names
     return backend.has_session(session_name)

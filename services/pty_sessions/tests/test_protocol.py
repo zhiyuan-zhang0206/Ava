@@ -24,7 +24,7 @@ from base.native_process.ownership import OwnedProcess
 from base.sessions.pty import client, protocol
 from base.sessions.pty.paths import service_socket_path
 from services.healthchecks import owned_service
-from services.pty_sessions.tests import support
+from tests.path_scoped import pty_shells as support
 from tests.path_scoped.pty_service import PtyServiceProcess
 from tests.path_scoped.pty_service import pty_service as pty_service
 

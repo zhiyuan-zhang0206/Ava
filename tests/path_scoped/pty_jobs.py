@@ -14,7 +14,7 @@ from pathlib import Path
 
 import psutil
 
-from services.pty_sessions.tests import support
+from tests.path_scoped import pty_shells as support
 
 # A regular interruptible job: no signal handlers of its own, it relies on the
 # default TERM disposition (which a shell that inherited SIG_IGN would defeat).

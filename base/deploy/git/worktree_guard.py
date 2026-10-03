@@ -11,8 +11,8 @@ production schedule with no warning and no obviously-broken signal afterwards
 
 `find_live_anchors` reports the two surfaces that can be checked cheaply:
 
-- PTY session records (`$AVA_HOME/run/pty/*.json`): the session host's cwd —
-  exactly the surface from the incident, since every cluster-owned session
+- PTY sessions, as the pty-sessions service lists them: the cwd each was started
+  in — exactly the surface from the incident, since every cluster-owned session
   (schedules, agent shells) records its cwd there.
 - Live processes whose cwd / executable / command line is anchored under the
   path (psutil), excluding the invoking job tree — the caller's process chain
@@ -27,7 +27,6 @@ hook for that operation, so the check has to sit in the tooling.
 from __future__ import annotations
 
 import contextlib
-import json
 import os
 from pathlib import Path
 from typing import cast
@@ -35,6 +34,8 @@ from typing import cast
 import psutil
 
 from base.host.env.dotenv_boot import resolve_ava_home
+from base.sessions.pty import client
+from base.sessions.pty.paths import service_socket_path
 
 
 def _same_dir(candidate: Path, target: Path) -> bool:
@@ -136,20 +137,17 @@ def _pgid_of(pid: int) -> int | None:
         return None
 
 
-def _pty_anchors(pty_dir: Path, target: Path, *, fold: bool) -> list[str]:
-    """Persistent pty sessions whose recorded cwd is under `target`."""
-    hits: list[str] = []
-    if not pty_dir.is_dir():
-        return hits
-    for rec in sorted(pty_dir.glob("*.json")):
-        try:
-            data = json.loads(rec.read_text())
-        except (json.JSONDecodeError, OSError):
-            continue
-        cwd = data.get("cwd")
-        if isinstance(cwd, str) and _under(cwd, target, fold=fold):
-            hits.append(f"pty session {rec.stem!r} (pid {data.get('pid')}) cwd={cwd!r}")
-    return hits
+def _pty_anchors(run: Path, target: Path, *, fold: bool) -> list[str]:
+    """Persistent pty sessions whose recorded cwd is under `target`.
+
+    Asks the service on `run`'s socket (read-only: the home is never created); no
+    service listening means no session.
+    """
+    return [
+        f"pty session {info.name!r} (pid {info.pid}) cwd={info.cwd!r}"
+        for info in client.list_sessions(socket_path=service_socket_path(run))
+        if _under(info.cwd, target, fold=fold)
+    ]
 
 
 def _process_anchors(target: Path, *, fold: bool) -> list[str]:
@@ -175,17 +173,17 @@ def _process_anchors(target: Path, *, fold: bool) -> list[str]:
     return hits
 
 
-def find_live_anchors(path: Path, *, records_dir: Path | None = None) -> list[str]:
+def find_live_anchors(path: Path, *, run: Path | None = None) -> list[str]:
     """Human-readable list of live things anchored under `path`.
 
-    `records_dir` overrides the pty records location (tests); it defaults to
-    `$AVA_HOME/run/pty` (else `~/.ava/run/pty`). The scan only reads: the home is
-    resolved, never created, repaired or chmodded. Process scanning excludes the invoking job tree —
-    the caller's chain (issue #3685) and its process group — because the
-    check is run by the cleanup from inside the target; a genuinely unrelated
-    anchor (another session, a daemon) is in neither.
+    `run` overrides the run directory holding the pty-sessions socket (tests); it
+    defaults to `$AVA_HOME/run` (else `~/.ava/run`). The scan only reads: the home is
+    resolved, never created, repaired or chmodded. Process scanning excludes the
+    invoking job tree: the caller's chain (issue #3685) and its process group,
+    because the check is run by the cleanup from inside the target; a genuinely
+    unrelated anchor (another session, a daemon) is in neither.
     """
     target = path.resolve()
     fold = _folds_case(target)
-    pty_dir = records_dir if records_dir is not None else resolve_ava_home() / "run" / "pty"
-    return _pty_anchors(pty_dir, target, fold=fold) + _process_anchors(target, fold=fold)
+    run_dir = run if run is not None else resolve_ava_home() / "run"
+    return _pty_anchors(run_dir, target, fold=fold) + _process_anchors(target, fold=fold)

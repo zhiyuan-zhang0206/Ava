@@ -4,9 +4,9 @@ PTY session whose command line tees output to a log file and session capture,
 then ends with the CLI completion notice (`ava agents send ... --source
 watcher:N`); cron/at build a script then spawn.
 
-The `_pty_sessions_env` fixture (session-scoped, tests/path_scoped/ava_tests.py) runs the
-real supervisor daemon under the tmp test home; the session tests are
-POSIX-only (skip on Windows — the PTY supervisor is POSIX-only)."""
+The `pty_service` fixture (tests/path_scoped/pty_service.py) runs a real
+pty-sessions service under the tmp test home; the session tests are
+POSIX-only (skip on Windows — the pty-sessions service is POSIX-only)."""
 
 from __future__ import annotations
 
@@ -30,9 +30,9 @@ pytestmark = [
     pytest.mark.skipif(IS_WINDOWS, reason="PTY supervisor is POSIX-only"),
     # `_isolated_agent` is opt-in (mutates global ava.self.AGENT_ID); apply it
     # module-wide here since every watcher session test needs the fake-id +
-    # pty cleanup isolation. `_pty_sessions_env` first — the isolation fixture's
+    # pty cleanup isolation. `pty_service` first — the isolation fixture's
     # own kill_all/list calls hit the daemon.
-    pytest.mark.usefixtures("_pty_sessions_env", "_isolated_agent"),
+    pytest.mark.usefixtures("pty_service", "_isolated_agent"),
 ]
 
 
@@ -158,13 +158,16 @@ def test_at_registers_ttl_row_from_fires_at_plus_grace(
         ava.shell.sessions.kill(wid)
 
 
-def test_watcher_child_dies_when_pty_host_dies(_agent_row: int, tmp_path: pathlib.Path) -> None:
-    """Task #1726 acceptance: a watcher child must NEVER outlive its pty host.
+def test_watcher_child_dies_when_the_pty_service_dies(
+    _agent_row: int, tmp_path: pathlib.Path
+) -> None:
+    """Task #1726 acceptance: a watcher child must NEVER outlive its pty service.
 
-    When the host dies (crash / SIGKILL / a reaper sweep), the login shell
-    dies with it and the child is reparented to init — still alive, still
-    firing cron/at; 49 of 85 watcher processes on the fleet host were such
-    multi-generation orphans (8/19 onwards). The bootstrap's orphan guard
+    When the service dies (crash / SIGKILL), the login shell dies with it
+    (the master closes, which hangs it up) and the child is reparented to
+    init — still alive, still firing cron/at; 49 of 85 watcher processes on
+    the fleet host were such multi-generation orphans (8/19 onwards). The
+    bootstrap's orphan guard
     compares getppid() against the boot-time parent and hard-exits within a
     few seconds. The child IGNORES SIGHUP, so its death can only come from
     the guard — the test fails if the guard regresses and the child survives.
@@ -199,11 +202,11 @@ def test_watcher_child_dies_when_pty_host_dies(_agent_row: int, tmp_path: pathli
 
     try:
         # The child's parent is the session shell; the grandparent is the pty
-        # host — the process whose death orphans the child.
+        # service — the process whose death orphans the child.
         child = psutil.Process(child_pid)
         shell = psutil.Process(child.ppid())
         host = psutil.Process(shell.ppid())
-        assert "base.sessions.pty.host" in " ".join(host.cmdline())
+        assert "services.pty_sessions.daemon" in " ".join(host.cmdline())
 
         os.kill(host.pid, signal.SIGKILL)
 
@@ -297,7 +300,7 @@ def test_boot_orphan_guard_message_names_session_gone(tmp_path: pathlib.Path) ->
     # The guard's stderr line lands in the watcher's log — a debugger must be
     # able to tell an orphan-guard exit (125) from a watchdog timeout (124).
     boot = watcher._build_boot(tmp_path / "x.py", None, 42)
-    assert "[watcher] session gone (pty host died)" in boot
+    assert "[watcher] session gone (pty session ended)" in boot
     assert "os._exit(125)" in boot
 
 

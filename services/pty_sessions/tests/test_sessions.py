@@ -17,8 +17,10 @@ import pytest
 from base.native_process.os_platform import IS_WINDOWS
 from base.sessions.pty import client
 from base.sessions.pty.tests.job_wait import wait_for_job
-from services.pty_sessions.tests import support
-from services.pty_sessions.tests.support import (
+from tests.path_scoped import pty_shells as support
+from tests.path_scoped.pty_service import PtyServiceProcess
+from tests.path_scoped.pty_service import pty_service as pty_service
+from tests.path_scoped.pty_shells import (
     new,
     output_until,
     press,
@@ -27,8 +29,6 @@ from services.pty_sessions.tests.support import (
     type_line,
     wait_for,
 )
-from tests.path_scoped.pty_service import PtyServiceProcess
-from tests.path_scoped.pty_service import pty_service as pty_service
 
 pytestmark = [
     pytest.mark.skipif(IS_WINDOWS, reason="pty sessions are POSIX-only"),
@@ -356,3 +356,29 @@ def test_a_zombie_shell_is_not_a_live_session(unit_home: Path) -> None:
     os.kill(shell.pid, signal.SIGKILL)
     assert wait_for(lambda: not client.has_session(name))
     assert name not in client.live_sessions()
+
+
+def test_a_process_inside_a_session_is_told_it_is_hosted_there(unit_home: Path) -> None:
+    """A stop or restart closes every persistent terminal, so the host-transition verbs
+    refuse to run from inside one (`hosting_supervised_session`): they would end
+    themselves mid-flight."""
+    import sys
+
+    from tests.path_scoped.pty_service import _REPO
+
+    name = "ava-test-hosting-1"
+    new(name, _REPO, {"AVA_HOME": str(unit_home), "AVA_CONFIG_FETCH": "skip"})
+    probe = (
+        "from base.host.proc import hosting_supervised_session as hosting; "
+        "print('hosted-in=' + str(hosting()))"
+    )
+    type_line(name, f'{sys.executable} -c "{probe}"')
+    output_until(name, f"hosted-in={name}")
+    assert wait_for(lambda: hosting_from_outside() is None)
+
+
+def hosting_from_outside() -> str | None:
+    """The same question asked by this test process, which no session hosts."""
+    from base.host.proc import hosting_supervised_session
+
+    return hosting_supervised_session()

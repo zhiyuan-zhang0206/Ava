@@ -18,9 +18,9 @@ import pytest
 
 from base.native_process.os_platform import IS_WINDOWS
 from base.sessions.pty import client
-from services.pty_sessions.tests import support
-from services.pty_sessions.tests.support import new, type_line, wait_for
+from tests.path_scoped import pty_shells as support
 from tests.path_scoped.pty_service import pty_service as pty_service
+from tests.path_scoped.pty_shells import new, type_line, wait_for
 
 pytestmark = [
     pytest.mark.skipif(IS_WINDOWS, reason="pty sessions are POSIX-only"),

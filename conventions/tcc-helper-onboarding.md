@@ -15,7 +15,7 @@ verdict matrix.
 ## Why before the flip
 
 `AVA_PERMISSIONS_HELPER_SPAWN` (host scope, default off) routes service,
-agent, and PTY-host spawns through the helper so their TCC attribution lands on
+agent, and pty-sessions service spawns through the helper so their TCC attribution lands on
 `com.ava.permissions-helper`. Enabling it while a grant is still missing flips
 that access from the already-granted python identity to an ungranted helper
 identity: dialogs at best, silent denials at worst. Complete this onboarding

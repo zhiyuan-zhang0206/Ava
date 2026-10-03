@@ -17,7 +17,8 @@ import socket
 import time
 import uuid
 from dataclasses import dataclass
-from typing import Any
+from pathlib import Path
+from typing import Any, cast
 
 from base.sessions.pty import protocol
 from base.sessions.pty.closure import Outcome
@@ -35,7 +36,15 @@ _CONNECT_RETRY_S = 0.1
 
 
 class ServiceUnavailableError(OSError):
-    """No pty-sessions service is answering on its socket."""
+    """The pty-sessions service did not answer: it is down, or wedged."""
+
+
+class ServiceDownError(ServiceUnavailableError):
+    """No pty-sessions service is listening: its socket is absent or refuses connections.
+
+    Nothing can be alive in a service that is not there, which is what the queries
+    below read it as.
+    """
 
 
 class ServiceError(RuntimeError):
@@ -80,8 +89,8 @@ class KillVerdict:
     survivors: tuple[int, ...] = ()
 
 
-def _connect(wait_s: float) -> socket.socket:
-    path = str(service_socket_path())
+def _connect(wait_s: float, socket_path: Path | None) -> socket.socket:
+    path = str(service_socket_path() if socket_path is None else socket_path)
     deadline = time.monotonic() + wait_s
     while True:
         conn = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
@@ -90,9 +99,7 @@ def _connect(wait_s: float) -> socket.socket:
         except (FileNotFoundError, ConnectionRefusedError) as exc:
             conn.close()
             if time.monotonic() >= deadline:
-                raise ServiceUnavailableError(
-                    f"pty-sessions service is not answering at {path}"
-                ) from exc
+                raise ServiceDownError(f"no pty-sessions service is listening at {path}") from exc
             time.sleep(_CONNECT_RETRY_S)
         except OSError:
             conn.close()
@@ -106,17 +113,22 @@ def request(
     *,
     timeout: float = REQUEST_TIMEOUT_S,
     wait: float = 0.0,
+    socket_path: Path | None = None,
     **fields: Any,
 ) -> dict[str, Any]:
     """Send one request and return the response's data.
 
+    `socket_path` names the service's socket explicitly (a read-only scan that must
+    not create the home); the default is this process's own.
+
     Raises:
-        ServiceUnavailableError: no service answers (after waiting up to `wait`
-            seconds for one to accept).
+        ServiceDownError: no service listens (after waiting up to `wait` seconds for
+            one to accept).
+        ServiceUnavailableError: a service was dialed and did not answer.
         ServiceError: the service refused or failed the request.
     """
     req_id = uuid.uuid4().hex
-    conn = _connect(wait)
+    conn = _connect(wait, socket_path)
     with conn:
         conn.settimeout(timeout)
         try:
@@ -139,21 +151,21 @@ def request(
     if not response.get("ok"):
         raise ServiceError(int(response.get("code") or protocol.ERROR), str(response.get("error")))
     data = response.get("data")
-    return data if isinstance(data, dict) else {}
+    return cast("dict[str, Any]", data) if isinstance(data, dict) else {}
 
 
 def has_session(name: str) -> bool:
     try:
         return bool(request("has", name=name)["alive"])
-    except ServiceUnavailableError:
+    except ServiceDownError:
         return False
 
 
-def list_sessions(prefix: str = "") -> list[SessionInfo]:
+def list_sessions(prefix: str = "", *, socket_path: Path | None = None) -> list[SessionInfo]:
     """Every live session whose name starts with `prefix`, sorted by name."""
     try:
-        rows = request("list", prefix=prefix)["sessions"]
-    except ServiceUnavailableError:
+        rows = request("list", socket_path=socket_path, prefix=prefix)["sessions"]
+    except ServiceDownError:
         return []
     return [SessionInfo(**row) for row in rows]
 
@@ -191,8 +203,14 @@ def resize(name: str, cols: int, rows: int) -> None:
 
 
 def kill(name: str, *, graceful: bool) -> KillVerdict:
-    """End the session and report whether it cut running work short (idempotent)."""
-    data = request("kill", name=name, graceful=graceful)
+    """End the session and report whether it cut running work short (idempotent).
+
+    Without a service there is no session to end: a noop, like killing an absent one.
+    """
+    try:
+        data = request("kill", name=name, graceful=graceful)
+    except ServiceDownError:
+        return KillVerdict("noop", interrupted=False)
     return KillVerdict(
         str(data["mode"]), bool(data["interrupted"]), tuple(data.get("survivors", ()))
     )

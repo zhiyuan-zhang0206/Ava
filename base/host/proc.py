@@ -63,19 +63,21 @@ _SESSION_CREATE_TIME_TOLERANCE_S = 2.0
 
 def hosting_supervised_session() -> str | None:
     """The supervised session this process is running INSIDE — the name of a live
-    `$AVA_HOME/run/sessions/<name>.json` record whose pid is this process or one
-    of its ancestors — or None when the lineage is clear.
+    `$AVA_HOME/run/sessions/<name>.json` record, or of a persistent shell session
+    of the pty-sessions service, whose pid is this process or one of its ancestors
+    — or None when the lineage is clear.
 
     The question a host-transition verb must ask before running in-process: the
     stop leg of a stop/restart kills every service session's whole tree, and
     agents + their shells are quiesced/reaped with it, so a transition launched
     from inside one of those trees is killed by its own stop mid-flight
-    (2026-08-12: a host transition run in an agent's pty-hosted background shell
-    died when stopping ava-pty-supervisor force-killed the supervisor's whole
-    tree, stranding the cluster paused with every service down).
+    (2026-08-12: a host transition run in an agent's background shell died when
+    the stop force-killed that shell's whole tree, stranding the cluster paused
+    with every service down).
 
     A record whose process is gone, or whose pid the OS recycled onto a
-    different process (start-time mismatch), does not count.
+    different process (start-time mismatch), does not count. Neither does a
+    pty-sessions service that does not answer: there is then no evidence either way.
     """
     # Function-local: `base.paths` pulls in `base.config` settings and
     # its session stack, which this leaf module keeps out of its import-time
@@ -107,6 +109,26 @@ def hosting_supervised_session() -> str | None:
                 return name
         except psutil.Error:
             continue
+    return _hosting_pty_session(lineage)
+
+
+def _hosting_pty_session(lineage: set[int]) -> str | None:
+    """The persistent shell session whose shell is in `lineage`, if any.
+
+    A stop closes every persistent terminal, so one run from a shell the
+    pty-sessions service holds would end itself mid-stop.
+    """
+    from base.sessions.pty import client
+
+    try:
+        sessions = client.list_sessions()
+    except OSError:
+        return None
+    for info in sessions:
+        if info.pid in lineage:
+            with contextlib.suppress(RuntimeError, psutil.Error):
+                if OwnedProcess(info.pid, info.create_time, info.starttime).live():
+                    return info.name
     return None
 
 

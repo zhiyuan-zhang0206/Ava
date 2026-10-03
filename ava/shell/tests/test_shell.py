@@ -1,15 +1,15 @@
 """ava.shell unit tests — one-shot `run(cmd)` + persistent PTY session wrapper.
 
-Runs against real detached per-session PTY hosts + real bash. The
-`_pty_sessions_env` fixture (session-scoped, tests/path_scoped/ava_tests.py) pins a tmp
-test home and sweeps its sessions; POSIX-only, skips entirely on Windows.
+Runs against a real pty-sessions service + real bash. The `pty_service` fixture
+(tests/path_scoped/pty_service.py) starts one under the tmp test home and closes its
+sessions when the test ends; POSIX-only, skips entirely on Windows.
 
 Sessions are distinguished by name prefix. Parallel xdist workers each use a
 reserved high-range fake agent-id (`_TEST_AGENT_BASE`) for isolation; tests
 clean up only their own agent-prefixed sessions via prefix-scoped `kill_all`.
 
 Session naming format: `ava-agent-{agent_id}-shell-{shell_id}[-<name>]`; the
-per-home record namespace provides cluster isolation.
+home's own service provides cluster isolation.
 """
 
 import contextlib
@@ -28,12 +28,12 @@ from base.native_process.os_platform import IS_WINDOWS
 pytestmark = [
     pytest.mark.skipif(IS_WINDOWS, reason="PTY sessions are POSIX-only"),
     # `_isolated_agent` is opt-in (mutates global ava.self.AGENT_ID); only the
-    # pty-backed session tests want it. `_pty_sessions_env` must come first: the
+    # pty-backed session tests want it. `pty_service` must come first: the
     # isolation fixture's own kill_all/list calls hit the session backend.
-    pytest.mark.usefixtures("_pty_sessions_env", "_isolated_agent"),
+    pytest.mark.usefixtures("pty_service", "_isolated_agent"),
 ]
 
-# The shared PTY/agent isolation fixtures (`_pty_sessions_env`, `_isolated_agent`,
+# The shared PTY/agent isolation fixtures (`pty_service`, `_isolated_agent`,
 # `_agent_row`) and the `_ensure_agents_meta_row` helper live in
 # `tests/path_scoped/ava_tests.py` so both this module and `test_watcher.py` inherit
 # them.
@@ -316,8 +316,8 @@ def test_rebuild_uses_new_id_and_old_handle_stays_rejected(_agent_row: int) -> N
 
 # ─── send_keys + per-session PTY integration ──────────────────────────────
 #
-# These run against REAL detached session hosts + REAL bash -l -i (the
-# `_pty_sessions_env` fixture), exercising the PtySessionBackend end to end:
+# These run against a REAL pty-sessions service + REAL bash -l -i (the
+# `pty_service` fixture), exercising the PtySessionBackend end to end:
 # sessions.new -> send -> capture, the key vocabulary (Enter / C-c / Up), and
 # kill. A short poll replaces fixed sleeps so a loaded box does not flake.
 
@@ -472,19 +472,17 @@ def test_kill_reaps_session_and_foreground_child(_agent_row: int) -> None:
     the PTY kill signals the shell's group AND the tty's foreground group (a
     job backgrounded into its own pgrp outlives the tty, exactly like a shell session
     kill-session)."""
-    import json
-
     import psutil
 
     from ava.shell import sessions as _sessions
-    from base.paths import run_dir
+    from base.sessions.pty import client
 
     sid = shell.sessions.new("test-tree", ttl=120)
     try:
         _ready(sid)
         full = _sessions._handle().resolve(sid)
-        rec = json.loads((run_dir() / "pty" / f"{full}.json").read_text())
-        shell_pid = int(rec["pid"])
+        (info,) = [s for s in client.list_sessions() if s.name == full]
+        shell_pid = info.pid
         assert psutil.pid_exists(shell_pid)
         # a foreground child blocks the shell; it gets its own pgrp (job
         # control), which the kill must signal alongside the shell's group.

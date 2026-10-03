@@ -161,10 +161,11 @@ learn about it depends on how its session ended:
 - It exits on its own (fired / timed out) — you get the usual completion
   notice, and that's it.
 - You kill it yourself — no extra message; you already have the result.
-- The platform reclaims it at its TTL deadline, or a normal `ava stop` /
-  update force-closes a busy terminal — you get a message saying so.
-- `ava stop --force`, a Windows unit's stop, or its pty host being killed
-  with nothing to record it (an external SIGKILL, a power loss) — no
+- The platform reclaims it at its TTL deadline, or a normal `ava stop` or
+  `ava restart` (updates included) force-closes a busy terminal — you get a
+  message saying so.
+- `ava stop --force`, a Windows unit's stop, or the pty-sessions service
+  ending with nothing to record it (an external SIGKILL, a power loss) — no
   message in any of these; check `ava.shell.sessions.list()` if a watcher's
   continued presence matters to you.
 

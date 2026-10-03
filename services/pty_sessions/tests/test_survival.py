@@ -22,10 +22,11 @@ from base.native_process.os_platform import IS_WINDOWS
 from base.sessions.pty import client, closure
 from base.sessions.pty.paths import ledger_path
 from services.pty_sessions import ledger
-from services.pty_sessions.tests import jobs, support
-from services.pty_sessions.tests.support import new, output_until, type_line, wait_for
+from tests.path_scoped import pty_jobs as jobs
+from tests.path_scoped import pty_shells as support
 from tests.path_scoped.pty_service import _REPO, PtyServiceProcess
 from tests.path_scoped.pty_service import pty_service as pty_service
+from tests.path_scoped.pty_shells import new, output_until, type_line, wait_for
 
 pytestmark = [
     pytest.mark.skipif(IS_WINDOWS, reason="pty sessions are POSIX-only"),
@@ -85,6 +86,47 @@ def test_a_session_outlives_the_process_that_created_it(unit_home: Path) -> None
     type_line(name, "echo reached-by-the-next-client")
     output_until(name, "reached-by-the-next-client")
     assert client.kill(name, graceful=False).interrupted is True
+
+
+# The same stand-in, through the backend every SDK call goes through.
+_BACKEND_HOST = """
+import sys, time
+from pathlib import Path
+from base.sessions.backend import get_shell_backend
+assert get_shell_backend().new_session(sys.argv[1], "", Path(sys.argv[2]), env={})
+print("created", flush=True)
+while True:
+    time.sleep(1)
+"""
+
+
+@pytest.mark.usefixtures("pty_service")
+def test_a_backend_session_outlives_the_process_that_created_it(unit_home: Path) -> None:
+    """The SDK's transport: kill the process that created a session through
+    `get_shell_backend()` (an agent host going down) and the next backend call in a new
+    process succeeds against the same shell."""
+    from base.sessions.backend import PtySessionBackend
+
+    name = "ava-agent-987-shell-2-backend"
+    host = subprocess.Popen(  # noqa: S603 — repo-internal interpreter + inline program
+        [sys.executable, "-c", _BACKEND_HOST, name, str(unit_home)],
+        cwd=_REPO,
+        stdout=subprocess.PIPE,
+        text=True,
+    )
+    assert host.stdout is not None and host.stdout.readline().strip() == "created"
+    (before,) = client.list_sessions()
+
+    host.send_signal(signal.SIGKILL)
+    host.wait(timeout=10)
+
+    backend = PtySessionBackend()
+    assert backend.has_session(name)
+    backend.send(name, "echo reached-through-the-backend")
+    backend.send_keys(name, "Enter")
+    output_until(name, "reached-through-the-backend")
+    assert [s.pid for s in client.list_sessions()] == [before.pid], "the same shell answered"
+    assert backend.kill_session(name) == (True, "forced")
 
 
 @pytest.mark.usefixtures("pty_service")
