@@ -1,7 +1,7 @@
 """Graph-edge hook system (plugin declaration mechanism).
 
 Plugin system has two layers (see decisions/2026-05-13-plugin-and-hook-layers.md):
-- **SDK wrap**: SDK function wrapping — see ava/sdk_surface/wraps.py (`ava.extend.wrap`)
+- **SDK wrap**: SDK function wrapping — see ava/sdk_surface/wraps.py (declared as `SdkWrap`)
 - **Graph-edge hook**: here — 4 hook container Nodes run the hooks the graph build hands them
 
 Public API (re-exported from `_registry`):

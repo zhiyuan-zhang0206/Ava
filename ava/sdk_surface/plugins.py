@@ -19,14 +19,13 @@ from .sdk_disable import _DisabledSDKModule
 # ── Exception hierarchy (AGENTS.md SDK docstring rule: parent + subclass) ─
 # Plugin authors use RegisterNamespaceError for coarse catch, specific
 # subclass for fine catch.
-# `__all_for_ava__` and `_REGISTERED_NAMESPACES` are two-faced representations
-# of the same invariant — only modifiable via register_namespace /
-# clear_registered_namespaces; external mutation of `ava.__all_for_ava__` would
-# diverge the two; convention: do not directly modify `ava.__all_for_ava__`.
+# `ava.__all_for_ava__` is only modified by the install primitives here and their
+# undo; external mutation would diverge it from what the install recorded.
+# Convention: do not directly modify `ava.__all_for_ava__`.
 
 
 class RegisterNamespaceError(Exception):
-    """Root of `ava.register_namespace` failures. Plugin authors use this for coarse catch."""
+    """Root of namespace / member install failures. Plugin authors use this for coarse catch."""
 
 
 class InvalidNamespaceNameError(RegisterNamespaceError):
@@ -54,27 +53,26 @@ class FrameworkNamespaceConflictError(NamespaceConflictError):
 
 
 class PluginNamespaceConflictError(NamespaceConflictError):
-    """name already registered by another plugin — last-write-wins would
+    """name already installed by another plugin — last-write-wins would
     cause plugins to silently trample on each other; fail-fast so plugin
-    authors negotiate to rename. Message contains the name-holding plugin
-    (if `agent.state.PluginContext` is active during plugin.py import)."""
+    authors negotiate to rename. Message contains the name-holding plugin."""
 
 
 class UnknownNamespaceError(RegisterNamespaceError):
-    """register_namespace_member target namespace does not exist — the parent
+    """member install target namespace does not exist — the parent
     (e.g. ava.self) must be an existing namespace before a plugin can hang a
     member on it. Typo in the namespace name, or a namespace disabled by
     AVA_SDK_DISABLE."""
 
 
 class InvalidNamespaceMemberError(RegisterNamespaceError):
-    """register_namespace_member was passed a non-callable member. Members are
+    """a declared member is not callable. Members are
     functions the agent invokes (ava.<namespace>.<name>(...)); a non-callable
     has no signature/docstring to render and cannot be called — raise now."""
 
 
 class MemberConflictError(NamespaceConflictError):
-    """register_namespace_member name already exists on the target namespace
+    """a declared member name already exists on the target namespace
     (any existing attribute — a framework member/constant or another plugin's) —
     last-write-wins would silently trample; fail-fast so the plugin author renames."""
 
