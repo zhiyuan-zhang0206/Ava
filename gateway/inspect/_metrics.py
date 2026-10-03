@@ -436,24 +436,6 @@ def _read_snapshot(
                 "reason": "missing_turn_durations",
             }
         )
-    if historical and (
-        not distribution or precision != "exact" or turn_evidence.availability == "unavailable"
-    ):
-        retained = _rows(
-            conn,
-            "SELECT EXISTS (SELECT 1 FROM agent_archive_stats WHERE agent_id=%s "
-            "AND turn_distribution <> '[]'::jsonb) AS present",
-            (agent_id,),
-        )[0]["present"]
-        if retained:
-            turn_evidence = turn_evidence.model_copy(
-                update={
-                    "retained_unapplied_sources": ["historical_archive_distribution"],
-                    "reason": turn_evidence.reason
-                    if turn_evidence.reason == "missing_turn_durations"
-                    else "archive_precision_unattributed",
-                }
-            )
     activity_evidence = _evidence(
         historical=historical, present=bool(observed), sources=["observations"]
     )
