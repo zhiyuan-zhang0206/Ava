@@ -111,9 +111,7 @@ EVENTS: dict[str, EventSpec] = {
         "heartbeat circuit breaker opened — a permanent provider rejection stopped "
         "heartbeat re-fires (context_overflow reason arms the forced-compact self-rescue)",
     ),
-    "report_activity": audit_event(
-        "report_activity", "activity report", site="no current producer (DB 5,274 rows)"
-    ),
+    "report_activity": audit_event("report_activity", "activity report", retired=True),
     "status_change": telemetry_audit_event(
         "status_change",
         "agent status transition — both telemetry (loguru) and audit (audit_events) sides emit this name",
@@ -124,9 +122,7 @@ EVENTS: dict[str, EventSpec] = {
     "skill_invoked": audit_event("skill_invoked", "skill invoked by an agent"),
     "task_create": audit_event("task_create", "task created"),
     "task_update": audit_event("task_update", "task updated", payload=TaskUpdate),
-    "report_breached": audit_event(
-        "report_breached", "guarantee report breached", site="no current producer (DB 14 rows)"
-    ),
+    "report_breached": audit_event("report_breached", "guarantee report breached", retired=True),
     "computer_action": audit_event(
         "computer_action",
         "computer-use desktop action (executed or refused)",

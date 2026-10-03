@@ -315,6 +315,7 @@ def build_record(
     ]
 
     compactions = sum(1 for event_type, _ in log_events if event_type == "compact")
+    # `report_breached` is retired: only rows written before its producer was removed set this.
     breached = any(event_type == "report_breached" for event_type, _ in log_events)
     transcript = _transcript(agent_id)
 
