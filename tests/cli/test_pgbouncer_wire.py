@@ -243,9 +243,8 @@ def _insert_agent(pg_url: str) -> int:
 
 def test_write_transaction_overrides_a_read_only_default_on_connect(
     monkeypatch: pytest.MonkeyPatch,
-    database: Database,
 ) -> None:
-    """Rule A writes (`set_posture`'s upsert, opened by `write_transaction()` on its
+    """Rule A writes (`set_posture`'s upsert, opened by `Database.write_transaction()` on its
     own dial) land in sessions that default to read-only."""
     from base import config
     from base.deploy.state import host_deploy_state
