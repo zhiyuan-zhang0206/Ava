@@ -111,7 +111,7 @@ installed skill with a recorded source is on the **git** channel.
 ava packages status [--json]                 # host version, channels, per-package policy/state
 ava packages refresh [--check] [--package NAME]   # check + apply due updates now
 ava packages policy <name> --update-mode auto|notify|off [--check-every 24h]
-ava packages rollback <name> [--force]       # restore the previous tree kept by the last apply
+ava packages rollback <name>                 # restore the previous tree kept by the last apply
 ```
 
 - A converge-registered OS job runs `ava packages refresh --from-job` on a

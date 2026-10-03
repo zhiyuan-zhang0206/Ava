@@ -30,7 +30,7 @@ def _h_packages_refresh(args: argparse.Namespace) -> int:
 def _h_packages_rollback(args: argparse.Namespace) -> int:
     from cli.commands.extensions.packages import cmd_packages_rollback
 
-    return cmd_packages_rollback(args.name, force=args.force)
+    return cmd_packages_rollback(args.name)
 
 
 def _duration(value: str) -> str:
@@ -98,7 +98,6 @@ def _add_packages_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser
         help="restore a package's previous tree (the .<name>.prev kept by the last apply)",
     )
     rollback_p.add_argument("name")
-    rollback_p.add_argument("--force", action="store_true", help="override the local-edit guard")
     rollback_p.set_defaults(func=_h_packages_rollback)
 
     policy_p = packages_sub.add_parser(
