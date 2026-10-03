@@ -4,7 +4,8 @@ description: >-
   continue-on-error never fails its job by itself; the Trunk gate is what turns its
   failures red. Call this when TRUNK_ORG_URL_SLUG is empty, i.e. when that gate is
   about to be skipped: a run that should have the secret errors out, and a run that
-  cannot have it (a fork) fails on pytest's own outcome.
+  cannot have it (a fork's pull request, or any Dependabot-triggered run) fails on
+  pytest's own outcome.
 inputs:
   pytest-outcome:
     description: steps.<id>.outcome of the pytest step whose failures the gate would judge.
@@ -14,8 +15,10 @@ runs:
   steps:
     - shell: bash
       env:
-        # Secrets exist only on this repository's own runs; a fork's pull request gets none.
-        CAN_HAVE_SECRETS: ${{ github.repository == 'zhiyuan-zhang0206/Ava' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
+        # Secrets exist only on this repository's own runs; a fork's pull request
+        # gets none, and a Dependabot-triggered run never gets them either (even on
+        # this repository's own branches) — GitHub withholds them from dependabot[bot].
+        CAN_HAVE_SECRETS: ${{ github.repository == 'zhiyuan-zhang0206/Ava' && github.actor != 'dependabot[bot]' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
         PYTEST_OUTCOME: ${{ inputs.pytest-outcome }}
       run: |
         if [ "$CAN_HAVE_SECRETS" = "true" ]; then
