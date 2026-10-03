@@ -16,7 +16,9 @@ enqueues its own job, so a tick CONSUMES — the reconcile scan runs only when
 included). The scan stays the safety net for lost events and stranded
 retries, never the trigger. Before each claim the fleet's 24h regeneration
 budget is checked: crossing it trips the persistent breaker and claiming
-stops until an operator resets it (the §4 guardrails, task #4674).
+stops until an operator resets it (the §4 guardrails, task #4674). First
+builds are paced separately: past their own 24h budget the claim parks them
+and takes the rest, resuming as the window rolls — no trip.
 
 Serial by construction — one child at a time, the cost guardrail pinned in
 review (3187). Every DB step is idempotent and race-free (partial unique
@@ -69,6 +71,27 @@ def _fallback_scan_due(now: datetime, config: HierarchyWorkerConfig) -> bool:
     return now - _fallback_scanned_at >= timedelta(seconds=config.hierarchy_fallback_scan_seconds)
 
 
+# A finished job row that was a first build is a compact job with `include_tail` (the claim
+# backfills the flag for event-enqueued rows, so the stored value is the one the run used) —
+# spelled out in the two budget queries below.
+
+
+def _first_builds_deferred(conn: Connection, config: HierarchyWorkerConfig) -> bool:
+    """Whether first builds wait for the next day: the rolling 24h window already holds
+    `hierarchy_first_build_daily_budget_nodes` first-build nodes.
+
+    A deferral, not a trip: the claim just skips first-build jobs and takes everything
+    else; they resume as earlier jobs age out of the window, with no operator step.
+    """
+    row = conn.execute(
+        "SELECT coalesce(sum(generated), 0) FROM hierarchy_jobs"
+        " WHERE finished_at >= now() - interval '24 hours'"
+        " AND kind = 'compact' AND include_tail"
+    ).fetchone()
+    spent = int(row[0]) if row is not None else 0
+    return spent >= config.hierarchy_first_build_daily_budget_nodes
+
+
 def _regen_budget_check(conn: Connection, config: HierarchyWorkerConfig) -> bool:
     """The fleet's 24h rolling regeneration budget (task #4674 §4).
 
@@ -85,6 +108,7 @@ def _regen_budget_check(conn: Connection, config: HierarchyWorkerConfig) -> bool
     row = conn.execute(
         "SELECT coalesce(sum(generated), 0) FROM hierarchy_jobs"
         " WHERE finished_at >= now() - interval '24 hours'"
+        " AND NOT (kind = 'compact' AND include_tail)"
     ).fetchone()
     total = int(row[0]) if row is not None else 0
     if total > budget:
@@ -162,7 +186,9 @@ def _baseline_untracked(conn: Connection, job_id: int, agent_id: int, boundary: 
     )
 
 
-def claim_next(conn: Connection, *, agents: frozenset[int] = frozenset()) -> ClaimedJob | None:
+def claim_next(
+    conn: Connection, *, agents: frozenset[int] = frozenset(), defer_first_builds: bool = False
+) -> ClaimedJob | None:
     """Claim the oldest pending job, atomically; never-seen compact jobs are
     silent-baselined instead of built (task #4674) — the scan's first-sight
     pass normally retires those first, so this claim-side branch covers the
@@ -176,7 +202,9 @@ def claim_next(conn: Connection, *, agents: frozenset[int] = frozenset()) -> Cla
     (a success can only appear, and a live job blocks other work for the
     same agent), so that value never turns stale-true before the claim.
     `agents` is the rollout allowlist (empty = every agent): a pending job of an
-    unlisted agent is left parked, not claimed.
+    unlisted agent is left parked, not claimed. `defer_first_builds` (the first-build
+    daily budget is spent) likewise parks a compact job whose agent is tracked but has
+    no clean build yet — a never-tracked agent still baselines (no model call).
 
     Returns None when nothing (left) is pending — baselines drained in
     passing do not stop the drain.
@@ -189,11 +217,21 @@ def claim_next(conn: Connection, *, agents: frozenset[int] = frozenset()) -> Cla
         with conn.transaction():
             row = conn.execute(
                 "UPDATE hierarchy_jobs SET status = 'running', started_at = now()"
-                " WHERE id = (SELECT id FROM hierarchy_jobs WHERE status = 'pending'"
-                "             AND (cardinality(%s::bigint[]) = 0 OR agent_id = ANY(%s::bigint[]))"
-                "             ORDER BY id LIMIT 1 FOR UPDATE SKIP LOCKED)"
+                " WHERE id = (SELECT j.id FROM hierarchy_jobs j WHERE j.status = 'pending'"
+                "             AND (cardinality(%s::bigint[]) = 0 OR j.agent_id = ANY(%s::bigint[]))"
+                # A first-build candidate (deferred when its budget is spent): a compact job
+                # of a tracked agent with no clean finished build (`scan.first_build`).
+                "             AND (NOT %s OR NOT (j.kind = 'compact'"
+                "               AND EXISTS (SELECT 1 FROM hierarchy_worker_state s"
+                "                           WHERE s.agent_id = j.agent_id)"
+                "               AND NOT EXISTS (SELECT 1 FROM hierarchy_jobs d"
+                "                               WHERE d.agent_id = j.agent_id AND d.status = 'done'"
+                "                                 AND coalesce(d.failed, 0) = 0"
+                "                                 AND coalesce(d.skipped, 0) = 0"
+                "                                 AND d.error IS NULL)))"
+                "             ORDER BY j.id LIMIT 1 FOR UPDATE SKIP LOCKED)"
                 " RETURNING id, agent_id, include_tail, kind, trigger_boundary",
-                (sorted(agents), sorted(agents)),
+                (sorted(agents), sorted(agents), defer_first_builds),
             ).fetchone()
             if row is None:
                 return None
@@ -295,7 +333,11 @@ def run_tick(config: HierarchyWorkerConfig, db: Database) -> None:
                             tail=outcome.tail_enqueued,
                             stale=outcome.stale_recovered,
                         )
-                job = claim_next(conn, agents=config.served_agents())
+                job = claim_next(
+                    conn,
+                    agents=config.served_agents(),
+                    defer_first_builds=_first_builds_deferred(conn, config),
+                )
         except psycopg.ProgrammingError:
             # Code<->DB drift: no retry self-heals. Exit so the manager's
             # crash path (backoff + breaker + last_error) exposes it.

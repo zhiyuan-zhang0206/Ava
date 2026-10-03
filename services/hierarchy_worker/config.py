@@ -32,6 +32,7 @@ class HierarchyWorkerConfig:
     hierarchy_regen_alert_nodes_per_job: int
     hierarchy_regen_halt_nodes_per_job: int
     hierarchy_regen_daily_budget_nodes: int
+    hierarchy_first_build_daily_budget_nodes: int
     hierarchy_regen_min_reuse_ratio: float
 
     def served_agents(self) -> frozenset[int]:
