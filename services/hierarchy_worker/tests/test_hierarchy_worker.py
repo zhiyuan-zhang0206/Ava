@@ -82,7 +82,7 @@ def _fake_generation_model(monkeypatch: pytest.MonkeyPatch) -> None:
     model lifecycle install their own spies over these.
     """
 
-    def fake_build(model: str) -> object:
+    def fake_build(model: str, overrides: object = None) -> object:
         return object()
 
     def fake_close(_llm: object) -> None:
@@ -405,7 +405,7 @@ def test_execute_builds_one_model_and_closes_it(
     closed: list[object] = []
     seen_llm: list[object] = []
 
-    def fake_build(model: str) -> object:
+    def fake_build(model: str, overrides: object = None) -> object:
         built.append(model)
         return sentinel
 
@@ -445,7 +445,7 @@ def test_execute_closes_the_model_even_when_generation_fails(
     sentinel = object()
     closed: list[object] = []
 
-    def fake_build(model: str) -> object:
+    def fake_build(model: str, overrides: object = None) -> object:
         return sentinel
 
     def fake_known(*args: object, **kwargs: object) -> dict[str, str]:

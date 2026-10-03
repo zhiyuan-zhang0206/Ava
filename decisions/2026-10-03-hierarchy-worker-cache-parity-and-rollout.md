@@ -25,7 +25,9 @@ shipped (dark) worker made that unsafe to switch on:
    segment with no head SystemMessage, sends the material-only request. Rejected: truncating
    the stitched prefix to a token budget (still not the agent's bytes, so no cache hit).
 2. The model is the agent's own: overlay over birth stamp over the live default, then the
-   withdrawal fallback, built with no effort override. Rejected: keeping the cheaper
+   withdrawal fallback, built with the agent's own tuning pins (`ModelOverrides` from the same
+   overlay-over-birth map — a pinned reasoning effort or thinking budget is the agent's) and no
+   worker-side effort override. Rejected: keeping the cheaper
    summarizer effort — a reasoning-parameter mismatch costs the cache hit the shape exists for.
 3. `AVA_HIERARCHY_WORKER_AGENTS` (empty = everyone) is a rollout allowlist beside the
    cluster-wide master switch, so one or two agents can be canaries. Rejected: a per-agent
