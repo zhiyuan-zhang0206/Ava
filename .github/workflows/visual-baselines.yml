@@ -84,6 +84,9 @@ jobs:
       - name: Install Python deps
         uses: ./.github/actions/uv-sync
 
+      - name: Vendored Postgres runtime (production's server build)
+        uses: ./.github/actions/vendor-pg-runtime
+
       - name: Install frontend deps
         working-directory: ui/web
         run: npm ci

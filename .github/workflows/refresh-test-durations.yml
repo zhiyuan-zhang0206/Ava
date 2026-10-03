@@ -89,6 +89,9 @@ jobs:
       - name: Install locked Python environment
         run: uv sync --frozen
 
+      - name: Vendored Postgres runtime (production's server build)
+        uses: ./.github/actions/vendor-pg-runtime
+
       - name: Measure backend shard
         run: >
           uv run python scripts/ci/refresh_test_durations.py measure backend
@@ -137,6 +140,9 @@ jobs:
 
       - name: Install locked Python environment
         run: uv sync --frozen
+
+      - name: Vendored Postgres runtime (production's server build)
+        uses: ./.github/actions/vendor-pg-runtime
 
       - name: Install frontend deps
         working-directory: ui/web
