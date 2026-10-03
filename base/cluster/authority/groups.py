@@ -84,6 +84,7 @@ _RUNNER_TABLE_GRANTS: tuple[tuple[LiteralString, tuple[str, ...]], ...] = (
         (
             "agent_metric_days",
             "agent_lifecycle_intervals",
+            "agent_metric_scans",
             "agent_metric_file_cursors",
         ),
     ),
