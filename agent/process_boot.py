@@ -16,7 +16,7 @@ from typing import Any
 
 import ava
 from ava.sdk_surface import plugin_loader, sdk_disable
-from base.host.env.agent_slices import AgentSlices
+from base.host.env.agent_slices import agent_setting
 from base.log import logger
 from base.paths import workspace_dir
 
@@ -31,7 +31,7 @@ def _apply_per_agent_sdk_disable() -> None:
     only genuinely new entries take effect.
     """
 
-    configured = AgentSlices.resolve().prompt.sdk_disable
+    configured = agent_setting("sdk_disable")
     if not configured:
         return
     env_entries = set(sdk_disable.sdk_disable_entries)
@@ -47,11 +47,10 @@ def _apply_per_agent_eval_isolation() -> None:
     must rebind the live `ava.memory` surface rather than affect the plugin's
     import-time default path.
     """
-    sandbox = AgentSlices.resolve().sandbox
-    if not sandbox.eval_isolation:
+    if not agent_setting("eval_isolation"):
         return
 
-    allowed_network = set(sandbox.eval_network_allowlist)
+    allowed_network = set(agent_setting("eval_network_allowlist"))
     disabled = ["agents.get_last_message", "tasks", "mcps", "ui"]
     if "web" not in allowed_network:
         disabled.append("web")

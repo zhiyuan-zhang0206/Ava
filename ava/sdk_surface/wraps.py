@@ -134,7 +134,7 @@ def _record_activation(target: str, plugin: str, inner_calls: int) -> None:
         from ava import _settings
         from base.packages.plugins import activation
 
-        model = _settings.slices().brain.llm_model
+        model = _settings.agent_setting("llm_model")
     except Exception:
         return
     activation.record(plugin, "sdkWraps", target, detail=f"inner_calls={inner_calls}", model=model)
