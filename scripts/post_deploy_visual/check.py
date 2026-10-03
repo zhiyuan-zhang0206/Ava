@@ -32,6 +32,7 @@ if str(REPO_ROOT) not in sys.path:
 
 from base.native_process.child_env import inherited_process_env  # noqa: E402
 from scripts.post_deploy_visual.matrix import (  # noqa: E402
+    SESSION_REJECTED_DETAIL,
     VisualGateBudgetExceeded,
 )
 from scripts.post_deploy_visual.policy import (  # noqa: E402
@@ -130,6 +131,42 @@ def _cookie_file(cookie_file: Path) -> Path:
     if mode != 0o600:
         raise PermissionError(f"{cookie_file} must have mode 0600, found {mode:04o}")
     return cookie_file
+
+
+def _session_precheck(base_url: str, cookie_file: Path) -> None:
+    """Fail fast when the stored session cookie is already dead.
+
+    The matrix's control surface exercises the real /api/auth/check, and a
+    dead cookie there stalls the combination out to the settle timeout; one
+    probe against the gateway turns that into a fast failure. The cookie
+    file's full text is the header value (it already carries name=value, so
+    no prefix is added). A network problem is not a verdict — warn and let
+    the pass proceed (task #4758).
+    """
+    try:
+        cookie_header = cookie_file.read_text(encoding="utf-8").strip()
+        request = urllib.request.Request(  # noqa: S310 - operator URL
+            f"{base_url.rstrip('/')}/api/auth/check",
+            headers={"Cookie": cookie_header},
+            method="GET",
+        )
+        response = urllib.request.urlopen(request, timeout=10)  # noqa: S310 - operator URL
+    except urllib.error.HTTPError as exc:
+        if exc.code in {401, 403}:
+            raise RuntimeError(SESSION_REJECTED_DETAIL) from exc
+        print(f"warning: auth precheck saw HTTP {exc.code}; continuing", file=sys.stderr)
+        return
+    except (OSError, ValueError) as exc:
+        print(f"warning: auth precheck could not run: {exc}; continuing", file=sys.stderr)
+        return
+    with response:
+        try:
+            payload = json.load(response)
+        except ValueError:
+            print("warning: auth precheck response is not JSON; continuing", file=sys.stderr)
+            return
+    if isinstance(payload, dict) and payload.get("authenticated") is False:
+        raise RuntimeError(SESSION_REJECTED_DETAIL)
 
 
 def _validate_demo_target(value: str) -> None:
@@ -387,6 +424,7 @@ def _run_host(args: argparse.Namespace) -> int:
         raise ValueError("AVA_VISUAL_GATE_COOKIE_FILE is required")
     cookie_file = _cookie_file(Path(cookie_value).resolve())
     health_base = args.health_url or args.base_url.rstrip("/")
+    _session_precheck(health_base, cookie_file)
     health = _health_payload(health_base)
     started_at = extract_gateway_started_at(health)
     serving_sha = extract_gateway_sha(health)
