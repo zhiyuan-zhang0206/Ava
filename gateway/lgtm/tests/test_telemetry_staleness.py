@@ -14,13 +14,7 @@ import pytest
 
 from base import telemetry
 from gateway.lgtm import telemetry_staleness
-
-
-@pytest.fixture(autouse=True)
-def _isolated_source_state(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(telemetry_staleness, "_source_states", {})
-    monkeypatch.setattr(telemetry_staleness, "_check_state", telemetry_staleness._CheckState())
-    monkeypatch.setattr(telemetry_staleness, "CHECK_INTERVAL_S", 0, raising=False)
+from gateway.lgtm.telemetry_staleness import TelemetryStaleness
 
 
 class _Pool:
@@ -69,7 +63,7 @@ def test_check_reports_stale_rate_limits_and_recovers(monkeypatch: pytest.Monkey
         del now
         return ages["postgres"]
 
-    monkeypatch.setattr(telemetry_staleness, "heartbeat_age", postgres_age)
+    guard = TelemetryStaleness(check_interval_s=0, read_heartbeat_age=postgres_age)
 
     def capture_emit(
         _category: str, event_name: str, *, attributes: dict[str, Any], **_kwargs: Any
@@ -79,11 +73,11 @@ def test_check_reports_stale_rate_limits_and_recovers(monkeypatch: pytest.Monkey
     monkeypatch.setattr(telemetry, "emit", capture_emit)
     started = datetime(2026, 8, 23, 12, 0, tzinfo=UTC)
 
-    assert telemetry_staleness.check_and_report(None, now=started) is False
+    assert guard.check_and_report(None, now=started) is False
     assert emitted == []
 
     ages["postgres"] = None
-    assert telemetry_staleness.check_and_report(None, now=started) is True
+    assert guard.check_and_report(None, now=started) is True
     assert emitted == [
         (
             "telemetry_read_stale",
@@ -98,20 +92,15 @@ def test_check_reports_stale_rate_limits_and_recovers(monkeypatch: pytest.Monkey
         )
     ]
 
-    assert telemetry_staleness.check_and_report(
-        None, now=datetime(2026, 8, 23, 12, 4, 59, tzinfo=UTC)
-    )
+    assert guard.check_and_report(None, now=datetime(2026, 8, 23, 12, 4, 59, tzinfo=UTC))
     assert len(emitted) == 1
 
-    assert telemetry_staleness.check_and_report(None, now=datetime(2026, 8, 23, 12, 5, tzinfo=UTC))
+    assert guard.check_and_report(None, now=datetime(2026, 8, 23, 12, 5, tzinfo=UTC))
     assert emitted[-1][0] == "telemetry_read_stale"
     assert emitted[-1][1]["action"] == "ongoing"
 
     ages["postgres"] = 30.0
-    assert (
-        telemetry_staleness.check_and_report(None, now=datetime(2026, 8, 23, 12, 6, tzinfo=UTC))
-        is False
-    )
+    assert guard.check_and_report(None, now=datetime(2026, 8, 23, 12, 6, tzinfo=UTC)) is False
     assert emitted[-1] == (
         "telemetry_read_recovered",
         {
@@ -122,7 +111,7 @@ def test_check_reports_stale_rate_limits_and_recovers(monkeypatch: pytest.Monkey
     )
 
 
-def test_check_throttles_heartbeat_queries(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_check_throttles_heartbeat_queries() -> None:
     calls = 0
     monotonic_times = iter((100.0, 100.1, 160.1))
 
@@ -132,15 +121,17 @@ def test_check_throttles_heartbeat_queries(monkeypatch: pytest.MonkeyPatch) -> N
         calls += 1
         return 30.0
 
-    monkeypatch.setattr(telemetry_staleness, "CHECK_INTERVAL_S", 60)
-    monkeypatch.setattr(telemetry_staleness.time, "monotonic", lambda: next(monotonic_times))
-    monkeypatch.setattr(telemetry_staleness, "heartbeat_age", heartbeat_age)
+    guard = TelemetryStaleness(
+        check_interval_s=60,
+        read_heartbeat_age=heartbeat_age,
+        monotonic=lambda: next(monotonic_times),
+    )
 
-    assert telemetry_staleness.check_and_report(None) is False
-    assert telemetry_staleness.check_and_report(None) is False
+    assert guard.check_and_report(None) is False
+    assert guard.check_and_report(None) is False
     assert calls == 1
 
-    assert telemetry_staleness.check_and_report(None) is False
+    assert guard.check_and_report(None) is False
     assert calls == 2
 
 
@@ -150,12 +141,12 @@ def test_check_fail_open_when_heartbeat_query_raises(monkeypatch: pytest.MonkeyP
     def boom(_pool: object, *, now: datetime) -> float | None:
         raise RuntimeError(f"backend failed at {now}")
 
-    monkeypatch.setattr(telemetry_staleness, "heartbeat_age", boom)
+    guard = TelemetryStaleness(check_interval_s=0, read_heartbeat_age=boom)
 
     def capture_emit(_category: str, event_name: str, **_kwargs: Any) -> None:
         emitted.append(event_name)
 
     monkeypatch.setattr(telemetry, "emit", capture_emit)
 
-    assert telemetry_staleness.check_and_report(None) is False
+    assert guard.check_and_report(None) is False
     assert emitted == []

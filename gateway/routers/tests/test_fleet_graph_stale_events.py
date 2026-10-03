@@ -22,7 +22,7 @@ from psycopg import errors as pg_errors
 from base import telemetry
 from base.events.live.tests.fakes import patch_sync_redis
 from gateway.app import app
-from gateway.lgtm import telemetry_staleness
+from gateway.routers.tests.staleness_support import use_heartbeat_age
 
 _STALE_EVENT = "fleet_graph_stale"
 
@@ -64,9 +64,7 @@ def _fresh_heartbeat_age(pool: object, *, now: datetime) -> float:
 @pytest.fixture(autouse=True)
 def _fresh_telemetry_heartbeat(monkeypatch: pytest.MonkeyPatch) -> None:
     """The success-path heartbeat guard must not dial real services here."""
-    monkeypatch.setattr(telemetry_staleness, "heartbeat_age", _fresh_heartbeat_age)
-    monkeypatch.setattr(telemetry_staleness, "_source_states", {})
-    monkeypatch.setattr(telemetry_staleness, "CHECK_INTERVAL_S", 0, raising=False)
+    use_heartbeat_age(monkeypatch, _fresh_heartbeat_age)
 
 
 @pytest.fixture(autouse=True)

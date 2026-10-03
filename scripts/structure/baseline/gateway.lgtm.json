@@ -1,6 +1,0 @@
-{
-  "ambient_state": {
-    "gateway/lgtm/telemetry_staleness.py::ambient-container:_source_states": 1,
-    "gateway/lgtm/telemetry_staleness.py::ambient-instance:_check_state": 1
-  }
-}

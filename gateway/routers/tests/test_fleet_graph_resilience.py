@@ -11,7 +11,7 @@ from base import telemetry
 from base.agents import AgentStatus
 from base.events.live.tests.fakes import patch_sync_redis
 from gateway.app import app
-from gateway.lgtm import telemetry_staleness
+from gateway.routers.tests.staleness_support import use_heartbeat_age
 from gateway.schemas.fleet_graph import FleetGraphNode, FleetGraphResponse
 
 
@@ -54,9 +54,7 @@ class _RedisFactory:
 @pytest.fixture(autouse=True)
 def _fresh_telemetry_heartbeat(monkeypatch: pytest.MonkeyPatch) -> None:
     """Existing resilience cases isolate their named failure."""
-    monkeypatch.setattr(telemetry_staleness, "heartbeat_age", _fresh_heartbeat_age)
-    monkeypatch.setattr(telemetry_staleness, "_source_states", {})
-    monkeypatch.setattr(telemetry_staleness, "CHECK_INTERVAL_S", 0, raising=False)
+    use_heartbeat_age(monkeypatch, _fresh_heartbeat_age)
 
 
 def _seed_agent(db_conn: psycopg.Connection) -> int:
@@ -129,7 +127,7 @@ def test_stale_heartbeat_marks_telemetry_and_keeps_fresh_graph_cached(
     def missing_heartbeat(pool: object, *, now: datetime) -> None:
         del pool, now
 
-    monkeypatch.setattr(telemetry_staleness, "heartbeat_age", missing_heartbeat)
+    use_heartbeat_age(monkeypatch, missing_heartbeat)
     emitted: list[tuple[str, dict[str, object]]] = []
 
     def capture_emit(

@@ -24,6 +24,7 @@ from __future__ import annotations
 import contextlib
 import threading
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
@@ -39,17 +40,6 @@ CHECK_INTERVAL_S = 60
 class _SourceState:
     stale_since: float
     last_reported: float
-
-
-@dataclass
-class _CheckState:
-    last_check_monotonic: float | None = None
-    last_stale: bool = False
-
-
-_source_states: dict[str, _SourceState] = {}
-_check_state = _CheckState()
-_state_lock = threading.Lock()
 
 
 def heartbeat_age(pool: Any, *, now: datetime) -> float | None:
@@ -79,67 +69,91 @@ def _emit(event_name: str, attributes: dict[str, Any]) -> None:
         telemetry.emit("telemetry", event_name, attributes=attributes)
 
 
-def _report_source(*, source: str, age_s: float | None, now_s: float) -> bool:
-    stale = age_s is None or age_s > STALENESS_THRESHOLD_S
-    state = _source_states.get(source)
-    if stale:
-        reason = "heartbeat missing" if age_s is None else "heartbeat older than threshold"
-        if state is None:
-            state = _SourceState(stale_since=now_s, last_reported=now_s)
-            _source_states[source] = state
-            action = "entered"
-        elif now_s - state.last_reported >= STALENESS_THRESHOLD_S:
-            state.last_reported = now_s
-            action = "ongoing"
-        else:
-            return True
-        _emit(
-            "telemetry_read_stale",
-            {
-                "source": source,
-                "signal": HEARTBEAT_EVENT,
-                "threshold_s": STALENESS_THRESHOLD_S,
-                "age_s": age_s,
-                "action": action,
-                "reason": reason,
-            },
-        )
-        return True
+class TelemetryStaleness:
+    """The read-side heartbeat guard: transition state plus the check cadence.
 
-    if state is not None:
-        _source_states.pop(source, None)
-        _emit(
-            "telemetry_read_recovered",
-            {
-                "source": source,
-                "signal": HEARTBEAT_EVENT,
-                "stale_duration_s": now_s - state.stale_since,
-            },
-        )
-    return False
-
-
-def check_and_report(pool: Any, *, now: datetime | None = None) -> bool:
-    """Return whether a successful telemetry read should be marked stale.
-
-    A heartbeat-query exception is not a staleness verdict: it is logged at debug,
-    left out of this poll's result, and does not mutate transition state. The
-    fail-open verdict is cached on a monotonic cadence alongside successful checks.
+    One instance per gateway process (built by the app lifespan). `check_and_report`
+    is the only entry point; `read_heartbeat_age` reads the newest heartbeat's age and
+    `monotonic` is the cadence clock.
     """
-    with _state_lock:
-        checked_at = time.monotonic()
-        if (
-            _check_state.last_check_monotonic is not None
-            and checked_at - _check_state.last_check_monotonic < CHECK_INTERVAL_S
-        ):
-            return _check_state.last_stale
-        moment = now or datetime.now(UTC)
-        stale = False
-        try:
-            age_s = heartbeat_age(pool, now=moment)
-            stale = _report_source(source="postgres", age_s=age_s, now_s=moment.timestamp())
-        except Exception as exc:
-            logger.debug("telemetry heartbeat check failed: {}", exc)
-        _check_state.last_check_monotonic = checked_at
-        _check_state.last_stale = stale
-        return stale
+
+    def __init__(
+        self,
+        *,
+        check_interval_s: float = CHECK_INTERVAL_S,
+        read_heartbeat_age: Callable[..., float | None] = heartbeat_age,
+        monotonic: Callable[[], float] = time.monotonic,
+    ) -> None:
+        self._check_interval_s = check_interval_s
+        self._monotonic = monotonic
+        self._read_heartbeat_age = read_heartbeat_age
+        self._source_states: dict[str, _SourceState] = {}
+        self._last_check_monotonic: float | None = None
+        self._last_stale = False
+        self._lock = threading.Lock()
+
+    def _report_source(self, *, source: str, age_s: float | None, now_s: float) -> bool:
+        stale = age_s is None or age_s > STALENESS_THRESHOLD_S
+        state = self._source_states.get(source)
+        if stale:
+            reason = "heartbeat missing" if age_s is None else "heartbeat older than threshold"
+            if state is None:
+                state = _SourceState(stale_since=now_s, last_reported=now_s)
+                self._source_states[source] = state
+                action = "entered"
+            elif now_s - state.last_reported >= STALENESS_THRESHOLD_S:
+                state.last_reported = now_s
+                action = "ongoing"
+            else:
+                return True
+            _emit(
+                "telemetry_read_stale",
+                {
+                    "source": source,
+                    "signal": HEARTBEAT_EVENT,
+                    "threshold_s": STALENESS_THRESHOLD_S,
+                    "age_s": age_s,
+                    "action": action,
+                    "reason": reason,
+                },
+            )
+            return True
+
+        if state is not None:
+            self._source_states.pop(source, None)
+            _emit(
+                "telemetry_read_recovered",
+                {
+                    "source": source,
+                    "signal": HEARTBEAT_EVENT,
+                    "stale_duration_s": now_s - state.stale_since,
+                },
+            )
+        return False
+
+    def check_and_report(self, pool: Any, *, now: datetime | None = None) -> bool:
+        """Return whether a successful telemetry read should be marked stale.
+
+        A heartbeat-query exception is not a staleness verdict: it is logged at debug,
+        left out of this poll's result, and does not mutate transition state. The
+        fail-open verdict is cached on a monotonic cadence alongside successful checks.
+        """
+        with self._lock:
+            checked_at = self._monotonic()
+            if (
+                self._last_check_monotonic is not None
+                and checked_at - self._last_check_monotonic < self._check_interval_s
+            ):
+                return self._last_stale
+            moment = now or datetime.now(UTC)
+            stale = False
+            try:
+                age_s = self._read_heartbeat_age(pool, now=moment)
+                stale = self._report_source(
+                    source="postgres", age_s=age_s, now_s=moment.timestamp()
+                )
+            except Exception as exc:
+                logger.debug("telemetry heartbeat check failed: {}", exc)
+            self._last_check_monotonic = checked_at
+            self._last_stale = stale
+            return stale
