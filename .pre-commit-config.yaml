@@ -50,9 +50,16 @@ repos:
 
       - id: lint-python-lock
         name: lint Python lock (canonical PyPI sources)
-        entry: .venv/bin/python scripts/lint/python_lock.py
+        entry: .venv/bin/python scripts/lint/locks/python_lock.py
         language: system
-        files: ^(uv\.lock|scripts/lint/python_lock\.py|scripts/lint/tests/test_lint_python_lock\.py)$
+        files: ^(uv\.lock|scripts/lint/locks/python_lock\.py|scripts/lint/tests/test_lint_python_lock\.py)$
+        pass_filenames: false
+
+      - id: lint-package-lock
+        name: lint npm lock (canonical registry sources)
+        entry: .venv/bin/python scripts/lint/locks/package_lock.py
+        language: system
+        files: ^(ui/web/package-lock\.json|scripts/lint/locks/package_lock\.py|scripts/lint/tests/test_lint_package_lock\.py)$
         pass_filenames: false
 
       - id: pyright
