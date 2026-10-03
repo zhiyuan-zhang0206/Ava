@@ -21,6 +21,9 @@ from pathlib import Path
 from typing import Any
 from uuid import UUID
 
+from base.db import Database
+from base.events.live.bus import EventBus
+
 
 def relay_token_from_env() -> str:
     """Read the scoped relay credential the controller received at request time."""
@@ -165,7 +168,7 @@ def _dsh_relay_stub() -> Path:
 
 
 async def _wait_inbox(
-    lease_id: str, caller: dict[str, Any], limit: int, wait: float
+    db: Database, lease_id: str, caller: dict[str, Any], limit: int, wait: float
 ) -> list[dict[str, Any]]:
     from base.agents import impersonation as control
     from base.config import settings
@@ -173,14 +176,14 @@ async def _wait_inbox(
 
     if not math.isfinite(wait) or wait < 0:
         raise ValueError("--wait must be finite and nonnegative")
-    lease = await asyncio.to_thread(control.require_active, lease_id, caller)
+    lease = await asyncio.to_thread(control.require_active, db, lease_id, caller)
     listener = RedisInboundListener(settings.data_plane.redis_url, lease["agent_id"])
     try:
         if wait:
             await listener.ensure_listening()
         deadline = time.monotonic() + wait
         while True:
-            messages = await asyncio.to_thread(control.inbox, lease_id, caller, limit=limit)
+            messages = await asyncio.to_thread(control.inbox, db, lease_id, caller, limit=limit)
             remaining = deadline - time.monotonic()
             if messages or remaining <= 0:
                 return messages
@@ -221,8 +224,9 @@ def _send(args: argparse.Namespace) -> int:
 
     content = sys.stdin.read() if args.content == "-" else args.content
     caller = process_metadata()
-    lease_id = sessions.private_id(args.agent_id, args.session_id)
-    lease = control.require_active(lease_id, caller)
+    db = Database.from_settings()
+    lease_id = sessions.private_id(db, args.agent_id, args.session_id)
+    lease = control.require_active(db, lease_id, caller)
     source = f"agent:{lease['agent_id']}"
     status = send_agent_message(args.target_agent_id, content, source=source)
     _emit({"status": status, "to": args.target_agent_id, "source": source})
@@ -241,6 +245,8 @@ def _request(args: argparse.Namespace) -> int:
     if args.relay_provider == "codex":
         endpoint = require_control_endpoint(endpoint)
     response = sessions.request(
+        Database.from_settings(),
+        EventBus.from_settings(),
         args.agent_id,
         name=args.name,
         executor_name=args.caller,
@@ -292,30 +298,38 @@ def _dispatch(args: argparse.Namespace) -> int:
     from base.native_process.ownership import process_metadata
 
     command = args.impersonation_cmd
+    db = Database.from_settings()
+    bus = EventBus.from_settings()
     if command == "request":
         return _request(args)
     if command == "list":
-        _emit(sessions.list_sessions(args.agent_id, before=args.before, limit=args.limit))
+        _emit(sessions.list_sessions(db, args.agent_id, before=args.before, limit=args.limit))
         return 0
     if command == "send":
         return _send(args)
     caller = process_metadata()
-    args.lease_id = sessions.private_id(args.agent_id, args.session_id)
+    args.lease_id = sessions.private_id(db, args.agent_id, args.session_id)
     if command == "status":
-        _emit(public_session(control.get(args.lease_id, caller)))
+        _emit(public_session(control.get(db, bus, args.lease_id, caller)))
     elif command == "renew":
-        _emit(public_session(control.renew(args.lease_id, caller, ttl_seconds=args.ttl)))
+        _emit(public_session(control.renew(db, bus, args.lease_id, caller, ttl_seconds=args.ttl)))
     elif command == "release":
         summary = sys.stdin.read() if args.summary == "-" else args.summary
-        _emit(public_session(control.release(args.lease_id, caller, summary)))
+        _emit(public_session(control.release(db, bus, args.lease_id, caller, summary)))
     elif command == "inbox":
-        _emit(asyncio.run(_wait_inbox(args.lease_id, caller, args.limit, args.wait)))
+        _emit(asyncio.run(_wait_inbox(db, args.lease_id, caller, args.limit, args.wait)))
     elif command == "ack":
-        control.ack(args.lease_id, caller, args.message_ids)
+        control.ack(db, bus, args.lease_id, caller, args.message_ids)
         _emit({"acknowledged": args.message_ids})
     elif command == "say":
         content = sys.stdin.read() if args.content == "-" else args.content
-        _emit({"seq": say(args.lease_id, caller, content, phase=args.phase, message_key=args.key)})
+        _emit(
+            {
+                "seq": say(
+                    db, bus, args.lease_id, caller, content, phase=args.phase, message_key=args.key
+                )
+            }
+        )
     elif command == "exec":
         return _run_local(args)
     else:

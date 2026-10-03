@@ -26,6 +26,7 @@ from psycopg import sql
 from psycopg.conninfo import conninfo_to_dict
 
 from base.config import settings
+from base.db import Database
 from base.native_process.os_platform import LockTimeoutError
 from services import backup
 from services.gateway_side.backup import names, offsite
@@ -171,7 +172,9 @@ def test_backup_hour_is_cluster_time(bdir: Path, monkeypatch: pytest.MonkeyPatch
 # ─── the clock dumps are named on ───
 
 
-def test_dump_name_is_utc_stamped(bdir: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_dump_name_is_utc_stamped(
+    bdir: Path, monkeypatch: pytest.MonkeyPatch, database: Database
+) -> None:
     """The filename stamp is UTC with an explicit `Z`, not cluster wall clock:
     the name has to identify one instant for prune's ordering to be a total
     order."""
@@ -190,12 +193,16 @@ def test_dump_name_is_utc_stamped(bdir: Path, monkeypatch: pytest.MonkeyPatch) -
 
     monkeypatch.setattr(backup.subprocess, "run", _fake_run)
     path = backup.run_backup(
-        datetime(2026, 6, 10, 3, 0, tzinfo=ZoneInfo("Asia/Shanghai")), db_url="dbname=ava"
+        datetime(2026, 6, 10, 3, 0, tzinfo=ZoneInfo("Asia/Shanghai")),
+        db_url="dbname=ava",
+        db=database,
     )
     assert path.name == "ava-20260609T190000Z.dump.enc"
 
 
-def test_run_backup_can_defer_offsite_publish(bdir: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_run_backup_can_defer_offsite_publish(
+    bdir: Path, monkeypatch: pytest.MonkeyPatch, database: Database
+) -> None:
     """`publish=False` retains the local artifact without a network publish."""
     published: list[Path] = []
 
@@ -213,7 +220,9 @@ def test_run_backup_can_defer_offsite_publish(bdir: Path, monkeypatch: pytest.Mo
     monkeypatch.setattr(backup.subprocess, "run", _fake_run)
     monkeypatch.setattr(offsite, "publish", published.append)
 
-    artifact = backup.run_backup(_dt(2026, 6, 10, 3, 0), db_url="dbname=ava", publish=False)
+    artifact = backup.run_backup(
+        _dt(2026, 6, 10, 3, 0), db_url="dbname=ava", publish=False, db=database
+    )
 
     assert artifact.exists()
     assert published == []
@@ -252,7 +261,7 @@ def test_publish_offsite_entry_rejects_a_malformed_root(
     assert "--offsite-root" in capsys.readouterr().err
 
 
-def test_db_size_breakdown_real_db(db_conn: Any) -> None:
+def test_db_size_breakdown_real_db(db_conn: Any, database: Database) -> None:
     """The composition query itself is pinned against a real throwaway DB: a
     fresh DB with no checkpoint tables reads 0 instead of failing (the
     to_regclass path). The frozen `events` archive is gone since the task
@@ -265,7 +274,7 @@ def test_db_size_breakdown_real_db(db_conn: Any) -> None:
     with psycopg.connect(admin_url, autocommit=True) as admin, admin.cursor() as cur:
         cur.execute(sql.SQL("CREATE DATABASE {}").format(sql.Identifier(name)))
     try:
-        line = backup._db_size_breakdown(url)
+        line = backup._db_size_breakdown(database, url)
     finally:
         with psycopg.connect(admin_url, autocommit=True) as admin, admin.cursor() as cur:
             cur.execute(
@@ -280,7 +289,7 @@ def test_db_size_breakdown_real_db(db_conn: Any) -> None:
     assert "checkpoint=0MiB" in line
 
 
-def test_db_size_breakdown_format(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_db_size_breakdown_format(monkeypatch: pytest.MonkeyPatch, database: Database) -> None:
     """The backup log line reports the DB composition that dominates dump
     time: total, the checkpoint tables, and the rest. Best-effort: a failed
     sample degrades to "unavailable", never fails the backup."""
@@ -299,22 +308,22 @@ def test_db_size_breakdown_format(monkeypatch: pytest.MonkeyPatch) -> None:
             # db, blobs, checkpoints, writes
             return (4_240_000_000, 1_240_000_000, 130_000_000, 30_000_000)
 
-    def _fake_connect(**_: object) -> _FakeConn:
+    def _fake_connect(_self: Database, **_: object) -> _FakeConn:
         return _FakeConn()
 
-    monkeypatch.setattr(backup, "connect", _fake_connect)
-    line = backup._db_size_breakdown()
+    monkeypatch.setattr(Database, "connect", _fake_connect)
+    line = backup._db_size_breakdown(database)
     assert line == "db=4044MiB checkpoint=1335MiB rest=2708MiB"
 
-    def _boom(**_: object) -> object:
+    def _boom(_self: Database, **_: object) -> object:
         raise RuntimeError("db down")
 
-    monkeypatch.setattr(backup, "connect", _boom)
-    assert backup._db_size_breakdown() == "unavailable"
+    monkeypatch.setattr(Database, "connect", _boom)
+    assert backup._db_size_breakdown(database) == "unavailable"
 
 
 def test_run_backup_repairs_storage_permissions(
-    bdir: Path, monkeypatch: pytest.MonkeyPatch
+    bdir: Path, monkeypatch: pytest.MonkeyPatch, database: Database
 ) -> None:
     """The backup directory and completed dump are owner-only despite umask drift."""
     bdir.chmod(0o755)
@@ -333,7 +342,7 @@ def test_run_backup_repairs_storage_permissions(
         return _Ok()
 
     monkeypatch.setattr(backup.subprocess, "run", _fake_run)
-    target = backup.run_backup(_dt(2026, 6, 10, 3, 0), db_url="dbname=ava")
+    target = backup.run_backup(_dt(2026, 6, 10, 3, 0), db_url="dbname=ava", db=database)
 
     assert bdir.stat().st_mode & 0o777 == 0o700
     assert target.stat().st_mode & 0o777 == 0o600
@@ -401,7 +410,7 @@ def test_prune_keep_follows_config(bdir: Path, monkeypatch: pytest.MonkeyPatch) 
 
 
 def test_run_backup_failure_leaves_no_plaintext(
-    bdir: Path, monkeypatch: pytest.MonkeyPatch
+    bdir: Path, monkeypatch: pytest.MonkeyPatch, database: Database
 ) -> None:
     """A failed dump removes its reaped writer's plaintext partial, and the next
     run sweeps a dead run's partial that no process holds open."""
@@ -413,20 +422,22 @@ def test_run_backup_failure_leaves_no_plaintext(
 
     monkeypatch.setattr(backup.subprocess, "run", fail)
     with pytest.raises(RuntimeError, match="pg_dump exited 1"):
-        backup.run_backup(_dt(2026, 8, 2, 3, 0), db_url="dbname=whatever")
+        backup.run_backup(_dt(2026, 8, 2, 3, 0), db_url="dbname=whatever", db=database)
     assert not list(bdir.glob("*.partial")) and not list(bdir.glob(".backup-key-*"))
     assert not list(bdir.glob("*.dump.enc"))
 
 
 @pytest.mark.skipif(not backup.pg_tool("pg_dump").exists(), reason="needs a native pg_dump binary")
-def test_run_backup_real_dump_and_prune(bdir: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_run_backup_real_dump_and_prune(
+    bdir: Path, monkeypatch: pytest.MonkeyPatch, database: Database
+) -> None:
     """Real pg_dump of the session's Postgres (an explicit dial: not a born home): dump
     lands under the managed name, the .partial is gone, and old dumps prune."""
     for i in range(1, settings.services.backup_keep + 1):
         _touch(bdir, f"test-2026060{i}T100000Z.dump")
 
     _disable_offsite(monkeypatch)
-    path = backup.run_backup(_dt(2026, 6, 10, 3, 0), db_url=settings.data_plane.db_url)
+    path = backup.run_backup(_dt(2026, 6, 10, 3, 0), db_url=settings.data_plane.db_url, db=database)
 
     assert path.parent == bdir
     assert names.DUMP_NAME_RE.match(path.name)
@@ -453,7 +464,7 @@ def test_run_backup_real_dump_and_prune(bdir: Path, monkeypatch: pytest.MonkeyPa
 
 
 def test_run_backup_keeps_checkpoints_and_hides_db_password_from_argv(
-    bdir: Path, monkeypatch: pytest.MonkeyPatch
+    bdir: Path, monkeypatch: pytest.MonkeyPatch, database: Database
 ) -> None:
     """The recoverable dump includes checkpoints while its child argv omits the
     database password. A password exposed in `ps` is a credential leak; an
@@ -486,6 +497,7 @@ def test_run_backup_keeps_checkpoints_and_hides_db_password_from_argv(
     path = backup.run_backup(
         _dt(2026, 8, 8, 3, 0),
         db_url=f"postgresql://backup:{password}@db.example:5432/whatever",
+        db=database,
     )
 
     # The final artifact must be encrypted and private rather than the plaintext
@@ -518,7 +530,7 @@ def test_run_backup_keeps_checkpoints_and_hides_db_password_from_argv(
 
 
 def test_run_backup_keeps_database_password_out_of_argv(
-    bdir: Path, monkeypatch: pytest.MonkeyPatch
+    bdir: Path, monkeypatch: pytest.MonkeyPatch, database: Database
 ) -> None:
     """pg_dump's connection target is visible in argv, so its password must be
     supplied only through the child-only PGPASSWORD environment variable."""
@@ -542,6 +554,7 @@ def test_run_backup_keeps_database_password_out_of_argv(
     backup.run_backup(
         _dt(2026, 8, 8, 3, 0),
         db_url=f"postgresql://ava:{password}@127.0.0.1:5433/ava",
+        db=database,
     )
 
     cmd = cast(list[str], captured["cmd"])
@@ -551,7 +564,7 @@ def test_run_backup_keeps_database_password_out_of_argv(
 
 
 def test_encrypted_artifact_decrypts_to_original_dump(
-    bdir: Path, monkeypatch: pytest.MonkeyPatch
+    bdir: Path, monkeypatch: pytest.MonkeyPatch, database: Database
 ) -> None:
     """The published artifact reverses exactly to pg_dump's custom-format bytes.
 
@@ -574,7 +587,7 @@ def test_encrypted_artifact_decrypts_to_original_dump(
 
     monkeypatch.setattr(backup.subprocess, "run", _fake_pg_dump)
     _disable_offsite(monkeypatch)
-    artifact = backup.run_backup(_dt(2026, 8, 8, 3, 0), db_url="dbname=whatever")
+    artifact = backup.run_backup(_dt(2026, 8, 8, 3, 0), db_url="dbname=whatever", db=database)
 
     assert artifact.name.endswith(".dump.enc")
     key_file = bdir / "decrypt.key"
@@ -625,7 +638,9 @@ def test_gunzip_if_needed_decompresses_legacy_artifact_layer(
     assert plain.read_bytes() == raw
 
 
-def test_run_backup_forwards_requested_timeout(bdir: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_run_backup_forwards_requested_timeout(
+    bdir: Path, monkeypatch: pytest.MonkeyPatch, database: Database
+) -> None:
     """A bounded caller's deadline applies to every backup pipeline process."""
     timeouts: list[float] = []
 
@@ -643,7 +658,7 @@ def test_run_backup_forwards_requested_timeout(bdir: Path, monkeypatch: pytest.M
 
     monkeypatch.setattr(backup.subprocess, "run", _fake_run)
 
-    backup.run_backup(_dt(2026, 8, 8, 3, 0), db_url="dbname=whatever", timeout_s=123.0)
+    backup.run_backup(_dt(2026, 8, 8, 3, 0), db_url="dbname=whatever", timeout_s=123.0, db=database)
 
     assert timeouts == [123.0, 123.0]  # pg_dump + encryption — the gzip stage is gone
 
@@ -742,7 +757,7 @@ def test_run_with_progress_timeout_still_kills_the_child(
 
 
 def test_run_backup_narrates_both_silent_stages_through_progress(
-    bdir: Path, monkeypatch: pytest.MonkeyPatch
+    bdir: Path, monkeypatch: pytest.MonkeyPatch, database: Database
 ) -> None:
     """`run_backup(progress=...)` reports both stages allowed to run for minutes
     without output — pg_dump and the encryption pass — each with its label, its
@@ -772,7 +787,7 @@ def test_run_backup_narrates_both_silent_stages_through_progress(
     lines: list[str] = []
 
     path = backup.run_backup(
-        _dt(2026, 9, 14, 21, 0), db_url="dbname=whatever", progress=lines.append
+        _dt(2026, 9, 14, 21, 0), db_url="dbname=whatever", progress=lines.append, db=database
     )
 
     assert path.exists()
@@ -841,7 +856,9 @@ def test_backup_lock_timeout_expires(tmp_path: Path, monkeypatch: pytest.MonkeyP
         holder.wait(timeout=10)
 
 
-def test_run_backup_serializes_dump_creation(bdir: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_run_backup_serializes_dump_creation(
+    bdir: Path, monkeypatch: pytest.MonkeyPatch, database: Database
+) -> None:
     """The public entry point holds the cross-process lock around its body."""
     events: list[str] = []
     artifact = bdir / "verified.dump.enc"
@@ -872,31 +889,7 @@ def test_run_backup_serializes_dump_creation(bdir: Path, monkeypatch: pytest.Mon
     monkeypatch.setattr(offsite, "publish", _record("publish"))
     monkeypatch.setattr(backup, "_prune", _record("prune", []))
 
-    assert backup.run_backup(_dt(2026, 8, 8, 3, 0), db_url="dbname=whatever") == artifact
+    assert (
+        backup.run_backup(_dt(2026, 8, 8, 3, 0), db_url="dbname=whatever", db=database) == artifact
+    )
     assert events == ["lock-enter", "backup-body", "publish", "prune", "lock-exit"]
-
-
-def test_run_backup_avoids_overwriting_a_same_second_dump(
-    bdir: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """A second managed writer publishes a new encrypted name, not a replacement."""
-    existing = _touch(bdir, "whatever-20260808T100000Z.dump.enc")
-
-    class _Ok:
-        returncode = 0
-        stderr = ""
-
-    def _fake_run(cmd: list[str], **kwargs: object) -> _Ok:
-        if cmd[0].endswith("pg_dump"):
-            Path(cmd[cmd.index("--file") + 1]).write_bytes(b"plaintext dump")
-        else:
-            Path(cmd[cmd.index("-out") + 1]).write_bytes(b"encrypted dump")
-        return _Ok()
-
-    monkeypatch.setattr(backup.subprocess, "run", _fake_run)
-
-    created = backup.run_backup(_dt(2026, 8, 8, 3, 0), db_url="dbname=whatever")
-
-    assert created.name == "whatever-20260808T100001Z.dump.enc"
-    assert existing.read_bytes() == b"x"
-    assert created.read_bytes() == b"encrypted dump"

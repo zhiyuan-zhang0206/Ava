@@ -114,7 +114,12 @@ async def test_abort_survives_database_loss_before_halted_state_write(
     )
     publisher = MagicMock()
     ctx = AvaContext(
-        ops_pool=aops_pool, event_publisher=publisher, llm=MagicMock(), agent=AgentSlices.resolve()
+        ops_pool=aops_pool,
+        event_publisher=publisher,
+        llm=MagicMock(),
+        agent=AgentSlices.resolve(),
+        db=Database.from_settings(),
+        bus=EventBus.from_settings(),
     )
     with bind_turn_identity(agent, incarnation=owner):
         assert not (await host._invoke_until_done(agent, ctx)).exited
@@ -163,7 +168,12 @@ async def test_interrupted_abort_preparation_does_not_repeat_notifications(
     graph, saver, config, history = await _prepare_graph(aops_pool, agent, model)
     publisher = MagicMock()
     ctx = AvaContext(
-        ops_pool=aops_pool, event_publisher=publisher, llm=MagicMock(), agent=AgentSlices.resolve()
+        ops_pool=aops_pool,
+        event_publisher=publisher,
+        llm=MagicMock(),
+        agent=AgentSlices.resolve(),
+        db=Database.from_settings(),
+        bus=EventBus.from_settings(),
     )
     pending = PendingTurnFailure(failure)
     with bind_turn_identity(agent, incarnation=owner):

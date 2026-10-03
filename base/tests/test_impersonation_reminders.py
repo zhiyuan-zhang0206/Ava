@@ -5,12 +5,16 @@ from __future__ import annotations
 import psycopg
 
 from base.agents import impersonation as leases
+from base.db import Database
+from base.events.live.bus import EventBus
 from base.tests._impersonation_helpers import _active, _agent
 from tests.impersonation_support import attested_caller
 
 
 def test_reminder_is_inserted_once_per_lease_and_wakes(
     db_conn: psycopg.Connection,
+    database: Database,
+    event_bus: EventBus,
 ) -> None:
     from base.agents.impersonation.maintenance import remind_expiring_impersonations
     from base.db import pool
@@ -24,9 +28,9 @@ def test_reminder_is_inserted_once_per_lease_and_wakes(
     )
     db_conn.commit()
     with pool(max_size=2) as reaper_pool:
-        assert remind_expiring_impersonations(reaper_pool) == 1
+        assert remind_expiring_impersonations(reaper_pool, database, event_bus) == 1
         # Idempotent: a second scan in the same window inserts nothing new.
-        assert remind_expiring_impersonations(reaper_pool) == 0
+        assert remind_expiring_impersonations(reaper_pool, database, event_bus) == 0
     reminder = db_conn.execute(
         "SELECT content,kind,source,status,payload FROM inbound_messages "
         "WHERE agent_id=%s AND kind='reminder'",
@@ -42,6 +46,8 @@ def test_reminder_is_inserted_once_per_lease_and_wakes(
 
 def test_reminder_ack_suppresses_further_reminders(
     db_conn: psycopg.Connection,
+    database: Database,
+    event_bus: EventBus,
 ) -> None:
     """Issue #2054: an ACKed reminder still counts for the once-per-lease rule.
 
@@ -62,7 +68,7 @@ def test_reminder_ack_suppresses_further_reminders(
     )
     db_conn.commit()
     with pool(max_size=2) as reaper_pool:
-        assert remind_expiring_impersonations(reaper_pool) == 1
+        assert remind_expiring_impersonations(reaper_pool, database, event_bus) == 1
     reminder_row = db_conn.execute(
         "SELECT id FROM inbound_messages WHERE agent_id=%s AND kind='reminder'",
         (owner.agent_id,),
@@ -75,17 +81,19 @@ def test_reminder_ack_suppresses_further_reminders(
         (lease["id"], reminder_id),
     )
     db_conn.commit()
-    leases.ack(lease["id"], attested_caller(lease), [reminder_id])
+    leases.ack(database, event_bus, lease["id"], attested_caller(lease), [reminder_id])
     db_conn.commit()
     with pool(max_size=2) as reaper_pool:
-        assert remind_expiring_impersonations(reaper_pool) == 0
+        assert remind_expiring_impersonations(reaper_pool, database, event_bus) == 0
     assert db_conn.execute(
         "SELECT count(*), max(status) FROM inbound_messages WHERE agent_id=%s AND kind='reminder'",
         (owner.agent_id,),
     ).fetchone() == (1, "done")
 
 
-def test_reminder_skips_leases_outside_the_window(db_conn: psycopg.Connection) -> None:
+def test_reminder_skips_leases_outside_the_window(
+    db_conn: psycopg.Connection, database: Database, event_bus: EventBus
+) -> None:
     from base.agents.impersonation.maintenance import remind_expiring_impersonations
     from base.db import pool
 
@@ -98,14 +106,16 @@ def test_reminder_skips_leases_outside_the_window(db_conn: psycopg.Connection) -
     )
     db_conn.commit()
     with pool(max_size=2) as reaper_pool:
-        assert remind_expiring_impersonations(reaper_pool) == 0
+        assert remind_expiring_impersonations(reaper_pool, database, event_bus) == 0
     assert db_conn.execute(
         "SELECT count(*) FROM inbound_messages WHERE agent_id=%s AND kind='reminder'",
         (owner.agent_id,),
     ).fetchone() == (0,)
 
 
-def test_release_dismisses_its_pending_reminder(db_conn: psycopg.Connection) -> None:
+def test_release_dismisses_its_pending_reminder(
+    db_conn: psycopg.Connection, database: Database, event_bus: EventBus
+) -> None:
     from base.agents.impersonation.maintenance import remind_expiring_impersonations
     from base.db import pool
 
@@ -118,15 +128,17 @@ def test_release_dismisses_its_pending_reminder(db_conn: psycopg.Connection) -> 
     )
     db_conn.commit()
     with pool(max_size=2) as reaper_pool:
-        assert remind_expiring_impersonations(reaper_pool) == 1
-    leases.release(lease["id"], attested_caller(lease), "Done before expiry")
+        assert remind_expiring_impersonations(reaper_pool, database, event_bus) == 1
+    leases.release(database, event_bus, lease["id"], attested_caller(lease), "Done before expiry")
     assert db_conn.execute(
         "SELECT status FROM inbound_messages WHERE agent_id=%s AND kind='reminder'",
         (owner.agent_id,),
     ).fetchone() == ("done",)
 
 
-def test_expiry_dismisses_its_pending_reminder(db_conn: psycopg.Connection) -> None:
+def test_expiry_dismisses_its_pending_reminder(
+    db_conn: psycopg.Connection, database: Database, event_bus: EventBus
+) -> None:
     from base.agents.impersonation import maintenance as maintenance
     from base.db import pool
 
@@ -139,14 +151,14 @@ def test_expiry_dismisses_its_pending_reminder(db_conn: psycopg.Connection) -> N
     )
     db_conn.commit()
     with pool(max_size=2) as reaper_pool:
-        assert maintenance.remind_expiring_impersonations(reaper_pool) == 1
+        assert maintenance.remind_expiring_impersonations(reaper_pool, database, event_bus) == 1
         db_conn.execute(
             "UPDATE agent_impersonations SET expires_at=clock_timestamp()-interval '1 second' "
             "WHERE id=%s",
             (lease["id"],),
         )
         db_conn.commit()
-        assert maintenance.reap_impersonations(reaper_pool) == 1
+        assert maintenance.reap_impersonations(reaper_pool, database, event_bus) == 1
     assert db_conn.execute(
         "SELECT status FROM inbound_messages WHERE agent_id=%s AND kind='reminder'",
         (owner.agent_id,),

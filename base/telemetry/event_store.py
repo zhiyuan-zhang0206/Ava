@@ -31,6 +31,7 @@ from typing import Any, LiteralString, cast
 import psycopg
 from psycopg.types.json import Jsonb
 
+from base.db import Database
 from base.events.contract import EVENTS
 from base.telemetry.emitter import Event, event_row
 
@@ -136,16 +137,14 @@ _retry_at = 0.0
 _ensured_month: tuple[int, int] | None = None
 
 
-def _open_pool() -> Any:
+def _open_pool(db: Database) -> Any:
     global _pool  # noqa: PLW0603
     if _pool is None:
-        from base.db import pool
-
-        _pool = pool(min_size=0, max_size=1, timeout=_POOL_TIMEOUT_S)
+        _pool = db.pool(min_size=0, max_size=1, timeout=_POOL_TIMEOUT_S)
     return _pool
 
 
-def store_events(events: Sequence[Event]) -> None:
+def store_events(db: Database, events: Sequence[Event]) -> None:
     """Emitter sink: append a batch's persisted telemetry and log events to `telemetry_events`.
 
     Never raises: the drain thread must survive a database that does not answer.
@@ -162,20 +161,20 @@ def store_events(events: Sequence[Event]) -> None:
         if _disabled or time.monotonic() < _retry_at:
             return
         try:
-            _write(records)
+            _write(db, records)
         except Exception as exc:
             _failed(exc, len(records))
         else:
             _failures = 0
 
 
-def _write(records: list[dict[str, Any]]) -> None:
+def _write(db: Database, records: list[dict[str, Any]]) -> None:
     global _ensured_month  # noqa: PLW0603
     from base.db.transaction import write_transaction
 
     today = datetime.now(UTC)
     month = (today.year, today.month)
-    with write_transaction(_open_pool(), timeout=_POOL_TIMEOUT_S) as conn:
+    with write_transaction(_open_pool(db), timeout=_POOL_TIMEOUT_S) as conn:
         conn.execute(f"SET LOCAL statement_timeout = '{_STATEMENT_TIMEOUT}'")
         conn.execute(f"SET LOCAL lock_timeout = '{_LOCK_TIMEOUT}'")
         if _ensured_month != month:

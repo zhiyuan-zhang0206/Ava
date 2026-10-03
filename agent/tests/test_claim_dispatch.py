@@ -15,7 +15,8 @@ from agent.state import AgentState
 from agent.tests.claim_status_support import _committed_publishes, _set_agent_status
 from agent.tests.claim_status_support import running_agent as running_agent
 from agent.tests.claim_support import _config, _insert_inbound_kind, _make_runtime
-from base.db import insert_inbound_message
+from base.db import Database, insert_inbound_message
+from base.events.live.bus import EventBus
 from tests.fixtures.units import spawn_agent
 from tests.path_scoped.agent_tests import _fresh_snapshot_cursor as _fresh_snapshot_cursor
 from tests.path_scoped.agent_tests import (
@@ -24,14 +25,18 @@ from tests.path_scoped.agent_tests import (
 
 
 async def test_claim_first_entry_keeps_boot_claim_running(
-    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool, monkeypatch: pytest.MonkeyPatch
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    monkeypatch: pytest.MonkeyPatch,
+    database: Database,
+    event_bus: EventBus,
 ):
     """The bootstrap claim already sets running before the first graph entry."""
     tid = spawn_agent()
     with db_conn.cursor() as cur:
         cur.execute("UPDATE agents_meta SET status = 'running' WHERE id = %s", (tid,))
     db_conn.commit()
-    insert_inbound_message(db_conn, tid, "hello", source="user")
+    insert_inbound_message(db_conn, tid, "hello", source="user", bus=event_bus, database=database)
 
     await claim_node(
         AgentState(),
@@ -48,12 +53,16 @@ async def test_claim_first_entry_keeps_boot_claim_running(
 
 
 async def test_claim_subsequent_entry_does_not_disturb_running(
-    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool, monkeypatch: pytest.MonkeyPatch
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    monkeypatch: pytest.MonkeyPatch,
+    database: Database,
+    event_bus: EventBus,
 ):
     """A subsequent graph entry leaves its already-running row untouched."""
     tid = spawn_agent()
     _set_agent_status(db_conn, tid, "running")
-    insert_inbound_message(db_conn, tid, "hello", source="user")
+    insert_inbound_message(db_conn, tid, "hello", source="user", bus=event_bus, database=database)
 
     # Don't raise — status is already 'running' when the next turn enters claim_node, 0-row no-op
     await claim_node(
@@ -71,13 +80,19 @@ async def test_claim_subsequent_entry_does_not_disturb_running(
 
 
 async def test_claim_inbound_batch_stamps_claimed_at(
-    running_agent: Callable[[], int], db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool
+    running_agent: Callable[[], int],
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    database: Database,
+    event_bus: EventBus,
 ):
     """Only the accepted command gets pickup time; queued chat stays unclaimed."""
     from agent.db import claim_inbound_batch
 
     tid = running_agent()
-    chat_id = insert_inbound_message(db_conn, tid, "hello", source="user")
+    chat_id = insert_inbound_message(
+        db_conn, tid, "hello", source="user", bus=event_bus, database=database
+    )
     with db_conn.cursor() as cur:
         cur.execute(
             "INSERT INTO inbound_messages (agent_id, content, kind, source) "
@@ -104,7 +119,9 @@ async def test_claim_inbound_batch_stamps_claimed_at(
     assert state[0][2] is None and state[1][2] is not None
 
     # A fresh unclaimed row keeps claimed_at NULL.
-    fresh_id = insert_inbound_message(db_conn, tid, "later", source="user")
+    fresh_id = insert_inbound_message(
+        db_conn, tid, "later", source="user", bus=event_bus, database=database
+    )
     with db_conn.cursor() as cur:
         cur.execute("SELECT claimed_at FROM inbound_messages WHERE id = %s", (fresh_id,))
         row = cur.fetchone()
@@ -113,7 +130,10 @@ async def test_claim_inbound_batch_stamps_claimed_at(
 
 
 async def test_claim_chat_kind_appends_humanmessage_with_envelope(
-    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    database: Database,
+    event_bus: EventBus,
 ):
     """chat inbound → claim returns Command(goto='before_llm'), update.messages
     contains HumanMessage after envelope wrapping.
@@ -122,7 +142,7 @@ async def test_claim_chat_kind_appends_humanmessage_with_envelope(
     messages[0] for prompt cache hit across restarts.
     """
     tid = spawn_agent()
-    insert_inbound_message(db_conn, tid, "hello", source="user")
+    insert_inbound_message(db_conn, tid, "hello", source="user", bus=event_bus, database=database)
 
     cmd = await claim_node(
         AgentState(active_task_id=99),
@@ -147,12 +167,17 @@ async def test_claim_chat_kind_appends_humanmessage_with_envelope(
 
 
 async def test_claim_chat_expands_slash_command(
-    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    database: Database,
+    event_bus: EventBus,
 ):
     """A `/<name> ...` chat inbound is expanded by the claim node into the
     command's template + the user's note before being wrapped for the model."""
     tid = spawn_agent()
-    insert_inbound_message(db_conn, tid, "/recap just the PRs", source="user")
+    insert_inbound_message(
+        db_conn, tid, "/recap just the PRs", source="user", bus=event_bus, database=database
+    )
 
     cmd = await claim_node(
         AgentState(),
@@ -170,13 +195,18 @@ async def test_claim_chat_expands_slash_command(
 
 
 async def test_claim_multiple_chat_inbounds_all_appended_in_fifo_order(
-    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    database: Database,
+    event_bus: EventBus,
 ):
     """multiple chat inbounds in same batch → all appended in FIFO order by created_at (none lost)."""
     tid = spawn_agent()
-    insert_inbound_message(db_conn, tid, "first", source="user")
-    insert_inbound_message(db_conn, tid, "second", source="agent:5")
-    insert_inbound_message(db_conn, tid, "third", source="user")
+    insert_inbound_message(db_conn, tid, "first", source="user", bus=event_bus, database=database)
+    insert_inbound_message(
+        db_conn, tid, "second", source="agent:5", bus=event_bus, database=database
+    )
+    insert_inbound_message(db_conn, tid, "third", source="user", bus=event_bus, database=database)
 
     cmd = await claim_node(
         AgentState(),
@@ -196,13 +226,18 @@ async def test_claim_multiple_chat_inbounds_all_appended_in_fifo_order(
 
 
 async def test_claim_chat_marks_inbound_claimed_immediately(
-    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    database: Database,
+    event_bus: EventBus,
 ):
     """chat inbound uses two-phase commit (since 2026-05-27): claim UPDATE pending → claimed;
     a subsequent startup reconcile will move claimed → done; if the process dies midway,
     claimed rows will be reset back to pending by the new process for re-delivery."""
     tid = spawn_agent()
-    iid = insert_inbound_message(db_conn, tid, "msg", source="user")
+    iid = insert_inbound_message(
+        db_conn, tid, "msg", source="user", bus=event_bus, database=database
+    )
 
     await claim_node(
         AgentState(),
@@ -219,7 +254,11 @@ async def test_claim_chat_marks_inbound_claimed_immediately(
 
 
 async def test_claim_short_path_does_not_enter_idling(
-    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool, running_agent: Callable[[], int]
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    running_agent: Callable[[], int],
+    database: Database,
+    event_bus: EventBus,
 ) -> None:
     """first SELECT already has inbound → does not enter wait branch, status not switched to idling.
 
@@ -229,7 +268,9 @@ async def test_claim_short_path_does_not_enter_idling(
     after completion (not idling).
     """
     tid = running_agent()
-    insert_inbound_message(db_conn, tid, "preexisting", source="user")
+    insert_inbound_message(
+        db_conn, tid, "preexisting", source="user", bus=event_bus, database=database
+    )
 
     cmd = await claim_node(
         AgentState(),
@@ -248,7 +289,10 @@ async def test_claim_short_path_does_not_enter_idling(
 
 
 async def test_claim_chat_publishes_inbound_committed_per_id(
-    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    database: Database,
+    event_bus: EventBus,
 ) -> None:
     """After each chat inbound is envelope-wrapped into state, publish one InboundCommitted
     (frontend relies on this event to trigger reload to fetch the committed version).
@@ -259,8 +303,12 @@ async def test_claim_chat_publishes_inbound_committed_per_id(
     import json
 
     tid = spawn_agent()
-    id1 = insert_inbound_message(db_conn, tid, "first", source="user")
-    id2 = insert_inbound_message(db_conn, tid, "second", source="user")
+    id1 = insert_inbound_message(
+        db_conn, tid, "first", source="user", bus=event_bus, database=database
+    )
+    id2 = insert_inbound_message(
+        db_conn, tid, "second", source="user", bus=event_bus, database=database
+    )
 
     pub = MagicMock()
     await claim_node(
@@ -309,12 +357,17 @@ async def test_claim_lifecycle_kind_does_not_publish_committed(
 
 
 async def test_claim_mixed_batch_publishes_only_chat_ids(
-    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    database: Database,
+    event_bus: EventBus,
 ) -> None:
     """same batch chat + compact_summary → publish only for the chat's inbound_id,
     summary does not emit publish."""
     tid = spawn_agent()
-    chat_id = insert_inbound_message(db_conn, tid, "user msg", source="user")
+    chat_id = insert_inbound_message(
+        db_conn, tid, "user msg", source="user", bus=event_bus, database=database
+    )
     _insert_inbound_kind(db_conn, tid, "summary", "compact_summary")
 
     pub = MagicMock()
@@ -406,7 +459,10 @@ async def test_claim_multi_step_continue_no_inbound(
 
 
 async def test_claim_chat_only_publishes_chat_id_not_lifecycle_in_mixed_batch(
-    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    database: Database,
+    event_bus: EventBus,
 ):
     """same batch chat + resurrect → publish only for the chat's inbound_id, lifecycle
     inbound id does not enter committed_chat_ids.
@@ -415,7 +471,9 @@ async def test_claim_chat_only_publishes_chat_id_not_lifecycle_in_mixed_batch(
     mutation moving it to dispatch top / resurrect branch would cause publish for extra
     lifecycle id, frontend fetching timeline would not find reload anchor."""
     tid = spawn_agent()
-    chat_id = insert_inbound_message(db_conn, tid, "user msg", source="user")
+    chat_id = insert_inbound_message(
+        db_conn, tid, "user msg", source="user", bus=event_bus, database=database
+    )
     _insert_inbound_kind(db_conn, tid, "", "resurrect", source="user")
 
     pub = MagicMock()
@@ -434,14 +492,17 @@ async def test_claim_chat_only_publishes_chat_id_not_lifecycle_in_mixed_batch(
 
 
 async def test_claim_chat_message_carries_source_metadata(
-    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    database: Database,
+    event_bus: EventBus,
 ):
     """chat dispatch passes source=item.source to inbound_message helper, cannot be None.
 
     Lock down mutant_76: `source=item.source` → `source=None`. Verify message's
     additional_kwargs.ava_source equals original item.source ('user'), preventing None leak."""
     tid = spawn_agent()
-    insert_inbound_message(db_conn, tid, "hello", source="user")
+    insert_inbound_message(db_conn, tid, "hello", source="user", bus=event_bus, database=database)
 
     cmd = await claim_node(
         AgentState(),
@@ -457,13 +518,18 @@ async def test_claim_chat_message_carries_source_metadata(
 
 
 async def test_claim_node_wrapper_returns_underlying_command(
-    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    database: Database,
+    event_bus: EventBus,
 ):
     """`claim_node` is a thin wrapper around `node_lifecycle` enter/exit, **must** return the
     inner `_claim_node_impl`'s Command (cannot drop / change goto / wrap into something else).
     Lock down mutation that removes `await` / `return` from `return await _claim_node_impl(...)`."""
     tid = spawn_agent()
-    insert_inbound_message(db_conn, tid, "wrapper test", source="user")
+    insert_inbound_message(
+        db_conn, tid, "wrapper test", source="user", bus=event_bus, database=database
+    )
 
     cmd = await claim_node(
         AgentState(),

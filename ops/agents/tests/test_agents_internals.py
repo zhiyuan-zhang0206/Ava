@@ -17,6 +17,8 @@ from base.agents import ForkCheckpointNotFound
 from base.agents.observation.snapshot import select_one
 from base.cluster.machine import machine_name
 from base.config import settings
+from base.db import Database
+from base.events.live.bus import EventBus
 from ops.agents import create_agent_row
 
 
@@ -53,6 +55,8 @@ def _spawn_agent(
     (runner-side), with the launch stubbed by the autouse guard. The launch op's
     prompt-delivery half is covered in ops/lifecycle/tests/test_operations.py."""
     agent_id, _birth_config, _prompt_id, _attempt_id = create_agent_row(
+        Database.from_settings(),
+        EventBus.from_settings(),
         spawner=spawner,
         fork_from=fork_from,
         fork_checkpoint=fork_checkpoint,
@@ -62,7 +66,7 @@ def _spawn_agent(
         prompt=prompt,
         prompt_source=prompt_source,
     )
-    base.db.publish_inbound_wake(agent_id, "0")
+    base.db.publish_inbound_wake(Database.from_settings(), EventBus.from_settings(), agent_id, "0")
     return agent_id
 
 
@@ -504,7 +508,7 @@ class TestSpawnFork:
 
         seen: list[list[tuple]] = []
 
-        def _spy_wake(agent_id: int, _payload: str) -> None:
+        def _spy_wake(_db: object, _bus: object, agent_id: int, _payload: str) -> None:
             with base.db.connect() as conn, conn.cursor() as cur:
                 cur.execute(
                     "SELECT content, kind, source FROM inbound_messages "
@@ -613,7 +617,11 @@ class TestSpawnFork:
         assert row == (f"agent:{parent}", f"agent:{parent}")
 
     def test_fork_inbound_via_unified_path_emits_fork_source_target(
-        self, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+        self,
+        db_conn: psycopg.Connection,
+        monkeypatch: pytest.MonkeyPatch,
+        database: Database,
+        event_bus: EventBus,
     ) -> None:
         """The unified inbound writer's kind='fork' mapping (currently
         reached by no caller; the fork inbound is inserted with raw SQL in
@@ -628,7 +636,15 @@ class TestSpawnFork:
 
         source = _spawn_agent()
         new_id = _spawn_agent()
-        base.db.insert_inbound_message(db_conn, new_id, "", source=f"agent:{source}", kind="fork")
+        base.db.insert_inbound_message(
+            db_conn,
+            new_id,
+            "",
+            source=f"agent:{source}",
+            kind="fork",
+            bus=event_bus,
+            database=database,
+        )
 
         telemetry.sync()
         day = datetime.now(UTC).strftime("%Y%m%d")

@@ -11,6 +11,7 @@ import ava
 from ava.agents import AgentStatus as S
 from schedules.catchup import catch_up, fire_slot_once
 from base.daemon.schedules.watcher import next_fire
+from base.db import Database
 
 
 def report_agent(env_name: str, label: str) -> int:
@@ -36,9 +37,9 @@ def report_agent(env_name: str, label: str) -> int:
         before_id = page.next_cursor
 
 
-def run_daily_loop(cron: str, tz: str, fire: Callable[[None], None]) -> None:
+def run_daily_loop(db: Database, cron: str, tz: str, fire: Callable[[None], None]) -> None:
     """Catch up bounded missed slots, then claim each due slot at most once."""
-    catch_up([(cron, None)], timezone=tz, fire=fire)
+    catch_up(db, [(cron, None)], timezone=tz, fire=fire)
     last_run_at = datetime.now(UTC)
     while True:
         now = datetime.now(UTC)
@@ -49,6 +50,6 @@ def run_daily_loop(cron: str, tz: str, fire: Callable[[None], None]) -> None:
         if wait_seconds > 0:
             time.sleep(min(wait_seconds, 3600))
             continue
-        fire_slot_once(next_run, None, fire=fire)
+        fire_slot_once(db, next_run, None, fire=fire)
         last_run_at = datetime.now(UTC)
         time.sleep(120)

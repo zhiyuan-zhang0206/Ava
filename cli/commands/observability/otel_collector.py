@@ -35,6 +35,7 @@ from string import Template
 from urllib.parse import unquote, urlsplit
 
 from base.cluster.machine import MachineRoles
+from base.db import Database
 from base.deploy.release import collector_artifact
 from base.host.atomic_io import write_text_atomic
 from base.telemetry.observability import collector_allowed_for_home
@@ -262,7 +263,7 @@ def station_otel_ingress_endpoint() -> str:
         )
     from base.telemetry.station_endpoint import resolve_station_target
 
-    return resolve_station_target(base).url
+    return resolve_station_target(Database.from_settings(), base).url
 
 
 def telemetry_bearer() -> str | None:

@@ -27,6 +27,8 @@ import ava
 from ava import gateway_client
 from ava.agents import AgentNotFound, ForkSourceEmpty, TerminateResult
 from ava.gateway_client.transport import use_client
+from base.db import Database
+from base.events.live.bus import EventBus
 
 
 def _spawn_agent() -> int:
@@ -36,12 +38,16 @@ def _spawn_agent() -> int:
     from base.cluster.machine import machine_name
     from ops.agents.spawn import create_agent_row
 
-    agent_id, _, _prompt_id, _attempt_id = create_agent_row(machine=machine_name())
+    agent_id, _, _prompt_id, _attempt_id = create_agent_row(
+        Database.from_settings(), EventBus.from_settings(), machine=machine_name()
+    )
     return agent_id
 
 
 @pytest.fixture(autouse=True)
-def _sdk_via_inprocess_gateway(monkeypatch: pytest.MonkeyPatch):
+def _sdk_via_inprocess_gateway(
+    monkeypatch: pytest.MonkeyPatch, database: Database, event_bus: EventBus
+):
     """SDK ↔ Gateway path in-process test apparatus:
     1. monkeypatch session noop — spawn / resurrect / respawn don't really start child python
     2. TestClient(app) starts lifespan (build db_pool etc.), mount it as ava SDK's
@@ -50,7 +56,6 @@ def _sdk_via_inprocess_gateway(monkeypatch: pytest.MonkeyPatch):
     """
     from base.cluster import machines as _machines
     from base.cluster.machine import machine_name
-    from base.db import Database
     from gateway.agents import forward as _agents_forward_router
     from gateway.agents import router as _agents_router
     from gateway.app import app
@@ -65,7 +70,7 @@ def _sdk_via_inprocess_gateway(monkeypatch: pytest.MonkeyPatch):
     async def _in_process_forward(
         _db: object, target: str, body: LaunchAgentRequest
     ) -> SpawnedAgent:
-        return await launch_agent_op(body, app.state.db_pool)
+        return await launch_agent_op(database, event_bus, body, app.state.db_pool)
 
     # Same pattern for lifecycle ops (terminate / resurrect / restart): the
     # runner's ops daemon dispatches lifecycle_op in-process; mirror that here
@@ -74,7 +79,9 @@ def _sdk_via_inprocess_gateway(monkeypatch: pytest.MonkeyPatch):
         _db: object, target: str, path: str, json_body: dict[str, Any]
     ) -> dict[str, Any]:
         # model_dump mirrors the daemon serializing the response model onto the wire.
-        return (await lifecycle_op(path, json_body, app.state.db_pool)).model_dump(mode="json")
+        return (
+            await lifecycle_op(database, event_bus, path, json_body, app.state.db_pool)
+        ).model_dump(mode="json")
 
     # post_agents reads the target's capability from the registry; the SDK targets
     # the local machine, so resolve it to agent-runner as register_self would.

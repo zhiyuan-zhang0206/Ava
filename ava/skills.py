@@ -674,10 +674,8 @@ def _insert_skill_events(agent: int, skills: list[Skill]) -> bool:
     landed. Callers key their dedup on that return, so a failed write is retried
     rather than remembered as done.
 
-    The single write path, so the per-skill call and any future batch caller
-    cannot drift in what they record. The batch is one `audit_events`
-    transaction (`record_audit_standalone_many`); the events reach the unified
-    stream after the commit.
+    The single write path, so per-skill and batch callers cannot drift in what they record.
+    The batch is one `audit_events` transaction; the events reach the unified stream after commit.
 
     Attribution must never take an agent down: a failed write is logged with its
     traceback and returns False instead of raising, and the dedup retries it.
@@ -691,7 +689,10 @@ def _insert_skill_events(agent: int, skills: list[Skill]) -> bool:
             record_audit_standalone_many,
         )
 
+        from ._settings import database
+
         record_audit_standalone_many(
+            database(),
             [
                 prepare_event_log(
                     event_type="skill_invoked",
@@ -704,7 +705,7 @@ def _insert_skill_events(agent: int, skills: list[Skill]) -> bool:
                     ).model_dump(),
                 )
                 for skill in skills
-            ]
+            ],
         )
     except Exception as e:
         names = ", ".join(s["name"] for s in skills)

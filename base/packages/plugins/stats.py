@@ -21,13 +21,10 @@ reads with its own (owner) connection.
 
 from __future__ import annotations
 
-from collections.abc import Generator
-from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
-from psycopg import Connection
 from psycopg_pool import ConnectionPool
 
 from base.config import settings
@@ -130,32 +127,14 @@ def upsert(
         conn.execute(_UPSERT, (name, card, shown, detail, status, updated_by))
 
 
-@contextmanager
-def _read_connection(pool: ConnectionPool[Any] | None) -> Generator[Connection[Any]]:
-    """One connection for a read: the caller's pool when given, else this
-    process's own connection — the writer side's freshness check runs in an
-    agent process, which has no gateway pool.
-    """
-    if pool is not None:
-        with pool.connection() as conn:
-            yield conn
-        return
-    from base.db import connect
-
-    with connect() as conn:
-        yield conn
-
-
-def read_all(pool: ConnectionPool[Any] | None = None) -> list[PluginStatRow]:
+def read_all(pool: ConnectionPool[Any]) -> list[PluginStatRow]:
     """Every card value, ordered by `(plugin, id)` — a stable read order.
 
     Unfiltered on purpose: declarations are the console's side of the join,
     so a row whose card was never declared (or whose plugin is now gone) is
-    the console's to ignore, not this read's to guess about. `pool` (optional)
-    is the gateway's; the writer side (an agent process checking whether its
-    cards are due) omits it and reads on its own connection.
+    the console's to ignore, not this read's to guess about. `pool` is the caller's.
     """
-    with _read_connection(pool) as conn, conn.cursor() as cur:
+    with pool.connection() as conn, conn.cursor() as cur:
         cur.execute(_SELECT_ALL)
         rows = cur.fetchall()
     return [

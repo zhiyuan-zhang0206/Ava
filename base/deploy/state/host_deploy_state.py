@@ -19,10 +19,8 @@ import datetime as _dt
 from dataclasses import dataclass
 from typing import Any
 
-import base.db
 from base.cluster.machine import machine_name
 from base.db import Database
-from base.db.transaction import write_transaction
 
 POSTURE_IDLE = "idle"
 POSTURE_PAUSED = "paused"
@@ -65,7 +63,9 @@ def _read_with_conn(conn: Any, machine: str) -> HostDeployState | None:
     return HostDeployState(machine=row[0], posture=row[1], updated_at=row[2], db_now=row[3])
 
 
-def read(machine: str | None = None, *, conn: Any | None = None) -> HostDeployState | None:
+def read(
+    db: Database, machine: str | None = None, *, conn: Any | None = None
+) -> HostDeployState | None:
     """This host's (or `machine`'s) deploy-state row; None when no row exists yet.
 
     A missing row reads as idle — every consumer's default — so a host that has
@@ -76,7 +76,7 @@ def read(machine: str | None = None, *, conn: Any | None = None) -> HostDeploySt
     machine = machine or machine_name()
     if conn is not None:
         return _read_with_conn(conn, machine)
-    with base.db.connect(autocommit=True) as owned_conn:
+    with db.connect(autocommit=True) as owned_conn:
         return _read_with_conn(owned_conn, machine)
 
 
@@ -99,7 +99,7 @@ def read_all(db: Database) -> dict[str, HostDeployState]:
         }
 
 
-def set_posture(posture: str) -> None:
+def set_posture(db: Database, posture: str) -> None:
     """Transition THIS host's posture (idle/paused).
 
     Called by the pause/unpause lifecycle (`ops.cluster_pause`) and the `ava
@@ -107,7 +107,7 @@ def set_posture(posture: str) -> None:
     """
     if posture not in _VALID_POSTURES:
         raise ValueError(f"invalid posture: {posture!r}")
-    with write_transaction() as conn, conn.cursor() as cur:
+    with db.write_transaction() as conn, conn.cursor() as cur:
         cur.execute(
             "INSERT INTO host_deploy_state (machine, posture, updated_at) "
             "VALUES (%s, %s, now()) "

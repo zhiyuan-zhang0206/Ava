@@ -68,7 +68,13 @@ async def _failed_turn(
     )
     monkeypatch.setattr(host, "_runtime_for", AsyncMock(return_value=object()))
     monkeypatch.setattr(runtime_module, "validate_model_config", MagicMock())
-    ctx = AvaContext(ops_pool=pool, event_publisher=MagicMock(), agent=AgentSlices.resolve())
+    ctx = AvaContext(
+        ops_pool=pool,
+        event_publisher=MagicMock(),
+        agent=AgentSlices.resolve(),
+        db=Database.from_settings(),
+        bus=EventBus.from_settings(),
+    )
 
     async def drive(target: int, _runtime: object, _slices: object) -> TurnOutcome:
         return await host._invoke_until_done(target, ctx)
@@ -93,10 +99,14 @@ async def test_prior_ordinary_failure_can_drain_without_replaying_work(
     db_conn: psycopg.Connection[Any],
     aops_pool: AsyncConnectionPool[Any],
     monkeypatch: pytest.MonkeyPatch,
+    database: Database,
+    event_bus: EventBus,
 ) -> None:
     agent = _agent(db_conn)
     host, _saver, config, tail, calls = await _failed_turn(aops_pool, agent, monkeypatch)
-    chat = insert_inbound_message(db_conn, agent, "Leave queued work untouched", "user")
+    chat = insert_inbound_message(
+        db_conn, agent, "Leave queued work untouched", "user", bus=event_bus, database=database
+    )
     original = db_conn.execute(
         "SELECT runtime_owner,runtime_generation FROM agents_meta WHERE id=%s", (agent,)
     ).fetchone()

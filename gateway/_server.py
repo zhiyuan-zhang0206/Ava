@@ -18,6 +18,7 @@ from uvicorn.config import STARTUP_FAILURE
 from base.cluster.machine import is_gateway
 from base.cluster.transport_encryption import verify_transport_encryption
 from base.config import settings
+from base.db import Database
 from base.db.code_version_gate import raise_min_code_version
 from base.deploy.schema.migrations import assert_schema_current
 from base.log import init_gateway_process
@@ -94,7 +95,7 @@ def main() -> None:
     # to write. After the schema assertion and the logger init, so a refusal or
     # a failure is logged; a runner's local gateway holds no write on the row.
     if is_gateway():
-        raise_min_code_version()
+        raise_min_code_version(Database.from_settings())
 
     # Thread dump on SIGUSR1: the watchdog's gateway healthcheck sends this
     # before respawning a frozen gateway, so a stall lands a stack trace in

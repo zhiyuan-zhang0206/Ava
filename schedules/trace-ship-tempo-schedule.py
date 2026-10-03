@@ -9,6 +9,7 @@ import time
 from datetime import UTC, datetime
 
 import ava
+from base.db import Database
 from schedules.catchup import catch_up, fire_slot_once
 from base.daemon.schedules.watcher import next_fire
 
@@ -25,12 +26,13 @@ def ship_traces(_trigger: None) -> None:
 
 
 def main() -> None:
-    catch_up([(CRON, None)], timezone=TIMEZONE, fire=ship_traces)
+    db = Database.from_settings()
+    catch_up(db, [(CRON, None)], timezone=TIMEZONE, fire=ship_traces)
     while True:
         nxt = next_fire(CRON, after=datetime.now(UTC), timezone=TIMEZONE)
         while datetime.now(UTC) < nxt:
             time.sleep(30)
-        fire_slot_once(nxt, None, fire=ship_traces)
+        fire_slot_once(db, nxt, None, fire=ship_traces)
 
 
 if __name__ == "__main__":

@@ -15,9 +15,11 @@ import psycopg
 import pytest
 from fastapi.testclient import TestClient
 
+from base.db import Database
 from base.deploy.git import cluster_drift
 from base.deploy.lifecycle.start_serving import RootBirth
 from base.deploy.maintenance import admission, pause_owner
+from base.events.live.bus import EventBus
 from gateway.app import app
 from gateway.auth.cors import cors_allowed_origins
 from gateway.events import telemetry_rows
@@ -41,12 +43,12 @@ def fake_flag(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
     async def _paused(_request: object) -> bool:
         return flag.exists()
 
-    def _snapshot_paused(_state: object = None) -> bool:
+    def _snapshot_paused(_db: object, _state: object = None) -> bool:
         return flag.exists()
 
     monkeypatch.setattr("gateway.app._cluster_is_paused", _paused)
-    monkeypatch.setattr("gateway.cluster.router.cluster_is_paused", flag.exists)
-    monkeypatch.setattr("gateway.cluster.status.cluster_is_paused", flag.exists)
+    monkeypatch.setattr("gateway.cluster.router.cluster_is_paused", lambda _db: flag.exists())  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr("gateway.cluster.status.cluster_is_paused", lambda _db: flag.exists())  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr("ops.cluster_pause.is_paused", _snapshot_paused)
     return flag
 
@@ -243,27 +245,29 @@ class TestPauseAgents:
         monkeypatch.setattr(pause_owner, "lock_path", lambda: tmp_path / "pause.lock")
 
     def test_completed_drain_keeps_sdk_requests_and_services_available(
-        self, pause_backend: _FakeSessionBackend
+        self, pause_backend: _FakeSessionBackend, database: Database, event_bus: EventBus
     ) -> None:
         """Phase A may finish while a peer still needs this gateway's SDK API."""
         pause_backend.alive_answer = True
 
-        agent_pause.pause_agents()
+        agent_pause.pause_agents(database, event_bus)
 
         current = admission.snapshot()
         assert current is not None and current.maintenance is not None
         assert current.maintenance.phase == "drained"
         with TestClient(app) as client:
             assert client.get("/api/agents").status_code == 200
-        assert not cluster_pause.is_paused()
+        assert not cluster_pause.is_paused(database)
         assert pause_backend.killed == []
         assert pause_backend.has_session("ava-test-agent-host")
 
-    def test_idempotent_when_session_missing(self, pause_backend: _FakeSessionBackend) -> None:
+    def test_idempotent_when_session_missing(
+        self, pause_backend: _FakeSessionBackend, database: Database, event_bus: EventBus
+    ) -> None:
         """Repeated Phase A reuses the same drain without starting services."""
-        agent_pause.pause_agents()
+        agent_pause.pause_agents(database, event_bus)
         first = pause_owner.read()
-        agent_pause.pause_agents()
+        agent_pause.pause_agents(database, event_bus)
         assert pause_owner.read() == first
         assert first.maintenance is not None and first.maintenance.phase == "drained"
         assert pause_backend.killed == pause_backend.spawned == []
@@ -276,26 +280,26 @@ class TestUnpauseLocalCluster:
         monkeypatch.setattr(pause_owner, "lock_path", lambda: tmp_path / "pause.lock")
 
     def test_unpause_restores_posture_and_releases_admission(
-        self, pause_backend: _FakeSessionBackend
+        self, pause_backend: _FakeSessionBackend, database: Database, event_bus: EventBus
     ) -> None:
         from base.deploy.state.host_deploy_state import set_posture
 
-        agent_pause.pause_agents()
-        set_posture("paused")
-        assert cluster_pause.is_paused()
+        agent_pause.pause_agents(database, event_bus)
+        set_posture(database, "paused")
+        assert cluster_pause.is_paused(database)
 
-        cluster_pause.unpause_local_cluster()
+        cluster_pause.unpause_local_cluster(database, event_bus)
 
-        assert not cluster_pause.is_paused()
+        assert not cluster_pause.is_paused(database)
         assert not admission.held()
         assert pause_backend.spawned == pause_backend.killed == []
 
     def test_missing_pause_and_repeated_resume_do_not_start_services(
-        self, pause_backend: _FakeSessionBackend
+        self, pause_backend: _FakeSessionBackend, database: Database, event_bus: EventBus
     ) -> None:
-        cluster_pause.unpause_local_cluster()
-        cluster_pause.unpause_local_cluster()
-        assert not cluster_pause.is_paused()
+        cluster_pause.unpause_local_cluster(database, event_bus)
+        cluster_pause.unpause_local_cluster(database, event_bus)
+        assert not cluster_pause.is_paused(database)
         assert pause_backend.spawned == pause_backend.killed == []
 
 
@@ -315,7 +319,7 @@ class TestRetiredDeploymentEndpoints:
     ) -> None:
         """The retired update and recovery routes do not exist over HTTP."""
 
-        def forbidden(*_args: object, **_kwargs: object) -> None:
+        def forbidden(_db: object, _bus: object, *_args: object, **_kwargs: object) -> None:
             pytest.fail("retired HTTP ingress reached the old updater")
 
         monkeypatch.setattr(agent_pause, "pause_agents", forbidden)
@@ -331,40 +335,43 @@ class TestStatusSnapshot:
         fake_flag: Path,
         set_machine_identity,
         monkeypatch: pytest.MonkeyPatch,
+        database: Database,
     ) -> None:
         from base.deploy.lifecycle import start_serving
         from base.deploy.state import host_deploy_state
 
         monkeypatch.setattr(start_serving, "run_dir", lambda: fake_flag.parent)
         set_machine_identity(role="agent-runner", name="wsl")
-        host_deploy_state.set_posture("idle")
+        host_deploy_state.set_posture(database, "idle")
         start_serving.mark_serving(start_serving.begin_start(), runtime=serving_root.runtime)
         # unpaused
-        snap = cluster_status.status_snapshot()
+        snap = cluster_status.status_snapshot(database)
         assert snap.machine_name == "wsl"
         assert snap.serve_gateway is False
         assert snap.serve_agent_runner is True
         assert snap.paused is False
         # paused
         fake_flag.write_text("")
-        snap2 = cluster_status.status_snapshot()
+        snap2 = cluster_status.status_snapshot(database)
         assert snap2.paused is True
 
     def test_snapshot_includes_head_sha(
         self,
         set_machine_identity,
         monkeypatch: pytest.MonkeyPatch,
+        database: Database,
     ) -> None:
         """status_snapshot threads the prod-source HEAD so the roster can compare
         it against the cluster pin."""
         set_machine_identity(role="agent-runner", name="wsl")
         monkeypatch.setattr(cluster_drift, "prod_source_head_sha", lambda: "abc1234")
-        assert cluster_status.status_snapshot().head_sha == "abc1234"
+        assert cluster_status.status_snapshot(database).head_sha == "abc1234"
 
     def test_snapshot_includes_running_sha(
         self,
         set_machine_identity,
         monkeypatch: pytest.MonkeyPatch,
+        database: Database,
     ) -> None:
         """status_snapshot threads the commit the answering process froze at its
         own boot — distinct from head_sha (the checkout the pin verdict compares)
@@ -372,12 +379,13 @@ class TestStatusSnapshot:
         reads on-pin."""
         set_machine_identity(role="agent-runner", name="wsl")
         monkeypatch.setattr("base.native_process.loaded_commit.get", lambda: "def5678")
-        assert cluster_status.status_snapshot().running_sha == "def5678"
+        assert cluster_status.status_snapshot(database).running_sha == "def5678"
 
     def test_snapshot_ignores_the_start_bookmark(
         self,
         set_machine_identity,
         monkeypatch: pytest.MonkeyPatch,
+        database: Database,
     ) -> None:
         """A start that restarted nothing must not be able to make this node look
         current.
@@ -395,7 +403,7 @@ class TestStatusSnapshot:
         monkeypatch.setattr("base.deploy.git.running_sha.get", lambda: "n3wn3w0bbbb")
         monkeypatch.setattr(cluster_drift, "prod_source_head_sha", lambda: "n3wn3w0bbbb")
 
-        snap = cluster_status.status_snapshot()
+        snap = cluster_status.status_snapshot(database)
 
         assert snap.running_sha == "0ld0ld0aaaa"
         assert snap.head_sha == "n3wn3w0bbbb"
@@ -408,11 +416,12 @@ class TestStatusSnapshot:
         set_machine_identity,
         monkeypatch: pytest.MonkeyPatch,
         online: bool | None,
+        database: Database,
     ) -> None:
         del fake_flag
         set_machine_identity(role="agent-runner", name="test-host")
         monkeypatch.setattr(cluster_status, "_supervisor_online", lambda: online)
-        assert cluster_status.status_snapshot().supervisor_online is online
+        assert cluster_status.status_snapshot(database).supervisor_online is online
 
 
 # ─── cluster endpoints via TestClient ─────────────────────────────────────────
@@ -747,7 +756,7 @@ class TestAgentMachineList:
         db_conn.commit()  # pyright: ignore[reportUnknownMemberType]
         now = datetime.now(UTC)
 
-        async def _fake_gather(rows, local_name, **_kw):  # type: ignore[no-untyped-def]
+        async def _fake_gather(_db: object, rows, local_name, **_kw):  # type: ignore[no-untyped-def]
             return [
                 MachineStatus(
                     name="wsl-test",
@@ -802,7 +811,7 @@ class TestAgentMachineList:
 
         now = datetime.now(UTC)
 
-        async def _fake_gather(rows, local_name, **_kw):  # type: ignore[no-untyped-def]
+        async def _fake_gather(_db: object, rows, local_name, **_kw):  # type: ignore[no-untyped-def]
             return [
                 MachineStatus(
                     name="control-test",
@@ -1045,6 +1054,8 @@ class TestMachinePauseResume:
         db_conn: psycopg.Connection,
         set_machine_identity,
         monkeypatch: pytest.MonkeyPatch,
+        database: Database,
+        event_bus: EventBus,
     ) -> None:  # type: ignore[no-untyped-def]
         """A machine whose ops server cannot take the graceful terminate (already
         unreachable) gets its agent rows force-marked terminated in the shared
@@ -1056,7 +1067,9 @@ class TestMachinePauseResume:
         aid = _seed_agent_on_machine(db_conn, "away")
         from base.db import insert_inbound_message
 
-        old_chat_id = insert_inbound_message(db_conn, aid, "queued before pause", source="user")
+        old_chat_id = insert_inbound_message(
+            db_conn, aid, "queued before pause", source="user", bus=event_bus, database=database
+        )
 
         async def _unreachable(_db: object, target: str, path: str, json_body: dict) -> dict:
             raise RuntimeError("ops server unreachable")

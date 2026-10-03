@@ -76,7 +76,7 @@ LEASE = {{
     "event_delivery_protocol_version": None,
 }}
 
-external.control.require_active = lambda _lease_id, _caller: dict(LEASE)
+external.control.require_active = lambda _db, _lease_id, _caller: dict(LEASE)
 external.machine_name = lambda: "external-cli-probe"
 external.process_metadata = lambda: {{"pid": 1}}
 def load_snapshot(_agent_id):

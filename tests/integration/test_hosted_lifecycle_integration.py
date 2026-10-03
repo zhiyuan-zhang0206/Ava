@@ -12,14 +12,19 @@ from agent.ownership.hosted import admit_hosted_runtime, apply_hosted_lifecycle
 from agent.ownership.tests.test_lifecycle_intent import _command
 from agent.tests.test_inbound_ownership import _admit, _agent
 from base.config import settings
-from base.db import PG_KEEPALIVE_KWARGS
+from base.db import PG_KEEPALIVE_KWARGS, Database
+from base.events.live.bus import EventBus
 from base.native_process.turn_identity import bind_turn_identity
 from ops.lifecycle.termination import _force_terminate_transaction
 
 
 @pytest.mark.parametrize("applied", [False, True])
 async def test_hosted_force_cannot_be_undone_by_prior_restart(
-    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool, applied: bool
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    applied: bool,
+    database: Database,
+    event_bus: EventBus,
 ) -> None:
     agent_id = _agent(db_conn)
     owner = await _admit(aops_pool, agent_id)
@@ -27,7 +32,7 @@ async def test_hosted_force_cannot_be_undone_by_prior_restart(
     with bind_turn_identity(agent_id, incarnation=owner):
         await claim_inbound_batch(aops_pool, agent_id)
         if applied:
-            assert await apply_hosted_lifecycle(aops_pool, owner) == "restart"
+            assert await apply_hosted_lifecycle(aops_pool, owner, bus=event_bus) == "restart"
     with ConnectionPool[psycopg.Connection](
         settings.data_plane.db_url, min_size=1, max_size=1, kwargs=PG_KEEPALIVE_KWARGS
     ) as pool:
@@ -35,10 +40,10 @@ async def test_hosted_force_cannot_be_undone_by_prior_restart(
             _force_terminate_transaction, agent_id, pool, source="user"
         )
     later = _command(db_conn, agent_id, "restart")
-    assert await apply_hosted_lifecycle(aops_pool, owner) is None
+    assert await apply_hosted_lifecycle(aops_pool, owner, bus=event_bus) is None
     assert (
         await admit_hosted_runtime(
-            aops_pool, agent_id, "claim-test", uuid4(), expected_from="idling"
+            aops_pool, agent_id, "claim-test", uuid4(), expected_from="idling", db=database
         )
         is None
     )

@@ -14,8 +14,9 @@ from psycopg_pool import AsyncConnectionPool, PoolTimeout
 from agent.ownership.inbound import lock_inbound_owner
 from base.agents.messages.inbound import InterruptReason
 from base.config import settings
-from base.db import ALIVE_STATUSES, InboundRow, publish_inbound_wake
+from base.db import ALIVE_STATUSES, Database, InboundRow, publish_inbound_wake
 from base.db.transaction import async_write_transaction
+from base.events.live.bus import EventBus
 from base.log import logger
 
 # A successful borrow that took at least this long still gets a WARNING — a
@@ -174,6 +175,8 @@ async def enqueue_fatal_provider_report_to_nearest_alive_ancestor(
     pool: AsyncConnectionPool,
     failed_agent_id: int,
     *,
+    db: Database,
+    bus: EventBus,
     error_class: str,
     provider: str | None,
     vendor: str | None,
@@ -235,7 +238,7 @@ async def enqueue_fatal_provider_report_to_nearest_alive_ancestor(
         if inbound_row is None:
             raise RuntimeError("expected inbound row after fatal provider ancestor report insert")
         inbound_id = cast(int, inbound_row[0])
-    await asyncio.to_thread(publish_inbound_wake, ancestor_id, str(inbound_id))
+    await asyncio.to_thread(publish_inbound_wake, db, bus, ancestor_id, str(inbound_id))
     return ancestor_id
 
 

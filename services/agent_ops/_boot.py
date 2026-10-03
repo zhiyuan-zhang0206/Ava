@@ -23,6 +23,7 @@ from psycopg_pool import ConnectionPool
 from base.cluster.machine import daemon_acceptance
 from base.config import settings
 from base.db import Database
+from base.events.live.bus import EventBus
 
 _log = logging.getLogger("services.agent_ops.daemon")
 
@@ -88,6 +89,11 @@ def _ops_acceptance() -> frozenset[str] | None:
     daemon acceptance of `base.cluster.machine.daemon_acceptance` (the gateway dials /ops with its
     gateway-class machine API token, a runner-class process of the unit with its runner token)."""
     return daemon_acceptance()
+
+
+def _ops_handles() -> tuple[Database, EventBus]:
+    """The cluster handles every in-process lifecycle op works with, as the settings name them."""
+    return Database.from_settings(), EventBus.from_settings()
 
 
 def _open_db_pool() -> ConnectionPool[psycopg.Connection[TupleRow]]:

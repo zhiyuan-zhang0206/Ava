@@ -37,7 +37,8 @@ from datetime import UTC, datetime
 import psycopg
 
 from base.agents.messages.inbound_provenance import InboundProvenance
-from base.db import connect, insert_inbound_message
+from base.db import Database, insert_inbound_message
+from base.events.live.bus import EventBus
 from base.log import logger
 from base.native_process.ownership import shown_name
 from ops.cluster_status import AGENT_SHELL_RE
@@ -150,7 +151,7 @@ def _content(notice: ClosureNotice) -> str:
     return text
 
 
-def _deliver(conn: psycopg.Connection, notice: ClosureNotice) -> None:
+def _deliver(db: Database, bus: EventBus, conn: psycopg.Connection, notice: ClosureNotice) -> None:
     """Deliver one notice at most once in one transaction; raise to report it unwritten.
 
     The idempotency claim and the inbound insert commit together: a failure
@@ -183,6 +184,8 @@ def _deliver(conn: psycopg.Connection, notice: ClosureNotice) -> None:
                 source="system",
                 payload={"closure": notice.as_dict()},
                 provenance=InboundProvenance(source_verified_by=None, source_transport="ops"),
+                database=db,
+                bus=bus,
             )
         elif owned:
             logger.info(
@@ -203,7 +206,7 @@ def _deliver(conn: psycopg.Connection, notice: ClosureNotice) -> None:
 
 
 def write_notices(
-    notices: Sequence[ClosureNotice], *, direct: bool
+    db: Database, bus: EventBus, notices: Sequence[ClosureNotice], *, direct: bool
 ) -> list[tuple[ClosureNotice, Exception]]:
     """Write every notice over one short connection; return those that failed.
 
@@ -218,14 +221,14 @@ def write_notices(
     if not notices:
         return []
     try:
-        conn = connect(direct=direct)
+        conn = db.connect(direct=direct)
     except Exception as exc:
         return [(notice, exc) for notice in notices]
     failed: list[tuple[ClosureNotice, Exception]] = []
     with conn:
         for notice in notices:
             try:
-                _deliver(conn, notice)
+                _deliver(db, bus, conn, notice)
             except Exception as exc:
                 failed.append((notice, exc))
     return failed

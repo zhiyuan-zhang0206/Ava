@@ -10,12 +10,15 @@ from base.agents import ForkSourceEmpty
 from base.agents.labels import spawn_prompt_with_label
 from base.cluster.machine import machine_name
 from base.config import settings
-from base.db import insert_inbound_message, publish_inbound_wake
+from base.db import Database, insert_inbound_message, publish_inbound_wake
+from base.events.live.bus import EventBus
 from ops.agents import latest_checkpoint_id
 from ops.rpc_schemas import LaunchAgentRequest, SpawnAgentRequest, SpawnedAgent
 
 
-async def launch_agent_op(body: LaunchAgentRequest, db_pool: ConnectionPool) -> SpawnedAgent:
+async def launch_agent_op(
+    db: Database, bus: EventBus, body: LaunchAgentRequest, db_pool: ConnectionPool
+) -> SpawnedAgent:
     """Validate a gateway-created row and wake its host without changing identity.
 
     The legacy prompt branch supports an old gateway during a rolling update.
@@ -25,7 +28,6 @@ async def launch_agent_op(body: LaunchAgentRequest, db_pool: ConnectionPool) -> 
     """
     # Lazy import: the package door re-exports this module, so a module-level
     # import of the door would be circular.
-    from base.events.live.bus import EventBus
     from base.lm.factory import validate_model_config
     from ops.lifecycle import publish_inbound_arrived
 
@@ -37,12 +39,10 @@ async def launch_agent_op(body: LaunchAgentRequest, db_pool: ConnectionPool) -> 
         assert body.prompt_source is not None  # narrowed by the caller  # noqa: S101
         prompt = spawn_prompt_with_label(body.prompt, body.label)
         iid = await asyncio.to_thread(
-            _insert_prompt_blocking, db_pool, body.agent_id, prompt, body.prompt_source
+            _insert_prompt_blocking, db, bus, db_pool, body.agent_id, prompt, body.prompt_source
         )
-        await publish_inbound_arrived(
-            EventBus.from_settings(), body.agent_id, iid, "chat", body.prompt_source, prompt
-        )
-    publish_inbound_wake(body.agent_id, "0")
+        await publish_inbound_arrived(bus, body.agent_id, iid, "chat", body.prompt_source, prompt)
+    publish_inbound_wake(db, bus, body.agent_id, "0")
     return SpawnedAgent(id=body.agent_id)
 
 
@@ -82,11 +82,11 @@ def spawn_prechecks_blocking(body: SpawnAgentRequest, db_pool: ConnectionPool) -
 
 
 def _insert_prompt_blocking(
-    db_pool: ConnectionPool, agent_id: int, prompt: str, source: str
+    db: Database, bus: EventBus, db_pool: ConnectionPool, agent_id: int, prompt: str, source: str
 ) -> int:
     """Sync first-prompt insert for an old gateway during a rolling update."""
     with db_pool.connection() as conn:
-        return insert_inbound_message(conn, agent_id, prompt, source=source)
+        return insert_inbound_message(conn, agent_id, prompt, source=source, database=db, bus=bus)
 
 
 # ─── lifecycle: terminate / resurrect / restart ─────────────────────────────

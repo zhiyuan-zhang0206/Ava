@@ -94,7 +94,7 @@ def test_strip_overlaps_events_and_joins_with_request_context(
     def narrative(*_args: object, **_kwargs: object) -> tuple[None, None, None]:
         return None, None, None
 
-    def inbounds(*_args: object) -> list[object]:
+    def inbounds(_db: object, *_args: object) -> list[object]:
         return []
 
     monkeypatch.setattr(timeline, "_narrative_for_window", narrative)

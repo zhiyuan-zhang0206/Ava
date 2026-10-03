@@ -12,6 +12,8 @@ from psycopg_pool import ConnectionPool
 
 from base.cluster.machine import machine_name
 from base.config import settings
+from base.db import Database
+from base.events.live.bus import EventBus
 from ops.agents import wake
 from ops.agents.resurrection_retry import ResurrectTriggerStaleError
 from ops.agents.spawn import create_agent_row
@@ -22,7 +24,7 @@ _WAKE = "Continue from the latest checkpoint."
 _MARKED = Jsonb({"hosted_turn_recovery": True})
 
 
-def _publish_nothing(*_args: object) -> None:
+def _publish_nothing(_db: object, _bus: object, *_args: object) -> None:
     return None
 
 
@@ -43,10 +45,10 @@ def db_pool() -> Iterator[ConnectionPool]:
 
 
 @pytest.fixture
-def agent_id(db_conn: psycopg.Connection) -> int:
+def agent_id(db_conn: psycopg.Connection, database: Database, event_bus: EventBus) -> int:
     """A never-admitted agent: it has no runtime identity, so a force on it
     leaves the unowned-termination receipt that resurrection accepts."""
-    new_id, _, _, _ = create_agent_row(spawner="user", machine=machine_name())
+    new_id, _, _, _ = create_agent_row(database, event_bus, spawner="user", machine=machine_name())
     db_conn.commit()
     return new_id
 
@@ -90,7 +92,11 @@ def test_the_wake_commits_with_the_fence_and_qualifies_as_a_trigger(
 
 
 def test_the_wake_resurrects_the_agent_through_the_final_cas(
-    db_conn: psycopg.Connection, db_pool: ConnectionPool, agent_id: int
+    db_conn: psycopg.Connection,
+    db_pool: ConnectionPool,
+    agent_id: int,
+    database: Database,
+    event_bus: EventBus,
 ) -> None:
     termination._force_terminate_transaction(
         agent_id, db_pool, source="system", recovery_wake=_WAKE
@@ -98,6 +104,8 @@ def test_the_wake_resurrects_the_agent_through_the_final_cas(
     [(wake_id, _, _, _)] = _wakes(db_conn, agent_id)
 
     wake.resurrect_agent(
+        database,
+        event_bus,
         agent_id,
         resurrected_by="system",
         trigger_inbound_id=wake_id,
@@ -110,7 +118,11 @@ def test_the_wake_resurrects_the_agent_through_the_final_cas(
 
 
 def test_a_chat_queued_before_the_fence_cannot_resurrect(
-    db_conn: psycopg.Connection, db_pool: ConnectionPool, agent_id: int
+    db_conn: psycopg.Connection,
+    db_pool: ConnectionPool,
+    agent_id: int,
+    database: Database,
+    event_bus: EventBus,
 ) -> None:
     """Why the wake follows the terminate command instead of preceding it: work
     older than a force cannot reverse that force."""
@@ -127,6 +139,8 @@ def test_a_chat_queued_before_the_fence_cannot_resurrect(
 
     with pytest.raises(ResurrectTriggerStaleError):
         wake.resurrect_agent(
+            database,
+            event_bus,
             agent_id,
             resurrected_by="system",
             trigger_inbound_id=row[0],
@@ -171,13 +185,22 @@ def test_a_force_terminate_queues_no_wake_unless_asked(
 
 
 async def test_a_recovery_wake_is_refused_without_a_force(
-    db_conn: psycopg.Connection, db_pool: ConnectionPool, agent_id: int
+    db_conn: psycopg.Connection,
+    db_pool: ConnectionPool,
+    agent_id: int,
+    database: Database,
+    event_bus: EventBus,
 ) -> None:
     before = _inbound_count(db_conn, agent_id)
 
     with pytest.raises(ValueError, match="rides a force terminate"):
         await terminate_agent_op(
-            agent_id, TerminateAgentRequest(source="system"), db_pool, recovery_wake=_WAKE
+            database,
+            event_bus,
+            agent_id,
+            TerminateAgentRequest(source="system"),
+            db_pool,
+            recovery_wake=_WAKE,
         )
 
     assert _inbound_count(db_conn, agent_id) == before
@@ -224,7 +247,11 @@ def test_a_force_terminate_whose_audit_fact_cannot_be_recorded_does_not_terminat
 
 
 def test_a_resurrection_records_its_audit_fact(
-    db_conn: psycopg.Connection, db_pool: ConnectionPool, agent_id: int
+    db_conn: psycopg.Connection,
+    db_pool: ConnectionPool,
+    agent_id: int,
+    database: Database,
+    event_bus: EventBus,
 ) -> None:
     termination._force_terminate_transaction(
         agent_id, db_pool, source="system", recovery_wake=_WAKE
@@ -232,6 +259,8 @@ def test_a_resurrection_records_its_audit_fact(
     [(wake_id, _, _, _)] = _wakes(db_conn, agent_id)
 
     wake.resurrect_agent(
+        database,
+        event_bus,
         agent_id,
         resurrected_by="system",
         trigger_inbound_id=wake_id,

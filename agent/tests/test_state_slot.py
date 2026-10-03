@@ -53,6 +53,8 @@ from agent.state import (
     build_agent_state,
 )
 from base.agents.context import AvaContext
+from base.db import Database
+from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices
 from base.packages.plugins.extensions import ExtensionRegistry, PluginContributions
 
@@ -455,6 +457,8 @@ def _make_runtime_and_config(
         llm=MagicMock(),
         event_publisher=MagicMock(),
         agent=AgentSlices.resolve(pins),
+        db=Database.from_settings(),
+        bus=EventBus.from_settings(),
     )
     runtime = Runtime(context=ctx)
     config: RunnableConfig = {"configurable": {"thread_id": "42"}}

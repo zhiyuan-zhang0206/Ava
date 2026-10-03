@@ -30,6 +30,7 @@ from base.agents import AgentStatus
 from base.daemon import round_loop
 from base.daemon.loop_health import LoopProgress
 from base.db import Database
+from base.events.live.bus import EventBus
 from services.delivery_watchdog import attempts, resurrect_guard, rounds
 
 _log = logging.getLogger("services.delivery_watchdog.resurrect_retry")
@@ -105,7 +106,7 @@ def select_terminated_owners_with_pending(
 
 
 async def resurrect_one(
-    pool: ConnectionPool, db: Database, agent_id: int, trigger_inbound_id: int
+    pool: ConnectionPool, db: Database, bus: EventBus, agent_id: int, trigger_inbound_id: int
 ) -> None:
     """Run `resurrect_if_terminated` for one claimed agent under the RPC
     deadline; classify the returned status and escalate consecutive failures
@@ -117,6 +118,7 @@ async def resurrect_one(
             async with asyncio.timeout(rounds.rpc_deadline_s()):
                 status = await resurrect_if_terminated(
                     db,
+                    bus,
                     agent_id,
                     trigger_inbound_id=trigger_inbound_id,
                     trigger_inbound_kind="chat",
@@ -147,6 +149,7 @@ async def resurrect_one(
 async def resurrect_round(
     pool: ConnectionPool,
     db: Database,
+    bus: EventBus,
     progress: LoopProgress,
     max_per_round: int,
     threshold_s: float,
@@ -172,7 +175,7 @@ async def resurrect_round(
     if claimed:
         _log.info("[delivery] retrying %s resurrect(s)", len(claimed))
     await round_loop.fan_out(
-        [functools.partial(resurrect_one, pool, db, a, trigger_of[a]) for a in claimed],
+        [functools.partial(resurrect_one, pool, db, bus, a, trigger_of[a]) for a in claimed],
         concurrency=_RESURRECT_MAX_CONCURRENCY,
         progress=progress,
     )
@@ -181,6 +184,7 @@ async def resurrect_round(
 async def resurrect_loop(
     pool: ConnectionPool,
     db: Database,
+    bus: EventBus,
     progress: LoopProgress,
     interval_s: float,
     max_per_round: int,
@@ -189,6 +193,6 @@ async def resurrect_loop(
     """The resurrect retry as a resident sequential loop."""
 
     async def one_round() -> None:
-        await resurrect_round(pool, db, progress, max_per_round, threshold_s)
+        await resurrect_round(pool, db, bus, progress, max_per_round, threshold_s)
 
     await round_loop.run_rounds("resurrect retry", progress, interval_s, one_round)

@@ -14,6 +14,7 @@ from pathlib import Path
 import ava
 from ava.agents import AgentStatus as S
 from schedules.agent_status_guard import ensure_agent_status_members
+from base.db import Database
 from schedules.catchup import catch_up, cluster_timezone, fire_slot_once
 from base.daemon.schedules.watcher import next_fire
 
@@ -146,6 +147,7 @@ def _main_loop() -> None:
     """The gateway runs this file as `python self-evolution-weekly-schedule.py`
     (never imports it); the guard keeps the loop out of import, so tests can
     load the module and call count_events directly."""
+    db = Database.from_settings()
     thursday_enabled = False
 
     def fire_weekly_trigger(trigger: str) -> None:
@@ -172,6 +174,7 @@ def _main_loop() -> None:
         raise ValueError(f"unknown self-evolution weekly trigger: {trigger}")
 
     catch_up(
+        db,
         [
             (MONDAY_CRON, MONDAY_TRIGGER),
             (THURSDAY_CRON, THURSDAY_TRIGGER),
@@ -205,6 +208,7 @@ def _main_loop() -> None:
 
         if wait_monday <= 90:
             fire_slot_once(
+                db,
                 nxt_monday,
                 MONDAY_TRIGGER,
                 fire=fire_weekly_trigger,
@@ -214,6 +218,7 @@ def _main_loop() -> None:
 
         if wait_thursday <= 90:
             fire_slot_once(
+                db,
                 nxt_thursday,
                 THURSDAY_TRIGGER,
                 fire=fire_weekly_trigger,

@@ -15,18 +15,19 @@ from typing import Any
 import pytest
 
 import services.healthchecks.computer_mcp as hc
+from base.db import Database
 from services.computer.mcp_daemon import ComputerMcpDaemon
 from services.computer.tests.slices import computer_use_config
 
 
 @pytest.fixture
-async def daemon_sock(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+async def daemon_sock(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, database: Database):
     """A live ComputerMcpDaemon on a short /tmp socket; monkeypatch the
     healthcheck's socket path to it."""
     sock = f"/tmp/computer-hc-test-{os.getpid()}.sock"  # noqa: S108 — test-only short AF_UNIX path
     with suppress(OSError):
         Path(sock).unlink()
-    daemon = ComputerMcpDaemon(computer_use_config(), sock=sock)
+    daemon = ComputerMcpDaemon(computer_use_config(), database, sock=sock)
     server = await asyncio.start_unix_server(daemon.handle, path=sock)
 
     def _sock() -> Any:

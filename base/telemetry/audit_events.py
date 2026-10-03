@@ -51,6 +51,7 @@ from psycopg_pool import AsyncConnectionPool
 from pydantic import BaseModel, ConfigDict
 
 from base import telemetry
+from base.db import Database
 from base.events.contract import EVENTS
 
 
@@ -191,21 +192,19 @@ async def record_audit_async(
     return event
 
 
-def record_audit_standalone_many(events: Sequence[telemetry.Event]) -> None:
+def record_audit_standalone_many(db: Database, events: Sequence[telemetry.Event]) -> None:
     """Record several audit events in one write transaction, then emit them all.
 
     All rows commit together or none does; nothing is emitted unless they commit.
     """
-    from base.db.transaction import write_transaction
-
-    with write_transaction() as conn:
+    with db.write_transaction() as conn:
         for event in events:
             record_audit(conn, event)
     for event in events:
         telemetry.emit_prepared(event)
 
 
-def record_audit_standalone(event: telemetry.Event) -> None:
+def record_audit_standalone(db: Database, event: telemetry.Event) -> None:
     """Record one audit event in its own write transaction, then emit it.
 
     For a producer that owns no business transaction: the effect already
@@ -215,9 +214,7 @@ def record_audit_standalone(event: telemetry.Event) -> None:
     there is no projection-only fallback. The window this does not cover is a
     process that dies after the effect and before this call.
     """
-    from base.db.transaction import write_transaction
-
-    with write_transaction() as conn:
+    with db.write_transaction() as conn:
         record_audit(conn, event)
     telemetry.emit_prepared(event)
 
@@ -258,7 +255,7 @@ def _report_unrecorded(event: telemetry.Event, exc: Exception) -> None:
     telemetry.emit_prepared(event)
 
 
-def record_audit_reported(event: telemetry.Event) -> None:
+def record_audit_reported(db: Database, event: telemetry.Event) -> None:
     """:func:`record_audit_standalone` for a producer that must not fail its caller.
 
     Used where the operation already succeeded and raising would be wrong:
@@ -267,7 +264,7 @@ def record_audit_reported(event: telemetry.Event) -> None:
     failed write does not raise; it is reported by :func:`_report_unrecorded`.
     """
     try:
-        record_audit_standalone(event)
+        record_audit_standalone(db, event)
     except Exception as exc:
         _report_unrecorded(event, exc)
 

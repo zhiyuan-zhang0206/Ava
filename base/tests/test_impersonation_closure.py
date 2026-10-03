@@ -8,13 +8,17 @@ import psycopg
 import pytest
 
 from base.agents import impersonation as leases
+from base.db import Database
+from base.events.live.bus import EventBus
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from base.tests._impersonation_helpers import _active, _agent, _request
 from tests.impersonation_support import attested_caller
 
 
 @pytest.mark.parametrize("ending", ["released", "expired"])
-def test_closure_restores_six_native_owners(db_conn: psycopg.Connection, ending: str) -> None:
+def test_closure_restores_six_native_owners(
+    db_conn: psycopg.Connection, ending: str, database: Database, event_bus: EventBus
+) -> None:
     from base.agents.impersonation.maintenance import reap_impersonations
     from base.db import pool
     from base.deploy.maintenance.cohort import _classify, _RuntimeRow
@@ -43,8 +47,10 @@ def test_closure_restores_six_native_owners(db_conn: psycopg.Connection, ending:
         )
         db_conn.commit()
         if ending == "released":
-            leases.release(lease["id"], attested_caller(lease), "Complete")
-            leases.release(lease["id"], attested_caller(lease), "Complete again")
+            leases.release(database, event_bus, lease["id"], attested_caller(lease), "Complete")
+            leases.release(
+                database, event_bus, lease["id"], attested_caller(lease), "Complete again"
+            )
         else:
             db_conn.execute(
                 "UPDATE agent_impersonations SET expires_at=clock_timestamp()-interval '1 second' "
@@ -53,8 +59,8 @@ def test_closure_restores_six_native_owners(db_conn: psycopg.Connection, ending:
             )
             db_conn.commit()
             with pool(max_size=2) as reaper_pool:
-                assert reap_impersonations(reaper_pool) == 1
-                assert reap_impersonations(reaper_pool) == 0
+                assert reap_impersonations(reaper_pool, database, event_bus) == 1
+                assert reap_impersonations(reaper_pool, database, event_bus) == 0
         assert db_conn.execute(
             "SELECT runtime_generation,runtime_owner,runtime_kind,runtime_protocol_version,"
             "lease_expires_at FROM agents_meta WHERE id=%s",
@@ -125,13 +131,13 @@ def test_closure_preserves_guarded_rows(db_conn: psycopg.Connection, guard: str)
 
 @pytest.mark.parametrize("lease_status", ["accepted", "active"])
 def test_closure_restore_rolls_back_with_lease(
-    db_conn: psycopg.Connection, lease_status: str
+    db_conn: psycopg.Connection, lease_status: str, database: Database, event_bus: EventBus
 ) -> None:
     owner = _agent(db_conn)
     lease = _request(owner)
-    leases.accept(lease["id"], owner.agent_id, owner, "Handoff brief")
+    leases.accept(database, event_bus, lease["id"], owner.agent_id, owner, "Handoff brief")
     if lease_status == "active":
-        leases.activate(lease["id"], owner)
+        leases.activate(database, event_bus, lease["id"], owner)
     foreign = (uuid4(), uuid4())
     db_conn.execute(
         "UPDATE agents_meta SET status='running',runtime_generation=%s,runtime_owner=%s WHERE id=%s",

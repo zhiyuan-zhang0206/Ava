@@ -17,6 +17,7 @@ import pytest
 from psycopg_pool import AsyncConnectionPool
 
 from base import telemetry
+from base.db import Database
 from base.db.transaction import async_write_transaction
 from base.telemetry import audit_events
 from base.telemetry.audit_events import record_audit, record_audit_standalone
@@ -142,7 +143,7 @@ def test_the_stream_id_maps_onto_a_signed_bigint(
 
 
 def test_standalone_commits_the_row_before_it_emits(
-    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch, database: Database
 ) -> None:
     marker = _marker()
     seen_at_emit: list[int] = []
@@ -152,13 +153,13 @@ def test_standalone_commits_the_row_before_it_emits(
 
     monkeypatch.setattr(telemetry, "emit_prepared", emit)
 
-    record_audit_standalone(_event(marker))
+    record_audit_standalone(database, _event(marker))
 
     assert seen_at_emit == [1]
 
 
 def test_standalone_failure_raises_and_emits_nothing(
-    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch, database: Database
 ) -> None:
     marker = _marker()
     emitted: list[telemetry.Event] = []
@@ -166,7 +167,7 @@ def test_standalone_failure_raises_and_emits_nothing(
     bad_level = replace(_event(marker), level=cast(Any, "loud"))
 
     with pytest.raises(psycopg.errors.CheckViolation):
-        record_audit_standalone(bad_level)
+        record_audit_standalone(database, bad_level)
 
     assert emitted == []
     assert _rows(db_conn, marker) == []
@@ -205,7 +206,7 @@ async def test_async_standalone_commits_the_row_before_it_emits(
 
 
 def test_reported_recording_does_not_raise_but_reports_and_still_projects(
-    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch, database: Database
 ) -> None:
     marker = _marker()
     emitted: list[telemetry.Event] = []
@@ -218,7 +219,7 @@ def test_reported_recording_does_not_raise_but_reports_and_still_projects(
     monkeypatch.setattr(telemetry, "emit", report)
     bad_level = replace(_event(marker), level=cast(Any, "loud"))
 
-    audit_events.record_audit_reported(bad_level)
+    audit_events.record_audit_reported(database, bad_level)
 
     assert _rows(db_conn, marker) == []
     assert emitted == [bad_level]
@@ -231,7 +232,7 @@ def test_reported_recording_does_not_raise_but_reports_and_still_projects(
 
 
 def test_reported_recording_of_a_healthy_write_reports_nothing(
-    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch, database: Database
 ) -> None:
     marker = _marker()
     reports: list[str] = []
@@ -245,14 +246,14 @@ def test_reported_recording_of_a_healthy_write_reports_nothing(
     monkeypatch.setattr(telemetry, "emit_prepared", emit_prepared)
     monkeypatch.setattr(telemetry, "emit", emit)
 
-    audit_events.record_audit_reported(_event(marker))
+    audit_events.record_audit_reported(database, _event(marker))
 
     assert len(_rows(db_conn, marker)) == 1
     assert reports == []
 
 
 def test_standalone_many_commits_every_row_together_and_emits_after(
-    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch, database: Database
 ) -> None:
     first, second = _marker(), _marker()
     seen_at_emit: list[int] = []
@@ -262,13 +263,13 @@ def test_standalone_many_commits_every_row_together_and_emits_after(
 
     monkeypatch.setattr(telemetry, "emit_prepared", emit)
 
-    audit_events.record_audit_standalone_many([_event(first), _event(second)])
+    audit_events.record_audit_standalone_many(database, [_event(first), _event(second)])
 
     assert seen_at_emit == [1, 1]
 
 
 def test_standalone_many_with_one_refused_event_records_and_emits_none(
-    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch, database: Database
 ) -> None:
     good, bad = _marker(), _marker()
     emitted: list[telemetry.Event] = []
@@ -276,7 +277,7 @@ def test_standalone_many_with_one_refused_event_records_and_emits_none(
 
     with pytest.raises(psycopg.errors.CheckViolation):
         audit_events.record_audit_standalone_many(
-            [_event(good), replace(_event(bad), level=cast(Any, "loud"))]
+            database, [_event(good), replace(_event(bad), level=cast(Any, "loud"))]
         )
 
     assert emitted == []

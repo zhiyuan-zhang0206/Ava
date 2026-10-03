@@ -45,7 +45,14 @@ async def test_a_quiesced_unit_sends_no_check_in_pass(
     monkeypatch: pytest.MonkeyPatch, quiesced: bool
 ) -> None:
     pool = MagicMock()
-    await _run_briefly(monkeypatch, daemon._dispatch_loop, pool, quiesced=quiesced)
+    await _run_briefly(
+        monkeypatch,
+        lambda pool, progress: daemon._dispatch_loop(
+            pool, Database.from_settings(), EventBus.from_settings(), progress
+        ),
+        pool,
+        quiesced=quiesced,
+    )
     assert bool(pool.mock_calls) is (not quiesced)
 
 

@@ -41,7 +41,13 @@ async def test_database_failure_after_graph_return_preserves_completed_work(
         bus=EventBus.from_settings(),
         db=Database.from_settings(),
     )
-    ctx = AvaContext(ops_pool=aops_pool, event_publisher=MagicMock(), agent=AgentSlices.resolve())
+    ctx = AvaContext(
+        ops_pool=aops_pool,
+        event_publisher=MagicMock(),
+        agent=AgentSlices.resolve(),
+        db=Database.from_settings(),
+        bus=EventBus.from_settings(),
+    )
     # A real closed PostgreSQL connection supplies the I/O failure. Injection
     # selects only the boundary; checkpoint, graph and lifecycle transactions run.
     broken = await psycopg.AsyncConnection.connect(settings.data_plane.db_url)

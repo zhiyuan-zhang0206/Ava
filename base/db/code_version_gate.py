@@ -32,7 +32,9 @@ from __future__ import annotations
 
 import sys
 import time
-from typing import Any, NoReturn, cast
+from typing import Any, NoReturn, Protocol, cast
+
+import psycopg
 
 from base.agents.exit_codes import CODE_BEHIND_MINIMUM_EXIT_CODE
 from base.log import logger
@@ -116,7 +118,13 @@ def application_name() -> str:
     return f"ava:{process_name()}:v{code_version.get()}"
 
 
-def raise_min_code_version() -> int:
+class _Dialer(Protocol):
+    """What `raise_min_code_version` needs of a `Database`; the handle's own module imports this one."""
+
+    def connect(self, *, autocommit: bool = False) -> psycopg.Connection: ...
+
+
+def raise_min_code_version(db: _Dialer) -> int:
     """Raise the cluster minimum to this process's code version; return the minimum.
 
     Called once by every gateway start, after migrations and the schema
@@ -128,10 +136,8 @@ def raise_min_code_version() -> int:
         CodeVersionError: this process has no resolvable code version.
         RuntimeError: the `deployment_state` singleton row is missing.
     """
-    from base.db.connections import connect
-
     version = code_version.get()
-    with connect(autocommit=True) as conn:
+    with db.connect(autocommit=True) as conn:
         row = conn.execute(
             "UPDATE deployment_state SET min_code_version = GREATEST(min_code_version, %s) "
             "WHERE id = 1 RETURNING min_code_version",

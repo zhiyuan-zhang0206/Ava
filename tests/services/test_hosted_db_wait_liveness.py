@@ -46,6 +46,8 @@ async def test_real_db_wait_survives_both_stale_paths_and_clears_afterward(  # n
     aops_pool: AsyncConnectionPool,
     held: bool,
     force: bool,
+    database: Database,
+    event_bus: EventBus,
 ) -> None:
     incarnation = await _admit(aops_pool)
     agent = incarnation.agent_id
@@ -74,7 +76,9 @@ async def test_real_db_wait_survives_both_stale_paths_and_clears_afterward(  # n
             acquired_at=acquired,
         )
     else:
-        message = insert_inbound_message(db_conn, agent, "pending", "user")
+        message = insert_inbound_message(
+            db_conn, agent, "pending", "user", bus=event_bus, database=database
+        )
         db_conn.execute(
             "UPDATE inbound_messages SET created_at=now()-interval '100s' WHERE id=%s", (message,)
         )

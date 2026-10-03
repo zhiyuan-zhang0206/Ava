@@ -15,6 +15,7 @@ import pytest
 
 from base import telemetry
 from base.agents.messages.caller_identity import CallerIdentity
+from base.db import Database
 from gateway.mcp_server.endpoint import _record_tool_call
 
 
@@ -22,10 +23,12 @@ def _caller() -> CallerIdentity:
     return CallerIdentity(kind="external_agent", subject="mcp", instance=uuid.uuid4().hex[:12])
 
 
-async def test_a_tool_call_is_recorded_with_its_outcome(db_conn: psycopg.Connection) -> None:
+async def test_a_tool_call_is_recorded_with_its_outcome(
+    db_conn: psycopg.Connection, database: Database
+) -> None:
     caller = _caller()
 
-    await _record_tool_call(caller, {"tool": "spawn_agent", "outcome": "ok"})
+    await _record_tool_call(database, caller, {"tool": "spawn_agent", "outcome": "ok"})
 
     rows = db_conn.execute(
         "SELECT agent_id, attributes FROM audit_events "
@@ -38,12 +41,12 @@ async def test_a_tool_call_is_recorded_with_its_outcome(db_conn: psycopg.Connect
 
 
 async def test_a_failed_audit_write_does_not_fail_the_tool_call(
-    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch, database: Database
 ) -> None:
     caller = _caller()
     reported: list[str] = []
 
-    def refuse(_event: object) -> None:
+    def refuse(_db: object, _event: object) -> None:
         raise RuntimeError("database down")
 
     monkeypatch.setattr("base.telemetry.audit_events.record_audit_standalone", refuse)
@@ -54,7 +57,7 @@ async def test_a_failed_audit_write_does_not_fail_the_tool_call(
 
     monkeypatch.setattr(telemetry, "emit", emit)
 
-    await _record_tool_call(caller, {"tool": "spawn_agent", "outcome": "ok"})
+    await _record_tool_call(database, caller, {"tool": "spawn_agent", "outcome": "ok"})
 
     assert reported == ["mcp_tool_call"]
     count = db_conn.execute(

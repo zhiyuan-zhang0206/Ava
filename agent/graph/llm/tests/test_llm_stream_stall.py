@@ -38,6 +38,8 @@ from agent.state import AgentState
 from agent.tests._fakes import make_fake_ops_pool
 from base.agents.context import AvaContext
 from base.config import settings
+from base.db import Database
+from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices
 from base.lm.registry import MODELS, ModelSpec
 from base.native_process.turn_identity import bind_turn_identity
@@ -60,6 +62,8 @@ def _make_runtime(llm: MagicMock) -> Runtime[AvaContext]:
         llm=llm,
         event_publisher=MagicMock(),
         agent=AgentSlices.resolve(),
+        db=Database.from_settings(),
+        bus=EventBus.from_settings(),
     )
     return Runtime(context=ctx)
 

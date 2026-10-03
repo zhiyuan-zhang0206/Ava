@@ -12,13 +12,16 @@ import logging
 from typing import cast
 
 import base.deploy.state.host_deploy_state
+from base.db import Database
 from base.deploy.maintenance.pause_owner import PauseOwnerSnapshot
+from base.events.live.bus import EventBus
 
 _log = logging.getLogger(__name__)
 _UNSET = object()
 
 
 def is_paused(
+    db: Database,
     state: base.deploy.state.host_deploy_state.HostDeployState | object | None = _UNSET,
 ) -> bool:
     """Whether this host is paused — the `host_deploy_state.posture` row written
@@ -31,7 +34,7 @@ def is_paused(
     """
     if state is _UNSET:
         try:
-            resolved_state = base.deploy.state.host_deploy_state.read()
+            resolved_state = base.deploy.state.host_deploy_state.read(db)
         except Exception:
             _log.warning(
                 "[cluster] is_paused: host_deploy_state read failed; reading as not paused",
@@ -43,14 +46,14 @@ def is_paused(
     return resolved_state is not None and resolved_state.posture == "paused"
 
 
-def unpause_local_cluster() -> None:
+def unpause_local_cluster(db: Database, bus: EventBus) -> None:
     """Restore posture, then release this unit's existing agent pause."""
     from base.deploy.maintenance import admission
     from ops.agent_pause import resume_agents
 
     current = admission.snapshot()
     if current is None:
-        _unpause_local_cluster()
+        _unpause_local_cluster(db)
         return
     assert current.holder is not None and current.acquired_at is not None  # noqa: S101
     if (refusal := _hold_refusal(current)) is not None:
@@ -62,8 +65,8 @@ def unpause_local_cluster() -> None:
             sorted(current.maintenance.undelivered),
         )
     with admission.authorized_start(current.holder, current.acquired_at):
-        _unpause_local_cluster()
-    resume_agents()
+        _unpause_local_cluster(db)
+    resume_agents(db, bus)
 
 
 def _hold_refusal(current: PauseOwnerSnapshot) -> str | None:
@@ -87,11 +90,11 @@ def _hold_refusal(current: PauseOwnerSnapshot) -> str | None:
     return None
 
 
-def _unpause_local_cluster() -> None:
+def _unpause_local_cluster(db: Database) -> None:
     """Restore this unit's HTTP posture without launching any agent or service."""
     from base.deploy.maintenance import admission
     from base.deploy.state.host_deploy_state import set_posture
 
     admission.require_start_allowed()
-    set_posture("idle")
+    set_posture(db, "idle")
     _log.info("[cluster] unpaused: posture -> idle")

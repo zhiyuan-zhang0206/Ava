@@ -50,6 +50,7 @@ from base.agents.impersonation.maintenance import (
 from base.config import settings
 from base.daemon import round_loop
 from base.daemon.loop_health import LoopProgress
+from base.db import Database
 from base.db.transaction import write_transaction
 from base.events.live.announce import publish_agent_updated_sync
 from base.events.live.bus import EventBus
@@ -70,7 +71,9 @@ _log = logging.getLogger(__name__)
 _FIRE_LOG_PASS_BATCH = 50_000
 
 
-def _reap_expired_notices_blocking(pool: ConnectionPool, bus: EventBus) -> list[tuple[int, int]]:
+def _reap_expired_notices_blocking(
+    pool: ConnectionPool, db: Database, bus: EventBus
+) -> list[tuple[int, int]]:
     """Auto-resolve notices whose expire_at deadline has elapsed; return (agent_id, notice_id)."""
     with write_transaction(pool) as conn:
         with conn.cursor() as cur:
@@ -99,6 +102,8 @@ def _reap_expired_notices_blocking(pool: ConnectionPool, bus: EventBus) -> list[
                 updated_agents.add(agent_id)
             notify_owner(
                 conn,
+                db,
+                bus,
                 agent_id,
                 f'Re: "{title}"\n\n[This notice has expired.]',
                 source="system:notice-expire",
@@ -110,7 +115,9 @@ def _reap_expired_notices_blocking(pool: ConnectionPool, bus: EventBus) -> list[
     return reaped
 
 
-def _reap_expired_pages_blocking(pool: ConnectionPool, bus: EventBus) -> list[tuple[int, str, int]]:
+def _reap_expired_pages_blocking(
+    pool: ConnectionPool, db: Database, bus: EventBus
+) -> list[tuple[int, str, int]]:
     """Terminalize page rows past their deadline; return (agent_id, name, id).
 
     Runs on one connection (via to_thread — the gateway event loop never
@@ -144,6 +151,8 @@ def _reap_expired_pages_blocking(pool: ConnectionPool, bus: EventBus) -> list[tu
                 # the owner to stop it and release the port.
                 notify_owner(
                     conn,
+                    db,
+                    bus,
                     agent_id,
                     f"Page {name!r} (agent {agent_id}) was reclaimed after its TTL "
                     "expired. Stop the page's HTTP server to release its port; "
@@ -152,6 +161,8 @@ def _reap_expired_pages_blocking(pool: ConnectionPool, bus: EventBus) -> list[tu
             else:
                 notify_owner(
                     conn,
+                    db,
+                    bus,
                     agent_id,
                     f"Page {name!r} (agent {agent_id}) was reclaimed after its TTL "
                     "expired. Serve it again with ava.ui.serve() to republish.",
@@ -241,18 +252,20 @@ async def _slow_phases(pool: ConnectionPool) -> tuple[int, int, int]:
     return pruned, torn, settled
 
 
-async def sweep_round(pool: ConnectionPool, bus: EventBus, progress: LoopProgress) -> None:
+async def sweep_round(
+    pool: ConnectionPool, db: Database, bus: EventBus, progress: LoopProgress
+) -> None:
     """One pass over every database-only phase, beating `progress` between them."""
-    reminded = await asyncio.to_thread(remind_expiring_impersonations, pool)
+    reminded = await asyncio.to_thread(remind_expiring_impersonations, pool, db, bus)
     progress.beat()
-    impersonations = await asyncio.to_thread(reap_impersonations, pool)
+    impersonations = await asyncio.to_thread(reap_impersonations, pool, db, bus)
     await asyncio.to_thread(alert_stuck_event_logs, pool)
     progress.beat()
-    pages = await asyncio.to_thread(_reap_expired_pages_blocking, pool, bus)
+    pages = await asyncio.to_thread(_reap_expired_pages_blocking, pool, db, bus)
     progress.beat()
     sessions = await asyncio.to_thread(_reap_expired_web_sessions_blocking, pool)
     progress.beat()
-    notices = await asyncio.to_thread(_reap_expired_notices_blocking, pool, bus)
+    notices = await asyncio.to_thread(_reap_expired_notices_blocking, pool, db, bus)
     for agent_id, nid in notices:
         with suppress(Exception):
             await lifecycle.publish_notice_resolved(bus, agent_id, nid)
@@ -284,11 +297,13 @@ async def sweep_round(pool: ConnectionPool, bus: EventBus, progress: LoopProgres
         )
 
 
-async def sweep_loop(pool: ConnectionPool, bus: EventBus, progress: LoopProgress) -> None:
+async def sweep_loop(
+    pool: ConnectionPool, db: Database, bus: EventBus, progress: LoopProgress
+) -> None:
     """The database-only sweep as a resident sequential loop."""
 
     async def one_round() -> None:
-        await sweep_round(pool, bus, progress)
+        await sweep_round(pool, db, bus, progress)
 
     await round_loop.run_rounds(
         "sweep", progress, settings.daemon.ttl_reaper_poll_interval_seconds, one_round

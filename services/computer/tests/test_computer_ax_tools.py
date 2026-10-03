@@ -14,6 +14,7 @@ from typing import Any
 import pytest
 
 import services.computer.ax_tools as ax
+from base.db import Database
 from services.computer.errors import ComputerUseError
 from services.computer.mcp_daemon import ComputerMcpDaemon
 from services.computer.tests.slices import computer_use_config
@@ -261,7 +262,9 @@ def fake_ax(monkeypatch: pytest.MonkeyPatch) -> FakeAxHelper:
 async def call_ax(
     args: dict[str, Any] | None = None, daemon: ComputerMcpDaemon | None = None
 ) -> dict[str, Any]:
-    daemon = daemon or ComputerMcpDaemon(computer_use_config(), sock="/nonexistent-test.sock")
+    daemon = daemon or ComputerMcpDaemon(
+        computer_use_config(), Database.from_settings(), sock="/nonexistent-test.sock"
+    )
     resp = await daemon._dispatch(
         {"id": 1, "method": "call_tool", "tool": "ax_tree", "args": args or {}, "agent_id": None}
     )
@@ -281,8 +284,9 @@ async def test_ax_tree_defaults_to_the_frontmost_app_and_renders(fake_ax: FakeAx
 
 async def test_ax_tree_scope_goes_through_the_raw_id_and_widens_the_walk(
     fake_ax: FakeAxHelper,
+    database: Database,
 ) -> None:
-    daemon = ComputerMcpDaemon(computer_use_config(), sock="/nonexistent-test.sock")
+    daemon = ComputerMcpDaemon(computer_use_config(), database, sock="/nonexistent-test.sock")
     await call_ax({"app": "Mail"}, daemon)
     await call_ax({"app": "Mail", "scope": "e2", "max_nodes": 300}, daemon)
     call = fake_ax.calls[-1][1]
@@ -327,8 +331,8 @@ async def test_ax_tree_rejects_bad_arguments(fake_ax: FakeAxHelper, args: dict[s
     assert fake_ax.calls == []
 
 
-async def test_ax_tree_is_declared_in_the_tool_list() -> None:
-    daemon = ComputerMcpDaemon(computer_use_config(), sock="/nonexistent-test.sock")
+async def test_ax_tree_is_declared_in_the_tool_list(database: Database) -> None:
+    daemon = ComputerMcpDaemon(computer_use_config(), database, sock="/nonexistent-test.sock")
     resp = await daemon._dispatch({"id": 1, "method": "list_tools"})
     assert resp["ok"] is True
     assert resp["ok"] is True

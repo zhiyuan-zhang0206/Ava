@@ -9,7 +9,7 @@ import psycopg
 import pytest
 
 from base.config import settings
-from base.db import publish_inbound_wake
+from base.db import Database, publish_inbound_wake
 from base.events.live.announce import (
     publish_agent_updated_sync,
     publish_impersonation_changed_sync,
@@ -40,7 +40,9 @@ def _seed_active_lease(agent_id: int) -> tuple[UUID, int]:
         ).fetchone()
         assert session_row is not None
         session_id = session_row[0]
-    publish_inbound_wake(agent_id, "impersonation")
+    publish_inbound_wake(
+        Database.from_settings(), EventBus.from_settings(), agent_id, "impersonation"
+    )
     bus = EventBus.from_settings()
     publish_impersonation_changed_sync(bus, agent_id)
     publish_agent_updated_sync(bus, agent_id)

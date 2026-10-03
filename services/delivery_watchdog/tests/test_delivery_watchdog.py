@@ -15,15 +15,12 @@ from psycopg_pool import ConnectionPool
 
 from base import telemetry
 from base.config import settings
-from base.db import insert_inbound_message
+from base.db import Database, insert_inbound_message
+from base.events.live.bus import EventBus
 from base.events.live.redis_listener import RedisInboundListener
 from services.delivery_watchdog.daemon import (
     dispatch_wakes,
-    gc_alerted,
-    persist_alerted,
-    prune_alerted,
     scan_once,
-    select_alerted_ids,
     select_pending_for_dispatch,
     select_pending_ids,
     select_stale_pending,
@@ -72,7 +69,14 @@ def _make_running_agent(db: psycopg.Connection) -> int:
 def _insert_old_inbound(db: psycopg.Connection, agent_id: int, *, age_s: float) -> int:
     """Insert a chat inbound backdated `age_s` (timestamp-only UPDATE — the
     inbound table has no triggers on created_at). Returns the inbound id."""
-    iid = insert_inbound_message(db, agent_id, "stale", source="user")
+    iid = insert_inbound_message(
+        db,
+        agent_id,
+        "stale",
+        source="user",
+        bus=EventBus.from_settings(),
+        database=Database.from_settings(),
+    )
     with db.cursor() as cur:
         cur.execute(
             "UPDATE inbound_messages SET created_at = now() - make_interval(secs => %s) "
@@ -262,7 +266,12 @@ class TestScanOnce:
 
 class TestDispatchWakes:
     def test_republishes_wake_per_stale_row(
-        self, db_conn: psycopg.Connection, pool: ConnectionPool, monkeypatch: pytest.MonkeyPatch
+        self,
+        db_conn: psycopg.Connection,
+        pool: ConnectionPool,
+        monkeypatch: pytest.MonkeyPatch,
+        database: Database,
+        event_bus: EventBus,
     ) -> None:
         """dispatch_wakes re-publishes one wake (payload = inbound id) per
         stale pending row of an idling owner — the lost-wake recovery."""
@@ -275,10 +284,12 @@ class TestDispatchWakes:
         monkeypatch.setattr(
             base.db,
             "publish_inbound_wake",
-            lambda agent_id, payload: calls.append((agent_id, payload)) or True,  # pyright: ignore[reportUnknownArgumentType]
+            lambda _db, _bus, agent_id, payload: calls.append((agent_id, payload)) or True,  # pyright: ignore[reportUnknownArgumentType]
         )
         dispatched = dispatch_wakes(
             pool,
+            database,
+            event_bus,
             _DISPATCH_THRESHOLD_S,
             _MAX_DISPATCH_COUNT,
             _DISPATCH_BACKOFF_STEPS_S,
@@ -288,7 +299,12 @@ class TestDispatchWakes:
         assert calls == [(aid, str(iid))]
 
     def test_publish_failure_does_not_raise(
-        self, db_conn: psycopg.Connection, pool: ConnectionPool, monkeypatch: pytest.MonkeyPatch
+        self,
+        db_conn: psycopg.Connection,
+        pool: ConnectionPool,
+        monkeypatch: pytest.MonkeyPatch,
+        database: Database,
+        event_bus: EventBus,
     ) -> None:
         """A failing publish is logged, not raised — the alert path and the
         claim loop's 30s recheck remain as backstops."""
@@ -297,13 +313,15 @@ class TestDispatchWakes:
         aid = _make_idling_agent(db_conn)
         _insert_old_inbound(db_conn, aid, age_s=_DISPATCH_THRESHOLD_S + 0.5)
 
-        def boom(*_a, **_k) -> bool:
+        def boom(_db: object, _bus: object, *_a, **_k) -> bool:
             return False
 
         monkeypatch.setattr(base.db, "publish_inbound_wake", boom)  # pyright: ignore[reportUnknownArgumentType]
         assert (
             dispatch_wakes(
                 pool,
+                database,
+                event_bus,
                 _DISPATCH_THRESHOLD_S,
                 _MAX_DISPATCH_COUNT,
                 _DISPATCH_BACKOFF_STEPS_S,
@@ -317,6 +335,8 @@ class TestDispatchWakes:
         db_conn: psycopg.Connection,
         pool: ConnectionPool,
         aredis_inbound_listener: RedisInboundListener,
+        database: Database,
+        event_bus: EventBus,
     ) -> None:
         """End-to-end: dispatch_wakes publishes on the agent's Redis channel,
         so a listener subscribed to it wakes immediately — the lost-wake window
@@ -332,6 +352,8 @@ class TestDispatchWakes:
             await listener.ensure_listening()
             dispatched = dispatch_wakes(
                 pool,
+                database,
+                event_bus,
                 _DISPATCH_THRESHOLD_S,
                 _MAX_DISPATCH_COUNT,
                 _DISPATCH_BACKOFF_STEPS_S,
@@ -348,6 +370,8 @@ class TestDispatchBackoffAndPoison:
     def _dispatch(pool: ConnectionPool) -> int:
         return dispatch_wakes(
             pool,
+            Database.from_settings(),
+            EventBus.from_settings(),
             _DISPATCH_THRESHOLD_S,
             _MAX_DISPATCH_COUNT,
             _DISPATCH_BACKOFF_STEPS_S,
@@ -375,7 +399,7 @@ class TestDispatchBackoffAndPoison:
         iid = _insert_old_inbound(db_conn, aid, age_s=_DISPATCH_THRESHOLD_S + 1)
         calls: list[tuple[int, str]] = []
 
-        def record_publish(agent_id: int, payload: str) -> bool:
+        def record_publish(_db: object, _bus: object, agent_id: int, payload: str) -> bool:
             calls.append((agent_id, payload))
             return True
 
@@ -401,7 +425,7 @@ class TestDispatchBackoffAndPoison:
         aid = _make_idling_agent(db_conn)
         iid = _insert_old_inbound(db_conn, aid, age_s=_DISPATCH_THRESHOLD_S + 1)
 
-        def accept_publish(_agent_id: int, _payload: str) -> bool:
+        def accept_publish(_db: object, _bus: object, _agent_id: int, _payload: str) -> bool:
             return True
 
         monkeypatch.setattr("base.db.publish_inbound_wake", accept_publish)
@@ -454,7 +478,7 @@ class TestDispatchBackoffAndPoison:
         aid = _make_idling_agent(db_conn)
         iid = _insert_old_inbound(db_conn, aid, age_s=_DISPATCH_THRESHOLD_S + 1)
 
-        def fail_publish(*_args: object) -> bool:
+        def fail_publish(_db: object, _bus: object, *_args: object) -> bool:
             return False
 
         monkeypatch.setattr("base.db.publish_inbound_wake", fail_publish)
@@ -476,7 +500,7 @@ class TestDispatchBackoffAndPoison:
         aid = _make_idling_agent(db_conn)
         iid = _insert_old_inbound(db_conn, aid, age_s=_DISPATCH_THRESHOLD_S + 1)
 
-        def publish_and_claim(agent_id: int, payload: str) -> bool:
+        def publish_and_claim(_db: object, _bus: object, agent_id: int, payload: str) -> bool:
             with db_conn.cursor() as cur:
                 cur.execute(
                     "UPDATE inbound_messages SET status = 'claimed' WHERE id = %s",
@@ -509,7 +533,7 @@ class TestDispatchBackoffAndPoison:
         aid = _make_idling_agent(db_conn)
         iid = _insert_old_inbound(db_conn, aid, age_s=_DISPATCH_THRESHOLD_S + 1)
 
-        def accept_publish(_agent_id: int, _payload: str) -> bool:
+        def accept_publish(_db: object, _bus: object, _agent_id: int, _payload: str) -> bool:
             return True
 
         monkeypatch.setattr("base.db.publish_inbound_wake", accept_publish)
@@ -596,7 +620,9 @@ class TestDispatchBackoffAndPoison:
         db_conn.commit()
         calls: list[tuple[int, str]] = []
 
-        def record_unexpected_publish(agent_id: int, payload: str) -> bool:
+        def record_unexpected_publish(
+            _db: object, _bus: object, agent_id: int, payload: str
+        ) -> bool:
             calls.append((agent_id, payload))
             return True
 
@@ -628,7 +654,7 @@ class TestDispatchBackoffAndPoison:
         db_conn.commit()
         calls: list[tuple[int, str]] = []
 
-        def record_publish(agent_id: int, payload: str) -> bool:
+        def record_publish(_db: object, _bus: object, agent_id: int, payload: str) -> bool:
             calls.append((agent_id, payload))
             return True
 
@@ -654,7 +680,7 @@ class TestDispatchBackoffAndPoison:
         iid = _insert_old_inbound(db_conn, aid, age_s=_DISPATCH_THRESHOLD_S + 1)
         calls: list[tuple[int, str]] = []
 
-        def record_publish(agent_id: int, payload: str) -> bool:
+        def record_publish(_db: object, _bus: object, agent_id: int, payload: str) -> bool:
             calls.append((agent_id, payload))
             return True
 
@@ -676,9 +702,17 @@ class TestDispatchBackoffAndPoison:
 
 
 class TestSelectPendingIds:
-    def test_only_pending(self, db_conn: psycopg.Connection, pool: ConnectionPool) -> None:
+    def test_only_pending(
+        self,
+        db_conn: psycopg.Connection,
+        pool: ConnectionPool,
+        database: Database,
+        event_bus: EventBus,
+    ) -> None:
         aid = _make_idling_agent(db_conn)
-        iid = insert_inbound_message(db_conn, aid, "hi", source="user")
+        iid = insert_inbound_message(
+            db_conn, aid, "hi", source="user", bus=event_bus, database=database
+        )
         with db_conn.cursor() as cur:
             cur.execute(
                 "INSERT INTO inbound_messages (agent_id, content, kind, source) "
@@ -1036,20 +1070,28 @@ class TestDeadLetterStalePendingChats:
 
 class TestSelectTerminatedOwnersWithPending:
     def test_force_fence_excludes_older_chat_but_accepts_newer_chat(
-        self, db_conn: psycopg.Connection, pool: ConnectionPool
+        self,
+        db_conn: psycopg.Connection,
+        pool: ConnectionPool,
+        database: Database,
+        event_bus: EventBus,
     ) -> None:
         """The selector uses the monotonic explicit-kill fence in addition to
         wall-clock status time: old queued work stays dead, later work wakes."""
         from services.delivery_watchdog.daemon import select_terminated_owners_with_pending
 
         aid = _make_terminated_agent(db_conn)
-        old_chat_id = insert_inbound_message(db_conn, aid, "before force", source="user")
+        old_chat_id = insert_inbound_message(
+            db_conn, aid, "before force", source="user", bus=event_bus, database=database
+        )
         fence_id = insert_inbound_message(
             db_conn,
             aid,
             "",
             source="user",
             kind="terminate",
+            bus=event_bus,
+            database=database,
         )
         with db_conn.cursor() as cur:
             cur.execute(
@@ -1061,19 +1103,27 @@ class TestSelectTerminatedOwnersWithPending:
         assert old_chat_id < fence_id
         assert select_terminated_owners_with_pending(pool, 86400.0) == []
 
-        new_chat_id = insert_inbound_message(db_conn, aid, "after force", source="user")
+        new_chat_id = insert_inbound_message(
+            db_conn, aid, "after force", source="user", bus=event_bus, database=database
+        )
         assert new_chat_id > fence_id
         assert select_terminated_owners_with_pending(pool, 86400.0) == [(aid, new_chat_id)]
 
     def test_ignores_pending_chat_that_predates_latest_termination(
-        self, db_conn: psycopg.Connection, pool: ConnectionPool
+        self,
+        db_conn: psycopg.Connection,
+        pool: ConnectionPool,
+        database: Database,
+        event_bus: EventBus,
     ) -> None:
         """A user's explicit kill wins over mail already waiting when they
         killed the agent; that old row must not immediately undo the kill."""
         from services.delivery_watchdog.daemon import select_terminated_owners_with_pending
 
         aid = _make_idling_agent(db_conn)
-        iid = insert_inbound_message(db_conn, aid, "already waiting", source="user")
+        iid = insert_inbound_message(
+            db_conn, aid, "already waiting", source="user", bus=event_bus, database=database
+        )
         with db_conn.cursor() as cur:
             cur.execute(
                 "UPDATE agents_meta SET status = 'terminated', termination_source = 'user' "
@@ -1092,14 +1142,20 @@ class TestSelectTerminatedOwnersWithPending:
         assert select_terminated_owners_with_pending(pool, 86400.0) == []
 
     def test_returns_pending_chat_created_after_latest_termination(
-        self, db_conn: psycopg.Connection, pool: ConnectionPool
+        self,
+        db_conn: psycopg.Connection,
+        pool: ConnectionPool,
+        database: Database,
+        event_bus: EventBus,
     ) -> None:
         """A new chat sent after termination preserves the existing contract:
         delivery to a dead agent wakes it automatically."""
         from services.delivery_watchdog.daemon import select_terminated_owners_with_pending
 
         aid = _make_terminated_agent(db_conn)
-        iid = insert_inbound_message(db_conn, aid, "new request", source="user")
+        iid = insert_inbound_message(
+            db_conn, aid, "new request", source="user", bus=event_bus, database=database
+        )
         with db_conn.cursor() as cur:
             cur.execute(
                 "UPDATE inbound_messages "
@@ -1113,17 +1169,27 @@ class TestSelectTerminatedOwnersWithPending:
         assert select_terminated_owners_with_pending(pool, 86400.0) == [(aid, iid)]
 
     def test_returns_terminated_owners_with_pending_chat(
-        self, db_conn: psycopg.Connection, pool: ConnectionPool
+        self,
+        db_conn: psycopg.Connection,
+        pool: ConnectionPool,
+        database: Database,
+        event_bus: EventBus,
     ) -> None:
         from services.delivery_watchdog.daemon import select_terminated_owners_with_pending
 
         aid = _make_terminated_agent(db_conn)
-        iid = insert_inbound_message(db_conn, aid, "hello?", source="user")
+        iid = insert_inbound_message(
+            db_conn, aid, "hello?", source="user", bus=event_bus, database=database
+        )
 
         assert select_terminated_owners_with_pending(pool, 86400.0) == [(aid, iid)]
 
     def test_deduplicates_per_agent(
-        self, db_conn: psycopg.Connection, pool: ConnectionPool
+        self,
+        db_conn: psycopg.Connection,
+        pool: ConnectionPool,
+        database: Database,
+        event_bus: EventBus,
     ) -> None:
         """250 dead letters for one agent mean ONE resurrect, not 250."""
         from services.delivery_watchdog.daemon import select_terminated_owners_with_pending
@@ -1131,17 +1197,25 @@ class TestSelectTerminatedOwnersWithPending:
         aid = _make_terminated_agent(db_conn)
         iids: list[int] = []
         for _ in range(3):
-            iids.append(insert_inbound_message(db_conn, aid, "hello?", source="user"))
+            iids.append(
+                insert_inbound_message(
+                    db_conn, aid, "hello?", source="user", bus=event_bus, database=database
+                )
+            )
 
         assert select_terminated_owners_with_pending(pool, 86400.0) == [(aid, min(iids))]
 
     def test_ignores_live_owners_and_non_chat_kinds(
-        self, db_conn: psycopg.Connection, pool: ConnectionPool
+        self,
+        db_conn: psycopg.Connection,
+        pool: ConnectionPool,
+        database: Database,
+        event_bus: EventBus,
     ) -> None:
         from services.delivery_watchdog.daemon import select_terminated_owners_with_pending
 
         live = _make_idling_agent(db_conn)  # idling owner — not a resurrect case
-        insert_inbound_message(db_conn, live, "hi", source="user")
+        insert_inbound_message(db_conn, live, "hi", source="user", bus=event_bus, database=database)
         dead = _make_terminated_agent(db_conn)
         with db_conn.cursor() as cur:
             cur.execute(
@@ -1154,12 +1228,18 @@ class TestSelectTerminatedOwnersWithPending:
         assert select_terminated_owners_with_pending(pool, 86400.0) == []
 
     def test_claimed_chat_is_not_retried(
-        self, db_conn: psycopg.Connection, pool: ConnectionPool
+        self,
+        db_conn: psycopg.Connection,
+        pool: ConnectionPool,
+        database: Database,
+        event_bus: EventBus,
     ) -> None:
         from services.delivery_watchdog.daemon import select_terminated_owners_with_pending
 
         aid = _make_terminated_agent(db_conn)
-        iid = insert_inbound_message(db_conn, aid, "hello?", source="user")
+        iid = insert_inbound_message(
+            db_conn, aid, "hello?", source="user", bus=event_bus, database=database
+        )
         with db_conn.cursor() as cur:
             cur.execute("UPDATE inbound_messages SET status = 'claimed' WHERE id = %s", (iid,))
         db_conn.commit()
@@ -1167,12 +1247,23 @@ class TestSelectTerminatedOwnersWithPending:
         assert select_terminated_owners_with_pending(pool, 86400.0) == []
 
     def test_wake_suppression_excludes_until_expiry(
-        self, db_conn: psycopg.Connection, pool: ConnectionPool
+        self,
+        db_conn: psycopg.Connection,
+        pool: ConnectionPool,
+        database: Database,
+        event_bus: EventBus,
     ) -> None:
         from services.delivery_watchdog.daemon import select_terminated_owners_with_pending
 
         aid = _make_terminated_agent(db_conn)
-        iid = insert_inbound_message(db_conn, aid, "queued during suppression", source="agent:1")
+        iid = insert_inbound_message(
+            db_conn,
+            aid,
+            "queued during suppression",
+            source="agent:1",
+            bus=event_bus,
+            database=database,
+        )
         with db_conn.cursor() as cur:
             cur.execute(
                 "UPDATE agents_meta SET wake_suppressed_until = now() + interval '1 hour', "
@@ -1193,14 +1284,20 @@ class TestSelectTerminatedOwnersWithPending:
         assert select_terminated_owners_with_pending(pool, 86400.0) == [(aid, iid)]
 
     def test_stale_pending_chat_does_not_resurrect_owner(
-        self, db_conn: psycopg.Connection, pool: ConnectionPool
+        self,
+        db_conn: psycopg.Connection,
+        pool: ConnectionPool,
+        database: Database,
+        event_bus: EventBus,
     ) -> None:
         """Issue #2049: the ghost-alive state — a terminated owner whose only
         pending chats are past the stale threshold — is not a resurrect trigger."""
         from services.delivery_watchdog.daemon import select_terminated_owners_with_pending
 
         aid = _make_terminated_agent(db_conn)
-        iid = insert_inbound_message(db_conn, aid, "stale peer mail", source="agent:1")
+        iid = insert_inbound_message(
+            db_conn, aid, "stale peer mail", source="agent:1", bus=event_bus, database=database
+        )
         with db_conn.cursor() as cur:
             cur.execute(
                 "UPDATE inbound_messages SET created_at = now() - interval '2 days' WHERE id = %s",
@@ -1216,21 +1313,31 @@ class TestSelectTerminatedOwnersWithPending:
         assert select_terminated_owners_with_pending(pool, 86400.0) == []
 
     def test_recent_pending_chat_still_resurrects_owner(
-        self, db_conn: psycopg.Connection, pool: ConnectionPool
+        self,
+        db_conn: psycopg.Connection,
+        pool: ConnectionPool,
+        database: Database,
+        event_bus: EventBus,
     ) -> None:
         """Inside the threshold the G4 retry window is unchanged: a recent
         post-termination chat still wakes its terminated owner."""
         from services.delivery_watchdog.daemon import select_terminated_owners_with_pending
 
         aid = _make_terminated_agent(db_conn)
-        iid = insert_inbound_message(db_conn, aid, "fresh peer mail", source="agent:1")
+        iid = insert_inbound_message(
+            db_conn, aid, "fresh peer mail", source="agent:1", bus=event_bus, database=database
+        )
 
         assert select_terminated_owners_with_pending(pool, 86400.0) == [(aid, iid)]
 
     # ── Task #3617: system-reaped crash rows resume their leftover work ──────
 
     def test_system_reaped_crash_row_resumes_leftover_chat(
-        self, db_conn: psycopg.Connection, pool: ConnectionPool
+        self,
+        db_conn: psycopg.Connection,
+        pool: ConnectionPool,
+        database: Database,
+        event_bus: EventBus,
     ) -> None:
         """A chat already waiting when the SYSTEM reaped a crash-marked corpse
         is leftover work, not mail an operator's kill cancelled — the relaxed
@@ -1238,13 +1345,19 @@ class TestSelectTerminatedOwnersWithPending:
         from services.delivery_watchdog.daemon import select_terminated_owners_with_pending
 
         aid = _make_reaped_crash_agent(db_conn)
-        iid = insert_inbound_message(db_conn, aid, "leftover work", source="user")
+        iid = insert_inbound_message(
+            db_conn, aid, "leftover work", source="user", bus=event_bus, database=database
+        )
         _backdate_chat_before_termination(db_conn, aid, iid)
 
         assert select_terminated_owners_with_pending(pool, 86400.0) == [(aid, iid)]
 
     def test_relaxed_guard_still_requires_the_crash_marker(
-        self, db_conn: psycopg.Connection, pool: ConnectionPool
+        self,
+        db_conn: psycopg.Connection,
+        pool: ConnectionPool,
+        database: Database,
+        event_bus: EventBus,
     ) -> None:
         """`reaper` alone — marker already cleared by a completed turn of the
         revived incarnation — is an ordinary system death: the fence holds."""
@@ -1258,14 +1371,21 @@ class TestSelectTerminatedOwnersWithPending:
                 (aid,),
             )
         db_conn.commit()
-        iid = insert_inbound_message(db_conn, aid, "leftover work", source="user")
+        iid = insert_inbound_message(
+            db_conn, aid, "leftover work", source="user", bus=event_bus, database=database
+        )
         _backdate_chat_before_termination(db_conn, aid, iid)
 
         assert select_terminated_owners_with_pending(pool, 86400.0) == []
 
     @pytest.mark.parametrize("source", ["user", "exit", "launch-confirm", "integrity"])
     def test_relaxed_guard_requires_reaper_source(
-        self, db_conn: psycopg.Connection, pool: ConnectionPool, source: str
+        self,
+        db_conn: psycopg.Connection,
+        pool: ConnectionPool,
+        source: str,
+        database: Database,
+        event_bus: EventBus,
     ) -> None:
         """The crash marker alone never relaxes the fence: only the SYSTEM's
         own reap is not an operator decision (user/exit) and not a launch or
@@ -1280,13 +1400,19 @@ class TestSelectTerminatedOwnersWithPending:
                 (source, aid),
             )
         db_conn.commit()
-        iid = insert_inbound_message(db_conn, aid, "leftover work", source="user")
+        iid = insert_inbound_message(
+            db_conn, aid, "leftover work", source="user", bus=event_bus, database=database
+        )
         _backdate_chat_before_termination(db_conn, aid, iid)
 
         assert select_terminated_owners_with_pending(pool, 86400.0) == []
 
     def test_relaxed_guard_keeps_suppression_and_breaker_gates(
-        self, db_conn: psycopg.Connection, pool: ConnectionPool
+        self,
+        db_conn: psycopg.Connection,
+        pool: ConnectionPool,
+        database: Database,
+        event_bus: EventBus,
     ) -> None:
         """The relaxed fence does not bypass the automatic-recovery gates: an
         active wake suppression refuses, an expired one does not, and a
@@ -1295,7 +1421,9 @@ class TestSelectTerminatedOwnersWithPending:
         from services.delivery_watchdog.daemon import select_terminated_owners_with_pending
 
         aid = _make_reaped_crash_agent(db_conn)
-        iid = insert_inbound_message(db_conn, aid, "leftover work", source="user")
+        iid = insert_inbound_message(
+            db_conn, aid, "leftover work", source="user", bus=event_bus, database=database
+        )
         _backdate_chat_before_termination(db_conn, aid, iid)
 
         with db_conn.cursor() as cur:
@@ -1328,14 +1456,20 @@ class TestSelectTerminatedOwnersWithPending:
         assert select_terminated_owners_with_pending(pool, 86400.0) == []
 
     def test_relaxed_guard_still_bounds_age_and_keeps_the_force_fence(
-        self, db_conn: psycopg.Connection, pool: ConnectionPool
+        self,
+        db_conn: psycopg.Connection,
+        pool: ConnectionPool,
+        database: Database,
+        event_bus: EventBus,
     ) -> None:
         """The remaining conjuncts are untouched: past the dead-letter bound
         the row is no trigger, and a later explicit force fence still wins."""
         from services.delivery_watchdog.daemon import select_terminated_owners_with_pending
 
         aid = _make_reaped_crash_agent(db_conn)
-        iid = insert_inbound_message(db_conn, aid, "leftover work", source="user")
+        iid = insert_inbound_message(
+            db_conn, aid, "leftover work", source="user", bus=event_bus, database=database
+        )
         with db_conn.cursor() as cur:
             cur.execute(
                 "UPDATE inbound_messages SET created_at = now() - interval '2 hours' WHERE id = %s",
@@ -1346,7 +1480,9 @@ class TestSelectTerminatedOwnersWithPending:
         assert select_terminated_owners_with_pending(pool, 3600.0) == []
         assert select_terminated_owners_with_pending(pool, 86400.0) == [(aid, iid)]
 
-        fence = insert_inbound_message(db_conn, aid, "", source="user", kind="terminate")
+        fence = insert_inbound_message(
+            db_conn, aid, "", source="user", kind="terminate", bus=event_bus, database=database
+        )
         with db_conn.cursor() as cur:
             cur.execute(
                 "UPDATE agents_meta SET last_force_terminate_inbound_id = %s WHERE id = %s",
@@ -1356,7 +1492,11 @@ class TestSelectTerminatedOwnersWithPending:
         assert select_terminated_owners_with_pending(pool, 86400.0) == []
 
     def test_relaxed_guard_still_refuses_failed_restart(
-        self, db_conn: psycopg.Connection, pool: ConnectionPool
+        self,
+        db_conn: psycopg.Connection,
+        pool: ConnectionPool,
+        database: Database,
+        event_bus: EventBus,
     ) -> None:
         """A failed-restart target keeps its own hard fence: the relaunch
         observation must settle before any resurrection, reaped crash row or
@@ -1364,7 +1504,9 @@ class TestSelectTerminatedOwnersWithPending:
         from services.delivery_watchdog.daemon import select_terminated_owners_with_pending
 
         aid = _make_reaped_crash_agent(db_conn)
-        iid = insert_inbound_message(db_conn, aid, "leftover work", source="user")
+        iid = insert_inbound_message(
+            db_conn, aid, "leftover work", source="user", bus=event_bus, database=database
+        )
         _backdate_chat_before_termination(db_conn, aid, iid)
         with db_conn.cursor() as cur:
             cur.execute(
@@ -1387,7 +1529,11 @@ class TestSelectTerminatedOwnersWithPending:
         assert select_terminated_owners_with_pending(pool, 86400.0) == []
 
     def test_system_notice_chat_never_selected(
-        self, db_conn: psycopg.Connection, pool: ConnectionPool
+        self,
+        db_conn: psycopg.Connection,
+        pool: ConnectionPool,
+        database: Database,
+        event_bus: EventBus,
     ) -> None:
         """A system-family chat is a platform notification, never a resurrect
         trigger: plain 'system' and every 'system:<subtype>' variant must not
@@ -1396,16 +1542,26 @@ class TestSelectTerminatedOwnersWithPending:
         from services.delivery_watchdog.daemon import select_terminated_owners_with_pending
 
         aid = _make_terminated_agent(db_conn)
-        insert_inbound_message(db_conn, aid, "notice", source="system")
-        insert_inbound_message(db_conn, aid, "variant", source="system:notice-reply")
+        insert_inbound_message(
+            db_conn, aid, "notice", source="system", bus=event_bus, database=database
+        )
+        insert_inbound_message(
+            db_conn, aid, "variant", source="system:notice-reply", bus=event_bus, database=database
+        )
 
         assert select_terminated_owners_with_pending(pool, 86400.0) == []
 
-        real = insert_inbound_message(db_conn, aid, "real chat", source="user")
+        real = insert_inbound_message(
+            db_conn, aid, "real chat", source="user", bus=event_bus, database=database
+        )
         assert select_terminated_owners_with_pending(pool, 86400.0) == [(aid, real)]
 
     def test_machine_wakeup_chats_still_select(
-        self, db_conn: psycopg.Connection, pool: ConnectionPool
+        self,
+        db_conn: psycopg.Connection,
+        pool: ConnectionPool,
+        database: Database,
+        event_bus: EventBus,
     ) -> None:
         """Machine wakeups (watcher: / shell: / schedule:) are deliberately NOT
         notices: a crash-reaped owner's watcher wake is a revival channel, so
@@ -1413,12 +1569,18 @@ class TestSelectTerminatedOwnersWithPending:
         from services.delivery_watchdog.daemon import select_terminated_owners_with_pending
 
         aid = _make_terminated_agent(db_conn)
-        wid = insert_inbound_message(db_conn, aid, "wake", source="watcher:3")
+        wid = insert_inbound_message(
+            db_conn, aid, "wake", source="watcher:3", bus=event_bus, database=database
+        )
 
         assert select_terminated_owners_with_pending(pool, 86400.0) == [(aid, wid)]
 
     def test_hosted_turn_recovery_marked_chat_still_selects(
-        self, db_conn: psycopg.Connection, pool: ConnectionPool
+        self,
+        db_conn: psycopg.Connection,
+        pool: ConnectionPool,
+        database: Database,
+        event_bus: EventBus,
     ) -> None:
         """The watchdog's hosted-turn recovery chat is the one system-source
         chat that must stay selected: it is this scan's durable retry for a
@@ -1434,6 +1596,8 @@ class TestSelectTerminatedOwnersWithPending:
             "string marker",
             source="system",
             payload={"hosted_turn_recovery": "true"},
+            bus=event_bus,
+            database=database,
         )
         assert select_terminated_owners_with_pending(pool, 86400.0) == []
 
@@ -1443,6 +1607,8 @@ class TestSelectTerminatedOwnersWithPending:
             "continue from the latest checkpoint",
             source="system",
             payload={"hosted_turn_recovery": True},
+            bus=event_bus,
+            database=database,
         )
         assert select_terminated_owners_with_pending(pool, 86400.0) == [(aid, recovery)]
 
@@ -1523,96 +1689,6 @@ class TestSystemNoticeSourcePredicateParity:
         assert is_system_notice_source("watcher:3", {"hosted_turn_recovery": True}) is False
 
 
-class TestAlertDedupPersistence:
-    """Task #945: the once-per-row alert set survives daemon restarts via the
-    `delivery_watchdog_alerted` table — a restart must not re-report every
-    still-stalled inbound, and a row that leaves pending must still be
-    forgotten (so the pending -> claimed -> pending flip re-alerts)."""
-
-    def test_persist_then_reload_seeds_alerted_set(
-        self, db_conn: psycopg.Connection, pool: ConnectionPool
-    ) -> None:
-        aid = _make_idling_agent(db_conn)
-        iid = _insert_old_inbound(db_conn, aid, age_s=_THRESHOLD_S + 5)
-
-        # First daemon life: alert once, persist the delta.
-        newly, alerted = scan_once(pool, _THRESHOLD_S, set())
-        assert newly == 1
-        persist_alerted(pool, alerted - set())
-
-        # "Restart": a fresh in-memory set seeded from the table must dedup
-        # the still-stalled inbound — no re-report burst.
-        reloaded = select_alerted_ids(pool)
-        assert reloaded == {iid}
-        newly, _ = scan_once(pool, _THRESHOLD_S, reloaded)
-        assert newly == 0
-
-    def test_reload_roundtrip_persists_only_given_ids(
-        self, db_conn: psycopg.Connection, pool: ConnectionPool
-    ) -> None:
-        # FK -> inbound_messages: only real inbound ids can be persisted.
-        aid = _make_idling_agent(db_conn)
-        iid_a = _insert_old_inbound(db_conn, aid, age_s=_THRESHOLD_S + 5)
-        iid_b = _insert_old_inbound(db_conn, aid, age_s=_THRESHOLD_S + 5)
-        persist_alerted(pool, {iid_a, iid_b})
-        assert select_alerted_ids(pool) == {iid_a, iid_b}
-        # A second persist of the same ids is a no-op (ON CONFLICT DO NOTHING).
-        persist_alerted(pool, {iid_a, iid_b})
-        assert select_alerted_ids(pool) == {iid_a, iid_b}
-
-    def test_prune_forgets_rows_that_left_pending(
-        self, db_conn: psycopg.Connection, pool: ConnectionPool
-    ) -> None:
-        aid = _make_idling_agent(db_conn)
-        iid = _insert_old_inbound(db_conn, aid, age_s=_THRESHOLD_S + 5)
-        _, alerted = scan_once(pool, _THRESHOLD_S, set())
-        persist_alerted(pool, alerted)
-
-        # Inbound gets claimed (delivered): the row leaves pending.
-        with db_conn.cursor() as cur:
-            cur.execute("UPDATE inbound_messages SET status = 'claimed' WHERE id = %s", (iid,))
-        db_conn.commit()
-        # Same scan semantics as the daemon: scan_once prunes `alerted` in
-        # place, so snapshot before the call, then prune the delta.
-        prev_alerted = set(alerted)
-        _, alerted2 = scan_once(pool, _THRESHOLD_S, alerted)
-        prune_alerted(pool, prev_alerted - alerted2)
-        assert select_alerted_ids(pool) == set()
-
-        # And the flip back to pending re-alerts, exactly as with memory alone.
-        with db_conn.cursor() as cur:
-            cur.execute("UPDATE inbound_messages SET status = 'pending' WHERE id = %s", (iid,))
-        db_conn.commit()
-        newly, alerted3 = scan_once(pool, _THRESHOLD_S, set())
-        assert newly == 1
-        assert alerted3 == {iid}
-
-    def test_gc_removes_old_rows(self, db_conn: psycopg.Connection, pool: ConnectionPool) -> None:
-        aid = _make_idling_agent(db_conn)
-        iid = _insert_old_inbound(db_conn, aid, age_s=_THRESHOLD_S + 5)
-        persist_alerted(pool, {iid})
-        # Backdate the row beyond the TTL (2h) — as if it were alerted long ago
-        # and the inbound left pending while the daemon was down.
-        with db_conn.cursor() as cur:
-            cur.execute(
-                "UPDATE delivery_watchdog_alerted "
-                "SET alerted_at = now() - make_interval(hours => 24) "
-                "WHERE inbound_id = %s",
-                (iid,),
-            )
-        db_conn.commit()
-        removed = gc_alerted(pool, 2 * 3600.0)
-        assert removed == 1
-        assert select_alerted_ids(pool) == set()
-
-    def test_prune_empty_and_persist_empty_are_noops(
-        self, db_conn: psycopg.Connection, pool: ConnectionPool
-    ) -> None:
-        prune_alerted(pool, set())
-        persist_alerted(pool, set())
-        assert select_alerted_ids(pool) == set()
-
-
 def _make_crash_marked_agent(db: psycopg.Connection) -> int:
     """An idling row with the corpse marker set — the corpse reaper's own
     predicate (`last_turn_fatal_at IS NOT NULL` on an idling row).
@@ -1627,55 +1703,3 @@ def _make_crash_marked_agent(db: psycopg.Connection) -> int:
         )
     db.commit()
     return aid
-
-
-class TestStalledCrashMarkedRecovery:
-    """Watchdog escalation for a stalled chat on a crash-marked idling corpse
-    (task #3618; `services.delivery_watchdog.stall_recovery`): the selector and
-    the breaker/suppression exclusions. The request loop is covered in
-    `test_stall_recovery.py`."""
-
-    def test_selector_matches_only_marked_idling_owners(
-        self, db_conn: psycopg.Connection, pool: ConnectionPool
-    ) -> None:
-        from services.delivery_watchdog import stall_recovery as sr
-
-        zombie = _make_crash_marked_agent(db_conn)
-        zombie_inbound = _insert_old_inbound(db_conn, zombie, age_s=_THRESHOLD_S + 5)
-        healthy = _make_idling_agent(db_conn)
-        _insert_old_inbound(db_conn, healthy, age_s=_THRESHOLD_S + 5)
-        running = _make_running_agent(db_conn)
-        with db_conn.cursor() as cur:
-            cur.execute(
-                "UPDATE agents_meta SET last_turn_fatal_at = now() WHERE id = %s", (running,)
-            )
-        db_conn.commit()
-        _insert_old_inbound(db_conn, running, age_s=_THRESHOLD_S + 5)
-        fresh = _make_crash_marked_agent(db_conn)
-        _insert_old_inbound(db_conn, fresh, age_s=1.0)
-
-        rows = sr.select_stalled_crash_marked(pool, _THRESHOLD_S)
-        assert [(r[0], r[1]) for r in rows] == [(zombie_inbound, zombie)]
-
-    def test_selector_excludes_halted_owners(
-        self, db_conn: psycopg.Connection, pool: ConnectionPool
-    ) -> None:
-        """A tripped recovery breaker (durable streak) or a live suppression
-        window keeps the scan from starting a recovery — task #3617's halt."""
-        from services.delivery_watchdog import stall_recovery as sr
-
-        tripped = _make_crash_marked_agent(db_conn)
-        _insert_old_inbound(db_conn, tripped, age_s=_THRESHOLD_S + 5)
-        suppressed = _make_crash_marked_agent(db_conn)
-        _insert_old_inbound(db_conn, suppressed, age_s=_THRESHOLD_S + 5)
-        with db_conn.cursor() as cur:
-            cur.execute(
-                "UPDATE agents_meta SET permanent_reject_streak = 2 WHERE id = %s", (tripped,)
-            )
-            cur.execute(
-                "UPDATE agents_meta SET wake_suppressed_until = now() + interval '1 hour', "
-                "wake_suppress_reason = 'permanent_provider_reject' WHERE id = %s",
-                (suppressed,),
-            )
-        db_conn.commit()
-        assert sr.select_stalled_crash_marked(pool, _THRESHOLD_S) == []

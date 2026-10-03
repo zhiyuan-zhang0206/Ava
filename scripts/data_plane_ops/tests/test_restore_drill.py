@@ -17,6 +17,7 @@ from langgraph.checkpoint.base import empty_checkpoint
 from langgraph.checkpoint.postgres import PostgresSaver
 
 from base.config import settings
+from base.db import Database
 from base.paths import ava_home
 from services.gateway_side.backup import offsite, passphrase
 
@@ -95,7 +96,7 @@ def _grant_prod_roles(db_conn: psycopg.Connection) -> None:
 
 @pytest.mark.skipif(not restore_drill.pg_tool("pg_dump").exists(), reason="needs native pg_dump")
 def test_run_drill_restores_an_encrypted_artifact_into_throwaway_postgres(
-    db_conn: psycopg.Connection, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    db_conn: psycopg.Connection, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, database: Database
 ) -> None:
     """The command path decrypts, restores, and proves a checkpoint
     reader can consume the restored conversation without touching the source DB.
@@ -121,7 +122,7 @@ def test_run_drill_restores_an_encrypted_artifact_into_throwaway_postgres(
     # The session database is not a born home: dump it through an explicit dial,
     # under the passphrase a gateway birth pins.
     passphrase.ensure_minted(ava_home())
-    artifact = restore_drill.backup.run_backup(db_url=settings.data_plane.db_url)
+    artifact = restore_drill.backup.run_backup(db_url=settings.data_plane.db_url, db=database)
     report, elapsed = restore_drill.run_drill(artifact)
 
     assert report.agents == 1

@@ -24,6 +24,8 @@ from redis.exceptions import NoPermissionError
 
 from base.cluster import inbound_channel, redis_channel_prefix
 from base.config import settings
+from base.db import Database
+from base.events.live.bus import EventBus
 from base.events.live.redis_listener import RedisInboundListener, WakeFailure, WakeState
 
 
@@ -667,7 +669,7 @@ class TestWakeKeyBreadcrumb:
         finally:
             await listener.close()
 
-    async def test_publish_sets_wake_key_too(self) -> None:
+    async def test_publish_sets_wake_key_too(self, database: Database, event_bus: EventBus) -> None:
         """The publisher writes the key alongside the pub/sub message (pinned
         at the `base.db.publish_inbound_wake` boundary via
         `insert_inbound_message`), so a wake that the listener DOES receive
@@ -676,7 +678,7 @@ class TestWakeKeyBreadcrumb:
 
         with psycopg.connect(settings.data_plane.db_url, autocommit=True) as conn:
             agent_id = create_agent(conn)
-            insert_inbound_message(conn, agent_id, "wake", "user")
+            insert_inbound_message(conn, agent_id, "wake", "user", bus=event_bus, database=database)
         assert await self._get_wake_key(agent_id) is not None, (
             "insert_inbound_message did not SETEX the wake key"
         )

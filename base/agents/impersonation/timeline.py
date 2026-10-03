@@ -7,10 +7,11 @@ from psycopg.rows import dict_row
 from base.agents.history.timeline import TimelineItem
 from base.agents.impersonation.history import ImpersonationMetadata
 from base.agents.messages.inbound_images import inbound_image_urls
-from base.db import connect
+from base.db import Database
 
 
 def hydrate(
+    db: Database,
     items: list[TimelineItem],
     agent_id: int,
     *,
@@ -42,7 +43,7 @@ def hydrate(
             upper_session, upper_seq = info.session_id, cursor_position[1] - 1
     if not anchors:
         return items
-    with connect() as conn, conn.cursor(row_factory=dict_row) as cur:
+    with db.connect() as conn, conn.cursor(row_factory=dict_row) as cur:
         cur.execute(
             "SELECT p.session_id,e.seq,e.created_at,e.payload FROM agent_impersonations p "
             "JOIN agent_impersonation_entries e ON e.lease_id=p.id "

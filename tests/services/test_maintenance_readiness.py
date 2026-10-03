@@ -15,10 +15,12 @@ from psycopg_pool import PoolTimeout
 from base import config
 from base.cluster.auth import bearer_header
 from base.config import settings
+from base.db import Database
 from base.deploy.lifecycle import start_serving
 from base.deploy.maintenance import admission, pause_owner
 from base.deploy.maintenance.state import MaintenanceHold
 from base.deploy.state import host_deploy_state
+from base.events.live.bus import EventBus
 from base.host.env import runtime_config as rt
 from gateway.app import app
 from tests.agent.test_maintenance import WHEN
@@ -26,11 +28,11 @@ from tests.agent.test_maintenance import isolate as isolate
 
 
 @pytest.fixture
-def held(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+def held(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, database: Database) -> None:
     monkeypatch.setattr(start_serving, "state_path", lambda: tmp_path / "serving.json")
     pause_owner.begin_maintenance("update", WHEN)
     pause_owner.change_maintenance("update", WHEN, MaintenanceHold(), MaintenanceHold("stopped"))
-    host_deploy_state.set_posture("paused")
+    host_deploy_state.set_posture(database, "paused")
     start_serving.begin_start()
 
 
@@ -77,6 +79,8 @@ def test_control_plane_bypasses_an_unreadable_admission_journal(
 
 def test_fleet_drain_keeps_sdk_open_during_preparation_identity_probe(
     monkeypatch: pytest.MonkeyPatch,
+    database: Database,
+    event_bus: EventBus,
 ) -> None:
     from ops import agent_pause
 
@@ -99,7 +103,7 @@ def test_fleet_drain_keeps_sdk_open_during_preparation_identity_probe(
         # A continued release drain: its hold is published, still preparing.
         pause_owner.begin_maintenance("fleet", WHEN)
         with pytest.raises(ProbeBoundaryError):
-            agent_pause.prepare("fleet", WHEN)
+            agent_pause.prepare(database, event_bus, "fleet", WHEN)
     # Only an explicit abort releases the hold, never the drain.
     assert admission.held()
 

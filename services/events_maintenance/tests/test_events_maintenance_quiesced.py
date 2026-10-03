@@ -20,7 +20,12 @@ _Loop = Callable[[Any, LoopProgress, EventsMaintenanceConfig], Coroutine[Any, An
 
 
 def _rollup(pool: Any, progress: LoopProgress, config: EventsMaintenanceConfig) -> Any:
-    return daemon._dispatch_loop(pool, progress, config, events_maintenance_db())
+    return daemon._dispatch_loop(
+        pool,
+        progress,
+        config,
+        events_maintenance_db(),
+    )
 
 
 _LOOPS: dict[str, tuple[_Loop, str]] = {

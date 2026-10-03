@@ -11,9 +11,17 @@ the probe itself against a real local HTTP server.
 
 from __future__ import annotations
 
+from typing import cast
+from unittest.mock import MagicMock
+
 import pytest
 
 from agent.startup import _page_server_alive, reconcile_open_pages
+from base.db import Database
+from base.events.live.bus import EventBus
+
+_DB = cast(Database, MagicMock())
+_BUS = cast(EventBus, MagicMock())
 
 
 class _FakeCursor:
@@ -105,7 +113,7 @@ async def test_reserves_dead_server(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("ava.ui.serve", _fake_serve(served))
 
     pool = _FakePool([_row("report", 18001, title="Report", serve_dir="/data/report")])
-    await reconcile_open_pages(pool, 7)  # type: ignore[arg-type]
+    await reconcile_open_pages(pool, 7, db=_DB, bus=_BUS)  # type: ignore[arg-type]
 
     assert served == [((("/data/report", "report", 18001, "Report"), {}))]
     # no UPDATE closed (serve_dir exists -> re-serve instead of closing)
@@ -119,7 +127,7 @@ async def test_keeps_alive_server(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("ava.ui.serve", _fake_serve(served))
 
     pool = _FakePool([_row("report", 18001, serve_dir="/data/report")])
-    await reconcile_open_pages(pool, 7)  # type: ignore[arg-type]
+    await reconcile_open_pages(pool, 7, db=_DB, bus=_BUS)  # type: ignore[arg-type]
 
     assert served == []
 
@@ -144,7 +152,7 @@ async def test_closes_dead_page_without_serve_dir(monkeypatch: pytest.MonkeyPatc
             _row("plain", 18002, serve_dir=None),
         ]
     )
-    await reconcile_open_pages(pool, 7, event_publisher=_Pub())  # type: ignore[arg-type]
+    await reconcile_open_pages(pool, 7, event_publisher=_Pub(), db=_DB, bus=_BUS)  # type: ignore[arg-type]
 
     # report re-served; plain closed + PageClosed + one re-serve notice
     assert served == [((("/data/report", "report", 18001, None), {}))]
@@ -175,7 +183,7 @@ async def test_keeps_alive_page_without_serve_dir(monkeypatch: pytest.MonkeyPatc
     monkeypatch.setattr("ava.ui.serve", lambda *a, **k: pytest.fail("must not serve"))  # noqa: ARG005  # pyright: ignore[reportUnknownArgumentType]
 
     pool = _FakePool([_row("plain", 18002, serve_dir=None)])
-    await reconcile_open_pages(pool, 7, event_publisher=_Pub())  # type: ignore[arg-type]
+    await reconcile_open_pages(pool, 7, event_publisher=_Pub(), db=_DB, bus=_BUS)  # type: ignore[arg-type]
 
     assert not any("UPDATE agent_pages" in sql for sql, _ in pool.executed)  # pyright: ignore[reportUnknownMemberType]
     assert events == []
@@ -196,7 +204,7 @@ async def test_closes_multiple_dead_show_pages_with_one_notice(
             _row("b", 18002, serve_dir=None),
         ]
     )
-    await reconcile_open_pages(pool, 7)  # type: ignore[arg-type]
+    await reconcile_open_pages(pool, 7, db=_DB, bus=_BUS)  # type: ignore[arg-type]
 
     updates = [p for sql, p in pool.executed if "UPDATE agent_pages" in sql]  # pyright: ignore[reportUnknownMemberType]
     assert updates == [(7, "a"), (7, "b")]
@@ -218,7 +226,7 @@ async def test_dead_show_page_recent_notice_skips_notify(
     monkeypatch.setattr("ava.ui.serve", _fake_serve(served))
 
     pool = _FakePool([_row("plain", 18002, serve_dir=None)], fetchone_row=((1,),))
-    await reconcile_open_pages(pool, 7)  # type: ignore[arg-type]
+    await reconcile_open_pages(pool, 7, db=_DB, bus=_BUS)  # type: ignore[arg-type]
 
     updates = [p for sql, p in pool.executed if "UPDATE agent_pages" in sql]  # pyright: ignore[reportUnknownMemberType]
     assert updates == [(7, "plain")]
@@ -233,7 +241,7 @@ async def test_swallows_query_failure(monkeypatch: pytest.MonkeyPatch) -> None:
             raise RuntimeError("pg down")
 
     monkeypatch.setattr("ava.ui.serve", lambda *a, **k: pytest.fail("must not serve"))  # noqa: ARG005  # pyright: ignore[reportUnknownArgumentType]
-    await reconcile_open_pages(_BoomPool(), 7)  # type: ignore[arg-type]  # must not raise
+    await reconcile_open_pages(_BoomPool(), 7, db=_DB, bus=_BUS)  # type: ignore[arg-type]  # must not raise
 
 
 def test_page_server_alive_ok() -> None:
@@ -278,7 +286,7 @@ async def test_open_pages_query_filters_closed_and_expired(
     monkeypatch.setattr("ava.ui.serve", _fake_serve(served))
 
     pool = _FakePool([_row("report", 18001, serve_dir="/data/report")])
-    await reconcile_open_pages(pool, 7)  # type: ignore[arg-type]
+    await reconcile_open_pages(pool, 7, db=_DB, bus=_BUS)  # type: ignore[arg-type]
 
     selects = [sql for sql, _p in pool.executed if sql.startswith("SELECT")]  # pyright: ignore[reportUnknownMemberType]
     assert len(selects) == 1

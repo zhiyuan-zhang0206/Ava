@@ -30,7 +30,8 @@ from ava import security
 from base.agents.context import AvaContext
 from base.agents.messages.kwargs import AvaMsgType, read_ava_kwargs
 from base.config import settings
-from base.db import insert_inbound_message
+from base.db import Database, insert_inbound_message
+from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices
 from tests.fixtures.units import spawn_agent
 
@@ -61,6 +62,8 @@ async def _claim(pool: AsyncConnectionPool, agent_id: int) -> Command[Any]:
                 llm=MagicMock(),
                 event_publisher=MagicMock(),
                 agent=AgentSlices.resolve(),
+                db=Database.from_settings(),
+                bus=EventBus.from_settings(),
             )
         ),
         {"configurable": {"thread_id": str(agent_id)}},
@@ -80,12 +83,17 @@ def _is_security_note(message: AnyMessage) -> bool:
 
 
 async def test_flagged_chat_note_rides_right_behind_its_message(
-    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    database: Database,
+    event_bus: EventBus,
 ) -> None:
     """The note names where the flagged inbound came from and what matched, and
     carries no message body; nothing is left in process state."""
     agent_id = spawn_agent()
-    insert_inbound_message(db_conn, agent_id, _HOSTILE_USER, source="user")
+    insert_inbound_message(
+        db_conn, agent_id, _HOSTILE_USER, source="user", bus=event_bus, database=database
+    )
 
     inbound, note = _delta(await _claim(aops_pool, agent_id))
 
@@ -98,7 +106,10 @@ async def test_flagged_chat_note_rides_right_behind_its_message(
 
 
 async def test_flagged_system_note_inbound_note_rides_behind_it(
-    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    database: Database,
+    event_bus: EventBus,
 ) -> None:
     """A peer-authored system-note inbound (a task note) is scanned like chat."""
     agent_id = spawn_agent()
@@ -109,6 +120,8 @@ async def test_flagged_system_note_inbound_note_rides_behind_it(
         source="agent:405",
         kind="system_note",
         payload={"note_tag": "task"},
+        bus=event_bus,
+        database=database,
     )
 
     task_note, note = _delta(await _claim(aops_pool, agent_id))
@@ -119,14 +132,23 @@ async def test_flagged_system_note_inbound_note_rides_behind_it(
 
 
 async def test_each_flagged_message_in_a_batch_gets_its_own_note(
-    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    database: Database,
+    event_bus: EventBus,
 ) -> None:
     """One batch of three chats: a note behind each flagged message, none behind
     the clean one, in batch order."""
     agent_id = spawn_agent()
-    insert_inbound_message(db_conn, agent_id, _HOSTILE_USER, source="user")
-    insert_inbound_message(db_conn, agent_id, _BENIGN, source="user")
-    insert_inbound_message(db_conn, agent_id, _HOSTILE_PEER, source="agent:7")
+    insert_inbound_message(
+        db_conn, agent_id, _HOSTILE_USER, source="user", bus=event_bus, database=database
+    )
+    insert_inbound_message(
+        db_conn, agent_id, _BENIGN, source="user", bus=event_bus, database=database
+    )
+    insert_inbound_message(
+        db_conn, agent_id, _HOSTILE_PEER, source="agent:7", bus=event_bus, database=database
+    )
 
     delta = _delta(await _claim(aops_pool, agent_id))
 
@@ -148,10 +170,12 @@ async def test_unflagged_inbound_gets_no_note(
     monkeypatch: pytest.MonkeyPatch,
     text: str,
     scan_enabled: bool,
+    database: Database,
+    event_bus: EventBus,
 ) -> None:
     monkeypatch.setattr(settings.agent, "security_scan_enabled", scan_enabled)
     agent_id = spawn_agent()
-    insert_inbound_message(db_conn, agent_id, text, source="user")
+    insert_inbound_message(db_conn, agent_id, text, source="user", bus=event_bus, database=database)
 
     delta = _delta(await _claim(aops_pool, agent_id))
 
@@ -160,14 +184,27 @@ async def test_unflagged_inbound_gets_no_note(
 
 
 async def test_compact_batch_defers_the_flagged_chat_together_with_its_note(
-    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    database: Database,
+    event_bus: EventBus,
 ) -> None:
     """A chat sharing a batch with a compaction is deferred and re-delivered in
     the fresh context: its note goes with it, and is raised once when the chat is
     claimed and scanned again."""
     agent_id = spawn_agent()
-    insert_inbound_message(db_conn, agent_id, _HOSTILE_USER, source="user")
-    insert_inbound_message(db_conn, agent_id, "summary", source="system", kind="compact_summary")
+    insert_inbound_message(
+        db_conn, agent_id, _HOSTILE_USER, source="user", bus=event_bus, database=database
+    )
+    insert_inbound_message(
+        db_conn,
+        agent_id,
+        "summary",
+        source="system",
+        kind="compact_summary",
+        bus=event_bus,
+        database=database,
+    )
 
     compacted = await _claim(aops_pool, agent_id)
 

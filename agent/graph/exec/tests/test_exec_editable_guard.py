@@ -12,6 +12,7 @@ import pytest
 from agent.graph.exec import _subprocess
 from agent.graph.exec._result import ExecChildError, _ExecCrashed, _ExecDone
 from agent.graph.exec._subprocess import _run_in_subprocess
+from base.db import Database
 from base.deploy.release import editable_install
 
 _AGENT_ID = 424242
@@ -23,6 +24,7 @@ async def _run(
     editable_guard: Callable[[], tuple[str, ...]],
 ) -> object:
     result, _payload = await _run_in_subprocess(
+        Database.from_settings(),
         "print('healthy child')",
         _AGENT_ID,
         asyncio.Event(),

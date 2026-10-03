@@ -15,6 +15,7 @@ from loguru import logger
 
 from agent.graph.exec._result import _ExecCrashed, _ExecDone
 from agent.graph.exec._subprocess import _result_from_payload, _run_in_subprocess
+from base.db import Database
 from base.host.memory_pressure import PressureLevel
 from base.host.proc import kill_process_tree
 from base.native_process.exec_kill_notice import notice_path, read_notice
@@ -186,7 +187,13 @@ class _CriticalOs:
 
 async def _run(tmp_path: Path, code: str) -> Any:
     result, _payload = await _run_in_subprocess(
-        code, 424242, asyncio.Event(), 60.0, None, exec_dir=tmp_path / "exec"
+        Database.from_settings(),
+        code,
+        424242,
+        asyncio.Event(),
+        60.0,
+        None,
+        exec_dir=tmp_path / "exec",
     )
     return result
 

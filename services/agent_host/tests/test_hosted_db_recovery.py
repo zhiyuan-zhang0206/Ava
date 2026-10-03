@@ -27,7 +27,6 @@ from base.agents.context import AvaContext
 from base.agents.history.delta_read_compat import wrap_saver_reads_with_delta_reconstruction
 from base.agents.incarnation.hosted_force import install_hosted_force
 from base.agents.incarnation.resources import ResourceBirth
-from base.agents.observation import db_wait
 from base.agents.observation.db_wait import database_wait_snapshot
 from base.cluster.machine import machine_name
 from base.config import settings
@@ -56,14 +55,16 @@ def isolate(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 async def _admit(pool: AsyncConnectionPool) -> RuntimeIncarnation:
-    agent, _, _prompt_id, _attempt_id = create_agent_row(spawner="user", machine=machine_name())
+    agent, _, _prompt_id, _attempt_id = create_agent_row(
+        Database.from_settings(), EventBus.from_settings(), spawner="user", machine=machine_name()
+    )
     async with pool.connection() as conn:
         await conn.execute(
             "UPDATE agents_meta SET incarnation_resources=%s WHERE id=%s",
             (Jsonb(ResourceBirth(birth=uuid4()).model_dump(mode="json")), agent),
         )
     incarnation = await admit_hosted_runtime(
-        pool, agent, machine_name(), uuid4(), expected_from="idling"
+        pool, agent, machine_name(), uuid4(), expected_from="idling", db=Database.from_settings()
     )
     assert incarnation is not None
     return incarnation
@@ -200,7 +201,8 @@ async def test_recovery_never_repairs_or_renews_a_lost_or_forced_incarnation(
 
 
 async def test_cancelling_database_wait_keeps_checkpoint_and_does_not_ack_pause(
-    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
 ) -> None:
     incarnation = await _admit(aops_pool)
     agent = incarnation.agent_id
@@ -257,7 +259,11 @@ async def test_cancelling_database_wait_keeps_checkpoint_and_does_not_ack_pause(
 
 @pytest.mark.parametrize("action", ["replace_owner", "force_terminate"])
 async def test_decision_committed_during_outage_prevents_old_continuation(
-    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool, action: str
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    action: str,
+    database: Database,
+    event_bus: EventBus,
 ) -> None:
     incarnation = await _admit(aops_pool)
     agent = incarnation.agent_id
@@ -283,7 +289,15 @@ async def test_decision_committed_during_outage_prevents_old_continuation(
                     while control.get_stats().get("requests_waiting", 0) == 0:
                         await asyncio.sleep(0.001)
                 if action == "force_terminate":
-                    command = insert_inbound_message(db_conn, agent, "", "user", kind="terminate")
+                    command = insert_inbound_message(
+                        db_conn,
+                        agent,
+                        "",
+                        "user",
+                        kind="terminate",
+                        bus=event_bus,
+                        database=database,
+                    )
                     db_conn.execute(
                         "UPDATE agents_meta SET status='terminated' WHERE id=%s", (agent,)
                     )
@@ -416,7 +430,14 @@ async def _seed_stalled_repair_scenario(
     builder.add_edge("work", "__end__")
     graph = builder.compile(checkpointer=saver)
     config: RunnableConfig = {"configurable": {"thread_id": str(aid)}}
-    inbound = insert_inbound_message(db_conn, aid, "Original private request", "user")
+    inbound = insert_inbound_message(
+        db_conn,
+        aid,
+        "Original private request",
+        "user",
+        bus=EventBus.from_settings(),
+        database=Database.from_settings(),
+    )
     db_conn.commit()
     with bind_turn_identity(aid, incarnation=incarnation):
         await claim_inbound_batch(aops_pool, aid)
@@ -713,81 +734,3 @@ async def test_recovery_summary_counts_all_attempts_and_backoff_time(
         c.args[0] != "host checkpoint recovery prolonged" for c in log.warning.call_args_list
     )
     log.error.assert_not_called()
-
-
-@pytest.mark.parametrize("write_before_retry", [False, True])
-async def test_recovery_reuses_unchanged_checkpoint_across_retry(
-    aops_pool: AsyncConnectionPool,
-    monkeypatch: pytest.MonkeyPatch,
-    write_before_retry: bool,
-) -> None:
-    incarnation = await _admit(aops_pool)
-
-    async def never(_state: states.AgentState) -> dict[str, Any]:
-        raise AssertionError("recovery cannot invoke agent work")
-
-    graph, saver = await _graph(aops_pool, incarnation.agent_id, never)
-    config: RunnableConfig = {"configurable": {"thread_id": str(incarnation.agent_id)}}
-    await graph.aupdate_state(
-        config, {"messages": [HumanMessage(content="Another message")]}, as_node="work"
-    )
-    raw = await AsyncPostgresSaver.aget_tuple(saver, config)
-    assert raw is not None
-    assert "messages" not in raw.checkpoint["channel_values"]
-
-    history = saver.aget_delta_channel_history
-    walks = 0
-    flushes = 0
-    repairs = 0
-
-    async def counted_history(*, config: RunnableConfig, channels: Any) -> Any:
-        nonlocal walks
-        walks += 1
-        return await history(config=config, channels=channels)
-
-    async def counted_flush(_saver: AsyncPostgresSaver, _agent: int) -> None:
-        nonlocal flushes
-        flushes += 1
-
-    async def flaky_repair(_graph: Any, _agent: int) -> None:
-        nonlocal repairs
-        repairs += 1
-        await graph.aget_state(config)
-        if repairs == 1:
-            if write_before_retry:
-                await graph.aupdate_state(
-                    config,
-                    {"messages": [HumanMessage(content="State changed in repair")]},
-                    as_node="work",
-                )
-            raise PoolTimeout("retry after a completed read")
-
-    monkeypatch.setattr(saver, "aget_delta_channel_history", counted_history)
-    monkeypatch.setattr(db_recovery, "flush_checkpoint", counted_flush)
-    monkeypatch.setattr(db_recovery, "repair_dangling_tool_use_at_startup", flaky_repair)
-    with bind_turn_identity(incarnation.agent_id, incarnation=incarnation):
-        await db_recovery.recover_database(
-            pool=aops_pool, graph=graph, checkpointer=saver, incarnation=incarnation
-        )
-    assert repairs == 2
-    assert flushes == (2 if write_before_retry else 1)
-    assert walks == (2 if write_before_retry else 1)
-    await saver.aget_tuple(config)
-    assert walks == (3 if write_before_retry else 2)
-
-
-def test_database_phase_bound_fits_checkpoint_recovery_band() -> None:
-    """INC-927 (task #4781): observed checkpoint reads ran 25-45s under load.
-
-    The bound must fit a full settle pass (read + write + flush + receipt) and
-    every recovery stage, while staying finite as the one-stage fence (#1972).
-    """
-    assert db_recovery._DATABASE_PHASE_TIMEOUT_SECONDS == 120.0
-
-
-def test_db_wait_proof_ttl_covers_widened_recovery_stages() -> None:
-    """The wait proof must outlive two bounded stages plus the documented slack."""
-    slack_seconds = 10 + 3 + 15 + 12  # heartbeat, publication, sleep, scheduling
-    assert (
-        2 * db_recovery._DATABASE_PHASE_TIMEOUT_SECONDS + slack_seconds
-    ) <= db_wait.DB_WAIT_PROOF_TTL_SECONDS

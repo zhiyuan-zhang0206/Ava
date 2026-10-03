@@ -449,7 +449,7 @@ def test_insert_skill_events_writes_only_the_loaded_depth(
 
     captured: list[dict[str, str]] = []
 
-    def _capture(events: list[Any]) -> None:
+    def _capture(_db: object, events: list[Any]) -> None:
         captured.extend(event.attributes for event in events)
 
     monkeypatch.setattr("base.telemetry.audit_events.record_audit_standalone_many", _capture)

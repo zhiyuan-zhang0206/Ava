@@ -7,9 +7,9 @@ from dataclasses import dataclass
 
 import psycopg
 
-import base.db
 from base.api_contracts.status import SchemaMismatchKind, SchemaMismatchStatus
 from base.cluster.machine import machine_name
+from base.db import Database
 from base.deploy.schema.migration_errors import MigrationLayoutError
 from base.deploy.schema.migration_layout import required_migration_set
 from base.deploy.schema.migrations import applied_migration_names
@@ -44,11 +44,11 @@ def classify(applied: set[str], required: set[str]) -> Mismatch | None:
     return None
 
 
-def detect(*, conn: psycopg.Connection | None = None) -> Mismatch | None:
+def detect(db: Database, *, conn: psycopg.Connection | None = None) -> Mismatch | None:
     """Read applied names once; required names come from the running image's SQL."""
     try:
         if conn is None:
-            with base.db.connect(autocommit=True) as borrowed:
+            with db.connect(autocommit=True) as borrowed:
                 applied = applied_migration_names(borrowed)
         else:
             applied = applied_migration_names(conn)
@@ -64,9 +64,9 @@ def detect(*, conn: psycopg.Connection | None = None) -> Mismatch | None:
     return classify(applied, required)
 
 
-def status(*, conn: psycopg.Connection | None = None) -> SchemaMismatchStatus | None:
+def status(db: Database, *, conn: psycopg.Connection | None = None) -> SchemaMismatchStatus | None:
     """Current diagnosis; return None only after both migration sets were read and match."""
-    mismatch = detect() if conn is None else detect(conn=conn)
+    mismatch = detect(db) if conn is None else detect(db, conn=conn)
     if mismatch is None:
         return None
     return SchemaMismatchStatus(kind=mismatch.kind, machine=machine_name(), detail=mismatch.detail)

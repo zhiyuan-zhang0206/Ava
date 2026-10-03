@@ -15,6 +15,7 @@ import sys
 from pathlib import Path
 
 from base import telemetry
+from base.db import Database
 from cli.commands.converge.rendered_file import write_rendered_guarded
 
 from .observatory_urls import _atomic_write
@@ -41,7 +42,7 @@ def _render_ava_ops_dashboard(dest: Path, hashes_path: Path, key: str) -> None:
     from base.telemetry.metrics.grafana_dashboard_supply import render_dashboard_json
 
     try:
-        rendered, failed = render_dashboard_json()
+        rendered, failed = render_dashboard_json(Database.from_settings())
     except Exception as exc:
         print(
             f"  ! lgtm native: ava-ops dashboard render failed ({exc}); keeping the previous file",

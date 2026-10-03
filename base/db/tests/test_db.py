@@ -18,8 +18,9 @@ from psycopg_pool import AsyncConnectionPool
 
 from base import db
 from base.config import settings
-from base.db import connections
+from base.db import Database, connections
 from base.db.tests.live_agents import seed_agent
+from base.events.live.bus import EventBus
 from base.host.env.dotenv_boot import PLACEHOLDER_DB_URL
 from base.native_process import code_version
 from base.telemetry import Event, process_name
@@ -231,14 +232,16 @@ def test_insert_restart_completed_inbound_without_restart_returns_none(
     assert _inbound_rows(db_conn, agent_id) == []
 
 
-def test_signal_live_agents_restart_only_live(db_conn: psycopg.Connection) -> None:
+def test_signal_live_agents_restart_only_live(
+    db_conn: psycopg.Connection, database: Database, event_bus: EventBus
+) -> None:
     """One restart inbound (content='', the given source) per running/idling agent;
     terminated get none. Returns the ids signalled."""
     running = seed_agent(db_conn, "running")
     idling = seed_agent(db_conn, "idling")
     terminated = seed_agent(db_conn, "terminated")
 
-    ids = db.signal_live_agents_restart(source="system:update")
+    ids = db.signal_live_agents_restart(database, event_bus, source="system:update")
 
     assert sorted(ids) == sorted([running, idling])
     assert _inbound_rows(db_conn, running) == [("restart", "system:update", "")]
@@ -248,6 +251,8 @@ def test_signal_live_agents_restart_only_live(db_conn: psycopg.Connection) -> No
 
 def test_signal_live_agents_restart_requires_an_unexpired_lease(
     db_conn: psycopg.Connection,
+    database: Database,
+    event_bus: EventBus,
 ) -> None:
     """R1 (Task #1021): a running/idling row WITHOUT a lease (pre-lease code) or
     with an EXPIRED one (a process that stopped renewing) is not alive — the
@@ -256,7 +261,7 @@ def test_signal_live_agents_restart_requires_an_unexpired_lease(
     idling_no_lease = seed_agent(db_conn, "idling", live_lease=False)
     running_fresh = seed_agent(db_conn, "running")
 
-    ids = db.signal_live_agents_restart(source="system:update")
+    ids = db.signal_live_agents_restart(database, event_bus, source="system:update")
 
     assert ids == [running_fresh]
     assert _inbound_rows(db_conn, running_no_lease) == []
@@ -279,34 +284,40 @@ def test_agent_is_alive_predicate() -> None:
     assert db.agent_is_alive("terminated", future) is False
 
 
-def test_signal_live_agents_restart_none_live(db_conn: psycopg.Connection) -> None:
+def test_signal_live_agents_restart_none_live(
+    db_conn: psycopg.Connection, database: Database, event_bus: EventBus
+) -> None:
     """No live agents → no inbound inserted, returns []."""
     terminated = seed_agent(db_conn, "terminated")
-    assert db.signal_live_agents_restart(source="system:update") == []
+    assert db.signal_live_agents_restart(database, event_bus, source="system:update") == []
     assert _inbound_rows(db_conn, terminated) == []
 
 
-def test_signal_live_agents_restart_exclude_ids(db_conn: psycopg.Connection) -> None:
+def test_signal_live_agents_restart_exclude_ids(
+    db_conn: psycopg.Connection, database: Database, event_bus: EventBus
+) -> None:
     """exclude_agent_ids agents are skipped even when live — the quiesce
     convergence loop passes its already-signalled set so a pass only signals
     newly-live agents."""
     already = seed_agent(db_conn, "running")
     late = seed_agent(db_conn, "running")
 
-    ids = db.signal_live_agents_restart(source="system:update", exclude_agent_ids={already})
+    ids = db.signal_live_agents_restart(
+        database, event_bus, source="system:update", exclude_agent_ids={already}
+    )
 
     assert ids == [late]
     assert _inbound_rows(db_conn, already) == []
     assert _inbound_rows(db_conn, late) == [("restart", "system:update", "")]
 
 
-def test_list_live_agent_ids(db_conn: psycopg.Connection) -> None:
+def test_list_live_agent_ids(db_conn: psycopg.Connection, database: Database) -> None:
     """list_live_agent_ids lists agents with a LIVE process to act on (quiesce):
     running/idling only."""
     running = seed_agent(db_conn, "running")
     idling = seed_agent(db_conn, "idling")
     seed_agent(db_conn, "terminated")
-    assert sorted(db.list_live_agent_ids()) == sorted([running, idling])
+    assert sorted(db.list_live_agent_ids(database)) == sorted([running, idling])
 
 
 def test_pool_check_connections_flag(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -344,6 +355,7 @@ def test_pool_check_connections_flag(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_list_chat_inbound_facts_windows_and_filters_kind(
     db_conn: psycopg.Connection,
+    database: Database,
 ) -> None:
     """The arrow read: chat inbounds only, inside the closed [from_, to], oldest first."""
     from datetime import UTC, datetime, timedelta
@@ -373,7 +385,7 @@ def test_list_chat_inbound_facts_windows_and_filters_kind(
         )
     db_conn.commit()
 
-    facts = db.list_chat_inbound_facts(agent_id, base, base + timedelta(minutes=5))
+    facts = db.list_chat_inbound_facts(database, agent_id, base, base + timedelta(minutes=5))
 
     assert [(fact.source, fact.created_at) for fact in facts] == [
         ("agent:2", base + timedelta(minutes=1)),

@@ -7,7 +7,7 @@ from psycopg.types.json import Jsonb
 from psycopg_pool import ConnectionPool
 
 from base.agents.impersonation._store import expire, lock_lease
-from base.db import publish_inbound_wake
+from base.db import Database, publish_inbound_wake
 from base.db.transaction import write_transaction
 from base.events.live.announce import (
     publish_agent_updated_sync,
@@ -23,7 +23,9 @@ from base.events.live.bus import EventBus
 _PASS_BATCH = 200
 
 
-def reap_impersonations(pool: ConnectionPool, *, limit: int = _PASS_BATCH) -> int:
+def reap_impersonations(
+    pool: ConnectionPool, db: Database, bus: EventBus, *, limit: int = _PASS_BATCH
+) -> int:
     """Reconcile expired controllers even when their native runner is offline.
 
     Session records, lifecycle events and messages are retained permanently.
@@ -40,9 +42,9 @@ def reap_impersonations(pool: ConnectionPool, *, limit: int = _PASS_BATCH) -> in
             if expire(conn, lease)["status"] == "expired":
                 expired_agents.append(lease["agent_id"])
     for agent_id in expired_agents:
-        publish_inbound_wake(agent_id, "impersonation-expired")
-        publish_impersonation_changed_sync(EventBus.from_settings(), agent_id)
-        publish_agent_updated_sync(EventBus.from_settings(), agent_id)
+        publish_inbound_wake(db, bus, agent_id, "impersonation-expired")
+        publish_impersonation_changed_sync(bus, agent_id)
+        publish_agent_updated_sync(bus, agent_id)
     return len(expired_agents)
 
 
@@ -65,7 +67,7 @@ def alert_stuck_event_logs(pool: ConnectionPool) -> int:
 
 
 def force_expire_impersonation(
-    pool: ConnectionPool, agent_id: int, session_id: int, actor: str
+    pool: ConnectionPool, db: Database, bus: EventBus, agent_id: int, session_id: int, actor: str
 ) -> Literal["expired", "not_open"]:
     """Close only the open session the caller saw; return expired or not_open.
 
@@ -121,9 +123,9 @@ def force_expire_impersonation(
         session_id=session_id,
         actor=actor,
     )
-    publish_inbound_wake(agent_id, "impersonation-expired")
-    publish_impersonation_changed_sync(EventBus.from_settings(), agent_id)
-    publish_agent_updated_sync(EventBus.from_settings(), agent_id)
+    publish_inbound_wake(db, bus, agent_id, "impersonation-expired")
+    publish_impersonation_changed_sync(bus, agent_id)
+    publish_agent_updated_sync(bus, agent_id)
     return "expired"
 
 
@@ -135,7 +137,11 @@ REMINDER_WINDOW_SECONDS = 300.0
 
 
 def remind_expiring_impersonations(
-    pool: ConnectionPool, *, window_seconds: float = REMINDER_WINDOW_SECONDS
+    pool: ConnectionPool,
+    db: Database,
+    bus: EventBus,
+    *,
+    window_seconds: float = REMINDER_WINDOW_SECONDS,
 ) -> int:
     """Insert one pending renewal reminder per approaching expiry deadline.
 
@@ -216,5 +222,5 @@ def remind_expiring_impersonations(
             "AND l.status NOT IN ('requested','accepted','active')"
         )
     for agent_id in reminded_agents:
-        publish_inbound_wake(agent_id, "impersonation-reminder")
+        publish_inbound_wake(db, bus, agent_id, "impersonation-reminder")
     return len(reminded_agents)

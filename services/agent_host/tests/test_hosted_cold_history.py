@@ -36,9 +36,13 @@ def test_unwrapped_saver_does_not_opt_into_reconstruction_cache() -> None:
 
 @pytest.mark.parametrize("needs_repair", [False, True])
 async def test_cold_repair_and_invocation_share_only_unchanged_messages(
-    aops_pool: AsyncConnectionPool, monkeypatch: pytest.MonkeyPatch, needs_repair: bool
+    aops_pool: AsyncConnectionPool,
+    monkeypatch: pytest.MonkeyPatch,
+    needs_repair: bool,
+    database: Database,
+    event_bus: EventBus,
 ) -> None:
-    agent, *_ = create_agent_row(spawner="user", machine=machine_name())
+    agent, *_ = create_agent_row(database, event_bus, spawner="user", machine=machine_name())
     async with aops_pool.connection() as conn:
         await conn.execute(
             "UPDATE agents_meta SET incarnation_resources=%s WHERE id=%s",

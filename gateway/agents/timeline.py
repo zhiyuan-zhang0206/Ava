@@ -284,7 +284,7 @@ def _load_history_segment(
             exc,
         )
         return None
-    return hydrate(items, agent_id, limit=limit, before=before)
+    return hydrate(db, items, agent_id, limit=limit, before=before)
 
 
 def _load_boundary_ids(db: Database, agent_id: int, depth: int) -> list[str]:
@@ -546,7 +546,7 @@ def get_timeline(
         _log.warning("timeline cold load: checkpoint read failed for agent %s: %r", agent_id, exc)
         messages = []
     items, msg_count = build_timeline_items(messages, chat_anchors)
-    items = hydrate(items, agent_id, limit=limit, before=before)
+    items = hydrate(db, items, agent_id, limit=limit, before=before)
     items.sort(key=lambda it: _item_sort_key(it.item_id))
     if before is None:
         window, has_more = _initial_window(

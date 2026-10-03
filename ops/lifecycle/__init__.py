@@ -31,9 +31,7 @@ from typing import Any, Literal
 
 from psycopg_pool import ConnectionPool
 
-from base import telemetry
 from base.agents import (
-    AgentNotFound,
     AgentStatus,
     ResurrectAlreadyAlive,
 )
@@ -42,7 +40,6 @@ from base.db import Database, insert_inbound_message
 from base.events.live.announce import publish_agent_updated_sync
 from base.events.live.bus import EventBus
 from base.lm.registry import normalize_overlay_llm_model
-from base.telemetry.audit_events import prepare_event_log, record_audit
 from ops import cluster_rpc as _cluster_rpc
 from ops.agents import (
     get_agent_machine,
@@ -53,6 +50,9 @@ from ops.agents.resurrection_retry import report_auto_resurrect_failure
 from ops.agents.wake import ResurrectTriggerStaleError
 from ops.cluster_status import kill_agent_shells
 from ops.lifecycle import termination
+from ops.lifecycle.crash_harvest import (
+    _recover_crash_marked_blocking as _recover_crash_marked_blocking,
+)
 
 # Re-exported from `events`; callers keep module-qualified sites.
 from ops.lifecycle.events import (
@@ -119,17 +119,23 @@ from ops.rpc_schemas.terminate import ShellSessionsKill
 _log = logging.getLogger(__name__)
 
 
-def _cancel_blocking(agent_id: int, db_pool: ConnectionPool) -> int | None:
+def _cancel_blocking(
+    db: Database, bus: EventBus, agent_id: int, db_pool: ConnectionPool
+) -> int | None:
     """Sync cancel section — via to_thread. Returns the inbound id, or None
     when the agent is already terminated (the cancel would sit pending
     forever / fire a spurious pause on a future resurrect)."""
-    if get_agent_status(agent_id) is AgentStatus.TERMINATED:
+    if get_agent_status(db, agent_id) is AgentStatus.TERMINATED:
         return None
     with db_pool.connection() as conn:
-        return insert_inbound_message(conn, agent_id, "", source="user", kind="cancel")
+        return insert_inbound_message(
+            conn, agent_id, "", source="user", kind="cancel", database=db, bus=bus
+        )
 
 
-async def cancel_agent_op(agent_id: int, db_pool: ConnectionPool) -> CancelRequested:
+async def cancel_agent_op(
+    db: Database, bus: EventBus, agent_id: int, db_pool: ConnectionPool
+) -> CancelRequested:
     """Pause/stop the agent: INSERT a durable kind='cancel' inbound.
 
     No cross-machine forwarding — the INSERT lands in the shared DB and the
@@ -140,14 +146,16 @@ async def cancel_agent_op(agent_id: int, db_pool: ConnectionPool) -> CancelReque
     (the row would sit pending forever / fire a spurious pause on a future
     resurrect), so short-circuit on TERMINATED.
     """
-    iid = await asyncio.to_thread(_cancel_blocking, agent_id, db_pool)
+    iid = await asyncio.to_thread(_cancel_blocking, db, bus, agent_id, db_pool)
     if iid is None:
         return CancelRequested(status="already_terminated")
-    await publish_inbound_arrived(EventBus.from_settings(), agent_id, iid, "cancel", "user", "")
+    await publish_inbound_arrived(bus, agent_id, iid, "cancel", "user", "")
     return CancelRequested(status="enqueued")
 
 
 async def terminate_agent_op(
+    db: Database,
+    bus: EventBus,
     agent_id: int,
     body: TerminateAgentRequest,
     db_pool: ConnectionPool,
@@ -173,11 +181,11 @@ async def terminate_agent_op(
         raise ValueError("recovery_wake rides a force terminate")
     if body.force:
         _old_status, pid, killed_page_names, command_id = await asyncio.to_thread(
-            _terminate_force_blocking, agent_id, body, db_pool, recovery_wake
+            _terminate_force_blocking, db, bus, agent_id, body, db_pool, recovery_wake
         )
         await _cancel_hosted_turn_best_effort(agent_id, command_id)
         for page_name in killed_page_names:
-            await publish_page_closed(EventBus.from_settings(), agent_id, page_name)
+            await publish_page_closed(bus, agent_id, page_name)
         _log.info(
             "[gateway] agent %s force requested by %s (pid=%s)",
             agent_id,
@@ -192,7 +200,7 @@ async def terminate_agent_op(
             ),
         )
 
-    s = await asyncio.to_thread(get_agent_status, agent_id)
+    s = await asyncio.to_thread(get_agent_status, db, agent_id)
     if s is AgentStatus.TERMINATED:
         return TerminateAgentResponse(
             status="already_terminated",
@@ -201,16 +209,14 @@ async def terminate_agent_op(
             ),
         )
 
-    iid = await asyncio.to_thread(_terminate_graceful_blocking, agent_id, body, db_pool)
+    iid = await asyncio.to_thread(_terminate_graceful_blocking, db, bus, agent_id, body, db_pool)
     if iid is None:
         # The kill-requesting enqueue found the row terminated under its lock.
         return TerminateAgentResponse(
             status="already_terminated",
             shell_sessions=await _kill_shell_sessions_now(agent_id, kill=True),
         )
-    await publish_inbound_arrived(
-        EventBus.from_settings(), agent_id, iid, "terminate", body.source, ""
-    )
+    await publish_inbound_arrived(bus, agent_id, iid, "terminate", body.source, "")
     return TerminateAgentResponse(
         status="enqueued",
         shell_sessions=ShellSessionsKill(when="at_exit") if body.kill_all_shell_sessions else None,
@@ -265,6 +271,8 @@ async def _cancel_hosted_turn_best_effort(agent_id: int, command_id: int) -> Non
 
 
 def _terminate_force_blocking(
+    db: Database,
+    bus: EventBus,
     agent_id: int,
     body: TerminateAgentRequest,
     db_pool: ConnectionPool,
@@ -279,17 +287,23 @@ def _terminate_force_blocking(
         kill_all_shell_sessions=body.kill_all_shell_sessions,
         recovery_wake=recovery_wake,
     )
-    _publish_force_terminate_inbound(agent_id, inbound_id, body.source)
-    publish_agent_updated_sync(EventBus.from_settings(), agent_id)
+    _publish_force_terminate_inbound(db, bus, agent_id, inbound_id, body.source)
+    publish_agent_updated_sync(bus, agent_id)
     return old_status, pid, killed_page_names, inbound_id
 
 
 def _terminate_graceful_blocking(
-    agent_id: int, body: TerminateAgentRequest, db_pool: ConnectionPool
+    db: Database,
+    bus: EventBus,
+    agent_id: int,
+    body: TerminateAgentRequest,
+    db_pool: ConnectionPool,
 ) -> int | None:
     """Insert the durable termination message and command; None when a
     kill-requesting enqueue found the agent already terminated."""
     return termination._enqueue_termination_inbounds(
+        db,
+        bus,
         agent_id,
         db_pool,
         source=body.source,
@@ -299,6 +313,8 @@ def _terminate_graceful_blocking(
 
 
 async def resurrect_agent_op(
+    db: Database,
+    bus: EventBus,
     agent_id: int,
     body: ResurrectAgentRequest,
     *,
@@ -310,7 +326,7 @@ async def resurrect_agent_op(
     `trigger_inbound_id` carries the internal auto-resurrect CAS to the home
     runner; manual resurrects omit it and may reopen a closed hosted agent.
     """
-    s = await asyncio.to_thread(get_agent_status, agent_id)
+    s = await asyncio.to_thread(get_agent_status, db, agent_id)
     if s is not AgentStatus.TERMINATED:
         return ResurrectAgentResponse(status="already_alive")
     try:
@@ -318,6 +334,8 @@ async def resurrect_agent_op(
         # the gateway event loop. The agent host admits the successor later.
         await asyncio.to_thread(
             resurrect_agent,
+            db,
+            bus,
             agent_id,
             resurrected_by=body.resurrected_by,
             prompt=body.prompt,
@@ -331,6 +349,7 @@ async def resurrect_agent_op(
 
 async def resurrect_if_terminated(
     db: Database,
+    bus: EventBus,
     agent_id: int,
     *,
     trigger_inbound_id: int,
@@ -383,17 +402,17 @@ async def resurrect_if_terminated(
     wedged owner (task #3687 review). User / peer chats, compact requests,
     and system notes with an explicit resurrect request remain unaffected.
     """
-    status = await asyncio.to_thread(get_agent_status, agent_id)
+    status = await asyncio.to_thread(get_agent_status, db, agent_id)
     if status is not AgentStatus.TERMINATED:
         return status
-    if await asyncio.to_thread(_wake_suppression_active, agent_id):
+    if await asyncio.to_thread(_wake_suppression_active, db, agent_id):
         _log.debug(
             "resurrect_if_terminated: automatic wake suppressed for agent %s; "
             "skipping auto-resurrect",
             agent_id,
         )
         return status
-    if await asyncio.to_thread(_recovery_halted, agent_id):
+    if await asyncio.to_thread(_recovery_halted, db, agent_id):
         _log.debug(
             "resurrect_if_terminated: recovery circuit breaker tripped for agent %s "
             "after consecutive permanent provider rejections; skipping auto-resurrect",
@@ -401,7 +420,7 @@ async def resurrect_if_terminated(
         )
         return status
     notice_source = await asyncio.to_thread(
-        _system_notice_source_of_trigger, agent_id, trigger_inbound_id
+        _system_notice_source_of_trigger, db, agent_id, trigger_inbound_id
     )
     if notice_source is not None:
         _log.debug(
@@ -415,7 +434,7 @@ async def resurrect_if_terminated(
         return status
     body = ResurrectAgentRequest(resurrected_by="system")
     try:
-        home = await asyncio.to_thread(get_agent_machine, agent_id)
+        home = await asyncio.to_thread(get_agent_machine, db, agent_id)
         try:
             lifecycle_payload: dict[str, object] = {
                 "path": f"/api/agents/{agent_id}/resurrect-if-pending-work-v2",
@@ -436,6 +455,8 @@ async def resurrect_if_terminated(
                 # fall back to in-process resurrect.
                 result_status = (
                     await resurrect_agent_op(
+                        db,
+                        bus,
                         agent_id,
                         body,
                         trigger_inbound_id=trigger_inbound_id,
@@ -445,8 +466,8 @@ async def resurrect_if_terminated(
             else:
                 raise
         if result_status == "spawned":
-            await asyncio.to_thread(_clear_wake_suppression, agent_id)
-            status = await asyncio.to_thread(get_agent_status, agent_id)
+            await asyncio.to_thread(_clear_wake_suppression, db, agent_id)
+            status = await asyncio.to_thread(get_agent_status, db, agent_id)
     except _cluster_rpc.ClusterOpUnreachable as exc:
         _log.info(
             "resurrect_if_terminated: agent %s home machine unreachable, skipping "
@@ -461,7 +482,7 @@ async def resurrect_if_terminated(
 
 
 def _restart_blocking(
-    agent_id: int, body: RestartAgentRequest, db_pool: ConnectionPool
+    db: Database, bus: EventBus, agent_id: int, body: RestartAgentRequest, db_pool: ConnectionPool
 ) -> int | None:
     """Sync restart section — via to_thread. Returns the inbound id, or None
     when the agent is already terminated."""
@@ -510,134 +531,39 @@ def _restart_blocking(
         # insert_inbound_message commits this connection, so its INSERT commits
         # the preceding overlay UPDATE in the same transaction.
         return insert_inbound_message(
-            conn, agent_id, "", source=body.source, kind="restart", payload=payload
+            conn,
+            agent_id,
+            "",
+            source=body.source,
+            kind="restart",
+            payload=payload,
+            database=db,
+            bus=bus,
         )
 
 
 async def restart_agent_op(
-    agent_id: int, body: RestartAgentRequest, db_pool: ConnectionPool
+    db: Database, bus: EventBus, agent_id: int, body: RestartAgentRequest, db_pool: ConnectionPool
 ) -> RestartAgentResponse:
     """Local-target restart — INSERT one kind='restart' inbound."""
-    iid = await asyncio.to_thread(_restart_blocking, agent_id, body, db_pool)
+    iid = await asyncio.to_thread(_restart_blocking, db, bus, agent_id, body, db_pool)
     if iid is None:
         return RestartAgentResponse(status="already_terminated")
-    await publish_inbound_arrived(
-        EventBus.from_settings(), agent_id, iid, "restart", body.source, ""
-    )
+    await publish_inbound_arrived(bus, agent_id, iid, "restart", body.source, "")
     return RestartAgentResponse(status="enqueued")
 
 
-def _recover_crash_marked_blocking(agent_id: int) -> RecoverCrashMarkedResponse:
-    """Adjudicate one `recover-crash-marked-v2` harvest (task #3618).
-
-    The requester is the delivery watchdog, escalating a chat inbound still
-    `pending` past the stall threshold whose owner is a crash-marked idling
-    corpse (`last_turn_fatal_at IS NOT NULL`). The harvest mirrors the corpse
-    reaper's terminal shape (`agent/ownership/hosted.py::reap_crash_corpses`):
-    status='terminated', termination_source='reaper', lease dropped, and the
-    crash marker KEPT so the row still matches the relaxed
-    `SYSTEM_REAPED_CRASH_ROW` trigger afterwards. The row lock plus the
-    re-checked guards make the op idempotent and fail-closed:
-
-    - missing row -> AgentNotFound;
-    - the recovery breaker tripped (consecutive permanent provider
-      rejections; `RECOVERY_BREAKER_CLEAR` inverted) -> refused with
-      `permanent_provider_reject` — no automatic recovery may start;
-    - an active wake-suppression window -> refused with its reason;
-    - unmarked / non-idling / non-hosted / foreign machine / live lease ->
-      refused, naming the guard that failed;
-    - already terminated -> `already_terminated` (an idempotent repeat).
-    """
-    from base.agents.recovery_breaker import (
-        HALT_AFTER_CONSECUTIVE_PERMANENT_REJECTS,
-        SUPPRESS_REASON_PERMANENT_REJECT,
-    )
-    from base.db.transaction import write_transaction
-
-    with write_transaction() as conn:
-        row = conn.execute(
-            "SELECT status, runtime_kind, machine, last_turn_fatal_at, "
-            "(permanent_reject_streak >= %s), "
-            "wake_suppress_reason, "
-            "(wake_suppressed_until IS NOT NULL AND wake_suppressed_until >= now()), "
-            "(lease_expires_at IS NOT NULL AND lease_expires_at > now()) "
-            "FROM agents_meta WHERE id = %s FOR UPDATE",
-            (HALT_AFTER_CONSECUTIVE_PERMANENT_REJECTS, agent_id),
-        ).fetchone()
-        if row is None:
-            raise AgentNotFound(f"agent {agent_id} does not exist")
-        (
-            status,
-            runtime_kind,
-            machine,
-            last_fatal_at,
-            breaker_halted,
-            suppress_reason,
-            suppress_active,
-            lease_alive,
-        ) = row
-        if breaker_halted:
-            return RecoverCrashMarkedResponse(
-                status="refused", reason=SUPPRESS_REASON_PERMANENT_REJECT
-            )
-        if suppress_active:
-            return RecoverCrashMarkedResponse(
-                status="refused", reason=suppress_reason or "wake_suppressed"
-            )
-        if last_fatal_at is None:
-            return RecoverCrashMarkedResponse(status="refused", reason="not_marked")
-        if status == "terminated":
-            return RecoverCrashMarkedResponse(status="already_terminated")
-        if status != "idling":
-            return RecoverCrashMarkedResponse(status="refused", reason=f"not_settled:{status}")
-        if runtime_kind != "hosted":
-            return RecoverCrashMarkedResponse(
-                status="refused", reason=f"not_settled:runtime_kind={runtime_kind}"
-            )
-        if machine != machine_name():
-            return RecoverCrashMarkedResponse(status="refused", reason="wrong_machine")
-        if lease_alive:
-            return RecoverCrashMarkedResponse(status="refused", reason="lease_alive")
-        conn.execute(
-            "UPDATE agents_meta SET status = 'terminated', "
-            "termination_source = 'reaper', lease_expires_at = NULL, "
-            "runtime_protocol_version = 0 "
-            "WHERE id = %s AND status = 'idling' AND last_turn_fatal_at IS NOT NULL",
-            (agent_id,),
-        )
-        prepared_event = prepare_event_log(
-            event_type="status_change",
-            agent_id=agent_id,
-            source="system",
-            payload={"from": "idling", "to": "terminated", "reason": "corpse_reaper"},
-        )
-        from base.agents.impersonation_manifest import record_central_event
-
-        prepared_event = record_audit(conn, record_central_event(conn, prepared_event))
-    telemetry.emit_prepared(prepared_event)
-    _log.info(
-        "recover-crash-marked-v2: harvested crash-marked corpse for agent %s "
-        "(termination_source=reaper; the relaxed trigger resumes its queued work)",
-        agent_id,
-    )
-    try:
-        publish_agent_updated_sync(EventBus.from_settings(), agent_id)
-    except Exception:
-        _log.exception(
-            "recover-crash-marked-v2: lifecycle hint publish failed for agent %s", agent_id
-        )
-    return RecoverCrashMarkedResponse(status="harvested")
-
-
-async def recover_crash_marked_op(agent_id: int) -> RecoverCrashMarkedResponse:
+async def recover_crash_marked_op(
+    db: Database, bus: EventBus, agent_id: int
+) -> RecoverCrashMarkedResponse:
     """Local-target adjudication of a stalled crash-marked harvest — runs on
     the agent's home machine (the ops server's 'lifecycle' dispatch target).
     Off-loop: the transaction waits on the row lock."""
-    return await asyncio.to_thread(_recover_crash_marked_blocking, agent_id)
+    return await asyncio.to_thread(_recover_crash_marked_blocking, db, bus, agent_id)
 
 
 async def recover_crash_marked_if_stalled(
-    db: Database, agent_id: int, *, stalled_inbound_id: int
+    db: Database, bus: EventBus, agent_id: int, *, stalled_inbound_id: int
 ) -> tuple[str, str | None]:
     """Ask `agent_id`'s home machine to adjudicate harvesting its crash-marked
     corpse, so the stalled chat `stalled_inbound_id` stops waiting on a dead
@@ -652,7 +578,7 @@ async def recover_crash_marked_if_stalled(
     breaker's streak or an active wake-suppression window — and its reason
     ('permanent_provider_reject' when the breaker tripped) is the refusal
     reported."""
-    halt_reason = await asyncio.to_thread(_recovery_halt_reason, agent_id)
+    halt_reason = await asyncio.to_thread(_recovery_halt_reason, db, agent_id)
     if halt_reason is not None:
         _log.debug(
             "recover_crash_marked_if_stalled: automatic recovery is halted for "
@@ -663,7 +589,7 @@ async def recover_crash_marked_if_stalled(
         )
         return "refused", halt_reason
     try:
-        home = await asyncio.to_thread(get_agent_machine, agent_id)
+        home = await asyncio.to_thread(get_agent_machine, db, agent_id)
         try:
             payload: dict[str, object] = {
                 "path": f"/api/agents/{agent_id}/recover-crash-marked-v2",
@@ -681,7 +607,7 @@ async def recover_crash_marked_if_stalled(
             if home == machine_name():
                 # Local ops server not reachable (test / single-process):
                 # adjudicate in-process, like the other lifecycle ops.
-                response = await recover_crash_marked_op(agent_id)
+                response = await recover_crash_marked_op(db, bus, agent_id)
                 return response.status, response.reason
             raise
     except _cluster_rpc.ClusterOpUnreachable as exc:
@@ -711,6 +637,8 @@ _LIFECYCLE_PATH = re.compile(
 
 
 async def lifecycle_op(
+    db: Database,
+    bus: EventBus,
     path: str,
     body: dict[str, Any],
     db_pool: ConnectionPool,
@@ -752,12 +680,14 @@ async def lifecycle_op(
         )
     if action == "terminate":
         return await terminate_agent_op(
-            agent_id, TerminateAgentRequest.model_validate(body), db_pool
+            db, bus, agent_id, TerminateAgentRequest.model_validate(body), db_pool
         )
     if action == "resurrect":
         raise ValueError("legacy /resurrect is refused; use a versioned internal path")
     if action == "resurrect-explicit-v2":
-        return await resurrect_agent_op(agent_id, ResurrectAgentRequest.model_validate(body))
+        return await resurrect_agent_op(
+            db, bus, agent_id, ResurrectAgentRequest.model_validate(body)
+        )
     if action == "resurrect-if-pending-work-v2":
         if trigger_inbound_id is None:
             raise ValueError("resurrect-if-pending-work-v2 requires trigger inbound")
@@ -765,6 +695,8 @@ async def lifecycle_op(
         if request.resurrected_by != "system":
             raise ValueError("resurrect-if-pending-work-v2 requires resurrected_by='system'")
         return await resurrect_agent_op(
+            db,
+            bus,
             agent_id,
             request,
             trigger_inbound_id=trigger_inbound_id,
@@ -773,9 +705,11 @@ async def lifecycle_op(
     if action == "resurrect-billing-v1":
         from ops.lifecycle.billing_recovery import resurrect_billing_agent_op
 
-        return await resurrect_billing_agent_op(agent_id)
+        return await resurrect_billing_agent_op(db, bus, agent_id)
     if action == "recover-crash-marked-v2":
-        return await recover_crash_marked_op(agent_id)
+        return await recover_crash_marked_op(db, bus, agent_id)
     if action == "restart":
-        return await restart_agent_op(agent_id, RestartAgentRequest.model_validate(body), db_pool)
+        return await restart_agent_op(
+            db, bus, agent_id, RestartAgentRequest.model_validate(body), db_pool
+        )
     raise AssertionError(f"unreachable: action={action!r}")

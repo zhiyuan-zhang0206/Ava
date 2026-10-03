@@ -336,6 +336,7 @@ class AgentHost:
                 agent_id,
                 self._machine,
                 self._owner,
+                db=self._db,
                 expected_from=stored.status,
             )
             if incarnation is None:
@@ -389,6 +390,7 @@ class AgentHost:
                     self._pool,
                     self._control_pool,
                     self._db,
+                    self._bus,
                     self._checkpointer,
                     incarnation,
                     outcome,
@@ -398,7 +400,12 @@ class AgentHost:
         """Maintain ownership and apply admin intent without touching the graph."""
 
         incarnation = await admit_hosted_runtime(
-            self._control_pool, agent_id, self._machine, self._owner, expected_from=status
+            self._control_pool,
+            agent_id,
+            self._machine,
+            self._owner,
+            db=self._db,
+            expected_from=status,
         )
         if incarnation is None:
             return
@@ -417,8 +424,8 @@ class AgentHost:
             # calls, no polling). A supervision failure rides the existing
             # held-wake error path (record_failure is a no-op outside a
             # maintenance hold) and the next wake re-drives.
-            session = await native_status(agent_id)
-            await supervise_relay(session, agent_id)
+            session = await native_status(self._db, self._bus, agent_id)
+            await supervise_relay(self._db, self._bus, session, agent_id)
             # An earlier ordinary failure can leave a buffered tail. Preserve
             # it before accepting maintenance intent, without replaying graph work.
             await flush_checkpoint(self._checkpointer, agent_id)
@@ -428,10 +435,11 @@ class AgentHost:
             kind = await apply_hosted_lifecycle(
                 self._control_pool,
                 incarnation,
+                bus=self._bus,
                 kill_shell_sessions=kill_terminating_agent_shells,
             )
             if kind is None:
-                await settle_hosted_runtime(self._control_pool, incarnation)
+                await settle_hosted_runtime(self._control_pool, incarnation, bus=self._bus)
             else:
                 self.drop_agent(agent_id)
 
@@ -658,7 +666,9 @@ class AgentHost:
         while True:
             try:
                 async with database_phase():
-                    await settle_checkpoint(self._graph, agent_id, activate_accepted=False)
+                    await settle_checkpoint(
+                        self._graph, self._db, self._bus, agent_id, activate_accepted=False
+                    )
                 turn += 1
                 with turn_span(name=f"ava-agent-{agent_id}", session_id=str(agent_id), turn=turn):
                     if pending_failure is not None:
@@ -717,6 +727,7 @@ class AgentHost:
                         kind = await apply_hosted_lifecycle(
                             self._control_pool,
                             incarnation,
+                            bus=self._bus,
                             kill_shell_sessions=kill_terminating_agent_shells,
                         )
                     logger.info(
@@ -728,7 +739,7 @@ class AgentHost:
                     return TurnOutcome(exited=kind == "terminate", crashed=False)
                 if result["turn_idle"]:
                     async with database_phase():
-                        await settle_checkpoint(self._graph, agent_id)
+                        await settle_checkpoint(self._graph, self._db, self._bus, agent_id)
                     return TurnOutcome(exited=False, crashed=False)
             except (psycopg.OperationalError, PoolTimeout):
                 incarnation = current_incarnation(agent_id)
@@ -778,8 +789,10 @@ class AgentHost:
         """
         await renew_hosted_owner(self._control_pool, self._machine, self._owner)
         try:
-            reaped = await reap_crash_corpses(self._control_pool, self._machine, self._owner)
-            await recover_reaped_corpses(self._db, reaped)
+            reaped = await reap_crash_corpses(
+                self._control_pool, self._machine, self._owner, bus=self._bus
+            )
+            await recover_reaped_corpses(self._db, self._bus, reaped)
         except Exception:
             logger.exception(
                 "corpse reap failed — retrying next beat",

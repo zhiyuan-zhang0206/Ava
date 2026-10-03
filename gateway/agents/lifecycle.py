@@ -24,8 +24,9 @@ from pydantic import BaseModel, Field
 
 from base.agents.impersonation import ImpersonationError
 from base.agents.impersonation.maintenance import force_expire_impersonation
-from base.db import agent_exists, insert_compact_request_inbound
+from base.db import Database, agent_exists, insert_compact_request_inbound
 from base.db.transaction import write_transaction
+from base.events.live.bus import EventBus
 from gateway.agents.forward import forward_to_home_machine
 from gateway.agents.schemas import CancelRequest, CompactEnqueued
 from ops import lifecycle as _ops
@@ -77,6 +78,8 @@ async def post_force_expire_impersonation(
         status = await asyncio.to_thread(
             force_expire_impersonation,
             request.app.state.db_pool,
+            request.app.state.db,
+            request.app.state.bus,
             agent_id,
             body.session_id,
             actor,
@@ -111,10 +114,13 @@ async def post_compact(
     inbound_id = await asyncio.to_thread(
         _compact_request_blocking,
         request.app.state.db_pool,
+        request.app.state.db,
+        request.app.state.bus,
         agent_id,
     )
     await _ops.resurrect_if_terminated(
         request.app.state.db,
+        request.app.state.bus,
         agent_id,
         trigger_inbound_id=inbound_id,
         trigger_inbound_kind="compact_request",
@@ -137,15 +143,19 @@ async def post_cancel(body: CancelRequest, request: Request) -> CancelRequested:
     No cross-machine forwarding: the cancel is a durable row in the shared DB
     (plus a Redis wake), delivered regardless of which host runs the agent.
     """
-    return await _ops.cancel_agent_op(body.agent_id, request.app.state.db_pool)
+    return await _ops.cancel_agent_op(
+        request.app.state.db, request.app.state.bus, body.agent_id, request.app.state.db_pool
+    )
 
 
-def _compact_request_blocking(pool: ConnectionPool, agent_id: int) -> int:
+def _compact_request_blocking(
+    pool: ConnectionPool, db: Database, bus: EventBus, agent_id: int
+) -> int:
     """Sync compact-request INSERT + 404 guard — via to_thread."""
     with pool.connection() as conn:
         if not agent_exists(conn, agent_id):
             raise HTTPException(status_code=404, detail=f"agent {agent_id} not found")
-        return insert_compact_request_inbound(conn, agent_id)
+        return insert_compact_request_inbound(conn, agent_id, database=db, bus=bus)
 
 
 @router.post("/api/agents/{agent_id}/terminate")
@@ -317,7 +327,10 @@ async def post_agents_resurrect_billing(
     from ops.lifecycle.billing_recovery import run_billing_recovery
 
     return await run_billing_recovery(
-        execute=body.execute, pool=request.app.state.db_pool, db=request.app.state.db
+        execute=body.execute,
+        pool=request.app.state.db_pool,
+        db=request.app.state.db,
+        bus=request.app.state.bus,
     )
 
 

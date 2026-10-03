@@ -2,3 +2,7 @@
 # modules here that may read the global `settings`; the rest takes its configuration as
 # constructor arguments.
 settings = ["mcp_daemon.py"]
+
+# The only modules here that may build the `db` handle from the live settings; the rest takes it
+# from them.
+db = ["mcp_daemon.py"]

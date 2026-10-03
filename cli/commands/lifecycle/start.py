@@ -453,9 +453,10 @@ def _cmd_start_body(
 
     # The exact maintenance generation stays held through readiness. Its
     # authorized owner, or resume_after_start, alone may release admission.
+    from base.db import Database
     from base.deploy.state.host_deploy_state import set_posture
 
-    set_posture("paused" if admission.held() else "idle")
+    set_posture(Database.from_settings(), "paused" if admission.held() else "idle")
 
     # Success requires real readiness for every launched service, frontend included.
     print("\n→ waiting for services to come up")

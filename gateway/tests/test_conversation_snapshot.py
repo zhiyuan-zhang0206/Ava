@@ -12,7 +12,8 @@ import psycopg
 import pytest
 from fastapi.testclient import TestClient
 
-from base.db import create_agent, insert_inbound_message
+from base.db import Database, create_agent, insert_inbound_message
+from base.events.live.bus import EventBus
 from gateway.app import app
 
 
@@ -59,11 +60,13 @@ def _usage_message(input_tokens: int, output_tokens: int, reasoning: int):
 
 
 def test_snapshot_composes_all_three_sections(
-    db_conn: psycopg.Connection, test_client: TestClient
+    db_conn: psycopg.Connection, test_client: TestClient, database: Database, event_bus: EventBus
 ) -> None:
     tid = create_agent(db_conn)
     _put_checkpoint(tid, [_usage_message(100, 20, 7)])
-    pending_id = insert_inbound_message(db_conn, tid, "queued question", source="user")
+    pending_id = insert_inbound_message(
+        db_conn, tid, "queued question", source="user", bus=event_bus, database=database
+    )
 
     resp = test_client.get(f"/api/agents/{tid}/conversation-snapshot")
     assert resp.status_code == 200
@@ -88,13 +91,13 @@ def test_snapshot_composes_all_three_sections(
 
 
 def test_snapshot_sections_match_the_standalone_endpoints(
-    db_conn: psycopg.Connection, test_client: TestClient
+    db_conn: psycopg.Connection, test_client: TestClient, database: Database, event_bus: EventBus
 ) -> None:
     """No drift: each composed section equals the standalone endpoint's own
     response for the same state (read side by side)."""
     tid = create_agent(db_conn)
     _put_checkpoint(tid, [_usage_message(42, 2, 0)])
-    insert_inbound_message(db_conn, tid, "queued", source="user")
+    insert_inbound_message(db_conn, tid, "queued", source="user", bus=event_bus, database=database)
 
     snap = test_client.get(f"/api/agents/{tid}/conversation-snapshot").json()
     assert snap["timeline"] == test_client.get(f"/api/agents/{tid}/timeline").json()

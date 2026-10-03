@@ -12,6 +12,7 @@ import sys
 from pathlib import Path
 
 from base.db import Database
+from base.events.live.bus import EventBus
 from cli.commands._repo import _repo_root, session_name
 from cli.commands.lifecycle._pause_resume import exclusive_resources
 from cli.start_runtime import StartRuntime
@@ -348,7 +349,7 @@ def _release_self_heal_pause() -> None:
 
     # The pause lives in the posture row (R1, PR5): only `paused` is this heal's business.
     try:
-        state = read()
+        state = read(Database.from_settings())
     except Exception as exc:
         print(
             f"  · leaving this host paused (could not read host_deploy_state: {exc})",
@@ -359,7 +360,7 @@ def _release_self_heal_pause() -> None:
         return  # nothing paused this host; an operator's `ava restart` changes nothing
     from ops.cluster_pause import unpause_local_cluster
 
-    unpause_local_cluster()
+    unpause_local_cluster(Database.from_settings(), EventBus.from_settings())
     print("  · unpaused this host (nothing else owns the pause; nothing was stopped)")
 
 

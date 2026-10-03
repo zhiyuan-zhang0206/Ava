@@ -17,6 +17,8 @@ import psycopg
 import pytest
 from fastapi.testclient import TestClient
 
+from base.db import Database
+from base.events.live.bus import EventBus
 from base.lm.plugin_providers import ensure_provider_plugins_loaded
 from base.lm.registry import MODELS
 from gateway.app import app
@@ -41,7 +43,9 @@ def _spawn_agent(spawner: str = "test") -> int:
     from base.cluster.machine import machine_name
     from ops.agents.spawn import create_agent_row
 
-    agent_id, _, _prompt_id, _attempt_id = create_agent_row(spawner=spawner, machine=machine_name())
+    agent_id, _, _prompt_id, _attempt_id = create_agent_row(
+        Database.from_settings(), EventBus.from_settings(), spawner=spawner, machine=machine_name()
+    )
     return agent_id
 
 

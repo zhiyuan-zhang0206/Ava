@@ -34,6 +34,8 @@ from base import paths
 from base.agents.context import AvaContext
 from base.agents.messages.kwargs import NoteTag
 from base.config import settings
+from base.db import Database
+from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices
 
 _CONFIG = {"configurable": {"thread_id": "1042"}}
@@ -48,6 +50,8 @@ def _runtime(*, container: bool = False) -> Runtime[AvaContext]:
             llm=MagicMock(),
             event_publisher=MagicMock(),
             agent=AgentSlices.resolve(),
+            db=Database.from_settings(),
+            bus=EventBus.from_settings(),
         )
     )
 

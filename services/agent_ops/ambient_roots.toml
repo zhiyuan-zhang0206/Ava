@@ -5,3 +5,7 @@ endpoints = ["daemon.py"]
 # The only modules here that may build the `db` handle from the live settings; the rest takes it
 # from them.
 db = ["_boot.py"]
+
+# The only modules here that may build the `bus` handle from the live settings; the rest takes it
+# from them.
+bus = ["_boot.py"]

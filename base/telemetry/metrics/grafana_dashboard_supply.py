@@ -31,6 +31,7 @@ from types import ModuleType
 
 import psycopg
 
+from base.db import Database
 from base.log import logger
 from base.packages.extensions import registry
 from base.packages.plugins import data_registry, load_report
@@ -225,7 +226,7 @@ def collect_plugin_specs(
     )
 
 
-def render_dashboard_json(*, repo_only: bool = False) -> tuple[str, tuple[str, ...]]:
+def render_dashboard_json(db: Database, *, repo_only: bool = False) -> tuple[str, tuple[str, ...]]:
     """Render the complete ava-ops dashboard JSON from the live spec suppliers.
 
     The one render path shared by the operator command (``ava lgtm render``)
@@ -245,9 +246,7 @@ def render_dashboard_json(*, repo_only: bool = False) -> tuple[str, tuple[str, .
     if repo_only:
         plugins = collect_plugin_specs()
     else:
-        from base.db import connect
-
-        with connect() as conn:
+        with db.connect() as conn:
             plugins = collect_plugin_specs(conn)
     rendered = render_to_json(render_dashboard(core_specs, plugins.specs))
     return rendered, tuple(sorted(plugins.failed))

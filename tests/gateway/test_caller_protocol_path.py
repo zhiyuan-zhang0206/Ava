@@ -21,7 +21,8 @@ from agent.db import claim_inbound_batch
 from agent.graph._chat_inbound import build_chat_inbound
 from agent.ownership.hosted import admit_hosted_runtime, settle_hosted_runtime
 from base.config import settings
-from base.db import create_agent
+from base.db import Database, create_agent
+from base.events.live.bus import EventBus
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from base.native_process.turn_identity import bind_turn_identity
 from cli.commands.agents.control import cmd_agents_send
@@ -40,10 +41,10 @@ async def _admit(db: psycopg.Connection, pool: AsyncConnectionPool) -> RuntimeIn
     )
     db.commit()
     incarnation = await admit_hosted_runtime(
-        pool, agent_id, "host-test", uuid4(), expected_from="idling"
+        pool, agent_id, "host-test", uuid4(), expected_from="idling", db=Database.from_settings()
     )
     assert incarnation is not None
-    assert await settle_hosted_runtime(pool, incarnation)
+    assert await settle_hosted_runtime(pool, incarnation, bus=EventBus.from_settings())
     return incarnation
 
 

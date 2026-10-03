@@ -12,6 +12,8 @@ import psycopg
 import pytest
 
 from base.cluster.machine import machine_name
+from base.db import Database
+from base.events.live.bus import EventBus
 from ops.agents import spawn
 from ops.agents.spawn import create_agent_row
 
@@ -38,21 +40,27 @@ def _first_checkpoint(db: psycopg.Connection, agent_id: int) -> str:
     return "ckpt-1"
 
 
-def test_a_spawn_is_recorded_with_its_machine(db_conn: psycopg.Connection) -> None:
+def test_a_spawn_is_recorded_with_its_machine(
+    db_conn: psycopg.Connection, database: Database, event_bus: EventBus
+) -> None:
     machine = machine_name()
 
-    agent_id, _, _, _ = create_agent_row(spawner="user", machine=machine)
+    agent_id, _, _, _ = create_agent_row(database, event_bus, spawner="user", machine=machine)
 
     [(source, target, attributes)] = _audit(db_conn, agent_id, "spawn")
     assert (source, target) == ("user", None)
     assert attributes["machine"] == machine
 
 
-def test_a_fork_is_recorded_against_its_source_agent(db_conn: psycopg.Connection) -> None:
-    parent, _, _, _ = create_agent_row(spawner="user", machine=machine_name())
+def test_a_fork_is_recorded_against_its_source_agent(
+    db_conn: psycopg.Connection, database: Database, event_bus: EventBus
+) -> None:
+    parent, _, _, _ = create_agent_row(database, event_bus, spawner="user", machine=machine_name())
     checkpoint = _first_checkpoint(db_conn, parent)
 
     child, _, _, _ = create_agent_row(
+        database,
+        event_bus,
         spawner="agent:4242",
         fork_from=parent,
         fork_checkpoint=checkpoint,
@@ -67,9 +75,16 @@ def test_a_fork_is_recorded_against_its_source_agent(db_conn: psycopg.Connection
 
 def test_an_agent_sourced_first_prompt_is_recorded_as_a_message(
     db_conn: psycopg.Connection,
+    database: Database,
+    event_bus: EventBus,
 ) -> None:
     agent_id, _, inbound_id, _ = create_agent_row(
-        spawner="user", machine=machine_name(), prompt="hello", prompt_source="agent:4242"
+        database,
+        event_bus,
+        spawner="user",
+        machine=machine_name(),
+        prompt="hello",
+        prompt_source="agent:4242",
     )
 
     [(source, target, attributes)] = _audit(db_conn, agent_id, "send_message")
@@ -78,7 +93,10 @@ def test_an_agent_sourced_first_prompt_is_recorded_as_a_message(
 
 
 def test_a_spawn_whose_audit_fact_cannot_be_recorded_creates_no_agent(
-    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+    db_conn: psycopg.Connection,
+    monkeypatch: pytest.MonkeyPatch,
+    database: Database,
+    event_bus: EventBus,
 ) -> None:
     before = db_conn.execute("SELECT count(*) FROM agents").fetchone()
     db_conn.commit()
@@ -89,7 +107,7 @@ def test_a_spawn_whose_audit_fact_cannot_be_recorded_creates_no_agent(
     monkeypatch.setattr(spawn, "record_audit", refuse)
 
     with pytest.raises(RuntimeError, match="audit write failed"):
-        create_agent_row(spawner="user", machine=machine_name())
+        create_agent_row(database, event_bus, spawner="user", machine=machine_name())
 
     after = db_conn.execute("SELECT count(*) FROM agents").fetchone()
     db_conn.commit()

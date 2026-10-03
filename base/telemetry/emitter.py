@@ -306,13 +306,15 @@ def _write_batch(events: list[Event]) -> None:
         return
     _append_jsonl(events)
     with contextlib.suppress(Exception):
+        from base.db import Database
         from base.telemetry.event_store import store_events
 
-        store_events(events)
+        store_events(Database.from_settings(), events)
     try:
+        from base.db import Database
         from base.telemetry.metrics.observed_metrics import project_events
 
-        project_events(events)
+        project_events(Database.from_settings(), events)
     except Exception as exc:
         report_no_pipeline("[observed-metrics] sink unavailable: {err}", err=repr(exc))
     _export_otlp(events)

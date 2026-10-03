@@ -24,10 +24,7 @@ from agent.ownership.hosted import admit_hosted_runtime
 from agent.tests.test_inbound_ownership import _agent, _insert
 from base.agents.incarnation import exec_request_evidence
 from base.agents.incarnation.exec_request_evidence import Verdict
-from base.agents.incarnation.hosted_force import (
-    original_host_force,
-    recover_orphaned_hosted_forces,
-)
+from base.agents.incarnation.hosted_force import original_host_force, recover_orphaned_hosted_forces
 from base.config import settings
 from base.db import Database
 from base.events.live.bus import EventBus
@@ -115,11 +112,12 @@ async def _assert_pending_force(
         (command,),
     ).fetchone() == ("claimed", True, None)
     conn.commit()
+    handles = Database.from_settings(), EventBus.from_settings()
     with pytest.raises(ResurrectSettlementDeferredError):
-        await asyncio.to_thread(resurrect_agent, agent_id, resurrected_by="user")
+        await asyncio.to_thread(resurrect_agent, *handles, agent_id, resurrected_by="user")
     assert (
         await admit_hosted_runtime(
-            pool, agent_id, "claim-test", uuid4(), expected_from="terminated"
+            pool, agent_id, "claim-test", uuid4(), expected_from="terminated", db=handles[0]
         )
         is None
     )
@@ -175,6 +173,7 @@ async def test_force_waits_for_real_work_and_delayed_cancel_cannot_hit_successor
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     work_kind: str,
+    database: Database,
 ) -> None:
     agent_id = _agent(db_conn)
     entered, release = threading.Event(), threading.Event()
@@ -195,6 +194,7 @@ async def test_force_waits_for_real_work_and_delayed_cancel_cannot_hit_successor
             from agent.graph.exec._subprocess import _run_in_subprocess
 
             await _run_in_subprocess(
+                database,
                 "from pathlib import Path\nimport time\n"
                 f"Path({str(marker)!r}).touch()\n"
                 + (
@@ -257,7 +257,7 @@ async def test_force_waits_for_real_work_and_delayed_cancel_cannot_hit_successor
 
 
 async def test_idle_force_only_original_live_host_can_observe(
-    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool
+    db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool, database: Database
 ) -> None:
     agent_id = _agent(db_conn)
     host = AgentHost(
@@ -270,7 +270,7 @@ async def test_idle_force_only_original_live_host_can_observe(
     )
     assert (
         await admit_hosted_runtime(
-            aops_pool, agent_id, "claim-test", host._owner, expected_from="idling"
+            aops_pool, agent_id, "claim-test", host._owner, expected_from="idling", db=database
         )
         is not None
     )
@@ -293,6 +293,7 @@ async def test_exclusive_host_boot_recovers_resource_free_applied_force(
     aops_pool: AsyncConnectionPool,
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
+    database: Database,
 ) -> None:
     """A dead host owner must not strand a force when no exec domain survived."""
     agent_id = _agent(db_conn)
@@ -306,7 +307,7 @@ async def test_exclusive_host_boot_recovers_resource_free_applied_force(
     )
     assert (
         await admit_hosted_runtime(
-            aops_pool, agent_id, "claim-test", old_host._owner, expected_from="idling"
+            aops_pool, agent_id, "claim-test", old_host._owner, expected_from="idling", db=database
         )
         is not None
     )
@@ -335,6 +336,7 @@ async def test_exclusive_host_boot_recovers_torn_pointer_done_force(
     aops_pool: AsyncConnectionPool,
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
+    database: Database,
 ) -> None:
     """A command torn into `done` with the pointer alive (task #3678) is blind to
     the claimed-only boot recovery; the widened candidate predicate settles it."""
@@ -349,7 +351,7 @@ async def test_exclusive_host_boot_recovers_torn_pointer_done_force(
     )
     assert (
         await admit_hosted_runtime(
-            aops_pool, agent_id, "claim-test", old_host._owner, expected_from="idling"
+            aops_pool, agent_id, "claim-test", old_host._owner, expected_from="idling", db=database
         )
         is not None
     )
@@ -398,6 +400,7 @@ async def test_exclusive_host_boot_defers_force_with_persistent_exec_evidence(
     aops_pool: AsyncConnectionPool,
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
+    database: Database,
 ) -> None:
     """A request envelope survives its parent and forbids guessed quiescence."""
     agent_id = _agent(db_conn)
@@ -411,7 +414,7 @@ async def test_exclusive_host_boot_defers_force_with_persistent_exec_evidence(
     )
     assert (
         await admit_hosted_runtime(
-            aops_pool, agent_id, "claim-test", old_host._owner, expected_from="idling"
+            aops_pool, agent_id, "claim-test", old_host._owner, expected_from="idling", db=database
         )
         is not None
     )
@@ -467,6 +470,7 @@ async def test_exclusive_host_boot_quarantines_superseded_evidence_and_recovers(
     aops_pool: AsyncConnectionPool,
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
+    database: Database,
 ) -> None:
     """Old-owner evidence is preserved, not deleted, and stops fencing the force."""
     agent_id = _agent(db_conn)
@@ -480,7 +484,7 @@ async def test_exclusive_host_boot_quarantines_superseded_evidence_and_recovers(
     )
     assert (
         await admit_hosted_runtime(
-            aops_pool, agent_id, "claim-test", old_host._owner, expected_from="idling"
+            aops_pool, agent_id, "claim-test", old_host._owner, expected_from="idling", db=database
         )
         is not None
     )
@@ -542,6 +546,7 @@ async def test_exclusive_host_boot_disposes_aged_unreadable_evidence_and_recover
     aops_pool: AsyncConnectionPool,
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
+    database: Database,
 ) -> None:
     """The 6285 shape: a zero-byte remnant no longer defers boot recovery."""
 
@@ -556,7 +561,7 @@ async def test_exclusive_host_boot_disposes_aged_unreadable_evidence_and_recover
     )
     assert (
         await admit_hosted_runtime(
-            aops_pool, agent_id, "claim-test", old_host._owner, expected_from="idling"
+            aops_pool, agent_id, "claim-test", old_host._owner, expected_from="idling", db=database
         )
         is not None
     )
@@ -598,6 +603,7 @@ async def test_exclusive_host_boot_still_defers_young_unreadable_evidence(
     aops_pool: AsyncConnectionPool,
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
+    database: Database,
 ) -> None:
     """A fresh remnant may still settle: the bound is not a cleanup timer."""
 
@@ -612,7 +618,7 @@ async def test_exclusive_host_boot_still_defers_young_unreadable_evidence(
     )
     assert (
         await admit_hosted_runtime(
-            aops_pool, agent_id, "claim-test", old_host._owner, expected_from="idling"
+            aops_pool, agent_id, "claim-test", old_host._owner, expected_from="idling", db=database
         )
         is not None
     )
@@ -644,6 +650,7 @@ async def test_exclusive_host_boot_defers_while_a_live_child_references_the_requ
     aops_pool: AsyncConnectionPool,
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
+    database: Database,
 ) -> None:
     """A live matching child defers; the same evidence recovers on the next boot."""
     agent_id = _agent(db_conn)
@@ -657,7 +664,7 @@ async def test_exclusive_host_boot_defers_while_a_live_child_references_the_requ
     )
     assert (
         await admit_hosted_runtime(
-            aops_pool, agent_id, "claim-test", old_host._owner, expected_from="idling"
+            aops_pool, agent_id, "claim-test", old_host._owner, expected_from="idling", db=database
         )
         is not None
     )
@@ -707,6 +714,8 @@ async def test_formatted_exec_cleanup_failure_retains_actual_resource_evidence(
     aops_pool: AsyncConnectionPool,
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
+    database: Database,
+    event_bus: EventBus,
 ) -> None:
     from agent.graph.exec._process import ExecProcessDomain
     from agent.graph.exec._result import _ExecCrashed
@@ -727,7 +736,7 @@ async def test_formatted_exec_cleanup_failure_retains_actual_resource_evidence(
     scope = HostedTurnResources()
     with bind_hosted_resources(scope):
         outcome, _ = await _run_in_subprocess(
-            "print('resource-proof')", agent_id, asyncio.Event(), 10, exec_dir=tmp_path
+            database, "print('resource-proof')", agent_id, asyncio.Event(), 10, exec_dir=tmp_path
         )
         assert isinstance(outcome, _ExecCrashed)
         assert "teardown failure" in outcome.output
@@ -738,8 +747,8 @@ async def test_formatted_exec_cleanup_failure_retains_actual_resource_evidence(
         assert scope.unresolved[path] is domain
         assert domain.proc.returncode is None  # unresolved closure must not reap
         # A formatted tool failure cannot become a positive lifecycle barrier.
-        assert await apply_hosted_lifecycle(aops_pool, incarnation) is None
-        assert not await settle_hosted_runtime(aops_pool, incarnation)
+        assert await apply_hosted_lifecycle(aops_pool, incarnation, bus=event_bus) is None
+        assert not await settle_hosted_runtime(aops_pool, incarnation, bus=event_bus)
     assert len(scope.unresolved) == 1  # cache/context reset does not erase the evidence
     original_close(domain, time.monotonic() + 5)
     domain.proc.wait(timeout=5)

@@ -42,8 +42,7 @@ from base.agents.impersonation.history import append, capture_pending, set_actor
 from base.agents.messages.caller_identity import CallerIdentity
 from base.cluster.machine import machine_name
 from base.config.service_read import current_field_values
-from base.db import connect, publish_inbound_wake
-from base.db.transaction import write_transaction
+from base.db import Database, publish_inbound_wake
 from base.events.live.announce import (
     publish_agent_updated_sync,
     publish_impersonation_changed_sync,
@@ -60,11 +59,11 @@ def _ttl(value: int) -> int:
     return value
 
 
-def wake_agent(agent_id: int, *, roster_changed: bool = False) -> None:
-    publish_inbound_wake(agent_id, "impersonation")
-    publish_impersonation_changed_sync(EventBus.from_settings(), agent_id)
+def wake_agent(db: Database, bus: EventBus, agent_id: int, *, roster_changed: bool = False) -> None:
+    publish_inbound_wake(db, bus, agent_id, "impersonation")
+    publish_impersonation_changed_sync(bus, agent_id)
     if roster_changed:
-        publish_agent_updated_sync(EventBus.from_settings(), agent_id)
+        publish_agent_updated_sync(bus, agent_id)
 
 
 def _validate_invoked_python(process_metadata: dict[str, Any] | None) -> None:
@@ -125,6 +124,8 @@ def _reject_open_previous(conn: Connection[Any], agent_id: int) -> None:
 
 
 def request(
+    db: Database,
+    bus: EventBus,
     agent_id: int,
     *,
     caller: CallerIdentity,
@@ -156,7 +157,7 @@ def request(
     lease_id = uuid4()
     delivery_config = current_field_values()
     event_delivery_protocol_version = event_protocol_for_new_lease(automatic=automatic)
-    with write_transaction() as conn:
+    with db.write_transaction() as conn:
         meta = lock_agent(conn, agent_id)
         if meta["machine"] != machine_name():
             raise ImpersonationError("Impersonation is limited to the agent's own machine")
@@ -194,7 +195,7 @@ def request(
             ),
         )
         result = public(lock_lease(conn, str(lease_id)))
-    wake_agent(agent_id, roster_changed=True)
+    wake_agent(db, bus, agent_id, roster_changed=True)
     if relay_token is not None:
         return result | {"relay_token": relay_token}
     return result
@@ -205,20 +206,20 @@ def event_protocol_for_new_lease(*, automatic: bool) -> int | None:
     return LOG_PROTOCOL_VERSION if automatic else None
 
 
-def get(lease_id: str, caller: object) -> dict[str, Any]:
-    with write_transaction() as conn:
+def get(db: Database, bus: EventBus, lease_id: str, caller: object) -> dict[str, Any]:
+    with db.write_transaction() as conn:
         lease = lock_lease(conn, lease_id)
         authenticate(lease, caller)
         was_open = lease["status"] in OPEN
         result = public(expire(conn, lease))
     if was_open and result["status"] == "expired":
-        wake_agent(lease["agent_id"], roster_changed=True)
+        wake_agent(db, bus, lease["agent_id"], roster_changed=True)
     return result
 
 
-def require_active(lease_id: str, caller: object) -> dict[str, Any]:
+def require_active(db: Database, lease_id: str, caller: object) -> dict[str, Any]:
     """Check one committed snapshot; SDK work does not hold a database lock."""
-    with connect() as conn, conn.cursor(row_factory=dict_row) as cur:
+    with db.connect() as conn, conn.cursor(row_factory=dict_row) as cur:
         cur.execute(
             "SELECT l.*,m.machine AS current_machine,m.status AS current_status,"
             "l.expires_at>clock_timestamp() AS fresh FROM agent_impersonations l "
@@ -239,6 +240,8 @@ def require_active(lease_id: str, caller: object) -> dict[str, Any]:
 
 
 def accept(
+    db: Database,
+    bus: EventBus,
     lease_id: str,
     agent_id: int,
     incarnation: RuntimeIncarnation,
@@ -255,7 +258,7 @@ def accept(
         raise ImpersonationError("A nonempty start message is required for the external controller")
     if incarnation.agent_id != agent_id:
         raise ImpersonationError("Consent belongs to a different agent")
-    with write_transaction() as conn:
+    with db.write_transaction() as conn:
         require_native(conn, incarnation)
         lease = lock_lease(conn, lease_id)
         local(lease)
@@ -276,14 +279,19 @@ def accept(
             (incarnation.generation, incarnation.owner, start_message, lease_id),
         )
         result = public(lock_lease(conn, lease_id))
-    wake_agent(agent_id)
+    wake_agent(db, bus, agent_id)
     return result
 
 
 def reject(
-    lease_id: str, agent_id: int, incarnation: RuntimeIncarnation, reason: str = ""
+    db: Database,
+    bus: EventBus,
+    lease_id: str,
+    agent_id: int,
+    incarnation: RuntimeIncarnation,
+    reason: str = "",
 ) -> dict[str, Any]:
-    with write_transaction() as conn:
+    with db.write_transaction() as conn:
         require_native(conn, incarnation)
         lease = lock_lease(conn, lease_id)
         if (
@@ -298,15 +306,17 @@ def reject(
             (reason, lease_id),
         )
         result = public(lock_lease(conn, lease_id))
-    wake_agent(agent_id, roster_changed=True)
+    wake_agent(db, bus, agent_id, roster_changed=True)
     return result
 
 
-def activate(lease_id: str, incarnation: RuntimeIncarnation) -> dict[str, Any]:
+def activate(
+    db: Database, bus: EventBus, lease_id: str, incarnation: RuntimeIncarnation
+) -> dict[str, Any]:
     """Called only after native exec drains AND its checkpoint flush completes."""
     from base.agents.incarnation.resources import IncarnationResources, decode_resources
 
-    with write_transaction() as conn:
+    with db.write_transaction() as conn:
         meta = require_native(conn, incarnation)
         lease = lock_lease(conn, lease_id)
         was_open = lease["status"] in OPEN
@@ -334,17 +344,21 @@ def activate(lease_id: str, incarnation: RuntimeIncarnation) -> dict[str, Any]:
             )
             result = public(lock_lease(conn, lease_id))
             capture_pending(conn, result)
-    wake_agent(incarnation.agent_id, roster_changed=was_open and result["status"] == "expired")
+    wake_agent(
+        db, bus, incarnation.agent_id, roster_changed=was_open and result["status"] == "expired"
+    )
     return result
 
 
-def native_status(agent_id: int, incarnation: RuntimeIncarnation) -> dict[str, Any] | None:
+def native_status(
+    db: Database, bus: EventBus, agent_id: int, incarnation: RuntimeIncarnation
+) -> dict[str, Any] | None:
     if incarnation.agent_id != agent_id:
         raise ImpersonationError("Native status belongs to a different agent")
     # No-lease reads must not lock the hot native metadata row at every node.
     # A concurrently inserted request still needs this native owner's consent;
     # absence can delay presentation until the next gate, never activate it.
-    with connect() as conn:
+    with db.connect() as conn:
         row = conn.execute(
             "SELECT runtime_generation=%s AND runtime_owner=%s "
             "AND status IN ('running','idling') AND lease_expires_at>clock_timestamp(),"
@@ -357,7 +371,7 @@ def native_status(agent_id: int, incarnation: RuntimeIncarnation) -> dict[str, A
         raise ImpersonationError("Native runtime no longer owns this agent")
     if not row[1]:
         return None
-    with write_transaction() as conn:
+    with db.write_transaction() as conn:
         require_native(conn, incarnation)
         with conn.cursor(row_factory=dict_row) as cur:
             cur.execute(
@@ -421,12 +435,14 @@ def native_status(agent_id: int, incarnation: RuntimeIncarnation) -> dict[str, A
             )
         result = public(lease)
     if was_open and result["status"] == "expired":
-        wake_agent(agent_id, roster_changed=True)
+        wake_agent(db, bus, agent_id, roster_changed=True)
     return result
 
 
-def renew(lease_id: str, caller: object, *, ttl_seconds: int | None = None) -> dict[str, Any]:
-    with write_transaction() as conn:
+def renew(
+    db: Database, bus: EventBus, lease_id: str, caller: object, *, ttl_seconds: int | None = None
+) -> dict[str, Any]:
+    with db.write_transaction() as conn:
         lease = lock_lease(conn, lease_id)
         require_active_locked(conn, lease, caller)
         set_actor(conn, lease["source"])
@@ -437,18 +453,20 @@ def renew(lease_id: str, caller: object, *, ttl_seconds: int | None = None) -> d
             (ttl, ttl, lease_id),
         )
         result = public(lock_lease(conn, lease_id))
-    wake_agent(lease["agent_id"])
+    wake_agent(db, bus, lease["agent_id"])
     return result
 
 
-def release(lease_id: str, caller: object, summary: str) -> dict[str, Any]:
+def release(
+    db: Database, bus: EventBus, lease_id: str, caller: object, summary: str
+) -> dict[str, Any]:
     if not summary.strip():
         raise ValueError("A nonempty handoff summary is required")
     from base.agents import impersonation_manifest as capture
     from base.agents.impersonation.event_log import is_log_native
 
     # Keep the admission fence durable when a live participant delays release.
-    with write_transaction() as conn:
+    with db.write_transaction() as conn:
         lease = lock_lease(conn, lease_id)
         authenticate(lease, caller)
         if lease["status"] == "released":
@@ -458,7 +476,7 @@ def release(lease_id: str, caller: object, summary: str) -> dict[str, Any]:
         if is_log_native(lease):
             capture.close_event_admission(conn, lease_id)
 
-    with write_transaction() as conn:
+    with db.write_transaction() as conn:
         lease = lock_lease(conn, lease_id)
         authenticate(lease, caller)
         if lease["status"] == "released":
@@ -488,15 +506,15 @@ def release(lease_id: str, caller: object, summary: str) -> dict[str, Any]:
         )
         dismiss_reminders(conn, lease)
         result = public(lock_lease(conn, lease_id))
-    wake_agent(lease["agent_id"], roster_changed=True)
+    wake_agent(db, bus, lease["agent_id"], roster_changed=True)
     return result
 
 
-def inbox(lease_id: str, caller: object, *, limit: int = 100) -> list[dict[str, Any]]:
+def inbox(db: Database, lease_id: str, caller: object, *, limit: int = 100) -> list[dict[str, Any]]:
     """Read and record the controller's pending inbox page, oldest first."""
     if not 1 <= limit <= 1000:
         raise ValueError("Inbox limit must be from 1 through 1000")
-    with write_transaction() as conn:
+    with db.write_transaction() as conn:
         lease = lock_lease(conn, lease_id)
         require_active_locked(conn, lease, caller)
         with conn.cursor(row_factory=dict_row) as cur:
@@ -517,8 +535,8 @@ def inbox(lease_id: str, caller: object, *, limit: int = 100) -> list[dict[str, 
     return messages
 
 
-def ack(lease_id: str, caller: object, message_ids: list[int]) -> None:
-    with write_transaction() as conn:
+def ack(db: Database, bus: EventBus, lease_id: str, caller: object, message_ids: list[int]) -> None:
+    with db.write_transaction() as conn:
         lease = lock_lease(conn, lease_id)
         require_active_locked(conn, lease, caller)
         rows = conn.execute(
@@ -551,20 +569,20 @@ def ack(lease_id: str, caller: object, message_ids: list[int]) -> None:
                 event_key="ack:" + ",".join(map(str, sorted(set(message_ids)))),
             )
     if any(row[0] == "cancel" for row in acknowledged):
-        EventBus.from_settings().publish_best_effort_sync(
+        bus.publish_best_effort_sync(
             Cancelled(agent_id=lease["agent_id"]).model_dump_json(),
             context="impersonation_cancel_ack",
         )
     # Consuming a page exposes previously hidden pending IDs to the relay.
     # Publish after real progress so its next page does not wait for DB catchup.
     if acknowledged:
-        wake_agent(lease["agent_id"])
+        wake_agent(db, bus, lease["agent_id"])
 
 
 def merge_plugin_delta(
-    lease_id: str, caller: object, delta: dict[str, Any], *, expected_version: int
+    db: Database, lease_id: str, caller: object, delta: dict[str, Any], *, expected_version: int
 ) -> None:
-    with write_transaction() as conn:
+    with db.write_transaction() as conn:
         lease = lock_lease(conn, lease_id)
         require_active_locked(conn, lease, caller)
         if lease["delta_version"] != expected_version:
@@ -576,9 +594,11 @@ def merge_plugin_delta(
         )
 
 
-def mark_plugin_applied(lease_id: str, version: int, incarnation: RuntimeIncarnation) -> None:
+def mark_plugin_applied(
+    db: Database, lease_id: str, version: int, incarnation: RuntimeIncarnation
+) -> None:
     """Receipt follows a durable checkpoint containing the same lease/version."""
-    with write_transaction() as conn:
+    with db.write_transaction() as conn:
         require_native(conn, incarnation)
         lease = lock_lease(conn, lease_id)
         if lease["agent_id"] != incarnation.agent_id or lease["status"] in OPEN:
@@ -591,7 +611,7 @@ def mark_plugin_applied(lease_id: str, version: int, incarnation: RuntimeIncarna
         )
 
 
-def relay_liveness_alert(agent_id: int) -> None:
+def relay_liveness_alert(db: Database, agent_id: int) -> None:
     """Loud, best-effort signal when a wake lands for an agent whose active
     lease has a stale relay heartbeat. Never raises: the wake itself must not
     be held hostage to this diagnostic. Logged at most once per stamp interval.
@@ -599,7 +619,7 @@ def relay_liveness_alert(agent_id: int) -> None:
     from datetime import UTC, datetime, timedelta
 
     try:
-        with connect() as conn:
+        with db.connect() as conn:
             row = conn.execute(
                 "SELECT relay_provider,relay_heartbeat_at,relay_last_failure_at "
                 "FROM agent_impersonations WHERE agent_id=%s AND status='active' "

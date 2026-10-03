@@ -16,6 +16,7 @@ from psycopg_pool import ConnectionPool
 import base.db
 from base.daemon.endpoints import ServiceEndpoint
 from base.daemon.loop_health import LivenessGroup, LoopProgress
+from base.db import Database
 from base.deploy.maintenance import admission
 from base.events.live.bus import EventBus
 from services.page_server import daemon, dead_pages
@@ -42,7 +43,7 @@ def published(monkeypatch: pytest.MonkeyPatch) -> dict[str, list[Any]]:
     async def publish(_bus: object, payload: str, *, context: str) -> None:
         seen["events"].append(payload)
 
-    def wake(agent_id: int, inbound_id: str) -> None:
+    def wake(_db: object, _bus: object, agent_id: int, inbound_id: str) -> None:
         seen["wakes"].append((agent_id, inbound_id))
 
     monkeypatch.setattr(EventBus, "publish_best_effort", publish)
@@ -96,7 +97,9 @@ def _progress() -> LoopProgress:
 
 
 async def _round(pool: ConnectionPool) -> None:
-    await dead_pages.dead_pages_round(pool, _HOST, _progress(), EventBus.from_settings())
+    await dead_pages.dead_pages_round(
+        pool, Database.from_settings(), _HOST, _progress(), EventBus.from_settings()
+    )
 
 
 def test_only_open_show_pages_of_this_host_are_selected(
@@ -211,16 +214,21 @@ async def test_a_failed_close_rolls_back_the_close_and_the_notice(
     assert published["events"] == []
 
 
-async def test_the_loop_scans_at_once_then_paces(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_the_loop_scans_at_once_then_paces(
+    monkeypatch: pytest.MonkeyPatch, database: Database
+) -> None:
     rounds: list[object] = []
 
-    async def fake_round(_pool: object, host: str, _progress: object, _bus: object) -> None:
+    async def fake_round(
+        _pool: object, _db: Database, host: str, _progress: object, _bus: object
+    ) -> None:
         rounds.append(host)
 
     monkeypatch.setattr(dead_pages, "dead_pages_round", fake_round)
     task = asyncio.create_task(
         dead_pages.dead_pages_loop(
             cast(ConnectionPool, object()),
+            database,
             _HOST,
             _progress(),
             page_server_config(),
@@ -286,7 +294,12 @@ def test_each_loop_gets_its_own_progress_tracker(monkeypatch: pytest.MonkeyPatch
         received["reconcile"] = progress
 
     async def dead(
-        _pool: object, _host: str, progress: LoopProgress, _config: object, _bus: object
+        _pool: object,
+        _db: object,
+        _host: str,
+        progress: LoopProgress,
+        _config: object,
+        _bus: object,
     ) -> None:
         received["dead"] = progress
 

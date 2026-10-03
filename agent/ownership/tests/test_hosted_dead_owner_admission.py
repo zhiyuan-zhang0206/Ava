@@ -20,7 +20,7 @@ from base.agents.incarnation.resources import (
     ResourceProcess,
     decode_resources,
 )
-from base.db import create_agent
+from base.db import Database, create_agent
 from base.native_process.ownership import stable_create_time
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 
@@ -89,6 +89,7 @@ async def test_dead_host_does_not_bypass_resource_or_machine_fences(
     aops_pool: AsyncConnectionPool,
     exited_host: ResourceProcess,
     fence: str,
+    database: Database,
 ) -> None:
     agent_id, evidence = _seed(db_conn, exited_host, fence=fence)
     with pytest.raises(ResourceEvidenceError):
@@ -98,6 +99,7 @@ async def test_dead_host_does_not_bypass_resource_or_machine_fences(
             "host-test",
             uuid4(),
             expected_from="running",
+            db=database,
         )
     stored = db_conn.execute(
         "SELECT runtime_owner,incarnation_resources,lease_expires_at>clock_timestamp() "
@@ -111,6 +113,7 @@ async def test_two_successors_of_dead_host_admit_only_one_owner(
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     exited_host: ResourceProcess,
+    database: Database,
 ) -> None:
     agent_id, _ = _seed(db_conn, exited_host)
     results = await asyncio.gather(
@@ -121,6 +124,7 @@ async def test_two_successors_of_dead_host_admit_only_one_owner(
                 "host-test",
                 uuid4(),
                 expected_from="running",
+                db=database,
             )
             for _ in range(2)
         ),
@@ -143,6 +147,7 @@ async def test_two_successors_of_dead_host_admit_only_one_owner(
 async def test_reused_pid_identifies_old_host_exit_without_touching_replacement(
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
+    database: Database,
 ) -> None:
     native = psutil.Process()
     current = ResourceProcess.capture(native)
@@ -158,6 +163,7 @@ async def test_reused_pid_identifies_old_host_exit_without_touching_replacement(
         "host-test",
         uuid4(),
         expected_from="running",
+        db=database,
     )
     assert admitted is not None
     assert native.is_running() and stable_create_time(native) == current.birth

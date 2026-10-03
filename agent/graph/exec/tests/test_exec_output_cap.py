@@ -23,6 +23,7 @@ import pytest
 
 from agent.graph.exec._stream import StreamCap, StreamingTextIO
 from agent.graph.exec.output import wrap_code_output
+from base.db import Database
 
 # ---------------------------------------------------------------------------
 # The accumulator: head + rolling tail under a fixed budget
@@ -232,6 +233,7 @@ def test_instrumentation_logs_the_true_length_not_the_capped_one(
 
 async def test_runaway_print_loop_is_truncated_and_the_run_completes(
     monkeypatch: pytest.MonkeyPatch,
+    database: Database,
 ) -> None:
     """The whole point of truncate-over-kill: a runaway loop comes back as a
     normal `_ExecDone` with bounded output and an explicit marker, so the model
@@ -247,6 +249,7 @@ async def test_runaway_print_loop_is_truncated_and_the_run_completes(
     monkeypatch.setattr("base.config.settings.sandbox.exec_output_accumulation_max_chars", budget)
 
     result, _payload = await _run_in_subprocess(
+        database,
         code="for i in range(20000): print('spam', i)\nprint('DONE_MARKER')",
         agent_id=1,
         cancel_event=asyncio.Event(),

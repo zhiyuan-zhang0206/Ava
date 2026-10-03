@@ -710,7 +710,11 @@ class TestMachineAlertEdges:
 
 
 async def test_failed_checkin_is_retried_after_backoff_across_ticks(
-    pool: ConnectionPool, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+    pool: ConnectionPool,
+    db_conn: psycopg.Connection,
+    monkeypatch: pytest.MonkeyPatch,
+    database: Database,
+    event_bus: EventBus,
 ) -> None:
     """A failed check-in stays skipped, then becomes a probe when its window ends."""
     idle_threshold = settings.daemon.heartbeat_idle_threshold_seconds
@@ -738,7 +742,9 @@ async def test_failed_checkin_is_retried_after_backoff_across_ticks(
             raise asyncio.CancelledError from None
         tick[0] += 1
 
-    def record_checkin(_pool: ConnectionPool, agent_id: int, _idle_minutes: float) -> None:
+    def record_checkin(
+        _pool: ConnectionPool, _db: Database, _bus: EventBus, agent_id: int, _idle_minutes: float
+    ) -> None:
         if agent_id == aid:
             sent_on_ticks.append(tick[0])
 
@@ -751,6 +757,8 @@ async def test_failed_checkin_is_retried_after_backoff_across_ticks(
     monkeypatch.setattr(heartbeat_daemon, "_sweep_backoff_resets", skip_sweep)
 
     with pytest.raises(asyncio.CancelledError):
-        await heartbeat_daemon._dispatch_loop(pool, LoopProgress("dispatch", 60.0))
+        await heartbeat_daemon._dispatch_loop(
+            pool, database, event_bus, LoopProgress("dispatch", 60.0)
+        )
 
     assert sent_on_ticks == [0, 3]

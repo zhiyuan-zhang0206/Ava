@@ -19,6 +19,8 @@ from agent.graph.exec.node import _exec_node_impl
 from agent.state import AgentState
 from agent.tests._fakes import make_fake_ops_pool
 from base.agents.context import AvaContext
+from base.db import Database
+from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices
 
 _CONFIG: RunnableConfig = {"configurable": {"thread_id": "7"}}
@@ -41,6 +43,8 @@ def _make_runtime() -> Runtime[AvaContext]:
         llm=None,
         event_publisher=MagicMock(),
         agent=AgentSlices.resolve(),
+        db=Database.from_settings(),
+        bus=EventBus.from_settings(),
     )
     return Runtime(context=ctx)
 
@@ -57,7 +61,7 @@ async def test_exec_node_timeout_fires_asyncio_wait_for(
     # Graph-level timeout very short, inner timeout irrelevant (patched out)
     monkeypatch.setattr("base.config.settings.sandbox.exec_node_timeout_seconds", 0.05)
 
-    async def _hang_forever(*args, **kwargs):
+    async def _hang_forever(_db: object, *args, **kwargs):
         await asyncio.Future()  # never completes
 
     monkeypatch.setattr(
@@ -101,7 +105,9 @@ async def test_exec_node_timeout_does_not_fire_when_fast(
     from agent.graph.exec.node import _ExecDone, _ExecResult
     from agent.graph.exec.protocol import ResultPayload
 
-    async def _fast_return(*args, **kwargs) -> tuple[_ExecResult, ResultPayload | None]:
+    async def _fast_return(
+        _db: object, *args, **kwargs
+    ) -> tuple[_ExecResult, ResultPayload | None]:
         return (_ExecDone(output="hello"), None)
 
     monkeypatch.setattr(

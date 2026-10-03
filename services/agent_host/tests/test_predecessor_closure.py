@@ -20,9 +20,11 @@ from base.agents.incarnation.resources import (
     decode_resources,
 )
 from base.cluster.machine import machine_name
+from base.db import Database
 from base.deploy.maintenance import admission
 from base.deploy.maintenance.cohort import _applied_capture, verify_drained
 from base.deploy.maintenance.state import MaintenanceHold
+from base.events.live.bus import EventBus
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from base.native_process.turn_identity import bind_turn_identity
 from ops.agents.spawn import create_agent_row
@@ -61,7 +63,9 @@ def _retired(generation: UUID, owner: UUID, *, open_request: bool = False) -> di
 def _drained(db: psycopg.Connection, **resources: bool) -> tuple[int, int, dict[str, Any]]:
     """An idle agent exactly as the retired drain left it: the applied restart
     receipt is still the lifecycle pointer and the old owner was released."""
-    aid, _, _, _ = create_agent_row(spawner="user", machine=machine_name())
+    aid, _, _, _ = create_agent_row(
+        Database.from_settings(), EventBus.from_settings(), spawner="user", machine=machine_name()
+    )
     before = _retired(uuid4(), uuid4(), **resources)
     receipt = db.execute(
         "INSERT INTO inbound_messages(agent_id,kind,source,content,payload,status,claimed_at,"
@@ -105,7 +109,9 @@ def _closed_form(db: psycopg.Connection, aid: int, before: dict[str, Any]) -> In
 
 
 async def _admit(pool: AsyncConnectionPool, aid: int, owner: UUID) -> RuntimeIncarnation | None:
-    return await admit_hosted_runtime(pool, aid, machine_name(), owner, expected_from="idling")
+    return await admit_hosted_runtime(
+        pool, aid, machine_name(), owner, expected_from="idling", db=Database.from_settings()
+    )
 
 
 def test_retired_shape_is_a_typed_refusal() -> None:
@@ -176,7 +182,9 @@ def _resurrected(db: psycopg.Connection) -> tuple[int, int, dict[str, Any]]:
     """An agent whose recorded incarnation ended through an applied and observed
     terminate, then resurrected and never readmitted: idling, its owner
     released, no lifecycle pointer, the retired value still stored."""
-    aid, _, _, _ = create_agent_row(spawner="user", machine=machine_name())
+    aid, _, _, _ = create_agent_row(
+        Database.from_settings(), EventBus.from_settings(), spawner="user", machine=machine_name()
+    )
     before = _retired(uuid4(), uuid4())
     receipt = db.execute(
         "INSERT INTO inbound_messages(agent_id,kind,source,content,status,claimed_at,applied_at,"
@@ -213,6 +221,7 @@ async def test_admitted_successor_drains_with_its_complete_recorded_set(
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     monkeypatch: pytest.MonkeyPatch,
+    event_bus: EventBus,
 ) -> None:
     """The next release drains a converted agent: a restart released by the
     managed host leaves the complete empty set of exactly that incarnation,
@@ -231,7 +240,7 @@ async def test_admitted_successor_drains_with_its_complete_recorded_set(
     command = row[0]
     with bind_turn_identity(aid, incarnation=incarnation):
         assert [item.id for item in await claim_inbound_batch(aops_pool, aid)] == [command]
-        assert await apply_hosted_lifecycle(aops_pool, incarnation) == "restart"
+        assert await apply_hosted_lifecycle(aops_pool, incarnation, bus=event_bus) == "restart"
 
     recorded: list[tuple[int, int]] = []
 

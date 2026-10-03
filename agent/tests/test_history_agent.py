@@ -10,7 +10,8 @@ from base.agents import impersonation as leases
 from base.agents.impersonation import history as history
 from base.agents.impersonation import sessions as sessions
 from base.cluster.machine import machine_name
-from base.db import create_agent
+from base.db import Database, create_agent
+from base.events.live.bus import EventBus
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from tests.impersonation_support import attested_caller, recorded_tree
 
@@ -31,6 +32,8 @@ def owner(db_conn: psycopg.Connection[Any]) -> RuntimeIncarnation:
 
 def start(owner: RuntimeIncarnation, *, active: bool = True) -> dict[str, Any]:
     result = sessions.request(
+        Database.from_settings(),
+        EventBus.from_settings(),
         owner.agent_id,
         name="Fix login",
         executor_name="Codex: thoughtful squirrel",
@@ -38,17 +41,28 @@ def start(owner: RuntimeIncarnation, *, active: bool = True) -> dict[str, Any]:
         thread_id=str(uuid4()),
         process_metadata=recorded_tree(),
     )
-    lease = history.resolve(owner.agent_id, result["session_id"])
+    lease = history.resolve(Database.from_settings(), owner.agent_id, result["session_id"])
     if active:
-        leases.accept(str(lease["id"]), owner.agent_id, owner, "Continue the login fix")
-        leases.activate(str(lease["id"]), owner)
-        lease = history.resolve(owner.agent_id, result["session_id"])
+        leases.accept(
+            Database.from_settings(),
+            EventBus.from_settings(),
+            str(lease["id"]),
+            owner.agent_id,
+            owner,
+            "Continue the login fix",
+        )
+        leases.activate(Database.from_settings(), EventBus.from_settings(), str(lease["id"]), owner)
+        lease = history.resolve(Database.from_settings(), owner.agent_id, result["session_id"])
     return lease
 
 
 @pytest.mark.parametrize("automatic", [True, False])
 def test_inbound_attachments_survive_timeline_and_handoff(
-    db_conn: psycopg.Connection[Any], owner: RuntimeIncarnation, automatic: bool
+    db_conn: psycopg.Connection[Any],
+    owner: RuntimeIncarnation,
+    automatic: bool,
+    database: Database,
+    event_bus: EventBus,
 ) -> None:
     from psycopg.types.json import Jsonb
 
@@ -78,10 +92,10 @@ def test_inbound_attachments_survive_timeline_and_handoff(
     ).fetchone()
     assert inserted is not None
     db_conn.commit()
-    leases.inbox(str(lease["id"]), attested_caller(lease))
-    leases.ack(str(lease["id"]), attested_caller(lease), [inserted[0]])
+    leases.inbox(database, str(lease["id"]), attested_caller(lease))
+    leases.ack(database, event_bus, str(lease["id"]), attested_caller(lease), [inserted[0]])
     items, _ = build_timeline_items([start_marker(lease)], [])
-    projected = hydrate(items, owner.agent_id, limit=5)
+    projected = hydrate(database, items, owner.agent_id, limit=5)
     image_item = next(item for item in projected if item.inbound_id == inserted[0])
     assert image_item.images == [valid_url]
     document = history.build_document(lease, history.entries(str(lease["id"]), db_conn))

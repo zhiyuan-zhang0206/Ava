@@ -22,9 +22,10 @@ from agent.ownership.hosted import admit_hosted_runtime, settle_hosted_runtime
 from base import telemetry
 from base.cluster.machine import machine_name
 from base.config import settings
-from base.db import insert_inbound_message
+from base.db import Database, insert_inbound_message
 from base.deploy.maintenance import admission, cohort, pause_owner
 from base.deploy.maintenance.state import MaintenanceHold
+from base.events.live.bus import EventBus
 from ops import agent_pause
 from ops.agent_pause.probe import HostIdentity
 from tests.agent.test_maintenance import WHEN, _agent
@@ -78,26 +79,35 @@ async def _live_member(
     """An idling hosted agent under the live owner — preparation's original cohort."""
     agent = _agent(conn)
     incarnation = await admit_hosted_runtime(
-        aops_pool, agent, machine_name(), owner, expected_from="idling"
+        aops_pool, agent, machine_name(), owner, expected_from="idling", db=Database.from_settings()
     )
     assert incarnation is not None
-    assert await settle_hosted_runtime(aops_pool, incarnation)
+    assert await settle_hosted_runtime(aops_pool, incarnation, bus=EventBus.from_settings())
     return agent
 
 
 async def test_member_collision_is_waitable_and_freezes_nothing(
-    db_conn: psycopg.Connection[Any], aops_pool: AsyncConnectionPool[Any]
+    db_conn: psycopg.Connection[Any],
+    aops_pool: AsyncConnectionPool[Any],
+    database: Database,
+    event_bus: EventBus,
 ) -> None:
     owner = uuid4()
     agent = await _live_member(db_conn, aops_pool, owner)
     other = await _live_member(db_conn, aops_pool, owner)
-    command = insert_inbound_message(db_conn, agent, "", "agent:6090", kind="terminate")
+    command = insert_inbound_message(
+        db_conn, agent, "", "agent:6090", kind="terminate", bus=event_bus, database=database
+    )
     db_conn.commit()
     pause_owner.begin_maintenance("move", WHEN)
 
     with pytest.raises(cohort.LifecycleCollisionError) as raised:
         cohort.prepare(
-            db_conn, machine=machine_name(), host_owner=owner, holder="move", acquired_at=WHEN
+            db_conn,
+            machine=machine_name(),
+            host_owner=owner,
+            holder="move",
+            acquired_at=WHEN,
         )
     assert raised.value.waitable
     assert raised.value.agent_ids == (agent,)
@@ -112,7 +122,11 @@ async def test_member_collision_is_waitable_and_freezes_nothing(
     db_conn.execute("UPDATE agents_meta SET status='terminated' WHERE id=%s", (agent,))
     db_conn.commit()
     hold = cohort.prepare(
-        db_conn, machine=machine_name(), host_owner=owner, holder="move", acquired_at=WHEN
+        db_conn,
+        machine=machine_name(),
+        host_owner=owner,
+        holder="move",
+        acquired_at=WHEN,
     )
     assert hold.phase == "draining"
     assert set(hold.commands) == {other}
@@ -122,12 +136,18 @@ async def test_prepare_waits_for_resolving_command_then_proceeds(
     db_conn: psycopg.Connection[Any],
     aops_pool: AsyncConnectionPool[Any],
     monkeypatch: pytest.MonkeyPatch,
+    database: Database,
+    event_bus: EventBus,
 ) -> None:
     owner = uuid4()
     agent = await _live_member(db_conn, aops_pool, owner)
-    chat = insert_inbound_message(db_conn, agent, "in flight", "user")
+    chat = insert_inbound_message(
+        db_conn, agent, "in flight", "user", bus=event_bus, database=database
+    )
     _claim(db_conn, chat)
-    command = insert_inbound_message(db_conn, agent, "", "agent:6090", kind="terminate")
+    command = insert_inbound_message(
+        db_conn, agent, "", "agent:6090", kind="terminate", bus=event_bus, database=database
+    )
     db_conn.commit()
     _as_live_host(monkeypatch, owner)
     monkeypatch.setattr(settings.gateway, "pause_lifecycle_wait_seconds", 5.0)
@@ -148,7 +168,7 @@ async def test_prepare_waits_for_resolving_command_then_proceeds(
             raise
 
     monkeypatch.setattr(cohort, "prepare", resolving_prepare)
-    await asyncio.to_thread(agent_pause.prepare, "move", WHEN)
+    await asyncio.to_thread(agent_pause.prepare, database, event_bus, "move", WHEN)
 
     hold = agent_pause._hold("move", WHEN)
     assert hold.phase == "draining"
@@ -167,10 +187,14 @@ async def test_prepare_aborts_when_collision_outlives_the_bound(
     db_conn: psycopg.Connection[Any],
     aops_pool: AsyncConnectionPool[Any],
     monkeypatch: pytest.MonkeyPatch,
+    database: Database,
+    event_bus: EventBus,
 ) -> None:
     owner = uuid4()
     agent = await _live_member(db_conn, aops_pool, owner)
-    insert_inbound_message(db_conn, agent, "", "agent:6090", kind="terminate")
+    insert_inbound_message(
+        db_conn, agent, "", "agent:6090", kind="terminate", bus=event_bus, database=database
+    )
     db_conn.commit()
     _as_live_host(monkeypatch, owner)
     monkeypatch.setattr(settings.gateway, "pause_lifecycle_wait_seconds", 0.3)
@@ -178,7 +202,7 @@ async def test_prepare_aborts_when_collision_outlives_the_bound(
     events = _events(monkeypatch)
 
     with pytest.raises(RuntimeError, match=r"waited .*still unfinished after the") as raised:
-        agent_pause.prepare("move", WHEN)
+        agent_pause.prepare(database, event_bus, "move", WHEN)
     assert not isinstance(raised.value, cohort.LifecycleCollisionError)
     assert "unfinished lifecycle command" in str(raised.value)
 
@@ -194,13 +218,15 @@ async def test_collision_free_prepare_is_unchanged(
     db_conn: psycopg.Connection[Any],
     aops_pool: AsyncConnectionPool[Any],
     monkeypatch: pytest.MonkeyPatch,
+    database: Database,
+    event_bus: EventBus,
 ) -> None:
     owner = uuid4()
     agent = await _live_member(db_conn, aops_pool, owner)
     _as_live_host(monkeypatch, owner)
     events = _events(monkeypatch)
 
-    agent_pause.prepare("move", WHEN)
+    agent_pause.prepare(database, event_bus, "move", WHEN)
     hold = agent_pause._hold("move", WHEN)
     assert hold.phase == "draining"
     assert set(hold.commands) == {agent}
@@ -211,6 +237,8 @@ async def test_maintenance_command_refuses_without_wait(
     db_conn: psycopg.Connection[Any],
     aops_pool: AsyncConnectionPool[Any],
     monkeypatch: pytest.MonkeyPatch,
+    database: Database,
+    event_bus: EventBus,
 ) -> None:
     owner = uuid4()
     agent = await _live_member(db_conn, aops_pool, owner)
@@ -221,28 +249,38 @@ async def test_maintenance_command_refuses_without_wait(
         "system:maintenance",
         kind="restart",
         payload={"maintenance": {"holder": "other-move", "acquired_at": WHEN.isoformat()}},
+        bus=event_bus,
+        database=database,
     )
     db_conn.commit()
     _as_live_host(monkeypatch, owner)
     events = _events(monkeypatch)
 
     with pytest.raises(RuntimeError, match="refusing without a wait") as raised:
-        agent_pause.prepare("move", WHEN)
+        agent_pause.prepare(database, event_bus, "move", WHEN)
     assert not isinstance(raised.value, cohort.LifecycleCollisionError)
     assert [event["attributes"]["outcome"] for event in events] == ["refused"]
 
 
 def test_parked_agent_lifecycle_command_is_waitable(
     db_conn: psycopg.Connection[Any],
+    database: Database,
+    event_bus: EventBus,
 ) -> None:
     agent = _agent(db_conn)
-    insert_inbound_message(db_conn, agent, "", "agent:6090", kind="terminate")
+    insert_inbound_message(
+        db_conn, agent, "", "agent:6090", kind="terminate", bus=event_bus, database=database
+    )
     db_conn.commit()
     pause_owner.begin_maintenance("move", WHEN)
 
     with pytest.raises(cohort.LifecycleCollisionError) as raised:
         cohort.prepare(
-            db_conn, machine=machine_name(), host_owner=None, holder="move", acquired_at=WHEN
+            db_conn,
+            machine=machine_name(),
+            host_owner=None,
+            holder="move",
+            acquired_at=WHEN,
         )
     assert raised.value.waitable
     assert raised.value.agent_ids == (agent,)
@@ -256,9 +294,13 @@ def test_parked_claimed_ordinary_work_settles(
     age_s: int,
     expected: str,
     legacy: bool,
+    database: Database,
+    event_bus: EventBus,
 ) -> None:
     agent = _agent(db_conn)
-    message = insert_inbound_message(db_conn, agent, "hello", "user")
+    message = insert_inbound_message(
+        db_conn, agent, "hello", "user", bus=event_bus, database=database
+    )
     _claim(db_conn, message)
     db_conn.execute(
         "UPDATE inbound_messages SET created_at=now()-make_interval(secs => %s), "
@@ -272,7 +314,11 @@ def test_parked_claimed_ordinary_work_settles(
     pause_owner.begin_maintenance("move", WHEN)
 
     hold = cohort.prepare(
-        db_conn, machine=machine_name(), host_owner=None, holder="move", acquired_at=WHEN
+        db_conn,
+        machine=machine_name(),
+        host_owner=None,
+        holder="move",
+        acquired_at=WHEN,
     )
     assert hold.phase == "draining" and hold.parked == (agent,) and hold.commands == {}
     assert db_conn.execute(
@@ -288,16 +334,20 @@ def test_parked_claimed_ordinary_work_settles(
 def test_parked_claimed_work_prepares_without_wait(
     db_conn: psycopg.Connection[Any],
     monkeypatch: pytest.MonkeyPatch,
+    database: Database,
+    event_bus: EventBus,
 ) -> None:
     agent = _agent(db_conn)
-    message = insert_inbound_message(db_conn, agent, "hello", "user")
+    message = insert_inbound_message(
+        db_conn, agent, "hello", "user", bus=event_bus, database=database
+    )
     _claim(db_conn, message)
     db_conn.commit()
     _as_live_host(monkeypatch, uuid4())
     monkeypatch.setattr(settings.gateway, "pause_lifecycle_wait_seconds", 0.0)
     events = _events(monkeypatch)
 
-    agent_pause.prepare("move", WHEN)
+    agent_pause.prepare(database, event_bus, "move", WHEN)
 
     hold = agent_pause._hold("move", WHEN)
     assert hold.phase == "draining"
@@ -314,9 +364,13 @@ def test_parked_claimed_lifecycle_outliving_the_bound_aborts(
     db_conn: psycopg.Connection[Any],
     monkeypatch: pytest.MonkeyPatch,
     kind: str,
+    database: Database,
+    event_bus: EventBus,
 ) -> None:
     agent = _agent(db_conn)
-    message = insert_inbound_message(db_conn, agent, "", "user", kind=kind)
+    message = insert_inbound_message(
+        db_conn, agent, "", "user", kind=kind, bus=event_bus, database=database
+    )
     _claim(db_conn, message)
     db_conn.commit()
     _as_live_host(monkeypatch, uuid4())
@@ -325,7 +379,7 @@ def test_parked_claimed_lifecycle_outliving_the_bound_aborts(
     events = _events(monkeypatch)
 
     with pytest.raises(RuntimeError, match=r"waited .*still unfinished after the") as raised:
-        agent_pause.prepare("move", WHEN)
+        agent_pause.prepare(database, event_bus, "move", WHEN)
     assert not isinstance(raised.value, cohort.LifecycleCollisionError)
     assert "unfinished lifecycle command" in str(raised.value)
 
@@ -338,12 +392,23 @@ def test_parked_claimed_lifecycle_outliving_the_bound_aborts(
 
 
 def test_maintenance_authored_chat_refuses_and_rolls_back_orphan_settlement(
-    db_conn: psycopg.Connection[Any], monkeypatch: pytest.MonkeyPatch
+    db_conn: psycopg.Connection[Any],
+    monkeypatch: pytest.MonkeyPatch,
+    database: Database,
+    event_bus: EventBus,
 ) -> None:
     agent = _agent(db_conn)
-    ordinary = insert_inbound_message(db_conn, agent, "orphan", "user")
+    ordinary = insert_inbound_message(
+        db_conn, agent, "orphan", "user", bus=event_bus, database=database
+    )
     authored = insert_inbound_message(
-        db_conn, agent, "maintenance", "system:maintenance", payload={"maintenance": {}}
+        db_conn,
+        agent,
+        "maintenance",
+        "system:maintenance",
+        payload={"maintenance": {}},
+        bus=event_bus,
+        database=database,
     )
     _claim(db_conn, ordinary)
     _claim(db_conn, authored)
@@ -352,7 +417,7 @@ def test_maintenance_authored_chat_refuses_and_rolls_back_orphan_settlement(
     events = _events(monkeypatch)
 
     with pytest.raises(RuntimeError, match="refusing without a wait"):
-        agent_pause.prepare("move", WHEN)
+        agent_pause.prepare(database, event_bus, "move", WHEN)
     assert db_conn.execute(
         "SELECT id,status FROM inbound_messages WHERE agent_id=%s ORDER BY id", (agent,)
     ).fetchall() == [(ordinary, "claimed"), (authored, "claimed")]
@@ -363,10 +428,15 @@ def test_maintenance_authored_chat_refuses_and_rolls_back_orphan_settlement(
 
 
 def test_orphan_cas_miss_accepts_concurrent_settlement(
-    db_conn: psycopg.Connection[Any], monkeypatch: pytest.MonkeyPatch
+    db_conn: psycopg.Connection[Any],
+    monkeypatch: pytest.MonkeyPatch,
+    database: Database,
+    event_bus: EventBus,
 ) -> None:
     agent = _agent(db_conn)
-    message = insert_inbound_message(db_conn, agent, "orphan", "user")
+    message = insert_inbound_message(
+        db_conn, agent, "orphan", "user", bus=event_bus, database=database
+    )
     _claim(db_conn, message)
     db_conn.commit()
     read_claims = cohort.orphaned_claims
@@ -380,7 +450,11 @@ def test_orphan_cas_miss_accepts_concurrent_settlement(
     events = _events(monkeypatch)
     pause_owner.begin_maintenance("move", WHEN)
     hold = cohort.prepare(
-        db_conn, machine=machine_name(), host_owner=None, holder="move", acquired_at=WHEN
+        db_conn,
+        machine=machine_name(),
+        host_owner=None,
+        holder="move",
+        acquired_at=WHEN,
     )
     assert hold.phase == "draining" and hold.parked == (agent,)
     assert db_conn.execute(
@@ -391,6 +465,8 @@ def test_orphan_cas_miss_accepts_concurrent_settlement(
 
 def test_parked_maintenance_command_refuses_without_wait(
     db_conn: psycopg.Connection[Any],
+    database: Database,
+    event_bus: EventBus,
 ) -> None:
     agent = _agent(db_conn)
     command = insert_inbound_message(
@@ -400,6 +476,8 @@ def test_parked_maintenance_command_refuses_without_wait(
         "system:maintenance",
         kind="restart",
         payload={"maintenance": {"holder": "other-move", "acquired_at": WHEN.isoformat()}},
+        bus=event_bus,
+        database=database,
     )
     _claim(db_conn, command)
     db_conn.commit()
@@ -407,7 +485,11 @@ def test_parked_maintenance_command_refuses_without_wait(
 
     with pytest.raises(cohort.LifecycleCollisionError) as raised:
         cohort.prepare(
-            db_conn, machine=machine_name(), host_owner=None, holder="move", acquired_at=WHEN
+            db_conn,
+            machine=machine_name(),
+            host_owner=None,
+            holder="move",
+            acquired_at=WHEN,
         )
     assert not raised.value.waitable
     assert raised.value.agent_ids == (agent,)
@@ -416,6 +498,8 @@ def test_parked_maintenance_command_refuses_without_wait(
 
 def test_parked_claim_guards_agree_on_waitability(
     db_conn: psycopg.Connection[Any],
+    database: Database,
+    event_bus: EventBus,
 ) -> None:
     """Both parked guards carry the same rule: ordinary work waits, maintenance refuses.
 
@@ -424,7 +508,9 @@ def test_parked_claim_guards_agree_on_waitability(
     consistent (task #4013).
     """
     agent = _agent(db_conn)
-    message = insert_inbound_message(db_conn, agent, "hello", "user")
+    message = insert_inbound_message(
+        db_conn, agent, "hello", "user", bus=event_bus, database=database
+    )
     _claim(db_conn, message)
     db_conn.commit()
     hold = MaintenanceHold(parked=(agent,))
@@ -445,6 +531,8 @@ def test_parked_claim_guards_agree_on_waitability(
         "system:maintenance",
         kind="restart",
         payload={"maintenance": {"holder": "other-move", "acquired_at": WHEN.isoformat()}},
+        bus=event_bus,
+        database=database,
     )
     _claim(db_conn, command)
     db_conn.commit()

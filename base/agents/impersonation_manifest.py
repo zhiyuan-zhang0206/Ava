@@ -28,7 +28,7 @@ from base.agents.impersonation.event_log import (
     refresh_completed_export,
 )
 from base.agents.impersonation_event_alerts import alert_capture_failed
-from base.db.transaction import write_transaction
+from base.db import Database
 from base.log import logger
 from base.telemetry import Event
 
@@ -41,6 +41,7 @@ class LocalParticipant:
     agent_id: int
     session_id: int
     source_key: str
+    db: Database = field(compare=False, repr=False)
 
 
 @dataclass
@@ -121,9 +122,9 @@ def pending_reason(lease: dict[str, Any]) -> str | None:
     return "awaiting_session_end" if lease["ended_at"] is None else "awaiting_participant_seal"
 
 
-def open_local_participant(lease_id: str, *, agent_id: int, source_key: str) -> bool:
+def open_local_participant(db: Database, lease_id: str, *, agent_id: int, source_key: str) -> bool:
     """Open one controller receipt before it can emit an eligible event."""
-    with write_transaction() as conn:
+    with db.write_transaction() as conn:
         lease = lock_lease(conn, lease_id)
         if not is_log_native(lease):
             return False
@@ -281,7 +282,7 @@ def capture_local_event(event: Event) -> Event:
 
 
 def _insert_local_item(participant: LocalParticipant, event: Event) -> None:
-    with write_transaction() as conn:
+    with participant.db.write_transaction() as conn:
         lease = lock_lease(conn, participant.lease_id)
         if not is_log_native(lease):
             raise RuntimeError("Local receipt belongs to a lease without an event log")
@@ -310,7 +311,7 @@ def _mark_participant_failed(participant: LocalParticipant) -> None:
 
 def _persist_capture_failure(participant: LocalParticipant) -> None:
     """Durably turn an open receipt into failed before alert delivery is attempted."""
-    with write_transaction() as conn:
+    with participant.db.write_transaction() as conn:
         lease = lock_lease(conn, participant.lease_id)
         state = locked_receipt_state(conn, participant.lease_id, participant.source_key)
         if state is None:
@@ -335,7 +336,7 @@ def _persist_capture_failure(participant: LocalParticipant) -> None:
 def _alert_capture_failure(participant: LocalParticipant) -> None:
     """Best-effort alert after the failed receipt is committed independently."""
     try:
-        with write_transaction() as conn:
+        with participant.db.write_transaction() as conn:
             alert_capture_failed(conn, lock_lease(conn, participant.lease_id))
     except Exception:
         logger.exception("Could not alert on impersonation event capture failure")
@@ -352,7 +353,7 @@ def seal_local_participant(participant: LocalParticipant) -> None:
             with gate.condition:
                 if gate.capture_failure_pending:
                     raise RuntimeError("Local capture failure is not durably recorded")
-    with write_transaction() as conn:
+    with participant.db.write_transaction() as conn:
         lease = lock_lease(conn, participant.lease_id)
         if not is_log_native(lease):
             return
@@ -411,7 +412,7 @@ def record_central_event(conn: psycopg.Connection, event: Event) -> Event:
     return tagged
 
 
-def emit_recorded_central_event(event: Event) -> None:
+def emit_recorded_central_event(db: Database, event: Event) -> None:
     """Record a service-owned audit event, commit it, then emit those exact bytes.
 
     Services such as the computer daemon do not own the transaction that
@@ -422,7 +423,7 @@ def emit_recorded_central_event(event: Event) -> None:
     from base import telemetry
     from base.telemetry.audit_events import record_audit
 
-    with write_transaction() as conn:
+    with db.write_transaction() as conn:
         tagged = record_audit(conn, record_central_event(conn, event))
     telemetry.emit_prepared(tagged)
 

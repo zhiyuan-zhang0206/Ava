@@ -22,7 +22,8 @@ from agent.graph._init_context import init_context_node
 from agent.state import AgentState, ContextReset
 from base.agents.context import AvaContext
 from base.config import settings
-from base.db import create_agent
+from base.db import Database, create_agent
+from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices
 from base.packages.plugins.extensions import (
     EMPTY,
@@ -48,6 +49,8 @@ def _runtime(
             event_publisher=MagicMock(),
             agent=AgentSlices.resolve(),
             extensions=extensions,
+            db=Database.from_settings(),
+            bus=EventBus.from_settings(),
         )
     )
 

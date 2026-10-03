@@ -23,7 +23,10 @@ from tests.agent.test_maintenance import isolate as isolate
 
 
 async def test_successor_cannot_sign_original_host_final_cleanup(
-    db_conn: psycopg.Connection[Any], aops_pool: AsyncConnectionPool[Any]
+    db_conn: psycopg.Connection[Any],
+    aops_pool: AsyncConnectionPool[Any],
+    database: Database,
+    event_bus: EventBus,
 ) -> None:
     agent = _agent(db_conn)
     old = AgentHost(
@@ -35,17 +38,21 @@ async def test_successor_cannot_sign_original_host_final_cleanup(
         db=Database.from_settings(),
     )
     incarnation = await admit_hosted_runtime(
-        aops_pool, agent, machine_name(), old._owner, expected_from="idling"
+        aops_pool, agent, machine_name(), old._owner, expected_from="idling", db=database
     )
     assert incarnation is not None
     pause_owner.begin_maintenance("owner", WHEN)
     hold = cohort.prepare(
-        db_conn, machine=machine_name(), host_owner=old._owner, holder="owner", acquired_at=WHEN
+        db_conn,
+        machine=machine_name(),
+        host_owner=old._owner,
+        holder="owner",
+        acquired_at=WHEN,
     )
     with bind_turn_identity(agent, incarnation=incarnation):
         batch = await claim_inbound_batch(aops_pool, agent, lifecycle_only=True)
         assert [item.id for item in batch] == [hold.commands[agent]]
-        assert await apply_hosted_lifecycle(aops_pool, incarnation) == "restart"
+        assert await apply_hosted_lifecycle(aops_pool, incarnation, bus=event_bus) == "restart"
     successor = AgentHost(
         pool=aops_pool,
         checkpointer=MagicMock(),
@@ -70,10 +77,13 @@ async def test_journal_write_failure_before_or_after_commit_keeps_same_restart(
     aops_pool: AsyncConnectionPool[Any],
     monkeypatch: pytest.MonkeyPatch,
     failure_write: int,
+    database: Database,
 ) -> None:
     agent, owner = _agent(db_conn), uuid4()
     assert (
-        await admit_hosted_runtime(aops_pool, agent, machine_name(), owner, expected_from="idling")
+        await admit_hosted_runtime(
+            aops_pool, agent, machine_name(), owner, expected_from="idling", db=database
+        )
         is not None
     )
     pause_owner.begin_maintenance("retry", WHEN)
@@ -90,7 +100,11 @@ async def test_journal_write_failure_before_or_after_commit_keeps_same_restart(
     monkeypatch.setattr(pause_owner, "change_maintenance", fail_once)
     with pytest.raises(OSError, match="journal failure"):
         cohort.prepare(
-            db_conn, machine=machine_name(), host_owner=owner, holder="retry", acquired_at=WHEN
+            db_conn,
+            machine=machine_name(),
+            host_owner=owner,
+            holder="retry",
+            acquired_at=WHEN,
         )
     committed = db_conn.execute(
         "SELECT id FROM inbound_messages WHERE agent_id=%s AND kind='restart'", (agent,)
@@ -98,7 +112,11 @@ async def test_journal_write_failure_before_or_after_commit_keeps_same_restart(
     db_conn.commit()
     assert len(committed) == (1 if failure_write == 2 else 0)
     hold = cohort.prepare(
-        db_conn, machine=machine_name(), host_owner=owner, holder="retry", acquired_at=WHEN
+        db_conn,
+        machine=machine_name(),
+        host_owner=owner,
+        holder="retry",
+        acquired_at=WHEN,
     )
     rows = db_conn.execute(
         "SELECT id,target_owner,target_generation FROM inbound_messages "
@@ -118,7 +136,11 @@ def test_unowned_idle_intent_is_preserved_without_restart_or_termination(
     db_conn.commit()
     pause_owner.begin_maintenance("parked", WHEN)
     hold = cohort.prepare(
-        db_conn, machine=machine_name(), host_owner=uuid4(), holder="parked", acquired_at=WHEN
+        db_conn,
+        machine=machine_name(),
+        host_owner=uuid4(),
+        holder="parked",
+        acquired_at=WHEN,
     )
     assert hold.parked == (agent,)
     assert hold.commands == {}
@@ -134,6 +156,7 @@ async def test_cold_idle_resume_uses_pointer_without_an_extra_model_call(
     db_conn: psycopg.Connection[Any],
     aops_pool: AsyncConnectionPool[Any],
     monkeypatch: pytest.MonkeyPatch,
+    database: Database,
 ) -> None:
     from unittest.mock import AsyncMock
 
@@ -169,13 +192,17 @@ async def test_cold_idle_resume_uses_pointer_without_an_extra_model_call(
     )
     assert (
         await admit_hosted_runtime(
-            aops_pool, agent, machine_name(), original._owner, expected_from="idling"
+            aops_pool, agent, machine_name(), original._owner, expected_from="idling", db=database
         )
         is not None
     )
     pause_owner.begin_maintenance("idle", WHEN)
     hold = cohort.prepare(
-        db_conn, machine=machine_name(), host_owner=original._owner, holder="idle", acquired_at=WHEN
+        db_conn,
+        machine=machine_name(),
+        host_owner=original._owner,
+        holder="idle",
+        acquired_at=WHEN,
     )
     await original.run_turn(agent)
     current = admission.require_operation("idle", WHEN)
@@ -196,6 +223,8 @@ async def test_cold_idle_resume_uses_pointer_without_an_extra_model_call(
         event_publisher=MagicMock(),
         llm=MagicMock(),
         agent=AgentSlices.resolve(),
+        db=Database.from_settings(),
+        bus=EventBus.from_settings(),
     )
     monkeypatch.setattr(successor, "_runtime_for", AsyncMock(return_value=object()))
     monkeypatch.setattr("services.agent_host.runtime.validate_model_config", MagicMock())
@@ -218,6 +247,8 @@ async def test_prepare_retry_preserves_restart_applied_before_final_journal_writ
     db_conn: psycopg.Connection[Any],
     aops_pool: AsyncConnectionPool[Any],
     monkeypatch: pytest.MonkeyPatch,
+    database: Database,
+    event_bus: EventBus,
 ) -> None:
     agent = _agent(db_conn)
     host = AgentHost(
@@ -229,7 +260,7 @@ async def test_prepare_retry_preserves_restart_applied_before_final_journal_writ
         db=Database.from_settings(),
     )
     incarnation = await admit_hosted_runtime(
-        aops_pool, agent, machine_name(), host._owner, expected_from="idling"
+        aops_pool, agent, machine_name(), host._owner, expected_from="idling", db=database
     )
     assert incarnation is not None
     pause_owner.begin_maintenance("commit-gap", WHEN)
@@ -252,7 +283,7 @@ async def test_prepare_retry_preserves_restart_applied_before_final_journal_writ
     with bind_turn_identity(agent, incarnation=incarnation):
         batch = await claim_inbound_batch(aops_pool, agent, lifecycle_only=True)
         assert len(batch) == 1
-        assert await apply_hosted_lifecycle(aops_pool, incarnation) == "restart"
+        assert await apply_hosted_lifecycle(aops_pool, incarnation, bus=event_bus) == "restart"
     monkeypatch.setattr(pause_owner, "change_maintenance", original)
     hold = cohort.prepare(
         db_conn,

@@ -10,7 +10,8 @@ from base.agents import impersonation as leases
 from base.agents.impersonation import history as history
 from base.agents.impersonation import sessions as sessions
 from base.cluster.machine import machine_name
-from base.db import create_agent
+from base.db import Database, create_agent
+from base.events.live.bus import EventBus
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from tests.impersonation_support import attested_caller, recorded_tree
 
@@ -31,6 +32,8 @@ def owner(db_conn: psycopg.Connection[Any]) -> RuntimeIncarnation:
 
 def start(owner: RuntimeIncarnation, *, active: bool = True) -> dict[str, Any]:
     result = sessions.request(
+        Database.from_settings(),
+        EventBus.from_settings(),
         owner.agent_id,
         name="Fix login",
         executor_name="Codex: thoughtful squirrel",
@@ -38,16 +41,26 @@ def start(owner: RuntimeIncarnation, *, active: bool = True) -> dict[str, Any]:
         thread_id=str(uuid4()),
         process_metadata=recorded_tree(),
     )
-    lease = history.resolve(owner.agent_id, result["session_id"])
+    lease = history.resolve(Database.from_settings(), owner.agent_id, result["session_id"])
     if active:
-        leases.accept(str(lease["id"]), owner.agent_id, owner, "Continue the login fix")
-        leases.activate(str(lease["id"]), owner)
-        lease = history.resolve(owner.agent_id, result["session_id"])
+        leases.accept(
+            Database.from_settings(),
+            EventBus.from_settings(),
+            str(lease["id"]),
+            owner.agent_id,
+            owner,
+            "Continue the login fix",
+        )
+        leases.activate(Database.from_settings(), EventBus.from_settings(), str(lease["id"]), owner)
+        lease = history.resolve(Database.from_settings(), owner.agent_id, result["session_id"])
     return lease
 
 
 def test_timeline_pages_inside_a_session_using_existing_numeric_cursors(
-    db_conn: psycopg.Connection[Any], owner: RuntimeIncarnation
+    db_conn: psycopg.Connection[Any],
+    owner: RuntimeIncarnation,
+    database: Database,
+    event_bus: EventBus,
 ) -> None:
     from agent.impersonation_handoff import start_marker
     from base.agents.history.timeline import build_timeline_items
@@ -58,20 +71,25 @@ def test_timeline_pages_inside_a_session_using_existing_numeric_cursors(
     marker = start_marker(lease)
     for number in range(15):
         history.say(
-            str(lease["id"]), attested_caller(lease), f"Message {number}", message_key=str(number)
+            database,
+            event_bus,
+            str(lease["id"]),
+            attested_caller(lease),
+            f"Message {number}",
+            message_key=str(number),
         )
     items, count = build_timeline_items([marker], [])
-    page = hydrate(items, owner.agent_id, limit=5)
+    page = hydrate(database, items, owner.agent_id, limit=5)
     assert count == 1
     assert len(page) == 7  # marker + limit+1 lookahead
     assert page[-1].payload == "Message 14"
     cursor = page[-5].item_id
-    older = hydrate(items, owner.agent_id, limit=5, before=cursor)
+    older = hydrate(database, items, owner.agent_id, limit=5, before=cursor)
     window, more = _window_before(older, cursor, 5)
     assert [item.payload for item in window] == [f"Message {i}" for i in range(5, 10)]
     assert more
     assert page[-1].impersonation is not None
     assert page[-1].impersonation.executor_name == "Codex: thoughtful squirrel"
     archived, _ = build_timeline_items([marker], [], segment_prefix="s2.checkpoint")
-    archive_page = hydrate(archived, owner.agent_id, limit=5)
+    archive_page = hydrate(database, archived, owner.agent_id, limit=5)
     assert archive_page[-1].item_id.startswith("s2.checkpoint.0.")

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+from collections.abc import Callable
 from contextlib import nullcontext
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -17,7 +18,8 @@ from base.agents.impersonation import history as history
 from base.agents.impersonation.tests import test_history as history_cases
 from base.agents.messages import delivery_outbox as outbox
 from base.cluster.machine import machine_name
-from base.db import create_agent
+from base.db import Database, create_agent
+from base.events.live.bus import EventBus
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from cli.commands.agents.impersonation import _send
 from tests.impersonation_support import attested_caller
@@ -36,6 +38,9 @@ def test_a_failed_send_replayed_from_the_outbox_logs_one_event(
     db_conn: psycopg.Connection[Any],
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Any,
+    database: Database,
+    event_bus: EventBus,
+    publish_wake: Callable[[int, str], bool],
 ) -> None:
     agent_id = create_agent(db_conn)
     owner = RuntimeIncarnation(agent_id, uuid4(), uuid4())
@@ -92,7 +97,10 @@ def test_a_failed_send_replayed_from_the_outbox_logs_one_event(
     entry = entries[0]
 
     pool = _SingleConnectionPool(db_conn)
-    assert outbox.flush(pool, now=datetime.now(UTC) + timedelta(seconds=1)).delivered == 1
+    assert (
+        outbox.flush(pool, publish_wake, now=datetime.now(UTC) + timedelta(seconds=1)).delivered
+        == 1
+    )
     # A stale retry after the first response was lost carries the same key and must
     # only recover the committed receipt, not insert a second message or log row.
     outbox.record_failed_send(
@@ -101,13 +109,18 @@ def test_a_failed_send_replayed_from_the_outbox_logs_one_event(
         content="CLI event-log delivery",
         client_message_id=entry.client_message_id,
     )
-    assert outbox.flush(pool, now=datetime.now(UTC) + timedelta(seconds=1)).delivered == 1
+    assert (
+        outbox.flush(pool, publish_wake, now=datetime.now(UTC) + timedelta(seconds=1)).delivered
+        == 1
+    )
     assert db_conn.execute(
         "SELECT count(*) FROM inbound_messages WHERE client_message_id=%s",
         (entry.client_message_id,),
     ).fetchone() == (1,)
 
-    leases.release(str(lease["id"]), attested_caller(lease), "CLI delivery replayed")
+    leases.release(
+        database, event_bus, str(lease["id"]), attested_caller(lease), "CLI delivery replayed"
+    )
     api_events = [
         row["payload"]
         for row in history.entries(str(lease["id"]), db_conn)
@@ -116,4 +129,4 @@ def test_a_failed_send_replayed_from_the_outbox_logs_one_event(
     assert [(event["event_name"], event["agent_id"]) for event in api_events] == [
         ("send_message", target_id)
     ]
-    assert history.resolve(owner.agent_id, 0)["events_completed_at"] is not None
+    assert history.resolve(database, owner.agent_id, 0)["events_completed_at"] is not None

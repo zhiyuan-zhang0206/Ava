@@ -12,6 +12,7 @@ from typing import Any
 import ava
 from ava.agents import AgentStatus as S
 from schedules.agent_status_guard import ensure_agent_status_members
+from base.db import Database
 from schedules.catchup import catch_up, cluster_timezone, fire_slot_once
 from base.paths import ava_home, repo_root
 from base.daemon.schedules.watcher import next_fire
@@ -139,7 +140,8 @@ def _fire_tracker(_trigger: None) -> None:
 
 
 def _main_loop() -> None:
-    catch_up([(CRON, None)], timezone=cluster_timezone(), fire=_fire_tracker)
+    db = Database.from_settings()
+    catch_up(db, [(CRON, None)], timezone=cluster_timezone(), fire=_fire_tracker)
     last_run_at = datetime.now(UTC)
     while True:
         now = datetime.now(UTC)
@@ -150,7 +152,7 @@ def _main_loop() -> None:
         if wait_seconds > 0:
             time.sleep(min(wait_seconds, 3600))
             continue
-        fire_slot_once(next_run, None, fire=_fire_tracker)
+        fire_slot_once(db, next_run, None, fire=_fire_tracker)
         last_run_at = datetime.now(UTC)
         time.sleep(120)
 

@@ -44,6 +44,7 @@ from psycopg_pool import ConnectionPool
 
 from base.cluster.machine import machine_name
 from base.db import Database
+from base.events.live.bus import EventBus
 from ops import cluster_rpc as _cluster_rpc
 from ops.rpc_schemas import (
     BillingBalanceReport,
@@ -242,7 +243,7 @@ def fetch_provider_balance() -> BillingBalanceReport:
 
 
 async def run_billing_recovery(
-    *, execute: bool, pool: ConnectionPool, db: Database
+    *, execute: bool, pool: ConnectionPool, db: Database, bus: EventBus
 ) -> BillingResurrectResponse:
     """Preview (``execute=False``, read-only) or run the batch rescue."""
     candidates = await asyncio.to_thread(_enumerate_blocking, pool)
@@ -283,10 +284,10 @@ async def run_billing_recovery(
         # Re-enumerate under the lock: a concurrent runner (or an operator)
         # may have changed the set since the preflight read.
         candidates = await asyncio.to_thread(_enumerate_blocking, pool)
-        outcomes = await _dispatch_all(db, candidates)
+        outcomes = await _dispatch_all(db, bus, candidates)
     finally:
         await asyncio.to_thread(_release_run_lock, pool, lock_conn)
-    await asyncio.to_thread(_record_run_event, balance, outcomes)
+    await asyncio.to_thread(_record_run_event, db, balance, outcomes)
     return BillingResurrectResponse(
         mode="execute",
         outcome="executed",
@@ -296,7 +297,9 @@ async def run_billing_recovery(
     )
 
 
-async def resurrect_billing_agent_op(agent_id: int) -> BillingResurrectAgentResponse:
+async def resurrect_billing_agent_op(
+    db: Database, bus: EventBus, agent_id: int
+) -> BillingResurrectAgentResponse:
     """The versioned ``resurrect-billing-v1`` action (home runner), also used
     as the in-process fallback when the local ops server is unreachable."""
     from base.agents import MachinePaused, ResurrectAlreadyAlive, ResurrectRefused
@@ -305,7 +308,7 @@ async def resurrect_billing_agent_op(agent_id: int) -> BillingResurrectAgentResp
 
     try:
         await asyncio.to_thread(
-            resurrect_agent, agent_id, resurrected_by="user", billing_recovery=True
+            resurrect_agent, db, bus, agent_id, resurrected_by="user", billing_recovery=True
         )
     except ResurrectAlreadyAlive:
         return BillingResurrectAgentResponse(status="already_alive")
@@ -319,7 +322,7 @@ async def resurrect_billing_agent_op(agent_id: int) -> BillingResurrectAgentResp
 
 
 async def _dispatch_all(
-    db: Database, candidates: list[BillingCandidate]
+    db: Database, bus: EventBus, candidates: list[BillingCandidate]
 ) -> list[BillingResurrectAgentOutcome]:
     from base.config import settings
 
@@ -327,12 +330,14 @@ async def _dispatch_all(
 
     async def _guarded(candidate: BillingCandidate) -> BillingResurrectAgentOutcome:
         async with sem:
-            return await _dispatch_one(db, candidate)
+            return await _dispatch_one(db, bus, candidate)
 
     return await asyncio.gather(*(_guarded(c) for c in candidates))
 
 
-async def _dispatch_one(db: Database, candidate: BillingCandidate) -> BillingResurrectAgentOutcome:
+async def _dispatch_one(
+    db: Database, bus: EventBus, candidate: BillingCandidate
+) -> BillingResurrectAgentOutcome:
     path = f"/api/agents/{candidate.agent_id}/resurrect-billing-v1"
     try:
         forwarded = await _cluster_rpc.dispatch_to_machine(
@@ -348,7 +353,7 @@ async def _dispatch_one(db: Database, candidate: BillingCandidate) -> BillingRes
         # Local ops server unreachable (test / single-process): mirror
         # `resurrect_if_terminated` and fall back to the in-process op.
         try:
-            response = await resurrect_billing_agent_op(candidate.agent_id)
+            response = await resurrect_billing_agent_op(db, bus, candidate.agent_id)
         except Exception as exc:
             return _outcome(candidate, "failed", f"{type(exc).__name__}: {exc}")
     except Exception as exc:
@@ -407,7 +412,7 @@ def _outcome(
 
 
 def _record_run_event(
-    balance: BillingBalanceReport, outcomes: list[BillingResurrectAgentOutcome]
+    db: Database, balance: BillingBalanceReport, outcomes: list[BillingResurrectAgentOutcome]
 ) -> None:
     from base import telemetry
     from base.telemetry.audit_events import prepare_event_log, record_audit_standalone
@@ -445,4 +450,4 @@ def _record_run_event(
     )
     # Last: the batch already ran, so a failed write raises after its summary
     # event went out.
-    record_audit_standalone(run_event)
+    record_audit_standalone(db, run_event)
