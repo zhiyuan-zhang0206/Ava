@@ -492,6 +492,105 @@ def get_resolved_config(model: str | None = None) -> ResolvedConfigView:
     return ResolvedConfigView(model=target, registered=target in MODELS, fields=fields)
 
 
+def _reject_invalid_plan(plan: ConfigPatchPlan) -> None:
+    if plan.violations:
+        raise HTTPException(
+            status_code=400,
+            detail=f"unknown or read-only fields: {sorted(plan.violations)}",
+        )
+    if plan.scalar_error:
+        raise HTTPException(status_code=400, detail=plan.scalar_error)
+    if plan.remote_cluster_keys:
+        raise HTTPException(
+            status_code=400,
+            detail="cluster config is machine-independent; edit it on the Cluster view",
+        )
+
+
+def _validate_cluster_candidate(
+    plan: ConfigPatchPlan, metas: dict[str, Any], *, local: bool
+) -> None:
+    candidate_writes = dict(plan.cluster_writes)
+    candidate_removals = set(plan.cluster_removals)
+    # A local host field shares the gateway's `.env`. Include only host edits
+    # from a cluster-touched domain: this catches a transition spanning the cluster
+    # and host scopes of one domain before its host write, without changing the existing host capability-result
+    # contract for unrelated fields.
+    cluster_domains = {field_domain(name) for name in set(candidate_writes) | candidate_removals}
+    if local and cluster_domains:
+        host_writes, host_removals = split_reducer_patch(plan.host_body, metas)
+        for name, value in host_writes.items():
+            if field_domain(name) in cluster_domains:
+                candidate_writes[name] = value
+        candidate_removals.update(
+            name for name in host_removals if field_domain(name) in cluster_domains
+        )
+    candidate = validate_env_patch_for_write(candidate_writes, candidate_removals)
+    if candidate.errors:
+        raise HTTPException(
+            status_code=400,
+            detail="candidate config rejected: " + "; ".join(candidate.errors),
+        )
+
+
+async def _put_local(
+    target: str,
+    plan: ConfigPatchPlan,
+    metas: dict[str, Any],
+    *,
+    has_cluster_patch: bool,
+    actor: str | None,
+    trace_id: str | None,
+) -> tuple[ConfigWriteOpResult, list[str]]:
+    """The Cluster-view PUT: host fields first, then (when they applied) the cluster `.env`."""
+    # Host first: if a host field is rejected the write returns applied=False
+    # and we leave the cluster .env untouched (atomic from the cluster's view).
+    # No in-memory apply, no restart — the change is persisted and the named
+    # process picks it up on its next restart (restart_required says which).
+    host_result = await _dispatch_config_write(
+        target, plan.host_body, local=True, actor=actor, trace_id=trace_id
+    )
+    cluster_changed: set[str] = set()
+    if host_result.applied and has_cluster_patch:
+        await _write_cluster_fields(plan, actor=actor, trace_id=trace_id)
+        cluster_changed = set(plan.cluster_writes) | plan.cluster_removals
+    cluster_restart = {
+        metas[k].restart_required for k in cluster_changed if metas[k].restart_required
+    }
+    return host_result, sorted(cluster_restart | set(host_result.restart_required))
+
+
+async def _write_cluster_fields(
+    plan: ConfigPatchPlan, *, actor: str | None, trace_id: str | None
+) -> None:
+    # A successful host write can legitimately change this same local
+    # file. Revalidate the cluster patch against that new image and use
+    # its digest as the compare-and-swap precondition for persistence.
+    candidate = validate_env_patch_for_write(plan.cluster_writes, plan.cluster_removals)
+    if candidate.errors:
+        raise HTTPException(
+            status_code=400,
+            detail="candidate config rejected: " + "; ".join(candidate.errors),
+        )
+    try:
+        await asyncio.to_thread(
+            runtime_config.write_fields,
+            plan.cluster_writes,
+            plan.cluster_removals,
+            expected_digest=candidate.expected_digest,
+            audit_site="gateway_config_put",
+            actor=actor,
+            trace_id=trace_id,
+        )
+    except RuntimeError as exc:
+        if str(exc) != ".env changed before owned runtime-config write":
+            raise
+        raise HTTPException(
+            status_code=409,
+            detail="config changed concurrently; retry the request",
+        ) from None
+
+
 @router.put("/api/config")
 async def put_config(
     request: Request, body: dict[str, object], machine: str | None = None
@@ -532,85 +631,15 @@ async def put_config(
 
     metas = {m.name: m for m in get_config_metadata()}
     plan = ConfigPatchPlan.parse(body, metas, is_remote=machine is not None)
-    if plan.violations:
-        raise HTTPException(
-            status_code=400,
-            detail=f"unknown or read-only fields: {sorted(plan.violations)}",
-        )
-    if plan.scalar_error:
-        raise HTTPException(status_code=400, detail=plan.scalar_error)
-    if plan.remote_cluster_keys:
-        raise HTTPException(
-            status_code=400,
-            detail="cluster config is machine-independent; edit it on the Cluster view",
-        )
+    _reject_invalid_plan(plan)
     has_cluster_patch = bool(plan.cluster_writes or plan.cluster_removals)
     if has_cluster_patch:
-        candidate_writes = dict(plan.cluster_writes)
-        candidate_removals = set(plan.cluster_removals)
-        # A local host field shares the gateway's `.env`. Include only host edits
-        # from a cluster-touched domain: this catches a transition spanning the cluster
-        # and host scopes of one domain before its host write, without changing the existing host capability-result
-        # contract for unrelated fields.
-        cluster_domains = {
-            field_domain(name) for name in set(candidate_writes) | candidate_removals
-        }
-        if machine is None and cluster_domains:
-            host_writes, host_removals = split_reducer_patch(plan.host_body, metas)
-            for name, value in host_writes.items():
-                if field_domain(name) in cluster_domains:
-                    candidate_writes[name] = value
-            candidate_removals.update(
-                name for name in host_removals if field_domain(name) in cluster_domains
-            )
-        candidate = validate_env_patch_for_write(candidate_writes, candidate_removals)
-        if candidate.errors:
-            raise HTTPException(
-                status_code=400,
-                detail="candidate config rejected: " + "; ".join(candidate.errors),
-            )
+        _validate_cluster_candidate(plan, metas, local=machine is None)
 
     if machine is None:
-        # Host first: if a host field is rejected the write returns applied=False
-        # and we leave the cluster .env untouched (atomic from the cluster's view).
-        # No in-memory apply, no restart — the change is persisted and the named
-        # process picks it up on its next restart (restart_required says which).
-        host_result = await _dispatch_config_write(
-            target, plan.host_body, local=True, actor=actor, trace_id=trace_id
+        host_result, restart_required = await _put_local(
+            target, plan, metas, has_cluster_patch=has_cluster_patch, actor=actor, trace_id=trace_id
         )
-        cluster_changed: set[str] = set()
-        if host_result.applied and has_cluster_patch:
-            # A successful host write can legitimately change this same local
-            # file. Revalidate the cluster patch against that new image and use
-            # its digest as the compare-and-swap precondition for persistence.
-            candidate = validate_env_patch_for_write(plan.cluster_writes, plan.cluster_removals)
-            if candidate.errors:
-                raise HTTPException(
-                    status_code=400,
-                    detail="candidate config rejected: " + "; ".join(candidate.errors),
-                )
-            try:
-                await asyncio.to_thread(
-                    runtime_config.write_fields,
-                    plan.cluster_writes,
-                    plan.cluster_removals,
-                    expected_digest=candidate.expected_digest,
-                    audit_site="gateway_config_put",
-                    actor=actor,
-                    trace_id=trace_id,
-                )
-            except RuntimeError as exc:
-                if str(exc) != ".env changed before owned runtime-config write":
-                    raise
-                raise HTTPException(
-                    status_code=409,
-                    detail="config changed concurrently; retry the request",
-                ) from None
-            cluster_changed = set(plan.cluster_writes) | plan.cluster_removals
-        cluster_restart = {
-            metas[k].restart_required for k in cluster_changed if metas[k].restart_required
-        }
-        restart_required = sorted(cluster_restart | set(host_result.restart_required))
     else:
         # Remote target: cluster config is machine-independent; only host fields
         # go. Invariant: an agent-runner's host .env set is written only by

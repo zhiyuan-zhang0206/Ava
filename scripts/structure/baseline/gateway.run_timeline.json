@@ -3,9 +3,6 @@
     "gateway/run_timeline/strip.py::ambient-instance:_STRIP_CACHE": 1
   },
   "complexity": {
-    "gateway/run_timeline/router.py::_bucket_rows": 25,
-    "gateway/run_timeline/router.py::aggregate_turn_timeline": 28,
-    "gateway/run_timeline/strip.py::_strip_messages_for_window": 19,
     "gateway/run_timeline/tests/test_run_timeline.py::test_aggregate_turn_timeline_joins_usage_and_marks_compact_boundary": 15
   }
 }

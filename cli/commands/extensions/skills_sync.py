@@ -271,70 +271,72 @@ def _untracked_warning(s: _Source, dest: Path) -> str:
     )
 
 
-def _sync_one(
+def _sync_bootstrap_only(
     s: _Source,
-    skills_root: Path,
     registry: install_registry.Registry,
     now: str,
     result: SkillsConvergeResult,
+    dest: Path,
+    entry: InstalledPackage | None,
+    src_hash: str,
+    skip: frozenset[tuple[str, ...]],
 ) -> None:
-    """Bring `skills_root/<s.name>` in line with `s.src` (copy / update /
-    leave alone) and upsert its registry row. Appends its outcome to `result`."""
-    dest = skills_root / s.name
-    entry = next((p for p in registry.packages if match_key(p.name) == s.key), None)
-    # An installed plugin's own skills dir is fair game even while its
-    # registry row still says origin="user" (the state right after
-    # `ava plugins install`, before the first converge).
-    own_plugin_skills = (
-        entry is not None
-        and entry.type == "plugin"
-        and s.origin == "plugin"
-        and s.src == paths.plugins_dir() / entry.name / "skills"
-    )
-    if entry is not None and entry.origin == "user" and not own_plugin_skills:
-        # A user-installed package holds this name; its content is not
-        # derived state, so the repo/plugin source loses. (Design calls
-        # for repo-wins, but overwriting would destroy user content.)
-        result.warnings.append(
-            f"'{s.name}': user-installed package shadows {s.src}; source not synced"
-        )
-        return
-    src_hash = tree_hash(s.src)
-    skip = install_registry.preserved_subpaths(dest)
-    if s.bootstrap_only and dest.exists():
-        # Repo-native sources are bootstrap-only (R5): an existing copy is
-        # never touched here — updates are the explicit `ava skill update`
-        # (which owns conflict detection + --force). The one exception is the
-        # lost-registry-row self-heal (#974): a source-identical copy is
-        # adopted back; a differing registry-less copy stays an untracked
-        # warning (it may be a deliberate edit — adopting it would let a later
-        # update overwrite it).
-        if entry is None:
-            if src_hash == tree_hash(dest, skip_subtrees=skip):
-                _adopt_copy(s, registry, now, result)
-            else:
-                result.warnings.append(_untracked_warning(s, dest))
+    """A repo-native (bootstrap-only) source whose copy already exists."""
+    # Repo-native sources are bootstrap-only (R5): an existing copy is
+    # never touched here — updates are the explicit `ava skill update`
+    # (which owns conflict detection + --force). The one exception is the
+    # lost-registry-row self-heal (#974): a source-identical copy is
+    # adopted back; a differing registry-less copy stays an untracked
+    # warning (it may be a deliberate edit — adopting it would let a later
+    # update overwrite it).
+    if entry is None:
+        if src_hash == tree_hash(dest, skip_subtrees=skip):
+            _adopt_copy(s, registry, now, result)
         else:
-            # Re-anchor a stale recorded source on the no-op pass (#15): a row
-            # written from a deleted worktree keeps pointing at it otherwise.
-            if entry.origin_path != str(s.src):
-                entry.origin_path, entry.updated_at = str(s.src), now
-            result.unchanged.append(s.name)
-        return
-    if not dest.exists():
-        _copy_tree(s.src, dest)
-        if entry is None:
-            entry = InstalledPackage(name=s.name, type="skill", installed_at=now)
-            registry.packages.append(entry)
-        entry.origin = s.origin
-        entry.origin_path = str(s.src)
-        _stamp_trust(entry, s)
-        entry.content_hash = src_hash
-        entry.updated_at = now
-        if entry.installed_at is None:
-            entry.installed_at = now
-        result.copied.append(s.name)
-        return
+            result.warnings.append(_untracked_warning(s, dest))
+    else:
+        # Re-anchor a stale recorded source on the no-op pass (#15): a row
+        # written from a deleted worktree keeps pointing at it otherwise.
+        if entry.origin_path != str(s.src):
+            entry.origin_path, entry.updated_at = str(s.src), now
+        result.unchanged.append(s.name)
+
+
+def _land_new_copy(
+    s: _Source,
+    registry: install_registry.Registry,
+    now: str,
+    result: SkillsConvergeResult,
+    dest: Path,
+    entry: InstalledPackage | None,
+    src_hash: str,
+) -> None:
+    """The destination is absent: copy the source in and upsert its registry row."""
+    _copy_tree(s.src, dest)
+    if entry is None:
+        entry = InstalledPackage(name=s.name, type="skill", installed_at=now)
+        registry.packages.append(entry)
+    entry.origin = s.origin
+    entry.origin_path = str(s.src)
+    _stamp_trust(entry, s)
+    entry.content_hash = src_hash
+    entry.updated_at = now
+    if entry.installed_at is None:
+        entry.installed_at = now
+    result.copied.append(s.name)
+
+
+def _sync_existing(
+    s: _Source,
+    registry: install_registry.Registry,
+    now: str,
+    result: SkillsConvergeResult,
+    dest: Path,
+    entry: InstalledPackage | None,
+    src_hash: str,
+    skip: frozenset[tuple[str, ...]],
+) -> None:
+    """The destination exists: adopt, warn, leave alone or update it by content hash."""
     dest_hash = tree_hash(dest, skip_subtrees=skip)
     if entry is None:
         if src_hash == dest_hash:
@@ -366,6 +368,45 @@ def _sync_one(
     entry.content_hash = src_hash
     entry.updated_at = now
     result.updated.append(s.name)
+
+
+def _sync_one(
+    s: _Source,
+    skills_root: Path,
+    registry: install_registry.Registry,
+    now: str,
+    result: SkillsConvergeResult,
+) -> None:
+    """Bring `skills_root/<s.name>` in line with `s.src` (copy / update /
+    leave alone) and upsert its registry row. Appends its outcome to `result`."""
+    dest = skills_root / s.name
+    entry = next((p for p in registry.packages if match_key(p.name) == s.key), None)
+    # An installed plugin's own skills dir is fair game even while its
+    # registry row still says origin="user" (the state right after
+    # `ava plugins install`, before the first converge).
+    own_plugin_skills = (
+        entry is not None
+        and entry.type == "plugin"
+        and s.origin == "plugin"
+        and s.src == paths.plugins_dir() / entry.name / "skills"
+    )
+    if entry is not None and entry.origin == "user" and not own_plugin_skills:
+        # A user-installed package holds this name; its content is not
+        # derived state, so the repo/plugin source loses. (Design calls
+        # for repo-wins, but overwriting would destroy user content.)
+        result.warnings.append(
+            f"'{s.name}': user-installed package shadows {s.src}; source not synced"
+        )
+        return
+    src_hash = tree_hash(s.src)
+    skip = install_registry.preserved_subpaths(dest)
+    if s.bootstrap_only and dest.exists():
+        _sync_bootstrap_only(s, registry, now, result, dest, entry, src_hash, skip)
+        return
+    if not dest.exists():
+        _land_new_copy(s, registry, now, result, dest, entry, src_hash)
+        return
+    _sync_existing(s, registry, now, result, dest, entry, src_hash, skip)
 
 
 def _cleanup_gone_sources(

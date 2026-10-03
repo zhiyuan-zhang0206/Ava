@@ -127,6 +127,33 @@ def _ai_message_chars(msg: AIMessage) -> dict[str, int]:
     return out
 
 
+def _note_bucket(tag: object) -> str:
+    if tag == NoteTag.MEMORY:
+        return "cluster_memory"
+    if tag in (NoteTag.AGENT_MEMORY, NoteTag.INHERITED_MEMORY):
+        # Inherited-memory blocks are agent memory too (the chain's
+        # copy of it), so they share the agent_memory bucket.
+        return "agent_memory"
+    return "context_note"
+
+
+def _human_bucket(msg: HumanMessage) -> str:
+    """The context bucket a HumanMessage belongs to, by its Ava message type."""
+    kwargs = read_ava_kwargs(msg)
+    ava_type = kwargs.get("ava_msg_type")
+    if ava_type == AvaMsgType.INBOUND:
+        return _inbound_bucket(kwargs.get("ava_source") or "")
+    if ava_type == AvaMsgType.COMPACT_SUMMARY:
+        return "compact_summary"
+    if ava_type == AvaMsgType.SYSTEM_NOTE:
+        return _note_bucket(kwargs.get("ava_note_tag"))
+    if isinstance(msg.content, str) and msg.content.startswith(COMPACT_SUMMARY_HEADER):  # pyright: ignore[reportUnknownMemberType]
+        # The auto-compact summary is injected as an untagged HumanMessage
+        # (compose_summary_message); the header is its one invariant.
+        return "compact_summary"
+    return "user_input"
+
+
 def bucket_messages(messages: Sequence[BaseMessage]) -> tuple[dict[str, int], str]:
     """Bucket the raw messages into `{kind: chars}` and return the system-prompt
     content alongside (for the section split). Buckets that never occur are
@@ -152,29 +179,7 @@ def bucket_messages(messages: Sequence[BaseMessage]) -> tuple[dict[str, int], st
                 add(kind, chars)
             continue
         if isinstance(msg, HumanMessage):
-            kwargs = read_ava_kwargs(msg)
-            ava_type = kwargs.get("ava_msg_type")
-            chars = _text_chars(msg.content)  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
-            if ava_type == AvaMsgType.INBOUND:
-                add(_inbound_bucket(kwargs.get("ava_source") or ""), chars)
-            elif ava_type == AvaMsgType.COMPACT_SUMMARY:
-                add("compact_summary", chars)
-            elif ava_type == AvaMsgType.SYSTEM_NOTE:
-                tag = kwargs.get("ava_note_tag")
-                if tag == NoteTag.MEMORY:
-                    add("cluster_memory", chars)
-                elif tag in (NoteTag.AGENT_MEMORY, NoteTag.INHERITED_MEMORY):
-                    # Inherited-memory blocks are agent memory too (the chain's
-                    # copy of it), so they share the agent_memory bucket.
-                    add("agent_memory", chars)
-                else:
-                    add("context_note", chars)
-            elif isinstance(msg.content, str) and msg.content.startswith(COMPACT_SUMMARY_HEADER):  # pyright: ignore[reportUnknownMemberType]
-                # The auto-compact summary is injected as an untagged HumanMessage
-                # (compose_summary_message); the header is its one invariant.
-                add("compact_summary", chars)
-            else:
-                add("user_input", chars)
+            add(_human_bucket(msg), _text_chars(msg.content))  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
     return buckets, system_prompt_content
 
 

@@ -57,43 +57,53 @@ def _parse_py_spec(spec: str) -> tuple[list[_Bounds], list[_Bounds]]:
     uppers: list[_Bounds] = []
     for part in [p for p in _CLAUSE_SPLIT_RE.split(spec.strip()) if p]:
         if part.startswith("==") and part.endswith(".*"):
-            core = part[2:-2].rstrip(".")
-            ver = _parse_version(core)
-            if ver is None:
-                raise ManifestError(f"specifier {spec!r}: bad wildcard {part!r}")
-            lowers.append(_Bounds(">=", ver))
-            segments = len(core.split("."))
-            if segments == 1:
-                uppers.append(_Bounds("<", _Version(ver.major + 1, 0, 0)))
-            else:
-                uppers.append(_Bounds("<", _Version(ver.major, ver.minor + 1, 0)))
-            continue
-        op = next((o for o in ("==", ">=", "<=", "~=", ">", "<", "=") if part.startswith(o)), None)
-        if op is None:
-            raise ManifestError(f"specifier {spec!r}: unsupported clause {part!r}")
-        if op == "~=":
-            ver = _parse_version(part[2:])
-            if ver is None:
-                raise ManifestError(f"specifier {spec!r}: bad ~= version")
-            lowers.append(_Bounds(">=", ver))
-            if ver.patch:
-                uppers.append(_Bounds("<", _Version(ver.major, ver.minor + 1, 0)))
-            else:
-                uppers.append(_Bounds("<", _Version(ver.major + 1, 0, 0)))
-            continue
-        if op == "=":
-            op = "=="
-        ver = _parse_version(part[len(op) :])
-        if ver is None:
-            raise ManifestError(f"specifier {spec!r}: {part[len(op) :]!r} is not a version")
-        if op == "==":
-            lowers.append(_Bounds(op, ver))
-            uppers.append(_Bounds(op, ver))
-        elif op in (">", ">="):
-            lowers.append(_Bounds(op, ver))
+            lower, upper = _wildcard_bounds(spec, part)
         else:
-            uppers.append(_Bounds(op, ver))
+            op = next(
+                (o for o in ("==", ">=", "<=", "~=", ">", "<", "=") if part.startswith(o)), None
+            )
+            if op is None:
+                raise ManifestError(f"specifier {spec!r}: unsupported clause {part!r}")
+            lower, upper = _op_bounds(spec, part, op)
+        lowers.extend(lower)
+        uppers.extend(upper)
     return lowers, uppers
+
+
+def _wildcard_bounds(spec: str, part: str) -> tuple[list[_Bounds], list[_Bounds]]:
+    """Bounds of an `==X.Y.*` clause: from X.Y up to the next minor (or major for `==X.*`)."""
+    core = part[2:-2].rstrip(".")
+    ver = _parse_version(core)
+    if ver is None:
+        raise ManifestError(f"specifier {spec!r}: bad wildcard {part!r}")
+    if len(core.split(".")) == 1:
+        upper = _Version(ver.major + 1, 0, 0)
+    else:
+        upper = _Version(ver.major, ver.minor + 1, 0)
+    return [_Bounds(">=", ver)], [_Bounds("<", upper)]
+
+
+def _op_bounds(spec: str, part: str, op: str) -> tuple[list[_Bounds], list[_Bounds]]:
+    """Bounds of one `op version` clause (`~=` compatible release included)."""
+    if op == "~=":
+        ver = _parse_version(part[2:])
+        if ver is None:
+            raise ManifestError(f"specifier {spec!r}: bad ~= version")
+        if ver.patch:
+            upper = _Version(ver.major, ver.minor + 1, 0)
+        else:
+            upper = _Version(ver.major + 1, 0, 0)
+        return [_Bounds(">=", ver)], [_Bounds("<", upper)]
+    if op == "=":
+        op = "=="
+    ver = _parse_version(part[len(op) :])
+    if ver is None:
+        raise ManifestError(f"specifier {spec!r}: {part[len(op) :]!r} is not a version")
+    if op == "==":
+        return [_Bounds(op, ver)], [_Bounds(op, ver)]
+    if op in (">", ">="):
+        return [_Bounds(op, ver)], []
+    return [], [_Bounds(op, ver)]
 
 
 def _strictest_lower(bounds: list[_Bounds]) -> _Bounds | None:
@@ -148,36 +158,42 @@ def pyproject_dependency_specs(pkg_dir: Path) -> dict[str, str]:
         raise ManifestError(f"{pyproject}: [project].dependencies is not a list")
     specs: dict[str, str] = {}
     for raw_entry in deps:
-        if not isinstance(raw_entry, str) or not raw_entry.strip():
-            raise ManifestError(f"{pyproject}: bad dependency entry {raw_entry!r}")
-        entry = raw_entry.strip()
-        m = _NAME_RE.match(entry)
-        if m is None:
-            raise ManifestError(f"{pyproject}: cannot read a package name from {entry!r}")
-        name = m[1]
-        rest = entry[m.end() :].strip()
-        if name in specs:
-            raise ManifestError(f"{pyproject}: duplicate dependency {name!r}")
-        if rest.startswith("["):
-            close = rest.find("]")
-            if close < 0:
-                raise ManifestError(f"{pyproject}: bad extras in {entry!r}")
-            rest = rest[close + 1 :].strip()
-        if "@" in rest:
-            raise ManifestError(
-                f"{pyproject}: {name!r} is a direct-URL dependency; the manifest "
-                "mirror needs a versioned requirement"
-            )
-        if ";" in rest:
-            raise ManifestError(
-                f"{pyproject}: {name!r} carries an environment marker; the "
-                "manifest mirror does not model markers — declare it as a plain "
-                "versioned requirement"
-            )
+        name, rest = _dependency_entry(pyproject, raw_entry, specs)
         if rest:
             _parse_py_spec(rest)  # syntax gate: refuse what we cannot analyze
         specs[name] = rest
     return specs
+
+
+def _dependency_entry(pyproject: Path, raw_entry: object, seen: dict[str, str]) -> tuple[str, str]:
+    """`(name, specifier)` of one dependency entry; refuses everything the mirror cannot model."""
+    if not isinstance(raw_entry, str) or not raw_entry.strip():
+        raise ManifestError(f"{pyproject}: bad dependency entry {raw_entry!r}")
+    entry = raw_entry.strip()
+    m = _NAME_RE.match(entry)
+    if m is None:
+        raise ManifestError(f"{pyproject}: cannot read a package name from {entry!r}")
+    name = m[1]
+    rest = entry[m.end() :].strip()
+    if name in seen:
+        raise ManifestError(f"{pyproject}: duplicate dependency {name!r}")
+    if rest.startswith("["):
+        close = rest.find("]")
+        if close < 0:
+            raise ManifestError(f"{pyproject}: bad extras in {entry!r}")
+        rest = rest[close + 1 :].strip()
+    if "@" in rest:
+        raise ManifestError(
+            f"{pyproject}: {name!r} is a direct-URL dependency; the manifest "
+            "mirror needs a versioned requirement"
+        )
+    if ";" in rest:
+        raise ManifestError(
+            f"{pyproject}: {name!r} carries an environment marker; the "
+            "manifest mirror does not model markers — declare it as a plain "
+            "versioned requirement"
+        )
+    return name, rest
 
 
 # ── the mirror check ────────────────────────────────────────────────────
@@ -196,19 +212,20 @@ def _pick_bound(clauses: tuple[_Clause, ...], side: str) -> _Clause | None:
             continue
         if side == "upper" and clause.op not in _UPPER_OPS:
             continue
-        if best is None:
-            best = clause
-            continue
-        if side == "lower":
-            if clause.version > best.version or (
-                clause.version == best.version and clause.op == ">" and best.op != ">"
-            ):
-                best = clause
-        elif clause.version < best.version or (
-            clause.version == best.version and clause.op == "<" and best.op != "<"
-        ):
+        if best is None or _tighter(clause, best, side):
             best = clause
     return best
+
+
+def _tighter(clause: _Clause, best: _Clause, side: str) -> bool:
+    """Whether `clause` admits fewer versions than `best` on `side` (ties go to the exclusive op)."""
+    if side == "lower":
+        return clause.version > best.version or (
+            clause.version == best.version and clause.op == ">" and best.op != ">"
+        )
+    return clause.version < best.version or (
+        clause.version == best.version and clause.op == "<" and best.op != "<"
+    )
 
 
 def check_python_packages(manifest: PluginManifest, specs: dict[str, str]) -> list[str]:

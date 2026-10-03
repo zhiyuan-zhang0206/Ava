@@ -5,7 +5,6 @@
     "gateway/routers/pages.py::ambient-container:_page_host_cache": 1
   },
   "complexity": {
-    "gateway/routers/config.py::put_config": 24,
     "gateway/routers/tests/test_tasks_router.py::TestGetTaskFields.test_full_is_backward_compatible_and_summary_is_metadata_only": 15,
     "gateway/routers/tests/test_upload_endpoint.py::TestUploadFile.test_upload_single_file_saves_and_inserts_one_inbound": 15
   },

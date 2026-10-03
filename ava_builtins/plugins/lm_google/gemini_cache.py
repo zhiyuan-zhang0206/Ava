@@ -202,23 +202,8 @@ async def _adopt_existing(
     return None
 
 
-async def get_or_create_cache(
-    llm: BaseChatModel,
-    system_text: str,
-    tools: list[Any],
-    policy: LlmCallPolicy,
-) -> CacheRef | None:
-    """Return a live explicit cache for (llm.model, system_text, tools), or None.
-
-    None means "use the plain path" — non-Gemini model, feature flag off,
-    prompt below the token floor, or any cache-layer error (logged). Callers
-    treat None as today's behavior: SystemMessage in-band + bind_tools.
-
-    `tools` are LangChain tools (``[execute_code]``); their converted schema
-    is baked into the cache, so cache-bound requests must NOT bind tools.
-    """
-    if not policy.gemini_explicit_cache_enabled:
-        return None
+def _eligible_gemini(llm: BaseChatModel, system_text: str) -> Any | None:
+    """The Gemini chat model when an explicit cache is worth trying for this prompt, else None."""
     # Cheap pre-check before the ~66MB google-genai import: this function runs
     # on EVERY LLM call, and for non-Gemini providers the import was pure waste
     # (deepseek/anthropic models can never be ChatGoogleGenerativeAI) — ~66MB
@@ -226,9 +211,6 @@ async def get_or_create_cache(
     if "langchain_google_genai" not in type(llm).__module__:
         return None
     from langchain_google_genai import ChatGoogleGenerativeAI
-    from langchain_google_genai._function_utils import (
-        convert_to_genai_function_declarations,
-    )
 
     if not isinstance(llm, ChatGoogleGenerativeAI):
         return None
@@ -241,32 +223,13 @@ async def get_or_create_cache(
             guard=_MIN_TOKENS_GUARD,
         )
         return None
+    return llm
 
-    genai_tools = convert_to_genai_function_declarations(tools)
-    key = _hash_material(llm.model, system_text, genai_tools)
-    now = datetime.now(UTC)
 
-    memo = _MEMO.get(key)
-    if memo is not None:
-        if _remaining_seconds(memo, now) > 60:
-            await _maybe_refresh(llm.client, memo, now, policy.gemini_cache_timeout_seconds)
-            return memo
-        _MEMO.pop(key, None)
-
-    neg_until = _NEGATIVE.get(key)
-    if neg_until is not None:
-        if time.monotonic() < neg_until:
-            return None
-        _NEGATIVE.pop(key, None)
-
-    adopted = await _adopt_existing(
-        llm.client, llm.model, key, now, policy.gemini_cache_timeout_seconds
-    )
-    if adopted is not None:
-        _MEMO[key] = adopted
-        await _maybe_refresh(llm.client, adopted, now, policy.gemini_cache_timeout_seconds)
-        return adopted
-
+async def _create_cache(
+    llm: Any, system_text: str, genai_tools: Any, key: str, policy: LlmCallPolicy
+) -> Any | None:
+    """Create the explicit cache; None (and a negative-cache stamp) when the create fails."""
     from google.genai import types
 
     try:
@@ -291,6 +254,61 @@ async def get_or_create_cache(
             window=int(_NEGATIVE_RETRY_SECONDS),
             exc=exc,
         )
+        return None
+    return cache
+
+
+async def get_or_create_cache(
+    llm: BaseChatModel,
+    system_text: str,
+    tools: list[Any],
+    policy: LlmCallPolicy,
+) -> CacheRef | None:
+    """Return a live explicit cache for (llm.model, system_text, tools), or None.
+
+    None means "use the plain path" — non-Gemini model, feature flag off,
+    prompt below the token floor, or any cache-layer error (logged). Callers
+    treat None as today's behavior: SystemMessage in-band + bind_tools.
+
+    `tools` are LangChain tools (``[execute_code]``); their converted schema
+    is baked into the cache, so cache-bound requests must NOT bind tools.
+    """
+    if not policy.gemini_explicit_cache_enabled:
+        return None
+    gemini = _eligible_gemini(llm, system_text)
+    if gemini is None:
+        return None
+    from langchain_google_genai._function_utils import (
+        convert_to_genai_function_declarations,
+    )
+
+    genai_tools = convert_to_genai_function_declarations(tools)
+    key = _hash_material(gemini.model, system_text, genai_tools)
+    now = datetime.now(UTC)
+
+    memo = _MEMO.get(key)
+    if memo is not None:
+        if _remaining_seconds(memo, now) > 60:
+            await _maybe_refresh(gemini.client, memo, now, policy.gemini_cache_timeout_seconds)
+            return memo
+        _MEMO.pop(key, None)
+
+    neg_until = _NEGATIVE.get(key)
+    if neg_until is not None:
+        if time.monotonic() < neg_until:
+            return None
+        _NEGATIVE.pop(key, None)
+
+    adopted = await _adopt_existing(
+        gemini.client, gemini.model, key, now, policy.gemini_cache_timeout_seconds
+    )
+    if adopted is not None:
+        _MEMO[key] = adopted
+        await _maybe_refresh(gemini.client, adopted, now, policy.gemini_cache_timeout_seconds)
+        return adopted
+
+    cache = await _create_cache(gemini, system_text, genai_tools, key, policy)
+    if cache is None:
         return None
 
     if cache.name is None:

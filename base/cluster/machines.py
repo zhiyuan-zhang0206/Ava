@@ -28,6 +28,7 @@ source as [[machine]] / [[memory_repo]]: the home's `.env`).
 
 from __future__ import annotations
 
+from typing import Any
 from urllib.parse import urlparse
 
 import psycopg
@@ -378,6 +379,28 @@ def mark_stopping(db: Database, name: str, home: str) -> None:
         conn.commit()
 
 
+def _composed_role(live: list[tuple[Any, ...]]) -> list[str]:
+    """Sorted union of the capabilities the live units serve."""
+    return sorted(
+        cap
+        for cap, index in (("gateway", 0), ("agent-runner", 1), ("observability-station", 2))
+        if any(row[index] for row in live)
+    )
+
+
+def _composed_gateway_url(live: list[tuple[Any, ...]]) -> str | None:
+    """Dial URL: ops URL of the live agent-runner unit when present, else the gateway unit's URL,
+    else the station unit's advertised OTLP ingress URL (WP4: a pure station advertises the
+    address remote consumers dial — the bearer-authenticated OTLP ingress; see
+    conventions/reachability-and-credentials.md)."""
+    runner_url = next((row[3] for row in live if row[1]), None)
+    gateway_only_url = next((row[3] for row in live if row[0]), None)
+    station_only_url = next((row[3] for row in live if row[2]), None)
+    if any(row[1] for row in live):
+        return runner_url
+    return gateway_only_url if gateway_only_url is not None else station_only_url
+
+
 def _recompute_machine_row(cur: psycopg.Cursor, name: str) -> None:
     """Rebuild the `machines` row for `name` by composing its `machine_units`.
 
@@ -418,39 +441,14 @@ def _recompute_machine_row(cur: psycopg.Cursor, name: str) -> None:
     )
     live = cur.fetchall()
 
-    serve_gateway = any(row[0] for row in live)
-    serve_agent_runner = any(row[1] for row in live)
-    serve_observability_station = any(row[2] for row in live)
-    role = sorted(
-        cap
-        for cap, on in (
-            ("gateway", serve_gateway),
-            ("agent-runner", serve_agent_runner),
-            ("observability-station", serve_observability_station),
-        )
-        if on
-    )
+    role = _composed_role(live)
     if not role:
         # No live unit — leave the existing composed row untouched but mark it
         # stopped (the machines CHECK forbids an empty role array).
         cur.execute("UPDATE machines SET stopped_at = NOW() WHERE name = %s", (name,))
         return
 
-    # Dial URL: ops URL of the live agent-runner unit when present, else the
-    # gateway unit's URL, else the station unit's advertised OTLP ingress URL
-    # (WP4: a pure station advertises the address remote consumers dial — the
-    # bearer-authenticated OTLP ingress; see
-    # conventions/reachability-and-credentials.md).
-    runner_url = next((row[3] for row in live if row[1]), None)
-    gateway_only_url = next((row[3] for row in live if row[0]), None)
-    station_only_url = next((row[3] for row in live if row[2]), None)
-    gateway_url = (
-        runner_url
-        if serve_agent_runner
-        else gateway_only_url
-        if gateway_only_url is not None
-        else station_only_url
-    )
+    gateway_url = _composed_gateway_url(live)
     # The composed "up since" is the LATEST announce across live units; a unit
     # whose up_since_at is NULL (pre-#981 registration, never backfilled)
     # contributes nothing to the max instead of raising.

@@ -106,37 +106,30 @@ def _audit_one(path: Path, derived: str, legacy: str | None) -> None:
     )
 
 
-def main(argv: list[str] | None = None) -> int:
-    argv = list(sys.argv[1:] if argv is None else argv)
+def _parse_audit_dirs(argv: list[str]) -> tuple[list[Path], int | None]:
+    """The `--audit-dir` values, or the exit code of a usage / missing-path error."""
     audit_dirs: list[Path] = []
     while argv and argv[0] == "--audit-dir":
         argv.pop(0)
         if not argv:
             print("error: --audit-dir requires a value", file=sys.stderr)
-            return 2
+            return [], 2
         audit_dirs.append(Path(argv.pop(0)).expanduser())
 
     missing = [str(d) for d in audit_dirs if not d.exists()]
     if missing:
         print(f"error: target path(s) not found: {', '.join(missing)}", file=sys.stderr)
-        return 1
+        return [], 1
     if argv:
         print(f"error: unrecognized argument(s): {' '.join(argv)}", file=sys.stderr)
-        return 2
+        return [], 2
+    return audit_dirs, None
 
-    try:
-        derived = host_version.host_version(_REPO_ROOT)
-    except host_version.HostVersionError as e:
-        print(f"cannot determine the repo's derived host version: {e}", file=sys.stderr)
-        return 1
-    try:
-        legacy: str | None = pm.host_version_from_repo(_REPO_ROOT)
-    except pm.ManifestError:
-        legacy = None
 
-    core = _tracked_manifests(_CORE_ROOT)
+def _core_errors(derived: str) -> int:
+    """Check every tracked core manifest against the derived host version; the error count."""
     errors = 0
-    for path in core:
+    for path in _tracked_manifests(_CORE_ROOT):
         rel = path.relative_to(_REPO_ROOT)
         try:
             manifest = pm.load_manifest(path.parent)
@@ -152,6 +145,26 @@ def main(argv: list[str] | None = None) -> int:
         for problem in pm.check_host_commit(manifest, _REPO_ROOT):
             print(f"{rel}: {problem}")
             errors += 1
+    return errors
+
+
+def main(argv: list[str] | None = None) -> int:
+    argv = list(sys.argv[1:] if argv is None else argv)
+    audit_dirs, failure = _parse_audit_dirs(argv)
+    if failure is not None:
+        return failure
+
+    try:
+        derived = host_version.host_version(_REPO_ROOT)
+    except host_version.HostVersionError as e:
+        print(f"cannot determine the repo's derived host version: {e}", file=sys.stderr)
+        return 1
+    try:
+        legacy: str | None = pm.host_version_from_repo(_REPO_ROOT)
+    except pm.ManifestError:
+        legacy = None
+
+    errors = _core_errors(derived)
 
     audit = [p for p in _tracked_manifests() if not p.is_relative_to(_REPO_ROOT / _CORE_ROOT)]
     for d in audit_dirs:

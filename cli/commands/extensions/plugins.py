@@ -34,6 +34,7 @@ import sys
 from collections.abc import Callable
 from pathlib import Path
 
+from cli.commands.extensions._claude_code_plugin import Materialized
 from cli.commands.extensions._manifest_gate import gate_refuses
 
 from ._pkg_source import cleanup_temp, clone_git
@@ -228,6 +229,66 @@ def _atomic_plugin_replace(dest: Path, materialize: Callable[[], object]) -> Non
     shutil.rmtree(backup, ignore_errors=True)
 
 
+def _install_claude_code_plugin(
+    pkg_dir: Path, url: str, path: str | None, ref: str | None, *, accept_risk: bool
+) -> int:
+    """Scan, materialize and register a Claude Code plugin bundle; prints what it contributes."""
+    from base import paths
+
+    from . import _claude_code_plugin, skill_package
+
+    try:
+        report, accepted = skill_package.scan_report(pkg_dir, pkg_dir.name, accept_risk=accept_risk)
+    except skill_package.SkillScanRefused as e:
+        return _report_refusal(e.report)
+    _claude_code_plugin.sweep_plugin_residue(paths.plugins_dir())
+    try:
+        result = _claude_code_plugin.materialize(pkg_dir, paths.plugins_dir())
+    except _claude_code_plugin.ClaudeCodePluginError as e:
+        print(f"[ava plugins install] {e}", file=sys.stderr)
+        return 1
+    _register_plugin_install(
+        result.name,
+        url,
+        path,
+        ref,
+        accepted=accepted,
+        dest=paths.plugins_dir() / result.name,
+    )
+    _sync_skills_load_dir()
+    _print_plugin_install(result, report)
+    return 0
+
+
+def _print_plugin_install(result: Materialized, report: str) -> None:
+    from base import paths
+
+    print(
+        f"[ava plugins install] installed plugin '{result.name}' "
+        f"-> {paths.plugins_dir() / result.name}"
+    )
+    print(report)
+    print("  contributes:")
+    if result.shipped_skills:
+        skills = ", ".join(result.shipped_skills)
+        print(
+            f"    {len(result.shipped_skills)} skill(s): {skills} — "
+            "active on the next skill scan, no restart."
+        )
+    if result.skill_name:
+        agents = ", ".join(result.agents)
+        print(
+            f"    skill '{result.skill_name}' ({len(result.agents)} review "
+            f"agent(s): {agents}) — active on the next skill scan, no restart."
+        )
+    if result.commands:
+        cmds = ", ".join(f"/{c}" for c in result.commands)
+        print(f"    {len(result.commands)} command(s): {cmds} — available in the composer.")
+    if result.mcp_servers:
+        servers = ", ".join(result.mcp_servers)
+        print(f"    MCP server(s): {servers} — connect on next use.")
+
+
 def cmd_plugins_install(
     url: str, ref: str | None, path: str | None, *, accept_risk: bool = False
 ) -> int:
@@ -238,9 +299,8 @@ def cmd_plugins_install(
     run code rather than being read — so the same scan gates it, over the whole
     bundle rather than just the skills it ships.
     """
-    from base import paths
 
-    from . import _claude_code_plugin, skill_package
+    from . import _claude_code_plugin
 
     try:
         cloned = clone_git(url, ref)
@@ -269,52 +329,7 @@ def cmd_plugins_install(
             return _install_bare_skill(pkg_dir, name, url, path, ref, accept_risk=accept_risk)
 
         if _claude_code_plugin.is_claude_code_plugin(pkg_dir):
-            try:
-                report, accepted = skill_package.scan_report(
-                    pkg_dir, pkg_dir.name, accept_risk=accept_risk
-                )
-            except skill_package.SkillScanRefused as e:
-                return _report_refusal(e.report)
-            _claude_code_plugin.sweep_plugin_residue(paths.plugins_dir())
-            try:
-                result = _claude_code_plugin.materialize(pkg_dir, paths.plugins_dir())
-            except _claude_code_plugin.ClaudeCodePluginError as e:
-                print(f"[ava plugins install] {e}", file=sys.stderr)
-                return 1
-            _register_plugin_install(
-                result.name,
-                url,
-                path,
-                ref,
-                accepted=accepted,
-                dest=paths.plugins_dir() / result.name,
-            )
-            _sync_skills_load_dir()
-            print(
-                f"[ava plugins install] installed plugin '{result.name}' "
-                f"-> {paths.plugins_dir() / result.name}"
-            )
-            print(report)
-            print("  contributes:")
-            if result.shipped_skills:
-                skills = ", ".join(result.shipped_skills)
-                print(
-                    f"    {len(result.shipped_skills)} skill(s): {skills} — "
-                    "active on the next skill scan, no restart."
-                )
-            if result.skill_name:
-                agents = ", ".join(result.agents)
-                print(
-                    f"    skill '{result.skill_name}' ({len(result.agents)} review "
-                    f"agent(s): {agents}) — active on the next skill scan, no restart."
-                )
-            if result.commands:
-                cmds = ", ".join(f"/{c}" for c in result.commands)
-                print(f"    {len(result.commands)} command(s): {cmds} — available in the composer.")
-            if result.mcp_servers:
-                servers = ", ".join(result.mcp_servers)
-                print(f"    MCP server(s): {servers} — connect on next use.")
-            return 0
+            return _install_claude_code_plugin(pkg_dir, url, path, ref, accept_risk=accept_risk)
 
         if (pkg_dir / ".mcp.json").is_file():
             print(

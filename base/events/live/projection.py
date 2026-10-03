@@ -414,7 +414,7 @@ class PageClosed(_Base):
     marks only serve_dir-NULL show() rows closed on
     `UPDATE agents_meta.status='terminated'`; all
     three terminate entries (gateway `mark_agent_exited_op` self-exit /
-    `_force_mark_terminated` zombie cleanup / gateway force=true)
+    `force_mark_terminated` zombie cleanup / gateway force=true)
     SELECT page names before the UPDATE and publish each after
     UPDATE so the popover removes entries in real time instead of
     waiting for the user to switch agents."""

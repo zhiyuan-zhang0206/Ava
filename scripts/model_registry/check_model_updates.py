@@ -534,6 +534,36 @@ def _valid_status(value: object) -> str:
     return value
 
 
+def _loaded_pending(pending: object) -> dict[str, object]:
+    if not isinstance(pending, dict) or "status" not in pending or "rounds" not in pending:
+        raise ValueError("model tracker state pending must carry status and rounds")
+    rounds = pending["rounds"]
+    if not isinstance(rounds, int) or rounds < 1:
+        raise TypeError("model tracker state pending rounds must be a positive integer")
+    return {"status": _valid_status(pending["status"]), "rounds": rounds}
+
+
+def _loaded_provider(entry: dict[str, Any]) -> dict[str, object]:
+    if "reported" not in entry or "status" not in entry:
+        raise ValueError("model tracker state provider is missing reported or status")
+    if not isinstance(entry["reported"], list) or not all(
+        isinstance(model_id, str) for model_id in entry["reported"]
+    ):
+        raise ValueError("model tracker state reported must be a list of strings")
+    status = _valid_status(entry["status"])
+    # `announced` postdates the first state files: a file written before
+    # the field existed baselines on the status it was left in, so the
+    # upgrade itself never announces anything.
+    loaded: dict[str, object] = {
+        "reported": entry["reported"],
+        "status": status,
+        "announced": _valid_status(entry.get("announced", status)),
+    }
+    if "pending" in entry:
+        loaded["pending"] = _loaded_pending(entry["pending"])
+    return loaded
+
+
 def _load_state(path: Path) -> dict[str, dict[str, dict[str, object]]]:
     if not path.exists():
         return {"providers": {}}
@@ -544,30 +574,7 @@ def _load_state(path: Path) -> dict[str, dict[str, dict[str, object]]]:
     for provider, entry in raw["providers"].items():
         if not isinstance(provider, str) or not isinstance(entry, dict):
             raise TypeError("model tracker state has an invalid provider entry")
-        if "reported" not in entry or "status" not in entry:
-            raise ValueError("model tracker state provider is missing reported or status")
-        if not isinstance(entry["reported"], list) or not all(
-            isinstance(model_id, str) for model_id in entry["reported"]
-        ):
-            raise ValueError("model tracker state reported must be a list of strings")
-        status = _valid_status(entry["status"])
-        # `announced` postdates the first state files: a file written before
-        # the field existed baselines on the status it was left in, so the
-        # upgrade itself never announces anything.
-        loaded: dict[str, object] = {
-            "reported": entry["reported"],
-            "status": status,
-            "announced": _valid_status(entry.get("announced", status)),
-        }
-        if "pending" in entry:
-            pending = entry["pending"]
-            if not isinstance(pending, dict) or "status" not in pending or "rounds" not in pending:
-                raise ValueError("model tracker state pending must carry status and rounds")
-            rounds = pending["rounds"]
-            if not isinstance(rounds, int) or rounds < 1:
-                raise TypeError("model tracker state pending rounds must be a positive integer")
-            loaded["pending"] = {"status": _valid_status(pending["status"]), "rounds": rounds}
-        providers[provider] = loaded
+        providers[provider] = _loaded_provider(entry)
     return {"providers": providers}
 
 
@@ -696,31 +703,33 @@ def _report_payload(reports: Mapping[str, ProviderReport]) -> dict[str, object]:
     }
 
 
+def _report_section(title: str, items: list[tuple[str, str]]) -> list[str]:
+    return ["", f"## {title}", *(f"- **{provider}**: {text}" for provider, text in items)]
+
+
+def _report_sections(reports: Mapping[str, ProviderReport]) -> dict[str, list[tuple[str, str]]]:
+    return {
+        "Provider errors": [(name, r.error) for name, r in reports.items() if r.error],
+        "Skipped older models": [
+            (name, ", ".join(r.suppressed)) for name, r in reports.items() if r.suppressed
+        ],
+        "Other provider ids": [
+            (name, ", ".join(r.other_ids)) for name, r in reports.items() if r.other_ids
+        ],
+    }
+
+
 def _markdown_report(reports: Mapping[str, ProviderReport]) -> str:
     lines = ["# Model update check", "", "## Actionable candidates"]
-    actionable = False
-    for provider, report in reports.items():
-        if report.actionable_candidates:
-            actionable = True
-            lines.append(f"- **{provider}**: {', '.join(report.actionable_candidates)}")
-    if not actionable:
-        lines.append("- None")
-    errors = [(provider, report.error) for provider, report in reports.items() if report.error]
-    if errors:
-        lines.extend(["", "## Provider errors"])
-        lines.extend(f"- **{provider}**: {error}" for provider, error in errors)
-    skipped = [
-        (provider, report.suppressed) for provider, report in reports.items() if report.suppressed
+    actionable = [
+        f"- **{provider}**: {', '.join(report.actionable_candidates)}"
+        for provider, report in reports.items()
+        if report.actionable_candidates
     ]
-    if skipped:
-        lines.extend(["", "## Skipped older models"])
-        lines.extend(f"- **{provider}**: {', '.join(models)}" for provider, models in skipped)
-    other = [
-        (provider, report.other_ids) for provider, report in reports.items() if report.other_ids
-    ]
-    if other:
-        lines.extend(["", "## Other provider ids"])
-        lines.extend(f"- **{provider}**: {', '.join(models)}" for provider, models in other)
+    lines.extend(actionable or ["- None"])
+    for title, items in _report_sections(reports).items():
+        if items:
+            lines.extend(_report_section(title, items))
     changed = [provider for provider, report in reports.items() if report.status_changed]
     if changed:
         lines.extend(["", "## Provider status changes", f"- {', '.join(changed)}"])

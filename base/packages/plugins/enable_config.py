@@ -393,71 +393,66 @@ def update_all_disk_images() -> PluginUpdateResult:
     — to avoid triggering hook registration / state registration
     side effects.
     """
-    entries: list[PluginUpdateEntry] = []
-    for name, plugin_dir in sorted(discover_plugins().items()):
-        default_config_py = plugin_dir / "default_config.py"
-        if not default_config_py.exists():
-            entries.append(
-                PluginUpdateEntry(name=name, status="skipped", detail="no default_config.py")
-            )
-            continue
-
-        spec = importlib.util.spec_from_file_location(
-            f"plugins.{name}.default_config", default_config_py
-        )
-        if spec is None or spec.loader is None:
-            entries.append(
-                PluginUpdateEntry(
-                    name=name, status="error", detail="spec_from_file_location returned None"
-                )
-            )
-            continue
-        module = importlib.util.module_from_spec(spec)
-        try:
-            spec.loader.exec_module(module)
-        except Exception as e:
-            entries.append(PluginUpdateEntry(name=name, status="error", detail=str(e)))
-            continue
-
-        cls_candidates = [
-            obj
-            for _attr, obj in inspect.getmembers(module)
-            if inspect.isclass(obj) and issubclass(obj, BaseModel) and obj is not BaseModel
-        ]
-        if not cls_candidates:
-            entries.append(
-                PluginUpdateEntry(
-                    name=name, status="error", detail="default_config.py has no BaseModel subclass"
-                )
-            )
-            continue
-        if len(cls_candidates) > 1:
-            entries.append(
-                PluginUpdateEntry(
-                    name=name,
-                    status="error",
-                    detail=(
-                        f"default_config.py has {len(cls_candidates)} BaseModel subclasses, "
-                        f"want exactly 1: {[c.__name__ for c in cls_candidates]}"
-                    ),
-                )
-            )
-            continue
-        cls = cls_candidates[0]
-
-        try:
-            added, removed = merge_disk_image_schema(name, cls)
-        except Exception as e:
-            entries.append(PluginUpdateEntry(name=name, status="error", detail=str(e)))
-            continue
-
-        if not added and not removed:
-            entries.append(PluginUpdateEntry(name=name, status="no_diff"))
-        else:
-            entries.append(
-                PluginUpdateEntry(
-                    name=name, status="updated", added=sorted(added), removed=sorted(removed)
-                )
-            )
-
+    entries = [
+        _update_one_disk_image(name, plugin_dir)
+        for name, plugin_dir in sorted(discover_plugins().items())
+    ]
     return PluginUpdateResult(entries=entries)
+
+
+def _default_config_class(
+    name: str, default_config_py: Path
+) -> type[BaseModel] | PluginUpdateEntry:
+    """The plugin's single `BaseModel` config class, or the error entry saying why not."""
+    spec = importlib.util.spec_from_file_location(
+        f"plugins.{name}.default_config", default_config_py
+    )
+    if spec is None or spec.loader is None:
+        return PluginUpdateEntry(
+            name=name, status="error", detail="spec_from_file_location returned None"
+        )
+    module = importlib.util.module_from_spec(spec)
+    try:
+        spec.loader.exec_module(module)
+    except Exception as e:
+        return PluginUpdateEntry(name=name, status="error", detail=str(e))
+
+    cls_candidates = [
+        obj
+        for _attr, obj in inspect.getmembers(module)
+        if inspect.isclass(obj) and issubclass(obj, BaseModel) and obj is not BaseModel
+    ]
+    if not cls_candidates:
+        return PluginUpdateEntry(
+            name=name, status="error", detail="default_config.py has no BaseModel subclass"
+        )
+    if len(cls_candidates) > 1:
+        return PluginUpdateEntry(
+            name=name,
+            status="error",
+            detail=(
+                f"default_config.py has {len(cls_candidates)} BaseModel subclasses, "
+                f"want exactly 1: {[c.__name__ for c in cls_candidates]}"
+            ),
+        )
+    return cls_candidates[0]
+
+
+def _update_one_disk_image(name: str, plugin_dir: Path) -> PluginUpdateEntry:
+    """Merge one plugin's `default_config.py` schema into its disk image; never raises."""
+    default_config_py = plugin_dir / "default_config.py"
+    if not default_config_py.exists():
+        return PluginUpdateEntry(name=name, status="skipped", detail="no default_config.py")
+    cls = _default_config_class(name, default_config_py)
+    if isinstance(cls, PluginUpdateEntry):
+        return cls
+    try:
+        added, removed = merge_disk_image_schema(name, cls)
+    except Exception as e:
+        return PluginUpdateEntry(name=name, status="error", detail=str(e))
+
+    if not added and not removed:
+        return PluginUpdateEntry(name=name, status="no_diff")
+    return PluginUpdateEntry(
+        name=name, status="updated", added=sorted(added), removed=sorted(removed)
+    )

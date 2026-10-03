@@ -206,6 +206,49 @@ def finish(rc: int, *, error: str | None = None, extra: dict[str, Any] | None = 
     _write(op)
 
 
+def _parse_phases(raw_phases: object) -> list[LifecyclePhase]:
+    """The well-formed phase entries of a journal's `phases` field; malformed ones are skipped."""
+    phases: list[LifecyclePhase] = []
+    if not isinstance(raw_phases, list):
+        return phases
+    for raw in cast("list[object]", raw_phases):
+        if not isinstance(raw, dict):
+            continue
+        entry = cast("dict[str, object]", raw)
+        name = entry.get("name")
+        if not isinstance(name, str):
+            continue
+        started = entry.get("started_at", 0.0)
+        finished = entry.get("finished_at")
+        ok = entry.get("ok")
+        phases.append(
+            LifecyclePhase(
+                name=name,
+                started_at=float(started) if isinstance(started, (int, float)) else 0.0,
+                finished_at=float(finished) if isinstance(finished, (int, float)) else None,
+                ok=None if ok is None else bool(ok),
+            )
+        )
+    return phases
+
+
+def _parse_resumed_from(raw_resumed: object) -> ResumedFrom | None:
+    """The `resumed_from` record, or None when absent or not fully typed."""
+    if not isinstance(raw_resumed, dict):
+        return None
+    entry = cast("dict[str, object]", raw_resumed)
+    prev_pid = entry.get("pid")
+    prev_operation = entry.get("operation")
+    prev_started = entry.get("started_at")
+    if (
+        isinstance(prev_pid, int)
+        and isinstance(prev_operation, str)
+        and isinstance(prev_started, (int, float))
+    ):
+        return ResumedFrom(pid=prev_pid, operation=prev_operation, started_at=float(prev_started))
+    return None
+
+
 def read() -> LifecycleOp | None:
     """The current journal, or None when absent or unreadable."""
     try:
@@ -217,27 +260,7 @@ def read() -> LifecycleOp | None:
     data = cast("dict[str, Any]", raw)
     if not isinstance(data.get("operation"), str):
         return None
-    raw_phases = data.get("phases", [])
-    phases: list[LifecyclePhase] = []
-    if isinstance(raw_phases, list):
-        for raw in cast("list[object]", raw_phases):
-            if not isinstance(raw, dict):
-                continue
-            entry = cast("dict[str, object]", raw)
-            name = entry.get("name")
-            if not isinstance(name, str):
-                continue
-            started = entry.get("started_at", 0.0)
-            finished = entry.get("finished_at")
-            ok = entry.get("ok")
-            phases.append(
-                LifecyclePhase(
-                    name=name,
-                    started_at=float(started) if isinstance(started, (int, float)) else 0.0,
-                    finished_at=float(finished) if isinstance(finished, (int, float)) else None,
-                    ok=None if ok is None else bool(ok),
-                )
-            )
+    phases = _parse_phases(data.get("phases", []))
     try:
         pid = int(data["pid"])
         started_at = float(data.get("started_at", 0.0))
@@ -247,21 +270,7 @@ def read() -> LifecycleOp | None:
         # types) is as unreadable as a corrupt one: readers on the
         # stop/pause/restart path must see "absent", never a raise.
         return None
-    resumed_from: ResumedFrom | None = None
-    raw_resumed = data.get("resumed_from")
-    if isinstance(raw_resumed, dict):
-        entry = cast("dict[str, object]", raw_resumed)
-        prev_pid = entry.get("pid")
-        prev_operation = entry.get("operation")
-        prev_started = entry.get("started_at")
-        if (
-            isinstance(prev_pid, int)
-            and isinstance(prev_operation, str)
-            and isinstance(prev_started, (int, float))
-        ):
-            resumed_from = ResumedFrom(
-                pid=prev_pid, operation=prev_operation, started_at=float(prev_started)
-            )
+    resumed_from = _parse_resumed_from(data.get("resumed_from"))
     return LifecycleOp(
         operation=data["operation"],
         pid=pid,

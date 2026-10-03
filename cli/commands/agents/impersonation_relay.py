@@ -356,7 +356,136 @@ def _due_ids(snapshot: InboxSnapshot, *, redelivery: bool) -> frozenset[int]:
     )
 
 
-async def relay_inbox(  # noqa: PLR0915 — one consent/window/reservation delivery loop
+class _InboxRelay:
+    """The state of one relay's delivery loop: start notice, batching window, rate limit."""
+
+    def __init__(
+        self,
+        agent_id: int,
+        lease_id: int | UUID,
+        *,
+        read_inbox: Callable[[], Awaitable[InboxSnapshot]],
+        reserve: Callable[[list[int]], Awaitable[frozenset[int]]],
+        listener: WakeListener,
+        emit: Callable[[str], None],
+        debounce: float,
+        catchup_seconds: float,
+        max_chars: int | None,
+    ) -> None:
+        self.agent_id = agent_id
+        self.lease_id = lease_id
+        self.read_inbox = read_inbox
+        self.reserve = reserve
+        self.listener = listener
+        self.emit = emit
+        self.debounce = debounce
+        self.catchup_seconds = catchup_seconds
+        self.max_chars = max_chars
+        self.start_sent = False
+        self.last_emit = float("-inf")
+        self.routine_deadline: float | None = None
+        self.activation_pending: frozenset[int] = frozenset()
+
+    async def _read(self) -> InboxSnapshot | None:
+        """The current snapshot, or None once the lease ended (the end was emitted)."""
+        snapshot = await self.read_inbox()
+        if _ended(snapshot, self.agent_id, self.lease_id, self.emit):
+            return None
+        return snapshot
+
+    async def _wait(self, snapshot: InboxSnapshot, remaining: float | None = None) -> None:
+        bound = min(self.catchup_seconds, _seconds_left(snapshot))
+        if remaining is not None:
+            bound = min(bound, remaining)
+        await self.listener.wait_one(max(0.5, bound))
+
+    def _emit_start(self, snapshot: InboxSnapshot) -> None:
+        self.activation_pending = snapshot.message_ids
+        hint = activation_hint(
+            self.agent_id,
+            self.lease_id,
+            ack_window_seconds=snapshot.ack_window_seconds,
+            max_delivery_attempts=snapshot.max_delivery_attempts,
+        )
+        start_message = snapshot.start_message or hint
+        if snapshot.start_message and isinstance(self.lease_id, int):
+            start_message += "\n\n" + hint
+        self.emit(start_message)
+        self.start_sent = True
+        self.last_emit = _loop_time()
+
+    async def _deliver_due(
+        self, snapshot: InboxSnapshot, due: frozenset[int], *, redelivery: bool
+    ) -> bool:
+        """Merge a burst, reserve and push what is due; True when the lease ended meanwhile."""
+        if not redelivery and not (due & self.activation_pending):
+            self.routine_deadline, remaining = _window_wait(
+                snapshot,
+                new_ids=due,
+                routine_deadline=self.routine_deadline,
+                now=_loop_time(),
+            )
+            if remaining is not None:
+                await self._wait(snapshot, remaining)
+                return False
+        # Catch ACK/release during debounce and merge bursts. Claude
+        # Monitor replenishes one event allowance per two seconds.
+        await asyncio.sleep(
+            max(self.debounce, self.last_emit + _MIN_EMIT_INTERVAL_SECONDS - _loop_time())
+        )
+        fresh = await self._read()
+        if fresh is None:
+            return True
+        if not fresh.active:
+            return False
+        redelivery = bool(_due_ids(fresh, redelivery=True))
+        due = _due_ids(fresh, redelivery=redelivery)
+        reserved: frozenset[int] = await self.reserve(sorted(due)) if due else frozenset()
+        if reserved:
+            self.emit(
+                message_push(
+                    self.agent_id,
+                    self.lease_id,
+                    [fresh.messages[i] for i in sorted(reserved)],
+                    ack_window_seconds=fresh.ack_window_seconds,
+                    max_delivery_attempts=fresh.max_delivery_attempts,
+                    redelivery=redelivery,
+                    max_chars=self.max_chars,
+                )
+            )
+            self.last_emit = _loop_time()
+        self.routine_deadline = None
+        return False
+
+    async def run(self) -> None:
+        try:
+            if await self._read() is None:
+                return
+            await self.listener.ensure_listening()
+            while True:
+                snapshot = await self._read()
+                if snapshot is None:
+                    return
+                if not snapshot.active:
+                    await self._wait(snapshot)
+                    continue
+                if not self.start_sent:
+                    self._emit_start(snapshot)
+                    continue
+                redelivery = bool(_due_ids(snapshot, redelivery=True))
+                due = _due_ids(snapshot, redelivery=redelivery)
+                if due:
+                    if await self._deliver_due(snapshot, due, redelivery=redelivery):
+                        return
+                    continue
+                # The database owns expiry; periodic catchup also repairs missed
+                # Redis wakes and observes the final ACK window's expiration.
+                await self._wait(snapshot)
+        finally:
+            await self.listener.close()
+
+
+async def relay_inbox(
     agent_id: int,
     lease_id: int | UUID,
     *,
@@ -381,85 +510,17 @@ async def relay_inbox(  # noqa: PLR0915 — one consent/window/reservation deliv
         raise ValueError(f"debounce must be between 0 and {_CATCHUP_SECONDS:g} seconds")
     if not math.isfinite(catchup_seconds) or catchup_seconds <= 0:
         raise ValueError("catchup_seconds must be finite and positive")
-    start_sent = False
-    last_emit = float("-inf")
-    routine_deadline: float | None = None
-    activation_pending: frozenset[int] = frozenset()
-    try:
-        initial = await read_inbox()
-        if _ended(initial, agent_id, lease_id, emit):
-            return
-        await listener.ensure_listening()
-        while True:
-            snapshot = await read_inbox()
-            if _ended(snapshot, agent_id, lease_id, emit):
-                return
-            if not snapshot.active:
-                await listener.wait_one(max(0.5, min(catchup_seconds, _seconds_left(snapshot))))
-                continue
-            if not start_sent:
-                activation_pending = snapshot.message_ids
-                hint = activation_hint(
-                    agent_id,
-                    lease_id,
-                    ack_window_seconds=snapshot.ack_window_seconds,
-                    max_delivery_attempts=snapshot.max_delivery_attempts,
-                )
-                start_message = snapshot.start_message or hint
-                if snapshot.start_message and isinstance(lease_id, int):
-                    start_message += "\n\n" + hint
-                emit(start_message)
-                start_sent = True
-                last_emit = _loop_time()
-                continue
-            redelivery = bool(_due_ids(snapshot, redelivery=True))
-            due = _due_ids(snapshot, redelivery=redelivery)
-            if due:
-                if not redelivery and not (due & activation_pending):
-                    routine_deadline, remaining = _window_wait(
-                        snapshot,
-                        new_ids=due,
-                        routine_deadline=routine_deadline,
-                        now=_loop_time(),
-                    )
-                    if remaining is not None:
-                        await listener.wait_one(
-                            max(0.5, min(catchup_seconds, _seconds_left(snapshot), remaining))
-                        )
-                        continue
-                # Catch ACK/release during debounce and merge bursts. Claude
-                # Monitor replenishes one event allowance per two seconds.
-                await asyncio.sleep(
-                    max(debounce, last_emit + _MIN_EMIT_INTERVAL_SECONDS - _loop_time())
-                )
-                snapshot = await read_inbox()
-                if _ended(snapshot, agent_id, lease_id, emit):
-                    return
-                if not snapshot.active:
-                    continue
-                redelivery = bool(_due_ids(snapshot, redelivery=True))
-                due = _due_ids(snapshot, redelivery=redelivery)
-                reserved: frozenset[int] = await reserve(sorted(due)) if due else frozenset()
-                if reserved:
-                    emit(
-                        message_push(
-                            agent_id,
-                            lease_id,
-                            [snapshot.messages[i] for i in sorted(reserved)],
-                            ack_window_seconds=snapshot.ack_window_seconds,
-                            max_delivery_attempts=snapshot.max_delivery_attempts,
-                            redelivery=redelivery,
-                            max_chars=max_chars,
-                        )
-                    )
-                    last_emit = _loop_time()
-                routine_deadline = None
-                continue
-            # The database owns expiry; periodic catchup also repairs missed
-            # Redis wakes and observes the final ACK window's expiration.
-            await listener.wait_one(max(0.5, min(catchup_seconds, _seconds_left(snapshot))))
-    finally:
-        await listener.close()
+    await _InboxRelay(
+        agent_id,
+        lease_id,
+        read_inbox=read_inbox,
+        reserve=reserve,
+        listener=listener,
+        emit=emit,
+        debounce=debounce,
+        catchup_seconds=catchup_seconds,
+        max_chars=max_chars,
+    ).run()
 
 
 def _write_heartbeat(lease_id: UUID, token: str) -> bool:

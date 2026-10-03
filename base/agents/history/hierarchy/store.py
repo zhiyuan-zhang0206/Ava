@@ -90,99 +90,120 @@ def write_tree(
     if not nodes:
         return 0
     with db.write_transaction() as conn:
-        ids: dict[tuple[int, int, int], int] = {}
-        for node in nodes:
+        ids = _upsert_nodes(conn, agent_id, nodes, model)
+        _link_parents(conn, agent_id, nodes, ids)
+        _prune_recut(conn, agent_id, nodes)
+    return len(nodes)
+
+
+def _upsert_nodes(
+    conn: Connection[Any], agent_id: int, nodes: Sequence[MaterializedNode], model: str
+) -> dict[tuple[int, int, int], int]:
+    """Upsert every node; the stored row id by `(level, span start, span end)`."""
+    ids: dict[tuple[int, int, int], int] = {}
+    for node in nodes:
+        cursor = conn.execute(
+            """
+            INSERT INTO understanding_nodes (
+                agent_id, depth, span_start, span_end, start_ts, end_ts,
+                segment_key, text, text_hash, input_hash, children_count,
+                model, engine_version, prompt_version, schema_version
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            ON CONFLICT (agent_id, depth, span_start, span_end) DO UPDATE SET
+                start_ts = EXCLUDED.start_ts,
+                end_ts = EXCLUDED.end_ts,
+                segment_key = EXCLUDED.segment_key,
+                text = EXCLUDED.text,
+                text_hash = EXCLUDED.text_hash,
+                input_hash = EXCLUDED.input_hash,
+                children_count = EXCLUDED.children_count,
+                model = EXCLUDED.model,
+                engine_version = EXCLUDED.engine_version,
+                prompt_version = EXCLUDED.prompt_version,
+                schema_version = EXCLUDED.schema_version,
+                updated_at = now()
+            RETURNING id
+            """,
+            (
+                agent_id,
+                node.level,
+                node.span[0],
+                node.span[1],
+                _parse_ts(node.at[0]),
+                _parse_ts(node.at[1]),
+                node.trigger,
+                node.text,
+                node.text_hash,
+                node.input_hash,
+                len(node.children),
+                "" if node.kind == "alias" else model,
+                ENGINE_VERSION,
+                PROMPT_VERSION,
+                SCHEMA_VERSION,
+            ),
+        )
+        row = cursor.fetchone()
+        if row is None:
+            raise RuntimeError(f"understanding_nodes upsert returned no id for {node.nid}")
+        ids[(node.level, node.span[0], node.span[1])] = int(row[0])
+    return ids
+
+
+def _link_parents(
+    conn: Connection[Any],
+    agent_id: int,
+    nodes: Sequence[MaterializedNode],
+    ids: dict[tuple[int, int, int], int],
+) -> None:
+    """Point every child row at its parent; every expected link must resolve."""
+    linked = 0
+    for node in nodes:
+        if node.level < 2:
+            continue  # a leaf's children are blocks, not rows
+        parent_id = ids[(node.level, node.span[0], node.span[1])]
+        for child_span in node.children_spans:
             cursor = conn.execute(
                 """
-                INSERT INTO understanding_nodes (
-                    agent_id, depth, span_start, span_end, start_ts, end_ts,
-                    segment_key, text, text_hash, input_hash, children_count,
-                    model, engine_version, prompt_version, schema_version
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                ON CONFLICT (agent_id, depth, span_start, span_end) DO UPDATE SET
-                    start_ts = EXCLUDED.start_ts,
-                    end_ts = EXCLUDED.end_ts,
-                    segment_key = EXCLUDED.segment_key,
-                    text = EXCLUDED.text,
-                    text_hash = EXCLUDED.text_hash,
-                    input_hash = EXCLUDED.input_hash,
-                    children_count = EXCLUDED.children_count,
-                    model = EXCLUDED.model,
-                    engine_version = EXCLUDED.engine_version,
-                    prompt_version = EXCLUDED.prompt_version,
-                    schema_version = EXCLUDED.schema_version,
-                    updated_at = now()
-                RETURNING id
+                UPDATE understanding_nodes SET parent_id = %s
+                WHERE agent_id = %s AND depth = %s AND span_start = %s AND span_end = %s
                 """,
-                (
-                    agent_id,
-                    node.level,
-                    node.span[0],
-                    node.span[1],
-                    _parse_ts(node.at[0]),
-                    _parse_ts(node.at[1]),
-                    node.trigger,
-                    node.text,
-                    node.text_hash,
-                    node.input_hash,
-                    len(node.children),
-                    "" if node.kind == "alias" else model,
-                    ENGINE_VERSION,
-                    PROMPT_VERSION,
-                    SCHEMA_VERSION,
-                ),
+                (parent_id, agent_id, node.level - 1, child_span[0], child_span[1]),
             )
-            row = cursor.fetchone()
-            if row is None:
-                raise RuntimeError(f"understanding_nodes upsert returned no id for {node.nid}")
-            ids[(node.level, node.span[0], node.span[1])] = int(row[0])
-        linked = 0
-        for node in nodes:
-            if node.level < 2:
-                continue  # a leaf's children are blocks, not rows
-            parent_id = ids[(node.level, node.span[0], node.span[1])]
-            for child_span in node.children_spans:
-                cursor = conn.execute(
-                    """
-                    UPDATE understanding_nodes SET parent_id = %s
-                    WHERE agent_id = %s AND depth = %s AND span_start = %s AND span_end = %s
-                    """,
-                    (parent_id, agent_id, node.level - 1, child_span[0], child_span[1]),
-                )
-                linked += cursor.rowcount
-        if linked != sum(len(n.children_spans) for n in nodes if n.level >= 2):
-            raise RuntimeError(
-                f"parent linkage resolved {linked} rows for "
-                f"{sum(len(n.children_spans) for n in nodes if n.level >= 2)} children — "
-                "the tree and the stored rows disagree"
-            )
-        # Reconcile: a rebuild after history grew re-cuts only the provisional
-        # tail (compact-sealed stretches reproduce identically). Rows this run
-        # did not reproduce but that overlap a reproduced span at the same
-        # level are an earlier cut of a re-cut stretch — removed, so storage
-        # mirrors the current partition. An unreproduced row with no reproduced
-        # overlap stays: this pass left its stretch pending (a compact-driven
-        # pass seals no tail), and the row is still that region's coverage.
-        spans_by_level: dict[int, list[tuple[int, int]]] = {}
-        for node in nodes:
-            spans_by_level.setdefault(node.level, []).append(node.span)
-        reproduced = {(node.level, node.span[0], node.span[1]) for node in nodes}
-        stale_ids: list[int] = []
-        stored = conn.execute(
-            "SELECT id, depth, span_start, span_end FROM understanding_nodes WHERE agent_id = %s",
-            (agent_id,),
-        ).fetchall()
-        for row_id, depth, span_start, span_end in stored:
-            if (depth, span_start, span_end) in reproduced:
-                continue
-            if any(
-                start <= span_end and end >= span_start
-                for start, end in spans_by_level.get(depth, ())
-            ):
-                stale_ids.append(row_id)
-        if stale_ids:
-            conn.execute("DELETE FROM understanding_nodes WHERE id = ANY(%s)", (stale_ids,))
-    return len(nodes)
+            linked += cursor.rowcount
+    if linked != sum(len(n.children_spans) for n in nodes if n.level >= 2):
+        raise RuntimeError(
+            f"parent linkage resolved {linked} rows for "
+            f"{sum(len(n.children_spans) for n in nodes if n.level >= 2)} children — "
+            "the tree and the stored rows disagree"
+        )
+
+
+def _prune_recut(conn: Connection[Any], agent_id: int, nodes: Sequence[MaterializedNode]) -> None:
+    # Reconcile: a rebuild after history grew re-cuts only the provisional
+    # tail (compact-sealed stretches reproduce identically). Rows this run
+    # did not reproduce but that overlap a reproduced span at the same
+    # level are an earlier cut of a re-cut stretch — removed, so storage
+    # mirrors the current partition. An unreproduced row with no reproduced
+    # overlap stays: this pass left its stretch pending (a compact-driven
+    # pass seals no tail), and the row is still that region's coverage.
+    spans_by_level: dict[int, list[tuple[int, int]]] = {}
+    for node in nodes:
+        spans_by_level.setdefault(node.level, []).append(node.span)
+    reproduced = {(node.level, node.span[0], node.span[1]) for node in nodes}
+    stale_ids: list[int] = []
+    stored = conn.execute(
+        "SELECT id, depth, span_start, span_end FROM understanding_nodes WHERE agent_id = %s",
+        (agent_id,),
+    ).fetchall()
+    for row_id, depth, span_start, span_end in stored:
+        if (depth, span_start, span_end) in reproduced:
+            continue
+        if any(
+            start <= span_end and end >= span_start for start, end in spans_by_level.get(depth, ())
+        ):
+            stale_ids.append(row_id)
+    if stale_ids:
+        conn.execute("DELETE FROM understanding_nodes WHERE id = ANY(%s)", (stale_ids,))
 
 
 def load_known_texts(db: Database, agent_id: int) -> dict[str, str]:

@@ -136,33 +136,27 @@ def _pgid_of(pid: int) -> int | None:
         return None
 
 
-def find_live_anchors(path: Path, *, records_dir: Path | None = None) -> list[str]:
-    """Human-readable list of live things anchored under `path`.
+def _pty_anchors(pty_dir: Path, target: Path, *, fold: bool) -> list[str]:
+    """Persistent pty sessions whose recorded cwd is under `target`."""
+    hits: list[str] = []
+    if not pty_dir.is_dir():
+        return hits
+    for rec in sorted(pty_dir.glob("*.json")):
+        try:
+            data = json.loads(rec.read_text())
+        except (json.JSONDecodeError, OSError):
+            continue
+        cwd = data.get("cwd")
+        if isinstance(cwd, str) and _under(cwd, target, fold=fold):
+            hits.append(f"pty session {rec.stem!r} (pid {data.get('pid')}) cwd={cwd!r}")
+    return hits
 
-    `records_dir` overrides the pty records location (tests); it defaults to
-    `$AVA_HOME/run/pty` (else `~/.ava/run/pty`). The scan only reads: the home is
-    resolved, never created, repaired or chmodded. Process scanning excludes the invoking job tree —
-    the caller's chain (issue #3685) and its process group — because the
-    check is run by the cleanup from inside the target; a genuinely unrelated
-    anchor (another session, a daemon) is in neither.
-    """
-    target = path.resolve()
+
+def _process_anchors(target: Path, *, fold: bool) -> list[str]:
+    """Live processes (outside the caller's job tree) with cwd / exe / argv under `target`."""
     hits: list[str] = []
     skip = _caller_chain()
     group = _caller_group()
-    fold = _folds_case(target)
-
-    pty_dir = records_dir if records_dir is not None else resolve_ava_home() / "run" / "pty"
-    if pty_dir.is_dir():
-        for rec in sorted(pty_dir.glob("*.json")):
-            try:
-                data = json.loads(rec.read_text())
-            except (json.JSONDecodeError, OSError):
-                continue
-            cwd = data.get("cwd")
-            if isinstance(cwd, str) and _under(cwd, target, fold=fold):
-                hits.append(f"pty session {rec.stem!r} (pid {data.get('pid')}) cwd={cwd!r}")
-
     for proc in psutil.process_iter(["pid", "cwd", "exe", "cmdline"]):
         pid = proc.info["pid"]
         if pid in skip:
@@ -178,5 +172,20 @@ def find_live_anchors(path: Path, *, records_dir: Path | None = None) -> list[st
             or any(tok.startswith("/") and _under(tok, target, fold=fold) for tok in cmdline)
         ):
             hits.append(f"process {pid} cwd={cwd!r} exe={exe!r}")
-
     return hits
+
+
+def find_live_anchors(path: Path, *, records_dir: Path | None = None) -> list[str]:
+    """Human-readable list of live things anchored under `path`.
+
+    `records_dir` overrides the pty records location (tests); it defaults to
+    `$AVA_HOME/run/pty` (else `~/.ava/run/pty`). The scan only reads: the home is
+    resolved, never created, repaired or chmodded. Process scanning excludes the invoking job tree —
+    the caller's chain (issue #3685) and its process group — because the
+    check is run by the cleanup from inside the target; a genuinely unrelated
+    anchor (another session, a daemon) is in neither.
+    """
+    target = path.resolve()
+    fold = _folds_case(target)
+    pty_dir = records_dir if records_dir is not None else resolve_ava_home() / "run" / "pty"
+    return _pty_anchors(pty_dir, target, fold=fold) + _process_anchors(target, fold=fold)

@@ -104,6 +104,26 @@ def _content_text(content: object) -> str:
     return ""
 
 
+def _block_part(block: dict[str, Any]) -> str | None:
+    """The rendered text of a thinking or text content block; None for anything else or blank."""
+    kind = block.get("type")
+    if kind not in ("thinking", "text"):
+        return None
+    value = block.get(kind)
+    if not isinstance(value, str) or not value.strip():
+        return None
+    return f"[thinking] {value}" if kind == "thinking" else value
+
+
+def _tool_call_part(tool_call: Any) -> str:
+    name = tool_call.get("name") or "?"
+    args = tool_call.get("args")
+    rendered_args = (
+        json.dumps(args, ensure_ascii=False, default=str) if isinstance(args, dict) else ""
+    )
+    return f"-> tool_call {name}: {rendered_args}"
+
+
 def _ai_body(msg: AIMessage) -> str:
     """An AI message's body: thinking sections, text sections, tool calls."""
     parts: list[str] = []
@@ -118,22 +138,10 @@ def _ai_body(msg: AIMessage) -> str:
         for raw in content_blocks(cast("list[str | dict[str, Any]]", content)):
             if not isinstance(raw, dict):
                 continue
-            block = cast("dict[str, Any]", raw)
-            if block.get("type") == "thinking":
-                thinking = block.get("thinking")
-                if isinstance(thinking, str) and thinking.strip():
-                    parts.append(f"[thinking] {thinking}")
-            elif block.get("type") == "text":
-                text = block.get("text")
-                if isinstance(text, str) and text.strip():
-                    parts.append(text)
-    for tool_call in msg.tool_calls:
-        name = tool_call.get("name") or "?"
-        args = tool_call.get("args")
-        rendered_args = (
-            json.dumps(args, ensure_ascii=False, default=str) if isinstance(args, dict) else ""
-        )
-        parts.append(f"-> tool_call {name}: {rendered_args}")
+            part = _block_part(cast("dict[str, Any]", raw))
+            if part is not None:
+                parts.append(part)
+    parts.extend(_tool_call_part(tool_call) for tool_call in msg.tool_calls)
     return "\n\n".join(parts)
 
 

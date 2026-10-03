@@ -573,6 +573,38 @@ def _acquire_or_report(source: str, ref: str | None, verb: str) -> AcquiredSourc
         return None
 
 
+def _detect_server(pkg_dir: Path) -> tuple[str, Any] | None:
+    """`(server name, auto-detected spec)` of a package; the spec is None when it ships `.mcp.json`."""
+    mcp_json = pkg_dir / ".mcp.json"
+    try:
+        if mcp_json.is_file():
+            return _package_server_name(mcp_json), None
+        return _auto_detect_mcp(pkg_dir)
+    except ValueError as e:
+        print(f"[ava mcp install] {e}", file=sys.stderr)
+        return None
+
+
+def _install_name_conflict(name: str, dest: Path) -> bool:
+    """Whether `name` collides with a built-in server or an existing install (reported)."""
+    from base.packages.extensions import install_registry
+
+    if name in _builtin_server_names():
+        print(
+            f"[ava mcp install] '{name}' collides with a built-in MCP server; "
+            "rename the server (in the package's .mcp.json or pyproject.toml [project] name).",
+            file=sys.stderr,
+        )
+        return True
+    if install_registry.get(name) is not None or dest.exists():
+        print(
+            f"[ava mcp install] '{name}' already installed; use `ava mcp upgrade {name}`.",
+            file=sys.stderr,
+        )
+        return True
+    return False
+
+
 def cmd_mcp_install(
     source: str, ref: str | None, path: str | None, env_pairs: list[str] | None = None
 ) -> int:
@@ -606,34 +638,12 @@ def cmd_mcp_install(
         if not pkg_dir.is_dir():
             print(f"[ava mcp install] path '{path}' not found in source.", file=sys.stderr)
             return 1
-        mcp_json = pkg_dir / ".mcp.json"
-        if mcp_json.is_file():
-            try:
-                name = _package_server_name(mcp_json)
-            except ValueError as e:
-                print(f"[ava mcp install] {e}", file=sys.stderr)
-                return 1
-            auto_spec = None
-        else:
-            try:
-                name, auto_spec = _auto_detect_mcp(pkg_dir)
-            except ValueError as e:
-                print(f"[ava mcp install] {e}", file=sys.stderr)
-                return 1
-
-        if name in _builtin_server_names():
-            print(
-                f"[ava mcp install] '{name}' collides with a built-in MCP server; "
-                "rename the server (in the package's .mcp.json or pyproject.toml [project] name).",
-                file=sys.stderr,
-            )
+        detected = _detect_server(pkg_dir)
+        if detected is None:
             return 1
+        name, auto_spec = detected
         dest = paths.mcps_dir() / name
-        if install_registry.get(name) is not None or dest.exists():
-            print(
-                f"[ava mcp install] '{name}' already installed; use `ava mcp upgrade {name}`.",
-                file=sys.stderr,
-            )
+        if _install_name_conflict(name, dest):
             return 1
 
         from cli.commands.extensions._manifest_gate import gate_refuses

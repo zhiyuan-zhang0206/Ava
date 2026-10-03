@@ -60,6 +60,51 @@ def _agent_status_map(
     return statuses
 
 
+def _fetch_open_notices(base: str, headers: Any, dial_get: Any) -> list[dict[str, Any]]:
+    resp = dial_get(
+        f"{base}/notices/open",
+        timeout=_TIMEOUT_S,
+        headers=headers,
+        params={"include_awaiting": True},
+    )
+    resp.raise_for_status()
+    return resp.json()
+
+
+def _filter_notices(
+    notices: list[dict[str, Any]],
+    *,
+    agent_id: int | None,
+    priority: str | None,
+    type_filter: str | None,
+) -> list[dict[str, Any]]:
+    if agent_id is not None:
+        notices = [n for n in notices if n["agent_id"] == agent_id]
+    if priority:
+        notices = [n for n in notices if n["priority"] == priority.upper()]
+    if type_filter == "fyi":
+        notices = [n for n in notices if not n["require_response"]]
+    elif type_filter == "decision":
+        notices = [n for n in notices if n["require_response"]]
+    return notices
+
+
+def _confirm_clear(notices: list[dict[str, Any]], *, stale: bool, agent_id: int | None) -> bool:
+    """List what `clear` will resolve and ask for confirmation (EOF reads as no)."""
+    for i, n in enumerate(notices, start=1):
+        _print_notice(n, i, len(notices))
+    target = "stale (terminated-agent) notices" if stale else f"agent #{agent_id}"
+    print(
+        f"Clear {len(notices)} notice(s): {target}? "
+        "(FYI -> read, decision -> dismiss; re-run with --force to skip this prompt)"
+    )
+    try:
+        answer = input("y/N: ").strip().lower()
+    except EOFError:
+        answer = "n"
+    return answer in ("y", "yes")
+
+
 def cmd_notices_list(
     *,
     agent_id: int | None,
@@ -73,22 +118,10 @@ def cmd_notices_list(
     backlog of dead agents, as opposed to live agents' open notices
     (Task #1149)."""
     base, headers, dial_get, _ = _dial()
-    resp = dial_get(
-        f"{base}/notices/open",
-        timeout=_TIMEOUT_S,
-        headers=headers,
-        params={"include_awaiting": True},
+    notices = _fetch_open_notices(base, headers, dial_get)
+    notices = _filter_notices(
+        notices, agent_id=agent_id, priority=priority, type_filter=type_filter
     )
-    resp.raise_for_status()
-    notices = resp.json()
-    if agent_id is not None:
-        notices = [n for n in notices if n["agent_id"] == agent_id]
-    if priority:
-        notices = [n for n in notices if n["priority"] == priority.upper()]
-    if type_filter == "fyi":
-        notices = [n for n in notices if not n["require_response"]]
-    elif type_filter == "decision":
-        notices = [n for n in notices if n["require_response"]]
     statuses: dict[int, str] = {}
     if stale:
         statuses = _agent_status_map(base, headers, dial_get, {n["agent_id"] for n in notices})
@@ -125,6 +158,22 @@ def cmd_notices_resolve(*, notice_id: int, agent_id: int, action: str, reply: st
     return 0
 
 
+def _resolve_all(notices: list[dict[str, Any]], base: str, headers: Any, dial_post: Any) -> int:
+    """Read each FYI and dismiss each decision; the number the gateway accepted."""
+    cleared = 0
+    for n in notices:
+        action = "read" if not n["require_response"] else "dismiss"
+        r = dial_post(
+            f"{base}/agents/{n['agent_id']}/notices/{n['id']}/resolve",
+            timeout=_TIMEOUT_S,
+            headers=headers,
+            json={"action": action, "reply": None},
+        )
+        if r.status_code in (200, 201):
+            cleared += 1
+    return cleared
+
+
 def cmd_notices_clear(*, agent_id: int | None, force: bool, stale: bool = False) -> int:
     """`ava notices clear --agent <id>` — resolve every open notice of one agent.
 
@@ -138,51 +187,23 @@ def cmd_notices_clear(*, agent_id: int | None, force: bool, stale: bool = False)
         print("--stale and --agent are mutually exclusive")
         return 2
     base, headers, dial_get, dial_post = _dial()
-    resp = dial_get(
-        f"{base}/notices/open",
-        timeout=_TIMEOUT_S,
-        headers=headers,
-        params={"include_awaiting": True},
-    )
-    resp.raise_for_status()
-    notices = resp.json()
+    notices = _fetch_open_notices(base, headers, dial_get)
     if stale:
         statuses = _agent_status_map(base, headers, dial_get, {n["agent_id"] for n in notices})
         notices = [n for n in notices if statuses.get(n["agent_id"]) == "terminated"]
-        if not notices:
-            print("No stale notices (terminated agents).")
-            return 0
     else:
         notices = [n for n in notices if n["agent_id"] == agent_id]
-        if not notices:
-            print(f"agent #{agent_id}: no open notices.")
-            return 0
-    if not force:
-        for i, n in enumerate(notices, start=1):
-            _print_notice(n, i, len(notices))
-        target = "stale (terminated-agent) notices" if stale else f"agent #{agent_id}"
+    if not notices:
         print(
-            f"Clear {len(notices)} notice(s): {target}? "
-            "(FYI -> read, decision -> dismiss; re-run with --force to skip this prompt)"
+            "No stale notices (terminated agents)."
+            if stale
+            else f"agent #{agent_id}: no open notices."
         )
-        try:
-            answer = input("y/N: ").strip().lower()
-        except EOFError:
-            answer = "n"
-        if answer not in ("y", "yes"):
-            print("aborted.")
-            return 1
-    cleared = 0
-    for n in notices:
-        action = "read" if not n["require_response"] else "dismiss"
-        r = dial_post(
-            f"{base}/agents/{n['agent_id']}/notices/{n['id']}/resolve",
-            timeout=_TIMEOUT_S,
-            headers=headers,
-            json={"action": action, "reply": None},
-        )
-        if r.status_code in (200, 201):
-            cleared += 1
+        return 0
+    if not force and not _confirm_clear(notices, stale=stale, agent_id=agent_id):
+        print("aborted.")
+        return 1
+    cleared = _resolve_all(notices, base, headers, dial_post)
     target = "stale notices" if stale else f"agent #{agent_id}"
     print(f"cleared {cleared}/{len(notices)} notices: {target}")
     return 0

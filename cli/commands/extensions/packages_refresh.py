@@ -24,7 +24,6 @@ took over before a first refresh ran).
 
 from __future__ import annotations
 
-import hashlib
 import re
 import shutil
 import subprocess
@@ -32,28 +31,27 @@ import tarfile
 import tempfile
 import time
 from dataclasses import dataclass, field
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from pathlib import Path
 
 from loguru import logger
 
 from base import paths
 from base.config import settings
-from base.deploy.git import host_version
 from base.deploy.git.gitenv import git_env
 from base.host.proc import run_bounded
 from base.host.system.cron import os_jobs_enabled
 from base.native_process.os_platform import LockTimeoutError, file_lock
 from base.packages.extensions import install_registry
-from base.packages.plugins import manifest as manifest_module
-from base.packages.skills import scan
 from base.packages.skills.names import match_key
+from cli.commands.extensions._refresh_rules import (
+    core_head_from_ls_remote,
+    git_head_from_ls_remote,
+    is_due,
+    staged_gate_error,
+)
 from cli.commands.extensions.skills_sync import _Source, iter_sources
 
-# Backoff: failures double the effective interval, capped after this many
-# doublings (so a repeatedly failing package still re-checks about weekly).
-_BACKOFF_MAX_DOUBLINGS = 5
-_BACKOFF_CAP_SECONDS = 7 * 24 * 3600
 # How long the pass waits for the per-home flock before skipping (a held lock
 # means another pass is live; waiting is pointless — this pass is periodic).
 _QUEUE_LOCK_TIMEOUT_S = 1.0
@@ -64,8 +62,6 @@ _DEFAULT_INTERVAL_S = 86400
 
 _DURATION_RE = re.compile(r"^\s*(\d+)\s*([smhd]?)\s*$")
 _DURATION_UNITS = {"s": 1, "m": 60, "h": 3600, "d": 86400}
-_SHA_RE = re.compile(r"^[0-9a-f]{7,40}$")
-_CONFLICT = "conflict: local copy differs from the last applied content"
 
 
 def parse_duration(text: str) -> int:
@@ -76,53 +72,7 @@ def parse_duration(text: str) -> int:
     return max(1, int(match.group(1)) * _DURATION_UNITS[match.group(2) or "s"])
 
 
-def _jitter_percent(name: str, last_check_at: str | None) -> int:
-    """Deterministic +/-10% jitter token for one package's interval.
-
-    Deterministic (keyed on the name + last check stamp) so two runs agree on
-    when a package is due; the point is only that fleet machines do not all
-    check at the same instant of their interval.
-    """
-    digest = hashlib.sha256(f"{name}|{last_check_at or ''}".encode()).digest()
-    return (digest[0] % 21) - 10
-
-
-def effective_interval_seconds(
-    base_seconds: int, failures: int, *, name: str, last_check_at: str | None
-) -> int:
-    """`base` doubled per consecutive failure (capped), plus +/-10% jitter."""
-    seconds = min(base_seconds * (2 ** min(failures, _BACKOFF_MAX_DOUBLINGS)), _BACKOFF_CAP_SECONDS)
-    return max(1, int(seconds * (100 + _jitter_percent(name, last_check_at)) / 100))
-
-
-def _parse_stamp(stamp: str | None) -> datetime | None:
-    if stamp is None:
-        return None
-    try:
-        parsed = datetime.fromisoformat(stamp)
-    except ValueError:
-        return None
-    if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=UTC)
-    return parsed
-
-
-def is_due(
-    last_check_at: str | None,
-    interval_seconds: int,
-    failures: int,
-    *,
-    name: str,
-    now: datetime,
-) -> bool:
-    """Whether a package's next check is due — never checked = due now."""
-    last = _parse_stamp(last_check_at)
-    if last is None:
-        return True
-    eff = effective_interval_seconds(
-        interval_seconds, failures, name=name, last_check_at=last_check_at
-    )
-    return now >= last + timedelta(seconds=eff)
+_CONFLICT = "conflict: local copy differs from the last applied content"
 
 
 @dataclass(frozen=True)
@@ -231,20 +181,10 @@ class _Pass:
 
     # -- engine --------------------------------------------------------------
 
-    def run(self) -> RefreshReport:
-        try:
-            registry = install_registry.load()
-        except (install_registry.InstallRegistryError, OSError) as exc:
-            return RefreshReport(
-                ran=False,
-                skip_reason=f"registry unreadable: {exc}",
-                channel_line=None,
-                items=(),
-                counts={},
-            )
-        self.registry = registry
-        self.deadline = time.monotonic() + settings.packages.refresh_budget_seconds
-
+    def _partition(
+        self, registry: install_registry.Registry
+    ) -> tuple[list[install_registry.InstalledPackage], list[install_registry.InstalledPackage]]:
+        """The due, channel-backed packages: `(core channel, git channel)`; the rest are skipped."""
         core: list[install_registry.InstalledPackage] = []
         git_pkgs: list[install_registry.InstalledPackage] = []
         for pkg in registry.packages:
@@ -275,14 +215,14 @@ class _Pass:
                 core.append(pkg)
             else:
                 git_pkgs.append(pkg)
-        if self.only is not None and not core and not git_pkgs and not self.notes:
-            self.notes.append(f"no tracked channel-backed skill named '{self.only}'")
+        return core, git_pkgs
 
-        if core:
-            self._resolve_core_channel(core, registry)
-            if self.core_head is None:
-                # Channel resolution failed — every package was recorded above.
-                core = []
+    def _process_queue(
+        self,
+        core: list[install_registry.InstalledPackage],
+        git_pkgs: list[install_registry.InstalledPackage],
+    ) -> None:
+        """Process the least-recently-checked packages first, within the apply and time budgets."""
         core_keys = {p.name for p in core}
         queue = sorted(core + git_pkgs, key=lambda p: (p.update.last_check_at or "", p.name))
         for idx, pkg in enumerate(queue):
@@ -296,6 +236,31 @@ class _Pass:
                 self._process_core(pkg, self.core_head)
             else:
                 self._process_git(pkg)
+
+    def run(self) -> RefreshReport:
+        try:
+            registry = install_registry.load()
+        except (install_registry.InstallRegistryError, OSError) as exc:
+            return RefreshReport(
+                ran=False,
+                skip_reason=f"registry unreadable: {exc}",
+                channel_line=None,
+                items=(),
+                counts={},
+            )
+        self.registry = registry
+        self.deadline = time.monotonic() + settings.packages.refresh_budget_seconds
+
+        core, git_pkgs = self._partition(registry)
+        if self.only is not None and not core and not git_pkgs and not self.notes:
+            self.notes.append(f"no tracked channel-backed skill named '{self.only}'")
+
+        if core:
+            self._resolve_core_channel(core, registry)
+            if self.core_head is None:
+                # Channel resolution failed — every package was recorded above.
+                core = []
+        self._process_queue(core, git_pkgs)
 
         try:
             self._commit()
@@ -339,16 +304,9 @@ class _Pass:
             return None, f"ls-remote failed: {exc}"
         if result.returncode != 0:
             return None, f"ls-remote failed: {_tail(result.stderr)}"
-        lines = [line for line in result.stdout.splitlines() if line.strip()]
-        for line in lines:
-            if line.rstrip().endswith(f"refs/heads/{ref}") or line.rstrip().endswith(f"\t{ref}"):
-                sha = line.split("\t", 1)[0].strip()
-                if _SHA_RE.match(sha):
-                    return sha, None
-        for line in lines:
-            sha = line.split("\t", 1)[0].strip()
-            if _SHA_RE.match(sha):
-                return sha, None
+        sha = core_head_from_ls_remote(result.stdout, ref)
+        if sha is not None:
+            return sha, None
         return None, f"ref {ref!r} not found on {remote}"
 
     def _fetch_core(self, remote: str, ref: str) -> str | None:
@@ -367,6 +325,31 @@ class _Pass:
             return f"fetch failed: {_tail(result.stderr)}"
         return None
 
+    def _fail_core(
+        self,
+        core_pkgs: list[install_registry.InstalledPackage],
+        *,
+        remote: str,
+        ref: str,
+        last_seen: str | None,
+        stamp: str,
+        note: str,
+        message: str,
+        result: str,
+    ) -> None:
+        """The core channel could not be resolved: record every due package and the channel."""
+        self.core_note = note
+        for pkg in core_pkgs:
+            self._record(pkg, message)
+        self.channel = install_registry.ChannelState(
+            name="core",
+            remote_url=remote,
+            ref=ref,
+            last_seen_sha=last_seen,
+            last_checked_at=stamp,
+            last_result=result,
+        )
+
     def _resolve_core_channel(
         self,
         core_pkgs: list[install_registry.InstalledPackage],
@@ -383,39 +366,33 @@ class _Pass:
             for pkg in core_pkgs:
                 self._record(pkg, "error: core channel has no 'origin' remote on the checkout")
             return
+        last_seen = state.last_seen_sha if state else None
         head, err = self._ls_remote(remote, ref)
         if err is not None or head is None:
-            self.core_note = f"core@{ref}: {err}"
-            for pkg in core_pkgs:
-                self._record(pkg, f"error: core channel check failed — {err}")
-            self.channel = install_registry.ChannelState(
-                name="core",
-                remote_url=remote,
+            self._fail_core(
+                core_pkgs,
+                remote=remote,
                 ref=ref,
-                last_seen_sha=state.last_seen_sha if state else None,
-                last_checked_at=stamp,
-                last_result=f"error: {err}",
+                last_seen=last_seen,
+                stamp=stamp,
+                note=f"core@{ref}: {err}",
+                message=f"error: core channel check failed — {err}",
+                result=f"error: {err}",
             )
             return
-        need_objects = any(
-            p.update.applied_rev is None or p.update.applied_rev != head or p.update.failures > 0
-            for p in core_pkgs
-        )
-        last_seen = state.last_seen_sha if state else None
         note = f"core@{ref} head {head[:7]}"
-        if head != last_seen or need_objects:
+        if head != last_seen or _needs_objects(core_pkgs, head):
             fetch_err = self._fetch_core(remote, ref)
             if fetch_err is not None:
-                self.core_note = f"{note} — {fetch_err}"
-                for pkg in core_pkgs:
-                    self._record(pkg, f"error: core channel fetch failed — {fetch_err}")
-                self.channel = install_registry.ChannelState(
-                    name="core",
-                    remote_url=remote,
+                self._fail_core(
+                    core_pkgs,
+                    remote=remote,
                     ref=ref,
-                    last_seen_sha=last_seen,
-                    last_checked_at=stamp,
-                    last_result=f"error: {fetch_err}",
+                    last_seen=last_seen,
+                    stamp=stamp,
+                    note=f"{note} — {fetch_err}",
+                    message=f"error: core channel fetch failed — {fetch_err}",
+                    result=f"error: {fetch_err}",
                 )
                 return
             last_seen = head
@@ -557,27 +534,9 @@ class _Pass:
         staged_hash = install_registry.tree_hash(staged)
         if dest_hash is not None and staged_hash == dest_hash:
             return "up_to_date", None
-        if not any(staged.rglob("SKILL.md")):
-            return "error: staged tree carries no SKILL.md", None
-        findings = scan.scan_package(staged)
-        critical = scan.criticals(findings)
-        if critical:
-            return f"refused_scan: {', '.join(scan.rule_ids(critical))}", None
-        try:
-            manifest = manifest_module.load_manifest(staged)
-        except manifest_module.ManifestError as exc:
-            return f"error: manifest invalid: {exc}", None
-        if manifest is not None:
-            host_errors: list[str] = []
-            try:
-                host = host_version.host_version(self.repo)
-            except host_version.HostVersionError as exc:
-                host_errors.append(str(exc))
-            else:
-                host_errors += manifest_module.check_host_engine(manifest, host)
-            host_errors += manifest_module.check_host_commit(manifest, self.repo)
-            if host_errors:
-                return f"blocked_version: {'; '.join(host_errors)}", None
+        gate_error = staged_gate_error(staged, self.repo)
+        if gate_error is not None:
+            return gate_error, None
         if dest_hash is not None and (
             conflict := self._local_edit_conflict(pkg, staged, dest, dest_hash)
         ):
@@ -630,68 +589,67 @@ class _Pass:
             return None, False, f"ls-remote failed: {exc}"
         if result.returncode != 0:
             return None, False, f"ls-remote failed: {_tail(result.stderr)}"
-        lines = [line for line in result.stdout.splitlines() if line.strip()]
-        if ref is None:
-            for line in lines:
-                if line.rstrip().endswith("\tHEAD"):
-                    sha = line.split("\t", 1)[0].strip()
-                    if _SHA_RE.match(sha):
-                        return sha, False, None
-            return None, False, "no HEAD on the remote"
-        heads = [line for line in lines if line.rstrip().endswith(f"refs/heads/{ref}")]
-        if heads:
-            sha = heads[0].split("\t", 1)[0].strip()
-            if _SHA_RE.match(sha):
-                return sha, False, None
-        tags = [
-            line
-            for line in lines
-            if line.rstrip().endswith(f"refs/tags/{ref}")
-            or line.rstrip().endswith(f"refs/tags/{ref}^{{}}")
-        ]
-        if tags:
-            peeled = [line for line in tags if line.rstrip().endswith("^{}")]
-            sha = (peeled or tags)[0].split("\t", 1)[0].strip()
-            if _SHA_RE.match(sha):
-                return sha, True, None
-        if _SHA_RE.match(ref):
-            return ref, True, None
-        return None, False, f"ref {ref!r} not found on {source}"
+        return git_head_from_ls_remote(result.stdout, ref, source)
 
-    def _process_git(self, pkg: install_registry.InstalledPackage) -> None:
-        from cli.commands.extensions._pkg_source import (
-            SourcePathNotFoundError,
-            acquire_source,
-            cleanup_temp,
-            looks_like_local_path,
-        )
+    def _note_applied(
+        self, pkg: install_registry.InstalledPackage, result: str, new_hash: str | None, sha: str
+    ) -> None:
+        """Stage the registry delta of an applied (or already current) git-channel package."""
+        if result not in ("applied", "up_to_date"):
+            return
+        delta = self.deltas.setdefault(pkg.name, _Delta())
+        delta.update["applied_rev"] = sha
+        if result == "applied":
+            stamp = self.now.isoformat(timespec="seconds")
+            delta.update["last_apply_at"] = stamp
+            delta.package["content_hash"] = new_hash
+            delta.package["installed_hash"] = new_hash
+            delta.package["updated_at"] = stamp
+
+    def _git_candidate(self, pkg: install_registry.InstalledPackage) -> str | None:
+        """The remote sha worth acquiring, or None after recording why this package stops here."""
+        from cli.commands.extensions._pkg_source import looks_like_local_path
 
         policy = install_registry.resolved_policy(pkg)
         source = pkg.source
         if not source:
             self._record(pkg, "error: no recorded source to check")
-            return
+            return None
         if looks_like_local_path(source):
             self._record(pkg, "error: local-path source has no remote channel")
-            return
+            return None
         sha, pinned, err = self._ls_remote_git(source, pkg.ref)
         if err is not None or sha is None:
             self._record(pkg, f"error: {err}")
-            return
+            return None
         applied = pkg.update.applied_rev
         if applied == sha:
             self._record(pkg, "up_to_date")
-            return
+            return None
         if pinned and applied is not None:
             self._record(
                 pkg,
                 f"error: pinned ref {pkg.ref!r} now resolves to {sha[:7]} (was "
                 f"{(applied or '?')[:7]}); pinned refs never auto-advance",
             )
-            return
+            return None
         if self.check_only or policy.mode == "notify":
             self._record(pkg, f"available: {sha[:7]}")
+            return None
+        return sha
+
+    def _process_git(self, pkg: install_registry.InstalledPackage) -> None:
+        from cli.commands.extensions._pkg_source import (
+            SourcePathNotFoundError,
+            acquire_source,
+            cleanup_temp,
+        )
+
+        sha = self._git_candidate(pkg)
+        if sha is None:
             return
+        source = pkg.source
+        assert source is not None  # noqa: S101
         acquired = None
         try:
             try:
@@ -716,15 +674,7 @@ class _Pass:
                 root, staged, ignore=shutil.ignore_patterns(*install_registry.IGNORED_NAMES)
             )
             result, new_hash = self._apply_staged(pkg, staged, sha)
-            if result in ("applied", "up_to_date"):
-                delta = self.deltas.setdefault(pkg.name, _Delta())
-                delta.update["applied_rev"] = sha
-                if result == "applied":
-                    stamp = self.now.isoformat(timespec="seconds")
-                    delta.update["last_apply_at"] = stamp
-                    delta.package["content_hash"] = new_hash
-                    delta.package["installed_hash"] = new_hash
-                    delta.package["updated_at"] = stamp
+            self._note_applied(pkg, result, new_hash, sha)
             self._record(pkg, result)
         finally:
             if acquired is not None:
@@ -750,6 +700,14 @@ class _Pass:
                     setattr(row.update, field_name, value)
                 for field_name, value in delta.package.items():
                     setattr(row, field_name, value)
+
+
+def _needs_objects(core_pkgs: list[install_registry.InstalledPackage], head: str) -> bool:
+    """Whether any due package still lacks the objects of `head` (never applied, behind, failing)."""
+    return any(
+        p.update.applied_rev is None or p.update.applied_rev != head or p.update.failures > 0
+        for p in core_pkgs
+    )
 
 
 # Operator-facing error tails: the last line of a stream, capped — the full

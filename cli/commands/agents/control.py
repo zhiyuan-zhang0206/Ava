@@ -191,6 +191,27 @@ def cmd_agents_send(
     return 0
 
 
+def _with_tail(content: str, tail_file: str) -> str:
+    """`content` with the last `_TAIL_BYTES` of `tail_file` appended (or why it is unavailable)."""
+    import os
+    from pathlib import Path
+
+    # Delivering the notice is the primary contract; the tail is a rider.
+    # An unreadable tail file must not abort the POST — the failure is
+    # surfaced inside the delivered message instead, so the agent still
+    # learns its command finished and sees why the tail is missing.
+    try:
+        with Path(tail_file).open("rb") as f:
+            f.seek(0, os.SEEK_END)
+            f.seek(max(0, f.tell() - _TAIL_BYTES))
+            tail = f.read().decode("utf-8", errors="replace")
+    except OSError as e:
+        return content + f"\n\n[tail unavailable: {e}]"
+    if tail.strip():
+        return content + f"\n\nLast output ({tail_file}):\n{tail.strip()}"
+    return content
+
+
 def send_agent_message(
     agent_id: int,
     content: str,
@@ -217,9 +238,7 @@ def send_agent_message(
     loud and unrecorded — the wire reason is application semantics, replay
     cannot change it. Returns the gateway's delivery status; HTTP errors raise
     to the calling command."""
-    import os
     import sys
-    from pathlib import Path
 
     import httpx
 
@@ -228,20 +247,7 @@ def send_agent_message(
     from base.host.net.http_dial import post as dial_post
 
     if tail_file is not None:
-        # Delivering the notice is the primary contract; the tail is a rider.
-        # An unreadable tail file must not abort the POST — the failure is
-        # surfaced inside the delivered message instead, so the agent still
-        # learns its command finished and sees why the tail is missing.
-        try:
-            with Path(tail_file).open("rb") as f:
-                f.seek(0, os.SEEK_END)
-                f.seek(max(0, f.tell() - _TAIL_BYTES))
-                tail = f.read().decode("utf-8", errors="replace")
-        except OSError as e:
-            content += f"\n\n[tail unavailable: {e}]"
-        else:
-            if tail.strip():
-                content += f"\n\nLast output ({tail_file}):\n{tail.strip()}"
+        content = _with_tail(content, tail_file)
     completion_notice: dict[str, object] | None = None
     if completion_exit_code is not None:
         completion_notice = {"outcome": "exit", "exit_code": completion_exit_code}

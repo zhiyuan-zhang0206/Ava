@@ -10,6 +10,7 @@ import subprocess
 import sys
 import threading
 import time
+from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, Literal
@@ -103,117 +104,120 @@ def _complete(context: OwnerContext, attached: ExecAllocation) -> None:
         )
 
 
-async def run_owned(  # noqa: PLR0915 -- one caller retains exact allocation and subprocess ownership.
-    target: RuntimeIncarnation,
-    code: str,
-    cancel_event: asyncio.Event,
-    timeout: float,
-    chunk_publisher: ExecOutputChunkPublisher | None,
-    *,
-    state: dict[str, Any] | None,
-    exec_dir: Path | None,
-    config_overlay: dict[str, object] | None,
-    birth_config: dict[str, object] | None,
-) -> tuple[_ExecResult, ResultPayload | None]:
-    from agent.graph.exec._subprocess import (
-        _build_child_env,
-        _drain_output,
-        _read_result_envelope,
-        _result_from_payload,
-    )
+class _OwnedRun:
+    """One managed exec: one object retains the exact allocation and subprocess ownership."""
 
-    request_id = uuid4()
-    directory = (
-        (exec_dir or exec_run_dir()) / str(target.agent_id) / "domains" / str(request_id)
-    ).resolve()
-    directory.mkdir(parents=True, mode=0o700)
-    request = directory / f"req-{request_id.hex}.json"
-    result = directory / "result.json"
-    context_path = directory / "owner.json"
-    deadline = datetime.now(UTC) + timedelta(seconds=timeout)
-    write_request(request, code=code, agent_id=target.agent_id, timeout_s=timeout, state=state)
-    allocation = ExecAllocation(
-        request=request_id,
-        domain=uuid4(),
-        request_digest=hashlib.sha256(request.read_bytes()).hexdigest(),
-        deadline=deadline,
-    )
-    context = OwnerContext(
-        agent_id=target.agent_id,
-        generation=target.generation,
-        runtime_owner=target.owner,
-        request_path=request,
-        result_path=result,
-        allocation=allocation,
-    )
-    publish_owner_message(context_path, context)
-    scope = current_hosted_resources()
-    if scope is not None:
-        scope.unresolved[request] = None
-    stream = StreamingTextIO()
-    proc: subprocess.Popen[bytes] | None = None
-    ready: OwnerReady | None = None
-    reader: threading.Thread | None = None
-    cancelled = False
-    settled = False
-    attached = False
-    registration: asyncio.Task[None] | None = None
-    completion: asyncio.Task[OwnerClosed] | None = None
-    bound = time.monotonic() + max(0, (deadline - datetime.now(UTC)).total_seconds()) + KILL_GRACE_S
+    def __init__(
+        self,
+        target: RuntimeIncarnation,
+        code: str,
+        cancel_event: asyncio.Event,
+        timeout: float,
+        chunk_publisher: ExecOutputChunkPublisher | None,
+        *,
+        state: dict[str, Any] | None,
+        exec_dir: Path | None,
+    ) -> None:
+        self.cancel_event = cancel_event
+        self.chunk_publisher = chunk_publisher
+        self.request_id = uuid4()
+        directory = (
+            (exec_dir or exec_run_dir()) / str(target.agent_id) / "domains" / str(self.request_id)
+        ).resolve()
+        directory.mkdir(parents=True, mode=0o700)
+        self.agent_id = target.agent_id
+        self.request = directory / f"req-{self.request_id.hex}.json"
+        self.result = directory / "result.json"
+        self.context_path = directory / "owner.json"
+        deadline = datetime.now(UTC) + timedelta(seconds=timeout)
+        write_request(
+            self.request, code=code, agent_id=target.agent_id, timeout_s=timeout, state=state
+        )
+        self.allocation = ExecAllocation(
+            request=self.request_id,
+            domain=uuid4(),
+            request_digest=hashlib.sha256(self.request.read_bytes()).hexdigest(),
+            deadline=deadline,
+        )
+        self.context = OwnerContext(
+            agent_id=target.agent_id,
+            generation=target.generation,
+            runtime_owner=target.owner,
+            request_path=self.request,
+            result_path=self.result,
+            allocation=self.allocation,
+        )
+        publish_owner_message(self.context_path, self.context)
+        self.scope = current_hosted_resources()
+        if self.scope is not None:
+            self.scope.unresolved[self.request] = None
+        self.stream = StreamingTextIO()
+        self.proc: subprocess.Popen[bytes] | None = None
+        self.ready: OwnerReady | None = None
+        self.reader: threading.Thread | None = None
+        self.cancelled = False
+        self.settled = False
+        self.attached = False
+        self.registration: asyncio.Task[None] | None = None
+        self.completion: asyncio.Task[OwnerClosed] | None = None
+        # Installed by `run_owned`, which alone spawns the retained completion task.
+        self.attached_completion: Callable[[], asyncio.Task[OwnerClosed]] = _unbound_completion
+        self.bound = (
+            time.monotonic() + max(0, (deadline - datetime.now(UTC)).total_seconds()) + KILL_GRACE_S
+        )
 
-    def send(action: Literal["permit", "cancel"]) -> None:
+    def _send(self, action: Literal["permit", "cancel"]) -> None:
+        proc = self.proc
         if proc is None or proc.stdin is None or proc.stdin.closed:
             return
-        message = OwnerControl(request=request_id, domain=allocation.domain, action=action)
+        message = OwnerControl(
+            request=self.request_id, domain=self.allocation.domain, action=action
+        )
         proc.stdin.write(message.model_dump_json().encode() + b"\n")
         proc.stdin.flush()
 
-    async def settle_unpermitted_owner() -> None:
+    async def settle_unpermitted_owner(self) -> None:
         """Prove a gated owner closed without permission before forgetting its scope."""
+        proc, ready, reader = self.proc, self.ready, self.reader
         if proc is None or ready is None or reader is None:
             raise ResourceEvidenceError("unpermitted owner lacks exact ready evidence")
         if proc.stdin is not None and not proc.stdin.closed:
             proc.stdin.close()
-        code = await asyncio.to_thread(proc.wait, max(0.001, bound - time.monotonic()))
+        code = await asyncio.to_thread(proc.wait, max(0.001, self.bound - time.monotonic()))
         if code != 0:
             raise ResourceEvidenceError("unpermitted owner did not close successfully")
-        receipt = validate_closed(context, ready.allocation, context_path.with_suffix(".closed"))
+        receipt = validate_closed(
+            self.context, ready.allocation, self.context_path.with_suffix(".closed")
+        )
         if receipt.reason != "host_eof":
             raise ResourceEvidenceError("unpermitted owner closed for an unexpected reason")
-        await asyncio.to_thread(reader.join, max(0, bound - time.monotonic()))
+        await asyncio.to_thread(reader.join, max(0, self.bound - time.monotonic()))
         if reader.is_alive():
             raise ResourceEvidenceError("unpermitted owner output remains unresolved")
 
-    async def settle_attached_owner() -> OwnerClosed:
+    async def settle_attached_owner(self) -> OwnerClosed:
         """Consume one exact owner receipt before releasing durable allocation."""
-        if proc is None or ready is None or reader is None or not attached:
+        proc, ready, reader = self.proc, self.ready, self.reader
+        if proc is None or ready is None or reader is None or not self.attached:
             raise ResourceEvidenceError("attached owner lacks exact local completion evidence")
-        code = await asyncio.to_thread(proc.wait, max(0.001, bound - time.monotonic()))
+        code = await asyncio.to_thread(proc.wait, max(0.001, self.bound - time.monotonic()))
         if code != 0:
             raise ResourceEvidenceError("attached owner did not close successfully")
         receipt = await asyncio.to_thread(
             validate_closed,
-            context,
+            self.context,
             ready.allocation,
-            context_path.with_suffix(".closed"),
+            self.context_path.with_suffix(".closed"),
         )
-        await asyncio.to_thread(reader.join, max(0, bound - time.monotonic()))
+        await asyncio.to_thread(reader.join, max(0, self.bound - time.monotonic()))
         if reader.is_alive():
             raise ResourceEvidenceError("owner output reader remains unresolved")
-        await asyncio.to_thread(_complete, context, ready.allocation)
-        if scope is not None:
-            scope.complete(request, ready)
+        await asyncio.to_thread(_complete, self.context, ready.allocation)
+        if self.scope is not None:
+            self.scope.complete(self.request, ready)
         return receipt
 
-    def attached_completion() -> asyncio.Task[OwnerClosed]:
-        """Keep one completion task alive across cancellation/commit boundaries."""
-        nonlocal completion
-        if completion is None:
-            completion = asyncio.create_task(
-                settle_attached_owner(), name=f"exec-owner-complete-{request_id}"
-            )
-        return completion
-
+    @staticmethod
     async def finish_despite_cancellation(task: asyncio.Task[Any]) -> Any:
         """Wait for one retained owner task even if cancellation repeats."""
         while not task.done():
@@ -223,11 +227,16 @@ async def run_owned(  # noqa: PLR0915 -- one caller retains exact allocation and
                 continue
         return task.result()
 
-    try:
+    def launch(
+        self, config_overlay: dict[str, object] | None, birth_config: dict[str, object] | None
+    ) -> tuple[subprocess.Popen[bytes], ResourceProcess]:
+        """Spawn the isolated owner; returns it with its launcher identity."""
+        from agent.graph.exec._subprocess import _build_child_env
+
         env = _build_child_env(
-            target.agent_id,
-            request,
-            result,
+            self.agent_id,
+            self.request,
+            self.result,
             config_overlay=config_overlay,
             birth_config=birth_config,
         )
@@ -241,7 +250,7 @@ async def run_owned(  # noqa: PLR0915 -- one caller retains exact allocation and
                 "-m",
                 "agent.exec_domain_owner",
                 "--context",
-                str(context_path),
+                str(self.context_path),
             ],
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
@@ -249,137 +258,227 @@ async def run_owned(  # noqa: PLR0915 -- one caller retains exact allocation and
             env=env,
             close_fds=True,
         )
-        native = psutil.Process(proc.pid)
-        launcher = ResourceProcess.capture(native)
-        reader = threading.Thread(target=_drain_output, args=(proc, stream), daemon=True)
-        reader.start()
-        while proc.poll() is None:
-            if ready is None and context_path.with_suffix(".ready").exists():
-                ready = OwnerReady.model_validate_json(
-                    read_owner_bytes(context_path.with_suffix(".ready"))
-                )
-                validate_native_ready(ready, launcher, context_path)
-                registration = asyncio.create_task(
-                    asyncio.to_thread(_register_attached, context, ready),
-                    name=f"exec-owner-register-{request_id}",
-                )
-                await asyncio.shield(registration)
-                attached = True
-                if scope is not None:
-                    scope.unresolved[request] = ready
-                send("permit")
-            if cancel_event.is_set() and not cancelled:
-                cancelled = True
-                send("cancel")
-            if time.monotonic() >= bound:
-                raise ResourceEvidenceError("owner did not settle within the original exec bound")  # noqa: TRY301 -- uncertainty remains durable.
-            if chunk_publisher is not None:
-                chunk_publisher.publish(stream.take_pending())
-                chunk_publisher.maybe_keepalive()
-            await asyncio.sleep(0.05)
-        if ready is None or proc.returncode != 0:
-            await asyncio.to_thread(reader.join, max(0, bound - time.monotonic()))
-            raise ResourceEvidenceError("owner exited without a successful exact close receipt")  # noqa: TRY301 -- uncertainty remains durable.
-        receipt = await asyncio.shield(attached_completion())
-        settled = True
-        if chunk_publisher is not None:
-            chunk_publisher.publish(stream.take_pending())
-        payload, error = _read_result_envelope(result, receipt.root_exit_code)
+        self.proc = proc
+        return proc, ResourceProcess.capture(psutil.Process(proc.pid))
+
+    def ready_pending(self) -> bool:
+        return self.ready is None and self.context_path.with_suffix(".ready").exists()
+
+    def read_ready(self, launcher: ResourceProcess) -> OwnerReady:
+        """Validate the owner's ready evidence before its allocation is registered."""
+        ready = OwnerReady.model_validate_json(
+            read_owner_bytes(self.context_path.with_suffix(".ready"))
+        )
+        self.ready = ready
+        validate_native_ready(ready, launcher, self.context_path)
+        return ready
+
+    async def finish_attach(self, registration: asyncio.Task[None], ready: OwnerReady) -> None:
+        """Await the registration, then record the attachment and permit the exec."""
+        await asyncio.shield(registration)
+        self.attached = True
+        if self.scope is not None:
+            self.scope.unresolved[self.request] = ready
+        self._send("permit")
+
+    async def tick(self) -> None:
+        """One poll beat: forward cancel, enforce the original bound, stream output."""
+        if self.cancel_event.is_set() and not self.cancelled:
+            self.cancelled = True
+            self._send("cancel")
+        if time.monotonic() >= self.bound:
+            raise ResourceEvidenceError("owner did not settle within the original exec bound")
+        if self.chunk_publisher is not None:
+            self.chunk_publisher.publish(self.stream.take_pending())
+            self.chunk_publisher.maybe_keepalive()
+        await asyncio.sleep(0.05)
+
+    async def collect(
+        self, proc: subprocess.Popen[bytes]
+    ) -> tuple[_ExecResult, ResultPayload | None]:
+        """The exact close receipt and the result envelope of an owner that exited."""
+        from agent.graph.exec._subprocess import _read_result_envelope, _result_from_payload
+
+        reader = self.reader
+        if self.ready is None or proc.returncode != 0 or reader is None:
+            if reader is not None:
+                await asyncio.to_thread(reader.join, max(0, self.bound - time.monotonic()))
+            raise ResourceEvidenceError("owner exited without a successful exact close receipt")
+        receipt = await asyncio.shield(self.attached_completion())
+        self.settled = True
+        if self.chunk_publisher is not None:
+            self.chunk_publisher.publish(self.stream.take_pending())
+        payload, error = _read_result_envelope(self.result, receipt.root_exit_code)
         return _result_from_payload(
-            stream.getvalue(),
+            self.stream.getvalue(),
             payload,
-            cancelled=cancelled,
+            cancelled=self.cancelled,
             timed_out=receipt.reason == "timeout",
             envelope_error=error,
-            stream_cap=stream.cap(),
-            memory_guard_notice=read_notice(result),
+            stream_cap=self.stream.cap(),
+            memory_guard_notice=read_notice(self.result),
         ), payload
-    except asyncio.CancelledError as original:
-        # EOF asks the independent owner to close. Process mode has no hosted
-        # resource scope to retain a later consumer, so cancellation cannot
-        # propagate until this task consumes the exact terminal receipt itself.
+
+    async def on_cancelled(self, original: asyncio.CancelledError) -> None:
+        """EOF asks the independent owner to close; consume its exact terminal receipt first.
+
+        Process mode has no hosted resource scope to retain a later consumer, so
+        cancellation cannot propagate until this task has done so itself.
+        """
+        proc = self.proc
         if proc is not None and proc.stdin is not None:
             proc.stdin.close()
-        if registration is not None and not attached:
+        if self.registration is not None and not self.attached:
+            await self.settle_registration_after_cancel(self.registration, original)
+        if self.attached:
+            owner_completion = self.attached_completion()
             try:
-                await finish_despite_cancellation(registration)
-            except ResourceEvidenceError:
-                try:
-                    await settle_unpermitted_owner()
-                except Exception as cleanup:
-                    original.add_note(
-                        "unpermitted owner cancellation cleanup remains unresolved: "
-                        f"{type(cleanup).__name__}: {cleanup}"
-                    )
-                else:
-                    settled = True
-                    if scope is not None:
-                        scope.complete(request, None)
-            except Exception as cleanup:
-                original.add_note(
-                    "exec registration outcome remains ambiguous after cancellation: "
-                    f"{type(cleanup).__name__}: {cleanup}"
-                )
-            else:
-                attached = True
-                if scope is not None:
-                    scope.unresolved[request] = ready
-        if attached:
-            owner_completion = attached_completion()
-            try:
-                await finish_despite_cancellation(owner_completion)
+                await self.finish_despite_cancellation(owner_completion)
             except Exception as cleanup:
                 original.add_note(
                     "attached owner cancellation cleanup remains unresolved: "
                     f"{type(cleanup).__name__}: {cleanup}"
                 )
             else:
-                settled = True
-        raise
-    except ResourceEvidenceError as exc:
-        if proc is None and scope is not None:
+                self.settled = True
+
+    async def settle_registration_after_cancel(
+        self, registration: asyncio.Task[None], original: asyncio.CancelledError
+    ) -> None:
+        try:
+            await self.finish_despite_cancellation(registration)
+        except ResourceEvidenceError:
+            try:
+                await self.settle_unpermitted_owner()
+            except Exception as cleanup:
+                original.add_note(
+                    "unpermitted owner cancellation cleanup remains unresolved: "
+                    f"{type(cleanup).__name__}: {cleanup}"
+                )
+            else:
+                self.settled = True
+                if self.scope is not None:
+                    self.scope.complete(self.request, None)
+        except Exception as cleanup:
+            original.add_note(
+                "exec registration outcome remains ambiguous after cancellation: "
+                f"{type(cleanup).__name__}: {cleanup}"
+            )
+        else:
+            self.attached = True
+            if self.scope is not None:
+                self.scope.unresolved[self.request] = self.ready
+
+    async def on_refused(self, exc: ResourceEvidenceError) -> None:
+        """Settle what a refusal left behind: nothing launched, or an unpermitted owner."""
+        if self.proc is None and self.scope is not None:
             # A synchronous validation refusal rolled back before Popen. This
             # does not cover connection/commit ambiguity, which stays sticky.
-            scope.complete(request, None)
-        elif ready is not None and not attached:
+            self.scope.complete(self.request, None)
+        elif self.ready is not None and not self.attached:
             try:
-                await settle_unpermitted_owner()
+                await self.settle_unpermitted_owner()
             except Exception as cleanup:
                 exc.add_note(
                     "unpermitted owner closure remains unresolved: "
                     f"{type(cleanup).__name__}: {cleanup}"
                 )
             else:
-                if scope is not None:
-                    scope.complete(request, None)
-        return _ExecCrashed(
-            output=f"managed exec refused: {exc}\n{stream.getvalue()}", exc=exc
-        ), None
-    except Exception as exc:
-        return _ExecCrashed(
-            output=f"managed exec remains unresolved: {exc}\n{stream.getvalue()}", exc=exc
-        ), None
-    finally:
+                if self.scope is not None:
+                    self.scope.complete(self.request, None)
+
+    def close_stdin(self) -> None:
+        proc = self.proc
         if proc is not None and proc.stdin is not None and not proc.stdin.closed:
             proc.stdin.close()
-        if (
-            not settled
-            and attached
-            and proc is not None
-            and ready is not None
-            and reader is not None
-            and scope is not None
-        ):
-            # Preserve the original task's strong completion ownership. Host
-            # cancellation does not mean the independent owner already closed.
-            async def finish_owner() -> None:
-                try:
-                    await asyncio.shield(attached_completion())
-                except Exception as exc:
-                    from base.log import logger
 
-                    logger.error("exec owner remains unresolved: {error}", error=exc)
+    def needs_hand_off(self) -> bool:
+        """Whether an attached owner is still unsettled while a hosted scope can retain it."""
+        return not (
+            self.settled
+            or not self.attached
+            or self.proc is None
+            or self.ready is None
+            or self.reader is None
+            or self.scope is None
+        )
 
-            task = asyncio.create_task(finish_owner(), name=f"exec-owner-close-{request_id}")
-            scope.completions.add(task)
-            task.add_done_callback(scope.completions.discard)
+    async def finish_owner(self) -> None:
+        # Preserve the original task's strong completion ownership. Host
+        # cancellation does not mean the independent owner already closed.
+        try:
+            await asyncio.shield(self.attached_completion())
+        except Exception as exc:
+            from base.log import logger
+
+            logger.error("exec owner remains unresolved: {error}", error=exc)
+
+    def crashed(self, label: str, exc: Exception) -> tuple[_ExecCrashed, None]:
+        return _ExecCrashed(output=f"{label}: {exc}\n{self.stream.getvalue()}", exc=exc), None
+
+
+def _unbound_completion() -> asyncio.Task[OwnerClosed]:
+    raise RuntimeError("the completion task is created by run_owned")
+
+
+async def run_owned(
+    target: RuntimeIncarnation,
+    code: str,
+    cancel_event: asyncio.Event,
+    timeout: float,
+    chunk_publisher: ExecOutputChunkPublisher | None,
+    *,
+    state: dict[str, Any] | None,
+    exec_dir: Path | None,
+    config_overlay: dict[str, object] | None,
+    birth_config: dict[str, object] | None,
+) -> tuple[_ExecResult, ResultPayload | None]:
+    """Run one managed exec; this function alone spawns the owner's reader thread and tasks."""
+    from agent.graph.exec._subprocess import _drain_output
+
+    owned = _OwnedRun(
+        target, code, cancel_event, timeout, chunk_publisher, state=state, exec_dir=exec_dir
+    )
+
+    def attached_completion() -> asyncio.Task[OwnerClosed]:
+        """Keep one completion task alive across cancellation/commit boundaries."""
+        if owned.completion is None:
+            owned.completion = asyncio.create_task(
+                owned.settle_attached_owner(), name=f"exec-owner-complete-{owned.request_id}"
+            )
+        return owned.completion
+
+    owned.attached_completion = attached_completion
+    try:
+        proc, launcher = owned.launch(config_overlay, birth_config)
+        owned.reader = threading.Thread(
+            target=_drain_output, args=(proc, owned.stream), daemon=True
+        )
+        owned.reader.start()
+        while proc.poll() is None:
+            if owned.ready_pending():
+                ready = owned.read_ready(launcher)
+                owned.registration = asyncio.create_task(
+                    asyncio.to_thread(_register_attached, owned.context, ready),
+                    name=f"exec-owner-register-{owned.request_id}",
+                )
+                await owned.finish_attach(owned.registration, ready)
+            await owned.tick()
+        return await owned.collect(proc)
+    except asyncio.CancelledError as original:
+        await owned.on_cancelled(original)
+        raise
+    except ResourceEvidenceError as exc:
+        await owned.on_refused(exc)
+        return owned.crashed("managed exec refused", exc)
+    except Exception as exc:
+        return owned.crashed("managed exec remains unresolved", exc)
+    finally:
+        owned.close_stdin()
+        if owned.needs_hand_off():
+            task = asyncio.create_task(
+                owned.finish_owner(), name=f"exec-owner-close-{owned.request_id}"
+            )
+            assert owned.scope is not None  # noqa: S101
+            owned.scope.completions.add(task)
+            task.add_done_callback(owned.scope.completions.discard)

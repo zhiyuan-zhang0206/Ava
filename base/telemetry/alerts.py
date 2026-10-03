@@ -160,6 +160,106 @@ def im_fanout_allowed(labels: dict[str, str]) -> bool:
     return labels.get(_IM_GATE_LABEL) != _IM_GATE_VALUE
 
 
+def _existing_starts_at(conn: psycopg.Connection, fp: str, alertname: str) -> datetime | None:
+    """The latest known starts_at of `fp` for a payload that carries none; None rejects it."""
+    # No starts_at (payload drift): re-sends of an EXISTING instance
+    # reuse its starts_at so the (fingerprint, starts_at) dedup key stays
+    # stable. A genuinely new alert with no starts_at has no stable
+    # identity — fabricating now() would make every re-send a fresh
+    # instance (duplicate rows + duplicate IMs), so it is rejected.
+    with conn.cursor() as cur:
+        cur.execute(
+            "SELECT starts_at FROM alerts WHERE fingerprint = %s ORDER BY starts_at DESC LIMIT 1",
+            (fp,),
+        )
+        row = cur.fetchone()
+    if row is not None:
+        return row[0]
+    _log.warning(
+        "alerts: alert %r has no starts_at and no existing instance "
+        "— rejected (dedup key would be unstable)",
+        alertname,
+    )
+    return None
+
+
+def _transition_notifies(
+    status: str,
+    severity: str,
+    old_status: str | None,
+    old_severity: str | None,
+    *,
+    was_notified: bool,
+) -> bool:
+    """The transition rules of the notification gate (see `upsert_alert`)."""
+    if status == "unresolved" and (old_status == "resolved" or not was_notified):
+        # Firing gate is ``notified_at IS NULL``: keep notifying on every
+        # re-send until the message actually lands (was_notified), and on a
+        # re-fire after a resolution regardless (new event for the user).
+        return True
+    if (
+        status == "unresolved"
+        and old_status == "unresolved"
+        and was_notified
+        and old_severity is not None
+        and _SEVERITY_RANK[severity] > _SEVERITY_RANK[old_severity]
+    ):
+        # Every firing transition pushes. Escalation on an open instance is
+        # new information even though the instance itself was already sent.
+        return True
+    return old_status == "unresolved" and status == "resolved" and was_notified
+
+
+def _upsert_row(
+    cur: psycopg.Cursor[dict[str, Any]],
+    alert: dict[str, Any],
+    *,
+    status: str,
+    severity: str,
+    alertname: str,
+    fp: str,
+    starts_at: datetime,
+    source: str,
+) -> tuple[dict[str, Any], bool]:
+    """INSERT .. ON CONFLICT the instance; the stored row and whether it was a fresh insert."""
+    cur.execute(
+        "INSERT INTO alerts"
+        " (status, severity, alertname, labels, annotations, starts_at, ends_at,"
+        "  fingerprint, generator_url, source)"
+        " VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)"
+        " ON CONFLICT (fingerprint, starts_at) DO UPDATE SET"
+        "  status = EXCLUDED.status,"
+        "  severity = EXCLUDED.severity,"
+        "  alertname = EXCLUDED.alertname,"
+        "  labels = EXCLUDED.labels,"
+        "  annotations = EXCLUDED.annotations,"
+        "  ends_at = EXCLUDED.ends_at,"
+        "  generator_url = EXCLUDED.generator_url,"
+        "  updated_at = now()"
+        " RETURNING id, status, severity, alertname, labels, annotations, starts_at,"
+        "           ends_at, fingerprint, generator_url, source, notified_at,"
+        "           created_at, updated_at, (xmax = 0) AS inserted",
+        (
+            status,
+            severity,
+            alertname,
+            Jsonb(alert.get("labels") or {}),
+            Jsonb(alert.get("annotations") or {}),
+            starts_at,
+            parse_ts(alert.get("ends_at") or ""),
+            fp,
+            str(alert.get("generator_url") or ""),
+            source,
+        ),
+    )
+    # xmax = 0 distinguishes the fresh INSERT from the ON CONFLICT UPDATE
+    # (rowcount is 1 on both paths).
+    row = cur.fetchone()
+    assert row is not None  # noqa: S101 — upsert always returns a row
+    did_insert = bool(row.pop("inserted"))
+    return row, did_insert
+
+
 def upsert_alert(
     conn: psycopg.Connection, alert: dict[str, Any], source: str = "grafana"
 ) -> tuple[AlertKey, bool, bool, dict[str, Any]]:
@@ -194,26 +294,8 @@ def upsert_alert(
     starts_at = parse_ts(alert.get("starts_at") or "")
 
     if starts_at is None:
-        # No starts_at (payload drift): re-sends of an EXISTING instance
-        # reuse its starts_at so the (fingerprint, starts_at) dedup key stays
-        # stable. A genuinely new alert with no starts_at has no stable
-        # identity — fabricating now() would make every re-send a fresh
-        # instance (duplicate rows + duplicate IMs), so it is rejected.
-        with conn.cursor() as cur:
-            cur.execute(
-                "SELECT starts_at FROM alerts WHERE fingerprint = %s "
-                "ORDER BY starts_at DESC LIMIT 1",
-                (fp,),
-            )
-            row = cur.fetchone()
-        if row is not None:
-            starts_at = row[0]
-        else:
-            _log.warning(
-                "alerts: alert %r has no starts_at and no existing instance "
-                "— rejected (dedup key would be unstable)",
-                alertname,
-            )
+        starts_at = _existing_starts_at(conn, fp, alertname)
+        if starts_at is None:
             return (fp, datetime.min.replace(tzinfo=UTC)), False, False, {}
 
     with conn.cursor(row_factory=dict_row) as cur:
@@ -227,61 +309,20 @@ def upsert_alert(
         old_severity = str(old["severity"]) if old else None
         was_notified = old is not None and old["notified_at"] is not None
 
-        cur.execute(
-            "INSERT INTO alerts"
-            " (status, severity, alertname, labels, annotations, starts_at, ends_at,"
-            "  fingerprint, generator_url, source)"
-            " VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)"
-            " ON CONFLICT (fingerprint, starts_at) DO UPDATE SET"
-            "  status = EXCLUDED.status,"
-            "  severity = EXCLUDED.severity,"
-            "  alertname = EXCLUDED.alertname,"
-            "  labels = EXCLUDED.labels,"
-            "  annotations = EXCLUDED.annotations,"
-            "  ends_at = EXCLUDED.ends_at,"
-            "  generator_url = EXCLUDED.generator_url,"
-            "  updated_at = now()"
-            " RETURNING id, status, severity, alertname, labels, annotations, starts_at,"
-            "           ends_at, fingerprint, generator_url, source, notified_at,"
-            "           created_at, updated_at, (xmax = 0) AS inserted",
-            (
-                status,
-                severity,
-                alertname,
-                Jsonb(labels),
-                Jsonb(alert.get("annotations") or {}),
-                starts_at,
-                parse_ts(alert.get("ends_at") or ""),
-                fp,
-                str(alert.get("generator_url") or ""),
-                source,
-            ),
+        row, did_insert = _upsert_row(
+            cur,
+            alert,
+            status=status,
+            severity=severity,
+            alertname=alertname,
+            fp=fp,
+            starts_at=starts_at,
+            source=source,
         )
-        # xmax = 0 distinguishes the fresh INSERT from the ON CONFLICT UPDATE
-        # (rowcount is 1 on both paths).
-        row = cur.fetchone()
-        assert row is not None  # noqa: S101 — upsert always returns a row
-        did_insert = bool(row.pop("inserted"))
 
-    should_notify = False
-    if status == "unresolved" and (old_status == "resolved" or not was_notified):
-        # Firing gate is ``notified_at IS NULL``: keep notifying on every
-        # re-send until the message actually lands (was_notified), and on a
-        # re-fire after a resolution regardless (new event for the user).
-        should_notify = True
-    elif (
-        status == "unresolved"
-        and old_status == "unresolved"
-        and was_notified
-        and old_severity is not None
-        and _SEVERITY_RANK[severity] > _SEVERITY_RANK[old_severity]
-    ):
-        # Every firing transition pushes. Escalation on an open instance is
-        # new information even though the instance itself was already sent.
-        should_notify = True
-    elif old_status == "unresolved" and status == "resolved" and was_notified:
-        should_notify = True
-    should_notify = im_fanout_allowed(labels) and should_notify
+    should_notify = im_fanout_allowed(labels) and _transition_notifies(
+        status, severity, old_status, old_severity, was_notified=was_notified
+    )
     return (fp, starts_at), did_insert, should_notify, row
 
 

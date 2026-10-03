@@ -1,5 +1,1 @@
-{
-  "complexity": {
-    "gateway/middleware/idempotency.py::idempotency_middleware": 15
-  }
-}
+{}

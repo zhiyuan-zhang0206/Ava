@@ -360,17 +360,8 @@ def _budget_targets(targets: list[Path]) -> tuple[set[Path], set[Path]]:
 
     for target in targets:
         for scope in (_REPO_ROOT / name for name in _STRUCTURE_DIRS):
-            if target == scope or scope in target.parents:
-                selected = target
-            elif target in scope.parents:
-                selected = scope
-            else:
-                continue
-            relative = selected.relative_to(_REPO_ROOT)
-            if any(
-                part.startswith(".") or part in {"__pycache__", "migrations"}
-                for part in relative.parts
-            ) or any(path.is_symlink() for path in (selected, *selected.parents)):
+            selected = directory_budget.selected_under(target, scope, _REPO_ROOT)
+            if selected is None:
                 continue
             if selected.is_dir():
                 visit(selected)

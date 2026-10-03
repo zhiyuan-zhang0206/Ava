@@ -65,6 +65,7 @@ from __future__ import annotations
 import ast
 import re
 import sys
+from collections.abc import Iterator
 from pathlib import Path
 
 from base.host.env.dotenv_boot import enter_scratch_home
@@ -215,6 +216,45 @@ def _scan_fragment(fragment: str) -> set[str]:
     return names
 
 
+def _fenced_fragments(text: str) -> Iterator[tuple[int, str]]:
+    """`(line number, code fragment)` of every checkable fragment: fenced-block lines, inline code."""
+    in_fence = False
+    fence_marker = ""
+    for lineno, line in enumerate(text.splitlines(), start=1):
+        stripped = line.lstrip()
+        if not in_fence and (stripped.startswith(("```", "~~~"))):
+            in_fence = True
+            fence_marker = stripped[:3]
+            continue
+        if in_fence:
+            if stripped.startswith(fence_marker):
+                in_fence = False
+                continue
+            yield lineno, line
+        else:
+            for m in _INLINE_CODE.finditer(line):
+                yield lineno, m.group(1)
+
+
+def _dangling_refs(root: Path, valid: set[str]) -> list[str]:
+    """One message per `ava.<name>` reference under `root` that names no SDK member."""
+    # Display paths relative to the repo root when the scanned tree lives under
+    # it (the real run); fall back to the root's parent when it is monkeypatched
+    # to a tmp tree under test.
+    display_root = _REPO_ROOT if root.is_relative_to(_REPO_ROOT) else root.parent
+    violations: list[str] = []
+    for md in sorted(root.rglob("*.md")):
+        for lineno, fragment in _fenced_fragments(md.read_text(encoding="utf-8")):
+            for name in _scan_fragment(fragment):
+                if name not in valid:
+                    rel = md.relative_to(display_root)
+                    violations.append(
+                        f"{rel}:{lineno}: ava.{name} is not a member of the ava "
+                        f"namespace (valid: {', '.join(sorted(valid))})"
+                    )
+    return violations
+
+
 def check() -> int:
     """Validate every procedural-doc `ava.<name>` ref; return 0 (clean) or 1 (violations)."""
     valid = valid_ava_names()
@@ -222,37 +262,8 @@ def check() -> int:
     # Read the roots through the module globals so a test can monkeypatch either
     # one at a throwaway tree.
     for root in (_DOCS_CONVENTIONS, _DEV_SKILLS):
-        if not root.is_dir():
-            continue
-        # Display paths relative to the repo root when the scanned tree lives under
-        # it (the real run); fall back to the root's parent when it is monkeypatched
-        # to a tmp tree under test.
-        display_root = _REPO_ROOT if root.is_relative_to(_REPO_ROOT) else root.parent
-        for md in sorted(root.rglob("*.md")):
-            text = md.read_text(encoding="utf-8")
-            in_fence = False
-            fence_marker = ""
-            for lineno, line in enumerate(text.splitlines(), start=1):
-                stripped = line.lstrip()
-                if not in_fence and (stripped.startswith(("```", "~~~"))):
-                    in_fence = True
-                    fence_marker = stripped[:3]
-                    continue
-                if in_fence:
-                    if stripped.startswith(fence_marker):
-                        in_fence = False
-                        continue
-                    fragments = [line]
-                else:
-                    fragments = [m.group(1) for m in _INLINE_CODE.finditer(line)]
-                for fragment in fragments:
-                    for name in _scan_fragment(fragment):
-                        if name not in valid:
-                            rel = md.relative_to(display_root)
-                            violations.append(
-                                f"{rel}:{lineno}: ava.{name} is not a member of the ava "
-                                f"namespace (valid: {', '.join(sorted(valid))})"
-                            )
+        if root.is_dir():
+            violations.extend(_dangling_refs(root, valid))
     if violations:
         for v in violations:
             print(v, file=sys.stderr)

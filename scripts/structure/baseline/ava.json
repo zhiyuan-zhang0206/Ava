@@ -17,9 +17,6 @@
     "ava/skills.py::ambient-container:_recorded_skill_invocations": 1,
     "ava/web.py::ambient-container:_GATED_SITE_SKILLS": 1
   },
-  "complexity": {
-    "ava/files.py::read": 19
-  },
   "directories": {
     "ava": 21
   }

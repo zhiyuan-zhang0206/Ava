@@ -282,6 +282,78 @@ def _send_heartbeat_checkin(pool: ConnectionPool, agent_id: int, idle_minutes: f
     base.db.publish_inbound_wake(agent_id, "0")
 
 
+def _reconcile_agent(
+    pool: ConnectionPool,
+    cur: psycopg.Cursor,
+    agent_id: int,
+    *,
+    pending_checkin: dict[int, float],
+    failure_streak: dict[int, int],
+    noop_streak: dict[int, int],
+    idle_threshold_s: float,
+    heartbeat_interval_s: float,
+    threshold: int,
+) -> None:
+    """Judge one tracked agent's last check-in: update its failure and no-op streaks."""
+    cur.execute(
+        "SELECT status, "
+        "(EXTRACT(EPOCH FROM (now() - last_active_at)) / 60.0)::double precision, "
+        "heartbeat_backoff_level, "
+        "(heartbeat_paused_until IS NOT NULL AND heartbeat_paused_until > now()), "
+        "(last_heartbeat_at IS NOT NULL AND EXISTS ("
+        "  SELECT 1 FROM inbound_messages im "
+        "  WHERE im.agent_id = agents_meta.id AND im.kind <> 'heartbeat' "
+        "    AND im.created_at > agents_meta.last_heartbeat_at)) "
+        "FROM agents_meta WHERE id = %s",
+        (agent_id,),
+    )
+    row = cur.fetchone()
+    sent_at = pending_checkin.pop(agent_id, None)
+    if row is None or row[0] not in ("idling", "running"):
+        # Gone, or parked outside the daemon's lanes — stop tracking.
+        failure_streak.pop(agent_id, None)
+        noop_streak.pop(agent_id, None)
+        return
+    idle_minutes = row[1]
+    advanced = (
+        sent_at is not None
+        and idle_minutes is not None
+        and idle_minutes < sent_at - _ADVANCE_SLACK_MINUTES
+    )
+    recovered = advanced or (idle_minutes is not None and idle_minutes < idle_threshold_s / 60.0)
+    if recovered:
+        failure_streak.pop(agent_id, None)
+    elif sent_at is not None:
+        failure_streak[agent_id] = failure_streak.get(agent_id, 0) + 1
+    # Not pending and not recovered: keep the existing streak and
+    # its previously assigned backoff deadline.
+
+    # B7 no-op nudge streak — independent of the failure streak above.
+    if bool(row[3]) or bool(row[4]):
+        noop_streak.pop(agent_id, None)
+    elif sent_at is not None:
+        _count_noop_nudge(
+            pool, agent_id, int(row[2] or 0), noop_streak, heartbeat_interval_s, threshold
+        )
+
+
+def _count_noop_nudge(
+    pool: ConnectionPool,
+    agent_id: int,
+    level: int,
+    noop_streak: dict[int, int],
+    heartbeat_interval_s: float,
+    threshold: int,
+) -> None:
+    """A check-in with no real inbound and no pause: count it, and at `threshold` raise the level."""
+    noop_streak[agent_id] = noop_streak.get(agent_id, 0) + 1
+    if noop_streak[agent_id] >= threshold:
+        noop_streak[agent_id] = 0
+        new_level = min(level + 1, _backoff_max_level(heartbeat_interval_s))
+        if new_level > level:
+            _raise_backoff_level(pool, agent_id, new_level, heartbeat_interval_s)
+
+
 def _reconcile_checkin_outcomes(
     pool: ConnectionPool,
     *,
@@ -330,54 +402,17 @@ def _reconcile_checkin_outcomes(
         return
     with pool.connection() as conn, conn.cursor() as cur:
         for agent_id in tracked:
-            cur.execute(
-                "SELECT status, "
-                "(EXTRACT(EPOCH FROM (now() - last_active_at)) / 60.0)::double precision, "
-                "heartbeat_backoff_level, "
-                "(heartbeat_paused_until IS NOT NULL AND heartbeat_paused_until > now()), "
-                "(last_heartbeat_at IS NOT NULL AND EXISTS ("
-                "  SELECT 1 FROM inbound_messages im "
-                "  WHERE im.agent_id = agents_meta.id AND im.kind <> 'heartbeat' "
-                "    AND im.created_at > agents_meta.last_heartbeat_at)) "
-                "FROM agents_meta WHERE id = %s",
-                (agent_id,),
+            _reconcile_agent(
+                pool,
+                cur,
+                agent_id,
+                pending_checkin=pending_checkin,
+                failure_streak=failure_streak,
+                noop_streak=noop_streak,
+                idle_threshold_s=idle_threshold_s,
+                heartbeat_interval_s=heartbeat_interval_s,
+                threshold=threshold,
             )
-            row = cur.fetchone()
-            sent_at = pending_checkin.pop(agent_id, None)
-            if row is None or row[0] not in ("idling", "running"):
-                # Gone, or parked outside the daemon's lanes — stop tracking.
-                failure_streak.pop(agent_id, None)
-                noop_streak.pop(agent_id, None)
-                continue
-            idle_minutes = row[1]
-            level = int(row[2] or 0)
-            paused = bool(row[3])
-            real_inbound = bool(row[4])
-            advanced = (
-                sent_at is not None
-                and idle_minutes is not None
-                and idle_minutes < sent_at - _ADVANCE_SLACK_MINUTES
-            )
-            recovered = advanced or (
-                idle_minutes is not None and idle_minutes < idle_threshold_s / 60.0
-            )
-            if recovered:
-                failure_streak.pop(agent_id, None)
-            elif sent_at is not None:
-                failure_streak[agent_id] = failure_streak.get(agent_id, 0) + 1
-            # Not pending and not recovered: keep the existing streak and
-            # its previously assigned backoff deadline.
-
-            # B7 no-op nudge streak — independent of the failure streak above.
-            if paused or real_inbound:
-                noop_streak.pop(agent_id, None)
-            elif sent_at is not None:
-                noop_streak[agent_id] = noop_streak.get(agent_id, 0) + 1
-                if noop_streak[agent_id] >= threshold:
-                    noop_streak[agent_id] = 0
-                    new_level = min(level + 1, _backoff_max_level(heartbeat_interval_s))
-                    if new_level > level:
-                        _raise_backoff_level(pool, agent_id, new_level, heartbeat_interval_s)
 
 
 def _raise_backoff_level(

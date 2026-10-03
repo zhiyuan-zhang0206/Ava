@@ -9,10 +9,7 @@
     "base/cluster/provision.py::ambient-container:CHECKPOINT_SCHEMA_AVA_MIGRATIONS": 1,
     "base/cluster/rate_limit.py::ambient-instance:login_limiter": 1
   },
-  "complexity": {
-    "base/cluster/machines.py::_recompute_machine_row": 17,
-    "base/cluster/port_preflight.py::listener_addrs": 18
-  },
+  "complexity": {},
   "files": {
     "base/cluster/tests/test_machines.py": 849
   }

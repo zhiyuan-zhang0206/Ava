@@ -7,11 +7,7 @@
     "base/telemetry/tracing.py::thread:_start_collector_retry": 1
   },
   "complexity": {
-    "base/telemetry/alerts.py::upsert_alert": 26,
-    "base/telemetry/metrics/aggregate.py::_sections_from_aggregate": 31,
     "base/telemetry/metrics/core/tests/test_core_observability.py::test_pack_registers_all_metrics": 16,
-    "base/telemetry/metrics/plugin_metrics.py::validate_metric_sql": 31,
-    "base/telemetry/metrics/plugin_metrics_sql.py::_check_from_item": 20,
     "base/telemetry/metrics/tests/test_metrics_aggregate_equivalence.py::test_equivalence_full_thread": 24,
     "base/telemetry/otlp/tests/test_telemetry_otlp.py::test_log_mapping_full_record_shape": 18,
     "base/telemetry/otlp/tests/test_telemetry_otlp.py::test_metric_mapping_int_counter_float_histogram": 17,

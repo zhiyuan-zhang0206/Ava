@@ -1041,7 +1041,7 @@ async def test_launch_agent_op_hosted_failure_preserves_its_row(
         reclaimed.append((agent_id, source))
         return []
 
-    monkeypatch.setattr(lifecycle, "_force_mark_terminated", _fake_reclaim)
+    monkeypatch.setattr(lifecycle, "force_mark_terminated", _fake_reclaim)
 
     body = LaunchAgentRequest(agent_id=7, prompt="go", prompt_source="user")
     with pytest.raises(RuntimeError, match="prompt insert failed"):
@@ -1065,7 +1065,7 @@ async def test_launch_agent_op_hosted_validation_failure_preserves_its_row(
         reclaimed.append((agent_id, source))
         return []
 
-    monkeypatch.setattr(lifecycle, "_force_mark_terminated", _fake_reclaim)
+    monkeypatch.setattr(lifecycle, "force_mark_terminated", _fake_reclaim)
 
     body = LaunchAgentRequest(agent_id=7, prompt="go", prompt_source="user")
     with pytest.raises(RuntimeError, match="bad model config"):

@@ -70,37 +70,43 @@ def select_layers(
     usable = [node for node in nodes if node.start_ts is not None and node.end_ts is not None]
     if not usable:
         return LayerSelection(layers=None, coverage="none")
+    finest = _finest_level(usable, max_nodes)
+    selected = [node for node in usable if node.depth >= finest]
+    layers = _layer_nodes(selected)
+    covered = _covers(selected, window_start=window_start, window_end=window_end)
+    return LayerSelection(layers=tuple(layers), coverage="full" if covered else "partial")
+
+
+def _finest_level(usable: Sequence[StoredNode], max_nodes: int) -> int:
+    """The shallowest depth whose node count fits `max_nodes` (the deepest when none does)."""
     counts: dict[int, int] = {}
     for node in usable:
         counts[node.depth] = counts.get(node.depth, 0) + 1
-    finest: int | None = None
     for level in sorted(counts):
         if counts[level] <= max_nodes:
-            finest = level
-            break
-    if finest is None:  # every level above the cap (cannot happen with a root)
-        finest = max(counts)
-    selected = [node for node in usable if node.depth >= finest]
+            return level
+    return max(counts)  # every level above the cap (cannot happen with a root)
+
+
+def _layer_nodes(selected: Sequence[StoredNode]) -> list[LayerNode]:
+    """Time-placed nodes as layers, finest-to-coarsest depth re-based so the top layer is 0."""
     top = max(node.depth for node in selected)
     timed: list[tuple[datetime, datetime, StoredNode]] = [
         (node.start_ts, node.end_ts, node)
         for node in selected
         if node.start_ts is not None and node.end_ts is not None
     ]
-    layers: list[LayerNode] = []
-    for start, stop, node in sorted(timed, key=lambda trio: (trio[2].depth, trio[0])):
-        layers.append(
-            LayerNode(
-                id=str(node.id),
-                depth=top - node.depth,
-                parent=str(node.parent_id) if node.parent_id is not None else None,
-                start=start,
-                end=stop,
-                summary=node.text,
-            )
+    return [
+        LayerNode(
+            id=str(node.id),
+            depth=top - node.depth,
+            parent=str(node.parent_id) if node.parent_id is not None else None,
+            start=start,
+            end=stop,
+            summary=node.text,
         )
-    covered = _covers(selected, window_start=window_start, window_end=window_end)
-    return LayerSelection(layers=tuple(layers), coverage="full" if covered else "partial")
+        for start, stop, node in sorted(timed, key=lambda trio: (trio[2].depth, trio[0]))
+    ]
 
 
 def _merge_spans(

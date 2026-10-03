@@ -168,6 +168,64 @@ def _preserve_claimed_tree(
     _write_ledger(ledger_path, ledger)
 
 
+def _claim_from_source(
+    ledger_path: Path,
+    ledger: dict[str, Any],
+    item: dict[str, Any],
+    source: Path,
+    quarantine: Path,
+    rename: Callable[[Path, Path], None],
+) -> bool:
+    """Move the garbage source into quarantine; True when there was nothing left to claim."""
+    source_exists = _exists(source)
+    quarantine_exists = _exists(quarantine)
+    if not source_exists:
+        if quarantine_exists:
+            raise _ClientConflictError("unclaimed cleanup quarantine exists")
+        return True
+    if quarantine_exists:
+        raise _ClientConflictError("cleanup source and quarantine both exist")
+    item["location"] = "claiming"
+    _write_ledger(ledger_path, ledger)
+    try:
+        rename(source, quarantine)
+    except OSError:
+        if _exists(source) and not _exists(quarantine):
+            item["location"] = "source"
+            _write_ledger(ledger_path, ledger)
+        raise
+    return False
+
+
+def _settle_claim(
+    ledger_path: Path,
+    ledger: dict[str, Any],
+    item: dict[str, Any],
+    source: Path,
+    quarantine: Path,
+    rename: Callable[[Path, Path], None],
+) -> bool:
+    """Resolve an in-flight claim; False when the source is back and cleanup must be retried."""
+    source_exists = _exists(source)
+    quarantine_exists = _exists(quarantine)
+    if source_exists and quarantine_exists:
+        raise _ClientConflictError("cleanup claim outcome is ambiguous")
+    if source_exists:
+        item["location"] = "source"
+        _write_ledger(ledger_path, ledger)
+        return False
+    if not quarantine_exists:
+        raise _ClientConflictError("cleanup claim outcome is ambiguous")
+    try:
+        _verify_cleanup_candidate(quarantine, item["manifest"])
+    except (OSError, _ClientConflictError):
+        _restore_cleanup_candidate(ledger_path, ledger, item, source, quarantine, rename)
+        raise
+    item["location"] = "quarantine"
+    _write_ledger(ledger_path, ledger)
+    return True
+
+
 def _cleanup_garbage_item(
     ledger_path: Path,
     ledger: dict[str, Any],
@@ -178,42 +236,14 @@ def _cleanup_garbage_item(
     generation_id = item["path_generation_id"]
     source = _source_path(ledger_path, skills_root, item["kind"], generation_id)
     quarantine = _quarantine_path(ledger_path, item["kind"], generation_id)
-    if item["location"] == "source":
-        source_exists = _exists(source)
-        quarantine_exists = _exists(quarantine)
-        if not source_exists:
-            if quarantine_exists:
-                raise _ClientConflictError("unclaimed cleanup quarantine exists")
-            return True
-        if quarantine_exists:
-            raise _ClientConflictError("cleanup source and quarantine both exist")
-        item["location"] = "claiming"
-        _write_ledger(ledger_path, ledger)
-        try:
-            rename(source, quarantine)
-        except OSError:
-            if _exists(source) and not _exists(quarantine):
-                item["location"] = "source"
-                _write_ledger(ledger_path, ledger)
-            raise
-    if item["location"] == "claiming":
-        source_exists = _exists(source)
-        quarantine_exists = _exists(quarantine)
-        if source_exists and quarantine_exists:
-            raise _ClientConflictError("cleanup claim outcome is ambiguous")
-        if source_exists:
-            item["location"] = "source"
-            _write_ledger(ledger_path, ledger)
-            return False
-        if not quarantine_exists:
-            raise _ClientConflictError("cleanup claim outcome is ambiguous")
-        try:
-            _verify_cleanup_candidate(quarantine, item["manifest"])
-        except (OSError, _ClientConflictError):
-            _restore_cleanup_candidate(ledger_path, ledger, item, source, quarantine, rename)
-            raise
-        item["location"] = "quarantine"
-        _write_ledger(ledger_path, ledger)
+    if item["location"] == "source" and _claim_from_source(
+        ledger_path, ledger, item, source, quarantine, rename
+    ):
+        return True
+    if item["location"] == "claiming" and not _settle_claim(
+        ledger_path, ledger, item, source, quarantine, rename
+    ):
+        return False
     if not _exists(quarantine):
         return True
     _preserve_claimed_tree(ledger_path, ledger, item, quarantine, rename)

@@ -442,6 +442,33 @@ def _comment_matches(source: str) -> dict[int, tuple[int, re.Match[str]]]:
     return matches
 
 
+def _strip_rules(
+    line: str,
+    comment_column: int,
+    match: re.Match[str],
+    rules_to_remove: set[str],
+    *,
+    preserve_line_numbers: bool,
+) -> tuple[str, list[str]]:
+    """`line` with the zombie rules dropped from its ignore comment, and the rules dropped.
+
+    The comment goes entirely when no rule remains; a line holding only the comment is
+    emptied (kept as a bare newline when `preserve_line_numbers`).
+    """
+    rules = [rule.strip() for rule in match.group(1).split(",")]
+    remaining = [rule for rule in rules if rule not in rules_to_remove]
+    gone = [rule for rule in rules if rule in rules_to_remove]
+    if remaining:
+        start = comment_column + match.start(1)
+        end = comment_column + match.end(1)
+        return line[:start] + ", ".join(remaining) + line[end:], gone
+    comment_start = comment_column + match.start()
+    prefix = line[:comment_start].rstrip(" \t")
+    if prefix:
+        return prefix + ("\n" if line.endswith("\n") else ""), gone
+    return ("\n" if preserve_line_numbers and line.endswith("\n") else ""), gone
+
+
 def strip_file(
     path: Path,
     candidates: frozenset[PyrightIgnore],
@@ -465,23 +492,14 @@ def strip_file(
         if line_number not in comments:
             continue
         comment_column, match = comments[line_number]
-        rules = [rule.strip() for rule in match.group(1).split(",")]
-        remaining = [rule for rule in rules if rule not in rules_to_remove]
-        removed.update((line_number, rule) for rule in rules if rule in rules_to_remove)
-        line = lines[line_number - 1]
-        if remaining:
-            start = comment_column + match.start(1)
-            end = comment_column + match.end(1)
-            lines[line_number - 1] = line[:start] + ", ".join(remaining) + line[end:]
-            continue
-
-        comment_start = comment_column + match.start()
-        prefix = line[:comment_start].rstrip(" \t")
-        if prefix:
-            newline = "\n" if line.endswith("\n") else ""
-            lines[line_number - 1] = prefix + newline
-        else:
-            lines[line_number - 1] = "\n" if preserve_line_numbers and line.endswith("\n") else ""
+        lines[line_number - 1], gone = _strip_rules(
+            lines[line_number - 1],
+            comment_column,
+            match,
+            rules_to_remove,
+            preserve_line_numbers=preserve_line_numbers,
+        )
+        removed.update((line_number, rule) for rule in gone)
 
     expected = {(candidate.line, candidate.rule) for candidate in candidates}
     if removed != expected:

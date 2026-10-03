@@ -6,11 +6,7 @@
     "base/host/net/resilience.py::ambient-instance:http_classifier": 1,
     "base/host/system/backend.py::global-rebind:_backend": 1
   },
-  "complexity": {
-    "base/host/env/config_registry.py::_build_registry": 19,
-    "base/host/env/dotenv_boot.py::_enforce_cluster_env_authority": 18,
-    "base/host/env/runtime_config.py::write_fields": 22
-  },
+  "complexity": {},
   "files": {
     "base/host/env/tests/test_dotenv_boot.py": 969
   },

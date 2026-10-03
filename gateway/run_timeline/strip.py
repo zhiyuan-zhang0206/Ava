@@ -267,6 +267,49 @@ def _placed_min_ts(groups: list[tuple[str, list[TimelineItem]]]) -> datetime | N
     return min(stamps) if stamps else None
 
 
+def _extend_with_history(
+    database: Database,
+    agent_id: int,
+    groups: list[tuple[str, list[TimelineItem]]],
+    window_start: datetime,
+) -> bool:
+    """Walk compact-history segments newest-first into `groups` until the window is covered.
+
+    True when the walk cap cut it short (truncation is reported, never silent).
+    """
+    boundaries = _cached_boundaries(database, agent_id)
+    covered = False
+    for rank, boundary in enumerate(boundaries[:_MESSAGE_SEGMENT_WALK_MAX], start=1):
+        segment = _cached_segment_messages(database, agent_id, boundary)
+        if not segment:
+            continue
+        segment_items, _ = build_timeline_items(segment, [], segment_prefix=f"s{rank}.{boundary}")
+        segment_groups = _group_strip_items(segment_items)
+        groups.extend(segment_groups)
+        segment_min = _placed_min_ts(segment_groups)
+        if segment_min is not None and segment_min <= window_start:
+            covered = True
+            break
+    return not covered and len(boundaries) > _MESSAGE_SEGMENT_WALK_MAX
+
+
+def _place_in_window(
+    groups: list[tuple[str, list[TimelineItem]]], window_start: datetime, window_end: datetime
+) -> tuple[list[RunTimelineMessage], bool]:
+    """The groups whose ts falls in the window; True when a legacy-ts group was unplaceable."""
+    placed: list[RunTimelineMessage] = []
+    unplaceable = False
+    for key, group in groups:
+        ts = _group_ts(group)
+        if ts is not None and ts < _LEGACY_TS_FLOOR:
+            unplaceable = True
+            continue
+        if ts is not None and not (window_start <= ts <= window_end):
+            continue
+        placed.append(_message_from_group(key, group))
+    return placed, unplaceable
+
+
 def _strip_messages_for_window(
     database: Database,
     agent_id: int,
@@ -295,34 +338,9 @@ def _strip_messages_for_window(
 
     current_min = _placed_min_ts(groups)
     if current_min is None or current_min > window_start:
-        boundaries = _cached_boundaries(database, agent_id)
-        covered = False
-        for rank, boundary in enumerate(boundaries[:_MESSAGE_SEGMENT_WALK_MAX], start=1):
-            segment = _cached_segment_messages(database, agent_id, boundary)
-            if not segment:
-                continue
-            segment_items, _ = build_timeline_items(
-                segment, [], segment_prefix=f"s{rank}.{boundary}"
-            )
-            segment_groups = _group_strip_items(segment_items)
-            groups.extend(segment_groups)
-            segment_min = _placed_min_ts(segment_groups)
-            if segment_min is not None and segment_min <= window_start:
-                covered = True
-                break
-        if not covered and len(boundaries) > _MESSAGE_SEGMENT_WALK_MAX:
-            truncated = True
+        truncated = _extend_with_history(database, agent_id, groups, window_start)
 
-    placed: list[RunTimelineMessage] = []
-    unplaceable = False
-    for key, group in groups:
-        ts = _group_ts(group)
-        if ts is not None and ts < _LEGACY_TS_FLOOR:
-            unplaceable = True
-            continue
-        if ts is not None and not (window_start <= ts <= window_end):
-            continue
-        placed.append(_message_from_group(key, group))
+    placed, unplaceable = _place_in_window(groups, window_start, window_end)
     if unplaceable:
         truncated = True
     placed.sort(key=lambda message: (message.ts is not None, message.ts or window_start))

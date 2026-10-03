@@ -4,6 +4,7 @@ import secrets
 from typing import Any
 from uuid import uuid4
 
+from psycopg import Connection
 from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
 
@@ -76,6 +77,53 @@ def _validate_invoked_python(process_metadata: dict[str, Any] | None) -> None:
         raise ValueError("process_metadata.invoked_python must be a nonempty string")
 
 
+def _validate_request(
+    caller: CallerIdentity,
+    *,
+    automatic: bool,
+    name: str,
+    executor_name: str,
+    process_metadata: dict[str, Any] | None,
+    relay_provider: str,
+    relay_thread_id: str | None,
+    relay_codex_remote: str | None,
+    relay_batch_window_seconds: int,
+) -> None:
+    if automatic and (not name.strip() or not executor_name.strip()):
+        raise ValueError("Session name and executor name must be nonempty")
+    if caller.kind != "external_agent":
+        raise ValueError("Impersonation requires an external_agent caller")
+    _validate_invoked_python(process_metadata)
+    validate_relay_spec(relay_provider, relay_thread_id, relay_codex_remote)
+    if (
+        not isinstance(relay_batch_window_seconds, int)
+        or isinstance(relay_batch_window_seconds, bool)
+        or not 0 <= relay_batch_window_seconds <= 300
+    ):
+        raise ValueError("relay_batch_window_seconds must be an integer from 0 through 300")
+
+
+def _reject_open_previous(conn: Connection[Any], agent_id: int) -> None:
+    """Lock the agent's latest lease row and refuse a new request while one is still live."""
+    with conn.cursor(row_factory=dict_row) as cur:
+        cur.execute(
+            "SELECT * FROM agent_impersonations WHERE agent_id=%s "
+            "AND (status IN ('requested','accepted','active') OR delta_version>applied_version OR (automatic AND handoff_applied_at IS NULL)) "
+            "FOR UPDATE",
+            (agent_id,),
+        )
+        previous = cur.fetchone()
+    if previous is None:
+        return
+    previous = expire(conn, previous)
+    if (
+        previous["status"] in OPEN
+        or previous["delta_version"] > previous["applied_version"]
+        or (previous["automatic"] and previous["handoff_applied_at"] is None)
+    ):
+        raise ImpersonationError("Agent already has a request, lease, or unapplied state")
+
+
 def request(
     agent_id: int,
     *,
@@ -93,18 +141,17 @@ def request(
 ) -> dict[str, Any]:
     """Prepare a controller lease and return its scoped relay credential."""
     ttl = _ttl(ttl_seconds)
-    if automatic and (not name.strip() or not executor_name.strip()):
-        raise ValueError("Session name and executor name must be nonempty")
-    if caller.kind != "external_agent":
-        raise ValueError("Impersonation requires an external_agent caller")
-    _validate_invoked_python(process_metadata)
-    validate_relay_spec(relay_provider, relay_thread_id, relay_codex_remote)
-    if (
-        not isinstance(relay_batch_window_seconds, int)
-        or isinstance(relay_batch_window_seconds, bool)
-        or not 0 <= relay_batch_window_seconds <= 300
-    ):
-        raise ValueError("relay_batch_window_seconds must be an integer from 0 through 300")
+    _validate_request(
+        caller,
+        automatic=automatic,
+        name=name,
+        executor_name=executor_name,
+        process_metadata=process_metadata,
+        relay_provider=relay_provider,
+        relay_thread_id=relay_thread_id,
+        relay_codex_remote=relay_codex_remote,
+        relay_batch_window_seconds=relay_batch_window_seconds,
+    )
     relay_token = secrets.token_urlsafe(32) if relay_provider in SESSION_RELAY_PROVIDERS else None
     lease_id = uuid4()
     delivery_config = current_field_values()
@@ -115,22 +162,7 @@ def request(
             raise ImpersonationError("Impersonation is limited to the agent's own machine")
         if meta["status"] not in ("running", "idling"):
             raise ImpersonationError("Agent must be running or idling to receive a request")
-        with conn.cursor(row_factory=dict_row) as cur:
-            cur.execute(
-                "SELECT * FROM agent_impersonations WHERE agent_id=%s "
-                "AND (status IN ('requested','accepted','active') OR delta_version>applied_version OR (automatic AND handoff_applied_at IS NULL)) "
-                "FOR UPDATE",
-                (agent_id,),
-            )
-            previous = cur.fetchone()
-        if previous is not None:
-            previous = expire(conn, previous)
-            if (
-                previous["status"] in OPEN
-                or previous["delta_version"] > previous["applied_version"]
-                or (previous["automatic"] and previous["handoff_applied_at"] is None)
-            ):
-                raise ImpersonationError("Agent already has a request, lease, or unapplied state")
+        _reject_open_previous(conn, agent_id)
         set_actor(conn, caller.source())
         conn.execute(
             "INSERT INTO agent_impersonations(id,agent_id,source,machine,reason,"

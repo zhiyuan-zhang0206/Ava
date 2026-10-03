@@ -112,6 +112,35 @@ def reject_unnegotiated_caller(source: str) -> None:
         )
 
 
+_ID_SOURCE_LABELS = (
+    (_WATCHER_PREFIX, "Watcher"),
+    (_SHELL_PREFIX, "Shell session"),
+    (_SCHEDULE_PREFIX, "Schedule"),
+)
+
+
+def _caller_envelope(content: str, source: str) -> str:
+    caller = CallerIdentity.from_source(source)
+    instance = f" / {caller.instance}" if caller.instance is not None else ""
+    label = "External agent" if caller.kind == "external_agent" else "Unknown caller"
+    return f"{label} ({caller.subject}{instance}; asserted provenance):\n\n{content}"
+
+
+def _timestamp(created_at: datetime | None) -> tuple[str, str]:
+    """`(bare timestamp, header form with its leading space)`; both empty when timestamps are off.
+
+    The header form carries its own leading space so the off-state leaves no
+    stray space before the colon (gated by settings.general.message_timestamps).
+    """
+    if not settings.general.message_timestamps:
+        return "", ""
+    clock = Clock.from_settings()
+    formatted = (
+        clock.format_timestamp(created_at) if created_at is not None else clock.now_timestamp()
+    )
+    return formatted, f" {formatted}"
+
+
 def wrap_inbound(content: str, source: str, *, created_at: datetime | None = None) -> str:
     """Dispatch envelope wrap by source.
 
@@ -121,23 +150,10 @@ def wrap_inbound(content: str, source: str, *, created_at: datetime | None = Non
     callers / system messages), the current time is used as before.
     """
     if source.startswith(_CALLER_PREFIXES):
-        caller = CallerIdentity.from_source(source)
-        instance = f" / {caller.instance}" if caller.instance is not None else ""
-        label = "External agent" if caller.kind == "external_agent" else "Unknown caller"
-        return f"{label} ({caller.subject}{instance}; asserted provenance):\n\n{content}"
+        return _caller_envelope(content, source)
     if source == "system" or source.startswith(_SYSTEM_PREFIX):
         return f"[system] {content}"
-    # `ts` carries its own leading space so the off-state leaves no stray
-    # space before the colon (gated by settings.general.message_timestamps).
-    if settings.general.message_timestamps:
-        clock = Clock.from_settings()
-        formatted = (
-            clock.format_timestamp(created_at) if created_at is not None else clock.now_timestamp()
-        )
-        ts = f" {formatted}"
-    else:
-        formatted = ""
-        ts = ""
+    formatted, ts = _timestamp(created_at)
     if source == "user" or source.startswith(_PAGE_PREFIX):
         # Bare "[ts]" header for both human sources (user ruling 2026-09-18):
         # no label, no colon; with timestamps off there is no header at all.
@@ -145,18 +161,11 @@ def wrap_inbound(content: str, source: str, *, created_at: datetime | None = Non
     if source.startswith(_AGENT_PREFIX):
         sender_id = source.removeprefix(_AGENT_PREFIX)
         return f"Agent {sender_id}{ts}:\n\n{content}"
-    if source.startswith(_WATCHER_PREFIX):
-        wid = source.removeprefix(_WATCHER_PREFIX)
-        _check_positive_int_id(wid, source)
-        return f"Watcher (id {wid}){ts}:\n\n{content}"
-    if source.startswith(_SHELL_PREFIX):
-        sid = source.removeprefix(_SHELL_PREFIX)
-        _check_positive_int_id(sid, source)
-        return f"Shell session (id {sid}){ts}:\n\n{content}"
-    if source.startswith(_SCHEDULE_PREFIX):
-        sid = source.removeprefix(_SCHEDULE_PREFIX)
-        _check_positive_int_id(sid, source)
-        return f"Schedule (id {sid}){ts}:\n\n{content}"
+    for prefix, label in _ID_SOURCE_LABELS:
+        if source.startswith(prefix):
+            ident = source.removeprefix(prefix)
+            _check_positive_int_id(ident, source)
+            return f"{label} (id {ident}){ts}:\n\n{content}"
     raise ValueError(
         f"Unrecognized inbound source: {source!r} — "
         "must be 'system' / 'system:<subtype>' / 'agent:N' / 'user' / 'ui:page:<name>' / "

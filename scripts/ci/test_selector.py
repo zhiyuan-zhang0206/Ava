@@ -189,20 +189,10 @@ def build_import_reverse_map(repo_root: Path) -> dict[str, set[str]]:
     return reverse_map
 
 
-def select_tests(
-    changed_files: list[str],
-    *,
-    repo_root: Path,
-    event: str = "pull_request",
-    head_ref: str = "",
-) -> SelectionResult:
-    """Apply the ordered conservative test-selection rules to one changed-file list."""
-    repo_root = repo_root.resolve()
-    changed = tuple(sorted({path.strip() for path in changed_files if path.strip()}))
-    collectable = collectable_test_paths(repo_root)
-    durations = _load_durations(repo_root / ".test_durations")
-    full_estimate = _estimate_seconds(collectable, durations)
-
+def _early_decision(
+    changed: tuple[str, ...], *, event: str, head_ref: str, full_estimate: float
+) -> SelectionResult | None:
+    """The rules that decide from the changed paths alone; None when the import map is needed."""
     if event != "pull_request" or head_ref.startswith(_QUEUE_PREFIXES):
         return _result("FULL", "queue-or-non-pr", full_estimate=full_estimate)
     if all(_is_documentation_path(path) for path in changed):
@@ -225,6 +215,26 @@ def select_tests(
         return _result("FULL", "test-configuration", full_estimate=full_estimate)
     if any(path.startswith("tests/e2e/") for path in changed):
         return _result("FULL", "e2e", full_estimate=full_estimate)
+    return None
+
+
+def select_tests(
+    changed_files: list[str],
+    *,
+    repo_root: Path,
+    event: str = "pull_request",
+    head_ref: str = "",
+) -> SelectionResult:
+    """Apply the ordered conservative test-selection rules to one changed-file list."""
+    repo_root = repo_root.resolve()
+    changed = tuple(sorted({path.strip() for path in changed_files if path.strip()}))
+    collectable = collectable_test_paths(repo_root)
+    durations = _load_durations(repo_root / ".test_durations")
+    full_estimate = _estimate_seconds(collectable, durations)
+
+    early = _early_decision(changed, event=event, head_ref=head_ref, full_estimate=full_estimate)
+    if early is not None:
+        return early
 
     reverse_map = build_import_reverse_map(repo_root)
     blind_changed = tuple(
