@@ -1,19 +1,16 @@
-"""The plugin loader — by-path import, fail-soft containment, the external
-`plugins/` directory scan.
+"""The plugin loader — by-path import and fail-soft containment.
 
 This is framework API for the agent kernel, not the agent SDK: it carries a
-public name — reached across the `ava` package boundary by `agent/extensions/__init__.py`
-and `agent/process_boot.py` — but stays out of the agent's `ava.help()` view
+public name — reached across the `ava` package boundary by `agent/extensions/__init__.py` —
+but stays out of the agent's `ava.help()` view
 because it is absent from `ava.__all_for_ava__`.
 
-Every production load path shares the primitives here — `load_plugin_module`
+The one production load path (`agent/extensions/__init__.py:load_extensions`, which the
+agent host, a child and the plugin catalog all run) uses the primitives here — `load_plugin_module`
 (the by-path import contract: dotted name, synthetic parent packages,
 `sys.modules` registration before execution, reload-in-place) and
-`safe_load_plugin_module` (the fail-soft wrapper). `scan_and_load` is the
-external-only loader `agent/process_boot.py` calls at host boot;
-`agent/extensions/__init__.py:load_extensions` drives the same primitives, so a
-plugin sees the same module name, `__package__`, and `sys.modules` identity
-whichever production path imports it. Importing registers nothing: the SDK
+`safe_load_plugin_module` (the fail-soft wrapper), so a plugin sees one module name,
+`__package__`, and `sys.modules` identity however many times it loads. Importing registers nothing: the SDK
 surface a plugin declares is installed by `ava/sdk_surface/install.py`.
 """
 
@@ -69,10 +66,9 @@ def load_plugin_module(
 ) -> ModuleType:
     """Import one plugin's ``plugin.py`` by path under its production dotted name.
 
-    THE by-path loader both production load paths share (`scan_and_load` at
-    host boot, `agent.extensions.load_extensions` per graph build), so
+    THE by-path loader (`agent.extensions.load_extensions` drives it), so
     one plugin sees one module name, one ``__package__``, and one
-    ``sys.modules`` identity whichever path imported it. The dotted name is
+    ``sys.modules`` identity however many times it loads. The dotted name is
     ``plugins.<name>.<module>`` for an external plugin and
     ``ava_builtins.plugins.<name>.<module>`` for a built-in (`module` defaults
     to the entry ``plugin``; `agent.extensions` passes ``agent_runtime`` for
@@ -165,78 +161,3 @@ def safe_load_plugin_module(
 
         load_report.report_plugin_load_failure(name, exc)
         return None
-
-
-def scan_and_load(
-    plugin_dir: str | Path | None = None,
-    *,
-    enabled: set[str] | None = None,
-) -> list[str]:
-    """Scan every subdirectory under plugin_dir, import each one's plugin.py.
-
-    Layout convention:
-
-        $AVA_HOME/plugins/
-        ├── audit/plugin.py
-        ├── token_budget/plugin.py
-        └── my_custom/plugin.py
-
-    Importing a plugin.py registers nothing: it only makes the module (and its
-    `contribute()`) available to `agent.extensions.load_extensions`, which builds the
-    registry and installs the SDK surface. Every import goes through
-    `safe_load_plugin_module`, the exact contract
-    `agent/graph/_build.py:load_extensions` uses for the same file — same
-    dotted module name, same `sys.modules` identity, same fail-soft
-    containment — so the two production load paths cannot disagree about what
-    a plugin import does.
-
-    Args:
-        plugin_dir: scan root. `None` uses the loaded generation in wheel mode
-            or the per-home installation root in source mode. String with `~`
-            is auto-expanded to user home.
-        enabled: explicit set of enabled names. Empty set = load none
-            (distinct from `None`); `None` (default) loads all valid plugins
-            under plugin_dir — for tests and explicit full loads. The
-            production caller (`agent/process_boot.py:load_process_extensions`)
-            passes the per-machine enable set from `plugins_config.json`, so a
-            disabled plugin is never imported by the host-boot path either.
-
-    Returns the list of successfully loaded plugin names (sorted). No plugin_dir
-    → empty list. A plugin that fails to load — relative-import error, syntax
-    error, top-level exception, missing sibling — is skipped with a loud report
-    and the remaining plugins still load (the fail-soft contract; 2026-08-28
-    ava_ledger / 2026-09-10 agent-host incidents). Disabled names are never
-    imported.
-    """
-    if plugin_dir is None:
-        from base.deploy.release.runtime_interpreter import external_plugin_read_root
-
-        root = external_plugin_read_root()
-    else:
-        root = Path(plugin_dir).expanduser()
-    if not root.exists():
-        return []
-
-    loaded: list[str] = []
-    for plugin_subdir in sorted(root.iterdir()):
-        # Dot-prefixed dirs are atomic-install residue (.name.staging /
-        # .name.backup-<pid>, 2026-08-28 ava_ledger defense line) — never a
-        # real plugin, even when a hard kill left plugin.py inside.
-        if plugin_subdir.name.startswith("."):
-            continue
-        if not plugin_subdir.is_dir():
-            continue
-        plugin_py = plugin_subdir / "plugin.py"
-        if not plugin_py.exists():
-            continue
-
-        plugin_name = plugin_subdir.name
-        if enabled is not None and plugin_name not in enabled:
-            continue
-
-        module = safe_load_plugin_module(plugin_py, name=plugin_name, pkg="plugins")
-        if module is None:
-            continue
-        loaded.append(plugin_name)
-
-    return loaded

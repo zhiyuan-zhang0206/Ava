@@ -1,6 +1,6 @@
 """Real PostgreSQL consent, checkpoint hydration and the external SDK effects of an attachment: native checkpoint reads, borrowed sender and lease-log recording."""
 
-from typing import Annotated
+from typing import Annotated, Any, cast
 from uuid import uuid4
 
 import psycopg
@@ -41,8 +41,6 @@ def native_checkpoint(
     registry = ExtensionRegistry(
         (("integration", PluginContributions(state=(IntegrationPlugin,))),)
     )
-    # `build_agent_state` rebinds `agent.state.AgentState`; the monkeypatch restores it after the test.
-    monkeypatch.setattr(state_module, "AgentState", state_module.AgentState)
     # The attachment builds its state class from the registry of the plugins loaded into the process.
     monkeypatch.setattr("agent.extensions.registry.build_registry", lambda: registry)
     monkeypatch.setattr(agent_identity, "_external_identity", None)
@@ -113,8 +111,10 @@ def test_external_attach_reads_native_checkpoint_and_only_journals_delta(
         handle.update({"seen": {"external"}})
     updated = leases.get(database, event_bus, lease["id"], attested_caller(lease))
     assert updated["delta_version"] == 1
-    assert decode_plugin_delta(updated["plugin_delta"][0]) == {"integration__seen": {"external"}}
     native_snapshot, _, _ = load_snapshot(agent_id)
+    assert decode_plugin_delta(updated["plugin_delta"][0], cast(Any, type(native_snapshot))) == {
+        "integration__seen": {"external"}
+    }
     assert native_snapshot.integration__seen == {"native"}
     with external.attach(lease["id"]):
         assert handle.read().seen == {"native", "external"}

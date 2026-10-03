@@ -1,7 +1,8 @@
 """Plugin config — a declared Pydantic class bound once from its disk image, frozen, immutable.
 
 Symmetric with whole-class state declaration (`agent/state.py`): a plugin writes a Pydantic BaseModel
-and declares it (`PluginContributions.config`, from its `plugin.py` `contribute()`); the framework
+and declares it (`PluginContributions.config`, from the `contribute()` of its `default_config.py` config
+face, `base/packages/plugins/config_face.py`); the framework
 handles namespace isolation + disk persistence. Differences:
 
 - State is runtime mutable, written via LangGraph reducer; Config is a boot
@@ -22,7 +23,7 @@ bind failure as a load failure of that plugin.
 Field metadata `json_schema_extra={"per_agent": True}` marks "can be overridden
 by per-agent CLI overlay".
 
-Declaration (`ava_builtins/plugins/<name>/plugin.py`, with the class in `default_config.py`):
+Declaration (`ava_builtins/plugins/<name>/default_config.py`):
 
     from pydantic import BaseModel, ConfigDict, Field
     from base.packages.plugins.extensions import PluginContributions
@@ -295,6 +296,26 @@ def _per_agent_fields_for(cls: type[BaseModel]) -> set[str]:
     return out
 
 
+def overlay_config_classes() -> dict[str, type[BaseModel]]:
+    """The plugin config classes a per-agent overlay may name, by plugin.
+
+    The class every ENABLED plugin declares in its `default_config.py` config face, read from disk — so
+    the gateway and ops, which bind no plugin config, validate against the same classes as the agent
+    process — with a class this process has bound taking precedence.
+    """
+    from base.packages.plugins import enable_config
+    from base.packages.plugins.config_face import enabled_config_classes
+
+    installed = enable_config.installed_plugin_dirs()
+    config = enable_config.load_for_runtime(set(installed))
+    enabled = {
+        name: plugin_dir
+        for name, plugin_dir in installed.items()
+        if name in config.plugins and config.plugins[name].enabled
+    }
+    return {**enabled_config_classes(enabled), **_PLUGIN_CONFIG_CLASSES}
+
+
 def resolve_overlay_targets(overlay: dict[str, object]) -> dict[str, tuple[str | None, str]]:
     """Dispatch overlay flat keys to framework Settings or a specific plugin Config.
 
@@ -319,19 +340,20 @@ def resolve_overlay_targets(overlay: dict[str, object]) -> dict[str, tuple[str |
     framework_per_agent = per_agent_field_names()
     framework_all = field_names()
 
+    plugin_classes = overlay_config_classes()
     out: dict[str, tuple[str | None, str]] = {}
     for key in overlay:
         matches: list[tuple[str | None, str]] = []
         if key in framework_all:
             matches.append((None, key))
-        for plugin, cls in _PLUGIN_CONFIG_CLASSES.items():
+        for plugin, cls in plugin_classes.items():
             if key in cls.model_fields:
                 matches.append((plugin, key))
 
         if not matches:
             raise InvalidConfigOverlay(
                 f"overlay key {key!r} is not in framework Settings nor any plugin "
-                f"Config — typo? Known plugins: {sorted(_PLUGIN_CONFIG_CLASSES)}"
+                f"Config — typo? Known plugins: {sorted(plugin_classes)}"
             )
         if len(matches) > 1:
             owners = ", ".join(f"{p or 'framework'}.{f}" for p, f in matches)
@@ -348,7 +370,7 @@ def resolve_overlay_targets(overlay: dict[str, object]) -> dict[str, tuple[str |
                     f"per-agent override; if truly needed change framework Settings and plugin Config metadata."
                 )
         else:
-            cls = _PLUGIN_CONFIG_CLASSES[plugin]
+            cls = plugin_classes[plugin]
             if field not in _per_agent_fields_for(cls):
                 raise InvalidConfigOverlay(
                     f"overlay key {key!r} is in plugin {plugin!r} but not marked "
@@ -519,8 +541,11 @@ def validate_config_overlay(overlay: dict[str, object]) -> None:
                     sub = cls()
                     cls.model_validate({**sub.model_dump(), **upd})
             else:
-                cls = _PLUGIN_CONFIG_CLASSES[plugin]
-                current = _PLUGIN_CONFIGS[plugin].model_dump()
+                # The gateway and ops bind no plugin config: validate against the declared class,
+                # layered over this process's bound instance when it has one, else the defaults.
+                cls = overlay_config_classes()[plugin]
+                held = _PLUGIN_CONFIGS.get(plugin)
+                current = (held if held is not None else cls()).model_dump()
                 cls(**{**current, **updates})
         except ValidationError as e:
             owner = "framework" if plugin is None else f"plugin {plugin!r}"

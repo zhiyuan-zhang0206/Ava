@@ -22,9 +22,10 @@ frozen declaration.
   `inspector.py` instead (see below).
 - The SDK surface, declared by `plugin.py`: `sdk_namespaces` (`SdkNamespace(name, module, expand)`), `sdk_members`
   (`SdkMember(namespace, name, fn)` on an existing namespace), `sdk_expansions` (dotted paths promoted into the
-  prompt's expanded SDK reference), `sdk_wraps` (`SdkWrap(target, wrapper)`), `skill_sources`, `config` (one frozen
-  BaseModel bound from `~/.ava/configs/<plugin>/config.json`, schema drift points at `ava plugins update`) and `flags`
+  prompt's expanded SDK reference), `sdk_wraps` (`SdkWrap(target, wrapper)`), `skill_sources` and `flags`
   (`<domain>.<field>` core settings the plugin may read through `read_flag`).
+- `config`, declared by the plugin's `default_config.py` (the config face): one frozen BaseModel bound from
+  `~/.ava/configs/<plugin>/config.json`, schema drift points at `ava plugins update`.
 
 `agent/extensions/registry.py:build_registry()` calls `contribute()` on every enabled plugin's loaded face, in plugin name
 order, and returns an `ExtensionRegistry` — plugin name beside its contributions, so attribution is the entry,
@@ -54,7 +55,7 @@ an error; a reload is a new registry and a new install, and nothing triggers one
 
 ## Faces and registries
 
-A declaration lives in the face the consuming process loads: `agent_runtime.py` for the agent host (the registry above),
+A declaration lives in the face the consuming process loads: `plugin.py`, `default_config.py` and `agent_runtime.py` for the agent host (the registry above),
 `metrics.py` and `inspector.py` for processes with no agent runtime. Each exports `contribute()` with only its own
 field filled. The gateway (per-agent inspector panels) and the Grafana supply (dashboard render, repo and
 installed plugins) build a **data registry** with `base/packages/plugins/data_registry.py`: `load_declaration` imports a

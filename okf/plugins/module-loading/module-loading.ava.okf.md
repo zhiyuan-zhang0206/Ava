@@ -8,11 +8,10 @@ tags:
 
 # Plugin Module Loading
 
-## One loader contract, three production call sites
+## One loader contract, two production call sites
 `agent/extensions/__init__.py:load_extensions()` imports every enabled plugin's
 `plugin.py` (plus its optional `agent_runtime.py` face on the full form) by
-path, and `ava.sdk_surface.plugin_loader.scan_and_load()` does the same for the external
-plugins at host boot (`agent/process_boot.py:load_process_extensions`). The
+path — at host boot, and in the plugin catalog. The
 agent-launched child enters through the same loader (`ava.ensure_plugins_loaded`);
 its stateless form loads surfaces only ([[okf/plugins/module-loading/two-faces.ava.okf.md]]).
 All drive the same primitives (`ava/sdk_surface/plugin_loader.py`), so a plugin sees the same
@@ -87,9 +86,11 @@ reporting through the one reporter: a plugin's `provider.py`
 (`gateway/inspect/_plugin_metrics.py`), the gateway plugin inspector's
 `inspector.py` (`gateway/inspect/_plugin_widgets.py`), and the launched
 child's `import ava` self-load (`ava.ensure_plugins_loaded`, plus a stderr
-line — a child usually has no log sink). One contained site stays off that
-reporter: `default_config.py` images surface as `error`-status entries on the
-plugin-update result (`base/packages/plugins/enable_config.py:update_all_disk_images`).
+line — a child usually has no log sink). The config face `default_config.py` is read by two more processes through
+`base/packages/plugins/config_face.py` (never importing `plugin.py`): `ava plugins update`
+(`enable_config.update_all_disk_images`, a failing face is an `error`-status entry on its result, off the
+reporter) and the gateway/ops overlay validation (`config_registration.overlay_config_classes`, the enabled
+plugins' declared classes, reported fail-soft).
 
 ## Semantics boundary: what stays fail-closed
 Containment covers *code* that fails to load; inventory and contract conflicts

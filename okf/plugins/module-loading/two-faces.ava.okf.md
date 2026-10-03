@@ -26,7 +26,7 @@ Which faces load is the caller's choice:
   (`ava.sdk_surface.install.uninstall()`), then each plugin's surface followed by its
   face. The graph build and agent-side tooling take the full form.
 - `load_agent_faces()` — faces alone, for a process whose surfaces are already
-  loaded: host boot after `scan_and_load`, and a stateful child whose lazy
+  loaded: a stateful child whose lazy
   state slot materializes on first use (task #3633 leg-2 — the decode and the
   faces resolve together; state fields are part of the state schema it
   rebuilds).

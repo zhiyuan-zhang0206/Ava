@@ -107,7 +107,6 @@ def _exercise_shutdown(failure: str) -> None:
             process_boot,
             init_process_scope=MagicMock(),
             land_cluster_extensions=MagicMock(),
-            load_process_extensions=MagicMock(),
         ),
         patch.object(graph, "build_graph", return_value=MagicMock()),
         patch.multiple(

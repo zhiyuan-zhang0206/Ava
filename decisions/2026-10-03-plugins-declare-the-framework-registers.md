@@ -100,9 +100,9 @@ new registry, build a new graph, swap both", but nothing triggers that today and
   and one that raises or returns a non-`PluginContributions` is reported and skipped like a plugin that
   fails to import.
 
-## Final shape (A through C2)
+## Final shape (A through C2, amended by the leftover pass)
 
-A plugin ships up to six faces, each a plain module exporting a pure `contribute()` that returns the
+A plugin ships up to seven faces, each a plain module exporting a pure `contribute()` that returns the
 `PluginContributions` fields it owns; a process builds its registry from the faces it loads, gates each
 plugin against the keys of those faces in its `ava-plugin.json` (a mismatch, a malformed `contribute()`,
 an invalid state or a bad config is a load failure of that plugin: reported, left out), and hands the
@@ -110,7 +110,8 @@ registry to whatever consumes it.
 
 | Face (module) | Fields | Loaded by | Registry built by | Consumed by |
 | --- | --- | --- | --- | --- |
-| `plugin.py` | `sdk_namespaces`, `sdk_members`, `sdk_expansions`, `sdk_wraps`, `skill_sources`, `config`, `flags` | every process that runs agent code: agent host, exec child, watcher / schedule child, external attach | `agent.extensions.registry.build_registry(faces)` inside `load_extensions` | `ava.sdk_surface.install.install` |
+| `plugin.py` | `sdk_namespaces`, `sdk_members`, `sdk_expansions`, `sdk_wraps`, `skill_sources`, `flags` | every process that runs agent code: agent host, exec child, watcher / schedule child, external attach | `agent.extensions.registry.build_registry(faces)` inside `load_extensions` | `ava.sdk_surface.install.install` |
+| `default_config.py` | `config` | the surface's processes (loaded with `plugin.py`), plus `ava plugins update` and the gateway / ops overlay validation, which read it alone through `base/packages/plugins/config_face.py` | the same builder (surface faces) | `ava.sdk_surface.install.install` binds it; update merges the disk image; overlay validation checks keys and types |
 | `agent_runtime.py` | hooks, `state`, `system_prompt_sections`, `context_notes` | the agent host (full `load_extensions`); a stateful exec child or external attach upgrades to it only to build the state class | same builder, both faces merged per plugin | the host daemon: checkpoint serde, `build_graph(checkpointer, extensions)`, `AvaContext.extensions` |
 | `metrics.py`, `inspector.py` | `metrics`, `inspect_widgets` | the gateway (per call), the Grafana dashboard supply (repo and installed plugins), `ava plugins inspect` | `data_registry.build_data_registry` over `load_declaration` | inspector endpoints, dashboard render |
 | `provider.py` | `providers` | every process that builds or validates a chat model | none: each declaration is installed as it is read | `base/lm/plugin_providers.py` into the process's model catalog |
@@ -122,8 +123,7 @@ omitted from the registry `install` returns; the SDK-usage recorder goes in last
 wrap layer) and comes off first on `uninstall`; the installation is recorded on the `ava` module object.
 The only other process-wide writes left are the model catalog (one writer, the provider loader, because
 chat-model building, config validation, model lists and context budgets read it as a process-wide fact and
-a process never holds two catalogs), the rebinding of `agent.state.AgentState` by `build_agent_state`, and
-the bound plugin configs / declared flags that `install` writes for the readers in `ava._settings` and
+a process never holds two catalogs), and the bound plugin configs / declared flags that `install` writes for the readers in `ava._settings` and
 `read_flag`. There is no `PluginContext` ContextVar, no attribution ledger and no `register_*` entry point
 on the plugin side.
 
@@ -132,16 +132,14 @@ Left over, each a deliberate non-change:
 - No in-process reload exists (see Reload): the host loads once, the daemon restarts on a plugin directory
   change. A registry is a value, so "new registry, new graph, new install, swap" is now expressible; nothing
   triggers it.
-- The gateway and ops processes load no `plugin.py`, so overlay validation there knows only framework fields
-  and rejects an overlay naming a plugin's config field as an unknown key. Unexercised today (no builtin
-  plugin declares a config); fixing it means loading the declared config classes at that boundary.
-- The gateway loads every shipped plugin's `metrics.py` regardless of the enable state, while inspector
-  widgets follow it. Unifying them is a behavior change not made here.
-- `agent.state.AgentState` is still rebound by `build_agent_state(extensions)`, and the exec IPC serializer
-  reads the classes off it (`process_state_classes`).
-- `scan_and_load` at host boot still imports external `plugin.py` files that the full `load_extensions`
-  imports again.
-- `ava plugins update` still finds a plugin's config class in `default_config.py` by inspection rather than
-  from the declaration.
 - No compatibility layer: plugins outside the repo that call the deleted entry points must export
   `contribute()`.
+
+Resolved in the leftover pass (each was listed above before it): the gateway and ops overlay validation
+reads the config class every enabled plugin declares in `default_config.py`; the gateway's per-agent
+plugin metrics follow the enable state like its widgets (the Grafana supply still renders panels for every
+shipped plugin, so a disabled plugin's history stays visible); `build_agent_state` binds nothing and the
+graph registers each node with `input_schema=` (the exec IPC allowlist reads the loaded faces' state
+classes, the external attachment and impersonation replay take the class from their own caller); the host
+boot imports a plugin once, through `load_extensions`; `ava plugins update` takes the class from the
+`default_config.py` declaration.

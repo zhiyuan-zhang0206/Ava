@@ -28,6 +28,7 @@ import pytest
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
+from base.packages.plugins import enable_config
 from base.telemetry.metrics.plugin_metrics import MetricSpec
 from gateway.app import app
 from gateway.inspect import _plugin_metrics
@@ -482,6 +483,24 @@ def test_in_process_loader_imports_shipped_metrics() -> None:
     assert _plugin_metrics._load_plugin_metrics() == specs
 
 
+def test_a_disabled_plugins_metrics_are_not_loaded(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Metrics follow the enable rule the widgets already follow: a disabled shipped plugin
+    contributes none (the per-agent inspector panel), read per request."""
+    shipped = _plugin_metrics._PLUGINS_DIR / "ava_fleet" / "metrics.py"
+    assert shipped in _plugin_metrics._plugin_metric_modules()
+    real_load = enable_config.load_for_runtime
+
+    def _fleet_disabled(known: set[str]) -> enable_config.PluginsConfig:
+        config = real_load(known)
+        entries = {**config.plugins, "ava_fleet": enable_config.PluginEntry(enabled=False)}
+        return enable_config.PluginsConfig(plugins=entries)
+
+    monkeypatch.setattr(enable_config, "load_for_runtime", _fleet_disabled)
+
+    assert shipped not in _plugin_metrics._plugin_metric_modules()
+    assert "ava_fleet" not in {s.plugin for s in _plugin_metrics._load_plugin_metrics()}
+
+
 def _fixture_plugin(
     root: Path, name: str, *, metric: str = "", raises: bool = False, query: str = _STAT_QUERY
 ) -> Path:
@@ -516,6 +535,14 @@ def fixture_plugins_dir(
     """Point the loader at `tmp_path` as the shipped-plugins directory (the
     fixture plugins are the only ones it sees besides the core metrics)."""
     monkeypatch.setattr(_plugin_metrics, "_PLUGINS_DIR", tmp_path)
+    real_load = enable_config.load_for_runtime
+
+    def _with_fixture_plugins(known: set[str]) -> enable_config.PluginsConfig:
+        config = real_load(known)
+        fixtures = {p.name: enable_config.PluginEntry(enabled=True) for p in tmp_path.iterdir()}
+        return enable_config.PluginsConfig(plugins={**config.plugins, **fixtures})
+
+    monkeypatch.setattr(enable_config, "load_for_runtime", _with_fixture_plugins)
     shipped_path = importlib.import_module("ava_builtins.plugins").__path__
     monkeypatch.setattr("ava_builtins.plugins.__path__", [*shipped_path, str(tmp_path)])
 

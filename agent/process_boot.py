@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Any
 
 import ava
-from ava.sdk_surface import plugin_loader, sdk_disable
+from ava.sdk_surface import sdk_disable
 from base.db import Database
 from base.host.env.agent_slices import ModelOverrides, agent_setting
 from base.log import logger
@@ -113,8 +113,8 @@ def land_cluster_extensions(db: Database) -> None:
     this once at daemon boot, beside the other two process-scope halves, rather
     than per agent.
 
-    Runs before `load_process_extensions` so the ordering stays correct when
-    plugins become registry-owned in a later slice. Today it does not matter —
+    Runs before the plugin load (`agent.extensions.load_extensions`, at host boot) so the ordering
+    stays correct when plugins become registry-owned in a later slice. Today it does not matter —
     skills are read per turn and plugins still come from the checkout — which is
     exactly why it is worth fixing now rather than after the ordering has a
     consequence.
@@ -148,44 +148,6 @@ def land_cluster_extensions(db: Database) -> None:
             len(result.landed),
             len(result.updated),
         )
-
-
-def load_process_extensions() -> None:
-    """Process-scope boot: import every enabled external plugin under `$AVA_HOME/plugins`.
-
-    Import side effects are the registration (hooks, Layer A wraps, system-prompt
-    contributions), and they must land before the first exec node runs agent code
-    — plugins may monkey-patch `ava.X.y`.
-
-    The enable set comes from the same per-machine `plugins_config.json` the
-    graph-build loader reads (`plugins_config.load_for_runtime`): *disabled
-    means never imported on any path* (issue #2161). Before this, this loader
-    imported every directory on disk regardless of config — `ava plugins
-    disable` changed nothing at startup, and a hand-placed broken plugin (a
-    relative-import `plugin.py`) took the whole agent host down on every
-    restart. A plugin that fails to load is now skipped loudly by
-    `scan_and_load`'s fail-soft contract and can no longer block the boot.
-
-    **Exactly once per process.** Repeating it is not a supported way to pick up
-    a newly installed plugin: plugin-spec-v2's S4 dispose contract is
-    unimplemented, so a second load leaks whatever the first allocated and forks
-    class identity for anything that captured a plugin class before it (PR #154
-    made the module object stable, which removes a different obstacle, not this
-    one). Newly installed plugins take effect on the next runner restart.
-    """
-    from base.packages.plugins import enable_config
-
-    known = set(enable_config.installed_plugin_dirs())
-    config = enable_config.load_for_runtime(known)
-    enabled = {name for name, entry in config.plugins.items() if entry.enabled}
-    plugin_loader.scan_and_load(enabled=enabled)
-    # Each loaded surface's agent-runtime face (state fields / hooks / prompt
-    # sections). Faces of plugins whose surface loads later (the built-in set,
-    # via build_graph's full `load_extensions`) are picked up there — the face
-    # always follows its surface (task #3633).
-    from agent.extensions import load_agent_faces
-
-    load_agent_faces()
 
 
 # Return type is Any on purpose: the chat-model class must stay out of module

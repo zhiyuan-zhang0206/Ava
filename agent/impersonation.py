@@ -207,7 +207,9 @@ async def _apply_plugin_deltas(
             receipt.get("version", 0) if receipt.get("lease_id") == session["id"] else 0
         )
         if recorded_version < version:
-            delta = decode_plugin_delta(session["plugin_delta"][version - 1])
+            delta = decode_plugin_delta(
+                session["plugin_delta"][version - 1], graph.builder.state_schema
+            )
             await graph.aupdate_state(config, {**delta, "impersonation_applied": expected})
             await flush_checkpoint(graph.checkpointer, agent_id)  # pyright: ignore[reportUnknownMemberType, reportUnknownArgumentType]
             receipt = expected

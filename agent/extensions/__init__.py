@@ -1,14 +1,17 @@
 """Plugin/extension loader — imports each plugin's faces and installs what they declare.
 
-A plugin declares; the framework registers. Every plugin loads in up to two faces here, each exporting a
+A plugin declares; the framework registers. Every plugin loads in up to three faces here, each exporting a
 pure `contribute()` that returns the `PluginContributions` fields it owns (`registry.py` merges them):
 
 - ``plugin.py`` — the SDK **surface**: `sdk_namespaces`, `sdk_members`, `sdk_wraps`, `skill_sources`,
-  `config`, `flags`. Its imports must stay off the agent runtime (no `agent.state`, `agent.hooks`,
+  `flags`. Its imports must stay off the agent runtime (no `agent.state`, `agent.hooks`,
   `agent.graph.*`, or LangChain chain), because every process that runs agent code loads it.
+- ``default_config.py`` — optional sibling: the plugin's **config class** (`config`), declared on its own so
+  the gateway and `ava plugins update` can read it without importing `plugin.py`
+  (`base/packages/plugins/config_face.py`). Loaded with the surface.
 - ``agent_runtime.py`` — optional sibling file: the plugin's **agent runtime** (hooks, state, system
   prompt sections, context notes). Imported on the full path only (the agent process:
-  `load_agent_faces()` after the host boot's `scan_and_load`, and `load_extensions()` at host boot). An
+  `load_extensions()` at host boot, and `load_agent_faces()` for a child upgrading to the full load). An
   exec / watcher / schedule child never imports it — its boot stays off the graph and LM stacks.
 
 Entry points:
@@ -18,8 +21,8 @@ Entry points:
   what they declare, install its SDK surface into `ava`, return the admitted registry (plus the enable
   config). The host builds the graph, the checkpoint serde and its turns from that one registry.
 - ``load_extensions(surface=True)`` — surfaces only (child contexts); no uninstall.
-- ``load_agent_faces()`` — runtime faces only, for a process that already loaded the surfaces (host boot
-  after `scan_and_load`; a child upgrading to the full load because its request carries a state snapshot).
+- ``load_agent_faces()`` — runtime faces only, for a process that already loaded the surfaces (a child upgrading to the full
+  load because its request carries a state snapshot).
 
 `registry.py` builds the `ExtensionRegistry` from the loaded faces; `catalog.py` reads back what the
 loaded plugins declare (`ava plugins inspect`) and runs this loader in the calling process. This module
@@ -35,6 +38,7 @@ from pathlib import Path
 
 from base import paths
 from base.packages.plugins import enable_config as plugins_cfg
+from base.packages.plugins.config_face import CONFIG_FACE
 from base.packages.plugins.extensions import ExtensionRegistry
 
 SURFACE_MODULE = "plugin"
@@ -76,19 +80,19 @@ def _enabled_plugin_dirs() -> list[tuple[str, Path]]:
     ]
 
 
-def _load_face(name: str, plugin_dir: Path, *, pkg: str) -> None:
-    """Import one plugin's `agent_runtime` face, when it ships one.
+def _load_face(name: str, plugin_dir: Path, *, pkg: str, module: str = FACE_MODULE) -> None:
+    """Import one of a plugin's optional faces (`agent_runtime` by default), when it ships one.
 
     Same by-path loader and fail-soft containment as the surface: a face whose
     module body raises is reported and skipped without taking down the plugin
     (the surface stays loaded).
     """
-    face_py = plugin_dir / f"{FACE_MODULE}.py"
+    face_py = plugin_dir / f"{module}.py"
     if not face_py.exists():
         return
     from ava.sdk_surface.plugin_loader import safe_load_plugin_module
 
-    safe_load_plugin_module(face_py, name=name, pkg=pkg, module=FACE_MODULE)
+    safe_load_plugin_module(face_py, name=name, pkg=pkg, module=module)
 
 
 @dataclass(frozen=True)
@@ -118,7 +122,7 @@ def load_extensions(*, surface: bool = False) -> LoadedExtensions:
     `import ava` / host boot for the whole cluster. The remaining enabled plugins keep loading; the
     half-executed module was dropped from `sys.modules` so a later reload retries from a clean slate.
     """
-    from agent.extensions.registry import ALL_FACES, build_registry
+    from agent.extensions.registry import ALL_FACES, SURFACE_FACES, build_registry
     from ava.sdk_surface import install as sdk_install
     from ava.sdk_surface.plugin_loader import safe_load_plugin_module
 
@@ -138,10 +142,11 @@ def load_extensions(*, surface: bool = False) -> LoadedExtensions:
         pkg = _pkg_of(plugin_dir)
         if safe_load_plugin_module(plugin_dir / "plugin.py", name=name, pkg=pkg) is None:
             continue
+        _load_face(name, plugin_dir, pkg=pkg, module=CONFIG_FACE)
         if not surface:
             _load_face(name, plugin_dir, pkg=pkg)
 
-    registry = build_registry((SURFACE_MODULE,) if surface else ALL_FACES)
+    registry = build_registry(SURFACE_FACES if surface else ALL_FACES)
     return LoadedExtensions(config, sdk_install.install(registry))
 
 

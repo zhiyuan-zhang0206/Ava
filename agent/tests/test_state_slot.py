@@ -41,7 +41,6 @@ from langgraph.graph.message import REMOVE_ALL_MESSAGES, add_messages
 from langgraph.runtime import Runtime
 from pydantic import BaseModel, Field
 
-import agent.state as agent_state
 import ava
 from agent.graph.exec.node import _exec_node_impl
 from agent.messages.guard import MessagesMutationError
@@ -64,12 +63,9 @@ assert (
 
 
 @pytest.fixture(autouse=True)
-def _reset_state_slot(monkeypatch: pytest.MonkeyPatch):
+def _reset_state_slot():
     """Before/after each test, force reset slots back to None — do not restore previous (would mask test
-    leaks). Module-level slots should default to None; any leftover value is a bug.
-
-    `build_agent_state` rebinds `agent.state.AgentState`; the monkeypatch puts it back after the test."""
-    monkeypatch.setattr(agent_state, "AgentState", BaseAgentState)
+    leaks). Module-level slots should default to None; any leftover value is a bug."""
     ava.state = None
     ava.state_update = None
     yield

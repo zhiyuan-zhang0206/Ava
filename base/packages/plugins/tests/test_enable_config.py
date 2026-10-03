@@ -187,8 +187,15 @@ def test_discover_duplicate_raises(tmp_path: Path):
 # ── update_all_disk_images ──
 
 
+_DECLARE = (
+    "from base.packages.plugins.extensions import PluginContributions\n"
+    "def contribute():\n    return PluginContributions(config=Config)\n"
+)
+
+
 def _write_default_config_py(plugin_dir: Path, body: str) -> None:
-    (plugin_dir / "default_config.py").write_text(body)
+    """A config face: the plugin's model (`body`) plus the `contribute()` that declares `Config`."""
+    (plugin_dir / "default_config.py").write_text(body + _DECLARE)
 
 
 def test_update_no_plugins_returns_empty(tmp_path: Path):
@@ -206,25 +213,36 @@ def test_update_skips_plugin_without_default_config(tmp_path: Path):
     assert e.detail and "default_config.py" in e.detail
 
 
-def test_update_error_when_no_basemodel(tmp_path: Path):
+def test_update_error_when_the_declared_class_is_not_a_basemodel(tmp_path: Path):
     plugin_dir = _make_plugin_dir("nobm", tmp_path)
-    _write_default_config_py(plugin_dir, "x = 1\n")
+    _write_default_config_py(plugin_dir, "class Config:\n    x = 1\n")
     result = update_all_disk_images()
     assert result.entries[0].status == "error"
     assert "BaseModel" in (result.entries[0].detail or "")
 
 
-def test_update_error_when_multiple_basemodels(tmp_path: Path):
+def test_update_error_when_the_face_has_no_contribute(tmp_path: Path):
+    plugin_dir = _make_plugin_dir("nodecl", tmp_path)
+    (plugin_dir / "default_config.py").write_text(
+        "from pydantic import BaseModel\nclass Config(BaseModel):\n    x: int = 1\n"
+    )
+    result = update_all_disk_images()
+    assert result.entries[0].status == "error"
+    assert "contribute" in (result.entries[0].detail or "")
+
+
+def test_update_takes_the_declared_class_among_several_models(tmp_path: Path):
+    """The declaration names the class; a second model in the file is not an ambiguity."""
     plugin_dir = _make_plugin_dir("multibm", tmp_path)
     _write_default_config_py(
         plugin_dir,
         "from pydantic import BaseModel\n"
-        "class A(BaseModel):\n    x: int = 1\n"
-        "class B(BaseModel):\n    y: int = 2\n",
+        "class Other(BaseModel):\n    y: int = 2\n"
+        "class Config(BaseModel):\n    x: int = 1\n",
     )
     result = update_all_disk_images()
-    assert result.entries[0].status == "error"
-    assert "2 BaseModel" in (result.entries[0].detail or "")
+    assert result.entries[0].status == "updated"
+    assert result.entries[0].added == ["x"]
 
 
 def test_update_writes_default_when_no_disk_image(tmp_path: Path):

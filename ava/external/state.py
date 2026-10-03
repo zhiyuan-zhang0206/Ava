@@ -48,26 +48,22 @@ def _validate_messages_delta(delta: dict[str, Any]) -> None:
             )
 
 
-def encode_plugin_delta(delta: dict[str, Any]) -> dict[str, str]:
-    """Serialize a validated reducer input without coercing it to a field value."""
-    state_module = _state_module()
-    checked = state_module._validate_plugin_state_keys(delta, state_module.AgentState)
+def encode_plugin_delta(delta: dict[str, Any], state_cls: type[Any]) -> dict[str, str]:
+    """Serialize a reducer input validated against `state_cls`, without coercing it to a field value."""
+    checked = _state_module()._validate_plugin_state_keys(delta, state_cls)
     _validate_messages_delta(checked)
     encoding, payload = _serializer().dumps_typed(checked)
     return {"encoding": encoding, "data": base64.b64encode(payload).decode("ascii")}
 
 
-def decode_plugin_delta(encoded: dict[str, Any]) -> dict[str, Any]:
-    """Decode the checkpoint codec envelope, rejecting unknown state channels."""
+def decode_plugin_delta(encoded: dict[str, Any], state_cls: type[Any]) -> dict[str, Any]:
+    """Decode the checkpoint codec envelope, rejecting channels `state_cls` does not have."""
     payload = _serializer().loads_typed(
         (encoded["encoding"], base64.b64decode(encoded["data"], validate=True))
     )
     if not isinstance(payload, dict):
         raise TypeError("external plugin delta must decode to a dict")
-    state_module = _state_module()
-    checked = cast(
-        dict[str, Any], state_module._validate_plugin_state_keys(payload, state_module.AgentState)
-    )
+    checked = cast(dict[str, Any], _state_module()._validate_plugin_state_keys(payload, state_cls))
     _validate_messages_delta(checked)
     return checked
 
@@ -84,8 +80,8 @@ def apply_plugin_delta(state: Any, delta: dict[str, Any]) -> None:
 
 def load_snapshot(agent_id: int) -> tuple[Any, dict[str, Any] | None, dict[str, Any] | None]:
     """Read native state and pinned config; never create or update a checkpoint."""
-    # Built first: the checkpoint decode's allowlist is the class's plugin state classes.
-    # What the plugins this attachment loaded declare.
+    # What the plugins this attachment loaded declare; the checkpoint decode's allowlist is the state
+    # classes of the faces it loaded (`process_state_classes`).
     registry = importlib.import_module("agent.extensions.registry").build_registry()
     state_cls = _state_module().build_agent_state(registry)
     with database().connect(autocommit=True) as conn:

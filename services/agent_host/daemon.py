@@ -15,10 +15,10 @@ Usage:
 1. **Pidfile**, so a second instance exits instead of racing the first for turns.
 2. **Process-scope boot** — `init_process_scope` (trace export; must precede any
    model build so OpenLLMetry can instrument it), `land_cluster_extensions` (the
-   cluster's installed skills onto this machine), then `load_process_extensions`
-   (the external-plugin load). Exactly once per process: see
-   `agent/process_boot.py:load_process_extensions` for why repeating it is not
-   an option, and issue #170 for the behavioural change that follows. The
+   cluster's installed skills onto this machine). The plugin load
+   (`agent.extensions.load_extensions`, step 3) happens exactly once per process:
+   repeating it is not an option, see issue #170 for the behavioural change that
+   follows. The
    materialization is once per process for a milder reason — the skills
    directory belongs to the machine, not to any agent — but it lands here rather
    than per turn because the host is long-lived. Newly installed extensions
@@ -113,7 +113,7 @@ _TURN_PROGRESS_PUBLISH_TIMEOUT_S = 3.0
 
 
 # Plugin-discovery watchdog (issue #170): the host loads external plugins
-# exactly once per process (`load_process_extensions`), so a plugin installed
+# exactly once per process (`agent.extensions.load_extensions`), so a plugin installed
 # after boot is invisible to every agent on this runner until a restart. The
 # runner's supervisor (watchdog -> healthcheck) restarts a dead host within a
 # minute, so the fix is not a reload (plugin-spec-v2's S4 dispose contract is
@@ -452,13 +452,11 @@ async def run() -> None:
     from agent.process_boot import (
         init_process_scope,
         land_cluster_extensions,
-        load_process_extensions,
     )
 
     workload_pool, control_pool, bus, db = _boot_handles()
     init_process_scope()
     land_cluster_extensions(db)
-    load_process_extensions()
 
     liveness = Liveness(_LIVENESS_TIMEOUT_S)
     beat: asyncio.Task[None] | None = None
