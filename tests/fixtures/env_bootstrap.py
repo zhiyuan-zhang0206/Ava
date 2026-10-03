@@ -91,6 +91,12 @@ if sys.platform == "darwin":
 _SESSION_SUFFIX = f"{os.getpid()}_{int(time.time() * 1_000_000)}"
 _TEST_AVA_HOME = Path(tempfile.mkdtemp(prefix=f"ava_test_home_{_SESSION_SUFFIX}_"))
 os.environ["AVA_HOME"] = str(_TEST_AVA_HOME)
+# CI keeps the vendored Postgres tree (zonky + pgvector, put in place by
+# scripts/ci/vendor_pg_runtime.py) outside the per-session home; linking it in
+# makes `pg_tool` resolve the production server build instead of a host apt one.
+_CI_VENDORED_RUNTIME_ROOT = os.environ.get("CI_VENDORED_RUNTIME_ROOT")
+if _CI_VENDORED_RUNTIME_ROOT:
+    (_TEST_AVA_HOME / "runtime").symlink_to(_CI_VENDORED_RUNTIME_ROOT, target_is_directory=True)
 # Persist the same worker-local channel through settings refresh and child boot.
 # A mutation of settings.data_plane alone is lost when a rollout rebuilds it.
 _TEST_EVENTS_CHANNEL = f"ava:events:test:{_SESSION_SUFFIX}"
