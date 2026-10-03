@@ -24,6 +24,7 @@ from agent.hooks import (
 from agent.state import AgentState
 from agent.tests._fakes import make_fake_ops_pool
 from base.agents.context import AvaContext
+from base.agents.context.slices import AgentSlices
 from base.packages.plugins import activation, contributions
 from base.packages.plugins.context import PluginContext
 
@@ -79,6 +80,7 @@ def _empty_runtime() -> Runtime[AvaContext]:
         ops_pool=make_fake_ops_pool(),
         llm=MagicMock(),
         event_publisher=MagicMock(),
+        agent=AgentSlices.resolve(),
     )
     return Runtime(context=ctx)
 

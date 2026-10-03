@@ -20,14 +20,14 @@ tags:
 
 ```python
 @register_system_prompt_section
-def _coding_tools_section() -> str:
+def _coding_tools_section(slices: AgentSlices) -> str:
     # cwd / ava.files / ava.shell stub descriptions + coding convention preamble
     # (fail fast, don't reinvent, worktree + PR workflow, AGENTS.md/CLAUDE.md role)
 ```
 
 ```python
 @register_system_prompt_section
-def _engineering_workflow_section() -> str:
+def _engineering_workflow_section(slices: AgentSlices) -> str:
     # Loose debug / bug-fix workflow advice (reproduce → root cause → fix)
     # Gated by "ava_code_workflow" ∈ settings.agent.system_prompt_extra
     # (env AVA_SYSTEM_PROMPT_EXTRA), **default empty = not injected by default**

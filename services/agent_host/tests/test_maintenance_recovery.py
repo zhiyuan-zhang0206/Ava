@@ -10,6 +10,7 @@ from psycopg_pool import AsyncConnectionPool
 
 from agent.db import claim_inbound_batch
 from agent.ownership.hosted import admit_hosted_runtime, apply_hosted_lifecycle
+from base.agents.context.slices import AgentSlices
 from base.cluster.machine import machine_name
 from base.db import Database
 from base.deploy.maintenance import admission, cohort, pause_owner
@@ -190,11 +191,16 @@ async def test_cold_idle_resume_uses_pointer_without_an_extra_model_call(
         bus=EventBus.from_settings(),
         db=Database.from_settings(),
     )
-    ctx = AvaContext(ops_pool=aops_pool, event_publisher=MagicMock(), llm=MagicMock())
+    ctx = AvaContext(
+        ops_pool=aops_pool,
+        event_publisher=MagicMock(),
+        llm=MagicMock(),
+        agent=AgentSlices.resolve(),
+    )
     monkeypatch.setattr(successor, "_runtime_for", AsyncMock(return_value=object()))
     monkeypatch.setattr("services.agent_host.runtime.validate_model_config", MagicMock())
 
-    async def drive(_agent: int, _runtime: Any) -> TurnOutcome:
+    async def drive(_agent: int, _runtime: Any, _slices: object) -> TurnOutcome:
         return await successor._invoke_until_done(_agent, ctx)
 
     monkeypatch.setattr(successor, "_drive_turns", drive)

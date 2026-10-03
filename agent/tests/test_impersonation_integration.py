@@ -25,6 +25,7 @@ from agent.startup import wrap_saver_writes_with_nstep_interval
 from ava.external.state import encode_plugin_delta
 from base.agents import impersonation as leases
 from base.agents.context import AvaContext
+from base.agents.context.slices import AgentSlices
 from base.agents.history.delta_read_compat import wrap_saver_reads_with_delta_reconstruction
 from base.agents.messages.caller_identity import CallerIdentity
 from base.cluster.machine import machine_name
@@ -149,7 +150,7 @@ async def _prepare_graph(
     builder.add_node("after_exec", after_exec, destinations=("claim",))
     builder.add_edge(START, "claim")
     graph = builder.compile(checkpointer=saver)
-    ctx = AvaContext(ops_pool=aops_pool, event_publisher=MagicMock())
+    ctx = AvaContext(ops_pool=aops_pool, event_publisher=MagicMock(), agent=AgentSlices.resolve())
     config: RunnableConfig = {"configurable": {"thread_id": str(agent_id)}, "recursion_limit": 100}
     reset: dict[str, Any] = {
         "turn_active": False,

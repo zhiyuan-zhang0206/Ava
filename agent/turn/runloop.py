@@ -23,7 +23,6 @@ from agent.state_channels import (
     CircuitState,
 )
 from base.agents.context import AvaContext
-from base.config.turn_view import turn_settings
 from base.events.live.projection import Error
 from base.log import logger
 from base.telemetry.audit_events import prepare_event_log, record_audit_reported_async
@@ -106,7 +105,7 @@ def _provider_recovery(reason: str) -> str:
     return "Choose a different model overlay or resolve the provider policy rejection, then send a new message."
 
 
-def _model_vendor() -> str | None:
+def _model_vendor(ctx: AvaContext) -> str | None:
     """Vendor key of this turn's model — the account a failure bills to.
 
     The classifier stamps the same read onto the ``llm_provider_error`` log's
@@ -118,7 +117,7 @@ def _model_vendor() -> str | None:
     """
     from base.lm.factory import provider_key_of_model
 
-    return provider_key_of_model(turn_settings.lm.llm_model)
+    return provider_key_of_model(ctx.require_agent().brain.llm_model)
 
 
 async def _record_permanent_reject_outcome(
@@ -203,7 +202,7 @@ async def _record_permanent_reject_outcome(
             agent_id,
             error_class=exc.error_class or "permanent",
             provider=exc.provider,
-            vendor=_model_vendor(),
+            vendor=_model_vendor(ctx),
             status=exc.status,
             reason=SUPPRESS_REASON_PERMANENT_REJECT,
             occurred_at=occurred_at if occurred_at is not None else datetime.now(UTC),
@@ -373,7 +372,7 @@ async def _handle_fatal_llm_error(
                     agent_id,
                     error_class=exc.error_class,
                     provider=exc.provider,
-                    vendor=_model_vendor(),
+                    vendor=_model_vendor(ctx),
                     status=exc.status,
                     reason=reason,
                     occurred_at=occurred_at if occurred_at is not None else datetime.now(UTC),

@@ -30,8 +30,8 @@ from pathlib import Path
 from langchain_core.messages import HumanMessage
 
 from agent.messages import NoteTag, system_note_message
+from base.agents.context.slices import AgentSlices
 from base.config import settings
-from base.config.turn_view import turn_settings
 from base.log import logger
 from base.paths import memory_dir, workspace_dir
 
@@ -56,10 +56,10 @@ _FRAMING = (
 )
 
 
-def memory_index_note() -> HumanMessage | None:
+def memory_index_note(slices: AgentSlices) -> HumanMessage | None:
     """The shared `MEMORY.md` pointer index, or `None` when there is nothing to
     inject (the layer is off, or the pool has no index yet)."""
-    if turn_settings.agent.eval_isolation or not settings.agent.memory_index_inject_enabled:
+    if slices.sandbox.eval_isolation or not settings.agent.memory_index_inject_enabled:
         return None
     path = memory_dir() / _MEMORY_INDEX_FILE
     if not path.is_file():
@@ -180,7 +180,7 @@ def _migrate_legacy_memory_file(legacy: Path, index: Path) -> None:
     logger.info("[per-agent-memory] migrated legacy {} -> {}", legacy, index)
 
 
-def per_agent_memory_note() -> HumanMessage | None:
+def per_agent_memory_note(_slices: AgentSlices) -> HumanMessage | None:
     """The agent's own memory index (`<workspace>/memory/MEMORY.md`).
 
     Returns a note even when the index is absent or empty — the framing plus

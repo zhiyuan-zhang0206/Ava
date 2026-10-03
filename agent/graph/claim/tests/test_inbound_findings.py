@@ -28,6 +28,7 @@ from agent.messages import NoteTag
 from agent.state import AgentState
 from ava import security
 from base.agents.context import AvaContext
+from base.agents.context.slices import AgentSlices
 from base.agents.messages.kwargs import AvaMsgType, read_ava_kwargs
 from base.config import settings
 from base.db import insert_inbound_message
@@ -54,7 +55,14 @@ def _scan_on_with_fresh_snapshot_cursor(monkeypatch: pytest.MonkeyPatch) -> None
 async def _claim(pool: AsyncConnectionPool, agent_id: int) -> Command[Any]:
     return await claim_node(
         AgentState(messages=[SystemMessage(content="sys")]),
-        Runtime(context=AvaContext(ops_pool=pool, llm=MagicMock(), event_publisher=MagicMock())),
+        Runtime(
+            context=AvaContext(
+                ops_pool=pool,
+                llm=MagicMock(),
+                event_publisher=MagicMock(),
+                agent=AgentSlices.resolve(),
+            )
+        ),
         {"configurable": {"thread_id": str(agent_id)}},
     )
 

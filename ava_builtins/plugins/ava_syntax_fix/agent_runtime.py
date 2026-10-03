@@ -25,7 +25,6 @@ from agent.hooks import Hook, register_before_exec
 from agent.messages import exec_output_message
 from agent.state import AgentState
 from base.agents.context import AvaContext
-from base.config.turn_view import turn_settings
 
 from ._deterministic_fixes import apply_all_deterministic_fixes
 from ._escapes import _fix_invalid_escapes
@@ -94,7 +93,7 @@ def _emit_syntax_fix_event(
     )
 
 
-def _apply_fix_pipeline(code: str) -> tuple[str, list[str]]:
+def _apply_fix_pipeline(code: str, *, ruff_format: bool) -> tuple[str, list[str]]:
     """Run the deterministic fix pipeline (steps 1-6): Chinese punctuation,
     missing imports, invalid escapes, ruff --fix, ruff format (gated), and the
     11 compile-guarded deterministic patterns. Returns (fixed_code,
@@ -128,7 +127,7 @@ def _apply_fix_pipeline(code: str) -> tuple[str, list[str]]:
     # Step 5: ruff format (style normalization) — pulls in-context code toward
     # canonical formatting. Off the deterministic-correctness path: it never
     # fixes an error, only restyles, so it is gated and trivially skippable.
-    fixed_code, fmt_applied = _maybe_ruff_format(fixed_code)
+    fixed_code, fmt_applied = _maybe_ruff_format(fixed_code, enabled=ruff_format)
     if fmt_applied:
         fixes_applied.append("ruff_format")
 
@@ -151,10 +150,10 @@ def _apply_fix_pipeline(code: str) -> tuple[str, list[str]]:
     return fixed_code, fixes_applied
 
 
-def _maybe_ruff_format(code: str) -> tuple[str, bool]:
+def _maybe_ruff_format(code: str, *, enabled: bool) -> tuple[str, bool]:
     """Step 5 of the pipeline: run `ruff format` (style-only normalization)
     when gated on; returns (code, applied)."""
-    if not turn_settings.sandbox.syntax_fix_ruff_format:
+    if not enabled:
         return code, False
     formatted = _ruff_format(code)
     return formatted, formatted != code
@@ -258,14 +257,16 @@ async def _handle_compile_failure(
     }
 
 
-async def _fix_call(last_msg: AIMessage, call: ToolCall) -> dict[str, Any] | None:
+async def _fix_call(
+    last_msg: AIMessage, call: ToolCall, *, ruff_format: bool
+) -> dict[str, Any] | None:
     """Repair one invocation without inspecting or rewriting sibling code."""
     if call["name"] != "execute_code":
         return None
     code = first_tool_call_code([call])
     if not code:
         return None
-    fixed_code, fixes_applied = _apply_fix_pipeline(code)
+    fixed_code, fixes_applied = _apply_fix_pipeline(code, ruff_format=ruff_format)
     fixed_msg = replace_execute_code(last_msg, call["id"], fixed_code)
     try:
         compile(fixed_code, "<agent_code>", "exec")
@@ -286,7 +287,7 @@ class _SyntaxFixHook(Hook):
     async def __call__(
         self,
         state: AgentState,
-        _runtime: Runtime[AvaContext],
+        runtime: Runtime[AvaContext],
         _config: RunnableConfig,
         /,
     ) -> dict[str, Any] | None:
@@ -295,8 +296,9 @@ class _SyntaxFixHook(Hook):
             return None
         last_msg = normalize_tool_calls(original) or original
         changed = last_msg is not original
+        ruff_format = runtime.context.require_agent().sandbox.syntax_fix_ruff_format
         for call in last_msg.tool_calls:
-            result = await _fix_call(last_msg, call)
+            result = await _fix_call(last_msg, call, ruff_format=ruff_format)
             if result is None:
                 continue
             if "goto" in result:

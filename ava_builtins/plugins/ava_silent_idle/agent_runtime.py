@@ -45,14 +45,14 @@ class _SilentIdleContinueHook(Hook):
     async def __call__(
         self,
         state: AgentState,
-        _runtime: Runtime[AvaContext],
+        runtime: Runtime[AvaContext],
         _config: RunnableConfig,
         /,
     ) -> dict | None:
         if not _tail_is_silent_idle(state.messages):
             return None
 
-        if auto_compact_will_fire(state):
+        if auto_compact_will_fire(state, runtime.context.require_agent().brain.llm_model):
             logger.info(
                 "[{label}] {body}",
                 label="silent-idle",

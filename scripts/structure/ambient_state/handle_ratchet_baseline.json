@@ -1,16 +1,19 @@
 {
   "agent": {
-    "shim": 3
+    "shim": 3,
+    "turn-settings-read": 4
   },
   "agent/graph": {
-    "shim": 3
+    "shim": 3,
+    "turn-settings-read": 2
   },
   "agent/ownership": {
     "bus-built": 3
   },
   "ava": {
     "bus-built": 1,
-    "shim": 1
+    "shim": 1,
+    "turn-settings-read": 2
   },
   "ava/external": {
     "shim": 1
@@ -19,7 +22,8 @@
     "shim": 4
   },
   "ava_builtins/plugins": {
-    "bus-built": 3
+    "bus-built": 3,
+    "turn-settings-read": 4
   },
   "base/agents": {
     "bus-built": 10,
@@ -33,7 +37,8 @@
     "shim": 2
   },
   "base/packages": {
-    "shim": 1
+    "shim": 1,
+    "turn-settings-read": 3
   },
   "base/telemetry": {
     "shim": 6
@@ -60,6 +65,9 @@
   },
   "services": {
     "shim": 2
+  },
+  "services/agent_host": {
+    "turn-settings-read": 1
   },
   "services/ava_root_glue": {
     "self-built": 1

@@ -67,7 +67,6 @@ from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from base.agents import AvaAgentError
-from base.agents.context import AvaContext
 from base.cluster.auth import cookie_name
 from base.config import settings
 from base.db import Database
@@ -189,13 +188,6 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     """
     ensure_provider_plugins_loaded()
 
-    # AvaContext bundle — gateway is a non-graph entry point, so handles
-    # (llm / ops_pool / inbound_listener) stay None; string-level
-    # config (db_url / events_channel / ...) populates from settings defaults. Handlers that
-    # want a uniform view of "where this process should talk to infra" read
-    # app.state.ctx; raw db_pool / get_async_redis() keep working for
-    # call sites that aren't migrated yet.
-    app.state.ctx = AvaContext()
     # Runtime consumer -> `Database.pool()` dials the pooled URL (PgBouncer when
     # enabled, else direct) and decides the connection kwargs in one place:
     # prepare_threshold=None keeps every borrowed connection transaction-pooling-safe,

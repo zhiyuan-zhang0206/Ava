@@ -64,7 +64,6 @@ from agent.state import AgentState, CompactState, ContextReset
 from base.agents.context import AvaContext, agent_id_from_config
 from base.agents.history.checkpoint_cleanup import mark_compact_boundary
 from base.agents.messages.kwargs import AvaMsgType, read_ava_kwargs
-from base.config.turn_view import turn_settings
 from base.events.live.projection import Cancelled, CompactDone
 from base.lm.context_budget import latest_input_tokens, resolve_context_budget
 from base.log import logger
@@ -204,6 +203,7 @@ def emit_compaction_monitoring(
 async def generate_summary(
     messages: list[AnyMessage],
     llm: BaseChatModel,
+    llm_model: str,
 ) -> str:
     """Run the Compaction LLM over the whole conversation; returns the summary text.
 
@@ -242,7 +242,7 @@ async def generate_summary(
     # Gemini explicit cache is live the summary call rides it too (and its
     # stale-retry recovers a lapsed TTL), otherwise plain bind_tools.
     response, used_explicit_cache = await ainvoke_with_cache_retry(llm, compaction_input)
-    model = getattr(llm, "model_name", None) or turn_settings.lm.llm_model
+    model = getattr(llm, "model_name", None) or llm_model
     if isinstance(model, str) and model:
         from base.lm.usage import (
             CACHE_MECHANISM_MIXED,
@@ -324,7 +324,9 @@ def _emergency_fallback_summary(messages: list[AnyMessage]) -> str:
     return _EMERGENCY_COMPACT_MARKER
 
 
-async def emergency_compact_summary(messages: list[AnyMessage], llm: BaseChatModel) -> str:
+async def emergency_compact_summary(
+    messages: list[AnyMessage], llm: BaseChatModel, llm_model: str
+) -> str:
     """The circuit-breaker compaction summary: a real compaction first, then the
     no-LLM fallback — used by the overflow self-rescue path (claim decide).
 
@@ -350,7 +352,7 @@ async def emergency_compact_summary(messages: list[AnyMessage], llm: BaseChatMod
     last_error: Exception | None = None
     for attempt in range(1, COMPACT_MAX_ATTEMPTS + 1):
         try:
-            summary = await generate_summary(messages, llm)
+            summary = await generate_summary(messages, llm, llm_model)
         except Exception as e:
             last_error = e
             if _is_permanent_provider_failure(e):
@@ -437,7 +439,7 @@ def _summary_awaits_reply(messages: list[AnyMessage]) -> bool:
     return False
 
 
-def auto_compact_will_fire(state: AgentState) -> bool:
+def auto_compact_will_fire(state: AgentState, llm_model: str) -> bool:
     """Whether the force-compact path would replace ``state.messages`` this turn:
     occupancy over the model's hard ceiling AND a non-empty conversation to
     compress. The single gate — plugins that must defer a message write on a
@@ -445,12 +447,12 @@ def auto_compact_will_fire(state: AgentState) -> bool:
     this instead of replicating the estimate + threshold, so the prediction can
     never drift from ``auto_compact_for_llm``.
 
-    Resolves the ceiling from the agent's own model (``turn_settings.lm.llm_model``,
+    Resolves the ceiling from the agent's own model (`llm_model`, the brain slice,
     which the spawn overlay already applied); ``UnknownModelWindowError`` surfaces
     rather than silently mis-gating an agent whose window we do not know."""
     if _summary_awaits_reply(state.messages):
         return False
-    budget = resolve_context_budget(turn_settings.lm.llm_model)
+    budget = resolve_context_budget(llm_model)
     if _context_occupancy(state.messages) <= budget.hard_compact_tokens:
         return False
     return bool(conversation_messages(state.messages))
@@ -460,13 +462,14 @@ async def _auto_compact_summary(
     messages: list[AnyMessage],
     llm: BaseChatModel,
     content_count: int,
+    llm_model: str,
 ) -> str:
     """Generate and validate a summary without committing any context change."""
     summary: str = ""
     last_error: Exception | None = None
     for attempt in range(1, COMPACT_MAX_ATTEMPTS + 1):
         try:
-            summary = await generate_summary(messages, llm)
+            summary = await generate_summary(messages, llm, llm_model)
         except Exception as e:
             last_error = e
             logger.warning(
@@ -527,7 +530,8 @@ async def auto_compact_for_llm(
     if _summary_awaits_reply(state.messages):
         return None
     occupancy = _context_occupancy(state.messages)
-    if occupancy <= resolve_context_budget(turn_settings.lm.llm_model).hard_compact_tokens:
+    llm_model = runtime.context.require_agent().brain.llm_model
+    if occupancy <= resolve_context_budget(llm_model).hard_compact_tokens:
         return None
     content_msgs = conversation_messages(state.messages)
     if not content_msgs:
@@ -553,7 +557,8 @@ async def auto_compact_for_llm(
     try:
         async with subscribe_interrupt(runtime.context.ops_pool, agent_id) as interrupted:
             summary = await interruptible_model(
-                _auto_compact_summary(list(state.messages), llm, len(content_msgs)), interrupted
+                _auto_compact_summary(list(state.messages), llm, len(content_msgs), llm_model),
+                interrupted,
             )
     except ModelInterruptedError:
         emit_compact_finished(publisher, agent_id, compact_run_id, status="replaced")
@@ -614,7 +619,7 @@ async def auto_compact_for_llm(
     # REMOVE_ALL, and a note between an AIMessage and its ToolMessage would be
     # rejected by the provider. Best-effort: a dump failure must never abort
     # the compaction itself.
-    dump_path = dump_history(state.messages, agent_id)
+    dump_path = dump_history(state.messages, agent_id, runtime.context.require_agent().history_dump)
     summary_kwargs: dict[str, Any] = {
         "additional_kwargs": {
             "ava_msg_type": AvaMsgType.COMPACT_SUMMARY.value,
@@ -693,7 +698,7 @@ COMPACT_REMINDER_NOTE = (
 )
 
 
-def _compact_reminder_update(state: AgentState) -> dict | None:
+def _compact_reminder_update(state: AgentState, llm_model: str) -> dict | None:
     """The one-time wind-down reminder, injected when occupancy sits in the band
     below the forced ceiling (soft_compact_tokens < occupancy <=
     hard_compact_tokens). Returns the `messages` update + bookkeeping, or None.
@@ -710,7 +715,7 @@ def _compact_reminder_update(state: AgentState) -> dict | None:
       compaction advances compact.version past the stored bookmark.
     """
     occupancy = _context_occupancy(state.messages)
-    if occupancy <= resolve_context_budget(turn_settings.lm.llm_model).soft_compact_tokens:
+    if occupancy <= resolve_context_budget(llm_model).soft_compact_tokens:
         return None
     if not conversation_messages(state.messages):
         return None
@@ -759,13 +764,14 @@ class _CompactReminderHook(Hook):
     async def __call__(
         self,
         state: AgentState,
-        _runtime: Runtime[AvaContext],
+        runtime: Runtime[AvaContext],
         _config: RunnableConfig,
         /,
     ) -> dict | None:
-        if _summary_awaits_reply(state.messages) or auto_compact_will_fire(state):
+        llm_model = runtime.context.require_agent().brain.llm_model
+        if _summary_awaits_reply(state.messages) or auto_compact_will_fire(state, llm_model):
             return None
-        return _compact_reminder_update(state)
+        return _compact_reminder_update(state, llm_model)
 
 
 _compact_reminder = _CompactReminderHook()

@@ -58,6 +58,7 @@ from ava_builtins.plugins.ava_syntax_fix.agent_runtime import (
     syntax_fix_before_exec,
 )
 from base.agents.context import AvaContext
+from base.agents.context.slices import AgentSlices
 from base.config import settings
 
 # --- _fix_chinese_punctuation ---
@@ -775,10 +776,7 @@ class TestFixInvalidEscapes:
 class TestSyntaxFixBeforeExec:
     @staticmethod
     def _runtime():
-        ctx = AvaContext(
-            ops_pool=AsyncMock(),
-            llm=MagicMock(),
-        )
+        ctx = AvaContext(ops_pool=AsyncMock(), llm=MagicMock(), agent=AgentSlices.resolve())
         return Runtime(context=ctx)
 
     @staticmethod
@@ -1548,10 +1546,7 @@ class TestSyntaxFixEvents:
 
     @staticmethod
     def _runtime():
-        ctx = AvaContext(
-            ops_pool=AsyncMock(),
-            llm=MagicMock(),
-        )
+        ctx = AvaContext(ops_pool=AsyncMock(), llm=MagicMock(), agent=AgentSlices.resolve())
         return Runtime(context=ctx)
 
     @staticmethod
@@ -1658,7 +1653,7 @@ class TestSyntaxFixEvents:
         monkeypatch.setattr(_plugin, "_emit_syntax_fix_event", lambda **kw: events.append(kw))  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
         # Force the pipeline to be a no-op (nothing to fix, nothing formatted)
         # so the event decision is what is under test — not ruff's formatting.
-        monkeypatch.setattr(_plugin, "_apply_fix_pipeline", lambda code: (code, []))  # pyright: ignore[reportUnknownArgumentType]
+        monkeypatch.setattr(_plugin, "_apply_fix_pipeline", lambda code, **_kw: (code, []))  # pyright: ignore[reportUnknownArgumentType]
         state = AgentState(
             messages=[
                 AIMessage(

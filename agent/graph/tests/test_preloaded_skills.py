@@ -21,6 +21,7 @@ import pytest
 import ava.skills as skills_mod
 from agent.graph.capabilities import resolve_prompt_skills
 from agent.graph.context_notes import preloaded_skills_note
+from base.agents.context.slices import AgentSlices
 from base.agents.messages.kwargs import NoteTag
 from base.config import settings
 from base.paths import skills_dir
@@ -65,7 +66,11 @@ def _expand(monkeypatch: pytest.MonkeyPatch, wanted: list[str]) -> None:
 
 def test_resolve_by_bare_name(fake_skills_dir: Path) -> None:
     _write_skill(fake_skills_dir, "ultra_speed", "name: ultra_speed\ndescription: go fast")
-    resolved = resolve_prompt_skills(["ultra_speed"], config_field="skills_to_expand_at_start")
+    resolved = resolve_prompt_skills(
+        ["ultra_speed"],
+        AgentSlices.resolve().prompt.sdk_disable,
+        config_field="skills_to_expand_at_start",
+    )
     assert [s["name"] for s in resolved] == ["ultra_speed"]
 
 
@@ -74,7 +79,9 @@ def test_resolve_by_dotted_identifier(fake_skills_dir: Path) -> None:
     parent = fake_skills_dir / "ava-memory"
     _write_skill(parent, "consolidation", "name: consolidation\ndescription: merge notes")
     resolved = resolve_prompt_skills(
-        ["ava-memory.consolidation"], config_field="skills_to_expand_at_start"
+        ["ava-memory.consolidation"],
+        AgentSlices.resolve().prompt.sdk_disable,
+        config_field="skills_to_expand_at_start",
     )
     assert [skills_mod.identifier(s) for s in resolved] == ["ava-memory:consolidation"]
 
@@ -86,7 +93,9 @@ def test_resolve_accepts_the_python_spelling_of_a_dash_skill(fake_skills_dir: Pa
     parent = fake_skills_dir / "ava-memory"
     _write_skill(parent, "consolidation", "name: consolidation\ndescription: merge notes")
     resolved = resolve_prompt_skills(
-        ["ava_memory.consolidation"], config_field="skills_to_expand_at_start"
+        ["ava_memory.consolidation"],
+        AgentSlices.resolve().prompt.sdk_disable,
+        config_field="skills_to_expand_at_start",
     )
     assert [skills_mod.identifier(s) for s in resolved] == ["ava-memory:consolidation"]
 
@@ -96,7 +105,9 @@ def test_resolve_accepts_the_plugin_colon_spelling(fake_skills_dir: Path) -> Non
     parent = fake_skills_dir / "ava-memory"
     _write_skill(parent, "consolidation", "name: consolidation\ndescription: merge notes")
     resolved = resolve_prompt_skills(
-        ["ava-memory:consolidation"], config_field="skills_to_expand_at_start"
+        ["ava-memory:consolidation"],
+        AgentSlices.resolve().prompt.sdk_disable,
+        config_field="skills_to_expand_at_start",
     )
     assert [skills_mod.identifier(s) for s in resolved] == ["ava-memory:consolidation"]
 
@@ -104,7 +115,9 @@ def test_resolve_accepts_the_plugin_colon_spelling(fake_skills_dir: Path) -> Non
 def test_resolve_wildcard_selects_whole_catalog(fake_skills_dir: Path) -> None:
     _write_skill(fake_skills_dir, "alpha", "name: alpha\ndescription: a")
     _write_skill(fake_skills_dir, "beta", "name: beta\ndescription: b")
-    resolved = resolve_prompt_skills(["*"], config_field="skills_to_expand_at_start")
+    resolved = resolve_prompt_skills(
+        ["*"], AgentSlices.resolve().prompt.sdk_disable, config_field="skills_to_expand_at_start"
+    )
     assert {s["name"] for s in resolved} == {"alpha", "beta"}
 
 
@@ -114,7 +127,9 @@ def test_resolve_unknown_name_warns_and_skips(
     _write_skill(fake_skills_dir, "real", "name: real\ndescription: r")
     with caplog.at_level("WARNING"):
         resolved = resolve_prompt_skills(
-            ["real", "does_not_exist"], config_field="skills_to_expand_at_start"
+            ["real", "does_not_exist"],
+            AgentSlices.resolve().prompt.sdk_disable,
+            config_field="skills_to_expand_at_start",
         )
     assert [s["name"] for s in resolved] == ["real"]
     assert "does_not_exist" in caplog.text
@@ -123,7 +138,12 @@ def test_resolve_unknown_name_warns_and_skips(
 
 def test_resolve_empty_list_returns_empty(fake_skills_dir: Path) -> None:
     _write_skill(fake_skills_dir, "real", "name: real\ndescription: r")
-    assert resolve_prompt_skills([], config_field="skills_to_expand_at_start") == []
+    assert (
+        resolve_prompt_skills(
+            [], AgentSlices.resolve().prompt.sdk_disable, config_field="skills_to_expand_at_start"
+        )
+        == []
+    )
 
 
 def test_resolve_returns_empty_when_skills_sdk_disabled(
@@ -131,7 +151,14 @@ def test_resolve_returns_empty_when_skills_sdk_disabled(
 ) -> None:
     _write_skill(fake_skills_dir, "real", "name: real\ndescription: r")
     monkeypatch.setattr(settings.agent, "sdk_disable", ["skills"])
-    assert resolve_prompt_skills(["real"], config_field="skills_to_expand_at_start") == []
+    assert (
+        resolve_prompt_skills(
+            ["real"],
+            AgentSlices.resolve().prompt.sdk_disable,
+            config_field="skills_to_expand_at_start",
+        )
+        == []
+    )
 
 
 # ─── preloaded_skills_note ─────────────────────────────────────────────────
@@ -142,7 +169,7 @@ def test_note_none_when_config_empty(
 ) -> None:
     _write_skill(fake_skills_dir, "real", "name: real\ndescription: r")
     _expand(monkeypatch, [])
-    assert preloaded_skills_note() is None
+    assert preloaded_skills_note(AgentSlices.resolve()) is None
 
 
 def test_note_none_when_nothing_resolves(
@@ -150,7 +177,7 @@ def test_note_none_when_nothing_resolves(
 ) -> None:
     _write_skill(fake_skills_dir, "real", "name: real\ndescription: r")
     _expand(monkeypatch, ["ghost"])
-    assert preloaded_skills_note() is None
+    assert preloaded_skills_note(AgentSlices.resolve()) is None
 
 
 def test_note_carries_full_body_and_tag(
@@ -162,7 +189,7 @@ def test_note_carries_full_body_and_tag(
     )
     _expand(monkeypatch, ["ultra_speed"])
 
-    note = preloaded_skills_note()
+    note = preloaded_skills_note(AgentSlices.resolve())
     assert note is not None
     assert isinstance(note.content, str)  # pyright: ignore[reportUnknownMemberType]
     content = note.content
@@ -183,7 +210,7 @@ def test_note_merges_multiple_skills_in_order(
     _write_skill(fake_skills_dir, "second", "name: second\ndescription: 2", body="BBB body")
     _expand(monkeypatch, ["second", "first"])  # explicit order preserved
 
-    note = preloaded_skills_note()
+    note = preloaded_skills_note(AgentSlices.resolve())
     assert note is not None
     assert isinstance(note.content, str)  # pyright: ignore[reportUnknownMemberType]
     content = note.content
@@ -207,7 +234,7 @@ def test_note_heading_uses_dotted_access_path(
     )
     _expand(monkeypatch, ["ava_memory.consolidation"])
 
-    note = preloaded_skills_note()
+    note = preloaded_skills_note(AgentSlices.resolve())
     assert note is not None
     assert isinstance(note.content, str)  # pyright: ignore[reportUnknownMemberType]
     assert "## ava.skills.ava-memory:consolidation" in note.content

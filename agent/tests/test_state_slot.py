@@ -53,6 +53,7 @@ from agent.state import (
     register_plugin_state,
 )
 from base.agents.context import AvaContext
+from base.agents.context.slices import AgentSlices
 from base.config.turn_view import bind_agent_config
 from base.packages.plugins.context import PluginContext
 
@@ -470,6 +471,7 @@ def _make_runtime_and_config(redis_client: AsyncMock) -> tuple[Runtime[AvaContex
         ops_pool=None,
         llm=MagicMock(),
         event_publisher=MagicMock(),
+        agent=AgentSlices.resolve(),
     )
     runtime = Runtime(context=ctx)
     config: RunnableConfig = {"configurable": {"thread_id": "42"}}

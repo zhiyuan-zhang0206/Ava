@@ -15,6 +15,7 @@ import pytest
 from langchain_core.messages import AIMessage
 
 from agent.graph._memory_filter import Candidate, filter_candidates
+from base.agents.context.slices import AgentSlices
 
 
 def _candidates(*paths: str) -> list[Candidate]:
@@ -57,7 +58,9 @@ async def test_retries_when_reply_unparseable_then_succeeds(
     m.ainvoke = AsyncMock(side_effect=lambda *_a, **_k: AIMessage(content=next(replies)))
     monkeypatch.setattr("base.lm.factory.build_chat_model", lambda _model_name, **_kw: m)  # pyright: ignore[reportUnknownArgumentType]
 
-    picked = await filter_candidates("q", _candidates("a.md", "b.md", "c.md"))
+    picked = await filter_candidates(
+        "q", _candidates("a.md", "b.md", "c.md"), AgentSlices.resolve().memory
+    )
 
     assert picked == ["b.md"]
     assert m.ainvoke.await_count == 2  # one retry after the unparseable reply
@@ -74,7 +77,7 @@ async def test_warns_only_when_all_retries_fail(monkeypatch: pytest.MonkeyPatch)
     m.ainvoke = AsyncMock(side_effect=lambda *_a, **_k: AIMessage(content="still not a list"))
     monkeypatch.setattr("base.lm.factory.build_chat_model", lambda _model_name, **_kw: m)  # pyright: ignore[reportUnknownArgumentType]
 
-    picked = await filter_candidates("q", _candidates("a.md", "b.md"))
+    picked = await filter_candidates("q", _candidates("a.md", "b.md"), AgentSlices.resolve().memory)
 
     assert picked == []
     assert m.ainvoke.await_count == 3  # default max retries
@@ -84,7 +87,9 @@ async def test_warns_only_when_all_retries_fail(monkeypatch: pytest.MonkeyPatch)
 async def test_keeps_only_what_the_model_picked(monkeypatch: pytest.MonkeyPatch) -> None:
     _patch_model(monkeypatch, '["b.md"]')
 
-    picked = await filter_candidates("q", _candidates("a.md", "b.md", "c.md"))
+    picked = await filter_candidates(
+        "q", _candidates("a.md", "b.md", "c.md"), AgentSlices.resolve().memory
+    )
 
     assert picked == ["b.md"]
 
@@ -101,7 +106,9 @@ async def test_records_hmac_query_and_basename_path_sample(
     monkeypatch.setattr(memory_filter, "_RECALL_LOG_HMAC_KEY", hmac_key, raising=False)
     _patch_model(monkeypatch, f'["{full_path}"]')
 
-    assert await filter_candidates(query, _candidates("a.md", full_path)) == [full_path]
+    assert await filter_candidates(
+        query, _candidates("a.md", full_path), AgentSlices.resolve().memory
+    ) == [full_path]
 
     verdict = next(
         record for record in loguru_records if record["extra"].get("event") == "recall_filter"
@@ -135,7 +142,7 @@ async def test_does_not_log_an_unrecognised_model_path(
     )
     _patch_model(monkeypatch, f'["{query}"]')
 
-    assert await filter_candidates(query, _candidates("a.md")) == []
+    assert await filter_candidates(query, _candidates("a.md"), AgentSlices.resolve().memory) == []
     assert query not in "\n".join(logged)
 
 
@@ -158,7 +165,7 @@ async def test_does_not_log_an_unparseable_model_echo(
     )
     _patch_model(monkeypatch, f"not JSON: {query}")
 
-    assert await filter_candidates(query, _candidates("a.md")) == []
+    assert await filter_candidates(query, _candidates("a.md"), AgentSlices.resolve().memory) == []
     assert query not in "\n".join(logged)
 
 
@@ -181,7 +188,7 @@ async def test_does_not_log_a_filter_exception_echo(
     )
     _patch_model(monkeypatch, RuntimeError(query))
 
-    assert await filter_candidates(query, _candidates("a.md")) == []
+    assert await filter_candidates(query, _candidates("a.md"), AgentSlices.resolve().memory) == []
     assert query not in "\n".join(logged)
 
 
@@ -205,7 +212,9 @@ async def test_successful_filter_call_emits_chat_billing(
 
     monkeypatch.setattr("base.lm.factory.build_chat_model", lambda _name, **_kw: model)  # pyright: ignore[reportUnknownArgumentType]
 
-    assert await filter_candidates("q", _candidates("a.md")) == ["a.md"]
+    assert await filter_candidates("q", _candidates("a.md"), AgentSlices.resolve().memory) == [
+        "a.md"
+    ]
     [record] = [record for record in loguru_records if record["extra"].get("event") == "llm_usage"]
     assert record["extra"]["model"] == settings.agent.memory_recall_filter_model
     assert record["extra"]["usage_kind"] == "chat"
@@ -231,7 +240,10 @@ async def test_filter_model_is_built_with_reasoning_pinned_off(
 
     monkeypatch.setattr("base.lm.factory.build_chat_model", _capture)  # pyright: ignore[reportUnknownArgumentType]
 
-    assert await filter_candidates("q", _candidates("a.md", "b.md")) == []
+    assert (
+        await filter_candidates("q", _candidates("a.md", "b.md"), AgentSlices.resolve().memory)
+        == []
+    )
     assert seen["reasoning_effort"] == ReasoningEffort.NONE
 
 
@@ -242,7 +254,10 @@ async def test_injects_nothing_when_the_model_rejects_everything(
     show, however weakly it matched."""
     _patch_model(monkeypatch, "[]")
 
-    assert await filter_candidates("q", _candidates("a.md", "b.md")) == []
+    assert (
+        await filter_candidates("q", _candidates("a.md", "b.md"), AgentSlices.resolve().memory)
+        == []
+    )
 
 
 async def test_model_order_is_kept_and_capped_at_inject_k(
@@ -253,7 +268,9 @@ async def test_model_order_is_kept_and_capped_at_inject_k(
     monkeypatch.setattr(settings.agent, "memory_recall_inject_k", 2)
     _patch_model(monkeypatch, '["c.md", "a.md", "b.md"]')
 
-    assert await filter_candidates("q", _candidates("a.md", "b.md", "c.md")) == ["c.md", "a.md"]
+    assert await filter_candidates(
+        "q", _candidates("a.md", "b.md", "c.md"), AgentSlices.resolve().memory
+    ) == ["c.md", "a.md"]
 
 
 @pytest.mark.parametrize(
@@ -272,7 +289,9 @@ async def test_the_wrappers_small_models_add_are_seen_through(
     filter exists for."""
     _patch_model(monkeypatch, reply)
 
-    assert await filter_candidates("q", _candidates("a.md", "b.md")) == ["a.md"]
+    assert await filter_candidates(
+        "q", _candidates("a.md", "b.md"), AgentSlices.resolve().memory
+    ) == ["a.md"]
 
 
 async def test_invented_path_is_dropped_not_injected(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -281,13 +300,17 @@ async def test_invented_path_is_dropped_not_injected(monkeypatch: pytest.MonkeyP
     model's slip would be the worse outcome."""
     _patch_model(monkeypatch, '["a.md", "hallucinated.md"]')
 
-    assert await filter_candidates("q", _candidates("a.md", "b.md")) == ["a.md"]
+    assert await filter_candidates(
+        "q", _candidates("a.md", "b.md"), AgentSlices.resolve().memory
+    ) == ["a.md"]
 
 
 async def test_duplicate_picks_collapse(monkeypatch: pytest.MonkeyPatch) -> None:
     _patch_model(monkeypatch, '["a.md", "a.md"]')
 
-    assert await filter_candidates("q", _candidates("a.md", "b.md")) == ["a.md"]
+    assert await filter_candidates(
+        "q", _candidates("a.md", "b.md"), AgentSlices.resolve().memory
+    ) == ["a.md"]
 
 
 @pytest.mark.parametrize(
@@ -303,7 +326,10 @@ async def test_unreadable_reply_injects_nothing(
     the pre-filter behaviour."""
     _patch_model(monkeypatch, reply)
 
-    assert await filter_candidates("q", _candidates("a.md", "b.md")) == []
+    assert (
+        await filter_candidates("q", _candidates("a.md", "b.md"), AgentSlices.resolve().memory)
+        == []
+    )
 
 
 async def test_timeout_bound_comes_from_settings(
@@ -327,7 +353,7 @@ async def test_timeout_bound_comes_from_settings(
     monkeypatch.setattr(asyncio, "wait_for", _wait_for)  # pyright: ignore[reportUnknownArgumentType]
     _patch_model(monkeypatch, '["a.md"]')
 
-    picked = await filter_candidates("q", _candidates("a.md", "b.md"))
+    picked = await filter_candidates("q", _candidates("a.md", "b.md"), AgentSlices.resolve().memory)
 
     assert picked == ["a.md"]
     assert captured["timeout"] == 0.01
@@ -343,7 +369,10 @@ async def test_model_failure_injects_nothing(
     it since launch)."""
     _patch_model(monkeypatch, RuntimeError("provider down"))
 
-    assert await filter_candidates("q", _candidates("a.md", "b.md")) == []
+    assert (
+        await filter_candidates("q", _candidates("a.md", "b.md"), AgentSlices.resolve().memory)
+        == []
+    )
 
 
 async def test_disabled_filter_passes_the_top_through_untouched(
@@ -358,7 +387,9 @@ async def test_disabled_filter_passes_the_top_through_untouched(
 
     monkeypatch.setattr("base.lm.factory.build_chat_model", _boom)  # pyright: ignore[reportUnknownArgumentType]
 
-    assert await filter_candidates("q", _candidates("a.md", "b.md")) == ["a.md", "b.md"]
+    assert await filter_candidates(
+        "q", _candidates("a.md", "b.md"), AgentSlices.resolve().memory
+    ) == ["a.md", "b.md"]
     assert not [
         record for record in loguru_records if record["extra"].get("event") == "recall_filter"
     ]
@@ -370,7 +401,7 @@ async def test_no_candidates_needs_no_model(monkeypatch: pytest.MonkeyPatch) -> 
 
     monkeypatch.setattr("base.lm.factory.build_chat_model", _boom)  # pyright: ignore[reportUnknownArgumentType]
 
-    assert await filter_candidates("q", []) == []
+    assert await filter_candidates("q", [], AgentSlices.resolve().memory) == []
 
 
 async def test_prompt_lists_when_unsure_instead_of_staying_strict(
@@ -395,7 +426,7 @@ async def test_prompt_lists_when_unsure_instead_of_staying_strict(
 
     monkeypatch.setattr("base.lm.factory.build_chat_model", _capture)  # pyright: ignore[reportUnknownArgumentType]
 
-    await filter_candidates("q", _candidates("a.md", "b.md"))
+    await filter_candidates("q", _candidates("a.md", "b.md"), AgentSlices.resolve().memory)
 
     assert "err on the side of including" in seen["prompt"]
     assert "When in doubt, list the note" in seen["prompt"]
@@ -423,7 +454,9 @@ async def test_prompt_shows_the_type_tag(monkeypatch: pytest.MonkeyPatch) -> Non
     monkeypatch.setattr("base.lm.factory.build_chat_model", _capture)  # pyright: ignore[reportUnknownArgumentType]
 
     await filter_candidates(
-        "q", [Candidate(path="p.md", description="a profile", tags=["type/user", "tech-ops"])]
+        "q",
+        [Candidate(path="p.md", description="a profile", tags=["type/user", "tech-ops"])],
+        AgentSlices.resolve().memory,
     )
 
     assert "type/user" in seen["prompt"]

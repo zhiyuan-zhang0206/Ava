@@ -32,6 +32,7 @@ from agent.hooks.capabilities import _newly_installed_skills, register_capabilit
 from agent.state import AgentState, CapabilitiesState
 from base import paths
 from base.agents.context import AvaContext
+from base.agents.context.slices import AgentSlices
 from base.agents.messages.kwargs import NoteTag
 from base.config import settings
 
@@ -46,6 +47,7 @@ def _runtime(*, container: bool = False) -> Runtime[AvaContext]:
             ops_pool=None if container else MagicMock(),
             llm=MagicMock(),
             event_publisher=MagicMock(),
+            agent=AgentSlices.resolve(),
         )
     )
 
@@ -95,19 +97,21 @@ def test_drift_reports_only_what_appeared_since_the_snapshot(skills_dir: Path) -
     """The whole point: a skill installed after the index was rendered shows up
     as an addition, and one that was already indexed does not show up again."""
     _install(skills_dir, "alpha", "Alpha desc")
-    snapshot = indexed_skill_identifiers()
+    snapshot = indexed_skill_identifiers(AgentSlices.resolve().prompt)
     assert snapshot == {"alpha"}
 
     _install(skills_dir, "beta", "Beta desc")
 
-    drift = index_drift(snapshot)
+    drift = index_drift(snapshot, AgentSlices.resolve().prompt)
     assert [s["name"] for s in drift.added] == ["beta"]
     assert drift.identifiers == {"alpha", "beta"}
 
 
 def test_drift_is_empty_when_the_catalog_has_not_moved(skills_dir: Path) -> None:
     _install(skills_dir, "alpha", "Alpha desc")
-    drift = index_drift(indexed_skill_identifiers())
+    drift = index_drift(
+        indexed_skill_identifiers(AgentSlices.resolve().prompt), AgentSlices.resolve().prompt
+    )
     assert drift.added == []
 
 
@@ -117,15 +121,18 @@ def test_uninstall_leaves_the_snapshot_so_a_reinstall_announces_again(
     """Only additions are reported, but membership is replaced rather than
     unioned — otherwise a skill removed and put back would stay silent."""
     _install(skills_dir, "alpha", "Alpha desc")
-    snapshot = indexed_skill_identifiers()
+    snapshot = indexed_skill_identifiers(AgentSlices.resolve().prompt)
 
     shutil.rmtree(skills_dir / "alpha")
-    after_removal = index_drift(snapshot)
+    after_removal = index_drift(snapshot, AgentSlices.resolve().prompt)
     assert after_removal.added == []
     assert after_removal.identifiers == set()
 
     _install(skills_dir, "alpha", "Alpha desc")
-    assert [s["name"] for s in index_drift(after_removal.identifiers).added] == ["alpha"]
+    assert [
+        s["name"]
+        for s in index_drift(after_removal.identifiers, AgentSlices.resolve().prompt).added
+    ] == ["alpha"]
 
 
 # ── the note ──
@@ -135,7 +142,7 @@ async def test_hook_names_the_new_skill_in_the_index_line_shape(skills_dir: Path
     """The note has to read as more of the `# Capabilities` listing, so it uses
     the same `- \\`ava.skills.<path>\\` — description` line the index does."""
     _install(skills_dir, "alpha", "Alpha desc")
-    snapshot = indexed_skill_identifiers()
+    snapshot = indexed_skill_identifiers(AgentSlices.resolve().prompt)
     _install(skills_dir, "beta", "Beta desc")
 
     update = await _run_hook(snapshot)
@@ -151,7 +158,7 @@ async def test_hook_advances_the_snapshot_so_one_install_is_named_once(
     skills_dir: Path,
 ) -> None:
     _install(skills_dir, "alpha", "Alpha desc")
-    snapshot = indexed_skill_identifiers()
+    snapshot = indexed_skill_identifiers(AgentSlices.resolve().prompt)
     _install(skills_dir, "beta", "Beta desc")
 
     update = await _run_hook(snapshot)
@@ -164,7 +171,7 @@ async def test_hook_advances_the_snapshot_so_one_install_is_named_once(
 
 async def test_hook_is_silent_when_nothing_was_installed(skills_dir: Path) -> None:
     _install(skills_dir, "alpha", "Alpha desc")
-    assert await _run_hook(indexed_skill_identifiers()) is None
+    assert await _run_hook(indexed_skill_identifiers(AgentSlices.resolve().prompt)) is None
 
 
 async def test_no_snapshot_adopts_the_live_catalog_without_announcing_it(
@@ -238,7 +245,7 @@ async def test_hook_defers_when_a_compaction_will_replace_the_window(
     that composition end to end; this pins the predicate the defer is gated on.
     """
     _install(skills_dir, "alpha", "Alpha desc")
-    snapshot = indexed_skill_identifiers()
+    snapshot = indexed_skill_identifiers(AgentSlices.resolve().prompt)
     _install(skills_dir, "beta", "Beta desc")
     over_the_ceiling: list[AnyMessage] = [
         SystemMessage(content="<sys>"),
@@ -262,7 +269,7 @@ async def test_container_mode_writes_nothing(skills_dir: Path) -> None:
     its head by. An eval's context is deterministic by construction, and this
     note's trigger is whatever the host filesystem gained mid-run."""
     _install(skills_dir, "alpha", "Alpha desc")
-    snapshot = indexed_skill_identifiers()
+    snapshot = indexed_skill_identifiers(AgentSlices.resolve().prompt)
     _install(skills_dir, "beta", "Beta desc")
 
     state = _state(snapshot)
@@ -280,7 +287,7 @@ async def test_narrowing_holds_and_a_configured_name_that_arrives_late_drifts_in
     drift, and a skill outside the list never becomes drift."""
     monkeypatch.setattr(settings.agent, "skills_to_inject_into_system_prompt", ["beta"])
     _install(skills_dir, "alpha", "Alpha desc")
-    snapshot = indexed_skill_identifiers()
+    snapshot = indexed_skill_identifiers(AgentSlices.resolve().prompt)
     assert snapshot == set()  # `beta` is configured but not installed yet
 
     _install(skills_dir, "beta", "Beta desc")

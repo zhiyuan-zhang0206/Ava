@@ -349,9 +349,8 @@ def wired(monkeypatch: pytest.MonkeyPatch, host_plugin: None) -> _Build:
     """An `AgentHost` over fakes, with the per-agent build stubbed.
 
     The per-agent build is stubbed because it needs a live key.
-    `boot_agent_scope` is replaced by a build that reads
-    `turn_settings.lm.llm_model` exactly as the real one does, so a test can
-    still tell whether the config bind was in effect when the model was built.
+    `boot_agent_scope` is replaced by a build that returns a model named as the
+    host asked, so a test can tell which model the host prepared.
     """
     # This suite's agents/ownership live exclusively in _FakePool. Real lease
     # SQL is covered by takeover integration tests, so its no-lease baseline
@@ -369,8 +368,8 @@ def wired(monkeypatch: pytest.MonkeyPatch, host_plugin: None) -> _Build:
     monkeypatch.setattr(host_mod, "repair_dangling_tool_use_at_startup", _noop_reconcile)
     monkeypatch.setattr(host_mod, "publish_agent_updated", _noop_reconcile)
 
-    async def _fake_boot_agent_scope(_agent_id: int) -> _Model:
-        return _Model(turn_settings.lm.llm_model)
+    async def _fake_boot_agent_scope(_agent_id: int, llm_model: str) -> _Model:
+        return _Model(llm_model)
 
     monkeypatch.setattr(host_mod, "boot_agent_scope", _fake_boot_agent_scope)
 
@@ -574,7 +573,7 @@ class TestSettlementReconciles:
         self,
         wired: _Build,
         monkeypatch: pytest.MonkeyPatch,
-        drive: Callable[[int, object], Awaitable[TurnOutcome]],
+        drive: Callable[[int, object, object], Awaitable[TurnOutcome]],
         order: list[str],
     ) -> None:
         host, _, _ = wired({1: _Row()})
@@ -605,7 +604,7 @@ class TestSettlementReconciles:
     async def test_settled_abort_reconciles_after_the_settle(
         self, wired: _Build, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        async def drive(_agent: int, _runtime: object) -> TurnOutcome:
+        async def drive(_agent: int, _runtime: object, _slices: object) -> TurnOutcome:
             return TurnOutcome(exited=False, crashed=True, aborted=True)
 
         order: list[str] = []
@@ -619,7 +618,7 @@ class TestSettlementReconciles:
         unclassified crash drops the runtime instead, and the next admission
         (or boot) reconciles."""
 
-        async def drive(_agent: int, _runtime: object) -> TurnOutcome:
+        async def drive(_agent: int, _runtime: object, _slices: object) -> TurnOutcome:
             raise ValueError("unclassified crash")
 
         order: list[str] = []
@@ -636,7 +635,7 @@ class TestSettlementReconciles:
         its unconfirmable claims re-deliver at-least-once (see the pass's
         docstring)."""
 
-        async def drive(_agent: int, _runtime: object) -> TurnOutcome:
+        async def drive(_agent: int, _runtime: object, _slices: object) -> TurnOutcome:
             return TurnOutcome(exited=False, crashed=False)
 
         order: list[str] = []
@@ -1333,9 +1332,9 @@ class TestRejectedModelConfig:
         boot_calls: list[int] = []
         error_events: list[str] = []
 
-        async def _record_boot(agent_id: int) -> _Model:
+        async def _record_boot(agent_id: int, llm_model: str) -> _Model:
             boot_calls.append(agent_id)
-            return _Model(turn_settings.lm.llm_model)
+            return _Model(llm_model)
 
         def _record_error(_message: str, *, event: str, **_details: object) -> None:
             error_events.append(event)
@@ -1368,9 +1367,9 @@ class TestRejectedModelConfig:
             if model == "fable":
                 raise ValueError("unknown model 'fable'")
 
-        async def _record_boot(agent_id: int) -> _Model:
+        async def _record_boot(agent_id: int, llm_model: str) -> _Model:
             boot_calls.append(agent_id)
-            return _Model(turn_settings.lm.llm_model)
+            return _Model(llm_model)
 
         monkeypatch.setattr(runtime_mod, "validate_model_config", _validate_model)
         monkeypatch.setattr(host_mod, "boot_agent_scope", _record_boot)
@@ -1729,7 +1728,7 @@ class TestSchedulerIntegration:
         def _capture(_msg: str, **kw: object) -> None:
             records.append(kw)
 
-        async def _explode(_agent_id: int, _fingerprint: str) -> None:
+        async def _explode(_agent_id: int, _fingerprint: str, _model: str) -> None:
             raise ValueError("runtime build failed")
 
         monkeypatch.setattr(dispatcher.logger, "exception", _capture)

@@ -24,6 +24,7 @@ from agent.ownership.hosted import admit_hosted_runtime
 from agent.ownership.inbound import RuntimeOwnershipLostError
 from agent.startup import wrap_saver_writes_with_nstep_interval
 from base.agents.context import AvaContext
+from base.agents.context.slices import AgentSlices
 from base.agents.history.delta_read_compat import wrap_saver_reads_with_delta_reconstruction
 from base.agents.incarnation.hosted_force import install_hosted_force
 from base.agents.incarnation.resources import ResourceBirth
@@ -127,7 +128,9 @@ async def test_original_host_task_resumes_autonomous_work_without_pending_inboun
         )
         with bind_turn_identity(agent, incarnation=incarnation):
             async with control.connection():
-                original = asyncio.create_task(host._invoke_until_done(agent, AvaContext()))
+                original = asyncio.create_task(
+                    host._invoke_until_done(agent, AvaContext(agent=AgentSlices.resolve()))
+                )
                 try:
                     await asyncio.wait_for(recovering.wait(), 3)
                     assert not original.done()

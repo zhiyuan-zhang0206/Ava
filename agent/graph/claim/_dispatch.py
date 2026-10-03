@@ -32,6 +32,7 @@ from agent.nodes import BEFORE_LLM, CLAIM, END
 from agent.state_channels import CIRCUIT_REASON_CONTEXT_OVERFLOW
 from ava.security import SecurityFindingEntry, scan_inbound_content
 from base.agents.context import AvaContext
+from base.agents.context.slices import AgentSlices
 from base.agents.messages.inbound import InboundKind
 from base.agents.messages.kwargs import AvaMsgType, read_ava_kwargs
 from base.clock import Clock
@@ -288,7 +289,9 @@ async def _handle_compact_request(
     summary = ""
     for attempt in range(1, COMPACT_MAX_ATTEMPTS + 1):
         try:
-            summary = await generate_summary(state.messages, ctx.llm)
+            summary = await generate_summary(
+                state.messages, ctx.llm, ctx.require_agent().brain.llm_model
+            )
             break
         except Exception as e:
             last_error = e
@@ -524,6 +527,7 @@ async def _handle_fork(
     item: ClaimedInbound,
     st: _BatchState,
     state: _state.AgentState,
+    slices: AgentSlices,
 ) -> None:
     """FORK: rebuild the head (drop source-identity notes), append marker, graft own notes.
 
@@ -549,7 +553,7 @@ async def _handle_fork(
             created_at=datetime.now(UTC),
         )
     )
-    st.new_msgs.extend(fork_notes())
+    st.new_msgs.extend(fork_notes(slices))
     # Tail-graft skill additions (decisions/2026-09-10-preset-in-config-overlay-
     # fork-cache): skills the fork's config added to
     # skills_to_inject_into_system_prompt (minus what the expand list already
@@ -560,7 +564,9 @@ async def _handle_fork(
     if isinstance(tail_skills, list):
         from agent.graph.context_notes import fork_tail_skills_note
 
-        note = fork_tail_skills_note([s for s in tail_skills if isinstance(s, str)])
+        note = fork_tail_skills_note(
+            [s for s in tail_skills if isinstance(s, str)], slices.prompt.sdk_disable
+        )
         if note is not None:
             st.new_msgs.append(note)
 
@@ -615,7 +621,7 @@ async def dispatch_batch(
             if item.id == latest_resurrect_id:
                 await _handle_resurrect(item, st)
         elif kind == InboundKind.FORK:
-            await _handle_fork(agent_id, item, st, state)
+            await _handle_fork(agent_id, item, st, state, ctx.require_agent())
         elif kind == InboundKind.REMINDER:
             # Lease-expiry reminders are dismissed in the lease's release/expiry
             # transaction, so one reaching the claim node means that invariant
