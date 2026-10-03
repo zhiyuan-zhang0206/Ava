@@ -1675,7 +1675,7 @@ BEGIN
     IF NEW.executor_name='' THEN NEW.executor_name=NEW.source; END IF;
     RETURN NEW;
 END;
-$$ LANGUAGE plpgsql;
+$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, public;
 CREATE TRIGGER agent_impersonations_allocate BEFORE INSERT ON agent_impersonations
     FOR EACH ROW EXECUTE FUNCTION allocate_impersonation_session();
 

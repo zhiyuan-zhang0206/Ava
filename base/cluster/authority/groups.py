@@ -51,9 +51,6 @@ _RUNNER_TABLE_GRANTS: tuple[tuple[LiteralString, tuple[str, ...]], ...] = (
     ("SELECT, UPDATE", ("inbound_messages", "agents_meta")),
     # Agent-side self-lifecycle inbounds (terminate / restart / compact).
     ("INSERT", ("inbound_messages",)),
-    # No runner path writes `agents` (labels go through the gateway); the grant stays until
-    # grants can be revoked.
-    ("UPDATE", ("agents",)),
     # register_self / mark_stopping and the deploy posture on every start.
     ("INSERT, UPDATE, SELECT", ("machine_units",)),
     ("INSERT, UPDATE", ("machines", "host_deploy_state")),
@@ -93,6 +90,13 @@ _RUNNER_TABLE_GRANTS: tuple[tuple[LiteralString, tuple[str, ...]], ...] = (
     # Agent state: the LangGraph checkpoint tables.
     ("ALL", CHECKPOINT_TABLES),
 )
+
+# Tables the runner group must not rewrite. Earlier releases granted it UPDATE
+# here, and a grant already recorded on a cluster survives its removal from the
+# matrix, so the refresh revokes it explicitly. `agents` is gateway-only
+# (labels go through the gateway; the impersonation counter is bumped by a
+# SECURITY DEFINER trigger).
+_RUNNER_REVOKED_UPDATE_TABLES = ("agents",)
 
 
 def group_violations(conn: Conn, groups: Groups) -> list[str]:
@@ -161,6 +165,8 @@ def _grant_runner(conn: Conn, owner: str, runner: str) -> None:
     for privileges, tables in _RUNNER_TABLE_GRANTS:
         for table in tables:
             _grant(conn, f"GRANT {privileges} ON {{}} TO {{}}", table, runner)
+    for table in _RUNNER_REVOKED_UPDATE_TABLES:
+        _grant(conn, "REVOKE UPDATE ON {} FROM {}", table, runner)
     _grant(conn, "GRANT USAGE, SELECT ON SEQUENCE agent_shell_ttl_renewals_id_seq TO {}", runner)
     # The writer creates the next month's partition itself (SECURITY DEFINER).
     _grant(
@@ -174,9 +180,10 @@ def _grant_runner(conn: Conn, owner: str, runner: str) -> None:
 def apply_group_grants(conn: Conn, *, owner: str, database: str, groups: Groups) -> None:
     """Converge both groups' grant surface in the connected cluster database.
 
-    Idempotent; grants are only added. The checkpoint tables and every table the
-    runner matrix names must exist, so a missing table fails loudly instead of
-    silently narrowing the contract.
+    Idempotent; grants are added, except the runner's retired UPDATE grants,
+    which are revoked. The checkpoint tables and every table the runner matrix
+    names must exist, so a missing table fails loudly instead of silently
+    narrowing the contract.
     """
     require_admin(conn)
     row = conn.execute("SELECT current_database()").fetchone()
