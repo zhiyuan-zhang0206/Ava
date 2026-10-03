@@ -117,6 +117,69 @@ def env_value_text(value: Any) -> str:
     return str(value)
 
 
+def _pending_changes(
+    path: Path, amap: dict[str, str], updates: dict[str, Any], removals: set[str]
+) -> list[dict[str, str | None]]:
+    """The pre-write audit diff of one `write_fields` call, sorted by alias.
+
+    Captured before the file is rewritten in place. `_audit_changes` (the record
+    helper) drops values for everything but `sensitive: false` fields.
+    """
+    from base.host.env.audit import env_values_from_text
+
+    before = env_values_from_text(
+        path.read_text(encoding="utf-8", errors="replace") if path.exists() else ""
+    )
+    pending: list[dict[str, str | None]] = [
+        {"alias": amap[name], "old": before.get(amap[name]), "new": env_value_text(value)}
+        for name, value in updates.items()
+    ]
+    pending += [
+        {"alias": amap[name], "old": before.get(amap[name]), "new": None} for name in removals
+    ]
+    pending.sort(key=lambda change: str(change["alias"]))
+    return pending
+
+
+def _pin_private(path: Path) -> None:
+    # Inside the lock: `.env` is the only on-disk copy of a cluster's secrets
+    # — a fresh file (or a dotenv rewrite of one) inherits the umask default
+    # (0644 under 022), readable by every user on the box, while its backups
+    # are 0600 (snapshot_env). Pin the live file to 0600 like the backups
+    # before anything else may observe it, rather than leaving a window where
+    # a rewritten file sits world-readable. Best-effort: a chmod failure must
+    # not block the config write it follows.
+    try:
+        path.chmod(0o600)
+    except OSError:
+        _log.warning("write_fields: could not chmod 0600 %s", path, exc_info=True)
+
+
+def _check_digest(path: Path, expected_digest: str | None) -> None:
+    if expected_digest is None:
+        return
+    import hashlib
+
+    current = path.read_bytes() if path.exists() else b""
+    if hashlib.sha256(current).hexdigest() != expected_digest:
+        raise RuntimeError(".env changed before owned runtime-config write")
+
+
+def _rewrite_env(
+    path: Path, amap: dict[str, str], updates: dict[str, Any], removals: set[str]
+) -> None:
+    """Snapshot the `.env`, apply the updates and removals, and pin it private."""
+    snapshot_env(path)
+    path.touch(exist_ok=True)
+    sp = str(path)
+    for name, value in updates.items():
+        quote_mode = "never" if _field_is_list(name) else "always"
+        set_key(sp, amap[name], env_value_text(value), quote_mode=quote_mode)
+    for name in removals:
+        unset_key(sp, amap[name])
+    _pin_private(path)
+
+
 def write_fields(
     updates: dict[str, Any],
     removals: set[str],
@@ -157,51 +220,11 @@ def write_fields(
         if not updates and not removals:
             return path.read_bytes() if capture_bytes and path.exists() else None
         amap = _field_alias_map()
-        if expected_digest is not None:
-            import hashlib
-
-            current = path.read_bytes() if path.exists() else b""
-            if hashlib.sha256(current).hexdigest() != expected_digest:
-                raise RuntimeError(".env changed before owned runtime-config write")
-        changes: list[dict[str, str | None]] | None = None
-        if audit_site is not None:
-            # Capture the pre-write values for the audit diff — after this point
-            # the file is rewritten in place. `_audit_changes` (the record
-            # helper) drops values for everything but `sensitive: false` fields.
-            from base.host.env.audit import env_values_from_text
-
-            before = env_values_from_text(
-                path.read_text(encoding="utf-8", errors="replace") if path.exists() else ""
-            )
-            pending: list[dict[str, str | None]] = [
-                {"alias": amap[name], "old": before.get(amap[name]), "new": env_value_text(value)}
-                for name, value in updates.items()
-            ]
-            pending += [
-                {"alias": amap[name], "old": before.get(amap[name]), "new": None}
-                for name in removals
-            ]
-            pending.sort(key=lambda change: str(change["alias"]))
-            changes = pending
-        snapshot_env(path)
-        path.touch(exist_ok=True)
-        sp = str(path)
-        for name, value in updates.items():
-            quote_mode = "never" if _field_is_list(name) else "always"
-            set_key(sp, amap[name], env_value_text(value), quote_mode=quote_mode)
-        for name in removals:
-            unset_key(sp, amap[name])
-        # Inside the lock: `.env` is the only on-disk copy of a cluster's secrets
-        # — a fresh file (or a dotenv rewrite of one) inherits the umask default
-        # (0644 under 022), readable by every user on the box, while its backups
-        # are 0600 (snapshot_env). Pin the live file to 0600 like the backups
-        # before anything else may observe it, rather than leaving a window where
-        # a rewritten file sits world-readable. Best-effort: a chmod failure must
-        # not block the config write it follows.
-        try:
-            path.chmod(0o600)
-        except OSError:
-            _log.warning("write_fields: could not chmod 0600 %s", path, exc_info=True)
+        _check_digest(path, expected_digest)
+        changes = (
+            _pending_changes(path, amap, updates, removals) if audit_site is not None else None
+        )
+        _rewrite_env(path, amap, updates, removals)
         if audit_site is not None:
             # Lazy import avoids a module cycle: the audit helper resolves this
             # module's env_file_path only after this writer has acquired the lock.
