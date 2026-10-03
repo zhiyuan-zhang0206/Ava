@@ -12,32 +12,53 @@ Methods are synchronous (psycopg pool): async callers run them in a thread.
 
 from __future__ import annotations
 
-from typing import Any, LiteralString
+from typing import Any, LiteralString, NamedTuple
+
+
+class PushWatermark(NamedTuple):
+    """One chat's push position: the newest agent item already sent to it.
+
+    ``created_at`` (ISO-8601, exactly as the timeline stamps items) is the
+    primary key — monotone, immune to the compact that renumbers a session's
+    item ids (task #4933). ``item_id`` breaks ties between the blocks of one
+    message. ``created_at`` is None on rows written before the column existed
+    and on items carrying no stamp: those compare by item_id alone — the
+    pre-#4933 semantics, recovered by the rollback reset in core.
+    """
+
+    created_at: str | None
+    item_id: str
 
 
 class CursorStore:
     def __init__(self, db_pool: Any = None) -> None:
         self._pool = db_pool
 
-    def load_push(self) -> dict[tuple[str, str, int], str]:
-        """{(channel, chat_id, agent_id): newest pushed item_id}, one per chat."""
+    def load_push(self) -> dict[tuple[str, str, int], PushWatermark]:
+        """{(channel, chat_id, agent_id): newest pushed item}, one per chat."""
 
         if self._pool is None:
             return {}
         with self._pool.connection() as conn, conn.cursor() as cur:
             cur.execute(
-                "SELECT channel, chat_id, push_agent_id, push_item_id FROM im_bridge_cursors "
-                "WHERE push_item_id IS NOT NULL"
+                "SELECT channel, chat_id, push_agent_id, push_item_id, push_created_at "
+                "FROM im_bridge_cursors WHERE push_item_id IS NOT NULL"
             )
-            return {(ch, chat, int(agent)): item for ch, chat, agent, item in cur.fetchall()}
+            return {
+                (ch, chat, int(agent)): PushWatermark(created_at=stamp, item_id=item)
+                for ch, chat, agent, item, stamp in cur.fetchall()
+            }
 
-    def save_push(self, channel: str, chat_id: str, agent_id: int, item_id: str) -> None:
+    def save_push(
+        self, channel: str, chat_id: str, agent_id: int, watermark: PushWatermark
+    ) -> None:
         self._upsert(
-            "INSERT INTO im_bridge_cursors (channel, chat_id, push_agent_id, push_item_id) "
-            "VALUES (%s, %s, %s, %s) ON CONFLICT (channel, chat_id) DO UPDATE SET "
+            "INSERT INTO im_bridge_cursors "
+            "(channel, chat_id, push_agent_id, push_item_id, push_created_at) "
+            "VALUES (%s, %s, %s, %s, %s) ON CONFLICT (channel, chat_id) DO UPDATE SET "
             "push_agent_id = EXCLUDED.push_agent_id, push_item_id = EXCLUDED.push_item_id, "
-            "updated_at = now()",
-            (channel, chat_id, agent_id, item_id),
+            "push_created_at = EXCLUDED.push_created_at, updated_at = now()",
+            (channel, chat_id, agent_id, watermark.item_id, watermark.created_at),
         )
 
     def load_poll(self, channel: str) -> dict[str, tuple[str, int]]:
