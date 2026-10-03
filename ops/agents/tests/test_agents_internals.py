@@ -163,6 +163,11 @@ class TestSpawnAgent:
         )
         monkeypatch.setattr(settings.lm, "llm_model", "claude-sonnet-5")
         default_model_agent = _spawn_agent()
+        # No birth pin: the live default decides (spawn stamps whatever .env says).
+        db_conn.execute(
+            "UPDATE agents_meta SET birth_config = '{}' WHERE id = %s", (default_model_agent,)
+        )
+        db_conn.commit()
         text_only_agent = _spawn_agent(config={"llm_model": "deepseek-flash"})
         withdrawn_vision_agent = _spawn_agent(config={"llm_model": model})
 
@@ -176,6 +181,30 @@ class TestSpawnAgent:
         assert text_only_snapshot.supports_vision is False
         assert withdrawn_snapshot is not None
         assert withdrawn_snapshot.supports_vision is False
+
+    def test_snapshot_effective_model_follows_the_birth_stamp(
+        self, db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """`llm_model` is birth-frozen: an agent born under a vision-capable default keeps
+        it after the cluster default flips to a text-only model, as the host resolves it
+        (overlay over birth stamp over the live default)."""
+        born_vision = _spawn_agent()
+        born_text = _spawn_agent()
+        for agent_id, stamped in ((born_vision, "claude-sonnet-5"), (born_text, "deepseek-flash")):
+            db_conn.execute(
+                "UPDATE agents_meta SET birth_config = %s::jsonb WHERE id = %s",
+                (f'{{"llm_model": "{stamped}"}}', agent_id),
+            )
+        db_conn.commit()
+        monkeypatch.setattr(
+            settings.lm, "llm_model", "deepseek-flash"
+        )  # the default has since flipped
+
+        vision = select_one(db_conn, born_vision)
+        text = select_one(db_conn, born_text)
+
+        assert vision is not None and vision.supports_vision is True
+        assert text is not None and text.supports_vision is False
 
 
 def _insert_checkpoint(
