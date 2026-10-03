@@ -318,6 +318,17 @@ def test_node_npm_and_codegen_share_one_condition() -> None:
     assert order.index("Select codegen freshness from changed files") < order.index("Install Node")
 
 
+def test_structure_guard_pins_the_merge_refs_base_not_the_event_field() -> None:
+    """#4903: base.sha can lag the merge ref's actual base (a stale branch's
+    sync point), which hard-fails the guard once a baseline section retires;
+    the step resolves HEAD^1 and keeps base.sha only as a fallback."""
+    script = STEPS["Fetch base revision for structure guard"]["run"]
+    assert "git rev-parse HEAD^1" in script
+    assert script.index("HEAD^1") < script.index("base.sha")
+    assert 'git fetch --depth=1 origin "$base"' in script
+    assert "LINT_STRUCTURE_BASELINE_BASE" in script
+
+
 def test_every_codegen_input_family_selects_freshness() -> None:
     paths = (
         "gateway/schemas/tasks.py",
