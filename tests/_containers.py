@@ -175,9 +175,7 @@ def redis_server() -> Generator[str]:
             proc.wait(timeout=10)
         except subprocess.TimeoutExpired:
             # A wedged redis-server must not leak (and must not mask the
-            # test's original exception): kill it, mirroring the milvus
-            # fixture's terminate→wait→kill pattern in tests/fixtures/milvus.py
-            # (audit round-2 cc-docs-tests P2).
+            # test's original exception): kill it.
             proc.kill()
             proc.wait(timeout=10)
         shutil.rmtree(tmp, ignore_errors=True)

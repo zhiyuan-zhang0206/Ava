@@ -393,7 +393,7 @@ def test_probe_fatal_with_actionable_fix_when_extension_missing(
     assert result.fatal is True
     assert result.message is not None
     assert "fallback-only" in result.message
-    assert "milvus" in result.message and "numpy" in result.message  # the actionable switch
+    assert "numpy" in result.message  # the actionable switch
 
 
 def test_probe_transient_when_postgres_unreachable(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -221,7 +221,7 @@ async def test_modelled_outage_degrades_without_an_error_log(
     """The gateway naming its own outage in the wire contract is a self-clearing
     state (a restart, a stalled embedder), so it degrades the same way but stays
     below error — otherwise every gateway bounce reads as a bug."""
-    _raise_on_search(monkeypatch, IndexerUnavailable("milvus search failed"))
+    _raise_on_search(monkeypatch, IndexerUnavailable("memory search failed"))
 
     result = await recall.passive_memory_recall(_conversation(), agent=AgentSlices.resolve())  # pyright: ignore[reportUnknownArgumentType]
 

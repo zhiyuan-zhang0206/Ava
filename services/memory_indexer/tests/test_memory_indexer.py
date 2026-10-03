@@ -1,10 +1,10 @@
-"""Memory indexer unit tests — daemon reconcile + the milvus storage engine.
+"""Memory indexer unit tests — daemon reconcile + chunk commit logic.
 
-The embedding provider is mocked (a `_FakeProvider`); the storage tests use
-a session-scoped milvus-lite standalone server (`milvus_client` fixture in
-tests/fixtures/milvus.py). The milvus-lite standalone server starts in ~3s, one
-shared per session; tests drop the collection between them for isolation.
-Same backing as prod (standalone server), no in-process mixing.
+The embedding provider is mocked (a `_FakeProvider`); storage is the real
+`MemoryStore` behind an in-process adapter (`store_backend.StoreBackend`), so
+the daemon's reconcile, tail-cleanup and provider-switch behavior runs against
+the production numpy storage core without the HTTP hop. The store's own
+semantics are pinned in `services/memory_search/tests/test_memory_search_store.py`.
 
 The provider contract (Gemini adapter wire behavior) is pinned separately
 in `services/memory_indexer/embeddings/tests/test_embeddings.py`; here the focus is the daemon's
@@ -36,23 +36,23 @@ from base.daemon.health import Liveness
 from base.host.net.resilience import MAX_RETRY_AFTER_RESPECT_S, ExponentialBackoff
 from services.memory_indexer import daemon
 from services.memory_indexer.backends.base import MemorySearchBackend, content_hash
-from services.memory_indexer.backends.milvus import (
-    _COLLECTION,
-    _EXPECTED_FIELDS,
-    MilvusBackend,
-    _schema_current,
-)
 from services.memory_indexer.embeddings import factory, gemini
 from services.memory_indexer.embeddings.base import EmbeddingAPIError
+from services.memory_indexer.tests.store_backend import StoreBackend
 
 _DIM = 8
 _FP = "test:gemini:dim=8"
 
 
-def _backend(client: Any) -> MilvusBackend:
-    """Wrap the raw milvus fixture client in the backend adapter — the
-    daemon talks to backends, not raw clients."""
-    return MilvusBackend(dim=_DIM, fingerprint=_FP, client=client)
+@pytest.fixture
+def store_backend(tmp_path: Path) -> StoreBackend:
+    """A fresh in-process backend over a real `MemoryStore` (npz under tmp_path)."""
+    return StoreBackend(tmp_path / "index" / "vectors.npz", dim=_DIM, fingerprint=_FP)
+
+
+def _vec(seed: int) -> np.ndarray:
+    rng = np.random.default_rng(seed)
+    return rng.standard_normal(_DIM).astype(np.float32)
 
 
 class _FakeProvider:
@@ -94,208 +94,6 @@ def test_content_hash_deterministic() -> None:
     assert content_hash("hello") != content_hash("world")
 
 
-# ── milvus storage engine (through the backend adapter) ───────────────────
-
-
-def _vec(seed: int) -> np.ndarray:
-    rng = np.random.default_rng(seed)
-    return rng.standard_normal(_DIM).astype(np.float32)
-
-
-def test_index_connect_creates_collection(milvus_client) -> None:
-    """The fixture's connect() idempotently created the collection at the
-    test dim; `_schema_current` agrees."""
-    assert milvus_client.has_collection(_COLLECTION)  # pyright: ignore[reportUnknownMemberType]
-    assert _schema_current(milvus_client, _DIM)  # pyright: ignore[reportUnknownArgumentType]
-
-
-def test_upsert_then_all_meta(milvus_client) -> None:
-    backend = _backend(milvus_client)
-    backend.upsert("/a/b.md", 1.0, "hash1", _vec(0), kind="body", chunk_idx=0)
-    backend.upsert("/c/d.md", 2.0, "hash2", _vec(1), kind="body", chunk_idx=0)
-    assert backend.all_meta() == {
-        "/a/b.md": (1.0, "hash1", _FP),
-        "/c/d.md": (2.0, "hash2", _FP),
-    }
-
-
-def test_upsert_overwrite(milvus_client) -> None:
-    """Same path = update (by primary key path), not insert."""
-    backend = _backend(milvus_client)
-    backend.upsert("/a.md", 1.0, "hash1", _vec(0), kind="body", chunk_idx=0)
-    backend.upsert("/a.md", 2.0, "hash2", _vec(1), kind="body", chunk_idx=0)
-    assert backend.all_meta() == {"/a.md": (2.0, "hash2", _FP)}
-
-
-def test_upsert_many_inserts_all_rows_and_overwrites(milvus_client) -> None:
-    backend = _backend(milvus_client)
-    backend.upsert_many(
-        [
-            ("/a.md", 1.0, "old", _vec(0), "body", 0),
-            ("/b.md", 2.0, "hb", _vec(1), "body", 0),
-            ("/a.md", 3.0, "new", _vec(2), "body", 0),
-        ]
-    )
-    assert backend.all_meta() == {"/a.md": (3.0, "new", _FP), "/b.md": (2.0, "hb", _FP)}
-    rows = milvus_client.query(  # pyright: ignore[reportUnknownMemberType]
-        collection_name=_COLLECTION, filter="", output_fields=["pk"], limit=100
-    )
-    assert len(rows) == 2  # pyright: ignore[reportUnknownArgumentType]
-
-
-def test_readonly_milvus_upsert_many_raises(milvus_client) -> None:
-    backend = MilvusBackend(
-        dim=_DIM,
-        fingerprint=_FP,
-        client=milvus_client,  # pyright: ignore[reportUnknownArgumentType]
-        readonly=True,
-    )
-    with pytest.raises(RuntimeError, match="read-only"):
-        backend.upsert_many([("/a.md", 1.0, "ha", _vec(0), "body", 0)])
-
-
-def test_delete(milvus_client) -> None:
-    backend = _backend(milvus_client)
-    backend.upsert("/a.md", 1.0, "h", _vec(0), kind="body", chunk_idx=0)
-    backend.delete("/a.md")
-    assert backend.all_meta() == {}
-
-
-def test_delete_missing_noop(milvus_client) -> None:
-    _backend(milvus_client).delete("/never_existed.md")  # no raise
-
-
-def test_search_topk_returns_sorted_by_cosine(milvus_client) -> None:
-    """milvus-lite >=3.1 returns raw cosine similarity, ranked descending.
-
-    Lite 3.0's 1 - similarity form is no longer the supported contract.
-    """
-    backend = _backend(milvus_client)
-    target = np.ones(_DIM, dtype=np.float32)
-    orthogonal = np.zeros(_DIM, dtype=np.float32)
-    orthogonal[0] = 1.0
-    opposite = -np.ones(_DIM, dtype=np.float32)
-
-    backend.upsert("/target.md", 1.0, "h1", target, kind="body", chunk_idx=0)
-    backend.upsert("/orthogonal.md", 2.0, "h2", orthogonal, kind="body", chunk_idx=0)
-    backend.upsert("/opposite.md", 3.0, "h3", opposite, kind="body", chunk_idx=0)
-
-    results = backend.search_topk(target, k=3)
-    assert results == ["/target.md", "/orthogonal.md", "/opposite.md"]
-
-
-def test_search_topk_empty_collection(milvus_client) -> None:
-    assert _backend(milvus_client).search_topk(_vec(0), k=5) == []
-
-
-def test_search_topk_respects_k(milvus_client) -> None:
-    backend = _backend(milvus_client)
-    for i in range(10):
-        backend.upsert(f"/{i}.md", float(i), f"h{i}", _vec(i), kind="body", chunk_idx=0)
-    assert len(backend.search_topk(_vec(0), k=3)) == 3
-
-
-def test_upsert_chunk_rows_meta_stays_per_path(milvus_client) -> None:
-    backend = _backend(milvus_client)
-    for idx in range(3):
-        backend.upsert("/a.md", 1.0, "ha", _vec(idx), kind="body", chunk_idx=idx)
-    backend.upsert("/a.md", 1.0, "ha", _vec(9), kind="desc", chunk_idx=0)
-    backend.upsert("/b.md", 2.0, "hb", _vec(0), kind="body", chunk_idx=0)
-    assert backend.all_meta() == {
-        "/a.md": (1.0, "ha", _FP),
-        "/b.md": (2.0, "hb", _FP),
-    }
-
-
-def test_search_topk_aggregates_chunks_by_path(milvus_client) -> None:
-    """Chunk rows of one path collapse to a single hit; the best chunk per
-    path decides the rank."""
-    backend = _backend(milvus_client)
-    ones = np.ones(_DIM, dtype=np.float32)
-    worst_chunk = np.zeros(_DIM, dtype=np.float32)
-    worst_chunk[0] = 1.0
-    backend.upsert("/a.md", 1.0, "ha", ones, kind="body", chunk_idx=0)
-    backend.upsert("/a.md", 1.0, "ha", 0.9 * ones, kind="body", chunk_idx=1)
-    backend.upsert("/a.md", 1.0, "ha", 0.5 * ones, kind="body", chunk_idx=2)
-    backend.upsert("/a.md", 1.0, "ha", worst_chunk, kind="body", chunk_idx=3)
-    backend.upsert("/b.md", 2.0, "hb", -ones, kind="body", chunk_idx=0)
-    backend.upsert("/c.md", 3.0, "hc", 0.7 * ones, kind="body", chunk_idx=0)
-    results = backend.search_topk(ones, k=5)
-    assert results == ["/a.md", "/c.md", "/b.md"]  # no duplicate paths
-
-
-def test_delete_removes_all_chunks_of_path(milvus_client) -> None:
-    backend = _backend(milvus_client)
-    for idx in range(3):
-        backend.upsert("/a.md", 1.0, "ha", _vec(idx), kind="body", chunk_idx=idx)
-    backend.upsert("/a.md", 1.0, "ha", _vec(9), kind="desc", chunk_idx=0)
-    backend.upsert("/b.md", 2.0, "hb", _vec(0), kind="body", chunk_idx=0)
-    backend.delete("/a.md")
-    assert backend.all_meta() == {"/b.md": (2.0, "hb", _FP)}
-    assert backend.search_topk(_vec(0), k=5) == ["/b.md"]
-
-
-def test_connect_migrates_legacy_schema(milvus_client) -> None:
-    """A legacy single-row-per-file collection (path PK, no kind/chunk_idx)
-    is dropped and recreated by connect(); its rows are gone — cold-start
-    rebuilds them chunked."""
-    from pymilvus import DataType
-
-    client = milvus_client
-    client.drop_collection(_COLLECTION)  # pyright: ignore[reportUnknownMemberType]
-    schema = client.create_schema(auto_id=False, enable_dynamic_field=False)  # pyright: ignore[reportUnknownMemberType]
-    schema.add_field("path", DataType.VARCHAR, is_primary=True, max_length=1024)  # pyright: ignore[reportUnknownMemberType]
-    schema.add_field("mtime", DataType.DOUBLE)  # pyright: ignore[reportUnknownMemberType]
-    schema.add_field("content_hash", DataType.VARCHAR, max_length=128)  # pyright: ignore[reportUnknownMemberType]
-    schema.add_field("vector", DataType.FLOAT_VECTOR, dim=_DIM)  # pyright: ignore[reportUnknownMemberType]
-    legacy_idx = client.prepare_index_params()  # pyright: ignore[reportUnknownMemberType]
-    legacy_idx.add_index(field_name="vector", metric_type="COSINE", index_type="AUTOINDEX")  # pyright: ignore[reportUnknownMemberType]
-    client.create_collection(  # pyright: ignore[reportUnknownMemberType]
-        collection_name=_COLLECTION, schema=schema, index_params=legacy_idx
-    )
-    client.insert(  # pyright: ignore[reportUnknownMemberType]
-        collection_name=_COLLECTION,
-        data=[
-            {
-                "path": "/old.md",
-                "mtime": 1.0,
-                "content_hash": "h",
-                "vector": [0.0] * _DIM,
-            }
-        ],
-    )
-
-    fresh = MilvusBackend(dim=_DIM, fingerprint=_FP)
-    fresh.connect()
-    try:
-        info = fresh._require_client().describe_collection(collection_name=_COLLECTION)  # pyright: ignore[reportUnknownMemberType]
-        fields = info["fields"] if isinstance(info, dict) else getattr(info, "fields", [])  # pyright: ignore[reportUnknownArgumentType]
-        names = {f["name"] for f in fields}
-        assert names >= _EXPECTED_FIELDS
-        assert fresh.all_meta() == {}  # legacy row dropped with the collection
-    finally:
-        fresh.close()
-
-
-def test_schema_current_detects_legacy_layout(milvus_client) -> None:
-    """_schema_current is True on the chunked schema, False on the legacy one."""
-    assert _schema_current(milvus_client, _DIM)  # pyright: ignore[reportUnknownArgumentType]
-
-    from pymilvus import DataType
-
-    client = milvus_client
-    client.drop_collection(_COLLECTION)  # pyright: ignore[reportUnknownMemberType]
-    schema = client.create_schema(auto_id=False, enable_dynamic_field=False)  # pyright: ignore[reportUnknownMemberType]
-    schema.add_field("path", DataType.VARCHAR, is_primary=True, max_length=1024)  # pyright: ignore[reportUnknownMemberType]
-    schema.add_field("mtime", DataType.DOUBLE)  # pyright: ignore[reportUnknownMemberType]
-    schema.add_field("content_hash", DataType.VARCHAR, max_length=128)  # pyright: ignore[reportUnknownMemberType]
-    schema.add_field("vector", DataType.FLOAT_VECTOR, dim=_DIM)  # pyright: ignore[reportUnknownMemberType]
-    idx = client.prepare_index_params()  # pyright: ignore[reportUnknownMemberType]
-    idx.add_index(field_name="vector", metric_type="COSINE", index_type="AUTOINDEX")  # pyright: ignore[reportUnknownMemberType]
-    client.create_collection(collection_name=_COLLECTION, schema=schema, index_params=idx)  # pyright: ignore[reportUnknownMemberType]
-    assert not _schema_current(client, _DIM)  # pyright: ignore[reportUnknownArgumentType]
-
-
 # ── daemon helpers ──────────────────────────────────────────────────────
 
 
@@ -328,7 +126,7 @@ def test_scan_disk_missing_root_returns_empty(tmp_path: Path) -> None:
 def test_process_paths_embeds_new_files(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
-    milvus_client,
+    store_backend: StoreBackend,
 ) -> None:
     f1 = tmp_path / "a.md"
     f1.write_text("content A")
@@ -337,13 +135,13 @@ def test_process_paths_embeds_new_files(
 
     provider = _FakeProvider()
     daemon._process_paths(
-        _backend(milvus_client),
+        store_backend,
         {f1.resolve(), f2.resolve()},
         provider,
         Liveness(daemon._liveness_timeout_s()),
     )
     assert provider.embed_batch_count == 1
-    meta = _backend(milvus_client).all_meta()
+    meta = store_backend.all_meta()
     assert str(f1.resolve()) in meta
     assert str(f2.resolve()) in meta
 
@@ -351,19 +149,19 @@ def test_process_paths_embeds_new_files(
 def test_process_paths_skips_unchanged_hash(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
-    milvus_client,
+    store_backend: StoreBackend,
 ) -> None:
     f = tmp_path / "a.md"
     f.write_text("content")
 
     provider = _FakeProvider()
     daemon._process_paths(
-        _backend(milvus_client), {f.resolve()}, provider, Liveness(daemon._liveness_timeout_s())
+        store_backend, {f.resolve()}, provider, Liveness(daemon._liveness_timeout_s())
     )
     assert provider.embed_batch_count == 1
 
     daemon._process_paths(
-        _backend(milvus_client), {f.resolve()}, provider, Liveness(daemon._liveness_timeout_s())
+        store_backend, {f.resolve()}, provider, Liveness(daemon._liveness_timeout_s())
     )
     assert provider.embed_batch_count == 1  # hash unchanged, no re-embed
 
@@ -371,7 +169,7 @@ def test_process_paths_skips_unchanged_hash(
 def test_process_paths_reembeds_on_provider_fingerprint_change(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
-    milvus_client,
+    store_backend: StoreBackend,
 ) -> None:
     """CTO ① (2026-08-30): a provider switch must trigger a full rebuild —
     old vectors live in a different semantic space even at the same dim, so
@@ -381,18 +179,14 @@ def test_process_paths_reembeds_on_provider_fingerprint_change(
 
     first = _FakeProvider()
     daemon._process_paths(
-        _backend(milvus_client), {f.resolve()}, first, Liveness(daemon._liveness_timeout_s())
+        store_backend, {f.resolve()}, first, Liveness(daemon._liveness_timeout_s())
     )
     assert first.embed_batch_count == 1
 
     # Simulate the switch: same content, same mtime, new provider fingerprint —
     # a fresh daemon run would build the backend for the new provider too.
     switched = _FakeProvider(fingerprint="another-provider:dim=8")
-    switched_backend = MilvusBackend(
-        dim=_DIM,
-        fingerprint="another-provider:dim=8",
-        client=milvus_client,  # pyright: ignore[reportUnknownArgumentType]
-    )
+    switched_backend = store_backend.reopen("another-provider:dim=8")
     daemon._process_paths(
         switched_backend, {f.resolve()}, switched, Liveness(daemon._liveness_timeout_s())
     )
@@ -401,19 +195,19 @@ def test_process_paths_reembeds_on_provider_fingerprint_change(
     assert meta[str(f.resolve())][2] == "another-provider:dim=8"
 
 
-def test_process_paths_deletes_missing_files(tmp_path: Path, milvus_client) -> None:
+def test_process_paths_deletes_missing_files(tmp_path: Path, store_backend: StoreBackend) -> None:
     """Path enters dirty set but file not on disk — index row is deleted."""
     ghost = str(
         tmp_path / "ghost_nonexistent.md"
     )  # under tmp_path, definitely does not exist (never written)
-    _backend(milvus_client).upsert(ghost, 1.0, "h", _vec(0), kind="body", chunk_idx=0)
+    store_backend.upsert(ghost, 1.0, "h", _vec(0), kind="body", chunk_idx=0)
     daemon._process_paths(
-        _backend(milvus_client),
+        store_backend,
         {Path(ghost)},
         _FakeProvider(),
         Liveness(daemon._liveness_timeout_s()),
     )
-    assert _backend(milvus_client).all_meta() == {}
+    assert store_backend.all_meta() == {}
 
 
 def test_event_handler_pushes_md_paths_only() -> None:
@@ -459,7 +253,7 @@ def test_event_handler_on_moved_pushes_both_ends() -> None:
 def test_process_paths_deletes_foreign_paths_even_when_file_exists(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
-    milvus_client,
+    store_backend: StoreBackend,
 ) -> None:
     """Rows outside the watched root are pruned even when the file still
     exists on disk — the stale authoring-checkout leftovers that surface
@@ -473,17 +267,17 @@ def test_process_paths_deletes_foreign_paths_even_when_file_exists(
     foreign = foreign_dir / "note.md"  # exists on disk, outside watched root
     foreign.write_text("content")
 
-    _backend(milvus_client).upsert(str(foreign), 1.0, "h", _vec(0), kind="body", chunk_idx=0)
+    store_backend.upsert(str(foreign), 1.0, "h", _vec(0), kind="body", chunk_idx=0)
     daemon._process_paths(
-        _backend(milvus_client), {foreign}, _FakeProvider(), Liveness(daemon._liveness_timeout_s())
+        store_backend, {foreign}, _FakeProvider(), Liveness(daemon._liveness_timeout_s())
     )
-    assert _backend(milvus_client).all_meta() == {}
+    assert store_backend.all_meta() == {}
 
 
 def test_cold_start_reconcile_prunes_foreign_rows(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
-    milvus_client,
+    store_backend: StoreBackend,
 ) -> None:
     """Cold-start reconcile deletes rows whose path is outside the watched
     root — the durable fix for the 11 stale authoring-checkout entries."""
@@ -497,12 +291,12 @@ def test_cold_start_reconcile_prunes_foreign_rows(
     monkeypatch.setattr(daemon, "_memory_root", lambda: root)
     # Both rows pre-exist in the index (e.g. from an era before the
     # gateway-checkout split).
-    backend = _backend(milvus_client)
+    backend = store_backend
     backend.upsert(str(watched.resolve()), 1.0, "h", _vec(0), kind="body", chunk_idx=0)
     backend.upsert(str(foreign.resolve()), 1.0, "h", _vec(0), kind="body", chunk_idx=0)
 
     daemon._reconcile(backend, _FakeProvider(), Liveness(daemon._liveness_timeout_s()))
-    meta = _backend(milvus_client).all_meta()
+    meta = store_backend.all_meta()
     assert str(foreign.resolve()) not in meta
     assert str(watched.resolve()) in meta
 
@@ -510,7 +304,7 @@ def test_cold_start_reconcile_prunes_foreign_rows(
 def test_cold_start_reconcile_reembeds_on_provider_switch(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
-    milvus_client,
+    store_backend: StoreBackend,
 ) -> None:
     """CTO ①: the provider fingerprint is part of the reconcile key — a row
     built by another provider is dirty at cold start even at the same mtime
@@ -521,18 +315,14 @@ def test_cold_start_reconcile_reembeds_on_provider_switch(
     watched.write_text("watched content")
 
     monkeypatch.setattr(daemon, "_memory_root", lambda: root)
-    backend = _backend(milvus_client)
+    backend = store_backend
     watched_mtime = watched.stat().st_mtime
     backend.upsert(str(watched.resolve()), watched_mtime, "h", _vec(0), kind="body", chunk_idx=0)
     # mtime matches disk, hash matches — but the fingerprint is the old provider's.
     assert backend.all_meta() == {str(watched.resolve()): (watched_mtime, "h", _FP)}
 
     switched = _FakeProvider(fingerprint="other:provider")
-    switched_backend = MilvusBackend(
-        dim=_DIM,
-        fingerprint="other:provider",
-        client=milvus_client,  # pyright: ignore[reportUnknownArgumentType]
-    )
+    switched_backend = store_backend.reopen("other:provider")
     daemon._reconcile(switched_backend, switched, Liveness(daemon._liveness_timeout_s()))
     # The row was re-embedded with the new fingerprint.
     meta = switched_backend.all_meta()
@@ -748,7 +538,7 @@ def test_factory_worst_case_registry_complete(monkeypatch: pytest.MonkeyPatch) -
 def test_cold_start_reconcile_beats_liveness_across_chunks(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
-    milvus_client,
+    store_backend: StoreBackend,
 ) -> None:
     """Regression (watchdog kill loop, 2026-09-19): the cold-start rebuild
     works the dirty set in file-granular chunks, beating liveness between them.
@@ -780,7 +570,7 @@ def test_cold_start_reconcile_beats_liveness_across_chunks(
 
     liveness = Liveness(0.4)
     started = time.monotonic()
-    assert daemon._reconcile(_backend(milvus_client), _FakeProvider(), liveness) is True
+    assert daemon._reconcile(store_backend, _FakeProvider(), liveness) is True
     elapsed = time.monotonic() - started
 
     # Chunked by file: call count and sizes exact, every file visited once.
@@ -796,7 +586,7 @@ def test_cold_start_reconcile_beats_liveness_across_chunks(
 def test_reconcile_embed_error_truncates_and_returns_false(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
-    milvus_client,
+    store_backend: StoreBackend,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     """Error semantics preserved from the pre-chunking reconcile (one
@@ -822,7 +612,7 @@ def test_reconcile_embed_error_truncates_and_returns_false(
 
     liveness = Liveness(600.0)
     with caplog.at_level(logging.ERROR, logger="services.memory_indexer.daemon"):
-        assert daemon._reconcile(_backend(milvus_client), _FakeProvider(), liveness) is False
+        assert daemon._reconcile(store_backend, _FakeProvider(), liveness) is False
 
     assert calls == [2]  # first chunk failed -> remaining chunks never ran (as before)
     expected = (
@@ -967,7 +757,7 @@ def test_file_rows_no_frontmatter_no_desc() -> None:
 def test_process_paths_indexes_desc_and_body_chunks(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
-    milvus_client,
+    store_backend: StoreBackend,
 ) -> None:
     """One file with a description + a long body lands as 1 desc row + N body
     chunks; all_meta still reports the file once."""
@@ -979,30 +769,14 @@ def test_process_paths_indexes_desc_and_body_chunks(
     )
 
     daemon._process_paths(
-        _backend(milvus_client),
+        store_backend,
         {f.resolve()},
         _FakeProvider(),
         Liveness(daemon._liveness_timeout_s()),
     )
-    assert str(f.resolve()) in _backend(milvus_client).all_meta()
-    rows = milvus_client.query(  # pyright: ignore[reportUnknownMemberType]
-        collection_name=_COLLECTION,
-        filter=f'path == "{f.resolve()!s}"',
-        output_fields=["kind", "chunk_idx"],
-        limit=100,
-    )
-    kinds = sorted((r["kind"], r["chunk_idx"]) for r in rows)  # pyright: ignore[reportUnknownArgumentType]
+    assert str(f.resolve()) in store_backend.all_meta()
+    kinds = sorted(store_backend.rows(f))
     assert kinds == [("body", 0), ("body", 1), ("desc", 0)]
-
-
-def _indexed_rows(milvus_client: Any, path: Path) -> set[tuple[str, int]]:
-    rows = milvus_client.query(  # pyright: ignore[reportUnknownMemberType]
-        collection_name=_COLLECTION,
-        filter=f'path == "{path.resolve()!s}"',
-        output_fields=["kind", "chunk_idx"],
-        limit=100,
-    )
-    return {(r["kind"], r["chunk_idx"]) for r in rows}  # pyright: ignore[reportUnknownArgumentType]
 
 
 def _long_note(paragraphs: int) -> str:
@@ -1014,78 +788,77 @@ def _long_note(paragraphs: int) -> str:
 def test_process_paths_removes_stale_tail_when_file_shrinks(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
-    milvus_client,
+    store_backend: StoreBackend,
 ) -> None:
     """Issue #1946: after a file shrinks, the rows it no longer produces
     (old body tail) are gone — every remaining chunk matches current content."""
     f = tmp_path / "long.md"
     f.write_text(_long_note(12), encoding="utf-8")
-    backend = _backend(milvus_client)
+    backend = store_backend
     daemon._process_paths(
         backend, {f.resolve()}, _FakeProvider(), Liveness(daemon._liveness_timeout_s())
     )
-    assert _indexed_rows(milvus_client, f) == {("desc", 0), ("body", 0), ("body", 1), ("body", 2)}
+    assert store_backend.rows(f) == {("desc", 0), ("body", 0), ("body", 1), ("body", 2)}
 
     f.write_text(_long_note(3), encoding="utf-8")
     daemon._process_paths(
         backend, {f.resolve()}, _FakeProvider(), Liveness(daemon._liveness_timeout_s())
     )
-    assert _indexed_rows(milvus_client, f) == {("desc", 0), ("body", 0)}
+    assert store_backend.rows(f) == {("desc", 0), ("body", 0)}
     assert backend.all_meta()[str(f.resolve())][1] == content_hash(f.read_text())
 
 
 def test_process_paths_removes_desc_row_when_description_deleted(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
-    milvus_client,
+    store_backend: StoreBackend,
 ) -> None:
     """A removed description removes its row; the body stays current."""
     f = tmp_path / "note.md"
     f.write_text("---\ndescription: old description\n---\n\nbody text", encoding="utf-8")
-    backend = _backend(milvus_client)
+    backend = store_backend
     daemon._process_paths(
         backend, {f.resolve()}, _FakeProvider(), Liveness(daemon._liveness_timeout_s())
     )
-    assert _indexed_rows(milvus_client, f) == {("desc", 0), ("body", 0)}
+    assert store_backend.rows(f) == {("desc", 0), ("body", 0)}
 
     f.write_text("body text", encoding="utf-8")
     daemon._process_paths(
         backend, {f.resolve()}, _FakeProvider(), Liveness(daemon._liveness_timeout_s())
     )
-    assert _indexed_rows(milvus_client, f) == {("body", 0)}
+    assert store_backend.rows(f) == {("body", 0)}
     assert backend.all_meta()[str(f.resolve())][1] == content_hash(f.read_text())
 
 
 def test_process_paths_removes_all_rows_when_file_becomes_empty(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
-    milvus_client,
+    store_backend: StoreBackend,
 ) -> None:
     """An emptied file leaves no rows behind (issue #1946)."""
     f = tmp_path / "note.md"
     f.write_text("---\ndescription: old description\n---\n\nbody text", encoding="utf-8")
-    backend = _backend(milvus_client)
+    backend = store_backend
     daemon._process_paths(
         backend, {f.resolve()}, _FakeProvider(), Liveness(daemon._liveness_timeout_s())
     )
-    assert _indexed_rows(milvus_client, f) == {("desc", 0), ("body", 0)}
+    assert store_backend.rows(f) == {("desc", 0), ("body", 0)}
 
     f.write_text("", encoding="utf-8")
     daemon._process_paths(
         backend, {f.resolve()}, _FakeProvider(), Liveness(daemon._liveness_timeout_s())
     )
-    assert _indexed_rows(milvus_client, f) == set()
+    assert store_backend.rows(f) == set()
     assert backend.all_meta() == {}
 
 
 def test_process_paths_calls_upsert_many_once_across_embed_batches(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
-    milvus_client,
 ) -> None:
-    class _RecordingBackend(MilvusBackend):
+    class _RecordingBackend(StoreBackend):
         def __init__(self) -> None:
-            super().__init__(dim=_DIM, fingerprint=_FP, client=milvus_client)  # pyright: ignore[reportUnknownArgumentType]
+            super().__init__(tmp_path / "recording" / "vectors.npz", dim=_DIM, fingerprint=_FP)
             self.calls: list[list[tuple[str, float, str, np.ndarray, str, int]]] = []
 
         def upsert_many(self, rows: Sequence[tuple[str, float, str, np.ndarray, str, int]]) -> None:
@@ -1114,7 +887,6 @@ def test_process_paths_calls_upsert_many_once_across_embed_batches(
 def test_partial_embedding_failure_keeps_old_rows_intact(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
-    milvus_client,
 ) -> None:
     """A file whose embedding fails part way keeps its previous rows whole —
     all-old is the recoverable consistent state; the hash stays mismatching so
@@ -1126,9 +898,9 @@ def test_partial_embedding_failure_keeps_old_rows_intact(
                 raise EmbeddingAPIError("second batch failed")
             return super().embed_batch(texts)
 
-    class _RecordingBackend(MilvusBackend):
+    class _RecordingBackend(StoreBackend):
         def __init__(self) -> None:
-            super().__init__(dim=_DIM, fingerprint=_FP, client=milvus_client)  # pyright: ignore[reportUnknownArgumentType]
+            super().__init__(tmp_path / "recording" / "vectors.npz", dim=_DIM, fingerprint=_FP)
             self.calls: list[list[tuple[str, float, str, np.ndarray, str, int]]] = []
 
         def upsert_many(self, rows: Sequence[tuple[str, float, str, np.ndarray, str, int]]) -> None:
@@ -1162,7 +934,7 @@ def test_partial_embedding_failure_keeps_old_rows_intact(
 def test_complete_file_still_commits_when_another_fails(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
-    milvus_client,
+    store_backend: StoreBackend,
 ) -> None:
     """Files whose rows are ALL embedded commit even when a sibling file
     fails mid-embedding (issue #1946)."""
@@ -1174,7 +946,7 @@ def test_complete_file_still_commits_when_another_fails(
             return super().embed_batch(texts)
 
     monkeypatch.setattr(daemon, "_BATCH_SIZE", 1)
-    backend = _backend(milvus_client)
+    backend = store_backend
     complete = tmp_path / "complete.md"
     complete.write_text("complete body", encoding="utf-8")
     partial = tmp_path / "partial.md"
@@ -1256,7 +1028,7 @@ class _FlakyProvider(_FakeProvider):
 async def test_reconcile_retry_drain_loop_converges_after_embed_failures(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
-    milvus_client,
+    store_backend: StoreBackend,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     from unittest.mock import Mock
@@ -1268,7 +1040,7 @@ async def test_reconcile_retry_drain_loop_converges_after_embed_failures(
     for note in files:
         note.write_text(f"content of {note.name}")
     monkeypatch.setattr(daemon, "_LOOP_INTERVAL_S", 0.01)
-    backend = _backend(milvus_client)
+    backend = store_backend
     provider = _FlakyProvider(failures=3)
     liveness = Liveness(1.0)
     retry = daemon._ReconcileRetrySchedule(base_s=0.05, cap_s=0.1)
@@ -1303,13 +1075,13 @@ async def test_reconcile_retry_drain_loop_converges_after_embed_failures(
 async def test_reconcile_retry_drain_failure_arms_schedule(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
-    milvus_client,
+    store_backend: StoreBackend,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     note = tmp_path / "changed.md"
     note.write_text("new content")
     monkeypatch.setattr(daemon, "_LOOP_INTERVAL_S", 0.01)
-    backend = _backend(milvus_client)
+    backend = store_backend
     provider = _FlakyProvider(failures=1)
     dirty: queue.Queue[Path] = queue.Queue()
     dirty.put(note)

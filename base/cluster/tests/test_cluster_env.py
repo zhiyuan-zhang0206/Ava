@@ -16,7 +16,6 @@ def _rec(tmp_path: Path):
             "task_maintenance": 18005,
             "memory_indexer": 18006,
             "ops": 18007,
-            "milvus": 18008,
             "browser": 18009,
             "permissions_helper": 18010,
             "postgres": 18011,
@@ -57,8 +56,6 @@ def test_derive_env_ports_and_urls(tmp_path: Path):
     assert env["AVA_GATEWAY_URL"] == "http://localhost:18000"
     assert env["AVA_GATEWAY_HEALTH_URL"] == "http://localhost:18000/api/health"
     assert env["AVA_FRONTEND_HEALTHCHECK_URL"] == "http://localhost:18001"
-    assert env["AVA_MILVUS_PORT"] == "18008"
-    assert env["AVA_MILVUS_URI"] == "http://127.0.0.1:18008"
     # db_url + redis_url carry the data-plane identity AS DATA: a fresh birth
     # writes the fixed `ava` db/role/ACL identifier. AVA_DB_URL is the
     # credential-free endpoint (the owner is NOLOGIN; processes dial delivered

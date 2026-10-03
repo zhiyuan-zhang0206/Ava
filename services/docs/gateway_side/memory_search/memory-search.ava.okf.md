@@ -9,8 +9,8 @@ tags: []
 
 ## What is it
 A standalone local process (`python -m services.memory_search.daemon`) serving
-the memory search HTTP API on `127.0.0.1:19531` (one past milvus's 19530). The
-indexer daemon and the gateway both dial it like the milvus daemon, so the
+the memory search HTTP API on `127.0.0.1:19531` . The
+indexer daemon and the gateway both dial it over HTTP, so the
 numpy backend needs no cross-process shared state: this one process owns the
 in-memory matrix (~2k rows x 3072 dims float32 ≈ 24MB) and its npz
 persistence.
@@ -21,7 +21,7 @@ persistence.
 ## Core Responsibilities
 - **Exact search**: one matrix product per query over every row, aggregated
   per path — no approximate index, so its results are the reconciliation
-  baseline for the approximate backends (milvus)
+  baseline
 - **Persistence**: every mutation rewrites `$AVA_HOME/memory-search/vectors.npz`
   atomically (tmp file + rename) before acking — a kill-after-ack never loses
   a row; a fresh service loads the file at boot and the indexer's cold-start

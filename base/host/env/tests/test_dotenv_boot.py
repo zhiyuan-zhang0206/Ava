@@ -311,12 +311,12 @@ def test_enforce_drops_every_undeclared_derived_key(
     `_point_env_at`.)"""
     monkeypatch.setitem(os.environ, "AVA_APP_PORT", "3001")
     monkeypatch.setitem(os.environ, "AVA_EVENTS_CHANNEL", "ava:events:leaked")
-    monkeypatch.setitem(os.environ, "AVA_MILVUS_PORT", "19530")
+    monkeypatch.setitem(os.environ, "AVA_MEMORY_SEARCH_PORT", "19531")
     _point_env_at(monkeypatch, tmp_path / "no-port.env", tmp_path)
     dotenv_boot._enforce_cluster_env_authority(resolve_ava_home())
     assert "AVA_APP_PORT" not in os.environ
     assert "AVA_EVENTS_CHANNEL" not in os.environ
-    assert "AVA_MILVUS_PORT" not in os.environ
+    assert "AVA_MEMORY_SEARCH_PORT" not in os.environ
 
 
 def test_enforce_keeps_placeholder_url(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

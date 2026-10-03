@@ -1,4 +1,4 @@
-"""`POST /api/memory/search` endpoint unit tests — primary direct embed+milvus;
+"""`POST /api/memory/search` endpoint unit tests — primary direct embed + the configured backend;
 relative-path conversion; wire error propagation."""
 
 from __future__ import annotations
@@ -15,6 +15,12 @@ from fastapi.testclient import TestClient
 
 from gateway.app import app
 from services.memory_indexer.embeddings.base import EmbeddingAPIError
+
+
+@pytest.fixture(autouse=True)
+def _app_db(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Only the app lifespan sets app.state.db; ASGITransport tests never run it.
+    monkeypatch.setattr(app.state, "db", object(), raising=False)
 
 
 class _StubProvider:
@@ -39,7 +45,7 @@ class _StubProvider:
 
 
 class TestPrimaryPath:
-    """Primary node goes directly through embedder + milvus, returns relative paths."""
+    """Primary node goes directly through embedder + the backend, returns relative paths."""
 
     def test_primary_returns_relative_paths(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
@@ -55,7 +61,7 @@ class TestPrimaryPath:
         (tmp_path / "notes" / "foo.md").write_text("x")
         (tmp_path / "bar.md").write_text("y")
 
-        # stub embedder/backend to avoid real Gemini / milvus calls
+        # stub embedder/backend to avoid real Gemini / backend calls
         import services.memory_indexer.backends.factory as _factory
         import services.memory_indexer.embeddings.factory as _embedding_factory
 
@@ -192,7 +198,7 @@ title: No Description
         outage still saw a raw HTTP error. That is how agent 405 died on
         2026-08-07: the gateway was running out of a deleted worktree's venv and
         the embed client raised `FileNotFoundError` on the missing certifi
-        cacert. The milvus phase below already caught broadly; this makes the
+        cacert. The backend phase below already caught broadly; this makes the
         two symmetric.
         """
         import services.memory_indexer.embeddings.factory as _embedding_factory
@@ -215,7 +221,7 @@ title: No Description
     def test_primary_backend_failure_raises_indexer_unavailable(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """backend raises (e.g. milvus connect refused) → IndexerUnavailable (wire 503)."""
+        """backend raises (e.g. connect refused) → IndexerUnavailable (wire 503)."""
         import services.memory_indexer.backends.factory as _factory
         import services.memory_indexer.embeddings.factory as _embedding_factory
 
@@ -869,7 +875,7 @@ def test_extract_meta_coerces_non_string_description(tmp_path: Path) -> None:
 
 
 class TestEventLoopIsolation:
-    """The embed + milvus calls are synchronous clients; the endpoint must run
+    """The embed + backend calls are synchronous clients; the endpoint must run
     them off the event loop so a slow backend cannot stall the whole gateway
     (the 2026-08-03 freeze: 13 gateway restarts in 8h, three of the five
     examined freezes ended with a gemini-embedding POST as the last MainThread
@@ -1018,17 +1024,12 @@ class TestWedgedBackendReleasesPermits:
     """Every search finishes, and its permit comes back — whatever the backend does.
 
     The evening of 2026-08-03: the handler held one of two permits across an
-    unbounded pymilvus await. Both permits were pinned, every later request
+    unbounded backend await. Both permits were pinned, every later request
     parked in `acquire` with no deadline, and `curl` on the route returned
     neither a response nor an error. Seven agents were stuck in passive recall
     without producing a single LLM turn, and force-killing them only restarted
-    the same wait.
-
-    pymilvus is what makes an unbounded await reachable at all: given no
-    explicit timeout its retry loop awaits each attempt without
-    `asyncio.wait_for`, and connect/close serialize on one process-global lock,
-    so a single stalled call outlives the request that made it. These stub that
-    away and assert the property the handler owes regardless.
+    the same wait. These stub a stalled backend and assert the property the
+    handler owes regardless.
     """
 
     async def test_wedged_backend_answers_503_instead_of_hanging(
@@ -1060,12 +1061,11 @@ class TestWedgedBackendReleasesPermits:
     async def test_a_wedged_embed_is_covered_too(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
-        """The deadline spans both phases, not just the milvus one.
+        """The deadline spans both phases, not just the backend one.
 
-        milvus is the phase with the unbounded pymilvus awaits, but the embed
-        runs under the same permit — a deadline covering only the backend that
-        happened to stall this time would leave the other phase able to pin the
-        endpoint exactly the same way.
+        The backend stalled in the incident, but the embed runs under the same
+        permit — a deadline covering only one phase would leave the other able to
+        pin the endpoint the same way.
         """
         import services.memory_indexer.embeddings.factory as _embedding_factory
 

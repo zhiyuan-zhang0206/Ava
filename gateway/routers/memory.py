@@ -278,14 +278,9 @@ async def _backend_topk(
     backend is constructed for it even though the read path never writes
     rows.
 
-    pymilvus (the default backend) leaves awaits unbounded when given no
-    timeout, and serializes connect/close on one process-global
-    `AsyncConnectionManager` lock. So an unbounded call does not just stall
-    its own request — it pins that lock and every later milvus call in the
-    process queues behind it, including the `close()` in the backend's own
-    `finally`. Passing the deadline down bounds pymilvus's retry loop and
-    its channel wait; the caller's `asyncio.timeout` covers the rest (the
-    `Connect` RPC inside `ensure_channel_ready` takes no deadline at all).
+    An unbounded backend await would pin the request's semaphore permit, so
+    the deadline is handed down to bound the backend's own wait; the caller's
+    `asyncio.timeout` covers the rest.
     """
     from services.memory_indexer.backends import factory
 

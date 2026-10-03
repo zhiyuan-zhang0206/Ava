@@ -16,7 +16,7 @@ from cli.commands._probe import _binds_a_daemon_health_port, _occupied_health_po
 from ops import roster
 from ops.roster.service_spec import ServiceSpec
 
-_NOT_DAEMON_PORTS = ("gateway", "browser", "milvus", "frontend", "memory-search", "otel-collector")
+_NOT_DAEMON_PORTS = ("gateway", "browser", "frontend", "memory-search", "otel-collector")
 
 
 def _by_session() -> dict[str, ServiceSpec]:

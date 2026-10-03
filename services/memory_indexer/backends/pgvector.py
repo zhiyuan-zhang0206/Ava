@@ -2,7 +2,7 @@
 
 Storage: a `memory_embeddings` table in the cluster's own Postgres (the same
 database every other gateway table lives in), schema aligned with the chunk
-rows the milvus backend keeps:
+rows the numpy store keeps:
 
 - `pk` VARCHAR(2048) PK — the same folded `{path}\x1f{kind}\x1f{chunk_idx}`
   key (`base.pk_of`), so reconciliation tooling can compare rows across
@@ -15,7 +15,7 @@ rows the milvus backend keeps:
   the factory and checked at connect (the indexer daemon rebuilds a mismatch)
 
 The table is a **derived cache** (rebuildable from the memory pool by the
-indexer daemon's cold-start reconcile), exactly like the milvus collection.
+indexer daemon's cold-start reconcile), exactly like the numpy store.
 Its DDL is not a migration (migrations govern business data and must apply
 without pgvector) and not a runtime effect either: the gateway's `ava start`
 creates or rebuilds it through `prepare_table`, acting as the schema owner,
@@ -25,11 +25,9 @@ binary in the cluster's Postgres — provisioned by
 
 Search is exact: `vector <=> %s::vector` over every row (a few thousand rows
 x 3072 dims is single-digit ms), aggregated per path (minimum distance wins)
-and returned as top-k paths. Its native cosine distance is 1 - similarity,
-unlike Milvus's raw-similarity response. No approximate index yet: at the
-current pool size an exact scan is cheaper than an HNSW build, and exactness
-is what makes this backend a useful
-reconciliation baseline for the approximate ones.
+and returned as top-k paths. Its native cosine distance is 1 - similarity.
+No approximate index yet: at the current pool size an exact scan is cheaper
+than an HNSW build.
 """
 
 from __future__ import annotations
@@ -53,8 +51,7 @@ _log = logging.getLogger("services.memory_indexer.backends.pgvector")
 _TABLE = "memory_embeddings"
 _RAW_SEARCH_LIMIT = 200
 """Raw chunk rows scanned per query; aggregation then reduces to top-k paths
-(same value as the milvus backend's _RAW_SEARCH_LIMIT — keeps the two
-read paths' contracts aligned)."""
+(a few hundred chunk rows cover any realistic k)."""
 
 # The table name is a module constant and appears verbatim in every
 # statement (a plain LiteralString satisfies psycopg's execute typing); only
@@ -337,7 +334,7 @@ class PGVectorBackend:
         """Write / update one chunk row, keyed by (path, kind, chunk_idx).
 
         Re-upserting the same triple overwrites in place via the folded pk —
-        identical semantics to the milvus backend."""
+        the same semantics as the numpy store."""
         self._require_writable()
         with self._write_conn() as conn:
             conn.execute(
@@ -368,8 +365,7 @@ class PGVectorBackend:
     def delete(self, path: str) -> None:
         """Delete every chunk row of `path`. No-ops when the path has no rows.
 
-        Plain equality — no filter-expression escaping worries the way milvus
-        boolean filters have them."""
+        Plain equality — no filter-expression escaping."""
         self._require_writable()
         with self._write_conn() as conn:
             conn.execute(_DELETE_SQL, (path,))
@@ -392,14 +388,10 @@ class PGVectorBackend:
 
     def all_meta(self) -> dict[str, tuple[float, str, str]]:
         """Per-path (mtime, content_hash, provider_fingerprint) — one entry
-        per **file**, not per chunk (aggregation keeps the max mtime; same
-        contract as milvus). The fingerprint is the reconcile key's third
+        per **file**, not per chunk (aggregation keeps the max mtime). The fingerprint is the reconcile key's third
         element.
 
-        No row cap: the milvus backend truncates its all_meta at 16384 chunk
-        rows (a milvus-side quirk), so a pool past that size would show a
-        spurious row-set diff in reconciliation — this side is the more
-        correct one, not the regression."""
+        No row cap."""
         meta: dict[str, tuple[float, str, str]] = {}
         with self._conn() as conn:
             rows = conn.execute(_ALL_META_SQL).fetchall()
@@ -419,7 +411,7 @@ class PGVectorBackend:
         """Cosine top-k **paths**, aggregated over chunk rows.
 
         `vector <=> %s` is pgvector's cosine distance (1 - cosine_similarity,
-        ascending), unlike Milvus's raw-similarity response. Raw rows aggregate
+        ascending). Raw rows aggregate
         per path (minimum distance wins) and the top-k paths return in that
         order; fewer than k when the table has fewer distinct paths; empty
         when the table is empty. `timeout` bounds the pool-borrow wait when

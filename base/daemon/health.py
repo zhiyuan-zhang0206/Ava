@@ -30,8 +30,7 @@ Design:
   liveness or a degraded component flips the response to 503 so a live sibling
   cannot hide wedged work from the watchdog.
 - ``extra_routes``: ``{("POST", "/search"): handler}`` lets a daemon
-  expose its own RPCs (e.g. memory_indexer ``/search``, bypassing
-  milvus-lite single-process flock restrictions)
+  expose its own RPCs (e.g. a ``/search`` route)
 - No new dependency — uses stdlib ``asyncio.start_server`` +
   hand-written HTTP parsing
 

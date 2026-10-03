@@ -39,7 +39,6 @@ FIXED_PORTS: dict[str, int] = {
     # ops: NOT 8106 — the Windows iphlpsvc service (svchost) permanently holds
     # 8106 on Windows hosts, so a default there makes ops fail to bind there.
     "ops": 8113,
-    "milvus": 19530,
     "browser": 9222,
     "permissions_helper": 9223,
     "postgres": 5433,
@@ -53,7 +52,7 @@ FIXED_PORTS: dict[str, int] = {
     "pg_backup": 8116,
     "ttl_reaper": 8121,
     "schedule_manager": 8122,
-    # The memory search service's TCP port (like milvus's 19530, not a health
-    # port — its healthcheck probes the real /search endpoint).
+    # The memory search service's TCP port (not a health port — its healthcheck
+    # probes the real /search endpoint).
     "memory_search": 19531,
 }

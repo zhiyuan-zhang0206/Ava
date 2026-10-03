@@ -210,7 +210,7 @@ def _otel_collector_gate_reason() -> str | None:
 # chain, which is what previously drove `_gate_reason`'s complexity above the
 # hard ceiling. Every row here has exactly this shape; a session whose gate
 # needs more than one flag or a non-boolean comparison (browser, mcp-daemon,
-# computer-mcp, the lgtm trio, otel-collector, milvus) stays a dedicated branch
+# computer-mcp, the lgtm trio, otel-collector) stays a dedicated branch
 # in `_core_gate_reason` below.
 _FLAG_GATES: tuple[tuple[str, Callable[[], bool], str], ...] = (
     (
@@ -272,16 +272,6 @@ def _core_gate_reason(session: str) -> str | None:
         return None if is_lgtm_host() else "this home is not an observability station"
     if session == "otel-collector":
         return _otel_collector_gate_reason()
-    if session == "milvus" and settings.services.memory_search_backend != "milvus":
-        # The milvus-lite server only serves the memory indexer's milvus
-        # backend; numpy (default) and pgvector never dial it. Without the
-        # gate every `ava start` launched an idle ~1GB milvus-lite process the
-        # memory search never uses (2026-09-02 numpy-default ruling; daemon
-        # was disabled by hand 2026-09-03, this gate makes it durable).
-        return (
-            "memory-search backend is "
-            f"{settings.services.memory_search_backend!r} (AVA_MEMORY_SEARCH_BACKEND) — milvus not needed"
-        )
     return _flag_gate_reason(session)
 
 

@@ -1,6 +1,6 @@
 """Memory search service daemon — uvicorn over the MemoryStore on 19531.
 
-`ava start` spawns this session right after milvus (the indexer's
+`ava start` spawns this session before the memory indexer (the indexer's
 cold-start connects to whichever backend `AVA_MEMORY_SEARCH_BACKEND`
 names, so the storage service must be up first). The store loads its npz
 at boot; the indexer daemon then reconciles disk against it, so a fresh

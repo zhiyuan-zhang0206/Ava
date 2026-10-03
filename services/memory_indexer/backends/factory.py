@@ -30,17 +30,6 @@ from base.db import Database
 from services.memory_indexer.backends.base import MemorySearchBackend
 
 
-def _milvus_backend(
-    database: Database, dim: int, fingerprint: str, *, readonly: bool = False
-) -> MemorySearchBackend:
-    """MilvusBackend talks to its own server; `database` is accepted for the uniform factory
-    signature only."""
-    from services.memory_indexer.backends.milvus import MilvusBackend
-
-    del database
-    return MilvusBackend(dim=dim, fingerprint=fingerprint, readonly=readonly)
-
-
 def _numpy_backend(
     database: Database, dim: int, fingerprint: str, *, readonly: bool = False
 ) -> MemorySearchBackend:
@@ -63,9 +52,6 @@ def _pgvector_backend(
 
 # Uniform constructor shape `(database, dim, fingerprint, readonly)`.
 _BACKENDS: dict[str, Callable[[Database, int, str, bool], MemorySearchBackend]] = {
-    "milvus": lambda database, dim, fingerprint, readonly: _milvus_backend(
-        database, dim, fingerprint, readonly=readonly
-    ),
     "numpy": lambda database, dim, fingerprint, readonly: _numpy_backend(
         database, dim, fingerprint, readonly=readonly
     ),
@@ -79,7 +65,7 @@ def get_backend_named(
     name: str, *, database: Database, dim: int, fingerprint: str, readonly: bool = False
 ) -> MemorySearchBackend:
     """Construct a backend by name — the one dispatch path; unknown names
-    fail fast (an unrecognized value must not silently fall back to milvus:
+    fail fast (an unrecognized value must not silently fall back to numpy:
     a typo would otherwise keep the old storage while the operator believes
     the switch happened)."""
     try:

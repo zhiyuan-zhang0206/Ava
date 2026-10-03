@@ -37,8 +37,8 @@ missing value prints an actionable error and exits 1. An agent calling `ava`
 
 | Capability | Owns | Data plane it uses |
 |---|---|---|
-| `gateway` | the HTTP gateway + this cluster's Postgres / Redis / Milvus + the gateway-side daemons | its own local instances |
-| `agent-runner` | the agent host + the ops server | its own local instances when the host is also `gateway`; otherwise a gateway node's, via `AVA_DB_URL` / `AVA_REDIS_URL` / `AVA_MILVUS_URI` in its `.env` |
+| `gateway` | the HTTP gateway + this cluster's Postgres / Redis + the gateway-side daemons | its own local instances |
+| `agent-runner` | the agent host + the ops server | its own local instances when the host is also `gateway`; otherwise a gateway node's, via `AVA_DB_URL` / `AVA_REDIS_URL` in its `.env` |
 | `observability-station` | the native LGTM observability backends (Loki / Prometheus / Grafana) — the declarative form of the `$AVA_HOME/lgtm-host` marker | none of its own — native processes on this host; Grafana dials Loki / Prometheus / Postgres over the host loopback |
 
 A host runs the **union** of its capabilities' services — the per-service

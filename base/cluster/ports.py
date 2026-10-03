@@ -30,7 +30,6 @@ class ClusterPorts(TypedDict):
     task_maintenance: int
     memory_indexer: int
     ops: int
-    milvus: int
     browser: int
     permissions_helper: int
     postgres: int

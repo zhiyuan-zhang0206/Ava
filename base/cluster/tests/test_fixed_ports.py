@@ -32,7 +32,6 @@ def test_fixed_ports_carry_the_production_values() -> None:
     assert FIXED_PORTS["gateway"] == 8000
     assert FIXED_PORTS["frontend"] == 3000
     assert FIXED_PORTS["app"] == 3001
-    assert FIXED_PORTS["milvus"] == 19530
     assert FIXED_PORTS["postgres"] == 5433
     assert FIXED_PORTS["redis"] == 6380
     assert FIXED_PORTS["pgbouncer"] == 6433
@@ -94,7 +93,6 @@ def test_settings_defaults_match_the_table() -> None:
     home's `.env` is written from the table: the two copies of each number agree."""
     port_fields = {
         "gateway_port": "gateway",
-        "milvus_port": "milvus",
         "browser_cdp_port": "browser",
         "permissions_helper_port": "permissions_helper",
         "memory_search_port": "memory_search",
@@ -104,7 +102,6 @@ def test_settings_defaults_match_the_table() -> None:
     url_fields = {
         "gateway_health_url": "gateway",
         "frontend_healthcheck_url": "frontend",
-        "milvus_uri": "milvus",
         "memory_search_uri": "memory_search",
     }
     for field, slot in url_fields.items():

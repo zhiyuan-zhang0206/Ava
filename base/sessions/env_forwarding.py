@@ -229,8 +229,8 @@ def venv_activation_prefix() -> str:
     — macOS `path_helper` especially — rebuilds PATH from scratch, dropping any
     venv prefix the forwarded env carried (VIRTUAL_ENV survives, PATH does not). Re-exporting here, after the
     profile has run, is what makes a daemon that execs a bare binary off PATH
-    work — `services.milvus.daemon` execvp's `milvus-lite`, and a daemon that
-    shells out to bare `ava` / `python` resolves them into the venv. It also
+    work — a daemon that shells out to bare `ava` / `python` resolves them
+    into the venv. It also
     injects the provisioned Node locations after the venv, because the frontend
     session runs bare `npm` after that profile has had a chance to discard PATH.
     """

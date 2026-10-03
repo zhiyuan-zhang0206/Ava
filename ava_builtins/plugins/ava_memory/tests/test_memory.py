@@ -1,9 +1,9 @@
 """`ava.memory.PATH` + `search` + `IndexerUnavailable` unit tests.
 
 After PR-1 (`feat: route ava.memory.search through gateway`), the SDK calls the
-local gateway over HTTP, **no longer** importing pymilvus / embedder directly.
+local gateway over HTTP, **no longer** importing the embedder or a vector store directly.
 Data-plane behaviour unit tests live in `gateway/routers/tests/test_memory_search.py`
-(gateway-side primary embeds + milvus directly; secondary forwards). This file
+(gateway-side primary embeds + searches the memory-search service directly; secondary forwards). This file
 only tests the SDK ↔ gateway wire and PATH prefix conversion.
 """
 
