@@ -193,17 +193,17 @@ def require_human_credential(request: Request) -> None:
         )
 
 
-def current_session_fact(pool: Any, session_id: str | None, secret: str) -> str | None:
+def current_session_fact(sessions: Any, session_id: str | None, secret: str) -> str | None:
     """The credential fact of a valid session whose minting credential is
     current (`user_session` / `machine_session:runner`), else None: the one
     session check the auth middleware and `/api/auth/check` share."""
-    from gateway.auth.session_store import session_is_valid, session_mint
+    from gateway.auth.session_store import session_mint
 
     mint = None if session_id is None else session_mint(session_id)
     if mint is None:
         return None
     mints = session_mints(secret)
-    if not session_is_valid(pool, session_id, admitted=mints):
+    if not sessions.is_valid(session_id, admitted=mints):
         return None
     return mints[mint]
 

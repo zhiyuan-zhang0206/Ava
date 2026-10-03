@@ -85,7 +85,7 @@ from gateway.auth import rejection_log
 from gateway.auth import router as auth_router
 from gateway.auth.cors import cors_allowed_origins
 from gateway.auth.rejection_log import log_auth401_rejection
-from gateway.auth.session_store import touch_session
+from gateway.auth.session_store import SessionStore, touch_session
 from gateway.cluster import bootstrap as bootstrap_router
 from gateway.cluster import machine_pause as machine_pause_router
 from gateway.cluster import ops_monitor as ops_monitor_router
@@ -204,6 +204,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     app.state.memory_search_gate = memory_router.build_search_gate()
     app.state.memory_graph_cache = memory_router.MemoryGraphCache()
     app.state.db_pool = app.state.db.pool(max_size=8)
+    app.state.sessions = SessionStore(app.state.db_pool)
     app.state.idempotency = idempotency.IdempotencyService(
         idempotency.IdempotencyStore(app.state.db_pool)
     )
@@ -401,7 +402,7 @@ async def _cookie_session(request: Request, secret: str) -> tuple[str, str] | No
     if not cookie_token:
         return None
     fact = await asyncio.to_thread(
-        current_session_fact, request.app.state.db_pool, cookie_token, secret
+        current_session_fact, request.app.state.sessions, cookie_token, secret
     )
     return None if fact is None else (cookie_token, fact)
 

@@ -220,10 +220,10 @@ def test_a_session_records_which_credential_minted_it(gateway: Path) -> None:
         human = client.post("/api/auth/login", json={"password": _HUMAN}).cookies[cookie_name()]
         client.cookies.clear()
         machine = client.post("/api/auth/login", json={"password": runner}).cookies[cookie_name()]
-        pool = client.app.state.db_pool  # type: ignore[attr-defined]
-        assert request_principal.current_session_fact(pool, human, _HUMAN) == "user_session"
+        sessions = client.app.state.sessions  # type: ignore[attr-defined]
+        assert request_principal.current_session_fact(sessions, human, _HUMAN) == "user_session"
         assert (
-            request_principal.current_session_fact(pool, machine, _HUMAN)
+            request_principal.current_session_fact(sessions, machine, _HUMAN)
             == "machine_session:runner"
         )
 
@@ -232,16 +232,14 @@ def test_the_sessions_list_shows_only_sessions_that_authenticate(gateway: Path) 
     """`/api/auth/sessions` lists what the session check would still admit: an id
     without a mint (the pre-mint format) never appears."""
     from base.cluster.auth import new_session_id
-    from gateway.auth.session_store import create_session
 
     runner = _tokens(gateway).api.runner
     with TestClient(config_app()) as client:
-        pool = client.app.state.db_pool  # type: ignore[attr-defined]
         machine = client.post("/api/auth/login", json={"password": runner}).cookies[cookie_name()]
         client.cookies.clear()
         human = client.post("/api/auth/login", json={"password": _HUMAN}).cookies[cookie_name()]
         client.cookies.clear()
-        create_session(pool, new_session_id(), 3600, "legacy-browser", "10.0.0.9")
+        client.app.state.sessions.create(new_session_id(), 3600, "legacy-browser", "10.0.0.9")  # type: ignore[attr-defined]
 
         def listed() -> set[str]:
             response = client.get("/api/auth/sessions", headers=bearer_header(_HUMAN))
