@@ -17,9 +17,6 @@ updates:
       interval: weekly
     commit-message:
       prefix: "ci"
-    labels:
-      - ci
-      - dependencies
     groups:
       # One PR for all action bumps: they are reviewed as a batch and each is a
       # one-line SHA swap, so per-action PRs are pure noise.

@@ -27,8 +27,9 @@ It now fails closed:
 - The uploader runs with `allow-missing-junit-files: false`.
 - When the secret is empty, the `require-test-gate` composite action runs
   instead: on this repository's own runs it errors (`TRUNK_ORG_URL_SLUG is
-  empty, the test gate cannot run`); on a fork's pull request, which never gets
-  secrets, pytest's own outcome decides.
+  empty, the test gate cannot run`); on a run that never gets secrets — a
+  fork's pull request, or any Dependabot-triggered run (even on this
+  repository's own branches) — pytest's own outcome decides.
 - Each backend shard's `Report executed test counts` step is a gate: no JUnit
   report, or no executed test, reds the shard (`--min-tests 1`). The flaky
   bucket may be empty, so it only needs a report (`--min-tests 0`).
