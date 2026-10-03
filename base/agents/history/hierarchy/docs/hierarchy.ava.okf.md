@@ -42,7 +42,9 @@ merge are the layers built on top.
   leading messages (byte-identical, provider-side prefix-cache hits) plus a
   trailing material + prompt + text-only message, tools bound for schema
   parity; a tool-call response is refused with a `ToolMessage` error and
-  re-invoked up to `GenParams.tool_rounds` rounds.
+  re-invoked up to `GenParams.tool_rounds` rounds. The model is built exactly
+  as the agent builds its own (no effort override), so the reasoning
+  parameters the provider matches its cache against are the agent's.
 - `prefix.py` — `PrefixPlanner` picks each node's request prefix from the
   segment layout of the stitched history (`checkpoint.FullHistory`): the node's
   own compaction segment's SystemMessage plus that segment's messages up to the
