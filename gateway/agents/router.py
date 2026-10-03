@@ -312,6 +312,42 @@ def _as_str_list(value: object) -> list[str] | None:
     return value if isinstance(value, list) and all(isinstance(x, str) for x in value) else None
 
 
+def _fork_source(
+    pool: ConnectionPool, source_id: int | None
+) -> tuple[dict[str, object], str | None, dict[str, object]]:
+    """`(config_overlay, preset_name, birth_config)` of the fork source agent."""
+    with pool.connection() as conn, conn.cursor() as cur:
+        cur.execute(
+            "SELECT config_overlay, preset_name, birth_config FROM agents_meta WHERE id = %s",
+            (source_id,),
+        )
+        row = cur.fetchone()
+    if row is None:
+        raise AgentNotFound(f"fork source agent {source_id} does not exist")
+    return row[0] or {}, row[1], row[2] or {}
+
+
+def _offending_fork_keys(
+    merged: dict[str, object],
+    source_overlay: dict[str, object],
+    source_effective: dict[str, object],
+    fork_effective: dict[str, object],
+) -> list[str]:
+    """Overlay keys the fork may not change: any non-skill-list difference or a skill reduction."""
+    offending: list[str] = []
+    for key in set(merged) | set(source_overlay):
+        if fork_effective.get(key) == source_effective.get(key):
+            continue
+        if key not in _FORK_SKILL_KEYS:
+            offending.append(key)
+            continue
+        fork_list = _as_str_list(fork_effective.get(key))
+        source_list = _as_str_list(source_effective.get(key))
+        if fork_list is None or source_list is None or not set(source_list) <= set(fork_list):
+            offending.append(key)
+    return offending
+
+
 def _validate_fork_config(
     pool: ConnectionPool, body: SpawnAgentRequest, preset_name: str | None
 ) -> tuple[str | None, list[str] | None]:
@@ -336,17 +372,7 @@ def _validate_fork_config(
     already graft — carried in the fork inbound's payload for the claim node
     to append at the tail. Raises AgentNotFound when the source row is gone.
     """
-    with pool.connection() as conn, conn.cursor() as cur:
-        cur.execute(
-            "SELECT config_overlay, preset_name, birth_config FROM agents_meta WHERE id = %s",
-            (body.fork_from,),
-        )
-        row = cur.fetchone()
-    if row is None:
-        raise AgentNotFound(f"fork source agent {body.fork_from} does not exist")
-    source_overlay: dict[str, object] = row[0] or {}
-    source_preset: str | None = row[1]
-    source_birth: dict[str, object] = row[2] or {}
+    source_overlay, source_preset, source_birth = _fork_source(pool, body.fork_from)
 
     fork_overlay = body.config
     if fork_overlay is None:
@@ -362,20 +388,7 @@ def _validate_fork_config(
     merged = {**source_overlay, **fork_overlay}
     source_effective = {**source_birth, **source_overlay}
     fork_effective = {**source_birth, **merged}
-    offending: list[str] = []
-    for key in set(merged) | set(source_overlay):
-        if fork_effective.get(key) == source_effective.get(key):
-            continue
-        if key not in _FORK_SKILL_KEYS:
-            offending.append(key)
-            continue
-        fork_list = _as_str_list(fork_effective.get(key))
-        source_list = _as_str_list(source_effective.get(key))
-        if fork_list is None or source_list is None:
-            offending.append(key)
-            continue
-        if not set(source_list) <= set(fork_list):
-            offending.append(key)
+    offending = _offending_fork_keys(merged, source_overlay, source_effective, fork_effective)
     if offending:
         raise ForkConfigChangeNotAllowed(
             f"fork may not change config overlay keys {sorted(offending)!r} — a fork "

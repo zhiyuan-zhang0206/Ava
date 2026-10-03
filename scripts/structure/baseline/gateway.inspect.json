@@ -2,8 +2,5 @@
   "ambient_state": {
     "gateway/inspect/_cache.py::asyncio-task:InspectQueryCache.get_or_load_async": 1,
     "gateway/inspect/_metrics_health.py::ambient-container:_last_logged": 1
-  },
-  "complexity": {
-    "gateway/inspect/_metrics.py::_read_snapshot": 20
   }
 }

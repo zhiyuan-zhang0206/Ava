@@ -396,6 +396,35 @@ def _throughput_and_activity(
     return tps, activity
 
 
+def _turn_evidence(
+    *,
+    historical: bool,
+    turns: Any,
+    observed: Any,
+    distribution: Any,
+    precision: Any,
+    durations_known: bool,
+) -> MetricEvidence:
+    """The turn counters' evidence block: availability, precision and any retained archive source."""
+    turn_evidence = _evidence(
+        historical=historical,
+        present=bool(turns)
+        or any(
+            row["turn_total"] or row["exec_ok"] or row["exec_failed"] for row in observed.values()
+        ),
+        sources=["observations", *(["historical_daily_turns"] if turns else [])],
+        precision=precision if distribution else None,
+    )
+    if not durations_known:
+        turn_evidence = turn_evidence.model_copy(
+            update={
+                "availability": "partial",
+                "reason": "missing_turn_durations",
+            }
+        )
+    return turn_evidence
+
+
 def _read_snapshot(
     conn: Connection[Any],
     agent_id: int,
@@ -420,22 +449,14 @@ def _read_snapshot(
         present=bool(costs) or any(row["usage_calls"] for row in observed.values()),
         sources=["observations", *(["historical_daily_costs"] if costs else [])],
     )
-    turn_evidence = _evidence(
+    turn_evidence = _turn_evidence(
         historical=historical,
-        present=bool(turns)
-        or any(
-            row["turn_total"] or row["exec_ok"] or row["exec_failed"] for row in observed.values()
-        ),
-        sources=["observations", *(["historical_daily_turns"] if turns else [])],
-        precision=precision if distribution else None,
+        turns=turns,
+        observed=observed,
+        distribution=distribution,
+        precision=precision,
+        durations_known=durations_known,
     )
-    if not durations_known:
-        turn_evidence = turn_evidence.model_copy(
-            update={
-                "availability": "partial",
-                "reason": "missing_turn_durations",
-            }
-        )
     activity_evidence = _evidence(
         historical=historical, present=bool(observed), sources=["observations"]
     )

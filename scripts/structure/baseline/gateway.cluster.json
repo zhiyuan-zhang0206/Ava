@@ -1,9 +1,5 @@
 {
   "ambient_state": {
     "gateway/cluster/roster_probe.py::ambient-container:_identity_mismatch_active": 1
-  },
-  "private_imports": {
-    "gateway/cluster/machine_pause.py::ops.lifecycle._force_mark_terminated": 1,
-    "gateway/cluster/status.py::ops.cluster_status._check_pidfile": 1
   }
 }

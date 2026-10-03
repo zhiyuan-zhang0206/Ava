@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 
 from ops import cluster_status
-from ops.cluster_status import _check_pidfile, _count_agent_shells, agent_shell_sessions
+from ops.cluster_status import _count_agent_shells, agent_shell_sessions, check_pidfile
 from ops.rpc_schemas import SessionInfo
 
 
@@ -355,21 +355,21 @@ def test_capture_shell_capture_failure_raises(monkeypatch: pytest.MonkeyPatch):
         cluster_status.capture_shell(7, 1)
 
 
-def test_check_pidfile_alive(tmp_path: Path):
+def testcheck_pidfile_alive(tmp_path: Path):
     pf = tmp_path / "live.pid"
     pf.write_text(str(os.getpid()))
-    alive, pid = _check_pidfile(str(pf))
+    alive, pid = check_pidfile(str(pf))
     assert alive is True
     assert pid == os.getpid()
 
 
-def test_check_pidfile_missing(tmp_path: Path):
-    alive, pid = _check_pidfile(str(tmp_path / "nope.pid"))
+def testcheck_pidfile_missing(tmp_path: Path):
+    alive, pid = check_pidfile(str(tmp_path / "nope.pid"))
     assert alive is False
     assert pid is None
 
 
-def test_check_pidfile_dead(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+def testcheck_pidfile_dead(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     pf = tmp_path / "dead.pid"
     pf.write_text("999999")
 
@@ -377,7 +377,7 @@ def test_check_pidfile_dead(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         raise OSError(3, "No such process")
 
     monkeypatch.setattr(os, "kill", _raise_oserror)
-    alive, pid = _check_pidfile(str(pf))
+    alive, pid = check_pidfile(str(pf))
     assert alive is False
     assert pid == 999999
 

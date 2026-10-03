@@ -15,8 +15,10 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from psycopg import Connection
 from pydantic import BaseModel
 
 from base.agents.history.checkpoint import (
@@ -34,7 +36,7 @@ from base.agents.history.timeline import (
 )
 from base.agents.impersonation.timeline import hydrate
 from base.config import settings
-from base.db import Database, agent_exists, list_inbound_messages
+from base.db import Database, InboundRow, agent_exists, list_inbound_messages
 from gateway.agents.eval_guard import deny_isolated_result_read
 
 router = APIRouter()
@@ -367,18 +369,11 @@ def _historical_window(
     return [*head, *older_window], older_has_more
 
 
-def _initial_window(
-    items: list[TimelineItem], limit: int, *, historical_segments_available: bool
-) -> tuple[list[TimelineItem], bool]:
-    """Window the current segment while preserving its standing context."""
-    window, has_more = tail_window(items, limit)
-    # The system-prompt item (0.0) is the OLDEST item and falls off the tail
-    # window for a long conversation. Re-attach it without counting it
-    # against the page limit or creating a phantom older-page affordance.
-    prompt = None
-    if not any(item.item_id == "0.0" for item in window):
-        prompt = next((item for item in items if item.kind == "system_prompt"), None)
-
+def _missing_standing_context(
+    items: list[TimelineItem], window: list[TimelineItem]
+) -> tuple[list[TimelineItem], list[TimelineItem]]:
+    """The standing head notes and compact summaries that fell off the tail `window`."""
+    in_window = {window_item.item_id for window_item in window}
     # The standing head notes — the contiguous system_marker run right after
     # the prompt (exec timeout / timezone / cluster memory / agent id / agent
     # memory / preloaded skills, agent/graph/context_notes.py) — are the same
@@ -391,21 +386,32 @@ def _initial_window(
     # 3 system notes"). Deduped by item_id; not counted against `limit`.
     head_note_ids = _standing_head_note_ids(items)
     notes_missing = [
-        item
-        for item in items
-        if item.item_id in head_note_ids
-        and not any(window_item.item_id == item.item_id for window_item in window)
+        item for item in items if item.item_id in head_note_ids and item.item_id not in in_window
     ]
-
     # Compact summaries are standing context too. Once the prompt is
     # re-attached, a cursor can never page to summaries older than it, so keep
     # every missing summary immediately after the head notes.
     compact_missing = [
         item
         for item in items
-        if item.kind == "inbound_compact_summary"
-        and not any(window_item.item_id == item.item_id for window_item in window)
+        if item.kind == "inbound_compact_summary" and item.item_id not in in_window
     ]
+    return notes_missing, compact_missing
+
+
+def _initial_window(
+    items: list[TimelineItem], limit: int, *, historical_segments_available: bool
+) -> tuple[list[TimelineItem], bool]:
+    """Window the current segment while preserving its standing context."""
+    window, has_more = tail_window(items, limit)
+    # The system-prompt item (0.0) is the OLDEST item and falls off the tail
+    # window for a long conversation. Re-attach it without counting it
+    # against the page limit or creating a phantom older-page affordance.
+    prompt = None
+    if not any(item.item_id == "0.0" for item in window):
+        prompt = next((item for item in items if item.kind == "system_prompt"), None)
+
+    notes_missing, compact_missing = _missing_standing_context(items, window)
 
     reattached = (0 if prompt is None else 1) + len(notes_missing) + len(compact_missing)
     if reattached:
@@ -419,6 +425,76 @@ def _initial_window(
         ]
         has_more = has_more and len(items) - reattached > limit
     return window, has_more or historical_segments_available
+
+
+def _chat_anchors(conn: Connection[Any], agent_id: int) -> list[InboundRow]:
+    """All chat inbound anchors — they drive the ts alignment of the timeline items."""
+    # The 100_000 ceiling is a protective bound, not a page size: truncation
+    # would drop alignment anchors, so the read stays a literal rather
+    # than config (task #3696 exception inventory).
+    return [
+        row for row in list_inbound_messages(conn, agent_id, limit=100_000) if row.kind == "chat"
+    ]
+
+
+def _current_page_before(
+    items: list[TimelineItem],
+    cursor: _TimelineCursor | None,
+    limit: int,
+    depth: int,
+    boundary_ids: list[str],
+    msg_count: int,
+) -> TimelineResponse | list[TimelineItem]:
+    """A `before=` page of the current segment; the head still to extend with older history
+    when the page crosses into a compact-history segment."""
+    if cursor is None or cursor.checkpoint_id is not None:
+        return TimelineResponse(items=[], msg_count=msg_count, has_more=False)
+    # Depth 0 is the compatibility posture: preserve the exact current-
+    # segment paging rule, including pages that contain standing context.
+    # No boundary query or history branch runs.
+    if depth == 0:
+        window, has_more = _window_before(items, cursor.item_id(), limit)
+        return TimelineResponse(items=window, msg_count=msg_count, has_more=has_more)
+    older_available = bool(boundary_ids) and _depth_allows(1, depth)
+    window, has_more, cross = _window_or_cross(
+        items,
+        cursor.item_id(),
+        limit,
+        older_segment_available=older_available,
+    )
+    if not cross:
+        return TimelineResponse(items=window, msg_count=msg_count, has_more=has_more)
+    if not older_available:
+        return TimelineResponse(items=window, msg_count=msg_count, has_more=False)
+    return window
+
+
+def _historical_response(
+    db: Database,
+    agent_id: int,
+    before: str | None,
+    cursor: _TimelineCursor | None,
+    limit: int,
+    boundary_ids: list[str],
+    depth: int,
+) -> TimelineResponse | None:
+    """The page of a historical or malformed `before=` request; None for a live-checkpoint read."""
+    # Historical pages do not deserialize the live checkpoint. Its exact
+    # message count comes from the five-byte channel header instead.
+    if before is not None and cursor is None:
+        return TimelineResponse(
+            items=[],
+            msg_count=_load_current_message_count(db, agent_id),
+            has_more=False,
+        )
+    if cursor is not None and cursor.checkpoint_id is not None:
+        window, has_more = _historical_window(db, agent_id, cursor, limit, boundary_ids, depth)
+        return TimelineResponse(
+            items=window,
+            msg_count=_load_current_message_count(db, agent_id),
+            has_more=has_more,
+        )
+    return None
 
 
 @router.get("/api/agents/{agent_id}/timeline", dependencies=[Depends(deny_isolated_result_read)])
@@ -451,45 +527,18 @@ def get_timeline(
     with request.app.state.db_pool.connection() as conn:
         if not agent_exists(conn, agent_id):
             raise HTTPException(status_code=404, detail=f"agent {agent_id} not found")
-        # All chat inbound anchors — they drive the ts alignment below. The
-        # 100_000 ceiling is a protective bound, not a page size: truncation
-        # would drop alignment anchors, so the read stays a literal rather
-        # than config (task #3696 exception inventory).
         chat_anchors = (
             []
             if historical_request or (cursor is None and before is not None)
-            else [
-                row
-                for row in list_inbound_messages(conn, agent_id, limit=100_000)
-                if row.kind == "chat"
-            ]
+            else _chat_anchors(conn, agent_id)
         )
     depth = settings.gateway.timeline_compact_history
     db: Database = request.app.state.db
     boundary_ids = _load_boundary_ids(db, agent_id, depth)
 
-    # Historical pages do not deserialize the live checkpoint. Its exact
-    # message count comes from the five-byte channel header instead.
-    if before is not None and cursor is None:
-        return TimelineResponse(
-            items=[],
-            msg_count=_load_current_message_count(db, agent_id),
-            has_more=False,
-        )
-    if historical_request and cursor is not None:
-        window, has_more = _historical_window(
-            db,
-            agent_id,
-            cursor,
-            limit,
-            boundary_ids,
-            depth,
-        )
-        return TimelineResponse(
-            items=window,
-            msg_count=_load_current_message_count(db, agent_id),
-            has_more=has_more,
-        )
+    early = _historical_response(db, agent_id, before, cursor, limit, boundary_ids, depth)
+    if early is not None:
+        return early
 
     try:
         messages = load_checkpoint_messages(db, agent_id)
@@ -505,34 +554,10 @@ def get_timeline(
             limit,
             historical_segments_available=bool(boundary_ids),
         )
-    else:
-        if cursor is None or cursor.checkpoint_id is not None:
-            return TimelineResponse(items=[], msg_count=msg_count, has_more=False)
-        # Depth 0 is the compatibility posture: preserve the exact current-
-        # segment paging rule, including pages that contain standing context.
-        # No boundary query or history branch runs.
-        if depth == 0:
-            window, has_more = _window_before(items, cursor.item_id(), limit)
-            return TimelineResponse(items=window, msg_count=msg_count, has_more=has_more)
-        older_available = bool(boundary_ids) and _depth_allows(1, depth)
-        window, has_more, cross = _window_or_cross(
-            items,
-            cursor.item_id(),
-            limit,
-            older_segment_available=older_available,
-        )
-        if cross:
-            head = window
-            if not older_available:
-                return TimelineResponse(items=head, msg_count=msg_count, has_more=False)
-            del messages, items
-            older_window, has_more = _load_history_tail(
-                db,
-                agent_id,
-                boundary_ids,
-                1,
-                limit,
-                depth,
-            )
-            window = [*head, *older_window]
-    return TimelineResponse(items=window, msg_count=msg_count, has_more=has_more)
+        return TimelineResponse(items=window, msg_count=msg_count, has_more=has_more)
+    paged = _current_page_before(items, cursor, limit, depth, boundary_ids, msg_count)
+    if isinstance(paged, TimelineResponse):
+        return paged
+    del messages, items
+    older_window, has_more = _load_history_tail(db, agent_id, boundary_ids, 1, limit, depth)
+    return TimelineResponse(items=[*paged, *older_window], msg_count=msg_count, has_more=has_more)

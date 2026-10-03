@@ -25,6 +25,7 @@ from base.db import Database
 from base.log import logger
 from gateway.agents.eval_guard import deny_isolated_result_read
 from gateway.run_timeline import _events
+from gateway.run_timeline._buckets import bucket_rows
 from gateway.run_timeline.schemas import (
     RunTimelineBoundaries,
     RunTimelineEvent,
@@ -344,50 +345,6 @@ def _row_for_turn(
     )
 
 
-def _bucket_rows(
-    rows: list[RunTimelineRow], window_start: datetime, bucket_seconds: int
-) -> list[RunTimelineRow]:
-    groups: dict[int, list[RunTimelineRow]] = {}
-    for row in rows:
-        index = max(0, int((row.start - window_start).total_seconds() // bucket_seconds))
-        groups.setdefault(index, []).append(row)
-
-    bucketed: list[RunTimelineRow] = []
-    for index, group in sorted(groups.items()):
-        llm_events = [row.llm for row in group]
-        models = {llm.model for llm in llm_events if llm.model is not None}
-        bucketed.append(
-            RunTimelineRow(
-                turn=None,
-                n_turns=sum(row.n_turns for row in group),
-                start=window_start + timedelta(seconds=index * bucket_seconds),
-                end=max(row.end for row in group),
-                active_s=sum(row.active_s for row in group),
-                trace_id=None,
-                checkpoint_id=None,
-                ok=all(row.ok is True for row in group),
-                llm=RunTimelineLlm(
-                    calls=sum(llm.calls for llm in llm_events),
-                    in_total=sum(llm.in_total for llm in llm_events),
-                    cache_read=sum(llm.cache_read for llm in llm_events),
-                    out_total=sum(llm.out_total for llm in llm_events),
-                    reasoning=sum(llm.reasoning for llm in llm_events),
-                    latency_ms=sum(llm.latency_ms for llm in llm_events),
-                    cost_usd=sum(llm.cost_usd for llm in llm_events),
-                    model=next(iter(models))
-                    if len(models) == 1
-                    else "multiple"
-                    if models
-                    else None,
-                ),
-                execs=[exec_ for row in group for exec_ in row.execs],
-                anomalies=sorted({anomaly for row in group for anomaly in row.anomalies}),
-                tags=sorted({tag for row in group for tag in row.tags}),
-            )
-        )
-    return bucketed
-
-
 def _assign_marker_tags(rows: list[RunTimelineRow], events: list[dict[str, object]]) -> None:
     for event in events:
         name = _event_name(event)
@@ -427,15 +384,32 @@ def _rail_events(events: list[dict[str, object]]) -> list[RunTimelineEvent]:
     return rail
 
 
-def aggregate_turn_timeline(
-    events: list[dict[str, object]],
+def _timeline_meta(
+    turn_rows: list[RunTimelineRow],
+    ordered: list[dict[str, object]],
     window_start: datetime,
     window_end: datetime,
-    *,
-    bucket_seconds: int | None = None,
-) -> TurnTimelineAggregate:
-    """Build ordered turn rows from an event slice, optionally time-bucketed."""
-    ordered = sorted(events, key=_event_ts)
+    n_compact: int,
+    used_usage_fallback: list[bool],
+) -> RunTimelineMeta:
+    llm_rows = [row.llm for row in turn_rows]
+    return RunTimelineMeta(
+        n_turns=len(turn_rows),
+        wall_span_s=max(0.0, (window_end - window_start).total_seconds()),
+        active_s=sum(row.active_s for row in turn_rows),
+        tokens_in=sum(row.in_total for row in llm_rows),
+        tokens_out=sum(row.out_total for row in llm_rows),
+        cost_usd=sum(row.cost_usd for row in llm_rows),
+        n_exec_failed=sum(1 for event in ordered if _event_name(event) in _EXEC_EVENTS - {"exec"}),
+        n_compact=n_compact,
+        n_restart=sum(1 for event in ordered if _event_name(event) in _RESTART_EVENTS),
+        fallback_turns=sum(used_usage_fallback),
+        unmatched_turns=sum(1 for row in turn_rows if row.llm.calls == 0),
+    )
+
+
+def _turn_rows(ordered: list[dict[str, object]]) -> tuple[list[RunTimelineRow], list[bool]]:
+    """One row per turn with its LLM usage and events attached; and which turns used the fallback."""
     turns = [
         _turn_window(turn, turn_end)
         for turn, turn_end in enumerate(
@@ -464,31 +438,35 @@ def aggregate_turn_timeline(
                 associated_events_by_turn[index],
             )
         )
+    return rows, used_usage_fallback
 
+
+def _last_turn_before_compact(
+    rows: list[RunTimelineRow], compact_events: list[dict[str, object]]
+) -> int | None:
+    if not compact_events:
+        return None
+    last_ts = _event_ts(compact_events[-1])
+    return next((row.turn for row in reversed(rows) if row.end <= last_ts), None)
+
+
+def aggregate_turn_timeline(
+    events: list[dict[str, object]],
+    window_start: datetime,
+    window_end: datetime,
+    *,
+    bucket_seconds: int | None = None,
+) -> TurnTimelineAggregate:
+    """Build ordered turn rows from an event slice, optionally time-bucketed."""
+    ordered = sorted(events, key=_event_ts)
+    rows, used_usage_fallback = _turn_rows(ordered)
     _assign_marker_tags(rows, ordered)
     compact_events = [event for event in ordered if _event_name(event) in _COMPACT_EVENTS]
-    last_compact = compact_events[-1] if compact_events else None
-    last_before_compact = (
-        next((row.turn for row in reversed(rows) if row.end <= _event_ts(last_compact)), None)
-        if last_compact is not None
-        else None
-    )
+    last_before_compact = _last_turn_before_compact(rows, compact_events)
     turn_rows = rows
-    rows = _bucket_rows(rows, window_start, bucket_seconds) if bucket_seconds is not None else rows
-
-    llm_rows = [row.llm for row in turn_rows]
-    meta = RunTimelineMeta(
-        n_turns=len(turn_rows),
-        wall_span_s=max(0.0, (window_end - window_start).total_seconds()),
-        active_s=sum(row.active_s for row in turn_rows),
-        tokens_in=sum(row.in_total for row in llm_rows),
-        tokens_out=sum(row.out_total for row in llm_rows),
-        cost_usd=sum(row.cost_usd for row in llm_rows),
-        n_exec_failed=sum(1 for event in ordered if _event_name(event) in _EXEC_EVENTS - {"exec"}),
-        n_compact=len(compact_events),
-        n_restart=sum(1 for event in ordered if _event_name(event) in _RESTART_EVENTS),
-        fallback_turns=sum(used_usage_fallback),
-        unmatched_turns=sum(1 for row in turn_rows if row.llm.calls == 0),
+    rows = bucket_rows(rows, window_start, bucket_seconds) if bucket_seconds is not None else rows
+    meta = _timeline_meta(
+        turn_rows, ordered, window_start, window_end, len(compact_events), used_usage_fallback
     )
     return TurnTimelineAggregate(
         meta=meta,

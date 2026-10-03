@@ -1,6 +1,4 @@
 {
-  "complexity": {},
-  "files": {},
   "patch_targets": {
     "gateway/tests/test_agent_inspect.py::gateway.inspect._live": 1,
     "gateway/tests/test_agents_endpoints.py::gateway.routers.memory._backend_topk": 1,

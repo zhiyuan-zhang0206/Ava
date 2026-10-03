@@ -313,7 +313,7 @@ def _publish_force_terminate_inbound(agent_id: int, inbound_id: int, _source: st
     publish_inbound_wake(agent_id, str(inbound_id))
 
 
-def _force_mark_terminated(
+def force_mark_terminated(
     agent_id: int,
     db_pool: ConnectionPool,
     *,

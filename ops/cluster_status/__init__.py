@@ -121,7 +121,7 @@ class ClusterStatus(BaseModel):
     resource: ResourceSample | None = None
 
 
-def _check_pidfile(pidfile_path: str) -> tuple[bool, int | None]:
+def check_pidfile(pidfile_path: str) -> tuple[bool, int | None]:
     """Read a pidfile + `process_alive(pid)` to test liveness. Returns (alive, pid).
 
     Missing/empty/non-int file -> (False, None). Pidfile present but the process
@@ -500,7 +500,7 @@ def status_snapshot(pool: Any | None = None) -> ClusterStatus:
     from base.native_process import loaded_commit as _process_sha
 
     agent_host_alive = (
-        _check_pidfile(str(ServiceEndpoints.from_settings().of("agent_host").pidfile))[0]
+        check_pidfile(str(ServiceEndpoints.from_settings().of("agent_host").pidfile))[0]
         if is_agent_runner()
         else None
     )
