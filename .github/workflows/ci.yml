@@ -1756,13 +1756,18 @@ jobs:
           path: ~/.cache/ms-playwright
           key: playwright-${{ runner.os }}-${{ hashFiles('uv.lock') }}
       - name: Install Playwright chromium
-        # Cached browser -> only the system deps apt pass runs. That apt pass is
-        # the same class of hang install-pg-redis is hardened against, but it is
-        # playwright's own and takes no timeout options, so cap the step: a stall
-        # here otherwise holds the job (and with it the whole run's rerun
-        # eligibility) for the full 30-minute ceiling.
+        # Split from the system-deps pass so each half carries its own bound and
+        # a stall names its half: a cached browser makes this half seconds. The
+        # apt half is the separate step below — the 2026-10-02/03 ten-minute
+        # timeouts all sat in its azure.archive downloads. Neither half holds
+        # the job (nor the run's rerun eligibility) toward the 30-minute ceiling.
         timeout-minutes: 10
-        run: uv run playwright install --with-deps chromium
+        run: timeout 300 uv run playwright install chromium
+      - name: Install Playwright system deps
+        # The class of hang install-pg-redis is hardened against; inside the
+        # action: bounded attempts, restorable .deb cache, dpkg fallback.
+        uses: ./.github/actions/install-playwright-deps
+        timeout-minutes: 15
 
       - name: Run e2e tests
         continue-on-error: true
@@ -1847,9 +1852,12 @@ jobs:
           path: ~/.cache/ms-playwright
           key: playwright-${{ runner.os }}-${{ hashFiles('uv.lock') }}
       - name: Install Playwright chromium
-        # Same bounded-install reasoning as the e2e-shard job.
+        # Same split + hardened apt pass as the e2e-shard job (see ci.yml).
         timeout-minutes: 10
-        run: uv run playwright install --with-deps chromium
+        run: timeout 300 uv run playwright install chromium
+      - name: Install Playwright system deps
+        uses: ./.github/actions/install-playwright-deps
+        timeout-minutes: 15
 
       - name: Run hosted e2e tests
         continue-on-error: true
@@ -1945,9 +1953,12 @@ jobs:
           path: ~/.cache/ms-playwright
           key: playwright-${{ runner.os }}-${{ hashFiles('uv.lock') }}
       - name: Install Playwright chromium
-        # Same bounded-install reasoning as the e2e-shard job.
+        # Same split + hardened apt pass as the e2e-shard job (see ci.yml).
         timeout-minutes: 10
-        run: uv run playwright install --with-deps chromium
+        run: timeout 300 uv run playwright install chromium
+      - name: Install Playwright system deps
+        uses: ./.github/actions/install-playwright-deps
+        timeout-minutes: 15
 
       - name: Run env-guard warmup + home-isolation in one serial process
         continue-on-error: true

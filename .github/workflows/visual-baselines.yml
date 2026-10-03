@@ -96,9 +96,12 @@ jobs:
           key: playwright-${{ runner.os }}-${{ hashFiles('uv.lock') }}
 
       - name: Install Playwright chromium
-        # Same bounded-install reasoning as the e2e-shard job in ci.yml.
+        # Same split + hardened apt pass as the e2e-shard job (see ci.yml).
         timeout-minutes: 10
-        run: uv run playwright install --with-deps chromium
+        run: timeout 300 uv run playwright install chromium
+      - name: Install Playwright system deps
+        uses: ./.github/actions/install-playwright-deps
+        timeout-minutes: 15
 
       - name: Check visual baselines
         if: github.event_name == 'push'

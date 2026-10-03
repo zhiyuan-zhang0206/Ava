@@ -52,7 +52,7 @@ cap-domain exits use `exitType`, `expires`, and `approver`); readers ignore unkn
 ### deps:playwright-1.62to1.63
 - **class**: deps
 - **status**: open
-- **evidence**: `uv pip list --outdated` (synced worktree venv, 2026-09-23) reports playwright 1.62.0 -> 1.63.0; PyPI latest re-confirmed 1.63.0. `uv.lock` pins 1.62.0. Chromium follows the wheel — the CI jobs that need a browser install it with `uv run playwright install --with-deps chromium`, cached on the `uv.lock` hash — so the bump is the wheel alone.
+- **evidence**: `uv pip list --outdated` (synced worktree venv, 2026-09-23) reports playwright 1.62.0 -> 1.63.0; PyPI latest re-confirmed 1.63.0. `uv.lock` pins 1.62.0. Chromium follows the wheel — the CI jobs that need a browser install it with `uv run playwright install chromium` plus its system deps through the hardened `install-deps` step, cached on the `uv.lock` hash — so the bump is the wheel alone.
 - **first-seen**: 2026-09-21
 - **last-verified**: 2026-09-23
 
