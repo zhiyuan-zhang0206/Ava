@@ -216,6 +216,149 @@ def _generic_actionable_woke(
     return False
 
 
+class _Watch:
+    """One polling session: what the watcher has seen so far and the wake decisions that follow."""
+
+    def __init__(
+        self,
+        path: str,
+        target_agent: int,
+        canonical_context: tuple[coding_session_owner.CodingSessionKey, str, int] | None,
+    ) -> None:
+        self.path = path
+        self.target_agent = target_agent
+        self.canonical_context = canonical_context
+        self.start_time = time.monotonic()
+        self.last_change = time.monotonic()
+        self.last_wake = time.monotonic()
+        self.last_mtime: float | None = None
+        self.last_actionable_mtime: float | None = None
+        self.first_poll = True
+        self.saw_work_file = Path(path).exists()
+
+    def poll(self) -> bool:
+        """One polling beat; True when the watch is over (the caller sleeps otherwise)."""
+        path = self.path
+        try:
+            mtime: float | None = Path(path).stat().st_mtime
+            self.saw_work_file = True
+        except FileNotFoundError:
+            mtime = None
+        if mtime != self.last_mtime:
+            self.last_mtime = mtime
+            self.last_change = time.monotonic()
+
+        status = read_status(path)
+        elapsed_total = time.monotonic() - self.start_time
+        elapsed_change = time.monotonic() - self.last_change
+        elapsed_wake = time.monotonic() - self.last_wake
+        if self.canonical_context is not None:
+            return self._canonical_poll(status, mtime, elapsed_change, elapsed_wake)
+        return self._generic_poll(status, mtime, elapsed_total, elapsed_change, elapsed_wake)
+
+    def _canonical_poll(
+        self, status: str | None, mtime: float | None, elapsed_change: float, elapsed_wake: float
+    ) -> bool:
+        assert self.canonical_context is not None  # noqa: S101
+        key, expected_generation, canonical_owner = self.canonical_context
+        path = self.path
+        owner = coding_session_owner.read(key, expected_generation)
+        if owner.generation != expected_generation or owner.status in (
+            "inactive",
+            "terminal",
+            "invalid",
+        ):
+            return True
+        status_is_current = bool(
+            mtime is not None
+            and owner.created_at is not None
+            and mtime >= owner.created_at.timestamp()
+        )
+        reason = terminal_reason(
+            status,
+            status_is_current=status_is_current,
+            owner_terminated=_owner_terminated(canonical_owner),
+            session_crashed=_session_crashed(owner),
+            expired=bool(
+                owner.expires_at is not None and dt.datetime.now(dt.UTC) >= owner.expires_at
+            ),
+            work_file_deleted=self.saw_work_file and mtime is None,
+            # Canonical supervision uses the generation's persisted expiry;
+            # the generic watcher's shorter wake-only hard limit must not
+            # silently shorten a task-adapted Codex lease.
+            hard_limit_reached=False,
+        )
+        if reason is not None:
+            return _terminalize(key, expected_generation, canonical_owner, reason)
+
+        if status == "NEED_INPUT" and status_is_current and mtime != self.last_actionable_mtime:
+            _notify(
+                self.target_agent,
+                f"coding agent reported STATUS: NEED_INPUT in {path} -- read the file and reply",
+                canonical=True,
+            )
+            self.last_actionable_mtime = mtime
+            self.last_wake = time.monotonic()
+        elif elapsed_change > STALL_SECONDS and elapsed_wake > HEARTBEAT_SECONDS:
+            _notify(
+                self.target_agent,
+                f"coding agent has made no work-file change for {elapsed_change:.0f}s: {path}",
+                canonical=True,
+            )
+            self.last_wake = time.monotonic()
+        return False
+
+    def _wake_or_exit(self, message: str) -> bool:
+        """A generic wake notification; a failed delivery exits the watcher with status 2."""
+        if not _notify(self.target_agent, message, canonical=False):
+            raise SystemExit(2)
+        return True
+
+    def _generic_poll(
+        self,
+        status: str | None,
+        mtime: float | None,
+        elapsed_total: float,
+        elapsed_change: float,
+        elapsed_wake: float,
+    ) -> bool:
+        path = self.path
+        self.first_poll, self.last_actionable_mtime = _baseline_first_actionable_poll(
+            first_poll=self.first_poll,
+            status=status,
+            mtime=mtime,
+            last_actionable_mtime=self.last_actionable_mtime,
+        )
+        if status is None and self.saw_work_file and mtime is None:
+            return self._wake_or_exit(
+                f"work file deleted: {path} -- the coding agent may have removed its workspace"
+            )
+        if elapsed_total > HARD_LIMIT_SECONDS:
+            return self._wake_or_exit(
+                f"hard limit reached while polling {path} for over {HARD_LIMIT_SECONDS}s"
+            )
+        if status in ACTIONABLE:
+            return _generic_actionable_woke(
+                self.target_agent,
+                status,
+                path,
+                mtime,
+                self.last_actionable_mtime,
+                elapsed_wake,
+            )
+        if status in (None, "WORKING"):
+            if elapsed_change > STALL_SECONDS:
+                return self._wake_or_exit(
+                    f"coding agent has been WORKING with no change to {path} for over "
+                    f"{STALL_SECONDS}s -- capture its screen"
+                )
+            if elapsed_wake > HEARTBEAT_SECONDS:
+                label = status if status else "MISSING"
+                return self._wake_or_exit(f"coding agent heartbeat: STATUS is {label!r} in {path}")
+            return False
+        return self._wake_or_exit(f"coding agent reported unknown STATUS: {status!r} in {path}")
+
+
 def watch(
     path: str,
     *,
@@ -232,142 +375,8 @@ def watch(
         owner_agent_id=owner_agent_id,
     )
     target_agent = owner_agent_id if owner_agent_id is not None else ava.self.AGENT_ID
-    start_time = time.monotonic()
-    last_change = time.monotonic()
-    last_wake = time.monotonic()
-    last_mtime: float | None = None
-    last_actionable_mtime: float | None = None
-    first_poll = True
-    saw_work_file = Path(path).exists()
-
-    while True:
-        try:
-            mtime: float | None = Path(path).stat().st_mtime
-            saw_work_file = True
-        except FileNotFoundError:
-            mtime = None
-        if mtime != last_mtime:
-            last_mtime = mtime
-            last_change = time.monotonic()
-
-        status = read_status(path)
-        elapsed_total = time.monotonic() - start_time
-        elapsed_change = time.monotonic() - last_change
-        elapsed_wake = time.monotonic() - last_wake
-
-        if canonical_context is not None:
-            key, expected_generation, canonical_owner = canonical_context
-            owner = coding_session_owner.read(key, expected_generation)
-            if owner.generation != expected_generation or owner.status in (
-                "inactive",
-                "terminal",
-                "invalid",
-            ):
-                return
-            status_is_current = bool(
-                mtime is not None
-                and owner.created_at is not None
-                and mtime >= owner.created_at.timestamp()
-            )
-            reason = terminal_reason(
-                status,
-                status_is_current=status_is_current,
-                owner_terminated=_owner_terminated(canonical_owner),
-                session_crashed=_session_crashed(owner),
-                expired=bool(
-                    owner.expires_at is not None and dt.datetime.now(dt.UTC) >= owner.expires_at
-                ),
-                work_file_deleted=saw_work_file and mtime is None,
-                # Canonical supervision uses the generation's persisted expiry;
-                # the generic watcher's shorter wake-only hard limit must not
-                # silently shorten a task-adapted Codex lease.
-                hard_limit_reached=False,
-            )
-            if reason is not None:
-                if _terminalize(key, expected_generation, canonical_owner, reason):
-                    return
-                time.sleep(POLL_SECONDS)
-                continue
-
-            if status == "NEED_INPUT" and status_is_current and mtime != last_actionable_mtime:
-                _notify(
-                    target_agent,
-                    f"coding agent reported STATUS: NEED_INPUT in {path} -- read the file and reply",
-                    canonical=True,
-                )
-                last_actionable_mtime = mtime
-                last_wake = time.monotonic()
-            elif elapsed_change > STALL_SECONDS and elapsed_wake > HEARTBEAT_SECONDS:
-                _notify(
-                    target_agent,
-                    f"coding agent has made no work-file change for {elapsed_change:.0f}s: {path}",
-                    canonical=True,
-                )
-                last_wake = time.monotonic()
-            time.sleep(POLL_SECONDS)
-            continue
-
-        first_poll, last_actionable_mtime = _baseline_first_actionable_poll(
-            first_poll=first_poll,
-            status=status,
-            mtime=mtime,
-            last_actionable_mtime=last_actionable_mtime,
-        )
-        if status is None and saw_work_file and mtime is None:
-            if not _notify(
-                target_agent,
-                f"work file deleted: {path} -- the coding agent may have removed its workspace",
-                canonical=False,
-            ):
-                raise SystemExit(2)
-            return
-        if elapsed_total > HARD_LIMIT_SECONDS:
-            if not _notify(
-                target_agent,
-                f"hard limit reached while polling {path} for over {HARD_LIMIT_SECONDS}s",
-                canonical=False,
-            ):
-                raise SystemExit(2)
-            return
-        if status in ACTIONABLE:
-            if _generic_actionable_woke(
-                target_agent,
-                status,
-                path,
-                mtime,
-                last_actionable_mtime,
-                elapsed_wake,
-            ):
-                return
-            time.sleep(POLL_SECONDS)
-            continue
-        if status in (None, "WORKING"):
-            if elapsed_change > STALL_SECONDS:
-                if not _notify(
-                    target_agent,
-                    f"coding agent has been WORKING with no change to {path} for over "
-                    f"{STALL_SECONDS}s -- capture its screen",
-                    canonical=False,
-                ):
-                    raise SystemExit(2)
-                return
-            if elapsed_wake > HEARTBEAT_SECONDS:
-                label = status if status else "MISSING"
-                if not _notify(
-                    target_agent,
-                    f"coding agent heartbeat: STATUS is {label!r} in {path}",
-                    canonical=False,
-                ):
-                    raise SystemExit(2)
-                return
-        else:
-            if not _notify(
-                target_agent,
-                f"coding agent reported unknown STATUS: {status!r} in {path}",
-                canonical=False,
-            ):
-                raise SystemExit(2)
-            return
+    session = _Watch(path, target_agent, canonical_context)
+    while not session.poll():
         time.sleep(POLL_SECONDS)
 
 

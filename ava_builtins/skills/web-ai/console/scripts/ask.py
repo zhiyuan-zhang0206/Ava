@@ -108,7 +108,7 @@ def _read_prompt(arg: str | None) -> str:
     sys.exit("no prompt: pass --prompt '...' or pipe the question on stdin")
 
 
-def main() -> None:
+def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Ask several frontier models the same question.")
     parser.add_argument("--prompt", help="the question; if omitted, read from stdin")
     parser.add_argument(
@@ -143,9 +143,11 @@ def main() -> None:
         help="leave each model's browser tab open after answering (default: close "
         "it — the answer is already captured here; resume later with --continue-url <url>)",
     )
-    args = parser.parse_args()
+    return parser
 
-    # Resolve the continue target: --chat-id builds the URL via the site profile.
+
+def _continue_url(args: argparse.Namespace) -> str | None:
+    """The conversation to continue: --continue-url, or --chat-id resolved via the first model's site."""
     continue_url = args.continue_url
     if args.chat_id:
         if continue_url:
@@ -158,19 +160,39 @@ def main() -> None:
             continue_url = webchat.chat_url(models_early[0], args.chat_id)
         except Exception as exc:
             sys.exit(f"bad --chat-id {args.chat_id!r}: {exc}")
+    return continue_url
+
+
+def _models_of(models_arg: str, *, single: bool) -> list[str]:
+    """The known model sites asked; exactly one when continuing a conversation."""
+    models = [m.strip() for m in models_arg.split(",") if m.strip()]
+    unknown = [m for m in models if m not in webchat.SITES]
+    if unknown:
+        sys.exit(f"unknown model(s): {', '.join(unknown)}; known: {', '.join(webchat.SITES)}")
+    if single and len(models) != 1:
+        sys.exit(
+            "--continue-url/--chat-id requires exactly one --models site (the conversation belongs to one site)"
+        )
+    return models
+
+
+def _note_kept_tabs(results: list[dict[str, Any]]) -> None:
+    # stdout is the JSON contract the agent parses; the kept-tab note (and
+    # each resume url) lives in the result rows. Mirror a human breadcrumb to
+    # stderr so it is visible in a terminal without disturbing that contract.
+    kept = [r["url"] for r in results if r.get("tab_kept") and r.get("url")]
+    if kept:
+        print(f"[console] left {len(kept)} tab(s) open: {', '.join(kept)}", file=sys.stderr)
+
+
+def main() -> None:
+    args = _build_parser().parse_args()
+    continue_url = _continue_url(args)
 
     prompt = _read_prompt(args.prompt)
     if not prompt.strip():
         sys.exit("empty prompt")
-    models = [m.strip() for m in args.models.split(",") if m.strip()]
-    unknown = [m for m in models if m not in webchat.SITES]
-    if unknown:
-        sys.exit(f"unknown model(s): {', '.join(unknown)}; known: {', '.join(webchat.SITES)}")
-
-    if continue_url and len(models) != 1:
-        sys.exit(
-            "--continue-url/--chat-id requires exactly one --models site (the conversation belongs to one site)"
-        )
+    models = _models_of(args.models, single=continue_url is not None)
     specs = [
         {"name": m, "prompt": prompt, "file": args.file, "conversation_url": continue_url}
         for m in models
@@ -184,12 +206,7 @@ def main() -> None:
     outdir = _save(prompt, results)
 
     if args.keep_tab:
-        # stdout is the JSON contract the agent parses; the kept-tab note (and
-        # each resume url) lives in the result rows. Mirror a human breadcrumb to
-        # stderr so it is visible in a terminal without disturbing that contract.
-        kept = [r["url"] for r in results if r.get("tab_kept") and r.get("url")]
-        if kept:
-            print(f"[console] left {len(kept)} tab(s) open: {', '.join(kept)}", file=sys.stderr)
+        _note_kept_tabs(results)
 
     print(
         json.dumps(
