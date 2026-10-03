@@ -210,7 +210,7 @@ def test_log_llm_usage_emits_agent_billing_span(
     expected = quote("deepseek-v4-pro", 1_000, 100, 800, at=priced_at)
     assert expected is not None
     monkeypatch.setattr("base.config.settings.observability.trace_enabled", True)
-    monkeypatch.setitem(tracing_mod._state, "initialized", True)
+    monkeypatch.setattr(tracing_mod, "is_initialized", lambda: True)
     monkeypatch.setattr(otel_trace, "get_tracer", lambda _name: tracer)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr("time.time_ns", lambda: 5_000_000_000)
     message = AIMessage(
@@ -272,7 +272,7 @@ def test_log_llm_usage_skips_billing_when_usage_metadata_is_incomplete(
 
     tracer = _Tracer()
     monkeypatch.setattr("base.config.settings.observability.trace_enabled", True)
-    monkeypatch.setitem(tracing_mod._state, "initialized", True)
+    monkeypatch.setattr(tracing_mod, "is_initialized", lambda: True)
     monkeypatch.setattr(otel_trace, "get_tracer", lambda _name: tracer)  # pyright: ignore[reportUnknownArgumentType]
     message = AIMessage(
         content="",

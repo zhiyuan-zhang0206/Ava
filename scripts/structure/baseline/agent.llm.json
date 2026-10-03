@@ -1,5 +1,0 @@
-{
-  "patch_targets": {
-    "agent/llm/tests/test_llm_usage.py::base.telemetry.tracing._state": 2
-  }
-}
