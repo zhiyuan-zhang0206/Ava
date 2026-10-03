@@ -59,6 +59,7 @@ import os
 import threading
 import time
 import uuid
+from collections import Counter
 from collections.abc import Callable, Iterator
 from contextlib import AbstractContextManager, suppress
 from dataclasses import dataclass, replace
@@ -682,6 +683,85 @@ def _paced(paths: list[Path], on_record: Callable[[], None] | None) -> Iterator[
         yield path
 
 
+def _flush_path(
+    pool: FlushPool, path: Path, snapshot: DeliveryOutboxLimits, moment: datetime
+) -> str | None:
+    """One entry's flush outcome (a `FlushReport` counter name); None for a non-record."""
+    if path.suffix != _ENTRY_SUFFIX or not path.is_file():
+        return None
+    entry = _read(path)
+    if entry is None:
+        logger.warning("[delivery-outbox] unreadable record kept for inspection: {}", path)
+        return "unreadable"
+    if entry.state != "pending":
+        # Abandoned records keep their inspection window, then expire (inert while off).
+        if snapshot.enabled and _abandoned_expired(
+            entry, moment, snapshot.abandoned_retention_days
+        ):
+            with suppress(OSError):
+                path.unlink()
+            return "expired"
+        return None
+    if not snapshot.enabled:
+        return "deferred"
+    age_s = (moment - _parse_iso(entry.created_at)).total_seconds()
+    if moment < _due_at(entry, snapshot.retry_backoff_steps):
+        return "deferred"
+    try:
+        inbound_id = _deliver(pool, entry, snapshot.flush_interval_seconds)
+    except PermanentDeliveryError as exc:
+        _abandon(path, entry, exc.reason, moment, detail=exc.detail)
+        return "abandoned"
+    except Exception as exc:
+        logger.opt(exception=True).warning(
+            "[delivery-outbox] flush attempt for agent {} failed; record kept: {}",
+            entry.agent_id,
+            path,
+        )
+        updated = _record_failed_flush(path, entry, moment)
+        if age_s >= snapshot.budget_seconds:
+            # The failed attempt at/after the budget is the terminal one (decided after it).
+            _abandon(path, updated, "budget", moment, detail=str(exc) or None)
+            return "abandoned"
+        return "deferred"
+    with suppress(OSError):
+        path.unlink()
+    return _log_redelivery(entry, inbound_id, age_s)
+
+
+def _log_redelivery(entry: OutboxEntry, inbound_id: int | None, age_s: float) -> str:
+    """Log + emit one successful redelivery; returns its `FlushReport` counter name."""
+    if inbound_id is None:
+        logger.info(
+            "[delivery-outbox] replayed completion notice for agent {} (source {!r}, "
+            "{} send attempt(s)) into its hourly digest",
+            entry.agent_id,
+            entry.source,
+            entry.attempts,
+        )
+        return "buffered"
+    logger.info(
+        "[delivery-outbox] redelivered message to agent {} (source {!r}, "
+        "{} send attempt(s)) as inbound {}",
+        entry.agent_id,
+        entry.source,
+        entry.attempts,
+        inbound_id,
+    )
+    _emit(
+        "delivery_outbox_flushed",
+        entry,
+        {
+            "inbound_id": inbound_id,
+            "attempts": entry.attempts,
+            "flush_attempts": entry.flush_attempts,
+            "age_s": max(0.0, age_s),
+            "origin_agent_id": entry.origin_agent_id,
+        },
+    )
+    return "delivered"
+
+
 def flush(
     pool: FlushPool,
     *,
@@ -710,91 +790,9 @@ def flush(
     directory = journal_dir()
     if not directory.is_dir():
         return FlushReport()
-    delivered = buffered = abandoned = deferred = unreadable = expired = 0
+    outcomes: Counter[str] = Counter()
     for path in _paced(sorted(directory.iterdir()), on_record):
-        if path.suffix != _ENTRY_SUFFIX or not path.is_file():
-            continue
-        entry = _read(path)
-        if entry is None:
-            unreadable += 1
-            logger.warning("[delivery-outbox] unreadable record kept for inspection: {}", path)
-            continue
-        if entry.state != "pending":
-            # Abandoned records keep their inspection window, then this pass
-            # expires them (no-op while the outbox is off — the switch is
-            # inert, never destructive).
-            if snapshot.enabled and _abandoned_expired(
-                entry, moment, snapshot.abandoned_retention_days
-            ):
-                with suppress(OSError):
-                    path.unlink()
-                expired += 1
-            continue
-        if not snapshot.enabled:
-            deferred += 1
-            continue
-        age_s = (moment - _parse_iso(entry.created_at)).total_seconds()
-        if moment < _due_at(entry, snapshot.retry_backoff_steps):
-            deferred += 1
-            continue
-        try:
-            inbound_id = _deliver(pool, entry, snapshot.flush_interval_seconds)
-        except PermanentDeliveryError as exc:
-            _abandon(path, entry, exc.reason, moment, detail=exc.detail)
-            abandoned += 1
-        except Exception as exc:
-            logger.opt(exception=True).warning(
-                "[delivery-outbox] flush attempt for agent {} failed; record kept: {}",
-                entry.agent_id,
-                path,
-            )
-            updated = _record_failed_flush(path, entry, moment)
-            if age_s >= snapshot.budget_seconds:
-                # The failed attempt at/after the budget is the terminal one —
-                # abandon it with the attempt already on the record. The
-                # decision falls after the attempt, never before it.
-                _abandon(path, updated, "budget", moment, detail=str(exc) or None)
-                abandoned += 1
-            else:
-                deferred += 1
-        else:
-            with suppress(OSError):
-                path.unlink()
-            if inbound_id is None:
-                buffered += 1
-                logger.info(
-                    "[delivery-outbox] replayed completion notice for agent {} (source {!r}, "
-                    "{} send attempt(s)) into its hourly digest",
-                    entry.agent_id,
-                    entry.source,
-                    entry.attempts,
-                )
-            else:
-                delivered += 1
-                logger.info(
-                    "[delivery-outbox] redelivered message to agent {} (source {!r}, "
-                    "{} send attempt(s)) as inbound {}",
-                    entry.agent_id,
-                    entry.source,
-                    entry.attempts,
-                    inbound_id,
-                )
-                _emit(
-                    "delivery_outbox_flushed",
-                    entry,
-                    {
-                        "inbound_id": inbound_id,
-                        "attempts": entry.attempts,
-                        "flush_attempts": entry.flush_attempts,
-                        "age_s": max(0.0, age_s),
-                        "origin_agent_id": entry.origin_agent_id,
-                    },
-                )
-    return FlushReport(
-        delivered=delivered,
-        buffered=buffered,
-        abandoned=abandoned,
-        deferred=deferred,
-        unreadable=unreadable,
-        expired=expired,
-    )
+        outcome = _flush_path(pool, path, snapshot, moment)
+        if outcome is not None:
+            outcomes[outcome] += 1
+    return FlushReport(**outcomes)

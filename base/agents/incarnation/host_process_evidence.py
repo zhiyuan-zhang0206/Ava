@@ -65,6 +65,35 @@ class LocalHostEvidence:
         return reasons
 
 
+def _same_user(process: psutil.Process, pid: int, shape: str, unreadable: list[str]) -> bool:
+    """False for a process that cannot be this unit's (foreign user, gone, or owner unreadable)."""
+    try:
+        if os.name == "posix" and process.uids().real != os.getuid():
+            # A foreign-user process cannot be this unit's daemon or exec
+            # child. Windows has no comparable uid (placeholder ids); the
+            # environment read decides ownership there.
+            return False
+    except psutil.AccessDenied:
+        unreadable.append(f"pid {pid}: owner unreadable for a {shape} shape")
+        return False
+    except (psutil.NoSuchProcess, psutil.ZombieProcess):
+        return False
+    return True
+
+
+def _read_environ(
+    process: psutil.Process, pid: int, shape: str, unreadable: list[str]
+) -> dict[str, str] | None:
+    """The process environment, or None when it vanished or cannot be read."""
+    try:
+        return process.environ()
+    except (psutil.NoSuchProcess, psutil.ZombieProcess):
+        return None
+    except psutil.AccessDenied:
+        unreadable.append(f"pid {pid}: environment unreadable for a {shape} shape")
+        return None
+
+
 def local_host_evidence(agent_id: int, home: Path, *, exclude_pid: int) -> LocalHostEvidence:
     """Scan this machine for live processes that could still serve ``agent_id``.
 
@@ -85,24 +114,11 @@ def local_host_evidence(agent_id: int, home: Path, *, exclude_pid: int) -> Local
         shape = _shape(argv)
         if shape is None:
             continue
-        try:
-            if os.name == "posix" and process.uids().real != os.getuid():
-                # A foreign-user process cannot be this unit's daemon or exec
-                # child. Windows has no comparable uid (placeholder ids); the
-                # environment read below decides ownership there.
-                continue
-        except psutil.AccessDenied:
-            unreadable.append(f"pid {pid}: owner unreadable for a {shape} shape")
-            continue
-        except (psutil.NoSuchProcess, psutil.ZombieProcess):
+        if not _same_user(process, pid, shape, unreadable):
             continue
         scanned += 1
-        try:
-            env = process.environ()
-        except (psutil.NoSuchProcess, psutil.ZombieProcess):
-            continue
-        except psutil.AccessDenied:
-            unreadable.append(f"pid {pid}: environment unreadable for a {shape} shape")
+        env = _read_environ(process, pid, shape, unreadable)
+        if env is None:
             continue
         if shape == _DAEMON:
             verdict = _daemon_verdict(env.get("AVA_HOME"), resolved_home)
