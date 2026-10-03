@@ -208,8 +208,8 @@ export interface paths {
          *     fallback `#N`. Both cases also set `label_user_set=TRUE` — sticky bit
          *     so the background LLM CAS no longer overwrites (otherwise after the
          *     user resets, the LLM would still match `label IS NULL` and rename it,
-         *     defeating the reset intent). Both cases publish LabelUpdated so SSE
-         *     pushes in real time.
+         *     defeating the reset intent). The change and its `label_change` audit fact commit
+         *     together; both cases publish LabelUpdated so SSE pushes in real time.
          *
          *     404: agent_id does not exist.
          */
@@ -5551,11 +5551,19 @@ export interface components {
          * @description PATCH /api/agents/{id} body — manually set / reset agent label.
          *
          *     `label=""` resets back to NULL; the frontend re-displays fallback
-         *     `#N`. Non-empty strings are stripped; length 1-64 inclusive.
+         *     `#N`. Non-empty strings are stripped; length 1-64 inclusive. `source` names who
+         *     changed it in the `label_change` audit fact: the operator by default, `"self"` when
+         *     the agent sets its own label.
          */
         LabelPatchRequest: {
             /** Label */
             label: string;
+            /**
+             * Source
+             * @default user
+             * @enum {string}
+             */
+            source: "user" | "self";
         };
         /**
          * LastMessageResponse

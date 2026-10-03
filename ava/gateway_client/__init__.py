@@ -61,7 +61,7 @@ Design trade-offs:
 
 from __future__ import annotations
 
-from typing import Any, NamedTuple
+from typing import Any, Literal, NamedTuple
 
 import ava
 import ava.agent_identity
@@ -396,6 +396,16 @@ def list_agents(
     resp = get("/api/agents", params=params)
     raise_from_response(resp)
     return resp.json()
+
+
+def patch_label(agent_id: int, label: str, *, source: Literal["user", "self"] = "self") -> None:
+    """Set an agent's label through the gateway; `""` resets it to unset.
+
+    The label sticks (the background labeler no longer renames it), the change is
+    audited as `label_change` with `source`, and every client's view refreshes live.
+    """
+    resp = patch(f"/api/agents/{agent_id}", json={"label": label, "source": source})
+    raise_from_response(resp)
 
 
 def get_agent(agent_id: int) -> dict[str, Any]:

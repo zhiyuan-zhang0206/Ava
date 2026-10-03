@@ -22,6 +22,7 @@ from uuid import UUID, uuid4
 from fastapi import APIRouter, HTTPException, Query, Request, Response
 from psycopg_pool import ConnectionPool
 
+from base import telemetry
 from base.agents import (
     AgentLaunchFailed,
     AgentNotFound,
@@ -40,6 +41,7 @@ from base.db.transaction import write_transaction
 from base.events.live.announce import publish_agent_updated_sync
 from base.events.live.bus import EventBus
 from base.log import logger
+from base.telemetry.audit_events import prepare_event_log, record_audit
 from gateway.agents import forward
 from gateway.agents.forward import forward_spawn_to_remote
 from gateway.agents.schemas import AgentRow, LabelPatchRequest
@@ -67,13 +69,15 @@ async def patch_agent(agent_id: int, body: LabelPatchRequest, request: Request) 
     fallback `#N`. Both cases also set `label_user_set=TRUE` — sticky bit
     so the background LLM CAS no longer overwrites (otherwise after the
     user resets, the LLM would still match `label IS NULL` and rename it,
-    defeating the reset intent). Both cases publish LabelUpdated so SSE
-    pushes in real time.
+    defeating the reset intent). The change and its `label_change` audit fact commit
+    together; both cases publish LabelUpdated so SSE pushes in real time.
 
     404: agent_id does not exist.
     """
     new_label: str | None = body.label if body.label else None
-    await asyncio.to_thread(_patch_label_blocking, request.app.state.db_pool, agent_id, new_label)
+    await asyncio.to_thread(
+        _patch_label_blocking, request.app.state.db_pool, agent_id, new_label, body.source
+    )
     await publish_label_updated(request.app.state.bus, agent_id, new_label)
     return Response(status_code=204)
 
@@ -165,15 +169,28 @@ def get_agent_roster(request: Request) -> roster.AgentRoster:
         return roster.select_roster(conn)
 
 
-def _patch_label_blocking(pool: ConnectionPool, agent_id: int, new_label: str | None) -> None:
-    """Sync label UPDATE + 404 guard — via to_thread."""
-    with write_transaction(pool) as conn, conn.cursor() as cur:
-        cur.execute(
-            "UPDATE agents SET label=%s, label_user_set=TRUE WHERE id=%s",
-            (new_label, agent_id),
+def _patch_label_blocking(
+    pool: ConnectionPool, agent_id: int, new_label: str | None, source: str
+) -> None:
+    """Sync label UPDATE + 404 guard + audit fact in one transaction — via to_thread."""
+    with write_transaction(pool) as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "UPDATE agents SET label=%s, label_user_set=TRUE WHERE id=%s",
+                (new_label, agent_id),
+            )
+            if cur.rowcount == 0:
+                raise HTTPException(status_code=404, detail=f"agent {agent_id} not found")
+        label_event = record_audit(
+            conn,
+            prepare_event_log(
+                event_type="label_change",
+                agent_id=agent_id,
+                source=source,
+                payload={"new_label": new_label},
+            ),
         )
-        if cur.rowcount == 0:
-            raise HTTPException(status_code=404, detail=f"agent {agent_id} not found")
+    telemetry.emit_prepared(label_event)
 
 
 def _spawn_preflight_blocking(

@@ -297,29 +297,27 @@ def _label_of(db_conn: psycopg.Connection, agent_id: int) -> str | None:
     return None if row is None else row[0]
 
 
-def test_set_label_sticky(_load_activity_plugin: None, db_conn: psycopg.Connection):
-    agent_id = _seed_agent(db_conn)
+def test_set_label_hands_the_agents_own_label_to_the_gateway(
+    _load_activity_plugin: None, monkeypatch: pytest.MonkeyPatch
+):
+    from ava import gateway_client
+
+    calls: list[tuple[int, str, str]] = []
+
+    def patch_label(agent_id: int, label: str, *, source: str = "self") -> None:
+        calls.append((agent_id, label, source))
+
+    monkeypatch.setattr(gateway_client, "patch_label", patch_label)
     original = ava.agent_identity._agent_id
-    ava.agent_identity._agent_id = agent_id
+    ava.agent_identity._agent_id = 7
     try:
-        assert _label_of(db_conn, agent_id) is None
-
         ava.self.set_label("auth-refactor lead")  # type: ignore[attr-defined]
-        assert _label_of(db_conn, agent_id) == "auth-refactor lead"
-        snap = select_one(db_conn, agent_id)
-        assert snap is not None and snap.label == "auth-refactor lead"
-
-        # Self-set flips the sticky bit so the labeler's CAS won't overwrite.
-        with db_conn.cursor() as cur:
-            cur.execute("SELECT label_user_set FROM agents WHERE id=%s", (agent_id,))
-            row = cur.fetchone()
-        assert row is not None and row[0] is True
-
         # Empty string clears back to the default (#N fallback).
         ava.self.set_label("")  # type: ignore[attr-defined]
-        assert _label_of(db_conn, agent_id) is None
     finally:
         ava.agent_identity._agent_id = original
+
+    assert calls == [(7, "auth-refactor lead", "self"), (7, "", "self")]
 
 
 def test_plugin_registers_ui_notice_members(_load_activity_plugin: None):

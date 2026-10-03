@@ -26,6 +26,8 @@ Sets the agent's role label — the name displayed in the fleet graph.
 - Task names are legitimate labels for ephemeral workers — a worker's "role" is its task
 - Other agents discover and locate peers by label through `get_neighbors`, and read the responsibility chain above you through `get_ancestors`
 - Once set, it is not automatically replaced; explicit call needed to change
+- The call goes through the gateway (`PATCH /api/agents/{id}`, source `self`), so it needs the
+  gateway reachable like every other `ava.*` call that touches the cluster
 - The label is stated in the agent's own agent-ID context note at every window
   establishment — agents read their current label there, and it is how a peer
   renders your role without a getter call
@@ -42,8 +44,9 @@ agents (table)
 
 ## Dependencies
 
-- DB table `agents`
-- `publish_agent_updated_sync()` — pushes to fleet monitoring view after set_label
+- `ava.gateway_client.patch_label` → `PATCH /api/agents/{id}`: the gateway writes the label and
+  the sticky bit, records the `label_change` audit fact in the same transaction, and publishes
+  `label_updated` so the fleet monitoring view refreshes
 
 ## Relationship to Other Subsystems
 

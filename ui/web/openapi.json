@@ -192,7 +192,7 @@
     "/api/agents/{agent_id}": {
       "patch": {
         "summary": "Patch Agent",
-        "description": "Manually set / reset an agent label.\n\nbody.label non-empty: UPDATE directly. Empty string (after strip):\nUPDATE label=NULL to reset back to \"not set\"; frontend re-displays\nfallback `#N`. Both cases also set `label_user_set=TRUE` — sticky bit\nso the background LLM CAS no longer overwrites (otherwise after the\nuser resets, the LLM would still match `label IS NULL` and rename it,\ndefeating the reset intent). Both cases publish LabelUpdated so SSE\npushes in real time.\n\n404: agent_id does not exist.",
+        "description": "Manually set / reset an agent label.\n\nbody.label non-empty: UPDATE directly. Empty string (after strip):\nUPDATE label=NULL to reset back to \"not set\"; frontend re-displays\nfallback `#N`. Both cases also set `label_user_set=TRUE` — sticky bit\nso the background LLM CAS no longer overwrites (otherwise after the\nuser resets, the LLM would still match `label IS NULL` and rename it,\ndefeating the reset intent). The change and its `label_change` audit fact commit\ntogether; both cases publish LabelUpdated so SSE pushes in real time.\n\n404: agent_id does not exist.",
         "operationId": "patch_agent_api_agents__agent_id__patch",
         "parameters": [
           {
@@ -10602,6 +10602,15 @@
             "type": "string",
             "maxLength": 64,
             "title": "Label"
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "user",
+              "self"
+            ],
+            "title": "Source",
+            "default": "user"
           }
         },
         "type": "object",
@@ -10609,7 +10618,7 @@
           "label"
         ],
         "title": "LabelPatchRequest",
-        "description": "PATCH /api/agents/{id} body — manually set / reset agent label.\n\n`label=\"\"` resets back to NULL; the frontend re-displays fallback\n`#N`. Non-empty strings are stripped; length 1-64 inclusive."
+        "description": "PATCH /api/agents/{id} body — manually set / reset agent label.\n\n`label=\"\"` resets back to NULL; the frontend re-displays fallback\n`#N`. Non-empty strings are stripped; length 1-64 inclusive. `source` names who\nchanged it in the `label_change` audit fact: the operator by default, `\"self\"` when\nthe agent sets its own label."
       },
       "LastMessageResponse": {
         "properties": {
