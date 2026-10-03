@@ -141,9 +141,10 @@ def collector_allowed_for_home(home: Path | None) -> bool:
 
 # ── The read-boundary refusal (no observability on this cluster) ────────────
 # A gateway that is not the observability station and has no explicit
-# AVA_TELEMETRY_LOKI_URL refuses observability reads outright (the read gate in
-# ``gateway/_loki_transport._read_gate``): the wire answer is a 503 problem+json
-# whose ``code`` is this constant. It is a configuration state, not a transient
+# AVA_TELEMETRY_LOKI_URL refused observability reads outright: the wire answer
+# was a 503 problem+json whose ``code`` is this constant. Current gateways no
+# longer read Loki and never answer it; the reader classification stays for a
+# unit still running an older gateway. It is a configuration state, not a transient
 # failure — retrying cannot clear it — so readers branch on it and take a local
 # fallback where one exists (the events JSONL mirror for the self-evolution
 # scans). One constant + one predicate, so every reader classifies the same
@@ -152,7 +153,7 @@ def collector_allowed_for_home(home: Path | None) -> bool:
 OBSERVABILITY_READ_UNAVAILABLE_CODE = "observability_read_unavailable"
 
 
-class ObservabilityReadUnavailable(RuntimeError):  # noqa: N818 — mirrors gateway/lgtm/_loki_transport
+class ObservabilityReadUnavailable(RuntimeError):  # noqa: N818
     """A reader's view of the no-observability refusal above.
 
     Raised by readers (e.g. the self-evolution collect path) so callers can

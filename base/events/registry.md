@@ -306,7 +306,6 @@ above (or when its name is unregistered); otherwise it stays in the JSONL mirror
 | `telemetry_read_recovered` | read-side telemetry heartbeat recovered | observation | source, signal, stale_duration_s | — | events | — |
 | `otlp_backend_disabled` | OTLP backend disabled for this process (init failure / collector unreachable); retry scheduled | anomaly | reason, endpoint | — | events | — |
 | `otlp_backend_recovered` | OTLP backend brought up after a disabled episode (periodic retry) | observation | endpoint, disabled_s | — | events | — |
-| `loki_query_budget` | local Loki query-admission transition and capacity metrics | noise | outcome, active, queued, high_water, wait_ms, acquired, queue_full, wait_timeout | — | events | — |
 | `warning_resolved` | class-level warning dismissal marker (legacy target-event attributes remain accepted) | anomaly | target_event_id, match, resolved_by, category, level, event_name, source, process, agent_id, dismissed_by, note | — | events | — |
 | `error_resolved` | class-level error/critical dismissal marker (legacy target-event attributes remain accepted) | anomaly | target_event_id, match, resolved_by, category, level, event_name, source, process, agent_id, dismissed_by, note | — | events | — |
 | `warning_reopened` | class-level warning dismissal reopened manually or by the burst safety valve | anomaly | category, level, event_name, source, process, agent_id, dismissed_by, note, reopened_by, triggered_by_count | — | events | — |
@@ -345,7 +344,6 @@ above (or when its name is unregistered); otherwise it stays in the JSONL mirror
 | `shell_ttl_expired` | the TTL reaper killed a persistent shell whose declared TTL passed; attributes carry agent_id, session_id, mode | observation | — | events |
 | `chrome_page_ttl_expired` | the browser-mcp TTL sweep closed a Chrome page whose hard deadline passed; attributes carry page_id, url, agent_id (None when no affinity slot still named the page) | observation | — | events |
 | `log` | bare log line | noise | msg | events |
-| `loki_query_failed` | a Loki HTTP query failed (timeout / disconnect / non-2xx) — carries the request shape | anomaly | endpoint, duration_s, error, window_from, window_to, query | events |
 | `lifecycle_pointer_done_torn` | the TTL reaper's scan found lifecycle command(s) sitting at done while agents_meta.lifecycle_command_id still pointed at them (an out-of-band torn write, task #3678) — every resurrect of the named agent(s) defers until settled; attributes carry count and samples | anomaly | — | events |
 | `lifecycle_fences_settled_absent_machine` | the TTL reaper settled applied-but-unobserved force-terminate command(s) whose agent's home machine is absent from the machines registry (a decommissioned machine never runs the boot recovery that would observe its fences, task #4143); attributes carry count and samples | observation | — | events |
 

@@ -608,7 +608,7 @@ def test_fetch_no_observability_refusal_fails_fast_with_typed_error(
     collect_mod: Any, monkeypatch: pytest.MonkeyPatch, retry_waits: list[float]
 ) -> None:
     """A cluster without observability refuses reads with 503 +
-    code=observability_read_unavailable (gateway/_loki_transport._read_gate).
+    code=observability_read_unavailable (an older gateway's Loki read gate).
     That is a policy state, not a transient blip: it must raise the typed
     ObservabilityReadUnavailable on the FIRST reply — no retry budget spent —
     so callers can fall back to the local event mirror."""

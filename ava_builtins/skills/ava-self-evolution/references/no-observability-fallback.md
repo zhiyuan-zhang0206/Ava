@@ -2,9 +2,9 @@
 
 ## The refusal is a policy state, not an outage
 
-A gateway whose home is not the observability station and that has no explicit
-`AVA_TELEMETRY_LOKI_URL` refuses observability reads outright (the read gate in
-`gateway/lgtm/_loki_transport.py`). The wire answer is a 503 `application/problem+json`
+A gateway (an older build; current ones no longer read Loki) whose home is not the
+observability station and that has no explicit `AVA_TELEMETRY_LOKI_URL` refuses
+observability reads outright. The wire answer is a 503 `application/problem+json`
 with `"code": "observability_read_unavailable"` — "set AVA_TELEMETRY_LOKI_URL and
 provide its stack, or accept that this cluster has no observability".
 
