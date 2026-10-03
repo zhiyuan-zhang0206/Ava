@@ -42,7 +42,7 @@ def test_failed_plain_launch_persists_prompt_and_retry_reuses_identity(
         attempts.append(body)
         raise LaunchForwardError(AvailabilityReason.LAUNCH_UNREACHABLE, "runner offline")
 
-    monkeypatch.setattr(route, "_forward_spawn_to_remote", _fail)
+    monkeypatch.setattr(route, "forward_spawn_to_remote", _fail)
     with TestClient(app) as client:
         failed = client.post("/api/agents", json={"prompt": "Do the task", "prompt_source": "user"})
         assert failed.status_code == 502
@@ -55,7 +55,7 @@ def test_failed_plain_launch_persists_prompt_and_retry_reuses_identity(
             attempts.append(retry)
             return SpawnedAgent(id=retry.agent_id)
 
-        monkeypatch.setattr(route, "_forward_spawn_to_remote", _succeed)
+        monkeypatch.setattr(route, "forward_spawn_to_remote", _succeed)
         repaired = client.post(body["retry_launch_path"])
         assert repaired.status_code == 200
         assert repaired.json()["id"] == agent_id
@@ -121,7 +121,7 @@ def test_failed_launch_state_write_outage_keeps_committed_id_retriable(
     def _write_outage(*_args: object) -> None:
         raise OSError("database unavailable")
 
-    monkeypatch.setattr(route, "_forward_spawn_to_remote", _fail)
+    monkeypatch.setattr(route, "forward_spawn_to_remote", _fail)
     monkeypatch.setattr(route, "_mark_launch_failure", _write_outage)
     with TestClient(app) as client:
         failed = client.post("/api/agents", json={"prompt": "Keep me", "prompt_source": "user"})
@@ -134,7 +134,7 @@ def test_failed_launch_state_write_outage_keeps_committed_id_retriable(
         async def _succeed(_db: object, _target: str, retry: LaunchAgentRequest) -> SpawnedAgent:
             return SpawnedAgent(id=retry.agent_id)
 
-        monkeypatch.setattr(route, "_forward_spawn_to_remote", _succeed)
+        monkeypatch.setattr(route, "forward_spawn_to_remote", _succeed)
         assert client.post(f"/api/agents/{body['agent_id']}/retry-launch").status_code == 200
 
 
@@ -159,7 +159,7 @@ def test_failed_fork_launch_keeps_marker_and_prompt_in_one_birth(
         async def _fail(_db: object, _target: str, _body: LaunchAgentRequest) -> SpawnedAgent:
             raise LaunchForwardError(AvailabilityReason.LAUNCH_UNREACHABLE, "runner offline")
 
-        monkeypatch.setattr(route, "_forward_spawn_to_remote", _fail)
+        monkeypatch.setattr(route, "forward_spawn_to_remote", _fail)
         failed = client.post(
             "/api/agents",
             json={"fork_from": source, "prompt": "Continue here", "prompt_source": "user"},
@@ -190,7 +190,7 @@ def test_admission_winning_dispatch_failure_returns_accepted_receipt(
         db_conn.commit()
         raise LaunchForwardError(AvailabilityReason.LAUNCH_UNREACHABLE, "response lost")
 
-    monkeypatch.setattr(route, "_forward_spawn_to_remote", _admit_then_fail)
+    monkeypatch.setattr(route, "forward_spawn_to_remote", _admit_then_fail)
     with TestClient(app) as client:
         response = client.post("/api/agents", json={"prompt": "Stay", "prompt_source": "user"})
     assert response.status_code == 201

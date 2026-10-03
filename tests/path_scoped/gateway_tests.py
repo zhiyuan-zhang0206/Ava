@@ -2,7 +2,7 @@
 
 `POST /api/agents` and the lifecycle endpoints (terminate / resurrect /
 restart) are HTTP-uniform: they always reach a runner via that runner's ops
-server (`_forward_spawn_to_remote` / `enqueue_lifecycle` ->
+server (`forward_spawn_to_remote` / `enqueue_lifecycle` ->
 `dispatch_to_machine`; both live in gateway/agents/forward.py), even when the
 target is the co-located box (localhost). There is no in-process shortcut in
 the router anymore.
@@ -66,7 +66,7 @@ def _local_spawn_in_process(monkeypatch: pytest.MonkeyPatch) -> None:
         # mirror that here so a forwarded local launch produces a real child.
         return await launch_agent_op(body, app.state.db_pool)
 
-    monkeypatch.setattr(_agents_router, "_forward_spawn_to_remote", _in_process_forward)
+    monkeypatch.setattr(_agents_router, "forward_spawn_to_remote", _in_process_forward)
 
     # `POST /api/agents` reads the target's capability from the registry (the same
     # source the forward resolves the ops URL from) for every target, local

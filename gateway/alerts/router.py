@@ -74,13 +74,6 @@ _WINDOWS = {
     "7d": timedelta(days=7),
 }
 
-# Underscored aliases of the shared core — the ingest endpoint resolves them
-# at call time, so tests can monkeypatch the router's notify/upsert internals.
-_upsert_alert = upsert_alert
-_notify_im = notify_im
-_notify_text = notify_text
-_stamp_notified = stamp_notified
-
 # Each SSE frame is one AlertRow JSON — validate what we forward so a bad
 # publish degrades to a dropped frame, never a crashed stream.
 _alert_frame_validator = TypeAdapter(AlertRow)
@@ -127,7 +120,7 @@ def ingest_alerts(body: AlertWebhookPayload, request: Request) -> AlertIngestRes
     with write_transaction(request.app.state.db_pool) as conn:
         lang = display_language(conn)
         for alert in body.flattened():
-            key, did_insert, should_notify, row = _upsert_alert(conn, alert, source=body.source)
+            key, did_insert, should_notify, row = upsert_alert(conn, alert, source=body.source)
             if not row:
                 continue
             if did_insert:
@@ -136,7 +129,7 @@ def ingest_alerts(body: AlertWebhookPayload, request: Request) -> AlertIngestRes
                 updated += 1
             rows.append(row)
             if should_notify:
-                pending.append((key, _notify_text(alert, lang)))
+                pending.append((key, notify_text(alert, lang)))
         conn.commit()
 
     publish_alert_rows(request.app.state.bus, rows)
@@ -144,9 +137,9 @@ def ingest_alerts(body: AlertWebhookPayload, request: Request) -> AlertIngestRes
     if pending:
         with write_transaction(request.app.state.db_pool) as conn:
             for key, text in pending:
-                if _notify_im(text):
+                if notify_im(text):
                     notified += 1
-                    _stamp_notified(conn, [key])
+                    stamp_notified(conn, [key])
             conn.commit()
 
     return AlertIngestResult(

@@ -1,7 +1,7 @@
 """Cross-machine spawn forward (`gateway/agents/router.py:post_agents`) unit tests —
 
-Verify "body.machine != local → _forward_spawn_to_remote is called" routing decision + error propagation.
-Actual httpx network calls are not made (mock `_forward_spawn_to_remote` intercepts); only validate router
+Verify "body.machine != local → forward_spawn_to_remote is called" routing decision + error propagation.
+Actual httpx network calls are not made (mock `forward_spawn_to_remote` intercepts); only validate router
 branch + body passthrough.
 """
 
@@ -48,7 +48,7 @@ class TestRouting:
             if failure == "exception":
                 raise RuntimeError("receipt read unavailable")
 
-        monkeypatch.setattr(app_module, "_forward_spawn_to_remote", _capture_forward)
+        monkeypatch.setattr(app_module, "forward_spawn_to_remote", _capture_forward)
         monkeypatch.setattr(app_module.snapshot_module, "select_one", _unreadable)
         with TestClient(app) as client:
             resp = client.post("/api/agents", json={"machine": "local-test"})
@@ -77,7 +77,7 @@ class TestRouting:
             captured["body"] = body
             return SpawnedAgent(id=body.agent_id)
 
-        monkeypatch.setattr(app_module, "_forward_spawn_to_remote", _capture_forward)
+        monkeypatch.setattr(app_module, "forward_spawn_to_remote", _capture_forward)
         db_conn.execute(
             "INSERT INTO machine_probe (machine_name,online,agent_host_online) "
             "VALUES ('local-test',TRUE,FALSE)"
@@ -106,7 +106,7 @@ class TestRouting:
             captured["body"] = body
             return SpawnedAgent(id=body.agent_id)
 
-        monkeypatch.setattr(app_module, "_forward_spawn_to_remote", _capture_forward)
+        monkeypatch.setattr(app_module, "forward_spawn_to_remote", _capture_forward)
         with TestClient(app) as client:
             resp = client.post("/api/agents", json={})
         assert resp.status_code == 201
@@ -134,7 +134,7 @@ class TestRouting:
             forwarded.append(target)
             return SpawnedAgent(id=0)
 
-        monkeypatch.setattr(app_module, "_forward_spawn_to_remote", _should_not_forward)
+        monkeypatch.setattr(app_module, "forward_spawn_to_remote", _should_not_forward)
         with TestClient(app) as client:
             resp = client.post("/api/agents", json={})
         assert resp.status_code == 400
@@ -167,7 +167,7 @@ class TestRouting:
             forwarded.append(target)
             return SpawnedAgent(id=0)
 
-        monkeypatch.setattr(app_module, "_forward_spawn_to_remote", _should_not_forward)
+        monkeypatch.setattr(app_module, "forward_spawn_to_remote", _should_not_forward)
         with TestClient(app) as client:
             resp = client.post("/api/agents", json={"machine": "paused-box"})
         assert resp.status_code == 409
@@ -179,7 +179,7 @@ class TestRouting:
     def test_machine_neq_local_forwards(
         self, _force_local_machine: str, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """body.machine != local → _forward_spawn_to_remote is called, body passthrough."""
+        """body.machine != local → forward_spawn_to_remote is called, body passthrough."""
         captured: dict[str, Any] = {}
 
         async def _capture_forward(
@@ -189,7 +189,7 @@ class TestRouting:
             captured["body"] = body
             return SpawnedAgent(id=body.agent_id)
 
-        monkeypatch.setattr(app_module, "_forward_spawn_to_remote", _capture_forward)
+        monkeypatch.setattr(app_module, "forward_spawn_to_remote", _capture_forward)
         # The pre-dispatch capability check resolves the target's role; stub it as
         # a runner so the forward proceeds (the lookup itself is exercised by the
         # 404 / no-capability tests).
@@ -232,7 +232,7 @@ class TestRouting:
             captured["target"] = target
             return SpawnedAgent(id=body.agent_id)
 
-        monkeypatch.setattr(app_module, "_forward_spawn_to_remote", _capture_forward)
+        monkeypatch.setattr(app_module, "forward_spawn_to_remote", _capture_forward)
         monkeypatch.setattr(
             "base.cluster.machines.lookup_role",
             lambda _db, _name: ["agent-runner"],  # pyright: ignore[reportUnknownArgumentType]
@@ -270,7 +270,7 @@ class TestRouting:
                 AvailabilityReason.LAUNCH_UNREACHABLE, "target unreachable after 3 retries"
             )
 
-        monkeypatch.setattr(app_module, "_forward_spawn_to_remote", _forward_raises)
+        monkeypatch.setattr(app_module, "forward_spawn_to_remote", _forward_raises)
         monkeypatch.setattr(
             "base.cluster.machines.lookup_role",
             lambda _db, _name: ["agent-runner"],  # pyright: ignore[reportUnknownArgumentType]
@@ -289,7 +289,7 @@ class TestRouting:
         async def _wrong_id(_db: object, _target: str, body: LaunchAgentRequest) -> SpawnedAgent:
             return SpawnedAgent(id=body.agent_id + 1)
 
-        monkeypatch.setattr(app_module, "_forward_spawn_to_remote", _wrong_id)
+        monkeypatch.setattr(app_module, "forward_spawn_to_remote", _wrong_id)
         with TestClient(app) as client:
             response = client.post("/api/agents", json={})
         assert response.status_code == 502
@@ -317,7 +317,7 @@ async def test_spawn_forward_classifies_rpc_unreachable_and_uses_versioned_kind(
 
     monkeypatch.setattr(cluster_rpc, "dispatch_to_machine", _fail)
     with pytest.raises(forward.LaunchForwardError) as raised:
-        await forward._forward_spawn_to_remote(
+        await forward.forward_spawn_to_remote(
             Database.from_settings(),
             "runner",
             LaunchAgentRequest(agent_id=4, launch_attempt_id=attempt_id),
@@ -343,7 +343,7 @@ async def test_spawn_forward_preserves_runner_rejection_detail(
 
     monkeypatch.setattr(cluster_rpc, "dispatch_to_machine", _fail)
     with pytest.raises(forward.LaunchForwardError) as raised:
-        await forward._forward_spawn_to_remote(
+        await forward.forward_spawn_to_remote(
             Database.from_settings(), "runner", LaunchAgentRequest(agent_id=4)
         )
     assert raised.value.reason == AvailabilityReason.LAUNCH_REJECTED

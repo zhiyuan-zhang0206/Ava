@@ -324,7 +324,7 @@ def test_spawn_launch_failure_tool_error_names_committed_agent(
     async def _fail(_db: object, _target: str, _body: LaunchAgentRequest) -> SpawnedAgent:
         raise LaunchForwardError(AvailabilityReason.LAUNCH_UNREACHABLE, "runner offline")
 
-    monkeypatch.setattr(route, "_forward_spawn_to_remote", _fail)
+    monkeypatch.setattr(route, "forward_spawn_to_remote", _fail)
     with TestClient(app) as client:
         token = _create_token(client)
         response = _tool_call(client, token, "spawn_agent", {"prompt": "Keep this task"})

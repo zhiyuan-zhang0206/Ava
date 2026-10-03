@@ -93,7 +93,7 @@ class TestTerminateRouting:
         with TestClient(app) as client:
             agent_id = client.post("/api/agents", json={}).json()["id"]
             _set_agent_machine(db_conn, agent_id, "remote-mac")
-            monkeypatch.setattr(lifecycle_module, "_forward_to_home_machine", _capture_forward)  # pyright: ignore[reportUnknownArgumentType]
+            monkeypatch.setattr(lifecycle_module, "forward_to_home_machine", _capture_forward)  # pyright: ignore[reportUnknownArgumentType]
             resp = client.post(
                 f"/api/agents/{agent_id}/terminate",
                 json={"message": "retain this note"},
@@ -120,7 +120,7 @@ class TestTerminateRouting:
         with TestClient(app) as client:
             agent_id = client.post("/api/agents", json={}).json()["id"]
             _set_agent_machine(db_conn, agent_id, "remote-mac")
-            monkeypatch.setattr(lifecycle_module, "_forward_to_home_machine", _capture_forward)  # pyright: ignore[reportUnknownArgumentType]
+            monkeypatch.setattr(lifecycle_module, "forward_to_home_machine", _capture_forward)  # pyright: ignore[reportUnknownArgumentType]
             resp = client.post(
                 f"/api/agents/{agent_id}/terminate",
                 json={"force": True, "source": "user"},
@@ -142,7 +142,7 @@ class TestTerminateRouting:
         with TestClient(app) as client:
             agent_id = client.post("/api/agents", json={}).json()["id"]
             _set_agent_machine(db_conn, agent_id, "remote-mac")
-            monkeypatch.setattr(lifecycle_module, "_forward_to_home_machine", _forward_raises)
+            monkeypatch.setattr(lifecycle_module, "forward_to_home_machine", _forward_raises)
             resp = client.post(f"/api/agents/{agent_id}/terminate")
         assert resp.status_code == 404
         assert resp.json()["reason"] == "machine_not_registered"
@@ -159,7 +159,7 @@ class TestTerminateRouting:
         with TestClient(app) as client:
             agent_id = client.post("/api/agents", json={}).json()["id"]
             _set_agent_machine(db_conn, agent_id, "remote-mac")
-            monkeypatch.setattr(lifecycle_module, "_forward_to_home_machine", _forward_raises)
+            monkeypatch.setattr(lifecycle_module, "forward_to_home_machine", _forward_raises)
             resp = client.post(f"/api/agents/{agent_id}/terminate")
         assert resp.status_code == 502
         assert resp.json()["reason"] == "cross_machine_gateway_unavailable"
@@ -214,7 +214,7 @@ def test_restart_overlay_is_validated_without_gateway_agent_domain(
         captured["json_body"] = json_body
         return {"status": "enqueued"}
 
-    monkeypatch.setattr(lifecycle_module, "_forward_to_home_machine", _capture_forward)  # pyright: ignore[reportUnknownArgumentType]
+    monkeypatch.setattr(lifecycle_module, "forward_to_home_machine", _capture_forward)  # pyright: ignore[reportUnknownArgumentType]
     with TestClient(app) as client:
         agent_id = client.post("/api/agents", json={}).json()["id"]
         _set_agent_machine(db_conn, agent_id, "remote-runner")
@@ -385,7 +385,7 @@ class TestTerminateShellSessions:
             agent_id = client.post("/api/agents", json={}).json()["id"]
             _set_agent_machine(db_conn, agent_id, "remote-mac")
             _seed_shell_ttls(db_conn, agent_id, [0, 1, 2])
-            monkeypatch.setattr(lifecycle_module, "_forward_to_home_machine", _capture_forward)  # pyright: ignore[reportUnknownArgumentType]
+            monkeypatch.setattr(lifecycle_module, "forward_to_home_machine", _capture_forward)  # pyright: ignore[reportUnknownArgumentType]
             resp = client.post(
                 f"/api/agents/{agent_id}/terminate",
                 json={"force": True, "kill_all_shell_sessions": True},
@@ -409,7 +409,7 @@ class TestTerminateShellSessions:
             agent_id = client.post("/api/agents", json={}).json()["id"]
             _set_agent_machine(db_conn, agent_id, "remote-mac")
             _seed_shell_ttls(db_conn, agent_id, [0])
-            monkeypatch.setattr(lifecycle_module, "_forward_to_home_machine", _capture_forward)  # pyright: ignore[reportUnknownArgumentType]
+            monkeypatch.setattr(lifecycle_module, "forward_to_home_machine", _capture_forward)  # pyright: ignore[reportUnknownArgumentType]
             resp = client.post(
                 f"/api/agents/{agent_id}/terminate", json={"kill_all_shell_sessions": True}
             )

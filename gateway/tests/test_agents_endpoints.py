@@ -386,7 +386,7 @@ def test_post_commit_unknown_launch_failure_carries_id_and_cors_headers(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """An unexpected post-commit error retains the identity and CORS headers."""
-    # The autouse conftest fixture stubs _forward_spawn_to_remote in-process;
+    # The autouse conftest fixture stubs forward_spawn_to_remote in-process;
     # this test's monkeypatch runs later and wins, making the route itself blow up.
     import gateway.agents.router as _agents_router
     from ops.rpc_schemas import LaunchAgentRequest, SpawnedAgent
@@ -394,7 +394,7 @@ def test_post_commit_unknown_launch_failure_carries_id_and_cors_headers(
     async def _explode(_db: object, target: str, body: LaunchAgentRequest) -> SpawnedAgent:
         raise RuntimeError("boom")
 
-    monkeypatch.setattr(_agents_router, "_forward_spawn_to_remote", _explode)
+    monkeypatch.setattr(_agents_router, "forward_spawn_to_remote", _explode)
     allowed_origin = cors_allowed_origins()[0]
     with TestClient(app) as client:
         resp = client.post(

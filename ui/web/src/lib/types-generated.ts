@@ -510,7 +510,7 @@ export interface paths {
          *     message to deliver.
          *
          *     Always runs on the agent's home machine via its ops server
-         *     (`_forward_to_home_machine`) — that host starts the new process; launching
+         *     (`forward_to_home_machine`) — that host starts the new process; launching
          *     anywhere else would start it on the wrong host.
          *
          *     404: agent_id does not exist (AgentNotFound -> handler returns 404 + reason).
