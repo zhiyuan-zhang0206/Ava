@@ -135,7 +135,7 @@ def test_run_wires_the_liveness_task(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_load_adapters_skips_disabled(monkeypatch: pytest.MonkeyPatch) -> None:
     """AVA_IM_DISABLED_ADAPTERS skips the named adapters at load; the code
-    stays importable (user ruling 2026-08-06: only Telegram stays live)."""
+    stays importable (user ruling 2026-08-06 disabled WeChat iLink + Feishu; Feishu was re-enabled 2026-09)."""
     imported: list[str] = []
 
     def fake_import(name: str, *args: Any, **kwargs: Any) -> Any:

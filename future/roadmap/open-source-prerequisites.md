@@ -14,7 +14,7 @@ the mechanical publish steps.
 
 ## IM ingress channels (20+)
 
-Today: Telegram is the only live channel (WeChat iLink / Feishu adapters exist but are production-disabled since 2026-08-06). IM **ingress is live**: the IM Bridge takes user commands via the IM surface (`/list` `/switch` `/status` `/spawn` `/commands` `/help` `/notice`) — ingress is *not* web-only.
+Today: Telegram + Feishu are the live channels (the WeChat iLink adapter exists but is production-disabled since 2026-08-06). IM **ingress is live**: the IM Bridge takes user commands via the IM surface (`/list` `/switch` `/status` `/spawn` `/commands` `/help` `/notice`) — ingress is *not* web-only.
 
 At open-source time: native ingress for the IM apps users actually live in —
 Slack, Discord, Telegram, WhatsApp, Signal, WeChat/Weixin, Feishu/Lark, and the
