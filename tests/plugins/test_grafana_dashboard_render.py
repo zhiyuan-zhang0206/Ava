@@ -349,6 +349,53 @@ def test_barchart_panels_keep_the_tick_label_filter_enabled(
     assert not offenders, "barchart panels with the tick-label filter off:\n" + "\n".join(offenders)
 
 
+def test_fleet_barcharts_rotate_their_tick_labels(
+    world: tuple[list[MetricSpec], list[MetricSpec], dict[str, Any]],
+) -> None:
+    """The two half-width Fleet barcharts rotate their crowded x labels.
+
+    Spacing thins the axis but at 1920px the half-width pair still crowds the
+    HH:MM labels; a -45 rotation buys the horizontal room (task #4204, the
+    #3697 S3 QA observation). Readability is not machine-testable from the
+    render — the option value is the closest machine-observable proxy, same
+    as the spacing guard above."""
+    _, _, dashboard = world
+    panels = cast("list[dict[str, Any]]", dashboard["panels"])
+    fleet_titles = {"Agent spawns / minute (by source)", "Agent lifecycle / minute"}
+    fleet = {panel["title"]: panel for panel in panels if panel.get("title") in fleet_titles}
+    assert set(fleet) == fleet_titles, "the Fleet barchart pair is not on the board"
+    offenders = [
+        f"{title}: xTickLabelRotation={panel.get('options', {}).get('xTickLabelRotation')!r}"
+        for title, panel in fleet.items()
+        if panel.get("options", {}).get("xTickLabelRotation") != -45
+    ]
+    assert not offenders, "Fleet barcharts without rotated tick labels:\n" + "\n".join(offenders)
+
+
+def test_compaction_ratio_panel_aggregates_and_spans_nulls(
+    world: tuple[list[MetricSpec], list[MetricSpec], dict[str, Any]],
+) -> None:
+    """The ratio panel renders one averaged series, drawn across gaps.
+
+    Each compaction_completed row carries trace/span/agent labels, so the
+    unwrapped series splits into dozens of one-point lines and the panel
+    renders sparse near-empty; the avg() wrap restores a single series, and
+    the spanNulls pin keeps that line drawn across the gaps between events
+    (task #4204, measured against the live Loki)."""
+    _, _, dashboard = world
+    panels = cast("list[dict[str, Any]]", dashboard["panels"])
+    panel = next(
+        (entry for entry in panels if entry.get("title") == "Compaction ratio (summary/history)"),
+        None,
+    )
+    assert panel is not None, "the compaction-ratio panel is not on the board"
+    expr = cast("str", panel["targets"][0]["expr"])
+    assert expr.startswith("avg(100 * avg_over_time("), expr
+    defaults = cast("dict[str, Any]", panel.get("fieldConfig", {}).get("defaults") or {})
+    custom = cast("dict[str, Any]", defaults.get("custom") or {})
+    assert custom.get("spanNulls") is True, custom
+
+
 def test_render_rejects_unplaced_core_specs() -> None:
     """A core spec without its placement pins fails loudly rather than
     rendering into an arbitrary section."""
