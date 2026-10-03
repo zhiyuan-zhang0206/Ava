@@ -12,6 +12,7 @@ table is real SQL too (`/api/metrics/agents` reads labels from it).
 from __future__ import annotations
 
 import functools
+from typing import Any
 
 import psycopg
 import pytest
@@ -249,6 +250,25 @@ def test_metrics_agents_empty(db_conn: psycopg.Connection, stream: TelemetryStre
     assert body["meta"]["since_compact"] is False
 
 
+def _assert_expensive_agent_metrics(row: dict[str, Any]) -> None:
+    assert row["label"] == "agent-two"
+    assert row["cost_usd"] == 30.0
+    assert row["llm_calls"] == 1
+    assert row["exec_ok"] == 1
+    assert row["exec_failed"] == 0
+
+
+def _assert_cheap_agent_metrics(row: dict[str, Any]) -> None:
+    assert row["label"] == "agent-one"
+    assert row["cost_usd"] == 0  # unpriced model contributes 0
+    assert row["events"] == 3
+    assert row["tokens_in"] == 1000
+    assert row["cache_hit_pct"] == 80.0
+    assert row["turn_ok"] == 1
+    assert row["turn_total"] == 1
+    assert row["exec_failed"] == 1
+
+
 def test_metrics_agents_multi_agent(db_conn: psycopg.Connection, stream: TelemetryStream) -> None:
     """One row per agent with its own aggregates + label from the agents table,
     sorted by cost descending. Service-level (agent_id None) events count in
@@ -287,19 +307,8 @@ def test_metrics_agents_multi_agent(db_conn: psycopg.Connection, stream: Telemet
     assert body["meta"]["distinct_agents"] == 2
     assert [a["agent_id"] for a in body["agents"]] == [a2, a1]  # cost desc
     expensive, cheap = body["agents"]
-    assert expensive["label"] == "agent-two"
-    assert expensive["cost_usd"] == 30.0
-    assert expensive["llm_calls"] == 1
-    assert expensive["exec_ok"] == 1
-    assert expensive["exec_failed"] == 0
-    assert cheap["label"] == "agent-one"
-    assert cheap["cost_usd"] == 0  # unpriced model contributes 0
-    assert cheap["events"] == 3
-    assert cheap["tokens_in"] == 1000
-    assert cheap["cache_hit_pct"] == 80.0
-    assert cheap["turn_ok"] == 1
-    assert cheap["turn_total"] == 1
-    assert cheap["exec_failed"] == 1
+    _assert_expensive_agent_metrics(expensive)
+    _assert_cheap_agent_metrics(cheap)
 
 
 def test_metrics_agents_since_compact(db_conn: psycopg.Connection, stream: TelemetryStream) -> None:

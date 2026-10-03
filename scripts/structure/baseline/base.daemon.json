@@ -5,9 +5,7 @@
   "complexity": {
     "base/daemon/health_schema.py::render": 16
   },
-  "files": {
-    "base/daemon/tests/test_health.py": 923
-  },
+  "files": {},
   "nesting": {
     "base/daemon/http_transport.py::start_daemon_http.<locals>.handle": 6
   }

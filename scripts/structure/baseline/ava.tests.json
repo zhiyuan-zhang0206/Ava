@@ -1,10 +1,5 @@
 {
-  "files": {
-    "ava/tests/test_skills.py": 1502,
-    "ava/tests/test_understand.py": 967,
-    "ava/tests/test_watcher.py": 1078,
-    "ava/tests/test_web.py": 1046
-  },
+  "files": {},
   "patch_targets": {
     "ava/tests/test_log_batching.py::base.telemetry.emitter._jsonl_failures": 1
   }

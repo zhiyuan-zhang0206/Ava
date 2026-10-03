@@ -2,9 +2,38 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from fastapi.testclient import TestClient
 
 from gateway.app import app
+
+
+def _assert_created_client(body: dict[str, Any], *, name: str, scope: str) -> None:
+    assert body["id"] > 0
+    assert body["name"] == name
+    assert body["scope"] == scope
+    assert isinstance(body["token"], str)
+    assert len(body["token"]) >= 32
+
+
+def _assert_listed_client_row(
+    row: dict[str, Any], *, client_id: int, name: str, scope: str
+) -> None:
+    assert set(row) == {
+        "id",
+        "name",
+        "scope",
+        "created_at",
+        "revoked_at",
+        "last_used_at",
+    }
+    assert row["id"] == client_id
+    assert row["name"] == name
+    assert row["scope"] == scope
+    assert isinstance(row["created_at"], str)
+    assert row["revoked_at"] is None
+    assert row["last_used_at"] is None
 
 
 def test_create_shows_token_once_and_list_redacts_credentials() -> None:
@@ -15,31 +44,14 @@ def test_create_shows_token_once_and_list_redacts_credentials() -> None:
         )
         assert created.status_code == 200, created.text
         body = created.json()
-        assert body["id"] > 0
-        assert body["name"] == "codex"
-        assert body["scope"] == "write"
-        assert isinstance(body["token"], str)
-        assert len(body["token"]) >= 32
+        _assert_created_client(body, name="codex", scope="write")
 
         listed = client.get("/api/mcp/clients")
         assert listed.status_code == 200, listed.text
 
     rows = listed.json()
     assert len(rows) == 1
-    assert set(rows[0]) == {
-        "id",
-        "name",
-        "scope",
-        "created_at",
-        "revoked_at",
-        "last_used_at",
-    }
-    assert rows[0]["id"] == body["id"]
-    assert rows[0]["name"] == "codex"
-    assert rows[0]["scope"] == "write"
-    assert isinstance(rows[0]["created_at"], str)
-    assert rows[0]["revoked_at"] is None
-    assert rows[0]["last_used_at"] is None
+    _assert_listed_client_row(rows[0], client_id=body["id"], name="codex", scope="write")
     assert "token" not in listed.text
     assert "hash" not in listed.text
 

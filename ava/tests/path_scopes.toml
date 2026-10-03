@@ -18,10 +18,18 @@
     "test_self_machine_spec.py",
     "test_session_venv_projection.py",
     "test_skills.py",
+    "test_skills_attribution.py",
+    "test_skills_mount.py",
     "test_understand.py",
+    "test_understand_autosave.py",
+    "test_understand_batch.py",
+    "test_understand_injection.py",
     "test_watcher.py",
+    "test_watcher_commands.py",
+    "test_watcher_files.py",
     "test_watcher_plugin_load.py",
     "test_web.py",
+    "test_web_search.py",
 ]
 "tests.path_scoped.integration_tests" = [
     "test_core.py",

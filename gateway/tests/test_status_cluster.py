@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 from pathlib import Path
+from typing import Any
 
 import psycopg
 import pytest
@@ -121,6 +122,27 @@ def _insert_machine(
     conn.commit()
 
 
+def _assert_local_machine_row(row: dict[str, Any]) -> None:
+    # local row picks up status_snapshot() — online=True, paused=False
+    assert row["online"] is True
+    assert row["paused"] is False
+    assert row["serve_gateway"] is True
+    assert row["serve_agent_runner"] is False
+    assert row["description"] == "central node"
+
+
+def _assert_remote_machine_rows(by_name: dict[str, dict[str, Any]]) -> None:
+    # remote rows come from the stub
+    assert by_name["test-host"]["online"] is True
+    assert by_name["test-host"]["paused"] is False
+    assert by_name["test-host"]["serve_gateway"] is False
+    assert by_name["test-host"]["serve_agent_runner"] is True
+    assert by_name["wsl-test"]["online"] is False
+    assert by_name["wsl-test"]["paused"] is None
+    assert by_name["wsl-test"]["serve_gateway"] is False
+    assert by_name["wsl-test"]["serve_agent_runner"] is True
+
+
 class TestClusterPanel:
     def test_current_machine_role_paused_from_local(
         self,
@@ -184,21 +206,8 @@ class TestClusterPanel:
         machines = r.json()["cluster"]["machines"]
         assert len(machines) == 3
         by_name = {m["name"]: m for m in machines}
-        # local row picks up status_snapshot() — online=True, paused=False
-        assert by_name["cloud-test"]["online"] is True
-        assert by_name["cloud-test"]["paused"] is False
-        assert by_name["cloud-test"]["serve_gateway"] is True
-        assert by_name["cloud-test"]["serve_agent_runner"] is False
-        assert by_name["cloud-test"]["description"] == "central node"
-        # remote rows come from the stub
-        assert by_name["test-host"]["online"] is True
-        assert by_name["test-host"]["paused"] is False
-        assert by_name["test-host"]["serve_gateway"] is False
-        assert by_name["test-host"]["serve_agent_runner"] is True
-        assert by_name["wsl-test"]["online"] is False
-        assert by_name["wsl-test"]["paused"] is None
-        assert by_name["wsl-test"]["serve_gateway"] is False
-        assert by_name["wsl-test"]["serve_agent_runner"] is True
+        _assert_local_machine_row(by_name["cloud-test"])
+        _assert_remote_machine_rows(by_name)
 
     def test_station_machine_row_carries_station_capability(
         self,
