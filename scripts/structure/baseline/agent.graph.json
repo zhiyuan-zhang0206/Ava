@@ -22,22 +22,11 @@
     "agent/graph/llm_errors.py::ambient-container:_consecutive_errors": 1,
     "agent/graph/llm_errors.py::ambient-container:_stall_pair_streaks": 1
   },
-  "complexity": {
-    "agent/graph/claim/_decide.py::decide": 35,
-    "agent/graph/claim/_dispatch.py::dispatch_batch": 21,
-    "agent/graph/claim/_routing.py::resolve_routing": 22,
-    "agent/graph/exec/_owned_run.py::run_owned": 47,
-    "agent/graph/exec/output.py::wrap_code_output": 18,
-    "agent/graph/exec/tests/test_exec_domain_confirmation.py::_exercise_domain": 23,
-    "agent/graph/llm/_stream.py::_consume_stream_with_stall_timeout": 17,
-    "agent/graph/llm/node.py::llm_attempt": 15,
-    "agent/graph/memory_recall.py::passive_memory_recall": 15
-  },
   "directories": {
     "agent/graph": 24
   },
   "files": {
-    "agent/graph/tests/test_llm_helpers.py": 1146
+    "agent/graph/tests/test_llm_helpers.py": 1128
   },
   "nesting": {
     "agent/graph/exec/tests/test_exec_child_telemetry_delivery.py::_sent_keys": 6
