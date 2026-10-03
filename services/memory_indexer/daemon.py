@@ -51,6 +51,7 @@ import sys
 import time
 from collections.abc import Callable
 from contextlib import suppress
+from dataclasses import dataclass, field
 from pathlib import Path
 
 import numpy as np
@@ -204,6 +205,64 @@ def _scan_disk(root: Path) -> dict[Path, float]:
     return result
 
 
+@dataclass
+class _EmbedProgress:
+    """Rows embedded so far and the files whose rows are all embedded."""
+
+    embedded_files: list[Path]
+    upsert_rows: list[tuple[str, float, str, np.ndarray, str, int]] = field(
+        default_factory=list[tuple[str, float, str, np.ndarray, str, int]]
+    )
+    done_by_file: dict[Path, int] = field(default_factory=dict[Path, int])
+
+
+def _classify_dirty(
+    backend: MemorySearchBackend, paths: set[Path], provider: EmbeddingProvider, root: Path
+) -> tuple[list[Path], list[tuple[Path, float, str, str]]]:
+    """Split dirty paths into `(to delete, to embed as (path, mtime, hash, content))`."""
+    to_delete: list[Path] = []
+    to_embed: list[tuple[Path, float, str, str]] = []
+    existing_meta = backend.all_meta()
+    for p in paths:
+        if not p.exists() or not p.is_file() or not p.is_relative_to(root):
+            to_delete.append(p)
+            continue
+        try:
+            content = p.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError) as exc:
+            _log.warning("[indexer] skip %s: %r", p, exc)
+            continue
+        mtime = p.stat().st_mtime
+        hash_ = content_hash(content)
+        prev = existing_meta.get(str(p))
+        if prev is not None and prev[1] == hash_ and prev[2] == provider.fingerprint:
+            continue  # content unchanged AND same provider space; mtime touch only
+        to_embed.append((p, mtime, hash_, content))
+    return to_delete, to_embed
+
+
+def _embed_batches(
+    provider: EmbeddingProvider,
+    flat_rows: list[tuple[Path, float, str, str, int, str]],
+    total_by_file: dict[Path, int],
+    progress: _EmbedProgress,
+    liveness: Liveness,
+) -> None:
+    """Embed `flat_rows` in batches, recording each embedded row (and each completed file)."""
+    for i in range(0, len(flat_rows), _BATCH_SIZE):
+        batch = flat_rows[i : i + _BATCH_SIZE]
+        texts = [text for *_, text in batch]
+        # One external call per gap; commit calls beat separately below.
+        liveness.beat()
+        vectors = provider.embed_batch(texts)
+        for (path, mtime, hash_, kind, chunk_idx, _), vector in zip(batch, vectors, strict=True):
+            progress.upsert_rows.append((str(path), mtime, hash_, vector, kind, chunk_idx))
+            done = progress.done_by_file.get(path, 0) + 1
+            progress.done_by_file[path] = done
+            if done == total_by_file[path] and path not in progress.embedded_files:
+                progress.embedded_files.append(path)
+
+
 def _process_paths(
     backend: MemorySearchBackend, paths: set[Path], provider: EmbeddingProvider, liveness: Liveness
 ) -> None:
@@ -241,24 +300,7 @@ def _process_paths(
     """
     liveness.beat()
     root = _memory_root().resolve()
-    to_delete: list[Path] = []
-    to_embed: list[tuple[Path, float, str, str]] = []  # (path, mtime, hash, content)
-    existing_meta = backend.all_meta()
-    for p in paths:
-        if not p.exists() or not p.is_file() or not p.is_relative_to(root):
-            to_delete.append(p)
-            continue
-        try:
-            content = p.read_text(encoding="utf-8")
-        except (OSError, UnicodeDecodeError) as exc:
-            _log.warning("[indexer] skip %s: %r", p, exc)
-            continue
-        mtime = p.stat().st_mtime
-        hash_ = content_hash(content)
-        prev = existing_meta.get(str(p))
-        if prev is not None and prev[1] == hash_ and prev[2] == provider.fingerprint:
-            continue  # content unchanged AND same provider space; mtime touch only
-        to_embed.append((p, mtime, hash_, content))
+    to_delete, to_embed = _classify_dirty(backend, paths, provider, root)
 
     for p in to_delete:
         liveness.beat()
@@ -276,42 +318,33 @@ def _process_paths(
         ]
         file_rows.append((path, rows))
 
-    upsert_rows: list[tuple[str, float, str, np.ndarray, str, int]] = []
     total_by_file = {path: len(rows) for path, rows in file_rows}
-    # A file that produces no rows (empty body, no description) is complete
-    # by definition — committing it means deleting every row it used to have.
-    embedded_files: list[Path] = [path for path, total in total_by_file.items() if total == 0]
-    done_by_file: dict[Path, int] = {}
+    progress = _EmbedProgress(
+        # A file that produces no rows (empty body, no description) is complete
+        # by definition — committing it means deleting every row it used to have.
+        embedded_files=[path for path, total in total_by_file.items() if total == 0]
+    )
     flat_rows = [
         (path, mtime, hash_, kind, chunk_idx, text)
         for path, rows in file_rows
         for mtime, hash_, kind, chunk_idx, text in rows
     ]
     try:
-        for i in range(0, len(flat_rows), _BATCH_SIZE):
-            batch = flat_rows[i : i + _BATCH_SIZE]
-            texts = [text for *_, text in batch]
-            # One external call per gap; commit calls beat separately below.
-            liveness.beat()
-            vectors = provider.embed_batch(texts)
-            for (path, mtime, hash_, kind, chunk_idx, _), vector in zip(
-                batch, vectors, strict=True
-            ):
-                upsert_rows.append((str(path), mtime, hash_, vector, kind, chunk_idx))
-                done = done_by_file.get(path, 0) + 1
-                done_by_file[path] = done
-                if done == total_by_file[path] and path not in embedded_files:
-                    embedded_files.append(path)
+        _embed_batches(provider, flat_rows, total_by_file, progress, liveness)
     except EmbeddingAPIError:
         # Only files whose rows are ALL embedded commit; a partially-embedded
         # file keeps its old rows intact (consistent old state, re-embeds on
         # the next trigger against its still-mismatching hash).
-        committed = _commit_files(backend, upsert_rows, embedded_files, file_rows, liveness)
+        committed = _commit_files(
+            backend, progress.upsert_rows, progress.embedded_files, file_rows, liveness
+        )
         for path in committed:
             _log.info("[indexer] indexed %s", path)
         raise
 
-    committed = _commit_files(backend, upsert_rows, embedded_files, file_rows, liveness)
+    committed = _commit_files(
+        backend, progress.upsert_rows, progress.embedded_files, file_rows, liveness
+    )
     for path in committed:
         _log.info("[indexer] indexed %s", path)
 

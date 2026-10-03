@@ -140,6 +140,87 @@ def _mcp_result(result: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _snapshot_tool(
+    args: dict[str, Any], agent_id: int, ocr_cache: dict[str, Any] | None
+) -> dict[str, Any]:
+    path, size, scale, (pw, ph) = _capture_screen(agent_id)
+    result: dict[str, Any] = {
+        "path": str(path),
+        "screen": {"width": size["w"], "height": size["h"], "scale": scale},
+        "pixels": {"width": pw, "height": ph},
+    }
+    if args.get("include_ax"):
+        app = helper.frontmost_app()["app"]
+        if app:
+            ax = helper.ax_window_info(app)
+            # AX geometry is logical; convert to the click space like OCR.
+            result["ax"] = {
+                **ax,
+                "x": ax["x"] * scale,
+                "y": ax["y"] * scale,
+                "w": ax["w"] * scale,
+                "h": ax["h"] * scale,
+            }
+    if args.get("include_ocr"):
+        # Soft failure: snapshot stays usable without text recognition.
+        try:
+            result["ocr"] = ocr_mod.ocr_image(path)
+            if ocr_cache is not None:
+                ocr_cache["items"] = result["ocr"]
+        except ocr_mod.OcrError as e:
+            result["ocr"] = []
+            result["ocr_error"] = str(e)
+    return result
+
+
+def _click_tool(args: dict[str, Any], scale: float | None) -> dict[str, Any]:
+    scale = _current_scale(scale)
+    clicked = helper.click(
+        _to_logical(float(args["x"]), scale),
+        _to_logical(float(args["y"]), scale),
+        double=bool(args.get("double", False)),
+    )
+    return {"clicked": clicked["clicked"], "double": clicked["double"]}
+
+
+def _key_tool(args: dict[str, Any]) -> dict[str, Any]:
+    code = int(args["keycode"]) if "keycode" in args else _keycode_for(str(args.get("key") or ""))
+    if code is None:
+        raise ComputerUseError(
+            "key needs a key name ('return', 'space', 'a', ...) or an integer keycode"
+        )
+    # The helper echoes {"key": code, "cmd": ...}; the MCP contract keeps
+    # the "pressed" name the callers read, so map the echo through.
+    echoed = helper.key(code, cmd=bool(args.get("cmd", False)))
+    return {"pressed": echoed["key"], "cmd": echoed["cmd"]}
+
+
+def _scroll_tool(
+    args: dict[str, Any], pointer: tuple[float, float] | None, scale: float | None
+) -> dict[str, Any]:
+    dy = int(args["dy"])
+    scale = _current_scale(scale)
+    if "x" in args and "y" in args:
+        lx, ly = _to_logical(float(args["x"]), scale), _to_logical(float(args["y"]), scale)
+    elif pointer is not None:
+        lx, ly = _to_logical(pointer[0], scale), _to_logical(pointer[1], scale)
+    else:
+        size = helper.screen_size()
+        # Center from the helper is already logical — never re-divide
+        # (that double conversion scrolled at a quarter of the screen).
+        lx, ly = size["w"] / 2, size["h"] / 2
+    return {"scrolled": helper.scroll(lx, ly, dy)["scrolled"]}
+
+
+def _window_info_tool(args: dict[str, Any]) -> dict[str, Any]:
+    # owner is optional — the caller usually wants the focused window, and
+    # defaulting here saves a frontmost_app round trip.
+    owner = args.get("owner") or helper.frontmost_app()["app"]
+    if not owner:
+        raise ComputerUseError("window_info needs an owner and no app is frontmost")
+    return {**helper.window_info(str(owner))}
+
+
 def _execute(
     tool: str,
     args: dict[str, Any],
@@ -157,81 +238,21 @@ def _execute(
     find_text / click_text), reused by find_text(snapshot_fresh=false)."""
     _require(tool, args)
     if tool == "snapshot":
-        path, size, scale, (pw, ph) = _capture_screen(agent_id)
-        result: dict[str, Any] = {
-            "path": str(path),
-            "screen": {"width": size["w"], "height": size["h"], "scale": scale},
-            "pixels": {"width": pw, "height": ph},
-        }
-        if args.get("include_ax"):
-            app = helper.frontmost_app()["app"]
-            if app:
-                ax = helper.ax_window_info(app)
-                # AX geometry is logical; convert to the click space like OCR.
-                result["ax"] = {
-                    **ax,
-                    "x": ax["x"] * scale,
-                    "y": ax["y"] * scale,
-                    "w": ax["w"] * scale,
-                    "h": ax["h"] * scale,
-                }
-        if args.get("include_ocr"):
-            # Soft failure: snapshot stays usable without text recognition.
-            try:
-                result["ocr"] = ocr_mod.ocr_image(path)
-                if ocr_cache is not None:
-                    ocr_cache["items"] = result["ocr"]
-            except ocr_mod.OcrError as e:
-                result["ocr"] = []
-                result["ocr_error"] = str(e)
-        return result
+        return _snapshot_tool(args, agent_id, ocr_cache)
     if tool == "find_text":
         return _find_text_tool(args, agent_id, ocr_cache)
     if tool == "click":
-        scale = _current_scale(scale)
-        clicked = helper.click(
-            _to_logical(float(args["x"]), scale),
-            _to_logical(float(args["y"]), scale),
-            double=bool(args.get("double", False)),
-        )
-        return {"clicked": clicked["clicked"], "double": clicked["double"]}
+        return _click_tool(args, scale)
     if tool == "click_text":
         return _click_text_tool(args, agent_id, ocr_cache)
     if tool == "type_text":
         return {"typed": helper.type_text(str(args["text"]))["typed"]}
     if tool == "key":
-        if "keycode" in args:
-            code = int(args["keycode"])
-        else:
-            code = _keycode_for(str(args.get("key") or ""))
-        if code is None:
-            raise ComputerUseError(
-                "key needs a key name ('return', 'space', 'a', ...) or an integer keycode"
-            )
-        # The helper echoes {"key": code, "cmd": ...}; the MCP contract keeps
-        # the "pressed" name the callers read, so map the echo through.
-        echoed = helper.key(code, cmd=bool(args.get("cmd", False)))
-        return {"pressed": echoed["key"], "cmd": echoed["cmd"]}
+        return _key_tool(args)
     if tool == "scroll":
-        dy = int(args["dy"])
-        scale = _current_scale(scale)
-        if "x" in args and "y" in args:
-            lx, ly = _to_logical(float(args["x"]), scale), _to_logical(float(args["y"]), scale)
-        elif pointer is not None:
-            lx, ly = _to_logical(pointer[0], scale), _to_logical(pointer[1], scale)
-        else:
-            size = helper.screen_size()
-            # Center from the helper is already logical — never re-divide
-            # (that double conversion scrolled at a quarter of the screen).
-            lx, ly = size["w"] / 2, size["h"] / 2
-        return {"scrolled": helper.scroll(lx, ly, dy)["scrolled"]}
+        return _scroll_tool(args, pointer, scale)
     if tool == "window_info":
-        # owner is optional — the caller usually wants the focused window, and
-        # defaulting here saves a frontmost_app round trip.
-        owner = args.get("owner") or helper.frontmost_app()["app"]
-        if not owner:
-            raise ComputerUseError("window_info needs an owner and no app is frontmost")
-        return {**helper.window_info(str(owner))}
+        return _window_info_tool(args)
     if tool == "session_info":
         return {**helper.session_info()}
     if tool == "frontmost_app":

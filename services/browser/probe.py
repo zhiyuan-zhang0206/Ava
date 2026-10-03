@@ -259,6 +259,35 @@ def probe_browser(port: int | None = None, profile: Path | None = None) -> Daemo
         return DaemonProbe.down(f"probe raised {type(exc).__name__}: {exc}")
 
 
+def _unusable_cdp_verdict(port: int, profile: Path, answer: _CdpAnswer) -> DaemonProbe:
+    """The verdict when CDP did not give a usable answer (`answer.reason` says why)."""
+    assert answer.reason is not None  # noqa: S101
+    wait_reason = macos_readiness.degraded_wait_reason()
+    prefix = (
+        f"ava-browser waiting for macOS startup readiness: {wait_reason}; "
+        if wait_reason is not None
+        else ""
+    )
+    if not answer.answered:
+        # Nothing answered: no occupant to clear, so a respawn (and the
+        # healthcheck's sweep + rebuild behind it) is the remedy.
+        return DaemonProbe.down(prefix + answer.reason)
+    # Something answered, so the port has an occupant even though its
+    # payload is unusable (or its status was not 200). Who it is decides
+    # whether this unit can recover at all — see _our_chrome_holds_port.
+    found = find_cluster_chrome(profile)
+    ours = _our_chrome_holds_port(port, profile, found)
+    if ours is not None:
+        return DaemonProbe.down(
+            f"{prefix}{answer.reason}; the LISTEN socket is this cluster's Chrome "
+            f"(pid {ours}) — its endpoint is dead, and the sweep + rebuild clears it"
+        )
+    return DaemonProbe.port_taken(
+        f"identity mismatch on CDP :{port}: {answer.reason}, and the listener is not a "
+        f"Chrome on this cluster's profile {profile} — another process occupies the port"
+    )
+
+
 def _probe_browser(port: int | None, profile: Path | None) -> DaemonProbe:
     """CDP answers on this cluster's port AND a Chrome on this cluster's profile is
     the process listening there.
@@ -287,30 +316,7 @@ def _probe_browser(port: int | None, profile: Path | None) -> DaemonProbe:
 
     answer = _cdp_unreachable(port)
     if answer.reason is not None:
-        wait_reason = macos_readiness.degraded_wait_reason()
-        prefix = (
-            f"ava-browser waiting for macOS startup readiness: {wait_reason}; "
-            if wait_reason is not None
-            else ""
-        )
-        if not answer.answered:
-            # Nothing answered: no occupant to clear, so a respawn (and the
-            # healthcheck's sweep + rebuild behind it) is the remedy.
-            return DaemonProbe.down(prefix + answer.reason)
-        # Something answered, so the port has an occupant even though its
-        # payload is unusable (or its status was not 200). Who it is decides
-        # whether this unit can recover at all — see _our_chrome_holds_port.
-        found = find_cluster_chrome(profile)
-        ours = _our_chrome_holds_port(port, profile, found)
-        if ours is not None:
-            return DaemonProbe.down(
-                f"{prefix}{answer.reason}; the LISTEN socket is this cluster's Chrome "
-                f"(pid {ours}) — its endpoint is dead, and the sweep + rebuild clears it"
-            )
-        return DaemonProbe.port_taken(
-            f"identity mismatch on CDP :{port}: {answer.reason}, and the listener is not a "
-            f"Chrome on this cluster's profile {profile} — another process occupies the port"
-        )
+        return _unusable_cdp_verdict(port, profile, answer)
 
     found = find_cluster_chrome(profile)
 

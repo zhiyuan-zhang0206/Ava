@@ -372,6 +372,36 @@ async def _dispatch_request(
     return {"id": req_id, "ok": False, "error": f"Unknown method: {method}"}
 
 
+async def _dispatch_with_retry(
+    req: dict[str, Any],
+    sessions: dict[str, Any],
+    stacks: dict[str, AsyncExitStack],
+    session_locks: dict[str, asyncio.Lock],
+) -> dict[str, Any]:
+    """Serve one request; one bad call becomes an error response, not a dropped connection."""
+    req_id = req.get("id")
+    method = req.get("method")
+    params = req.get("params") or {}
+    server = params.get("server", "")
+    try:
+        # Retry transport errors before a tool call starts, or while
+        # listing tools. A started tool call converts an uncertain
+        # transport failure to MCPCallError before reaching here.
+        for _attempt in range(3):
+            try:
+                return await _dispatch_request(
+                    req, req_id, method, params, server, sessions, stacks, session_locks
+                )
+            except Exception as e:
+                if _attempt == 2 or not _is_transport_error(e):
+                    raise
+                await _invalidate_session(server, sessions, stacks, session_locks)
+                await asyncio.sleep(min(2**_attempt, 8))
+    except Exception as e:
+        return {"id": req_id, "ok": False, "error": f"{type(e).__name__}: {e}"}
+    raise AssertionError("unreachable: the last attempt returns or raises")  # pragma: no cover
+
+
 async def _handle_client(
     reader: asyncio.StreamReader,
     writer: asyncio.StreamWriter,
@@ -384,10 +414,7 @@ async def _handle_client(
         # Client may drop mid-stream (peer reset / pipe closed) — that ends the
         # connection, not an error; the finally still closes our writer.
         with suppress(ConnectionResetError, BrokenPipeError):
-            while True:
-                line = await reader.readline()
-                if not line:
-                    break
+            while line := await reader.readline():
                 try:
                     req = json.loads(line.decode("utf-8"))
                 except json.JSONDecodeError as e:
@@ -395,38 +422,7 @@ async def _handle_client(
                     writer.write((json.dumps(resp) + "\n").encode())
                     await writer.drain()
                     continue
-
-                req_id = req.get("id")
-                method = req.get("method")
-                params = req.get("params") or {}
-                server = params.get("server", "")
-
-                try:
-                    # Retry transport errors before a tool call starts, or while
-                    # listing tools. A started tool call converts an uncertain
-                    # transport failure to MCPCallError before reaching here.
-                    resp = None
-                    for _attempt in range(3):
-                        try:
-                            resp = await _dispatch_request(
-                                req,
-                                req_id,
-                                method,
-                                params,
-                                server,
-                                sessions,
-                                stacks,
-                                session_locks,
-                            )
-                            break
-                        except Exception as e:
-                            if _attempt == 2 or not _is_transport_error(e):
-                                raise
-                            await _invalidate_session(server, sessions, stacks, session_locks)
-                            await asyncio.sleep(min(2**_attempt, 8))
-                except Exception as e:
-                    resp = {"id": req_id, "ok": False, "error": f"{type(e).__name__}: {e}"}
-
+                resp = await _dispatch_with_retry(req, sessions, stacks, session_locks)
                 writer.write((json.dumps(resp, ensure_ascii=False) + "\n").encode())
                 await writer.drain()
     finally:

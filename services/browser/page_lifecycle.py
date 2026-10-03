@@ -349,28 +349,12 @@ def local_host_port(url: str) -> tuple[str, int] | None:
         return None
 
 
-async def reap_dead_agent_pages(daemon: _PageDaemon) -> None:
-    """One sweep pass: close agent-owned pages whose URL is a dead local URL.
-
-    Only pages with a slot in ``_AGENT_AFFINITY`` are candidates — user tabs and
-    other agents' tabs are never inspected or touched. Two leak classes are
-    cleaned here: an agent killed without reaching its exit hook (SIGKILL /
-    force-terminate / OOM — the hook can't fire, the slot stays), and a dev
-    server that died under a still-alive agent (the tab is a dead link either
-    way, and the agent re-opens its tab on the next navigate). A port the probe
-    cannot confirm dead stays open.
-
-    Lock discipline: the port probes run OUTSIDE the serial lock (a pass with
-    many stale slots must not stall every agent's browser call for seconds),
-    and the closes re-read the page list under the lock first — a page the
-    agent navigated to a live target while the probe ran, or already closed,
-    is not touched. The slot is cleared only when it still names the closed
-    page, so a live page the agent opened meanwhile keeps its affinity.
-    """
+async def _reap_candidates(daemon: _PageDaemon) -> list[tuple[int, int, str]]:
+    """Agent-owned pages (this generation) whose URL is a local http(s) URL."""
     async with daemon._lock:
         listing = await daemon._call("list_pages", {})
         if listing.is_error:
-            return
+            return []
         page_urls = parse_page_listing(_text_of(listing))
         candidates: list[tuple[int, int, str]] = []
         for agent_id, (page_id, entry_generation) in list(_AGENT_AFFINITY.items()):
@@ -386,8 +370,13 @@ async def reap_dead_agent_pages(daemon: _PageDaemon) -> None:
             if target is None:
                 continue
             candidates.append((agent_id, page_id, url))
-    if not candidates:
-        return
+    return candidates
+
+
+async def _dead_candidates(
+    candidates: list[tuple[int, int, str]],
+) -> list[tuple[int, int, str]]:
+    """The candidates whose local port nothing listens on."""
     dead: list[tuple[int, int, str]] = []
     for agent_id, page_id, url in candidates:
         target = local_host_port(url)
@@ -397,8 +386,11 @@ async def reap_dead_agent_pages(daemon: _PageDaemon) -> None:
         if await port_listening(host, port):
             continue
         dead.append((agent_id, page_id, url))
-    if not dead:
-        return
+    return dead
+
+
+async def _close_dead_pages(daemon: _PageDaemon, dead: list[tuple[int, int, str]]) -> None:
+    """Re-read the page list under the lock and close each still-dead page, clearing its slot."""
     async with daemon._lock:
         listing = await daemon._call("list_pages", {})
         if listing.is_error:
@@ -421,6 +413,33 @@ async def reap_dead_agent_pages(daemon: _PageDaemon) -> None:
             logger.info(
                 f"[browser-mcp] reaper closed dead page {page_id} ({url}) for agent {agent_id}"
             )
+
+
+async def reap_dead_agent_pages(daemon: _PageDaemon) -> None:
+    """One sweep pass: close agent-owned pages whose URL is a dead local URL.
+
+    Only pages with a slot in ``_AGENT_AFFINITY`` are candidates — user tabs and
+    other agents' tabs are never inspected or touched. Two leak classes are
+    cleaned here: an agent killed without reaching its exit hook (SIGKILL /
+    force-terminate / OOM — the hook can't fire, the slot stays), and a dev
+    server that died under a still-alive agent (the tab is a dead link either
+    way, and the agent re-opens its tab on the next navigate). A port the probe
+    cannot confirm dead stays open.
+
+    Lock discipline: the port probes run OUTSIDE the serial lock (a pass with
+    many stale slots must not stall every agent's browser call for seconds),
+    and the closes re-read the page list under the lock first — a page the
+    agent navigated to a live target while the probe ran, or already closed,
+    is not touched. The slot is cleared only when it still names the closed
+    page, so a live page the agent opened meanwhile keeps its affinity.
+    """
+    candidates = await _reap_candidates(daemon)
+    if not candidates:
+        return
+    dead = await _dead_candidates(candidates)
+    if not dead:
+        return
+    await _close_dead_pages(daemon, dead)
 
 
 def touch_agent_page(agent_id: int) -> None:

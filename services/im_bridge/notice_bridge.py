@@ -80,6 +80,21 @@ def _row_to_notice(r: tuple[Any, ...]) -> dict[str, Any]:
     }
 
 
+def _parse_filter_tokens(rest: list[str]) -> dict[str, Any]:
+    """`{"min_priority", "agent"}` from the tokens after `/notice filter`."""
+    filters: dict[str, Any] = {"min_priority": None, "agent": None}
+    i = 0
+    while i < len(rest):
+        tok = rest[i]
+        if tok.upper() in _PRIORITY_RANK or tok.lower() == "off":
+            filters["min_priority"] = None if tok.lower() == "off" else tok.upper()
+        elif tok.lower() == "agent" and i + 1 < len(rest):
+            filters["agent"] = int(rest[i + 1])
+            i += 1
+        i += 1
+    return filters
+
+
 class NoticeBridge:
     """Push fleet notices to the owner chat; own reply mode + filters."""
 
@@ -412,15 +427,6 @@ class NoticeBridge:
                 "Current filter: " + " ".join(f"{k}={v}" for k, v in f.items() if v is not None)
                 or "none (all pushed)"
             )
-        self._filters = {"min_priority": None, "agent": None}
-        i = 0
-        while i < len(rest):
-            tok = rest[i]
-            if tok.upper() in _PRIORITY_RANK or tok.lower() == "off":
-                self._filters["min_priority"] = None if tok.lower() == "off" else tok.upper()
-            elif tok.lower() == "agent" and i + 1 < len(rest):
-                self._filters["agent"] = int(rest[i + 1])
-                i += 1
-            i += 1
+        self._filters = _parse_filter_tokens(rest)
         self._save("notice_filters.json", self._filters)
         return "Filter updated: " + json.dumps(self._filters)
