@@ -19,15 +19,6 @@
     "base/agents/sdk/telemetry.py::contextvar:_tally": 1
   },
   "complexity": {
-    "base/agents/history/hierarchy/render.py::_ai_body": 15,
-    "base/agents/history/hierarchy/serve.py::select_layers": 18,
-    "base/agents/history/hierarchy/store.py::write_tree": 21,
-    "base/agents/history/tests/test_checkpoint_postgres_walks.py::test_historical_walk_page_boundary_and_compact_segment": 15,
-    "base/agents/history/timeline.py::build_timeline_items": 17,
-    "base/agents/impersonation/__init__.py::request": 20,
-    "base/agents/incarnation/exec_owner_recovery.py::recover_local_resources": 27,
-    "base/agents/incarnation/host_process_evidence.py::local_host_evidence": 15,
-    "base/agents/messages/delivery_outbox.py::flush": 18,
-    "base/agents/messages/envelope.py::wrap_inbound": 15
+    "base/agents/history/tests/test_checkpoint_postgres_walks.py::test_historical_walk_page_boundary_and_compact_segment": 15
   }
 }

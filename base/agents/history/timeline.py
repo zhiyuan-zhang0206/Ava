@@ -213,10 +213,8 @@ def build_timeline_items(
             )
             continue
         raw_content = message_content(msg)
-        content = raw_content if isinstance(raw_content, str) else str(raw_content)
         kwargs = read_ava_kwargs(msg)
-        ava_type = kwargs.get("ava_msg_type")
-        if ava_type == AvaMsgType.INBOUND:
+        if kwargs.get("ava_msg_type") == AvaMsgType.INBOUND:
             item, current_anchor, sub_offset, next_anchor_idx = _inbound_item(
                 msg_idx,
                 raw_content,
@@ -229,53 +227,65 @@ def build_timeline_items(
                 next_ts,
             )
             items.append(item)
-        elif ava_type == AvaMsgType.ATTACH:
-            items.append(_attach_item(msg_idx, raw_content, next_ts(msg)))
-        elif ava_type == AvaMsgType.EXEC_OUTPUT:
-            items.append(
-                _exec_output_item(msg_idx, content, next_ts(msg), kwargs.get("ava_exec_ms"))
-            )
-        elif ava_type == AvaMsgType.SYSTEM_NOTE:
-            item = _system_note_item(msg_idx, content, kwargs.get("ava_note_tag"), next_ts(msg))
-            if "ava_impersonation" in kwargs:
-                item.impersonation = ImpersonationMetadata.model_validate(
-                    kwargs["ava_impersonation"]
-                )
-            items.append(item)
-        elif ava_type == AvaMsgType.COMPACT_SUMMARY:
-            items.append(
-                _compact_item(
-                    msg_idx,
-                    "inbound_compact_summary",
-                    content,
-                    next_ts(msg),
-                    kwargs.get("ava_compact_id"),
-                )
-            )
-        elif ava_type == AvaMsgType.COMPACT_REQUEST:
-            items.append(
-                _compact_item(
-                    msg_idx,
-                    "inbound_compact_request",
-                    content,
-                    next_ts(msg),
-                    kwargs.get("ava_compact_id"),
-                )
-            )
-        elif isinstance(msg, AIMessage):
-            # AIMessage.content (ChatAnthropic + bind_tools shape) is a
-            # list-of-blocks: thinking / text / tool_use each takes a slot;
-            # one timeline item per block, block_idx = anthropic
-            # content_block_index, aligned with streaming SSE item_id.
-            items.extend(_ai_message_items(msg, msg_idx, next_ts, sdk_by_id))
-        elif isinstance(msg, HumanMessage):
-            items.append(_fallback_human_item(msg_idx, content, next_ts(msg)))
+        else:
+            items.extend(_message_items(msg, msg_idx, kwargs, next_ts, sdk_by_id))
     if segment_prefix:
         items = [
             item.model_copy(update={"item_id": f"{segment_prefix}.{item.item_id}"})
             for item in items
         ]
     return items, msg_count
+
+
+def _message_items(
+    msg: BaseMessage,
+    msg_idx: int,
+    kwargs: AvaMessageKwargs,
+    next_ts: Callable[[BaseMessage | None], str],
+    sdk_by_id: dict[str, Any],
+) -> list[TimelineItem]:
+    """The timeline items of one non-system, non-inbound message (empty for an unknown shape)."""
+    raw_content = message_content(msg)
+    content = raw_content if isinstance(raw_content, str) else str(raw_content)
+    ava_type = kwargs.get("ava_msg_type")
+    if ava_type == AvaMsgType.ATTACH:
+        return [_attach_item(msg_idx, raw_content, next_ts(msg))]
+    if ava_type == AvaMsgType.EXEC_OUTPUT:
+        return [_exec_output_item(msg_idx, content, next_ts(msg), kwargs.get("ava_exec_ms"))]
+    if ava_type == AvaMsgType.SYSTEM_NOTE:
+        item = _system_note_item(msg_idx, content, kwargs.get("ava_note_tag"), next_ts(msg))
+        if "ava_impersonation" in kwargs:
+            item.impersonation = ImpersonationMetadata.model_validate(kwargs["ava_impersonation"])
+        return [item]
+    if ava_type == AvaMsgType.COMPACT_SUMMARY:
+        return [
+            _compact_item(
+                msg_idx,
+                "inbound_compact_summary",
+                content,
+                next_ts(msg),
+                kwargs.get("ava_compact_id"),
+            )
+        ]
+    if ava_type == AvaMsgType.COMPACT_REQUEST:
+        return [
+            _compact_item(
+                msg_idx,
+                "inbound_compact_request",
+                content,
+                next_ts(msg),
+                kwargs.get("ava_compact_id"),
+            )
+        ]
+    if isinstance(msg, AIMessage):
+        # AIMessage.content (ChatAnthropic + bind_tools shape) is a
+        # list-of-blocks: thinking / text / tool_use each takes a slot;
+        # one timeline item per block, block_idx = anthropic
+        # content_block_index, aligned with streaming SSE item_id.
+        return list(_ai_message_items(msg, msg_idx, next_ts, sdk_by_id))
+    if isinstance(msg, HumanMessage):
+        return [_fallback_human_item(msg_idx, content, next_ts(msg))]
+    return []
 
 
 def _system_prompt_item(msg_idx: int, content: str) -> TimelineItem:
