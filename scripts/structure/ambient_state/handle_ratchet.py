@@ -5,7 +5,7 @@ Run: `.venv/bin/python scripts/structure/ambient_state/handle_ratchet.py [--writ
 A package in `DB_HANDLE_PACKAGES` takes its `Database` from a composition root and is
 policed site by site (structure Rule 9, `ambient-db`). The library packages are not
 governed yet: they still dial through the process-default shim (`connect` / `pool` /
-`async_pool` / `direct_db_url` / a pool-less `write_transaction`) or build their own
+`async_pool` / `direct_db_url`) or build their own
 `Database.from_settings()`; the same holds for an `EventBus.from_settings()` built outside
 `BUS_PACKAGES`. This lint counts those sites per package, freezes the counts in
 `handle_ratchet_baseline.json`, and lets them only fall:

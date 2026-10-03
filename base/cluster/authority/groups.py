@@ -51,7 +51,8 @@ _RUNNER_TABLE_GRANTS: tuple[tuple[LiteralString, tuple[str, ...]], ...] = (
     ("SELECT, UPDATE", ("inbound_messages", "agents_meta")),
     # Agent-side self-lifecycle inbounds (terminate / restart / compact).
     ("INSERT", ("inbound_messages",)),
-    # ava.self.set_label updates the agent's own row.
+    # No runner path writes `agents` (labels go through the gateway); the grant stays until
+    # grants can be revoked.
     ("UPDATE", ("agents",)),
     # register_self / mark_stopping and the deploy posture on every start.
     ("INSERT, UPDATE, SELECT", ("machine_units",)),

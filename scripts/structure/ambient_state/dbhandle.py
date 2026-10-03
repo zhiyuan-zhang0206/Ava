@@ -1,8 +1,7 @@
 """The ambient-db rule: a package that holds a `Database` handle dials no database ambiently.
 
-`base.db.connect()` / `pool()` / `async_pool()` / `direct_db_url()` and a `write_transaction()`
-without a pool build the dial from the live settings at each call: a process-default
-database that nothing passes in. A package listed in `DB_HANDLE_PACKAGES` takes a
+`base.db.connect()` / `pool()` / `async_pool()` / `direct_db_url()` build the dial from the
+live settings at each call: a process-default database that nothing passes in. A package listed in `DB_HANDLE_PACKAGES` takes a
 `Database` (or an open pool/connection) from its composition root instead; any of those
 ambient entries in one of its non-test modules is a site, frozen like the other
 ambient-state sites as `path::ambient-db:<name>`, and a `Database.from_settings()` call
@@ -25,7 +24,6 @@ FIX = (
 )
 _PRIMITIVES = frozenset({"connect", "pool", "async_pool", "direct_db_url"})
 _DB_MODULES = frozenset({"base.db", "base.db.connections"})
-_TRANSACTION_MODULES = frozenset({"base.db", "base.db.transaction"})
 
 
 def package_of(rel: str) -> str | None:
@@ -38,7 +36,6 @@ class _Names:
     def __init__(self, tree: ast.Module) -> None:
         self.modules: set[str] = {"base.db", "base.db.connections"}
         self.primitives: dict[str, str] = {}
-        self.write_transactions: set[str] = set()
         self.databases: set[str] = set()
         for node in ast.walk(tree):
             if isinstance(node, ast.Import):
@@ -55,32 +52,21 @@ class _Names:
                 self.modules.add(local)
             elif node.module in _DB_MODULES and alias.name in _PRIMITIVES:
                 self.primitives[local] = alias.name
-            elif node.module in _TRANSACTION_MODULES and alias.name == "write_transaction":
-                self.write_transactions.add(local)
             elif node.module in {"base.db", "base.db.handle"} and alias.name == "Database":
                 self.databases.add(local)
-
-
-def _ambient_write_transaction(call: ast.Call) -> bool:
-    return not call.args and all(kw.arg != "pool" for kw in call.keywords)
 
 
 def _call_hit(call: ast.Call, names: _Names, *, is_root: bool) -> str | None:
     func = call.func
     if isinstance(func, ast.Attribute) and isinstance(func.value, (ast.Name, ast.Attribute)):
         owner = ast.unparse(func.value)
-        if owner in names.modules:
-            if func.attr in _PRIMITIVES:
-                return func.attr
-            if func.attr == "write_transaction" and _ambient_write_transaction(call):
-                return "write_transaction"
+        if owner in names.modules and func.attr in _PRIMITIVES:
+            return func.attr
         if owner in names.databases and func.attr == "from_settings" and not is_root:
             return "Database.from_settings"
     elif isinstance(func, ast.Name):
         if func.id in names.primitives:
             return names.primitives[func.id]
-        if func.id in names.write_transactions and _ambient_write_transaction(call):
-            return "write_transaction"
     return None
 
 
