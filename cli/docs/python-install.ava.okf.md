@@ -24,7 +24,7 @@ by the installer. These files are never rewritten by discovery. Operators config
 Additional/explicit-only indexes fail rather than silently losing their source policy.
 
 The lock-source lint runs before installation. Its stdlib implementation lives in
-`base/deploy/release/python_lock.py`; `scripts/lint/python_lock.py` is a thin CLI
+`base/deploy/release/python_lock.py`; `scripts/lint/locks/python_lock.py` is a thin CLI
 entry point. Both transports first run
 offline, freshness-checked uv export to temporary hashed requirements, before
 any uv command can create or recreate the target environment. This also protects

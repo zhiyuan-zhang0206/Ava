@@ -82,6 +82,8 @@ env:
   # restore that behavior; all routing below derives from this one value.
   # See conventions/test-selection.md.
   TEST_SELECTION_MODE: "enforce"
+  # uv reads UV_FROZEN=1 as --frozen: CI never rewrites uv.lock; a stale lock fails the run.
+  UV_FROZEN: "1"
 
 concurrency:
   # Reruns retain the original ref/SHA. Isolate immutable heads so a stale
@@ -226,7 +228,10 @@ jobs:
         run: python3 scripts/lint/ava_root_scope.py
 
       - name: Check canonical Python lock sources (stdlib only)
-        run: python3 scripts/lint/python_lock.py
+        run: python3 scripts/lint/locks/python_lock.py
+
+      - name: Check canonical npm lock sources (stdlib only)
+        run: python3 scripts/lint/locks/package_lock.py
 
   core-content-manifests:
     # The content-channel gate (tasks #2915/#3267): core manifests' declared
@@ -394,6 +399,9 @@ jobs:
 
       - name: Install Python deps
         uses: ./.github/actions/uv-sync
+
+      - name: Verify uv.lock is fresh
+        run: uv lock --check
 
       - name: Vendored Postgres runtime (production's server build)
         uses: ./.github/actions/vendor-pg-runtime

@@ -3,7 +3,7 @@
 # from a pinned GitHub release asset (fixed version + sha256, single source
 # with base/host/brew_pin.py) instead of the astral installer's rolling latest,
 # so a fresh box gets the same operator-approved version CI and brew-pinned
-# hosts run. Idempotent: skips the fetch when `uv` is already on PATH.
+# hosts run. Idempotent: skips the fetch only when that exact `uv` version is on PATH.
 #
 # This installs ONLY the uv binary. Interpreter provisioning + dependency sync
 # differ per consumer and stay with them: source development uses its locked
@@ -68,8 +68,13 @@ install_uv() {
 # <anything>` silently succeeds without doing the thing. That is exactly how the
 # CI runner snapshot shipped a do-nothing uv and 36 hours of green CI ran zero
 # tests. Version output is the discriminator: an empty file can fake an exit
-# code, it cannot fake stdout.
+# code, it cannot fake stdout — and an answer of the wrong version is the same
+# class of lie, so that dies too.
 if uv --version 2>/dev/null | grep -q .; then
+  uv_actual="$(uv --version | awk '{print $2}')"
+  if [ "${uv_actual}" != "${UV_VERSION}" ]; then
+    prov_die "uv ${uv_actual} is already on PATH; the pin installs ${UV_VERSION} — replace the binary before provisioning"
+  fi
   prov_log "uv already present ($(uv --version))"
 else
   install_uv

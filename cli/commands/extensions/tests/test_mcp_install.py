@@ -387,6 +387,21 @@ def test_install_real_uv_sync_builds_venv(unit_home: Path, tmp_path: Path) -> No
     assert "echoreal" in load_mcp_config()
 
 
+@pytest.mark.skipif(shutil.which("uv") is None, reason="uv not on PATH")
+def test_install_ignores_ambient_lock_policy(
+    unit_home: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Ambient UV_FROZEN/UV_LOCKED (a CI job exports them for its own repo)
+    must not block an MCP package's first venv build, which has no lockfile."""
+    monkeypatch.setenv("UV_FROZEN", "1")
+    monkeypatch.setenv("UV_LOCKED", "1")
+    pkg = _make_mcp_package(tmp_path, "ambient", module="ambient_mcp")
+    assert cmd_mcp_install(str(pkg), None, None) == 0
+    dest = unit_home / "mcps" / "ambient"
+    assert (dest / ".venv" / "bin" / "python").exists()
+    assert (dest / "uv.lock").is_file()  # the build was free to create its own lock
+
+
 # ─── dead local-path source (audit round 2, skills-plugins #4) ──────────────
 
 

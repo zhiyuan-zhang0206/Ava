@@ -19,6 +19,8 @@ on:
       - 'base/agents/incarnation/tests/test_resource_admission.py'
 permissions:
   contents: read
+env:
+  UV_FROZEN: "1"
 jobs:
   resource-fences:
     runs-on: ubuntu-24.04
