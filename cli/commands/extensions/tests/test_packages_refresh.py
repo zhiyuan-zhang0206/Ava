@@ -502,7 +502,7 @@ def test_only_reports_a_skip_reason_for_untracked_names(core_repo: Path) -> None
 # ── rollback / policy verbs ─────────────────────────────────────────────────
 
 
-def test_rollback_restores_the_previous_tree(core_repo: Path) -> None:
+def test_rollback_restores_the_previous_tree(core_repo: Path, capsys) -> None:
     from cli.commands.extensions.packages import cmd_packages_rollback
 
     c1 = _head(core_repo)
@@ -517,11 +517,11 @@ def test_rollback_restores_the_previous_tree(core_repo: Path) -> None:
     assert "# v2" in (home / "skills" / ".foo.prev" / "SKILL.md").read_text(encoding="utf-8")
     assert (_row("foo").update.last_result or "").startswith("rolled_back")
 
-    # local edits refuse without --force
+    # a differing local copy is replaced (and reported), not refused
     copy = home / "skills" / "foo" / "SKILL.md"
     copy.write_text("---\nname: foo\ndescription: MINE\n---\n\nedited\n", encoding="utf-8")
-    assert cmd_packages_rollback("foo") == 1
-    assert cmd_packages_rollback("foo", force=True) == 0
+    assert cmd_packages_rollback("foo") == 0
+    assert "current copy differs" in capsys.readouterr().out  # pyright: ignore[reportUnknownMemberType]
     assert "# v2" in copy.read_text(encoding="utf-8")
 
 

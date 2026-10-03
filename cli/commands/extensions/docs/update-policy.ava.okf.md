@@ -60,13 +60,13 @@ their sources (design §5.3; plugin/MCP applies land in P2):
   `ava packages refresh --from-job` (`base/host/system/packages_job.py`, 15-minute base
   tick; per-package cadence is registry data).
 
-## `ava packages rollback <name> [--force]`
+## `ava packages rollback <name>`
 
 Restores the previous tree kept at `skills/.<name>.prev` by the last apply
-(swaps it with the current one; marker-protected subtrees ride along). The
-local-edit guard refuses unless `--force`. The channel watermark (`applied_rev`)
-is left where it was — a later refresh applies only what changed after the
-revoked rev.
+(swaps it with the current one; marker-protected subtrees ride along). A
+current copy differing from the last applied content is replaced and reported.
+The channel watermark (`applied_rev`) is left where it was — a later refresh
+applies only what changed after the revoked rev.
 
 ## `ava packages policy <name> [--update-mode auto|notify|off] [--check-every 24h]`
 
