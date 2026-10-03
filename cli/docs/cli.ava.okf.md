@@ -19,9 +19,8 @@ The `ava` CLI — single entry point for cluster lifecycle. `cli/main.py` builds
 |---------|----------|
 | `ava init` | Once per home, Settings-free: records the machine name, capabilities, credentials, ports and (for a runner) the gateway join, publishes `.env`, and starts nothing. An interrupted init resumes with no flags; an initialized home is refused |
 | `ava start` | Idempotent first and repeated startup of an initialized home; it takes only the service selection and refuses a home `ava init` has not finished. A Settings-free admission precedes host convergence, owned storage/schema provisioning (first start), root launch, and all-selected-service readiness. Exit 0 means ready, 4 means readiness failed, and 1 means a step failed |
-| `ava pause` | Normal native drain and service stop; retain infrastructure, browser and persistent PTYs. Default timeout 300 seconds, no implicit force |
 | `ava stop` | Same drain, then full local stop including terminals, browser, extras and private pg/redis; `--keep-infra` / repeatable `--keep-service` preserve selected resources; `--force` is explicit |
-| `ava restart` | Pause + start on this unit, retaining PTYs and infrastructure |
+| `ava restart` | Stop + start on this unit: services are replaced; PTYs, browser and infrastructure stay up |
 | `ava status` | status (including pg/redis and the end-to-end private-network Redis bridge view) |
 | `ava converge` | replays idempotent host wiring (symlink/PATH/dirs/plugin images and the macOS Redis bridge), usually via `ava start`; it never touches the memory pool |
 | `ava firewall status` / `ava firewall sync` | macOS Application Firewall allowlist manifest: `status` renders each manifest purpose, glob, resolved path, and Allow/Block/Missing state; `sync` applies it (repair + prune stale rules). Unprivileged mutation was empirically verified on the macmini running macOS 15.3.1, then falls back to non-interactive `sudo -n` and finally reports the exact manual commands on platforms that still require elevation |
@@ -38,9 +37,9 @@ Verbs that act on the cluster rather than on this host's services, on the home
 Agent lifecycle, context reads, local operations, and package-management command
 groups are enumerated in [[cli/docs/operator-surfaces.ava.okf.md]].
 
-Ordinary `ava start` resumes the existing local pause after readiness. Durable
-agent identity and work survive both pause and stop; live terminal processes
-survive pause only. See [operator procedure](../../conventions/graceful-maintenance.md).
+Ordinary `ava start` resumes the existing local maintenance hold after readiness. Durable
+agent identity and work survive both stop and restart; live terminal processes
+survive restart only. See [operator procedure](../../conventions/graceful-maintenance.md).
 
 ## Init and idempotent start
 
@@ -77,7 +76,7 @@ Per-cluster pg/redis bring-up, host convergence, the host lifecycle and the
 - **Two lifecycle entries**: `ava init` owns identity, `ava start` owns startup and restart; package acquisition does not create cluster identity or launch services.
 - **Ops-layer only**: not exposed to agents (they use the `ava.*` SDK).
 - **Settings-independent**: `ava init` and `ava start`'s admission are specially routed in `main()` before settings-gated imports — no `base.config` (stdlib + `base.host.env.dotenv_boot`). `ava config` uses only registry metadata and direct local files until a full Settings consumer needs the singleton, so a broken `.env` remains repairable. `ava pty` is settings-lite and data-plane-independent.
-- **Cold stop**: normal pause/stop loads the cluster configuration for native drain. Explicit force stop, or repeating a completed stop with no recorded failures, can skip gateway configuration fetch; the latter reads the existing pause journal before Settings bootstrap.
+- **Cold stop**: normal stop loads the cluster configuration for native drain. Explicit force stop, or repeating a completed stop with no recorded failures, can skip gateway configuration fetch; the latter reads the existing pause journal before Settings bootstrap.
 - **Migrations are not a command**: `cli/commands/lifecycle/migrations.py:cmd_migrations_apply` runs internally from `ava start`.
 
 ## Entry Points

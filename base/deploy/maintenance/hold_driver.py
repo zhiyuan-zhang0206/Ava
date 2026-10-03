@@ -264,7 +264,7 @@ def mint_driver() -> HoldDriver:
     """Record the shepherding identity of the CALLING process, best-effort.
 
     Called by the operator-side entrypoints that take or advance a maintenance
-    hold (`ava maintenance ...` verbs, the local stop/pause flow). Nothing here
+    hold (`ava maintenance ...` verbs, the local stop flow). Nothing here
     raises: an unreadable environment mints an empty identity, which readers
     treat as missing evidence -- loud, never a release license.
     """

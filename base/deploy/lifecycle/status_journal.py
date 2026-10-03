@@ -1,4 +1,4 @@
-"""Durable status journal for hosted lifecycle operations (pause / stop / restart).
+"""Durable status journal for hosted lifecycle operations (stop / restart).
 
 A lifecycle command can outlive its caller: an outer budget (a subprocess
 timeout on `ava restart`, a dropped SSH session) kills the CLI process
@@ -111,7 +111,7 @@ def _writer_alive(op: LifecycleOp) -> bool:
 
 
 def begin(operation: str, *, deadline: float | None = None) -> bool:
-    """Start journaling `operation` (pause / stop / restart).
+    """Start journaling `operation` (stop / restart).
 
     Returns True when this call OWNS the journal: it started a fresh one,
     replaced a completed one, or took over an unfinished one whose writer is
@@ -268,7 +268,7 @@ def read() -> LifecycleOp | None:
     except (KeyError, TypeError, ValueError):
         # A parseable-but-wrong-shape journal (missing identity fields, bad
         # types) is as unreadable as a corrupt one: readers on the
-        # stop/pause/restart path must see "absent", never a raise.
+        # stop/restart path must see "absent", never a raise.
         return None
     resumed_from = _parse_resumed_from(data.get("resumed_from"))
     return LifecycleOp(

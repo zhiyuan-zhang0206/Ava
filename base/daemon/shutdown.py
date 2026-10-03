@@ -1,6 +1,6 @@
 """Route service stop signals through cleanup, then leave without thread joins.
 
-Normal pause/stop requests SIGTERM on POSIX and Ctrl-Break in each Windows
+Normal stop requests SIGTERM on POSIX and Ctrl-Break in each Windows
 service's verified private console. Both become KeyboardInterrupt, matching
 the daemon's existing asyncio.run()/finally cleanup. Normal stop waits for
 actual completion and reports an incomplete stop on timeout; only an explicit

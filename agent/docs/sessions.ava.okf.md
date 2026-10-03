@@ -22,7 +22,7 @@ Interactive shells and watchers use independent PTY hosts through
 
 Shell handles are monotonic and never reused after closure. A rebuilt shell
 receives a new handle; an old capture request cannot address its replacement.
-Agent terminate/restart and cluster pause/update preserve shells. Full cluster
+Agent terminate/restart and `ava restart` preserve shells. Full cluster
 stop explicitly closes them; start does not serialize their processes or shell
 variables. Data and profile directories remain on disk.
 

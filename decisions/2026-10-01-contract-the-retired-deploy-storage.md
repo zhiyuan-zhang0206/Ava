@@ -121,3 +121,5 @@ steps stated above (a rollback restores shape; rolling back past these
 migrations needs the down files first) are void: recovery from these migrations
 is fix-forward. The expand-contract ordering the Context describes still
 stands.
+
+Forward link (2026-10-03): `ava pause` was deleted; a stop with a different keep set replaces it. See [delete ava pause](2026-10-03-delete-ava-pause.md).

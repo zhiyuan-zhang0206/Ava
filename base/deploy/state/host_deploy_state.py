@@ -2,7 +2,7 @@
 
 One row per machine in `host_deploy_state` records that machine's **posture** —
 `idle` or `paused`. `paused` is the window in which this host is stopped or held
-by maintenance (`ava stop`, `ava pause`, `ava maintenance`); `ava start` returns
+by maintenance (`ava stop`, `ava restart`, `ava maintenance`); `ava start` returns
 it to `idle`. The gateway's 503 middleware and `ava status` read this host's
 posture, and `ops.deploy_window` reads every machine's row to tell a health-probe
 alert that a transition is under way.

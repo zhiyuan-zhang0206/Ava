@@ -8,6 +8,10 @@ and the matching GitHub Releases.
 ## [Unreleased]
 
 ### Removed
+- `ava pause`: a stop that kept the data plane, browser, helper and persistent shells.
+  `ava stop --keep-infra --keep-service NAME` names the retained services, and `ava
+  restart` keeps the data plane, browser, helper and shells as before
+  ([decision](decisions/2026-10-03-delete-ava-pause.md)).
 - Port-block allocation and the start-time port scan and `.env` drift check:
   every home records one fixed port table (25 slots,
   `base/host/env/port_table.py`) at birth, and the health-port-base start option

@@ -1,7 +1,7 @@
-"""Home lifecycle mutex shared by local start/stop/pause.
+"""Home lifecycle mutex shared by local start/stop.
 
 ``resource_lock`` (``deploy-state.lifecycle.lock``) is an OS advisory lock under
-``$AVA_HOME`` that serializes long local start/stop/pause transitions with a
+``$AVA_HOME`` that serializes long local start/stop transitions with a
 bounded wait.
 
 The lock has an atomically replaced ``.holder.json`` sidecar naming the last
@@ -112,6 +112,6 @@ def _diagnostic_lock(path: Path, *, purpose: str, timeout_s: float) -> Generator
 
 @contextlib.contextmanager
 def resource_lock(*, purpose: str, timeout_s: float = _RESOURCE_LOCK_TIMEOUT_S) -> Generator[None]:
-    """Serialize long local start/stop/pause operations with bounded waiting."""
+    """Serialize long local start/stop operations with bounded waiting."""
     with _diagnostic_lock(lifecycle_lock_path(), purpose=purpose, timeout_s=timeout_s):
         yield

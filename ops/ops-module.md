@@ -12,7 +12,7 @@ coordination. Its design rationale is recorded in
 | Agent lifecycle | `ops/agents/` (birth and wake); `ops/lifecycle/` (lifecycle RPC ops) |
 | RPC | `ops/rpc_schemas/` (wire vocabulary); `ops/cluster_rpc.py` (gateway client) |
 | Op clusters the ops server dispatches | `ops/lifecycle/`, `ops/cluster.py`, `ops/host_config.py`, `ops/inventory.py`, `ops/uploads.py` |
-| Pause, stop and restart | CLI maintenance orchestration over the shared drain |
+| Stop and restart | CLI maintenance orchestration over the shared drain |
 | Fleet update | `cli/fleet_update.py` (down and up scripts per unit, gated by the code version) |
 
 Each package door is the module it grew from; `ops.agents`,
@@ -31,9 +31,10 @@ The application root owns service supervision. There is no controller manager,
 background checkout/update trigger, scheduled updater reaper, or automatic
 stranded-hold restart path.
 
-Pause and update hold admission and wait for native restart, checkpoint flush,
-actual continuation completion and resource settlement. Ordinary stop shares
-that drain and then closes the selected local services, PTYs and data plane.
+Stop, restart and update hold admission and wait for native restart, checkpoint
+flush, actual continuation completion and resource settlement. Ordinary stop
+shares that drain and then closes the selected local services, PTYs and data
+plane; restart keeps the data plane, browser and PTYs.
 Timeout fails without implicit force. The complete operator contract is in
 [graceful maintenance](../conventions/graceful-maintenance.md).
 
@@ -73,7 +74,7 @@ these fields do not certify every sibling daemon's running code.
 with the running image's required set. Wheel runtimes use installed SQL metadata without Git.
 The status contract contains the diagnosis kind, machine and detail; it has no
 Git-pin category, watchdog counters, held-service projection, or stranded-hold
-record. Ordinary pause and maintenance status remain independent of this
+record. Ordinary stop and maintenance status remain independent of this
 read-only schema diagnosis. Invalid database catalogs or image migration layouts
 report `invalid-migration-layout`; query and connection failures report
 `unavailable`. Only a successful comparison of equal sets returns no diagnosis.

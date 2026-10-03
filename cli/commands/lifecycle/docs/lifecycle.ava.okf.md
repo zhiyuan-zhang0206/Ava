@@ -1,7 +1,7 @@
 ---
 type: doc
 title: Host lifecycle
-description: '`ava start` / `pause` / `stop` / `restart` / `maintenance` / `status` and the single application root they drive: one package, because every verb goes through the same root driver and drain boundary.'
+description: '`ava start` / `stop` / `restart` / `maintenance` / `status` and the single application root they drive: one package, because every verb goes through the same root driver and drain boundary.'
 tags:
 - cli
 - lifecycle
@@ -12,8 +12,8 @@ tags:
 ## What it is
 
 `cli/commands/lifecycle/` holds the local host lifecycle verbs and the machinery
-they share. The verbs are `start.py` (`ava start`), `stop.py` (`ava pause`,
-`ava stop`, `ava restart`), `maintenance.py` (`ava maintenance ...`) and
+they share. The verbs are `start.py` (`ava start`), `stop.py` (`ava stop`,
+`ava restart`), `maintenance.py` (`ava maintenance ...`) and
 `status.py` (`ava status`). Every one of them reaches the single application
 root through `root_driver.py`, and every stopping verb goes through the same
 native drain boundary (`_temporary_stop`, `service_stop`) — which is why they
@@ -23,11 +23,12 @@ form one package rather than one per verb.
 `migrations.py` are public: `data_plane/maintenance_stop` and the cutover
 scripts reach them. The `_`-prefixed modules are steps only this package calls.
 
-## Stop, pause and maintenance
+## Stop, restart and maintenance
 
-`stop.py` exposes `pause` and `stop` through `_temporary_stop`; restart reuses
-its native drain, after `_start_readiness_preflight` has refused any restart
-whose start would fail ([[start-readiness-preflight.ava.okf.md]]).
+`stop.py` exposes `stop` through `_temporary_stop`; restart calls the same stop
+kernel with the data plane, browser and persistent terminals kept (`keep_infra`,
+`keep_browser`, `reap_agents=False`), once `_start_readiness_preflight` has not
+refused it for a start that would fail ([[start-readiness-preflight.ava.okf.md]]).
 `ops.agent_pause` and `ops.agent_pause.probe` own prepare/drain and runtime
 capability checks; `service_stop` and `data_plane/maintenance_stop` verify
 resource exits (`_maintenance_stop_report` names survivors).

@@ -45,10 +45,9 @@ def test_restart_is_not_settings_lite(monkeypatch: pytest.MonkeyPatch) -> None:
     assert _dispatched_fetch_env(monkeypatch, ["restart"]) is None
 
 
-@pytest.mark.parametrize("verb", ["pause", "stop"])
-def test_normal_drain_requires_cluster_config(monkeypatch: pytest.MonkeyPatch, verb: str) -> None:
+def test_normal_drain_requires_cluster_config(monkeypatch: pytest.MonkeyPatch) -> None:
     """Native restart/checkpoint draining needs the runner's real data-plane URLs."""
-    assert _dispatched_fetch_env(monkeypatch, [verb]) is None
+    assert _dispatched_fetch_env(monkeypatch, ["stop"]) is None
 
 
 def test_force_stop_stays_settings_lite(monkeypatch: pytest.MonkeyPatch) -> None:

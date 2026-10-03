@@ -753,7 +753,7 @@ def stop_root_service_tree(
 ) -> None:
     """Stop the root-owned tree — everything, or only the units not preserved.
 
-    `preserve` holds bare service names (pause's browser, `--keep-service`).
+    `preserve` holds bare service names (restart's browser, `--keep-service`).
     Stopping every unit also stops the root itself; keeping at least one unit
     leaves the root running to host it. Raises `_RootDriverError` when the
     tree cannot be brought down; the caller's phase accounting reports it.
