@@ -12,17 +12,11 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict
 
 __all_for_ava__ = [
-    "MARKER",
     "SecurityFindingEntry",
     "is_flagged",
     "scan_content",
     "take_findings",
 ]
-
-# Retained for backward-compatible is_flagged() checks. No longer prepended
-# to content by scan_content — findings are delivered as SECURITY system notes
-# (exec-child findings by the exec node, inbound findings by the claim node).
-MARKER = "[⚠️ SECURITY:"  # emoji-ok: security warning marker
 
 # Structural markup an attacker uses to forge a system message or a tool call.
 # Matched case-insensitively as a plain substring; these strings do not occur in
@@ -188,9 +182,9 @@ def take_findings() -> list[SecurityFindingEntry]:
 def is_flagged(content: str) -> bool:
     """True when `content` carries injection patterns.
 
-    Checks `_triggers` directly rather than looking for the old MARKER string
-    (scan_content no longer prepends a warning). For memory-note write paths
-    that previously checked for the prepended marker, this returns the same
-    logical answer: does the content contain injection patterns?
+    Findings are delivered as SECURITY system notes (exec-child findings by the
+    exec node, inbound findings by the claim node), never as a marker inside the
+    content, so this checks `_triggers` directly: does the content contain
+    injection patterns?
     """
     return bool(_triggers(content))
