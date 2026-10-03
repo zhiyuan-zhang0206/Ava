@@ -490,11 +490,30 @@ jobs:
         if: github.event_name == 'pull_request'
         run: |
           # Pin the comparison to the base revision THIS event was built
-          # against (the same revision as the checked-out merge ref) — not the
-          # branch's current tip: a base branch that shrinks while the run waits
-          # in the queue would otherwise report a phantom "raised" for every
-          # in-between shrink (task #4597, run 35859679689 on #3238).
-          git fetch --depth=1 origin "${{ github.event.pull_request.base.sha }}"
+          # against — the same revision as the checked-out merge ref: HEAD^1 is
+          # that base (the merge commit's first parent). The checkout is
+          # depth-1, so the parent object is absent and the merge commit must
+          # be deepened one level first (its parents are base and head). Note
+          # that a failed plain rev-parse echoes its own argument: the literal
+          # string would reach the fetch below as an invalid refspec (run
+          # 37081265642), hence --verify. The event's base.sha lags the merge
+          # ref's base for a stale branch (it is the head-to-base sync point),
+          # and comparing the current tree against that older shard set fails
+          # hard once a section retires (task #4903, run 37076721939 on
+          # #3631); pinning the base branch's *current* tip instead would
+          # report a phantom "raised" for every in-between shrink while the
+          # run waits in the queue (task #4597, run 35859679689 on #3238).
+          # base.sha stays only as the fallback for a checkout that is not a
+          # merge ref.
+          git fetch --depth=2 origin "$(git rev-parse HEAD)"
+          base=""
+          if git rev-parse --verify --quiet HEAD^2 >/dev/null; then
+            base="$(git rev-parse --verify --quiet 'HEAD^1^{commit}' || true)"
+          fi
+          if [ -z "$base" ]; then
+            base="${{ github.event.pull_request.base.sha }}"
+          fi
+          git fetch --depth=1 origin "$base"
           echo "LINT_STRUCTURE_BASELINE_BASE=$(git rev-parse FETCH_HEAD^{commit})" >> "$GITHUB_ENV"
 
       - name: Run pre-commit structural gates (--all-files)
