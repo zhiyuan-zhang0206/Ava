@@ -38,9 +38,8 @@ long-lived process is a member of the root's tree.
    bounded grace, SIGKILL whole sessions), write the owners' closure notices from the answer, then
    stop the unit and, with nothing else kept, the root. `--force` closes without notices. The one
    way to keep sessions across a stop is the generic `--keep-service pty-sessions`, which leaves the
-   unit and its sessions alone; no command uses it by default. `ava maintenance stop` refuses while
-   any session is live and has no option to proceed. A service that receives SIGTERM closes what is
-   still alive before it exits.
+   unit and its sessions alone; no command uses it by default. A service that receives SIGTERM
+   closes what is still alive before it exits.
 4. Crashes are swept by identity. The service alone writes a ledger (`run/pty-sessions.json`): each
    live shell's identity and the members of its session last seen alive, rewritten as sessions come
    and go and every ten seconds. A crash closes the masters, which hangs up every shell; what ignored
@@ -90,7 +89,6 @@ long-lived process is a member of the root's tree.
   sessions) is a separate change.
 - `ava restart` no longer spares shells: a smooth restart used to leave them, and the update ladder
   restarts with it, so a restart now closes every terminal and notifies its owner like a stop does.
-  `ava maintenance stop --keep-terminals` is gone with the per-session hosts it protected.
 - One process now holds every master. A fault in it ends every session instead of one; a wedged
   service reads as DOWN to the root's health round and is replaced, which ends them too. The service
   therefore keeps its event loop free of blocking work and its ping off the executor.
