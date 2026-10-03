@@ -3,7 +3,7 @@
 **Date:** 2026-10-01
 **Anchors:** `services/ava_root/health.py` (`_HELD_DOWN` branch),
 `services/ava_root/supervisor.py` (`revival_deferral`); fixes: #3830, #3866,
-#3909. Host-side records (supervisor log, agent event files, the
+#3909, #3937. Host-side records (supervisor log, agent event files, the
 recovery logs) are not in this repo `(summarized)`; the drill VM and its logs
 were destroyed, and its memory telemetry is summarized from a host-side monitor.
 
@@ -127,12 +127,25 @@ reconciliation" until the process group was verified gone.
   refuses; a record that keeps an unproven fact still refuses, naming its
   reconcile steps and evidence path (`services/ava_root/custody.py`,
   `services/ava_root/reconciling.py`).
+- **Wake re-dispatch waits for a live host (#3937).** Wake re-dispatch and
+  poisoning require a fresh healthy host verdict for the owner's machine — a
+  `machine_probe` row inside the staleness window, machine graded online,
+  agent host alive. A missing, stale or unreachable verdict freezes the
+  pending row instead: no publish, no dispatch-count advance, no poison — a
+  host outage cannot burn a row's dispatch budget — and redelivery resumes on
+  the first fresh verdict (anchor: the host returning at 19:37:50, first
+  delivery 19:37:55). One `delivery_poisoned` event still marks an exhaustion
+  against a reachable host, and the stall report keeps frozen rows visible
+  (`services/delivery_watchdog/dispatch_guard.py`).
 
-Unguarded, relying on the rule alone: none of the three changes touches wake
-delivery's bounded retry budget (c) — exhaustion still ends without an
-escalation outcome. The load-isolation rule (e) is an operating convention, not
-code: drills with sustained multi-stream network I/O or multi-GB working sets
-run on an isolated machine, or with hard caps recorded before starting.
+Unguarded, relying on the rule alone: the wake-delivery fix (#3937) removes
+the outage-driven corner of (c) — a host outage freezes a row instead of
+burning its budget, and redelivery resumes on the first fresh verdict — but
+exhaustion against a reachable host still ends in a recorded poison rather
+than an escalation: one `delivery_poisoned` event, the row left pending and
+claimable. The load-isolation rule (e) is an operating convention, not code:
+drills with sustained multi-stream network I/O or multi-GB working sets run on
+an isolated machine, or with hard caps recorded before starting.
 
 ## Lessons
 
@@ -150,3 +163,27 @@ run on an isolated machine, or with hard caps recorded before starting.
 
 The general rule is condensed in
 [`conventions/defensive-patterns.md`](../conventions/defensive-patterns.md).
+
+## Addendum (2026-10-02): the custody block on the browser unit
+
+A second, milder instance of the same family occurred on the macmini host the
+next day: the browser unit stayed down from 11:58:59 to 16:45:35 (~4h47m) on
+the old code. The restart breaker opened after five rounds without a live
+probe; later rounds reported `NOT REVIVABLE (port 9222 has no root-owned
+generation)`, and the unit then sat in "restart held — native custody requires
+reconciliation" until that counter reached 13,548 s. No automatic recovery
+existed; the custody record was released by hand during the 16:45 maintenance
+window, and the unit was healthy again by 16:49. The episode alert was not
+routed anywhere — the running code had no router, a routing gap rather than a
+delivery failure.
+
+On the new code (ed3f8b0b4 and later) the covered behavior is the reverse: a
+process group whose recorded births are gone is released automatically, and a
+group that cannot be proven gone is retained with an alert plus its
+documentation. No new-code instance has happened yet, so the alert path itself
+still awaits its first real case (a tail item of #4872).
+
+Read together with the guardrails above: the same lesson at smaller stakes — a
+custody hold that cannot release itself turns a transient restart failure into
+a manual-recovery dependency, and the fix set's release path is what retires
+it.
