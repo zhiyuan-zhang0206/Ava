@@ -1,6 +1,5 @@
 {
   "ambient_state": {
-    "gateway/cluster/_health.py::import-time-read:_STARTED_AT": 1,
     "gateway/cluster/roster_probe.py::ambient-container:_identity_mismatch_active": 1
   },
   "private_imports": {

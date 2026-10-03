@@ -1,5 +1,0 @@
-{
-  "ambient_state": {
-    "services/schedule_manager/manager.py::ambient-instance:_SCHEDULE_PREFIX": 1
-  }
-}
