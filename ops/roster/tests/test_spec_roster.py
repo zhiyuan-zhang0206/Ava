@@ -362,7 +362,7 @@ def test_healthy_protocol_cannot_certify_an_unowned_listener(
 
     monkeypatch.setattr(roster, "probe_home", _fake_probe_home)
     monkeypatch.setattr(roster, "_browser_probe", _fake_browser_probe)
-    monkeypatch.setattr("base.daemon.health._probe_daemon", _fake_probe_daemon)
+    monkeypatch.setattr("ops.roster.healthz.probe_daemon", _fake_probe_daemon)
     monkeypatch.setattr(roster, "daemon_identity", _fake_daemon_identity)
     monkeypatch.setattr(owned_service, "listener_pids", _fake_listener_pids)
     monkeypatch.setattr(owned_service, "owned_process", _fake_owned_process)
@@ -404,7 +404,7 @@ def test_daemon_identity_binds_the_probe_to_one_daemons_facts(
 
         return DaemonProbe.up("stub")
 
-    monkeypatch.setattr("base.daemon.health._probe_daemon", _capture)
+    monkeypatch.setattr("ops.roster.healthz.probe_daemon", _capture)
     pidfile = tmp_path / "ops.pid"
     assert roster.daemon_identity("ops", pidfile)().alive is True
     assert seen["name"] == "ops"

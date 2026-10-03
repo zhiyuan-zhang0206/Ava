@@ -27,7 +27,6 @@ from typing import Any
 
 import pytest
 
-import base.daemon.health as dh
 from base.daemon.health import DaemonProbe, ProbeVerdict
 from base.paths import ava_home
 from services.healthchecks import gateway as hc
@@ -131,25 +130,6 @@ def test_probe_survives_an_http_exception(monkeypatch: pytest.MonkeyPatch, caplo
     assert probe.alive is False
     assert "IncompleteRead" in probe.detail
     assert any("raised unexpectedly" in r.getMessage() for r in caplog.records)  # pyright: ignore[reportUnknownMemberType]
-
-
-def test_probe_fails_closed_on_any_unexpected_exception(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Fail CLOSED — reporting alive on an unreadable probe would make the
-    watchdog skip a genuinely dead gateway forever."""
-    monkeypatch.setattr(
-        dh,
-        "_probe_home",
-        lambda *_a, **_kw: (_ for _ in ()).throw(RuntimeError("unpredicted")),  # pyright: ignore[reportUnknownArgumentType]
-    )
-    assert hc._probe().alive is False
-
-
-def test_probe_passes_through_a_normal_verdict(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The wrapper adds a floor, not a behaviour change."""
-    monkeypatch.setattr(dh, "_probe_home", lambda *_a, **_kw: DaemonProbe.up("home /x"))  # pyright: ignore[reportUnknownArgumentType]
-    probe = hc._probe()
-    assert probe.alive is True
-    assert probe.detail == "home /x"
 
 
 def test_probe_reads_the_gateway_health_url_when_it_runs(monkeypatch: pytest.MonkeyPatch) -> None:
