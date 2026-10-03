@@ -15,7 +15,7 @@ import asyncio
 import logging
 import threading
 import time
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from datetime import UTC, datetime
 from typing import Annotated, Any, cast
 
@@ -62,16 +62,42 @@ router = APIRouter()
 ARCHIVE_TOTAL_ROWS = 4_813_148  # frozen archive rows at the #1823 drop (pg_dump-verified)
 _log = logging.getLogger(__name__)
 _STATUS_CACHE_TTL_S = 15.0
-_status_cache: tuple[float, SystemStatus] | None = None
-_status_cache_lock = threading.Lock()
+
+
+class StatusCache:
+    """Single-flight TTL cache of the `/api/status` response, one per gateway process.
+
+    Built by the app lifespan. Probe wall time follows the slowest machine and several
+    frontend pollers request this roster, so one caller recomputes while the others wait
+    on the lock and then read what it stored.
+    """
+
+    def __init__(
+        self,
+        *,
+        ttl_s: float = _STATUS_CACHE_TTL_S,
+        monotonic: Callable[[], float] = time.monotonic,
+    ) -> None:
+        self._ttl_s = ttl_s
+        self._monotonic = monotonic
+        self._cached: tuple[float, SystemStatus] | None = None
+        self._lock = threading.Lock()
+
+    def get(self, compute: Callable[[], SystemStatus]) -> SystemStatus:
+        """The cached response while it is fresh, else the result of `compute()`."""
+        cached = self._cached
+        if cached is not None and self._monotonic() - cached[0] < self._ttl_s:
+            return cached[1]
+        with self._lock:
+            cached = self._cached
+            if cached is not None and self._monotonic() - cached[0] < self._ttl_s:
+                return cached[1]
+            response = compute()
+            self._cached = (self._monotonic(), response)
+            return response
+
 
 router.add_api_route("/api/health", get_health, methods=["GET"], response_model=None)
-
-
-def cache_clear() -> None:
-    global _status_cache  # noqa: PLW0603 — intentional process-cache test seam
-    with _status_cache_lock:
-        _status_cache = None
 
 
 @router.get("/api/stats/dashboard")
@@ -568,52 +594,44 @@ def get_system_status(request: Request) -> SystemStatus:
     the others (each has its own try/except that falls back to a
     degraded value).
     """
-    global _status_cache  # noqa: PLW0603 — synchronized process-level cache
+    status_cache: StatusCache = request.app.state.status_cache
+    return status_cache.get(lambda: _compute_system_status(request))
 
-    now = time.monotonic()
-    cached = _status_cache
-    if cached is not None and now - cached[0] < _STATUS_CACHE_TTL_S:
-        return cached[1]
 
-    with _status_cache_lock:
-        now = time.monotonic()
-        cached = _status_cache
-        if cached is not None and now - cached[0] < _STATUS_CACHE_TTL_S:
-            return cached[1]
-        # Services
+def _compute_system_status(request: Request) -> SystemStatus:
+    """One uncached build of the status panel."""
+    # Services
+    try:
+        services = _get_services_status()
+    except Exception:
+        _log.exception("GET /api/status: services check failed")
+        services = ServicesStatus(items=[])
+
+    # Cluster
+    try:
+        with request.app.state.db_pool.connection() as conn, conn.cursor() as cur:
+            cluster = _get_cluster_status(cur)
+    except Exception:
+        _log.exception("GET /api/status: cluster query failed")
+        # Fallback: at least surface this host's name/role so the frontend
+        # does not lose the whole section.
         try:
-            services = _get_services_status()
+            cluster = ClusterPanel(
+                current_machine=machine_name(),
+                current_serve_gateway=is_gateway(),
+                current_serve_agent_runner=is_agent_runner(),
+                current_serve_observability_station=is_observability_station(),
+                current_paused=cluster_is_paused(),
+                machines=[],
+            )
         except Exception:
-            _log.exception("GET /api/status: services check failed")
-            services = ServicesStatus(items=[])
+            _log.exception("GET /api/status: cluster fallback failed")
+            cluster = ClusterPanel(
+                current_machine="?",
+                current_serve_gateway=False,
+                current_serve_agent_runner=False,
+                current_paused=False,
+                machines=[],
+            )
 
-        # Cluster
-        try:
-            with request.app.state.db_pool.connection() as conn, conn.cursor() as cur:
-                cluster = _get_cluster_status(cur)
-        except Exception:
-            _log.exception("GET /api/status: cluster query failed")
-            # Fallback: at least surface this host's name/role so the frontend
-            # does not lose the whole section.
-            try:
-                cluster = ClusterPanel(
-                    current_machine=machine_name(),
-                    current_serve_gateway=is_gateway(),
-                    current_serve_agent_runner=is_agent_runner(),
-                    current_serve_observability_station=is_observability_station(),
-                    current_paused=cluster_is_paused(),
-                    machines=[],
-                )
-            except Exception:
-                _log.exception("GET /api/status: cluster fallback failed")
-                cluster = ClusterPanel(
-                    current_machine="?",
-                    current_serve_gateway=False,
-                    current_serve_agent_runner=False,
-                    current_paused=False,
-                    machines=[],
-                )
-
-        response = SystemStatus(services=services, cluster=cluster)
-        _status_cache = (time.monotonic(), response)
-        return response
+    return SystemStatus(services=services, cluster=cluster)
