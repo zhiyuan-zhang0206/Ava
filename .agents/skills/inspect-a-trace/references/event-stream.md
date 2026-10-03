@@ -36,7 +36,8 @@ Two rules the whole tree obeys, both learned the hard way:
   hundreds of streams a day; an unaggregated `count_over_time` hits Loki's
   per-query series cap.
 
-Retention is 168h. Older than that, the run is gone from Loki.
+Retention is 84h. Older than that, the run is gone from Loki; the JSONL event mirror
+(`$AVA_HOME/logs/events-*.jsonl`, 7 days, per machine) still holds every event.
 
 ## The line shape
 
@@ -91,6 +92,12 @@ Over HTTP, the same two narrowings:
 GET /api/events?agent_id=3048&hours=6
 GET /api/events?trace_id=<hex>&from=<ISO-with-offset>
 ```
+
+`/api/events` reads Postgres, which keeps only the events a reader queries by name
+(`persist=True` in the registry) and every event at warning level or above; the rest of
+a trace's chain — `exec_envelope`, `hook_timing`, `node_exit`, info-level logs — is not
+there. The whole chain is in Loki within its 84-hour window (`| trace_id="<hex>"`) and in
+the JSONL event mirror beyond it.
 
 `from` must carry a timezone offset. Absent both `from` and `hours` the window
 is forced to the last 24h — never unbounded. `limit` caps at 1000; paging is
