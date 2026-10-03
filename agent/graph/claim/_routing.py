@@ -104,6 +104,49 @@ class _Routing:
         return self.exit_kind is None and not self.has_revive
 
 
+def _durable_routing(batch: list[ClaimedInbound]) -> _Routing | None:
+    """The routing of a durable lifecycle command; None for an ordinary batch."""
+    if not any(item.durable_lifecycle for item in batch):
+        return None
+    if len(batch) != 1 or batch[0].kind not in (
+        InboundKind.RESTART,
+        InboundKind.TERMINATE,
+    ):
+        raise RuntimeError("durable lifecycle dispatch requires its single accepted command")
+    # Acceptance already serialized this command against the target owner.
+    # A later pending message cannot veto it and strand the durable pointer.
+    # The effect still rechecks the pointer and incarnation in its own CAS.
+    return _Routing(
+        exit_kind=InboundKind(batch[0].kind),
+        has_revive=False,
+        terminate_vetoed_by_pending=False,
+    )
+
+
+async def _terminate_veto(
+    ctx: AvaContext,
+    agent_id: int,
+    batch: list[ClaimedInbound],
+    latest_exit: ClaimedInbound,
+) -> tuple[InboundKind | None, bool]:
+    """`(exit_kind, vetoed_by_pending)` for a batch whose winning exit is a terminate."""
+    latest_chat = max(
+        (it for it in batch if it.kind == InboundKind.CHAT),
+        key=lambda it: it.id,
+        default=None,
+    )
+    # Veto half 1: same-batch chat the terminate decision did not see.
+    if latest_chat is not None and (
+        latest_exit.source == "self" or latest_chat.id > latest_exit.id
+    ):
+        return None, False
+    # Veto half 2: post-claim arrival newer than the whole batch.
+    assert ctx.ops_pool is not None  # noqa: S101
+    if await has_pending_inbound_after(ctx.ops_pool, agent_id, after_id=max(it.id for it in batch)):
+        return None, True
+    return InboundKind.TERMINATE, False
+
+
 async def resolve_routing(
     ctx: AvaContext,
     agent_id: int,
@@ -116,20 +159,9 @@ async def resolve_routing(
     side-effects.
     """
     assert ctx.ops_pool is not None, "resolve_routing requires ctx.ops_pool"  # noqa: S101
-    if any(item.durable_lifecycle for item in batch):
-        if len(batch) != 1 or batch[0].kind not in (
-            InboundKind.RESTART,
-            InboundKind.TERMINATE,
-        ):
-            raise RuntimeError("durable lifecycle dispatch requires its single accepted command")
-        # Acceptance already serialized this command against the target owner.
-        # A later pending message cannot veto it and strand the durable pointer.
-        # The effect still rechecks the pointer and incarnation in its own CAS.
-        return _Routing(
-            exit_kind=InboundKind(batch[0].kind),
-            has_revive=False,
-            terminate_vetoed_by_pending=False,
-        )
+    durable = _durable_routing(batch)
+    if durable is not None:
+        return durable
     latest_exit = max(
         (it for it in batch if it.kind in (InboundKind.TERMINATE, InboundKind.RESTART)),
         key=lambda it: it.id,
@@ -152,22 +184,9 @@ async def resolve_routing(
         assert latest_exit is not None, (  # noqa: S101
             "exit_kind == TERMINATE implies the exit row is a terminate"
         )
-        latest_chat = max(
-            (it for it in batch if it.kind == InboundKind.CHAT),
-            key=lambda it: it.id,
-            default=None,
+        exit_kind, terminate_vetoed_by_pending = await _terminate_veto(
+            ctx, agent_id, batch, latest_exit
         )
-        # Veto half 1: same-batch chat the terminate decision did not see.
-        if latest_chat is not None and (
-            latest_exit.source == "self" or latest_chat.id > latest_exit.id
-        ):
-            exit_kind = None
-        # Veto half 2: post-claim arrival newer than the whole batch.
-        elif await has_pending_inbound_after(
-            ctx.ops_pool, agent_id, after_id=max(it.id for it in batch)
-        ):
-            exit_kind = None
-            terminate_vetoed_by_pending = True
 
     return _Routing(
         exit_kind=exit_kind,

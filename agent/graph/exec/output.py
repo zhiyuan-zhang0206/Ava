@@ -61,6 +61,57 @@ def _overflow_dir() -> Path:
     return workspace_dir(ava.agent_identity.require_agent_id()) / _OVERFLOW_DIRNAME
 
 
+def _marker(
+    *, cancelled: bool, cancel_reason: InterruptReason, timed_out: bool, timeout_seconds: float
+) -> str:
+    # cancelled and timed_out are mutually exclusive — the subprocess result
+    # constructor guarantees only one is set. Assert is defense-in-depth: if a future caller
+    # forgets the mutual exclusion, this blows up rather than silently emitting two markers.
+    assert not (cancelled and timed_out), "cancelled and timed_out are mutually exclusive"  # noqa: S101
+    if cancelled:
+        return f" [cancelled by {cancel_reason.value}]"
+    if timed_out:
+        return f" [timeout after {timeout_seconds:.0f}s]"
+    return ""
+
+
+def _fit_body(
+    output: str,
+    stream_cap: StreamCap | None,
+    referenced_messages: Sequence[BaseMessage],
+    max_chars: int,
+) -> str:
+    """The envelope body for non-empty output: logged, soft-cropped or truncated to fit."""
+    # Log the true (pre-truncation) length on every exec — instrumentation
+    # for tuning max_chars from a real distribution (the stored output is
+    # capped, so length can't be recovered from history afterwards). When
+    # the accumulation cap fired, `len(output)` is already the capped
+    # length; the StreamCap carries what the code actually produced.
+    produced = stream_cap.produced_chars if stream_cap is not None else len(output)
+    logger.info("[exec output chars] {n}", n=produced)
+    preview = None
+    crop_after = settings.sandbox.exec_output_crop_after_lines
+    if stream_cap is None and crop_after:
+        over = (
+            len(output.splitlines()) > crop_after
+            or len(output) > settings.sandbox.exec_output_crop_after_chars
+            or len(output.encode("utf-8")) > settings.sandbox.exec_output_crop_after_bytes
+        )
+        if over:
+            preview = crop_output(
+                output,
+                _overflow_dir(),
+                settings.sandbox,
+                referenced_messages=referenced_messages,
+                max_chars=max_chars,
+            )
+    if preview is not None:
+        output = preview
+    elif len(output) > max_chars:
+        output = truncate_both_ends(output, max_chars, stream_cap=stream_cap)
+    return output if output.endswith("\n") else output + "\n"
+
+
 def wrap_code_output(
     output: str,
     *,
@@ -106,49 +157,18 @@ def wrap_code_output(
         timeout_seconds = settings.sandbox.exec_timeout_seconds
     if max_chars is None:
         max_chars = settings.sandbox.exec_output_max_chars
-    # cancelled and timed_out are mutually exclusive — the subprocess result
-    # constructor guarantees only one is set. Assert is defense-in-depth: if a future caller
-    # forgets the mutual exclusion, this blows up rather than silently emitting two markers.
-    assert not (cancelled and timed_out), "cancelled and timed_out are mutually exclusive"  # noqa: S101
-    if cancelled:
-        marker = f" [cancelled by {cancel_reason.value}]"
-    elif timed_out:
-        marker = f" [timeout after {timeout_seconds:.0f}s]"
-    else:
-        marker = ""
+    marker = _marker(
+        cancelled=cancelled,
+        cancel_reason=cancel_reason,
+        timed_out=timed_out,
+        timeout_seconds=timeout_seconds,
+    )
     ts = f" {Clock.from_settings().now_timestamp()}" if settings.general.message_timestamps else ""
     header = f"Code execution output{marker}{ts}:"
     if not output:
         body = "(no output)"
     else:
-        # Log the true (pre-truncation) length on every exec — instrumentation
-        # for tuning max_chars from a real distribution (the stored output is
-        # capped, so length can't be recovered from history afterwards). When
-        # the accumulation cap fired, `len(output)` is already the capped
-        # length; the StreamCap carries what the code actually produced.
-        produced = stream_cap.produced_chars if stream_cap is not None else len(output)
-        logger.info("[exec output chars] {n}", n=produced)
-        preview = None
-        crop_after = settings.sandbox.exec_output_crop_after_lines
-        if stream_cap is None and crop_after:
-            over = (
-                len(output.splitlines()) > crop_after
-                or len(output) > settings.sandbox.exec_output_crop_after_chars
-                or len(output.encode("utf-8")) > settings.sandbox.exec_output_crop_after_bytes
-            )
-            if over:
-                preview = crop_output(
-                    output,
-                    _overflow_dir(),
-                    settings.sandbox,
-                    referenced_messages=referenced_messages,
-                    max_chars=max_chars,
-                )
-        if preview is not None:
-            output = preview
-        elif len(output) > max_chars:
-            output = truncate_both_ends(output, max_chars, stream_cap=stream_cap)
-        body = output if output.endswith("\n") else output + "\n"
+        body = _fit_body(output, stream_cap, referenced_messages, max_chars)
     if timed_out:
         # The envelope is the agent's only cue to change strategy — the better
         # primitives must be named here, where the timeout is actually seen.

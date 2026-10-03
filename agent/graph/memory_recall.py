@@ -114,35 +114,14 @@ def _build_query(messages: Collection[AnyMessage]) -> str:
     return "\n".join(picked)[-_QUERY_CHAR_CAP:]
 
 
-async def passive_memory_recall(
-    messages: Collection[AnyMessage],
-    *,
-    agent: AgentSlices,
-    injected_paths: Collection[str] = frozenset(),
-) -> PassiveRecall | None:
-    """Search the memory pool on the recent conversation and render the fresh
-    top matches as a note to inject, or `None` when there is nothing to add.
-
-    `None` when: the feature is disabled, the conversation yields no query, the
-    search failed (index unavailable, or the gateway answered with an error
-    status), or every match is already in `injected_paths` (or not present on
-    this machine yet). `injected_paths` and the returned `PassiveRecall.paths`
-    are memory-pool-relative.
-
-    Never raises on a failed search: the caller is a before_llm hook, so an
-    exception here ends the agent process rather than the recall.
-    """
-    if agent.sandbox.eval_isolation or not agent.memory.passive_memory_recall_enabled:
-        return None
-    query = _build_query(messages)
-    if not query:
-        return None
-    retrieve_k = agent.memory.memory_recall_retrieve_k
+async def _search_or_none(
+    query: str, retrieve_k: int
+) -> list[gateway_client.MemorySearchResult] | None:
+    """The memory-pool search results, or None when the search is unavailable or failed."""
     import httpx  # deferred: stays off the child boot path
 
-    search_started = time.monotonic()
     try:
-        results = await asyncio.to_thread(gateway_client.memory_search, query, retrieve_k)
+        return await asyncio.to_thread(gateway_client.memory_search, query, retrieve_k)
     except (GatewayUnavailable, IndexerUnavailable) as exc:
         # Recall is an enhancement; a memory-index outage must not crash the
         # turn. Skip this turn and let the next one retry. Debug level because
@@ -180,13 +159,11 @@ async def passive_memory_recall(
         )
         return None
 
-    # Cheap local reject: a file that has not reached this machine yet is
-    # dropped before the filter is asked to judge it -- it cannot be injected
-    # either way. Already-injected paths are NOT dropped here: the filter must
-    # judge the full candidate set, or a second message close to the first
-    # would have its best matches pre-removed and inject unrelated notes that
-    # merely outranked the deduped ones. Dedup happens after the filter, on
-    # what the filter judged relevant.
+
+def _local_candidates(
+    results: list[gateway_client.MemorySearchResult],
+) -> tuple[list[Candidate], dict[str, str]]:
+    """The search results whose file is on this machine, with their descriptions by path."""
     root = memory_dir()
     candidates: list[Candidate] = []
     by_path: dict[str, str] = {}
@@ -198,7 +175,46 @@ async def passive_memory_recall(
             continue
         candidates.append(Candidate(path=rel, description=item.description, tags=list(item.tags)))
         by_path[rel] = item.description
+    return candidates, by_path
 
+
+async def passive_memory_recall(
+    messages: Collection[AnyMessage],
+    *,
+    agent: AgentSlices,
+    injected_paths: Collection[str] = frozenset(),
+) -> PassiveRecall | None:
+    """Search the memory pool on the recent conversation and render the fresh
+    top matches as a note to inject, or `None` when there is nothing to add.
+
+    `None` when: the feature is disabled, the conversation yields no query, the
+    search failed (index unavailable, or the gateway answered with an error
+    status), or every match is already in `injected_paths` (or not present on
+    this machine yet). `injected_paths` and the returned `PassiveRecall.paths`
+    are memory-pool-relative.
+
+    Never raises on a failed search: the caller is a before_llm hook, so an
+    exception here ends the agent process rather than the recall.
+    """
+    if agent.sandbox.eval_isolation or not agent.memory.passive_memory_recall_enabled:
+        return None
+    query = _build_query(messages)
+    if not query:
+        return None
+    retrieve_k = agent.memory.memory_recall_retrieve_k
+    search_started = time.monotonic()
+    results = await _search_or_none(query, retrieve_k)
+    if results is None:
+        return None
+
+    # Cheap local reject: a file that has not reached this machine yet is
+    # dropped before the filter is asked to judge it -- it cannot be injected
+    # either way. Already-injected paths are NOT dropped here: the filter must
+    # judge the full candidate set, or a second message close to the first
+    # would have its best matches pre-removed and inject unrelated notes that
+    # merely outranked the deduped ones. Dedup happens after the filter, on
+    # what the filter judged relevant.
+    candidates, by_path = _local_candidates(results)
     if not candidates:
         return None
 
