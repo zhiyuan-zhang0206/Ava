@@ -39,6 +39,7 @@ from base.agents.history.hierarchy.pipeline import MaterializedTree, build_agent
 from base.agents.history.hierarchy.store import load_known_texts, write_tree
 from base.agents.observation.snapshot import agent_effective_model
 from base.db import Database
+from base.lm.context_budget import resolve_context_budget
 from base.lm.factory import close_chat_model
 from base.log import logger
 from services.hierarchy_worker.config import HierarchyWorkerConfig
@@ -115,6 +116,7 @@ def execute_job(job_id: int, config: HierarchyWorkerConfig, db: Database) -> int
                 deadline=deadline,
                 tools=[execute_code],
                 max_generated=halt_nodes,
+                context_window_tokens=resolve_context_budget(model).max_context_tokens,
             )
         finally:
             close_chat_model(llm)

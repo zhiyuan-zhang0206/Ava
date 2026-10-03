@@ -13,6 +13,7 @@ from langgraph.checkpoint.postgres import PostgresSaver
 
 from base.agents.history.checkpoint import (
     list_compact_boundary_checkpoint_ids,
+    load_checkpoint_history_full,
     load_checkpoint_message_count,
     load_checkpoint_messages,
     load_checkpoint_messages_full,
@@ -284,3 +285,61 @@ def test_load_checkpoint_messages_segment_returns_empty_without_boundaries(
     assert load_checkpoint_messages_segment(_db(), 8, latest_id) == []
     assert load_checkpoint_message_count(_db(), 8) == 2
     assert load_checkpoint_message_count(_db(), 9) == 0
+
+
+def test_history_layout_records_each_segments_own_head_and_body_start(
+    db_conn: psycopg.Connection,
+) -> None:
+    """The stitched list drops the joins' SystemMessages; the layout keeps them."""
+    _put_checkpoint(
+        "7",
+        [SystemMessage(content="system-1"), HumanMessage(content="first task")],
+        metadata={"source": "input", "step": 1, "parents": {}, "compact_boundary": True},
+        version="1",
+    )
+    _put_checkpoint(
+        "7",
+        [
+            SystemMessage(content="system-2"),
+            HumanMessage(content="first summary"),
+            HumanMessage(content="second task"),
+        ],
+        metadata={"source": "input", "step": 2, "parents": {}, "compact_boundary": True},
+        version="2",
+    )
+    _put_checkpoint(
+        "7",
+        [HumanMessage(content="second summary"), HumanMessage(content="third task")],
+        version="3",
+    )
+
+    history = load_checkpoint_history_full(_db(), 7)
+
+    assert _contents(history.messages) == [
+        "system-1",
+        "first task",
+        "first summary",
+        "second task",
+        "second summary",
+        "third task",
+    ]
+    assert [None if head is None else head.content for head in history.segment_heads] == [
+        "system-1",
+        "system-2",
+        None,
+    ]
+    assert history.segment_starts == (1, 2, 4)
+
+
+def test_history_layout_of_a_single_snapshot_and_of_no_checkpoint(
+    db_conn: psycopg.Connection,
+) -> None:
+    assert load_checkpoint_history_full(_db(), 8).segment_starts == ()
+    _put_checkpoint(
+        "8", [SystemMessage(content="system"), HumanMessage(content="task")], version="1"
+    )
+
+    history = load_checkpoint_history_full(_db(), 8)
+
+    assert history.segment_starts == (1,)
+    assert [head.content if head else None for head in history.segment_heads] == ["system"]

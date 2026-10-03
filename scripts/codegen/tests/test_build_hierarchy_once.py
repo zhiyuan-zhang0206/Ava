@@ -21,6 +21,7 @@ from agent.llm import execute_code
 from base.agents.history.hierarchy.generate import GenResult
 from base.agents.history.hierarchy.pipeline import MaterializedNode, MaterializedTree
 from base.config import settings
+from base.lm.context_budget import ContextBudget
 from scripts.codegen import build_hierarchy_once as build
 
 
@@ -94,6 +95,7 @@ def _install_fakes(
         model: str,
         known_texts: Mapping[str, str] | None,
         tools: Sequence[Any] | None = None,
+        context_window_tokens: int | None = None,
     ) -> MaterializedTree:
         rec.built.append(
             {
@@ -102,6 +104,7 @@ def _install_fakes(
                 "model": model,
                 "known_texts": known_texts,
                 "tools": tools,
+                "context_window_tokens": context_window_tokens,
             }
         )
         if build_error is not None:
@@ -118,6 +121,11 @@ def _install_fakes(
     monkeypatch.setattr(build, "build_generation_llm", fake_llm)
     monkeypatch.setattr(build, "close_chat_model", fake_close)
     monkeypatch.setattr(build, "agent_effective_model", fake_effective_model)
+
+    def fake_budget(_model: str) -> ContextBudget:
+        return ContextBudget(200_000, 60_000, 80_000)
+
+    monkeypatch.setattr(build, "resolve_context_budget", fake_budget)
     monkeypatch.setattr(build, "build_agent_tree", fake_build)
     monkeypatch.setattr(build, "write_tree", fake_write)
     return rec
@@ -151,6 +159,7 @@ def test_clean_run_writes_nodes_under_the_resolved_model(
     assert rec.written[0]["nodes"] == nodes
     assert rec.built[0]["model"] == "agent-own-model"
     assert rec.built[0]["tools"] == [execute_code]
+    assert rec.built[0]["context_window_tokens"] == 200_000  # the prefix cap's window
     assert rec.llm_models == ["agent-own-model"]
     assert rec.llm_closes == [rec.built[0]["llm"]]
     assert rec.written[0]["model"] == "agent-own-model"
