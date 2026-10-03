@@ -146,6 +146,16 @@ def shell_sessions() -> "ShellSessions":  # noqa: F821  # pyright: ignore[report
     return ShellSessions(backend=get_shell_backend(), database=database(), agent_id=agent_id)
 
 
+def page_host() -> "PageHost":  # noqa: F821  # pyright: ignore[reportUndefinedVariable]
+    """The page host this agent's `ava.ui` calls run against: this machine's reachable host and
+    the agent's identity (RuntimeError when the process has none), read per call."""
+    import ava.agent_identity
+    from ava.ui import PageHost
+    from base.cluster.machine import reachable_host
+
+    return PageHost(host=reachable_host(), agent_id=ava.agent_identity.require_agent_id())
+
+
 def _attached() -> tuple[Mapping[str, Any], Any] | None:
     """The pins and plugin-config view of the agent this process attached to (`ava.external`:
     one attachment per process), if any."""

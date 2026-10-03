@@ -53,10 +53,10 @@ def _sdk_via_inprocess_gateway(monkeypatch: pytest.MonkeyPatch):
     edit_notice / dismiss_notice hit the real endpoints against the test DB."""
     from fastapi.testclient import TestClient
 
+    from ava.gateway_client.transport import use_client
     from gateway.app import app
 
-    with TestClient(app, base_url="http://test-gateway") as tc:
-        monkeypatch.setattr("ava.gateway_client.transport._client", tc)
+    with TestClient(app, base_url="http://test-gateway") as tc, use_client(tc):
         yield
 
 
