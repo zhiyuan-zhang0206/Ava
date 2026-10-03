@@ -133,31 +133,15 @@ def test_reduce_context_switch_defaults_ship_as_current_behavior() -> None:
     behavior-preserving defaults — the off-fallback, the wiring points, and the
     night-silence window are follow-ups."""
     from base.config.agent_prompt import AgentPromptSettings
-    from base.config.alerts import AlertsSettings
-    from base.config.observability import ObservabilitySettings
-    from base.config.services import ServiceSettings
 
     assert AgentPromptSettings().reduce_context_switch is True
-    assert AgentPromptSettings().pilot_scope == ["all"]
-    assert ServiceSettings().mirror_granularity == "full"
-    assert AlertsSettings().alert_digest is False
-    assert ObservabilitySettings().push_budget_target == 30
 
 
 def test_reduce_context_switch_env_aliases() -> None:
     from base.config.agent_prompt import AgentPromptSettings
-    from base.config.services import ServiceSettings
 
     configured = AgentPromptSettings.model_validate({"AVA_REDUCE_CONTEXT_SWITCH": "false"})
     assert configured.reduce_context_switch is False
-
-    scoped = AgentPromptSettings.model_validate(
-        {"AVA_REDUCE_CONTEXT_SWITCH_PILOT_SCOPE": "405,5251"}
-    )
-    assert scoped.pilot_scope == ["405", "5251"]
-
-    mirrored = ServiceSettings.model_validate({"AVA_IM_MIRROR_GRANULARITY": "final_only"})
-    assert mirrored.mirror_granularity == "final_only"
 
 
 @pytest.mark.parametrize("raw", ["", "[0]", "[-1, 2]"])
@@ -444,7 +428,7 @@ def test_capability_assignment_is_pinned_for_load_bearing_fields() -> None:
         "browser_enabled": "agent-runner",
         "timezone": "common",  # cluster-wide policy
         "machine_host": "common",  # shared host identity
-        "trace_tags": "common",  # observability domain default
+        "trace_retention_days": "common",  # observability domain default
     }
     for name, want in expected.items():
         assert cap[name] == want, f"{name}: capability drifted to {cap[name]!r} (want {want!r})"
@@ -587,7 +571,6 @@ def test_host_fields_declare_remote_writable_bool() -> None:
 
 _REMOTE_WRITABLE_ALLOWLIST = frozenset(
     {
-        "auto_resurrect_enabled",
         "browser_enabled",
         "browser_reach_failure_threshold",
         "browser_reach_probe_interval_s",

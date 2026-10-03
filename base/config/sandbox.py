@@ -230,27 +230,3 @@ class SandboxSettings(EnvSettings):
             "scope": "cluster-pinned",
         },
     )
-
-    mcp_daemon_start_timeout_seconds: float = Field(
-        default=30.0,
-        alias="AVA_MCP_DAEMON_START_TIMEOUT_SECONDS",
-        description="Timeout (seconds) for the in-process MCP daemon subprocess to reach ready.",
-        json_schema_extra={
-            "restart_required": "agent",
-            "writable": True,
-            "sensitive": False,
-            "scope": "cluster-pinned",
-        },
-    )
-
-    mcp_daemon_stop_timeout_seconds: float = Field(
-        default=5.0,
-        alias="AVA_MCP_DAEMON_STOP_TIMEOUT_SECONDS",
-        description="Graceful-stop timeout for the in-process MCP daemon; kill -9 after this (seconds).",
-        json_schema_extra={
-            "restart_required": "agent",
-            "writable": True,
-            "sensitive": False,
-            "scope": "cluster-pinned",
-        },
-    )

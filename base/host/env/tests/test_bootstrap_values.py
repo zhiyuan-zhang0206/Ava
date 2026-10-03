@@ -80,10 +80,10 @@ def test_bootstrap_still_skips_none(
     recipient falls back to the field default. Distinct from set-to-empty."""
     monkeypatch.setattr(rt, "_ava_home", lambda: tmp_path)
     serve_generation(tmp_path)
-    monkeypatch.setattr(config.settings.observability, "trace_tags", None)
+    monkeypatch.setattr(config.settings.observability, "trace_retention_days", None)
 
     vals = config.bootstrap_config_values()
-    assert "AVA_TRACE_TAGS" not in vals
+    assert "AVA_TRACE_RETENTION_DAYS" not in vals
 
 
 def test_bootstrap_fields_are_valid_field_names() -> None:

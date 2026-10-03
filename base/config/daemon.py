@@ -412,33 +412,6 @@ class DaemonSettings(
         },
     )
 
-    auto_resurrect_enabled: bool = Field(
-        default=True,
-        alias="AVA_AUTO_RESURRECT_ENABLED",
-        description="Run the crash auto-resurrect controller (agent-runner), which brings back agents that died involuntarily while a pending inbound waits. Off does not strand anything — a new inbound still resurrects a terminated agent; this controller only closes the gap where no new message arrives after the crash.",
-        json_schema_extra={
-            "capability": "agent-runner",
-            "restart_required": "",
-            "writable": False,
-            "sensitive": False,
-            "scope": "host",
-            "remote_writable": True,
-        },
-    )
-
-    auto_resurrect_backoff_seconds: float = Field(
-        default=300.0,
-        alias="AVA_AUTO_RESURRECT_BACKOFF_SECONDS",
-        description="Per-agent backoff (seconds) for crash auto-resurrect: after resurrecting a crashed agent, it won't resurrect the same agent again until this passes (loud WARN each retry). Caps a reliably-recrashing agent at one attempt per window while a transient outage still self-heals. Default 300s.",
-        json_schema_extra={
-            "capability": "agent-runner",
-            "restart_required": "all",
-            "writable": True,
-            "sensitive": False,
-            "scope": "cluster-pinned",
-        },
-    )
-
     auto_resurrect_max_attempts: int = Field(
         default=3,
         alias="AVA_AUTO_RESURRECT_MAX_ATTEMPTS",

@@ -47,40 +47,6 @@ class ObservabilitySettings(EnvSettings):
         },
     )
 
-    push_budget_target: int = Field(
-        default=30,
-        ge=0,
-        alias="AVA_PUSH_BUDGET_TARGET",
-        description=(
-            "Observation target for direct pushes delivered to the human per day "
-            "(user ruling 2026-09-20: at most 30/day, observed over a three-week "
-            "window). Record-only — the measurement side records against it; it "
-            "never enforces or intercepts a push."
-        ),
-        json_schema_extra={
-            "restart_required": "",
-            "writable": True,
-            "sensitive": False,
-            "scope": "cluster-pinned",
-        },
-    )
-
-    trace_tags: str = Field(
-        default="",
-        alias="AVA_TRACE_TAGS",
-        description=(
-            "General trace-tag passthrough (CSV): a caller (bench / eval) sets tags "
-            "in env and they attach to the root trace span. Agent code doesn't see "
-            "tag semantics. Empty = no-op."
-        ),
-        json_schema_extra={
-            "restart_required": "agent",
-            "writable": True,
-            "sensitive": False,
-            "scope": "cluster-pinned",
-        },
-    )
-
     trace_enabled: bool = Field(
         default=True,
         alias="AVA_TRACE_ENABLED",
