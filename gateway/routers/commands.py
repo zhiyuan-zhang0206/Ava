@@ -23,7 +23,7 @@ _AGENT_SKILL_VIEW_TIMEOUT_S = 3.0
 
 
 def _local_commands() -> list[CommandItem]:
-    """The gateway-local fallback and backwards-compatible no-agent view."""
+    """The gateway-local catalog: the unscoped view and the availability fallback."""
     from ava.composer_commands import discover_commands
 
     return [
