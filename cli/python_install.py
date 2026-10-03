@@ -199,49 +199,84 @@ def install(
         if result:
             return result
         if index == PYPI_INDEX:
-            env["UV_DEFAULT_INDEX"] = PYPI_INDEX
-            reinstall = ["--reinstall-package", reinstall_package] if reinstall_package else []
-            return run(
-                [
-                    "uv",
-                    "sync",
-                    "--locked",
-                    "--inexact",
-                    "--no-config",
-                    "--compile-bytecode",
-                    *flags,
-                    *pinned,
-                    *reinstall,
-                ],
-                repo,
-                env,
-            )
-        target = repo / ".venv" / "bin/python"
-        result = _mirror_environment(repo, target, interpreter, request, env, run)
-        if result:
-            return result
-        env["UV_DEFAULT_INDEX"] = index
-        common = [
-            "uv",
-            "pip",
-            "install",
-            "--no-config",
-            "--compile-bytecode",
-            "--python",
-            str(target),
-            "--no-deps",
-        ]
-        if verbose:
-            common.append("--verbose")
-        reinstall = ["--reinstall-package", reinstall_package] if reinstall_package else []
-        result = run(
-            [*common, "--require-hashes", "--requirements", str(requirements), *reinstall],
+            return _sync_from_pypi(repo, env, [*flags, *pinned], reinstall_package, run)
+        return _install_from_mirror(
             repo,
             env,
+            index=index,
+            requirements=requirements,
+            interpreter=interpreter,
+            request=request,
+            verbose=verbose,
+            reinstall_package=reinstall_package,
+            run=run,
         )
-        if result:
-            return result
-        return run([*common, "--editable", str(repo), *reinstall], repo, env)
+
+
+def _sync_from_pypi(
+    repo: Path,
+    env: dict[str, str],
+    flags: list[str],
+    reinstall_package: str | None,
+    run: UvRunner,
+) -> int:
+    env["UV_DEFAULT_INDEX"] = PYPI_INDEX
+    reinstall = ["--reinstall-package", reinstall_package] if reinstall_package else []
+    return run(
+        [
+            "uv",
+            "sync",
+            "--locked",
+            "--inexact",
+            "--no-config",
+            "--compile-bytecode",
+            *flags,
+            *reinstall,
+        ],
+        repo,
+        env,
+    )
+
+
+def _install_from_mirror(
+    repo: Path,
+    env: dict[str, str],
+    *,
+    index: str,
+    requirements: Path,
+    interpreter: str | None,
+    request: str,
+    verbose: bool,
+    reinstall_package: str | None,
+    run: UvRunner,
+) -> int:
+    """Install the exported hashes, then the checkout itself, through a configured mirror."""
+    target = repo / ".venv" / "bin/python"
+    result = _mirror_environment(repo, target, interpreter, request, env, run)
+    if result:
+        return result
+    env["UV_DEFAULT_INDEX"] = index
+    common = [
+        "uv",
+        "pip",
+        "install",
+        "--no-config",
+        "--compile-bytecode",
+        "--python",
+        str(target),
+        "--no-deps",
+    ]
+    if verbose:
+        common.append("--verbose")
+    reinstall = ["--reinstall-package", reinstall_package] if reinstall_package else []
+    result = run(
+        [*common, "--require-hashes", "--requirements", str(requirements), *reinstall],
+        repo,
+        env,
+    )
+    if result:
+        return result
+    return run([*common, "--editable", str(repo), *reinstall], repo, env)
 
 
 def main() -> int:
