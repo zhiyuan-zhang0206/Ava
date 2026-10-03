@@ -398,6 +398,7 @@ def test_build_generation_llm_forwards_params_effort(monkeypatch: pytest.MonkeyP
     monkeypatch.setattr("base.lm.factory.build_chat_model", fake_build)
     build_generation_llm(MODEL)
     assert captured["model"] == MODEL
-    assert captured["kwargs"] == {"reasoning_effort": GenParams().reasoning_effort}
+    # The default follows the agent's own build: no effort override.
+    assert captured["kwargs"] == {"reasoning_effort": None}
     build_generation_llm(MODEL, GenParams(reasoning_effort="max"))
     assert captured["kwargs"] == {"reasoning_effort": "max"}

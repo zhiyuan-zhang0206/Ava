@@ -178,10 +178,9 @@ def _effective_model(config_overlay: Any) -> str:
     """The model an agent's own calls run, withdrawal-resolved (task #3212).
 
     `config_overlay.llm_model` when set, otherwise `settings.lm.llm_model`; a
-    configured withdrawn id is served by its registered fallback. One
-    resolution site serves both the snapshot's capability judgment and
-    `agent_effective_model` — generation couples to the agent's own model for
-    provider cache parity (task #4674).
+    configured withdrawn id is served by its registered fallback. This is the
+    snapshot's capability judgment and reads the overlay only;
+    `agent_effective_model` also reads the birth stamp.
     """
     from base.lm.registry import resolve_available_model
 
@@ -248,17 +247,22 @@ def select_one(conn: psycopg.Connection, agent_id: int) -> AgentSnapshot | None:
 def agent_effective_model(db: Database, agent_id: int, *, fallback: str) -> str:
     """The model `agent_id`'s own calls run, withdrawal-resolved.
 
-    The same resolution `_row_to_snapshot` applies for the snapshot, without
-    building one; a consumer couples to it so its requests ride the agent's
-    own model (hierarchy generation, task #4674 — a hard model mismatch
-    silently halves its provider cache hit rate). A failed agents_meta read
-    logs a warning and returns `fallback` — generation must not die on a
-    bookkeeping miss.
+    The agent host's own resolution: `llm_model` is a birth-frozen field, so the
+    pin is `config_overlay` over `birth_config` (an agent born under an older
+    cluster default keeps its birth model), the live cluster default only when
+    neither pins it, and a withdrawn id is served by its registered fallback. A
+    consumer couples to it so its requests ride the agent's own model
+    (hierarchy generation, task #4674 — a hard model mismatch silently halves
+    its provider cache hit rate). A failed agents_meta read logs a warning and
+    returns `fallback` — generation must not die on a bookkeeping miss.
     """
+    from base.config.agent_pins import resolve_agent_config_pins
+    from base.lm.registry import resolve_available_model
+
     try:
         with db.connect(autocommit=True) as conn:
             row = conn.execute(
-                "SELECT config_overlay FROM agents_meta WHERE id = %s", (agent_id,)
+                "SELECT config_overlay, birth_config FROM agents_meta WHERE id = %s", (agent_id,)
             ).fetchone()
     except Exception as exc:
         logger.warning(
@@ -268,7 +272,8 @@ def agent_effective_model(db: Database, agent_id: int, *, fallback: str) -> str:
             model=fallback,
         )
         return fallback
-    return _effective_model(row[0] if row else None)
+    pins = resolve_agent_config_pins(row[0] if row else None, row[1] if row else None)
+    return resolve_available_model(pins.get("llm_model") or settings.lm.llm_model)
 
 
 class ActivityEntry(BaseModel):
