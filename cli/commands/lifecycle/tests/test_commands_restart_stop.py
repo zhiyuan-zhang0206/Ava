@@ -115,7 +115,7 @@ def _noop_start_prechecks(serving_root: RootBirth, monkeypatch: pytest.MonkeyPat
 def _root_stop_boundary(monkeypatch: pytest.MonkeyPatch) -> None:
     """No command-layer test contacts or signals a native application root."""
     monkeypatch.setattr(_root_driver_commands, "_root_tree_plan", lambda _preserve: [])  # pyright: ignore[reportUnknownArgumentType] — untyped test double
-    monkeypatch.setattr(_root_driver_commands, "_stop_root_service_tree", lambda **_kwargs: 0)  # pyright: ignore[reportUnknownArgumentType] — untyped test double
+    monkeypatch.setattr(_root_driver_commands, "stop_root_service_tree", lambda **_kwargs: 0)  # pyright: ignore[reportUnknownArgumentType] — untyped test double
     monkeypatch.setattr(_stop_commands, "_reap_cluster_chrome", lambda: None)
     monkeypatch.setattr("cli.commands.lifecycle.stop._stop_terminals_force", lambda: None)
 
@@ -322,7 +322,7 @@ def test_stop_proceeds_on_yes(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("builtins.input", lambda _prompt: "y")  # pyright: ignore[reportUnknownArgumentType] — untyped test double
     monkeypatch.setattr(
         _root_driver_commands,
-        "_stop_root_service_tree",
+        "stop_root_service_tree",
         lambda **_kw: events.append("root"),  # pyright: ignore[reportUnknownArgumentType] — untyped test double
     )
     monkeypatch.setattr(
@@ -344,7 +344,7 @@ def test_stop_revokes_serving_before_stopping_root(
     observed: list[bool] = []
     monkeypatch.setattr(
         _root_driver_commands,
-        "_stop_root_service_tree",
+        "stop_root_service_tree",
         lambda **_kw: observed.append(start_serving.is_serving()),  # pyright: ignore[reportUnknownArgumentType] — untyped test double
     )
     monkeypatch.setattr("cli.commands.data_plane.cluster_instance.stop_cluster_instance", lambda: 0)
@@ -358,7 +358,7 @@ def test_do_stop_keep_infra_skips_infra_teardown(
     events: list[str] = []
     monkeypatch.setattr(
         _root_driver_commands,
-        "_stop_root_service_tree",
+        "stop_root_service_tree",
         lambda **_kw: events.append("root"),  # pyright: ignore[reportUnknownArgumentType] — untyped test double
     )
     monkeypatch.setattr(
@@ -374,7 +374,7 @@ def test_do_stop_keeps_browser_by_default(monkeypatch: pytest.MonkeyPatch, tmp_p
     reaps: list[int] = []
     monkeypatch.setattr(
         _root_driver_commands,
-        "_stop_root_service_tree",
+        "stop_root_service_tree",
         lambda **kw: calls.append(kw),  # pyright: ignore[reportUnknownArgumentType] — untyped test double
     )
     monkeypatch.setattr(_stop_commands, "_reap_cluster_chrome", lambda: reaps.append(1))
@@ -391,7 +391,7 @@ def test_do_stop_stop_browser_kills_it(monkeypatch: pytest.MonkeyPatch, tmp_path
         assert kwargs == {"preserve": frozenset(), "force": True}
         events.append("root")
 
-    monkeypatch.setattr(_root_driver_commands, "_stop_root_service_tree", stop_root)
+    monkeypatch.setattr(_root_driver_commands, "stop_root_service_tree", stop_root)
     monkeypatch.setattr(_stop_commands, "_reap_cluster_chrome", lambda: events.append("browser"))
     monkeypatch.setattr(
         "cli.commands.data_plane.cluster_instance.stop_cluster_instance",

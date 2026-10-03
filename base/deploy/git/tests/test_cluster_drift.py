@@ -9,9 +9,9 @@ import pytest
 
 from base.deploy.git import cluster_drift
 from base.deploy.git.cluster_drift import (
-    _prod_source_dir,
     checkout_head_sha,
     prod_source_branch_drift,
+    prod_source_dir,
     prod_source_head_sha,
     running_from_prod_source,
 )
@@ -51,40 +51,30 @@ def _commit(source: Path, content: str, msg: str) -> str:
 
 def test_head_sha_absent(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """No source repo → None (nothing to read)."""
-    monkeypatch.setattr(
-        "base.deploy.git.cluster_drift._prod_source_dir", lambda: tmp_path / "source"
-    )
+    monkeypatch.setenv("AVA_HOME", str(tmp_path))
     assert prod_source_head_sha() is None
 
 
 def test_head_sha_returns_head(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     sha = _init_prod_source(tmp_path / "source")
-    monkeypatch.setattr(
-        "base.deploy.git.cluster_drift._prod_source_dir", lambda: tmp_path / "source"
-    )
+    monkeypatch.setenv("AVA_HOME", str(tmp_path))
     assert prod_source_head_sha() == sha
 
 
 def test_branch_drift_absent(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    monkeypatch.setattr(
-        "base.deploy.git.cluster_drift._prod_source_dir", lambda: tmp_path / "source"
-    )
+    monkeypatch.setenv("AVA_HOME", str(tmp_path))
     assert prod_source_branch_drift() is None
 
 
 def test_branch_drift_on_main(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     _init_prod_source(tmp_path / "source")
-    monkeypatch.setattr(
-        "base.deploy.git.cluster_drift._prod_source_dir", lambda: tmp_path / "source"
-    )
+    monkeypatch.setenv("AVA_HOME", str(tmp_path))
     assert prod_source_branch_drift() is None
 
 
 def test_branch_drift_feature_branch(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     _init_prod_source(tmp_path / "source", branch="ava-7/fix")
-    monkeypatch.setattr(
-        "base.deploy.git.cluster_drift._prod_source_dir", lambda: tmp_path / "source"
-    )
+    monkeypatch.setenv("AVA_HOME", str(tmp_path))
     assert prod_source_branch_drift() == "ava-7/fix"
 
 
@@ -100,7 +90,7 @@ def test_prod_source_dir_is_the_homes_own_source(
     elsewhere.write_text("#!/bin/sh\n")
     (home / "ava").symlink_to(elsewhere)
     monkeypatch.setattr("base.paths.ava_home", lambda: home)
-    assert _prod_source_dir() == home / "source"
+    assert prod_source_dir() == home / "source"
 
 
 def test_checkout_head_sha_reads_an_explicit_checkout(tmp_path: Path) -> None:
@@ -114,7 +104,7 @@ def test_running_from_prod_source_recognizes_the_loaded_checkout(
 ) -> None:
     """The module anchors on the checkout it was imported from, not on its package depth."""
     checkout = Path(__file__).resolve().parents[4]
-    monkeypatch.setattr(cluster_drift, "_prod_source_dir", lambda: checkout)
+    monkeypatch.setattr(cluster_drift, "prod_source_dir", lambda: checkout)
     assert running_from_prod_source() is True
-    monkeypatch.setattr(cluster_drift, "_prod_source_dir", lambda: tmp_path)
+    monkeypatch.setattr(cluster_drift, "prod_source_dir", lambda: tmp_path)
     assert running_from_prod_source() is False

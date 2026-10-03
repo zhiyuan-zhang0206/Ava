@@ -119,7 +119,7 @@ def test_resume_agents_releases_undelivered_receipts(monkeypatch: pytest.MonkeyP
 
     from ops.agent_pause import resume_agents
 
-    monkeypatch.setattr("ops.agent_pause._wake", MagicMock())
+    monkeypatch.setattr("ops.agent_pause.publish_inbound_wake", MagicMock())
     _hold_with(undelivered={7: "PoolTimeout"})
     resume_agents()
     assert pause_owner.read().status == "resumed"
@@ -132,7 +132,7 @@ def test_resume_agents_refuses_blocking_failures_with_repair_hint(
 
     from ops.agent_pause import resume_agents
 
-    monkeypatch.setattr("ops.agent_pause._wake", MagicMock())
+    monkeypatch.setattr("ops.agent_pause.publish_inbound_wake", MagicMock())
     _hold_with(failures={7: "RuntimeError"})
     with pytest.raises(RuntimeError, match="ava maintenance repair --operation"):
         resume_agents()
@@ -145,7 +145,7 @@ def test_unpause_releases_undelivered_receipts(monkeypatch: pytest.MonkeyPatch) 
     from ops.cluster_pause import unpause_local_cluster
 
     monkeypatch.setattr("ops.cluster_pause._unpause_local_cluster", MagicMock())
-    monkeypatch.setattr("ops.agent_pause._wake", MagicMock())
+    monkeypatch.setattr("ops.agent_pause.publish_inbound_wake", MagicMock())
     _hold_with(undelivered={7: "PoolTimeout"})
     unpause_local_cluster()
     assert pause_owner.read().status == "resumed"

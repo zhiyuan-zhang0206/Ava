@@ -30,7 +30,7 @@ def cli_dependencies(monkeypatch: pytest.MonkeyPatch) -> None:
     )
     patch_database(monkeypatch, connect=MagicMock())
     monkeypatch.setattr(command.cohort, "verify_drained", MagicMock())
-    monkeypatch.setattr("ops.agent_pause._wake", MagicMock())
+    monkeypatch.setattr("ops.agent_pause.publish_inbound_wake", MagicMock())
     monkeypatch.setattr("base.deploy.state.host_deploy_state.set_posture", MagicMock())
     monkeypatch.setattr(command, "ops_quiescent", MagicMock())
 

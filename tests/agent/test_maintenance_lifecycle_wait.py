@@ -36,7 +36,7 @@ def _as_live_host(monkeypatch: pytest.MonkeyPatch, owner: UUID) -> None:
     monkeypatch.setattr(agent_pause, "machine_role", lambda: frozenset({"agent-runner"}))
     monkeypatch.setattr(agent_pause, "host_running", lambda: True)
     monkeypatch.setattr(agent_pause, "host_identity", lambda: HostIdentity(owner, frozenset()))
-    monkeypatch.setattr(agent_pause, "_wake", MagicMock())
+    monkeypatch.setattr(agent_pause, "publish_inbound_wake", MagicMock())
 
 
 def _events(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]:

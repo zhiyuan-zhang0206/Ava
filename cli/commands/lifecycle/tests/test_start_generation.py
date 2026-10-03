@@ -112,7 +112,7 @@ def test_live_admission_requires_positive_absence(monkeypatch: pytest.MonkeyPatc
         return None
 
     monkeypatch.setattr(driver, "_root_status", no_status)
-    monkeypatch.setattr(driver, "_root_client", object)
+    monkeypatch.setattr(driver, "root_client", object)
 
     def unknown() -> None:
         raise RuntimeError("retained child custody")

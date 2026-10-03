@@ -121,7 +121,7 @@ patched and the test homes that patch them. This is the injection-seam work list
 | `ava.mcps._remote` | 18 | `_remote` 18 | `ava` 18 |
 | `scripts.lint.async_no_sync_blocking` | 18 | `_REPO_ROOT` 9, `_ROOT` 2, `_DEFINITION_DIRS` 2 | `scripts` 18 |
 | `agent.startup` | 16 | `_page_server_alive` 9, `_last_reconcile_at` 7 | `agent/graph/claim` 16 |
-| `cli.commands.lifecycle.root_driver` | 16 | `_stop_root_service_tree` 8, `_root_tree_selection` 4, `_root_tree_plan` 2 | `cli/commands/data_plane` 10, `cli` 4, `cli/commands/observability` 1, `(top-level)` 1 |
+| `cli.commands.lifecycle.root_driver` | 16 | `stop_root_service_tree` 8, `root_tree_selection` 4, `_root_tree_plan` 2 | `cli/commands/data_plane` 10, `cli` 4, `cli/commands/observability` 1, `(top-level)` 1 |
 | `cli.commands.lifecycle._temporary_stop` | 15 | `_temporary_stop` 15 | `cli` 15 |
 | `base.daemon.health` | 14 | `_probe_daemon` 5, `_probe_home` 3, `_health_payload` 3 | `base` 9, `cli/commands` 2, `services/healthchecks` 2, `services/events_maintenance` 1 |
 | `cli.commands.observability.lgtm_native` | 14 | `_download_and_verify` 4, `_verify_loki` 3, `_stream_download` 2 | `cli/commands` 9, `cli/commands/converge` 5 |

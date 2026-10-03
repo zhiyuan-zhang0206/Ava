@@ -7,7 +7,7 @@ from typing import Any, cast
 
 import pytest
 
-from cli.commands.converge import host as converge_host
+from cli.commands.converge.spec import ConvergeCtx
 from cli.commands.extensions import _external_skill_cleanup as bridge_cleanup
 from cli.commands.extensions import _external_skill_fs as bridge_fs
 from cli.commands.extensions import external_skills as bridge
@@ -15,7 +15,7 @@ from cli.commands.extensions import external_skills as bridge
 SKILL = "operating-ava-cluster"
 
 
-def _world(tmp_path: Path) -> tuple[Path, Path, converge_host.ConvergeCtx]:
+def _world(tmp_path: Path) -> tuple[Path, Path, ConvergeCtx]:
     repo = tmp_path / "repo"
     source = repo / ".agents" / "skills" / SKILL
     source.mkdir(parents=True)
@@ -25,14 +25,14 @@ def _world(tmp_path: Path) -> tuple[Path, Path, converge_host.ConvergeCtx]:
     client.mkdir(parents=True)
     ava_home = tmp_path / "ava-home"
     (ava_home / "configs").mkdir(parents=True)
-    return source, client, converge_host.ConvergeCtx(repo=repo, ava_home=ava_home, roles=None)
+    return source, client, ConvergeCtx(repo=repo, ava_home=ava_home, roles=None)
 
 
 def _target(client: Path) -> Path:
     return client / "skills" / SKILL
 
 
-def _ledger(context: converge_host.ConvergeCtx) -> dict[str, Any]:
+def _ledger(context: ConvergeCtx) -> dict[str, Any]:
     value: object = json.loads(
         (context.ava_home / "configs" / "external-agent-skills" / "codex.json").read_text()
     )

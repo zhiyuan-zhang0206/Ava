@@ -10,7 +10,7 @@ from typing import Any, cast
 
 import pytest
 
-from cli.commands.converge import host as converge_host
+from cli.commands.converge.spec import ConvergeCtx
 from cli.commands.extensions import _external_skill_fs as bridge_fs
 from cli.commands.extensions import external_skills as bridge
 
@@ -25,10 +25,10 @@ def _source(repo: Path, body: str = "operator v1\n") -> Path:
     return source
 
 
-def _context(repo: Path, tmp_path: Path) -> converge_host.ConvergeCtx:
+def _context(repo: Path, tmp_path: Path) -> ConvergeCtx:
     ava_home = tmp_path / "ava-home"
     (ava_home / "configs").mkdir(parents=True)
-    return converge_host.ConvergeCtx(repo=repo, ava_home=ava_home, roles=None)
+    return ConvergeCtx(repo=repo, ava_home=ava_home, roles=None)
 
 
 def _client_home(tmp_path: Path, name: str = ".codex") -> Path:
@@ -46,7 +46,7 @@ def _target(client: Path, tmp_path: Path) -> Path:
     return target
 
 
-def _ledger(context: converge_host.ConvergeCtx) -> dict[str, Any]:
+def _ledger(context: ConvergeCtx) -> dict[str, Any]:
     return cast(
         dict[str, Any],
         json.loads(
