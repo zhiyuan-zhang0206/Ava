@@ -21,10 +21,11 @@ from agent.graph.tool_calls import (
     normalize_tool_calls,
     replace_execute_code,
 )
-from agent.hooks import Hook, register_before_exec
+from agent.hooks import Hook
 from agent.messages import exec_output_message
 from agent.state import AgentState
 from base.agents.context import AvaContext
+from base.packages.plugins.extensions import PluginContributions
 
 from ._deterministic_fixes import apply_all_deterministic_fixes
 from ._escapes import _fix_invalid_escapes
@@ -309,4 +310,8 @@ class _SyntaxFixHook(Hook):
 
 
 syntax_fix_before_exec = _SyntaxFixHook()
-register_before_exec(syntax_fix_before_exec)
+
+
+def contribute() -> PluginContributions:
+    """What this plugin declares for the agent runtime."""
+    return PluginContributions(before_exec=(syntax_fix_before_exec,))

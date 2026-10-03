@@ -11,6 +11,10 @@ each registry mutation, keyed by the same identifiers the `ava-plugin.json`
 manifest declares (`base/packages/plugins/manifest.py:CONTRIBUTION_KEYS`) so declared and
 registered are directly comparable.
 
+Surfaces a plugin *declares* (hooks, state, system prompt sections, context notes) are not recorded
+here: `PluginContributions.as_records` derives the same `Contribution` values from the declaration, and
+the catalog merges both sources. This ledger holds what is still registered at import.
+
 **Only registrations made inside a `PluginContext` are recorded.** The framework
 registers its own hooks and prompt sections through the same entry points, and a
 test may wrap an `ava` target with no plugin in scope; neither is a plugin

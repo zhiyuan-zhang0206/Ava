@@ -27,8 +27,11 @@ def _state_module() -> Any:
 
 
 def _serializer() -> JsonPlusSerializer:
+    state_module = _state_module()
     return JsonPlusSerializer(
-        allowed_msgpack_modules=_state_module().checkpoint_msgpack_allowlist()
+        allowed_msgpack_modules=state_module.checkpoint_msgpack_allowlist(
+            state_module.process_state_classes()
+        )
     )
 
 
@@ -81,6 +84,10 @@ def apply_plugin_delta(state: Any, delta: dict[str, Any]) -> None:
 
 def load_snapshot(agent_id: int) -> tuple[Any, dict[str, Any] | None, dict[str, Any] | None]:
     """Read native state and pinned config; never create or update a checkpoint."""
+    # Built first: the checkpoint decode's allowlist is the class's plugin state classes.
+    # What the plugins this attachment loaded declare.
+    registry = importlib.import_module("agent.extensions.registry").build_registry()
+    state_cls = _state_module().build_agent_state(registry)
     with database().connect(autocommit=True) as conn:
         conn.row_factory = cast(Any, dict_row)
         typed_conn = cast(Connection[DictRow], conn)
@@ -97,6 +104,5 @@ def load_snapshot(agent_id: int) -> tuple[Any, dict[str, Any] | None, dict[str, 
             reconstruct_delta_messages(saver, snapshot)
     if snapshot is None:
         raise RuntimeError("approved agent has no checkpoint to attach")
-    state_cls = _state_module().build_agent_state()
     state = state_cls.model_validate(snapshot.checkpoint["channel_values"])
     return state, row["config_overlay"], row["birth_config"]

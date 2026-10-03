@@ -21,7 +21,7 @@ from agent.graph.context_notes import (
     RANK_PER_AGENT_MEMORY,
 )
 from agent.graph.memory_recall import passive_memory_recall
-from agent.hooks import Hook, register_before_llm
+from agent.hooks import Hook
 from agent.hooks.compact import auto_compact_will_fire
 from agent.messages import tail_has_recallable_inbound
 from agent.state import AgentState, MemoryState
@@ -249,13 +249,13 @@ class _PassiveMemoryRecallHook(Hook):
 
 
 passive_memory_recall_before_llm = _PassiveMemoryRecallHook()
-register_before_llm(passive_memory_recall_before_llm)
 
 
 def contribute() -> PluginContributions:
     """What this plugin declares for the agent runtime."""
     return PluginContributions(
         system_prompt_sections=(memory_discipline_section,),
+        before_llm=(passive_memory_recall_before_llm,),
         context_notes=(
             ContextNote(memory_index_note, rank=RANK_CLUSTER_MEMORY),
             ContextNote(per_agent_memory_note, on_fork=True, rank=RANK_PER_AGENT_MEMORY),

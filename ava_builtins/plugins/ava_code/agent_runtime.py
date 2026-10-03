@@ -29,9 +29,9 @@ from pydantic import BaseModel, Field
 
 import ava
 import ava.agent_identity as _ava_identity
-from agent.hooks import Hook, register_after_exec, register_after_init
+from agent.hooks import Hook
 from agent.messages import NoteTag, system_note_message
-from agent.state import AgentState, register_plugin_state
+from agent.state import AgentState, PluginStateHandle
 from base.host.env.agent_slices import AgentSlices
 from base.log import logger
 from base.packages.plugins.extensions import PluginContributions
@@ -94,8 +94,8 @@ class AvaCodeState(BaseModel):
     # Base-channel declaration: this plugin legitimately appends system notes
     # (AGENTS.md / CLAUDE.md context injection) to the framework's `messages`
     # channel during the exec turn. The annotation must match BaseAgentState
-    # exactly (incl. the add_messages reducer) — register_plugin_state
-    # enforces it — and the exec node merges the plugin's messages delta with
+    # exactly (incl. the add_messages reducer) — the registry's state
+    # validation enforces it — and the exec node merges the plugin's messages delta with
     # its own ToolMessage delta (agent/graph/exec/node.py), so the notes ride in
     # the same in-memory state update instead of a side-channel file.
     messages: Annotated[list[AnyMessage], add_messages] = Field(default_factory=list)
@@ -107,7 +107,7 @@ class AvaCodeState(BaseModel):
     cwd_note: str | None = None
 
 
-state_handle = register_plugin_state(AvaCodeState)
+state_handle = PluginStateHandle(AvaCodeState, "ava_code")
 
 # The surface module holds a stand-in handle until this face loads — on the
 # agent side the face loads at boot; in a stateful child the lazy state slot
@@ -323,14 +323,15 @@ class _ValidateCwdAfterInitHook(Hook):
 
 
 validate_cwd_after_init = _ValidateCwdAfterInitHook()
-register_after_init(validate_cwd_after_init)
 
 inject_cwd_notes_after_exec = _InjectCwdNotesAfterExecHook()
-register_after_exec(inject_cwd_notes_after_exec)
 
 
 def contribute() -> PluginContributions:
     """What this plugin declares for the agent runtime."""
     return PluginContributions(
-        system_prompt_sections=(_coding_tools_section, _engineering_workflow_section)
+        system_prompt_sections=(_coding_tools_section, _engineering_workflow_section),
+        after_init=(validate_cwd_after_init,),
+        after_exec=(inject_cwd_notes_after_exec,),
+        state=(AvaCodeState,),
     )

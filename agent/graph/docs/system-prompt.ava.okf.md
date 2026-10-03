@@ -66,7 +66,7 @@ The system prompt carried in every LLM call, built **once per context window** �
 - `base/packages/plugins/extensions.py:PluginContributions` — what a plugin's `contribute()` declares
 - `agent/graph/capabilities.py:capabilities_section(slices)` / `resolve_prompt_skills()` — the `# Capabilities` index and the name→skill resolver it shares with the preloaded-skills note
 - `agent/graph/capabilities.py:indexed_skills(prompt)` / `index_drift(known, prompt)` — what the index covers right now, and the diff against a snapshot of it
-- `agent/hooks/capabilities.py:register_capabilities_hooks()` — the `before_llm` hook that names skills installed since the index was built
+- `agent/hooks/capabilities.py:_newly_installed_skills` — the `before_llm` hook that names skills installed since the index was built
 - `agent/graph/_init_context.py:init_context_node()` — caller of `build_system_prompt()`, and where the snapshot is recorded
 
 ## Notes

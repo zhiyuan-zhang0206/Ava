@@ -1,6 +1,6 @@
 """`plugins.ava_code` integration tests — ava.cwd namespace, files.read and ui.serve wraps,
-AGENTS.md injection dedup. Plugin import uses `load_extensions` real path loading, testing
-the whole register_plugin_state + register_namespace + wrap end-to-end behavior.
+AGENTS.md injection dedup, end to end: surface imported under `PluginContext`, state declared
+through `agent_runtime.contribute()`.
 """
 
 import io
@@ -22,16 +22,13 @@ from agent.state import (
 )
 from base.host.env.agent_slices import AgentSlices
 from base.packages.plugins.context import PluginContext
+from base.packages.plugins.extensions import ExtensionRegistry
 
 
 @pytest.fixture(autouse=True)
 def _load_ava_code_plugin():
-    """Reload plugin module before each test — register_plugin_state / register_namespace
-    are module-load side effects, must re-run; otherwise build_agent_state won't have plugin
-    fields. Clean up after run.
-
-    Compact state is now a built-in field of BaseAgentState (Issue #1284),
-    no extra registration needed.
+    """Reload plugin module before each test — register_namespace / wrap are module-load
+    side effects, must re-run. Clean up after run.
     """
 
     clear_plugin_registrations()
@@ -43,7 +40,7 @@ def _load_ava_code_plugin():
 
     with PluginContext("ava_code"):
         from ava_builtins.plugins.ava_code import (
-            agent_runtime as agent_runtime,  # import side effects (state field, hooks, prompt)
+            agent_runtime as agent_runtime,  # state handle the surface reads
         )
         from ava_builtins.plugins.ava_code import (
             plugin as plugin,  # surface: cwd namespace, wraps
@@ -70,7 +67,9 @@ def _make_state_with_cwd(
     compact_version: int = 0,
 ) -> BaseAgentState:
     """Build dynamic AgentState instance filling cwd + optional dedup state + optional compact counter."""
-    state_cls = build_agent_state()
+    from ava_builtins.plugins.ava_code import agent_runtime
+
+    state_cls = build_agent_state(ExtensionRegistry((("ava_code", agent_runtime.contribute()),)))
     kwargs: dict = {"ava_code__cwd": cwd, "ava_code__last_seen_compact": last_seen_compact}
     if injected is not None:
         kwargs["ava_code__injected_paths"] = injected

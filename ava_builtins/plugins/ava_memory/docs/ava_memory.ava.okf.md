@@ -25,7 +25,7 @@ class _PassiveMemoryRecallHook(Hook):
     ) -> dict | None: ...
 
 passive_memory_recall_before_llm = _PassiveMemoryRecallHook()
-register_before_llm(passive_memory_recall_before_llm)
+# declared in contribute(): before_llm=(passive_memory_recall_before_llm,)
 ```
 
 **Trigger conditions**:

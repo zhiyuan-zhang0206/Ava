@@ -542,26 +542,19 @@ async def test_auto_compact_hook_emits_compact_done_on_success(monkeypatch: pyte
 # 2. compact successful (cur=0) → wrap returns dict with messages + compact.version=1
 # 3. compact successful (cur=N>0) → wrap returns dict with compact.version=N+1
 # Implementation detail: wrap reads `state.compact.version` then model_copy the whole compact channel
-# reads self-registered fields, must first register_plugin_state(AvaCompactState) so dynamic
-# AgentState subclass carries this field. Fixture uses _ava_compact_registered for isolation.
+# reads the compact channel, which lives on BaseAgentState (no plugin state needed).
 
 
 @pytest.fixture
 def _ava_compact_loaded():
-    """Compact is now built-in (Issue #1284). The wrapper function lives in
+    """Compact is built-in (Issue #1284). The wrapper function lives in
     agent.hooks.compact; state fields are on BaseAgentState. Returns
     (state_cls, wrap_fn) for tests to call.
-
-    Teardown clears hook registrations to prevent leakage into other tests.
     """
     from agent.hooks.compact import _compact_reminder
-    from agent.state import build_agent_state, clear_plugin_registrations
+    from agent.state import build_agent_state
 
-    clear_plugin_registrations()
-
-    yield build_agent_state(), _compact_reminder
-
-    clear_plugin_registrations()
+    return build_agent_state(EMPTY), _compact_reminder
 
 
 async def test_compact_reminder_passthrough_none(

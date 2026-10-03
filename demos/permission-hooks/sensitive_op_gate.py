@@ -27,11 +27,12 @@ from langchain_core.messages import AIMessage
 from langchain_core.runnables import RunnableConfig
 from langgraph.runtime import Runtime
 
-from agent.hooks import Hook, register_before_exec
+from agent.hooks import Hook
 from agent.messages import NoteTag, system_note_message
 from agent.state import AgentState
 from base.agents.context import AvaContext, agent_id_from_config
 from base.log import logger
+from base.packages.plugins.extensions import PluginContributions
 
 # ── Policy tier ────────────────────────────────────────────────────────────
 
@@ -265,4 +266,7 @@ class _SensitiveOpGateHook(Hook):
 
 
 sensitive_op_gate = _SensitiveOpGateHook()
-register_before_exec(sensitive_op_gate)
+
+
+def contribute() -> PluginContributions:
+    return PluginContributions(before_exec=(sensitive_op_gate,))

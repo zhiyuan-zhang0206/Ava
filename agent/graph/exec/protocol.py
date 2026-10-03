@@ -82,9 +82,11 @@ def _serde() -> Any:
     """
     from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
 
-    from agent.state import checkpoint_msgpack_allowlist
+    from agent.state import checkpoint_msgpack_allowlist, process_state_classes
 
-    return JsonPlusSerializer(allowed_msgpack_modules=checkpoint_msgpack_allowlist())
+    return JsonPlusSerializer(
+        allowed_msgpack_modules=checkpoint_msgpack_allowlist(process_state_classes())
+    )
 
 
 def dumps_typed(obj: Any) -> tuple[str, bytes]:

@@ -3,24 +3,19 @@
 import pytest
 
 from agent.hooks.compact import COMPACTION_INSTRUCTION
+from base.packages.plugins.extensions import EMPTY
 
 
 @pytest.fixture
 def _ava_compact_loaded():
-    """Compact is now built-in (Issue #1284). The wrapper function lives in
+    """Compact is built-in (Issue #1284). The wrapper function lives in
     agent.hooks.compact; state fields are on BaseAgentState. Returns
     (state_cls, wrap_fn) for tests to call.
-
-    Teardown clears hook registrations to prevent leakage into other tests.
     """
     from agent.hooks.compact import _compact_reminder
-    from agent.state import build_agent_state, clear_plugin_registrations
+    from agent.state import build_agent_state
 
-    clear_plugin_registrations()
-
-    yield build_agent_state(), _compact_reminder
-
-    clear_plugin_registrations()
+    return build_agent_state(EMPTY), _compact_reminder
 
 
 def test_compact_triggers_point_at_the_contract(_ava_compact_loaded):

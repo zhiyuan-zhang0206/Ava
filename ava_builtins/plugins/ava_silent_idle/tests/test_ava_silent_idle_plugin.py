@@ -3,9 +3,8 @@ nudge when the previous turn was a silent idle (a reasoning-only AIMessage tail:
 no text, no tool_call).
 
 The hook is a graph-edge node: it reads the message tail off `state` and returns
-a delta dict (or None). These tests load the plugin via the real registration
-path, build an AgentState, and call the hook directly — mirroring
-test_ava_sdk_reminder_plugin.py.
+a delta dict (or None). These tests import the plugin's agent-runtime face, build
+an AgentState, and call the hook directly — mirroring test_ava_sdk_reminder_plugin.py.
 
 Covered:
 - injects a system_note tagged SILENT_IDLE_CONTINUE when the tail is a
@@ -25,37 +24,30 @@ from langchain_core.runnables import RunnableConfig
 from langgraph.runtime import Runtime
 
 from agent.messages import NoteTag
-from agent.state import build_agent_state, clear_plugin_registrations
+from agent.state import build_agent_state
 from base.agents.context import AvaContext
 from base.host.env.agent_slices import AgentSlices
+from base.packages.plugins.extensions import EMPTY
 
 
 @pytest.fixture
 def _loaded():
-    """Load plugins.ava_silent_idle via the real plugin-registration path;
-    teardown clears registrations + unloads the module so its before_llm hook
-    does not leak into other tests."""
-    from base.packages.plugins.context import PluginContext
-
-    clear_plugin_registrations()
+    """Import the ava_silent_idle agent-runtime face fresh; teardown unloads the module."""
     for name in list(sys.modules):
         if name.startswith("ava_builtins.plugins.ava_silent_idle"):
             del sys.modules[name]
 
-    with PluginContext("ava_silent_idle"):
-        # The hook registrations live in the agent-runtime face (task #3633).
-        from ava_builtins.plugins.ava_silent_idle import agent_runtime as _plugin
+    from ava_builtins.plugins.ava_silent_idle import agent_runtime as _plugin
 
     yield _plugin
 
-    clear_plugin_registrations()
     for name in list(sys.modules):
         if name.startswith("ava_builtins.plugins.ava_silent_idle"):
             del sys.modules[name]
 
 
 def _state(messages: list[AnyMessage]):
-    return build_agent_state()(messages=messages)
+    return build_agent_state(EMPTY)(messages=messages)
 
 
 def _runtime() -> Runtime[AvaContext]:

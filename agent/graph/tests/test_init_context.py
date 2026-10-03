@@ -292,7 +292,7 @@ async def test_a_skill_installed_after_establishment_reaches_the_next_turn(
     driven in sequence, with the snapshot handed from the node that records it to
     the hook that reads it.
     """
-    from agent.hooks.capabilities import _newly_installed_skills
+    from agent.hooks.framework import framework_hooks
 
     d = skills_dir()
     (d / "alpha").mkdir(parents=True)
@@ -319,7 +319,8 @@ async def test_a_skill_installed_after_establishment_reaches_the_next_turn(
     assert "beta" not in str(head[0].content)  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
 
     state = AgentState(messages=head, capabilities=established.update["capabilities"])  # type: ignore[index]
-    update = await _newly_installed_skills(state, _runtime(aops_pool), _config(tid))
+    drift_hook = framework_hooks()["before_llm"][-1]  # the capability-index drift check runs last
+    update = await drift_hook(state, _runtime(aops_pool), _config(tid))
 
     assert update is not None
     (note,) = update["messages"]
@@ -341,10 +342,9 @@ async def test_a_compaction_in_the_same_pass_keeps_its_summary_and_its_head(
     """
     from langgraph.graph.message import add_messages
 
-    from agent.hooks import HOOKS, make_hook_runner
     from agent.hooks import compact as compact_mod
-    from agent.hooks.capabilities import _newly_installed_skills
-    from agent.hooks.compact import _compact_reminder
+    from agent.hooks import make_hook_runner
+    from agent.hooks.framework import framework_hooks
     from base.lm.context_budget import ContextBudget
 
     d = skills_dir()
@@ -388,14 +388,9 @@ async def test_a_compaction_in_the_same_pass_keeps_its_summary_and_its_head(
         ],
         capabilities=established.update["capabilities"],  # type: ignore[index]
     )
-    saved = list(HOOKS["before_llm"])
-    HOOKS["before_llm"][:] = [_compact_reminder, _newly_installed_skills]
-    try:
-        cmd = await make_hook_runner("before_llm", default_next="llm")(
-            state, _runtime(aops_pool), _config(tid)
-        )
-    finally:
-        HOOKS["before_llm"][:] = saved
+    cmd = await make_hook_runner(
+        "before_llm", "llm", [(None, hook) for hook in framework_hooks()["before_llm"]]
+    )(state, _runtime(aops_pool), _config(tid))
 
     assert cmd.goto == "llm"
     hook_update = cast("dict[str, object]", cmd.update)

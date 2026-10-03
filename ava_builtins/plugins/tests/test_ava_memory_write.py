@@ -16,6 +16,7 @@ import yaml
 import ava
 from agent.state import build_agent_state, clear_plugin_registrations
 from base.packages.plugins.context import PluginContext
+from base.packages.plugins.extensions import ExtensionRegistry
 
 
 @pytest.fixture
@@ -470,17 +471,16 @@ def test_personal_write_is_immune_to_ava_cwd_drift(memory_plugin: Any, tmp_path:
             del sys.modules[name]
     with PluginContext("ava_code"):
         import_module("ava_builtins.plugins.ava_code.plugin")
-        # The state field + real handle live in the runtime face (task #3633);
-        # the surface alone registers neither — load the face so
-        # build_agent_state() carries ava_code__* and the handle is bound,
-        # as in production.
-        import_module("ava_builtins.plugins.ava_code.agent_runtime")
+        # The state class + real handle live in the runtime face (task #3633); load the face
+        # so the handle is bound, as in production.
+        code_face = import_module("ava_builtins.plugins.ava_code.agent_runtime")
 
     drifted_cwd = tmp_path / "repository"
     drifted_cwd.mkdir()
     workspace = tmp_path / "workspace"
     workspace.mkdir()
-    state_cls = build_agent_state()
+    # The state class comes from the face's declaration, so it carries ava_code__*.
+    state_cls = build_agent_state(ExtensionRegistry((("ava_code", code_face.contribute()),)))
     state_kwargs: dict[str, object] = {
         "ava_code__cwd": str(workspace),
         "ava_code__last_seen_compact": 0,

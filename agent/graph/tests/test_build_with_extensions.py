@@ -82,7 +82,7 @@ def test_only_enabled_plugins_are_imported(monkeypatch: pytest.MonkeyPatch):
 
     import importlib.util
 
-    from agent.graph import _build
+    from agent import extensions as _loader
 
     loaded: list[str] = []
     real = importlib.util.spec_from_file_location
@@ -93,7 +93,7 @@ def test_only_enabled_plugins_are_imported(monkeypatch: pytest.MonkeyPatch):
 
     monkeypatch.setattr(importlib.util, "spec_from_file_location", spy)  # pyright: ignore[reportUnknownArgumentType]
 
-    _build.load_extensions()
+    _loader.load_extensions()
 
     assert any("compact" in n for n in loaded)
     assert any("syntax_fix" in n for n in loaded)
@@ -116,7 +116,7 @@ def test_external_plugin_also_loaded(monkeypatch: pytest.MonkeyPatch):
 
     import importlib.util
 
-    from agent.graph import _build
+    from agent import extensions as _loader
 
     loaded: list[str] = []
     real = importlib.util.spec_from_file_location
@@ -127,7 +127,7 @@ def test_external_plugin_also_loaded(monkeypatch: pytest.MonkeyPatch):
 
     monkeypatch.setattr(importlib.util, "spec_from_file_location", spy)  # pyright: ignore[reportUnknownArgumentType]
 
-    _build.load_extensions()
+    _loader.load_extensions()
 
     assert any("audit" in n for n in loaded)
     assert not any("compact" in n for n in loaded)
@@ -136,13 +136,13 @@ def test_external_plugin_also_loaded(monkeypatch: pytest.MonkeyPatch):
 def test_load_extensions_installs_metering(monkeypatch: pytest.MonkeyPatch):
     """load_extensions must install the SDK-usage recorder over the final ava.*
     surface (after plugins load), so every agent's SDK calls get metered."""
-    from agent.graph import _build
+    from agent import extensions as _loader
     from ava.sdk_surface import metering
 
     installed: list[bool] = []
     monkeypatch.setattr(metering, "install", lambda: installed.append(True))
 
-    _build.load_extensions()
+    _loader.load_extensions()
 
     assert installed == [True]
 
@@ -174,14 +174,14 @@ def test_a_repeat_load_reuses_the_module_object_so_a_patch_still_lands(
     )
     write_local({"plugins": {"demo": {"enabled": True}}})
 
-    from agent.graph import _build
+    from agent import extensions as _loader
 
-    _build.load_extensions()
+    _loader.load_extensions()
     dotted = "ava_builtins.plugins.demo.plugin"
     first = sys.modules[dotted]
     stale_probe = first.probe  # the reference an earlier importer would be holding
 
-    _build.load_extensions()
+    _loader.load_extensions()
 
     assert sys.modules[dotted] is first
     # The consequence that actually bites: a callable captured before the reload
@@ -205,9 +205,9 @@ def test_a_different_file_under_the_same_name_gets_a_fresh_module(
     _make_plugin("demo", "__description__ = 'demo'\nGHOST = 'first file'\n")
     write_local({"plugins": {"demo": {"enabled": True}}})
 
-    from agent.graph import _build
+    from agent import extensions as _loader
 
-    _build.load_extensions()
+    _loader.load_extensions()
     dotted = "ava_builtins.plugins.demo.plugin"
     first = sys.modules[dotted]
     assert first.GHOST == "first file"
@@ -217,7 +217,7 @@ def test_a_different_file_under_the_same_name_gets_a_fresh_module(
     monkeypatch.setattr(paths, "repo_plugins_dir", lambda: other_repo)
     _make_plugin("demo", "__description__ = 'demo'\n")
 
-    _build.load_extensions()
+    _loader.load_extensions()
 
     assert sys.modules[dotted] is not first
     assert not hasattr(sys.modules[dotted], "GHOST")
@@ -268,10 +268,10 @@ def test_build_registry_holds_what_each_enabled_plugin_declares():
         _make_face(name, _CONTRIBUTING_FACE.format(name=name))
     write_local({"plugins": {"alpha": {"enabled": True}, "beta": {"enabled": True}}})
 
+    from agent import extensions as _loader
     from agent.extensions.registry import build_registry
-    from agent.graph import _build
 
-    _build.load_extensions()
+    _loader.load_extensions()
     registry = build_registry()
 
     assert [(p, fn.__name__) for p, fn in registry.system_prompt_sections()] == [
@@ -301,10 +301,10 @@ def test_a_face_whose_contribute_misbehaves_is_skipped_not_fatal(contribute_body
     _make_face("bad", f"def contribute():\n{contribute_body}\n")
     write_local({"plugins": {"good": {"enabled": True}, "bad": {"enabled": True}}})
 
+    from agent import extensions as _loader
     from agent.extensions.registry import build_registry
-    from agent.graph import _build
 
-    _build.load_extensions()
+    _loader.load_extensions()
 
     assert [p for p, _fn in build_registry().system_prompt_sections()] == ["good"]
 
@@ -356,11 +356,11 @@ def test_broken_external_plugin_skipped_and_others_load(
     _make_external_plugin("audit")
     write_local({"plugins": {"ava_ledger": {"enabled": True}, "audit": {"enabled": True}}})
 
-    from agent.graph import _build
+    from agent import extensions as _loader
 
     events = _capture_plugin_load_events(monkeypatch)
 
-    _build.load_extensions()  # must not raise
+    _loader.load_extensions()  # must not raise
 
     # the healthy plugin loaded
     assert "plugins.audit.plugin" in sys.modules
@@ -386,9 +386,9 @@ def test_broken_builtin_plugin_skipped_and_others_load(
     _make_plugin("compact")
     write_local({"plugins": {"syntax_fix": {"enabled": True}, "compact": {"enabled": True}}})
 
-    from agent.graph import _build
+    from agent import extensions as _loader
 
-    _build.load_extensions()  # must not raise
+    _loader.load_extensions()  # must not raise
 
     assert "ava_builtins.plugins.compact.plugin" in sys.modules
     assert "ava_builtins.plugins.syntax_fix.plugin" not in sys.modules
@@ -423,9 +423,9 @@ def test_external_plugin_relative_import_resolves_when_plugins_prefix_is_shadowe
     (pdir / "_helper.py").write_text("VALUE = 7\n", encoding="utf-8")
     write_local({"plugins": {"ava_ledger": {"enabled": True}}})
 
-    from agent.graph import _build
+    from agent import extensions as _loader
 
-    _build.load_extensions()  # must not raise
+    _loader.load_extensions()  # must not raise
 
     assert sys.modules["plugins.ava_ledger.plugin"].MARK == 7
     assert sys.modules["plugins.ava_ledger"].__path__ == [str(pdir)]
@@ -446,11 +446,11 @@ def test_dangling_config_entry_reported_and_skipped(
     _make_external_plugin("audit")
     write_local({"plugins": {"audit": {"enabled": True}, "vanished": {"enabled": True}}})
 
-    from agent.graph import _build
+    from agent import extensions as _loader
 
     events = _capture_plugin_load_events(monkeypatch)
 
-    config = _build.load_extensions()  # must not raise
+    config = _loader.load_extensions()  # must not raise
 
     assert "plugins.audit.plugin" in sys.modules
     assert "vanished" not in config.plugins

@@ -15,7 +15,7 @@ tags:
 
 `ava_silent_idle` nudges the agent when it produces a "silent idle" (has reasoning tokens but no text, no tool_call). Such turns look like the agent is stuck thinking — reasoning but no action.
 
-## Registered Hooks
+## Declared Hooks
 
 ### before_llm hook
 
@@ -26,7 +26,7 @@ class _SilentIdleContinueHook(Hook):
     ) -> dict | None: ...
 
 silent_idle_continue_before_llm = _SilentIdleContinueHook()
-register_before_llm(silent_idle_continue_before_llm)
+# declared in contribute(): PluginContributions(before_llm=(silent_idle_continue_before_llm,))
 ```
 
 **Trigger conditions**:

@@ -86,7 +86,7 @@ class InvalidConfigOverlay(PluginConfigError):  # noqa: N818
     Nothing was spawned or queued — fix the dict and call again."""
 
 
-# Two-layer dict (similar to _EXTRA_FIELDS / _PLUGIN_NAMESPACE_FIELDS on the state side):
+# Two-layer dict (the state side now carries its tables on the AgentState class):
 #   _PLUGIN_CONFIG_CLASSES: plugin → Cls (filled on register, read on bind)
 #   _PLUGIN_CONFIGS:       plugin → instance (filled on bind, agent reads via
 #                          `ava._settings.plugins.<n>`)

@@ -11,23 +11,25 @@ tags:
 
 ## Graph-Edge Hooks (`agent/hooks/_registry.py`)
 Four hook container nodes sit in the LangGraph execution graph (topology: START → after_init → init_context → claim → before_llm → llm → before_exec → exec → after_exec → claim):
-- `after_init` — runs once after the checkpoint is loaded, before `claim` (e.g., ava_code's `register_after_init(validate_cwd_after_init)` repairs a persisted logical cwd that cannot be statted or is not a directory, without mutating the Python process cwd)
+- `after_init` — runs once after the checkpoint is loaded, before `claim` (e.g., ava_code's `validate_cwd_after_init` repairs a persisted logical cwd that cannot be statted or is not a directory, without mutating the Python process cwd)
 - `before_llm` — after claim completion, before LLM invocation
 - `before_exec` — after LLM completion, before code execution
 - `after_exec` — after code execution completion, before the next node
 
-Plugins register an **instance** of a `Hook` ABC subclass (PyTorch `nn.Module` shape—base class locks the signature, subclasses fill the body), rather than a bare async function + decorator:
+Plugins declare an **instance** of a `Hook` ABC subclass (PyTorch `nn.Module` shape—base class locks the signature, subclasses fill the body), rather than a bare async function + decorator:
 ```python
-from agent.hooks import Hook, register_before_llm
+from agent.hooks import Hook
+from base.packages.plugins.extensions import PluginContributions
 
 class MyHook(Hook):
     async def __call__(self, state, runtime, config, /) -> dict | None:
         return None  # or return a dict for state update
 
-register_before_llm(MyHook())
+def contribute() -> PluginContributions:
+    return PluginContributions(before_llm=(MyHook(),))
 ```
 
-The signature is inherited and checked by pyright strict's `reportIncompatibleMethodOverride`—narrowing parameter types / widening return value / missing parameters are caught at type-checking time, no longer just a convention described in a Protocol. The four hook points share the same `Hook` base class (same signature); the only difference is which list they are registered into. Instances can carry per-hook state in `__init__`. Returning a dict can modify state; returning None is a no-op. When two hooks write the same key in the same round, the merge is **reducer-aware** (`agent/hooks/_registry.py:202-229`): keys with reducers (e.g., `messages`→`add_messages`) merge both values; **only keys without reducers raise RuntimeError** (avoiding silent overwrites).
+The signature is inherited and checked by pyright strict's `reportIncompatibleMethodOverride`—narrowing parameter types / widening return value / missing parameters are caught at type-checking time, no longer just a convention described in a Protocol. The four hook points share the same `Hook` base class (same signature); the only difference is which `PluginContributions` field (edge) they are declared in. Instances can carry per-hook state in `__init__`. Returning a dict can modify state; returning None is a no-op. When two hooks write the same key in the same round, the merge is **reducer-aware** (`agent/hooks/_registry.py:202-229`): keys with reducers (e.g., `messages`→`add_messages`) merge both values; **only keys without reducers raise RuntimeError** (avoiding silent overwrites).
 
 
 Parent: [[okf/plugins/plugins.ava.okf.md|Plugin System]].

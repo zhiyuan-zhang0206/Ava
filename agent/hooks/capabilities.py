@@ -123,18 +123,5 @@ class _NewlyInstalledSkillsHook(Hook):
         }
 
 
-# Module-level singleton — the registered instance, so its identity is stable
-# across the re-registration each graph build performs.
+# Module-level singleton — the instance `framework_hooks()` hands the graph build.
 _newly_installed_skills = _NewlyInstalledSkillsHook()
-
-
-def register_capabilities_hooks() -> None:
-    """Register the built-in capability-index drift before_llm hook.
-
-    Called once at graph build time (from `build_graph`), after repair and
-    compact: repair guards the payload, compact may replace the whole history,
-    and this appends to whatever survives them. Unconditional — an index that
-    silently under-reports is a correctness problem, not an optional layer."""
-    from agent.hooks import register_before_llm
-
-    register_before_llm(_newly_installed_skills)

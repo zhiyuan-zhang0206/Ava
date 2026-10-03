@@ -35,16 +35,21 @@ def _union(left: set[str], right: set[str]) -> set[str]:
     return left | right
 
 
-class ExampleState(state_module.BaseAgentState):
-    sample__seen: Annotated[set[str], _union] = Field(default_factory=set)
-
-
 class ExamplePlugin(BaseModel):
     seen: Annotated[set[str], _union] = Field(default_factory=set)
 
 
 class ExampleMessagesPlugin(BaseModel):
     messages: Annotated[list[AnyMessage], add_messages] = Field(default_factory=list[AnyMessage])
+
+
+class ExampleState(state_module.BaseAgentState):
+    """What `build_agent_state` makes for a registry whose `sample` plugin declares `ExamplePlugin`
+    and whose messages-declaring plugin declares `ExampleMessagesPlugin`."""
+
+    sample__seen: Annotated[set[str], _union] = Field(default_factory=set)
+    __plugin_base_declared__ = frozenset({"messages"})
+    __plugin_state_classes__ = frozenset({ExamplePlugin, ExampleMessagesPlugin})
 
 
 @pytest.fixture
@@ -76,7 +81,6 @@ def attached_runtime(
 
     monkeypatch.setattr(ava, "ensure_plugins_loaded", loader_stub)
     monkeypatch.setattr(state_module, "AgentState", ExampleState)
-    monkeypatch.setattr(state_module, "_BASE_FIELD_DECLARED", {"messages"})
     monkeypatch.setattr(external, "machine_name", lambda: "local-runner")
 
     def load(_agent_id: int) -> tuple[ExampleState, dict[str, Any], None]:
@@ -183,7 +187,7 @@ def test_attach_requests_native_plugin_load(
 ) -> None:
     """The attach path asks for the faces-included plugin load (#2616 review).
 
-    ``load_snapshot`` rebuilds the checkpoint through ``build_agent_state()``,
+    ``load_snapshot`` rebuilds the checkpoint through ``build_agent_state(build_registry())``,
     so a surface-only load silently drops the plugin state fields the lease
     carries. Locks the wiring; the loader's own surface/full split is
     exercised in agent/tests/test_lazy_child_imports.py.

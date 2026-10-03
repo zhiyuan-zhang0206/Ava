@@ -1,21 +1,21 @@
-"""Graph-edge hook system (plugin registration mechanism).
+"""Graph-edge hook system (plugin declaration mechanism).
 
 Plugin system has two layers (see decisions/2026-05-13-plugin-and-hook-layers.md):
 - **SDK wrap**: SDK function wrapping — see ava/sdk_surface/wraps.py (`ava.extend.wrap`)
-- **Graph-edge hook**: here — 3 hook container Nodes register arbitrary hook functions
+- **Graph-edge hook**: here — 4 hook container Nodes run the hooks the graph build hands them
 
 Public API (re-exported from `_registry`):
-- `register_before_llm` / `register_before_exec` / `register_after_exec` / `register_after_init` — attach
-  a `Hook` instance to the corresponding container node
-- `make_hook_runner(name, default_next)` called at graph build time
-- `Hook` (base class) / `HookName` / `HOOKS` + global registry. Plugin authors
-  subclass `Hook` and override the typed `__call__`.
-- `clear_hooks()` — clear every hook list (used to reset registrations between
-  plugin reloads).
+- `make_hook_runner(name, default_next, hooks)` called at graph build time with
+  `(plugin, hook)` pairs in run order
+- `Hook` (base class) / `HookName`. Plugin authors subclass `Hook` and override the typed
+  `__call__`, then declare instances in `contribute()`.
+- `agent.hooks.framework.framework_hooks()` — the framework's own hooks (repair, compact,
+  capability-index drift).
 
-Hook registration example (in plugin's `plugin.py`):
+Hook declaration example (in a plugin's `agent_runtime.py`):
 
-    from agent.hooks import Hook, register_before_llm
+    from agent.hooks import Hook
+    from base.packages.plugins.extensions import PluginContributions
 
     class WatchTokenCount(Hook):
         async def __call__(self, state, runtime, config, /):
@@ -23,7 +23,8 @@ Hook registration example (in plugin's `plugin.py`):
                 logger.info("[plugin] tokens high")
             return None
 
-    register_before_llm(WatchTokenCount())
+    def contribute() -> PluginContributions:
+        return PluginContributions(before_llm=(WatchTokenCount(),))
 
 Submodules:
 - `agent.hooks.compact` — compact's `generate_summary()` utility function,
@@ -31,23 +32,13 @@ Submodules:
   `ava_builtins/plugins/ava_compact/plugin.py`.
 - `agent.hooks.repair` — dangling tool_use/tool_result pairing crash recovery: shared
   detection/rebuild helper + the built-in before_llm repair hook
-  (`register_repair_hooks()`, called from `build_graph`).
+  (its hook is one of `framework_hooks()`).
 - `agent.hooks.history_dump` — the pre-compact JSONL dump of the full
   conversation, written by every compaction path (the claim node's and
   `agent.hooks.compact`'s) before the history is wiped.
 """
 
-from ._registry import (
-    HOOKS,
-    Hook,
-    HookName,
-    clear_hooks,
-    make_hook_runner,
-    register_after_exec,
-    register_after_init,
-    register_before_exec,
-    register_before_llm,
-)
+from ._registry import Hook, HookName, make_hook_runner
 
 # Current built-in plugin list (lives under `ava_builtins/plugins/`).
 # Only used as a test fixture: agent/hooks/tests/test_builtin_metadata.py uses it
@@ -65,13 +56,7 @@ BUILTIN_PLUGINS: tuple[str, ...] = (
 
 __all__ = [
     "BUILTIN_PLUGINS",
-    "HOOKS",
     "Hook",
     "HookName",
-    "clear_hooks",
     "make_hook_runner",
-    "register_after_exec",
-    "register_after_init",
-    "register_before_exec",
-    "register_before_llm",
 ]

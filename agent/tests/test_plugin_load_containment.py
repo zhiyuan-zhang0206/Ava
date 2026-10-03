@@ -88,9 +88,9 @@ def test_boot_loader_never_imports_a_disabled_plugin(loguru_records: list[dict[s
     assert "plugins.codex_usage.plugin" not in sys.modules
     assert "plugins.good.plugin" in sys.modules
 
-    from agent.graph import _build
+    from agent.extensions import load_extensions
 
-    _build.load_extensions()  # graph build agrees on the same set
+    load_extensions()  # graph build agrees on the same set
 
     assert "plugins.codex_usage.plugin" not in sys.modules
     assert "plugins.good.plugin" in sys.modules
@@ -149,9 +149,9 @@ def test_both_loaders_agree_on_module_identity_and_relative_imports() -> None:
     boot_module = sys.modules["plugins.codex_usage.plugin"]
     assert boot_module.MARK == "x"
 
-    from agent.graph import _build
+    from agent.extensions import load_extensions
 
-    _build.load_extensions()
+    load_extensions()
 
     assert sys.modules["plugins.codex_usage.plugin"] is boot_module
 

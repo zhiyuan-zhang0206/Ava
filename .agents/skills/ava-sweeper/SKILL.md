@@ -69,7 +69,7 @@ scan produces 70+ false positives reflecting framework conventions):
 - SDK exports in `ava/__init__.py`'s `__all_for_ava__`
 - Pytest fixtures referenced by name
 - LangGraph node functions registered via `graph.add_node(name, fn)`
-- Plugin hook callbacks (`@register_after_exec`, etc.)
+- Plugin hook callbacks (declared in `contribute()`)
 - Pydantic schemas referenced only by wire-format-freezing tests
 - Watchdog event handler methods (`on_created` / `on_modified` etc.)
 - Transport `Protocol` / interface signatures (parameter names with `...`

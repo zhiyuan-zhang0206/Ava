@@ -46,8 +46,8 @@ from .sdk_surface.plugins import register_sdk_expand as register_sdk_expand
 #
 # **Framework-internal. Plugin authors do not directly touch these two
 # module attributes — all state read/write goes through
-# `agent.state.PluginStateHandle` (the typed handle returned by
-# `register_plugin_state(Cls)`)**. These two attributes exist because the
+# `agent.state.PluginStateHandle` (the typed handle a plugin builds from its declared
+# state class)**. These two attributes exist because the
 # framework itself (primarily `agent/graph/exec/node.py:_exec_node_impl`) and
 # the handle internals rely on them to pass the working copy + delta dict;
 # a module-level slot is simpler than ContextVar — the slot lives in the

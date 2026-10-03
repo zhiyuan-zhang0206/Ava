@@ -19,7 +19,7 @@ The three systems are decoupled — plugins don't need skills, skills don't depe
 
 ## Key Dependencies
 - [[agent/graph/docs/graph.ava.okf.md]] — plugin hook container nodes reside in the execution graph
-- [[agent/docs/state.ava.okf.md]] — plugins extend AgentState via `register_plugin_state`
+- [[agent/docs/state.ava.okf.md]] — plugins extend AgentState by declaring state classes in `contribute()`
 - [[system-prompt.ava.okf.md]] — both plugins and skills inject system prompts
 - [[mcp-daemon.ava.okf.md]] — MCP daemon subprocess management
 - [[agents-contract.ava.okf.md]] — contracts for plugin context and configuration registration
@@ -28,8 +28,8 @@ The three systems are decoupled — plugins don't need skills, skills don't depe
 - `base/packages/plugins/enable_config.py:discover_plugins()` — scans builtin + external plugin directories; `installed_plugin_dirs()` = plugins present on this machine (for service discovery, judged by presence regardless of enable state)
 - `plugins/<name>/services.py:services()` + `ops/spec.py:plugin_services()` — hook for plugin registering ops background services + the discovery side
 - `base/packages/plugins/config_registration.py:register_plugin_config()` — plugin Config class registration
-- `agent/hooks/_registry.py:register_before_llm()` — hook registration
-- `agent/state.py:register_plugin_state()` — state field registration
+- `base/packages/plugins/extensions.py:PluginContributions` — hooks, state, sections and notes a plugin declares
+- `agent/state.py:plugin_state_schema()` — state field validation
 - `agent/extensions/catalog.py:SURFACES` — the enumeration of every plugin injection surface, with each entry point's live signature; `ava plugins inspect` renders it beside what each installed plugin actually registered ([[okf/plugins/plugins.ava.okf.md|Plugin System]])
 - `ava/skills.py` — skill loading and help() rendering
 - `ava/mcps/__init__.py` — MCP client interface

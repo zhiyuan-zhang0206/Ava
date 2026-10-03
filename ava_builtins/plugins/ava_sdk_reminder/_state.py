@@ -1,7 +1,6 @@
 """ava_sdk_reminder state schema + detection tables — kept side-effect-free so
 tests can import the schema and the matchers without triggering hook
-registration (importing `plugin.py` calls `register_plugin_state` + the hook
-registrations).
+registration (the plugin's `agent_runtime.py` declares the state class and the hooks).
 
 Three reminder families share one `reminded` set:
 - Four code-cell categories (shell/wait/files/http): a regex scan over the
