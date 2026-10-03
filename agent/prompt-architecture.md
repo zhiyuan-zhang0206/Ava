@@ -118,7 +118,7 @@ Capabilities rather than standing as its own section.
   end, `off` omits the section from the system prompt entirely. General-agent behavior
   (see the section below for the deliberate restraint vs Codex).
 - **`ava_memory` behavior** — `ava_builtins/plugins/ava_memory/plugin.py:memory_discipline_section()`
-  (registered via `@register_system_prompt_section`; the old `agent/graph/system_prompt.py:_memory_behavior_section`
+  (declared in the plugin's `contribute()`; the old `agent/graph/system_prompt.py:_memory_behavior_section`
   moved out of core with the plugin split),
   on by default via `settings.agent.prompt_memory_behavior_enabled` (env
   `AVA_SYSTEM_PROMPT_MEMORY`): the *when / what to remember* behavioral layer over the

@@ -32,7 +32,7 @@ def _capture_ava_overview() -> str:
     match, no framework change needed.
 
     Duplication note: namespaces a plugin promotes in detail via its own
-    `register_system_prompt_section` (ava_code → cwd / files / shell) still
+    declared system prompt section (ava_code → cwd / files / shell) still
     appear here at index level (name + docstring); the plugin section adds the
     function stubs *without* repeating the docstring (help(ava.X) drops a
     submodule target's own docstring — see ava._format_module_stub).
@@ -46,7 +46,7 @@ def _capture_ava_overview() -> str:
 # At module top-level execution time, ava plugins are not yet loaded (order: import
 # _base_prompt → module top → main() → build_graph() → load_extensions()). So capture is
 # deferred to the build_system_prompt() call site — by then plugins are loaded
-# and each plugin's `register_system_prompt_section` has already registered.
+# and each plugin's `contribute()` declaration is in the registry the caller holds.
 #
 # No cache: build_system_prompt() is called only once in an agent's lifetime
 # when the first _claim sees state.messages empty; afterward SystemMessage is
@@ -60,7 +60,7 @@ def _get_ava_overview() -> str:
 # The {_AVA_OVERVIEW} placeholder is filled by _get_ava_overview() lazy capture
 # the first time build_system_prompt() is called — by then load_extensions() has
 # run and all plugin namespaces are visible.
-# Plugins inject extension content via register_system_prompt_section().
+# Plugins add extension content through `PluginContributions.system_prompt_sections`.
 _BASE_SYSTEM_PROMPT = """\
 You are Ava, an agent that acts by writing Python code — call the
 `execute_code(code: str)` tool — each call runs in an ephemeral interpreter. To idle, do not output any

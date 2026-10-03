@@ -29,12 +29,12 @@ from pydantic import BaseModel, Field
 
 import ava
 import ava.agent_identity as _ava_identity
-from agent.graph.system_prompt import register_system_prompt_section
 from agent.hooks import Hook, register_after_exec, register_after_init
 from agent.messages import NoteTag, system_note_message
 from agent.state import AgentState, register_plugin_state
 from base.host.env.agent_slices import AgentSlices
 from base.log import logger
+from base.packages.plugins.extensions import PluginContributions
 from base.paths import workspace_dir
 
 from . import plugin as _surface
@@ -127,7 +127,6 @@ _surface.state_handle = state_handle
 _PROMOTED_MODULES = ("cwd", "files", "shell")
 
 
-@register_system_prompt_section
 def _coding_tools_section(slices: AgentSlices) -> str:
     """Render the cwd / files / shell modules as Python stubs under `## ava.X`.
 
@@ -180,7 +179,6 @@ def _coding_tools_section(slices: AgentSlices) -> str:
 # prompt. Off by default; toggled by adding "ava_code_workflow" to
 # settings.agent.system_prompt_extra (env AVA_SYSTEM_PROMPT_EXTRA).
 # Empty return when disabled = no contribution.
-@register_system_prompt_section
 def _engineering_workflow_section(slices: AgentSlices) -> str:
     """Loose bug-fix-workflow advice, gated by system_prompt_extra=ava_code_workflow."""
     if "ava_code_workflow" not in slices.prompt.system_prompt_extra:
@@ -329,3 +327,10 @@ register_after_init(validate_cwd_after_init)
 
 inject_cwd_notes_after_exec = _InjectCwdNotesAfterExecHook()
 register_after_exec(inject_cwd_notes_after_exec)
+
+
+def contribute() -> PluginContributions:
+    """What this plugin declares for the agent runtime."""
+    return PluginContributions(
+        system_prompt_sections=(_coding_tools_section, _engineering_workflow_section)
+    )

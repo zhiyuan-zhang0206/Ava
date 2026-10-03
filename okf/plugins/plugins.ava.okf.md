@@ -20,8 +20,8 @@ The four hook container nodes (after_init / before_llm / before_exec / after_exe
 
 **Core-key contract (writable = private fields + `messages` only).** A plugin's own `BaseModel` fields are always private and plugin-writable. Among the framework core keys (`BaseAgentState` fields: messages / halted / update_initiated / compact / memory / context_reset / capabilities), only **`messages`** may be declared and written — with the exact base annotation (`Annotated[list[AnyMessage], add_messages]`); the exec node merges the plugin's messages delta with its own ToolMessage delta, so both reach the checkpoint. Declaring any other core key raises at registration; writing one via `ava.state_update` raises at turn end. Plugins that want to surface notes do it through the after-exec hook — `ava_code`'s AGENTS.md / security-findings injection (`system_note_message`, `NoteTag`) is the model use case — never by touching core lifecycle keys.
 
-### 3. System Prompt Injection (`agent/graph/system_prompt.py`)
-`register_system_prompt_section(fn)` — register a `(slices: AgentSlices) -> str` contributor as a **decorator**; `build_system_prompt(slices)` calls them in registration order at boot. An empty string means no contribution.
+### 3. Declared Contributions (`base/packages/plugins/extensions.py`)
+System prompt sections and context notes are declared, not registered: `contribute() -> PluginContributions` in the plugin's `agent_runtime.py`, collected by the loader into an `ExtensionRegistry` — [[okf/plugins/declared-contributions.ava.okf.md]].
 
 ### 4. SDK Namespace Registration
 `ava.register_namespace(name, module)` — registers a new namespace under `ava.*` (e.g., `ava.cwd` from the ava_code plugin). The registered object is also placed in `sys.modules` as `ava.<name>`, so `import ava.<name>` resolves to the same object as attribute access; SimpleNamespace namespaces are materialized as real modules. `ava.register_sdk_expand(name)` promotes that namespace into the system prompt's expanded SDK reference. `ava.register_namespace_member(namespace, name, fn)` — attaches a callable member to an already-registered namespace (used by ava_fleet to inject task helpers); all three are exported from `ava/__init__.py`.
@@ -44,7 +44,7 @@ recorded, so the ledger holds plugin contributions alone and
 
 `agent/extensions/catalog.py:SURFACES` is the enumeration of the injection surfaces —
 the ones above, plus SDK wraps (`ava.extend.wrap`, [[extensions.ava.okf.md]]),
-context notes (`agent/graph/context_notes.py:register_context_note`) and skill
+context notes (`base/packages/plugins/extensions.py:ContextNote`) and skill
 sources (`ava/skills.py:register_skill_source`) — each carrying the live
 signature of its entry point rather than a transcribed one. `ava plugins inspect`
 renders both halves, and `declared_vs_registered` is the read-only form of the

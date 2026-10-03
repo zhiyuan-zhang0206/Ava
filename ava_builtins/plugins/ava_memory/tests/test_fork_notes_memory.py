@@ -16,11 +16,12 @@ from langchain_core.messages import (
 )
 from psycopg_pool import AsyncConnectionPool
 
-from agent.graph import context_notes
 from agent.graph.claim.node import claim_node
+from agent.graph.context_notes import FRAMEWORK_NOTES
 from agent.messages import NoteTag
 from agent.state import AgentState
 from agent.tests.claim_support import _config, _insert_inbound_kind, _make_runtime
+from base.packages.plugins.extensions import ContextNote, ExtensionRegistry
 from tests.fixtures.units import spawn_agent
 from tests.path_scoped.agent_tests import _fresh_snapshot_cursor as _fresh_snapshot_cursor
 from tests.path_scoped.agent_tests import (
@@ -55,26 +56,34 @@ def memory_plugin() -> Any:
             del sys.modules[name]
 
 
-def _last_entry_by_name(name: str) -> context_notes.ContextNote:
-    """The last-registered entry whose builder is `name` (registration order
-    wins; a plugin reload appends, never replaces)."""
-    entries = [e for e in context_notes._CONTEXT_NOTES if e.build.__name__ == name]
-    assert entries, f"no context note registered as {name}"
+def _registry(memory_plugin: Any) -> ExtensionRegistry:
+    """The registry the loader would build with only this plugin enabled."""
+    return ExtensionRegistry((("ava_memory", memory_plugin.contribute()),))
+
+
+def _entry_by_name(memory_plugin: Any, name: str) -> ContextNote:
+    """The entry whose builder is `name`, among the framework's notes and the plugin's."""
+    entries = [
+        e
+        for e in (*FRAMEWORK_NOTES, *(n for _p, n in _registry(memory_plugin).context_notes()))
+        if e.build.__name__ == name
+    ]
+    assert entries, f"no context note declared as {name}"
     return entries[-1]
 
 
 def test_agent_identity_notes_are_on_fork(memory_plugin: Any) -> None:
     """The fork strips these from the inherited head and re-grafts the new
     agent's own — so all three must stay `on_fork`."""
-    assert _last_entry_by_name("agent_id_note").on_fork is True
-    assert _last_entry_by_name("preloaded_skills_note").on_fork is True
-    assert _last_entry_by_name("per_agent_memory_note").on_fork is True
+    assert _entry_by_name(memory_plugin, "agent_id_note").on_fork is True
+    assert _entry_by_name(memory_plugin, "preloaded_skills_note").on_fork is True
+    assert _entry_by_name(memory_plugin, "per_agent_memory_note").on_fork is True
 
 
 def test_cluster_memory_index_is_not_on_fork(memory_plugin: Any) -> None:
     """Cluster-wide content: grafting it duplicated the index in the forked
     window (issue #1320). The inherited copy stands."""
-    assert _last_entry_by_name("memory_index_note").on_fork is False
+    assert _entry_by_name(memory_plugin, "memory_index_note").on_fork is False
 
 
 async def test_fork_end_to_end_single_copy_each_note(
@@ -108,9 +117,7 @@ async def test_fork_end_to_end_single_copy_each_note(
 
     cmd = await claim_node(
         AgentState(messages=list(inherited)),
-        _make_runtime(
-            ops_pool=aops_pool,
-        ),
+        _make_runtime(ops_pool=aops_pool, extensions=_registry(memory_plugin)),
         _config(tid),
     )
 
@@ -171,7 +178,7 @@ async def test_fork_rebuild_preserves_prefix_bytes_until_first_stripped_note(
     ]
     cmd = await claim_node(
         AgentState(messages=list(inherited)),
-        _make_runtime(ops_pool=aops_pool),
+        _make_runtime(ops_pool=aops_pool, extensions=_registry(memory_plugin)),
         _config(tid),
     )
     msgs = cast(list[BaseMessage], (cmd.update or {})["messages"])

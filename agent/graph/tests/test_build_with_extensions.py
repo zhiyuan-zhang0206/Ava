@@ -234,35 +234,79 @@ def test_duplicate_plugin_name_raises(monkeypatch: pytest.MonkeyPatch):
         discover_plugins()
 
 
-def test_clear_plugin_registrations_keeps_framework_sections():
-    """clear_plugin_registrations drops plugin-contributed system prompt
-    sections but keeps the framework-owned ones (registered at module import).
-    Otherwise a plugin reload silently strips e.g. the always-on skill index for
-    the rest of the process — which is exactly how it used to break the system
-    prompt snapshot when another test cleared registrations first."""
-    from agent.graph.system_prompt import (
-        _FRAMEWORK_SECTION_COUNT,
-        _SYSTEM_PROMPT_SECTIONS,
-        register_system_prompt_section,
+def _make_face(name: str, body: str) -> None:
+    """Give an existing test plugin an `agent_runtime` face."""
+    (paths.repo_plugins_dir() / name / "agent_runtime.py").write_text(body)
+
+
+_CONTRIBUTING_FACE = """
+from base.packages.plugins.extensions import ContextNote, PluginContributions
+
+
+def {name}_section(_slices):
+    return "## {name}"
+
+
+def {name}_note(_slices):
+    return None
+
+
+def contribute():
+    return PluginContributions(
+        system_prompt_sections=({name}_section,),
+        context_notes=(ContextNote({name}_note, on_fork=True, rank=5),),
     )
-    from agent.state import clear_plugin_registrations
+"""
 
-    saved = _SYSTEM_PROMPT_SECTIONS[:]
-    try:
 
-        def _plugin_section(_slices: object) -> str:
-            return "## plugin section"
+def test_build_registry_holds_what_each_enabled_plugin_declares():
+    """The registry is built from `contribute()` alone, in plugin name order, and nothing is
+    registered anywhere: a second build is a new, equal registry, and a plugin disabled since
+    is simply absent from it."""
+    for name in ("beta", "alpha"):
+        _make_plugin(name)
+        _make_face(name, _CONTRIBUTING_FACE.format(name=name))
+    write_local({"plugins": {"alpha": {"enabled": True}, "beta": {"enabled": True}}})
 
-        register_system_prompt_section(_plugin_section)
-        assert _plugin_section in _SYSTEM_PROMPT_SECTIONS
+    from agent.extensions import build_registry
+    from agent.graph import _build
 
-        clear_plugin_registrations()
+    _build.load_extensions()
+    registry = build_registry()
 
-        assert _FRAMEWORK_SECTION_COUNT >= 1
-        assert len(_SYSTEM_PROMPT_SECTIONS) == _FRAMEWORK_SECTION_COUNT
-        assert _plugin_section not in _SYSTEM_PROMPT_SECTIONS
-    finally:
-        _SYSTEM_PROMPT_SECTIONS[:] = saved
+    assert [(p, fn.__name__) for p, fn in registry.system_prompt_sections()] == [
+        ("alpha", "alpha_section"),
+        ("beta", "beta_section"),
+    ]
+    assert [(p, n.build.__name__, n.rank, n.on_fork) for p, n in registry.context_notes()] == [
+        ("alpha", "alpha_note", 5, True),
+        ("beta", "beta_note", 5, True),
+    ]
+    assert registry.records("alpha")[0].identifier == "alpha_section"
+    assert build_registry() == registry
+
+    write_local({"plugins": {"alpha": {"enabled": True}, "beta": {"enabled": False}}})
+    assert [p for p, _fn in build_registry().system_prompt_sections()] == ["alpha"]
+
+
+@pytest.mark.parametrize(
+    "contribute_body",
+    ["    return ['not', 'contributions']", "    raise RuntimeError('boom')"],
+)
+def test_a_face_whose_contribute_misbehaves_is_skipped_not_fatal(contribute_body: str):
+    """Same fail-soft contract as a plugin that fails to import: report it, keep the others."""
+    _make_plugin("good")
+    _make_face("good", _CONTRIBUTING_FACE.format(name="good"))
+    _make_plugin("bad")
+    _make_face("bad", f"def contribute():\n{contribute_body}\n")
+    write_local({"plugins": {"good": {"enabled": True}, "bad": {"enabled": True}}})
+
+    from agent.extensions import build_registry
+    from agent.graph import _build
+
+    _build.load_extensions()
+
+    assert [p for p, _fn in build_registry().system_prompt_sections()] == ["good"]
 
 
 # --- fail-soft loading (2026-08-28 ava_ledger incident) --------------------

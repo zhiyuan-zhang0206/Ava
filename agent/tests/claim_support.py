@@ -12,6 +12,7 @@ from psycopg_pool import AsyncConnectionPool
 
 from base.agents.context import AvaContext
 from base.host.env.agent_slices import AgentSlices
+from base.packages.plugins.extensions import EMPTY, ExtensionRegistry
 
 
 def _fake_llm(summary: str = "synthetic compaction summary") -> Any:
@@ -27,6 +28,7 @@ def _make_runtime(
     ops_pool: AsyncConnectionPool | None = None,
     llm: Any | None = None,
     event_publisher: Any | None = None,
+    extensions: ExtensionRegistry = EMPTY,
 ) -> Runtime[AvaContext]:
     """test helper: assemble AvaContext into Runtime.
 
@@ -42,6 +44,7 @@ def _make_runtime(
         llm=llm if llm is not None else _fake_llm(),
         event_publisher=event_publisher if event_publisher is not None else MagicMock(),
         agent=AgentSlices.resolve(),
+        extensions=extensions,
     )
     return Runtime(context=ctx)
 

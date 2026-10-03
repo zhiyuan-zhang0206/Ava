@@ -32,6 +32,7 @@ from agent.graph.system_prompt import _delegation_check_section, build_system_pr
 from ava.sdk_surface import sdk_disable
 from base.config import FIELD_INFOS, settings
 from base.host.env.agent_slices import AgentSlices
+from base.packages.plugins.extensions import EMPTY
 from base.paths import skills_dir
 from base.telemetry import audit_events
 
@@ -294,7 +295,7 @@ def test_building_the_prompt_records_no_skill_attribution(
     monkeypatch.setattr(audit_events, "record_audit_standalone_many", _record)
     monkeypatch.setattr("ava.agent_identity.require_agent_id", lambda: 1)
 
-    prompt = build_system_prompt(AgentSlices.resolve())
+    prompt = build_system_prompt(EMPTY, AgentSlices.resolve())
 
     assert writes == []  # prompt assembly records nothing
     # And the prompt carries the index once — the expanded SDK reference does

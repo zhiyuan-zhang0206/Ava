@@ -9,7 +9,8 @@ dependencies as `runtime.context.X`:
   `db` (`Database`) and `bus` (`EventBus`) — a node that touches a handle expects it non-None;
   the eval driver and tests populate only the ones their path needs;
 - **`agent`**: the agent's resolved per-turn configuration (`AgentSlices`, see
-  `base.host.env.agent_slices`), built by the host when the turn starts.
+  `base.host.env.agent_slices`), built by the host when the turn starts;
+- **`extensions`**: the plugins' contributions, held by the host that loaded them.
 
 `frozen=True`: context is read-only during a run. If you need mutable state, split it into a
 separate dataclass.
@@ -25,6 +26,7 @@ from base.db import Database
 from base.events.live.bus import EventBus
 from base.events.live.publisher import AgentEventPublisher
 from base.host.env.agent_slices import AgentSlices
+from base.packages.plugins.extensions import EMPTY, ExtensionRegistry
 
 
 def agent_id_from_config(
@@ -79,6 +81,10 @@ class AvaContext:
 
     agent: AgentSlices | None = None
     """This agent's per-turn configuration, resolved by the host when the turn starts."""
+
+    extensions: ExtensionRegistry = EMPTY
+    """What the enabled plugins contribute (prompt sections, context notes), as the loader built it
+    for this host. Empty for the eval driver and tests that run no plugins."""
 
     def require_agent(self) -> AgentSlices:
         """The agent's slices; a graph run built without them fails here, not on first read."""
