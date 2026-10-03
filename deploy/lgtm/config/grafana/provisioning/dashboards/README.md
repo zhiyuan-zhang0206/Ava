@@ -214,8 +214,8 @@ of mass-editing targets.
 ## Writing a plugin metric
 
 1. Add `metrics.py` to your plugin dir (e.g. `ava_builtins/plugins/<name>/metrics.py`).
-2. Call `register_metric(MetricSpec(...))` at module top level — the plugin
-   name is auto-filled from the import context; do not pass it.
+2. Export `contribute()` returning `PluginContributions(metrics=(MetricSpec(...), ...))` —
+   the plugin name is filled when the data registry admits the declaration; do not pass it.
 3. The `query` template is **LogQL** (`query_type="logql"`) — the live event
    stream in Loki. Every template must select `{service_name="unknown_service"}`
    and pipeline `| json`; since the 2026-08-23 index-label cutover (task

@@ -1,8 +1,8 @@
-"""Registration for plugin inspector widgets (task #2909; taskList family #3216).
+"""Declaration of plugin inspector widgets (task #2909; taskList family #3216).
 
-Covers what ``register_inspect_widget`` enforces at import time: PluginContext
-attribution, per-plugin id uniqueness, and the closed kind vocabulary plus the
-widget shape. The per-agent resolution side lives in
+Covers what the data registry enforces when it admits an `inspect_widgets` declaration: plugin
+attribution from the registry entry, per-plugin id uniqueness, and the closed kind vocabulary plus
+the widget shape. The per-agent resolution side lives in
 `ava_builtins/plugins/tests/test_agent_inspect_widgets.py`.
 """
 
@@ -11,22 +11,9 @@ from typing import Any
 import pytest
 from pydantic import ValidationError
 
-from base.packages.plugins.context import PluginContext
-from base.packages.plugins.inspector import (
-    DuplicateInspectWidget,
-    InspectWidgetSpec,
-    NoPluginContext,
-    clear_registry,
-    register_inspect_widget,
-    registered_inspect_widgets,
-)
-
-
-@pytest.fixture(autouse=True)
-def _clean_registry() -> Any:
-    clear_registry()
-    yield
-    clear_registry()
+from base.packages.plugins.data_registry import DeclaredFace, build_data_registry
+from base.packages.plugins.extensions import PluginContributions
+from base.packages.plugins.inspector import InspectWidgetSpec
 
 
 def _widget(**over: Any) -> InspectWidgetSpec:
@@ -39,42 +26,41 @@ def _widget(**over: Any) -> InspectWidgetSpec:
     return InspectWidgetSpec(**data)
 
 
-def test_register_fills_plugin_and_keeps_order() -> None:
-    with PluginContext("ava_fleet"):
-        first = register_inspect_widget(_widget(id="one", order=750))
-    with PluginContext("other_plugin"):
-        second = register_inspect_widget(_widget(id="two", order=10))
-
-    assert first.plugin == "ava_fleet"
-    assert second.plugin == "other_plugin"
-    assert [w.id for w in registered_inspect_widgets()] == ["one", "two"]
-    assert [w.order for w in registered_inspect_widgets()] == [750, 10]
+def _face(plugin: str, *widgets: InspectWidgetSpec) -> DeclaredFace:
+    return DeclaredFace(plugin, PluginContributions(inspect_widgets=widgets))
 
 
-def test_register_replaces_an_author_supplied_plugin() -> None:
-    with PluginContext("ava_fleet"):
-        spec = register_inspect_widget(_widget(plugin="someone_else"))
-    assert spec.plugin == "ava_fleet"
+def test_admission_fills_plugin_and_keeps_order() -> None:
+    registry, refused = build_data_registry(
+        [
+            _face("ava_fleet", _widget(id="one", order=750)),
+            _face("other_plugin", _widget(id="two", order=10)),
+        ]
+    )
+
+    widgets = list(registry.inspect_widgets())
+    assert refused == []
+    assert [(w.plugin, w.id) for w in widgets] == [("ava_fleet", "one"), ("other_plugin", "two")]
+    assert [w.order for w in widgets] == [750, 10]
 
 
-def test_register_outside_plugin_context_refused() -> None:
-    with pytest.raises(NoPluginContext):
-        register_inspect_widget(_widget())
+def test_admission_replaces_an_author_supplied_plugin() -> None:
+    registry, _ = build_data_registry([_face("ava_fleet", _widget(plugin="someone_else"))])
+    assert [w.plugin for w in registry.inspect_widgets()] == ["ava_fleet"]
 
 
 def test_duplicate_id_within_one_plugin_refused() -> None:
-    with PluginContext("ava_fleet"):
-        register_inspect_widget(_widget())
-        with pytest.raises(DuplicateInspectWidget):
-            register_inspect_widget(_widget())
+    registry, refused = build_data_registry([_face("ava_fleet", _widget(), _widget())])
+    assert refused == ["ava_fleet"]
+    assert list(registry.inspect_widgets()) == []
 
 
 def test_same_id_across_plugins_allowed() -> None:
-    with PluginContext("ava_fleet"):
-        register_inspect_widget(_widget())
-    with PluginContext("other_plugin"):
-        register_inspect_widget(_widget())
-    assert len(registered_inspect_widgets()) == 2
+    registry, refused = build_data_registry(
+        [_face("ava_fleet", _widget()), _face("other_plugin", _widget())]
+    )
+    assert refused == []
+    assert len(list(registry.inspect_widgets())) == 2
 
 
 # ── closed vocabularies ───────────────────────────────────────────────────────

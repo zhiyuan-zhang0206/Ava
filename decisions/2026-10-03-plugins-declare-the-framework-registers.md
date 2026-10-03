@@ -46,8 +46,12 @@ This is done one surface family at a time, each its own change:
   schema instead of reading module tables. `build_registry()` becomes the load-time gate: a plugin whose
   `ava-plugin.json` and `contribute()` disagree on the `hooks` / `systemPromptSections` keys (either
   direction), whose state fails validation, or whose `contribute()` is malformed is a load failure of that
-  plugin. Plugin metrics and inspector widgets follow in their own change: their consumers (gateway, Grafana
-  supply) are other processes that never load an agent runtime face.
+  plugin.
+- **B2**: plugin metrics and inspector widgets. Their consumers (the gateway, the Grafana supply) are other
+  processes that never load an agent runtime face, so each declares in its own data face (`metrics.py`,
+  `inspector.py`, each exporting `contribute()`), and a process builds a data registry
+  (`base/packages/plugins/data_registry.py`) from the faces it loads. A face is gated on its own manifest key
+  (`metrics`, `inspectWidgets`).
 - **C**: SDK namespaces, members, wraps, skill sources, plugin configs and providers. Until then
   `clear_plugin_registrations` remains, covering exactly those registries, and is deleted with C.
 

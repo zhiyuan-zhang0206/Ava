@@ -16,10 +16,11 @@ import pytest
 
 from agent.extensions import catalog as catalog_mod
 from agent.extensions import load_extensions
-from agent.extensions.registry import ContributionMismatch, build_registry, declarations
+from agent.extensions.registry import build_registry, declarations
 from base import paths
 from base.packages.plugins import load_report
 from base.packages.plugins.enable_config import write_local
+from base.packages.plugins.gate import ContributionMismatch
 
 
 @pytest.fixture(autouse=True)
@@ -383,7 +384,7 @@ def test_a_plugin_whose_manifest_and_contribute_agree_is_admitted(
         pytest.param(
             ("before_llm", "after_exec"),
             ("before_llm",),
-            "hooks: 'after_exec' is declared but contribute() does not provide it",
+            "hooks: 'after_exec' is declared but the plugin does not provide it",
             id="declared-hook-missing-from-contribute",
         ),
         pytest.param(
@@ -431,7 +432,7 @@ def test_a_plugin_whose_manifest_and_contribute_disagree_on_hooks_is_excluded(
         pytest.param(
             ("gate_section",),
             False,
-            "systemPromptSections: 'gate_section' is declared but contribute() does not provide it",
+            "systemPromptSections: 'gate_section' is declared but the plugin does not provide it",
             id="declared-section-missing-from-contribute",
         ),
         pytest.param(

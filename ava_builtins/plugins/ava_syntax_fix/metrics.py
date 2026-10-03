@@ -1,9 +1,8 @@
-"""ava_syntax_fix Grafana metrics — registered at import time.
+"""ava_syntax_fix Grafana metrics — declared, not registered.
 
-``base/telemetry/metrics/grafana_dashboard_supply`` imports this module (inside a
-PluginContext) to collect the registrations below for the rendered Ava Ops
-dashboard (``ava lgtm render``, task #3697); the plugin name comes from the
-context. Query templates target the unified event stream in Loki
+``base/telemetry/metrics/grafana_dashboard_supply`` imports this module and takes its
+``contribute()`` declaration for the rendered Ava Ops dashboard (``ava lgtm render``,
+task #3697); the plugin name comes from the registry entry. Query templates target the unified event stream in Loki
 (task #180: the PG ``events`` table was frozen at the LGTM cutover and
 dropped with the archive cleanup — every metric reads the event stream
 through LogQL, the same read the core panels use, task #1280).
@@ -27,10 +26,11 @@ panels' pattern); the pre-convention PG rows were backfilled by the
 accompanying migration, Loki rows keep their emit-time category.
 """
 
+from base.packages.plugins.extensions import PluginContributions
 from base.telemetry.metrics.logql import CATEGORY_WITH_LEGACY_LOG, event_count
-from base.telemetry.metrics.plugin_metrics import MetricSpec, register_metric
+from base.telemetry.metrics.plugin_metrics import MetricSpec
 
-register_metric(
+METRICS: tuple[MetricSpec, ...] = (
     MetricSpec(
         name="ava_syntax_fix_count",
         title="Syntax fix count",
@@ -48,10 +48,7 @@ register_metric(
         query_type="logql",
         target_names=["fixes"],
         output=["grafana"],
-    )
-)
-
-register_metric(
+    ),
     MetricSpec(
         name="ava_syntax_fix_total",
         title="Syntax fixes",
@@ -68,5 +65,10 @@ register_metric(
         query_type="logql",
         target_names=["fixes"],
         output=["grafana"],
-    )
+    ),
 )
+
+
+def contribute() -> PluginContributions:
+    """What this plugin declares for the metric surfaces (Grafana dashboard, agent inspector)."""
+    return PluginContributions(metrics=METRICS)

@@ -11,7 +11,7 @@ retired Metrics page (base/telemetry/metrics/report.py).
 Migrated plugin -> core (user ruling 2026-08-06: core metrics + plugin
 metrics two-tier architecture): the 21 MetricSpec definitions below are returned
 by ``core_metrics()`` and validated by ``catalog.validate_core_metric`` instead of
-``register_metric`` — the same query safety validation, no PluginContext, ``plugin``
+the data registry's admission — the same query safety validation, ``plugin``
 auto-filled to "core" (``catalog.collect_core_metrics`` calls this module through the
 ``_CORE_DEFINITION_MODULES`` tuple); templates use the
 {event_name}/{category} placeholders and, on inspector-only metrics, the

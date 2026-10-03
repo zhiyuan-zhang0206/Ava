@@ -18,6 +18,8 @@ frozen declaration.
 - `after_init` / `before_llm` / `before_exec` / `after_exec` — `Hook` instances ([[okf/plugins/graph-edge-hooks.ava.okf.md]]).
 - `state` — `BaseModel` classes whose fields become channels `<plugin>__<field>`; the plugin keeps its own
   `PluginStateHandle(cls, plugin)`.
+- `metrics` / `inspect_widgets` — `MetricSpec` / `InspectWidgetSpec`, declared by the plugin's `metrics.py` /
+  `inspector.py` instead (see below).
 
 `agent/extensions/registry.py:build_registry()` calls `contribute()` on every enabled plugin's loaded face, in plugin name
 order, and returns an `ExtensionRegistry` — plugin name beside its contributions, so attribution is the entry,
@@ -34,5 +36,16 @@ in-process swap.
 `build_system_prompt(extensions, slices)`, `context_notes(extensions, slices)` and `fork_notes(extensions, slices)`
 read it. The attribution catalog (`ava plugins inspect`) merges `registry.records(plugin)` with the ledger of
 the surfaces still registered at import, and compares both with the `ava-plugin.json` contribution keys.
+
+## Faces and registries
+
+A declaration lives in the face the consuming process loads: `agent_runtime.py` for the agent host (the registry above),
+`metrics.py` and `inspector.py` for processes with no agent runtime. Each exports `contribute()` with only its own
+field filled. The gateway (per-agent inspector panels) and the Grafana supply (dashboard render, repo and
+installed plugins) build a **data registry** with `base/packages/plugins/data_registry.py`: `load_declaration` imports a
+face fail-soft, `build_data_registry` validates and admits each plugin whole (query validation, metric names unique
+across plugins, widget ids unique within one, `plugin` filled from the entry). A face is gated on its own manifest key
+(`metrics`, `inspectWidgets`; `base/packages/plugins/gate.py`). A refused or unloadable face costs only that plugin and
+leaves no partial state.
 
 Why: [decisions/2026-10-03-plugins-declare-the-framework-registers.md](../../decisions/2026-10-03-plugins-declare-the-framework-registers.md).

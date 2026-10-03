@@ -17,22 +17,18 @@ from __future__ import annotations
 import sys
 from collections.abc import Callable
 from pathlib import Path
-from typing import cast
 
 from agent.extensions import FACE_MODULE, _enabled_plugin_dirs, _pkg_of
 from agent.state import plugin_state_schema
 from base.packages.plugins import load_report
 from base.packages.plugins.extensions import ExtensionRegistry, PluginContributions
-from base.packages.plugins.manifest import load_manifest
+from base.packages.plugins.gate import check_manifest
 
-# Manifest contribution keys whose runtime side is a `PluginContributions` field; the key is also
-# the attribution surface id. The remaining keys (sdkNamespaces, sdkWraps, config) are still
-# registered at import and compared read-only by the catalog.
+# Manifest contribution keys whose runtime side is a `PluginContributions` field this registry owns
+# (the key is also the attribution surface id). The remaining keys (sdkNamespaces, sdkWraps, config)
+# are still registered at import and compared read-only by the catalog; metrics and inspectWidgets are
+# the data registry's (`base.packages.plugins.data_registry`).
 GATED_KEYS: tuple[str, ...] = ("hooks", "systemPromptSections")
-
-
-class ContributionMismatch(Exception):  # noqa: N818 — a load failure of one plugin, not an error class family
-    """A plugin's `ava-plugin.json` and its `contribute()` disagree."""
 
 
 def _declared(name: str, contribute: Callable[[], object]) -> PluginContributions:
@@ -66,40 +62,6 @@ def declarations() -> list[tuple[str, Path, PluginContributions]]:
     return found
 
 
-def check_manifest(name: str, plugin_dir: Path, contributions: PluginContributions) -> None:
-    """Refuse a declaration that disagrees with the plugin's manifest on the keys the registry owns.
-
-    A plugin without `ava-plugin.json` has nothing to disagree with. With one, each gated key's
-    declared identifiers must equal what `contribute()` provides: a declared surface it does not
-    deliver, and a delivered one it does not declare, both refuse.
-    """
-    manifest = load_manifest(plugin_dir)
-    if manifest is None:
-        return
-    delivered: dict[str, set[str]] = {key: set() for key in GATED_KEYS}
-    for record in contributions.as_records(name):
-        if record.surface in delivered:
-            delivered[record.surface].add(record.identifier)
-    problems: list[str] = []
-    for key in GATED_KEYS:
-        declared = cast(object, manifest.contributions.get(key))
-        declared_ids = (
-            {str(item) for item in cast(list[object], declared)}
-            if isinstance(declared, list)
-            else set[str]()
-        )
-        for identifier in sorted(declared_ids - delivered[key]):
-            problems.append(
-                f"{key}: {identifier!r} is declared but contribute() does not provide it"
-            )
-        for identifier in sorted(delivered[key] - declared_ids):
-            problems.append(f"{key}: {identifier!r} is provided but not declared")
-    if problems:
-        raise ContributionMismatch(
-            f"plugin {name!r}: ava-plugin.json and contribute() disagree — " + "; ".join(problems)
-        )
-
-
 def build_registry() -> ExtensionRegistry:
     """What every enabled plugin declares for the agent runtime, as a new registry.
 
@@ -111,7 +73,7 @@ def build_registry() -> ExtensionRegistry:
     for name, plugin_dir, contributions in declarations():
         try:
             plugin_state_schema(ExtensionRegistry(((name, contributions),)))
-            check_manifest(name, plugin_dir, contributions)
+            check_manifest(name, plugin_dir, contributions, GATED_KEYS)
         except Exception as exc:
             load_report.report_plugin_load_failure(name, exc)
             continue

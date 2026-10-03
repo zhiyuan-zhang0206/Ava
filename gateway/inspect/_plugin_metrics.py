@@ -35,14 +35,12 @@ from fastapi import HTTPException
 from psycopg import Connection, Cursor
 from psycopg_pool import ConnectionPool
 
-from base.packages.plugins.context import PluginContext
+from base.packages.plugins import data_registry
 from base.telemetry.metrics.core import catalog
 from base.telemetry.metrics.logql import validate_logql
 from base.telemetry.metrics.plugin_metrics import (
     MetricSpec,
     PluginMetricError,
-    drop_plugin_metrics,
-    registered_metrics,
     render_query,
     render_title,
     validate_metric_sql,
@@ -99,36 +97,33 @@ def _plugin_metric_modules() -> list[Path]:
 
 def _load_plugin_metrics() -> list[MetricSpec]:
     """The in-process metric registry: every shipped plugin ``metrics.py``
-    imported under its plugin context (registration fills the process-global
-    plugin registry), plus the core definition modules — plugin metrics
-    first, then core, the order the old snapshot's two sections read.
+    declaration (``contribute()``) admitted into a data registry, plus the core
+    definition modules — plugin metrics first, then core, the order the old
+    snapshot's two sections read.
 
     Task #180 PR D: this replaces the generator's state snapshot
     ($AVA_HOME/state/plugin_metrics.json) — the generator did not survive the
     archive->public port, so the snapshot froze while its consumers kept
-    reading it. No file means no staleness; module caching makes repeated
-    calls free.
+    reading it. No file means no staleness; module caching makes the imports free
+    and each call rebuilds the registry from the declarations.
 
     Fail-soft (user ruling 2026-09-11): a shipped metric module that fails to
-    import is skipped with a loud report and the remaining plugin + core
-    metrics still serve — never a 500 for the whole endpoint, never a stale
-    snapshot. The failed module is dropped from ``sys.modules`` and its
-    partial registrations are dropped too (``drop_plugin_metrics`` — a module
-    can raise mid-registration), so a fixed file is picked up cleanly on the
-    next call."""
-    from base.packages.plugins import load_report
-
-    for path in _plugin_metric_modules():
-        name = path.parent.name
-        try:
-            with PluginContext(name):
-                importlib.import_module(f"ava_builtins.plugins.{name}.metrics")
-        except (KeyboardInterrupt, SystemExit):
-            raise
-        except BaseException as exc:
-            load_report.report_plugin_load_failure(name, exc)
-            drop_plugin_metrics(name)
-    return registered_metrics() + catalog.collect_core_metrics()
+    import or declare is skipped with a loud report and the remaining plugin +
+    core metrics still serve — never a 500 for the whole endpoint, never a stale
+    snapshot. A declaration is admitted whole or not at all, so there is no partial
+    registration to clean up and a fixed file is picked up on the next call."""
+    declared = [
+        data_registry.load_declaration(
+            path.parent.name,
+            lambda name=path.parent.name: importlib.import_module(
+                f"ava_builtins.plugins.{name}.metrics"
+            ),
+            (path.parent, data_registry.METRICS_KEY),
+        )
+        for path in _plugin_metric_modules()
+    ]
+    registry, _refused = data_registry.build_data_registry(declared)
+    return [*registry.metrics(), *catalog.collect_core_metrics()]
 
 
 def _render_metric_query(spec: MetricSpec, agent_id: int | None) -> str:
