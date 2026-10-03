@@ -91,11 +91,11 @@ def test_versions_file_has_the_pinned_release_assets() -> None:
             },
         },
         "grafana": {
-            "version": "13.1.3",
+            "version": "13.2.3",
             "assets": {
                 "darwin-arm64": {
-                    "url": "https://dl.grafana.com/oss/release/grafana-13.1.3.darwin-arm64.tar.gz",
-                    "sha256": "cbd4fc856fa5817a7fbc141d1e11cb1d79ca21cea15294cd32d9c82a666d382a",
+                    "url": "https://dl.grafana.com/oss/release/grafana-13.2.3.darwin-arm64.tar.gz",
+                    "sha256": "248a51bcfacdb1ec642006cee46b4de44a34bcf41ddea88d96a4605e2e9d808c",
                 }
             },
         },
