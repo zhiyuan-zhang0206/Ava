@@ -56,3 +56,8 @@ posture, the maintenance "pause" journal and `ava.self.pause_heartbeat`, each a 
 
 Forward link (2026-10-03): `ava maintenance stop --keep-terminals` no longer exists; see
 [the manual maintenance verbs deletion](2026-10-03-delete-manual-maintenance-verbs.md).
+
+Forward link (2026-10-03): shells became a roster service the same day, and
+[the pty-sessions service decision](2026-10-03-pty-sessions-service.md) rules that `ava restart`
+closes them like `ava stop` (the service must run the new code after an update). The retained set
+above therefore loses the shells, and keeping them is the generic `--keep-service pty-sessions`.

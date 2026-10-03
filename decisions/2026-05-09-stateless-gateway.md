@@ -53,3 +53,9 @@ down exactly one session, and cluster updates take down none.*
 
 Forward link (2026-08-22): the launch-orphan state is now unclaimed idling; see
 [agent status model](2026-08-22-agent-status-model.md).
+
+Forward link (2026-10-03): the per-session bound of the 2026-08-13 forward link above no longer
+holds either: agent shells live in one machine-wide service again, so a dying
+[pty-sessions service](2026-10-03-pty-sessions-service.md) takes down every session on the
+machine, as the session server did, and a service stop closes them. That decision records the
+trade.

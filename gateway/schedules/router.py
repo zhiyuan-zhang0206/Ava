@@ -322,7 +322,7 @@ def _strip_trailing_blank(lines_list: list[str]) -> list[str]:
 def _read_transcript_blocking(schedule_id: int, lines: int) -> list[str] | None:
     """Tail the schedule session's PTY transcript, or None when it has none.
 
-    The session's pty host writes a byte transcript to
+    The pty-sessions service writes a byte transcript of the session to
     `$AVA_HOME/logs/ava-schedule-<id>.out.log` that survives the session being
     reaped — a completed/crashed runner's output lives there after live
     capture has nothing left to show (the backend keeps no such file, so this is the

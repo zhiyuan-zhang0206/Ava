@@ -9,12 +9,13 @@ tags:
 
 # PTY session liveness
 
-A matching PID/start-time is not sufficient for liveness: both the record
-reader (`cli._record_alive`) and host (`PtySession.pid_matches`) reject
-`STATUS_ZOMBIE`. A zombie cannot execute, even when its parent or init has not
-reaped its PID yet. Start-time identity still rejects recycled PIDs.
-The lazy record sweep uses the same terminal observation: a confirmed zombie's
-record and socket can be removed; a running or unreadable shell is retained.
+A matching PID/start-time is not sufficient for liveness: the service's
+`PtySession.pid_matches` rejects `STATUS_ZOMBIE`. A zombie cannot execute, even
+when its parent has not reaped its PID yet (the service is the shell's parent
+and reaps it on its next pass). Start-time identity still rejects recycled PIDs.
+`has`, `list` and every op that needs a live shell read the table through this
+rule, so a session whose shell exited reads as gone before the service has torn
+it down.
 
 Crash tests require the shell/child to be gone or zombie; running and
 unreadable survivors still fail. PID disappearance alone measures the parent's
@@ -22,4 +23,4 @@ reap timing, not whether the child can keep executing.
 
 ## Dependencies
 
-- [[pty_sessions.ava.okf.md]] — session lifecycle and record ownership.
+- [[pty_sessions/pty_sessions.ava.okf.md]] — the service and session lifecycle.

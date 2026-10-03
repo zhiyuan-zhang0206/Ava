@@ -173,7 +173,7 @@ class DisplaySettings(EnvSettings):
             "the shell monitor page's poll (GET /api/agents/{id}/shell/{sid}), the SDK's "
             "ava.shell.sessions.capture(), and the pty CLI's bare `capture` op. 200 lines "
             "is a few screenfuls and matches the monitor page's own default; the valid "
-            "range (50..2000 at the API, hard clamp 100000 at the pty host) stays fixed "
+            "range (50..2000 at the API, hard clamp 100000 at the pty-sessions service) stays fixed "
             "(protective constants, task #3696 exception inventory)."
         ),
         json_schema_extra={
