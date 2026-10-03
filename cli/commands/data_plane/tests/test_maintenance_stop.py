@@ -11,7 +11,6 @@ import sys
 import time
 from collections.abc import Iterator
 from pathlib import Path
-from types import SimpleNamespace
 from typing import NoReturn
 
 import psutil
@@ -21,14 +20,17 @@ from base.cluster import ownership
 from base.cluster.dataplane import pooler as base_pooler
 from base.config import settings
 from base.native_process import pid_starttime_ticks
-from base.sessions.backend import PosixProcSessionBackend
-from base.sessions.record import SessionRecord
+from base.sessions.pty import client, closure
+from base.sessions.pty.paths import ledger_path
 from cli.commands.data_plane import maintenance_stop as plane
 from cli.commands.data_plane import pgbouncer as pb
 from cli.commands.lifecycle import service_stop as stop
-from cli.commands.lifecycle.tests.stop_support import Launcher
+from cli.commands.lifecycle.tests.stop_support import Launcher, PtyServiceProcess
 from cli.commands.lifecycle.tests.stop_support import home as home
 from cli.commands.lifecycle.tests.stop_support import launch as launch
+from cli.commands.lifecycle.tests.stop_support import pty_service as pty_service
+from services.pty_sessions import ledger
+from tests.path_scoped.pty_shells import new as new_session
 
 
 def forbidden(*_args: object, **_kwargs: object) -> NoReturn:
@@ -45,16 +47,21 @@ _IGNORE = (
 )
 
 
-def test_persistent_terminals_refuse_before_signalling(
-    launch: Launcher, monkeypatch: pytest.MonkeyPatch
+def test_a_session_in_the_service_refuses_before_any_signal(
+    home: Path, launch: Launcher, pty_service: PtyServiceProcess
 ) -> None:
+    """A terminal refuses a stop that closes none; nothing is signalled."""
+    del pty_service
     proc = launch("ava-agent-host", _EXIT)
-    monkeypatch.setattr(
-        stop, "get_shell_backend", lambda: SimpleNamespace(list_sessions=lambda: ["schedule-8"])
-    )
+    assert new_session("ava-agent-123-shell-1", home)
     with pytest.raises(RuntimeError, match="will not kill or replay"):
         stop.require_no_terminals()
     assert proc.poll() is None
+
+
+def test_no_terminal_is_no_refusal(home: Path, pty_service: PtyServiceProcess) -> None:
+    del home, pty_service
+    stop.require_no_terminals()
 
 
 @pytest.mark.parametrize("timeout", [0, -1, float("nan"), float("inf")])
@@ -226,46 +233,37 @@ def test_foreign_redis_directory_refuses_before_local_signals(
             assert client.ping()  # pyright: ignore[reportUnknownMemberType] — redis stubs
 
 
-def test_live_pty_host_with_dead_shell_blocks_stop(home: Path, launch: Launcher) -> None:
-    from base.sessions.pty.paths import write_record
+def _dead_shell(launch: Launcher) -> stop.OwnedProcess:
+    proc = launch("dead-shell", _EXIT)
+    identity = stop.OwnedProcess.capture(psutil.Process(proc.pid))
+    proc.kill()
+    proc.wait(timeout=5)
+    return identity
 
-    proc = launch("temporary-host", _IGNORE)
-    (home / "run/sessions/temporary-host.json").unlink()
-    shell = launch("closed-shell", _IGNORE)
-    shell_identity = stop.OwnedProcess.capture(psutil.Process(shell.pid))
-    shell.kill()
-    shell.wait(timeout=5)
-    (home / "run/sessions/closed-shell.json").unlink()
-    host_identity = stop.OwnedProcess.capture(psutil.Process(proc.pid))
-    write_record(
-        home / "run/pty/ava-agent-123-shell-1.json",
-        SessionRecord(
-            shell_identity.pid,
-            0,
-            "private-fixture",
-            str(home),
-            shell_identity.birth,
-            starttime=shell_identity.starttime,
-        ),
-        host_pid=host_identity.pid,
-        host_create_time=host_identity.birth,
-        host_starttime=host_identity.starttime,
+
+def test_a_dead_service_with_a_surviving_ledger_member_refuses(
+    home: Path, launch: Launcher
+) -> None:
+    """The service crashed; its shell is gone but a job it started outlived the hangup."""
+    del home
+    job = launch("surviving-job", _IGNORE)
+    member = stop.OwnedProcess.capture(psutil.Process(job.pid))
+    ledger.write(
+        ledger_path(), [closure.Target("ava-agent-123-shell-1", _dead_shell(launch), (member,))]
     )
+    with pytest.raises(client.ServiceDownError):
+        client.request("list")
     with pytest.raises(RuntimeError, match="will not kill or replay"):
         stop.require_no_terminals()
-    assert proc.poll() is None
+    assert job.poll() is None
 
 
-def test_malformed_terminal_record_refuses_before_listing(
-    home: Path, monkeypatch: pytest.MonkeyPatch
+def test_a_dead_service_whose_ledger_names_only_dead_processes_does_not_refuse(
+    home: Path, launch: Launcher
 ) -> None:
-    path = home / "run/pty/unknown.json"
-    path.parent.mkdir(parents=True)
-    path.write_text("{")
-    monkeypatch.setattr(PosixProcSessionBackend, "list_sessions", forbidden)
-    with pytest.raises(RuntimeError, match="cannot verify terminal record"):
-        stop.require_no_terminals()
-    assert path.read_text() == "{"
+    del home
+    ledger.write(ledger_path(), [closure.Target("ava-agent-123-shell-1", _dead_shell(launch))])
+    stop.require_no_terminals()
 
 
 def test_redis_admin_credential_is_independent_of_runtime_url(
