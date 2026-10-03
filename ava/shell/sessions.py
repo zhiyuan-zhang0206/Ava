@@ -206,12 +206,13 @@ class ShellSessions:
         ttl = _validate_ttl(ttl, system=system)
         session_id = self._next_session_index_from_db()
         full = f"{self._shell_prefix()}{session_id}" + (f"-{name}" if name is not None else "")
-        # Pass the session allowlist to the backend. On POSIX the detached PTY host
-        # also inherits the launcher's ambient env before overlaying this dict;
+        # Pass the session allowlist to the backend. On POSIX the shell's base env is
+        # the pty-sessions service's own env, overlaid with this dict;
         # watcher-only runner credentials arrive through `env_overrides`, while
         # generic shell sessions keep the ordinary projection.
         #
-        # The override rides the backend's 0600 envfile, not argv (issue #974).
+        # The dict rides the request body over the service's 0600 unix socket, not
+        # argv (issue #974).
         backend = self._backend
         if cwd is None:
             cwd = str(workspace_dir(self._agent_id))

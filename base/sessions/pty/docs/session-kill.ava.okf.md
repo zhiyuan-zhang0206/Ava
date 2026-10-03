@@ -27,9 +27,8 @@ keeps the id. The id outlives the shell, so a scan uses it only while it is
 proven (below).
 
 Boundary: a process that calls setsid AND leaves the tree is outside both.
-That is the shape `base._reparent` gives every sovereign launch — a new PTY
-host, the services `ava start` brings up from an agent's shell — so it
-survives. Nothing is ever selected by name or argv.
+That is the shape `base._reparent` gives every sovereign launch — the
+services `ava start` brings up from an agent's shell — so it survives. Nothing is ever selected by name or argv.
 
 ## Session-id proof
 
@@ -88,9 +87,9 @@ nobody.
 
 A graceful kill first SIGTERMs the pre-kill snapshot and waits for the shell,
 then runs the same sweep (a TERM-ignoring job outlives its shell). `mode` is
-`forced` whenever the sweep had to SIGKILL a live process. The host counts a
-kill op in flight until it answers, and its exit after the shell dies waits
-for it, so a member is never left frozen under an exited host.
+`forced` whenever the sweep had to SIGKILL a live process. The service keeps
+running when a session dies, so a member is never left frozen under an exited
+process.
 
 ## Verdict
 
@@ -100,34 +99,33 @@ verifies answers `interrupted` (fail-open). A dead or absent session is the
 idempotent noop and answers `idle`. A survivor the caller could signal makes
 the op an error naming its pid. When only processes it may not signal survive
 (a root `sudo` on the pty) and the shell is gone, the op answers `ok` with
-`interrupted` and a `survivors` list; the CLI prints `interrupted` and names
-them on stderr, so the TTL reaper still sends its interruption notice.
+`interrupted` and a `survivors` list (`KillVerdict.survivors`), so the TTL
+reaper still sends its interruption notice.
 
 ## Callers
 
-The host's `kill` op; the CLI's record-based kill of a wedged host
-(`_kill_by_record`); the lazy sweep of a crashed host's surviving shell
-(`records._kill_recorded_shell`); and, through `kill_host_tree` (which
-freezes the host first and kills it even when a session kill raised), the
-orphan-host reaper and a failed spawn's abort.
+The pty-sessions service's `kill` request (`services/pty_sessions/session.py:kill_session`)
+and its terminal closure (`base/sessions/pty/closure.py`).
 `ava.shell.sessions.kill`, the TTL reaper's `shell_kill`, terminate's
-`kill_all_shell_sessions`, and a force stop reach the host op through the
+`kill_all_shell_sessions`, and a force stop reach the `kill` request through the
 session backend.
 
-The persistent-terminal closure (`cli/commands/lifecycle/service_stop.py`) — a normal
-`ava stop` (`close_terminals`) — captures each shell's session with
-`capture_session` before any signal, HUPs the shells and TERMs the rest. Each
-grace poll `refresh`es every capture with one scan, keeping its proof current.
-A poll is quiet only when no captured process lives and the scan read no
-non-zombie process in the session but the caller, pinned or not; it counts
-only once a second, immediate poll is quiet too, since a member can fork while
-the first scan runs. A capture nothing can prove any more is still scanned and
-its session's processes logged. What is left after the grace dies by
+The closure — a normal `ava stop` (`close_terminals` asks the service for
+`close_all`), the service's own SIGTERM stop, and the sweep of a crashed
+service's leftovers (`services/pty_sessions/ledger.py`) — captures each shell's
+session with `capture_session` before any signal, HUPs the shells and TERMs the
+rest. Each grace poll `refresh`es every capture with one scan, keeping its
+proof current. A poll is quiet only when no captured process lives and the scan
+read no non-zombie process in the session but the caller, pinned or not; it
+counts only once a second, immediate poll is quiet too, since a member can fork
+while the first scan runs. A capture nothing can prove any more is still scanned
+and its session's processes logged. What is left after the grace dies by
 `kill_session_tree(also=<capture>, proven_at=<its proof>)`
 (decisions/2026-09-28-stop-escalates-to-sigkill.md,
-decisions/2026-09-28-session-id-proven-by-a-live-member.md). `ava pause`
-closes no terminal.
+decisions/2026-09-28-session-id-proven-by-a-live-member.md). A shell already
+gone is still closed through the members the service recorded earlier: a live
+recorded member proves the session id.
 
 ## Dependencies
 
-- [[pty_sessions.ava.okf.md]] — session lifecycle and record ownership.
+- [[pty_sessions/pty_sessions.ava.okf.md]] — the service, its client and the session lifecycle.

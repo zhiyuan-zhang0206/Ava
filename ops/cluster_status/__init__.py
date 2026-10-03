@@ -235,7 +235,7 @@ def capture_shell(
     Resolves `session_id` against this host's live shell sessions for the agent
     (`agent_shell_sessions`), reconstructs the full session name (carrying the
     optional `-<name>` suffix), and captures the last `lines` lines through the
-    shell session backend (per-session pty hosts on POSIX; the native supervisor on
+    shell session backend (the pty-sessions service on POSIX; the native supervisor on
     Windows — the backend's exact-match capture pins it to that one session,
     never a prefix neighbour `shell-3` vs `shell-30`, or its `-watcher`). Returns
     (full_name, captured_lines, created_at, uptime_seconds) — lines newline-split
@@ -364,7 +364,7 @@ def _collect_sessions() -> tuple[list[SessionInfo], int, int]:
 
     The service/daemon sessions come from `get_backend()` (native supervisor)
     and the agents' persistent shells / watchers from
-    `get_shell_backend()` (per-session pty hosts) — the same two namespaces
+    `get_shell_backend()` (the pty-sessions service) — the same two namespaces
     `ava start` / the healthchecks write into. Only sessions matching the
     current cluster prefix (`ava-*`) are kept — dev-worktree clusters and bare
     non-ava sessions are excluded. Agent processes are not sessions (they are

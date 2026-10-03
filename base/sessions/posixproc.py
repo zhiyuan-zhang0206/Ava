@@ -6,9 +6,9 @@ caps `kern.tty.ptmx_max`, a whole-box wall the fleet hit long before any real
 resource limit). This module hosts agents as named, detached processes tracked
 by small on-disk records. Daemons run here too (services
 need no PTY, and the per-box PTY ceiling then stops bounding service count);
-only the agents' own persistent shells live elsewhere, each in its own
-detached pty host (`base/sessions/pty`), which keeps the long-lived
-interactive pane.
+only the agents' own persistent shells live elsewhere, in the machine's
+pty-sessions service (`services/pty_sessions`, reached through
+`base/sessions/pty`), which keeps the long-lived interactive pane.
 
 The agent launch and the reap / status consumers use this surface:
 

@@ -108,8 +108,8 @@ from base.native_process.turn_identity import (
 # use them, never at module top: both pull the pydantic Settings chain (+~30 MB
 # RSS per process, measured 2026-08-13), and `import base.log` must stay
 # cheap for lightweight processes that hold a logger but never call an init_*
-# (the per-session pty hosts — one process per live shell — are the forcing
-# case). An init_* caller is a real service and pays settings anyway.
+# (a process that only holds a logger, such as a short-lived CLI helper, is the
+# forcing case). An init_* caller is a real service and pays settings anyway.
 
 __all__ = [
     "add_postgres_sink",

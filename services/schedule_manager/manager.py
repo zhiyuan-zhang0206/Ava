@@ -383,10 +383,10 @@ class ScheduleManager:
         # row, and without this the old one would render as in-progress beside
         # it forever (QA P2-2).
         self._close_null_runs(schedule_id)
-        # The unit's config + this run's schedule id ride a 0600 env file the
-        # session sources; the backend writes it from the env dict (never argv
-        # — issue #974). The backend hands the command to the per-session host,
-        # which submits it once the login shell is ready.
+        # The unit's config + this run's schedule id ride the env dict, which the
+        # backend sends in the request body of the pty-sessions service's 0600
+        # socket (never argv — issue #974). The service submits the command once
+        # the login shell is ready.
         env = forward_env_dict()
         env["AVA_SCHEDULE_ID"] = str(schedule_id)
         # The runner's cron math is timezone-DEFINED: it must fire on the
