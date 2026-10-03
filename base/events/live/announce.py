@@ -15,9 +15,6 @@ from base.events.live.projection import (
     AgentSpawned,
     AgentUpdated,
     ImpersonationChanged,
-    NoticePosted,
-    NoticeResolved,
-    PageClosed,
     TaskCreated,
     TaskUpdated,
 )
@@ -41,29 +38,6 @@ def publish_impersonation_changed_sync(bus: EventBus, agent_id: int) -> None:
     bus.publish_best_effort_sync(ev.model_dump_json(), context="impersonation_changed")
 
 
-def publish_notice_posted_sync(
-    bus: EventBus,
-    agent_id: int,
-    notice_id: int,
-    priority: str,
-    title: str,
-    task_id: int | None = None,
-) -> None:
-    """Publish NoticePosted from a sync context. The unified Inbox refetches its
-    queue from this lightweight header; `task_id` groups it without a refetch."""
-    ev = NoticePosted(
-        agent_id=agent_id, notice_id=notice_id, priority=priority, title=title, task_id=task_id
-    )
-    bus.publish_best_effort_sync(ev.model_dump_json(), context="notice_posted")
-
-
-def publish_notice_resolved_sync(bus: EventBus, agent_id: int, notice_id: int) -> None:
-    """Publish NoticeResolved from a sync context to refresh the Inbox queue.
-    This is the same event as the async gateway-side publisher."""
-    ev = NoticeResolved(agent_id=agent_id, notice_id=notice_id)
-    bus.publish_best_effort_sync(ev.model_dump_json(), context="notice_resolved")
-
-
 def publish_task_created_sync(bus: EventBus, agent_id: int, task_id: int) -> None:
     """Publish TaskCreated from a sync context (the ava.tasks.create SDK path).
     No task read — the frontend refetches /api/tasks on receipt, so the event
@@ -83,17 +57,3 @@ async def publish_agent_updated(bus: EventBus, agent_id: int) -> None:
     """Publish a committed change hint from an async context."""
     ev = AgentUpdated(agent_id=agent_id)
     await bus.publish_best_effort(ev.model_dump_json(), context="agent_updated")
-
-
-def publish_page_closed_sync(bus: EventBus, agent_id: int, name: str) -> None:
-    """Publish PageClosed from a sync context (ops lifecycle, launch /
-    boot-failure force-terminate paths).
-
-    The `cascade_close_agent_pages` trigger closes only agent-owned show() rows
-    when status flips to 'terminated'; daemon-supervised serve() rows remain
-    open. Callers capture the former before the status UPDATE and emit one
-    PageClosed per name so the frontend removes those entries in real time.
-    Best-effort like every announce — a redis outage degrades to "the frontend
-    refreshes on its next full fetch"."""
-    ev = PageClosed(agent_id=agent_id, name=name)
-    bus.publish_best_effort_sync(ev.model_dump_json(), context="page_closed")

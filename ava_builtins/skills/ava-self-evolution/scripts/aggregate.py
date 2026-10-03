@@ -38,13 +38,6 @@ def load_json(path: Path) -> dict[str, Any]:
         return json.load(f)
 
 
-def load_json_maybe(path: Path) -> dict[str, Any] | None:
-    try:
-        return load_json(path)
-    except (FileNotFoundError, json.JSONDecodeError):
-        return None
-
-
 def parse_failure_md(text: str) -> list[dict[str, Any]]:
     """Parse mine.py's markdown output back into structured clusters.
 

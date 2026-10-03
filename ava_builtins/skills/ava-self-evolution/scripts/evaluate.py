@@ -286,23 +286,3 @@ def debrief(state: dict, skill_name: str) -> list[dict]:
             }
         )
     return results
-
-
-def collect_debriefs(state: dict) -> list[dict]:
-    """Read each debriefed eval agent's last message and pair it with the task."""
-    results: list[dict] = []
-    for entry in state["runs"]:
-        if not entry.get("debrief_sent"):
-            continue
-        try:
-            msg = ava.agents.get_last_message(entry["eval_agent_id"])
-        except Exception:
-            msg = None
-        results.append(
-            {
-                "eval_agent_id": entry["eval_agent_id"],
-                "prompt": entry["prompt"],
-                "reflection": msg,
-            }
-        )
-    return results

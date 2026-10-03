@@ -295,15 +295,6 @@ def _build_registry() -> dict[str, _FieldRef]:
     return reg
 
 
-def ensure_built() -> None:
-    """Force the registry build (first call only; the build is memoized).
-
-    `base/config/__init__.py` calls this at its own import so its module-level
-    consumers (BOOTSTRAP_FIELDS etc.) see a built registry regardless of import
-    order; every other caller gets the build lazily on first use."""
-    _build_registry()
-
-
 def fields() -> dict[str, _FieldRef]:
     return _build_registry()
 

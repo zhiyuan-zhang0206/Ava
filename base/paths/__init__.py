@@ -255,11 +255,6 @@ def quarantined_exec_requests_dir() -> Path:
     return target
 
 
-def monitors_dir() -> Path:
-    """Per-unit monitor-script directory ($AVA_HOME/monitors)."""
-    return ava_home() / "monitors"
-
-
 def launch_failures_path() -> Path:
     """Path of the `$AVA_HOME/last_launch_failures` file — the session names the
     last `ava start` on this host could not launch.

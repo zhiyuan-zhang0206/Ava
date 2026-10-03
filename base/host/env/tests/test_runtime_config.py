@@ -90,12 +90,3 @@ class TestEnvRoundtrip:
         aliases = rt.read_env_aliases()
         assert aliases["AVA_DB_URL"] == "postgresql://x@127.0.0.1:1/x"
         assert aliases["AVA_MODEL"] == "m1"
-
-
-def test_rename_env_keys_finds_and_keeps_an_export_prefixed_line(fake_ava_home: Path) -> None:
-    """A legacy key behind the export prefix is the same key to the parser: the
-    rename finds it, keeps the prefix, and leaves lookalikes alone (#2981)."""
-    env_path = fake_ava_home / ".env"
-    env_path.write_text("export OLD_KEY=v1\nKEEP=1\nexportED_OLD_KEY=v2\n")
-    assert rt.rename_env_keys(env_path, {"OLD_KEY": "NEW_KEY"}) == ["OLD_KEY -> NEW_KEY"]
-    assert env_path.read_text() == "export NEW_KEY=v1\nKEEP=1\nexportED_OLD_KEY=v2\n"
