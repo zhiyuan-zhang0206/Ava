@@ -1,4 +1,5 @@
-"""Start must provision the toolchain that it will actually execute."""
+"""Start must provision the toolchain that it will actually execute: the pinned vendored tree
+where the platform has one, a validated installed PostgreSQL 17 only where it does not."""
 
 from __future__ import annotations
 
@@ -36,6 +37,7 @@ def installed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
         tool.write_text(body)
         tool.chmod(0o700)
     monkeypatch.setattr(runtime_binaries, "vendored_pg_bin_dir", lambda: None)
+    monkeypatch.setattr(runtime_binaries, "vendored_pg_supported", lambda: False)
 
     def installed_tool(name: str) -> Path:
         return bindir / name
@@ -110,28 +112,41 @@ def test_mixed_installations_fail_before_data_mutation(
 
 
 @pytest.mark.parametrize("existing_vendor", [False, True])
-def test_vendor_provisioning_has_one_explicit_selection_rule(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, existing_vendor: bool
+def test_supported_platform_provisions_the_pinned_tree_whatever_is_installed(
+    installed: Path, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, existing_vendor: bool
 ) -> None:
+    """A valid system PostgreSQL 17 must not stand in for the pinned vendored tree: with the
+    pinned directory absent (first start, or a pin bump that left only an older version
+    directory) the pinned version is downloaded, never the installed binary selected."""
     calls: list[str] = []
+    monkeypatch.setattr(runtime_binaries, "vendored_pg_supported", lambda: True)
     monkeypatch.setattr(
         runtime_binaries, "vendored_pg_bin_dir", lambda: tmp_path if existing_vendor else None
     )
-    monkeypatch.setattr(pg_runtime, "_installed_server", lambda: None)
     monkeypatch.setattr(runtime_binaries, "ensure_pg_binaries", lambda: calls.append("postgres"))
     monkeypatch.setattr(runtime_binaries, "ensure_pgvector", lambda: calls.append("pgvector"))
     pg_runtime.ensure_pg_runtime()
     assert calls == ["postgres", "pgvector"]
 
 
-def test_existing_vendor_does_not_switch_to_installed(
-    installed: Path, monkeypatch: pytest.MonkeyPatch
+def test_platform_without_an_artifact_and_without_an_install_fails(
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    calls: list[str] = []
-    monkeypatch.setattr(
-        runtime_binaries, "vendored_pg_bin_dir", lambda: installed.parent / "vendor"
-    )
-    monkeypatch.setattr(runtime_binaries, "ensure_pg_binaries", lambda: calls.append("postgres"))
-    monkeypatch.setattr(runtime_binaries, "ensure_pgvector", lambda: calls.append("pgvector"))
-    pg_runtime.ensure_pg_runtime()
-    assert calls == ["postgres", "pgvector"]
+    monkeypatch.setattr(runtime_binaries, "vendored_pg_supported", lambda: False)
+    monkeypatch.setattr(pg_runtime, "_installed_server", lambda: None)
+    with pytest.raises(RuntimeError, match="no installed PostgreSQL 17"):
+        pg_runtime.ensure_pg_runtime()
+
+
+def test_vendored_platform_support_follows_the_artifact_table(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    for system, machine, supported in (
+        ("Linux", "x86_64", True),
+        ("Darwin", "arm64", True),
+        ("Linux", "aarch64", False),
+        ("Windows", "AMD64", False),
+    ):
+        monkeypatch.setattr("platform.system", lambda system=system: system)
+        monkeypatch.setattr("platform.machine", lambda machine=machine: machine)
+        assert runtime_binaries.vendored_pg_supported() is supported

@@ -1,4 +1,4 @@
-"""The start converge step accepts an installed PostgreSQL 17 without a download, and a remote-managed gateway needs no local server or extension."""
+"""The start converge step accepts an installed PostgreSQL 17 only where the platform has no vendored artifact, and a remote-managed gateway needs no local server or extension."""
 
 from __future__ import annotations
 
@@ -39,6 +39,7 @@ def installed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
         tool.write_text(body)
         tool.chmod(0o700)
     monkeypatch.setattr(runtime_binaries, "vendored_pg_bin_dir", lambda: None)
+    monkeypatch.setattr(runtime_binaries, "vendored_pg_supported", lambda: False)
 
     def installed_tool(name: str) -> Path:
         return bindir / name
@@ -57,7 +58,7 @@ def installed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     return bindir
 
 
-def test_start_converge_accepts_installed_pg17_without_download(installed: Path) -> None:
+def test_start_converge_accepts_installed_pg17_where_no_artifact_exists(installed: Path) -> None:
     _ensure_pg_binaries_step(
         ConvergeCtx(installed.parent, installed.parent, frozenset({"gateway"}))
     )

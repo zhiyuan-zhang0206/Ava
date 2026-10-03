@@ -204,7 +204,7 @@ commits no run, so this is what the runs established, not a log):
 
 - **arm64 runs natively; no `linux/amd64` emulation is needed.** The vendored Postgres has
   no `linux/aarch64` artifact (`runtime_binaries._platform_key` raises), but
-  `ensure_pg_runtime` validates an installed PostgreSQL 17 with pgvector first, and the
+  `ensure_pg_runtime` falls back to validating an installed PostgreSQL 17 with pgvector there (and only on platforms without a vendored artifact), and the
   pgdg, redis.io and nodesource repositories all serve arm64, as does the pinned
   PgBouncer build (`1.26.0-1.pgdg24.04+1`). Only the image's package install differs from
   an amd64 host.
