@@ -139,6 +139,38 @@ def _report(heading: str, entries: list[str]) -> None:
         print(f"  {entry}", file=sys.stderr)
 
 
+def _scan(
+    path: Path,
+    per_agent: set[str],
+    errors: list[str],
+    layered_errors: list[str],
+    plugin_errors: list[str],
+) -> None:
+    """Collect one file's bare, layered and process-global plugin config reads."""
+    resolved = path.resolve()
+    try:
+        rel = resolved.relative_to(_REPO_ROOT).as_posix()
+    except ValueError:
+        rel = resolved.as_posix()
+    if rel in _ALLOWED_FILES or "/tests/" in rel or rel.startswith("tests/"):
+        return
+    if path.name.startswith("test_") or path.name.endswith("_test.py"):
+        return
+    try:
+        text = path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        return
+    layered_errors.extend(_layered_reads(text, rel, per_agent))
+    for lineno, line in enumerate(text.splitlines(), start=1):
+        if line.lstrip().startswith("#"):
+            continue
+        for m in _SETTINGS_ATTR.finditer(line):
+            if m.group(2) in per_agent:
+                errors.append(f"{rel}:{lineno}: {line.strip()}")
+        if rel not in _PLUGIN_MECHANISM_FILES and _PLUGIN_CONFIGS_READ.search(line):
+            plugin_errors.append(f"{rel}:{lineno}: {line.strip()}")
+
+
 def main(argv: list[str]) -> int:
     from base.config import per_agent_field_names
 
@@ -153,28 +185,7 @@ def main(argv: list[str]) -> int:
     layered_errors: list[str] = []
     plugin_errors: list[str] = []
     for path in lint_common.restrict(_iter_files(argv), scope, _REPO_ROOT):
-        resolved = path.resolve()
-        try:
-            rel = resolved.relative_to(_REPO_ROOT).as_posix()
-        except ValueError:
-            rel = resolved.as_posix()
-        if rel in _ALLOWED_FILES or "/tests/" in rel or rel.startswith("tests/"):
-            continue
-        if path.name.startswith("test_") or path.name.endswith("_test.py"):
-            continue
-        try:
-            text = path.read_text(encoding="utf-8")
-        except (OSError, UnicodeDecodeError):
-            continue
-        layered_errors.extend(_layered_reads(text, rel, per_agent))
-        for lineno, line in enumerate(text.splitlines(), start=1):
-            if line.lstrip().startswith("#"):
-                continue
-            for m in _SETTINGS_ATTR.finditer(line):
-                if m.group(2) in per_agent:
-                    errors.append(f"{rel}:{lineno}: {line.strip()}")
-            if rel not in _PLUGIN_MECHANISM_FILES and _PLUGIN_CONFIGS_READ.search(line):
-                plugin_errors.append(f"{rel}:{lineno}: {line.strip()}")
+        _scan(path, per_agent, errors, layered_errors, plugin_errors)
     _report(
         "plugin config read straight out of the process-global _PLUGIN_CONFIGS in turn-scoped "
         "code — use `get_plugin_config(<plugin>, slices)` (or `process_plugin_config` in the "

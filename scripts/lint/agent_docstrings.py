@@ -161,6 +161,32 @@ _PLUGIN_MODULE_DOCSTRING_EXEMPT: frozenset[str] = frozenset(
 )
 
 
+def _registered_namespace_files(plugin_py: Path, tree: ast.Module) -> set[Path]:
+    """The module files a plugin registers as `ava.X` namespaces."""
+    files: set[Path] = set()
+    # Track `from . import <name> as <alias>` to resolve module references.
+    imported_modules: dict[str, str] = {}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom) and node.level == 1:
+            for alias in node.names:
+                imported_modules[alias.asname or alias.name] = alias.name
+    # Find `ava.register_namespace("X", <expr>)` calls.
+    for node in ast.walk(tree):
+        if (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and node.func.attr == "register_namespace"
+            and len(node.args) >= 2
+            and isinstance(node.args[1], ast.Name)
+        ):
+            module_alias = node.args[1].id
+            module_name = imported_modules.get(module_alias, module_alias)
+            candidate = plugin_py.parent / f"{module_name}.py"
+            if candidate.exists():
+                files.add(candidate.resolve())
+    return files
+
+
 def _discover_plugin_namespace_modules(repo_root: Path) -> set[Path]:
     """Find plugin module files registered as `ava.X` namespaces.
 
@@ -175,26 +201,7 @@ def _discover_plugin_namespace_modules(repo_root: Path) -> set[Path]:
             tree = ast.parse(plugin_py.read_text(encoding="utf-8"))
         except SyntaxError:
             continue
-        # Track `from . import <name> as <alias>` to resolve module references.
-        imported_modules: dict[str, str] = {}
-        for node in ast.walk(tree):
-            if isinstance(node, ast.ImportFrom) and node.level == 1:
-                for alias in node.names:
-                    imported_modules[alias.asname or alias.name] = alias.name
-        # Find `ava.register_namespace("X", <expr>)` calls.
-        for node in ast.walk(tree):
-            if (
-                isinstance(node, ast.Call)
-                and isinstance(node.func, ast.Attribute)
-                and node.func.attr == "register_namespace"
-                and len(node.args) >= 2
-                and isinstance(node.args[1], ast.Name)
-            ):
-                module_alias = node.args[1].id
-                module_name = imported_modules.get(module_alias, module_alias)
-                candidate = plugin_py.parent / f"{module_name}.py"
-                if candidate.exists():
-                    namespace_files.add(candidate.resolve())
+        namespace_files.update(_registered_namespace_files(plugin_py, tree))
     return namespace_files
 
 
@@ -285,36 +292,53 @@ def _docstring_violations(
     """Inspect a docstring node, return list of (line_number, reason)."""
     # ast.get_docstring returns the cleaned string; we want raw text and
     # exact line numbers, so pull from the Expr node directly.
-    if not isinstance(node, ast.Module | ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef):
+    located = _docstring_of(node)
+    if located is None:
         return []
-    if not node.body:
-        return []
-    first = node.body[0]
-    if not (isinstance(first, ast.Expr) and isinstance(first.value, ast.Constant)):
-        return []
-    value = first.value.value
-    if not isinstance(value, str):
-        return []
-
+    value, base_line = located
     violations: list[tuple[int, str]] = []
-    base_line = first.lineno  # 1-indexed line of opening triple-quote
     for offset, line in enumerate(value.splitlines()):
         line_no = base_line + offset
         # Check for inline exemption on this source line.
         if 0 < line_no <= len(source_lines) and "lint-docstring: ok" in source_lines[line_no - 1]:
             continue
-        if _CJK_RE.search(line):
-            violations.append((line_no, "Chinese characters in agent-facing docstring"))
-        if _MD_EMPHASIS_RE.search(line):
-            violations.append(
-                (line_no, "Markdown emphasis (**bold**) — docstrings are plain Python prose")
-            )
-        for pattern, reason in _IMPL_KEYWORDS:
-            if re.search(pattern, line, re.IGNORECASE):
-                violations.append((line_no, f"impl-detail leak: {reason}"))
-        for compiled, reason in extra or []:
-            if compiled.search(line):
-                violations.append((line_no, reason))
+        violations.extend(_line_violations(line, line_no, extra))
+    return violations
+
+
+def _docstring_of(node: ast.AST) -> tuple[str, int] | None:
+    """`(raw docstring text, 1-indexed line of its opening triple-quote)`, if the node has one."""
+    # ast.get_docstring returns the cleaned string; we want raw text and
+    # exact line numbers, so pull from the Expr node directly.
+    if not isinstance(node, ast.Module | ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef):
+        return None
+    if not node.body:
+        return None
+    first = node.body[0]
+    if not (isinstance(first, ast.Expr) and isinstance(first.value, ast.Constant)):
+        return None
+    value = first.value.value
+    if not isinstance(value, str):
+        return None
+    return value, first.lineno
+
+
+def _line_violations(
+    line: str, line_no: int, extra: list[tuple[re.Pattern[str], str]] | None
+) -> list[tuple[int, str]]:
+    violations: list[tuple[int, str]] = []
+    if _CJK_RE.search(line):
+        violations.append((line_no, "Chinese characters in agent-facing docstring"))
+    if _MD_EMPHASIS_RE.search(line):
+        violations.append(
+            (line_no, "Markdown emphasis (**bold**) — docstrings are plain Python prose")
+        )
+    for pattern, reason in _IMPL_KEYWORDS:
+        if re.search(pattern, line, re.IGNORECASE):
+            violations.append((line_no, f"impl-detail leak: {reason}"))
+    for compiled, reason in extra or []:
+        if compiled.search(line):
+            violations.append((line_no, reason))
     return violations
 
 
@@ -330,14 +354,10 @@ def _module_doc_child_reference_violations(
     """A module docstring must not restate its own children — they render
     directly below it, each carrying its own contract. A child's name inside
     a backtick code span is the zero-false-positive core of that rule."""
-    if not tree.body:
+    located = _docstring_of(tree)
+    if located is None:
         return []
-    first = tree.body[0]
-    if not (isinstance(first, ast.Expr) and isinstance(first.value, ast.Constant)):
-        return []
-    value = first.value.value
-    if not isinstance(value, str):
-        return []
+    value, base_line = located
 
     child_names = {
         node.name
@@ -349,7 +369,6 @@ def _module_doc_child_reference_violations(
         return []
 
     violations: list[tuple[int, str]] = []
-    base_line = first.lineno
     for offset, line in enumerate(value.splitlines()):
         line_no = base_line + offset
         if 0 < line_no <= len(source_lines) and "lint-docstring: ok" in source_lines[line_no - 1]:
@@ -403,38 +422,76 @@ def _wrap_targets(tree: ast.Module) -> set[str]:
     for node in tree.body:
         # `ava.extend.wrap("target", <name>)` — wrapper is the 2nd positional arg
         if isinstance(node, ast.Expr) and isinstance(node.value, ast.Call):
-            call = node.value
-            func = call.func
-            if (
-                isinstance(func, ast.Attribute)
-                and func.attr == "wrap"
-                and isinstance(func.value, ast.Attribute)
-                and func.value.attr == "extend"
-                and isinstance(func.value.value, ast.Name)
-                and func.value.value.id == "ava"
-                and len(call.args) >= 2
-                and isinstance(call.args[1], ast.Name)
-            ):
-                targets.add(call.args[1].id)
+            wrapper = _extend_wrap_wrapper(node.value)
+            if wrapper is not None:
+                targets.add(wrapper)
             continue
         # Legacy `ava.X.Y = <name>` reassignment
-        if isinstance(node, ast.Assign):
-            for target in node.targets:
-                if (
-                    isinstance(target, ast.Attribute)
-                    and isinstance(target.value, ast.Attribute)
-                    and isinstance(target.value.value, ast.Name)
-                    and target.value.value.id == "ava"
-                    and isinstance(node.value, ast.Name)
-                ):
-                    targets.add(node.value.id)
+        if (
+            isinstance(node, ast.Assign)
+            and isinstance(node.value, ast.Name)
+            and any(_is_ava_member_target(target) for target in node.targets)
+        ):
+            targets.add(node.value.id)
     return targets
+
+
+def _extend_wrap_wrapper(call: ast.Call) -> str | None:
+    """The wrapper name of an `ava.extend.wrap("target", <name>)` call."""
+    func = call.func
+    if (
+        isinstance(func, ast.Attribute)
+        and func.attr == "wrap"
+        and isinstance(func.value, ast.Attribute)
+        and func.value.attr == "extend"
+        and isinstance(func.value.value, ast.Name)
+        and func.value.value.id == "ava"
+        and len(call.args) >= 2
+        and isinstance(call.args[1], ast.Name)
+    ):
+        return call.args[1].id
+    return None
+
+
+def _is_ava_member_target(target: ast.expr) -> bool:
+    """`ava.X.<attr>` as an assignment target."""
+    return (
+        isinstance(target, ast.Attribute)
+        and isinstance(target.value, ast.Attribute)
+        and isinstance(target.value.value, ast.Name)
+        and target.value.value.id == "ava"
+    )
 
 
 def _is_visible(name: str, all_names: set[str] | None) -> bool:
     if all_names is not None:
         return name in all_names
     return not name.startswith("_")
+
+
+def _agent_visible_nodes(
+    tree: ast.Module, *, is_plugin_module: bool
+) -> list[ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef]:
+    """The top-level defs whose docstrings reach the agent prompt."""
+    if is_plugin_module:
+        # plugin.py is dev-facing. Only wrap targets (`ava.X.Y = <name>`)
+        # leak their docstrings into the agent prompt.
+        wrap_targets = _wrap_targets(tree)
+        return [
+            node
+            for node in tree.body
+            if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef)
+            and node.name in wrap_targets
+        ]
+    # ava/*.py + plugins/*/_*.py: lint everything agent-visible per
+    # `help()` discovery (`__all_for_ava__` whitelist, else non-underscore).
+    all_names = _agent_visible_names(tree)
+    return [
+        node
+        for node in tree.body
+        if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef)
+        and _is_visible(node.name, all_names)
+    ]
 
 
 def _check_file(path: Path) -> list[tuple[Path, int, str]]:
@@ -471,30 +528,11 @@ def _check_file(path: Path) -> list[tuple[Path, int, str]]:
         for line_no, reason in _module_doc_child_reference_violations(tree, source_lines):
             out.append((path, line_no, reason))
 
-    all_names = _agent_visible_names(tree)
-
     # Walk top-level functions/classes only. Nested defs (closures, methods)
     # are not directly agent-visible from `help(ava.X)`.
-    if is_plugin_module:
-        # plugin.py is dev-facing. Only wrap targets (`ava.X.Y = <name>`)
-        # leak their docstrings into the agent prompt.
-        wrap_targets = _wrap_targets(tree)
-        for node in tree.body:
-            if (
-                isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef)
-                and node.name in wrap_targets
-            ):
-                for line_no, reason in _docstring_violations(node, source_lines, extra=extra):
-                    out.append((path, line_no, reason))
-    else:
-        # ava/*.py + plugins/*/_*.py: lint everything agent-visible per
-        # `help()` discovery (`__all_for_ava__` whitelist, else non-underscore).
-        for node in tree.body:
-            if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef):
-                if not _is_visible(node.name, all_names):
-                    continue
-                for line_no, reason in _docstring_violations(node, source_lines, extra=extra):
-                    out.append((path, line_no, reason))
+    for node in _agent_visible_nodes(tree, is_plugin_module=is_plugin_module):
+        for line_no, reason in _docstring_violations(node, source_lines, extra=extra):
+            out.append((path, line_no, reason))
 
     return out
 
