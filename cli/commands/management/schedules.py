@@ -329,7 +329,10 @@ def cmd_schedules_runs(identifier: str, limit: int) -> int:
     for r in rows:
         ok = "-" if r["ok"] is None else ("yes" if r["ok"] else "no")
         agent = "-" if r["agent_id"] is None else str(r["agent_id"])
-        print(f"{r['ran_at']:<28}  {ok:<5}  {agent:<6}  {r['note'] or ''}")
+        head, *rest = (r["note"] or "").splitlines() or [""]
+        print(f"{r['ran_at']:<28}  {ok:<5}  {agent:<6}  {head}")
+        for line in rest:  # a crashed run's traceback follows its first line
+            print(f"    {line}")
     return 0
 
 

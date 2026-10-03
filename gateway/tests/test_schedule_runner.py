@@ -145,12 +145,12 @@ def test_run_records_clean_py_exit(db_conn: psycopg.Connection, unit_home: Path)
 
 
 def test_run_records_crash(db_conn: psycopg.Connection, unit_home: Path) -> None:
-    # A crash closes its run row with ok=false and a short note; the traceback
-    # itself goes to schedules.last_error (asserted in the existing crash test).
-    sid = _insert_schedule(db_conn, script="raise RuntimeError('boom-42')\n")
+    sid = _insert_schedule(db_conn, script="raise RuntimeError('x' * 5000 + 'the-end')\n")
 
     assert run(sid) == 1
-    assert _runs(db_conn, sid) == [(False, "crashed: RuntimeError")]
+    [(ok, note)] = _runs(db_conn, sid)
+    assert ok is False and note is not None and len(note) <= 3100  # the traceback's tail only
+    assert note.splitlines()[0] == "crashed: RuntimeError" and note.endswith("the-end")
 
 
 def test_run_records_nonzero_command(db_conn: psycopg.Connection, unit_home: Path) -> None:
