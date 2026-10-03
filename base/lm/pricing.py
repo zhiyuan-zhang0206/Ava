@@ -300,29 +300,33 @@ def _parse_catalog(raw: dict[str, Any]) -> dict[str, _ModelPrice]:
     raw_models = raw.get("models")
     if not isinstance(raw_models, dict) or not raw_models:
         raise RuntimeError("pricing catalog models must be a non-empty mapping")
-    catalog: dict[str, _ModelPrice] = {}
-    for model, entry_raw in cast(dict[str, dict[str, Any]], raw["models"]).items():
-        vendor = entry_raw.get("vendor")
-        if schema_version == 2 and (not isinstance(vendor, str) or not vendor.strip()):
-            raise RuntimeError(f"pricing catalog vendor must be a non-empty string for {model!r}")
-        source_url = entry_raw["source_url"]
-        if not isinstance(source_url, str) or not source_url.startswith("https://"):
-            raise RuntimeError(f"pricing catalog source_url must be HTTPS for {model!r}")
-        effective_time_note = entry_raw.get("effective_time_note")
-        if effective_time_note is not None and (
-            not isinstance(effective_time_note, str) or not effective_time_note
-        ):
-            raise RuntimeError(
-                f"pricing catalog effective_time_note must be non-empty text for {model!r}"
-            )
-        catalog[model] = _ModelPrice(
-            vendor=cast(str | None, vendor),
-            source_url=source_url,
-            source_checked_at=date.fromisoformat(entry_raw["source_checked_at"]),
-            effective_time_note=effective_time_note,
-            periods=_parse_periods(model, cast(list[dict[str, Any]], entry_raw["periods"])),
+    return {
+        model: _parse_model_price(model, entry_raw, schema_version)
+        for model, entry_raw in cast(dict[str, dict[str, Any]], raw["models"]).items()
+    }
+
+
+def _parse_model_price(model: str, entry_raw: dict[str, Any], schema_version: int) -> _ModelPrice:
+    vendor = entry_raw.get("vendor")
+    if schema_version == 2 and (not isinstance(vendor, str) or not vendor.strip()):
+        raise RuntimeError(f"pricing catalog vendor must be a non-empty string for {model!r}")
+    source_url = entry_raw["source_url"]
+    if not isinstance(source_url, str) or not source_url.startswith("https://"):
+        raise RuntimeError(f"pricing catalog source_url must be HTTPS for {model!r}")
+    effective_time_note = entry_raw.get("effective_time_note")
+    if effective_time_note is not None and (
+        not isinstance(effective_time_note, str) or not effective_time_note
+    ):
+        raise RuntimeError(
+            f"pricing catalog effective_time_note must be non-empty text for {model!r}"
         )
-    return catalog
+    return _ModelPrice(
+        vendor=cast(str | None, vendor),
+        source_url=source_url,
+        source_checked_at=date.fromisoformat(entry_raw["source_checked_at"]),
+        effective_time_note=effective_time_note,
+        periods=_parse_periods(model, cast(list[dict[str, Any]], entry_raw["periods"])),
+    )
 
 
 _CATALOG = _load_catalog()
