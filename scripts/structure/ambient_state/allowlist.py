@@ -241,7 +241,6 @@ DEFERRED: dict[str, str] = {
         "base/daemon/health.py::ambient-container:_warned_windows_8106",
         "base/events/live/redis_client.py::ambient-container:_warn_last",
         "base/packages/plugins/enable_config.py::ambient-container:_dangling_reported",
-        "base/sessions/pty/records.py::ambient-container:_retained_warning_reasons",
         "gateway/auth/rejection_log.py::global-rebind:_auth401_total",
         "gateway/auth/rejection_log.py::ambient-container:_auth401_last_warn",
         "gateway/auth/rejection_log.py::ambient-container:_auth401_suppressed",

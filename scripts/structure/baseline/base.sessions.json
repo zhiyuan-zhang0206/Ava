@@ -1,13 +1,7 @@
 {
   "ambient_state": {
     "base/sessions/backend.py::global-rebind:_backend": 1,
-    "base/sessions/backend.py::global-rebind:_shell_backend": 1,
-    "base/sessions/pty/host.py::import-time-call:sys.modules.setdefault": 1,
-    "base/sessions/pty/host.py::thread:_finish": 1,
-    "base/sessions/pty/host.py::thread:_schedule_initial_command": 1,
-    "base/sessions/pty/host.py::thread:main": 1,
-    "base/sessions/pty/launch.py::thread:_bring_up_locked": 1,
-    "base/sessions/pty/records.py::ambient-container:_retained_warning_reasons": 1
+    "base/sessions/backend.py::global-rebind:_shell_backend": 1
   },
   "complexity": {
     "base/sessions/tests/subreaper_probe.py::ancestor": 16

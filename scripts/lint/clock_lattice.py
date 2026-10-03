@@ -158,10 +158,6 @@ _INDEPENDENT_CLOCKS: dict[tuple[str, str], str] = {
         "_REAP_TIMEOUT_S",
     ): "independent: single wait_procs bound when reaping a process tree, no lattice neighbour",
     (
-        "base/sessions/pty/host.py",
-        "_REAP_POLL_S",
-    ): "independent: waitpid poll after SIGKILL to collect the zombie, no lattice neighbour",
-    (
         "cli/commands/lifecycle/service_stop.py",
         "_TERMINAL_STOP_GRACE_S",
     ): "independent: HUP/TERM -> SIGKILL grace of a normal stop's terminal closure "

@@ -102,10 +102,6 @@ PROCESS_PROFILES: dict[ProcessProfile, frozenset[str]] = {
             "observability",
             # Runner-owned event capture raises the capture-failure alert.
             "alerts",
-            # The pty CLI (base/sessions/pty/cli.py, reachable from the runner
-            # closure) resolves an omitted capture window from
-            # display.shell_capture_default_lines (task #3696).
-            "display",
             # base.packages.extensions.install_registry.resolved_policy() is reachable from the
             # runner closure and resolves per-package update defaults from
             # settings.packages (#3267).
