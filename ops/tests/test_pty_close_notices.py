@@ -7,7 +7,9 @@ once, and hands back whatever it could not write instead of dropping it.
 
 from __future__ import annotations
 
+import io
 import json
+import sys
 from datetime import UTC, datetime
 from typing import Any
 
@@ -16,6 +18,8 @@ import pytest
 
 from base.db import Database, create_agent
 from base.events.live.bus import EventBus
+from base.native_process.ownership import OwnedProcess
+from base.sessions.pty import closure
 from ops import pty_close_notices as notices
 
 _WHEN = datetime(2026, 9, 10, 1, 2, 3, tzinfo=UTC)
@@ -246,3 +250,80 @@ def test_the_connection_is_the_one_asked_for_and_is_closed(
 
     assert [flag for flag, _conn in dialed] == [direct]
     assert dialed[0][1].closed
+
+
+def _swept(*sessions: closure.ClosedSession) -> io.StringIO:
+    """The sweep's outcome as the service writes it to the child's stdin."""
+    return io.StringIO(json.dumps(closure.Outcome(closed=tuple(sessions)).to_wire()))
+
+
+def _ended(agent_id: int, session_id: int = 11, starttime: int = 4242) -> closure.ClosedSession:
+    return closure.ClosedSession(
+        f"ava-agent-{agent_id}-shell-{session_id}-crashed", OwnedProcess(9090, 1.0, starttime)
+    )
+
+
+def test_a_crash_notice_names_the_crash_and_no_operation(
+    db_conn: psycopg.Connection, database: Database, event_bus: EventBus
+) -> None:
+    """A sweep has no stop and no maintenance hold: the notice says the service ended
+    uncleanly and carries neither an operation nor a hold time."""
+    aid = _agent(db_conn, "running")
+    (built,) = notices.notices_for([_ended(aid)], reason=notices.CRASH_REASON)
+
+    assert notices.write_notices(database, event_bus, [built], direct=False) == []
+
+    ((content, source, payload),) = _inbounds(db_conn, aid)
+    assert source == "system"
+    assert notices.CRASH_REASON in content and "operation" not in content
+    record = json.loads(payload)["closure"]
+    assert "operation" not in record and "acquired_at" not in record
+    assert record["shell_birth"] == "starttime:4242" and record["shell_pid"] == 9090
+
+
+def test_notices_for_skips_a_session_that_is_not_an_agent_shell() -> None:
+    sessions = [
+        closure.ClosedSession("ava-gateway", OwnedProcess(1, 1.0, 1)),
+        _ended(5),
+    ]
+
+    built = notices.notices_for(sessions, reason=notices.CRASH_REASON)
+
+    assert [notice.agent_id for notice in built] == [5]
+
+
+def test_the_crash_child_writes_each_swept_session_once_and_never_resurrects(
+    db_conn: psycopg.Connection, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The one-shot child (`python -m ops.pty_close_notices`) end to end through the
+    real write: a live owner gets one inbound, a terminated owner none, and running the
+    child again for the same shell births delivers nothing new."""
+    live, dead = _agent(db_conn, "running"), _agent(db_conn, "terminated")
+    wire = (_ended(live), _ended(dead, session_id=12))
+
+    monkeypatch.setattr(sys, "stdin", _swept(*wire))
+    assert notices.main() == 0
+    monkeypatch.setattr(sys, "stdin", _swept(*wire))
+    assert notices.main() == 0
+
+    ((content, _source, _payload),) = _inbounds(db_conn, live)
+    assert notices.CRASH_REASON in content
+    assert _inbounds(db_conn, dead) == []
+
+
+def test_the_crash_child_reports_an_unreachable_database_and_fails_softly(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def refuse(self: Database, **_kwargs: object) -> psycopg.Connection:
+        raise psycopg.OperationalError("connection refused")
+
+    monkeypatch.setattr(Database, "connect", refuse)
+    monkeypatch.setattr(sys, "stdin", _swept(_ended(5)))
+
+    assert notices.main() == 1
+
+
+def test_the_crash_child_survives_an_unreadable_list(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(sys, "stdin", io.StringIO("{not json"))
+
+    assert notices.main() == 1

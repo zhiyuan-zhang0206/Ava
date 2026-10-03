@@ -11,7 +11,8 @@ session whole. `close_terminals` asks the service for it at `ava stop`
 (decisions/2026-09-28-stop-escalates-to-sigkill.md) and gives every busy session
 whose shell it verified gone its owner's notice, naming what of it outlived the
 SIGKILL. A service that is not running is closed from its ledger instead
-(`services.pty_sessions.ledger.sweep`). KILL reaches only identities the service
+(`services.pty_sessions.ledger.sweep`), and its owners are told it crashed, not
+that this stop closed their sessions. KILL reaches only identities the service
 captured from its sessions' shells.
 """
 
@@ -26,7 +27,6 @@ from datetime import datetime
 
 from base import telemetry
 from base.cluster import postgres as owned_postgres
-from base.cluster.machine import machine_name
 from base.db import Database
 from base.events.live.bus import EventBus
 from base.native_process.ownership import OwnedProcess, capture_tree, retain_processes
@@ -135,11 +135,21 @@ def live_terminals() -> list[str]:
 
 
 def _close_via_service(grace_s: float, kill_s: float) -> closure.Outcome:
-    """Run the one closure where the shells are: in the service, else from its ledger."""
+    """Run the one closure where the shells are: in the service (raises when it is down)."""
+    return client.close_all(grace_s=grace_s, kill_s=kill_s)
+
+
+def _close_terminals_now(grace_s: float, kill_s: float) -> tuple[closure.Outcome, str]:
+    """Close every terminal in the service, else from its ledger; with the reason owners are told.
+
+    A service that is down died uncleanly before this stop (the stop never
+    leaves one behind): what its ledger still names was lost to that, not to
+    this stop, and its notices say so (`pty_close_notices.CRASH_REASON`).
+    """
     try:
-        return client.close_all(grace_s=grace_s, kill_s=kill_s)
+        return _close_via_service(grace_s, kill_s), pty_close_notices.STOP_REASON
     except client.ServiceDownError:
-        return ledger.sweep(ledger_path())
+        return ledger.sweep(ledger_path()), pty_close_notices.CRASH_REASON
 
 
 def _terminals_incomplete(outcome: closure.Outcome, stage: str) -> StopIncompleteError:
@@ -207,25 +217,9 @@ def _record_close_notices(
     stderr, with the text its owner would have read, but never fails the
     closure — retrying the whole stop would not restore the resources it closes.
     """
-    notices: list[pty_close_notices.ClosureNotice] = []
-    for session in closed:
-        shell = session.shell
-        if shell.starttime is not None:
-            birth = f"starttime:{shell.starttime}"
-        else:
-            birth = f"birth:{shell.birth!r}"
-        built = pty_close_notices.closure_notice(
-            machine=machine_name(),
-            name=session.name,
-            shell_pid=shell.pid,
-            shell_birth=birth,
-            operation=notice.operation,
-            acquired_at=notice.acquired_at,
-            reason=notice.reason,
-            survivors=session.left,
-        )
-        if built is not None:
-            notices.append(built)
+    notices = pty_close_notices.notices_for(
+        closed, reason=notice.reason, operation=notice.operation, acquired_at=notice.acquired_at
+    )
     for unwritten, exc in pty_close_notices.write_notices(
         Database.from_settings(), EventBus.from_settings(), notices, direct=direct_db
     ):
@@ -261,10 +255,10 @@ def close_terminals(
     another session keeps the stop incomplete.
     """
     grace_s = max(0.0, min(deadline - time.monotonic(), _TERMINAL_STOP_GRACE_S))
-    outcome = _close_via_service(grace_s, _TERMINAL_KILL_WAIT_S)
+    outcome, reason = _close_terminals_now(grace_s, _TERMINAL_KILL_WAIT_S)
     _record_close_notices(
         outcome.closed,
-        _Notice(operation, acquired_at, pty_close_notices.STOP_REASON),
+        _Notice(operation, acquired_at, reason),
         direct_db=direct_db,
     )
     if any(live_identities([s.process]) for s in outcome.survivors):
@@ -278,7 +272,7 @@ def force_close_terminals() -> None:
     Force skips the owner notices and the drain guarantees by definition; a process
     that outlives the SIGKILL still fails it, naming the session.
     """
-    outcome = _close_via_service(0.0, _TERMINAL_KILL_WAIT_S)
+    outcome, _reason = _close_terminals_now(0.0, _TERMINAL_KILL_WAIT_S)
     if any(live_identities([s.process]) for s in outcome.survivors):
         raise RuntimeError(
             f"force stop did not close terminals: {sorted({s.session for s in outcome.survivors})}"

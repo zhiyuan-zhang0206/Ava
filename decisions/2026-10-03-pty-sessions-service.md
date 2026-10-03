@@ -100,3 +100,5 @@ long-lived process is a member of the root's tree.
   path is covered by the client, not by a sandbox test.
 - No migration and no port slot: the unit appears in the roster at the update that ships it. Hosts
   left by the previous code are closed by that code's own `ava stop` in the update's down leg.
+
+<!-- Later: the crash, forced-stop and sweep gap is closed by decisions/2026-10-04-pty-crash-notices.md -->
