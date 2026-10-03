@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+import threading
 import urllib.request
 from pathlib import Path
-from typing import Never
+from unittest.mock import MagicMock
 
 import psycopg
 import pytest
@@ -25,7 +26,12 @@ def test_operator_round_trip_needs_no_gateway_or_data_plane(
 ) -> None:
     """The recovery command stays local even when every network client fails."""
 
-    def _offline(*_args: object, **_kwargs: object) -> Never:
+    owner = threading.current_thread()
+
+    def _offline(*_args: object, **_kwargs: object) -> object:
+        if threading.current_thread() is not owner:
+            # a bystander thread sharing the xdist worker gets an inert stand-in
+            return MagicMock()
         raise AssertionError("PTY allocation commands must not use the gateway or data plane")
 
     monkeypatch.setattr(psycopg, "connect", _offline)

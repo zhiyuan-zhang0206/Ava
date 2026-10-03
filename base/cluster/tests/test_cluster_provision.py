@@ -281,7 +281,12 @@ def test_ensure_pgvector_extension_noop_on_connect_failure(
     every bring-up), never a birth-killing raise. The warning names the cause."""
     from base.cluster.provision import ensure_pgvector_extension
 
+    owner = threading.current_thread()
+
     def boom(url: str, **_kw: object) -> _FakePgConn:
+        if threading.current_thread() is not owner:
+            # a bystander thread sharing the xdist worker gets an inert dial
+            return _FakePgConn(url, first_row=None)
         raise psycopg.OperationalError("connection is bad")
 
     monkeypatch.setattr(psycopg, "connect", boom)
