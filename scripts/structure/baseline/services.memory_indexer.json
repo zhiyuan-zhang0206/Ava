@@ -11,7 +11,6 @@
     "services/memory_indexer/tests/test_memory_indexer.py": 1515
   },
   "patch_targets": {
-    "services/memory_indexer/embeddings/tests/test_embeddings.py::base.telemetry.tracing._state": 1,
     "services/memory_indexer/tests/test_memory_indexer.py::services.memory_indexer.embeddings.gemini._EMBED_POLICY": 1
   }
 }
