@@ -182,7 +182,7 @@ class UpdateState(BaseModel):
     last_apply_at: str | None = None
     last_result: str | None = None
     """Last outcome, design §5.3 vocabulary: up_to_date | applied | available |
-    blocked_version: … | conflict: … | refused_scan: … | error: …"""
+    blocked_version: … | refused_scan: … | error: …"""
     failures: int = 0
     """Consecutive non-success outcomes (the refresh pass's backoff counter;
     reset to 0 by up_to_date / applied / available)."""
@@ -234,7 +234,7 @@ class InstalledPackage(BaseModel):
     """Tree hash of the package directory as the last install/upgrade wrote it
     (R5). Distinct from `content_hash`, which converge owns for load-dir
     copies: converge overwrites `content_hash` on installed-plugin rows (it
-    records the *skills-copy* hash), so update/upgrade conflict detection
+    records the *skills-copy* hash), so the update/upgrade local-edit check
     against the *package* tree reads this field instead. A None here (legacy
     rows) counts as changed — see `copy_changed`."""
     installed_at: str | None = None
@@ -456,13 +456,15 @@ def copy_changed(
     skip_subtrees: frozenset[tuple[str, ...]] = frozenset(),
 ) -> bool:
     """True when the on-disk tree at `dest` differs from the recorded
-    `content_hash` — the "local edits" signal that `ava skill update` /
-    `ava plugins upgrade` / `ava mcp upgrade` must not clobber without
-    `--force` (R5 design, task #1013).
+    `content_hash` — the "local edits" signal `ava skill upgrade` /
+    `ava plugins upgrade` / `ava mcp upgrade` report before replacing the
+    copy, and `ava packages rollback` reports before restoring the previous
+    tree.
 
     A missing recorded hash counts as changed (None never equals a digest):
     nothing recorded means the copy cannot be proven to match what was last
-    written, so the safe direction is to require an explicit force.
+    written. Callers report and replace — nothing blocks on this (the R5
+    local-edit guard and its `--force` override were removed 2026-10-03).
 
     For installed packages (skill/plugin/mcp) pass `entry.installed_hash` —
     converge overwrites `content_hash` on installed-plugin rows with the

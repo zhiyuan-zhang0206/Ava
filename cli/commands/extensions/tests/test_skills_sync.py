@@ -93,7 +93,7 @@ def test_repo_source_change_not_propagated_by_converge(unit_home: Path, fake_rep
 def test_repo_copy_user_edit_untouched_by_converge(unit_home: Path, fake_repo: Path) -> None:
     """A user-edited repo-native copy is left alone, silently: converge no
     longer attempts to update repo-native copies at all, so the edit is not a
-    converge concern — `ava skill update` reports the conflict."""
+    converge concern — a later `ava skill update` replaces it."""
     converge_skills(fake_repo, unit_home)
     copy = unit_home / "skills" / "goal" / "SKILL.md"
     copy.write_text("---\nname: goal\ndescription: MINE\n---\n\nhands off\n", encoding="utf-8")

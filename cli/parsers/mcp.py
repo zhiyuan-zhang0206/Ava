@@ -68,7 +68,7 @@ def _h_mcp_uninstall(args: argparse.Namespace) -> int:
 def _h_mcp_upgrade(args: argparse.Namespace) -> int:
     from cli.commands.extensions.mcp import cmd_mcp_upgrade
 
-    return cmd_mcp_upgrade(args.name, force=args.force)
+    return cmd_mcp_upgrade(args.name)
 
 
 def _h_memory_refresh(_args: argparse.Namespace) -> int:
@@ -156,11 +156,6 @@ def _add_mcp_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) ->
 
     mcp_upgrade_p = mcp_sub.add_parser("upgrade", help="re-fetch an installed MCP package")
     mcp_upgrade_p.add_argument("name", help="installed MCP server name to upgrade")
-    mcp_upgrade_p.add_argument(
-        "--force",
-        action="store_true",
-        help="overwrite a locally modified copy instead of refusing",
-    )
     mcp_upgrade_p.set_defaults(func=_h_mcp_upgrade)
 
     mcp_add_p = mcp_sub.add_parser(

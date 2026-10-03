@@ -23,7 +23,6 @@ def _h_packages_refresh(args: argparse.Namespace) -> int:
         check_only=args.check,
         only=args.package,
         json_output=args.json_output,
-        force=args.force,
         from_job=args.from_job,
     )
 
@@ -31,7 +30,7 @@ def _h_packages_refresh(args: argparse.Namespace) -> int:
 def _h_packages_rollback(args: argparse.Namespace) -> int:
     from cli.commands.extensions.packages import cmd_packages_rollback
 
-    return cmd_packages_rollback(args.name, force=args.force)
+    return cmd_packages_rollback(args.name)
 
 
 def _duration(value: str) -> str:
@@ -84,11 +83,6 @@ def _add_packages_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser
         "--package", metavar="NAME", default=None, help="limit the pass to one package"
     )
     refresh_p.add_argument(
-        "--force",
-        action="store_true",
-        help="override the local-edit guard for this run (human-only)",
-    )
-    refresh_p.add_argument(
         "--from-job",
         action="store_true",
         dest="from_job",
@@ -104,7 +98,6 @@ def _add_packages_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser
         help="restore a package's previous tree (the .<name>.prev kept by the last apply)",
     )
     rollback_p.add_argument("name")
-    rollback_p.add_argument("--force", action="store_true", help="override the local-edit guard")
     rollback_p.set_defaults(func=_h_packages_rollback)
 
     policy_p = packages_sub.add_parser(

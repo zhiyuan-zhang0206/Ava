@@ -285,10 +285,9 @@ def cmd_packages_refresh(
     check_only: bool = False,
     only: str | None = None,
     json_output: bool = False,
-    force: bool = False,
     from_job: bool = False,
 ) -> int:
-    """`ava packages refresh [--check] [--package NAME] [--force] [--json]
+    """`ava packages refresh [--check] [--package NAME] [--json]
     [--from-job]` — check the channels and apply due updates to this machine's
     skill packages. The same code path serves the OS job (`--from-job`); manual
     runs work regardless of cadence. Returns 1 only when the registry is
@@ -298,7 +297,7 @@ def cmd_packages_refresh(
 
     from cli.commands.extensions.packages_refresh import run_refresh
 
-    report = run_refresh(check_only=check_only, only=only, force=force, from_job=from_job)
+    report = run_refresh(check_only=check_only, only=only, from_job=from_job)
     if json_output:
         payload = {
             "ran": report.ran,
@@ -370,10 +369,10 @@ def _swap_trees_with_prev(skills: Path, name: str, skip: frozenset[tuple[str, ..
     return dest
 
 
-def cmd_packages_rollback(name: str, *, force: bool = False) -> int:
-    """`ava packages rollback <name> [--force]` — restore the package's previous
+def cmd_packages_rollback(name: str) -> int:
+    """`ava packages rollback <name>` — restore the package's previous
     tree (the `.<name>.prev` kept by the last successful apply), swapping it with
-    the current one. `--force` overrides the local-edit guard. The channel
+    the current one. A differing local copy is replaced and reported. The channel
     watermark (`applied_rev`) is left where it was: a later refresh applies only
     what changed after the revoked rev."""
     from base import paths
@@ -405,17 +404,11 @@ def cmd_packages_rollback(name: str, *, force: bool = False) -> int:
         return 1
     skip = install_registry.preserved_subpaths(dest)
     recorded = row.installed_hash or row.content_hash
-    if (
-        not force
-        and dest.exists()
-        and install_registry.copy_changed(dest, recorded, skip_subtrees=skip)
-    ):
+    if dest.exists() and install_registry.copy_changed(dest, recorded, skip_subtrees=skip):
         print(
-            "[ava packages rollback] current copy differs from the last applied content "
-            "(local edits); re-run with --force to replace it",
-            file=sys.stderr,
+            f"[ava packages rollback] '{row.name}': current copy differs from the last "
+            "applied content; replacing it"
         )
-        return 1
     dest = _swap_trees_with_prev(skills, row.name, skip)
     stamp = datetime.now(UTC).isoformat(timespec="seconds")
     with install_registry.mutate() as reg:

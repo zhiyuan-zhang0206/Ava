@@ -237,7 +237,7 @@ def test_refresh_apply_then_apply_with_installed_hash(core_repo: Path) -> None:
     _write_skill(core_repo, "foo", "# v3\n")
     c3 = _commit_push(core_repo, "foo v3")
     second = run_refresh(repo=core_repo)
-    assert second.items[0].result == "applied"  # not "conflict: ..."
+    assert second.items[0].result == "applied"  # no local-edit refusal
     assert _row("foo").update.applied_rev == c3
 
     # rollback reads the same baseline: no false refusal, and it dual-writes too
@@ -276,7 +276,7 @@ def test_core_refresh_replaces_a_hand_edited_copy_and_reports_it(core_repo: Path
     copy.write_text(mine, encoding="utf-8")
 
     warnings: list[str] = []
-    sink = logger.add(lambda m: warnings.append(str(m)), level="WARNING", format="{message}")
+    sink = logger.add(lambda m: warnings.append(str(m)), level="INFO", format="{message}")
     try:
         report = run_refresh(repo=core_repo)
     finally:
@@ -289,10 +289,20 @@ def test_core_refresh_replaces_a_hand_edited_copy_and_reports_it(core_repo: Path
     assert _row("foo").update.failures == 0
 
 
-def test_git_channel_copy_edit_still_conflicts_until_force(core_repo: Path, tmp_path: Path) -> None:
-    dest = tmp_path / "skills" / "foo"
+def test_git_channel_copy_edit_converges_to_incoming(core_repo: Path, tmp_path: Path) -> None:
+    """A tracked copy that no longer matches its baseline is converged, not
+    blocked: the incoming tree lands and the replacement is reported (user
+    ruling 2026-10-02/03 — local copies are never hand-edited)."""
+    home = _home()
+    dest = home / "skills" / "foo"
     dest.mkdir(parents=True)
-    (dest / "SKILL.md").write_text("edited\n", encoding="utf-8")
+    mine = "---\nname: foo\ndescription: MINE\n---\n\nedited\n"
+    (dest / "SKILL.md").write_text(mine, encoding="utf-8")
+    staged = tmp_path / "staged"
+    staged.mkdir()
+    (staged / "SKILL.md").write_text(
+        "---\nname: foo\ndescription: d\n---\n\nfrom source\n", encoding="utf-8"
+    )
     pkg = reg.InstalledPackage(
         name="foo",
         type="skill",
@@ -301,22 +311,24 @@ def test_git_channel_copy_edit_still_conflicts_until_force(core_repo: Path, tmp_
         content_hash="0" * 64,
         update=reg.UpdateState(channel="git"),
     )
-    dest_hash = reg.tree_hash(dest)
 
-    def conflict(*, force: bool) -> str | None:
+    notes: list[str] = []
+    sink = logger.add(lambda m: notes.append(str(m)), level="INFO", format="{message}")
+    try:
         gate = _Pass(
             check_only=False,
             only=None,
-            force=force,
             from_job=False,
             now=datetime.now(UTC),
             repo=core_repo,
         )
-        return gate._local_edit_conflict(pkg, tmp_path, dest, dest_hash)
-
-    blocked = conflict(force=False)
-    assert blocked is not None and blocked.startswith("conflict")
-    assert conflict(force=True) is None
+        result, new_hash = gate._apply_staged(pkg, staged, "0" * 40)
+    finally:
+        logger.remove(sink)
+    assert result == "applied" and new_hash is not None
+    assert "from source" in (dest / "SKILL.md").read_text(encoding="utf-8")
+    assert (home / "skills" / ".foo.prev" / "SKILL.md").read_text(encoding="utf-8") == mine
+    assert any("local copy replaced" in n and "SKILL.md" in n for n in notes)
 
 
 def test_refresh_skips_local_source_rows(core_repo: Path, tmp_path: Path) -> None:
@@ -490,7 +502,7 @@ def test_only_reports_a_skip_reason_for_untracked_names(core_repo: Path) -> None
 # ── rollback / policy verbs ─────────────────────────────────────────────────
 
 
-def test_rollback_restores_the_previous_tree(core_repo: Path) -> None:
+def test_rollback_restores_the_previous_tree(core_repo: Path, capsys) -> None:
     from cli.commands.extensions.packages import cmd_packages_rollback
 
     c1 = _head(core_repo)
@@ -505,11 +517,11 @@ def test_rollback_restores_the_previous_tree(core_repo: Path) -> None:
     assert "# v2" in (home / "skills" / ".foo.prev" / "SKILL.md").read_text(encoding="utf-8")
     assert (_row("foo").update.last_result or "").startswith("rolled_back")
 
-    # local edits refuse without --force
+    # a differing local copy is replaced (and reported), not refused
     copy = home / "skills" / "foo" / "SKILL.md"
     copy.write_text("---\nname: foo\ndescription: MINE\n---\n\nedited\n", encoding="utf-8")
-    assert cmd_packages_rollback("foo") == 1
-    assert cmd_packages_rollback("foo", force=True) == 0
+    assert cmd_packages_rollback("foo") == 0
+    assert "current copy differs" in capsys.readouterr().out  # pyright: ignore[reportUnknownMemberType]
     assert "# v2" in copy.read_text(encoding="utf-8")
 
 

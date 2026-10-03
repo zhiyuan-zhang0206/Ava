@@ -1,7 +1,7 @@
 ---
 type: doc
 title: Skill sources — load-directory sync
-description: One load directory ~/.ava/skills/; converge syncs repo built-ins (ava_builtins/skills/) and plugin-carried skills into it, and user installs land directly (untouched). The 11 real .agents/skills project skills are NOT converged — they reach agents through the project-local mount.
+description: One load directory ~/.ava/skills/; converge syncs repo built-ins (ava_builtins/skills/) and plugin-carried skills into it, and user installs land directly (untouched). The 12 real .agents/skills project skills are NOT converged — they reach agents through the project-local mount.
 tags:
 - extensions
 - agent-instruction
@@ -22,9 +22,9 @@ the fleet update / `ava converge`) syncs two source types into it:
    its own cadence — commit objects fetched without ever touching the
    checkout's working tree. `ava skill update` and the rollout legs (issue
    #1289) now SKIP channel-managed packages; `ava packages policy <name>
-   --update-mode off` opts one back onto the rollout path. Local edits are
-   never clobbered either way: refresh records a conflict and leaves the copy
-   untouched, the same contract the rollout always had.
+   --update-mode off` opts one back onto the rollout path. A differing local
+   copy is replaced (reported; the old tree stays at `.<name>.prev` for
+   rollback): local copies are derived state (user ruling 2026-10-03).
 2. **Plugin-carried** (origin=plugin): `<repo>/ava_builtins/plugins/<p>/skills/`
    and `~/.ava/plugins/<p>/skills/` → `~/.ava/skills/<p>/`.
 
@@ -47,7 +47,7 @@ channels]]):
   `engines.ava` / `requires_commit` excludes the running host is dropped from
   the catalog/index, with the reason visible in `ava packages status`.
 
-**Not converged — the 11 real `.agents/skills/` project skills.** The
+**Not converged — the 12 real `.agents/skills/` project skills.** The
 repo-development workflow and Ava-cluster-operations family (ship-a-change,
 write-a-pr-description, ava-self-development, …) stopped being
 fleet-distributed (issue #146;

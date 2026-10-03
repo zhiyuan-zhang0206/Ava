@@ -52,8 +52,8 @@ Source of requirements: the user's 2026-09-11 request (task #2915).
 | Piece | What exists | Where |
 |---|---|---|
 | Single skills load dir | `$AVA_HOME/skills/`; converge syncs repo built-ins + plugin-carried skills into it; user installs land directly | `cli/commands/extensions/skills_sync.py`, `okf/skills/load-directory-sync.ava.okf.md` |
-| Install registry (per machine) | origin (`repo`/`plugin`/`user`), trust tier, `content_hash` / `installed_hash` (R5 edit guards), `enabled`, schema `version` field as a migration anchor | `base/packages/extensions/install_registry.py` |
-| Explicit update verbs | `ava skill update [name...] [--force]` (repo-native), `ava skill upgrade <name>` (git-sourced), `ava plugins upgrade <name> [--force]`, `ava mcp upgrade` — all with the R5 conflict contract and staged/atomic replacement | `cli/commands/extensions/skill.py`, `plugins.py`, `mcp.py` |
+| Install registry (per machine) | origin (`repo`/`plugin`/`user`), trust tier, `content_hash` / `installed_hash` (R5 edit detection), `enabled`, schema `version` field as a migration anchor | `base/packages/extensions/install_registry.py` |
+| Explicit update verbs | `ava skill update [name...]` (repo-native), `ava skill upgrade <name>` (git-sourced), `ava plugins upgrade <name>`, `ava mcp upgrade` — a differing local copy is replaced (reported), with staged/atomic replacement | `cli/commands/extensions/skill.py`, `plugins.py`, `mcp.py` |
 | Atomic apply patterns | stage `.<name>.new` → move `.trash`; `_atomic_plugin_replace`; dot-prefixed residue ignored by discovery | `cli/commands/extensions/skills_sync.py`, `plugins.py`, `base/packages/plugins/enable_config.py` |
 | Supply-chain gate | `base/packages/skills/scan.py` on every ingest (critical → refuse, `--accept-risk` recorded, trust never auto-promoted) | `base/packages/skills/scan.py`, `base/packages/extensions/install_registry.py` |
 | Manifest + host-compat gate | `ava-plugin.json` validator, range algebra, `engines.ava` vs the checkout's `pyproject.toml` version | `base/packages/plugins/manifest.py`, `conventions/plugin-spec-v2.md` |
@@ -102,13 +102,13 @@ Comparison axes: coupling boundary / versioning / update atomicity / failure & r
 - **Versioning**: content rides the repo's ref (main today; a dedicated content ref/tag train can be added later without changing the mechanism). Per-package applied revision + hash recorded in the registry; `engines.ava` gates plugins; skills are fail-soft.
 - **Update atomicity**: `git fetch` (objects only — never touches the checkout tree) + `git archive <rev> -- <paths> | tar` into a per-package staging dir + staged swap. Per-package atomic; optionally group-atomic.
 - **Failure & rollback**: keep the previous tree + applied revision; re-apply the previous revision to roll back; git history is the source of truth for "what did we run last week".
-- **Migration cost**: smallest — reuses the existing discovery, scan and land code paths (the load-dir sync contracts, the conflict harness, plugin atomic replace). New pieces: the channel fetcher, policy fields, the executor, and (P2) the plugin root materialization.
+- **Migration cost**: smallest — reuses the existing discovery, scan and land code paths (the load-dir sync contracts, plugin atomic replace). New pieces: the channel fetcher, policy fields, the executor, and (P2) the plugin root materialization.
 - **Risks**: content may run ahead of the installed code (accepted and bounded below); no separate content release train until one is added.
 
 ### D. Hybrid — C for delivery now, B-shaped abstraction, one policy plane for all package kinds
 
 - Core channel = C (fetch repo content paths, apply from a data dir).
-- Third-party git packages = the existing per-package flow, extended with the same policy/executor (`auto`/`notify`/`off` + interval), reusing `acquire_source` + conflict guards.
+- Third-party git packages = the existing per-package flow, extended with the same policy/executor (`auto`/`notify`/`off` + interval), reusing `acquire_source` + the scan and replace path.
 - The channel source is a configurable value, so a future move of core content to its own repo (B) — or a lock-pinned seed — is a source swap, not a rewrite.
 - **Verdict: recommended.**
 
@@ -151,7 +151,7 @@ class UpdateState(BaseModel):
     applied_rev: str | None = None                    # commit SHA (core) / ref@sha (git) of what is on disk
     last_check_at: str | None = None
     last_apply_at: str | None = None
-    last_result: str | None = None                    # up_to_date | applied | available | conflict | error: ...
+    last_result: str | None = None                    # up_to_date | applied | available | error: ...
 
 class ChannelState(BaseModel):
     name: str                                         # "core"
@@ -202,18 +202,19 @@ for each due package (auto|notify), oldest-check-first, bounded (budget: e.g. 60
         stage: extract/acquire new content into $AVA_HOME/…/.staging-<name>/
                core: git archive <head_sha> -- <paths> | tar -x -C <staging>
                git:  acquire_source(source, ref) (existing code path)
-        gates (any failure -> keep disk as-is, record the outcome, backoff; never a forced overwrite):
+        gates (any failure -> keep disk as-is, record the outcome, backoff):
             - trees non-empty, expected entry exists (SKILL.md / plugin.py | .claude-plugin/plugin.json)
             - supply-chain scan (base/packages/skills/scan.py) — critical finding refuses; NO auto --accept-risk
             - plugin manifest validation (existing code)
             - version gate (§5.5): engines.ava must include this host's version — else record
               blocked_version, keep the current content, retry after the host moves
-            - local-edit guard: on-disk tree hash must equal the recorded hash
-              (a hand-edited copy is NEVER overwritten — same contract as `ava skill update`)
+            - local copy check: a copy differing from the recorded hash is replaced
+              (reported; old tree kept at .<name>.prev — the R5 local-edit guard and its
+              human-only --force were removed 2026-10-03; local copies are derived state)
         apply (atomic, in this order):
             - skills: staged swap into $AVA_HOME/skills/<name>/ (stage → move old to .trash → move new in)
             - plugins (P2): staged swap into $AVA_HOME/plugins/<name>/ (the standard external root; existing _atomic_plugin_replace pattern)
-        outcomes: applied | available | blocked_version | conflict | refused_scan | error
+        outcomes: applied | available | blocked_version | refused_scan | error
         record: applied_rev, content_hash/installed_hash, updated_at, last_result
     for notify packages: stop after the check decision — record "available" with the remote rev (no staging, no apply)
 
@@ -226,7 +227,7 @@ Design decisions embedded above:
 
 - **Check ≠ fetch.** `ls-remote` answers "did the ref move" over the network without cloning; a full fetch happens only when it did. The core channel's fetch goes through the existing checkout's git, objects-only — the working tree, HEAD, and the source-tree guard are untouched. The package refresh executor (`cli/commands/_packages_refresh.py`) implements this objects-only fetch with a bounded timeout. A future wheel-mode deployment (no checkout) uses a data-dir bare mirror instead — same interface.
 - **Per-package granularity with a per-channel head.** The channel's head commit is a fleet-wide fact; which *packages* changed between `applied_rev` and the head is computed with `git diff --name-only <applied_rev> <head> -- <path>`, so a skill edit touches one package.
-- **Core-channel copies are derived state.** The local-edit guard (R5 contract) blocks only non-core channels (git-sourced user packages): a conflict is recorded, not forced, and `--force` remains a human-only flag. A core-channel copy that no longer matches the last applied content is replaced anyway — the incoming tree is reviewed main content, the old tree stays at `.<name>.prev`, and a warning names the files that differed; a local fix belongs in a PR, and local-only subtrees belong behind a `.preserved` marker.
+- **Local copies are derived state (updated 2026-10-03).** A copy that no longer matches the last applied content is replaced on any channel — incoming trees are reviewed content, the old tree stays at `.<name>.prev`, and a log line names the files that differed; a local fix belongs in a PR, and local-only subtrees belong behind a `.preserved` marker. The R5 local-edit guard and its human-only `--force` flag were removed fleet-wide (the user never hand-edits local copies): `ava skill update`/`upgrade`, `ava plugins upgrade`, `ava mcp upgrade` and `ava packages rollback` all replace and report.
 - **Bounded and polite.** Per-run wall budget, apply cap, network timeouts, ±jitter on intervals, exponential backoff on repeated errors (recorded in `last_result`).
 - **Removal is out of scope.** The pass never deletes packages; a package whose source disappeared upstream is left as-is — removal belongs to the converge cleanup path.
 - **Never a rollout.** The pass takes the per-home refresh flock; it never restarts a service, never writes the checkout, never touches the DB schema. It may run while the cluster is fully live — that is the point.
@@ -289,7 +290,7 @@ Rules:
 
 **Trust (unchanged by versioning).**
 - Core content stays `builtin`; a refreshed third-party package keeps its tier (a changed adopted cluster row resets to `unreviewed` per S2 semantics); auto paths never promote trust and never pass `--accept-risk`.
-- Third-party auto-update is the default per the user ruling (24h); the scan gate, the trust rules and the conflict guard are what keep that safe, and per-package `notify`/`off` overrides remain.
+- Third-party auto-update is the default per the user ruling (24h); the scan gate, the trust rules and report-on-replace are what keep that safe, and per-package `notify`/`off` overrides remain.
 - A `ref` pinned to a tag or commit stays pinned: the channel never advances a pinned ref.
 
 ### 5.6 Executor, scheduling, and surfaces
@@ -334,7 +335,7 @@ Each phase is independently landable and reversible; nothing in P0/P1 changes co
 - Version gates wired into the refresh (§5.5) + the runtime skill filter (out-of-range skills excluded from the catalog with a status reason) + `ava packages rollback <name>`.
 - Acceptance (end-to-end on macmini, then a second machine):
   1. merge a skill-only PR to main → within the interval, the machine's load dir shows the new content, `applied_rev` = the merge commit, no service restarted (`ava status` shows nothing bounced), and an agent reads the new body via `ava.help`.
-  2. hand-edit a core-channel load-dir copy → the next refresh replaces it, keeps the edited tree at `.<name>.prev` and logs a warning naming the files; a git-channel copy refuses with a conflict record, content preserved.
+  2. hand-edit a core-channel load-dir copy → the next refresh replaces it, keeps the edited tree at `.<name>.prev` and logs a line naming the files; a git-channel copy is replaced and reported the same way.
   3. offline / fetch failure → old content stays, `last_result` records the error, backoff, cluster unaffected.
   4. a second refresh pass on the same home while one runs → skipped (recorded).
   5. `notify` package → a moved ref records "available" without applying.
@@ -342,7 +343,7 @@ Each phase is independently landable and reversible; nothing in P0/P1 changes co
   7. no checkout mutation: `git status` in the prod checkout unchanged after refresh (source-tree guard agrees).
   8. version gate: a package whose `engines.ava` excludes this host is recorded `blocked_version` and keeps its previous content; when the host version moves past a package's max, its skill copy is dropped from the catalog with a visible reason.
   9. manual refresh works on demand and reports the same outcomes.
-- Test locks: unit (due math, policy resolution, diff→package mapping, gate order, conflict guard, backoff, flock), integration (local git fixture: two commits, one package changed), and the S2 two-home chain remains green.
+- Test locks: unit (due math, policy resolution, diff→package mapping, gate order, replace-and-report, backoff, flock), integration (local git fixture: two commits, one package changed), and the S2 two-home chain remains green.
 
 ### P2 — core plugins (structural; the pause lifted 2026-09-11 — schedulable, with the isolation gates below)
 - **Updated against the loader work landed 2026-09-11 (task #2985).** v2 of this section assumed a special "package-context root" was required; that is no longer true — the standard external root resolves package-relative imports exactly like the builtin tree (one loader contract), and failures are contained. P2 gets simpler, not riskier.
@@ -364,7 +365,7 @@ Each phase is independently landable and reversible; nothing in P0/P1 changes co
 |---|---|
 | Content ahead of installed code breaks a *skill* | fail-soft by design; visible in transcript; CI on the repo checks content against main; escalate normally |
 | Content ahead of code breaks a *plugin* | `engines.ava` hard gate at every landing; refuse + retry later |
-| Auto-applied third-party content | **user-ruled default (24h auto)**; the scan gate, trust rules (no promotion, no auto `--accept-risk`) and the conflict guard are what keep it safe; per-package `notify`/`off` overrides |
+| Auto-applied third-party content | **user-ruled default (24h auto)**; the scan gate and trust rules (no promotion, no auto `--accept-risk`) are what keep it safe — a differing local copy is replaced and reported; per-package `notify`/`off` overrides |
 | Refresh races a rollout / the source-tree guard | per-home refresh flock; content never lives in the checkout; rollout legs skip channel-managed packages |
 | A skill edit merged to main is *not* cluster-reviewed for the fleet | it is reviewed by the repo's PR/CI (same as any commit); the fast lane changes delivery, not review |
 | Disk growth (previous trees, fetched objects) | one previous tree per package (pruned on next apply); no mirrors in P1; wheel-mode mirrors get the same bound |
@@ -395,7 +396,7 @@ Each phase is independently landable and reversible; nothing in P0/P1 changes co
 ## Appendix A — current-state evidence (for reviewers)
 
 - Load dir sync + R5 bootstrap-only: `cli/commands/extensions/skills_sync.py` docstring; `okf/skills/load-directory-sync.ava.okf.md`.
-- Explicit update verbs + conflicts: `cli/commands/extensions/skill.py` (`cmd_skill_update` L423+, `cmd_skill_upgrade` L510+), `cli/commands/extensions/plugins.py` (`cmd_plugins_upgrade` L390+), `cli/commands/extensions/mcp.py`.
+- Explicit update verbs (they replace and report a differing copy): `cli/commands/extensions/skill.py` (`cmd_skill_update` L423+, `cmd_skill_upgrade` L510+), `cli/commands/extensions/plugins.py` (`cmd_plugins_upgrade` L390+), `cli/commands/extensions/mcp.py`.
 - Builtin skill sync (bootstrap-only, missing copies): `cli/commands/converge/host.py:_converge_skills_step` -> `cli/commands/extensions/skills_sync.py:converge_skills` (superseded the pre-unified-lifecycle updater's `_update_local`/`_update_agent_runner` rollout legs).
 - Registry model: `base/packages/extensions/install_registry.py` (`InstalledPackage`, `Registry.version`, `tree_hash`, `copy_changed`).
 - Plugin discovery + loaders: `base/packages/plugins/enable_config.py:discover_plugins`, `agent/extensions/__init__.py:load_extensions`, `base/lm/plugin_providers.py`; roots: `base/paths/__init__.py:repo_plugins_dir/plugins_dir`, `base/deploy/release/runtime_interpreter.py:external_plugin_read_root`.
@@ -412,7 +413,7 @@ Each phase is independently landable and reversible; nothing in P0/P1 changes co
 ## Appendix B — worked example (the P1 acceptance narrative)
 
 1. An agent edits `ava_builtins/skills/ava-workflow/...` in a worktree; PR merges to main at 14:03.
-2. 14:15 (next tick), each machine with the core channel ON runs `ava packages refresh`: `ls-remote` shows a new head; fetch (objects only); `git diff --name-only <applied_rev> <head> -- ava_builtins/skills/ava-workflow` → hits; archive-extract to staging; scan passes (builtin content); local-edit guard passes.
+2. 14:15 (next tick), each machine with the core channel ON runs `ava packages refresh`: `ls-remote` shows a new head; fetch (objects only); `git diff --name-only <applied_rev> <head> -- ava_builtins/skills/ava-workflow` → hits; archive-extract to staging; scan passes (builtin content); the local copy check passes.
 3. Staged swap lands the new `$AVA_HOME/skills/ava-workflow/`; registry records `applied_rev = <merge sha>`, `last_result = applied`.
 4. No process was restarted; the next agent that opens the skill reads the new text; the capabilities index of live agents names the change on its next rebuild (existing before_llm hook).
 5. `ava packages status` shows: `ava-workflow  core  auto  rev abc1234  applied 14:15`.

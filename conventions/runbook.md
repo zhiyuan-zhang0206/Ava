@@ -1275,8 +1275,8 @@ itself (its own public key in its own `authorized_keys`):
   the gateway smoke-tests each listed agent-runner with a real agent, reading its own
   address and bearer in place; last, each host runs `ava packages refresh`
   (skills follow their channel; `ava skill update` is retired) and its summary
-  line (`applied N, conflict M`) is printed. Conflicts are only reported: the
-  script never passes `--force`, which is human-only.
+  line (`summary: …`) is printed. A differing local copy is replaced and
+  reported — an info line names the differing files.
 - The first failure stops a half and nothing rolls back: fix the cause and
   rerun the whole half, which is idempotent. `--dry-run` runs only the
   read-only checks and prints the effects. Output is redacted and tee'd to
