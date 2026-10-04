@@ -2,8 +2,8 @@
 
 Host-specific half of the [impersonator guide](../SKILL.md): how the relay
 reaches a Claude Code session, where your authority comes from, and the traps
-seen in practice. Everything else — messages, ACK, renewal, SDK, release — is
-in the general guide.
+seen in practice. Everything else — inheriting the borrowed context, messages,
+ACK, renewal, SDK, release — is in the general guide.
 
 ## Relay startup
 
@@ -43,8 +43,9 @@ side ends the takeover (`aborted: the bound relay stopped heartbeating`).
 
 Each relay line becomes a notification in your conversation: one envelope per
 batch with the full content, the message ids, and the exact ACK command. A
-notification can arrive while you are mid-task; finish the current step, then
-handle it. Nothing needs polling.
+notification can arrive while you are mid-task: acknowledge it as soon as it
+reaches you — the ACK is receipt, not completion — then fit its work into your
+run. Nothing needs polling.
 
 ## Authority
 
@@ -60,7 +61,8 @@ than 8 process levels is refused.
   desktop app's. A signed-out CLI still renders its panel, then answers the
   first message with `Not logged in · Please run /login`; the launcher's
   `claude auth status` preflight refuses such a launch.
-- **Cancel.** To stop an in-flight tool when a `cancel` arrives, use your own
-  interrupt, then ACK the cancel.
+- **Cancel.** A `cancel` is acknowledged on receipt like every message — then
+  stop: use your own interrupt for an in-flight tool. The ACK never substitutes
+  for stopping.
 - **Permissions.** A takeover runs unattended under
   `--dangerously-skip-permissions`; nobody answers approval prompts.

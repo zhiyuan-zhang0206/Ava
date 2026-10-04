@@ -2,8 +2,8 @@
 
 Host-specific half of the [impersonator guide](../SKILL.md): how the relay
 reaches a Codex session, where your authority comes from, and the traps seen in
-practice. Everything else — messages, ACK, renewal, SDK, release — is in the
-general guide.
+practice. Everything else — inheriting the borrowed context, messages, ACK,
+renewal, SDK, release — is in the general guide.
 
 ## Relay startup
 
@@ -25,8 +25,8 @@ If the relay cannot start, the acceptance is rolled back and the lease ends
 The relay delivers through the app server's `turn/start`: an idle thread starts
 a new turn, and a running turn receives the batch as additional input (Steer).
 Each batch is one envelope with the full content, the message ids, and the
-exact ACK command. Server acceptance is not processing — only your ACK records
-that you handled a message.
+exact ACK command. Server acceptance is not host receipt — only your own ACK
+records that a message reached you.
 
 ## Authority
 

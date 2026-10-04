@@ -4,8 +4,8 @@ An impersonation relay runs beside the external host on the Ava agent's machine.
 It subscribes to the agent's existing Redis inbound channel and reads pending
 messages from the database. It pushes each pending message's full content into
 an already-open host conversation, in self-contained envelopes that carry the
-message ids and the exact ACK command; the external agent processes messages
-as they arrive and ACKs by id.
+message ids and the exact ACK command; the external agent acknowledges each batch on
+receipt and processes messages as they arrive.
 
 This page is the operator and mechanism side. The executor's side of each host
 is its host guide under `.agents/skills/impersonator-guide/reference/`
@@ -124,8 +124,8 @@ conversation to another host is a separate handoff, not a relay fallback.
 `--codex-remote` is rejected for Claude Monitor.
 
 Verify receipt on the actual host while it is busy and while idle. Server
-acceptance is not model processing: only the controller's explicit Ava ACK
-records that it handled the input. A timeout can follow acceptance, so a failed
+acceptance is not host receipt: only the controller's explicit Ava ACK
+records that the input reached it. A timeout can follow acceptance, so a failed
 transport must not silently resubmit through a second delivery mechanism.
 
 ## Claude Code Monitor
@@ -274,20 +274,22 @@ the stale window plus one scan interval (≈75 s).
   the inbox command: it fits Claude Monitor's per-line budget and keeps the
   host input bounded, so one oversized inbound cannot fail
   every emit and wedge the relay. Fetch messages (or full payloads) with
-  `impersonate inbox 0 --agent 42`; process and explicitly
+  `impersonate inbox 0 --agent 42` — a truncated body is fetched in full
+  before its ACK; acknowledge each batch on receipt with
   `impersonate ack 0 ID ... --agent 42`. The envelope's ACK line carries the
   exact command for its batch.
-  An ACK that marks messages done publishes a wake so the relay immediately
-  drops the ids from its outstanding set, even when no new message has arrived.
+  An ACK that marks messages done (the record's delivery status — not task
+  completion) publishes a wake so the relay immediately drops the ids from its
+  outstanding set, even when no new message has arrived.
   Repeating an ACK for already-done messages does not publish another wake.
-  Treat `kind="cancel"` as a request to stop current work, then explicitly ACK it.
+  Treat `kind="cancel"` as a request to stop current work; acknowledge it on receipt (like every message), then stop.
   Native Ava does not consume cancellation on behalf of the external controller.
 - Reading or successfully submitting a push does not mark a message done. The
   relay reserves each attempt in the database before host submission. Restart
   and credential rotation preserve the attempt count and ACK deadline. Failed
   or ambiguous submissions spend an attempt because transport acceptance and
   database commit cannot be atomic; content remains available for native
-  handoff. Envelope ids remain the idempotency key: a host that already handled
+  handoff. Envelope ids remain the idempotency key: a host that already received
   a batch simply re-ACKs it. The configured budget is per message, with no
   exactly-once claim across transport or process crashes.
 - The relay heartbeats the lease row every 10 seconds; a heartbeat older than

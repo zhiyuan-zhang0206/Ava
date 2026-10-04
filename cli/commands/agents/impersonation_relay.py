@@ -132,9 +132,10 @@ def message_push(
     Carries the full content, the batch's message ids and the exact ACK
     command, so the external session processes messages without reading or
     parsing the inbox. A re-delivery push says so explicitly; the ids make it
-    idempotent for a host that already handled the batch. ``max_chars`` bounds
+    idempotent for a host that already received the batch. ``max_chars`` bounds
     each content block to fit Claude Monitor's per-line budget and limit host
-    context; the tail points at the inbox command for the full text.
+    context; the tail points at the inbox command for the full body, to be read
+    before the ACK.
     """
     ids = [message.id for message in messages]
     header = f"Ava message agent={agent_id} lease={lease_id} ids={','.join(map(str, ids))}"
@@ -145,13 +146,14 @@ def message_push(
         content = message.content
         if max_chars is not None and len(content) > max_chars:
             content = (
-                content[:max_chars] + " (truncated; run the inbox command to read the full message)"
+                content[:max_chars]
+                + " (truncated — run the inbox command to read the full body before acknowledging)"
             )
         blocks.append(f"[id={message.id}] kind={message.kind} from={message.source}")
         blocks.append(f"Delivery attempt {message.delivery_attempts + 1}/{max_delivery_attempts}")
         blocks.append(content)
         blocks.append("")
-    blocks.append(f"ACK after processing: {ack_command(lease_id, ids, agent_id)}")
+    blocks.append(f"ACK after receiving this message: {ack_command(lease_id, ids, agent_id)}")
     blocks.append(
         f"ACK within {ack_window_seconds}s. "
         + (
@@ -171,7 +173,8 @@ def activation_hint(
 
     New accepts require a nonempty start message, so this only serves leases
     accepted before the push protocol shipped. Updated to the push contract:
-    messages arrive here, ACK each batch, inbox is the fallback read.
+    messages arrive here, acknowledge each batch on receipt, inbox is the
+    fallback read.
     """
     prefix = ["ava", "impersonate"]
     scope = ["--agent", str(agent_id)] if isinstance(lease_id, int) else []
@@ -179,8 +182,9 @@ def activation_hint(
     ack = shlex.join([*prefix, "ack", str(lease_id), *scope])
     return (
         f"Ava control active: agent={agent_id} lease={lease_id}. "
-        "Inbox messages are pushed to this session; after processing each batch "
-        f"run: {ack} ID... Use {inbox} to read missed or truncated messages. "
+        "Inbox messages are pushed to this session; acknowledge each batch as soon as it "
+        f"arrives: {ack} ID... Use {inbox} to read missed messages or a truncated "
+        "message's full body — read it before acknowledging. "
         f"Each message has {max_delivery_attempts} delivery attempts, "
         f"with {ack_window_seconds}s to ACK each; exhaustion ends impersonation."
     )

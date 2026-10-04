@@ -44,8 +44,9 @@ The two states, and nothing else:
 - **End — one message resumes you.** The takeover releases with its own
   summary; a system note resumes you carrying that summary and the path of
   `impersonation/<session_id>.json`. Read that file before acting on pending
-  human input: it retains all messages (including unACKed ones), operations and
-  consumed events.
+  human input: it retains all messages (unACKed and acknowledged alike),
+  operations and consumed events — and an ACK means received, never finished,
+  so check acknowledged messages for work the summary does not show as done.
 
 If the takeover's shell is closed (a full stop, a reboot, a crash), the platform
 ends the impersonation session ("the executor process is gone") and resumes

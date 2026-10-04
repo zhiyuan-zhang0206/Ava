@@ -151,6 +151,8 @@ async def deliver_handoff(
             "the record of emitted SDK/API events; SDK sampling policy is unknown, "
             "so an SDK consumed_event_count of zero never proves no SDK calls. "
             "Incoming messages marked unacknowledged still need your attention. "
+            "An ACK records receipt, not completion: check acknowledged messages for "
+            "work the summary does not show as finished, and continue it. "
             "Your execution resumes with this note.",
             tag=NoteTag.IMPERSONATION,
             created_at=datetime.now(UTC),
