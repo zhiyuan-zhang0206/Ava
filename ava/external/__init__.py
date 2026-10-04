@@ -33,14 +33,15 @@ from .state import (
 __all_for_ava__ = ["attach", "Attachment"]
 
 _attachment_lock = Lock()
-_active_attachment: Attachment | None = None
 _close_flush_permission = local()
 
 
 def attached_config() -> tuple[Mapping[str, Any], PluginConfigView] | None:
     """The pins and plugin-config view of the agent this process is attached to, if any."""
-    attachment = _active_attachment
-    return None if attachment is None else attachment.config
+    # The attachment is the process's external-identity provider: its bound `_validate` is
+    # what `agent_identity` calls to recheck the lease.
+    attachment = getattr(agent_identity._external_identity, "__self__", None)
+    return attachment.config if isinstance(attachment, Attachment) else None
 
 
 def _close_flush_permitted() -> bool:
@@ -85,7 +86,6 @@ class Attachment:
     def __init__(self, lease_id: str) -> None:
         import ava
 
-        global _active_attachment  # noqa: PLW0603 — one process attachment, guarded by _attachment_lock
         if agent_identity._external_identity is not None:
             raise RuntimeError("this process already has an external attachment")
         if agent_identity.current_turn_agent_id() is not None or (
@@ -109,7 +109,6 @@ class Attachment:
             lease = self._lease()
             self.agent_id = int(lease["agent_id"])
             self.session_id = int(lease["session_id"])
-            _active_attachment = self
             self._version = int(lease["delta_version"])
             agent_identity._external_identity = self._validate
             agent_identity._external_agent_id = self.agent_id
@@ -180,7 +179,7 @@ class Attachment:
                 expected_version=self._version,
             )
             self._version += 1
-            ava.state_update = {}
+            ava.state_update.clear()
 
     def close(self) -> None:
         """Flush plugin changes and remove the borrowed identity even if flushing fails."""
@@ -270,8 +269,6 @@ class Attachment:
 
         if self._closed:
             return
-        global _active_attachment  # noqa: PLW0603 — one process attachment, guarded by _attachment_lock
-        _active_attachment = None
         self._closed = True
         try:
             if self._event_participant is not None:

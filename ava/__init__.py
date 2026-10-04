@@ -388,7 +388,7 @@ __all_for_ava__ = [
 ]
 
 # Apply env-based entries at import time (existing behavior)
-_sdk_disable.apply_sdk_disable(_sdk_disable.sdk_disable_entries)
+_sdk_disable.apply_sdk_disable(_sdk_disable.env_entries())
 
 # The agent-facing FQN a help() heading shows comes from `fn.__module__`
 # (`ava.help` → `# ava.help`). The implementations live in `ava/sdk_surface/`

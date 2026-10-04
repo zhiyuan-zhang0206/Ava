@@ -22,7 +22,7 @@ def test_install_wraps_and_restores_mcp_call_funnel() -> None:
     metering.install()
     try:
         assert ava.mcps._call_raw is not before
-        assert ava.mcps._call_raw in metering._RECORDERS
+        assert metering.is_recorder(ava.mcps._call_raw)
     finally:
         metering.uninstall()
     assert ava.mcps._call_raw is before
