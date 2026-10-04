@@ -24,7 +24,7 @@ from base.db import Database
 from services.computer.errors import ComputerUseError
 from services.computer.mcp_daemon import ComputerMcpDaemon
 from services.computer.protocol import Request, Response
-from services.computer.tests.slices import computer_use_config
+from services.computer.tests.slices import computer_use_config, short_sock_dir
 from services.permissions_helper.client import PermissionsHelperError
 
 
@@ -1048,22 +1048,10 @@ async def test_task_session_emit_failure_warns_but_action_succeeds(
     assert [e["event_type"] for e in log] == ["computer_action"]
 
 
-def _short_sock_dir() -> tuple[Path, Path, Any]:
-    """A SHORT socket dir — AF_UNIX paths cap at ~104 bytes, and pytest's
-    tmp_path (/private/var/folders/...) blows past it (OSError: path too long,
-    which the guard treats as occupied). /tmp keeps the path short, same as
-    the browser daemon tests."""
-    import shutil
-    import tempfile
-
-    d = Path(tempfile.mkdtemp(prefix="ava-cmcp-", dir="/tmp"))
-    return d, d / "computer-mcp.sock", shutil.rmtree
-
-
 async def test_run_raises_stream_limit_for_large_snapshots(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    d, sock, cleanup = _short_sock_dir()
+    d, sock, cleanup = short_sock_dir()
     server_options: dict[str, Any] = {}
 
     async def socket_not_in_use(_path: Path) -> bool:
@@ -1086,7 +1074,7 @@ async def test_run_raises_stream_limit_for_large_snapshots(
 
 async def test_socket_in_use_false_when_nobody_listens() -> None:
     """A stale (or absent) socket is not "in use" — the daemon may unlink it."""
-    d, sock, cleanup = _short_sock_dir()
+    d, sock, cleanup = short_sock_dir()
     try:
         assert await daemon_mod._socket_in_use(sock) is False
     finally:
@@ -1096,7 +1084,7 @@ async def test_socket_in_use_false_when_nobody_listens() -> None:
 async def test_socket_in_use_true_when_listener_present() -> None:
     """A socket with a live listener is "in use" — a second daemon must refuse
     to start instead of unlink-stealing it (the #1137 dual-daemon orphan)."""
-    d, sock, cleanup = _short_sock_dir()
+    d, sock, cleanup = short_sock_dir()
     server = await asyncio.start_unix_server(lambda _r, w: w.close(), path=str(sock))
     try:
         assert await daemon_mod._socket_in_use(sock) is True
@@ -1110,7 +1098,7 @@ async def test_shutdown_cancels_active_clients(database: Database) -> None:
     """run()'s shutdown path cancels tracked client handlers, so a client that
     holds its connection open cannot hang server.wait_closed() and orphan the
     daemon process (the #1137 dual-daemon root cause)."""
-    d, sock, cleanup = _short_sock_dir()
+    d, sock, cleanup = short_sock_dir()
     try:
         daemon = daemon_mod.ComputerMcpDaemon(computer_use_config(), database, sock=str(sock))
         # A client handler that never returns unless cancelled — the persistent

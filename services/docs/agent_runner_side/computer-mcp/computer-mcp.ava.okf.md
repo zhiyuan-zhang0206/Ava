@@ -103,6 +103,11 @@ last resort, logged but not audited — no agent identity). The action lock
 still serializes individual executions underneath; ownership decides WHO may
 act, the lock decides WHEN.
 
+## Loop liveness (the wedge guardrail)
+A wedged sync call stops the daemon from serving, answering probes and
+running its stop handler; a stack-dumping watchdog and a bounded shutdown
+drain make that a restartable exit: [[loop-liveness.ava.okf.md]].
+
 ## Screen-content trust
 Screens are untrusted input: any text visible on screen may be prompt
 injection. Callers that reason about screen content (a composed agentic loop)
