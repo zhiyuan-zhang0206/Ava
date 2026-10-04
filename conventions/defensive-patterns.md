@@ -87,6 +87,38 @@ restart needs a reconcile path other than `--force`, and a bounded retry needs a
 escalation outcome instead of ending in silence.
 Evidence: [`postmortems/0010`](../postmortems/0010-a-failed-restart-must-not-look-like-an-operator-stop.md).
 
+### A watched process must be able to die for its restart
+
+A long-lived process whose work is synchronous needs a death path, not only a
+health probe: when its loop blocks in a sync call it stops accepting, cannot
+answer the probe, and cannot run its stop handler (Python reaches asyncio
+signal handlers only through the loop) — so every supervisor stop window
+passes, the restart breaker holds the unit down, and a human has to kill it
+([`postmortems/0011`](../postmortems/0011-a-process-that-cannot-be-stopped-cannot-be-restarted.md)).
+Give such servers a loop-liveness watchdog: no beat from the loop for a
+configured window ⇒ dump every thread's stack and exit, so the wedge degrades
+to a crash the supervisor restarts with evidence; bound the identified
+blocking paths directly too, but the watchdog is the guarantee — either
+serving, or gone. The watchdog alone is not enough: it stays silent when the
+loop is *idle* on a wait that never resolves — see the next entry.
+
+### A shutdown drain is a deadline, not a wait
+
+Cancelling the in-flight work and then awaiting it without a bound turns
+shutdown into a second wedge, past every earlier bound: the listener is
+closed (every connect refused, so the process reads as dead), the stop signal
+is already consumed, and no later SIGTERM changes anything — the
+2026-10-04 computer-use daemon spent its second quarter-hour exactly here,
+after the blocked-loop half was over
+([`postmortems/0011`](../postmortems/0011-a-process-that-cannot-be-stopped-cannot-be-restarted.md)).
+Make the bound structural: `asyncio.gather`'s `cancel()` only forwards into
+its children and leaves the awaiting task parked on a future that never
+completes (CPython #32684), so a timeout around a gather whose children ignore
+cancellation never fires — complete the wait with a timer of its own
+(`asyncio.wait(..., timeout=)`). When the deadline passes, trip the same last
+resort as the liveness watchdog — dump every thread's stack and exit for a
+restart — instead of waiting longer.
+
 ### An editable install is a cross-checkout pointer
 
 An editable install writes its source path into the **active virtualenv**; the

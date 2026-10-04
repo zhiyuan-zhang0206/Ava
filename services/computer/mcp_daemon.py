@@ -64,9 +64,16 @@ Run as a supervised daemon (ServiceSpec session "computer-mcp"):
 from __future__ import annotations
 
 import asyncio
+import faulthandler
 import json
+import os
 import signal
+import sys
+import threading
+import time
+from collections.abc import Callable
 from contextlib import suppress
+from functools import partial
 from pathlib import Path
 from typing import Any
 
@@ -117,7 +124,174 @@ def computer_use_config() -> ComputerUseConfig:
         computer_use_lease_s=settings.daemon.computer_use_lease_s,
         computer_use_queue_timeout_s=settings.daemon.computer_use_queue_timeout_s,
         computer_use_session_idle_s=settings.daemon.computer_use_session_idle_s,
+        computer_use_loop_stall_s=settings.daemon.computer_use_loop_stall_s,
+        computer_use_shutdown_drain_s=settings.daemon.computer_use_shutdown_drain_s,
     )
+
+
+# ── loop-liveness watchdog ──────────────────────────────────────────────────
+# Tools execute synchronously on the event loop (one action at a time
+# machine-wide). A sync call that never returns therefore wedges the whole
+# daemon: it stops accepting connections, cannot answer the healthcheck's
+# ping, and cannot even run its SIGTERM handler (Python only reaches that
+# handler through the loop). The 2026-10-04 incident: a wedged loop left the
+# unit unstoppable for ~15 minutes until a manual kill, because a blocked
+# loop cannot exit for the supervisor to respawn it, and the root stop
+# window (10s) passed five times into the restart breaker. The watchdog
+# bounds the blocked-loop half of that failure class: the loop re-beats a
+# timestamp on every tick and a background thread checks it; when the loop
+# has not beaten for the configured window, the watchdog dumps every
+# thread's stack to stderr (captured into the unit's output.log by the
+# supervisor) and exits(1) — a dead process the supervisor restarts on its
+# normal path. The incident's other half, a shutdown that never finished, is
+# bounded by `_bounded_cleanup` below. Either serving, or gone.
+_WATCHDOG_BEAT_S = 15.0  # loop-side re-beat interval (watchdog sampling detail)
+_WATCHDOG_CHECK_S = 5.0  # watchdog-thread check interval (watchdog sampling detail)
+_WATCHDOG_MIN_STALL_S = 1.0  # below this a misconfigured window would restart a healthy daemon
+
+
+class _LoopWatchdog(threading.Thread):
+    """Run `on_stall` once the event loop has not beaten for `stall_s`.
+
+    `on_stall` executes on this thread and must end the process (production:
+    `_dump_and_exit`); when it returns, the watchdog ends. The only beat source
+    is the loop's own tick callback, so a blocked loop stops beating — while
+    a live loop keeps the watchdog silent no matter how long a *caller* waits.
+    """
+
+    def __init__(
+        self,
+        stall_s: float,
+        *,
+        check_s: float,
+        on_stall: Callable[[], None],
+        clock: Callable[[], float] = time.monotonic,
+    ) -> None:
+        super().__init__(name="computer-mcp-loop-watchdog", daemon=True)
+        self._stall_s = stall_s
+        self._check_s = check_s
+        self._on_stall = on_stall
+        self._clock = clock
+        self._beat = clock()
+        self._stopped = threading.Event()
+
+    def beat(self) -> None:
+        """Prove the loop is alive (called from the loop's tick callback)."""
+        self._beat = self._clock()
+
+    def stale_for(self) -> float:
+        """Seconds since the last beat."""
+        return self._clock() - self._beat
+
+    @property
+    def stopped(self) -> bool:
+        return self._stopped.is_set()
+
+    def stop(self) -> None:
+        self._stopped.set()
+
+    def run(self) -> None:
+        while not self._stopped.wait(self._check_s):
+            if self.stale_for() > self._stall_s:
+                self._on_stall()
+                return
+
+
+def _dump_and_exit(reason: str) -> None:
+    """The last resort of every bound in this module: dump every thread's
+    stack, then exit for a supervisor restart.
+
+    Anything that reaches here passed its configured bound while the unit was
+    still not serving; the only exit left that the supervisor can act on is a
+    dead process. Raw stderr writes, not logging: the log path may be what is
+    blocked. The supervisor captures stderr into the unit's output.log, so
+    the dump — the forensics the 2026-10-04 wedge lacked — survives the exit.
+    `reason` names the bound that tripped, so the first line of the dump
+    already says which one it was.
+    """
+    try:
+        sys.stderr.write(
+            f"[computer-mcp] {reason} — thread stacks follow; exiting for a supervisor restart\n"
+        )
+        sys.stderr.flush()
+        faulthandler.dump_traceback(all_threads=True)
+    finally:
+        os._exit(1)
+
+
+def _guard_loop_liveness(
+    loop: asyncio.AbstractEventLoop,
+    stall_s: float,
+    *,
+    beat_s: float = _WATCHDOG_BEAT_S,
+    check_s: float = _WATCHDOG_CHECK_S,
+    on_stall: Callable[[], None] | None = None,
+) -> _LoopWatchdog:
+    """Start the loop-liveness watchdog and keep it beating from `loop`.
+
+    Returns the watchdog so the shutdown path can stop it. `on_stall`
+    defaults to `_dump_and_exit`; tests inject a recorder instead of the exit.
+    The re-beat cadence stays well inside the window (`beat_s` shrunk to a
+    third of it when the configured window is small), so an operator tuning
+    the window down cannot trip a healthy loop; a tiny window is floored so
+    a misconfiguration cannot restart-loop the daemon.
+    """
+    stall_s = max(stall_s, _WATCHDOG_MIN_STALL_S)
+    watchdog = _LoopWatchdog(
+        stall_s,
+        check_s=check_s,
+        on_stall=on_stall or partial(_dump_and_exit, f"run loop silent for over {stall_s}s"),
+    )
+    watchdog.start()
+    beat_interval = min(beat_s, stall_s / 3)
+
+    def tick() -> None:
+        if watchdog.stopped:
+            return
+        watchdog.beat()
+        loop.call_later(beat_interval, tick)
+
+    tick()
+    return watchdog
+
+
+async def _bounded_cleanup(
+    server: asyncio.AbstractServer, clients: set[asyncio.Task[None]], *, drain_s: float
+) -> None:
+    """Close out the clients and the listener, bounded by `drain_s`.
+
+    `server.close()` has already closed the listening socket; `wait_closed()`
+    returns only once every handler task is done, and a client holding its
+    connection open (the SDK keeps one persistent socket) or a handler stuck
+    in its own unwind would otherwise hang shutdown forever — the second half
+    of the 2026-10-04 wedge: listener closed (every later connect refused,
+    `Errno 61`), the stop signal already consumed, and the process neither
+    serving nor dying until a manual kill.
+
+    The clients wait is `asyncio.wait`, not `gather`, and deliberately so:
+    `gather`'s `cancel()` forwards into its children and leaves the awaiting
+    task parked on a future that never completes (CPython #32684 semantics), so
+    a `gather`-based drain could not be un-parked by any timeout — the bound
+    must be structural. `wait`'s own timer completes the wait regardless of its
+    children; a handler that ignores cancellation is reported by `wait` as
+    still pending, never awaited again. Past the bound there is no clean path
+    left inside the process, so it dumps every thread's stack and exits for a
+    supervisor restart — the same last resort as the loop watchdog.
+    """
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + drain_s
+    pending = list(clients)
+    for task in pending:
+        task.cancel()
+    if pending:
+        _, still_pending = await asyncio.wait(pending, timeout=drain_s)
+        if still_pending:
+            _dump_and_exit(f"shutdown cleanup did not finish within {drain_s:g}s")
+    try:
+        async with asyncio.timeout(max(deadline - loop.time(), 0.0)):
+            await server.wait_closed()
+    except TimeoutError:
+        _dump_and_exit(f"shutdown cleanup did not finish within {drain_s:g}s")
 
 
 class ComputerMcpDaemon:
@@ -391,7 +565,8 @@ def _tracked_client(
 
 
 async def run(sock: str | None = None) -> None:
-    daemon = ComputerMcpDaemon(computer_use_config(), Database.from_settings(), sock)
+    config = computer_use_config()
+    daemon = ComputerMcpDaemon(config, Database.from_settings(), sock)
     path = Path(daemon._sock)
     if await _socket_in_use(path):
         logger.error(
@@ -406,6 +581,7 @@ async def run(sock: str | None = None) -> None:
         lambda r, w: _tracked_client(daemon, r, w), path=str(path), limit=_LINE_LIMIT
     )
     logger.info(f"[computer-mcp] listening on {path}")
+    watchdog = _guard_loop_liveness(asyncio.get_running_loop(), config.computer_use_loop_stall_s)
     stop = asyncio.Event()
 
     def _stop() -> None:
@@ -417,16 +593,11 @@ async def run(sock: str | None = None) -> None:
     try:
         await stop.wait()
     finally:
+        watchdog.stop()
         server.close()
-        # Close active clients first: server.wait_closed() waits for every
-        # handler task, and a client holding its connection open (the SDK
-        # keeps one persistent socket) would otherwise hang shutdown forever,
-        # orphaning the process with the socket still bound.
-        for task in list(daemon._clients):
-            task.cancel()
-        with suppress(Exception):
-            await asyncio.gather(*daemon._clients, return_exceptions=True)
-        await server.wait_closed()
+        await _bounded_cleanup(
+            server, daemon._clients, drain_s=config.computer_use_shutdown_drain_s
+        )
         with suppress(OSError):
             path.unlink()
         logger.info("[computer-mcp] shutting down")

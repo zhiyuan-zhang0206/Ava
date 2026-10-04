@@ -193,6 +193,12 @@ _INDEPENDENT_CLOCKS: dict[tuple[str, str], str] = {
         "ava_builtins/skills/ava-use-other-agents/scripts/watch_work.py",
         "STALL_SECONDS",
     ): "example script (skill reference), not cluster runtime — its own stall judgment, no lattice neighbour",
+    (
+        "services/computer/mcp_daemon.py",
+        "_WATCHDOG_MIN_STALL_S",
+    ): "not a clock: a sanity floor on the operator-configured loop-stall window "
+    "(settings.daemon.computer_use_loop_stall_s) — it only keeps a below-floor "
+    "misconfiguration from restart-looping a healthy daemon, no lattice neighbour",
 }
 
 

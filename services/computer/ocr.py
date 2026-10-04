@@ -15,6 +15,12 @@ OCR reads a PNG file and needs no TCC grant: the screen-recording
 authorization already lives in the permissions helper, which produced the
 PNG. Failure is soft by design — snapshot stays usable without text
 recognition (the daemon surfaces `ocr: []` + `ocr_error` and carries on).
+
+Both runs (the swiftc build and the recognition itself) go through
+`base.host.proc.run_bounded`: on timeout the whole process tree dies and the
+post-kill drain is bounded too, so no OCR failure can hold the daemon's
+event loop (2026-10-04: a wedged Vision run); the failure still surfaces as
+OcrError.
 """
 
 from __future__ import annotations
@@ -23,6 +29,7 @@ import shutil
 import subprocess
 from pathlib import Path
 
+from base.host.proc import run_bounded
 from base.paths import logs_dir
 
 _SOURCE = Path(__file__).with_name("ocr.swift")
@@ -47,12 +54,8 @@ def _binary() -> Path:
         swiftc = shutil.which("swiftc")
         if swiftc is None:
             raise OcrError("swiftc not found on PATH — cannot build the OCR helper")
-        built = subprocess.run(  # noqa: S603 — swiftc from PATH, argv is our own source
-            [swiftc, "-o", str(binary), str(_SOURCE)],
-            capture_output=True,
-            text=True,
-            timeout=120,
-            check=False,
+        built = run_bounded(
+            [swiftc, "-o", str(binary), str(_SOURCE)], timeout=120, capture_output=True, text=True
         )
         if built.returncode != 0:
             raise OcrError(f"swiftc failed: {built.stderr.strip()[:300]}")
@@ -69,12 +72,8 @@ def ocr_image(path: str | Path) -> list[dict[str, float | str]]:
     the snapshot itself.
     """
     try:
-        ran = subprocess.run(  # noqa: S603 — our own compiled binary, caller path
-            [str(_binary()), str(path)],
-            capture_output=True,
-            text=True,
-            timeout=_OCR_TIMEOUT_S,
-            check=False,
+        ran = run_bounded(
+            [str(_binary()), str(path)], timeout=_OCR_TIMEOUT_S, capture_output=True, text=True
         )
     except (subprocess.TimeoutExpired, OSError) as e:
         raise OcrError(f"ocr run failed: {e}") from e

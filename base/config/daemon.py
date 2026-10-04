@@ -637,6 +637,34 @@ class DaemonSettings(
         },
     )
 
+    computer_use_loop_stall_s: float = Field(
+        default=180.0,
+        alias="AVA_COMPUTER_LOOP_STALL_S",
+        description="Computer-use daemon loop-liveness window (seconds): a run loop that has not ticked for this long dumps all thread stacks and exits for a supervisor restart (2026-10-04: a wedged loop left the unit unstoppable for ~15 minutes).",
+        json_schema_extra={
+            "capability": "agent-runner",
+            "restart_required": "",
+            "writable": False,
+            "sensitive": False,
+            "scope": "host",
+            "remote_writable": True,
+        },
+    )
+
+    computer_use_shutdown_drain_s: float = Field(
+        default=5.0,
+        alias="AVA_COMPUTER_SHUTDOWN_DRAIN_S",
+        description="Computer-use daemon shutdown drain window (seconds): on stop, the daemon cancels its client handlers and waits at most this long for the listener to finish, then dumps all thread stacks and exits for a supervisor restart (2026-10-04: an unbounded drain left the process half-down — listener closed, stop signal consumed). Keep it below the supervisor's stop window (10s) so the drain reports first.",
+        json_schema_extra={
+            "capability": "agent-runner",
+            "restart_required": "",
+            "writable": False,
+            "sensitive": False,
+            "scope": "host",
+            "remote_writable": True,
+        },
+    )
+
     @model_validator(mode="after")
     def _validate_db_recovery_prolonged_below_budget(self) -> DaemonSettings:
         """The prolonged warning must precede the final recovery fuse."""
