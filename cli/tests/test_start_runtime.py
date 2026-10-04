@@ -22,10 +22,10 @@ def test_development_runtime_is_the_checkout_and_the_running_interpreter(tmp_pat
 
     assert runtime.code_root == runtime.cwd == tmp_path
     assert runtime.interpreter == Path(sys.executable).absolute()
-    assert runtime.module_argv("services.ava_root", "--run-dir", "/run") == [
+    assert runtime.module_argv("services.supervision.ava_root", "--run-dir", "/run") == [
         str(runtime.interpreter),
         "-m",
-        "services.ava_root",
+        "services.supervision.ava_root",
         "--run-dir",
         "/run",
     ]

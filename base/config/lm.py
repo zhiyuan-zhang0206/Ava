@@ -61,7 +61,7 @@ class LmSettings(EnvSettings):
             "restart_required": "",
             "writable": True,
             "sensitive": False,
-            # The labeler daemon runs on the gateway side (services/labeler) —
+            # The labeler daemon runs on the gateway side (services/derived/labeler) —
             # its model key must survive the gateway profile pop.
             "capability": "gateway",
             "scope": "cluster-pinned",

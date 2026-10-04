@@ -6,7 +6,7 @@ per-agent command view. One of the op clusters beside `ops.lifecycle`,
 self-contained.
 
 Most of these are thin wrappers; this layer is the agent-runner-callable RPC
-surface the ops server dispatches (`services/agent_ops/daemon.py:_dispatch`) and
+surface the ops server dispatches (`services/agent_runner/agent_ops/daemon.py:_dispatch`) and
 the gateway cluster router calls.
 """
 

@@ -1238,7 +1238,7 @@ jobs:
           import subprocess
 
           from base.paths import permissions_helper_app_dir
-          from services.permissions_helper import client, lifecycle
+          from services.desktop.permissions_helper import client, lifecycle
 
           # Import the signing identity into the isolated keychain.
           lifecycle.ensure_signing_cert()
@@ -1367,7 +1367,7 @@ jobs:
         if: ${{ always() }}
         run: |
           export AVA_HOME="${AVA_HOME:-$RUNNER_TEMP/ava-home}"
-          label="$(uv run python -c 'from services.permissions_helper.lifecycle import _label; print(_label())' 2>/dev/null || true)"
+          label="$(uv run python -c 'from services.desktop.permissions_helper.lifecycle import _label; print(_label())' 2>/dev/null || true)"
           if [[ -n "$label" ]]; then
             launchctl bootout "gui/$(id -u)/$label" || true
           fi
@@ -1954,11 +1954,11 @@ jobs:
         # resurrect flips the row + wakes the dispatcher) and lock them too.
         run: >
           uv run pytest
-          tests/e2e/test_message_flow.py
-          tests/e2e/test_self_restart.py
-          tests/e2e/test_self_terminate.py
-          tests/e2e/test_compact_flow.py
-          tests/e2e/test_self_resurrect.py
+          tests/e2e/flow/test_message_flow.py
+          tests/e2e/lifecycle/test_self_restart.py
+          tests/e2e/lifecycle/test_self_terminate.py
+          tests/e2e/flow/test_compact_flow.py
+          tests/e2e/lifecycle/test_self_resurrect.py
           -v -n 1
           --junit-xml=tmp/junit-e2e-hosted.xml -o junit_family=xunit1
 
@@ -2066,7 +2066,7 @@ jobs:
         # tests/test_home_isolation.py.
         run: >
           uv run pytest
-          tests/e2e/test_alerts_no_horizontal_overflow.py::test_alerts_table_no_horizontal_scroll_desktop
+          tests/e2e/visual/test_alerts_no_horizontal_overflow.py::test_alerts_table_no_horizontal_scroll_desktop
           tests/test_env_guard_canary.py
           tests/test_home_isolation.py -v -n 1
           --junit-xml=tmp/junit-e2e-env-guard.xml -o junit_family=xunit1

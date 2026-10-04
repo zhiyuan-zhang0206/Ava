@@ -151,7 +151,7 @@ def test_helper_admission_requires_normal_retirement_protocol(
     capabilities = {"root_stop_intent_v1": True, "helper_shutdown_v1": True}
     if missing is not None:
         del capabilities[missing]
-    monkeypatch.setattr("services.permissions_helper.client.ping", lambda: capabilities)
+    monkeypatch.setattr("services.desktop.permissions_helper.client.ping", lambda: capabilities)
     assert driver._helper_wire_ok() is (missing is None)
 
 
@@ -159,7 +159,7 @@ def test_collector_config_bytes_change_the_live_unit_generation(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     from ops import roster
-    from services.ava_root.manifest import UnitManifest
+    from services.supervision.ava_root.manifest import UnitManifest
 
     config = tmp_path / "collector.yaml"
     config.write_text("receivers: {otlp: {}}\n")
@@ -204,8 +204,8 @@ def test_unresponsive_root_with_custody_is_not_an_absent_tree(
 
 
 def test_manifest_change_requires_generation_replacement(tmp_path: Path) -> None:
-    from services.ava_root.manifest import load_manifests
-    from services.ava_root_glue.manifests import generate
+    from services.supervision.ava_root.manifest import load_manifests
+    from services.supervision.ava_root_glue.manifests import generate
 
     path = tmp_path / "manifest.json"
     generate(
@@ -258,7 +258,7 @@ def test_helper_seed_is_durable_before_wire_start(
 ) -> None:
     import json
 
-    from services.permissions_helper import client
+    from services.desktop.permissions_helper import client
 
     monkeypatch.setattr(driver, "root_child_env", lambda: {"AVA_HOME": str(tmp_path)})
 
@@ -277,7 +277,7 @@ def test_helper_seed_is_durable_before_wire_start(
 def test_stop_without_root_ipc_cancels_pending_helper_restart(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from services.permissions_helper import client
+    from services.desktop.permissions_helper import client
 
     monkeypatch.setattr(driver, "_helper_spawn_committed", lambda: True)
     monkeypatch.setattr(driver, "_helper_wire_ok", lambda: True)
@@ -334,8 +334,8 @@ def test_linux_root_launch_never_consults_a_helper(
 def test_generation_change_refuses_without_signal_or_seed_publication(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, removed: bool
 ) -> None:
-    from services.ava_root.manifest import UnitManifest
-    from services.ava_root_glue.manifests import build_manifest
+    from services.supervision.ava_root.manifest import UnitManifest
+    from services.supervision.ava_root_glue.manifests import build_manifest
 
     requested = (spec(),)
     manifest = build_manifest(capabilities={"gateway"}, repo_root=tmp_path, specs=requested)
@@ -389,8 +389,8 @@ def test_mac_boot_tail_does_not_read_or_notify(monkeypatch: pytest.MonkeyPatch) 
 def test_root_launch_digest_controls_reuse(tmp_path: Path) -> None:
     import hashlib
 
-    from services.ava_root.manifest import UnitManifest
-    from services.ava_root_glue.manifests import build_manifest, write_manifest
+    from services.supervision.ava_root.manifest import UnitManifest
+    from services.supervision.ava_root_glue.manifests import build_manifest, write_manifest
 
     requested = (spec(),)
     manifest = build_manifest(capabilities={"gateway"}, repo_root=tmp_path, specs=requested)
@@ -518,7 +518,7 @@ def test_root_child_env_beyond_the_launch_inputs_is_only_ambient(
 def test_unusable_helper_socket_requires_positive_native_absence(
     monkeypatch: pytest.MonkeyPatch, loaded: bool
 ) -> None:
-    from services.permissions_helper import client, launchd_job
+    from services.desktop.permissions_helper import client, launchd_job
 
     monkeypatch.setattr(driver, "_helper_spawn_committed", lambda: True)
 
@@ -559,7 +559,7 @@ def test_signals_reject_reuse_inside_legacy_birth_tolerance(
     import psutil
 
     from base.native_process.ownership import OwnedProcess
-    from services.ava_root.supervisor import Supervisor
+    from services.supervision.ava_root.supervisor import Supervisor
 
     old = OwnedProcess(12345, 10.0, 100)
     replacement = OwnedProcess(12345, 10.01, 101)
@@ -617,7 +617,7 @@ def test_signals_keep_linux_custody_when_wall_birth_moves(
     import psutil
 
     from base.native_process.ownership import OwnedProcess
-    from services.ava_root.supervisor import Supervisor
+    from services.supervision.ava_root.supervisor import Supervisor
 
     captured = OwnedProcess(12345, 10.0, 100)
     observed = OwnedProcess(12345, 3610.0, 100)

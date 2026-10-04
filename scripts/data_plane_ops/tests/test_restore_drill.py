@@ -19,7 +19,7 @@ from langgraph.checkpoint.postgres import PostgresSaver
 from base.config import settings
 from base.db import Database
 from base.paths import ava_home
-from services.gateway_side.backup import offsite, passphrase
+from services.backup.artifact import offsite, passphrase
 
 _SCRIPT = Path(__file__).parents[3] / "scripts" / "data_plane_ops" / "restore_drill.py"
 _SPEC = importlib.util.spec_from_file_location("restore_drill", _SCRIPT)

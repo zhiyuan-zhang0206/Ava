@@ -1,0 +1,148 @@
+"""`services.supervision.healthchecks.gateway` unit tests — the `_probe` branches.
+
+A 2xx is necessary but NOT sufficient: the body must also report this unit's
+`$AVA_HOME`, otherwise the responder is some other cluster's gateway (or an
+unrelated process) sitting on the port and the real gateway is dead. Identity is
+home-only here, deliberately without the pid comparison the daemon healthchecks
+apply — uvicorn reload serves from a worker forked out of the process that wrote
+`gateway_pidfile`, so a healthy gateway routinely answers with an unrecorded pid.
+
+The check itself is `base.daemon.health.probe_home`, shared with the operator
+surfaces (`ava status` / `ava cluster health-probe` reach it through
+`ServiceSpec.identity_probe`) so the watchdog and the human cannot be told
+different things about the same port. These tests exercise it through the
+healthcheck, which is the caller whose behaviour they pin.
+
+No gateway is started — `urlopen` is monkeypatched and `_restart` is exercised
+against a stubbed respawn, asserting only the call shape.
+"""
+
+from __future__ import annotations
+
+import json
+import urllib.error
+import urllib.request
+from pathlib import Path
+from typing import Any
+
+import pytest
+
+from base.daemon.health import DaemonProbe, ProbeVerdict
+from base.paths import ava_home
+from services.supervision.healthchecks import gateway as hc
+
+
+class _FakeResponse:
+    def __init__(self, status: int, body: bytes = b"") -> None:
+        self.status = status
+        self._body = body
+
+    def read(self, _n: int = -1) -> bytes:
+        return self._body
+
+    def __enter__(self) -> _FakeResponse:
+        return self
+
+    def __exit__(self, *_args: object) -> None:
+        return None
+
+
+def _respond(monkeypatch: pytest.MonkeyPatch, status: int, body: bytes) -> None:
+    monkeypatch.setattr(urllib.request, "urlopen", lambda _url, **_kw: _FakeResponse(status, body))  # pyright: ignore[reportUnknownArgumentType]
+
+
+def _own_health_body() -> bytes:
+    return json.dumps({"status": "ok", "home": str(ava_home()), "machine": "m"}).encode()
+
+
+def test_probe_alive_when_home_matches(monkeypatch: pytest.MonkeyPatch) -> None:
+    """200 + this unit's home → alive."""
+    _respond(monkeypatch, 200, _own_health_body())
+    assert hc._probe().alive is True
+
+
+def test_probe_rejects_gateway_from_another_home(monkeypatch: pytest.MonkeyPatch) -> None:
+    """200 from a gateway whose `$AVA_HOME` is not ours → dead, not "healthy".
+
+    The foreign-unit impostor case: another unit's gateway (or a leaked test one)
+    holding this port would otherwise read as green forever while this unit's
+    gateway stays down. The verdict is TERMINAL — this unit cannot kill the gateway
+    session on another unit's socket (the socket lives under `$AVA_HOME`), so
+    respawning into the bound port every 60s is a loop, not a repair."""
+    _respond(
+        monkeypatch,
+        200,
+        json.dumps({"status": "ok", "home": str(Path.home() / ".ava-some-other-cluster")}).encode(),
+    )
+    probe = hc._probe()
+    assert probe.verdict is ProbeVerdict.PORT_TAKEN
+    assert probe.terminal is True
+    assert "home=" in probe.detail
+
+
+def test_probe_rejects_body_without_home(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A 200 whose body carries no identity at all is not evidence of our gateway."""
+    _respond(monkeypatch, 200, b'{"status": "ok"}')
+    assert hc._probe().alive is False
+
+
+def test_probe_rejects_non_json_body(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Some unrelated HTTP server on the port → dead."""
+    _respond(monkeypatch, 200, b"<html>nginx</html>")
+    probe = hc._probe()
+    assert probe.verdict is ProbeVerdict.PORT_TAKEN
+    assert "not JSON" in probe.detail
+
+
+def test_probe_dead_on_http_500(monkeypatch: pytest.MonkeyPatch) -> None:
+    _respond(monkeypatch, 500, b"")
+    assert hc._probe().alive is False
+
+
+def test_probe_dead_on_url_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Connection refused / DNS fail → URLError → dead."""
+
+    def fake_urlopen(_url: str, **_kw: Any) -> _FakeResponse:
+        raise urllib.error.URLError("connection refused")
+
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+    assert hc._probe().alive is False
+
+
+# ─── _probe always returns a verdict ─────────────────────────────────────
+
+
+def test_probe_survives_an_http_exception(monkeypatch: pytest.MonkeyPatch, caplog) -> None:
+    """`http.client.HTTPException` is not an `OSError`, so the inner probe's
+    narrow catch misses it. Losing the verdict matters most here: the gateway is
+    what the cluster health probe polls, with `--auto-rollback --threshold 3`
+    armed, and a probe that raises means no restart is ever attempted while every
+    60s round writes a fresh traceback."""
+    import http.client
+    import logging
+
+    def _boom(*_a: object, **_k: object) -> None:
+        raise http.client.IncompleteRead(b"half a body")
+
+    monkeypatch.setattr(urllib.request, "urlopen", _boom)
+    with caplog.at_level(logging.ERROR, logger="base.daemon.health"):  # pyright: ignore[reportUnknownMemberType]
+        probe = hc._probe()
+    assert probe.alive is False
+    assert "IncompleteRead" in probe.detail
+    assert any("raised unexpectedly" in r.getMessage() for r in caplog.records)  # pyright: ignore[reportUnknownMemberType]
+
+
+def test_probe_reads_the_gateway_health_url_when_it_runs(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The URL is read per probe, not captured when the module imports."""
+    from base.config import settings
+
+    seen: list[str] = []
+
+    def fake_probe_home(url: str) -> DaemonProbe:
+        seen.append(url)
+        return DaemonProbe.up("ok")
+
+    monkeypatch.setattr(hc, "probe_home", fake_probe_home)
+    monkeypatch.setattr(settings.services, "gateway_health_url", "http://gw.example:1/api/health")
+    hc._probe()
+    assert seen == ["http://gw.example:1/api/health"]

@@ -1,6 +1,6 @@
 """WAL-G config — WalgSettings.
 
-One key switches the physical-backup engine (`services/gateway_side/walg/`) on:
+One key switches the physical-backup engine (`services/backup/walg/`) on:
 the path of a 0600 JSON file in WAL-G's own configuration format
 (`WALG_OSS_PREFIX`, `OSS_*`, `WALG_LIBSODIUM_KEY_PATH`, ...). Ava does not
 translate that format into typed settings, so there is no second copy of any

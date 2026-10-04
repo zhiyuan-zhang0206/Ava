@@ -75,7 +75,7 @@ from base.host.system.backend import get_backend
 from base.native_process.child_env import daemon_process_env, inherited_process_env
 from base.paths import ava_home
 from cli.commands.data_plane.walg import warn_archive_inactive
-from services.gateway_side.walg.archive import archive_pg_args
+from services.backup.walg.archive import archive_pg_args
 
 
 def _pg_dial_host() -> str:

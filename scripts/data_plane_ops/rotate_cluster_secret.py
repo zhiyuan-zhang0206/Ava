@@ -15,7 +15,7 @@ fingerprints):
 1. Stage the next secret in ``backups/secret-rotation/bearer.pending`` (0600).
 2. Journal ``pinning``: the old and new bearer fingerprints and the fingerprint
    of the logical-backup passphrase the home keeps.
-3. Verify that pin (``services/gateway_side/backup/passphrase``). A home has
+3. Verify that pin (``services/backup/artifact/passphrase``). A home has
    one from its birth, and the secret never touches it; a home without one
    encrypted its earlier logical backups under ``sha256(secret)``, which is
    pinned here so they keep decrypting.
@@ -45,7 +45,7 @@ from dotenv import dotenv_values
 from base.deploy.release.verified_file import regular_bytes
 from base.host.env.dotenv_file import upsert_env
 from base.host.private_storage import write_private_bytes
-from services.gateway_side.backup import passphrase
+from services.backup.artifact import passphrase
 
 _TOKEN_BYTES = 32
 _SECRET_ENV = "AVA_CLUSTER_SECRET"  # noqa: S105 — env key name, not a credential

@@ -12,7 +12,7 @@ import pytest
 from scripts.structure import ambient_state
 from scripts.structure.ambient_state import allowlist as allow
 
-_PACKAGE = "services/im_bridge"
+_PACKAGE = "services/entrypoints/im_bridge"
 _ROOT = f"{_PACKAGE}/daemon.py"
 
 
@@ -60,7 +60,7 @@ def test_the_composition_root_may_read_settings() -> None:
 @pytest.mark.parametrize(
     "rel",
     [
-        "services/heartbeat/core.py",  # not governed
+        "services/wake/heartbeat/core.py",  # not governed
         f"{_PACKAGE}/tests/test_core.py",  # tests are outside the rule
         f"{_PACKAGE}/adapters/tests/test_feishu.py",
     ],

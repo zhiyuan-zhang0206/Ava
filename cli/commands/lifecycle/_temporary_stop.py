@@ -36,7 +36,7 @@ from ops.agent_pause.probe import ops_quiescent
 
 
 def _stop_browser(deadline: float) -> None:
-    from services.browser.orphan import find_cluster_chrome
+    from services.desktop.browser.orphan import find_cluster_chrome
 
     trees: set[OwnedProcess] = set()
     for pid in find_cluster_chrome():

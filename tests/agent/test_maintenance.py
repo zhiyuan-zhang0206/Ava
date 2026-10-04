@@ -29,8 +29,8 @@ from base.db import Database, create_agent, insert_inbound_message
 from base.deploy.maintenance import admission, cohort, pause_owner
 from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices
-from services.agent_host.host import AgentHost
-from services.agent_host.runtime import TurnOutcome
+from services.agent_runner.agent_host.host import AgentHost
+from services.agent_runner.agent_host.runtime import TurnOutcome
 
 WHEN = datetime(2026, 9, 6, tzinfo=UTC)
 
@@ -284,7 +284,9 @@ async def test_admitted_model_finishes_real_exec_and_after_exec_before_drain_rec
         db=Database.from_settings(),
         bus=EventBus.from_settings(),
     )
-    monkeypatch.setattr("services.agent_host.runtime.validate_model_config", MagicMock())
+    monkeypatch.setattr(
+        "services.agent_runner.agent_host.runtime.validate_model_config", MagicMock()
+    )
     host = _host_driving_invoke_until_done(monkeypatch, aops_pool, saver, graph, ctx)
     work = asyncio.create_task(host.run_turn(agent))
     try:

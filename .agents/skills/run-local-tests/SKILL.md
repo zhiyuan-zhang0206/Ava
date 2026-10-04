@@ -161,10 +161,10 @@ env -u VIRTUAL_ENV uv sync
 .venv/bin/playwright install chromium
 
 # Run (locally): one scenario file, no `-n` (e2e cannot run in parallel with itself)
-.venv/bin/pytest tests/e2e/test_message_flow.py -v
+.venv/bin/pytest tests/e2e/flow/test_message_flow.py -v
 
 # Watch the real browser
-HEADED=1 .venv/bin/pytest tests/e2e/test_message_flow.py -v
+HEADED=1 .venv/bin/pytest tests/e2e/flow/test_message_flow.py -v
 ```
 
 Run only the scenario file you changed or are reproducing; the whole `tests/e2e/`

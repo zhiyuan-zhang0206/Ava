@@ -2,7 +2,7 @@
 
 Registered by the packages whose tests run real shells; tests elsewhere that
 need one import the names from here. The service is a subprocess exactly as
-root launches it (`python -m services.pty_sessions.daemon`), pinned to the
+root launches it (`python -m services.agent_runner.pty_sessions.daemon`), pinned to the
 test's `AVA_HOME`, so a session survives its creating *test process's clients*
 the way it survives an agent host, and a service crash is a real SIGKILL. The
 service's `HOME` is the test home too: its login shells read no operator
@@ -53,7 +53,7 @@ class PtyServiceProcess:
         env = {**os.environ, "AVA_HOME": str(self.home), "HOME": str(self.home), **self.extra_env}
         with self.log.open("ab") as log:
             self.process = subprocess.Popen(
-                [sys.executable, "-m", "services.pty_sessions.daemon"],
+                [sys.executable, "-m", "services.agent_runner.pty_sessions.daemon"],
                 cwd=_REPO,
                 env=env,
                 stdout=log,

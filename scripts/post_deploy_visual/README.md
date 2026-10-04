@@ -99,8 +99,8 @@ formats; a storage-state JSON export must be revoked from the logged-in UI.
 
 ## CI preview gate
 
-`tests/e2e/test_preview_visual_gate.py` runs the same five-surface matrix
-against the committed golden set `tests/e2e/__snapshots__/preview-gate/` on
+`tests/e2e/visual/test_preview_visual_gate.py` runs the same five-surface matrix
+against the committed golden set `tests/e2e/visual/__snapshots__/preview-gate/` on
 every PR (blocking, inside the e2e shard): the production frontend build
 served by the e2e stack is captured on the GitHub ubuntu runner and compared
 with the goldens minted on that same runner. Generation and comparison share

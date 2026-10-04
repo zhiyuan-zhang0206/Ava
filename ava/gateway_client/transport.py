@@ -148,7 +148,7 @@ def _agent_jitter_seconds() -> float:
     """Deterministic per-agent offset in [0, _JITTER_SPAN_S); 0 when no agent id.
 
     The heartbeat daemon's per-agent due-time jitter pattern
-    (services/heartbeat/daemon.py): a correlated gateway outage hits every
+    (services/wake/heartbeat/daemon.py): a correlated gateway outage hits every
     agent at the same moment, and a fleet-wide identical retry schedule
     (1s, 2s, 4s, ...) would re-synchronize the retry waves as each agent
     retries in lockstep. Offsetting every sleep by a stable per-agent amount

@@ -35,7 +35,7 @@ from cli.commands.data_plane import pgbouncer as pooler
 from cli.commands.tests.test_single_box import Born
 from cli.commands.tests.test_single_box import born as born
 from cli.commands.tests.test_single_box import configured as configured
-from services.gateway_side.backup import offsite
+from services.backup.artifact import offsite
 
 pytestmark = pytest.mark.skipif(
     not (Path(pooler.pgbouncer_bin()).exists() or shutil.which(pooler.pgbouncer_bin())),
@@ -96,7 +96,7 @@ def test_scheduled_backup_dumps_as_the_owner_and_restores(
     maintenance: Born, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from scripts.data_plane_ops import restore_drill
-    from services.backup_scheduler import worker
+    from services.backup.scheduler import worker
 
     agent_id = _seed_conversation(maintenance)
     dumps: list[tuple[list[str], dict[str, str] | None]] = []

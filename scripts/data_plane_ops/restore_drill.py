@@ -29,7 +29,7 @@ from base.cluster.dataplane.pg_tools import pg_tool, throwaway_postgres
 from base.db import Database
 from base.db.config import db_config_from_settings
 from base.log import logger
-from services import backup
+from services.backup import dump as backup
 
 
 @dataclass(frozen=True)

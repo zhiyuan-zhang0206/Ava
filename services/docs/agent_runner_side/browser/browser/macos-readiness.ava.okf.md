@@ -12,7 +12,7 @@ tags:
 
 ## What It Is
 
-`services/browser/macos_readiness.py` prevents the headed browser from
+`services/desktop/browser/macos_readiness.py` prevents the headed browser from
 launching on macOS until the detached service has the same GUI and login
 Keychain prerequisites Chrome needs for its encrypted profile state. Static
 browser capability remains a separate prerequisite; this is the runtime gate

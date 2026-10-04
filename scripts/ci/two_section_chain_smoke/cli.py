@@ -98,9 +98,9 @@ def main() -> int:  # noqa: PLR0915 - one bounded smoke lifecycle: every phase, 
     if os.getuid() == 0:
         print("FAIL(phase=args): run as the desktop user, not root (launchctl gui domain)")
         return 2
-    if not (REPO_ROOT / "services" / "ava_root").is_dir():
+    if not (REPO_ROOT / "services" / "supervision" / "ava_root").is_dir():
         print(
-            f"FAIL(phase=args): {REPO_ROOT} does not contain services/ava_root (stack the root slice)"
+            f"FAIL(phase=args): {REPO_ROOT} does not contain services/supervision/ava_root (stack the root slice)"
         )
         return 2
 
@@ -113,7 +113,7 @@ def main() -> int:  # noqa: PLR0915 - one bounded smoke lifecycle: every phase, 
     recorded_pids: set[int] = set()
     phases: list[str] = []
 
-    from services.permissions_helper import client as helper_client
+    from services.desktop.permissions_helper import client as helper_client
 
     def root_status() -> dict[str, Any]:
         return _root_call(run_dir, "status")
@@ -133,14 +133,21 @@ def main() -> int:  # noqa: PLR0915 - one bounded smoke lifecycle: every phase, 
         shutil.rmtree(app, ignore_errors=True)
         exe.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(
-            REPO_ROOT / "services" / "permissions_helper" / "helper" / "Info.plist",
+            REPO_ROOT / "services" / "desktop" / "permissions_helper" / "helper" / "Info.plist",
             app / "Contents" / "Info.plist",
         )
         _run(
             [
                 "swiftc",
                 "-O",
-                str(REPO_ROOT / "services" / "permissions_helper" / "helper" / "main.swift"),
+                str(
+                    REPO_ROOT
+                    / "services"
+                    / "desktop"
+                    / "permissions_helper"
+                    / "helper"
+                    / "main.swift"
+                ),
                 "-o",
                 str(exe),
             ],
@@ -201,7 +208,7 @@ def main() -> int:  # noqa: PLR0915 - one bounded smoke lifecycle: every phase, 
             "argv": [
                 args.python,
                 "-m",
-                "services.ava_root",
+                "services.supervision.ava_root",
                 "--run-dir",
                 str(run_dir),
                 "--manifests",

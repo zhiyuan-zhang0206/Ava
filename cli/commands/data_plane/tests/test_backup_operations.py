@@ -31,7 +31,7 @@ def _stopped_controller(home: Path, controls: tuple[str, ...], name: str, *, boo
         json.dumps(
             {
                 "kind": "logical-dump",
-                "module": "services.backup_scheduler.worker",
+                "module": "services.backup.scheduler.worker",
                 "boot_id": boot_id,
                 "at": "2026-09-30T19:00:00+00:00",
             }

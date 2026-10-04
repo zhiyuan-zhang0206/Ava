@@ -1,8 +1,8 @@
 """Tests for base.host.converge.screen_capture -- the status type and its status file.
 
 The probe that produces a status lives with the process it interrogates
-(`services.permissions_helper.client.check_screen_capture`, covered by
-services/permissions_helper/tests/test_permissions_helper.py); what is pinned here is the three-state
+(`services.desktop.permissions_helper.client.check_screen_capture`, covered by
+services/desktop/permissions_helper/tests/test_permissions_helper.py); what is pinned here is the three-state
 result and the file that carries it from converge to agent startup.
 """
 

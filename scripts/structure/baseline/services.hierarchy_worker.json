@@ -1,8 +1,0 @@
-{
-  "ambient_state": {
-    "services/hierarchy_worker/runner.py::global-rebind:_fallback_scanned_at": 1
-  },
-  "files": {
-    "services/hierarchy_worker/tests/test_hierarchy_worker.py": 897
-  }
-}

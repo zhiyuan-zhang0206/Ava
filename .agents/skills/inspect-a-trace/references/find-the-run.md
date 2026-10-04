@@ -62,7 +62,7 @@ WHERE metadata ->> 'trace_id' = '<lowercase-32-hex>';
 
 ## Retention: what still exists
 
-The checkpoint reaper (`services/events_maintenance/checkpoint_reaper.py`)
+The checkpoint reaper (`services/upkeep/events_maintenance/checkpoint_reaper.py`)
 trims hard — a terminated or 24h-inactive thread keeps 1 checkpoint, a live
 thread over 20 keeps 5. Assume recent state is readable and older state is
 not, **except** for compaction boundaries.

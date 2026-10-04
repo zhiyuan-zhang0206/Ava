@@ -5,7 +5,6 @@
     "base/host/net/__init__.py::import-time-call:base.host.net.httpx_cli_guard.block_httpx_cli": 1,
     "base/host/net/resilience.py::ambient-instance:http_classifier": 1
   },
-  "complexity": {},
   "files": {
     "base/host/env/tests/test_dotenv_boot.py": 969
   },

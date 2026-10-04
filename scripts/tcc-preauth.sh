@@ -133,7 +133,7 @@ verify_helper_ping() {
     if ! output=$(
         cd "$repo_root"
         "$python_bin" - 2>&1 <<'PY'
-from services.permissions_helper.client import ping
+from services.desktop.permissions_helper.client import ping
 
 reply = ping()
 print(

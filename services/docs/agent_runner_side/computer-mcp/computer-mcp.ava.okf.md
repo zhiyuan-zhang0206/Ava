@@ -11,12 +11,12 @@ tags:
 
 ## What it is
 The executor layer of the computer-use capability (task #1101). One
-per-machine daemon (the `services/computer` module family: `mcp_daemon.py`,
+per-machine daemon (the `services/desktop/computer` module family: `mcp_daemon.py`,
 `execute.py`, `ocr_text.py`, `screen.py`, and `errors.py`; ServiceSpec session
 `computer-mcp`) sits between agents and the desktop:
 
 - every action executes through the signed permissions helper
-  (`services.permissions_helper`), the only process holding the macOS TCC
+  (`services.desktop.permissions_helper`), the only process holding the macOS TCC
   screen-recording / accessibility grants — no new code path touches
   CGEvent / screencapture directly;
 - actions are serialized machine-wide (one asyncio lock around execute), the
@@ -44,7 +44,7 @@ The only gate left is **platform capability** (`ops/spec.py`
 `_computer_mcp_gate_reason`): the service joins the agent-runner roster only
 when the signed permissions helper is enabled and reports capable, the host
 has AF_UNIX (the socket transport is POSIX-only). The
-healthcheck (`services.healthchecks.computer_mcp`) probes the daemon every
+healthcheck (`services.supervision.healthchecks.computer_mcp`) probes the daemon every
 60s with a lock-free `ping` — it never round-trips to the helper or takes the
 action lock, so a slow desktop action cannot false-kill a busy daemon — and
 the watchdog respawns it on death.
@@ -55,17 +55,17 @@ agent execute_code
   -> ava.mcps.computer_use.<tool>        [ava/mcps/__init__.py — generic client]
   -> mcp-daemon                          [ava/mcps/_daemon.py, shared="computer_use"]
   -> ava/mcps/_computer.py (direct dial, per-connection socket)
-  -> services/computer/{mcp_daemon,execute,ocr_text,screen,errors}.py
+  -> services/desktop/computer/{mcp_daemon,execute,ocr_text,screen,errors}.py
                                          [serialize + audit + execute]
-  -> services/permissions_helper.client  [the one TCC grant-holder]
+  -> services/desktop/permissions_helper.client  [the TCC grant-holder]
 ```
 `agent_id` rides the request envelope (`ava/mcps/__init__.py` stamps it from
 `AVA_AGENT_ID`; the mcp daemon forwards it onto the computer line protocol).
 It lands in the audit stream, where it is likewise self-reported by the
 agent's own process. Local fallback (no mcp-daemon):
-`services/computer/mcp_wrapper.py` (the `.mcp.json` command) dials the daemon
+`services/desktop/computer/mcp_wrapper.py` (the `.mcp.json` command) dials the daemon
 directly and stamps the same identity on every request, including `list_tools`.
-It uses `services/browser/mcp_socket_bridge.py` for socket framing and
+It uses `services/desktop/browser/mcp_socket_bridge.py` for socket framing and
 reconnection; its own policy closes a connection after any delivered error.
 P1 safety change: write/drain errors now surface without retry because delivery
 may be unknown and a desktop action could repeat; a closed socket detected
@@ -80,7 +80,7 @@ helper's logical-point space via the backing scale reported by `snapshot`
 (`screen.width/height/scale` + `pixels.width/height`). `snapshot` writes the
 PNG under `$AVA_HOME/logs/computer/snapshots/` and returns its path;
 `include_ocr` adds recognized text boxes (Vision framework, built on demand
-from `services/computer/ocr.swift` into `$AVA_HOME/logs/computer/ocr-bin/`),
+from `services/desktop/computer/ocr.swift` into `$AVA_HOME/logs/computer/ocr-bin/`),
 `include_ax` adds the focused window geometry.
 
 ## Accessibility tools (`ax_tree`, `ax_act`)
@@ -133,5 +133,5 @@ complete facts for replay.
 - [[../browser/browser/browser.ava.okf.md]] — browser tasks go through chrome MCP (DOM path,
   preferred); computer-mcp is the pixel-level fallback for surfaces DOM cannot
   reach (canvas, native apps, system settings).
-- [[ava_root.ava.okf.md]] — the healthcheck (`services.healthchecks.computer_mcp`)
+- [[ava_root.ava.okf.md]] — the healthcheck (`services.supervision.healthchecks.computer_mcp`)
   probes the daemon with a lock-free ping; the root's health monitor restarts it.

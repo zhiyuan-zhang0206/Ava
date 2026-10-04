@@ -2,7 +2,7 @@
 
 A `/bin/sh` started in its own session stands in for a login shell: it leads a POSIX
 session and holds a job. The real-pty behavior of the closure is covered end to end by
-the service tests (`services/pty_sessions/tests/test_close_all.py`); this file pins what
+the service tests (`services/agent_runner/pty_sessions/tests/test_close_all.py`); this file pins what
 only a simulated refusal can: a process this user may not signal (another user's, such as
 a root `sudo` on the pty) that outlives the SIGKILL.
 """

@@ -1,6 +1,0 @@
-{
-  "ambient_state": {
-    "services/ava_root_glue/diagnostics.py::asyncio-task:RootHealthRounds.start": 1,
-    "services/ava_root_glue/glue.py::ambient-container:STATIC_PROBES": 1
-  }
-}

@@ -39,7 +39,7 @@ _CONNECT_DELAY_S = 0.5
 class BrowserLineSession:
     """MCP-session-shaped client over the browser-mcp service's line protocol.
 
-    Replaces the per-agent `services.browser.mcp_wrapper` stdio bridge: the
+    Replaces the per-agent `services.desktop.browser.mcp_wrapper` stdio bridge: the
     browser daemon already owns the single chrome-devtools-mcp upstream, so
     this process-less connection is all the daemon needs to expose the same
     tools. `list_tools` / `call_tool` are the only methods the MCP daemon's

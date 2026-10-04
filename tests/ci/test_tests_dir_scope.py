@@ -110,11 +110,13 @@ def test_ava_root_scope_lint_exempts_the_supervisors_own_tests(
 ) -> None:
     lint = importlib.import_module("scripts.lint.ava_root_scope")
     monkeypatch.setattr(lint, "_REPO_ROOT", tmp_path)
-    proof = _write(tmp_path, "services/ava_root/tests/test_edge.py", 'NAME = "systemd"\n')
+    proof = _write(
+        tmp_path, "services/supervision/ava_root/tests/test_edge.py", 'NAME = "systemd"\n'
+    )
     assert lint.main([]) == 0
     assert lint.main([str(proof)]) == 0
 
-    _write(tmp_path, "services/ava_root/daemon.py", 'NAME = "systemd"\n')
+    _write(tmp_path, "services/supervision/ava_root/daemon.py", 'NAME = "systemd"\n')
     assert lint.main([]) == 1
 
 
@@ -276,8 +278,8 @@ def _hook_selects(hook_id: str, path: str) -> bool:
         ("lint-async-no-sync-blocking", "gateway/routers/agents.py", True),
         ("lint-async-no-sync-blocking", "gateway/agents/tests/test_x.py", False),
         ("lint-async-no-sync-blocking", "ops/tests/test_x.py", False),
-        ("lint-ava-root-scope", "services/ava_root/daemon.py", True),
-        ("lint-ava-root-scope", "services/ava_root/tests/test_daemon.py", False),
+        ("lint-ava-root-scope", "services/supervision/ava_root/daemon.py", True),
+        ("lint-ava-root-scope", "services/supervision/ava_root/tests/test_daemon.py", False),
         # A generated-artifact freshness check is triggered by its sources, never by their tests.
         ("types-codegen-fresh", "gateway/routers/agents.py", True),
         ("types-codegen-fresh", "gateway/agents/tests/test_x.py", False),

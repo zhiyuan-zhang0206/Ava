@@ -470,7 +470,7 @@ def kill(id: int) -> None:
 
 # Not in __all_for_ava__, so never rendered into the SDK docs: a prefix-scoped
 # cleanup helper used by test fixtures. The agent exit path deliberately does
-# NOT reap sessions — they outlive the turn (see services/agent_host/host.py); the agent
+# NOT reap sessions — they outlive the turn (see services/agent_runner/agent_host/host.py); the agent
 # itself kills sessions one by one via kill(id).
 def kill_all() -> int:
     return _handle().kill_all()

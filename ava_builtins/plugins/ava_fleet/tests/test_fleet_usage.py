@@ -22,7 +22,7 @@ from typing import Any
 import psycopg
 import pytest
 
-from services.events_maintenance import token_totals
+from services.upkeep.events_maintenance import token_totals
 
 _PATH = (
     Path(__file__).resolve().parents[4]

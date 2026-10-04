@@ -457,18 +457,18 @@ def test_reap_cluster_chrome_reports_pids_and_survives_a_failure(
     """The CLI seam: report what was reaped, stay silent when there was nothing,
     and never let a sweep failure fail the teardown around it."""
 
-    monkeypatch.setattr("services.browser.orphan.reap_cluster_chrome", lambda: [4242])
+    monkeypatch.setattr("services.desktop.browser.orphan.reap_cluster_chrome", lambda: [4242])
     _real_reap_cluster_chrome()
     assert "4242" in capsys.readouterr().out  # pyright: ignore[reportUnknownMemberType]
 
-    monkeypatch.setattr("services.browser.orphan.reap_cluster_chrome", list)
+    monkeypatch.setattr("services.desktop.browser.orphan.reap_cluster_chrome", list)
     _real_reap_cluster_chrome()
     assert capsys.readouterr().out == "", "nothing to reap prints nothing"  # pyright: ignore[reportUnknownMemberType]
 
     def _boom() -> list[int]:
         raise RuntimeError("process table unavailable")
 
-    monkeypatch.setattr("services.browser.orphan.reap_cluster_chrome", _boom)
+    monkeypatch.setattr("services.desktop.browser.orphan.reap_cluster_chrome", _boom)
     _real_reap_cluster_chrome()  # must not raise
     assert "could not sweep" in capsys.readouterr().err  # pyright: ignore[reportUnknownMemberType]
 

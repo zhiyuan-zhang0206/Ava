@@ -1,7 +1,7 @@
 """`ava start` over a hold that carries failed continuation receipts.
 
 A receipt is latched when an agent's continuation raised during the stop's drain
-(`services/agent_host/maintenance.py`). The agent's restart pointer is durable in
+(`services/agent_runner/agent_host/maintenance.py`). The agent's restart pointer is durable in
 Postgres, so the failure is crash-equivalent: the agent continues from its last
 durable checkpoint once the hold releases and its restart is delivered. `ava start`
 re-delivers each failed continuation, reports (an ERROR event the alert rules read) any whose pointer

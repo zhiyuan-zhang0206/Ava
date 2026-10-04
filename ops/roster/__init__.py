@@ -49,10 +49,10 @@ def _frontend_probe() -> DaemonProbe:
 
     Next.js serves no /healthz it can sign, so the frontend is identified by
     process ownership: the app-port listener must belong to the frontend's
-    captured ava-root unit (services/healthchecks/frontend.py). An old orphan
+    captured ava-root unit (services/supervision/healthchecks/frontend.py). An old orphan
     that answers 200 outside that process lineage is not frontend health.
     """
-    from services.healthchecks.frontend import probe_frontend
+    from services.supervision.healthchecks.frontend import probe_frontend
 
     return probe_frontend()
 
@@ -63,20 +63,20 @@ def _browser_probe() -> DaemonProbe:
     The one place ``ops`` reaches into ``services``. It has to: CDP exposes
     nothing we control, so the browser is identified by the Chrome process
     running on this cluster's ``--user-data-dir`` — and both the profile path and
-    the process-table identification already live in ``services/browser/``
+    the process-table identification already live in ``services/desktop/browser/``
     (``profile.py`` / ``orphan.py``), which imports only ``base``. Restating
     either here would give the cluster's Chrome two definitions, which is the
     failure mode this whole batch is about. Lazy so importing the roster never
     pulls psutil in for a host that has no browser.
     """
-    from services.browser.probe import probe_browser
+    from services.desktop.browser.probe import probe_browser
 
     return probe_browser()
 
 
 def _bind_owned_probe(spec: ServiceSpec) -> ServiceSpec:
     """Bind each network readiness verdict to the root-owned process generation."""
-    from services.healthchecks.owned_service import probe_endpoint
+    from services.supervision.healthchecks.owned_service import probe_endpoint
 
     if spec.session in {"frontend", "otel-collector", "loki", "prometheus", "grafana"}:
         return spec  # These probes already bind every listener to root ownership.
@@ -110,12 +110,12 @@ def build_services() -> tuple[ServiceSpec, ...]:
     owns the pool it indexes — `plugins/ava_memory/services.py`.)
     """
     # Share the public entry/app port definition with the serving process.
-    from services.browser import shutdown_budget as browser_mcp_budget
-    from services.gate.daemon import app_port, entry_port
-    from services.healthchecks.gate import probe as probe_gate
-    from services.healthchecks.otel_collector import probe_collector
-    from services.healthchecks.owned_service import probe as probe_owned_service
-    from services.pty_sessions import shutdown_budget as pty_sessions_budget
+    from services.agent_runner.pty_sessions import shutdown_budget as pty_sessions_budget
+    from services.desktop.browser import shutdown_budget as browser_mcp_budget
+    from services.entrypoints.gate.daemon import app_port, entry_port
+    from services.supervision.healthchecks.gate import probe as probe_gate
+    from services.supervision.healthchecks.otel_collector import probe_collector
+    from services.supervision.healthchecks.owned_service import probe as probe_owned_service
 
     _fe_port = app_port()
     _fe_url = f"http://localhost:{_fe_port}"
@@ -130,12 +130,12 @@ def build_services() -> tuple[ServiceSpec, ...]:
     gateway_services = (
         ServiceSpec(
             session="gate",
-            cmd=".venv/bin/python -m services.gate.daemon",
+            cmd=".venv/bin/python -m services.entrypoints.gate.daemon",
             capabilities=_GATEWAY,
             requires_db=False,
             curl_url=f"http://127.0.0.1:{entry_port()}/__ava/healthz",
             identity_probe=probe_gate,
-            healthcheck_module="services.healthchecks.gate",
+            healthcheck_module="services.supervision.healthchecks.gate",
             # The gate's /__ava/healthz names its home (`probe_gate` checks it), so a
             # foreign gate on the entry port is recognisable before the launch.
             home_healthz=True,
@@ -152,7 +152,7 @@ def build_services() -> tuple[ServiceSpec, ...]:
             # Home only: the reload fork means a healthy gateway routinely answers
             # with a pid its own pidfile never recorded (`probe_home`).
             identity_probe=partial(probe_home, settings.services.gateway_health_url),
-            healthcheck_module="services.healthchecks.gateway",
+            healthcheck_module="services.supervision.healthchecks.gateway",
             # SIGTERM lets uvicorn drain in-flight requests for up to the budget the
             # launch hands it (`gateway._server.serve_kwargs`), then run the lifespan
             # cleanup: root must wait at least that long.
@@ -163,13 +163,13 @@ def build_services() -> tuple[ServiceSpec, ...]:
         ),
         healthz_daemon(
             "im-bridge",
-            module="services.im_bridge.daemon",
+            module="services.entrypoints.im_bridge.daemon",
             capabilities=_GATEWAY,
             requires_db=True,  # R3 door ④: notice_bridge SELECT/UPDATEs agent_notices directly
         ),
         healthz_daemon(
             "labeler",
-            module="services.labeler.daemon",
+            module="services.derived.labeler.daemon",
             capabilities=_GATEWAY,
             requires_db=True,  # assert_schema_current at boot, then polls the DB
             # The labeler builds chat models (it generates labels), so it
@@ -182,7 +182,7 @@ def build_services() -> tuple[ServiceSpec, ...]:
         ),
         healthz_daemon(
             "heartbeat",
-            module="services.heartbeat.daemon",
+            module="services.wake.heartbeat.daemon",
             capabilities=_GATEWAY,
             requires_db=True,  # assert_schema_current at boot; INSERTs inbound rows
         ),
@@ -191,7 +191,7 @@ def build_services() -> tuple[ServiceSpec, ...]:
         # AVA_DELIVERY_WATCHDOG_ENABLED.
         healthz_daemon(
             "delivery-watchdog",
-            module="services.delivery_watchdog.daemon",
+            module="services.wake.delivery_watchdog.daemon",
             capabilities=_GATEWAY,
             requires_db=True,  # assert_schema_current at boot; polls inbound_messages
         ),
@@ -203,7 +203,7 @@ def build_services() -> tuple[ServiceSpec, ...]:
         # live in the Loki archive stream).
         healthz_daemon(
             "events-maintenance",
-            module="services.events_maintenance.daemon",
+            module="services.upkeep.events_maintenance.daemon",
             capabilities=_GATEWAY,
             requires_db=True,  # assert_schema_current at boot; checkpoint tables live in PG
         ),
@@ -213,7 +213,7 @@ def build_services() -> tuple[ServiceSpec, ...]:
         # runners' ops servers for shell kills.
         healthz_daemon(
             "ttl-reaper",
-            module="services.ttl_reaper.daemon",
+            module="services.upkeep.ttl_reaper.daemon",
             capabilities=_GATEWAY,
             requires_db=True,  # assert_schema_current at boot; every phase is a DB pass
         ),
@@ -224,7 +224,7 @@ def build_services() -> tuple[ServiceSpec, ...]:
         # start from any other checkout.
         healthz_daemon(
             "schedule-manager",
-            module="services.schedule_manager.daemon",
+            module="services.wake.schedule_manager.daemon",
             capabilities=_GATEWAY,
             requires_db=True,  # assert_schema_current at boot; every decision is a DB read
         ),
@@ -233,19 +233,19 @@ def build_services() -> tuple[ServiceSpec, ...]:
         # services must come up first.
         ServiceSpec(
             session="memory-search",
-            cmd=".venv/bin/python -m services.memory_search.daemon",
+            cmd=".venv/bin/python -m services.derived.memory_search.daemon",
             capabilities=_GATEWAY,
             # The numpy backend's store: in-memory matrix + npz, no Postgres —
             # a pg outage is not its business.
             requires_db=False,
             tcp_port=settings.services.memory_search_port,
             identity_probe=partial(probe_owned_service, "memory-search"),
-            healthcheck_module="services.healthchecks.memory_search",
+            healthcheck_module="services.supervision.healthchecks.memory_search",
         ),
         ServiceSpec(
             session="frontend",
             # Single source for the launch command: base.cluster.frontend_service_cmd
-            # — the watchdog respawn (services/healthchecks/frontend.py) builds the
+            # — the watchdog respawn (services/supervision/healthchecks/frontend.py) builds the
             # SAME string, so the two launch paths cannot drift (they did once: the
             # respawn lost its `exec`, the session validator rejected the command,
             # and a dead frontend could never self-heal). On Windows the supervisor
@@ -264,11 +264,11 @@ def build_services() -> tuple[ServiceSpec, ...]:
             requires_db=False,
             curl_url=_fe_url,
             identity_probe=_frontend_probe,
-            healthcheck_module="services.healthchecks.frontend",
+            healthcheck_module="services.supervision.healthchecks.frontend",
         ),
         healthz_daemon(
             "pg-backup",
-            module="services.backup_scheduler.daemon",
+            module="services.backup.scheduler.daemon",
             capabilities=_GATEWAY,
             requires_db=True,  # dumps that very database
         ),
@@ -284,14 +284,14 @@ def build_services() -> tuple[ServiceSpec, ...]:
         # for rows whose host is this host.
         healthz_daemon(
             "page-server",
-            module="services.page_server.daemon",
+            module="services.agent_runner.page_server.daemon",
             capabilities=_AGENT_RUNNER,
             requires_db=True,  # the agent_pages table is its truth source
         ),
         # One agent host per runner owns every local agent's turn tasks.
         healthz_daemon(
             "agent-host",
-            module="services.agent_host.daemon",
+            module="services.agent_runner.agent_host.daemon",
             capabilities=_AGENT_RUNNER,
             profile="agent",  # the host runs the agent kernel in-process; the runner-derived marker crashes it at import
             requires_db=True,  # assert_schema_current at boot; every turn reads/writes agents_meta
@@ -300,7 +300,7 @@ def build_services() -> tuple[ServiceSpec, ...]:
         # gateway dials it directly (HTTP-uniform, even on a co-located single box).
         healthz_daemon(
             "ops",
-            module="services.agent_ops.daemon",
+            module="services.agent_runner.agent_ops.daemon",
             capabilities=_AGENT_RUNNER,
             requires_db=True,  # assert_schema_current at boot; serves DB-backed ops calls
         ),
@@ -308,7 +308,7 @@ def build_services() -> tuple[ServiceSpec, ...]:
         # CDP exposes HTTP at /json/version, so probe via curl_url (not tcp_port).
         ServiceSpec(
             session="browser",
-            cmd=".venv/bin/python -m services.browser.daemon",
+            cmd=".venv/bin/python -m services.desktop.browser.daemon",
             capabilities=_AGENT_RUNNER,
             # A headed Chrome under a supervisor: no DB at boot, none at runtime, and
             # its healthcheck probes CDP + session liveness only. It must therefore
@@ -319,7 +319,7 @@ def build_services() -> tuple[ServiceSpec, ...]:
             # CDP has no identity field, so a 2xx here says only "a debuggable
             # Chrome is up" — the profile-anchored check is what says it is ours.
             identity_probe=_browser_probe,
-            healthcheck_module="services.healthchecks.browser",
+            healthcheck_module="services.supervision.healthchecks.browser",
         ),
         # browser-mcp: shared chrome-devtools-mcp upstream. Speaks MCP over a
         # Unix socket — no HTTP/TCP probe; its healthcheck dials the socket
@@ -327,13 +327,13 @@ def build_services() -> tuple[ServiceSpec, ...]:
         # (POSIX-only; see `_gate_reason`).
         ServiceSpec(
             session="browser-mcp",
-            cmd=".venv/bin/python -m services.browser.mcp_daemon",
+            cmd=".venv/bin/python -m services.desktop.browser.mcp_daemon",
             capabilities=_AGENT_RUNNER,
             # Same story: a Unix-socket multiplexer in front of chrome-devtools-mcp.
             # Its whole data plane is that socket plus CDP.
             requires_db=False,
             identity_probe=partial(probe_owned_service, "browser-mcp"),
-            healthcheck_module="services.healthchecks.browser_mcp",
+            healthcheck_module="services.supervision.healthchecks.browser_mcp",
             stop_ceiling_s=browser_mcp_budget.SHUTDOWN_CEILING_S,
         ),
         # computer-mcp: per-machine computer-use executor. Every desktop action
@@ -344,11 +344,11 @@ def build_services() -> tuple[ServiceSpec, ...]:
         # requires the platform to be capable (see _gate_reason).
         ServiceSpec(
             session="computer-mcp",
-            cmd=".venv/bin/python -m services.computer.mcp_daemon",
+            cmd=".venv/bin/python -m services.desktop.computer.mcp_daemon",
             capabilities=_AGENT_RUNNER,
             requires_db=True,
             identity_probe=partial(probe_owned_service, "computer-mcp"),
-            healthcheck_module="services.healthchecks.computer_mcp",
+            healthcheck_module="services.supervision.healthchecks.computer_mcp",
         ),
         # mcp-daemon: ONE shared MCP daemon for every agent on this machine
         # (replaces one ~12MB daemon child per agent). Sessions are isolated per
@@ -363,7 +363,7 @@ def build_services() -> tuple[ServiceSpec, ...]:
             # Config is local files (mcp.json); no DB at boot or runtime.
             requires_db=False,
             identity_probe=partial(probe_owned_service, "mcp-daemon"),
-            healthcheck_module="services.healthchecks.mcp_daemon",
+            healthcheck_module="services.supervision.healthchecks.mcp_daemon",
         ),
     )
 
@@ -388,7 +388,7 @@ def build_services() -> tuple[ServiceSpec, ...]:
         # (and pty itself) is why its gate is POSIX-only (see `_gate_reason`).
         ServiceSpec(
             session="pty-sessions",
-            cmd=".venv/bin/python -m services.pty_sessions.daemon",
+            cmd=".venv/bin/python -m services.agent_runner.pty_sessions.daemon",
             capabilities=_BOTH,
             requires_db=False,
             identity_probe=partial(probe_owned_service, "pty-sessions"),
@@ -406,7 +406,7 @@ def build_services() -> tuple[ServiceSpec, ...]:
             # The port follows AVA_TELEMETRY_OTLP_PORT (single source, task #1945).
             tcp_port=settings.observability.telemetry_otlp_port,
             identity_probe=probe_collector,
-            healthcheck_module="services.healthchecks.otel_collector",
+            healthcheck_module="services.supervision.healthchecks.otel_collector",
         ),
     )
 
@@ -417,7 +417,7 @@ def build_services() -> tuple[ServiceSpec, ...]:
         service_argv,
         service_input_paths,
     )
-    from services.healthchecks.lgtm import probe_backend
+    from services.supervision.healthchecks.lgtm import probe_backend
 
     urls = backend_urls()
     observability_services = tuple(
@@ -429,7 +429,7 @@ def build_services() -> tuple[ServiceSpec, ...]:
             requires_db=False,
             curl_url=urls[name] + HEALTH_PATHS[name],
             identity_probe=partial(probe_backend, name),
-            healthcheck_module="services.healthchecks.lgtm",
+            healthcheck_module="services.supervision.healthchecks.lgtm",
         )
         for name in BACKENDS
     )

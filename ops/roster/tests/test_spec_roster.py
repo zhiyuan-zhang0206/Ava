@@ -124,11 +124,11 @@ def test_annotated_roster_membership_per_capability(role: str, expected: set[str
 def test_station_roster_contains_only_lgtm_with_host_enablement_gate(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr("services.healthchecks.lgtm.is_lgtm_host", lambda: False)
+    monkeypatch.setattr("services.supervision.healthchecks.lgtm.is_lgtm_host", lambda: False)
     rows = spec.services_for_capabilities_annotated(frozenset({"observability-station"}))
     assert {service.session for service, _reason in rows} == {"loki", "prometheus", "grafana"}
     assert all(reason is not None for _service, reason in rows)
-    monkeypatch.setattr("services.healthchecks.lgtm.is_lgtm_host", lambda: True)
+    monkeypatch.setattr("services.supervision.healthchecks.lgtm.is_lgtm_host", lambda: True)
     assert {
         service.session
         for service in spec.services_for_capabilities(frozenset({"observability-station"}))
@@ -342,7 +342,7 @@ def test_healthy_protocol_cannot_certify_an_unowned_listener(
 ) -> None:
     from base.daemon.health import DaemonProbe
     from base.native_process.ownership import OwnedProcess
-    from services.healthchecks import owned_service
+    from services.supervision.healthchecks import owned_service
 
     def _fake_probe_home(*_a: object, **_kw: object) -> DaemonProbe:
         return DaemonProbe.up("healthy")
@@ -380,7 +380,7 @@ def test_browser_identity_is_the_profile_probe_not_a_curl() -> None:
     carries no field we control, so a 200 there says nothing about whose Chrome
     answered."""
     from base.daemon.health import DaemonProbe
-    from services.browser.probe import probe_browser
+    from services.desktop.browser.probe import probe_browser
 
     browser = next(s for s in roster.build_services() if s.session == "browser")
     probe = browser.identity_probe

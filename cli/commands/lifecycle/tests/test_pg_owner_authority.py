@@ -44,8 +44,8 @@ from base.host.env.dotenv_boot import resolve_ava_home
 from cli.commands.data_plane import cluster_instance as ci
 from cli.commands.data_plane.bringup import prepare_memory_vectors
 from cli.commands.lifecycle.migrations import cmd_migrations_apply
-from services.memory_indexer.backends.pgvector import prepare_table
-from services.memory_indexer.embeddings.factory import get_provider
+from services.derived.memory_indexer.backends.pgvector import prepare_table
+from services.derived.memory_indexer.embeddings.factory import get_provider
 
 _OWNER_PASSWORD = "owner-login-fixture"  # noqa: S105 — test fixture, not a real credential
 _GROUPS = Groups(gateway=GATEWAY_GROUP, runner=RUNNER_GROUP)

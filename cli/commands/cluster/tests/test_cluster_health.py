@@ -325,7 +325,7 @@ def test_wal_archiving_failure_signals_with_its_message(
 def test_wal_archiving_is_never_dialed_while_off(
     _all_checks_pass: None, _home: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from services.gateway_side.walg import probe
+    from services.backup.walg import probe
 
     def explode() -> object:
         raise AssertionError("the probe dialed Postgres while WAL-G is off")

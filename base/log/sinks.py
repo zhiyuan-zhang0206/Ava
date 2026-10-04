@@ -17,7 +17,7 @@ class _StdlibInterceptHandler(logging.Handler):
     callsite in the codebase lands in the loguru sinks (stderr / file / the unified stream)
     without per-file rewrites.
 
-    Many services (`services/agent_ops/daemon.py`, `gateway/app.py`, etc.) use
+    Many services (`services/agent_runner/agent_ops/daemon.py`, `gateway/app.py`, etc.) use
     stdlib `logging.getLogger(__name__)` for historical reasons. Without
     this handler their INFO/WARNING/ERROR lines reach stderr only and never
     reach the unified event stream that loguru's `_postgres_sink` feeds. The

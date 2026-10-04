@@ -12,7 +12,7 @@ logic).
 
 > **Status note (2026-08-08)**: the v1 command set and channel table below lag the shipped implementation — see [services/docs/gateway_side/im_bridge.ava.okf.md](../../services/docs/gateway_side/im_bridge.ava.okf.md) for the current reality. Telegram + Feishu are the live channels (Feishu was re-enabled 2026-09); the WeChat (iLink) adapter stays **production-disabled since 2026-08-06** (`AVA_IM_DISABLED_ADAPTERS=weixin`).
 
-- **IM Bridge = a gateway-hosted service** (`services/im_bridge/`, ServiceSpec
+- **IM Bridge = a gateway-hosted service** (`services/entrypoints/im_bridge/`, ServiceSpec
   `im-bridge`): one adapter (service) per IM, sharing a core (message envelope,
   command routing, per-channel in-memory session state, gateway REST + SSE
   clients).

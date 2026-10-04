@@ -48,13 +48,13 @@ Native vs installed (mirroring skills), the relative-path `.mcp.json` startup fo
 - `ava/mcp_config.py` — config loading, four-layer merging, `installed_mcp_dir`
 - `ava/mcps/_oauth.py` — OAuth 2.1 authorization-code + PKCE client builder (browser flow, loopback callback, per-server token storage)
 - `ava/mcps/_daemon.py` — **shared daemon process main loop** (`python -m ava.mcps._daemon`): binds the shared Unix socket (`$AVA_HOME/run/mcp_daemon.sock`) and manages every MCP server's session for every agent connection (per-connection isolation + `"shared"` server buckets)
-- `ava/mcps/_browser.py` — in-daemon line-protocol client for the browser-mcp service (the `"shared": "browser"` chrome path; process-less replacement for `services.browser.mcp_wrapper`)
+- `ava/mcps/_browser.py` — in-daemon line-protocol client for the browser-mcp service (the `"shared": "browser"` chrome path; process-less replacement for `services.desktop.browser.mcp_wrapper`)
 - `agent/mcp_daemon.py` — **no-op daemon handle** kept for boot-path compatibility (the daemon is now a supervised cluster service, never a per-agent child)
 - `cli/commands/extensions/mcp.py` — `ava mcp install/uninstall/upgrade/ls/add/remove/enable/disable`
 - `cli/commands/extensions/_pkg_source.py` — install source fetching (git URL / local path), shared with `ava plugins install`
 - `base/packages/extensions/install_registry.py` — install registry (`type="mcp"` rows = installed MCPs)
 - `base/packages/plugins/mcp_enabled.py` — enable/disable configuration management
-- `ava_builtins/mcps/chrome/.mcp.json` — chrome server definition (`"shared": "browser"` — the daemon dials the browser-mcp service directly; the `services.browser.mcp_wrapper` stdio bridge is retained only as the declared command for hosts running older daemons); scanned by `ava/mcp_config.py:builtin_mcp_paths()`
+- `ava_builtins/mcps/chrome/.mcp.json` — chrome server definition (`"shared": "browser"` — the daemon dials the browser-mcp service directly; the `services.desktop.browser.mcp_wrapper` stdio bridge is retained only as the declared command for hosts running older daemons); scanned by `ava/mcp_config.py:builtin_mcp_paths()`
 
 ## Current MCP Servers
 | Server | Type | Purpose | Expand |

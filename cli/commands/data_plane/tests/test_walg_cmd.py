@@ -15,9 +15,9 @@ import pytest
 from base.config import settings
 from cli.commands.data_plane import walg as walg_cmd
 from cli.parsers import build_parser
-from services.gateway_side.walg import config as walg_config
-from services.gateway_side.walg import probe, state
-from services.gateway_side.walg.tests.support import (
+from services.backup.walg import config as walg_config
+from services.backup.walg import probe, state
+from services.backup.walg.tests.support import (
     SECRETS,
     PgInstance,
     Sandbox,
@@ -315,7 +315,7 @@ def test_restore_rejects_a_bad_target_before_fetching(
 def test_restore_reports_a_failed_recovery_and_exits_non_zero(
     sandbox: Sandbox, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    from services.gateway_side.walg.restore import RestoreError
+    from services.backup.walg.restore import RestoreError
 
     @contextmanager
     def failing(*_args: Any, **_kwargs: Any) -> Generator[None]:

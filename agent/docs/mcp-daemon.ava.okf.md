@@ -22,7 +22,7 @@ This replaced the previous design where each agent spawned its own ~12MB daemon 
 - **Graceful degradation**: agent-side `ava.mcps` falls back to local mode when the shared socket is absent
 
 ## Key Dependencies
-- `ops/spec.py` — ServiceSpec "mcp-daemon" (agent-runner capability, `requires_db=False`, healthcheck `services.healthchecks.mcp_daemon`)
+- `ops/spec.py` — ServiceSpec "mcp-daemon" (agent-runner capability, `requires_db=False`, healthcheck `services.supervision.healthchecks.mcp_daemon`)
 - [[sdk-surface.ava.okf.md]] — `ava.mcps` SDK connects to the shared socket
 - [[oauth.ava.okf.md]] — OAuth 2.1 authorization-code + PKCE flow for remote servers
 
@@ -31,7 +31,7 @@ This replaced the previous design where each agent spawned its own ~12MB daemon 
 - `ava/mcps/_daemon.py:run_daemon(socket_path)` — bind + serve; per-connection `_handle_connection`
 - `ava/mcps/_browser.py:connect_browser_direct()` — in-daemon line-protocol client for the browser-mcp service (the `"shared": "browser"` path; no subprocess)
 - `ava/mcps/_daemon.py:_connect_http()` — remote Streamable HTTP / OAuth connect (no child process)
-- `services/healthchecks/mcp_daemon.py` — 60s watchdog probe (ping) + `respawn_service` restart
+- `services/supervision/healthchecks/mcp_daemon.py` — 60s watchdog probe (ping) + `respawn_service` restart
 
 ## Notes
 - Session cache lives per connection for non-shared servers: two agents listing the same server each spawn their own MCP server child (isolation for stateful servers). `"shared"` servers opt into one child for everyone: `"browser"` (chrome — process-less direct dial to the browser-mcp service, keeping per-connection page affinity) or `true` (x — one daemon-wide stdio child, serialized; safe because that server keeps no per-connection state)

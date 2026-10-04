@@ -27,8 +27,8 @@ from dotenv import dotenv_values
 from base.config import settings
 from base.db import Database
 from scripts.data_plane_ops import rotate_cluster_secret as rotate
-from services import backup
-from services.gateway_side.backup import passphrase
+from services.backup import dump as backup
+from services.backup.artifact import passphrase
 
 _OLD = "old-bearer-" + "o" * 32
 _RESTORES = itertools.count()

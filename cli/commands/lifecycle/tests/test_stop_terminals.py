@@ -1,7 +1,7 @@
 """Terminal closure at a normal stop (#2045): the stop's side of the pty-sessions service.
 
 The service holds every shell and runs the one terminal closure
-(`base.sessions.pty.closure`, covered by `services/pty_sessions/tests/test_close_all.py`).
+(`base.sessions.pty.closure`, covered by `services/agent_runner/pty_sessions/tests/test_close_all.py`).
 These tests lock what `ava stop` does around it, with real shells where the service
 is the thing under test:
 
@@ -51,7 +51,7 @@ from cli.commands.lifecycle.tests.stop_support import launch as launch
 from cli.commands.lifecycle.tests.stop_support import pty_service as pty_service
 from cli.commands.lifecycle.tests.stop_support import written as written
 from ops import pty_close_notices
-from services.pty_sessions import ledger
+from services.agent_runner.pty_sessions import ledger
 from tests.path_scoped import pty_jobs as jobs
 from tests.path_scoped import pty_shells as support
 from tests.path_scoped.pty_reaper import PtyReaper

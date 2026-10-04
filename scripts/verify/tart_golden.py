@@ -75,7 +75,7 @@ TCC_DB = "/Library/Application Support/com.apple.TCC/TCC.db"
 # The helper's two desktop grants, as the system TCC database names them.
 GRANTED = {"kTCCServiceScreenCapture": 2, "kTCCServiceAccessibility": 2}
 
-_HELPER_LIFECYCLE = "from services.permissions_helper import lifecycle; lifecycle.{call}"
+_HELPER_LIFECYCLE = "from services.desktop.permissions_helper import lifecycle; lifecycle.{call}"
 IDENTITY = guest_script(
     f'cd "{GUEST_SOURCE}" && AVA_CONFIG_FETCH=skip .venv/bin/python -c '
     f'"{_HELPER_LIFECYCLE.format(call="ensure_signing_cert()")}"'
@@ -102,7 +102,7 @@ RESTART_HELPER = guest_script(
 _VERIFY_PY = """
 import collections, json, struct, subprocess
 from base.paths import permissions_helper_app_dir
-from services.permissions_helper import client
+from services.desktop.permissions_helper import client
 
 def out(*argv):
     return subprocess.run(argv, capture_output=True, text=True).stdout

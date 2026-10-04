@@ -1,5 +1,0 @@
-{
-  "ambient_state": {
-    "services/healthchecks/permissions_helper.py::global-rebind:_reported_unhealthy": 1
-  }
-}

@@ -21,17 +21,17 @@ Semantic indexing daemon for the memory pool — monitors `**/*.md` file changes
 - **Package layout**: `daemon.py` (main loop), `embeddings/` (provider contract + Gemini adapter + factory switch `AVA_EMBEDDING_BACKEND`), `backends/` (numpy / pgvector storage behind `AVA_MEMORY_SEARCH_BACKEND`)
 
 ## Key Dependencies
-- `services/memory_indexer/backends/pgvector.py` — pgvector backend over the cluster Postgres (**v2 / fallback-only** — see Notes)
-- `services/memory_indexer/backends/numpy.py` — numpy backend over the local exact-search service (19531)
+- `services/derived/memory_indexer/backends/pgvector.py` — pgvector backend over the cluster Postgres (**v2 / fallback-only** — see Notes)
+- `services/derived/memory_indexer/backends/numpy.py` — numpy backend over the local exact-search service (19531)
 - [[base/lm/docs/lm.ava.okf.md]] — Gemini API (`GEMINI_API_KEY`)
 - [[gateway-cli.ava.okf.md]] — Gateway hosts this service
 
 ## Entry Points
-- `services/memory_indexer/daemon.py` — main loop entry
-- `services/memory_indexer/embeddings/factory.py:get_provider()` — provider switch (`AVA_EMBEDDING_BACKEND`)
-- `services/memory_indexer/embeddings/gemini.py:GeminiEmbeddingProvider` — Gemini Embedding 2 adapter (batch + query embeds)
-- `services/memory_indexer/backends/factory.py:get_backend()` — backend switch (`AVA_MEMORY_SEARCH_BACKEND`)
-- `services/memory_indexer/backends/pgvector.py` — `PGVectorBackend` (table `memory_embeddings` in the cluster Postgres, exact scan, no row cap)
+- `services/derived/memory_indexer/daemon.py` — main loop entry
+- `services/derived/memory_indexer/embeddings/factory.py:get_provider()` — provider switch (`AVA_EMBEDDING_BACKEND`)
+- `services/derived/memory_indexer/embeddings/gemini.py:GeminiEmbeddingProvider` — Gemini Embedding 2 adapter (batch + query embeds)
+- `services/derived/memory_indexer/backends/factory.py:get_backend()` — backend switch (`AVA_MEMORY_SEARCH_BACKEND`)
+- `services/derived/memory_indexer/backends/pgvector.py` — `PGVectorBackend` (table `memory_embeddings` in the cluster Postgres, exact scan, no row cap)
 
 ## Notes
 - The index uses the gateway's **consolidated checkout** (`gateway_memory_dir()`, combined machine = `$AVA_HOME/gateway/memory`, main branch), which is **deliberately separate** from the agent-runner's **authoring checkout** (`memory_dir()` = `$AVA_HOME/memory`, machine-`<name>` branch) (`daemon.py:49`, `base/paths/__init__.py:125-135`); on gateway-only units the two are the same

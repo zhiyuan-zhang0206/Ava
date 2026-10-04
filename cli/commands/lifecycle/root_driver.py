@@ -21,7 +21,7 @@ from ops.roster.service_spec import api_access, db_access, profile_marker
 _ROOT_SOCKET_NAME = "ava-root.sock"
 _ROOT_STDOUT_LOG = "root.stdout.log"
 _ROOT_STDERR_LOG = "root.stderr.log"
-_WIRING_REF = "services.ava_root_glue.glue:build_wiring"
+_WIRING_REF = "services.supervision.ava_root_glue.glue:build_wiring"
 _HELPER_PROTOCOLS = ("root_stop_intent_v1", "helper_shutdown_v1")
 
 # Root binds IPC after spawning its units.
@@ -143,7 +143,7 @@ def _helper_spawn_committed() -> bool:
 
 def _helper_wire_ok() -> bool:
     """Whether the permission helper answers on this cluster's socket."""
-    from services.permissions_helper import client as helper_client
+    from services.desktop.permissions_helper import client as helper_client
 
     try:
         ping = helper_client.ping()
@@ -159,7 +159,7 @@ def _require_root_owner(status: dict[str, Any]) -> None:
     from base.native_process.ownership import OwnedProcess
     from base.native_process.root_control.client import native_identity
     from base.paths import root_run_dir
-    from services.permissions_helper import client as helper_client
+    from services.desktop.permissions_helper import client as helper_client
 
     root = native_identity(status.get("root"))
     if not root.live():
@@ -195,8 +195,8 @@ def _root_argv(run_dir: Path, manifests: Path, runtime: StartRuntime | None = No
         _WIRING_REF,
     ]
     if runtime is not None:
-        return runtime.module_argv("services.ava_root", *arguments)
-    return [sys.executable, "-m", "services.ava_root", *arguments]
+        return runtime.module_argv("services.supervision.ava_root", *arguments)
+    return [sys.executable, "-m", "services.supervision.ava_root", *arguments]
 
 
 def root_child_env() -> dict[str, str]:
@@ -213,7 +213,7 @@ def tree_manifest(
     roles: MachineRoles,
 ) -> dict[str, object]:
     """Prepare launch inputs without changing any running generation's seed."""
-    from services.ava_root_glue.manifests import build_manifest
+    from services.supervision.ava_root_glue.manifests import build_manifest
 
     return build_manifest(
         capabilities=sorted(roles),
@@ -293,7 +293,7 @@ def _seed_via_helper(
     runtime: StartRuntime | None = None,
 ) -> None:
     """Seed the root keeper and wait for it to report the root `running`."""
-    from services.permissions_helper import client as helper_client
+    from services.desktop.permissions_helper import client as helper_client
 
     try:
         from base.host.atomic_io import write_text_atomic
@@ -364,7 +364,7 @@ def _bring_up_root(
 
 def _changed_units(manifest: dict[str, object], status: dict[str, Any]) -> set[str]:
     """A running root may be reused only for the exact requested launch inputs."""
-    from services.ava_root.manifest import UnitManifest
+    from services.supervision.ava_root.manifest import UnitManifest
 
     units = _root_units(status)
     desired = [
@@ -393,7 +393,7 @@ def _stop_root_process(
                 "signal a helper-seeded root directly (the keeper would restart it); stop it "
                 "through the helper"
             )
-        from services.permissions_helper import client as helper_client
+        from services.desktop.permissions_helper import client as helper_client
 
         try:
             reply = helper_client.stop_root()
@@ -502,7 +502,7 @@ def _ensure_root_service_tree(
 ) -> LaunchOutcome:
     """Reuse an identical generation; changing its inputs requires prior stop."""
     from base.paths import ava_home, root_manifests_path, root_run_dir
-    from services.ava_root_glue.manifests import write_manifest
+    from services.supervision.ava_root_glue.manifests import write_manifest
 
     run_dir = root_run_dir()
     if runtime is not None:
@@ -692,8 +692,8 @@ def _wait_for_root_services_ready(
 
 def require_root_absent() -> None:
     from base.paths import root_run_dir
-    from services.ava_root.custody import require_clear
-    from services.ava_root.singleton import acquire_instance_lock, release_instance_lock
+    from services.supervision.ava_root.custody import require_clear
+    from services.supervision.ava_root.singleton import acquire_instance_lock, release_instance_lock
 
     run_dir = root_run_dir()
     require_clear(run_dir)
@@ -719,8 +719,8 @@ def _stop_dormant_helper_root(deadline: float) -> None:
     """Revoke a pending keeper restart even when no root IPC is serving."""
     if not _helper_spawn_committed():
         return
-    from services.permissions_helper import client as helper_client
-    from services.permissions_helper.launchd_job import (
+    from services.desktop.permissions_helper import client as helper_client
+    from services.desktop.permissions_helper.launchd_job import (
         helper_job_domain,
         helper_job_label,
         retirement_query,

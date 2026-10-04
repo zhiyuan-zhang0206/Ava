@@ -251,8 +251,8 @@ def prepare_memory_vectors() -> None:
     if settings.services.memory_search_backend != "pgvector":
         return
     from base.db.pg_admin import local_owner_authority
-    from services.memory_indexer.backends.pgvector import prepare_table
-    from services.memory_indexer.embeddings.factory import get_provider
+    from services.derived.memory_indexer.backends.pgvector import prepare_table
+    from services.derived.memory_indexer.embeddings.factory import get_provider
 
     dim = get_provider().dim
     if settings.data_plane.is_remote:

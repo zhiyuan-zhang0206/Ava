@@ -9,7 +9,7 @@
 # paces the idle wait and keeps the worker in the fleet's standard schedule
 # ledger.
 #
-# The tick body lives in services/hierarchy_worker/runner.py so it is
+# The tick body lives in services/derived/hierarchy_worker/runner.py so it is
 # importable and testable; this file is the thin host, using the same slot
 # loop as the other built-ins (trace-ship-tempo shape).
 #
@@ -25,7 +25,7 @@ from datetime import UTC, datetime
 
 from base.db import Database
 from schedules.catchup import catch_up, cluster_timezone, fire_slot_once
-from services.hierarchy_worker.roots import prepare, tick
+from services.derived.hierarchy_worker.roots import prepare, tick
 from base.daemon.schedules.watcher import next_fire
 
 # One tick a minute: the scan is one aggregated query over `checkpoints`, so

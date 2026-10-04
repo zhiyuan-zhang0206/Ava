@@ -119,10 +119,10 @@ def _stub_label_llm(monkeypatch: pytest.MonkeyPatch) -> None:
 
         return _RaiseLLM()
 
-    # `services.labeler.labeler` is where `generate_label_async` actually resides;
+    # `services.derived.labeler.labeler` is where `generate_label_async` actually resides;
     # ImportError/AttributeError suppress a module or attribute that is not importable.
     with contextlib.suppress(ImportError, AttributeError):
-        monkeypatch.setattr("services.labeler.labeler.build_chat_model", _fake_factory)
+        monkeypatch.setattr("services.derived.labeler.labeler.build_chat_model", _fake_factory)
 
 
 # The old `_stub_os_cron` patched only pytest; registration leaked in the e2e
@@ -138,7 +138,7 @@ def _stub_everywhere(
     Patching only the definition site is a half-guard: `from mod import f` binds
     the function object into the importing module at ITS import time, and that
     alias is what gets called (a caller may hold one for
-    `unpause_local_cluster`, `services.healthchecks.frontend` one for
+    `unpause_local_cluster`, `services.supervision.healthchecks.frontend` one for
     `respawn_service`). Nothing is imported to find them — only modules the run
     already loaded are touched.
 
@@ -181,8 +181,8 @@ def _guard_permissions_helper_native_io(
     """
     if request.node.get_closest_marker("native_permissions_helper") is not None:
         return
-    from services import permissions_helper
-    from services.permissions_helper import launchd_job, lifecycle
+    from services.desktop import permissions_helper
+    from services.desktop.permissions_helper import launchd_job, lifecycle
 
     def forbidden(*_args: object, **_kwargs: object) -> Any:
         pytest.fail(
@@ -326,7 +326,7 @@ def _guard_process_exec(monkeypatch: pytest.MonkeyPatch) -> None:
     thin wrappers that call the module-global `execv`/`execvp`. Real in-process
     exec is never intended from a test: the production call sites are either a
     dedicated `__main__` that runs in a subprocess (`base._reparent`,
-    `services.browser.daemon`) or a CLI re-exec. Tests
+    `services.desktop.browser.daemon`) or a CLI re-exec. Tests
     that assert an exec *would* have happened patch `os.exec*` themselves
     inside the test body — last-write-wins over this default, restored LIFO at
     teardown.

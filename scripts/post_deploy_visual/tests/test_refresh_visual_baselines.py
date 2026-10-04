@@ -41,7 +41,7 @@ def _assert_run_options(options: dict[str, object], tmp_path: Path) -> None:
 
 def _drift_failure(test_name: str) -> str:
     return (
-        f"FAILED tests/e2e/test_visual_regression.py::{test_name} - Failed: "
+        f"FAILED tests/e2e/visual/test_visual_regression.py::{test_name} - Failed: "
         "Visual regression: 1001/100000 pixels changed (1.001%); "
         "allowed ratio is 0.100%.\n"
     )
@@ -49,7 +49,7 @@ def _drift_failure(test_name: str) -> str:
 
 def _candidate_failures(tmp_path: Path) -> str:
     return "".join(
-        f"FAILED tests/e2e/test_visual_regression.py::{test_name} - Failed: "
+        f"FAILED tests/e2e/visual/test_visual_regression.py::{test_name} - Failed: "
         f"Generated visual baseline candidate at {tmp_path / relative_path}. "
         "Review and commit it before rerunning the test.\n"
         for test_name, relative_path in refresh._BASELINE_PATHS_BY_TEST.items()
@@ -112,7 +112,7 @@ def test_check_only_does_not_mask_a_failure_mixed_with_pixel_drift(
 ) -> None:
     monkeypatch.setattr(refresh, "_REPO_ROOT", tmp_path)
     output = _drift_failure("test_home_visual_regression") + (
-        "FAILED tests/e2e/test_visual_regression.py::test_fleet_visual_regression - "
+        "FAILED tests/e2e/visual/test_visual_regression.py::test_fleet_visual_regression - "
         "playwright.sync_api.TimeoutError: page did not load\n"
     )
 
@@ -164,7 +164,7 @@ def test_regenerate_restores_references_when_candidate_generation_is_incomplete(
         first_test, first_path = next(iter(refresh._BASELINE_PATHS_BY_TEST.items()))
         (tmp_path / first_path).write_bytes(b"partial-candidate")
         output = (
-            f"FAILED tests/e2e/test_visual_regression.py::{first_test} - Failed: "
+            f"FAILED tests/e2e/visual/test_visual_regression.py::{first_test} - Failed: "
             f"Generated visual baseline candidate at {tmp_path / first_path}. "
             "Review and commit it before rerunning the test.\n"
         )
@@ -191,7 +191,7 @@ def test_regenerate_restores_references_when_non_png_file_changed(
         return _completed(
             command,
             0,
-            " M tests/e2e/__snapshots__/test_visual_regression/home.png\0?? unexpected.txt\0",
+            " M tests/e2e/visual/__snapshots__/test_visual_regression/home.png\0?? unexpected.txt\0",
         )
 
     _install_runner(monkeypatch, run)

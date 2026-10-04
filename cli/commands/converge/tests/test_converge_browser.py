@@ -35,7 +35,7 @@ def test_enabled_runs_preflight_writes_nothing(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     monkeypatch.setattr(cv.settings.services, "browser_enabled", True)
-    import services.browser.profile as bp
+    import services.desktop.browser.profile as bp
 
     monkeypatch.setattr(cv, "browser_incapability", lambda: None)
     monkeypatch.setattr(bp, "ensure_browser_profile", lambda **_k: None)  # pyright: ignore[reportUnknownArgumentType]
@@ -49,7 +49,7 @@ def test_capable_offers_profile_seed_with_tty_flag(
     """When the host is browser-capable, the step invokes the profile-seed offer,
     passing interactive = both stdin AND stdout are TTYs."""
     monkeypatch.setattr(cv.settings.services, "browser_enabled", True)
-    import services.browser.profile as bp
+    import services.desktop.browser.profile as bp
 
     monkeypatch.setattr(cv, "browser_incapability", lambda: None)
     monkeypatch.setattr(cv.sys.stdin, "isatty", lambda: True)
@@ -69,7 +69,7 @@ def test_incapable_host_does_not_offer_profile_seed(
 ) -> None:
     """A headless host must return before ever offering the profile-seed choice."""
     monkeypatch.setattr(cv.settings.services, "browser_enabled", True)
-    import services.browser.profile as bp
+    import services.desktop.browser.profile as bp
 
     monkeypatch.setattr(cv, "browser_incapability", lambda: "no display")
 

@@ -12,7 +12,7 @@ half-stopped until the watchdog respawned it. Task #4222's sweep-A migrated
 this daemon family — watchdog, memory_indexer, heartbeat, page_server,
 events_maintenance, memory_search — to the sibling daemons' established shape
 (``asyncio.Runner`` + an explicit cancellation drain + a hard exit that skips
-teardown; see ``services/agent_ops/daemon.py``, ``services/backup_scheduler/daemon.py``),
+teardown; see ``services/agent_runner/agent_ops/daemon.py``, ``services/backup/scheduler/daemon.py``),
 and these regressions lock the property in per daemon.
 
 Each child runs the production ``main()`` — signal wiring included — with
@@ -74,31 +74,31 @@ class _DaemonCase:
 
 _CASES: dict[str, _DaemonCase] = {
     "memory_indexer": _DaemonCase(
-        module="services.memory_indexer.daemon",
+        module="services.derived.memory_indexer.daemon",
         interrupt_line="[indexer] received interrupt, shutting down",
     ),
     "heartbeat": _DaemonCase(
-        module="services.heartbeat.daemon",
+        module="services.wake.heartbeat.daemon",
         interrupt_line="[heartbeat] interrupted, shutting down",
     ),
     "page_server": _DaemonCase(
-        module="services.page_server.daemon",
+        module="services.agent_runner.page_server.daemon",
         interrupt_line="[page-server] interrupted, shutting down",
     ),
     "events_maintenance": _DaemonCase(
-        module="services.events_maintenance.daemon",
+        module="services.upkeep.events_maintenance.daemon",
         interrupt_line="[events-maintenance] interrupted, shutting down",
     ),
     "memory_search": _DaemonCase(
-        module="services.memory_search.daemon",
+        module="services.derived.memory_search.daemon",
         interrupt_line="[memory-search] interrupted, shutting down",
     ),
     "ttl_reaper": _DaemonCase(
-        module="services.ttl_reaper.daemon",
+        module="services.upkeep.ttl_reaper.daemon",
         interrupt_line="[ttl-reaper] interrupted, shutting down",
     ),
     "schedule_manager": _DaemonCase(
-        module="services.schedule_manager.daemon",
+        module="services.wake.schedule_manager.daemon",
         interrupt_line="[schedule-manager] interrupted, shutting down",
     ),
 }

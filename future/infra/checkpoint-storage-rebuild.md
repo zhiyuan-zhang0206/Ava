@@ -52,7 +52,7 @@ counts or write volume). The write switch runs in the next user-supervised windo
 
 ### 1.1 Write path mechanics
 
-- Saver: `PooledPostgresSaver` (`services/agent_host/pooled_checkpoint.py`) subclasses
+- Saver: `PooledPostgresSaver` (`services/agent_runner/agent_host/pooled_checkpoint.py`) subclasses
   langgraph's `AsyncPostgresSaver`; one logical saver per host, per-cursor pool leases.
 - Serde: `build_checkpoint_serde()` -> `JsonPlusSerializer` with the framework msgpack
   allowlist (`agent/state.py`). In production, every blob row is `type='msgpack'`.
@@ -124,7 +124,7 @@ compressible content because TOAST pzips it).
 ### 1.4 Retention and cleanup — history, the stop, and the final rules
 
 **History (until 2026-09-12).** Three paths touched old rows: the reaper
-(`services/events_maintenance/checkpoint_reaper.py`) trimmed every thread over `_KEEP = 3`
+(`services/upkeep/events_maintenance/checkpoint_reaper.py`) trimmed every thread over `_KEEP = 3`
 checkpoints down to 3 (60 s cadence, <= 64 productive trims per pass, rotated for fairness;
 `compact_boundary: true` rows exempt); compaction (`agent/hooks/compact.py`) stamped the
 boundary and trimmed the frozen pre-compact history to `COMPACT_TRIM_KEEP = 1`; and

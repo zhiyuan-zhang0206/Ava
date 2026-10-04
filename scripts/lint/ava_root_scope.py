@@ -2,14 +2,14 @@
 """Forbid permission-domain and macOS-specific symbols in the root supervisor.
 
 Run: `.venv/bin/python scripts/lint/ava_root_scope.py [path ...]` — no paths
-scans `services/ava_root/` (the root supervisor's own code); explicit paths
+scans `services/supervision/ava_root/` (the root supervisor's own code); explicit paths
 scan exactly those files/directories, and an explicit path that does not
 exist is an error (stderr + exit 1) rather than a silent no-op. Also run
 automatically via pre-commit and in CI (the `repo-language` job).
 
 ## Why
 
-The root supervisor (`services/ava_root/`) is the platform-neutral core of the
+The root supervisor (`services/supervision/ava_root/`) is the platform-neutral core of the
 process tree. By design (ruling 2026-09-12) it must stay free of any
 permission-domain content, so that the privileged identity / desktop-permission
 machinery lives in a separate program behind an explicit adapter boundary.
@@ -43,7 +43,7 @@ this lint's review surface.
 
 ## Exemptions
 
-A test file (any `tests/` directory, e.g. `services/ava_root/tests/`) is exempt:
+A test file (any `tests/` directory, e.g. `services/supervision/ava_root/tests/`) is exempt:
 tests are the proof that the names stay at the edge, so they name them.
 
 A line that genuinely must carry one of these names opts out inline with
@@ -71,7 +71,7 @@ sys.path.insert(0, str(_REPO_ROOT))
 from scripts.structure import lint_common  # noqa: E402 - standalone script
 
 # The default scan root: the root supervisor's own code.
-_DEFAULT_TARGET = "services/ava_root"
+_DEFAULT_TARGET = "services/supervision/ava_root"
 
 # Inline opt-out marker, same convention as the other repo lints; matched
 # against real comment tokens only (see _exempt_lines).

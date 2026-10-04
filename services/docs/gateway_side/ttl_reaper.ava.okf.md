@@ -11,7 +11,7 @@ tags: []
 The service that enforces every deadline the cluster hands out. It runs once per cluster on the gateway side (`ServiceSpec.capabilities=_GATEWAY`, health port slot `ttl_reaper` = 8121), as its own root unit: stopping or restarting it never touches the HTTP gateway, and the gateway holds no loop that can kill a shell.
 
 ## Loops
-Two resident sequential loops under one `TaskGroup` (`services/ttl_reaper/daemon.py`), each running a round every `AVA_TTL_REAPER_POLL_INTERVAL_SECONDS` (default 60s). A loop that raises cancels its sibling and ends the process; the supervisor restarts it. An unreachable database skips a round. Each loop reports its own progress to `/healthz`.
+Two resident sequential loops under one `TaskGroup` (`services/upkeep/ttl_reaper/daemon.py`), each running a round every `AVA_TTL_REAPER_POLL_INTERVAL_SECONDS` (default 60s). A loop that raises cancels its sibling and ends the process; the supervisor restarts it. An unreachable database skips a round. Each loop reports its own progress to `/healthz`.
 
 - **`sweep`** (`sweep.py`) — database only: expired `agent_pages` (terminalized with `expired_at`, `PageClosed` published), `web_sessions`, `agent_notices`, impersonation leases (reminded, then reaped), plus three slow phases claimed in `maintenance_state` (`cadence.py`): the `schedule_fire_log` retention prune (daily), the torn lifecycle-pointer scan and the absent-machine fence settle (hourly, `lifecycle_fences.py`).
 - **`remote`** (`remote.py`) — calls out: TTL-expired persistent shell sessions are killed on their home machines (`shells.py`; machines concurrently, one machine's rows in order, each dispatch under a deadline sized from the RPC client's budget).
@@ -28,5 +28,5 @@ Two resident sequential loops under one `TaskGroup` (`services/ttl_reaper/daemon
 - `base/daemon/round_loop.py` — the round runner and bounded fan-out the resident service loops share (also the delivery watchdog).
 
 ## Entry Points
-- `services/ttl_reaper/daemon.py` — `.venv/bin/python -m services.ttl_reaper.daemon`
+- `services/upkeep/ttl_reaper/daemon.py` — `.venv/bin/python -m services.upkeep.ttl_reaper.daemon`
 - The application root supervises it through the roster's `/healthz` identity probe (`ops/roster/healthz.py`).

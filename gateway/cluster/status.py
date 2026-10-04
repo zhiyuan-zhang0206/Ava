@@ -233,7 +233,7 @@ def _get_services_status() -> ServicesStatus:
 # answered in ~15ms. The budget of a dial the gateway makes itself (a fresh read,
 # or a machine the snapshot does not cover). The default read dials nothing: it
 # renders the heartbeat liveness pass's snapshot (`gateway/cluster/snapshots.py`),
-# which reads this same setting (services/heartbeat/liveness.py), so the pass's
+# which reads this same setting (services/wake/heartbeat/liveness.py), so the pass's
 # probes stay aligned with a fresh read's.
 
 
@@ -359,7 +359,7 @@ async def _probe_agent_runner(
 ) -> MachineStatus:
     """Probe an agent-runner now, by POSTing a `status_probe` op to its ops server.
 
-    The machine is reached at its ava-ops server (services/agent_ops), which
+    The machine is reached at its ava-ops server (services/agent_runner/agent_ops), which
     dispatches `status_probe` via `ops.cluster.cluster_status_op` in-process and
     returns the snapshot. Same path the heartbeat liveness pass uses. The local
     machine is no special case — its ops server is dialed at its registered

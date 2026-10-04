@@ -34,7 +34,7 @@ from gateway.auth import request_principal
 from gateway.auth.request_principal import cluster_credential
 from gateway.auth.webhook import authenticate_webhook
 from ops.roster.service_spec import ServiceSpec, api_access
-from services.agent_ops import _boot as ops_boot
+from services.agent_runner.agent_ops import _boot as ops_boot
 
 _HUMAN = "human-" + "h" * 40
 _ENDPOINT = "postgresql://ava@10.0.0.7:6433/ava"

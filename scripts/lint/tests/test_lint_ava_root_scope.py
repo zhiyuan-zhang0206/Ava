@@ -1,6 +1,6 @@
 """scripts/lint/ava_root_scope.py: the root supervisor's scope gate.
 
-The gate keeps services/ava_root/ free of permission-domain and
+The gate keeps services/supervision/ava_root/ free of permission-domain and
 platform-specific names (ruling 2026-09-12: the privileged helper program is a
 separate codebase by design, so the root supervisor's own code may not couple
 to it). These tests pin the three symbol groups, the inline opt-out marker,
@@ -199,9 +199,9 @@ def test_explicit_missing_target_is_an_error(
 
 def test_default_scan_root_is_ava_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(gate, "_REPO_ROOT", tmp_path)
-    _write(tmp_path, "services/ava_root/ok.py", "value = 1\n")
+    _write(tmp_path, "services/supervision/ava_root/ok.py", "value = 1\n")
     assert gate.main([]) == 0
-    _write(tmp_path, "services/ava_root/bad.py", "value = 'launchd'\n")
+    _write(tmp_path, "services/supervision/ava_root/bad.py", "value = 'launchd'\n")
     assert gate.main([]) == 1
 
 

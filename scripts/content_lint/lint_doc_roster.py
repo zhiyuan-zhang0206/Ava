@@ -17,7 +17,7 @@ Two tables are checked, both by set equality in both directions:
    - a service registered in `build_services()` but missing from the roster
      -> "added a daemon, forgot to document it".
 
-2. the healthcheck roster (`services/healthchecks/docs/check-roster/check-roster.ava.okf.md`)
+2. the healthcheck roster (`services/supervision/healthchecks/docs/check-roster/check-roster.ava.okf.md`)
    against the healthcheck module directory plus the ServiceSpec
    `healthcheck_module` fields and root diagnostic adapter imports — the
    2026-08-21 audit (issue #192) found the table documenting a phantom module
@@ -158,11 +158,13 @@ _HEALTHCHECK_SENTINEL = "<!-- lint:healthcheck-roster-table -->"
 
 # The roster table lives in its own subdirectory (the node outgrew the
 # healthchecks overview — 2026-08-30 split); the modules it lists live
-# directly in `services/healthchecks/`.
-_HEALTHCHECK_DIR = _REPO_ROOT / "services" / "healthchecks"
+# directly in `services/supervision/healthchecks/`.
+_HEALTHCHECK_DIR = _REPO_ROOT / "services" / "supervision" / "healthchecks"
 _HEALTHCHECK_ROSTER = _HEALTHCHECK_DIR / "docs" / "check-roster" / "check-roster.ava.okf.md"
 
-_DIAGNOSTIC_PROBES = _REPO_ROOT / "services" / "ava_root_glue" / "diagnostic_probes.py"
+_DIAGNOSTIC_PROBES = (
+    _REPO_ROOT / "services" / "supervision" / "ava_root_glue" / "diagnostic_probes.py"
+)
 
 
 def diagnostic_healthchecks() -> set[str]:
@@ -176,22 +178,22 @@ def diagnostic_healthchecks() -> set[str]:
     for node in ast.walk(tree):
         if not isinstance(node, ast.ImportFrom) or node.module is None:
             continue
-        if node.module == "services.healthchecks":
+        if node.module == "services.supervision.healthchecks":
             names.update(alias.name for alias in node.names)
-        elif node.module.startswith("services.healthchecks."):
-            names.add(node.module.split(".")[2])
+        elif node.module.startswith("services.supervision.healthchecks."):
+            names.add(node.module.split(".")[3])
     return names
 
 
 def directory_healthchecks() -> set[str]:
     """The healthcheck module files themselves — every `*.py` in
-    `services/healthchecks/`, minus `__init__.py`."""
+    `services/supervision/healthchecks/`, minus `__init__.py`."""
     return {p.stem for p in _HEALTHCHECK_DIR.glob("*.py") if p.name != "__init__.py"}
 
 
 def spec_healthchecks() -> set[str]:
     """The healthcheck modules registered on ServiceSpec rows inside this
-    directory (`services.healthchecks.<x>`, last segment).
+    directory (`services.supervision.healthchecks.<x>`, last segment).
 
     Standard `/healthz` daemons declare no module (`healthz_daemon` derives their
     probe), and a plugin service that does keeps it in its own namespace; both are
@@ -199,7 +201,7 @@ def spec_healthchecks() -> set[str]:
     names: set[str] = set()
     for spec in build_services():
         hm = spec.healthcheck_module
-        if hm and hm.startswith("services.healthchecks."):
+        if hm and hm.startswith("services.supervision.healthchecks."):
             names.add(hm.rsplit(".", 1)[-1])
     return names
 

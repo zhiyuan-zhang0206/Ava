@@ -3,7 +3,7 @@
 The measurement itself is NOT here: OS-level screen capture is performed by the
 signed permissions helper, so the only Screen Recording grant that matters is the
 helper's, and the only way to read it is to ask the helper
-(``services.permissions_helper.client.check_screen_capture``). A preflight inside the
+(``services.desktop.permissions_helper.client.check_screen_capture``). A preflight inside the
 calling process would report the grant of whatever started that process -- a
 terminal session started over SSH holds none -- which is a different fact entirely.
 

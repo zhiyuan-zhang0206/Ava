@@ -192,7 +192,7 @@ code version. After every rollout, verify:
    units → 2 total).
    Ghosts accumulate when a respawn storm relaunches while the old detached
    process survives; a ghost's exit can steal the live socket.
-   Healthcheck probe: `.venv/bin/python -m services.healthchecks.mcp_daemon`
+   Healthcheck probe: `.venv/bin/python -m services.supervision.healthchecks.mcp_daemon`
    must log "alive, no-op".
 3. **watchdog processes** (agent-runner/gateway) restarted with the new code:
    start time must match the intended generation; a stale watchdog can keep

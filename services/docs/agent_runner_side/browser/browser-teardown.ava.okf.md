@@ -20,5 +20,5 @@ terminal ownership conflict. Unreadable native evidence is unavailable, rather
 than proof that the port is free. Interactive tabs and persistent browser state
 are governed by the explicit cluster lifecycle operation, not diagnostic failure.
 
-[[services/healthchecks/docs/probe-contract/browser-two-questions.ava.okf.md|Browser readiness]]
+[[services/supervision/healthchecks/docs/probe-contract/browser-two-questions.ava.okf.md|Browser readiness]]
 requires protocol evidence and the same native ownership boundary.

@@ -207,10 +207,10 @@ def test_stale_relative_prefix_warns(tmp_path, monkeypatch, capsys):
     """The shape this rule was written for: a link copied between siblings keeps a
     directory prefix that is already part of its own directory, so the relative read
     misses and only the basename saves it."""
-    _node(tmp_path, "services/healthchecks/verdict.ava.okf.md")
+    _node(tmp_path, "services/supervision/healthchecks/verdict.ava.okf.md")
     _node(
         tmp_path,
-        "services/healthchecks/probe.ava.okf.md",
+        "services/supervision/healthchecks/probe.ava.okf.md",
         "See [[healthchecks/verdict.ava.okf.md]].",
     )
 
@@ -218,7 +218,7 @@ def test_stale_relative_prefix_warns(tmp_path, monkeypatch, capsys):
 
     assert code == 0, out
     assert "W011" in out
-    assert "services/healthchecks/verdict.ava.okf.md" in out
+    assert "services/supervision/healthchecks/verdict.ava.okf.md" in out
 
 
 @pytest.mark.parametrize(

@@ -30,7 +30,7 @@ from ops import roster
 from ops.roster import _bind_owned_probe
 from ops.roster.healthz import healthz_url
 from ops.roster.service_spec import DbAccess, ServiceSpec, api_access, db_access, profile_marker
-from services.ava_root_glue import manifests as gen
+from services.supervision.ava_root_glue import manifests as gen
 
 _GATEWAY: frozenset[MachineRole] = frozenset({"gateway"})
 _RUNNER: frozenset[MachineRole] = frozenset({"agent-runner"})
@@ -52,39 +52,39 @@ class _Legacy:
 
 
 _LEGACY = (
-    _Legacy("im-bridge", "services.im_bridge.daemon", _GATEWAY, True),
+    _Legacy("im-bridge", "services.entrypoints.im_bridge.daemon", _GATEWAY, True),
     _Legacy(
         "labeler",
-        "services.labeler.daemon",
+        "services.derived.labeler.daemon",
         _GATEWAY,
         True,
         no_profile_marker=True,
     ),
-    _Legacy("heartbeat", "services.heartbeat.daemon", _GATEWAY, True),
+    _Legacy("heartbeat", "services.wake.heartbeat.daemon", _GATEWAY, True),
     _Legacy(
         "delivery-watchdog",
-        "services.delivery_watchdog.daemon",
+        "services.wake.delivery_watchdog.daemon",
         _GATEWAY,
         True,
     ),
     _Legacy(
         "events-maintenance",
-        "services.events_maintenance.daemon",
+        "services.upkeep.events_maintenance.daemon",
         _GATEWAY,
         True,
     ),
-    _Legacy("pg-backup", "services.backup_scheduler.daemon", _GATEWAY, True),
-    _Legacy("ttl-reaper", "services.ttl_reaper.daemon", _GATEWAY, True),
-    _Legacy("schedule-manager", "services.schedule_manager.daemon", _GATEWAY, True),
-    _Legacy("page-server", "services.page_server.daemon", _RUNNER, True),
+    _Legacy("pg-backup", "services.backup.scheduler.daemon", _GATEWAY, True),
+    _Legacy("ttl-reaper", "services.upkeep.ttl_reaper.daemon", _GATEWAY, True),
+    _Legacy("schedule-manager", "services.wake.schedule_manager.daemon", _GATEWAY, True),
+    _Legacy("page-server", "services.agent_runner.page_server.daemon", _RUNNER, True),
     _Legacy(
         "agent-host",
-        "services.agent_host.daemon",
+        "services.agent_runner.agent_host.daemon",
         _RUNNER,
         True,
         profile="agent",
     ),
-    _Legacy("ops", "services.agent_ops.daemon", _RUNNER, True),
+    _Legacy("ops", "services.agent_runner.agent_ops.daemon", _RUNNER, True),
     _Legacy(
         "task-maintenance",
         "ava_builtins.plugins.ava_fleet.task_maintenance.daemon",
@@ -94,7 +94,7 @@ _LEGACY = (
     ),
     _Legacy(
         "memory-indexer",
-        "services.memory_indexer.daemon",
+        "services.derived.memory_indexer.daemon",
         _GATEWAY,
         False,
         db_access="gateway",

@@ -10,7 +10,7 @@ tags:
 
 # Exec memory guard
 
-A runaway `execute_code` can grow until the operating system reclaims memory from a process of its own choosing, the agent host included. The guard (`services/agent_host/exec_memory_guard.py`) is the agent host's answer: relieve the pressure with the smallest possible kill, and say so.
+A runaway `execute_code` can grow until the operating system reclaims memory from a process of its own choosing, the agent host included. The guard (`services/agent_runner/agent_host/exec_memory_guard.py`) is the agent host's answer: relieve the pressure with the smallest possible kill, and say so.
 
 ## Mechanism
 

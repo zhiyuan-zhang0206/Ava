@@ -5,7 +5,7 @@ A `show()` page (no `serve_dir`) ran its server inside the agent's own process, 
 dead server cannot be rebuilt: the row is closed and the agent is told once to
 re-show it. Two passes do this, one async inside the agent (boot and heartbeat,
 `agent/startup/_page_reconcile.py`) and one synchronous in the page-server service
-(`services/page_server/dead_pages.py`); they differ only in the connection they
+(`services/agent_runner/page_server/dead_pages.py`); they differ only in the connection they
 use, so the wording, the dedupe window and the SQL live here.
 """
 

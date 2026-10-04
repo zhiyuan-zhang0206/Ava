@@ -36,7 +36,7 @@ venv and the user present:
 ```
 
 - Every trigger is a child process spawned through the helper
-  (`services.permissions_helper.client.spawn_process`), so tccd attributes the
+  (`services.desktop.permissions_helper.client.spawn_process`), so tccd attributes the
   request to `com.ava.permissions-helper`. The inventory probe uses the same
   helper-spawned `TCCAccessPreflight` pattern as
   `scripts/tcc-verify-spawn-chain.sh`: zero dialogs, repeatable.
@@ -109,7 +109,7 @@ are never attempted, by decision.
   first (same signing identity), then run this tool.
 - **AppleEvents rows need the helper's AppleEvents entitlement.** The helper
   is signed with `com.apple.security.automation.apple-events` (input:
-  `services/permissions_helper/helper/helper.entitlements`), and only then
+  `services/desktop/permissions_helper/helper/helper.entitlements`), and only then
   can tccd build an attribution chain for the spawned `osascript` child:
   each target reaches a normal Automation dialog, one at a time. Without it
   the request dies silently (`-1712` / `-609`) -- if the rows never prompt,

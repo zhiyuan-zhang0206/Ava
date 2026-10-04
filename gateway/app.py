@@ -183,7 +183,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     handed off to the kernel.
 
     The agent host handles native lifecycle work. Auto label generation
-    runs in the separate services/labeler daemon.
+    runs in the separate services/derived/labeler daemon.
     """
     model_catalog()  # load the provider plugins now: a broken provider setup fails the boot
 

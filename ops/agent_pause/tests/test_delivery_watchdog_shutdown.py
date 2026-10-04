@@ -32,7 +32,7 @@ def test_sigterm_bounded_exit_with_wedged_executor(tmp_path: Path) -> None:
     # assert the relationship, not just the number.
     assert EXIT_BOUND_S + KILL_SLACK_S < PAUSE_TIMEOUT_SECONDS / 5
     child = spawn_child(
-        tmp_path, module="services.delivery_watchdog.daemon", label="delivery_watchdog"
+        tmp_path, module="services.wake.delivery_watchdog.daemon", label="delivery_watchdog"
     )
     try:
         child.terminate()

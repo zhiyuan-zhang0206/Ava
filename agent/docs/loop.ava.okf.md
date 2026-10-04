@@ -7,7 +7,7 @@ tags: []
 
 # Agent Turn Loop
 
-`services/agent_host/daemon.py` owns the process; `AgentHost` owns local agent
+`services/agent_runner/agent_host/daemon.py` owns the process; `AgentHost` owns local agent
 turns. `TurnScheduler` serializes each agent while allowing bounded concurrency
 between agents. A wake with no work creates no model call; idle ends the task.
 
@@ -86,11 +86,11 @@ admission superseded it. Successful admission stamps `admitted` in the same
 transaction as the owner/lease update. These observations explain an unstarted
 turn; they do not change wake, claim, or recovery behavior.
 
-- `services/agent_host/daemon.py:run` — host startup, health and ownership renewal
-- `services/agent_host/dispatcher.py:TurnScheduler` — wake scheduling and single-flight
-- `services/agent_host/host.py:AgentHost.run_turn` — admission and settlement
-- `services/agent_host/stall_guard.py:run_invocation_with_stall_guard` — shared invocation guard
-- `services/agent_host/db_recovery.py:recover_database` — retain and recover an interrupted turn
+- `services/agent_runner/agent_host/daemon.py:run` — host startup, health and ownership renewal
+- `services/agent_runner/agent_host/dispatcher.py:TurnScheduler` — wake scheduling and single-flight
+- `services/agent_runner/agent_host/host.py:AgentHost.run_turn` — admission and settlement
+- `services/agent_runner/agent_host/stall_guard.py:run_invocation_with_stall_guard` — shared invocation guard
+- `services/agent_runner/agent_host/db_recovery.py:recover_database` — retain and recover an interrupted turn
 
 ## Related contracts
 

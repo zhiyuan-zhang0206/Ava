@@ -12,7 +12,7 @@ tags:
 
 ## What it is
 
-`base/sessions/backend.py` is the interface every long-running named session goes through. It unifies **posixproc** (`base/sessions/posixproc.py`, native service sessions), the macOS permissions-helper backend, and the **pty-sessions service** (`services/pty_sessions/`, client in `base/sessions/pty/`) behind one protocol. The `SessionBackend` surface: `has_session` / `new_session` / `kill_session` / `list_sessions`, plus optional `session_started_at` and its bulk counterpart `session_started_ats` (uptime; the base bulk implementation falls back to individual reads, and a backend without a timestamp source answers None so consumers render no uptime), and `session_log_path` (the file this backend redirects output to). PTY-only ops (`send` / `send_keys` / `capture_pane`) raise `NotImplementedError` on backends without a terminal.
+`base/sessions/backend.py` is the interface every long-running named session goes through. It unifies **posixproc** (`base/sessions/posixproc.py`, native service sessions), the macOS permissions-helper backend, and the **pty-sessions service** (`services/agent_runner/pty_sessions/`, client in `base/sessions/pty/`) behind one protocol. The `SessionBackend` surface: `has_session` / `new_session` / `kill_session` / `list_sessions`, plus optional `session_started_at` and its bulk counterpart `session_started_ats` (uptime; the base bulk implementation falls back to individual reads, and a backend without a timestamp source answers None so consumers render no uptime), and `session_log_path` (the file this backend redirects output to). PTY-only ops (`send` / `send_keys` / `capture_pane`) raise `NotImplementedError` on backends without a terminal.
 
 Three entry points, three session classes:
 
@@ -48,7 +48,7 @@ and off-box reachability attribution (issue #949):
 
 - `base/sessions/backend.py:get_backend()` / `get_shell_backend()` / `native_proc()` — the three dispatch points
 - `base/sessions/posixproc.py` — the native supervisor (agent processes + services)
-- `base/sessions/pty/` — the client of the pty-sessions service (`services/pty_sessions/`), which holds agent shells
+- `base/sessions/pty/` — the client of the pty-sessions service (`services/agent_runner/pty_sessions/`), which holds agent shells
 - `base/sessions/record.py:SessionRecord` — single shape for persisted background session records (`.read()`/`.write()`)
 - `base/sessions/env_forwarding.py` — env forwarding shared by both POSIX backends
 

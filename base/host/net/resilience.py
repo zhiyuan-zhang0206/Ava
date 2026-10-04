@@ -109,7 +109,7 @@ def _agent_phase(span: float) -> float:
     keeps its own phase across restarts; falls back to the pid for
     non-agent processes (gateway daemons, CLI); 0 when neither is available
     (tests). Same de-phasing idea as agent/graph/_build.py's
-    ``_retry_phase_jitter`` and services/heartbeat/daemon.py's due-time
+    ``_retry_phase_jitter`` and services/wake/heartbeat/daemon.py's due-time
     jitter: correlated failures hit the whole fleet at once, and an
     identical retry schedule would make every process retry at the same
     instants.

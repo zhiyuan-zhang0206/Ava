@@ -12,7 +12,7 @@ from base.cluster.dataplane.walg_binary import ensure_walg_binary
 from base.config import settings
 from base.host.private_storage import ensure_private_dir
 from cli.commands.converge.spec import ConvergeCtx
-from services.gateway_side.walg import config as walg_config
+from services.backup.walg import config as walg_config
 
 
 def converge_walg(ctx: ConvergeCtx) -> None:

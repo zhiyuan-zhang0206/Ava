@@ -92,7 +92,7 @@ class RootUnitNotRevivable(TypedDict):
 
 
 class RootDiagnostic(TypedDict):
-    """`root_diagnostic` payload — services/ava_root_glue/diagnostics.py.
+    """`root_diagnostic` payload — services/supervision/ava_root_glue/diagnostics.py.
 
     One row per non-alive diagnostic sample (WARNING, every sample while the
     condition persists) and one on recovery (INFO). ``diagnostic`` names the
@@ -107,7 +107,7 @@ class RootDiagnostic(TypedDict):
 
 
 class ScheduleStalled(TypedDict):
-    """`schedule_stalled` payload — services/schedule_manager/manager.py.
+    """`schedule_stalled` payload — services/wake/schedule_manager/manager.py.
 
     Emitted once after an enabled, non-completed schedule has had no live
     session for more than two hours. A live observation rearms a later outage.
@@ -291,7 +291,7 @@ EVENTS: dict[str, EventSpec] = {
         "enabled non-completed schedule has had no live session for more than two hours",
         payload=ScheduleStalled,
         tier="anomaly",
-        site=("services/schedule_manager/manager.py:_report_stalled_schedules telemetry.emit"),
+        site=("services/wake/schedule_manager/manager.py:_report_stalled_schedules telemetry.emit"),
     ),
     "root_health_expected": telemetry_event(
         "root_health_expected",
@@ -317,7 +317,7 @@ EVENTS: dict[str, EventSpec] = {
         "backup operation quarantined, blocked on unproven closure, or retired",
         payload=BackupOperationCustody,
         tier="anomaly",
-        site=("services/backup_scheduler/operation/custody.py:report (positional emit)"),
+        site=("services/backup/scheduler/operation/custody.py:report (positional emit)"),
     ),
     "postgres_stop_escalated": telemetry_event(
         "postgres_stop_escalated",
@@ -335,7 +335,7 @@ EVENTS: dict[str, EventSpec] = {
         "scheduled logical restore drill failed",
         payload=RecoveryDrillFailed,
         tier="anomaly",
-        site=("services/backup_scheduler/daemon.py:_run_due_local_dump_restore (positional emit)"),
+        site=("services/backup/scheduler/daemon.py:_run_due_local_dump_restore (positional emit)"),
     ),
     "health_probe_failing": telemetry_event(
         "health_probe_failing",
@@ -371,7 +371,7 @@ EVENTS: dict[str, EventSpec] = {
         tier="anomaly",
         doc="the TTL reaper's scan found lifecycle command(s) sitting at done while agents_meta.lifecycle_command_id still pointed at them (an out-of-band torn write, task #3678) — every resurrect of the named agent(s) defers until settled; attributes carry count and samples",
         site=(
-            "services/ttl_reaper/lifecycle_fences.py:_scan_torn_lifecycle_pointers_blocking "
+            "services/upkeep/ttl_reaper/lifecycle_fences.py:_scan_torn_lifecycle_pointers_blocking "
             "(positional emit)"
         ),
     ),
@@ -381,7 +381,7 @@ EVENTS: dict[str, EventSpec] = {
         tier="observation",
         doc="the TTL reaper settled applied-but-unobserved force-terminate command(s) whose agent's home machine is absent from the machines registry (a decommissioned machine never runs the boot recovery that would observe its fences, task #4143); attributes carry count and samples",
         site=(
-            "services/ttl_reaper/lifecycle_fences.py:settle_absent_machine_fences (positional emit)"
+            "services/upkeep/ttl_reaper/lifecycle_fences.py:settle_absent_machine_fences (positional emit)"
         ),
     ),
 }

@@ -8,7 +8,7 @@ from base.events.vocabulary import EventSpec, telemetry_event
 
 
 class DeliveryStalled(TypedDict):
-    """`delivery_stalled` payload — services/delivery_watchdog/daemon.py."""
+    """`delivery_stalled` payload — services/wake/delivery_watchdog/daemon.py."""
 
     inbound_id: int
     age_s: float
@@ -32,7 +32,7 @@ class DeliveryWakeSuppressed(TypedDict):
 
 
 class DeliveryRecoveryDecision(TypedDict):
-    """`delivery_recovery_decision` payload — services/delivery_watchdog/daemon.py.
+    """`delivery_recovery_decision` payload — services/wake/delivery_watchdog/daemon.py.
 
     One decision the delivery watchdog obtained for a stalled chat whose owner
     is a crash-marked idling corpse (task #3618): `decision` is the home
@@ -77,7 +77,7 @@ EVENTS: dict[str, EventSpec] = {
         "delivery backlog",
         payload=DeliveryStalled,
         tier="anomaly",
-        site="services/delivery_watchdog/daemon.py:_alert_stalled",
+        site="services/wake/delivery_watchdog/daemon.py:_alert_stalled",
         persist=True,
     ),
     "delivery_poisoned": telemetry_event(
@@ -85,21 +85,21 @@ EVENTS: dict[str, EventSpec] = {
         "delivery backlog — permanently-failing inbound poisoned (dispatch cap reached)",
         payload=DeliveryPoisoned,
         tier="anomaly",
-        site="services/delivery_watchdog/dispatch_guard.py:_alert_poisoned",
+        site="services/wake/delivery_watchdog/dispatch_guard.py:_alert_poisoned",
     ),
     "delivery_wake_suppressed": telemetry_event(
         "delivery_wake_suppressed",
         "automatic delivery wakes suppressed after repeated resurrection failures",
         payload=DeliveryWakeSuppressed,
         tier="anomaly",
-        site="services/delivery_watchdog/resurrect_guard.py:_alert_wake_suppressed",
+        site="services/wake/delivery_watchdog/resurrect_guard.py:_alert_wake_suppressed",
     ),
     "delivery_recovery_decision": telemetry_event(
         "delivery_recovery_decision",
         "stalled crash-marked recovery decision (harvest / refusal)",
         payload=DeliveryRecoveryDecision,
         tier="anomaly",
-        site="services/delivery_watchdog/stall_recovery.py:_request_harvest",
+        site="services/wake/delivery_watchdog/stall_recovery.py:_request_harvest",
     ),
     "delivery_outbox_flushed": telemetry_event(
         "delivery_outbox_flushed",

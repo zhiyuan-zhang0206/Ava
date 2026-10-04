@@ -61,7 +61,7 @@ _VENV_DIRS = (
     '-o -path ".venv/lib/python*/site-packages/ava-*.dist-info" \\) -exec chmod u+w {} +'
 )
 _LOCKS = ("uv.lock", "ui/web/package-lock.json", ".python-version")
-_WATCHED = ("migrations/", "services/permissions_helper/helper", *_LOCKS)
+_WATCHED = ("migrations/", "services/desktop/permissions_helper/helper", *_LOCKS)
 _SECRET_NAME = r"\w*(?:secret|password|token|api_key|capability_key)\w*"  # noqa: S105
 _SECRETS = (
     (re.compile(r"(?i)(\bbearer\s+)[^\s\"',;]+"), r"\1<redacted>"),

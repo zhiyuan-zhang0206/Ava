@@ -150,7 +150,7 @@ above relies on.
     opt-in `AVA_BROWSER_ENABLED`); agents reached it through an ordinary per-agent
     `chrome-devtools-mcp` (stdio) attaching via `--browserUrl`. So "machine scope"
     reduced to the existing long-running-session + converge primitives, not a new
-    daemon. See `services/browser/daemon.py` + `cli/commands/_repo.py` (`browser`) +
+    daemon. See `services/desktop/browser/daemon.py` + `cli/commands/_repo.py` (`browser`) +
     `cli/commands/converge/host.py:_ensure_browser` (writes/removes the attach plugin
     `$AVA_HOME/plugins/ava_chrome/.mcp.json` gated on `AVA_BROWSER_ENABLED`, so the
     MCP is contributed only where the browser runs).
@@ -158,9 +158,9 @@ above relies on.
     had to be shared too, and that forced a hand-built machine-level daemon.**
     `chrome-devtools-mcp`'s collectors subscribe to the whole browser's targets, so
     N per-agent upstreams each buffered every tab's network/console traffic — an
-    N-fold duplication that dominated agent-runner memory. `services/browser/
+    N-fold duplication that dominated agent-runner memory. `services/desktop/browser/
     mcp_daemon.py` is now a per-machine shared upstream multiplexed over a Unix
-    socket to each agent's bridge (`services/browser/mcp_wrapper.py`), with two
+    socket to each agent's bridge (`services/desktop/browser/mcp_wrapper.py`), with two
     invariants making one upstream safe for many clients: a single lock serializing
     every upstream interaction (one browser op at a time, machine-wide), and
     per-connection page affinity (each connection tracks its own current page and
@@ -180,7 +180,7 @@ above relies on.
     shared MCP daemon (`ava/mcps/_daemon.py`, ops roster session "mcp-daemon",
     per-connection session isolation) plus a `"shared"` server spec. Chrome's
     per-agent bridge process is gone (the wrapper module itself still exists at
-    `services/browser/mcp_wrapper.py` and remains the command chrome's `.mcp.json`
+    `services/desktop/browser/mcp_wrapper.py` and remains the command chrome's `.mcp.json`
     declares): the daemon dials
     the browser-mcp service's line protocol in-process (`ava/mcps/_browser.py`),
     keeping per-connection page affinity because each connection owns its socket.

@@ -1,7 +1,7 @@
 """base.host.system.probes — the single source of truth for the host's Chrome
 binary resolution, display detection, and AF_UNIX availability. These pure
 probes are patched-against here (monkeypatching the module's sys / socket /
-Path / shutil / settings) and consumed by services.browser.daemon,
+Path / shutil / settings) and consumed by services.desktop.browser.daemon,
 ava.mcp_config, ops.spec, and base.host.config_validators.
 """
 

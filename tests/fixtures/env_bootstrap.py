@@ -307,7 +307,7 @@ os.environ["AVA_TELEGRAM_OWNER_ID"] = "0"
 os.environ["AVA_PERMISSIONS_HELPER_SPAWN"] = "false"
 # The spawn-attribution marker rides a second channel the pin above cannot
 # close: the signed helper stamps AVA_PERMISSIONS_HELPER_PID (its own pid)
-# into every direct child (services/permissions_helper/helper/main.swift),
+# into every direct child (services/desktop/permissions_helper/helper/main.swift),
 # descendants inherit it, and base/helper_chain_guard.parent_chain_intact
 # treats a marked process whose ancestor chain lacks the helper as an
 # orphaned child — the agent-host heartbeat then self-terminates with os._exit(70),

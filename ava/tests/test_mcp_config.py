@@ -161,13 +161,13 @@ def test_builtin_mcps_folder_surfaces_chrome(
     monkeypatch.setattr(cfg_mod, "_plugin_config_paths", list)
     merged = cfg_mod.load_mcp_config()
     assert "chrome" in merged
-    # chrome is served through our per-agent bridge (services.browser.mcp_wrapper),
+    # chrome is served through our per-agent bridge (services.desktop.browser.mcp_wrapper),
     # which dials the shared chrome MCP daemon's socket (no args: the socket + CDP
     # port are derived from settings). The interpreter is launched directly by a
     # relative path — never `uv run`, which would hang a resident wrapper process
     # on every agent; it resolves because built-ins are spawned with cwd=repo root.
     assert merged["chrome"]["command"] == ".venv/bin/python"
-    assert "services.browser.mcp_wrapper" in merged["chrome"]["args"]
+    assert "services.desktop.browser.mcp_wrapper" in merged["chrome"]["args"]
     # unix_socket alongside display: the wrapper reaches the browser-mcp daemon
     # over an AF_UNIX socket, so a Windows agent must not be offered this entry —
     # it is gated on the same fact that keeps the daemon out of that host's roster.
@@ -489,5 +489,5 @@ def test_builtin_mcps_folder_surfaces_computer_use(
     assert "computer_use" in merged
     assert merged["computer_use"]["shared"] == "computer_use"
     assert merged["computer_use"]["command"] == ".venv/bin/python"
-    assert "services.computer.mcp_wrapper" in merged["computer_use"]["args"]
+    assert "services.desktop.computer.mcp_wrapper" in merged["computer_use"]["args"]
     assert merged["computer_use"]["requires"] == {"display": True, "unix_socket": True}

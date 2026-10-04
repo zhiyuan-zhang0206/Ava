@@ -331,7 +331,7 @@ class PtySessionBackend(SessionBackend):
     """POSIX backend for agent interactive shells / watchers — what
     ``get_shell_backend()`` returns on POSIX. Each session is an interactive
     login shell (``bash -l -i``, the classic pane shape) held by the machine's
-    pty-sessions service (``services.pty_sessions``), a roster service, so a
+    pty-sessions service (``services.agent_runner.pty_sessions``), a roster service, so a
     session persists across agent exits and agent-host restarts, and a service
     stop closes it. ``cmd`` is submitted after the shell is ready;
     ``login_shell=False`` raises ``NotImplementedError``. The shell's environment

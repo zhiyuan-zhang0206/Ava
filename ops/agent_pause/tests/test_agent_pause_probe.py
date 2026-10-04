@@ -119,7 +119,10 @@ def test_host_running_retries_the_scan_once_past_a_leaked_permission_error(
 
     class _UnrecordedHost:
         def __init__(self) -> None:
-            self.info = {"pid": 4242, "cmdline": ["python", "-m", "services.agent_host.daemon"]}
+            self.info = {
+                "pid": 4242,
+                "cmdline": ["python", "-m", "services.agent_runner.agent_host.daemon"],
+            }
 
         def environ(self) -> dict[str, str]:
             return {"AVA_HOME": str(tmp_path)}
@@ -172,7 +175,10 @@ def test_host_running_retries_the_scan_once_past_a_leaked_system_error(
 
     class _UnrecordedHost:
         def __init__(self) -> None:
-            self.info = {"pid": 4242, "cmdline": ["python", "-m", "services.agent_host.daemon"]}
+            self.info = {
+                "pid": 4242,
+                "cmdline": ["python", "-m", "services.agent_runner.agent_host.daemon"],
+            }
 
         def environ(self) -> dict[str, str]:
             return {"AVA_HOME": str(tmp_path)}

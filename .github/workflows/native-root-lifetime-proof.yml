@@ -7,8 +7,8 @@ on:
       - 'base/host/system/boot_unit.py'
       - 'cli/commands/lifecycle/root_driver.py'
       - 'cli/commands/lifecycle/start.py'
-      - 'services/ava_root/**'
-      - 'services/ava_root_glue/**'
+      - 'services/supervision/ava_root/**'
+      - 'services/supervision/ava_root_glue/**'
       - 'base/native_process/ownership.py'
       - 'base/sessions/backend.py'
       - 'base/native_process/root_control/**'
@@ -16,7 +16,7 @@ on:
       - 'cli/commands/lifecycle/service_stop.py'
       - 'cli/commands/lifecycle/stop.py'
       - 'tests/lifecycle/native_root/**'
-      - 'services/ava_root/tests/test_ava_root_daemon.py'
+      - 'services/supervision/ava_root/tests/test_ava_root_daemon.py'
       - 'conftest.py'
       - 'tests/fixtures/*.py'
       - 'tests/_*.py'
@@ -47,7 +47,7 @@ jobs:
           sudo -n true
           systemctl --version
       - name: Root lifetime and independent data sibling
-        run: uv run pytest --noconftest services/ava_root/tests/test_ava_root_daemon.py::test_native_systemd_root_lifetime -q --junitxml=root-lifetime.xml
+        run: uv run pytest --noconftest services/supervision/ava_root/tests/test_ava_root_daemon.py::test_native_systemd_root_lifetime -q --junitxml=root-lifetime.xml
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: always()
         with:

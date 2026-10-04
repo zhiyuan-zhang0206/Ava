@@ -5,7 +5,7 @@ a validated all-or-nothing override write. One of the op clusters beside
 `ops.lifecycle`, `ops.cluster`, `ops.inventory` and `ops.uploads`; each cluster
 is self-contained.
 
-Dispatched by the agent-runner ops server (`services/agent_ops/daemon.py`) and
+Dispatched by the agent-runner ops server (`services/agent_runner/agent_ops/daemon.py`) and
 called by the gateway config router. `SENSITIVE_MASK` is re-imported by the
 router to render masked fields consistently.
 """

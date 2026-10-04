@@ -30,7 +30,7 @@ so a notice written twice is delivered once.
 
 A pty-sessions service that died uncleanly (a crash, a SIGKILL, a reboot)
 closes its sessions to no one, so the next service start sweeps its ledger
-(`services.pty_sessions.ledger.sweep`) and hands the busy sessions it closed to
+(`services.agent_runner.pty_sessions.ledger.sweep`) and hands the busy sessions it closed to
 a one-shot child, ``python -m ops.pty_close_notices``, which writes their
 notices under `CRASH_REASON` with this module's `main`. The service itself
 stays database-free; the child is profile-less, so it dials as an operator

@@ -36,7 +36,7 @@ Gateway's idle agent check scheduler — every `AVA_HEARTBEAT_INTERVAL_SECONDS` 
 - [[loop.ava.okf.md]] — after receiving a heartbeat, the agent appends a system note and decides to continue working / wait / terminate
 
 ## Entry Points
-- `services/heartbeat/daemon.py` — `.venv/bin/python -m services.heartbeat.daemon`
+- `services/wake/heartbeat/daemon.py` — `.venv/bin/python -m services.wake.heartbeat.daemon`
 - The application root supervises the daemon through the roster's `/healthz` identity probe (`ops/roster/healthz.py`).
 
 ## Notes

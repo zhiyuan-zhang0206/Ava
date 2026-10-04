@@ -13,7 +13,7 @@ the decision, and reports a final matrix.
 
 Mechanics:
 - Every trigger is a child process spawned through the permissions helper
-  (services.permissions_helper.client.spawn_process), so tccd attributes the
+  (services.desktop.permissions_helper.client.spawn_process), so tccd attributes the
   request to com.ava.permissions-helper -- the identity the grant must land
   on. The inventory probe reuses the helper-spawned preflight pattern of
   scripts/tcc-verify-spawn-chain.sh (zero dialogs, repeatable).
@@ -293,7 +293,7 @@ def fill_request_error(
 
 def helper_client() -> Any:
     try:
-        from services.permissions_helper import client
+        from services.desktop.permissions_helper import client
     except ImportError as exc:
         raise OnboardError(
             "run this script with the repository venv "

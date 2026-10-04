@@ -7,7 +7,7 @@ the op clusters beside `ops.lifecycle`, `ops.cluster`, `ops.host_config` and
 
 Plugins + MCP servers are an agent-runner-only concern — a gateway runs no
 agent, so every op here asserts the agent-runner capability and fails loud on a
-gateway. Dispatched by the agent-runner ops server (`services/agent_ops/daemon.py`).
+gateway. Dispatched by the agent-runner ops server (`services/agent_runner/agent_ops/daemon.py`).
 """
 
 from __future__ import annotations

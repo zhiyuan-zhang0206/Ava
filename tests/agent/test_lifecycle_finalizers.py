@@ -10,7 +10,7 @@ from base.config import settings
 from base.db import Database, insert_inbound_message
 from base.events.live.bus import EventBus
 from base.native_process.turn_identity import bind_turn_identity
-from services.delivery_watchdog.daemon import dead_letter_stale_claimed
+from services.wake.delivery_watchdog.daemon import dead_letter_stale_claimed
 
 
 async def test_generic_dead_letter_leaves_fixed_command_claimed(

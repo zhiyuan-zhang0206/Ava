@@ -8,7 +8,7 @@ tags:
 
 # Agent Model Tokens Total
 
-`services/events_maintenance/token_totals.py`. A day of `agent_model_tokens_daily` stays open to
+`services/upkeep/events_maintenance/token_totals.py`. A day of `agent_model_tokens_daily` stays open to
 recomputation for `RECOMPUTE_DAYS` after it closes. Once a day is `FOLD_AFTER_DAYS` (ten) behind
 today it can no longer change, so each hourly pass (`fold_totals`, right after the rollup) adds the
 newly settled days into `agent_model_tokens_total` (every ledger column, per agent and model) and moves the watermark in
@@ -23,5 +23,5 @@ Both do work that does not grow with history. The inspector's metrics read per-d
 agent below a fixed cutover date, so it needs neither.
 
 Re-rolling days at or before the watermark (a backfill of old history) leaves the totals behind:
-`python -m services.events_maintenance.rollup --from ... --to ...` rebuilds them (`rebuild_totals`)
+`python -m services.upkeep.events_maintenance.rollup --from ... --to ...` rebuilds them (`rebuild_totals`)
 whenever its range reaches the watermark.

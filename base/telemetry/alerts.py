@@ -435,7 +435,7 @@ def notify_text(alert: dict[str, Any], lang: str | None = None) -> str:
 
     Templates live in ``base/telemetry/alerts_copy.py`` — the single source of
     user-visible IM copy (governance ruling 2026-08-08; moved down from
-    services/im_bridge/copy.py by the 2026-08-25 tech-audit P1 so shared does
+    services/entrypoints/im_bridge/copy.py by the 2026-08-25 tech-audit P1 so shared does
     not import up into services). ``lang`` picks the template language
     ("zh" | "en"); ``None`` (or an unknown value) falls back to
     ``ALERT_LANGUAGE_DEFAULT`` ("zh", user ruling 2026-08-13). Alert

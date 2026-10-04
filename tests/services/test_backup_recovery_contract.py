@@ -21,7 +21,7 @@ def _module_docstring(path: Path) -> str:
 def test_conversation_recovery_sources_are_checkpoint_tables_not_events_archive() -> None:
     """Checkpoint tables are the backed-up write and recovery source; the PG
     events archive was dropped (task #1823) and Loki owns the live stream."""
-    backup_path = _ROOT / "services" / "backup.py"
+    backup_path = _ROOT / "services" / "backup" / "dump.py"
     checkpoint_path = _ROOT / "base" / "agents" / "history" / "checkpoint.py"
     schema_path = _ROOT / "db" / "schema.sql"
 

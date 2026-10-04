@@ -89,7 +89,7 @@ def _parameter_lists() -> dict[str, set[str]]:
     from base.telemetry.metrics import aggregate_sql
     from gateway.lgtm import telemetry_staleness
     from gateway.run_timeline import router as run_timeline
-    from services.events_maintenance import observed_metrics
+    from services.upkeep.events_maintenance import observed_metrics
 
     return {
         "aggregate_sql.EXEC_FAILURE_EVENTS": set(aggregate_sql.EXEC_FAILURE_EVENTS),

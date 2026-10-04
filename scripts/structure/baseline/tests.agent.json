@@ -1,7 +1,7 @@
 {
   "patch_targets": {
-    "tests/agent/test_maintenance.py::services.agent_host.host.AgentHost._drive_turns": 1,
-    "tests/agent/test_maintenance.py::services.agent_host.host.AgentHost._runtime_for": 1,
+    "tests/agent/test_maintenance.py::services.agent_runner.agent_host.host.AgentHost._drive_turns": 1,
+    "tests/agent/test_maintenance.py::services.agent_runner.agent_host.host.AgentHost._runtime_for": 1,
     "tests/agent/test_maintenance_lifecycle_wait.py::ops.agent_pause._LIFECYCLE_WAIT_POLL_SECONDS": 3
   }
 }
