@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import datetime
 import hashlib
 import logging
@@ -90,6 +91,7 @@ def _agent_id() -> int:
 
 _SCRIPT_FILE_RE = _re.compile(r"^watcher_(\d+)\.py$")
 _BOOT_FILE_RE = _re.compile(r"^watcher_(\d+)_boot\.py$")
+_LAUNCH_FILE_RE = _re.compile(r"^watcher_(\d+)_launch\.sh$")
 
 
 def _prune_stale_watcher_files(keep: _pl.Path) -> None:
@@ -121,18 +123,15 @@ def _prune_stale_watcher_files(keep: _pl.Path) -> None:
             "[watcher] listing live sessions failed; skipping the prune of stale watcher files",
             exc_info=True,
         )
-        alive = None  # conservative: no session info, no pruning
+        return  # conservative: no session info, no pruning
     d = keep.parent
-    for pat, exclude in ((_SCRIPT_FILE_RE, _BOOT_FILE_RE), (_BOOT_FILE_RE, _SCRIPT_FILE_RE)):
+    for pat in (_SCRIPT_FILE_RE, _BOOT_FILE_RE, _LAUNCH_FILE_RE):
         for f in d.iterdir():
             if f == keep or not pat.match(f.name):
                 continue
-            if exclude.match(f.name):
-                continue
-            if alive is not None:
-                m = pat.match(f.name)
-                if m and int(m.group(1)) in alive:
-                    continue  # that watcher's session still exists — possibly still launching
+            m = pat.match(f.name)
+            if m and int(m.group(1)) in alive:
+                continue  # that watcher's session still exists — possibly still launching
             f.unlink(missing_ok=True)
 
 
@@ -311,8 +310,9 @@ def _spawn(
     with the same expression/timezone, say) does not replace anything — it
     simply starts another independent session; nothing dedupes.
 
-    The session runs two files: the agent's script (written verbatim) and a
-    generated bootstrap that inlines the agent identity, arms the optional
+    The session sources a generated shell launcher, which runs the agent's
+    script (written verbatim) and a generated bootstrap that inlines the agent
+    identity, arms the optional
     watchdog and runs the script via runpy — so the command line typed into
     the session stays short and readable. Identity is inlined because the
     session env allowlist does not forward ``AVA_AGENT_ID`` (Task #856 /
@@ -386,14 +386,24 @@ def _spawn(
         keep=False,
         notify=notify,
     )
+    # A fresh PTY may still be in canonical mode while the login shell reads
+    # its profile. That input buffer can truncate a long line before readline
+    # takes over (macOS: observed at 1024 bytes). Keep repeated absolute paths
+    # and the notification pipeline on disk, not in the terminal input stream.
+    # Source in the SAME shell: PIPESTATUS, session exit and the Python child's
+    # orphan-guard parent retain their existing semantics.
+    launch_path = script_path.with_name(f"watcher_{session_id}_launch.sh")
     try:
-        _sessions.send(session_id, line)
+        launch_line = background.write_launch_file(line, launch_path)
+        _sessions.send(session_id, launch_line)
     except Exception:
         # A session whose launch command never sent is not a watcher — it is
         # an idle login shell sitting under the watcher's name until its TTL
         # (up to 7 days for a default cron). Kill it now rather than leaking
         # it; there is no registry row to compensate for any more, but the
         # session itself still must not linger.
+        with contextlib.suppress(OSError):
+            launch_path.unlink(missing_ok=True)
         logger.error(
             "[watcher] failed to start session %s — killing it",
             session_id,

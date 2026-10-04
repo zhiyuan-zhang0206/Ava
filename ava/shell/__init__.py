@@ -3,6 +3,7 @@ and persistent sessions."""
 
 __all_for_ava__ = ["run", "run_background", "sessions"]
 
+import contextlib
 import os
 import subprocess
 from pathlib import Path
@@ -11,6 +12,7 @@ from typing import NamedTuple
 from ava import agent_identity
 from ava.sdk_surface.validation import coerce_str, coerce_typed
 from ava.security import scan_content
+from base.log import logger
 from base.native_process.os_platform import CREATE_NO_WINDOW
 from base.paths import workspace_dir
 
@@ -166,5 +168,20 @@ def run_background(
         keep=keep,
         notify=notify,
     )
-    sessions.send(session_id, line)
+    launch_path = output_path.with_suffix(".sh")
+    try:
+        launch_line = background.write_launch_file(line, launch_path)
+        sessions.send(session_id, launch_line)
+    except Exception:
+        with contextlib.suppress(OSError):
+            launch_path.unlink(missing_ok=True)
+        try:
+            sessions.kill(session_id)
+        except Exception:
+            logger.opt(exception=True).warning(
+                "killing background session {} after its failed start also failed; "
+                "it stays until its TTL expires",
+                session_id,
+            )
+        raise
     return BackgroundRun(session_id=session_id, output_path=str(output_path))

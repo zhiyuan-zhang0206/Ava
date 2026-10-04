@@ -5,6 +5,8 @@ The e2e tests run through a real pty-sessions service + real bash
 (`pty_service` fixture); POSIX-only, skip on Windows."""
 
 import os
+import shlex
+import sys
 import time
 from collections.abc import Callable
 from pathlib import Path
@@ -141,6 +143,8 @@ def test_allocate_output_path_never_evicts_live_session_log(
     base = time.time() - 3600
     live_log = d / "7_cron.log"  # the oldest file, owned by live session 7
     live_log.write_text("standing watcher")
+    live_launch = live_log.with_suffix(".sh")
+    live_launch.write_text("still needed")
     os.utime(live_log, (base - 100, base - 100))
     for i in range(background._OUTPUT_KEEP + 5):
         p = d / f"{100 + i}_seed.log"
@@ -149,6 +153,7 @@ def test_allocate_output_path_never_evicts_live_session_log(
     monkeypatch.setattr(_sessions, "list", lambda: {7: "cron"})  # pyright: ignore[reportUnknownArgumentType]
     background.allocate_output_path(999, "fresh")
     assert live_log.exists()
+    assert live_launch.exists()
 
 
 def test_allocate_output_path_prunes_ring() -> None:
@@ -163,6 +168,7 @@ def test_allocate_output_path_prunes_ring() -> None:
     for i in range(background._OUTPUT_KEEP + 5):
         p = d / f"{i}_seed.log"
         p.write_text("old")
+        p.with_suffix(".sh").write_text("not started")
         os.utime(p, (base + i, base + i))
     path = background.allocate_output_path(999, "fresh")
     assert path == d / "999_fresh.log"
@@ -170,6 +176,7 @@ def test_allocate_output_path_prunes_ring() -> None:
     remaining = list(d.glob("*.log"))
     assert len(remaining) <= background._OUTPUT_KEEP
     assert path in remaining  # the newest survives the prune
+    assert {p.stem for p in d.glob("*.sh")} <= {p.stem for p in remaining}
 
 
 # -- run_background ------------------------------------------------------------
@@ -204,7 +211,8 @@ def test_run_background_line_and_handle(monkeypatch: pytest.MonkeyPatch, tmp_pat
     handle = ava.shell.run_background("echo hi", name="test-bg", cwd=str(tmp_path), ttl=120)
     assert handle.session_id == 7
     assert Path(handle.output_path).exists()  # tailable immediately
-    cmd = captured["cmd"]
+    assert shlex.split(captured["cmd"]) == [".", str(Path(handle.output_path).with_suffix(".sh"))]
+    cmd = Path(handle.output_path).with_suffix(".sh").read_text().splitlines()[1]
     assert "( echo hi )" in cmd
     assert "2>&1 | tee" in cmd
     assert "_ec=${PIPESTATUS[0]}" in cmd
@@ -341,3 +349,57 @@ def test_run_background_keep_leaves_session(
         assert handle.session_id in ava.shell.sessions.list()
     finally:
         ava.shell.sessions.kill(handle.session_id)
+
+
+def test_background_long_paths_during_shell_startup(
+    _agent_row: int,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    unit_home: Path,
+) -> None:
+    (unit_home / ".bash_profile").write_text("sleep 1\n")
+    depth = 1 if sys.platform == "darwin" else 6
+    long_dir = tmp_path.joinpath(*("long-path-" + "a" * 180 for _ in range(depth)))
+    long_dir.mkdir(parents=True)
+    argv_file = long_dir / "argv.txt"
+    fake_cli = long_dir / "fake-ava"
+    fake_cli.write_text(f"#!/bin/sh\nprintf '%s\\n' \"$@\" > '{argv_file}'\n")
+    fake_cli.chmod(0o755)
+    monkeypatch.setattr(background, "cli_path", lambda: fake_cli)
+    monkeypatch.setattr(background, "output_dir", lambda: long_dir)
+    handle = ava.shell.run_background("echo long-bg; exit 3", name="test-long-bg", ttl=120)
+    _poll_until(argv_file.exists, 15)
+    assert argv_file.exists(), ava.shell.sessions.capture(handle.session_id, lines=30)
+    _assert_completion_notice_argv(argv_file.read_text().splitlines(), handle)
+    assert Path(handle.output_path).read_text().strip() == "long-bg"
+    _poll_until(lambda: handle.session_id not in ava.shell.sessions.list(), 10)
+    assert handle.session_id not in ava.shell.sessions.list()
+    assert not Path(handle.output_path).with_suffix(".sh").exists()
+
+
+@pytest.mark.parametrize("entry", ["watcher", "background"])
+def test_launcher_write_failure_disposes_session(
+    _agent_row: int,
+    monkeypatch: pytest.MonkeyPatch,
+    entry: str,
+) -> None:
+    created: list[int] = []
+    original_create = ava.shell.sessions.create_session
+
+    def capture_create(*args: Any, **kwargs: Any) -> tuple[int, str]:
+        result = original_create(*args, **kwargs)
+        created.append(result[0])
+        return result
+
+    def fail_write(_line: str, _path: Path) -> str:
+        raise OSError("carrier write failed")
+
+    monkeypatch.setattr(ava.shell.sessions, "create_session", capture_create)
+    monkeypatch.setattr(background, "write_launch_file", fail_write)
+    with pytest.raises(OSError, match="carrier write failed"):
+        if entry == "watcher":
+            ava.watcher.launch("pass", "1h", name="test-write-fail")
+        else:
+            ava.shell.run_background("true", name="test-write-fail", ttl=120)
+    assert len(created) == 1
+    assert created[0] not in ava.shell.sessions.list()

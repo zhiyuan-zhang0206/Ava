@@ -47,7 +47,8 @@ class TestShellEntries:
         run = _shell.run_background(("echo hi",), name=("bg",), ttl=60)  # pyright: ignore[reportArgumentType]
         assert run.session_id == 42
         assert created["name"] == "bg"
-        assert sent["line"] == "line"
+        assert sent["line"] == f". {tmp_path / '42.sh'}"
+        assert (tmp_path / "42.sh").read_text().endswith("\nline\n")
 
     def test_run_background_multi_element_name_type_errors(
         self, monkeypatch: pytest.MonkeyPatch
