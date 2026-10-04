@@ -107,6 +107,14 @@ are never attempted, by decision.
 - **A helper build without the nursery `spawn` wire method can not be
   onboarded.** Older builds answer `unknown method: spawn`; rebuild the helper
   first (same signing identity), then run this tool.
+- **AppleEvents rows need the helper's AppleEvents entitlement.** The helper
+  is signed with `com.apple.security.automation.apple-events` (input:
+  `services/permissions_helper/helper/helper.entitlements`), and only then
+  can tccd build an attribution chain for the spawned `osascript` child:
+  each target reaches a normal Automation dialog, one at a time. Without it
+  the request dies silently (`-1712` / `-609`) -- if the rows never prompt,
+  check the installed helper's entitlements (`codesign -d --entitlements :-`)
+  before blaming the row.
 - **Extended-group states are preflight-readable.** The five beyond-set
   services (SystemPolicyAppData, MediaLibrary + Photos, FileProviderDomain +
   Ubiquity, SystemPolicyAllFiles, DeveloperTool) answer `TCCAccessPreflight`
