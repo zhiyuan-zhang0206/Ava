@@ -110,8 +110,16 @@ the sweep is the tool for that. Recorded passes and residual classes:
   int:` + `parser = _parse()`); the incident's true blocks were all 3+ lines.
 - Change: minimum unit 2 -> 3 dead lines; the solo-line identifier bar
   12 -> 20 characters.
-- Pass 2 (after the change): numbers recorded in a follow-up commit before
-  the first enqueue.
+- Pass 2 (after the change, all 2024 commits of the window): 55 flagged
+  (2.7%); on the same first 850 commits pass 1 measured, 116 -> 35
+  (13.6% -> 4.1%). The solo-line path remains the dominant residual class
+  (93 of ~187 hits, concentrated in a few large refactor commits -
+  `raise GatewayApiBaseMissing(...)`, `ctypes.create_string_buffer(...)`);
+  the next candidate is raising that bar again or requiring a
+  corroborating line, left to real-world data.
+- Pass 2's largest flag is 3116eb0f "docs: restore the decision records
+  that described since-removed mechanisms" (66 hits): a deliberate
+  restoration - exactly the case the allowance line is for.
 - 2026-10-04, the check's own introduction: the skip table names the
   pre-2026-09-29 `shared/` locations; those literals are text the shared ->
   base move (9ae6105a6) had deleted. Under pass-1 thresholds the check
