@@ -130,16 +130,16 @@ def test_one_dropped_probe_keeps_the_last_status_and_its_age(no_dial: list[str])
 
 
 @pytest.mark.parametrize(
-    "snapshot",
-    [
-        _snap(reachable=False, failures=2, status=_status()),
-        _snap(reachable=False, failures=1, status=None),
-    ],
+    "failures, answered",
+    [(2, True), (1, False)],
     ids=["two-failed-passes", "failed-and-never-answered"],
 )
 def test_a_machine_that_failed_its_passes_renders_offline(
-    no_dial: list[str], snapshot: Snapshot
+    no_dial: list[str], failures: int, answered: bool
 ) -> None:
+    # Built here, not at collection: a snapshot is fresh only for a few pass intervals, and a
+    # long run reaches this test long after parametrization.
+    snapshot = _snap(reachable=False, failures=failures, status=_status() if answered else None)
     [machine] = _gather([_row()], {"wsl": snapshot})
 
     assert machine.online is False and machine.paused is None

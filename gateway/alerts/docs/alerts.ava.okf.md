@@ -25,7 +25,8 @@ reconciler:
 - `POST /api/alerts` — the webhook (Grafana embedded-Alertmanager contact
   point, `deploy/lgtm/config/grafana/provisioning/alerting/contact.yml`). Upserts each alert instance
   into `alerts`, publishes it on the SSE channel, and fans firing/recovery
-  IM notifications out via the im_bridge daemon — every severity pushes
+  IM notifications out via the im_bridge daemon, one message per rule and status in the POST
+  (a count plus the first instances' summaries; a lone instance keeps the single-alert format) — every severity pushes
   (critical/warning/error, no gate).
 - `GET /api/alerts` — the alert section's unresolved-first history list +
   unresolved count for the top-bar badge.

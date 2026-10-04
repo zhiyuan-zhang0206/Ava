@@ -66,3 +66,5 @@ this page, why did that not", and every new alert had to choose which layer to p
   message); accepted for the two conditions that matter when it is down.
 - The `alerts.source` column keeps its history values; only `grafana` is written now.
 - A `machine_probe.transition_since` column lost its last writer and is dropped by migration.
+
+Forward: the IM-count trade-off above was reversed the same day: [2026-10-04-one-im-per-alert-group](2026-10-04-one-im-per-alert-group.md).

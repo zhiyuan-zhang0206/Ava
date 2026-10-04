@@ -300,7 +300,7 @@ the telegram settings), because the webhook cannot report a down gateway.
 
 The ingest stores each alert instance in `alerts` (deduped by fingerprint x starts_at, Alertmanager
 webhook shape) and fans firing notifications out through the im_bridge daemon (the only sanctioned
-IM surface) — one alert instance = one row + one IM, every severity (critical/warning/error, no
+IM surface) — one alert instance = one row, one POST's instances of a rule = one IM (`xN`, the first three summaries), every severity (critical/warning/error, no
 gate beyond the rule's own `notify_im="false"`). It is the only writer of that table; no process
 writes alert rows, posts to the endpoint or pushes an alert to IM on its own
 (`tests/scripts/test_alert_single_path.py`).

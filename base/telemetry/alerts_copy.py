@@ -36,3 +36,10 @@ ALERT_TRIGGERED_AT = {
     "en": "triggered {time}",
 }
 ALERT_JUMP_LINK = "→ {url}/insights/alerts"
+# One webhook group (the instances of one rule) is one message: the head carries the count and
+# the body lists the first instances' summaries.
+ALERT_GROUP_COUNT = " ×{n}"  # noqa: RUF001 — the user-designated count mark
+ALERT_GROUP_MORE = {
+    "zh": "…另有 {n} 个",
+    "en": "… and {n} more",
+}

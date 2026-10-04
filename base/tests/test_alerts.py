@@ -218,3 +218,36 @@ def test_display_language_unknown_value_falls_back_to_zh(
         )
     db_conn.commit()
     assert display_language(db_conn) == "zh"
+
+
+# -- grouped message ---------------------------------------------------------
+
+
+def _instance(n: int, *, severity: str = "error", status: str = "firing") -> dict[str, Any]:
+    alert = _alert(status=status, severity=severity)
+    alert["annotations"] = {"summary": f"machine m{n} unreachable"}
+    alert["starts_at"] = f"2026-08-04T10:0{n}:00Z"
+    return alert
+
+
+def test_a_lone_instance_keeps_the_single_alert_format() -> None:
+    alert = _alert()
+    assert base_alerts.notify_group_text([alert], "en") == notify_text(alert, "en")
+
+
+def test_a_group_is_one_message_with_a_count_the_first_instances_and_the_rest_counted() -> None:
+    alerts = [_instance(n, severity="warning" if n else "critical") for n in range(5)]
+    text = base_alerts.notify_group_text(alerts, "en")
+    lines = text.splitlines()
+    assert lines[0] == _head("en", resolved=False, severity="CRITICAL") + " ×5"
+    assert lines[1:4] == [f"- machine m{n} unreachable" for n in range(3)]
+    assert lines[4] == copy.ALERT_GROUP_MORE["en"].format(n=2)
+    assert "m3" not in text and "m4" not in text
+    assert any(line.startswith(copy.ALERT_TRIGGERED_AT["en"].split("{")[0]) for line in lines)
+
+
+def test_a_resolved_group_swaps_the_head_and_a_small_group_has_no_remainder_line() -> None:
+    alerts = [_instance(n, status="resolved") for n in range(2)]
+    text = base_alerts.notify_group_text(alerts, "zh")
+    assert text.splitlines()[0] == _head("zh", resolved=True) + " ×2"
+    assert copy.ALERT_GROUP_MORE["zh"].split("{")[0] not in text

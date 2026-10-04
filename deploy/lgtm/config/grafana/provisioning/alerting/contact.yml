@@ -83,8 +83,8 @@ contactPoints:
 # - group_by [alertname]: every instance of one rule (one per machine / vendor /
 #   drill ...) rides one webhook POST, so a burst across a fleet is one batch to
 #   the ingest instead of one POST per instance. The ingest still stores one row
-#   per (fingerprint, starts_at) and sends one IM per instance; grouping bounds
-#   the POST rate, the rule's `for:` bounds how soon a condition counts.
+#   per (fingerprint, starts_at) but sends one IM per group (a count and the
+#   first instances); the rule's `for:` bounds how soon a condition counts.
 # - group_wait 30s: the first firing of a group waits half a minute so
 #   instances of the same burst join it. group_interval 5m: instances that join
 #   an already-notified group, and the resolution of a group, are announced at
