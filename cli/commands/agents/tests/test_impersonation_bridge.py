@@ -218,6 +218,8 @@ def test_start_message_then_pending_push_skips_the_merge_window() -> None:
     assert "[id=5] kind=system_note from=system" in push
     assert "body 5" in push and "body 6" in push
     assert relay.ack_command(LEASE_ID, [5, 6]) in push
+    assert "ACK after receiving this message:" in push
+    assert "after processing" not in push
     assert "re-delivery" not in push
 
 
@@ -232,6 +234,8 @@ def test_empty_start_message_falls_back_to_the_activation_hint() -> None:
     inbox_cmd = shlex.join(["ava", "impersonate", "inbox", str(LEASE_ID)])
     assert ack in emitted[0]
     assert inbox_cmd in emitted[0]
+    assert "acknowledge each batch as soon as it arrives" in emitted[0]
+    assert "after processing" not in emitted[0]
     assert "agents timeline" not in emitted[0]
 
 
@@ -566,11 +570,14 @@ def test_claude_envelope_truncates_long_content_but_keeps_the_ack_line() -> None
     assert len(emitted) == 2
     push = emitted[1]
     assert "truncated" in push
+    assert "before acknowledging" in push
+    assert "ACK after receiving this message:" in push
+    assert "after processing" not in push
     assert relay.ack_command(LEASE_ID, [1]) in push
     body_line = [line for line in push.splitlines() if line.startswith("x" * 10)]
     assert body_line
     assert len(body_line[0]) <= relay._PUSH_MAX_CHARS + len(
-        " (truncated; run the inbox command to read the full message)"
+        " (truncated — run the inbox command to read the full body before acknowledging)"
     )
 
 

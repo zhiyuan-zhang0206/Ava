@@ -57,8 +57,8 @@ The closing lease reason drives the bound relay's best-effort executor notice
 without reopening its expired inbox authority.
 
 Cancel requests remain pending in the external inbox while held. The controller
-stops its current work and explicitly acknowledges the request; an unacknowledged
-cancel remains in the handoff JSON for the resumed native agent when the lease ends. The native
+acknowledges the request on receipt, then stops its current work; the cancel
+remains in the handoff JSON for the resumed native agent when the lease ends. The native
 dispatcher cannot interrupt an external host's in-flight tools.
 
 External plugin deltas are an ordered lease log using the checkpoint codec.

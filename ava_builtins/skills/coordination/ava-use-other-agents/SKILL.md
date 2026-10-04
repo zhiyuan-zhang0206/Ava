@@ -262,9 +262,10 @@ A takeover is **file-less and supervisor-less** — nothing from Mode A applies:
   platform saves your checkpoint and pauses you; the two of you never run at
   the same time, so there is no lockstep and no supervisor.
 - **End — one message resumes you.** When the takeover releases, a system note
-  resumes you carrying its summary and the path of the handoff JSON
-  (`impersonation/<session_id>.json`). Read that file before acting on pending
-  human input; it retains all messages, including unACKed ones.
+  resumes you carrying its summary and the handoff JSON path
+  (`impersonation/<session_id>.json`). It retains every message, unACKed and
+  acknowledged, and an ACK means received, never finished: read it before acting
+  on pending human input, and check acknowledged messages for unfinished work.
 
 Launch it from your own execution context, briefing inline:
 
