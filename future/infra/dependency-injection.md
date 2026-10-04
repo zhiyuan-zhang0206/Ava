@@ -395,8 +395,8 @@ and the clock; the endpoint table is indexed by service name, a daemon taking on
   gateway, an explicit parameter or owned object for a re-entrancy guard, and a
   recorder owned by the exec child's root for the SDK telemetry.
 - **Cross-agent contamination audit.** About 25 entries are agent-scoped in meaning
-  and process-wide in storage. Unkeyed buffers such as the security findings buffer
-  are the first suspects. An audit is underway to decide which are live bugs; fixes
+  and process-wide in storage. Unkeyed buffers are the first suspects (the security
+  findings and skill-invocation buffers are gone; the attachment transport remains). An audit is underway to decide which are live bugs; fixes
   do not wait for the migration.
 - **Background-work audit.** A read-only audit covers all background work: what is
   persisted, what a mid-run kill leaves, and whether stop drains it. Its result

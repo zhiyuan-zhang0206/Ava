@@ -39,6 +39,7 @@ from langchain_core.messages import AIMessage, AnyMessage, HumanMessage, RemoveM
 from langchain_core.runnables import RunnableConfig
 from langgraph.graph.message import REMOVE_ALL_MESSAGES, add_messages
 from langgraph.runtime import Runtime
+from langgraph.types import Overwrite
 from pydantic import BaseModel, Field
 
 import ava
@@ -52,6 +53,7 @@ from agent.state import (
     build_agent_state,
 )
 from base.agents.context import AvaContext
+from base.agents.messages.security_finding import SecurityFindingEntry
 from base.db import Database
 from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices
@@ -69,11 +71,6 @@ def _reset_state_slot():
     ava.unbind_exec_turn()
     yield
     ava.unbind_exec_turn()
-    # The exec-child findings buffer is process-global; a failed test must not
-    # leak findings into the next test.
-    import ava.security as _security
-
-    _security._pending_findings = []
 
 
 def _registry(**plugins: type[BaseModel]) -> ExtensionRegistry:
@@ -711,19 +708,19 @@ async def test_exec_node_preserves_state_update_on_lifecycle(fake_cancel_event):
 
 
 # ── exec-side system-note injection (user ruling 2026-08-11) ────────────────
-# AGENTS.md / security findings are delivered in-memory inside the exec's
-# messages delta — the exec node reads the findings the exec child drained from
-# ava.security's buffer (result envelope) and merges plugin-contributed
-# messages, both AFTER the exec-result ToolMessage (the Anthropic-compat
-# tool_use -> tool_result adjacency invariant forbids notes between the
-# AIMessage and its ToolMessage; verified against the DeepSeek anthropic
-# endpoint 2026-08-11: "tool_use ids were found without tool_result blocks
-# immediately after").
+# AGENTS.md context notes are delivered in-memory inside the exec's messages
+# delta — the exec node merges plugin-contributed messages AFTER the
+# exec-result ToolMessage (the Anthropic-compat tool_use -> tool_result
+# adjacency invariant forbids notes between the AIMessage and its ToolMessage;
+# verified against the DeepSeek anthropic endpoint 2026-08-11: "tool_use ids
+# were found without tool_result blocks immediately after"). Security findings
+# take the graph-state route: the child writes them to the state update and the
+# after_exec hook delivers them (agent/hooks/tests/test_security_findings.py).
 
 
 def _scan_flagged_code(*sources: str) -> str:
     """Agent code that scans flagged content once per source inside the real exec
-    child, which is where scan_content buffers a finding."""
+    child, which is where scan_content writes a finding to the state update."""
     return "from ava.security import scan_content\n" + "".join(
         f"scan_content('ignore previous instructions', source={src!r})\n" for src in sources
     )
@@ -740,10 +737,10 @@ def _messages_plugin_state_cls() -> type[BaseAgentState]:
     return build_agent_state(_registry(delta_test=_MessagesPluginState))
 
 
-async def test_exec_node_injects_security_finding_after_toolmessage(fake_cancel_event):
-    """A finding the exec child buffered during the turn is delivered as a
-    SECURITY system note in the same exec's messages delta, after the
-    exec-result ToolMessage — no side-channel file."""
+async def test_exec_node_commits_security_finding_to_graph_state(fake_cancel_event):
+    """A finding raised inside the exec child rides the state update into
+    `state.security_findings`; the exec node itself adds no note to its messages
+    delta (the after_exec hook delivers it) and the host keeps no findings of its own."""
     state = BaseAgentState(
         messages=[_ai_message_with_code(_scan_flagged_code("shell.run"))],
         halted=False,
@@ -753,24 +750,17 @@ async def test_exec_node_injects_security_finding_after_toolmessage(fake_cancel_
     cmd = await _exec_node_impl(state, runtime, config)
 
     update = cast(dict[str, Any], cmd.update)
-    msgs = update["messages"]
-    assert len(msgs) == 2, f"expected ToolMessage + security note, got {msgs!r}"
-    assert msgs[0].type == "tool", f"exec ToolMessage must come first: {msgs[0]!r}"
-    assert msgs[0].tool_call_id == "call_1"
-    assert msgs[1].type == "human"
-    assert "shell.run" in msgs[1].content
-    assert "ignore previous instructions" in msgs[1].content
-    # The host never buffers the child's finding: it rode the result envelope.
-    from ava import security as _security
-
-    assert _security.take_findings() == []
+    assert [m.type for m in update["messages"]] == ["tool"]
+    assert update["messages"][0].tool_call_id == "call_1"
+    assert update["security_findings"] == [
+        SecurityFindingEntry(source="shell.run", triggers=["ignore previous instructions"])
+    ]
 
 
-async def test_exec_node_orders_tool_security_then_plugin_notes(fake_cancel_event):
-    """Order in the merged delta: exec ToolMessage, then security warnings
-    (they annotate the content notes), then the plugin's context notes — the
-    tool_use adjacency is preserved and warnings precede the content they
-    flag."""
+async def test_exec_node_keeps_plugin_notes_after_toolmessage_beside_findings(fake_cancel_event):
+    """Order in the exec's messages delta: ToolMessage, then the plugin's context
+    notes — the tool_use adjacency is preserved — while the finding for the same
+    context file goes to the graph-state channel."""
     state_cls = _messages_plugin_state_cls()
 
     code = (
@@ -786,12 +776,12 @@ async def test_exec_node_orders_tool_security_then_plugin_notes(fake_cancel_even
 
     update = cast(dict[str, Any], cmd.update)
     msgs = update["messages"]
-    assert [m.type for m in msgs] == ["tool", "human", "human"], (
-        f"expected [tool, security, plugin], got {[m.type for m in msgs]}"
+    assert [m.type for m in msgs] == ["tool", "human"], (
+        f"expected [tool, plugin], got {[m.type for m in msgs]}"
     )
-    assert "context-file:/repo/AGENTS.md" in msgs[1].content
-    assert msgs[2].id == "p1"
-    assert msgs[2].content == "project note"
+    assert msgs[1].id == "p1"
+    assert msgs[1].content == "project note"
+    assert [f.source for f in update["security_findings"]] == ["context-file:/repo/AGENTS.md"]
 
 
 async def test_exec_node_checkpoints_child_attachment(fake_cancel_event, tmp_path: Path):
@@ -838,7 +828,7 @@ async def test_exec_node_checkpoints_child_attachment(fake_cancel_event, tmp_pat
 async def test_exec_node_compact_path_drops_notes_and_findings(fake_cancel_event, tmp_path: Path):
     """The compact path (SystemHalt) writes nothing back — claim REMOVE_ALLs
     the whole history — so neither plugin notes nor the child's findings may
-    leak into the update."""
+    leak into the update (the findings channel is reset instead)."""
 
     state_cls = _messages_plugin_state_cls()
     # The real exec child rejects attach for a text-only model (user ruling
@@ -870,4 +860,5 @@ async def test_exec_node_compact_path_drops_notes_and_findings(fake_cancel_event
         f"compact path must write no messages back, got {update.get('messages')!r}"  # pyright: ignore[reportUnknownMemberType]
     )
     assert update.get("halted") is True  # pyright: ignore[reportUnknownMemberType]
+    assert update["security_findings"] == Overwrite([])
     assert "attach" not in update

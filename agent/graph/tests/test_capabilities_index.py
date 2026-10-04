@@ -19,14 +19,13 @@ agent/graph/tests/test_preloaded_skills.py.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterator
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
 import pytest
 
 import ava
-import ava.skills as skills_mod
 from agent.graph.prompt.capabilities import _disabled_by_sdk_config, capabilities_section
 from agent.graph.prompt.system_prompt import _delegation_check_section, build_system_prompt
 from ava.sdk_surface import sdk_disable
@@ -46,17 +45,6 @@ def _isolate_load_dir(unit_home: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         "base.packages.extensions.install_registry.loadable_skill_names", _all_enabled
     )
-
-
-@pytest.fixture(autouse=True)
-def _fresh_attribution_dedup() -> Iterator[None]:
-    """The attribution dedup is per-agent-RUN state living in a module global, so
-    it leaks between tests: whichever test records (agent, skill, depth) first
-    makes every later test's write a silent no-op. Any test asserting on
-    attribution has to start from an empty set."""
-    skills_mod.clear_recorded_skill_invocations()
-    yield
-    skills_mod.clear_recorded_skill_invocations()
 
 
 @pytest.fixture
@@ -286,13 +274,13 @@ def test_building_the_prompt_records_no_skill_attribution(
 
     writes: list[dict[str, Any]] = []
 
-    def _record(_db: object, events: list[Any]) -> None:
-        writes.append({"events": events})
+    def _record(_db: object, event: Any) -> None:
+        writes.append({"event": event})
 
     # Stub the ONE write path — every skill_invoked row goes through the
     # audit-event writer — so any regression that routes prompt assembly (or an
     # index render) into a skill_invoked write fails this test.
-    monkeypatch.setattr(audit_events, "record_audit_standalone_many", _record)
+    monkeypatch.setattr(audit_events, "record_audit_reported", _record)
     monkeypatch.setattr("ava.agent_identity.require_agent_id", lambda: 1)
 
     prompt = build_system_prompt(EMPTY, AgentSlices.resolve())

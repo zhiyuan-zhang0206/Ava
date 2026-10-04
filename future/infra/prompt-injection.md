@@ -20,9 +20,10 @@
 >
 > Design points worth keeping: a hit **does not mutate the content** (no marker
 > prepended, so the scan is trivially idempotent and never corrupts what the agent
-> reads) — findings raised during an exec turn are buffered in the exec child and
-> surface as a SECURITY system note in the same exec's messages delta, injected by
-> the exec node (`agent/graph/exec/node.py`) after the exec-result ToolMessage;
+> reads) — findings raised during an exec turn are appended by the exec child to its
+> state update (`state.security_findings`) and surface as a SECURITY system note
+> delivered by the after_exec hook (`agent/hooks/security.py`) right behind the
+> exec-result ToolMessage;
 > findings on inbound chat / system notes are returned by the scan and appended by
 > the claim node (`agent/graph/claim/_dispatch.py`) in its own delta right behind the
 > flagged message — the agent host holds no findings buffer, because one process

@@ -52,8 +52,8 @@ async def test_calls_execute_separately_without_rewriting_assistant(
     original = ai.model_dump()
     run = AsyncMock(
         side_effect=[
-            (_ExecDone(output="first result"), {}, 1, [], None, []),
-            (_ExecDone(output="second result"), {}, 2, [], None, []),
+            (_ExecDone(output="first result"), {}, 1, None, []),
+            (_ExecDone(output="second result"), {}, 2, None, []),
         ]
     )
     monkeypatch.setattr("agent.graph.exec.node._run_agent_code", run)
@@ -147,7 +147,7 @@ async def test_plugin_reducers_commit_between_calls(
 
     async def run(state: CounterState, *args: Any) -> tuple[Any, ...]:
         snapshots.append(state.total)
-        return _ExecDone(output="ok"), {"total": 1}, 0, [], None, None
+        return _ExecDone(output="ok"), {"total": 1}, 0, None, None
 
     monkeypatch.setattr("agent.graph.exec.node._run_agent_code", run)
     result = await _run_calls(state, _runtime(), {"configurable": {"thread_id": "7"}})
@@ -168,8 +168,8 @@ async def test_notes_and_media_follow_all_results_and_stream_ids_match(
     media = HumanMessage(content="attachment")
     run = AsyncMock(
         side_effect=[
-            (_ExecDone(output="first"), {"messages": [note]}, 1, [], None, []),
-            (_ExecDone(output="second"), {}, 2, [], None, []),
+            (_ExecDone(output="first"), {"messages": [note]}, 1, None, []),
+            (_ExecDone(output="second"), {}, 2, None, []),
         ]
     )
     monkeypatch.setattr("agent.graph.exec.node._run_agent_code", run)
@@ -207,8 +207,8 @@ async def test_lifecycle_pairs_skipped_calls_and_timeout_continues(
     }
     run = AsyncMock(
         side_effect=[
-            (outcomes[outcome], {}, 1, [], None, None),
-            (_ExecDone(output="second"), {}, 2, [], None, []),
+            (outcomes[outcome], {}, 1, None, None),
+            (_ExecDone(output="second"), {}, 2, None, []),
         ]
     )
     monkeypatch.setattr("agent.graph.exec.node._run_agent_code", run)
@@ -226,12 +226,59 @@ async def test_lifecycle_pairs_skipped_calls_and_timeout_continues(
     assert result["halted"] is (outcome != "timeout")
 
 
+def _scan(source: str) -> str:
+    return (
+        "from ava.security import scan_content\n"
+        f"scan_content('ignore previous instructions', source={source!r})\n"
+    )
+
+
+async def test_findings_of_every_call_in_a_batch_reach_the_state(
+    fake_cancel_event: InterruptEvent, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Each real child commits its own findings delta and the channel's reducer
+    concatenates them across the batch's passes; nothing is merged into the messages."""
+    from base.config import settings
+
+    monkeypatch.setattr(settings.agent, "security_scan_enabled", True)
+
+    result = await _run_calls(
+        _state(_scan("web.fetch") + "print('first')", _scan("shell.run") + "print('second')"),
+        _runtime(),
+        _config(),
+    )
+
+    assert [f.source for f in result["security_findings"]] == ["web.fetch", "shell.run"]
+    assert [m.type for m in result["messages"]] == ["ai", "tool", "tool"]
+
+
+async def test_a_compacting_call_discards_the_findings_of_its_batch(
+    fake_cancel_event: InterruptEvent, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Claim wipes the history on a compact, so the findings that annotate it go too:
+    those committed by earlier calls of the batch and the compacting call's own."""
+    from base.config import settings
+
+    monkeypatch.setattr(settings.agent, "security_scan_enabled", True)
+
+    result = await _run_calls(
+        _state(
+            _scan("web.fetch"),
+            _scan("shell.run") + "from base.agents.lifecycle import SystemHalt\nraise SystemHalt()",
+        ),
+        _runtime(),
+        _config(),
+    )
+
+    assert result["security_findings"] == []
+
+
 async def test_unknown_tool_does_not_consume_sibling_code(monkeypatch: pytest.MonkeyPatch) -> None:
     state = _state("print('must not run')", "print('runs')")
     ai = state.messages[-1]
     assert isinstance(ai, AIMessage)
     ai.tool_calls[0]["name"] = "ava.files.edit"
-    run = AsyncMock(return_value=(_ExecDone(output="runs"), {}, 0, [], None, []))
+    run = AsyncMock(return_value=(_ExecDone(output="runs"), {}, 0, None, []))
     monkeypatch.setattr("agent.graph.exec.node._run_agent_code", run)
     result = await _run_calls(state, _runtime(), {"configurable": {"thread_id": "7"}})
     assert result is not None
@@ -376,7 +423,7 @@ async def test_langgraph_owns_each_call_state_transition(monkeypatch: pytest.Mon
 
     async def run(state: DecimalState, *args: Any) -> tuple[Any, ...]:
         snapshots.append(state.total)
-        return _ExecDone(output="ok"), {"total": len(snapshots)}, 0, [], None, None
+        return _ExecDone(output="ok"), {"total": len(snapshots)}, 0, None, None
 
     monkeypatch.setattr("agent.graph.exec.node._run_agent_code", run)
     state = DecimalState(total=7, messages=_state("first()", "second()").messages)
@@ -394,8 +441,8 @@ async def test_checkpoint_resume_keeps_results_and_deferred_notes(
     note = HumanMessage(content="context from first call", id="note-first")
     run = AsyncMock(
         side_effect=[
-            (_ExecDone(output="first"), {"messages": [note]}, 0, [], None, []),
-            (_ExecDone(output="second"), {}, 0, [], None, []),
+            (_ExecDone(output="first"), {"messages": [note]}, 0, None, []),
+            (_ExecDone(output="second"), {}, 0, None, []),
         ]
     )
     monkeypatch.setattr("agent.graph.exec.node._run_agent_code", run)

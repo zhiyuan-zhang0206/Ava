@@ -450,8 +450,8 @@ async def _run_legacy_subprocess(
 
     Returns the `_ExecResult` sum type the exec node dispatches plus the raw
     child envelope (None when the child never wrote one — SIGKILL / watchdog /
-    os._exit): the envelope carries the plugin state-update delta and the
-    security findings the child drained, which only this function can see.
+    os._exit): the envelope carries the state-update delta (plugin fields,
+    security findings), which only this function can see.
     The child's outcome kinds map onto the result with the parent's flags
     authoritative.
     """

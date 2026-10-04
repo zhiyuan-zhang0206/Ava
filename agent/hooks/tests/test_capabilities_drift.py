@@ -13,7 +13,6 @@ agent/graph/tests/test_capabilities_index.py.
 from __future__ import annotations
 
 import shutil
-from collections.abc import Iterator
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -21,7 +20,6 @@ import pytest
 from langchain_core.messages import AnyMessage, HumanMessage, SystemMessage
 from langgraph.runtime import Runtime
 
-import ava.skills as skills_mod
 from agent.graph.prompt.capabilities import (
     _NEW_SKILLS_MAX_ENTRIES,
     index_drift,
@@ -54,15 +52,6 @@ def _runtime(*, container: bool = False) -> Runtime[AvaContext]:
             bus=EventBus.from_settings(),
         )
     )
-
-
-@pytest.fixture(autouse=True)
-def _fresh_attribution_dedup() -> Iterator[None]:
-    """The attribution dedup is per-agent-RUN state in a module global, so it
-    leaks between tests — see agent/graph/tests/test_capabilities_index.py."""
-    skills_mod.clear_recorded_skill_invocations()
-    yield
-    skills_mod.clear_recorded_skill_invocations()
 
 
 @pytest.fixture
