@@ -627,7 +627,7 @@ exclude = [
     # (e.g. `ava.self.log`) absent from a bare `import ava`. Mirrors the ruff
     # per-file-ignores for the same paths. scripts/ is NOT excluded: it holds
     # the skill's real, maintained CLI entry points, and those are checked.
-    "ava_builtins/skills/*/references",
+    "ava_builtins/skills/*/*/references",
     "ava_builtins/plugins/*/skills/**/reference",
 ]
 # Libraries with incomplete third-party stubs — temporarily lenient.
