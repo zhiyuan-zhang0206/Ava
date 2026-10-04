@@ -254,7 +254,13 @@ def build_diagnostics(requested: set[str]) -> list[Diagnostic]:
 
     checks: list[Diagnostic] = []
     if IS_MACOS:
-        checks.append(Diagnostic("brew-pin", brew_pins))
+        checks.append(
+            Diagnostic(
+                "brew-pin",
+                brew_pins,
+                failure_threshold=settings.services.brew_pin_probe_failure_threshold,
+            )
+        )
     checks.append(
         Diagnostic(
             "venv",
