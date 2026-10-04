@@ -23,7 +23,7 @@ from langchain_core.runnables import RunnableConfig
 from langgraph.runtime import Runtime
 from langgraph.types import Command
 
-from agent.graph import exec_node, llm_node
+from agent.graph import LlmLedger, exec_node, llm_node
 from agent.state import AgentState
 from agent.tests._fakes import make_fake_ops_pool
 from base.agents.context import AvaContext
@@ -102,7 +102,7 @@ async def test_llm_node_collects_chunks_into_final_message(
     state = AgentState(messages=[HumanMessage(content="hello")], halted=False)
     config: RunnableConfig = {"configurable": {"thread_id": "7"}}
 
-    result = await llm_node(state, _make_runtime(llm=fake_llm), config)
+    result = await llm_node(state, _make_runtime(llm=fake_llm), config, ledger=LlmLedger())
 
     assert isinstance(result, Command)
     assert result.update["messages"][0].content == "hello from agent"  # pyright: ignore[reportUnknownMemberType]
@@ -141,7 +141,9 @@ async def test_llm_node_stamps_last_active_at_with_text(
         bus=EventBus.from_settings(),
     )
     state = AgentState(messages=[HumanMessage(content="hi")], halted=False)
-    await llm_node(state, Runtime(context=ctx), {"configurable": {"thread_id": "7"}})
+    await llm_node(
+        state, Runtime(context=ctx), {"configurable": {"thread_id": "7"}}, ledger=LlmLedger()
+    )
 
     stamped = [s for s in _executed_sql(ops_pool) if "last_active_at = now()" in s]
     assert len(stamped) == 1, "a completed turn must issue exactly one last_active_at UPDATE"
@@ -184,7 +186,9 @@ async def test_llm_node_stamps_last_active_at_on_tool_only_turn(
         bus=EventBus.from_settings(),
     )
     state = AgentState(messages=[HumanMessage(content="run it")], halted=False)
-    await llm_node(state, Runtime(context=ctx), {"configurable": {"thread_id": "7"}})
+    await llm_node(
+        state, Runtime(context=ctx), {"configurable": {"thread_id": "7"}}, ledger=LlmLedger()
+    )
 
     stamped = [s for s in _executed_sql(ops_pool) if "last_active_at = now()" in s]
     assert len(stamped) == 1, "a tool-only turn must still stamp last_active_at"
@@ -248,7 +252,9 @@ async def test_llm_node_dispatches_chunks_to_handler_with_anthropic_shape(
     state = AgentState(messages=[HumanMessage(content="hi")], halted=False)
     config: RunnableConfig = {"configurable": {"thread_id": "7"}}
 
-    await llm_node(state, _make_runtime(llm=fake_llm, event_publisher=pub), config)
+    await llm_node(
+        state, _make_runtime(llm=fake_llm, event_publisher=pub), config, ledger=LlmLedger()
+    )
 
     events = [EVENT_ADAPTER.validate_json(c.args[0]) for c in pub.emit.call_args_list]
     roles = [e.role for e in events]
@@ -293,7 +299,9 @@ async def test_llm_node_publishes_reasoning_tokens(
     state = AgentState(messages=[HumanMessage(content="hi")], halted=False)
     config: RunnableConfig = {"configurable": {"thread_id": "7"}}
 
-    await llm_node(state, _make_runtime(llm=fake_llm, event_publisher=pub), config)
+    await llm_node(
+        state, _make_runtime(llm=fake_llm, event_publisher=pub), config, ledger=LlmLedger()
+    )
 
     events = [EVENT_ADAPTER.validate_json(c.args[0]) for c in pub.emit.call_args_list]
     usage = [e for e in events if e.role == "token_usage"]
@@ -328,7 +336,7 @@ async def test_llm_node_preserves_usage_metadata(
     state = AgentState(messages=[HumanMessage(content="go")], halted=False)
     config: RunnableConfig = {"configurable": {"thread_id": "7"}}
 
-    result = await llm_node(state, _make_runtime(llm=fake_llm), config)
+    result = await llm_node(state, _make_runtime(llm=fake_llm), config, ledger=LlmLedger())
 
     assert isinstance(result, Command)
     msg = result.update["messages"][0]

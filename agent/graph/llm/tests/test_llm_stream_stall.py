@@ -29,10 +29,9 @@ from agent.graph.llm._retry import Attempt
 from agent.graph.llm._stream import _consume_llm, _consume_stream_with_stall_timeout
 from agent.graph.llm.node import llm_attempt
 from agent.graph.llm_errors import (
+    LlmLedger,
     LLMRetryBudgetExceededError,
     LLMStreamStallPairError,
-    _record_stall_pair_streak,
-    _reset_stall_pair_streak,
 )
 from agent.state import AgentState
 from agent.tests._fakes import make_fake_ops_pool
@@ -48,10 +47,21 @@ _CONFIG: RunnableConfig = {"configurable": {"thread_id": "7"}}
 
 
 async def _one_try(
-    state: AgentState, runtime: Runtime[AvaContext], *, attempt: int = 1, started_ago: float = 0.0
+    state: AgentState,
+    runtime: Runtime[AvaContext],
+    *,
+    attempt: int = 1,
+    started_ago: float = 0.0,
+    ledger: LlmLedger | None = None,
 ) -> Any:
     """One try of the llm node (`llm_node` retries around it): a failure surfaces as raised."""
-    return await llm_attempt(state, runtime, _CONFIG, Attempt(attempt, time.time() - started_ago))
+    return await llm_attempt(
+        state,
+        runtime,
+        _CONFIG,
+        Attempt(attempt, time.time() - started_ago),
+        ledger or LlmLedger(),
+    )
 
 
 def _make_runtime(llm: MagicMock) -> Runtime[AvaContext]:
@@ -408,13 +418,14 @@ async def test_entry_retry_budget_skipped_while_delayed_sequence_active(
     state = AgentState(messages=[HumanMessage(content="hi")], halted=False)
 
     spent = settings.lm.llm_retry_max_total_seconds + 5.0
+    ledger = LlmLedger()
     with bind_turn_identity(7):
-        _record_stall_pair_streak("7", 1)
-        try:
-            result = await _one_try(state, _make_runtime(fake_llm), attempt=2, started_ago=spent)
-            assert result is not None
-        finally:
-            _reset_stall_pair_streak("7")
+        ledger.record_stall_pair_streak("7", 1)
+        result = await _one_try(
+            state, _make_runtime(fake_llm), attempt=2, started_ago=spent, ledger=ledger
+        )
+        assert result is not None
+        ledger.reset_stall_pair_streak("7")
 
         # Control: no active streak -> the same elapsed time trips the budget.
         with pytest.raises(LLMRetryBudgetExceededError):

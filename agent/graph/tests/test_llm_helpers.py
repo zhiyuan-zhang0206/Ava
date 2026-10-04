@@ -32,6 +32,7 @@ from agent.graph import llm_node
 from agent.graph._base_prompt import _capture_ava_overview, _get_ava_overview
 from agent.graph.llm._retry import Attempt, retry_wait
 from agent.graph.llm.node import llm_attempt
+from agent.graph.llm_errors import LlmLedger
 from agent.state import AgentState
 from agent.tests._fakes import make_fake_ops_pool
 from base.agents.context import AvaContext
@@ -41,6 +42,12 @@ from base.events.live.projection import EVENT_ADAPTER, Cancelled
 from base.host.env.agent_slices import AgentSlices, LlmCallPolicy
 
 _CONFIG: RunnableConfig = {"configurable": {"thread_id": "7"}}
+
+
+@pytest.fixture
+def ledger() -> LlmLedger:
+    """A fresh ledger per test: the node's error counts and silent-idle budget start empty."""
+    return LlmLedger()
 
 
 def _fixed_task_usage_tally(
@@ -200,6 +207,7 @@ def _has_cancelled_event(pub: MagicMock, agent_id: int) -> bool:
 
 async def test_cancel_branch_publishes_cancelled_and_returns_halted(
     fake_cancel_event: asyncio.Event,
+    ledger: LlmLedger,
 ) -> None:
     """cancel_event arrives in done set first → llm_node must enter the cancel branch:
     (a) publish a Cancelled event to settings.data_plane.events_channel
@@ -226,7 +234,9 @@ async def test_cancel_branch_publishes_cancelled_and_returns_halted(
         fake_cancel_event.set()
 
     trigger = asyncio.create_task(_trigger())
-    result = await llm_node(state, _make_runtime(llm=fake_llm, event_publisher=pub), _CONFIG)
+    result = await llm_node(
+        state, _make_runtime(llm=fake_llm, event_publisher=pub), _CONFIG, ledger=ledger
+    )
     await trigger
 
     # (a) Cancelled event emitted (cancel branch-exclusive side effect)
@@ -249,6 +259,7 @@ async def test_cancel_branch_publishes_cancelled_and_returns_halted(
 
 async def test_stream_normal_completion_no_cancelled_event(
     fake_cancel_event: asyncio.Event,
+    ledger: LlmLedger,
 ) -> None:
     """stream completes first (cancel_event never set) → takes stream-normal branch:
     (a) **does not** publish Cancelled event
@@ -273,7 +284,9 @@ async def test_stream_normal_completion_no_cancelled_event(
     state = AgentState(messages=[HumanMessage(content="hi")], halted=False)
 
     # Note: do not set cancel_event —— stream should complete naturally
-    result = await llm_node(state, _make_runtime(llm=fake_llm, event_publisher=pub), _CONFIG)
+    result = await llm_node(
+        state, _make_runtime(llm=fake_llm, event_publisher=pub), _CONFIG, ledger=ledger
+    )
 
     # (a) no Cancelled event
     assert not _has_cancelled_event(pub, agent_id=7), (
@@ -290,15 +303,12 @@ async def test_stream_normal_completion_no_cancelled_event(
     )
 
 
-async def test_silent_idle_with_reasoning_continue_loops_not_raises() -> None:
+async def test_silent_idle_with_reasoning_continue_loops_not_raises(ledger: LlmLedger) -> None:
     """No tool_call AND empty text BUT output_tokens > 0 (model produced
     reasoning) → the node no longer raises. It commits the reasoning AIMessage
     and returns halted=False so the claim node loops straight back to the LLM
     (the ava_silent_idle plugin then injects a Continue nudge). No token-wasting
     blind re-stream."""
-    from agent.graph.llm.node import _silent_idle_output_tokens
-
-    _silent_idle_output_tokens.pop("7", None)
 
     async def _empty_complete() -> AsyncIterator[AIMessageChunk]:
         yield AIMessageChunk(
@@ -312,7 +322,7 @@ async def test_silent_idle_with_reasoning_continue_loops_not_raises() -> None:
     state = AgentState(messages=[HumanMessage(content="hi")], halted=False)
 
     result = await llm_node(
-        state, _make_runtime(llm=fake_llm, event_publisher=MagicMock()), _CONFIG
+        state, _make_runtime(llm=fake_llm, event_publisher=MagicMock()), _CONFIG, ledger=ledger
     )
 
     assert isinstance(result, Command)
@@ -323,10 +333,11 @@ async def test_silent_idle_with_reasoning_continue_loops_not_raises() -> None:
     msgs = result.update["messages"]
     assert len(msgs) == 1  # pyright: ignore[reportUnknownArgumentType]
     assert isinstance(msgs[0], AIMessage)
-    _silent_idle_output_tokens.pop("7", None)
 
 
-async def test_truly_empty_no_reasoning_halts_with_warning(loguru_records) -> None:
+async def test_truly_empty_no_reasoning_halts_with_warning(
+    loguru_records, ledger: LlmLedger
+) -> None:
     """No tool_call AND empty text AND output_tokens=0 (model truly produced
     nothing, not even reasoning) → the existing WARNING + halt path still
     applies — retrying a deterministic empty output wastes API credits."""
@@ -343,7 +354,7 @@ async def test_truly_empty_no_reasoning_halts_with_warning(loguru_records) -> No
     state = AgentState(messages=[HumanMessage(content="hi")], halted=False)
 
     result = await llm_node(
-        state, _make_runtime(llm=fake_llm, event_publisher=MagicMock()), _CONFIG
+        state, _make_runtime(llm=fake_llm, event_publisher=MagicMock()), _CONFIG, ledger=ledger
     )
 
     assert isinstance(result, Command)
@@ -403,6 +414,7 @@ def test_text_display_uses_dot_text_for_list_content() -> None:
 
 async def test_cancel_event_set_before_first_chunk_returns_halted_no_publish_done(
     fake_cancel_event: asyncio.Event,
+    ledger: LlmLedger,
 ) -> None:
     """cancel_event set immediately (before first chunk) → cancel branch: the entire
     generation is discarded, Command(halted=True, goto=after_exec) does not commit any
@@ -420,7 +432,9 @@ async def test_cancel_event_set_before_first_chunk_returns_halted_no_publish_don
     # set immediately — stream has not yet yielded a first chunk
     fake_cancel_event.set()
 
-    result = await llm_node(state, _make_runtime(llm=fake_llm, event_publisher=pub), _CONFIG)
+    result = await llm_node(
+        state, _make_runtime(llm=fake_llm, event_publisher=pub), _CONFIG, ledger=ledger
+    )
 
     assert isinstance(result, Command)
     assert result.goto == "after_exec"
@@ -438,7 +452,7 @@ async def test_cancel_event_set_before_first_chunk_returns_halted_no_publish_don
 # ───────────── Silent idle supplementary tests (PR #35 review, agent #976) ─────────────
 
 
-async def test_silent_idle_with_thinking_blocks_continue_loops() -> None:
+async def test_silent_idle_with_thinking_blocks_continue_loops(ledger: LlmLedger) -> None:
     """thinking blocks present but output_tokens=0 → still judged as silent idle.
 
     The first condition of `has_reasoning`: when content contains a type="thinking" block,
@@ -447,9 +461,6 @@ async def test_silent_idle_with_thinking_blocks_continue_loops() -> None:
 
     Locks the silent_idle thinking-block condition so it is not coupled with the output_tokens > 0 condition.
     """
-    from agent.graph.llm.node import _silent_idle_output_tokens
-
-    _silent_idle_output_tokens.pop("7", None)
 
     async def _thinking_only_chunk() -> AsyncIterator[AIMessageChunk]:
         yield AIMessageChunk(
@@ -463,7 +474,7 @@ async def test_silent_idle_with_thinking_blocks_continue_loops() -> None:
     state = AgentState(messages=[HumanMessage(content="hi")], halted=False)
 
     result = await llm_node(
-        state, _make_runtime(llm=fake_llm, event_publisher=MagicMock()), _CONFIG
+        state, _make_runtime(llm=fake_llm, event_publisher=MagicMock()), _CONFIG, ledger=ledger
     )
 
     assert isinstance(result, Command)
@@ -472,83 +483,75 @@ async def test_silent_idle_with_thinking_blocks_continue_loops() -> None:
     msgs = result.update["messages"]
     assert len(msgs) == 1  # pyright: ignore[reportUnknownArgumentType]
     assert isinstance(msgs[0], AIMessage)
-    _silent_idle_output_tokens.pop("7", None)
 
 
-def test_record_consecutive_error_tracks_and_clears() -> None:
-    """`_record_consecutive_error` correctly accumulates same-type errors; `_clear_consecutive_errors` resets.
+def test_record_consecutive_error_tracks_and_clears(ledger: LlmLedger) -> None:
+    """`LlmLedger.record_consecutive_error` accumulates same-type errors; `clear_consecutive_errors` resets.
 
-    Directly operate on the `_consecutive_errors` dict, verifying:
+    Operate on the ledger's consecutive-error record, verifying:
     - first record → count=1
     - same type recorded again → count=2
     - after reset the entry disappears
     """
-    from agent.graph.llm_errors import (
-        LLMStreamSilentIdleError,
-        _clear_consecutive_errors,
-        _consecutive_errors,
-        _record_consecutive_error,
-    )
+    from agent.graph.llm_errors import LLMStreamSilentIdleError
 
     tid = "test-thread-1"
-    _consecutive_errors.pop(tid, None)  # clean up leftovers
 
     exc = LLMStreamSilentIdleError("test", output_tokens=1)
-    _record_consecutive_error(tid, exc)
-    assert _consecutive_errors[tid] == ("LLMStreamSilentIdleError", 1), (
+    ledger.record_consecutive_error(tid, exc)
+    assert ledger.consecutive_error(tid) == ("LLMStreamSilentIdleError", 1), (
         "first record should be count=1"
     )
 
-    _record_consecutive_error(tid, exc)
-    assert _consecutive_errors[tid] == ("LLMStreamSilentIdleError", 2), (
+    ledger.record_consecutive_error(tid, exc)
+    assert ledger.consecutive_error(tid) == ("LLMStreamSilentIdleError", 2), (
         "same type recorded again should be count=2"
     )
 
-    _clear_consecutive_errors(tid)
-    assert tid not in _consecutive_errors, "entry should disappear after reset"
+    ledger.clear_consecutive_errors(tid)
+    assert ledger.consecutive_error(tid) is None, "entry should disappear after reset"
 
 
-def test_check_consecutive_error_cap_raises_fatal_on_exhaustion() -> None:
-    """When cap is exhausted, `_check_consecutive_error_cap` raises FatalLLMStreamError.
+def test_check_consecutive_error_cap_raises_fatal_on_exhaustion(ledger: LlmLedger) -> None:
+    """When cap is exhausted, `check_consecutive_error_cap` raises FatalLLMStreamError.
 
-    Pre-fill _consecutive_errors to the cap value (default 3),
-    `_check_consecutive_error_cap` should raise FatalLLMStreamError and pop the entry.
+    Pre-fill the ledger's record to the cap value (default 3),
+    `check_consecutive_error_cap` should raise FatalLLMStreamError and pop the entry.
     """
-    from agent.graph.llm_errors import (
-        FatalLLMStreamError,
-        _check_consecutive_error_cap,
-        _consecutive_errors,
-    )
+    from agent.graph.llm_errors import FatalLLMStreamError, LLMStreamSilentIdleError
 
     tid = "test-thread-2"
-    _consecutive_errors[tid] = ("LLMStreamSilentIdleError", 3)
+    for _ in range(3):
+        ledger.record_consecutive_error(tid, LLMStreamSilentIdleError("test", output_tokens=1))
 
     with pytest.raises(FatalLLMStreamError, match="retry cap"):
-        _check_consecutive_error_cap(tid)
+        ledger.check_consecutive_error_cap(tid)
 
     # After cap exhaustion the entry is popped, next turn restarts counting
-    assert tid not in _consecutive_errors, (
-        "_check_consecutive_error_cap must pop entry after exhaustion"
+    assert ledger.consecutive_error(tid) is None, (
+        "check_consecutive_error_cap must pop entry after exhaustion"
     )
 
 
-def test_check_consecutive_error_cap_below_threshold_passes() -> None:
-    """Below cap, `_check_consecutive_error_cap` returns normally without raising."""
-    from agent.graph.llm_errors import _check_consecutive_error_cap, _consecutive_errors
+def test_check_consecutive_error_cap_below_threshold_passes(ledger: LlmLedger) -> None:
+    """Below cap, `check_consecutive_error_cap` returns normally without raising."""
+    from agent.graph.llm_errors import LLMStreamSilentIdleError
 
     tid = "test-thread-3"
-    _consecutive_errors[tid] = ("LLMStreamSilentIdleError", 2)  # < cap(3)
+    for _ in range(2):  # < cap(3)
+        ledger.record_consecutive_error(tid, LLMStreamSilentIdleError("test", output_tokens=1))
 
     # should not raise
-    _check_consecutive_error_cap(tid)
+    ledger.check_consecutive_error_cap(tid)
 
-    assert _consecutive_errors[tid] == ("LLMStreamSilentIdleError", 2), (
+    assert ledger.consecutive_error(tid) == ("LLMStreamSilentIdleError", 2), (
         "below cap must not alter entry"
     )
-    _consecutive_errors.pop(tid, None)  # clean up
 
 
-async def test_silent_idle_with_deepseek_reasoning_content_continue_loops() -> None:
+async def test_silent_idle_with_deepseek_reasoning_content_continue_loops(
+    ledger: LlmLedger,
+) -> None:
     """DeepSeek model's reasoning is in `additional_kwargs.reasoning_content`,
     not in Anthropic's content blocks thinking type — silent_idle detection
     must also cover this path, otherwise DeepSeek reasoning-only turn would be missed.
@@ -556,9 +559,6 @@ async def test_silent_idle_with_deepseek_reasoning_content_continue_loops() -> N
     Construct: output_tokens=0, no text, no tool_call, no thinking blocks,
     but has `additional_kwargs.reasoning_content` → judged silent idle → continue-loop.
     """
-    from agent.graph.llm.node import _silent_idle_output_tokens
-
-    _silent_idle_output_tokens.pop("7", None)
 
     async def _ds_reasoning_only() -> AsyncIterator[AIMessageChunk]:
         yield AIMessageChunk(
@@ -573,7 +573,7 @@ async def test_silent_idle_with_deepseek_reasoning_content_continue_loops() -> N
     state = AgentState(messages=[HumanMessage(content="hi")], halted=False)
 
     result = await llm_node(
-        state, _make_runtime(llm=fake_llm, event_publisher=MagicMock()), _CONFIG
+        state, _make_runtime(llm=fake_llm, event_publisher=MagicMock()), _CONFIG, ledger=ledger
     )
 
     assert isinstance(result, Command)
@@ -582,17 +582,15 @@ async def test_silent_idle_with_deepseek_reasoning_content_continue_loops() -> N
     msgs = result.update["messages"]
     assert len(msgs) == 1  # pyright: ignore[reportUnknownArgumentType]
     assert isinstance(msgs[0], AIMessage)
-    _silent_idle_output_tokens.pop("7", None)
 
 
 async def test_silent_idle_zero_output_reasoning_content_consumes_minimum_budget(
     monkeypatch: pytest.MonkeyPatch,
+    ledger: LlmLedger,
 ) -> None:
     """Reasoning-content-only turns cannot bypass the silent-idle cost guard."""
-    from agent.graph.llm.node import _silent_idle_output_tokens
     from base.config import settings
 
-    _silent_idle_output_tokens.pop("7", None)
     monkeypatch.setattr(settings.lm, "llm_silent_idle_max_output_tokens", 3)
 
     async def _reasoning_content_only() -> AsyncIterator[AIMessageChunk]:
@@ -610,11 +608,12 @@ async def test_silent_idle_zero_output_reasoning_content_consumes_minimum_budget
             AgentState(messages=[HumanMessage(content="hi")], halted=False),
             _make_runtime(llm=fake_llm, event_publisher=MagicMock()),
             _CONFIG,
+            ledger=ledger,
         )
         assert isinstance(result, Command)
         assert result.update["halted"] is (turn == 3)
 
-    assert "7" not in _silent_idle_output_tokens
+    assert ledger.silent_idle_output_tokens("7") == 0
 
 
 # ─────────── provider-error taxonomy: fail-fast (permanent) vs retry (transient) ───────────
@@ -643,6 +642,7 @@ def _astream_raising(exc: Exception) -> AsyncIterator[AIMessageChunk]:
 
 async def test_llm_node_permanent_provider_error_fails_fast_with_structured_fields(
     loguru_records,
+    ledger: LlmLedger,
 ) -> None:
     """A PERMANENT provider error (HTTP 400 — bad request / context length /
     schema) raised mid-stream becomes a FatalProviderError carrying the
@@ -650,16 +650,17 @@ async def test_llm_node_permanent_provider_error_fails_fast_with_structured_fiel
     `llm_provider_error` log lands error_class=permanent / status=400 / fatal=True.
     The retry loop excludes FatalProviderError, so the agent idles instead of
     burning the ~16-min backoff budget and dying."""
-    from agent.graph.llm_errors import FatalProviderError, _consecutive_errors
+    from agent.graph.llm_errors import FatalProviderError
     from base.config import settings
 
-    _consecutive_errors.pop("7", None)
     fake_llm = MagicMock()
     fake_llm.astream.return_value = _astream_raising(_FakeProviderStatusError(400))
     state = AgentState(messages=[HumanMessage(content="hi")], halted=False)
 
     with pytest.raises(FatalProviderError) as exc_info:
-        await llm_node(state, _make_runtime(llm=fake_llm, event_publisher=MagicMock()), _CONFIG)
+        await llm_node(
+            state, _make_runtime(llm=fake_llm, event_publisher=MagicMock()), _CONFIG, ledger=ledger
+        )
 
     assert exc_info.value.error_class == "permanent"
     assert exc_info.value.status == 400
@@ -674,10 +675,10 @@ async def test_llm_node_permanent_provider_error_fails_fast_with_structured_fiel
 
 
 async def test_llm_node_billing_error_logs_billing_vendor_and_model(
-    loguru_records, monkeypatch: pytest.MonkeyPatch
+    loguru_records, monkeypatch: pytest.MonkeyPatch, ledger: LlmLedger
 ) -> None:
     """Provider 402 logs the billing flag, vendor, and model for alert routing."""
-    from agent.graph.llm_errors import FatalProviderError, _consecutive_errors
+    from agent.graph.llm_errors import FatalProviderError
     from base.config import settings
     from base.lm.context_budget import ContextBudget
 
@@ -685,7 +686,6 @@ async def test_llm_node_billing_error_logs_billing_vendor_and_model(
         return ContextBudget(10_000, 3_000, 4_000)
 
     monkeypatch.setattr("agent.hooks.compact.resolve_context_budget", fixture_budget)
-    _consecutive_errors.pop("7", None)
     fake_llm = MagicMock()
     fake_llm.astream.return_value = _astream_raising(_FakeProviderStatusError(402))
     state = AgentState(messages=[HumanMessage(content="hi")], halted=False)
@@ -694,7 +694,12 @@ async def test_llm_node_billing_error_logs_billing_vendor_and_model(
     try:
         settings.lm.llm_model = "deepseek-v4-flash"
         with pytest.raises(FatalProviderError) as exc_info:
-            await llm_node(state, _make_runtime(llm=fake_llm, event_publisher=MagicMock()), _CONFIG)
+            await llm_node(
+                state,
+                _make_runtime(llm=fake_llm, event_publisher=MagicMock()),
+                _CONFIG,
+                ledger=ledger,
+            )
     finally:
         settings.lm.llm_model = original
 
@@ -709,33 +714,33 @@ async def test_llm_node_billing_error_logs_billing_vendor_and_model(
     assert extra["model"] == "deepseek-v4-flash"
 
 
-async def test_llm_node_transient_provider_error_propagates_for_retry() -> None:
+async def test_llm_node_transient_provider_error_propagates_for_retry(ledger: LlmLedger) -> None:
     """A TRANSIENT provider error (HTTP 500) is re-raised as-is — NOT wrapped in
     FatalProviderError — so the node's retry loop retries it. Fail-fast is
     reserved for permanent classes; a transient blip must keep retrying."""
-    from agent.graph.llm_errors import FatalProviderError, _consecutive_errors
+    from agent.graph.llm_errors import FatalProviderError
 
-    _consecutive_errors.pop("7", None)
     fake_llm = MagicMock()
     fake_llm.astream.return_value = _astream_raising(_FakeProviderStatusError(500))
     state = AgentState(messages=[HumanMessage(content="hi")], halted=False)
 
     runtime = _make_runtime(llm=fake_llm, event_publisher=MagicMock())
     with pytest.raises(_FakeProviderStatusError) as exc_info:
-        await llm_attempt(state, runtime, _CONFIG, Attempt(1, time.time()))
+        await llm_attempt(state, runtime, _CONFIG, Attempt(1, time.time()), ledger=ledger)
     assert not isinstance(exc_info.value, FatalProviderError)
-    assert retry_wait(exc_info.value, 1, model="deepseek-flash", agent_id=7) is not None
+    assert (
+        retry_wait(exc_info.value, 1, model="deepseek-flash", agent_id=7, ledger=ledger) is not None
+    )
 
 
-async def test_llm_node_configured_fatal_error_type_fails_fast() -> None:
+async def test_llm_node_configured_fatal_error_type_fails_fast(ledger: LlmLedger) -> None:
     """A configured fatal error *type* (e.g. engine_overloaded_error) surfacing on
     a transient-nature status (429) still fails fast: retrying an overloaded engine
     in-turn is futile, so it becomes a FatalProviderError (error_class records the
     transient nature; fatal=True records the fail-fast action)."""
-    from agent.graph.llm_errors import FatalProviderError, _consecutive_errors
+    from agent.graph.llm_errors import FatalProviderError
     from base.config import settings
 
-    _consecutive_errors.pop("7", None)
     original = settings.lm.llm_fatal_provider_error_types
     try:
         settings.lm.llm_fatal_provider_error_types = "engine_overloaded_error"
@@ -751,19 +756,24 @@ async def test_llm_node_configured_fatal_error_type_fails_fast() -> None:
         state = AgentState(messages=[HumanMessage(content="hi")], halted=False)
 
         with pytest.raises(FatalProviderError) as exc_info:
-            await llm_node(state, _make_runtime(llm=fake_llm, event_publisher=MagicMock()), _CONFIG)
+            await llm_node(
+                state,
+                _make_runtime(llm=fake_llm, event_publisher=MagicMock()),
+                _CONFIG,
+                ledger=ledger,
+            )
         assert exc_info.value.error_class == "transient"
         assert exc_info.value.status == 429
     finally:
         settings.lm.llm_fatal_provider_error_types = original
 
 
-async def test_silent_idle_guard_halts_at_cumulative_output_token_cap(loguru_records) -> None:
+async def test_silent_idle_guard_halts_at_cumulative_output_token_cap(
+    loguru_records, ledger: LlmLedger
+) -> None:
     """Silent-idle output consumes one token budget and reports its cost."""
-    from agent.graph.llm.node import _silent_idle_output_tokens
     from base.config import settings
 
-    _silent_idle_output_tokens.pop("7", None)
     cap = settings.lm.llm_silent_idle_max_output_tokens
     assert cap == 2048
 
@@ -779,7 +789,7 @@ async def test_silent_idle_guard_halts_at_cumulative_output_token_cap(loguru_rec
         fake_llm.astream.return_value = _reasoning_only()
         state = AgentState(messages=[HumanMessage(content="hi")], halted=False)
         result = await llm_node(
-            state, _make_runtime(llm=fake_llm, event_publisher=MagicMock()), _CONFIG
+            state, _make_runtime(llm=fake_llm, event_publisher=MagicMock()), _CONFIG, ledger=ledger
         )
         assert isinstance(result, Command)
         assert result.goto == "after_exec"
@@ -789,7 +799,7 @@ async def test_silent_idle_guard_halts_at_cumulative_output_token_cap(loguru_rec
             assert result.update["halted"] is True
 
     # The budget is popped at the cap, so the next run starts fresh.
-    assert "7" not in _silent_idle_output_tokens
+    assert ledger.silent_idle_output_tokens("7") == 0
     silent_logs = [
         r
         for r in loguru_records
@@ -799,7 +809,9 @@ async def test_silent_idle_guard_halts_at_cumulative_output_token_cap(loguru_rec
     assert silent_logs[-1]["extra"]["estimated_cost_usd"] > 0
 
 
-async def test_retried_llm_node_records_total_retry_duration(loguru_records) -> None:
+async def test_retried_llm_node_records_total_retry_duration(
+    loguru_records, ledger: LlmLedger
+) -> None:
     """A success after retry exports the full sequence duration as telemetry."""
 
     async def _text_turn() -> AsyncIterator[AIMessageChunk]:
@@ -818,6 +830,7 @@ async def test_retried_llm_node_records_total_retry_duration(loguru_records) -> 
         runtime,
         _CONFIG,
         Attempt(2, time.time() - 3.0),
+        ledger=ledger,
     )
 
     retry_logs = [
@@ -829,11 +842,8 @@ async def test_retried_llm_node_records_total_retry_duration(loguru_records) -> 
     assert retry_logs[-1]["extra"]["duration_seconds"] >= 3.0
 
 
-async def test_silent_idle_streak_resets_after_normal_turn() -> None:
+async def test_silent_idle_streak_resets_after_normal_turn(ledger: LlmLedger) -> None:
     """A real action clears the silent-idle output-token budget."""
-    from agent.graph.llm.node import _silent_idle_output_tokens
-
-    _silent_idle_output_tokens.pop("7", None)
 
     async def _reasoning_only() -> AsyncIterator[AIMessageChunk]:
         yield AIMessageChunk(
@@ -856,8 +866,9 @@ async def test_silent_idle_streak_resets_after_normal_turn() -> None:
         AgentState(messages=[HumanMessage(content="hi")], halted=False),
         _make_runtime(llm=fake_llm, event_publisher=MagicMock()),
         _CONFIG,
+        ledger=ledger,
     )
-    assert _silent_idle_output_tokens.get("7") == 1
+    assert ledger.silent_idle_output_tokens("7") == 1
 
     # 2) a normal text turn resets the streak
     fake_llm = MagicMock()
@@ -866,9 +877,10 @@ async def test_silent_idle_streak_resets_after_normal_turn() -> None:
         AgentState(messages=[HumanMessage(content="hi")], halted=False),
         _make_runtime(llm=fake_llm, event_publisher=MagicMock()),
         _CONFIG,
+        ledger=ledger,
     )
     assert result.update["halted"] is True  # text, no tool_call → halt
-    assert "7" not in _silent_idle_output_tokens
+    assert ledger.silent_idle_output_tokens("7") == 0
 
     # 3) a later silent idle starts back at one output token, not two.
     fake_llm = MagicMock()
@@ -877,10 +889,10 @@ async def test_silent_idle_streak_resets_after_normal_turn() -> None:
         AgentState(messages=[HumanMessage(content="hi")], halted=False),
         _make_runtime(llm=fake_llm, event_publisher=MagicMock()),
         _CONFIG,
+        ledger=ledger,
     )
     assert result.update["halted"] is False
-    assert _silent_idle_output_tokens.get("7") == 1
-    _silent_idle_output_tokens.pop("7", None)
+    assert ledger.silent_idle_output_tokens("7") == 1
 
 
 # ────────────────────────────────────────────────────────────
@@ -1025,7 +1037,7 @@ def test_is_fatal_provider_error_type_no_body() -> None:
     )
 
 
-async def test_llm_usage_event_carries_latency_ms(loguru_records) -> None:
+async def test_llm_usage_event_carries_latency_ms(loguru_records, ledger: LlmLedger) -> None:
     """The whole-call wall-clock lands on the llm_usage agent_event.
 
     `_stream_with_cache_retry` stamps `handler.llm_latency_ms` after the call
@@ -1034,9 +1046,6 @@ async def test_llm_usage_event_carries_latency_ms(loguru_records) -> None:
     source. A real stream (one chunk with usage_metadata) must produce an
     llm_usage record with a positive latency_ms in its payload extras.
     """
-    from agent.graph.llm_errors import _consecutive_errors
-
-    _consecutive_errors.pop("7", None)
 
     async def _one_chunk() -> AsyncIterator[AIMessageChunk]:
         yield AIMessageChunk(
@@ -1048,7 +1057,9 @@ async def test_llm_usage_event_carries_latency_ms(loguru_records) -> None:
     fake_llm = MagicMock()
     fake_llm.astream.return_value = _one_chunk()
     state = AgentState(messages=[HumanMessage(content="hi")], halted=False)
-    await llm_node(state, _make_runtime(llm=fake_llm, event_publisher=MagicMock()), _CONFIG)
+    await llm_node(
+        state, _make_runtime(llm=fake_llm, event_publisher=MagicMock()), _CONFIG, ledger=ledger
+    )
 
     usage = [r for r in loguru_records if r["extra"].get("event") == "llm_usage"]  # pyright: ignore[reportUnknownMemberType]
     assert len(usage) == 1, "exactly one llm_usage record per completed call"  # pyright: ignore[reportUnknownArgumentType]
@@ -1057,7 +1068,9 @@ async def test_llm_usage_event_carries_latency_ms(loguru_records) -> None:
     assert usage[0]["extra"]["model"] == "deepseek-flash"
 
 
-async def test_completed_task_turn_records_usage(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_completed_task_turn_records_usage(
+    monkeypatch: pytest.MonkeyPatch, ledger: LlmLedger
+) -> None:
     """A task-tagged completed turn forwards its measured usage to that task only."""
     import agent.graph.llm.node as llm_module
     from ava_builtins.plugins.ava_fleet import task_registry
@@ -1083,6 +1096,7 @@ async def test_completed_task_turn_records_usage(monkeypatch: pytest.MonkeyPatch
         AgentState(messages=[HumanMessage(content="hi")], halted=False, active_task_id=42),
         _make_runtime(llm=fake_llm, event_publisher=MagicMock()),
         _CONFIG,
+        ledger=ledger,
     )
 
     assert result.goto == "after_exec"
@@ -1092,6 +1106,7 @@ async def test_completed_task_turn_records_usage(monkeypatch: pytest.MonkeyPatch
 async def test_task_usage_failure_does_not_break_completed_turn(
     monkeypatch: pytest.MonkeyPatch,
     loguru_records: list[dict[str, Any]],
+    ledger: LlmLedger,
 ) -> None:
     """A metering-store outage cannot turn one completed LLM call into a retry."""
     import agent.graph.llm.node as llm_module
@@ -1117,6 +1132,7 @@ async def test_task_usage_failure_does_not_break_completed_turn(
         AgentState(messages=[HumanMessage(content="hi")], halted=False, active_task_id=42),
         _make_runtime(llm=fake_llm, event_publisher=MagicMock()),
         _CONFIG,
+        ledger=ledger,
     )
 
     assert result.goto == "after_exec"

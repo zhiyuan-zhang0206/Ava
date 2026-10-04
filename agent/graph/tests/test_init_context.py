@@ -19,6 +19,7 @@ from langgraph.runtime import Runtime
 from psycopg_pool import AsyncConnectionPool
 
 from agent.graph._init_context import init_context_node
+from agent.graph.llm_errors import LlmLedger
 from agent.state import AgentState, ContextReset
 from base.agents.context import AvaContext
 from base.config import settings
@@ -402,7 +403,7 @@ async def test_a_compaction_in_the_same_pass_keeps_its_summary_and_its_head(
     )  # Both hooks defer to the model operation.
     from agent.graph.llm.node import llm_node
 
-    cmd = await llm_node(state, _runtime(aops_pool), _config(tid))
+    cmd = await llm_node(state, _runtime(aops_pool), _config(tid), ledger=LlmLedger())
     assert cmd.goto == "init_context"
     assert isinstance(cmd.update, dict)
     # The reducer that makes the bug possible. With the note deferred there is
