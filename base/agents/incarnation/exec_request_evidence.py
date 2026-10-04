@@ -111,7 +111,7 @@ def _unreadable_expiry_age_s() -> float:
     A readable envelope declares the timeout that bounds its child's lifetime;
     an unreadable one does not, so the protocol's ceiling stands in for it:
     the inner exec timeout is validated strictly below the outer node timeout
-    (base/config/sandbox.py) and the child hard-exits at
+    (base/config/domains/sandbox.py) and the child hard-exits at
     timeout + kill grace + watchdog margin, so no in-flight request's child
     outlives twice the node timeout. An unreadable envelope past this age —
     with no live process reference and no live host process (see

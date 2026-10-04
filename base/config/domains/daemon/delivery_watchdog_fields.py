@@ -1,6 +1,6 @@
 """The delivery-watchdog and inbound-reconcile field blocks of `DaemonSettings`.
 
-Moved out of `base/config/daemon.py` when two in-flight field additions and
+Moved out of `base/config/domains/daemon/settings.py` when two in-flight field additions and
 this block together pushed that module past its 800-line hard ceiling (task
 #3616 x #3621 line-budget split, 2026-09-16). Mixed into `DaemonSettings` — NOT
 a config domain: `settings.daemon.delivery_watchdog_*`, every alias/scope/

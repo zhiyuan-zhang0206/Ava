@@ -357,7 +357,7 @@ def test_every_narrating_style_renders_a_distinct_section() -> None:
     from typing import get_args
 
     from agent.graph.prompt.system_prompt import _COMMUNICATION_STYLE_SECTIONS
-    from base.config.agent import AgentSettings
+    from base.config.domains.agent.settings import AgentSettings
 
     annotation = AgentSettings.model_fields["agent_communication_style"].annotation
     # The field is None-sentinel'd (`Literal[...] | None` — unset resolves the

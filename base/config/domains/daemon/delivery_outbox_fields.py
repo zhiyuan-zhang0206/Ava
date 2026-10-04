@@ -5,7 +5,7 @@ retry budget a durable machine-local record and a resident retry loop, so a
 gateway outage window cannot silently swallow it (see
 `base/agents/messages/delivery_outbox.py` for the mechanism). These fields live in their own
 mixin module for the same line-budget reason as the delivery-watchdog block:
-`base/config/daemon.py` sits at the 800-line ceiling. NOT a config domain —
+`base/config/domains/daemon/settings.py` sits at the 800-line ceiling. NOT a config domain —
 `settings.daemon.delivery_outbox_*`, every alias/scope/capability face, and the
 `.env` contract are exactly as if they were declared in `daemon.py`. The
 `delivery_outbox_retry_backoff_steps_s` validators stay on the model there (a

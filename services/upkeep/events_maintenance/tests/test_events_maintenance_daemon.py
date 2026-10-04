@@ -25,7 +25,7 @@ import pytest
 from psycopg_pool import ConnectionPool
 from pydantic import SecretStr
 
-from base.config.daemon import DaemonSettings
+from base.config.domains.daemon.settings import DaemonSettings
 from base.daemon.endpoints import ServiceEndpoint
 from base.daemon.health import LivenessGroup, LoopProgress
 from services.upkeep.events_maintenance import daemon

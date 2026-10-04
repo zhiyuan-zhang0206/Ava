@@ -8,7 +8,7 @@ from pydantic import ValidationError
 from pydantic.fields import FieldInfo
 
 from base.config import FIELD_INFOS, bootstrap_config_values
-from base.config.agent_runtime import AgentRuntimeSettings
+from base.config.domains.agent.runtime import AgentRuntimeSettings
 
 
 def test_delivery_policy_defaults() -> None:

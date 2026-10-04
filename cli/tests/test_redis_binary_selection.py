@@ -129,7 +129,7 @@ def test_explicit_nonexecutable_tool_never_falls_back(
 
 @pytest.mark.parametrize("value", ["relative/bin", "~/redis/bin", "/redis\n/bin"])
 def test_directory_setting_rejects_ambient_path_interpretation(value: str) -> None:
-    from base.config.data_plane import DataPlaneSettings
+    from base.config.domains.storage.data_plane import DataPlaneSettings
 
     with pytest.raises(ValidationError, match="absolute directory"):
         DataPlaneSettings(

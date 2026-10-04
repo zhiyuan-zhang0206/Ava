@@ -57,7 +57,7 @@ from psycopg_pool import AsyncConnectionPool, ConnectionPool
 
 from base import telemetry
 from base.config import settings
-from base.config.hierarchy_worker_fields import parse_hierarchy_worker_agents
+from base.config.domains.daemon.hierarchy_worker_fields import parse_hierarchy_worker_agents
 from base.db.transaction import async_write_transaction, write_transaction
 from base.log import logger
 

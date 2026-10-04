@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from base.config.walg import WalgSettings
+from base.config.domains.storage.walg import WalgSettings
 from base.host.env.config_registry import DOMAIN_MODELS, fields, schema_extra
 
 

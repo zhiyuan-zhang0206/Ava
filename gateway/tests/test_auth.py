@@ -30,7 +30,7 @@ from base.cluster.auth import (
     bearer_header,
     cookie_name,
 )
-from base.config.gateway import GatewaySettings
+from base.config.domains.gateway import GatewaySettings
 from gateway.app import app
 from gateway.auth.cors import cors_allowed_origins
 

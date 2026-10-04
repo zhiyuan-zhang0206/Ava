@@ -35,7 +35,7 @@ def is_ipv4_literal(host: str) -> bool:
     gateway; when the literal is CGNAT/private space (this cluster's
     VPN-overlay 100.64.0.0/10 addresses), that gateway has no route back and
     the dial hangs or times out. `base/host/net/http_dial.py` (httpx) and
-    `base/config/data_plane.py` (`hostaddr=`, for Postgres) use this
+    `base/config/domains/storage/data_plane.py` (`hostaddr=`, for Postgres) use this
     predicate to bypass resolution for exactly the hosts where it can never
     be anything other than itself.
 

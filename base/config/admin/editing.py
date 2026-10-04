@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from . import CONFIG_UNCHANGED_SENTINEL, ConfigFieldMeta
+from base.config import CONFIG_UNCHANGED_SENTINEL, ConfigFieldMeta
 
 __all__ = [
     "ConfigPatchPlan",

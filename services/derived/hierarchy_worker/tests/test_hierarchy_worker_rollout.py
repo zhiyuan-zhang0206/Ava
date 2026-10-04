@@ -10,7 +10,7 @@ from __future__ import annotations
 import psycopg
 import pytest
 
-from base.config.hierarchy_worker_fields import parse_hierarchy_worker_agents
+from base.config.domains.daemon.hierarchy_worker_fields import parse_hierarchy_worker_agents
 from services.derived.hierarchy_worker import runner
 from services.derived.hierarchy_worker import scan as scan_module
 from services.derived.hierarchy_worker.tests.slices import hierarchy_config

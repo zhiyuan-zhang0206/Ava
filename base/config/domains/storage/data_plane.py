@@ -19,7 +19,7 @@ from base.host.net.predicates import is_ipv4_literal, is_loopback_host
 from base.host.net.url_secret import url_host, url_with_host, url_with_query_param
 
 
-def _self_machine_host() -> str:
+def self_machine_host() -> str:
     """This host's reachable address, mirroring `base.cluster.machine.reachable_host`
     (env `AVA_MACHINE_HOST` > `localhost`).
     Duplicated at this leaf because base.cluster.machine imports settings — a config
@@ -61,7 +61,7 @@ def _loopback_if_self(url: str) -> str:
     host = urlsplit(url).hostname or ""
     if not host or is_loopback_host(host):
         return url
-    machine = _self_machine_host().strip().lower().removeprefix("[").removesuffix("]")
+    machine = self_machine_host().strip().lower().removeprefix("[").removesuffix("]")
     if host == machine:  # urlsplit lowercases + unbrackets hostname; match that form
         return url_with_host(url, "127.0.0.1")
     return url
@@ -450,7 +450,7 @@ class DataPlaneSettings(EnvSettings):
         rewrite covers both pg and redis here.
 
         After an external data-plane migration (Task #1752) the URLs name a
-        foreign host, which never equals `_self_machine_host()`, so no rewrite
+        foreign host, which never equals `self_machine_host()`, so no rewrite
         happens and every dial goes off-box as the URL states — the rewrite
         stays a self-dial optimization and is never extended to foreign hosts.
         """

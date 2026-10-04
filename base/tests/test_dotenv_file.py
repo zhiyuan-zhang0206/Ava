@@ -8,7 +8,7 @@ import pytest
 
 import base.host.private_storage
 from base.config import settings
-from base.config.general import GeneralSettings
+from base.config.domains.general import GeneralSettings
 from base.host.env.dotenv_file import (
     ENV_BACKUP_KEEP,
     env_line_export_prefix,

@@ -11,10 +11,13 @@ import json
 from pydantic import Field, field_validator, model_validator
 
 from base.config.base import EnvSettings
-from base.config.billing_recovery_fields import BillingRecoveryFields
-from base.config.delivery_outbox_fields import DeliveryOutboxFields
-from base.config.delivery_watchdog_fields import DeliveryWatchdogFields, InboundReconcileFields
-from base.config.hierarchy_worker_fields import (
+from base.config.domains.daemon.billing_recovery_fields import BillingRecoveryFields
+from base.config.domains.daemon.delivery_outbox_fields import DeliveryOutboxFields
+from base.config.domains.daemon.delivery_watchdog_fields import (
+    DeliveryWatchdogFields,
+    InboundReconcileFields,
+)
+from base.config.domains.daemon.hierarchy_worker_fields import (
     HierarchyWorkerFields,
     parse_hierarchy_worker_agents,
 )

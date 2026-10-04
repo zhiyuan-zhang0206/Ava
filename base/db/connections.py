@@ -13,7 +13,7 @@ from base.host.env.dotenv_boot import PLACEHOLDER_DB_URL
 from base.host.net.url_secret import url_with_port
 from base.log import logger
 
-# `base.config.data_plane`'s helpers are imported inside the dial functions
+# `base.config.domains.storage.data_plane`'s helpers are imported inside the dial functions
 # that call them (`connect` / `pool` / `direct_db_url`), never at module level:
 # this module is on the exec child's boot path (`agent.db` -> `base.db` ->
 # here) and a module-level import would pull the full eager config chain
@@ -305,7 +305,7 @@ def _direct_url(cfg: DbConfig) -> str:
     """`direct_db_url` for one resolved config."""
     from base.cluster import get_record
     from base.cluster.machine import reachable_host
-    from base.config.data_plane import gateway_url_host
+    from base.config.domains.storage.data_plane import gateway_url_host
     from base.host.net.predicates import is_loopback_host
     from base.paths import ava_home
 
@@ -412,7 +412,7 @@ def connect(
             the resolved db_url is a credential-free endpoint this process was
             given no login for (see `_guard_db_url`).
     """
-    from base.config.data_plane import sslmode_for_url
+    from base.config.domains.storage.data_plane import sslmode_for_url
 
     cfg = config or db_config_from_settings()
     url = _guard_db_url(cfg.db_url if not direct else direct_db_url(cfg))
@@ -535,7 +535,7 @@ def pool(
             the resolved db_url is a credential-free endpoint this process was
             given no login for (see `_guard_db_url`).
     """
-    from base.config.data_plane import resolved_pool_size, sslmode_for_url
+    from base.config.domains.storage.data_plane import resolved_pool_size, sslmode_for_url
 
     cfg = config or db_config_from_settings()
     url = _guard_db_url(cfg.db_url if not direct else direct_db_url(cfg))
@@ -613,7 +613,7 @@ def async_pool(
             the resolved db_url is a credential-free endpoint this process was
             given no login for (see `_guard_db_url`).
     """
-    from base.config.data_plane import sslmode_for_url
+    from base.config.domains.storage.data_plane import sslmode_for_url
 
     cfg = config or db_config_from_settings()
     sslmode = sslmode_for_url(cfg.db_url, cfg.db_sslmode)

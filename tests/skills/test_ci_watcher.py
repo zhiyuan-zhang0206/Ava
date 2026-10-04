@@ -302,7 +302,7 @@ def test_persistent_owner_url_error_stops_early_with_absolute_fallback(
     """A guarded config error cannot heal through transport retries."""
     from pydantic import BaseModel, ValidationError, model_validator
 
-    from base.config.data_plane import AgentProfileOwnerDbUrlRefusedError
+    from base.config.domains.storage.data_plane import AgentProfileOwnerDbUrlRefusedError
 
     class _Guarded(BaseModel):
         @model_validator(mode="after")
@@ -332,7 +332,7 @@ def test_exit_notice_tail_keeps_path_and_cause_after_boot_cleanup(
 
     from pydantic import BaseModel, ValidationError, model_validator
 
-    from base.config.data_plane import AgentProfileOwnerDbUrlRefusedError
+    from base.config.domains.storage.data_plane import AgentProfileOwnerDbUrlRefusedError
 
     class _Guarded(BaseModel):
         @model_validator(mode="after")

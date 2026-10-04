@@ -59,7 +59,7 @@ from typing import Any, Literal, Protocol, cast
 # importing base.log runs `logger.remove()` (dropping loguru's default
 # stderr handler). Without this, a Settings-construction warning that fires
 # during the ava import chain (e.g. `_warn_when_timezone_unset` on a host
-# without AVA_TIMEZONE — base/config/general.py logs it on loguru directly)
+# without AVA_TIMEZONE — base/config/domains/general.py logs it on loguru directly)
 # lands on stderr, which the parent pipes straight into the agent's exec
 # output. CI caught this leak twice (2026-08-21, PR #256 shard 1): once
 # unfixed, once after the import sorter silently moved the guard below the

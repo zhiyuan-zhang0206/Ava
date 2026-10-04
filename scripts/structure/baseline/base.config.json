@@ -5,7 +5,5 @@
     "base/config/_lite.py::ambient-instance:_state": 1,
     "base/config/service_read.py::hidden-singleton:_all_domains_settings": 1
   },
-  "directories": {
-    "base/config": 38
-  }
+  "directories": {}
 }

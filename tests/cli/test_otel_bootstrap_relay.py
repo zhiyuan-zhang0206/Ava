@@ -10,7 +10,7 @@ from fastapi.testclient import TestClient
 
 from base import config
 from base.cluster.authority.api import telemetry_token
-from base.config.observability import ObservabilitySettings
+from base.config.domains.observability.settings import ObservabilitySettings
 from base.host.env import runtime_config
 from cli.commands.observability import otel_collector as collector
 from gateway.app import app

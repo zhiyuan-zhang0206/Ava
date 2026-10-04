@@ -179,7 +179,7 @@ _PASSTHROUGH_ROWS = (
 
 # The health-port services (one Settings field each: `<svc>_health_port`,
 # alias `AVA_<SVC>_HEALTH_PORT`, scope=host). Adding a daemon with a health
-# port = one line here + the field in base/config/services.py; every
+# port = one line here + the field in base/config/domains/services/settings.py; every
 # consumer (derive_env, daemon.health, start, dotenv_boot's force set) follows
 # automatically.
 _HEALTH_PORT_SERVICES: tuple[str, ...] = (

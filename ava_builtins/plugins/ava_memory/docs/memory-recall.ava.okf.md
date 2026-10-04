@@ -28,7 +28,7 @@ The two are complementary: injection gives the agent a "memory directory", while
 
 ## Mechanism Details
 
-- **Trigger condition**: `passive_memory_recall_enabled` (default **on**; a cluster opts out by pinning `AVA_PASSIVE_MEMORY_RECALL=false` in its `.env` — `cluster-pinned` scope, so it applies cluster-wide), and memory index available. This node owns the recall settings' documented defaults; the authority they track is `base/config/agent.py`
+- **Trigger condition**: `passive_memory_recall_enabled` (default **on**; a cluster opts out by pinning `AVA_PASSIVE_MEMORY_RECALL=false` in its `.env` — `cluster-pinned` scope, so it applies cluster-wide), and memory index available. This node owns the recall settings' documented defaults; the authority they track is `base/config/domains/agent/settings.py`
 - **Query construction**: Takes the last 6 "real dialogue" messages (agent replies + inbound chats), excludes system heartbeats/lifecycle markers/previous recall injections
 - **Trigger gate**: fires on inbound from a real source — user chat, a peer agent (`agent:`), a scheduled turn (`schedule:`), or a system notice — and skips machine-originated wake-ups (`watcher:` / `shell:` prefixes; `tail_has_recallable_inbound` in `agent/messages/__init__.py`)
 - **Search**: retrieves `memory_recall_retrieve_k` (100) candidates — wide top-100 so the filter has real candidates to judge; injection stays capped at `memory_recall_inject_k`

@@ -22,20 +22,25 @@ from pydantic import BaseModel, Field
 
 import base.host.env.config_registry as _config_registry
 from base.config._lite import _plant_placeholders
-from base.config.agent import AgentSettings
-from base.config.alerts import AlertsSettings
-from base.config.daemon import DaemonSettings
-from base.config.data_plane import DataPlaneSettings
-from base.config.data_plane import (
-    _self_machine_host as _self_machine_host,  # re-export: service_read resolves it through base.config so tests can monkeypatch it
+from base.config.domains.agent.settings import AgentSettings
+from base.config.domains.channels.feishu import FeishuSettings
+from base.config.domains.channels.telegram import TelegramSettings
+from base.config.domains.daemon.settings import DaemonSettings
+from base.config.domains.display import DisplaySettings
+from base.config.domains.gateway import GatewaySettings
+from base.config.domains.general import GeneralSettings
+from base.config.domains.lm import LmSettings
+from base.config.domains.observability.alerts import AlertsSettings
+from base.config.domains.observability.settings import ObservabilitySettings
+from base.config.domains.packages import PackagesSettings
+from base.config.domains.sandbox import SandboxSettings
+from base.config.domains.services.settings import ServiceSettings
+from base.config.domains.storage.data_plane import DataPlaneSettings
+from base.config.domains.storage.data_plane import (
+    self_machine_host as _self_machine_host,  # service_read resolves it through base.config (as `_self_machine_host`) so tests can monkeypatch it
 )
-from base.config.display import DisplaySettings
-from base.config.feishu import FeishuSettings
-from base.config.gateway import GatewaySettings
-from base.config.general import GeneralSettings
-from base.config.lm import LmSettings
-from base.config.observability import ObservabilitySettings
-from base.config.packages import PackagesSettings
+from base.config.domains.storage.walg import WalgSettings
+from base.config.domains.web import WebSettings
 from base.config.profiles import (
     PROCESS_PROFILES,
     PROFILE_UNSET,
@@ -43,11 +48,6 @@ from base.config.profiles import (
     profile_domain_error,
     profile_unknown_error,
 )
-from base.config.sandbox import SandboxSettings
-from base.config.services import ServiceSettings
-from base.config.telegram import TelegramSettings
-from base.config.walg import WalgSettings
-from base.config.web import WebSettings
 from base.host.env.config_registry import DOMAIN_ATTRS, DOMAIN_MODELS, schema_extra
 
 
@@ -168,8 +168,8 @@ def build() -> FullBundle:
 def _facade_exports() -> dict[str, Any]:
     """The names `base.config` gains when a lite process upgrades."""
     from base.config import agent_pins as _agent_pins
-    from base.config import metadata as _metadata
     from base.config import service_read as _service_read
+    from base.config.admin import metadata as _metadata
 
     fields = _config_registry.fields()
     return {

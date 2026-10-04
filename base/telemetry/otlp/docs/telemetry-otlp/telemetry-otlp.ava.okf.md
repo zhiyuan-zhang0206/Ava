@@ -99,7 +99,7 @@ single-box hosts collapse to the local receiver even when their secret is set.
   `telemetry_otlp.shutdown()` at exit.
 - OTel SDK (`opentelemetry-*`) — imported lazily inside `_build_providers` /
   `_emit_log`, so flag-off processes never pay for it.
-- `base/config/observability.py` — the producer-local `telemetry_otlp_*`
+- `base/config/domains/observability/settings.py` — the producer-local `telemetry_otlp_*`
   settings plus gateway-local backend URLs.
 - `base/deploy/release/collector_artifact.py` — pinned downloader for release prep and
   `cli/commands/observability/otel_collector.py` converge. Converge and

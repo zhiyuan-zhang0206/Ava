@@ -16,8 +16,8 @@ from pydantic import Field, field_validator
 from pydantic_settings import NoDecode
 
 from base.config.base import _unit_home
-from base.config.service_health_ports_fields import ServiceHealthPortFields
-from base.config.service_runtime import _ServiceRuntimeSettings
+from base.config.domains.services.health_ports_fields import ServiceHealthPortFields
+from base.config.domains.services.runtime import _ServiceRuntimeSettings
 
 
 class ServiceSettings(ServiceHealthPortFields, _ServiceRuntimeSettings):

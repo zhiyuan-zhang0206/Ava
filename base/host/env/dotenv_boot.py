@@ -244,7 +244,7 @@ def _is_launcher_runner_projection(value: str | None) -> bool:
     environment input.
 
     The runner-class shape (a write-generation runner login, or a remote
-    plane's provider `ava_runner`) mirrors base/config/data_plane.py
+    plane's provider `ava_runner`) mirrors base/config/domains/storage/data_plane.py
     `_RUNNER_LOGIN`; it is duplicated at this leaf because this module runs
     BEFORE Settings.
     """

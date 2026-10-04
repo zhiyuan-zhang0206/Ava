@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from base.config.hierarchy_worker_fields import parse_hierarchy_worker_agents
+from base.config.domains.daemon.hierarchy_worker_fields import parse_hierarchy_worker_agents
 
 
 @dataclass(frozen=True)
