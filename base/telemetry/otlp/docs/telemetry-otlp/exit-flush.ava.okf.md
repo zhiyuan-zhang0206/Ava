@@ -32,7 +32,13 @@ shutdown call.
 
 ## Accepted semantics
 
-- A process that exits before provider bring-up (task #4314 triage:
+- CLI dispatch drains queued telemetry before returning or propagating an
+  exception. A probe's only heartbeat can be its first event; deferring provider
+  construction until atexit lets the SDK's resource detector encounter an
+  already stopped `concurrent.futures` executor (task #5011). The pre-exit drain
+  uses the emitter's bounded synchronization and leaves provider shutdown here.
+  Commands with no event pipeline do not initialize OTLP.
+- Other processes that exit before provider bring-up (task #4314 triage:
   lifetimes under ~0.5 s) never builds providers; its records stay
   mirror-only by design (accepted, task #4320).
 - `base/daemon/shutdown.py:hard_exit` skips every atexit handler
