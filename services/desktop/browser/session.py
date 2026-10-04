@@ -23,7 +23,6 @@ import itertools
 import json
 import time
 from collections.abc import Iterator
-from contextlib import suppress
 from http.cookies import SimpleCookie
 from typing import Any
 
@@ -31,6 +30,7 @@ import httpx
 import websockets
 
 from base.cluster.auth import MANAGED_BROWSER_USER_AGENT, cookie_name
+from base.log import logger
 
 # CDP endpoint timeouts: Chrome is local, so these only bound a wedged browser.
 _HTTP_TIMEOUT_S = 5.0
@@ -131,8 +131,14 @@ async def inject_session_cookie(cdp_port: int, gateway_url: str, secret: str) ->
                     },
                 )
         finally:
-            with suppress(Exception):
+            try:
                 await _cdp_call(browser_ws, ids, "Target.closeTarget", {"targetId": target_id})
+            except Exception:
+                logger.opt(exception=True).warning(
+                    "[browser-mcp] could not close the cookie-injection tab {}; "
+                    "it stays open in the shared Chrome",
+                    target_id,
+                )
 
     if not result.get("success"):
         raise RuntimeError(f"Chrome rejected the gateway session cookie: {result}")

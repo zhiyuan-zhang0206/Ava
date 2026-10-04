@@ -92,8 +92,14 @@ async def run_invocation_with_stall_guard(
     except asyncio.CancelledError:
         if not invoke_task.done():
             invoke_task.cancel()
-            with contextlib.suppress(BaseException):
-                await invoke_task
+            with contextlib.suppress(asyncio.CancelledError):
+                try:
+                    await invoke_task
+                except Exception:
+                    logger.opt(exception=True).warning(
+                        "hosted turn for agent {agent_id} raised while unwinding its cancel",
+                        agent_id=agent_id,
+                    )
         raise
 
 

@@ -157,7 +157,10 @@ class Supervisor(StoppingMixin, ReconcilingMixin):
         ]
         for task in pending:
             task.cancel()
-        await asyncio.gather(*pending, return_exceptions=True)
+        for result in await asyncio.gather(*pending, return_exceptions=True):
+            # Cancellation is the expected end of a watch task; anything else it died of is news.
+            if isinstance(result, Exception):
+                _log.warning("a unit watch task failed before shutdown", exc_info=result)
         for runtime in self._units.values():
             runtime.watch_task = None
 

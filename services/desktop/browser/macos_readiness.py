@@ -270,8 +270,8 @@ def degraded_wait_state() -> StartupReadiness | None:
     try:
         readiness = probe_startup_readiness()
     except Exception:  # Healthchecks must not turn an unknown readiness state into a crash loop.
+        _log.exception("ava-browser: startup readiness fallback probe failed")
         if IS_MACOS:
-            _log.exception("ava-browser: macOS readiness fallback probe failed")
             return StartupReadiness(
                 ready=False, reason="macOS startup readiness could not be probed"
             )

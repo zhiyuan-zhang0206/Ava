@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from contextlib import suppress
-
 import psycopg
 
 from base.agents.messages.inbound_provenance import InboundProvenance
@@ -48,5 +46,4 @@ def notify_owner(
         database=db,
         bus=bus,
     )
-    with suppress(Exception):
-        publish_inbound_wake(db, bus, agent_id, str(inbound_id))
+    publish_inbound_wake(db, bus, agent_id, str(inbound_id))

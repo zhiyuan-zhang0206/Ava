@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from contextlib import suppress
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -62,32 +61,28 @@ def _missing_serve_dir_backoff_s(observations: int) -> float:
 
 
 def _emit_missing_serve_dir(row: _PageRow, key: tuple[int, str]) -> None:
-    """Record the page-directory alert; telemetry delivery itself is best-effort."""
-    with suppress(Exception):
-        telemetry.emit(
-            "log",
-            "page_serve_dir_missing",
-            level="warning",
-            agent_id=row.agent_id,
-            attributes={
-                "agent_id": row.agent_id,
-                "key": f"{key[0]}:{key[1]}",
-                "name": row.name,
-                "serve_dir": row.serve_dir,
-                "port": row.port,
-            },
-        )
+    """Record the page-directory alert (`telemetry.emit` enqueues and never raises)."""
+    telemetry.emit(
+        "log",
+        "page_serve_dir_missing",
+        level="warning",
+        agent_id=row.agent_id,
+        attributes={
+            "agent_id": row.agent_id,
+            "key": f"{key[0]}:{key[1]}",
+            "name": row.name,
+            "serve_dir": row.serve_dir,
+            "port": row.port,
+        },
+    )
 
 
 def _publish_page_closed(row: _PageRow, bus: EventBus) -> None:
-    """Best-effort PageClosed publication from this sync daemon worker."""
+    """PageClosed publication from this sync daemon worker (`publish_best_effort` logs its own failure)."""
     event = PageClosed(agent_id=row.agent_id, name=row.name)
-    with suppress(Exception):
-        asyncio.run(
-            bus.publish_best_effort(
-                event.model_dump_json(), context="page_server_serve_dir_missing"
-            )
-        )
+    asyncio.run(
+        bus.publish_best_effort(event.model_dump_json(), context="page_server_serve_dir_missing")
+    )
 
 
 def _reconcile_serve_dir(

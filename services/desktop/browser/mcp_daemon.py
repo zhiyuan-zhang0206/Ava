@@ -483,7 +483,7 @@ async def _handle_client(
                 conn_page = await _serve_line(line, writer, daemon_ref, conn_page)
     finally:
         writer.close()
-        with suppress(Exception):
+        with suppress(OSError):
             await writer.wait_closed()
 
 
@@ -540,7 +540,7 @@ async def _socket_in_use(path: Path) -> bool:
     except OSError:
         return True
     writer.close()
-    with suppress(Exception):
+    with suppress(OSError):
         await writer.wait_closed()
     del reader  # nothing to close on a StreamReader; the writer close suffices
     return True

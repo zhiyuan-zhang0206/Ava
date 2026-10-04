@@ -16,6 +16,7 @@ from typing import Any
 import httpx
 import pytest
 
+from base.cluster.machine import GatewayApiBaseMissing
 from services.desktop.browser import gateway_session
 from services.desktop.browser import session as sess
 from services.desktop.browser.gateway_session import GatewaySession
@@ -213,7 +214,7 @@ async def test_inject_raises_when_chrome_unreachable(monkeypatch: pytest.MonkeyP
 
 async def test_inject_once_skips_when_gateway_url_unset(monkeypatch: pytest.MonkeyPatch) -> None:
     def raise_missing() -> str:
-        raise RuntimeError("gateway_url unset")
+        raise GatewayApiBaseMissing("gateway_url unset")
 
     calls: list[tuple[int, str, str]] = []
 
@@ -488,7 +489,7 @@ async def test_verify_once_skips_when_gateway_unconfigured(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     def raise_missing() -> str:
-        raise RuntimeError("gateway_url unset")
+        raise GatewayApiBaseMissing("gateway_url unset")
 
     monkeypatch.setattr(gateway_session, "gateway_api_base", raise_missing)
     await GatewaySession(asyncio.TaskGroup()).verify_once()  # must not raise
@@ -549,7 +550,7 @@ def test_navigates_to_gateway_false_when_gateway_base_unset(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     def raise_missing() -> str:
-        raise RuntimeError("gateway_url unset")
+        raise GatewayApiBaseMissing("gateway_url unset")
 
     monkeypatch.setattr(gateway_session, "gateway_api_base", raise_missing)
     assert gateway_session._navigates_to_gateway("navigate_page", {"url": f"{GATEWAY}/x"}) is False

@@ -352,7 +352,7 @@ class ComputerMcpDaemon:
                     await writer.drain()
         finally:
             writer.close()
-            with suppress(Exception):
+            with suppress(OSError):
                 await writer.wait_closed()
 
     async def _dispatch(self, req: Request) -> Response:
@@ -490,7 +490,9 @@ class ComputerMcpDaemon:
             # No identity, no audit row: events.agent_id references agents(id).
             return
         app = None
-        with suppress(Exception):
+        # Enrichment only: an unreachable helper is already reported by the
+        # tool call itself.
+        with suppress(PermissionsHelperError, OSError):
             app = helper.frontmost_app()["app"] or None
         event = audit_events.prepare_event_log(
             event_type="computer_action",
@@ -541,7 +543,7 @@ async def _socket_in_use(path: Path) -> bool:
     except OSError:
         return True
     writer.close()
-    with suppress(Exception):
+    with suppress(OSError):
         await writer.wait_closed()
     del reader  # nothing to close on a StreamReader; the writer close suffices
     return True

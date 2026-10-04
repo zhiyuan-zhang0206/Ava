@@ -107,8 +107,9 @@ _UNREACHED = ProbeOutcome(reached=False, host_online=None, status=None)
 async def _probe_machine(name: str, probe: Callable[..., Awaitable[object]]) -> ProbeOutcome:
     """One status_probe round-trip.
 
-    Any failure (unreachable, op failure, timeout, transport error) is a probe
-    failure — the caller counts consecutive failures.
+    An unreachable host or a failed op (timeout and transport errors surface as
+    unreachable) is a probe failure — the caller counts consecutive failures.
+    Anything else is a bug and propagates.
     """
     try:
         result = await probe(
@@ -131,7 +132,7 @@ async def _probe_machine(name: str, probe: Callable[..., Awaitable[object]]) -> 
             host_online=status.agent_host_online if status.machine_name == name else None,
             status=status.model_dump(mode="json"),
         )
-    except Exception:
+    except (cluster_rpc.ClusterOpUnreachable, cluster_rpc.ClusterOpFailed):
         return _UNREACHED
 
 

@@ -99,7 +99,12 @@ def fork_shell(cwd: str, env: dict[str, str], cols: int, rows: int) -> tuple[int
             for sig in (signal.SIGHUP, signal.SIGTERM, signal.SIGPIPE):
                 signal.signal(sig, signal.SIG_DFL)
             os.execve(SHELL_ARGV[0], list(SHELL_ARGV), env)  # noqa: S606 — the pty child execs the login shell directly; a wrapper would defeat the pty
-        except BaseException:
+        except BaseException as exc:
+            # Fork child: no logger and no locks a sibling thread might hold,
+            # so the only channel is raw fd 2, the pty slave the user's
+            # terminal reads. Already gone: nothing left to report on.
+            with contextlib.suppress(OSError):
+                os.write(2, f"ava: could not start the login shell: {exc!r}\n".encode())
             os._exit(127)
     os.set_inheritable(master, False)  # noqa: FBT003 — positional-only
     return pid, master
@@ -147,6 +152,7 @@ class PtySession:
         self._lock = threading.Lock()
         self._build_lock = threading.Lock()
         self._dead = False
+        self._screen_feed_failed = False
         self._cond = threading.Condition(self._lock)
 
     @property
@@ -160,8 +166,9 @@ class PtySession:
         Called on the service's event loop, so it never waits on the screen
         build (`screen`): bytes that arrive meanwhile land in the fresh ring and
         are replayed before the screen is published. pyte must never take the
-        session down (a fidelity bug would kill the shell with it): feed errors
-        are swallowed and the ring remains the degraded capture source.
+        session down (a fidelity bug would kill the shell with it): a feed error
+        is logged once per session and the ring remains the degraded capture
+        source.
         """
         with self._lock:
             screen = self._screen
@@ -170,8 +177,20 @@ class PtySession:
                 if len(self._ring) > _RAW_RING_CAP:
                     del self._ring[: len(self._ring) - _RAW_RING_CAP]
                 return
-        with contextlib.suppress(Exception):
+        self._feed_screen(screen, data)
+
+    def _feed_screen(self, screen: Any, data: bytes) -> None:
+        """Feed pyte; a failure is reported at WARNING once per session, not per chunk."""
+        try:
             screen.feed(data)
+        except Exception:
+            if not self._screen_feed_failed:
+                self._screen_feed_failed = True
+                logger.opt(exception=True).warning(
+                    "pty session {}: the screen model failed to ingest output; capture may be "
+                    "degraded (further failures are not logged)",
+                    self.name,
+                )
 
     def read_size(self) -> int:
         """How many bytes the next master read may take."""
@@ -195,8 +214,7 @@ class PtySession:
             screen = PtyScreen(self.cols, self.rows)
             late = replay
             while True:
-                with contextlib.suppress(Exception):
-                    screen.feed(late)
+                self._feed_screen(screen, late)
                 with self._lock:
                     late, self._ring = bytes(self._ring), bytearray()
                     if not late:

@@ -71,11 +71,16 @@ async def _bounded(awaitable: Awaitable[object], what: str) -> None:
 
 
 async def _bounded_stack_close(stack: AsyncExitStack | None, what: str) -> None:
-    """Close an upstream stack within the shutdown budget; never raises."""
+    """Close an upstream stack within the shutdown budget; a failure is logged, not raised."""
     if stack is None:
         return
-    with suppress(Exception):
+    try:
         await _bounded(stack.aclose(), what)
+    except Exception:
+        logger.opt(exception=True).warning(
+            "[browser-mcp] {} failed; its child processes may linger until the daemon exits",
+            what,
+        )
 
 
 async def _await_stop_or_timeout(stop: asyncio.Event, timeout: float) -> None:

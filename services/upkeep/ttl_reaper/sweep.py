@@ -37,7 +37,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from contextlib import suppress
 from datetime import UTC, datetime, timedelta
 
 from psycopg_pool import ConnectionPool
@@ -111,8 +110,7 @@ def _reap_expired_notices_blocking(
             )
             reaped.append((agent_id, nid))
     for aid in updated_agents:
-        with suppress(Exception):
-            publish_agent_updated_sync(bus, aid)
+        publish_agent_updated_sync(bus, aid)
     return reaped
 
 
@@ -268,8 +266,7 @@ async def sweep_round(
     progress.beat()
     notices = await asyncio.to_thread(_reap_expired_notices_blocking, pool, db, bus)
     for agent_id, nid in notices:
-        with suppress(Exception):
-            await lifecycle.publish_notice_resolved(bus, agent_id, nid)
+        await lifecycle.publish_notice_resolved(bus, agent_id, nid)
     progress.beat()
     pruned_fire_log, torn_pointers, absent_fences = await _slow_phases(pool)
     if (
