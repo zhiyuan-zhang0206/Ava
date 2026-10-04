@@ -262,17 +262,19 @@ def test_sink_opt_exception_without_active_exc_skips_garbage_payload(
     assert "exception_value" not in payload
 
 
-# ─── levels pass through untouched ──────────────────────────────────────────
+# ─── levels pass through untouched, one host-stall companion excepted ───────
 #
-# `_message_to_params` is pure: a record's level is the level the caller logged.
-# Predictable side effects of an update window (slow pool acquires, DB-outage
-# pauses, query cancellations) keep their WARNING; the sink consults no deploy
-# state and never reads the database.
+# `_message_to_params` is pure: a record's level is the level the caller logged,
+# except psycopg's `query cancellation failed` line — a host-stall companion
+# whose emitted event is demoted to info (2026-10-03 triage #13). Predictable
+# side effects of an update window (slow pool acquires, DB-outage pauses) keep
+# their WARNING; the sink consults no deploy state and never reads the
+# database.
 
 
 def test_slow_acquire_and_db_outage_warnings_keep_their_level(sink_logger) -> None:
-    """db_pool_acquire_slow, every db_outage_* category and the query-cancellation
-    line stay WARNING in the events row — nothing rewrites them."""
+    """db_pool_acquire_slow and every db_outage_* category stay WARNING in the
+    events row — nothing rewrites them."""
     sink_logger.warning(  # pyright: ignore[reportUnknownMemberType]
         "[db pool] acquire took 2.0s (slow — Postgres under load)",
         event="db_pool_acquire_slow",
@@ -287,7 +289,17 @@ def test_slow_acquire_and_db_outage_warnings_keep_their_level(sink_logger) -> No
         _event, _agent_id, level, _payload = _last_event()
         assert level == "warning", f"{event} must keep its WARNING level"
 
+
+def test_host_stall_companion_demotes_only_its_emitted_event(sink_logger) -> None:
+    """psycopg's `query cancellation failed` warning is a host-stall companion
+    (triage #13): the emitted event drops to info while the payload keeps the
+    library's message verbatim. The next warning is untouched."""
     sink_logger.warning("query cancellation failed: cancellation timeout expired")  # pyright: ignore[reportUnknownMemberType]
+    _event, _agent_id, level, payload = _last_event()
+    assert level == "info"
+    assert payload["msg"] == "query cancellation failed: cancellation timeout expired"
+
+    sink_logger.warning("some other warning")  # pyright: ignore[reportUnknownMemberType]
     _event, _agent_id, level, _payload = _last_event()
     assert level == "warning"
 
