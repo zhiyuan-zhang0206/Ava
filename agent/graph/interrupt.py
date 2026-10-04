@@ -118,19 +118,14 @@ async def _watch_for_interrupt(
     terminates at its next loop check, one poll at most — and because the
     watcher holds no shared resource, even that lingering poll is harmless.
     """
-    stop_task = asyncio.create_task(stop.wait())
-    try:
-        while not stop.is_set():
-            reason = await pending_interrupt_reason(pool, agent_id)
-            if reason is not None:
-                if not stop.is_set():
-                    event.set(reason)
-                return
-            done, _ = await asyncio.wait({stop_task}, timeout=_INTERRUPT_POLL_S)
-            if done:
-                break
-    finally:
-        stop_task.cancel()
+    while not stop.is_set():
+        reason = await pending_interrupt_reason(pool, agent_id)
+        if reason is not None:
+            if not stop.is_set():
+                event.set(reason)
+            return
+        with contextlib.suppress(TimeoutError):
+            await asyncio.wait_for(stop.wait(), timeout=_INTERRUPT_POLL_S)
 
 
 # How long exit waits for the cancelled watcher to unwind. Cancellation lands

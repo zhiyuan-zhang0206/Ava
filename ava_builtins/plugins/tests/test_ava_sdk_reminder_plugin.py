@@ -17,6 +17,7 @@ from langchain_core.messages import (
 from langchain_core.runnables import RunnableConfig
 from langgraph.runtime import Runtime
 
+from agent.graph.llm_errors import LlmLedger
 from agent.messages import inbound_message, tail_has_agent_inbound
 from agent.state import CompactState, build_agent_state
 from ava.sdk_surface import install
@@ -937,7 +938,7 @@ async def test_real_runner_compaction_wins_no_note(
     assert isinstance(hook_update, dict) and "messages" not in hook_update
     from agent.graph.llm.node import llm_node
 
-    cmd = await llm_node(state, _runtime_for_runner(), _config())
+    cmd = await llm_node(state, _runtime_for_runner(), _config(), ledger=LlmLedger())
     update = cmd.update
     assert isinstance(update, dict)
     # Apply the real add_messages reducer to get the committed messages.

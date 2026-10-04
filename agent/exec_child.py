@@ -50,8 +50,9 @@ import sys
 import threading
 import time
 import traceback
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Literal, cast
+from typing import Any, Literal, Protocol, cast
 
 # isort: split
 # First import after stdlib, BEFORE the heavy `import ava` inside `_run`:
@@ -72,11 +73,6 @@ import base.log  # noqa: F401  # pyright: ignore[reportUnusedImport]  # side eff
 from agent.graph.exec.protocol import RequestPayload
 from base.log import init_subprocess_logger, logger
 
-# Covers child runtime setup after initial module imports, ending immediately
-# before agent-authored code begins. The parent-owned exec duration includes
-# this interval but cannot isolate it from user code.
-_CHILD_BOOT_STARTED_AT = time.perf_counter()
-
 # Watchdog margin beyond (timeout + parent's kill grace) before the child
 # hard-exits — overridable so tests do not wait for the 5s default.
 WATCHDOG_MARGIN_S = 5.0
@@ -90,12 +86,41 @@ _RESULT_KIND: dict[type[BaseException], Literal["cancelled", "timed_out"]] = {
 }
 
 
-def _import_runtime() -> None:
-    """Load the SDK only after `main` can turn a boot failure into a result."""
-    global ava, agent_identity  # noqa: PLW0603
+class _Sdk(Protocol):
+    """The slice of the `ava` module the child drives: the framework-internal state slots and
+    the plugin load."""
 
+    state: Any
+    state_update: dict[str, Any] | None
+
+    def ensure_plugins_loaded(self, *, surface: bool = True) -> None: ...
+
+
+class _AgentIdentity(Protocol):
+    def establish(self, agent_id: int, *, owns_loop: bool) -> None: ...
+
+
+@dataclass(frozen=True)
+class _ChildContext:
+    """What this one exec child holds for the run: the SDK modules it bound after boot, and
+    when boot began.
+
+    `boot_started_at` covers child runtime setup after the initial module imports, ending
+    immediately before agent-authored code begins; the parent-owned exec duration includes
+    this interval but cannot isolate it from user code.
+    """
+
+    ava: _Sdk
+    agent_identity: _AgentIdentity
+    boot_started_at: float
+
+
+def _import_runtime(boot_started_at: float) -> _ChildContext:
+    """Load the SDK only after `main` can turn a boot failure into a result."""
     import ava
     from ava import agent_identity
+
+    return _ChildContext(ava=ava, agent_identity=agent_identity, boot_started_at=boot_started_at)
 
 
 def _line_buffered_output() -> None:
@@ -221,9 +246,9 @@ def _init_logger(agent_id: int | None) -> None:
     telemetry_otlp.defer_until_exit()
 
 
-def _emit_child_boot_timing() -> None:
+def _emit_child_boot_timing(child: _ChildContext) -> None:
     """Record the child-ready boundary before executing agent-authored code."""
-    duration_ms = (time.perf_counter() - _CHILD_BOOT_STARTED_AT) * 1000
+    duration_ms = (time.perf_counter() - child.boot_started_at) * 1000
     extra: dict[str, object] = {}
     module = sys.modules.get("base.telemetry.otlp.telemetry_otlp")
     if module is not None and hasattr(module, "deferred_state"):
@@ -250,8 +275,9 @@ class _LazyStateSlot:
     graph/LM stack for a snapshot the turn may never touch).
     """
 
-    def __init__(self, payload: RequestPayload) -> None:
+    def __init__(self, payload: RequestPayload, ava: _Sdk) -> None:
         object.__setattr__(self, "_payload", payload)
+        object.__setattr__(self, "_ava", ava)
         object.__setattr__(self, "_real", None)
 
     def materialize(self) -> None:
@@ -260,6 +286,7 @@ class _LazyStateSlot:
             return
         # The faces declare the plugins' state fields — loaded before the registry is built, and the
         # dynamic class is built before the blob is decoded: the decode's allowlist is the class's.
+        ava: _Sdk = object.__getattribute__(self, "_ava")
         ava.ensure_plugins_loaded(surface=False)
         payload: RequestPayload = object.__getattribute__(self, "_payload")
         from agent.extensions.registry import build_registry
@@ -280,7 +307,7 @@ class _LazyStateSlot:
         setattr(object.__getattribute__(self, "_real"), name, value)
 
 
-def _build_state_slot(payload: RequestPayload) -> None:
+def _build_state_slot(child: _ChildContext, payload: RequestPayload) -> None:
     """Arm the dynamic AgentState slot from the request snapshot.
 
     A stateless request leaves `ava.state` None. A stateful request binds a
@@ -290,11 +317,11 @@ def _build_state_slot(payload: RequestPayload) -> None:
     """
     if payload.state_raw is None:
         return
-    ava.state = _LazyStateSlot(payload)
-    ava.state_update = {}
+    child.ava.state = _LazyStateSlot(payload, child.ava)
+    child.ava.state_update = {}
 
 
-def _take_result_state_update(payload: Any, *, state_injected: bool) -> None:
+def _take_result_state_update(child: _ChildContext, payload: Any, *, state_injected: bool) -> None:
     """Serialize this turn's plugin delta into the result envelope.
 
     A tampered slot (agent set ava.state_update to a non-dict) is reported as
@@ -303,7 +330,7 @@ def _take_result_state_update(payload: Any, *, state_injected: bool) -> None:
     tampering — the slot was initialized to {}; without one (container/eval
     mode) None is the uninitialized default and carries no delta.
     """
-    update = ava.state_update
+    update = child.ava.state_update
     if update is None:
         if state_injected:
             payload.state_update_error = (
@@ -451,10 +478,10 @@ def _deliver_run_telemetry(result_path: str, payload: Any) -> None:
             _write_crashed_result(result_path, exc, code_reached=payload.code_reached)
 
 
-def _run(request_path: str, result_path: str) -> None:
+def _run(request_path: str, result_path: str, boot_started_at: float) -> None:
     """Child body: read the request, set up identity + plugins + state, run the
     code, write the result envelope."""
-    _import_runtime()
+    child = _import_runtime(boot_started_at)
     from agent.graph.exec.protocol import ResultPayload, read_request, write_result
     from ava.attachment_transport import own_media_gated_members, take_attachments
     from ava.sdk_surface.discovery import hidden_surface_members
@@ -469,7 +496,7 @@ def _run(request_path: str, result_path: str) -> None:
 
     birth, overlay = _pop_overlay_env()
     if request.agent_id is not None:
-        agent_identity.establish(request.agent_id, owns_loop=True)
+        child.agent_identity.establish(request.agent_id, owns_loop=True)
         if request.incarnation is not None:
             from base.native_process.runtime_incarnation import bind_child_incarnation
 
@@ -496,18 +523,18 @@ def _run(request_path: str, result_path: str) -> None:
     # request carrying a state snapshot arms a lazy slot whose first use
     # upgrades to the agent-runtime faces (state fields feed the state schema)
     # — the child start stays off the agent runtime either way (task #3633).
-    ava.ensure_plugins_loaded()
+    child.ava.ensure_plugins_loaded()
     _apply_overlay_scope(birth, overlay, scope="plugin")
     from agent.process_boot import _apply_per_agent_eval_isolation
 
     _apply_per_agent_eval_isolation()
-    _build_state_slot(request)
+    _build_state_slot(child, request)
 
     if request.timeout_s > 0:
         _arm_watchdog(request.timeout_s)
 
     try:
-        _emit_child_boot_timing()
+        _emit_child_boot_timing(child)
     except BaseException as exc:
         # Boot-timing failure: the code never ran.
         _write_crashed_result(result_path, exc, code_reached=False)
@@ -523,7 +550,7 @@ def _run(request_path: str, result_path: str) -> None:
         _deliver_envelope_telemetry()
         return
     finally:
-        _take_result_state_update(payload, state_injected=request.state_raw is not None)
+        _take_result_state_update(child, payload, state_injected=request.state_raw is not None)
         payload.findings = [f.model_dump() for f in take_findings()]
         payload.attachments = take_attachments()
     # Outside the try: a boot-phase exception (config fetch, request read,
@@ -544,6 +571,7 @@ def main() -> None:
     semantics, not the exit code (a non-zero exit would add nothing the
     envelope does not already say, and the parent treats a missing envelope
     as the crash path anyway)."""
+    boot_started_at = time.perf_counter()
     request_path = os.environ.get("AVA_EXEC_REQUEST_FILE")
     result_path = os.environ.get("AVA_EXEC_RESULT_FILE")
     if not request_path or not result_path:
@@ -553,7 +581,7 @@ def main() -> None:
         )
         raise SystemExit(2)
     try:
-        _run(request_path, result_path)
+        _run(request_path, result_path, boot_started_at)
     except BaseException as exc:
         _write_crashed_result(result_path, exc)
         # The crash envelope's record needs the same last-mile delivery (task
