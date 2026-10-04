@@ -43,8 +43,7 @@ class _InjectCwdNotesAfterExecHook(Hook):
         self, state: AgentState, _runtime: object, _config: object, /
     ) -> dict | None: ...
 
-inject_cwd_notes_after_exec = _InjectCwdNotesAfterExecHook()
-# declared in contribute(): after_exec=(inject_cwd_notes_after_exec,)
+# declared in contribute(): after_exec=(_InjectCwdNotesAfterExecHook(),)
 ```
 
 - Wraps `ava.files.read`: when the agent reads a file, traverses from the resolved path upward to git root or `$HOME` (whichever is farther), collecting `AGENTS.md` / `CLAUDE.md` along the way
@@ -58,8 +57,10 @@ inject_cwd_notes_after_exec = _InjectCwdNotesAfterExecHook()
 ### Plugin state declaration
 
 ```python
-state_handle = PluginStateHandle(AvaCodeState, "ava_code")
+def state_handle() -> PluginStateHandle[AvaCodeState]:
+    return PluginStateHandle(AvaCodeState, "ava_code")  # a view over the turn's state slot, built per use
 # declared in contribute(): state=(AvaCodeState,)
+# the SDK surface (`plugin.py`) reads and writes it through `read_state()` / `update_state(delta)`
 ```
 
 `AvaCodeState` lives in `_state.py` and the system-prompt sections in `_prompt_sections.py`: both import `ava`, which `agent_runtime.py` (hooks and `contribute()`) does not.
@@ -76,7 +77,7 @@ PluginContributions(sdk_namespaces=(SdkNamespace("cwd", _code_namespace, expand=
 
 - `ava.cwd.get()` → returns the current logical working directory
 - `ava.cwd.set(path)` → changes the logical working directory (relative path resolved against the current logical value, `~/...` expanded). AvaCode's `files` / `shell` / `understand` wrappers read it explicitly; bare `open`, `Path.cwd`, imports, and user subprocesses retain their Python process cwd. After set, writes `cwd_note` (and when git repo has `.claude/skills` / `.agents/skills` / `.ava/skills` project-local skills, writes `project_skills_note`), which are injected as system notes by the above after_exec hook
-- `validate_cwd_after_init` → after checkpoint restore, validates the persisted logical cwd and repairs a stat failure or non-directory value to the agent workspace; it never calls `os.chdir`
+- `_ValidateCwdAfterInitHook` (declared as `after_init`) → after checkpoint restore, validates the persisted logical cwd and repairs a stat failure or non-directory value to the agent workspace; it never calls `os.chdir`
 
 ## Key dependencies
 
