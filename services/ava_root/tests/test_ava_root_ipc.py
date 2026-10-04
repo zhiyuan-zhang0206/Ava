@@ -10,7 +10,9 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 from pathlib import Path
+from typing import Any, cast
 
 import psutil
 import pytest
@@ -364,3 +366,89 @@ def test_ipc_native_birth_rules_preserve_platform_authority(
     else:
         with pytest.raises(RootClientError, match="exact native IPC peer"):
             client._validate_status_peer(response, peer)
+
+
+class _DeadWriter:
+    """A StreamWriter stand-in whose peer is gone: every drain raises."""
+
+    def __init__(self, exc: ConnectionError) -> None:
+        self._exc = exc
+        self.closed = False
+
+    def write(self, _data: bytes) -> None:
+        pass
+
+    def close(self) -> None:
+        self.closed = True
+
+    async def drain(self) -> None:
+        raise self._exc
+
+    async def wait_closed(self) -> None:
+        pass
+
+
+class TestConnectionChurn:
+    """A client disconnecting early is churn, not an unhandled asyncio error."""
+
+    async def test_reset_while_reading_returns_quietly(
+        self, short_tmp: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        server = ControlServer(short_tmp / "root.sock", _echo_handler)
+        reader = asyncio.StreamReader()
+        reader.set_exception(ConnectionResetError("Connection lost"))
+        writer = _DeadWriter(ConnectionResetError("Connection lost"))
+        with caplog.at_level(logging.DEBUG, logger="services.ava_root.server"):
+            await server._serve_connection(reader, cast("asyncio.StreamWriter", writer))
+        assert writer.closed
+        assert any(
+            "connection lost while reading request" in record.getMessage()
+            for record in caplog.records
+        )
+
+    async def test_reset_before_response_delivery_returns_quietly(
+        self, short_tmp: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        server = ControlServer(short_tmp / "root.sock", _echo_handler)
+        reader = asyncio.StreamReader()
+        reader.feed_data(encode({"verb": "status"}))
+        writer = _DeadWriter(ConnectionResetError("Connection lost"))
+        with caplog.at_level(logging.DEBUG, logger="services.ava_root.server"):
+            await server._serve_connection(reader, cast("asyncio.StreamWriter", writer))
+        assert writer.closed
+        assert any(
+            "connection lost before response delivered" in record.getMessage()
+            for record in caplog.records
+        )
+
+    async def test_client_vanishing_early_never_reaches_the_asyncio_error_handler(
+        self, short_tmp: Path
+    ) -> None:
+        sock_path = short_tmp / "root.sock"
+        gate = asyncio.Event()
+
+        async def slow(request: RequestPayload) -> ResponsePayload:
+            await gate.wait()
+            return ok_response({"echo": request["verb"]})
+
+        server = ControlServer(sock_path, slow)
+        await server.start()
+        loop = asyncio.get_running_loop()
+        escaped: list[dict[str, Any]] = []
+
+        def record(_loop: asyncio.AbstractEventLoop, context: dict[str, Any]) -> None:
+            escaped.append(context)
+
+        previous = loop.get_exception_handler()
+        loop.set_exception_handler(record)
+        try:
+            _reader, writer = await asyncio.open_unix_connection(str(sock_path))
+            writer.write(encode({"verb": "status"}))
+            await writer.drain()
+            writer.transport.abort()
+            gate.set()
+            await asyncio.sleep(0.3)
+            assert escaped == []
+        finally:
+            loop.set_exception_handler(previous)
+            await server.close()
