@@ -12,6 +12,13 @@ aliases. `Settings` aggregates one instance of each; access is nested
 unchanged, so `.env` files, `_enforce_cluster_env_authority`, the bootstrap
 payload, and the config PUT keep working byte-for-byte.
 
+Layout: the sub-models live in `base/config/domains/` (grouped by owner:
+`agent`, `daemon`, `services`, `channels`, `storage`, `observability`, plus the
+single-module domains) and the write path (edit policy, candidate validation, panel
+metadata) in `base/config/admin/`. Grouping is by folder only: the registry stays
+the flat `DOMAIN_MODELS` / `MODEL_CLASSES` in `base/host/env/config_registry.py`, and a
+component's own config slice belongs in that component's package, not here.
+
 Precedence: env var > Field default. `$AVA_HOME/.env` is the single source of
 truth — the config panel and `ava config set` write edits straight into it
 (`set_key` / `unset_key` by alias; see `base/host/env/runtime_config.py`), and
@@ -190,18 +197,18 @@ if TYPE_CHECKING:
     # Names the lite latch installs into this module's globals at upgrade
     # (`_full._facade_exports`) or serves settings-free in `__getattr__`:
     # declared so `from base.config import X` / `from . import X` consumers
-    # (`base/config/editing.py`, the gateway config router, ops.host_config, tests)
+    # (`base/config/admin/editing.py`, the gateway config router, ops.host_config, tests)
     # keep resolving statically after the split.
-    from base.config.metadata import (
+    from base.config.admin.metadata import (
         CONFIG_UNCHANGED_SENTINEL as CONFIG_UNCHANGED_SENTINEL,
     )
-    from base.config.metadata import (
+    from base.config.admin.metadata import (
         ConfigFieldMeta as ConfigFieldMeta,
     )
-    from base.config.metadata import (
+    from base.config.admin.metadata import (
         env_override_values as env_override_values,
     )
-    from base.config.metadata import (
+    from base.config.admin.metadata import (
         get_config_metadata as get_config_metadata,
     )
     from base.config.service_read import (
@@ -403,14 +410,14 @@ def __getattr__(name: str) -> Any:
 
         return fields() if name == "_FIELDS" else field_infos()
     if name in ("CONFIG_UNCHANGED_SENTINEL", "ConfigFieldMeta"):
-        # The write-path policy (`base/config/editing.py`) imports these at
+        # The write-path policy (`base/config/admin/editing.py`) imports these at
         # module level; both are settings-free metadata objects, so serve them
         # without the upgrade for the same repair-path reason as the field
-        # faces above. Direct submodule import — `from base.config import
+        # faces above. Direct submodule import — `from base.config.admin import
         # metadata` would re-enter this `__getattr__` and upgrade.
         import importlib
 
-        _metadata = importlib.import_module(f"{__name__}.metadata")
+        _metadata = importlib.import_module(f"{__name__}.admin.metadata")
         return getattr(_metadata, name)
     if not _lite._maybe_upgrade(f"module attribute {name!r}"):
         raise AttributeError(_lite._build_window_message(f"module attribute {name!r}"))

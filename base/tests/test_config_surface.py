@@ -20,7 +20,7 @@ def _style_from_env(monkeypatch: pytest.MonkeyPatch, **env: str) -> str | None:
     is built at import, so a later setenv never reaches it. Every style alias is
     cleared first so an ambient `.env` cannot decide the outcome.
     """
-    from base.config.agent import AgentSettings
+    from base.config.domains.agent.settings import AgentSettings
 
     for key in _STYLE_ENV:
         monkeypatch.delenv(key, raising=False)
@@ -79,7 +79,7 @@ def _helper_port_from_env(monkeypatch: pytest.MonkeyPatch, **env: str) -> int:
     cannot decide the outcome). delitem/setitem, not delenv/setenv: the lint
     bans env mutation on Settings aliases; this constructs a fresh sub-model,
     which reads the RAW env by design."""
-    from base.config.services import ServiceSettings
+    from base.config.domains.services.settings import ServiceSettings
 
     for key in _HELPER_ENV:
         monkeypatch.delitem(os.environ, key, raising=False)
@@ -113,7 +113,7 @@ def test_permissions_helper_serialization_alias_is_the_new_key() -> None:
 def _im_send_delays_from_env(monkeypatch: pytest.MonkeyPatch, **env: str) -> list[float]:
     """Construct ServiceSettings from a clean env plus `env` (the singleton is
     built at import, so a later setenv never reaches it)."""
-    from base.config.services import ServiceSettings
+    from base.config.domains.services.settings import ServiceSettings
 
     # setenv/delenv via loop variables — the direct literal spelling is
     # linted (settings is a module-load singleton), the indirect one
@@ -153,7 +153,7 @@ def test_delay_lists_default_without_env(monkeypatch: pytest.MonkeyPatch) -> Non
 def _disabled_adapters_from_env(
     monkeypatch: pytest.MonkeyPatch, value: str | None = None
 ) -> list[str]:
-    from base.config.services import ServiceSettings
+    from base.config.domains.services.settings import ServiceSettings
 
     # setenv via a loop variable — the direct literal spelling is linted
     # (settings is a module-load singleton), the indirect one reaches the

@@ -173,11 +173,11 @@ def test_retired_env_aliases_are_not_read(monkeypatch: pytest.MonkeyPatch) -> No
     """The retired names are inert: a stale key left in an environment no longer
     reaches its field (defaults / the None sentinel survive) — the settings
     never read the old spelling."""
-    from base.config.agent import AgentSettings
-    from base.config.agent_eval import AgentEvalSettings
-    from base.config.alerts import AlertsSettings
-    from base.config.gateway import GatewaySettings
-    from base.config.services import ServiceSettings
+    from base.config.domains.agent.eval import AgentEvalSettings
+    from base.config.domains.agent.settings import AgentSettings
+    from base.config.domains.gateway import GatewaySettings
+    from base.config.domains.observability.alerts import AlertsSettings
+    from base.config.domains.services.settings import ServiceSettings
 
     for key in (
         "AVA_GATEWAY_URL",
@@ -210,7 +210,7 @@ def test_eval_isolation_env_aliases_parse(tmp_path: Path) -> None:
             sys.executable,
             "-c",
             textwrap.dedent("""
-                from base.config.agent_eval import AgentEvalSettings
+                from base.config.domains.agent.eval import AgentEvalSettings
                 config = AgentEvalSettings()
                 assert config.eval_isolation is True
                 assert config.eval_network_allowlist == ["web", "understand"]
@@ -287,7 +287,7 @@ def test_current_field_values_silently_serves_boot_db_url_for_agent_profile_refu
     launcher-injected runner projection) with NO warning and only a debug
     note; the old path warned on every panel read / agent send, while the
     guard's fail-fast for a MISSING projection is unchanged."""
-    from base.config import data_plane
+    from base.config.domains.storage import data_plane
     from base.host.env import runtime_config as rt
 
     rec = _patch_logger(monkeypatch)
@@ -316,7 +316,7 @@ def test_current_field_values_warns_on_bad_db_url_under_agent_profile_conditions
     decode failures — a malformed URL in the SAME agent-profile/default-home
     context still warns and falls back to the boot-time value, and the
     warning must not suggest removing the load-bearing .env line."""
-    from base.config import data_plane
+    from base.config.domains.storage import data_plane
     from base.host.env import runtime_config as rt
 
     rec = _patch_logger(monkeypatch)
@@ -370,7 +370,7 @@ def test_timezone_validated_at_construction(monkeypatch: pytest.MonkeyPatch) -> 
     the failure to Settings construction, where it is loud and immediate."""
     from pydantic import ValidationError
 
-    from base.config.general import GeneralSettings
+    from base.config.domains.general import GeneralSettings
 
     monkeypatch.setitem(os.environ, "AVA_TIMEZONE", "Not/A_Timezone")
     with pytest.raises(ValidationError, match="not a valid IANA timezone"):
@@ -405,7 +405,7 @@ def test_timezone_default_warns_when_unset(monkeypatch: pytest.MonkeyPatch) -> N
     cluster .env instead of discovering the wrong fire time."""
     from loguru import logger
 
-    from base.config.general import GeneralSettings
+    from base.config.domains.general import GeneralSettings
 
     monkeypatch.delitem(os.environ, "AVA_TIMEZONE", raising=False)
     records, sink_id = _capture_loguru_warnings()
@@ -421,7 +421,7 @@ def test_timezone_explicit_value_does_not_warn(monkeypatch: pytest.MonkeyPatch) 
     choice — no warning."""
     from loguru import logger
 
-    from base.config.general import GeneralSettings
+    from base.config.domains.general import GeneralSettings
 
     monkeypatch.setitem(os.environ, "AVA_TIMEZONE", "America/Los_Angeles")
     records, sink_id = _capture_loguru_warnings()

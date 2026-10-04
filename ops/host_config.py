@@ -16,8 +16,8 @@ from typing import Any
 
 from base.cluster.machine import machine_name
 from base.config import env_override_values, field_domain, get_config_metadata
-from base.config.candidate import validate_env_patch_for_write
-from base.config.editing import field_editable, split_reducer_patch
+from base.config.admin.candidate import validate_env_patch_for_write
+from base.config.admin.editing import field_editable, split_reducer_patch
 from base.host import config_validators
 from base.host.env import runtime_config
 from ops.rpc_schemas import (
@@ -197,7 +197,7 @@ def config_write_op(
     fields) from a remote one. A host field is editable iff `writable` when local,
     else `remote_writable` — `writable` means "a human may edit it on its own host",
     `remote_writable` is the narrower allowlist for editing a *remote* host's field.
-    The gate is `base.config.editing.field_editable` — the same definition the
+    The gate is `base.config.admin.editing.field_editable` — the same definition the
     gateway's PUT /api/config gate uses, so the two write paths cannot drift.
     """
     metas = {m.name: m for m in get_config_metadata()}

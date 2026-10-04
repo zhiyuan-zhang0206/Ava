@@ -82,7 +82,7 @@ def env_values_from_text(text: str) -> dict[str, str]:
 
 @functools.cache
 def _load_alias_metadata() -> dict[str, tuple[str, bool]]:
-    from base.config.metadata import get_config_metadata
+    from base.config.admin.metadata import get_config_metadata
 
     return {meta.env_var: (meta.scope, meta.sensitive) for meta in get_config_metadata()}
 

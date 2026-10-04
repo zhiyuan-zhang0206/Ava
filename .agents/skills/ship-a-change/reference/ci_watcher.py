@@ -56,7 +56,7 @@ import time
 from pydantic import ValidationError
 
 import ava
-from base.config.data_plane import AgentProfileOwnerDbUrlRefusedError
+from base.config.domains.storage.data_plane import AgentProfileOwnerDbUrlRefusedError
 from base.paths import workspace_dir
 
 # ── Configure before launching ───────────────────────────────────────────────

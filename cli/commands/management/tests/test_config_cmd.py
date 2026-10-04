@@ -112,7 +112,7 @@ def test_set_list_field_writes_bare_env_and_round_trips(
 ) -> None:
     """A list-backed CLI value lands as a bare comma list that the consuming
     Settings model parses back into the declared list type."""
-    from base.config.services import ServiceSettings
+    from base.config.domains.services.settings import ServiceSettings
 
     view = _view()
     view.fields.append(
@@ -309,11 +309,11 @@ def test_unset_machine_host_field_rejects_remote_read_only(
 def test_cli_field_editable_mirrors_shared_definition(
     scope: str, writable: bool, remote_writable: bool, remote: bool
 ) -> None:
-    """The CLI's wire-view gate and base.config.editing.field_editable are two
+    """The CLI's wire-view gate and base.config.admin.editing.field_editable are two
     definitions of one policy; this table pins their agreement so a future
     special case in the shared definition turns this test red (task #2552)."""
     from base.config import ConfigFieldMeta
-    from base.config.editing import field_editable
+    from base.config.admin.editing import field_editable
 
     view_field = _field(
         "parity",
@@ -510,7 +510,7 @@ def test_local_set_validates_candidate_and_rejects_incident_shape(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     # The candidate validation builds the sandbox model FRESH from os.environ
-    # (base/config/candidate.py `source_model()`), so the env itself is the seam,
+    # (base/config/admin/candidate.py `source_model()`), so the env itself is the seam,
     # not the Settings singleton (which is why setenv/delenv would be a no-op
     # elsewhere, and why the wholesale environ swap is the honest patch here):
     # an inherited exec timeout would otherwise decide the verdict.

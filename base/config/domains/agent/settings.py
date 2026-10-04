@@ -15,11 +15,11 @@ keep the config-panel field order as close to the historical one as possible.
 
 from __future__ import annotations
 
-from base.config.agent_compaction import AgentCompactionSettings
-from base.config.agent_eval import AgentEvalSettings
-from base.config.agent_memory import AgentMemorySettings
-from base.config.agent_prompt import AgentPromptSettings
-from base.config.agent_runtime import AgentRuntimeSettings
+from base.config.domains.agent.compaction import AgentCompactionSettings
+from base.config.domains.agent.eval import AgentEvalSettings
+from base.config.domains.agent.memory import AgentMemorySettings
+from base.config.domains.agent.prompt import AgentPromptSettings
+from base.config.domains.agent.runtime import AgentRuntimeSettings
 
 
 class AgentSettings(

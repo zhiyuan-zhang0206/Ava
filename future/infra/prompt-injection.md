@@ -6,7 +6,7 @@
 > updated. Corrected here.
 >
 > **Built** — `ava/security.py` (~240 lines), a rule-based scanner gated on
-> `AVA_SECURITY_SCAN_ENABLED` (`base/config/agent.py`), **default on**. It is
+> `AVA_SECURITY_SCAN_ENABLED` (`base/config/domains/agent/settings.py`), **default on**. It is
 > wired into every one of these ingestion points:
 >
 > | Call site | Source tag |

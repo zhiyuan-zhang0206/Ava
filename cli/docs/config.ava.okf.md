@@ -20,7 +20,7 @@ gateway response names the restart targets.
 gateway. It reads aliases, sensitivity, scope, editability, type, choices, and
 restart metadata from `base.host.env.config_registry`; sensitive values are masked.
 Before writing, it validates the full affected candidate through
-`base.config.candidate`, so a cross-field-invalid patch cannot replace the
+`base.config.admin.candidate`, so a cross-field-invalid patch cannot replace the
 only local config file. Host fields are locally writable; a pure runner cannot
 write cluster fields locally because its cluster configuration is fetched from
 the gateway.

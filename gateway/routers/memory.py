@@ -52,7 +52,7 @@ router = APIRouter()
 # the backend's async client); the semaphore caps in-flight Gemini query
 # embeds so a burst of searches cannot pile up unbounded on the shared key.
 # Sized by `memory_search_max_concurrency` (env
-# AVA_MEMORY_SEARCH_MAX_CONCURRENCY, default 20 — see base/config/services.py):
+# AVA_MEMORY_SEARCH_MAX_CONCURRENCY, default 20 — see base/config/domains/services/settings.py):
 # the historical hardcoded 2 predated the async-embed fix (2026-08-03, when a
 # sync embed on the event loop froze the whole gateway for up to ~4.5 minutes
 # and cost 13 restarts in 8h) and starved passive recall behind a queue

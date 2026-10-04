@@ -20,8 +20,9 @@ from urllib.parse import unquote, urlsplit
 import pytest
 
 from base.cluster.machine import reachable_host, reset_identity
-from base.config import DataPlaneSettings, data_plane, settings
-from base.config.data_plane import _self_machine_host
+from base.config import DataPlaneSettings, settings
+from base.config.domains.storage import data_plane
+from base.config.domains.storage.data_plane import self_machine_host
 from base.host.env.dotenv_boot import PLACEHOLDER_DB_URL
 from base.host.net.url_secret import redacted_url, url_with_password, url_with_userinfo
 
@@ -273,7 +274,7 @@ class TestSettingsKeepDatabaseCredentialsVerbatim:
 def _restore_machine_env() -> Iterator[None]:
     """Save/restore AVA_MACHINE_HOST around a test. It is a Settings alias, so
     monkeypatch.setenv on it is banned by the force-settings lint — but
-    `_self_machine_host` reads os.environ directly at sub-model construction time, so
+    `self_machine_host` reads os.environ directly at sub-model construction time, so
     the tests set os.environ directly with explicit restore (the pattern of
     base/config/tests/test_unit_home.py). AVA_HOME is not a Settings alias: the tests
     set it with `monkeypatch.setenv`, which restores it (a bare assignment would leave
@@ -445,7 +446,7 @@ class TestPinIpv4Hostaddr:
 
 @pytest.mark.usefixtures("_restore_machine_env")
 class TestSelfMachineHostParity:
-    """`_self_machine_host` is a leaf duplicate of `base.cluster.machine.reachable_host`
+    """`self_machine_host` is a leaf duplicate of `base.cluster.machine.reachable_host`
     (the config sub-model cannot import base.cluster.machine — circular), so pin its
     precedence (env AVA_MACHINE_HOST > localhost) to the real resolver: each source case
     asserts both return the same value, so a future drift in either side fails here."""
@@ -460,7 +461,7 @@ class TestSelfMachineHostParity:
 
     def _pin(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, *, env: str | None) -> None:
         # The two resolvers read different surfaces of the same sources:
-        # _self_machine_host reads os.environ at construction time; reachable_host
+        # self_machine_host reads os.environ at construction time; reachable_host
         # reads the settings singleton (machine_host / ava_home fields). Pin both
         # surfaces to the same values so the assertion compares precedence only.
         monkeypatch.setenv("AVA_HOME", str(tmp_path))
@@ -473,18 +474,18 @@ class TestSelfMachineHostParity:
 
     def test_env_wins(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
         self._pin(monkeypatch, tmp_path, env="gw.env-host")
-        assert _self_machine_host() == reachable_host() == "gw.env-host"
+        assert self_machine_host() == reachable_host() == "gw.env-host"
 
     def test_a_machine_host_file_is_not_read(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
         self._pin(monkeypatch, tmp_path, env=None)
         (tmp_path / "machine_host").write_text("gw.file-host\n")
-        assert _self_machine_host() == reachable_host() == "localhost"
+        assert self_machine_host() == reachable_host() == "localhost"
 
     def test_localhost_default(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
         self._pin(monkeypatch, tmp_path, env=None)
-        assert _self_machine_host() == reachable_host() == "localhost"
+        assert self_machine_host() == reachable_host() == "localhost"
 
 
 class TestRedactedUrl:

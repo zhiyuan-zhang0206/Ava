@@ -1,5 +1,5 @@
 """Pure unit tests for the shared config write-path policy
-(`base/config/editing.py`) — the editability gate, the merge-patch reducer and
+(`base/config/admin/editing.py`) — the editability gate, the merge-patch reducer and
 the ConfigPatchPlan parser that PUT /api/config and the host-side
 config_write_op both consume.
 
@@ -11,7 +11,7 @@ semantics, scalar coercion) with synthetic metadata, no fixtures.
 import pytest
 
 from base.config import CONFIG_UNCHANGED_SENTINEL, ConfigFieldMeta, get_config_metadata
-from base.config.editing import (
+from base.config.admin.editing import (
     ConfigPatchPlan,
     coerce_config_scalar,
     field_editable,

@@ -294,7 +294,7 @@ async def test_retrieval_default_is_top_100(
 ) -> None:
     """Retrieval goes wide by default — the relaxed filter lists rather than
     rejects, so it needs real candidates to judge; the default lives in
-    `base/config/agent.py` (memory_recall_retrieve_k = 100)."""
+    `base/config/domains/agent/settings.py` (memory_recall_retrieve_k = 100)."""
     from base.config import settings
 
     assert settings.agent.memory_recall_retrieve_k == 100

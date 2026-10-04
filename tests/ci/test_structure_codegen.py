@@ -451,7 +451,7 @@ def test_every_codegen_input_family_selects_freshness() -> None:
         "scripts/codegen/gen_event_registry.py",
         "base/events/registry.md",
         "base/host/env/config_registry.py",
-        "base/config/agent.py",
+        "base/config/domains/agent/settings.py",
         "scripts/codegen/gen_config_lite_table.py",
         "base/host/env/config_lite_table.json",
     )

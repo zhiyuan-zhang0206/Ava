@@ -26,7 +26,7 @@ from typing_extensions import TypedDict
 
 from agent.messages.guard import guarded_delta_reducer
 from agent.startup import CHECKPOINT_INTERVAL_KEY, wrap_saver_writes_with_nstep_interval
-from base.config.agent_runtime import AgentRuntimeSettings
+from base.config.domains.agent.runtime import AgentRuntimeSettings
 
 
 class _StubSaver:

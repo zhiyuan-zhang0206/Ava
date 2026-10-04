@@ -3,7 +3,7 @@
 import pytest
 from pydantic import ValidationError
 
-from base.config.daemon import DaemonSettings
+from base.config.domains.daemon.settings import DaemonSettings
 
 
 def test_default_admission_does_not_limit_waiting_agents() -> None:

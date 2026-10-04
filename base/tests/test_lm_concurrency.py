@@ -28,7 +28,7 @@ def _load_provider_plugins() -> None:
 
 def test_concurrency_cap_is_disabled_by_default() -> None:
     """No cap applies unless `AVA_LLM_MAX_CONCURRENT` is set (task #3590)."""
-    from base.config.lm import LmSettings
+    from base.config.domains.lm import LmSettings
 
     assert parse_limits(LmSettings().llm_max_concurrent) == {}
 

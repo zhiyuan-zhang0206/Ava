@@ -61,7 +61,7 @@ def test_at_announcement_uses_cluster_zone_when_authoritative(
     """at() passes the cluster timezone to the generated script when the
     process holds an authoritative one (user ruling 2026-08-27)."""
     from base.config import settings
-    from base.config.general import GeneralSettings
+    from base.config.domains.general import GeneralSettings
 
     monkeypatch.setattr(
         settings, "general", GeneralSettings.model_construct(timezone="Asia/Shanghai")
@@ -88,7 +88,7 @@ def test_at_announcement_uses_host_clock_without_authoritative_zone(
     None: the announcement renders in the watcher's own wall clock — the
     documented lite degradation."""
     from base.config import settings
-    from base.config.general import GeneralSettings
+    from base.config.domains.general import GeneralSettings
 
     monkeypatch.setattr(settings, "general", GeneralSettings.model_construct())
     captured: dict[str, Any] = {}
@@ -112,7 +112,7 @@ def test_cron_defaults_to_host_zone_without_authoritative_zone(
     """settings-lite cron (no authoritative cluster timezone) defaults to the
     host's own zone — not the silent America/Los_Angeles field default."""
     from base.config import host_tz_name, settings
-    from base.config.general import GeneralSettings
+    from base.config.domains.general import GeneralSettings
 
     monkeypatch.setattr(settings, "general", GeneralSettings.model_construct())
     captured: dict[str, Any] = {}

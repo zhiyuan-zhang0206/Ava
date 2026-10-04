@@ -272,7 +272,7 @@ def test_logs_retention_parser_rejects_unknown_family() -> None:
 
 
 def test_logs_retention_default_comes_from_observability_settings() -> None:
-    from base.config.observability import ObservabilitySettings
+    from base.config.domains.observability.settings import ObservabilitySettings
 
     field = ObservabilitySettings.model_fields["log_retention_days"]
     configured = ObservabilitySettings(AVA_LOG_RETENTION_DAYS=23)
@@ -289,7 +289,7 @@ def test_logs_retention_parser_rejects_non_positive_days() -> None:
 def test_logs_retention_settings_reject_non_positive_environment_default() -> None:
     from pydantic import ValidationError
 
-    from base.config.observability import ObservabilitySettings
+    from base.config.domains.observability.settings import ObservabilitySettings
 
     with pytest.raises(ValidationError):
         ObservabilitySettings(AVA_LOG_RETENTION_DAYS=0)

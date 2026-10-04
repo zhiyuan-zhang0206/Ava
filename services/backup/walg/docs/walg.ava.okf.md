@@ -22,7 +22,7 @@ base backups, verifies the chain and applies retention is
 proves it are [[walg-restore.ava.okf.md|WAL-G restore and recovery drill]].
 
 ## Core Responsibilities
-- **One key, WAL-G's own format** (`base/config/walg.py`, domain `walg`):
+- **One key, WAL-G's own format** (`base/config/domains/storage/walg.py`, domain `walg`):
   `AVA_WALG_CONFIG_FILE` names a 0600 JSON file holding `WALG_OSS_PREFIX`,
   `OSS_ACCESS_KEY_ID`, `OSS_ACCESS_KEY_SECRET`, `OSS_ENDPOINT`, `OSS_REGION`,
   `WALG_LIBSODIUM_KEY_PATH`, `WALG_LIBSODIUM_KEY_TRANSFORM=hex` and
