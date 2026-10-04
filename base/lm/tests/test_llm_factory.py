@@ -26,10 +26,11 @@ from base.lm.factory import (
     close_chat_model,
     validate_model_config,
 )
-from base.lm.plugin_providers import ensure_provider_plugins_loaded
-from base.lm.registry import MODELS, SUPPORTED_MODELS, resolve_setting
+from base.lm.plugin_providers import model_catalog
+from base.lm.registry import resolve_setting
+from tests.fixtures.model_catalog import AddModels
 
-ensure_provider_plugins_loaded()
+model_catalog()
 
 
 class TestBuildChatModel:
@@ -104,7 +105,7 @@ class TestBuildChatModel:
         assert llm.max_tokens == 64_000
 
     def test_unregistered_claude_model_fails_fast(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """claude models not registered in the registry (MODELS) with a max_output_tokens
+        """claude models not registered in the registry (model_catalog().models) with a max_output_tokens
         raise immediately — do not fall back to langchain's stale profile (unknown id gives 4096)
         which would borrow the wrong cap."""
         monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
@@ -1392,7 +1393,7 @@ class TestValidateModelConfig:
     # --- model name validation --------------------------------------------------
 
     def test_unknown_model_raises(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """model name not in SUPPORTED_MODELS → ValueError."""
+        """model name not in model_catalog().supported_models → ValueError."""
         with pytest.raises(ValueError, match="unknown model 'not-a-real-model'"):
             validate_model_config(model="not-a-real-model")
 
@@ -1404,32 +1405,26 @@ class TestValidateModelConfig:
         assert result == "deepseek-flash"
 
     def test_all_supported_models_pass_name_check(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """Every model in SUPPORTED_MODELS passes the name check."""
+        """Every model in model_catalog().supported_models passes the name check."""
         self._set_plugin_keys(monkeypatch)
-        all_models = [
-            m
-            for models in __import__(
-                "base.lm.factory", fromlist=["SUPPORTED_MODELS"]
-            ).SUPPORTED_MODELS.values()
-            for m in models
-        ]
+        all_models = [m for models in model_catalog().supported_models.values() for m in models]
         for m in all_models:
             # Only testing name existence, not key (key validation is separate)
             self._set_plugin_keys(monkeypatch)
             result = validate_model_config(model=m)
             assert result == m
 
-    def test_superseded_model_stays_spawn_valid(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_superseded_model_stays_spawn_valid(
+        self, monkeypatch: pytest.MonkeyPatch, add_models: AddModels
+    ) -> None:
         """Supersession is display-only: a registry model carrying
         ``superseded_by`` (hidden from the picker) must keep passing spawn
         validation — settings/config switching back to it stays allowed."""
         from dataclasses import replace
 
-        from base.lm.registry import MODELS
-
         self._clear_all_keys(monkeypatch)
         self._set_plugin_keys(monkeypatch)
-        monkeypatch.setitem(MODELS, "glm-5.2", replace(MODELS["glm-5.2"], superseded_by="kimi-k3"))
+        add_models({"glm-5.2": replace(model_catalog().models["glm-5.2"], superseded_by="kimi-k3")})
         result = validate_model_config(model="glm-5.2", config={"llm_model": "glm-5.2"})
         assert result == "glm-5.2"
 
@@ -1590,7 +1585,9 @@ class TestThinkingDisabledAcrossRoster:
         monkeypatch.setenv("MOONSHOT_API_KEY", "sk-test")
         monkeypatch.setenv("MIMO_API_KEY", "sk-test")
 
-    @pytest.mark.parametrize("model", [m for models in SUPPORTED_MODELS.values() for m in models])
+    @pytest.mark.parametrize(
+        "model", [m for models in model_catalog().supported_models.values() for m in models]
+    )
     def test_roster_model_constructs_with_thinking_disabled(
         self, model: str, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -1606,7 +1603,7 @@ class TestThinkingDisabledAcrossRoster:
         """An intentionally unregistered Gemini id has no thinking_level vocabulary:
         disabled must send no thinking parameters and warn (issue #190)."""
         model = "gemini-2.5-flash"
-        assert model not in MODELS
+        assert model not in model_catalog().models
         monkeypatch.setenv("GEMINI_API_KEY", "sk-test")
         from langchain_google_genai import ChatGoogleGenerativeAI
 

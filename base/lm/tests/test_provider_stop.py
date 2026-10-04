@@ -3,10 +3,10 @@ from pathlib import Path
 import pytest
 from langchain_core.messages import AIMessage
 
-from base.lm.plugin_providers import ensure_provider_plugins_loaded
+from base.lm.plugin_providers import model_catalog
 from base.lm.stop import StopCategory, classify_stop
 
-ensure_provider_plugins_loaded()
+model_catalog()
 
 
 def _msg(metadata: dict) -> AIMessage:
@@ -131,7 +131,7 @@ def test_moonshot_length_truncated():
 
 
 def test_unknown_provider_raises():
-    with pytest.raises(ValueError, match="register_stop_spec"):
+    with pytest.raises(ValueError, match=r"ProviderBinding\.stop_spec"):
         classify_stop(_msg({"model_provider": "cohere", "finish_reason": "stop"}))
 
 

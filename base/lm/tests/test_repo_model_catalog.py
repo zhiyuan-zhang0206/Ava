@@ -2,10 +2,8 @@
 
 from __future__ import annotations
 
-from base.lm import pricing, provider_api, stop
-from base.lm.factory import SUPPORTED_MODELS
-from base.lm.plugin_providers import ensure_provider_plugins_loaded
-from base.lm.registry import MODELS
+from base.lm import pricing, stop
+from base.lm.plugin_providers import model_catalog
 from base.packages.plugins import enable_config
 
 
@@ -14,7 +12,7 @@ def test_repo_anthropic_provider_is_enabled_and_registers_complete_contract() ->
     config = enable_config.load_for_runtime(set(discovered))
 
     assert config.plugins["lm_anthropic"].enabled
-    ensure_provider_plugins_loaded()
+    model_catalog()
 
     claude_models = {
         "claude-sonnet-5",
@@ -25,8 +23,8 @@ def test_repo_anthropic_provider_is_enabled_and_registers_complete_contract() ->
         "claude-fable-5",
         "claude-fable-5-1",
     }
-    assert claude_models <= MODELS.keys()
-    assert set(SUPPORTED_MODELS["claude"]) == {
+    assert claude_models <= model_catalog().models.keys()
+    assert set(model_catalog().supported_models["claude"]) == {
         "claude-sonnet-5",
         "claude-sonnet-5-5",
         "claude-haiku-4-5-20251001",
@@ -37,11 +35,10 @@ def test_repo_anthropic_provider_is_enabled_and_registers_complete_contract() ->
     }
     assert pricing.model_vendor("claude-sonnet-5") == "anthropic"
 
-    from base.lm.factory import _MODEL_KEY_MAP, provider_key_map
+    from base.lm.factory import provider_key_map
 
-    assert "claude-" not in _MODEL_KEY_MAP
-    assert provider_key_map()["claude-"] == ("Anthropic", None, "ANTHROPIC_API_KEY")
-    binding = provider_api.REGISTRY.bindings["claude-"]
+    assert provider_key_map()["claude-"] == ("Anthropic", "ANTHROPIC_API_KEY")
+    binding = model_catalog().bindings["claude-"]
     assert binding.effort_levels is None
     assert binding.anthropic_protocol
     assert binding.vision
@@ -54,25 +51,25 @@ def test_repo_anthropic_provider_is_enabled_and_registers_complete_contract() ->
 
 
 def test_claude_successors_and_thinking_contract() -> None:
-    ensure_provider_plugins_loaded()
-    opus = MODELS["claude-opus-5-5"]
+    model_catalog()
+    opus = model_catalog().models["claude-opus-5-5"]
     assert opus.spawnable and opus.context_window == 1_000_000
     assert opus.max_output_tokens == 128_000
     assert opus.knowledge_cutoff == "2026-06"
     assert opus.effort_levels == ("low", "medium", "high", "xhigh", "max")
     assert opus.tuning.reasoning_effort == "medium"
     assert opus.media_types == frozenset({"image", "pdf"})
-    assert MODELS["claude-opus-5"].superseded_by == "claude-opus-5-5"
-    assert MODELS["claude-opus-5"].spawnable
+    assert model_catalog().models["claude-opus-5"].superseded_by == "claude-opus-5-5"
+    assert model_catalog().models["claude-opus-5"].spawnable
     for model in ("claude-opus-5-5", "claude-fable-5", "claude-fable-5-1"):
-        assert MODELS[model].thinking_always_on, model
+        assert model_catalog().models[model].thinking_always_on, model
     for model in ("claude-sonnet-5", "claude-opus-5"):
-        assert not MODELS[model].thinking_always_on, model
+        assert not model_catalog().models[model].thinking_always_on, model
 
 
 def test_claude_sonnet_5_5_capabilities_and_display_successor() -> None:
-    ensure_provider_plugins_loaded()
-    sonnet = MODELS["claude-sonnet-5-5"]
+    model_catalog()
+    sonnet = model_catalog().models["claude-sonnet-5-5"]
     assert sonnet.spawnable and sonnet.context_window == 1_000_000
     assert sonnet.max_output_tokens == 128_000
     assert sonnet.knowledge_cutoff == "2026-06"
@@ -80,18 +77,21 @@ def test_claude_sonnet_5_5_capabilities_and_display_successor() -> None:
     assert sonnet.tuning.reasoning_effort == "high"
     assert sonnet.media_types == frozenset({"image", "pdf"})
     assert sonnet.thinking_always_on
-    assert MODELS["claude-sonnet-5"].superseded_by == "claude-sonnet-5-5"
-    assert MODELS["claude-sonnet-5"].spawnable
+    assert model_catalog().models["claude-sonnet-5"].superseded_by == "claude-sonnet-5-5"
+    assert model_catalog().models["claude-sonnet-5"].spawnable
 
 
 def test_gpt6_sol_luna_successors_and_capabilities() -> None:
-    ensure_provider_plugins_loaded()
-    assert MODELS["gpt-5.6-sol"].superseded_by == "gpt-6-sol"
-    assert MODELS["gpt-5.6-luna"].superseded_by == "gpt-6-luna"
-    assert MODELS["gpt-5.6-sol"].spawnable and MODELS["gpt-5.6-luna"].spawnable
-    assert MODELS["gpt-5.6-terra"].superseded_by is None
+    model_catalog()
+    assert model_catalog().models["gpt-5.6-sol"].superseded_by == "gpt-6-sol"
+    assert model_catalog().models["gpt-5.6-luna"].superseded_by == "gpt-6-luna"
+    assert (
+        model_catalog().models["gpt-5.6-sol"].spawnable
+        and model_catalog().models["gpt-5.6-luna"].spawnable
+    )
+    assert model_catalog().models["gpt-5.6-terra"].superseded_by is None
     for model, cutoff in (("gpt-6-sol", "2026-04"), ("gpt-6-luna", "2026-05")):
-        spec = MODELS[model]
+        spec = model_catalog().models[model]
         assert spec.spawnable and spec.context_window == 1_050_000
         assert spec.max_output_tokens is None  # GPT provider leaves the API cap unpinned.
         assert spec.knowledge_cutoff == cutoff
@@ -101,16 +101,16 @@ def test_gpt6_sol_luna_successors_and_capabilities() -> None:
 
 
 def test_gpt6_1_sol_capabilities_and_display_successor() -> None:
-    ensure_provider_plugins_loaded()
-    sol_61 = MODELS["gpt-6.1-sol"]
+    model_catalog()
+    sol_61 = model_catalog().models["gpt-6.1-sol"]
     assert sol_61.spawnable and sol_61.context_window == 1_050_000
     assert sol_61.max_output_tokens is None
     assert sol_61.knowledge_cutoff == "2026-04"
     assert sol_61.effort_levels == ("low", "medium", "high", "xhigh", "max")
     assert sol_61.tuning.reasoning_effort == "medium"
     assert sol_61.media_types == frozenset({"image"})
-    assert MODELS["gpt-6-sol"].superseded_by == "gpt-6.1-sol"
-    assert MODELS["gpt-6-sol"].spawnable
+    assert model_catalog().models["gpt-6-sol"].superseded_by == "gpt-6.1-sol"
+    assert model_catalog().models["gpt-6-sol"].spawnable
 
 
 def test_repo_openai_provider_is_enabled_and_registers_complete_contract() -> None:
@@ -118,7 +118,7 @@ def test_repo_openai_provider_is_enabled_and_registers_complete_contract() -> No
     config = enable_config.load_for_runtime(set(discovered))
 
     assert config.plugins["lm_openai"].enabled
-    ensure_provider_plugins_loaded()
+    model_catalog()
 
     gpt_models = {
         "gpt-5.6-sol",
@@ -128,8 +128,8 @@ def test_repo_openai_provider_is_enabled_and_registers_complete_contract() -> No
         "gpt-6.1-sol",
         "gpt-6-luna",
     }
-    assert gpt_models <= MODELS.keys()
-    assert set(SUPPORTED_MODELS["gpt"]) == {
+    assert gpt_models <= model_catalog().models.keys()
+    assert set(model_catalog().supported_models["gpt"]) == {
         "gpt-6-astra",
         "gpt-5.6-sol",
         "gpt-5.6-terra",
@@ -140,11 +140,10 @@ def test_repo_openai_provider_is_enabled_and_registers_complete_contract() -> No
     }
     assert pricing.model_vendor("gpt-5.6-sol") == "openai"
 
-    from base.lm.factory import _MODEL_KEY_MAP, provider_key_map
+    from base.lm.factory import provider_key_map
 
-    assert "gpt-" not in _MODEL_KEY_MAP
-    assert provider_key_map()["gpt-"] == ("OpenAI", None, "OPENAI_API_KEY")
-    binding = provider_api.REGISTRY.bindings["gpt-"]
+    assert provider_key_map()["gpt-"] == ("OpenAI", "OPENAI_API_KEY")
+    binding = model_catalog().bindings["gpt-"]
     assert binding.effort_levels == ("none", "low", "medium", "high", "xhigh", "max")
     assert not binding.anthropic_protocol
     assert binding.vision

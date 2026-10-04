@@ -298,15 +298,15 @@ def test_validate_config_overlay_registered_llm_model_passes(isolated_registry, 
 def test_validate_overlay_is_self_sufficient_in_a_fresh_process() -> None:
     """File-level isolation (task #3138, same class as the compact gate's budget):
     a process whose FIRST registry use is this validation must pass a registered
-    model id — pre-fix the empty MODELS false-rejected it ("valid models: "
+    model id — pre-fix the empty registry false-rejected it ("valid models: "
     empty). This test process already has the registry loaded (the other overlay
     tests here depend on it), so the scenario runs in a fresh interpreter."""
     code = textwrap.dedent(
         """
-        from base.lm.registry import MODELS
+        from base.lm import plugin_providers
         from base.packages.plugins.config_registration import validate_config_overlay
 
-        assert not MODELS, "fresh process must start with an empty registry"
+        assert plugin_providers._STATE.catalog is None, "fresh process must start with no catalog"
         validate_config_overlay({"llm_model": "deepseek-flash"})
         print("ok")
         """

@@ -17,7 +17,6 @@ from typing import Any
 
 import psycopg
 
-from base.lm.plugin_providers import ensure_provider_plugins_loaded
 from base.lm.pricing import cost_usd
 from base.telemetry.metrics import (
     MetricSection,
@@ -220,7 +219,6 @@ def _llm_totals_from_models(rows: list[tuple[str, int, int, int, int, int]]) -> 
     """Token + cost totals from per-model sums — cost_usd is linear in tokens
     per model, so pricing the summed tokens once per model equals the per-row
     loop (`_llm_totals`) exactly; every call on an unpriced model is unpriced."""
-    ensure_provider_plugins_loaded()
     calls = sum(r[1] for r in rows)
     tin = sum(r[2] for r in rows)
     tout = sum(r[3] for r in rows)
@@ -425,7 +423,6 @@ def agent_rollups(
     per_agent_llm: dict[int | None, list[tuple[str, int, int, int, int]]],
 ) -> dict[int, dict[str, Any]]:
     """Per-agent headline counters for `/api/metrics/agents` (service rows excluded)."""
-    ensure_provider_plugins_loaded()
     out: dict[int, dict[str, Any]] = {}
     for aid, row in per_agent.items():
         if aid is None:

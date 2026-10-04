@@ -1,20 +1,7 @@
 {
   "ambient_state": {
     "base/lm/concurrency.py::global-rebind:_limiter": 2,
-    "base/lm/factory.py::ambient-container:_MODEL_KEY_MAP": 1,
-    "base/lm/factory.py::import-time-call:base.lm.provider_api.REGISTRY.reserve_core_prefixes": 1,
-    "base/lm/plugin_providers.py::ambient-instance:_STATE": 1,
-    "base/lm/pricing.py::ambient-container:_PLUGIN_PRICES": 1,
-    "base/lm/pricing.py::ambient-instance:_CATALOG": 1,
-    "base/lm/provider_api.py::ambient-instance:REGISTRY": 1,
-    "base/lm/registry.py::ambient-container:MODELS": 1,
-    "base/lm/registry.py::ambient-container:MODEL_CONTEXT_WINDOW": 1,
-    "base/lm/registry.py::ambient-container:MODEL_IDENTITY": 1,
-    "base/lm/registry.py::ambient-container:MODEL_KNOWLEDGE_CUTOFF": 1,
-    "base/lm/registry.py::ambient-container:SUPPORTED_MODELS": 1,
-    "base/lm/registry.py::import-time-call:base.lm.registry._rebuild_derived_views": 1,
-    "base/lm/registry.py::import-time-call:base.lm.registry._validate_registry": 1,
-    "base/lm/stop.py::ambient-container:_BY_PROVIDER": 1
+    "base/lm/plugin_providers.py::ambient-instance:_STATE": 1
   },
   "complexity": {},
   "files": {

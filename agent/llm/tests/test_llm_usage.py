@@ -13,7 +13,7 @@ import pytest
 from langchain_core.messages import AIMessage
 
 from agent.llm.usage import log_llm_usage
-from base.lm.plugin_providers import ensure_provider_plugins_loaded
+from base.lm.plugin_providers import model_catalog
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -21,7 +21,7 @@ def _load_provider_plugins() -> None:
     """Provider vendor attribution needs the plugin registry populated; without
     it `vendor_of_model` returns None, the billing span is skipped, and
     order-dependent failures appear when this module runs standalone."""
-    ensure_provider_plugins_loaded()
+    model_catalog()
 
 
 def _msgs(records: list[dict]) -> str:

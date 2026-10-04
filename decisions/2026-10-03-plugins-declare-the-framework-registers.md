@@ -143,3 +143,5 @@ graph registers each node with `input_schema=` (the exec IPC allowlist reads the
 classes, the external attachment and impersonation replay take the class from their own caller); the host
 boot imports a plugin once, through `load_extensions`; `ava plugins update` takes the class from the
 `default_config.py` declaration.
+
+- Superseded in part by `decisions/2026-10-04-model-catalog-is-a-value.md`: the model catalog is now an immutable value built by the provider loader.

@@ -11,6 +11,7 @@ if TYPE_CHECKING:
     from langchain_core.language_models.chat_models import BaseChatModel
 
 from base.lm.effort import clamp_effort
+from base.lm.plugin_providers import model_catalog
 from base.lm.provider_api import (
     AttachPolicy,
     BuildContext,
@@ -22,7 +23,7 @@ from base.lm.provider_api import (
     ProviderContribution,
     require_key,
 )
-from base.lm.registry import MODELS, ModelSpec, ModelTuning
+from base.lm.registry import ModelSpec, ModelTuning
 from base.packages.plugins.extensions import PluginContributions
 
 # DeepSeek's anthropic-compatible endpoint. Also the single source of truth
@@ -74,13 +75,13 @@ def build(ctx: BuildContext) -> BaseChatModel:
         known_models = ", ".join(
             sorted(
                 model_id
-                for model_id, registered_spec in MODELS.items()
+                for model_id, registered_spec in model_catalog().models.items()
                 if registered_spec.provider == "deepseek"
             )
         )
         raise ValueError(
             f"Unknown deepseek model {ctx.model!r} — register it (with "
-            f"max_output_tokens) in `base/lm/registry.py:MODELS`. "
+            f"max_output_tokens) in this plugin's ModelSpec rows. "
             f"Known deepseek models: {known_models}"
         )
     max_tokens = ctx.spec.max_output_tokens

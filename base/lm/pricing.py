@@ -6,7 +6,7 @@ provider plugins mirror that complete shape for chat models, while catalog-only
 services such as embeddings continue to price directly from the archive. Both
 sources use the same parser and deterministic selection path.
 ``pricing_catalog.json`` is an empty placeholder that runtime never loads;
-``_load_catalog`` reads the archive.
+``load_archive`` reads the archive.
 ``quote`` returns one selected rate triple with its cost atomically, and
 ``cost_usd`` remains the compatibility surface for existing readers. Schema v2
 requires each catalog entry to identify its vendor; the cross-line contract
@@ -76,6 +76,7 @@ from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, time
 from pathlib import Path
+from types import MappingProxyType
 from typing import TYPE_CHECKING, Any, cast
 
 if TYPE_CHECKING:
@@ -156,7 +157,7 @@ class _EffectivePeriod:
 
 
 @dataclass(frozen=True)
-class _ModelPrice:
+class ModelPrice:
     vendor: str | None
     source_url: str
     source_checked_at: date
@@ -285,13 +286,13 @@ def _parse_periods(model: str, raw_periods: list[dict[str, Any]]) -> tuple[_Effe
     return tuple(periods)
 
 
-def _load_catalog() -> dict[str, _ModelPrice]:
+def load_archive() -> dict[str, ModelPrice]:
     path = Path(__file__).with_name("pricing_catalog_archive.json")
     raw = cast(dict[str, Any], json.loads(path.read_text(encoding="utf-8")))
     return _parse_catalog(raw)
 
 
-def _parse_catalog(raw: dict[str, Any]) -> dict[str, _ModelPrice]:
+def _parse_catalog(raw: dict[str, Any]) -> dict[str, ModelPrice]:
     schema_version = raw["schema_version"]
     if schema_version not in (1, 2) or raw["currency"] != "USD" or raw["unit_tokens"] != 1_000_000:
         raise RuntimeError("unsupported pricing catalog schema, currency, or token unit")
@@ -306,7 +307,7 @@ def _parse_catalog(raw: dict[str, Any]) -> dict[str, _ModelPrice]:
     }
 
 
-def _parse_model_price(model: str, entry_raw: dict[str, Any], schema_version: int) -> _ModelPrice:
+def _parse_model_price(model: str, entry_raw: dict[str, Any], schema_version: int) -> ModelPrice:
     vendor = entry_raw.get("vendor")
     if schema_version == 2 and (not isinstance(vendor, str) or not vendor.strip()):
         raise RuntimeError(f"pricing catalog vendor must be a non-empty string for {model!r}")
@@ -320,7 +321,7 @@ def _parse_model_price(model: str, entry_raw: dict[str, Any], schema_version: in
         raise RuntimeError(
             f"pricing catalog effective_time_note must be non-empty text for {model!r}"
         )
-    return _ModelPrice(
+    return ModelPrice(
         vendor=cast(str | None, vendor),
         source_url=source_url,
         source_checked_at=date.fromisoformat(entry_raw["source_checked_at"]),
@@ -329,22 +330,94 @@ def _parse_model_price(model: str, entry_raw: dict[str, Any], schema_version: in
     )
 
 
-_CATALOG = _load_catalog()
+class PriceBook:
+    """Every price the process knows: the reviewed archive plus the plugins' declarations.
+
+    A plugin price replaces the archive entry of the same model id (the archive keeps the
+    chat-model ids for history and scheduled windows). Immutable once built; one belongs to
+    each `base.lm.catalog.ModelCatalog`.
+    """
+
+    def __init__(self, archive: Mapping[str, ModelPrice], plugin: Mapping[str, ModelPrice]) -> None:
+        self.plugin: Mapping[str, ModelPrice] = MappingProxyType(dict(plugin))
+        """The plugins' prices, by model id."""
+        self.archive: Mapping[str, ModelPrice] = MappingProxyType(
+            {model: price for model, price in archive.items() if model not in plugin}
+        )
+        """The archive prices no plugin overrides, by model id."""
+
+    def __contains__(self, model: object) -> bool:
+        return model in self.archive or model in self.plugin
+
+    def __iter__(self) -> Iterator[str]:
+        return iter([*self.archive, *self.plugin])
+
+    def __len__(self) -> int:
+        return len(self.archive) + len(self.plugin)
+
+    def vendor(self, model: str) -> str | None:
+        """Vendor recorded by the archive or a plugin, or None when unavailable."""
+        entry = self.archive.get(model)
+        if entry is not None:
+            return entry.vendor
+        plugin_price = self.plugin.get(model)
+        return None if plugin_price is None else plugin_price.vendor
+
+    def provenance(self, model: str) -> tuple[str, str] | None:
+        """(source_url, source_checked_at) of a plugin-declared price, or None.
+
+        The observability hook for price drift: a cost event can name which source
+        its rates came from, so a plugin price stale for months is visible instead
+        of silently wrong.
+        """
+        entry = self.plugin.get(model)
+        if entry is None:
+            return None
+        return (entry.source_url, entry.source_checked_at.isoformat())
+
+    def rates_at(
+        self,
+        model: str,
+        at: datetime | None = None,
+        input_tokens: int | None = None,
+    ) -> Rates | None:
+        """Select rates for one model, instant, and total input-token tier.
+
+        Effective intervals and UTC daily windows are half-open. Token-tier
+        maxima are inclusive, mirroring provider wording such as ``<=200K``.
+        ``input_tokens=None`` selects the base tier for catalog/display callers.
+        Unknown models or an uncovered effective interval return ``None``.
+        """
+        if input_tokens is not None and input_tokens < 0:
+            raise ValueError("input_tokens must be non-negative")
+        instant = _aware_utc(at)
+        entry = self.archive.get(model)
+        if entry is None:
+            entry = self.plugin.get(model)
+        if entry is not None:
+            return entry.rates_at(instant, input_tokens)
+        retired = RETIRED_MODEL_PRICING.get(model)
+        return Rates(*retired) if retired is not None else None
+
+
+def _book() -> PriceBook:
+    """The process's price book, from its model catalog (loads the provider plugins once)."""
+    from base.lm.plugin_providers import model_catalog
+
+    return model_catalog().prices
 
 
 def model_vendor(model: str) -> str | None:
     """Vendor recorded by the catalog or a plugin, or None when unavailable."""
-    entry = _CATALOG.get(model)
-    if entry is not None:
-        return entry.vendor
-    plugin_price = _PLUGIN_PRICES.get(model)
-    return None if plugin_price is None else plugin_price.vendor
+    return _book().vendor(model)
 
 
-_PLUGIN_PRICES: dict[str, _ModelPrice] = {}
+def plugin_price_provenance(model: str) -> tuple[str, str] | None:
+    """(source_url, source_checked_at) of a plugin-declared price, or None."""
+    return _book().provenance(model)
 
 
-def register_plugin_price(
+def plugin_model_price(
     model: str,
     *,
     cache_miss: float,
@@ -355,20 +428,12 @@ def register_plugin_price(
     vendor: str | None = None,
     periods: tuple[Any, ...] = (),
     plugin: str = "<unknown>",
-) -> None:
-    """Register a plugin provider's per-model price (base/lm/provider_api.py).
+) -> ModelPrice:
+    """Validate and parse a plugin provider's per-model price declaration.
 
-    The archive intentionally contains the same chat-model ids for history and
-    scheduled windows. A successful plugin price registration removes that
-    model from the in-memory catalog view. Full and flat-compatible plugin
-    declarations both become ``_ModelPrice`` values and use the archive parser
-    and runtime selector. A second plugin price for one id is still an error.
+    Full and flat-compatible plugin declarations both become ``ModelPrice``
+    values and use the archive parser and runtime selector.
     """
-    if model in _PLUGIN_PRICES:
-        raise ValueError(
-            f"provider plugin {plugin!r}: model {model!r} already has a plugin "
-            "price registered — duplicate registration"
-        )
     if not source_url.startswith("https://"):
         raise ValueError(
             f"provider plugin {plugin!r}: source_url must be HTTPS, got {source_url!r}"
@@ -442,27 +507,13 @@ def register_plugin_price(
             }
         ]
     )
-    _PLUGIN_PRICES[model] = _ModelPrice(
+    return ModelPrice(
         vendor=vendor,
         source_url=source_url,
         source_checked_at=checked_at,
         effective_time_note=None,
         periods=_parse_periods(model, raw_periods),
     )
-    _CATALOG.pop(model, None)
-
-
-def plugin_price_provenance(model: str) -> tuple[str, str] | None:
-    """(source_url, source_checked_at) of a plugin-declared price, or None.
-
-    The observability hook for price drift: a cost event can name which source
-    its rates came from, so a plugin price stale for months is visible instead
-    of silently wrong.
-    """
-    entry = _PLUGIN_PRICES.get(model)
-    if entry is None:
-        return None
-    return (entry.source_url, entry.source_checked_at.isoformat())
 
 
 # Retired models — their FINAL published rate, frozen at retirement (add-only
@@ -502,43 +553,29 @@ def rates_at(
     at: datetime | None = None,
     input_tokens: int | None = None,
 ) -> Rates | None:
-    """Select rates for one model, instant, and total input-token tier.
-
-    Effective intervals and UTC daily windows are half-open. Token-tier
-    maxima are inclusive, mirroring provider wording such as ``<=200K``.
-    ``input_tokens=None`` selects the base tier for catalog/display callers.
-    Unknown models or an uncovered effective interval return ``None``.
-    """
-    if input_tokens is not None and input_tokens < 0:
-        raise ValueError("input_tokens must be non-negative")
-    instant = _aware_utc(at)
-    entry = _CATALOG.get(model)
-    if entry is None:
-        entry = _PLUGIN_PRICES.get(model)
-    if entry is not None:
-        return entry.rates_at(instant, input_tokens)
-    retired = RETIRED_MODEL_PRICING.get(model)
-    return Rates(*retired) if retired is not None else None
+    """`PriceBook.rates_at` over the process's price book."""
+    return _book().rates_at(model, at, input_tokens)
 
 
 class _CurrentPricing(Mapping[str, tuple[float, float, float]]):
     """Compatibility mapping whose values follow the current UTC schedule.
 
-    Iterates the catalog plus registered plugin prices — a plugin model must
+    Iterates the archive plus plugin prices — a plugin model must
     be visible wherever MODEL_PRICING is enumerated (e.g. the usage view).
     """
 
     def __getitem__(self, model: str) -> tuple[float, float, float]:
-        selected = rates_at(model)
-        if selected is None or (model not in _CATALOG and model not in _PLUGIN_PRICES):
+        book = _book()
+        selected = book.rates_at(model)
+        if selected is None or model not in book:
             raise KeyError(model)
         return selected.as_tuple()
 
     def __iter__(self) -> Iterator[str]:
-        return iter([*_CATALOG, *_PLUGIN_PRICES])
+        return iter(_book())
 
     def __len__(self) -> int:
-        return len(_CATALOG) + len(_PLUGIN_PRICES)
+        return len(_book())
 
 
 MODEL_PRICING: Mapping[str, tuple[float, float, float]] = _CurrentPricing()

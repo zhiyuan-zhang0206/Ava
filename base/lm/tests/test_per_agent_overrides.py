@@ -17,10 +17,10 @@ from base.config import settings
 from base.host.env.agent_slices import AgentSlices, ModelOverrides
 from base.lm.context_budget import resolve_context_budget
 from base.lm.factory import build_chat_model
-from base.lm.plugin_providers import ensure_provider_plugins_loaded
+from base.lm.plugin_providers import model_catalog
 from base.lm.registry import resolve_setting
 
-ensure_provider_plugins_loaded()
+model_catalog()
 
 _MODEL = "deepseek-flash"
 

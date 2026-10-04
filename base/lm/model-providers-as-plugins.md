@@ -64,9 +64,9 @@ separately loaded base-layer module. It may import `base` and installed
 LangChain packages, never `ava` or `agent`, because gateway, labeler, and eval
 processes load it without an agent runtime.
 
-`ensure_provider_plugins_loaded()` reuses `discover_plugins()` and
+`model_catalog()` reuses `discover_plugins()` and
 `load_for_runtime()`, imports enabled `provider.py` files in sorted-name order,
-and sets its once flag only after registration succeeds. The default config
+and fills the process's catalog slot only after the build succeeds. The default config
 enables every discovered plugin, including the exact eight `lm_*` plugins
 above. A deployment that disables or loses every provider raises:
 
@@ -74,17 +74,17 @@ above. A deployment that disables or loses every provider raises:
 no provider plugins enabled — enable at least one provider plugin (the repo ships the lm_* default set; check the plugin enable config)
 ```
 
-That failure occurs before the loaded flag is set, so a corrected enable
+That failure occurs before the catalog is set, so a corrected enable
 configuration is retryable. Gateway lifespan calls the loader directly during
 startup, outside best-effort blocks; a zero-provider deployment therefore
 fails boot rather than serving an empty model list. Other consumers retain the
 same loader guard at their first registry read.
 
-Registration mutates `MODELS` and rebuilds `SUPPORTED_MODELS`,
-`MODEL_CONTEXT_WINDOW`, `MODEL_KNOWLEDGE_CUTOFF`, and `MODEL_IDENTITY` in place.
-Existing importers see a newly registered model immediately, with no module
-reload or process restart. The known-provider-key cache is invalidated by the
-same registration.
+Installation fills a `CatalogBuilder`; `build()` validates the whole model graph and
+freezes it into an immutable `ModelCatalog` (`base/lm/catalog.py`) with the derived
+`supported_models`, `context_windows`, `knowledge_cutoffs` and `identities` views.
+A failed installation discards the builder, so a retry starts clean. Every reader
+takes the catalog from `model_catalog()`.
 
 ## Provider contract
 
@@ -136,7 +136,7 @@ from its in-memory runtime catalog view and uses the plugin's complete lattice.
 Both declarations pass through the same parser and selection code; the archive
 remains available for independent equivalence tests and bot reconciliation.
 `pricing_catalog.json` is retained only as an empty placeholder (`"models": {}`)
-that runtime never loads; `_load_catalog` reads `pricing_catalog_archive.json`.
+that runtime never loads; `load_archive` reads `pricing_catalog_archive.json`.
 Runtime never scrapes a pricing page.
 
 Future effective boundaries stay explicit in both the archive and generated

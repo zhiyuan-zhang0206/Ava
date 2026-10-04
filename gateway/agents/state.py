@@ -583,10 +583,6 @@ def get_token_usage(agent_id: int, request: Request) -> TokenUsageResponse:
     from langchain_core.messages import AIMessage
 
     from base.lm.context_budget import UnknownModelWindowError, resolve_context_budget
-    from base.lm.factory import ensure_provider_plugins_loaded
-
-    # Plugin models must be registered before the registry lookup below.
-    ensure_provider_plugins_loaded()
 
     # Look up the agent's model from config_overlay (per-agent override) else the
     # cluster default, and resolve its context budget: the window ceiling plus
@@ -678,11 +674,7 @@ def get_context_breakdown(agent_id: int, request: Request) -> ContextBreakdownRe
         latest_input_tokens,
         resolve_context_budget,
     )
-    from base.lm.factory import ensure_provider_plugins_loaded
     from gateway.agents.context_breakdown import SectionNode, compute_breakdown
-
-    # Plugin models must be registered before the registry lookup below.
-    ensure_provider_plugins_loaded()
 
     def _to_context_section(node: SectionNode) -> ContextSection:
         return ContextSection(
