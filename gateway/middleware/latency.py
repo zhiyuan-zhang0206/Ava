@@ -68,6 +68,8 @@ R17_R18_EXCLUSION_ROUTE_PATTERNS: dict[str, tuple[str, ...]] = {
         r"/api/memory/search",
         r"/api/agents/.*/inspect/statistics",
         r"/api/stats/dashboard",
+        r"/api/stats/alert-classes",
+        r"/api/stats/alert-classes/samples",
         r"/api/metrics/agents",
         r"/api/events",
         r"/api/fleet/graph",
