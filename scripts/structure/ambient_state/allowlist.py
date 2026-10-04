@@ -236,7 +236,7 @@ DEFERRED_WARNING_REDESIGN = "deferred: warning/alert redesign"
 DEFERRED: dict[str, str] = {
     f"{site}": DEFERRED_WARNING_REDESIGN
     for site in (
-        "agent/graph/capabilities.py::ambient-container:_warned_unresolved",
+        "agent/graph/prompt/capabilities.py::ambient-container:_warned_unresolved",
         "ava_builtins/plugins/ava_syntax_fix/_imports.py::hidden-singleton:_warn_ruff_missing_once",
         "base/daemon/health.py::ambient-container:_warned_windows_8106",
         "base/events/live/redis_client.py::ambient-container:_warn_last",

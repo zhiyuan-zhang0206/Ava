@@ -40,10 +40,10 @@ from agent.state import CapabilitiesState, ContextReset
 from base.agents.context import AvaContext, agent_id_from_config
 from base.log import logger
 
-from .capabilities import indexed_skill_identifiers
-from .context_notes import context_notes
 from .node_log import node_lifecycle
-from .system_prompt import build_system_prompt
+from .prompt.capabilities import indexed_skill_identifiers
+from .prompt.context_notes import context_notes
+from .prompt.system_prompt import build_system_prompt
 
 
 async def init_context_node(

@@ -683,13 +683,12 @@ def _insert_skill_events(agent: int, skills: list[Skill]) -> bool:
     if not skills:
         return True
     try:
+        from ava._settings import database
         from base.telemetry.audit_events import (
             SkillInvokedPayload,
             prepare_event_log,
             record_audit_standalone_many,
         )
-
-        from ._settings import database
 
         record_audit_standalone_many(
             database(),

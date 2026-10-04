@@ -136,7 +136,7 @@ def _coding_tools_section(slices: AgentSlices) -> str:
     already; the preamble conventions below still apply and are always
     rendered. With the default config every promoted module is expanded, so
     this section reduces to the preamble."""
-    from agent.graph.system_prompt import effective_sdk_expand
+    from agent.graph.prompt.system_prompt import effective_sdk_expand
 
     expanded = set(effective_sdk_expand(slices.prompt.sdk_disable))
     pieces: list[str] = []

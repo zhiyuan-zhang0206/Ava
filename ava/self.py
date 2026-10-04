@@ -98,7 +98,7 @@ def __getattr__(name: str) -> object:
 
 # `InvalidConfigOverlay` is lazily bound via module __getattr__ —
 # any eager `from base.packages.plugins.config_registration import ...` in ava.self triggers
-# agent.__init__ → agent.graph._base_prompt calling `ava.help(...)`
+# agent.__init__ → agent.graph.prompt._base_prompt calling `ava.help(...)`
 # which reverse-accesses an ava attribute, while ava.__init__ is still
 # running line 91 `import ava.self` and ava.help isn't registered yet →
 # AttributeError. Lazy makes this import chain only resolve when the

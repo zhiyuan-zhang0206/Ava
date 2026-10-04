@@ -78,7 +78,7 @@ the loop *is* skill-shaped, so it is built as skills, not framework machinery.
 ### Notice — in-moment, every turn
 
 > **Status (v0 shipped).** The in-moment half is live as the merged authoritative
-> system-prompt section "# Invest in the future" (`agent/graph/system_prompt.py`,
+> system-prompt section "# Invest in the future" (`agent/graph/prompt/system_prompt.py`,
 > gated by `AVA_SYSTEM_PROMPT_INVEST_FUTURE`, default on), which merged the former
 > "Beyond the task at hand": any noticed signal that could improve later work gets
 > an immediate closing action (resolve and verify / escalate with evidence and
@@ -241,7 +241,7 @@ Deliberately deferred so this round stays the in-moment section + the Curator:
 ## The framework delta (kept tiny on purpose)
 
 1. **The "plan for the future" system-prompt section** — a small always-on
-   section beside the memory-behavior one (`agent/graph/system_prompt.py`). This
+   section beside the memory-behavior one (`agent/graph/prompt/system_prompt.py`). This
    is the only *required* addition.
 2. **Optional: a `skill_loaded` event** — to rank skills by usage, the Curator
    needs to know which skill a turn used, and today nothing records it. The

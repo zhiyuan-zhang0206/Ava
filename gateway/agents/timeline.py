@@ -48,7 +48,7 @@ def _standing_head_note_ids(items: list[TimelineItem]) -> set[str]:
     """Item ids of the standing head notes: the contiguous ``system_marker``
     run immediately after the system prompt.
 
-    These are the notes ``agent/graph/context_notes.py`` lays down at window
+    These are the notes ``agent/graph/prompt/context_notes.py`` lays down at window
     establishment (exec timeout / timezone / cluster memory / agent id / agent
     memory / preloaded skills), rendered as ``system_marker`` items right
     behind the prompt. They are standing context of the same class as the
@@ -376,7 +376,7 @@ def _missing_standing_context(
     in_window = {window_item.item_id for window_item in window}
     # The standing head notes — the contiguous system_marker run right after
     # the prompt (exec timeout / timezone / cluster memory / agent id / agent
-    # memory / preloaded skills, agent/graph/context_notes.py) — are the same
+    # memory / preloaded skills, agent/graph/prompt/context_notes.py) — are the same
     # class of standing context as the prompt: laid down at window
     # establishment, they fall off the tail window for any conversation past
     # `limit` rendered items. Re-attach the missing ones right after the

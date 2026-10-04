@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import pytest
 
-from agent.graph.context_notes import exec_timeout_note
+from agent.graph.prompt.context_notes import exec_timeout_note
 from base.agents.messages.kwargs import NoteTag
 from base.config import settings
 from base.host.env.agent_slices import AgentSlices

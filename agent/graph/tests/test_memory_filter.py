@@ -14,7 +14,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from langchain_core.messages import AIMessage
 
-from agent.graph._memory_filter import Candidate, filter_candidates
+from agent.graph.recall._memory_filter import Candidate, filter_candidates
 from base.host.env.agent_slices import AgentSlices
 
 
@@ -69,7 +69,7 @@ async def test_retries_when_reply_unparseable_then_succeeds(
 async def test_warns_only_when_all_retries_fail(monkeypatch: pytest.MonkeyPatch) -> None:
     """Every attempt failing is the only case worth a warning; it injects
     nothing rather than the unfiltered top-k."""
-    import agent.graph._memory_filter as mf
+    import agent.graph.recall._memory_filter as mf
 
     warned: list[str] = []
     monkeypatch.setattr(mf.logger, "warning", lambda *_a, **k: warned.append(str(k.get("body"))))  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
@@ -98,7 +98,7 @@ async def test_records_hmac_query_and_basename_path_sample(
     monkeypatch: pytest.MonkeyPatch, loguru_records: list[dict[str, Any]]
 ) -> None:
     """A verdict keeps a keyed query digest and path basenames, never private text."""
-    import agent.graph._memory_filter as memory_filter
+    import agent.graph.recall._memory_filter as memory_filter
 
     query = "deploy the gateway without revealing this text"
     hmac_key = b"test-recall-telemetry-key"
@@ -127,7 +127,7 @@ async def test_does_not_log_an_unrecognised_model_path(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Untrusted filter output must not expose conversation text in telemetry."""
-    import agent.graph._memory_filter as memory_filter
+    import agent.graph.recall._memory_filter as memory_filter
 
     query = "do not persist this conversation text"
     logged: list[str] = []
@@ -150,7 +150,7 @@ async def test_does_not_log_an_unparseable_model_echo(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A malformed filter response can echo the prompt, so logs keep no reply text."""
-    import agent.graph._memory_filter as memory_filter
+    import agent.graph.recall._memory_filter as memory_filter
 
     query = "do not persist this malformed-response echo"
     logged: list[str] = []
@@ -173,7 +173,7 @@ async def test_does_not_log_a_filter_exception_echo(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Provider errors can include prompt text, so their details stay out of logs."""
-    import agent.graph._memory_filter as memory_filter
+    import agent.graph.recall._memory_filter as memory_filter
 
     query = "do not persist this provider-error echo"
     logged: list[str] = []

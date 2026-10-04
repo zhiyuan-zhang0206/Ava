@@ -2471,7 +2471,7 @@ class TestTimelineCompactHistory:
         self, db_conn: psycopg.Connection, test_client: TestClient
     ) -> None:
         """Head context notes (exec timeout / timezone / cluster memory / agent
-        id / agent memory — agent/graph/context_notes.py) fall off the tail
+        id / agent memory — agent/graph/prompt/context_notes.py) fall off the tail
         window in a long conversation; GET must re-attach them right after the
         prompt so the head reads like a fresh window (user report 2026-08-27:
         agent 2992's head showed only "system prompt · compact summary" while a

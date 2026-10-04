@@ -15,12 +15,12 @@ import asyncio
 from langchain_core.runnables import RunnableConfig
 from langgraph.runtime import Runtime
 
-from agent.graph.context_notes import (
+from agent.graph.prompt.context_notes import (
     RANK_CLUSTER_MEMORY,
     RANK_INHERITED_MEMORY,
     RANK_PER_AGENT_MEMORY,
 )
-from agent.graph.memory_recall import passive_memory_recall
+from agent.graph.recall.memory_recall import passive_memory_recall
 from agent.hooks import Hook
 from agent.hooks.compact import auto_compact_will_fire
 from agent.messages import tail_has_recallable_inbound

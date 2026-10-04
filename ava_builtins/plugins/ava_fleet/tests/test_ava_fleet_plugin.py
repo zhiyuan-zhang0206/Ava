@@ -23,7 +23,7 @@ import pytest
 
 import ava
 import ava.agents
-from agent.graph.system_prompt import build_system_prompt
+from agent.graph.prompt.system_prompt import build_system_prompt
 from ava.sdk_surface import install
 from ava_builtins.plugins.ava_fleet.tests.registry_support import (
     fleet_registry,

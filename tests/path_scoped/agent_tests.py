@@ -14,7 +14,7 @@ Redis SUBSCRIBE (fake_redis is an AsyncMock, no pubsub behavior).
 from __future__ import annotations
 
 import os
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Iterator
 from contextlib import asynccontextmanager
 from typing import Any
 
@@ -57,16 +57,18 @@ def _fresh_snapshot_cursor(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.fixture(autouse=True)
-def _fresh_unresolved_skill_warnings(monkeypatch: pytest.MonkeyPatch) -> None:
+def _fresh_unresolved_skill_warnings() -> Iterator[None]:
     """`capabilities._warned_unresolved` suppresses a repeat warning for a
     configured skill name that matched nothing — per process, because the drift
     check re-resolves before every LLM call. In a test session that process
     outlives every test, so whichever test warns first would silence the next
     one's assertion. Autouse: the leak is invisible at the call site, and any
     test that renders the index or resolves a config list can trip it."""
-    from agent.graph import capabilities
+    from agent.graph.prompt import capabilities
 
-    monkeypatch.setattr(capabilities, "_warned_unresolved", set())  # pyright: ignore[reportUnknownArgumentType]
+    capabilities.forget_unresolved_warnings()
+    yield
+    capabilities.forget_unresolved_warnings()
 
 
 @pytest.fixture

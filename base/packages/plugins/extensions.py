@@ -31,7 +31,7 @@ from base.telemetry.metrics.plugin_metrics import MetricSpec
 
 # A note builder returns a langchain `HumanMessage`, or None when it has nothing to say; the type is
 # `object` here because this module is imported by processes that must stay off the LM stack (a
-# child's surface load), and `agent.graph.context_notes` checks what a builder returns.
+# child's surface load), and `agent.graph.prompt.context_notes` checks what a builder returns.
 NoteBuilder = Callable[[AgentSlices], object | None]
 SectionFn = Callable[[AgentSlices], str]
 

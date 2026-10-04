@@ -1,4 +1,4 @@
-"""agent/graph/_chat_inbound.py:build_chat_inbound — text vs multimodal delivery.
+"""agent/graph/claim/_chat_inbound.py:build_chat_inbound — text vs multimodal delivery.
 
 Pure unit over the message builder (no DB / no graph run). Verifies a plain
 chat inbound still becomes an envelope-wrapped string HumanMessage, and a
@@ -19,7 +19,7 @@ import pytest
 from langchain_core.messages import HumanMessage
 
 from agent.db import ClaimedInbound
-from agent.graph._chat_inbound import build_chat_inbound
+from agent.graph.claim._chat_inbound import build_chat_inbound
 
 
 def _blocks(msg: HumanMessage) -> list[dict[str, Any]]:

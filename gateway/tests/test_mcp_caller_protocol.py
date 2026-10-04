@@ -8,7 +8,7 @@ from fastapi.testclient import TestClient
 from psycopg_pool import AsyncConnectionPool
 
 from agent.db import claim_inbound_batch
-from agent.graph._chat_inbound import build_chat_inbound
+from agent.graph.claim._chat_inbound import build_chat_inbound
 from base.config import settings
 from base.native_process.turn_identity import bind_turn_identity
 from gateway.app import app

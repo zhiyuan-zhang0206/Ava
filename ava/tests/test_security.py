@@ -19,7 +19,7 @@ from base.paths import ava_home
 def test_clean_content_returned_unchanged():
     for text in [
         "You are a helpful coding assistant.",
-        "The system prompt lives in agent/graph/system_prompt.py.",
+        "The system prompt lives in agent/graph/prompt/system_prompt.py.",
         "def read(path: str) -> str: return open(path).read()",
         "",
     ]:
