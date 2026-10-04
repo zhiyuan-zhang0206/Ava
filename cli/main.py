@@ -228,6 +228,15 @@ def main(argv: list[str] | None = None) -> int:
         # enrolled) fails fast with an actionable message; `ava boot` retries.
         print(f"✗ ava: {exc}", file=sys.stderr)
         return 1
+    finally:
+        # A quiet verb's first batch can otherwise reach OTLP only in atexit,
+        # after concurrent.futures has stopped accepting SDK resource probes.
+        # Drain while the interpreter is alive; the emitter still owns shutdown.
+        # No pipeline means no work, so settings-free/no-event verbs stay lazy.
+        telemetry = sys.modules.get("base.telemetry")
+        if telemetry is not None:
+            with telemetry.failure_isolated("CLI telemetry drain"):
+                telemetry.sync(timeout=5.0, bounded=True)
 
 
 if __name__ == "__main__":
