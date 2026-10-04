@@ -426,14 +426,18 @@ def test_list_tools_uses_url_for_remote_server(
     tool.name = "scrape"
     tool.description = "d"
     tool.input_schema = {"type": "object"}
-    connect_http = AsyncMock(
-        return_value=MagicMock(list_tools=AsyncMock(return_value=MagicMock(tools=[tool])))
-    )
+    session = MagicMock(list_tools=AsyncMock(return_value=MagicMock(tools=[tool])))
+    stack = MagicMock()
+    connect_http = AsyncMock(return_value=(session, stack))
     monkeypatch.setattr(mcps_mod, "_connect_http", connect_http)
+    monkeypatch.setattr(mcps_mod, "_session_stacks", {})
 
     tools = mcps_mod._list_tools("remote")
 
     connect_http.assert_awaited_once_with("https://mcp.example.com/mcp", None, server="remote")
+    # The session is cached with the stack that owns its transport, so a dead one is closed on rebuild.
+    assert mcps_mod._sessions["remote"] is session
+    assert mcps_mod._session_stacks["remote"] is stack
     assert tools == [{"name": "scrape", "description": "d", "input_schema": {"type": "object"}}]
 
 
@@ -457,11 +461,12 @@ def test_connect_http_local_fallback_initializes(
     client_factory = MagicMock(return_value=object())
     monkeypatch.setattr("mcp.client.streamable_http.create_mcp_http_client", client_factory)
 
-    got = mcps_mod._run_async(
+    got, stack = mcps_mod._run_async(
         mcps_mod._connect_http("https://mcp.example.com/mcp", {"x-api-key": "k"})
     )
 
     assert got is session
+    assert isinstance(stack, mcps_mod.AsyncExitStack)
     session.initialize.assert_awaited_once()
     client_factory.assert_called_once_with(headers={"x-api-key": "k"})
     assert factory.call_args.kwargs["http_client"] is client_factory.return_value

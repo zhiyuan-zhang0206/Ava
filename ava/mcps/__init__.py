@@ -184,23 +184,20 @@ _loop: asyncio.AbstractEventLoop | None = None
 _loop_lock = threading.Lock()
 _sessions: dict[str, Any] = {}  # server_name -> ClientSession (async-only)
 _session_locks: dict[str, asyncio.Lock] = {}
-# Per-server AsyncExitStack holding each stdio session's transport context, so a
-# dead session can be closed individually for rebuild (the global _exit_stack
-# below holds only stateless HTTP connections, which are never cached).
+# Per-server AsyncExitStack holding each session's transport context, so a dead
+# session can be closed individually for rebuild.
 _session_stacks: dict[str, AsyncExitStack] = {}
-_exit_stack: AsyncExitStack | None = None
 
 
 def _get_loop() -> asyncio.AbstractEventLoop:
     """Lazy-start background thread + asyncio loop. Thread-safe double-check."""
-    global _loop, _exit_stack  # noqa: PLW0603 — module-level lazy singleton
+    global _loop  # noqa: PLW0603 — module-level lazy singleton
     if _loop is not None:
         return _loop
     with _loop_lock:
         if _loop is not None:
             return _loop
         loop = asyncio.new_event_loop()
-        _exit_stack = AsyncExitStack()
         ready = threading.Event()
 
         def _run() -> None:
@@ -241,7 +238,10 @@ async def _connect(server: str, *, errlog: Any = None) -> Any:
         assert_requirements(spec)
         url = server_url(spec)
         if url is not None:
-            return await _connect_http(url, spec.get("headers"), server=server)
+            session, stack = await _connect_http(url, spec.get("headers"), server=server)
+            _session_stacks[server] = stack
+            _sessions[server] = session
+            return session
         cmd = spec.get("command")
         if not isinstance(cmd, str) or not cmd:
             raise MCPError(f"server {server!r} 'command' field missing or not str")
@@ -305,12 +305,12 @@ async def _connect(server: str, *, errlog: Any = None) -> Any:
 
 async def _connect_http(
     url: str, headers: dict[str, str] | None, *, oauth: bool = False, server: str = ""
-) -> Any:
+) -> tuple[Any, AsyncExitStack]:
     """Connect to a remote Streamable HTTP server in the background loop.
 
     Local-fallback counterpart of the daemon's `_connect_http`: dials the
-    endpoint directly (no child process), same stateless semantics; `oauth=True` builds the browser authorization flow instead of static headers. Returns a
-    ClientSession; the caller caches it in `_sessions`.
+    endpoint directly (no child process), same stateless semantics; `oauth=True` builds the browser authorization flow instead of static headers. Returns the
+    ClientSession and the stack that owns its transport; the caller caches both.
     """
     from mcp import ClientSession
     from mcp.client.streamable_http import (
@@ -318,14 +318,14 @@ async def _connect_http(
         streamable_http_client,
     )
 
-    assert _exit_stack is not None  # noqa: S101 — _get_loop already initialized
     local_stack = AsyncExitStack()
     timeout = _OAUTH_FLOW_TIMEOUT_S if oauth else settings.sandbox.mcp_connect_timeout_seconds
     try:
         if oauth:
             from ._oauth import oauth_http_client
 
-            http_client = await oauth_http_client(url, server)
+            # The per-server session lock `_connect` holds already serializes the flow.
+            http_client = await oauth_http_client(url, server, {})
         else:
             http_client = create_mcp_http_client(headers=headers) if headers else None
         read, write = await asyncio.wait_for(
@@ -348,8 +348,7 @@ async def _connect_http(
         raise MCPConnectError(
             f"connecting to server {url!r} failed: {type(e).__name__}: {e}"
         ) from e
-    await _exit_stack.enter_async_context(local_stack.pop_all())
-    return session
+    return session, local_stack
 
 
 def _run_async(coro: Any) -> Any:
