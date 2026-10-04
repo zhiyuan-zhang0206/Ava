@@ -14,8 +14,9 @@ Two checks; nothing from the script's body runs:
    placeholders), and a call that cannot be bound statically is skipped, never guessed: `*args` /
    `**kwargs` at the call site, a callee reached through an instance or a local variable, a name the
    script rebinds, a callable with no introspectable signature. The agent SDK (`ava.*`) is skipped
-   too: plugins wrap its functions at load time (`ava.agents.spawn(label=...)`), so its static
-   signature is not the call contract.
+   too, names and signatures alike: plugins install its namespaces (`ava.tasks`) and wrap its
+   functions at load time (`ava.agents.spawn(label=...)`), so the static module is neither the
+   set of names nor the call contract.
 
 Output: the last stdout line is the verdict — `CHILD-OK`, `CHILD-COMPILE-ERROR:<line>:<msg>` (rc 3),
 `CHILD-MODULE:<name>` (rc 4), `CHILD-EXC:<type>:<msg>` (rc 5), or `CHILD-SIG:<detail> | <detail>` (rc 6).
@@ -80,10 +81,17 @@ def _is_repo_code(obj: object, root: Path) -> bool:
     return path.relative_to(root).parts[0] != "ava"
 
 
+def _is_sdk(target: object) -> bool:
+    """The `ava` SDK package or a submodule: its surface is installed by plugins at load time."""
+    return isinstance(target, types.ModuleType) and target.__name__.split(".")[0] == "ava"
+
+
 def _resolve(namespace: dict[str, Any], chain: tuple[str, list[str]]) -> tuple[Any, str | None]:
     """The object a callee chain names, and (when a module lost the attribute) the missing name."""
     target: Any = namespace[chain[0]]
     for attr in chain[1]:
+        if _is_sdk(target):
+            return None, None
         if isinstance(target, types.ModuleType) and not hasattr(target, attr):
             return None, f"{target.__name__} has no `{attr}`"
         try:
