@@ -218,14 +218,19 @@ async def test_bounded_cleanup_dumps_and_exits_when_a_client_survives_cancel(
 
     monkeypatch.setattr(daemon_mod, "_dump_and_exit", _record_and_exit)
 
-    with pytest.raises(_DumpAndExitCalledError, match=re.escape("did not finish within 0.05s")):
-        await daemon_mod._bounded_cleanup(
-            cast(asyncio.AbstractServer, server), {task}, drain_s=0.05
-        )
+    try:
+        with pytest.raises(_DumpAndExitCalledError, match=re.escape("did not finish within 0.05s")):
+            await daemon_mod._bounded_cleanup(
+                cast(asyncio.AbstractServer, server), {task}, drain_s=0.05
+            )
 
-    assert dumped == ["shutdown cleanup did not finish within 0.05s"]
-    assert not server.waited  # the listener wait never completed
-    release.set()
-    task.cancel()
-    done, _ = await asyncio.wait({task}, timeout=2.0)
-    assert done == {task}
+        assert dumped == ["shutdown cleanup did not finish within 0.05s"]
+        assert not server.waited  # the listener wait never completed
+    finally:
+        # Unconditional: a broken bound must leave a *failed test*, not a live
+        # handler that traps the event loop's own teardown on the cancellation
+        # it swallows (the same gather-pinning this drain exists to escape).
+        release.set()
+        task.cancel()
+        _, still_running = await asyncio.wait({task}, timeout=2.0)
+        assert not still_running, "stubborn handler survived the test cleanup"
