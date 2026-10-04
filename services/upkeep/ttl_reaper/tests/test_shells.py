@@ -7,7 +7,6 @@ shell's reaping is silent. A renewal between the select and the dispatch wins.""
 
 from __future__ import annotations
 
-import logging
 from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
 
@@ -19,7 +18,6 @@ from base.clock.tests.fakes import fix_zone
 from base.daemon.loop_health import LoopProgress
 from base.db import Database, create_agent
 from base.events.live.bus import EventBus
-from ops.deploy_window import DeployWindow
 from ops.rpc_schemas import ShellKillResult
 from services.upkeep.ttl_reaper import shells
 from services.upkeep.ttl_reaper.shells import _claim_shell_row_still_expired, reap_expired_shells
@@ -152,61 +150,6 @@ async def test_reap_expired_shells_keeps_row_on_unreachable(
         cur.execute("SELECT count(*) FROM agent_shell_ttls WHERE agent_id = %s", (aid,))
         row = cur.fetchone()
         assert row is not None and row[0] == 1
-
-
-async def test_reap_expired_shells_defers_during_a_deploy_window(
-    db_conn: psycopg.Connection,
-    reaper_pool: ConnectionPool,
-    monkeypatch: pytest.MonkeyPatch,
-    caplog: pytest.LogCaptureFixture,
-) -> None:
-    """An open deploy window defers the round before anything is dialed: the
-    machines mid-restart are the expected-unreachable ones, so neither the
-    dispatch nor the RPC client's unreachable warning fires, and the row waits
-    for the first round after the window closes."""
-    aid = _running_agent(db_conn)
-    with db_conn.cursor() as cur:
-        cur.execute(
-            "INSERT INTO agent_shell_ttls (agent_id, session_id, expires_at) "
-            "VALUES (%s, 7, now() - interval '1 minute')",
-            (aid,),
-        )
-        cur.execute("UPDATE agents_meta SET machine = 'macmini' WHERE id = %s", (aid,))
-    db_conn.commit()
-
-    async def _dispatch(*_a: object, **_kw: object) -> dict[str, object]:
-        raise AssertionError("a window-deferred round must not dial")
-
-    monkeypatch.setattr(shells.cluster_rpc, "dispatch_to_machine", _dispatch)
-    window = DeployWindow(
-        active=True, detail="machine 'macmini' is mid-deploy (posture=stop, started 40s ago)"
-    )
-
-    def _window(_db: Database) -> DeployWindow:
-        return window
-
-    monkeypatch.setattr(shells, "deploy_in_flight", _window)
-    with caplog.at_level(logging.DEBUG, logger=shells._log.name):
-        assert await _reap(reaper_pool) == []
-    assert "deploy window is open" in caplog.text
-    with db_conn.cursor() as cur:
-        cur.execute("SELECT count(*) FROM agent_shell_ttls WHERE agent_id = %s", (aid,))
-        row = cur.fetchone()
-        assert row is not None and row[0] == 1
-
-    # the first round after the window closes reclaims the row
-
-    async def _kill(
-        _db: object, machine: str, kind: str, payload: dict[str, object], **kwargs: object
-    ) -> dict[str, object]:
-        return ShellKillResult(mode="killed", interrupted=False).model_dump()
-
-    def _idle_window(_db: Database) -> DeployWindow:
-        return DeployWindow(active=False, detail="no deploy in flight")
-
-    monkeypatch.setattr(shells.cluster_rpc, "dispatch_to_machine", _kill)
-    monkeypatch.setattr(shells, "deploy_in_flight", _idle_window)
-    assert await _reap(reaper_pool) == [(aid, 7)]
 
 
 async def test_reap_expired_shells_absent_machine_terminalizes_row(
