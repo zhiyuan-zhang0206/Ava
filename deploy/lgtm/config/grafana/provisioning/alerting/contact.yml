@@ -43,6 +43,14 @@
 #   credential (the only form the Grafana-13 notifier can send without
 #   plaintext storage).
 #
+# A second, direct contact point exists for the one outage the webhook cannot
+# report: the gateway itself being down. Grafana's native Telegram notifier posts
+# to the Bot API with the bot token and owner chat id converge renders from the
+# telegram settings (AVA_ALERTS_TELEGRAM_BOT_TOKEN / AVA_ALERTS_TELEGRAM_CHAT_ID;
+# inert placeholders when the home has no bot). Only `attributes_check="gateway_liveness"`
+# alerts and the health probe's dead-man rule (`metric="health_probe_silent"`) are
+# routed to it, in addition to the webhook.
+#
 # disableResolveMessage: false — resolution webhooks ARE wanted: the ingest
 # flips the row to resolved and sends the recovery IM line.
 apiVersion: 1
@@ -59,15 +67,76 @@ contactPoints:
           httpMethod: POST
           authorization_scheme: Bearer
           authorization_credentials: $__env{AVA_ALERTS_WEBHOOK_TOKEN}
+  - orgId: 1
+    name: ava-alerts-telegram
+    receivers:
+      - uid: ava-alerts-telegram
+        type: telegram
+        disableResolveMessage: false
+        settings:
+          bottoken: $__env{AVA_ALERTS_TELEGRAM_BOT_TOKEN}
+          chatid: $__env{AVA_ALERTS_TELEGRAM_CHAT_ID}
 
-# Root notification policy: everything -> the webhook. group_by: [] batches
-# all firing instances into one POST (the ingest dedups by fingerprint x
-# starts_at, so any grouping is safe); matchers: [] catches every rule.
+# The notification policy is the one place alert merging and repetition are
+# decided — no code in Ava dedups, throttles or grades a notification.
+#
+# - group_by [alertname]: every instance of one rule (one per machine / vendor /
+#   drill ...) rides one webhook POST, so a burst across a fleet is one batch to
+#   the ingest instead of one POST per instance. The ingest still stores one row
+#   per (fingerprint, starts_at) and sends one IM per instance; grouping bounds
+#   the POST rate, the rule's `for:` bounds how soon a condition counts.
+# - group_wait 30s: the first firing of a group waits half a minute so
+#   instances of the same burst join it. group_interval 5m: instances that join
+#   an already-notified group, and the resolution of a group, are announced at
+#   most every five minutes. repeat_interval 4h: an unchanged firing group is
+#   re-sent every four hours, which only refreshes the stored rows — the ingest
+#   sends no second IM for an instance it already announced.
+# - critical alerts are time-critical (out-of-credit key, a disk at the WAL hard
+#   stop): they skip the batching wait and refresh hourly.
+# - Deploy windows are not a policy concern: `python -m cli.fleet_update` creates
+#   one Grafana silence over every rule when `down` starts and expires it when
+#   `up` completes (cli/commands/observability/alert_silence.py).
 policies:
   - orgId: 1
     receiver: ava-alerts-webhook
-    group_by: []
+    group_by: [alertname]
     matchers: []
     group_wait: 30s
     group_interval: 5m
     repeat_interval: 4h
+    routes:
+      - receiver: ava-alerts-telegram
+        object_matchers:
+          - [attributes_check, "=", gateway_liveness]
+        continue: true
+        group_by: [alertname]
+        group_wait: 0s
+        group_interval: 5m
+        repeat_interval: 4h
+      # The probe going silent usually travels with a gateway problem, so its dead-man
+      # rule gets the same direct route.
+      - receiver: ava-alerts-telegram
+        object_matchers:
+          - [metric, "=", health_probe_silent]
+        continue: true
+        group_by: [alertname]
+        group_wait: 0s
+        group_interval: 5m
+        repeat_interval: 4h
+      - receiver: ava-alerts-webhook
+        object_matchers:
+          - [severity, "=", critical]
+        group_by: [alertname]
+        group_wait: 0s
+        group_interval: 1m
+        repeat_interval: 1h
+      # The root receiver only serves alerts no child route matched, and the
+      # Telegram route above continues, so every other alert needs its own
+      # explicit route to the webhook.
+      - receiver: ava-alerts-webhook
+        object_matchers:
+          - [alertname, "=~", ".+"]
+        group_by: [alertname]
+        group_wait: 30s
+        group_interval: 5m
+        repeat_interval: 4h
