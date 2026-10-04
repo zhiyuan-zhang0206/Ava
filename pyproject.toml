@@ -754,6 +754,11 @@ reportUnknownMemberType = "error"
 reportUnknownArgumentType = "error"
 
 [[tool.pyright.executionEnvironments]]
+root = "base/agents/context/tests"
+reportUnknownMemberType = "error"
+reportUnknownArgumentType = "error"
+
+[[tool.pyright.executionEnvironments]]
 root = "base/agents/history/hierarchy/tests"
 reportUnknownMemberType = "error"
 reportUnknownArgumentType = "error"

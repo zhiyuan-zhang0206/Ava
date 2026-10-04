@@ -11,6 +11,7 @@ import pytest
 
 import ava.mcps._daemon as daemon
 from ava import mcps
+from ava.mcps.tests._mcps_helpers import local_mcp_clients
 
 
 def test_local_tool_result_lost_after_effect(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -24,9 +25,9 @@ def test_local_tool_result_lost_after_effect(monkeypatch: pytest.MonkeyPatch) ->
     session = MagicMock(call_tool=AsyncMock(side_effect=execute_then_disconnect))
     stack = MagicMock(aclose=AsyncMock())
     monkeypatch.setattr(mcps, "_get_remote_client", lambda: None)
-    monkeypatch.setattr(mcps, "_sessions", {"fs": session})
-    monkeypatch.setattr(mcps, "_session_locks", {})
-    monkeypatch.setattr(mcps, "_session_stacks", {"fs": stack})
+    clients = local_mcp_clients(monkeypatch)
+    clients.sessions["fs"] = session
+    clients.session_stacks["fs"] = stack
     connect = AsyncMock(return_value=session)
     monkeypatch.setattr(mcps, "_connect", connect)
 

@@ -126,7 +126,10 @@ req.write_text(
             "v": 1,
             "code": "pass",
             "agent_id": None,
-            "context": {"identity": {"agent_id": None, "owns_loop": True, "actor": None}},
+            "context": {
+                "identity": {"agent_id": None, "owns_loop": True, "actor": None},
+                "gateway_url": "http://gateway.invalid:8000",
+            },
             "timeout_s": 1.0,
         }
     ),
@@ -337,7 +340,10 @@ def test_child_surface_upgrade_loads_faces_without_reexecuting_surfaces() -> Non
 # ── leg-2 (B3): the stateful child's lazy state slot ───────────────────────
 
 
-_NO_AGENT_CONTEXT = {"identity": {"agent_id": None, "owns_loop": True, "actor": None}}
+_NO_AGENT_CONTEXT = {
+    "identity": {"agent_id": None, "owns_loop": True, "actor": None},
+    "gateway_url": "http://gateway.invalid:8000",
+}
 
 
 def _craft_stateful_envelope(tmp_path: Path) -> Path:

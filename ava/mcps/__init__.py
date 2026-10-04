@@ -22,7 +22,6 @@ import inspect
 import json
 import keyword
 import subprocess
-import threading
 import time
 import types
 from contextlib import AsyncExitStack, suppress
@@ -48,6 +47,7 @@ from ava.security import scan_content
 from base.config import settings
 from base.log import logger
 
+from ._clients import McpClients
 from ._oauth import _OAUTH_FLOW_TIMEOUT_S
 from ._remote import (
     _current_agent_id as _current_agent_id,
@@ -55,13 +55,10 @@ from ._remote import (
 from ._remote import (
     _daemon_socket_path as _daemon_socket_path,
 )
-from ._remote import (
-    _get_remote_client as _get_remote_client,
-)
 
-# The MCP daemon socket client lives in `._remote` (#1229). `_get_remote_client`
-# is what `_list_tools` / `_call_raw` consult; the rest are re-exported so tests
-# and help() keep reaching them here.
+# The MCP daemon socket client lives in `._remote` (#1229); `_get_remote_client` (below) is what
+# `_list_tools` / `_call_raw` consult. The names are re-exported so tests and help() keep reaching
+# them here.
 from ._remote import (
     _RemoteMCPClient as _RemoteMCPClient,
 )
@@ -162,75 +159,48 @@ def _write_cache(server: str, tools: list[ToolInfo]) -> None:
 
 # ─── sync↔async bridge + per-server session cache ───────────────────────
 #
-# MCP ClientSession / stdio_client are async-only. The Ava SDK is sync;
-# cross over via a module-level daemon thread running an independent
-# asyncio loop:
-#   sync caller → asyncio.run_coroutine_threadsafe(coro, _loop).result()
-#                                                       ↓
-#                                  background thread runs _loop
-#                                  ClientSessions live inside _loop
+# MCP ClientSession / stdio_client are async-only. The Ava SDK is sync; it crosses over through
+# the `McpClients` of the bound context (`_clients.py`): a loop on a daemon thread whose sessions
+# live for the life of the context. Each session's stdio_client + ClientSession context enters an
+# AsyncExitStack; when the subprocess exits the loop dies with the process, the OS closes the stdin
+# pipe, and compliant servers see EOF and exit. No explicit close of the sessions at the end:
+# closing stdio subprocesses in parent-process-dying scenarios is prone to deadlock.
 #
-# Lifecycle: each session's stdio_client + ClientSession context enters
-# AsyncExitStack; when subprocess exits, daemon thread dies, OS closes
-# stdin pipe → compliant servers see EOF and graceful-exit. No explicit
-# atexit close — closing stdio subprocesses in parent-process-dying
-# scenarios is prone to deadlock.
-#
-# Concurrency: per-server asyncio.Lock prevents two callers from
-# concurrently connecting to the same server and spawning two
-# subprocesses. Failure cleanup: _connect uses a local AsyncExitStack
+# Concurrency: a per-server asyncio.Lock prevents two callers from concurrently connecting to the
+# same server and spawning two subprocesses. Failure cleanup: _connect uses a local AsyncExitStack
 # for isolation; on failure aclose semi-initialized resources.
 
-_loop: asyncio.AbstractEventLoop | None = None
-_loop_lock = threading.Lock()
-_sessions: dict[str, Any] = {}  # server_name -> ClientSession (async-only)
-_session_locks: dict[str, asyncio.Lock] = {}
-# Per-server AsyncExitStack holding each session's transport context, so a dead
-# session can be closed individually for rebuild.
-_session_stacks: dict[str, AsyncExitStack] = {}
+
+def _clients() -> McpClients:
+    """The MCP clients of the bound context, built on first use."""
+    from ava.sdk_surface import process_context
+
+    return process_context.current().clients.get(McpClients)
 
 
-def _get_loop() -> asyncio.AbstractEventLoop:
-    """Lazy-start background thread + asyncio loop. Thread-safe double-check."""
-    global _loop  # noqa: PLW0603 — module-level lazy singleton
-    if _loop is not None:
-        return _loop
-    with _loop_lock:
-        if _loop is not None:
-            return _loop
-        loop = asyncio.new_event_loop()
-        ready = threading.Event()
-
-        def _run() -> None:
-            asyncio.set_event_loop(loop)
-            ready.set()
-            loop.run_forever()
-
-        t = threading.Thread(target=_run, name="ava-mcps-loop", daemon=True)
-        t.start()
-        ready.wait()
-        _loop = loop
-        return loop
+def _get_remote_client() -> _RemoteMCPClient | None:
+    """The client of this machine's MCP daemon, or None to connect locally."""
+    return _clients().remote()
 
 
-async def _connect(server: str, *, errlog: Any = None) -> Any:
+async def _connect(mcp: McpClients, server: str, *, errlog: Any = None) -> Any:
     """Connect to the server in the background loop, return ClientSession (cache reused).
 
     errlog: stderr target passed to stdio_client.
       Default None → use mcp SDK default (sys.stderr).
       `subprocess.DEVNULL` → discard subprocess stderr (discovery scenario).
     """
-    if server in _sessions:
-        return _sessions[server]
+    if server in mcp.sessions:
+        return mcp.sessions[server]
 
-    lock = _session_locks.get(server)
+    lock = mcp.session_locks.get(server)
     if lock is None:
         lock = asyncio.Lock()
-        _session_locks[server] = lock
+        mcp.session_locks[server] = lock
 
     async with lock:
-        if server in _sessions:
-            return _sessions[server]
+        if server in mcp.sessions:
+            return mcp.sessions[server]
 
         cfg = _load_config()
         if server not in cfg:
@@ -240,8 +210,8 @@ async def _connect(server: str, *, errlog: Any = None) -> Any:
         url = server_url(spec)
         if url is not None:
             session, stack = await _connect_http(url, spec.get("headers"), server=server)
-            _session_stacks[server] = stack
-            _sessions[server] = session
+            mcp.session_stacks[server] = stack
+            mcp.sessions[server] = session
             return session
         cmd = spec.get("command")
         if not isinstance(cmd, str) or not cmd:
@@ -299,8 +269,8 @@ async def _connect(server: str, *, errlog: Any = None) -> Any:
 
         # Keep the per-server stack so a dead session can be closed individually
         # and rebuilt (the old global stack made selective teardown impossible).
-        _session_stacks[server] = local_stack
-        _sessions[server] = session
+        mcp.session_stacks[server] = local_stack
+        mcp.sessions[server] = session
         return session
 
 
@@ -354,12 +324,10 @@ async def _connect_http(
 
 def _run_async(coro: Any) -> Any:
     """Sync entry point — toss coro to the background loop and wait for result."""
-    loop = _get_loop()
-    fut = asyncio.run_coroutine_threadsafe(coro, loop)
-    return fut.result()
+    return _clients().run(coro)
 
 
-async def _invalidate_session(server: str) -> None:
+async def _invalidate_session(mcp: McpClients, server: str) -> None:
     """Close and drop `server`'s cached session — the stdio child died (server
     process restarted, pipe broke) and the cached ClientSession can never
     recover. Runs on the background loop; safe when uncached.
@@ -367,13 +335,13 @@ async def _invalidate_session(server: str) -> None:
     Closes the per-server transport stack, which terminates the child process
     and frees its pipes, so the next `_connect` spawns a fresh one.
     """
-    lock = _session_locks.get(server)
+    lock = mcp.session_locks.get(server)
     if lock is None:
         lock = asyncio.Lock()
-        _session_locks[server] = lock
+        mcp.session_locks[server] = lock
     async with lock:
-        _sessions.pop(server, None)
-        stack = _session_stacks.pop(server, None)
+        mcp.sessions.pop(server, None)
+        stack = mcp.session_stacks.pop(server, None)
         if stack is not None:
             try:
                 await stack.aclose()
@@ -386,7 +354,7 @@ async def _invalidate_session(server: str) -> None:
 
 
 async def _call_with_reconnect(
-    server: str, call: Any, *, errlog: Any = None, retry_transport: bool
+    mcp: McpClients, server: str, call: Any, *, errlog: Any = None, retry_transport: bool
 ) -> Any:
     """Run `call(session)` against the cached session and invalidate it on
     transport failure. Retry only for requests safe to repeat (tool listing).
@@ -395,19 +363,19 @@ async def _call_with_reconnect(
     failure reports an unknown result without replaying. Tool-level errors
     propagate untouched. At most one rebuild per safe call.
     """
-    session = await _connect(server, errlog=errlog)
+    session = await _connect(mcp, server, errlog=errlog)
     try:
         return await call(session)
     except Exception as e:
         if not is_transport_error(e):
             raise
-        await _invalidate_session(server)
+        await _invalidate_session(mcp, server)
         if not retry_transport:
             raise MCPCallError(
                 f"MCP tool result unknown for server {server!r}; request may have executed: "
                 f"{type(e).__name__}: {e}"
             ) from e
-        session = await _connect(server, errlog=errlog)
+        session = await _connect(mcp, server, errlog=errlog)
         return await call(session)
 
 
@@ -431,9 +399,11 @@ def _list_tools(server: str) -> list[ToolInfo]:
     if cached is not None:
         return cached
 
+    mcp = _clients()
+
     async def _do() -> list[ToolInfo]:
         result = await _call_with_reconnect(
-            server, lambda s: s.list_tools(), errlog=subprocess.DEVNULL, retry_transport=True
+            mcp, server, lambda s: s.list_tools(), errlog=subprocess.DEVNULL, retry_transport=True
         )
         return [
             {
@@ -464,10 +434,12 @@ def _call_raw(server: str, tool: str, **args: Any) -> dict[str, Any]:
         # The daemon attempt may have outlived the borrowed lease.
         agent_identity.validate_external_identity()
 
+    mcp = _clients()
+
     async def _do() -> dict[str, Any]:
         try:
             result = await _call_with_reconnect(
-                server, lambda s: s.call_tool(tool, args or None), retry_transport=False
+                mcp, server, lambda s: s.call_tool(tool, args or None), retry_transport=False
             )
         except MCPCallError:
             raise

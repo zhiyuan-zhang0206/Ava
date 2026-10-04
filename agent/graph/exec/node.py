@@ -207,7 +207,7 @@ async def _run_agent_code(
         raise TypeError(payload.state_update_error)
     delta = payload.state_update if payload is not None else None
     plugin_state_update = _validate_plugin_state_keys(dict(delta), state.__class__) if delta else {}
-    attachments = payload.attachments if payload is not None else None
+    attachments = plugin_state_update.pop("attach", None)
     sdk_calls = payload.sdk_calls if payload is not None else None
     return result, plugin_state_update, exec_ms, attachments, sdk_calls
 

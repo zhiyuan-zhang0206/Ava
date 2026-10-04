@@ -3,8 +3,9 @@ from types import ModuleType as _ModuleType
 from types import SimpleNamespace
 from typing import Any
 
-# Runtime connections — DB, Redis. The agent's own identity (AGENT_ID) lives
-# under ava.self alongside ava.self.MACHINE_SPEC, not here.
+# Runtime connections — `ava.DB`, `ava.REDIS` — are the bound context's clients
+# (`ava.context.sql` / `.redis`), served by the module class below. The agent's own identity
+# (AGENT_ID) lives under ava.self alongside ava.self.MACHINE_SPEC, not here.
 #
 # DB_URL / REDIS_URL / GATEWAY_URL are *not* re-exported here as module
 # attributes — they live on ava._settings as lazy __getattr__ entries that
@@ -14,8 +15,6 @@ from typing import Any
 # invariant.
 from base.agents.context import AvaContext
 
-from ._settings import DB as DB
-from ._settings import REDIS as REDIS
 from .sdk_surface import process_context
 
 # ── SDK entry machinery — implementations in `ava/sdk_surface/` ─────────────
@@ -100,8 +99,13 @@ turn, rebuilt in the exec child from the description the host put in the request
 `context.identity` says who the code acts as: `agent_id` (the agent whose calls these are, None
 for a process with no agent), `owns_loop` (True in your own turn, False in a script you launched,
 which may not compact or restart you) and `actor` (the provenance principal of a process that acts
-as something other than an agent, e.g. `schedule:7`). Raises `AttributeError` where no context is
-bound: the agent host, a bare script no agent launched.
+as something other than an agent, e.g. `schedule:7`).
+
+The framework provides the connections, built on first use and closed when your process ends:
+`context.sql` (the cluster database, one autocommit connection), `context.redis` and
+`context.gateway` (an `httpx.Client` for the gateway API). Use them; do not construct your own.
+
+Raises `AttributeError` where no context is bound: a bare script no agent launched.
 """
 
 
@@ -143,8 +147,16 @@ class _SdkModule(_ModuleType):
     def context(self) -> AvaContext:
         return process_context.current()
 
+    @property
+    def DB(self) -> Any:  # noqa: N802 — the SDK's name for the SQL connection
+        return process_context.current().sql
+
+    @property
+    def REDIS(self) -> Any:  # noqa: N802 — the SDK's name for the Redis client
+        return process_context.current().redis
+
     def __dir__(self) -> list[str]:
-        return sorted({*super().__dir__(), "context", "state", "state_update"})
+        return sorted({*super().__dir__(), "DB", "REDIS", "context", "state", "state_update"})
 
 
 _sys.modules[__name__].__class__ = _SdkModule
@@ -334,6 +346,10 @@ def __getattr__(name: str) -> Any:
     if name == "context":
         # Same fall-through: the property raised because no context is bound.
         return process_context.current()
+    if name == "DB":
+        return process_context.current().sql
+    if name == "REDIS":
+        return process_context.current().redis
     if name == "external":
         import importlib
 

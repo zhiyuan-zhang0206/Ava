@@ -5,6 +5,17 @@ from typing import Any, cast
 
 import pytest
 
+from ava.sdk_surface import process_context
+from base.agents.context import AvaContext
+from base.agents.context.clients import ClientSet
+
+
+@pytest.fixture(autouse=True)
+def _fresh_clients() -> Any:
+    """Each test builds the gateway client itself: a context with a clean `ClientSet`."""
+    with process_context.scoped(AvaContext(clients=ClientSet())):
+        yield
+
 
 def test_gateway_client_base_url_is_gateway_url(monkeypatch: pytest.MonkeyPatch) -> None:
     from base.cluster.machine import reset_identity, set_identity
@@ -15,9 +26,8 @@ def test_gateway_client_base_url_is_gateway_url(monkeypatch: pytest.MonkeyPatch)
 
     import ava.gateway_client.transport as gc
 
-    monkeypatch.setattr(gc, "_client", None)  # reset lazy singleton so it rebuilds
     try:
-        client = cast(Any, gc._client_singleton())  # pyright: ignore[reportUnknownMemberType]
+        client = cast(Any, gc._http())  # pyright: ignore[reportUnknownMemberType]
         assert str(client.base_url).rstrip("/") == "https://cp.example.com"
     finally:
         reset_identity()
@@ -33,8 +43,7 @@ def test_gateway_client_sends_cluster_secret_bearer(monkeypatch: pytest.MonkeyPa
 
     import ava.gateway_client.transport as gc
 
-    monkeypatch.setattr(gc, "_client", None)  # reset lazy singleton so it rebuilds
-    client = cast(Any, gc._client_singleton())  # pyright: ignore[reportUnknownMemberType]
+    client = cast(Any, gc._http())  # pyright: ignore[reportUnknownMemberType]
     assert client.headers.get("Authorization") == "Bearer s3cr3t-token"
 
 
@@ -48,8 +57,7 @@ def test_gateway_client_no_bearer_when_secret_unset(monkeypatch: pytest.MonkeyPa
 
     import ava.gateway_client.transport as gc
 
-    monkeypatch.setattr(gc, "_client", None)  # reset lazy singleton so it rebuilds
-    client = cast(Any, gc._client_singleton())  # pyright: ignore[reportUnknownMemberType]
+    client = cast(Any, gc._http())  # pyright: ignore[reportUnknownMemberType]
     assert "Authorization" not in client.headers
 
 
@@ -66,8 +74,7 @@ def test_gateway_client_in_an_agent_presents_the_delivered_token(
 
     import ava.gateway_client.transport as gc
 
-    monkeypatch.setattr(gc, "_client", None)  # reset lazy singleton so it rebuilds
-    client = cast(Any, gc._client_singleton())  # pyright: ignore[reportUnknownMemberType]
+    client = cast(Any, gc._http())  # pyright: ignore[reportUnknownMemberType]
     assert client.headers.get("Authorization") == "Bearer delivered-token"
 
 
@@ -82,9 +89,8 @@ def test_gateway_client_in_an_agent_without_a_token_fails_instead_of_using_the_s
 
     import ava.gateway_client.transport as gc
 
-    monkeypatch.setattr(gc, "_client", None)  # reset lazy singleton so it rebuilds
     with pytest.raises(RuntimeError, match="AVA_API_TOKEN"):
-        gc._client_singleton()  # pyright: ignore[reportUnknownMemberType]
+        gc._http()  # pyright: ignore[reportUnknownMemberType]
 
 
 def _answering(label: str, seen: list[str]) -> Any:
@@ -104,24 +110,37 @@ def test_use_client_routes_sdk_calls_through_the_injected_client_and_restores_th
 
     seen: list[str] = []
     outer = _answering("outer", seen)
-    monkeypatch.setattr(gc, "_client", outer)
 
-    with gc.use_client(_answering("injected", seen)) as injected:
-        assert gc._client_singleton() is injected  # pyright: ignore[reportUnknownMemberType]
-        gc.get("/api/x")  # pyright: ignore[reportUnknownMemberType]
-    gc.get("/api/y")  # pyright: ignore[reportUnknownMemberType]
+    with gc.use_client(outer):
+        with gc.use_client(_answering("injected", seen)) as injected:
+            assert gc._http() is injected  # pyright: ignore[reportUnknownMemberType]
+            gc.get("/api/x")  # pyright: ignore[reportUnknownMemberType]
+        gc.get("/api/y")  # pyright: ignore[reportUnknownMemberType]
 
     assert seen == ["injected http://injected.test/api/x", "outer http://outer.test/api/y"]
 
 
-def test_use_client_leaves_the_lazy_default_unbuilt_when_none_was_installed(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_use_client_leaves_the_lazy_default_unbuilt_when_none_was_installed() -> None:
     import ava.gateway_client.transport as gc
 
-    monkeypatch.setattr(gc, "_client", None)
+    clients = process_context.current().clients
 
     with pytest.raises(RuntimeError, match="boom"), gc.use_client(_answering("injected", [])):
         raise RuntimeError("boom")
+    assert clients._gateway is None
 
-    assert gc._client is None  # pyright: ignore[reportUnknownMemberType]
+
+def test_client_carries_the_configured_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The client default the sentinel defers to is the configured one.
+
+    Without this, `USE_CLIENT_DEFAULT` could be deferring to httpx's own
+    5s default rather than `AVA_GATEWAY_HTTP_TIMEOUT_SECONDS`.
+    """
+    import ava.gateway_client.transport as gc
+    from base.config import settings
+
+    monkeypatch.setattr(settings.gateway, "gateway_client_http_timeout_seconds", 20.0)  # pyright: ignore[reportUnknownMemberType]
+
+    client = cast(Any, gc._http())  # pyright: ignore[reportUnknownMemberType]
+    assert client.timeout.read == 20.0
+    assert client.timeout.connect == 20.0

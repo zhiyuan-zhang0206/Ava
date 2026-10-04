@@ -15,7 +15,7 @@ from typing import cast
 
 import pytest
 
-from ava._settings import _LazyConnection
+from base.agents.context.clients import LazyConnection as _LazyConnection
 
 
 class _FakeConn:

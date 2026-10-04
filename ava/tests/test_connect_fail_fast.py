@@ -150,10 +150,11 @@ def test_assert_schema_current_fails_fast(silent_peer_url: str) -> None:
 def test_ava_db_connect_fails_fast(silent_peer_url: str, monkeypatch: pytest.MonkeyPatch) -> None:
     """`ava.DB` is dialled from inside the agent's exec sandbox — an unbounded
     connect freezes the agent's tool call, not just a daemon's boot."""
-    from ava._settings import _connect_db
+    from base.agents.context.clients import ClientSet
+    from base.db import Database
 
     monkeypatch.setattr(settings.data_plane, "db_url", silent_peer_url)
-    _assert_fails_fast(_connect_db)  # pyright: ignore[reportUnknownArgumentType]
+    _assert_fails_fast(ClientSet(database=Database.from_settings)._connect_sql)  # pyright: ignore[reportUnknownArgumentType]
 
 
 def _record_connect_kwargs(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
@@ -204,12 +205,13 @@ def test_ava_db_connect_never_prepares(monkeypatch: pytest.MonkeyPatch) -> None:
     a server-side prepared statement made on one pgbouncer backend does not
     exist on the next (2026-09-21 watcher wedge on `_pg3_0`), so the dial must
     never prepare."""
-    from ava._settings import _connect_db
+    from base.agents.context.clients import ClientSet
+    from base.db import Database
 
     monkeypatch.setattr(settings.data_plane, "db_url", "postgresql://ava:x@127.0.0.1:1/ava")
     seen = _record_connect_kwargs(monkeypatch)
     with pytest.raises(psycopg.OperationalError):
-        _connect_db()
+        ClientSet(database=Database.from_settings)._connect_sql()
     assert seen["prepare_threshold"] is None
 
 

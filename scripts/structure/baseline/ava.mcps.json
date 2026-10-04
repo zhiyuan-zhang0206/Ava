@@ -1,12 +1,4 @@
 {
-  "ambient_state": {
-    "ava/mcps/__init__.py::ambient-container:_session_locks": 1,
-    "ava/mcps/__init__.py::ambient-container:_session_stacks": 1,
-    "ava/mcps/__init__.py::ambient-container:_sessions": 1,
-    "ava/mcps/__init__.py::global-rebind:_loop": 1,
-    "ava/mcps/__init__.py::thread:_get_loop": 1,
-    "ava/mcps/_remote.py::global-rebind:_remote_client": 1
-  },
   "files": {
     "ava/mcps/tests/test_daemon.py": 2110
   }

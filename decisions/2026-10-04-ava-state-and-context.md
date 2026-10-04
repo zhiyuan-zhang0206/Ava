@@ -48,9 +48,10 @@ They are of three different kinds, and the package treated them as one.
    `get_runtime()`: a context variable, `ava.sdk_surface.process_context._CURRENT`. The exec
    child, a script an agent launched (identity from `AVA_AGENT_ID`, `owns_loop=False`), a
    gateway-hosted schedule runner (an actor, no agent) and an external attachment (its lease) bind
-   it; the agent host does not, because it serves many agents and its identity is the turn
-   contextvar. Where nothing is bound, `ava.context` raises `AttributeError`, as `ava.state` does
-   outside an exec turn.
+   it for their process; the agent host binds each turn's context around that turn's graph run,
+   never for the process, because it serves many agents. Where nothing is bound (a bare script, the
+   host between turns), `ava.context` raises `AttributeError`, as `ava.state` does outside an exec
+   turn.
 
 4. **The SDK assembly is an immutable installation.** `install(registry)` produces one value
    holding the wraps, providers, metering state and disable entries; nothing outside it is
@@ -79,8 +80,9 @@ the context is bound carry it (see below).
   boot path, which the child keeps off on purpose, for a runtime the child does not run.
 - **Pass the context to every `ava.*` function.** It would change every call shape the agent
   writes and every plugin wrapper; the free-function surface is the contract.
-- **Bind the context in the agent host too.** The host is many agents in one process; a bound
-  context there would be one agent's, and the turn contextvar already answers per task.
+- **Bind one context for the host process.** The host is many agents in one process; a
+  process-wide context would be one agent's. Each turn binds its own around its graph run, and the
+  connections are the host's shared set.
 - **A process-wide fallback beside the ContextVar** (a module holder the thread case reads). It is
   the global being removed. A thread starts with an empty context, so `process_context` makes the
   threads started after `bind_process` carry this one variable (not the others: the host's turn
@@ -96,7 +98,13 @@ the context is bound carry it (see below).
   the bound context and holds no state; `establish` / `establish_actor` are gone. Tests pin an
   identity with `pin_agent(...)`, which binds a context; the `identity_restore` fixture puts the
   previous one back.
-- The exec request envelope carries `context` (the description) instead of a bare agent id.
+- The exec request envelope carries `context` (the description) beside the agent id, which stays the
+  attribution key the request-quarantine tooling reads. Attachments registered by `ava.self.attach`
+  travel in `ava.state_update["attach"]`, a second SDK-written core channel next to
+  `security_findings`; the result envelope's `attachments` field is gone.
+- `ava.DB` / `ava.REDIS` and the gateway client are the bound context's clients; code that runs
+  outside a bound context and needs them (a daemon, a script) binds one of its own. The host
+  shares one client set across turns and closes it with the host.
 - A pool thread started before a context was bound does not see it; one started after does, with
   the value bound at `start()`.
 - An external attachment borrows an identity by binding a context carrying its lease for its
@@ -115,9 +123,12 @@ exactly four legitimate sources:
    `AvaContext` (identity plus the database, Redis and gateway clients) from the identity its
    shell environment describes, so `ava.DB`, `ava.REDIS` and the gateway-backed `ava.*` calls
    work as in the child. The description is secret-free: credentials resolve from the process's
-   own settings, exactly as in the child. **Not yet shipped** — PR2 adds this source, first
-   verifying which identity and credential references the persistent shell's environment already
-   carries and injecting the description at session creation where it is missing.
+   own settings, exactly as in the child.
+   **Shipped in PR2.** `ava.shell.sessions` puts the owner's id into the session environment
+   at creation (`AVA_AGENT_ID`); a script run in the session builds its context from it
+   (`process_context._launched_child_context`, `owns_loop=False`), and the credential
+   references it needs (`AVA_DB_URL`, `AVA_REDIS_URL`, `AVA_GATEWAY_URL`) already ride the
+   session environment.
 3. **Other coding agents (Claude Code, Codex, ...)** — expected to use the `ava` CLI; they do
    not carry an SDK context.
 4. **Impersonation — the one exception**: constructing the impersonated ava agent's context

@@ -4,9 +4,6 @@
     "ava/__init__.py::global-rebind:_plugins_loaded": 1,
     "ava/__init__.py::import-time-call:ava.ensure_plugins_loaded": 1,
     "ava/__init__.py::import-time-call:ava.sdk_surface.metering.install": 1,
-    "ava/__init__.py::import-time-call:ava.sdk_surface.sdk_disable.apply_sdk_disable": 1,
-    "ava/_settings.py::ambient-instance:DB": 1,
-    "ava/_settings.py::ambient-instance:REDIS": 1,
-    "ava/attachment_transport.py::ambient-container:_ATTACHMENTS": 1
+    "ava/__init__.py::import-time-call:ava.sdk_surface.sdk_disable.apply_sdk_disable": 1
   }
 }

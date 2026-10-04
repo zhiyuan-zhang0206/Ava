@@ -12,7 +12,8 @@ import pytest
 
 import ava.mcps as mcps_mod
 import ava.mcps._remote as remote_mod
-from ava.mcps.tests._mcps_helpers import _content_text, _make_tool
+from ava.mcps._clients import McpClients
+from ava.mcps.tests._mcps_helpers import _content_text, _make_tool, local_mcp_clients
 from ava.mcps.tests._mcps_helpers import fake_config as fake_config
 from ava.mcps.tests._mcps_helpers import mock_session as mock_session
 from base.config import settings
@@ -350,11 +351,11 @@ def test_call_raw_falls_back_to_local_when_remote_fails(
         )
     )
 
-    async def _fake_connect(_server: str, **_kw: object) -> MagicMock:
+    async def _fake_connect(_mcp: McpClients, _server: str, **_kw: object) -> MagicMock:
         return fake_session
 
+    local_mcp_clients(monkeypatch)
     monkeypatch.setattr(mcps_mod, "_connect", _fake_connect)
-    monkeypatch.setattr(mcps_mod, "_sessions", {})
 
     out = mcps_mod._call_raw("srv", "tool_x", k="v")
     assert out["content"][0]["text"] == "ok"
@@ -369,9 +370,7 @@ def test_list_tools_raises_when_server_not_in_config(
     """`_connect` sees server not in mcp.json → MCPServerNotFound leaks to _list_tools."""
     fake_config.write_text(json.dumps({"mcpServers": {}}), encoding="utf-8")
     monkeypatch.setattr(remote_mod, "_daemon_socket_path", lambda: None)
-    monkeypatch.setattr(remote_mod, "_remote_client", None)
-    monkeypatch.setattr(mcps_mod, "_sessions", {})
-    monkeypatch.setattr(mcps_mod, "_session_locks", {})
+    local_mcp_clients(monkeypatch)
     monkeypatch.setattr(mcps_mod, "_read_cache", lambda _s: None)  # pyright: ignore[reportUnknownArgumentType]
 
     with pytest.raises(mcps_mod.MCPServerNotFound, match="nope"):
@@ -384,9 +383,7 @@ def test_list_tools_raises_when_command_field_invalid(
     """Config missing the command field → MCPError immediately (fail-fast)."""
     fake_config.write_text(json.dumps({"mcpServers": {"bad": {}}}), encoding="utf-8")
     monkeypatch.setattr(remote_mod, "_daemon_socket_path", lambda: None)
-    monkeypatch.setattr(remote_mod, "_remote_client", None)
-    monkeypatch.setattr(mcps_mod, "_sessions", {})
-    monkeypatch.setattr(mcps_mod, "_session_locks", {})
+    local_mcp_clients(monkeypatch)
     monkeypatch.setattr(mcps_mod, "_read_cache", lambda _s: None)  # pyright: ignore[reportUnknownArgumentType]
 
     with pytest.raises(mcps_mod.MCPError, match="command"):
@@ -398,9 +395,7 @@ def test_list_tools_raises_when_command_not_str(
 ) -> None:
     fake_config.write_text(json.dumps({"mcpServers": {"bad": {"command": 123}}}), encoding="utf-8")
     monkeypatch.setattr(remote_mod, "_daemon_socket_path", lambda: None)
-    monkeypatch.setattr(remote_mod, "_remote_client", None)
-    monkeypatch.setattr(mcps_mod, "_sessions", {})
-    monkeypatch.setattr(mcps_mod, "_session_locks", {})
+    local_mcp_clients(monkeypatch)
     monkeypatch.setattr(mcps_mod, "_read_cache", lambda _s: None)  # pyright: ignore[reportUnknownArgumentType]
 
     with pytest.raises(mcps_mod.MCPError, match="command"):
@@ -416,9 +411,7 @@ def test_list_tools_uses_url_for_remote_server(
         encoding="utf-8",
     )
     monkeypatch.setattr(remote_mod, "_daemon_socket_path", lambda: None)
-    monkeypatch.setattr(remote_mod, "_remote_client", None)
-    monkeypatch.setattr(mcps_mod, "_sessions", {})
-    monkeypatch.setattr(mcps_mod, "_session_locks", {})
+    mcp = local_mcp_clients(monkeypatch)
     monkeypatch.setattr(mcps_mod, "_read_cache", lambda _s: None)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(mcps_mod, "_write_cache", lambda _s, _t: None)  # pyright: ignore[reportUnknownArgumentType]
 
@@ -430,14 +423,13 @@ def test_list_tools_uses_url_for_remote_server(
     stack = MagicMock()
     connect_http = AsyncMock(return_value=(session, stack))
     monkeypatch.setattr(mcps_mod, "_connect_http", connect_http)
-    monkeypatch.setattr(mcps_mod, "_session_stacks", {})
 
     tools = mcps_mod._list_tools("remote")
 
     connect_http.assert_awaited_once_with("https://mcp.example.com/mcp", None, server="remote")
     # The session is cached with the stack that owns its transport, so a dead one is closed on rebuild.
-    assert mcps_mod._sessions["remote"] is session
-    assert mcps_mod._session_stacks["remote"] is stack
+    assert mcp.sessions["remote"] is session
+    assert mcp.session_stacks["remote"] is stack
     assert tools == [{"name": "scrape", "description": "d", "input_schema": {"type": "object"}}]
 
 
@@ -505,9 +497,7 @@ def test_connect_stdio_sets_request_timeout_on_client_session(
         encoding="utf-8",
     )
     monkeypatch.setattr(remote_mod, "_daemon_socket_path", lambda: None)
-    monkeypatch.setattr(remote_mod, "_remote_client", None)
-    monkeypatch.setattr(mcps_mod, "_sessions", {})
-    monkeypatch.setattr(mcps_mod, "_session_locks", {})
+    mcp = local_mcp_clients(monkeypatch)
 
     read, write = object(), object()
     streams = MagicMock()
@@ -522,7 +512,7 @@ def test_connect_stdio_sets_request_timeout_on_client_session(
     client_session_cls = MagicMock(return_value=session_cm)
     monkeypatch.setattr("mcp.ClientSession", client_session_cls)
 
-    got = mcps_mod._run_async(mcps_mod._connect("fs"))
+    got = mcps_mod._run_async(mcps_mod._connect(mcp, "fs"))
 
     assert got is session
     session.initialize.assert_awaited_once()

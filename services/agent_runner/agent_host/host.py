@@ -80,7 +80,9 @@ from agent.turn.runloop import (
     settle_turn_failure,
 )
 from agent.turn.trace_checkpoint import attach_trace_checkpoint_ref
+from ava.sdk_surface import process_context
 from base.agents.context import AvaContext
+from base.agents.context.clients import ClientSet
 from base.agents.context.identity import AgentIdentity
 from base.agents.history.delta_read_compat import recovery_reconstruction_scope
 from base.agents.observation.db_wait import DatabaseWaits
@@ -116,11 +118,11 @@ from services.agent_runner.agent_host.runtime import (
     HostStats,
     TurnOutcome,
     _AgentRuntime,
-    _StoredConfig,
     admit_stored_model,
 )
 from services.agent_runner.agent_host.settlement import close_hosted_turn
 from services.agent_runner.agent_host.stall_guard import run_invocation_with_stall_guard
+from services.agent_runner.agent_host.wake_screening import _is_runnable, _read_stored_config
 
 _HostGraph = CompiledStateGraph[BaseAgentState, AvaContext, BaseAgentState, BaseAgentState]
 
@@ -152,6 +154,9 @@ class AgentHost:
     ) -> None:
         self._bus = bus
         self._db = db
+        # The connections every turn's `AvaContext` shares (the SDK calls a graph node makes
+        # reach them through `ava.sdk_surface.process_context`, bound per turn below).
+        self._clients = ClientSet(database=lambda: db)
         self._extensions = extensions
         self._pool = pool
         self._control_pool = control_pool if control_pool is not None else pool
@@ -278,8 +283,8 @@ class AgentHost:
         # (2026-09-11: a resurrect wake for a terminated agent was cancelled
         # on its predecessor's 3.5h-old clock two seconds after it started).
         self.turn_progress.reset(agent_id)
-        stored = await self._read_stored_config(agent_id)
-        if stored is None or not self._is_runnable(agent_id, stored):
+        stored = await _read_stored_config(self._control_pool, agent_id)
+        if stored is None or not _is_runnable(self._machine, agent_id, stored):
             self.stats.wakes_skipped += 1
             return
         self.turn_fingerprints[agent_id] = stored.fingerprint
@@ -425,58 +430,6 @@ class AgentHost:
                 await settle_hosted_runtime(self._control_pool, incarnation, bus=self._bus)
             else:
                 self.drop_agent(agent_id)
-
-    # ── locality / runnability ───────────────────────────────────────────────
-
-    def _is_runnable(self, agent_id: int, stored: _StoredConfig) -> bool:
-        """Whether this host should hand `agent_id` a turn right now.
-
-        Two rejections, deliberately quiet rather than WARNING: a foreign
-        agent's wake is normal cross-talk (the dispatcher's pattern subscription
-        is cluster-wide, so every runner sees every wake), and a terminated
-        agent's wake is the delivery watchdog's resurrect path doing its job.
-        Neither is a fault of this host.
-        """
-        if stored.machine != self._machine:
-            logger.debug(
-                "hosted wake for agent {agent_id} belongs to machine {owner} — not ours",
-                agent_id=agent_id,
-                owner=stored.machine,
-            )
-            return False
-        if stored.status == "terminated":
-            logger.info(
-                "hosted wake for agent {agent_id} ignored — status {status} is not runnable",
-                agent_id=agent_id,
-                status=stored.status,
-            )
-            return False
-        return True
-
-    async def _read_stored_config(self, agent_id: int) -> _StoredConfig | None:
-        """This agent's machine, status and two config maps in one round trip.
-
-        None = the row is gone, which is a real anomaly (a wake was published for
-        an agent that does not exist) and says so, unlike the two ordinary
-        rejections above.
-        """
-        async with self._control_pool.connection() as conn:
-            row = await (
-                await conn.execute(
-                    "SELECT machine, status, config_overlay, birth_config "
-                    "FROM agents_meta WHERE id = %s",
-                    (agent_id,),
-                )
-            ).fetchone()
-        if row is None:
-            logger.warning(
-                "hosted wake for agent {agent_id} has no agents_meta row — ignoring",
-                agent_id=agent_id,
-            )
-            return None
-        return _StoredConfig(
-            machine=row[0], status=row[1], config_overlay=row[2], birth_config=row[3]
-        )
 
     # ── the per-agent runtime cache ──────────────────────────────────────────
 
@@ -628,10 +581,12 @@ class AgentHost:
             relays=self.relays,
             recall_log_key=self._recall_log_key,
             identity=AgentIdentity(agent_id=agent_id, owns_loop=True),
+            clients=self._clients,
             # The dispatcher owns subscriptions; an empty claim ends this task.
         )
         try:
-            return await self._invoke_until_done(agent_id, ctx)
+            with process_context.scoped(ctx):
+                return await self._invoke_until_done(agent_id, ctx)
         finally:
             await event_publisher.aclose()
 
@@ -763,6 +718,7 @@ class AgentHost:
         """Drop every cached runtime. The pool, checkpointer and graph belong to
         the daemon that built them and are closed there."""
         self._runtimes.clear()
+        await asyncio.to_thread(self._clients.close)
         try:
             async with asyncio.timeout(_RELEASE_OWNER_TIMEOUT_S):
                 await release_hosted_owner(

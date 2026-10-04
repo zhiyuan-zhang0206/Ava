@@ -110,7 +110,6 @@ def test_child_simple_code_done_envelope(tmp_path: Path) -> None:
     assert payload.kind == "done"
     assert payload.code_reached is True  # P0 #2100: the code really ran
     assert payload.state_update is None
-    assert payload.attachments == []
     assert payload.sdk_calls == []  # ran, executed no SDK calls
 
 
@@ -400,12 +399,13 @@ def test_child_attach_registration_reaches_result_envelope(tmp_path: Path) -> No
         # attach is a media-capable-model feature (user ruling 2026-08-28):
         # the child's default test model is text-only and rejects the call.
         config_overlay={"llm_model": "claude-sonnet-5"},
+        state={"messages": [HumanMessage(content="attach it")], "halted": False},
     )
 
     assert proc.returncode == 0, proc.stderr
-    assert read_result(result).attachments == [
-        {"path": str(image.resolve()), "label": "render result"}
-    ]
+    delta = read_result(result).state_update
+    assert delta is not None
+    assert delta["attach"] == [{"path": str(image.resolve()), "label": "render result"}]
 
 
 def test_child_attach_rejected_for_text_only_model(tmp_path: Path) -> None:
@@ -569,7 +569,6 @@ def test_child_installs_signal_handlers_before_reading_request(
     monkeypatch.setattr(exec_child, "_run_code", fake_run_code)
     monkeypatch.setattr(protocol, "write_result", fake_write_result)
     monkeypatch.setattr("ava.ensure_plugins_loaded", fake_ensure_plugins_loaded)
-    monkeypatch.setattr("ava.attachment_transport.take_attachments", list)
 
     try:
         exec_child._run("request.json", "result.json", 0.0)
