@@ -22,11 +22,9 @@ Invariants (design concept v0.3):
 from __future__ import annotations
 
 import re
-from collections.abc import Mapping
 from dataclasses import dataclass
 from enum import StrEnum
 from functools import lru_cache
-from types import MappingProxyType
 
 
 class Idempotency(StrEnum):
@@ -445,25 +443,17 @@ def match_path(template: str, path: str) -> bool:
     return _template_regex(template).match(path) is not None
 
 
-# ── route index (audit gateway.md P2-14) ──────────────────────────────
+# ── route lookup (audit gateway.md P2-14) ─────────────────────────────
 #
-# contract_for / exempt_from_pause used to scan the full ROUTE_CONTRACTS
-# dict (~120 entries) with a compiled-regex match per entry, on every
-# request, twice (pause + idempotency middlewares). Most templates share
-# their second path segment with the concrete paths they match
-# (`/api/agents/{agent_id}` matches paths whose second segment is
-# ``agents``), so the index buckets templates by (method, second segment)
-# and only scans the matching bucket, plus a small wildcard list for
-# templates with a `{...:path}` segment in the first two slots (those can
-# match any path and must scan last). Built lazily on first use.
-
-
-@dataclass(frozen=True)
-class _RouteIndex:
-    """`ROUTE_CONTRACTS` bucketed by (method, second segment), plus the wildcard templates."""
-
-    buckets: Mapping[tuple[str, str], tuple[tuple[str, RouteContract], ...]]
-    wildcards: tuple[tuple[str, str, RouteContract], ...]
+# contract_for / exempt_from_pause run on every request, twice (pause +
+# idempotency middlewares), and a compiled-regex match per ROUTE_CONTRACTS
+# entry (~120) is the cost to avoid. Most templates share their second path
+# segment with the concrete paths they match (`/api/agents/{agent_id}`
+# matches paths whose second segment is ``agents``), so only the templates
+# of that segment are regex-matched, then the few wildcard templates (a
+# `{...:path}` segment in the first two slots, which can match any path)
+# last. The segment filter is a string split, cheap next to a regex match,
+# so nothing is indexed or cached.
 
 
 def _index_bucket_key(template: str) -> str | None:
@@ -476,43 +466,20 @@ def _index_bucket_key(template: str) -> str | None:
     return parts[1]
 
 
-@lru_cache(maxsize=1)
-def _route_index() -> _RouteIndex:
-    """The index of the static `ROUTE_CONTRACTS` table, built on first use (module
-    import must stay free of side effects — lint-enforced)."""
-    buckets: dict[tuple[str, str], list[tuple[str, RouteContract]]] = {}
-    wildcards: list[tuple[str, str, RouteContract]] = []
-    for (method, tpl), contract in ROUTE_CONTRACTS.items():
-        bucket = _index_bucket_key(tpl)
-        if bucket is None:
-            wildcards.append((method, tpl, contract))
-        else:
-            buckets.setdefault((method, bucket), []).append((tpl, contract))
-    return _RouteIndex(
-        MappingProxyType({key: tuple(entries) for key, entries in buckets.items()}),
-        tuple(wildcards),
-    )
-
-
 def _contract_candidates(method: str | None, path: str) -> list[tuple[str, RouteContract]]:
-    """The (template, contract) pairs that could match a concrete path:
-    the (method, second-segment) bucket first, then the wildcard templates
-    (which are few and match anything). `method` None = any method — every
-    bucket for the path's second segment is scanned (exempt_from_pause does
-    not filter by method)."""
-    index = _route_index()
-    candidates: list[tuple[str, RouteContract]] = []
+    """The (template, contract) pairs that could match ``path``: templates sharing its
+    second segment first, then the wildcard templates. `method` None = any method
+    (exempt_from_pause does not filter by method)."""
     bucket = _index_bucket_key(path)
+    keyed = [
+        (tpl, contract, _index_bucket_key(tpl))
+        for (m, tpl), contract in ROUTE_CONTRACTS.items()
+        if method is None or m == method
+    ]
+    candidates: list[tuple[str, RouteContract]] = []
     if bucket is not None:
-        if method is not None:
-            candidates.extend(index.buckets.get((method, bucket), ()))
-        else:
-            for (_m, seg), templates in index.buckets.items():
-                if seg == bucket:
-                    candidates.extend(templates)
-    for m, tpl, contract in index.wildcards:
-        if method is None or m == method:
-            candidates.append((tpl, contract))
+        candidates.extend((tpl, c) for tpl, c, key in keyed if key == bucket)
+    candidates.extend((tpl, c) for tpl, c, key in keyed if key is None)
     return candidates
 
 
