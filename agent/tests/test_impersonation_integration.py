@@ -28,6 +28,7 @@ from base.agents import impersonation as leases
 from base.agents.context import AvaContext
 from base.agents.history.delta_read_compat import wrap_saver_reads_with_delta_reconstruction
 from base.agents.messages.caller_identity import CallerIdentity
+from base.agents.observation.relay_supervision import RelaySupervision
 from base.cluster.machine import machine_name
 from base.db import Database, create_agent, insert_inbound_message
 from base.events.live.bus import EventBus
@@ -255,7 +256,7 @@ async def test_consent_exec_inbox_release_and_resume(
     # recorded controller tree is synthetic (its pids are not live processes),
     # so pin the supervisor's liveness view (task #3998).
 
-    def relay_ready(_db: object, _bus: object, _session: Any, _incarnation: Any) -> bool:
+    def relay_ready(*_args: object) -> bool:
         return True
 
     monkeypatch.setattr(impersonation, "establish_relay", relay_ready)
@@ -269,7 +270,7 @@ async def test_consent_exec_inbox_release_and_resume(
         )
         # Merely returning from exec/graph has NOT issued the external lease.
         await flush_checkpoint(saver, agent_id)
-        assert await settle_checkpoint(graph, database, event_bus, agent_id)
+        assert await settle_checkpoint(graph, database, event_bus, agent_id, ctx.relays)
         assert (
             leases.require_active(database, requested["id"], attested_caller(requested))["status"]
             == "active"
@@ -301,14 +302,14 @@ async def test_consent_exec_inbox_release_and_resume(
             expected_version=0,
         )
         _end_external_session(db_conn, database, event_bus, requested, finish)
-        assert not await settle_checkpoint(graph, database, event_bus, agent_id)
+        assert not await settle_checkpoint(graph, database, event_bus, agent_id, ctx.relays)
         resumed = await graph.ainvoke(reset, config, context=ctx)
         await flush_checkpoint(saver, agent_id)
         assert resumed["handoff__total"] == 7
         assert len(model_calls) == 2
         _assert_resumed_transcript(resumed, finish)
         # A second resume-boundary pass cannot double an additive reducer.
-        assert not await settle_checkpoint(graph, database, event_bus, agent_id)
+        assert not await settle_checkpoint(graph, database, event_bus, agent_id, ctx.relays)
         assert (await graph.aget_state(config)).values["handoff__total"] == 7
 
 
@@ -391,7 +392,7 @@ async def test_automatic_takeover_handoff_precedes_queued_input(
             == "accepted"
         )
         await flush_checkpoint(saver, owner.agent_id)
-        assert await settle_checkpoint(graph, database, event_bus, owner.agent_id)
+        assert await settle_checkpoint(graph, database, event_bus, owner.agent_id, ctx.relays)
         inbound_id = insert_inbound_message(
             db_conn,
             owner.agent_id,
@@ -409,14 +410,14 @@ async def test_automatic_takeover_handoff_precedes_queued_input(
         await graph.ainvoke(reset, config, context=ctx)
         assert not model_calls
         await flush_checkpoint(saver, owner.agent_id)
-        assert not await settle_checkpoint(graph, database, event_bus, owner.agent_id)
+        assert not await settle_checkpoint(graph, database, event_bus, owner.agent_id, ctx.relays)
         snapshot = await graph.aget_state(config)
         _assert_end_note_and_handoff_document(snapshot.values["messages"][-1], tmp_path)
         assert db_conn.execute(
             "SELECT status FROM inbound_messages WHERE id=%s", (later,)
         ).fetchone() == ("pending",)
         # Repeated settlement must not duplicate the first resumed input.
-        assert not await settle_checkpoint(graph, database, event_bus, owner.agent_id)
+        assert not await settle_checkpoint(graph, database, event_bus, owner.agent_id, ctx.relays)
         await graph.ainvoke(reset, config, context=ctx)
         assert len(model_calls) == 1
         _assert_handoff_precedes_queued_input(model_calls[0].messages)
@@ -429,7 +430,7 @@ async def test_accepted_session_repairs_missing_start_checkpoint(
     database: Database,
     event_bus: EventBus,
 ) -> None:
-    graph, saver, _ctx, config, _reset, owner, requested, calls = await _prepare_graph(
+    graph, saver, ctx, config, _reset, owner, requested, calls = await _prepare_graph(
         db_conn,
         aops_pool,
         monkeypatch,
@@ -446,7 +447,7 @@ async def test_accepted_session_repairs_missing_start_checkpoint(
         "Saved request, lost checkpoint",
     )
     with bind_turn_identity(owner.agent_id, incarnation=owner):
-        assert await settle_checkpoint(graph, database, event_bus, owner.agent_id)
+        assert await settle_checkpoint(graph, database, event_bus, owner.agent_id, ctx.relays)
     assert not calls
     durable = await saver.aget_tuple(config)
     assert durable is not None
@@ -484,7 +485,7 @@ async def test_handoff_checkpoint_failure_keeps_gate_and_retry_flushes_receipt(
     with bind_turn_identity(owner.agent_id, incarnation=owner):
         await graph.ainvoke(reset, config, context=ctx)
         await flush_checkpoint(saver, owner.agent_id)
-        assert await settle_checkpoint(graph, database, event_bus, owner.agent_id)
+        assert await settle_checkpoint(graph, database, event_bus, owner.agent_id, ctx.relays)
         leases.release(
             database,
             event_bus,
@@ -539,7 +540,7 @@ async def test_handoff_of_a_released_log_native_lease_is_already_complete(
     with bind_turn_identity(owner.agent_id, incarnation=owner):
         await graph.ainvoke(reset, config, context=ctx)
         await flush_checkpoint(saver, owner.agent_id)
-        assert await settle_checkpoint(graph, database, event_bus, owner.agent_id)
+        assert await settle_checkpoint(graph, database, event_bus, owner.agent_id, ctx.relays)
         leases.release(
             database,
             event_bus,
@@ -608,7 +609,7 @@ async def test_end_note_resumes_an_empty_queue(
         await graph.ainvoke(reset, config, context=ctx)
         assert not model_calls  # No native model acceptance turn.
         await flush_checkpoint(saver, owner.agent_id)
-        assert await settle_checkpoint(graph, database, event_bus, owner.agent_id)
+        assert await settle_checkpoint(graph, database, event_bus, owner.agent_id, ctx.relays)
         leases.release(
             database,
             event_bus,
@@ -616,7 +617,7 @@ async def test_end_note_resumes_an_empty_queue(
             attested_caller(requested),
             "External work complete",
         )
-        assert not await settle_checkpoint(graph, database, event_bus, owner.agent_id)
+        assert not await settle_checkpoint(graph, database, event_bus, owner.agent_id, ctx.relays)
         assert not model_calls
         assert wakes == [(owner.agent_id, "impersonation")]
 
@@ -638,15 +639,14 @@ async def _stop_takeover_with_lost_relay(
     database: Database,
     event_bus: EventBus,
     owner: RuntimeIncarnation,
+    relays: RelaySupervision,
 ) -> str:
     """A lost relay outside the fresh-start window stops the takeover; the death detail."""
     monkeypatch.setattr(impersonation, "_provider_anchor_states", Mock(return_value=["alive"]))
-    monkeypatch.setattr(
-        impersonation, "_PROCESS_STARTED_MONOTONIC", impersonation.time.monotonic() - 1000.0
-    )
+    relays.started_monotonic = impersonation.time.monotonic() - 1000.0
     session = leases.native_status(database, event_bus, owner.agent_id, owner)
     assert session is not None
-    await impersonation.supervise_relay(database, event_bus, session, owner.agent_id)
+    await impersonation.supervise_relay(database, event_bus, session, owner.agent_id, relays)
     return "the bound relay stopped heartbeating"
 
 
@@ -717,10 +717,12 @@ async def test_aborted_takeover_resumes_the_native_with_the_death_cause(
     with bind_turn_identity(owner.agent_id, incarnation=owner):
         await graph.ainvoke(reset, config, context=ctx)
         await flush_checkpoint(saver, owner.agent_id)
-        assert await settle_checkpoint(graph, database, event_bus, owner.agent_id)
+        assert await settle_checkpoint(graph, database, event_bus, owner.agent_id, ctx.relays)
         assert not model_calls
         if cause == "relay_death":
-            detail = await _stop_takeover_with_lost_relay(monkeypatch, database, event_bus, owner)
+            detail = await _stop_takeover_with_lost_relay(
+                monkeypatch, database, event_bus, owner, ctx.relays
+            )
         else:
             detail = _stop_takeover_with_exhausted_ack(db_conn, requested, owner)
         died = leases.get(database, event_bus, requested["id"], attested_caller(requested))
@@ -731,7 +733,7 @@ async def test_aborted_takeover_resumes_the_native_with_the_death_cause(
         await graph.ainvoke(reset, config, context=ctx)
         assert not model_calls
         await flush_checkpoint(saver, owner.agent_id)
-        assert not await settle_checkpoint(graph, database, event_bus, owner.agent_id)
+        assert not await settle_checkpoint(graph, database, event_bus, owner.agent_id, ctx.relays)
         assert wakes == [(owner.agent_id, "impersonation")]
         resumed = await graph.ainvoke(reset, config, context=ctx)
         await flush_checkpoint(saver, owner.agent_id)

@@ -67,7 +67,6 @@ from agent.hooks.compact import auto_compact_for_llm
 from agent.llm.usage import log_llm_usage
 from agent.nodes import AFTER_EXEC, BEFORE_EXEC
 from agent.state_channels import CircuitState
-from agent.turn.progress import mark_turn_progress
 from base.agents.context import AvaContext, agent_id_from_config
 from base.agents.messages.kwargs import read_ava_kwargs
 from base.config import settings
@@ -248,7 +247,7 @@ def _note_failed_attempt(
     exc: BaseException, attempt: Attempt, runtime: Runtime[AvaContext], agent_id: int
 ) -> None:
     """Mark the settled attempt as progress and record the retry budget left on `exc`."""
-    mark_turn_progress(agent_id)
+    runtime.context.turn_progress.mark(agent_id)
     if isinstance(exc, Exception) and not isinstance(exc, LLMStreamStallPairError):
         remaining_seconds = settings.lm.llm_retry_max_total_seconds - attempt.elapsed_seconds()
         if remaining_seconds <= 0.0 and not isinstance(exc, LLMRetryBudgetExceededError):
@@ -293,6 +292,7 @@ async def llm_attempt(
         ops_pool=runtime.context.ops_pool,
         event_publisher=event_publisher,
         agent_id=agent_id,
+        turn_progress=runtime.context.turn_progress,
     ):
         try:
             _enforce_retry_budget(attempt, agent_id, ledger)
@@ -459,7 +459,7 @@ async def _persist_last_active(ctx: AvaContext, agent_id: int, text: str) -> Non
     # A completed LLM step is turn progress regardless of the DB outcome
     # below — the hosted stall clock must not age just because the persist
     # write itself failed.
-    mark_turn_progress(agent_id)
+    ctx.turn_progress.mark(agent_id)
     if ctx.ops_pool is None:
         return
     try:
@@ -531,6 +531,7 @@ async def _llm_node_impl(
         ctx.event_publisher,
         agent_id,
         msg_idx=len(state.messages),
+        turn_progress=ctx.turn_progress,
     )
 
     # chunks is a list — cancel race path: streaming task and outer coroutine

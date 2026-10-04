@@ -23,6 +23,7 @@ from langchain_core.messages import SystemMessage
 
 from agent.graph import node_log
 from agent.graph.node_log import node_lifecycle
+from base.agents.observation.turn_progress import TurnProgress
 from base.config import settings
 
 
@@ -44,6 +45,7 @@ def _wrap(node: str, msg_count: int, pub=None):
         ops_pool=None,
         event_publisher=pub if pub is not None else MagicMock(),  # pyright: ignore[reportUnknownArgumentType]
         agent_id=1,
+        turn_progress=TurnProgress(),
     )
 
 
@@ -323,6 +325,7 @@ async def test_node_lifecycle_first_snapshot_carries_system_prompt_then_drops_it
         ops_pool=None,
         event_publisher=pub,
         agent_id=1,
+        turn_progress=TurnProgress(),
     ):
         pass
     # third enter with a new committed message — incremental path, must NOT
@@ -334,6 +337,7 @@ async def test_node_lifecycle_first_snapshot_carries_system_prompt_then_drops_it
         ops_pool=None,
         event_publisher=pub,
         agent_id=1,
+        turn_progress=TurnProgress(),
     ):
         pass
     payloads = [json.loads(c.args[0]) for c in pub.emit.call_args_list]
@@ -367,6 +371,7 @@ async def test_node_lifecycle_incremental_second_enter_emits_only_new_messages()
         ops_pool=None,
         event_publisher=pub,
         agent_id=1,
+        turn_progress=TurnProgress(),
     ):
         pass
     # second enter: same state + one more committed message
@@ -380,6 +385,7 @@ async def test_node_lifecycle_incremental_second_enter_emits_only_new_messages()
         ops_pool=None,
         event_publisher=pub,
         agent_id=1,
+        turn_progress=TurnProgress(),
     ):
         pass
     snaps = _snapshots_from(pub)
@@ -415,11 +421,25 @@ async def test_node_lifecycle_empty_full_window_skips_emit() -> None:
 
     pub = MagicMock()
     msgs = [SystemMessage(content="x"), AIMessage(content="a")]
-    async with node_lifecycle("llm", messages=msgs, ops_pool=None, event_publisher=pub, agent_id=1):
+    async with node_lifecycle(
+        "llm",
+        messages=msgs,
+        ops_pool=None,
+        event_publisher=pub,
+        agent_id=1,
+        turn_progress=TurnProgress(),
+    ):
         pass
     # compact: history wiped to zero — the next enter is the full-window path
     # (len(messages) < cursor) with an empty render.
-    async with node_lifecycle("llm", messages=[], ops_pool=None, event_publisher=pub, agent_id=1):
+    async with node_lifecycle(
+        "llm",
+        messages=[],
+        ops_pool=None,
+        event_publisher=pub,
+        agent_id=1,
+        turn_progress=TurnProgress(),
+    ):
         pass
     snaps = _snapshots_from(pub)
     assert (
@@ -435,6 +455,7 @@ async def test_node_lifecycle_empty_full_window_skips_emit() -> None:
         ops_pool=None,
         event_publisher=pub,
         agent_id=1,
+        turn_progress=TurnProgress(),
     ):
         pass
     snaps = _snapshots_from(pub)
@@ -448,6 +469,7 @@ async def test_node_lifecycle_empty_full_window_skips_emit() -> None:
         ops_pool=None,
         event_publisher=pub,
         agent_id=1,
+        turn_progress=TurnProgress(),
     ):
         pass
     snaps = _snapshots_from(pub)
@@ -493,6 +515,7 @@ async def test_node_lifecycle_full_window_skips_anchors_query_for_modern_message
         ops_pool=pool,
         event_publisher=pub,
         agent_id=7,
+        turn_progress=TurnProgress(),
     ):
         pass
     assert queried == [], f"anchors queried for an all-modern history: {queried}"
@@ -512,6 +535,7 @@ async def test_node_lifecycle_full_window_skips_anchors_query_for_modern_message
         ops_pool=pool,
         event_publisher=pub2,
         agent_id=8,
+        turn_progress=TurnProgress(),
     ):
         pass
     assert queried == [8]
@@ -525,13 +549,23 @@ async def test_node_lifecycle_cursor_reset_after_shrink_forces_full_window() -> 
     pub = MagicMock()
     msgs42 = [SystemMessage(content="x")] + [AIMessage(content=str(i)) for i in range(41)]
     async with node_lifecycle(
-        "llm", messages=msgs42, ops_pool=None, event_publisher=pub, agent_id=1
+        "llm",
+        messages=msgs42,
+        ops_pool=None,
+        event_publisher=pub,
+        agent_id=1,
+        turn_progress=TurnProgress(),
     ):
         pass
     # compact: history shrinks to 3
     msgs3 = [SystemMessage(content="x"), AIMessage(content="a"), AIMessage(content="b")]
     async with node_lifecycle(
-        "llm", messages=msgs3, ops_pool=None, event_publisher=pub, agent_id=1
+        "llm",
+        messages=msgs3,
+        ops_pool=None,
+        event_publisher=pub,
+        agent_id=1,
+        turn_progress=TurnProgress(),
     ):
         pass
     snaps = _snapshots_from(pub)
@@ -549,7 +583,14 @@ async def test_node_lifecycle_full_window_flag_forces_full_snapshot() -> None:
     from langchain_core.messages import AIMessage
 
     msgs = [SystemMessage(content="prompt"), AIMessage(content="first")]
-    async with node_lifecycle("llm", messages=msgs, ops_pool=None, event_publisher=pub, agent_id=1):
+    async with node_lifecycle(
+        "llm",
+        messages=msgs,
+        ops_pool=None,
+        event_publisher=pub,
+        agent_id=1,
+        turn_progress=TurnProgress(),
+    ):
         pass
     # same state, but forced full window (claim entering idle)
     async with node_lifecycle(
@@ -559,6 +600,7 @@ async def test_node_lifecycle_full_window_flag_forces_full_snapshot() -> None:
         event_publisher=pub,
         agent_id=1,
         full_window=True,
+        turn_progress=TurnProgress(),
     ):
         pass
     snaps = _snapshots_from(pub)
@@ -566,7 +608,14 @@ async def test_node_lifecycle_full_window_flag_forces_full_snapshot() -> None:
     # forced full-window re-renders the whole (short) history — 0.0 included
     assert [it["item_id"] for it in snaps[1]["items"]] == ["0.0", "1.0"]
     # cursor advanced: a third enter with the same state emits nothing
-    async with node_lifecycle("llm", messages=msgs, ops_pool=None, event_publisher=pub, agent_id=1):
+    async with node_lifecycle(
+        "llm",
+        messages=msgs,
+        ops_pool=None,
+        event_publisher=pub,
+        agent_id=1,
+        turn_progress=TurnProgress(),
+    ):
         pass
     assert len(_snapshots_from(pub)) == 2  # pyright: ignore[reportUnknownArgumentType]
 
@@ -592,12 +641,24 @@ async def test_node_lifecycle_render_failure_does_not_advance_cursor(
     monkeypatch.setattr(nl, "build_timeline_items", _boom)  # pyright: ignore[reportUnknownArgumentType]
     with pytest.raises(RuntimeError, match="simulated render failure"):
         async with node_lifecycle(
-            "llm", messages=msgs, ops_pool=None, event_publisher=pub, agent_id=1
+            "llm",
+            messages=msgs,
+            ops_pool=None,
+            event_publisher=pub,
+            agent_id=1,
+            turn_progress=TurnProgress(),
         ):
             pass
     # cursor must be untouched (still 0) → the next enter goes full-window again
     monkeypatch.setattr(nl, "build_timeline_items", real_build)
-    async with node_lifecycle("llm", messages=msgs, ops_pool=None, event_publisher=pub, agent_id=1):
+    async with node_lifecycle(
+        "llm",
+        messages=msgs,
+        ops_pool=None,
+        event_publisher=pub,
+        agent_id=1,
+        turn_progress=TurnProgress(),
+    ):
         pass
     snaps = _snapshots_from(pub)
     assert len(snaps) == 1  # pyright: ignore[reportUnknownArgumentType]

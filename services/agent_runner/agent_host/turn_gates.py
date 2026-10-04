@@ -8,17 +8,20 @@ from __future__ import annotations
 
 import asyncio
 
-from agent.turn.progress import admission_wait_age_s, turn_progress_snapshot
 from base.agents.observation.db_wait import DatabaseWaits
+from base.agents.observation.turn_progress import TurnProgress
+from services.agent_runner.agent_host.admission import TurnAdmission
 
 
-def database_waiting(database_waits: DatabaseWaits, agent_id: int) -> bool:
-    progress = turn_progress_snapshot(agent_id)
+def database_waiting(
+    database_waits: DatabaseWaits, turn_progress: TurnProgress, agent_id: int
+) -> bool:
+    progress = turn_progress.snapshot(agent_id)
     last = progress["last_marks"][-1] if progress is not None else None
     return database_waits.snapshot(agent_id, last_progress=last) is not None
 
 
-def admission_waiting(agent_id: int) -> bool:
+def admission_waiting(admission: TurnAdmission, agent_id: int) -> bool:
     """True while the agent's turn queues at the admission gate — not a stall.
 
     A queued turn shows no progress by design; cancelling it would only send its
@@ -26,7 +29,7 @@ def admission_waiting(agent_id: int) -> bool:
     punishing the oldest waiters. Wait length is observability (host stats +
     host_admission_wait_exceeded), never a cancellation trigger.
     """
-    return admission_wait_age_s(agent_id) is not None
+    return admission.is_waiting(agent_id)
 
 
 def raise_if_cancellation_pending() -> None:

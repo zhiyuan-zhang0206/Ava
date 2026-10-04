@@ -18,7 +18,6 @@ from psycopg_pool import AsyncConnectionPool
 
 from agent.ownership.hosted import settle_stale_running_rows
 from agent.state import AgentState
-from agent.turn import progress
 from base.agents.incarnation import resources as resource_codec
 from base.cluster.machine import machine_name
 from base.db import Database
@@ -30,7 +29,7 @@ from services.agent_runner.agent_host.dispatcher import InboundWakeDispatcher, T
 from services.agent_runner.agent_host.host import AgentHost
 from services.agent_runner.agent_host.tests.test_agent_host import _PendingScanPool
 from services.agent_runner.agent_host.tests.test_hosted_db_recovery import _admit, _graph
-from services.agent_runner.agent_host.tests.test_turn_dispatcher import _ScanScheduler, _stale_age
+from services.agent_runner.agent_host.tests.test_turn_dispatcher import _FixedClock, _ScanScheduler
 from tests.base.poll_until import poll_until_async
 
 
@@ -40,7 +39,6 @@ def _accept_model_config(**_kwargs: object) -> str:
 
 @pytest.fixture(autouse=True)
 def isolated_clocks(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(progress, "_PROGRESS", {})
     monkeypatch.setattr(dispatcher, "CANCEL_UNWIND_TIMEOUT_S", 0.03)
     monkeypatch.setattr(runtime_module, "validate_model_config", _accept_model_config)
     monkeypatch.setattr(
@@ -113,7 +111,7 @@ async def test_old_pending_does_not_cancel_current_graph_progress(
 
     async def work(_state: AgentState) -> dict[str, object]:
         invocations.append(agent)
-        progress.mark_turn_progress(agent)
+        host.turn_progress.mark(agent)
         entered.set()
         await release.wait()
         return {"turn_idle": True, "halted": True, "messages": [AIMessage(content="Completed")]}
@@ -132,6 +130,8 @@ async def test_old_pending_does_not_cancel_current_graph_progress(
         EventBus.from_settings(),
         scheduler,
         pending_scan=host.pending_inbound_wakes,
+        turn_progress=host.turn_progress,
+        turn_admission=host.admission,
         stale_after_s=60,
     )
     try:
@@ -142,7 +142,7 @@ async def test_old_pending_does_not_cancel_current_graph_progress(
         ]
         assert (await host.pending_inbound_wakes(60))[0].recovery is False
         if not known_progress:
-            progress._PROGRESS.pop(agent)
+            host.turn_progress._marks.pop(agent)
         await dispatcher.scan_once()
         assert agent in scheduler.active_agents
         assert invocations == [agent]
@@ -718,7 +718,6 @@ class TestHostedWakePacing:
     async def test_recovery_cap_does_not_skip_stale_cancellation(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        monkeypatch.setattr(dispatcher, "turn_progress_age_s", _stale_age)
         scheduler = _ScanScheduler({3})
 
         async def _pending(_stale_after_s: float) -> list[dispatcher.PendingInboundWake]:
@@ -734,6 +733,7 @@ class TestHostedWakePacing:
             pending_scan=_pending,
             stale_after_s=180.0,
             recovery_wake_batch=1,
+            turn_progress=_FixedClock(3600.0),
         )
         await disp.scan_once()
         assert scheduler.cancelled == [3]

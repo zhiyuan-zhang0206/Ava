@@ -37,6 +37,7 @@ durable for a subsequent scan after the configuration is corrected.
 from __future__ import annotations
 
 import asyncio
+import secrets
 import time
 from collections import OrderedDict
 from datetime import datetime
@@ -53,7 +54,6 @@ from agent.graph.node_log import flush_node_exit_aggregate
 from agent.hooks.compact import CompactionFailedError
 from agent.impersonation import (
     active_lease,
-    drop_relay_supervision,
     flush_checkpoint,
     native_status,
     settle_checkpoint,
@@ -73,7 +73,6 @@ from agent.startup import (
     repair_dangling_tool_use_at_startup,
 )
 from agent.state import BaseAgentState
-from agent.turn.progress import reset_turn_progress
 from agent.turn.runloop import (
     PendingTurnFailure,
     emit_error_event,
@@ -84,6 +83,8 @@ from agent.turn.trace_checkpoint import attach_trace_checkpoint_ref
 from base.agents.context import AvaContext
 from base.agents.history.delta_read_compat import recovery_reconstruction_scope
 from base.agents.observation.db_wait import DatabaseWaits
+from base.agents.observation.relay_supervision import RelaySupervision
+from base.agents.observation.turn_progress import TurnProgress
 from base.cluster.machine import machine_name
 from base.config import settings
 from base.config.agent_pins import resolve_agent_config_pins
@@ -171,6 +172,10 @@ class AgentHost:
         self._maintenance_failed: dict[int, tuple[str | None, datetime | None]] = {}
         # Each agent's latest turn's config fingerprint (scheduler crash report); cleared per turn.
         self.turn_fingerprints: dict[int, str] = {}
+        # What the graph and this host share across turns: handed to every turn's context.
+        self.turn_progress = TurnProgress()
+        self.relays = RelaySupervision()
+        self._recall_log_key = secrets.token_bytes(32)
         self.admission = TurnAdmission(settings.daemon.host_max_concurrent_turns)
         self.database_waits = DatabaseWaits()
         self.stats = HostStats()
@@ -271,7 +276,7 @@ class AgentHost:
         # bounded unwind in teardown and takes the whole host down with it
         # (2026-09-11: a resurrect wake for a terminated agent was cancelled
         # on its predecessor's 3.5h-old clock two seconds after it started).
-        reset_turn_progress(agent_id)
+        self.turn_progress.reset(agent_id)
         stored = await self._read_stored_config(agent_id)
         if stored is None or not self._is_runnable(agent_id, stored):
             self.stats.wakes_skipped += 1
@@ -402,7 +407,7 @@ class AgentHost:
             # held-wake error path (record_failure is a no-op outside a
             # maintenance hold) and the next wake re-drives.
             session = await native_status(self._db, self._bus, agent_id)
-            await supervise_relay(self._db, self._bus, session, agent_id)
+            await supervise_relay(self._db, self._bus, session, agent_id, self.relays)
             # An earlier ordinary failure can leave a buffered tail. Preserve
             # it before accepting maintenance intent, without replaying graph work.
             await flush_checkpoint(self._checkpointer, agent_id)
@@ -592,7 +597,7 @@ class AgentHost:
         fresh-process half of `ava.self.restart()`. The checkpointer thread, the
         real state, is untouched, exactly as a process restart leaves it."""
         self._runtimes.pop(agent_id, None)
-        drop_relay_supervision(agent_id)
+        self.relays.drop(agent_id)
 
     # ── the turn loop ────────────────────────────────────────────────────────
 
@@ -618,6 +623,9 @@ class AgentHost:
             bus=self._bus,
             agent=slices,
             extensions=self._extensions,
+            turn_progress=self.turn_progress,
+            relays=self.relays,
+            recall_log_key=self._recall_log_key,
             # The dispatcher owns subscriptions; an empty claim ends this task.
         )
         try:
@@ -644,7 +652,12 @@ class AgentHost:
             try:
                 async with database_phase():
                     await settle_checkpoint(
-                        self._graph, self._db, self._bus, agent_id, activate_accepted=False
+                        self._graph,
+                        self._db,
+                        self._bus,
+                        agent_id,
+                        self.relays,
+                        activate_accepted=False,
                     )
                 turn += 1
                 with turn_span(name=f"ava-agent-{agent_id}", session_id=str(agent_id), turn=turn):
@@ -716,7 +729,9 @@ class AgentHost:
                     return TurnOutcome(exited=kind == "terminate", crashed=False)
                 if result["turn_idle"]:
                     async with database_phase():
-                        await settle_checkpoint(self._graph, self._db, self._bus, agent_id)
+                        await settle_checkpoint(
+                            self._graph, self._db, self._bus, agent_id, self.relays
+                        )
                     return TurnOutcome(exited=False, crashed=False)
             except (psycopg.OperationalError, PoolTimeout):
                 incarnation = current_incarnation(agent_id)

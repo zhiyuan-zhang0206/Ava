@@ -19,7 +19,6 @@
     "services/agent_runner/page_server/tests/test_page_server_daemon.py": 855
   },
   "patch_targets": {
-    "services/agent_runner/agent_host/tests/test_hosted_backlog_recovery.py::agent.turn.progress._PROGRESS": 1,
     "services/agent_runner/agent_host/tests/test_hosted_force_quiescence.py::agent.graph.exec._process": 2,
     "services/agent_runner/agent_host/tests/test_hosted_force_quiescence.py::agent.graph.exec._subprocess": 1,
     "services/agent_runner/agent_host/tests/test_reconcile_after_abort.py::base.agents.history.inbound_sideload._committed_ids_from_all_settled_writes": 1

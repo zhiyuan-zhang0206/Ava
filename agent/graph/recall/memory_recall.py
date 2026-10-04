@@ -182,6 +182,7 @@ async def passive_memory_recall(
     messages: Collection[AnyMessage],
     *,
     agent: AgentSlices,
+    log_key: bytes,
     injected_paths: Collection[str] = frozenset(),
 ) -> PassiveRecall | None:
     """Search the memory pool on the recent conversation and render the fresh
@@ -191,7 +192,7 @@ async def passive_memory_recall(
     search failed (index unavailable, or the gateway answered with an error
     status), or every match is already in `injected_paths` (or not present on
     this machine yet). `injected_paths` and the returned `PassiveRecall.paths`
-    are memory-pool-relative.
+    are memory-pool-relative. `log_key` keys the query HMAC the filter logs (`AvaContext.recall_log_key`).
 
     Never raises on a failed search: the caller is a before_llm hook, so an
     exception here ends the agent process rather than the recall.
@@ -220,7 +221,7 @@ async def passive_memory_recall(
 
     search_ms = (time.monotonic() - search_started) * 1000
     filter_started = time.monotonic()
-    picked = await filter_candidates(query, candidates, agent.memory)
+    picked = await filter_candidates(query, candidates, agent.memory, log_key)
     # Leg timings keep the recall pass diagnosable from its events alone: the
     # search leg is the one a congested gateway stretches (a fleet wake queues
     # searches behind the search endpoint's semaphore), the filter leg is a

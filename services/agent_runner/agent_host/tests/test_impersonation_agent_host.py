@@ -9,6 +9,8 @@ from uuid import uuid4
 import pytest
 from langgraph.checkpoint.memory import MemorySaver
 
+from base.agents.observation.relay_supervision import RelaySupervision
+from base.agents.observation.turn_progress import TurnProgress
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 
 
@@ -43,6 +45,8 @@ async def test_held_host_wake_returns_before_runtime_or_slot(
     host = object.__new__(AgentHost)
     host._machine = "local"
     host._owner = uuid4()
+    host.turn_progress = TurnProgress()
+    host.relays = RelaySupervision()
     host._maintenance_failed = {}
     host.turn_fingerprints = {}
     host._control_pool = MagicMock()
@@ -83,6 +87,8 @@ async def test_held_host_refuses_unaccepted_control_batch(monkeypatch: pytest.Mo
     host = object.__new__(AgentHost)
     host._machine = "local"
     host._owner = uuid4()
+    host.turn_progress = TurnProgress()
+    host.relays = RelaySupervision()
     host._control_pool = MagicMock()
     host._db = MagicMock()
     host._bus = MagicMock()
@@ -117,6 +123,8 @@ async def test_held_controls_supervise_the_active_lease_relay(
     host = object.__new__(AgentHost)
     host._machine = "local"
     host._owner = uuid4()
+    host.turn_progress = TurnProgress()
+    host.relays = RelaySupervision()
     host._control_pool = MagicMock()
     host._db = MagicMock()
     host._bus = MagicMock()
@@ -137,7 +145,7 @@ async def test_held_controls_supervise_the_active_lease_relay(
     )
     monkeypatch.setattr("services.agent_runner.agent_host.host.settle_hosted_runtime", AsyncMock())
     await host._run_held_controls(42, "idling")
-    supervise.assert_awaited_once_with(host._db, host._bus, session, 42)
+    supervise.assert_awaited_once_with(host._db, host._bus, session, 42, host.relays)
 
 
 def _relay_session(

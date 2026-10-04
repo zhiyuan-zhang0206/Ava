@@ -59,11 +59,11 @@ from psycopg_pool import AsyncConnectionPool
 from pydantic import BaseModel
 
 from agent.ownership.hosted import settle_stale_running_rows
-from agent.turn.progress import turn_progress_age_s, turn_progress_snapshot
 from base import paths
 from base.agents.incarnation.exec_request_evidence import disposition_hint
 from base.agents.incarnation.hosted_force import recover_orphaned_hosted_forces
 from base.agents.observation.db_wait import DatabaseWaits
+from base.agents.observation.turn_progress import TurnProgress
 from base.cluster.machine import machine_name
 from base.config import settings
 from base.daemon.endpoints import ServiceEndpoint, ServiceEndpoints
@@ -177,6 +177,7 @@ async def _publish_turn_progress_heartbeat(
     machine: str,
     active_agents: Collection[int],
     database_waits: DatabaseWaits,
+    turn_progress: TurnProgress,
 ) -> bool:
     """Best-effort Redis snapshot for the gateway's out-of-process breaker.
 
@@ -185,7 +186,7 @@ async def _publish_turn_progress_heartbeat(
     """
     snapshots = {}
     for agent_id in sorted(active_agents):
-        snapshot = turn_progress_snapshot(agent_id)
+        snapshot = turn_progress.snapshot(agent_id)
         if snapshot is not None:
             waiting = database_waits.snapshot(agent_id, last_progress=snapshot["last_marks"][-1])
             snapshots[str(agent_id)] = {
@@ -265,7 +266,7 @@ async def _beat_forever(
             except Exception:
                 _log.exception("[agent-host] ownership renewal failed — retrying next beat")
         published = await _publish_turn_progress_heartbeat(
-            bus, machine, scheduler.active_agents, host.database_waits
+            bus, machine, scheduler.active_agents, host.database_waits, host.turn_progress
         )
         if published and not heartbeat_ok:
             _log.warning("[agent-host] turn-progress heartbeat publish recovered")
@@ -529,6 +530,8 @@ async def run() -> None:
                     scheduler,
                     pending_scan=host.pending_inbound_wakes,
                     database_waits=host.database_waits,
+                    turn_progress=host.turn_progress,
+                    turn_admission=host.admission,
                     stale_after_s=float(settings.daemon.wedged_agent_inbound_age_seconds),
                     recovery_wake_batch=settings.daemon.host_recovery_wake_batch,
                     recovery_wake_inflight=settings.daemon.host_recovery_wake_inflight,
@@ -616,7 +619,7 @@ def _stats_route(host: AgentHost, scheduler: TurnScheduler):  # noqa: ANN202 —
         # turn-level fake-alive state a heartbeat probe alone cannot see.
         active_progress: dict[int, float] = {}
         for agent_id in sorted(scheduler.active_agents):
-            age = turn_progress_age_s(agent_id)
+            age = host.turn_progress.age_s(agent_id)
             if age is not None:
                 active_progress[agent_id] = round(age, 1)
         payload = {

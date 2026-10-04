@@ -62,13 +62,13 @@ from langchain_core.messages import BaseMessage
 from psycopg_pool import AsyncConnectionPool
 
 from agent.db import list_chat_inbound_anchors
-from agent.turn.progress import mark_turn_progress
 from base.agents.history.timeline import (
     build_timeline_items,
     needs_chat_anchors,
     tail_window,
     timeline_default_limit,
 )
+from base.agents.observation.turn_progress import TurnProgress
 from base.config import settings
 from base.events.live.projection import TimelineSnapshot
 from base.events.live.publisher import AgentEventPublisher
@@ -236,6 +236,7 @@ async def node_lifecycle(
     ops_pool: AsyncConnectionPool | None,
     event_publisher: AgentEventPublisher,
     agent_id: int,
+    turn_progress: TurnProgress,
     full_window: bool = False,
 ) -> AsyncGenerator[None]:
     """Wrap node body with enter/exit events + publish a TimelineSnapshot on enter.
@@ -261,7 +262,7 @@ async def node_lifecycle(
     # A node enter is turn activity, full stop: the hosted stall guard and the
     # dispatcher's turn-level stale scan both read this clock, and a turn
     # blocked inside one node is exactly what they must be able to see.
-    mark_turn_progress(agent_id)
+    turn_progress.mark(agent_id)
     # The guard spans the pre-enter ops_pool query AND the node body (the
     # `yield`), so a hang in either lands a stack dump naming the blocked frame.
     with _stall_dump_guard(node_name):

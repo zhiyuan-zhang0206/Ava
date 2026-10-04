@@ -1,10 +1,6 @@
 {
   "ambient_state": {
     "agent/exec_domain_owner.py::thread:run": 1,
-    "agent/exec_owner_child.py::thread:main": 1,
-    "agent/impersonation.py::ambient-container:_anchor_obscured": 1,
-    "agent/impersonation.py::ambient-container:_relay_children": 1,
-    "agent/impersonation.py::import-time-read:_PROCESS_STARTED_MONOTONIC": 1,
-    "agent/impersonation.py::import-time-read:_PROCESS_STARTED_WALL": 1
+    "agent/exec_owner_child.py::thread:main": 1
   }
 }
