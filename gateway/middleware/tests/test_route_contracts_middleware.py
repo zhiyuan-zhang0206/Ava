@@ -16,7 +16,6 @@ _EXPECTED_CONTROL_PLANE = frozenset(
         ("POST", "/api/cluster/machines/{name}/pause"),
         ("POST", "/api/cluster/machines/{name}/resume"),
         ("POST", "/api/alerts"),
-        ("POST", "/api/work-failed"),
         ("GET", "/api/health"),
         ("GET", "/api/bootstrap"),
     }

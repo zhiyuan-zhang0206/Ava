@@ -14,7 +14,7 @@ The service that enforces every deadline the cluster hands out. It runs once per
 Two resident sequential loops under one `TaskGroup` (`services/ttl_reaper/daemon.py`), each running a round every `AVA_TTL_REAPER_POLL_INTERVAL_SECONDS` (default 60s). A loop that raises cancels its sibling and ends the process; the supervisor restarts it. An unreachable database skips a round. Each loop reports its own progress to `/healthz`.
 
 - **`sweep`** (`sweep.py`) — database only: expired `agent_pages` (terminalized with `expired_at`, `PageClosed` published), `web_sessions`, `agent_notices`, impersonation leases (reminded, then reaped), plus three slow phases claimed in `maintenance_state` (`cadence.py`): the `schedule_fire_log` retention prune (daily), the torn lifecycle-pointer scan and the absent-machine fence settle (hourly, `lifecycle_fences.py`).
-- **`remote`** (`remote.py`) — calls out: TTL-expired persistent shell sessions are killed on their home machines (`shells.py`; machines concurrently, one machine's rows in order, each dispatch under a deadline sized from the RPC client's budget), then stale `work_failed_events` deliveries are retried (`gateway.routers.work_failed.reconcile_stale_work_failures`, one deadline per event).
+- **`remote`** (`remote.py`) — calls out: TTL-expired persistent shell sessions are killed on their home machines (`shells.py`; machines concurrently, one machine's rows in order, each dispatch under a deadline sized from the RPC client's budget).
 
 ## Semantics that matter
 - A shell row is deleted only on a definitive verdict (`killed` / `absent` / `machine_absent`); an unreachable machine, a failed op or a dispatch past its deadline leaves it for the next round. Each kill re-checks the row is still expired against `clock_timestamp()`, which pairs with the renewal guard so a renewed session is never killed.
@@ -23,7 +23,7 @@ Two resident sequential loops under one `TaskGroup` (`services/ttl_reaper/daemon
 - Known gap, unchanged: a kill dispatched but cut off before its row is deleted loses the "interrupted" notice (the next round's kill answers `absent`, silent).
 
 ## Key Dependencies
-- `agent_shell_ttls`, `agent_pages`, `web_sessions`, `agent_notices`, `work_failed_events`, `maintenance_state` — the tables it reads and settles.
+- `agent_shell_ttls`, `agent_pages`, `web_sessions`, `agent_notices`, `maintenance_state` — the tables it reads and settles.
 - `ops.cluster_rpc` — the `shell_kill` op to runners' ops servers.
 - `base/daemon/round_loop.py` — the round runner and bounded fan-out the resident service loops share (also the delivery watchdog).
 
