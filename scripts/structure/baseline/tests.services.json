@@ -1,7 +1,4 @@
 {
-  "complexity": {
-    "tests/services/test_hosted_db_wait_liveness.py::test_real_db_wait_survives_both_stale_paths_and_clears_afterward": 16
-  },
   "patch_targets": {
     "tests/services/test_backup_scheduler_shutdown.py::services.backup._db_size_breakdown": 1,
     "tests/services/test_backup_scheduler_shutdown.py::services.backup._key_file": 1,

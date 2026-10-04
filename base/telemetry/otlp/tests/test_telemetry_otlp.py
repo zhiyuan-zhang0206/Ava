@@ -113,6 +113,33 @@ def _attrs_of(dp: Any) -> dict[str, Any]:
 # ── signal mapping ───────────────────────────────────────────────────────────
 
 
+def _assert_log_record_severity_and_correlation(r: Any) -> None:
+    assert r.log_record.severity_text == "warning"  # pyright: ignore[reportUnknownMemberType]
+    assert r.log_record.severity_number.value == 13  # pyright: ignore[reportUnknownMemberType]
+    assert r.log_record.trace_id == int("abcd" * 8, 16)  # pyright: ignore[reportUnknownMemberType]
+    assert r.log_record.span_id == int("ef01" * 4, 16)  # pyright: ignore[reportUnknownMemberType]
+
+
+def _assert_log_record_indexed_attributes(r: Any) -> None:
+    attrs = dict(r.log_record.attributes)  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
+    assert attrs["event_name"] == "exec"
+    assert attrs["category"] == "log"
+    assert attrs["level"] == "warning"
+    assert attrs["machine"] == "test-mac"
+    assert attrs["cluster"] == ".ava-test"
+    assert attrs["process"] == "test-proc"
+    assert attrs["source"] == "test"
+    assert attrs["agent_id"] == _AGENT
+
+
+def _assert_log_record_json_body(r: Any) -> None:
+    body = json.loads(r.log_record.body)  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
+    assert body["event_name"] == "exec"
+    assert body["cluster"] == ".ava-test"
+    assert body["attributes"] == {"body": "print(1)", "ok": False}
+    assert body["ts"] == "2026-08-11T12:00:00+00:00"
+
+
 def test_log_mapping_full_record_shape(otlp_backend) -> None:
     """One event -> one OTLP LogRecord: severity mapping, indexed attributes,
     JSON body in the mirror shape, and trace/span ids as the correlation
@@ -130,25 +157,10 @@ def test_log_mapping_full_record_shape(otlp_backend) -> None:
     records = log_exporter.get_finished_logs()  # pyright: ignore[reportUnknownMemberType]
     assert len(records) == 1  # pyright: ignore[reportUnknownArgumentType]
     r = records[0]
-    assert r.log_record.severity_text == "warning"  # pyright: ignore[reportUnknownMemberType]
-    assert r.log_record.severity_number.value == 13  # pyright: ignore[reportUnknownMemberType]
-    assert r.log_record.trace_id == int("abcd" * 8, 16)  # pyright: ignore[reportUnknownMemberType]
-    assert r.log_record.span_id == int("ef01" * 4, 16)  # pyright: ignore[reportUnknownMemberType]
-    attrs = dict(r.log_record.attributes)  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
-    assert attrs["event_name"] == "exec"
-    assert attrs["category"] == "log"
-    assert attrs["level"] == "warning"
-    assert attrs["machine"] == "test-mac"
-    assert attrs["cluster"] == ".ava-test"
-    assert attrs["process"] == "test-proc"
-    assert attrs["source"] == "test"
-    assert attrs["agent_id"] == _AGENT
-    body = json.loads(r.log_record.body)  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
+    _assert_log_record_severity_and_correlation(r)
+    _assert_log_record_indexed_attributes(r)
     _assert_canonical_log_body(r, event)
-    assert body["event_name"] == "exec"
-    assert body["cluster"] == ".ava-test"
-    assert body["attributes"] == {"body": "print(1)", "ok": False}
-    assert body["ts"] == "2026-08-11T12:00:00+00:00"
+    _assert_log_record_json_body(r)
 
 
 def _assert_canonical_log_body(record: Any, event: Event) -> None:
@@ -203,6 +215,40 @@ def test_flush_groups_each_event_name_under_its_matching_resource(otlp_backend) 
                 )
 
 
+def _assert_int_payload_maps_to_counter_without_body_label(metrics: dict[str, Any]) -> None:
+    counter = metrics["ava_llm_usage_in_total"]
+    assert counter.unit == "1"
+    assert len(counter.data.data_points) == 1
+    dp = counter.data.data_points[0]
+    assert dp.value == 100
+    a = _attrs_of(dp)
+    assert a["model"] == "claude-sonnet"
+    assert "ok" not in a  # not in the llm_usage payload declaration
+    assert a["agent_id"] == _AGENT
+    assert a["machine"] == "test-mac"
+    assert "body" not in a
+
+
+def _assert_float_payload_maps_to_histogram_with_unit(metrics: dict[str, Any]) -> None:
+    # Unit suffix comes off the instrument name — the OTel unit supplies it on
+    # export (latency_ms + "ms" would render ava_..._latency_ms_milliseconds_*).
+    hist = metrics["ava_llm_usage_latency"]
+    assert hist.unit == "ms"
+    assert hist.data.data_points[0].count == 1
+    assert hist.data.data_points[0].sum == 42.5
+    assert "ava_llm_usage_latency_ms" not in metrics
+
+
+def _assert_bool_payload_is_attribute_not_metric(metrics: dict[str, Any]) -> None:
+    # turn_end's declared bool payload key rides as an attribute, not a metric.
+    assert "ava_turn_end_ok" not in metrics
+    turn = _attrs_of(metrics["ava_turn_end_duration"].data.data_points[0])
+    assert metrics["ava_turn_end_duration"].unit == "s"
+    assert turn["ok"] is True
+
+    assert "ava_llm_usage_ok" not in metrics  # bools are attributes, not metrics
+
+
 def test_metric_mapping_int_counter_float_histogram(otlp_backend) -> None:
     """Telemetry numeric payloads map by type: int -> Counter, float ->
     Histogram, with process dimensions + guarded payload scalars as
@@ -231,33 +277,9 @@ def test_metric_mapping_int_counter_float_histogram(otlp_backend) -> None:
     backend.flush()  # pyright: ignore[reportUnknownMemberType]
     metrics = _metrics(metric_reader)
 
-    counter = metrics["ava_llm_usage_in_total"]
-    assert counter.unit == "1"
-    assert len(counter.data.data_points) == 1
-    dp = counter.data.data_points[0]
-    assert dp.value == 100
-    a = _attrs_of(dp)
-    assert a["model"] == "claude-sonnet"
-    assert "ok" not in a  # not in the llm_usage payload declaration
-    assert a["agent_id"] == _AGENT
-    assert a["machine"] == "test-mac"
-    assert "body" not in a
-
-    # Unit suffix comes off the instrument name — the OTel unit supplies it on
-    # export (latency_ms + "ms" would render ava_..._latency_ms_milliseconds_*).
-    hist = metrics["ava_llm_usage_latency"]
-    assert hist.unit == "ms"
-    assert hist.data.data_points[0].count == 1
-    assert hist.data.data_points[0].sum == 42.5
-    assert "ava_llm_usage_latency_ms" not in metrics
-
-    # turn_end's declared bool payload key rides as an attribute, not a metric.
-    assert "ava_turn_end_ok" not in metrics
-    turn = _attrs_of(metrics["ava_turn_end_duration"].data.data_points[0])
-    assert metrics["ava_turn_end_duration"].unit == "s"
-    assert turn["ok"] is True
-
-    assert "ava_llm_usage_ok" not in metrics  # bools are attributes, not metrics
+    _assert_int_payload_maps_to_counter_without_body_label(metrics)
+    _assert_float_payload_maps_to_histogram_with_unit(metrics)
+    _assert_bool_payload_is_attribute_not_metric(metrics)
 
 
 def test_compaction_completed_maps_size_samples_and_frequency_counter(otlp_backend) -> None:

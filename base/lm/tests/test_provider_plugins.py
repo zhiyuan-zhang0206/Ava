@@ -341,29 +341,21 @@ def test_repo_moonshot_provider_is_enabled_and_registers_complete_contract() -> 
     )
 
 
-def test_repo_xiaomi_provider_is_enabled_and_registers_complete_contract() -> None:
-    discovered = enable_config.discover_plugins()
-    config = enable_config.load_for_runtime(set(discovered))
-
-    assert config.plugins["lm_xiaomi"].enabled
-    ensure_provider_plugins_loaded()
-
+def _assert_mimo_models_registered_with_pricing_vendor() -> None:
     mimo_models = {
         "mimo-v2.5-pro",
         "mimo-v2.6-pro",
         "mimo-v2.6-pro-ultraspeed",
     }
     assert {model for model in MODELS if model.startswith("mimo-")} == mimo_models
-    assert set(SUPPORTED_MODELS["mimo"]) == {
-        "mimo-v2.5-pro",
-        "mimo-v2.6-pro",
-        "mimo-v2.6-pro-ultraspeed",
-    }
+    assert set(SUPPORTED_MODELS["mimo"]) == mimo_models
     assert MODELS["mimo-v2.5-pro"].superseded_by == "mimo-v2.6-pro"
     assert "mimo-v2.5-pro-ultraspeed" not in pricing._PLUGIN_PRICES
     assert pricing.model_vendor("mimo-v2.5-pro-ultraspeed") == "xiaomi"
     assert pricing.model_vendor("mimo-v2.5-pro") == "xiaomi"
 
+
+def _assert_mimo_provider_key_and_binding() -> None:
     from base.lm.factory import _MODEL_KEY_MAP, provider_key_map, provider_key_of_model
 
     assert _MODEL_KEY_MAP == {}
@@ -376,6 +368,17 @@ def test_repo_xiaomi_provider_is_enabled_and_registers_complete_contract() -> No
     assert not binding.anthropic_protocol
     assert not binding.vision
     assert binding.stop_spec is None
+
+
+def test_repo_xiaomi_provider_is_enabled_and_registers_complete_contract() -> None:
+    discovered = enable_config.discover_plugins()
+    config = enable_config.load_for_runtime(set(discovered))
+
+    assert config.plugins["lm_xiaomi"].enabled
+    ensure_provider_plugins_loaded()
+
+    _assert_mimo_models_registered_with_pricing_vendor()
+    _assert_mimo_provider_key_and_binding()
 
 
 def test_plugin_model_registers_and_builds(provider_plugin: Callable[..., None]) -> None:

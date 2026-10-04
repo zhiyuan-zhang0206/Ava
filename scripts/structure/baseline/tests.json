@@ -1,7 +1,4 @@
 {
-  "complexity": {
-    "tests/test_lint_marker_contract.py::test_system_note_writers_use_notetag_values": 15
-  },
   "patch_targets": {
     "tests/test_helperproc.py::base.sessions.backend._backend": 2,
     "tests/test_helperproc.py::base.sessions.helper_chain_guard._read_ppid": 5,

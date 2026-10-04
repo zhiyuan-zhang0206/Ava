@@ -977,6 +977,20 @@ def test_every_rule_is_silent_on_no_data_and_datasource_error() -> None:
         assert rule["execErrState"] == "OK", rule["uid"]
 
 
+def _assert_latency_query_scopes_to_route_class(expr: str, route_class: str) -> None:
+    assert 'event_name="gateway_latency"' in expr
+    assert f'| attributes_route_class="{route_class}"' in expr
+    assert "attributes_route !~" not in expr
+    assert "unwrap attributes_p95_ms" in expr
+    assert "max by (attributes_route)" in expr
+
+
+def _assert_reduce_keeps_route_label(rule: dict[str, Any]) -> None:
+    reduce_node = next(d for d in rule["data"] if d["model"].get("type") == "reduce")
+    assert reduce_node["model"].get("mode") == "byLabels"
+    assert "attributes_route" in reduce_node["model"].get("includeLabels", [])
+
+
 @pytest.mark.parametrize(
     ("uid", "route_class", "threshold", "metric"),
     [
@@ -1002,19 +1016,12 @@ def test_gateway_latency_rules_scope_to_route_class(
     """R17 and R19 keep fast/slow routes in separately calibrated tiers."""
     rules = {r["uid"]: r for r in _load_rules()}
     rule = rules[uid]
-    expr = _exprs(rule, "loki")[0]
-    assert 'event_name="gateway_latency"' in expr
-    assert f'| attributes_route_class="{route_class}"' in expr
-    assert "attributes_route !~" not in expr
-    assert "unwrap attributes_p95_ms" in expr
-    assert "max by (attributes_route)" in expr
+    _assert_latency_query_scopes_to_route_class(_exprs(rule, "loki")[0], route_class)
     assert rule["for"] == "5m"
     assert rule["labels"]["notify_im"] == "false"
     assert rule["labels"]["metric"] == metric
     assert _threshold_params(rule) == [[threshold]]
-    reduce_node = next(d for d in rule["data"] if d["model"].get("type") == "reduce")
-    assert reduce_node["model"].get("mode") == "byLabels"
-    assert "attributes_route" in reduce_node["model"].get("includeLabels", [])
+    _assert_reduce_keeps_route_label(rule)
 
 
 def test_turn_duration_rule_uses_prometheus_histogram() -> None:

@@ -1,7 +1,4 @@
 {
-  "complexity": {
-    "tests/integration/test_grafana_native_runtime.py::test_anonymous_viewer_can_open_tempo_trace_in_explore": 19
-  },
   "patch_targets": {
     "tests/integration/test_cluster_instance.py::cli.commands.data_plane.cluster_instance._HBA_PROOF_TIMEOUT_S": 1
   }

@@ -1,8 +1,4 @@
 {
-  "complexity": {
-    "tests/scripts/test_alert_rules.py::test_gateway_latency_rules_scope_to_route_class": 15,
-    "tests/scripts/test_ci_secret_scanning.py::test_ci_secret_and_dependency_audits_are_wired_to_one_policy": 24
-  },
   "files": {
     "tests/scripts/test_alert_rules.py": 1150
   },

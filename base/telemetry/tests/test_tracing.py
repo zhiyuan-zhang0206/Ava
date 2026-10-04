@@ -6,6 +6,7 @@ import os
 import threading
 from contextlib import contextmanager
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import httpx
@@ -681,17 +682,7 @@ def test_otlp_exporter_posts_protobuf(monkeypatch: pytest.MonkeyPatch, tmp_path:
     from opentelemetry.sdk.trace.export import SimpleSpanProcessor
 
     monkeypatch.setattr("base.config.settings.observability.trace_strip_content", True)
-    posts: list[tuple[str, bytes, dict]] = []
-
-    class _Resp:
-        def raise_for_status(self):
-            pass
-
-    def _post(url, *, content, headers, timeout):
-        posts.append((url, content, headers))  # pyright: ignore[reportUnknownMemberType]
-        return _Resp()
-
-    monkeypatch.setattr("httpx.post", _post)  # pyright: ignore[reportUnknownArgumentType]
+    posts = _capture_otlp_json_posts(monkeypatch)
 
     exporter = OtlpJsonHttpSpanExporter(endpoint="http://127.0.0.1:4318")
     provider = TracerProvider()
@@ -783,6 +774,54 @@ def test_otlp_exporter_circuit_drops_during_cooldown_then_recovers(
 # --- turn_span placeholder-root export timing (#1964) ------------------------------
 
 
+def _capture_otlp_json_posts(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, bytes, dict]]:
+    """Route `httpx.post` into a list so exported OTLP/JSON batches can be decoded."""
+    posts: list[tuple[str, bytes, dict]] = []
+
+    def _post(url, *, content, headers, timeout):
+        posts.append((url, content, headers))  # pyright: ignore[reportUnknownMemberType]
+        return SimpleNamespace(raise_for_status=lambda: None)
+
+    monkeypatch.setattr("httpx.post", _post)  # pyright: ignore[reportUnknownArgumentType]
+    return posts
+
+
+def _spans_received(posts: list[tuple[str, bytes, dict]]) -> list[Any]:
+    from opentelemetry.proto.collector.trace.v1.trace_service_pb2 import (
+        ExportTraceServiceRequest,
+    )
+
+    requests = [ExportTraceServiceRequest.FromString(raw) for _url, raw, _h in posts]
+    return [
+        span
+        for req in requests
+        for rs in req.resource_spans
+        for ss in rs.scope_spans
+        for span in ss.spans
+    ]
+
+
+def _assert_turn_root_exported_at_start(spans: list[Any]) -> Any:
+    assert len(spans) == 1, f"root must export at turn start, got {len(spans)}"
+    root = spans[0]
+    assert root.name == "ava-agent-7"
+    attrs = {kv.key: kv.value.string_value or kv.value.int_value for kv in root.attributes}
+    assert attrs["session.id"] == "7"
+    assert attrs["ava.turn"] == 3
+    assert root.end_time_unix_nano > 0, "placeholder root must be ended when exported"
+    return root
+
+
+def _assert_root_once_with_child_parented_under_it(spans: list[Any], root: Any) -> None:
+    roots = [s for s in spans if not s.parent_span_id]
+    assert len(roots) == 1, f"root must be exported exactly once, got {len(roots)}"
+    assert roots[0].span_id == root.span_id
+    children = [s for s in spans if s.parent_span_id]
+    assert len(children) == 1
+    assert children[0].parent_span_id == root.span_id
+    assert children[0].trace_id == root.trace_id
+
+
 def test_turn_span_exports_root_at_start_not_at_end(monkeypatch: pytest.MonkeyPatch):
     """The turn root is a PLACEHOLDER: ended (and exported) at turn START, so a
     trace always has its root even when the process dies mid-turn.
@@ -803,68 +842,24 @@ def test_turn_span_exports_root_at_start_not_at_end(monkeypatch: pytest.MonkeyPa
 
     monkeypatch.setattr("base.config.settings.observability.trace_enabled", True)
     tracing_mod._state["initialized"] = True
-
-    posts: list[tuple[str, bytes, dict]] = []
-
-    class _Resp:
-        def raise_for_status(self):
-            pass
-
-    def _post(url, *, content, headers, timeout):
-        posts.append((url, content, headers))  # pyright: ignore[reportUnknownMemberType]
-        return _Resp()
-
-    monkeypatch.setattr("httpx.post", _post)  # pyright: ignore[reportUnknownArgumentType]
+    posts = _capture_otlp_json_posts(monkeypatch)
     exporter = OtlpJsonHttpSpanExporter(endpoint="http://127.0.0.1:4318")
     provider = TracerProvider()
     provider.add_span_processor(SimpleSpanProcessor(exporter))
     previous = otel_trace.get_tracer_provider()
     otel_trace.set_tracer_provider(provider)
     try:
-        from opentelemetry.proto.trace.v1.trace_pb2 import Span as OtlpSpan
-
-        def _received_spans() -> list[OtlpSpan]:
-            out: list[OtlpSpan] = []
-            for _url, raw, _h in posts:
-                from opentelemetry.proto.collector.trace.v1.trace_service_pb2 import (
-                    ExportTraceServiceRequest,
-                )
-
-                req = ExportTraceServiceRequest()
-                req.ParseFromString(raw)
-                for rs in req.resource_spans:
-                    for ss in rs.scope_spans:
-                        out.extend(ss.spans)
-            return out
-
         with turn_span(name="ava-agent-7", session_id="7", turn=3):
             # Assertion 1: the root is exported BEFORE the turn ends.
-            spans = _received_spans()
-            assert len(spans) == 1, f"root must export at turn start, got {len(spans)}"
-            root = spans[0]
-            assert root.name == "ava-agent-7"
-            attrs = {kv.key: kv.value.string_value or kv.value.int_value for kv in root.attributes}
-            assert attrs["session.id"] == "7"
-            assert attrs["ava.turn"] == 3
-            assert root.end_time_unix_nano > 0, "placeholder root must be ended when exported"
-            root_id = root.span_id
-            root_trace = root.trace_id
+            root = _assert_turn_root_exported_at_start(_spans_received(posts))
 
             # A child created inside the turn must parent under the ended root.
-            tracer = otel_trace.get_tracer("ava.session")
-            with tracer.start_as_current_span("child"):
+            with otel_trace.get_tracer("ava.session").start_as_current_span("child"):
                 pass
 
         # Assertion 2: exiting the turn does not re-export the root (and the
         # child arrived, parented under the root).
-        spans = _received_spans()
-        roots = [s for s in spans if not s.parent_span_id]
-        assert len(roots) == 1, f"root must be exported exactly once, got {len(roots)}"
-        assert roots[0].span_id == root_id
-        children = [s for s in spans if s.parent_span_id]
-        assert len(children) == 1
-        assert children[0].parent_span_id == root_id
-        assert children[0].trace_id == root_trace
+        _assert_root_once_with_child_parented_under_it(_spans_received(posts), root)
     finally:
         otel_trace.set_tracer_provider(previous)
 
@@ -1530,8 +1525,6 @@ def test_disk_watermark_exceeded(monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     from base.telemetry.tracing import _disk_watermark_exceeded
 
     monkeypatch.setattr("base.telemetry.trace_mirror.traces_dir", lambda: tmp_path)
-    from types import SimpleNamespace
-
     monkeypatch.setattr(
         "base.telemetry.trace_mirror.shutil.disk_usage",
         lambda _p: SimpleNamespace(used=50 * 4096, total=1000 * 4096, free=950 * 4096),  # pyright: ignore[reportUnknownArgumentType]

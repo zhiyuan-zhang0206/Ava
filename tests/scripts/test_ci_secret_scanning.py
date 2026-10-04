@@ -20,8 +20,7 @@ def _load_yaml(path: Path) -> dict[object, Any]:
     return cast("dict[object, Any]", document)
 
 
-def test_ci_secret_and_dependency_audits_are_wired_to_one_policy() -> None:
-    workflow = _load_yaml(_WORKFLOW)
+def _assert_secret_scan_job_runs_gitleaks(workflow: dict[object, Any]) -> None:
     secret_scan = workflow["jobs"]["secret-scan"]
     assert secret_scan.get("continue-on-error") is not True
     secret_steps = secret_scan["steps"]
@@ -29,6 +28,8 @@ def test_ci_secret_and_dependency_audits_are_wired_to_one_policy() -> None:
     assert "github.com/zricethezav/gitleaks/v8@v8.30.1" in secret_steps[1]["run"]
     assert "gitleaks detect --source . --config .gitleaks.toml --redact" in secret_steps[2]["run"]
 
+
+def _assert_dependency_audit_job_runs_both_audits(workflow: dict[object, Any]) -> None:
     dependency_audit = workflow["jobs"]["dependency-audit"]
     assert dependency_audit.get("continue-on-error") is not True
     audit_steps = dependency_audit["steps"]
@@ -38,12 +39,16 @@ def test_ci_secret_and_dependency_audits_are_wired_to_one_policy() -> None:
     assert audit_steps[4]["run"] == "npm audit"
     assert audit_steps[4]["continue-on-error"] is True
 
+
+def _assert_pre_commit_uses_the_gitleaks_policy() -> None:
     pre_commit = _load_yaml(_PRE_COMMIT)
     hooks = [hook for repo in pre_commit["repos"] for hook in repo["hooks"]]
     assert "detect-private-key" not in {hook["id"] for hook in hooks}
     gitleaks_hook = next(hook for hook in hooks if hook["id"] == "gitleaks")
     assert gitleaks_hook["args"] == ["--config=.gitleaks.toml"]
 
+
+def _assert_gitleaks_policy_allowlists() -> None:
     with _POLICY.open("rb") as policy_file:
         policy = tomllib.load(policy_file)
     assert policy["extend"]["useDefault"] is True
@@ -71,5 +76,13 @@ def test_ci_secret_and_dependency_audits_are_wired_to_one_policy() -> None:
         "regexTarget": "match",
         "regexes": [r"STORAGE_KEY = 'weekly-planner\.v1'"],
     }
+
+
+def test_ci_secret_and_dependency_audits_are_wired_to_one_policy() -> None:
+    workflow = _load_yaml(_WORKFLOW)
+    _assert_secret_scan_job_runs_gitleaks(workflow)
+    _assert_dependency_audit_job_runs_both_audits(workflow)
+    _assert_pre_commit_uses_the_gitleaks_policy()
+    _assert_gitleaks_policy_allowlists()
 
     assert not (_REPO_ROOT / ".gitguardian.yml").exists()
