@@ -45,10 +45,12 @@ Both read the home's layout and listener probes from `base.cluster`
 reorganization cannot silently turn them UNAVAILABLE.
 
 Status includes expected diagnostics before any sample, with null sample time and
-verdict. Each subsequent sample includes its verdict, detail, and observed failure
-count. Unknown results do not accumulate browser failure counts. Episode reports
-are transition-gated; alert reporters run only on fresh, non-unavailable evidence
-through the same bounded worker slot. An alert backend that hangs cannot create
+verdict. Each subsequent sample includes its verdict, detail, and the consecutive
+non-alive count: failures and unknown results both extend the streak, and only a
+healthy sample resets it. Episode reports are transition-gated behind each
+diagnostic's failure threshold, so a below-threshold streak stays out of the log;
+alert reporters run only on fresh, non-unavailable evidence through the same
+bounded worker slot. An alert backend that hangs cannot create
 concurrent reports or diagnostic workers.
 
 Readiness of native LGTM services belongs to their actual root service specs.

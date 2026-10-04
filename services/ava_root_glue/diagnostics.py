@@ -39,6 +39,8 @@ class Diagnostic:
 
 @dataclass(slots=True)
 class _State:
+    """One diagnostic's sampling state; ``failures`` counts consecutive non-alive rounds."""
+
     runner: ProbeRunner
     next_due: float = 0.0
     sampled_at: float | None = None
@@ -67,7 +69,7 @@ class DiagnosticMonitor:
         result = await state.runner.observe(check.probe, check.timeout_s)
         state.result = result
         state.sampled_at = time.time()
-        state.failures = state.failures + 1 if result.verdict == ProbeVerdict.DOWN else 0
+        state.failures = state.failures + 1 if not result.alive else 0
         self._report_transition(check, state, result)
         if check.report is not None and result.verdict != ProbeVerdict.UNAVAILABLE:
             # The result is fresh. Reporting is bounded through the SAME runner,
@@ -84,7 +86,10 @@ class DiagnosticMonitor:
 
     @staticmethod
     def _report_transition(check: Diagnostic, state: _State, result: DaemonProbe) -> None:
-        if result.verdict == ProbeVerdict.DOWN and state.failures < check.failure_threshold:
+        # An unknown round is not damage evidence, but it extends the streak:
+        # the episode log waits for the streak to reach the threshold, so one
+        # deadline miss cannot open it, and only a healthy round re-arms.
+        if not result.alive and state.failures < check.failure_threshold:
             return
         key = result.verdict.value
         if key == state.reported:

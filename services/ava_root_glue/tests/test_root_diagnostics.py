@@ -124,7 +124,7 @@ async def test_slow_diagnostic_cannot_block_peer_or_duplicate_itself(
         release.set()
 
 
-async def test_unknown_never_resolves_station_alert_or_counts_failed_canaries(
+async def test_unknown_never_resolves_station_alert_but_counts_the_streak(
     events: list[dict[str, object]],
 ) -> None:
     current = DaemonProbe.down("canary failed")
@@ -141,14 +141,42 @@ async def test_unknown_never_resolves_station_alert_or_counts_failed_canaries(
         ]
     )
     await monitor.run_round()
-    assert not events
+    assert not events  # the first failing round is below the threshold
     current = DaemonProbe.unavailable("no host baseline")
     await asyncio.sleep(0.002)
     await monitor.run_round()
     assert len(reported) == 1  # unknown did not fire or recover the external alert
     state = _entry(monitor.health_snapshot(), "diagnostic:canary")
-    assert state["consecutive_failures"] == 0
+    assert state["consecutive_failures"] == 2  # the unknown extended the failure streak
     assert state["last_verdict"] == "unavailable"
+    assert [record["consecutive_failures"] for record in events] == [2]
+    await asyncio.sleep(0.002)
+    await monitor.run_round()  # a repeated unknown stays in the same episode
+    assert [record["consecutive_failures"] for record in events] == [2]
+    assert _entry(monitor.health_snapshot(), "diagnostic:canary")["consecutive_failures"] == 3
+
+
+async def test_healthy_round_re_arms_the_streak_behind_an_unknown(
+    events: list[dict[str, object]],
+) -> None:
+    current = DaemonProbe.unavailable("host stalled")
+    monitor = DiagnosticMonitor(
+        [Diagnostic("canary", lambda: current, interval_s=0.001, failure_threshold=2)]
+    )
+    await monitor.run_round()
+    assert not events  # one unknown round is below the threshold
+    await asyncio.sleep(0.002)
+    await monitor.run_round()
+    assert [record["consecutive_failures"] for record in events] == [2]
+    current = DaemonProbe.up("healthy again")
+    await asyncio.sleep(0.002)
+    await monitor.run_round()
+    current = DaemonProbe.unavailable("host stalled")
+    await asyncio.sleep(0.002)
+    await monitor.run_round()
+    # the healthy sample reset the streak, so the next single unknown stays silent
+    assert [record["consecutive_failures"] for record in events] == [2, 0]
+    assert _entry(monitor.health_snapshot(), "diagnostic:canary")["consecutive_failures"] == 1
 
 
 class _NoRevival:
@@ -237,6 +265,7 @@ def test_helper_diagnostics_are_macos_only(monkeypatch: pytest.MonkeyPatch) -> N
         "settings",
         SimpleNamespace(
             services=SimpleNamespace(
+                brew_pin_probe_failure_threshold=2,
                 permissions_helper_enabled=False,
                 venv_probe_failure_threshold=2,
             )
@@ -258,6 +287,26 @@ def test_venv_diagnostic_uses_the_configured_failure_threshold(
     )
     check = next(c for c in probes.build_diagnostics(set()) if c.name == "venv")
     assert check.failure_threshold == 5
+
+
+def test_brew_pin_diagnostic_uses_the_configured_failure_threshold(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(probes, "IS_MACOS", True)
+    monkeypatch.setattr("base.cluster.machine.is_gateway", lambda: False)
+    monkeypatch.setattr(
+        probes,
+        "settings",
+        SimpleNamespace(
+            services=SimpleNamespace(
+                brew_pin_probe_failure_threshold=3,
+                permissions_helper_enabled=False,
+                venv_probe_failure_threshold=2,
+            )
+        ),
+    )
+    check = next(c for c in probes.build_diagnostics(set()) if c.name == "brew-pin")
+    assert check.failure_threshold == 3
 
 
 def test_station_no_credential_is_unknown_and_does_not_send(

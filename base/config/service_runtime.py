@@ -111,6 +111,20 @@ class _ServiceRuntimeSettings(EnvSettings):
         },
     )
 
+    brew_pin_probe_failure_threshold: int = Field(
+        default=2,
+        alias="AVA_BREW_PIN_PROBE_FAILURE_THRESHOLD",
+        description="Consecutive failing brew-pin diagnostic probes before the single WARNING (single-round host-stall suppression: a deadline miss or an unavailable inspection both count); the episode then stays quiet until a healthy probe re-arms it. 2 probes at the 60s default interval bound detection at ~2 min.",
+        json_schema_extra={
+            "capability": "agent-runner",
+            "restart_required": "",
+            "writable": False,
+            "sensitive": False,
+            "scope": "host",
+            "remote_writable": True,
+        },
+    )
+
     permissions_helper_enabled: bool = Field(
         default=True,
         alias="AVA_PERMISSIONS_HELPER_ENABLED",
