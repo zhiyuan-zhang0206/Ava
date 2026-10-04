@@ -11,6 +11,9 @@ The mirror rule: stdlib logging formats with `%`, so a loguru-style `{}` message
 with positional arguments raises `TypeError` while the record is formatted. The
 two loggers are told apart by where each name comes from, never by the file, so
 the mixed-module cases below are the ones that matter.
+
+Rule 3: loguru has no `exc_info` parameter — the kwarg is flagged on loguru log
+calls (the traceback would be lost) and left alone on stdlib ones (task #4979).
 """
 
 from __future__ import annotations
@@ -290,3 +293,51 @@ def test_a_stdlib_violation_fails_the_cli_and_names_both_formatters(
     captured = capsys.readouterr()
     assert f"{bad}:3:" in captured.out
     assert "`{}`" in captured.err and "`%s`" in captured.err
+
+
+# ── Rule 3: loguru has no `exc_info` ──────────────────────────────────────────
+
+
+@pytest.mark.parametrize(
+    "src",
+    [
+        'from base.log import logger\nlogger.warning("gate raised", exc_info=True)\n',
+        'from base.log import logger\nexc = RuntimeError("x")\nlogger.error("failed", exc_info=exc)\n',
+        'from base.log import logger\nlogger.exception("failed", exc_info=True)\n',
+        'from base.log import logger\nlogger.opt(depth=1).warning("failed", exc_info=True)\n',
+        'from base.log import logger\nlog = logger.bind(c=1)\nlog.debug("failed", exc_info=True)\n',
+        'import loguru\nloguru.logger.critical("failed", exc_info=True)\n',
+        'from base.log import logger\nlogger.log("INFO", "failed", exc_info=True)\n',
+    ],
+)
+def test_exc_info_on_a_loguru_call_is_flagged(src: str) -> None:
+    violations = _lint.violations_in_source(src)
+    assert len(violations) == 1
+    assert "exc_info" in violations[0][1]
+    assert "opt(exception=True)" in violations[0][1]
+
+
+@pytest.mark.parametrize(
+    "src",
+    [
+        # stdlib logging accepts exc_info — the same kwarg is correct there.
+        'import logging\n_log = logging.getLogger("svc")\n_log.warning("failed", exc_info=True)\n',
+        # loguru's own forms carry the exception; calls without the kwarg are clean.
+        'from base.log import logger\nlogger.opt(exception=True).warning("failed")\n',
+        'from base.log import logger\nlogger.opt(exception=exc).warning("failed")\n',
+        'from base.log import logger\nlogger.warning("failed", event="x", agent_id=1)\n',
+        # A name bound both ways is ambiguous — never flagged.
+        "from base.log import logger\nimport logging\ndef f():\n"
+        '    logger = logging.getLogger("x")\n    logger.warning("failed", exc_info=True)\n',
+    ],
+)
+def test_exc_info_outside_loguru_log_calls_is_clean(src: str) -> None:
+    assert _lines(src) == []
+
+
+def test_exemption_marker_covers_the_exc_info_rule() -> None:
+    src = (
+        "from base.log import logger\n"
+        'logger.warning("failed", exc_info=True)  # log-format-ok: proves it\n'
+    )
+    assert _lines(src) == []
