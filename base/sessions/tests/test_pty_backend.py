@@ -158,14 +158,26 @@ def test_send_types_text_without_enter(unit_home: Path) -> None:
     output_until(_NAME, "typed-marker")
 
 
+def _comm(process: psutil.Process) -> str:
+    try:
+        return process.name()
+    except psutil.NoSuchProcess:
+        return ""
+
+
 @pytest.mark.usefixtures("pty_service")
 def test_send_keys_names_become_key_presses(unit_home: Path) -> None:
     _new(_NAME, unit_home)
     type_line(_NAME, "cat")
     # `cat` runs with the terminal in its default mode: C-c interrupts it, then the
     # shell takes the next line.
-    assert wait_for(lambda: bool(shell_process(_NAME).children()))
+    shell = shell_process(_NAME)
+    # A forked child is not yet `cat` in the foreground (the interrupt would reach the
+    # shell instead), so wait for the exec; and the interrupt flushes the terminal's
+    # input queue, so type the next line only once `cat` is gone.
+    assert wait_for(lambda: any(_comm(child) == "cat" for child in shell.children()))
     _backend().send_keys(_NAME, "C-c")
+    assert wait_for(lambda: not shell.children())
     _backend().send(_NAME, "echo after-interrupt")
     _backend().send_keys(_NAME, "Enter")
     output_until(_NAME, "after-interrupt")
