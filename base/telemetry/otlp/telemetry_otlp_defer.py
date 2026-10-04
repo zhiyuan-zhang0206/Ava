@@ -35,7 +35,7 @@ import queue
 import threading
 from collections.abc import Callable
 
-from base.telemetry import Event
+from base.telemetry import Event, failure_isolated
 
 _CHILD_DEFER_ENV = "AVA_TELEMETRY_OTLP_CHILD_DEFER"
 _CHILD_DEFER_MAX_AGE_ENV = "AVA_TELEMETRY_OTLP_CHILD_DEFER_MAX_AGE_S"
@@ -155,7 +155,7 @@ class ChildDeferral:
                 return
             self.active = False
             for event in snapshot:
-                with contextlib.suppress(Exception):
+                with failure_isolated("otlp deferred metric mapping"):
                     self._record_metrics(event)
             for event in snapshot:
                 try:

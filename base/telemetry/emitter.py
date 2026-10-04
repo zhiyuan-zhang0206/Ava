@@ -34,9 +34,10 @@ import contextlib
 import json
 import queue
 import socket
+import sys
 import threading
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Generator
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
 from hashlib import blake2b
@@ -153,8 +154,10 @@ def capture_trace_ids() -> tuple[str | None, str | None]:
         ctx = span.get_span_context()
         if ctx.is_valid:
             return format(ctx.trace_id, "032x"), format(ctx.span_id, "016x")
-    except Exception:  # noqa: S110
-        pass  # trace capture must never break an emit
+    except ImportError:
+        return None, None  # OTel is not installed in this process: no trace to capture
+    except Exception as exc:  # trace capture must never break an emit — but is never silent
+        report_sink_failure("trace-id capture", exc)
     return None, None
 
 
@@ -227,10 +230,6 @@ def _append_jsonl(events: list[Event]) -> None:
     O_APPEND semantics (opened in append mode) keeps concurrent processes
     from interleaving."""
     day = datetime.now(UTC).strftime("%Y%m%d")
-    if _state["jsonl_day"] != day:
-        _state["jsonl_day"] = day
-        with contextlib.suppress(Exception):
-            _prune_jsonl_mirror()
     try:
         lines = [
             json.dumps(event_row(e), default=str, separators=(",", ":"), ensure_ascii=False) + "\n"
@@ -251,6 +250,13 @@ def _append_jsonl(events: list[Event]) -> None:
                 n=_jsonl_failures,
                 err=repr(exc),
             )
+    else:
+        # Once per day, after a write that landed: a prune failure is its own report and
+        # never a second one for the same disk fault.
+        if _state["jsonl_day"] != day:
+            _state["jsonl_day"] = day
+            with failure_isolated("jsonl mirror prune"):
+                _prune_jsonl_mirror()
 
 
 def _export_otlp(events: list[Event]) -> None:
@@ -259,9 +265,9 @@ def _export_otlp(events: list[Event]) -> None:
     Runs on the drain thread right after the JSONL mirror write. The OTLP
     side is fully failure-isolated (bounded queue, drop semantics, SDK-owned
     export threads — see `base.telemetry.otlp.telemetry_otlp`), and this call is
-    suppressed end to end, so even a programming error there must not cost
-    the batch its mirror copy or raise into the drain thread."""
-    with contextlib.suppress(Exception):
+    isolated end to end, so even a programming error there must not cost
+    the batch its mirror copy or raise into the drain thread — it is reported."""
+    with failure_isolated("otlp export"):
         from base.telemetry.otlp import telemetry_otlp  # deferred — heavy OTel imports
 
         telemetry_otlp.export_batch(events)
@@ -284,15 +290,63 @@ _jsonl_failures = 0
 _NO_EMITTER = "_no_emitter"
 
 
-def report_no_pipeline(message: str, *, level: str = "warning", **extra: Any) -> None:
+def report_no_pipeline(
+    message: str, *, level: str = "warning", exc: BaseException | None = None, **extra: Any
+) -> None:
     """Log a drain-thread diagnostic through loguru, marked `_NO_EMITTER` so
-    the emitter adapter skips it. Best-effort: never raises, never blocks."""
-    with contextlib.suppress(Exception):
+    the emitter adapter skips it; `exc` attaches that exception's traceback.
+    Never raises, never blocks — and never silent: when loguru itself fails the
+    diagnostic goes to stderr."""
+    try:
         from base.log import logger
 
         # **{_NO_EMITTER: True} — bind() takes literal kwargs, so the marker
         # key must be the constant's VALUE, not its name.
-        logger.bind(**{_NO_EMITTER: True}).log(level.upper(), message, **extra)
+        bound = logger.bind(**{_NO_EMITTER: True})
+        if exc is not None:
+            bound = bound.opt(exception=exc)
+        bound.log(level.upper(), message, **extra)
+    except Exception as log_exc:
+        try:
+            sys.stderr.write(
+                f"{level.upper()}: {message} {extra!r} "
+                f"(diagnostic logging failed: {log_exc!r}; cause: {exc!r})\n"
+            )
+        except (OSError, ValueError):
+            return  # stderr is closed or detached: no reporting channel is left
+
+
+# Failures per emitter-plumbing seam, for `report_sink_failure`.
+_sink_failures: dict[str, int] = {}
+
+
+def report_sink_failure(sink: str, exc: BaseException) -> None:
+    """Report a failure of a best-effort side channel (an emitter sink export,
+    the lazy pipeline init, an exit-time close, SDK-call or billing telemetry)
+    with its traceback — the first and every 50th per `sink`, like the JSONL
+    mirror: a seam that fails on every call must be loud without flooding the
+    log. Goes through the `_no_emitter` path, so a failing telemetry pipeline
+    cannot loop its own report back into itself."""
+    n = _sink_failures[sink] = _sink_failures.get(sink, 0) + 1
+    if n == 1 or n % 50 == 0:
+        report_no_pipeline(
+            "[best-effort] {sink} failed ({n} time(s) in this process; the first and every "
+            "50th are reported); carrying on without it: {err}",
+            sink=sink,
+            n=n,
+            err=repr(exc),
+            exc=exc,
+        )
+
+
+@contextlib.contextmanager
+def failure_isolated(sink: str) -> Generator[None]:
+    """Isolate one best-effort emitter seam: an `Exception` in the body must not
+    reach the producer or the drain thread, and is reported, not swallowed."""
+    try:
+        yield
+    except Exception as exc:
+        report_sink_failure(sink, exc)
 
 
 def _write_batch(events: list[Event]) -> None:
@@ -305,7 +359,7 @@ def _write_batch(events: list[Event]) -> None:
     if not events:
         return
     _append_jsonl(events)
-    with contextlib.suppress(Exception):
+    with failure_isolated("telemetry_events store"):
         from base.db import Database
         from base.telemetry.event_store import store_events
 
@@ -523,7 +577,7 @@ def _ensure_pipeline() -> _EventPipeline | None:
     whose pipeline init fails degrades to dropping (never raises, never
     blocks)."""
     if _state["pipeline"] is None:
-        with contextlib.suppress(Exception):
+        with failure_isolated("pipeline init"):
             init_telemetry()
     return _state["pipeline"]
 
@@ -644,7 +698,7 @@ def prepare_event(
 
 def emit_prepared(event: Event) -> None:
     """Enqueue an already constructed event without changing its identity."""
-    with contextlib.suppress(Exception):
+    with failure_isolated("emit"):
         # The external-controller recorder is deliberately at the producer
         # seam, before this bounded queue can shed the event.  Its import stays
         # lazy to preserve telemetry's standalone startup path.
@@ -697,15 +751,15 @@ def _drain_on_exit() -> None:
         return
     pipeline.flush()
     pipeline.stop()
-    with contextlib.suppress(Exception):
+    with failure_isolated("close observed-metrics projection"):
         from base.telemetry.metrics.observed_metrics import close_projection
 
         close_projection()
-    with contextlib.suppress(Exception):
+    with failure_isolated("close telemetry_events store"):
         from base.telemetry.event_store import close_store
 
         close_store()
-    with contextlib.suppress(Exception):
+    with failure_isolated("otlp shutdown"):
         from base.telemetry.otlp import telemetry_otlp  # deferred — heavy OTel imports
 
         telemetry_otlp.shutdown()

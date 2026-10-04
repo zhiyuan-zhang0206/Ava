@@ -372,7 +372,10 @@ def validate_factchecks(bundle: Path) -> list[str]:
                     argv, capture_output=True, timeout=15, check=False
                 ).returncode
                 ok = (rc == 0) != negate
-            except Exception:
+            except (
+                OSError,
+                subprocess.TimeoutExpired,
+            ):  # unrunnable or hung: reported as FAILED below
                 ok = False
             if not ok:
                 errors.append(f"{fp.name}: fact-check FAILED: {'!' if negate else ''}{cmdline}")

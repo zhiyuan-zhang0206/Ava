@@ -88,12 +88,19 @@ def _watch_via_poll(target_id: int, interval_s: float = 5.0) -> None:
     outer safety bound, so a persistently failing read also wakes the launching
     agent eventually (via the watcher's own exit).
     """
+    failing = False
     while True:
         try:
             idle = ava.agents.get_status(target_id) == IDLE_STATUS
-        except Exception:
+        except Exception as exc:
+            if not failing:
+                failing = True
+                print(f"status read failed, retrying every {interval_s}s: {exc!r}", flush=True)
             time.sleep(interval_s)
             continue
+        if failing:
+            failing = False
+            print("status read recovered", flush=True)
         if idle:
             _notify(target_id)
             return

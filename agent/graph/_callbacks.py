@@ -43,6 +43,7 @@ live-view events that must never stall the llm stream loop on a slow central
 Redis. `process_chunk` / `finish` are therefore synchronous.
 """
 
+import json
 import time
 from typing import Any, cast
 
@@ -424,7 +425,7 @@ class RedisStreamHandler:
             return
         try:
             partial = parse_partial_json(buf)
-        except Exception:
+        except json.JSONDecodeError:
             return
         if not isinstance(partial, dict):
             return

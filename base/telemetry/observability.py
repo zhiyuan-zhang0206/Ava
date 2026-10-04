@@ -23,15 +23,26 @@ def cluster_label(home: Path | None = None) -> str:
 
     try:
         resolved_home = home if home is not None else paths.ava_home()
-    except Exception:
+    except Exception as exc:
+        _report_label_fallback("home resolution", exc)
         return ".unknown"
     try:
         return cluster.home_label(resolved_home)
-    except Exception:
+    except Exception as exc:
+        _report_label_fallback("home label", exc)
         try:
             return cluster.home_slug(resolved_home)
-        except Exception:
+        except Exception as slug_exc:
+            _report_label_fallback("home slug", slug_exc)
             return ".unknown"
+
+
+def _report_label_fallback(stage: str, exc: BaseException) -> None:
+    """A degraded cluster label is reported (first + every 50th: the label is
+    resolved per event), never folded in silently."""
+    from base.telemetry.emitter import report_sink_failure
+
+    report_sink_failure(f"cluster label {stage}", exc)
 
 
 def production_identity() -> bool:
@@ -107,10 +118,7 @@ def home_is_observability_station(home: Path) -> bool:
             return False
     except (MachineRoleMissing, MachineRoleInvalid):
         return False
-    try:
-        return home.resolve() == ava_home().resolve()
-    except Exception:
-        return False
+    return home.resolve() == ava_home().resolve()
 
 
 def collector_allowed_for_home(home: Path | None) -> bool:

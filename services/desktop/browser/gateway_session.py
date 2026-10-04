@@ -20,7 +20,12 @@ from contextlib import suppress
 from typing import Any
 from urllib.parse import urlsplit
 
-from base.cluster.machine import GatewayApiTokenMissing, gateway_api_base, gateway_bearer
+from base.cluster.machine import (
+    GatewayApiBaseMissing,
+    GatewayApiTokenMissing,
+    gateway_api_base,
+    gateway_bearer,
+)
 from base.config import settings
 from base.log import logger
 from services.desktop.browser.mcp_upstream import _await_stop_or_timeout, contained
@@ -76,7 +81,7 @@ def _navigates_to_gateway(name: str, args: dict[str, Any]) -> bool:
         return False
     try:
         gateway_base = gateway_api_base()
-    except Exception:
+    except GatewayApiBaseMissing:
         return False
     target = urlsplit(url)
     gateway = urlsplit(gateway_base)

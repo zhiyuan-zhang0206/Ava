@@ -25,7 +25,7 @@ def frontmatter(rel):
         return {}
     try:
         return yaml.safe_load(m.group(1)) or {}
-    except Exception:
+    except yaml.YAMLError:  # malformed frontmatter: the note is indexed without one
         return {}
 
 

@@ -151,11 +151,11 @@ def _publish_self_inbound_wake() -> None:
             ch=channel,
             exc=exc,
         )
-    except Exception as exc:
-        logger.debug(
-            "self inbound wake publish to {ch!r} skipped ({exc!r}) — best-effort.",
+    except Exception:
+        logger.opt(exception=True).warning(
+            "self inbound wake publish to {ch!r} failed; the wake falls back to the claim "
+            "SELECT recheck",
             ch=channel,
-            exc=exc,
         )
 
 

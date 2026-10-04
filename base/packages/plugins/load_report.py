@@ -13,7 +13,6 @@ this function, and only an attribute-level call observes the substitution.
 
 from __future__ import annotations
 
-import contextlib
 from collections.abc import Callable
 
 Reporter = Callable[[str, BaseException], None]
@@ -39,10 +38,17 @@ def report_plugin_load_failure(name: str, exc: BaseException) -> None:
         "the remaining plugins still load",
         name,
     )
-    with contextlib.suppress(Exception):
+    try:
         emit(
             "telemetry",
             "plugin_load_failed",
             level="error",
             attributes={"plugin": name, "error": f"{type(exc).__name__}: {exc}"},
+        )
+    except Exception:
+        # `_no_emitter`: the failure may be the telemetry pipeline itself; its report must not
+        # re-enter it. The ERROR above already carries the load failure.
+        logger.bind(_no_emitter=True).opt(exception=True).warning(
+            "[plugins] plugin_load_failed event for {} was not emitted; only the log line records it",
+            name,
         )

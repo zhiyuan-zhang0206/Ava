@@ -124,14 +124,14 @@ def close_tab(page_id: int | None) -> None:
     a quick ask does not leave its tab piling up in the shared browser.
 
     Only ever closes the id handed in (a tab this driver created), so the user's
-    own tabs are never touched. No-ops on a None id, and swallows the close error
+    own tabs are never touched. No-ops on a None id, and swallows the tool's close error
     when it is the last open tab (the browser refuses to close the final one) or
     the tab is already gone -- cleanup must not turn into a failure.
     """
     if page_id is None:
         return
 
-    with contextlib.suppress(Exception):
+    with contextlib.suppress(ava.mcps.MCPCallError):
         ava.mcps.chrome.close_page(pageId=page_id)
 
 

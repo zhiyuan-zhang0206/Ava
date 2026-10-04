@@ -159,7 +159,10 @@ def live_identities(identities: Iterable[OwnedProcess]) -> list[OwnedProcess]:
     for identity in identities:
         try:
             alive = identity.live()
-        except Exception:  # the deadline report must not raise
+        except (RuntimeError, psutil.Error):
+            # Unverifiable birth (RuntimeError from `OwnedProcess.live`) or an
+            # unreadable process (psutil.AccessDenied): the deadline report keeps
+            # the survivor listed rather than dropping it.
             alive = True
         if alive:
             present.append(identity)

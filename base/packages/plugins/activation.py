@@ -35,8 +35,9 @@ framework's own hooks and prompt sections (they have no plugin entry), and
 those record nothing.
 
 **Side-channel contract**, identical to `base/agents/sdk/telemetry.py`: a recording
-failure is swallowed (`Exception` only, so cancel/timeout injection still
-propagates) and never perturbs hook or wrap semantics — no state update is
+failure is contained (`Exception` only, so cancel/timeout injection still
+propagates) and reported at WARNING with its traceback (`report_sink_failure`),
+and never perturbs hook or wrap semantics — no state update is
 changed, no result or exception is altered. No new table: the events land in the
 unified stream `sdk_call` already uses, so `collect.py` and
 `base.telemetry.metrics.aggregate` read them with no new plumbing.
@@ -44,10 +45,9 @@ unified stream `sdk_call` already uses, so `collect.py` and
 
 from __future__ import annotations
 
-import contextlib
-
 from base.log import logger
 from base.packages.plugins.contributions import SurfaceId
+from base.telemetry import report_sink_failure
 
 # Event name written to the unified stream for one activation.
 PLUGIN_ACTIVATION_EVENT = "plugin_activation"
@@ -83,12 +83,14 @@ def record(
     """
     if plugin is None:
         return
-    # The suppression boundary sits here, at the call site's edge: `record` is
+    # The containment boundary sits here, at the call site's edge: `record` is
     # what a hook runner / wrap layer / prompt builder calls, and none of them
     # may fail because telemetry did. `Exception` only, so a cancel/timeout
     # injection still propagates.
-    with contextlib.suppress(Exception):
+    try:
         emit(plugin, surface, identifier, detail, model)
+    except Exception as exc:
+        report_sink_failure("plugin_activation recording (activation events are dropped)", exc)
 
 
 def emit(plugin: str, surface: SurfaceId, identifier: str, detail: str, model: str) -> None:

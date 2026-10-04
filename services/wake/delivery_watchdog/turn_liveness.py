@@ -156,8 +156,9 @@ async def _detect_hosted_turn_wedges(
         except Exception:
             # Unreadable evidence cannot license a destructive recovery. A
             # successful GET returning None is handled above as an expired beat.
-            _log.debug(
-                "[delivery] hosted turn-progress read failed for agent %s on %s",
+            _log.warning(
+                "[delivery] hosted turn-progress read failed for agent %s on %s — "
+                "no wedge recovery for it this scan",
                 candidate.agent_id,
                 candidate.machine,
                 exc_info=True,

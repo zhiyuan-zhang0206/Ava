@@ -17,10 +17,10 @@ not reaching here.
 import sys
 import threading
 from collections.abc import Callable, Mapping
-from contextlib import suppress
 from typing import Any
 
 from base.config import settings
+from base.log import logger
 
 # DB_URL / REDIS_URL / GATEWAY_URL are exposed via module __getattr__ (PEP
 # 562) so each access reads the current `settings.X` value rather than a
@@ -87,8 +87,12 @@ class _LazyConnection:
             if conn is not None and not _conn_dead(conn):
                 return conn
             if conn is not None:
-                with suppress(Exception):
+                try:
                     conn.close()  # type: ignore[attr-defined]
+                except Exception:
+                    logger.opt(exception=True).warning(
+                        "closing the dead {} connection failed; replacing it anyway", self._name
+                    )
             self._conn = self._factory()
             return self._conn
 

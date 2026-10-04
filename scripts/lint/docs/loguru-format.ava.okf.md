@@ -1,7 +1,7 @@
 ---
 type: doc
 title: Loguru format lint
-description: loguru takes `{}` fields and has no `exc_info` parameter (tracebacks need `logger.opt(exception=True)`); stdlib logging takes `%s` — what scripts/lint/loguru_format.py flags, its hook, opt-out and scope.
+description: loguru takes `{}` fields and has no `exc_info` parameter (tracebacks need `logger.opt(exception=True)`); stdlib logging takes `%s` — what scripts/lint/diagnostics/loguru_format.py flags, its hook, opt-out and scope.
 tags:
 - scripts
 - lint
@@ -9,7 +9,7 @@ tags:
 
 # Loguru format lint
 
-`scripts/lint/loguru_format.py` (pre-commit `lint-loguru-format`) keeps each
+`scripts/lint/diagnostics/loguru_format.py` (pre-commit `lint-loguru-format`) keeps each
 logger's message format honest, told apart by where the name comes from, not by
 file. loguru formats with `str.format`: `logger.warning("x %s", x)` logs a
 literal `%s` and drops the arguments; stdlib `logging` formats with `%`:

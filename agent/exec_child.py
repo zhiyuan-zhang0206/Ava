@@ -443,8 +443,13 @@ def _deliver_envelope_telemetry() -> None:
     Never raises and never rewrites the envelope: the crash must stay the
     reported failure, and a failed delivery still leaves the JSONL mirror.
     """
-    with contextlib.suppress(BaseException):
+    try:
         _finalize_telemetry()
+    except BaseException:
+        logger.opt(exception=True).warning(
+            "exec child: telemetry delivery after a crash envelope failed; "
+            "queued records stay in the JSONL mirror"
+        )
 
 
 def _deliver_run_telemetry(result_path: str, payload: Any) -> None:
@@ -466,6 +471,11 @@ def _deliver_run_telemetry(result_path: str, payload: Any) -> None:
     try:
         _finalize_telemetry()
     except BaseException as exc:
+        logger.opt(exception=True).warning(
+            "exec child: post-run telemetry delivery failed (run outcome: {}); "
+            "queued records stay in the JSONL mirror",
+            payload.kind,
+        )
         # A post-run telemetry sync/flush failure must not read as a clean
         # outcome: report it with the REAL code_reached flag (P0 #2100). A
         # crashed envelope already carries its own failure.
@@ -621,7 +631,13 @@ def _write_crashed_result(
         )
         return
     except BaseException:
-        _write_crashed_result_stdlib(result_path, envelope)
+        # The fallback writes first: the envelope must land even if logging is what is broken.
+        try:
+            _write_crashed_result_stdlib(result_path, envelope)
+        finally:
+            logger.opt(exception=True).warning(
+                "exec child: the result envelope writer failed; fell back to the stdlib writer"
+            )
 
 
 def _write_crashed_result_stdlib(result_path: str, envelope: dict[str, object]) -> None:
@@ -643,12 +659,16 @@ def _write_crashed_result_stdlib(result_path: str, envelope: dict[str, object]) 
                 os.close(fd)
         with contextlib.suppress(OSError):
             path.unlink()
-        with contextlib.suppress(BaseException):
+        # A closed or broken stderr (OSError / ValueError) leaves only the log line below.
+        with contextlib.suppress(OSError, ValueError):
             sys.stderr.write(
                 "exec child could not write crash result envelope: "
                 f"{type(write_exc).__name__}: {write_exc}\n"
             )
             sys.stderr.flush()
+        logger.opt(exception=True).warning(
+            "exec child: the stdlib crash envelope write failed; the parent sees no result envelope"
+        )
 
 
 def _format_current_traceback(exc: BaseException) -> str:

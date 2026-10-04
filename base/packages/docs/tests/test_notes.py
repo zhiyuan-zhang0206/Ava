@@ -4,6 +4,7 @@ unit tests: no filesystem for parse/extract, tmp_path for walk)."""
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -175,6 +176,15 @@ class TestWalkNotes:
         out = list(walk_notes(tmp_path, warnings=warnings))
         assert [n.rel for _, n in out] == ["good"]
         assert warnings == ["cannot read x.md"]
+
+    def test_unreadable_file_without_warnings_list_logs_a_warning(
+        self, tmp_path: Path, loguru_records: list[dict[str, Any]]
+    ) -> None:
+        (tmp_path / "x.md").mkdir()
+        list(walk_notes(tmp_path))
+        assert any(
+            "cannot read note x.md" in r["message"] and r["level"].no >= 30 for r in loguru_records
+        )
 
     def test_notes_are_frozen(self, tmp_path: Path) -> None:
         (tmp_path / "a.md").write_text("---\ntitle: A\n---\n\na\n", encoding="utf-8")

@@ -185,17 +185,23 @@ def _refusal(call: Callable[[], object]) -> str:
     return ""
 
 
+# A status/ping poll that cannot get an answer yet: socket absent or refusing (OSError),
+# empty or malformed reply (ValueError), helper error reply (PermissionsHelperError and
+# SmokeError are RuntimeErrors). Anything else is a bug in the poll and surfaces.
+_NOT_ANSWERING = (OSError, ValueError, RuntimeError)
+
+
 def _ping_or_none(helper_client, sock: Path):
     try:
         return helper_client.ping(sock_path=sock)["pong"]
-    except Exception:
+    except _NOT_ANSWERING:
         return None
 
 
 def _status_if_running(root_status, *, excluding: int | None = None):
     try:
         status = root_status()
-    except Exception:
+    except _NOT_ANSWERING:
         return None
     if status["root"]["running"] and isinstance(status["root"]["pid"], int):
         pid = int(status["root"]["pid"])
@@ -208,7 +214,7 @@ def _status_if_running(root_status, *, excluding: int | None = None):
 def _status_if_keeper_running(helper_root_status):
     try:
         status = helper_root_status()
-    except Exception:
+    except _NOT_ANSWERING:
         return None
     if status.get("state") == "running" and isinstance(status.get("pid"), int):
         return status
@@ -218,7 +224,7 @@ def _status_if_keeper_running(helper_root_status):
 def _status_if_conflict(helper_root_status):
     try:
         status = helper_root_status()
-    except Exception:
+    except _NOT_ANSWERING:
         return None
     return status if status.get("state") == "conflict" else None
 
@@ -227,7 +233,7 @@ def _status_if_refused(helper_root_status, restarts_before: int):
     """The keeper once a replacement root has exited `refused` after the crash."""
     try:
         status = helper_root_status()
-    except Exception:
+    except _NOT_ANSWERING:
         return None
     refused = status.get("last_exit", {}).get("kind") == "refused"
     return status if refused and int(status["restarts"]) > restarts_before else None

@@ -117,7 +117,7 @@ class SocketLink:
             )
 
     def close(self) -> None:
-        with suppress(Exception):
+        with suppress(OSError):
             self._writer.close()
 
 

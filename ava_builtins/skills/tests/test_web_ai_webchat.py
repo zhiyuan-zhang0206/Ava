@@ -23,6 +23,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
+import ava
 from tests.skills import load_skill_script
 
 # `_utils.py` is a module-only sibling of `webchat.py`, reached in production
@@ -130,9 +131,16 @@ def test_close_tab_none_is_noop(fake_chrome: MagicMock) -> None:
 
 def test_close_tab_swallows_close_error(fake_chrome: MagicMock) -> None:
     # The browser refuses to close the last open tab; cleanup must not raise.
-    fake_chrome.close_page.side_effect = RuntimeError("last page cannot be closed")
+    fake_chrome.close_page.side_effect = ava.mcps.MCPCallError("last page cannot be closed")
     webchat.close_tab(2)  # must not raise
     fake_chrome.close_page.assert_called_once()
+
+
+def test_close_tab_does_not_hide_a_bug(fake_chrome: MagicMock) -> None:
+    # Only the tool's own refusal is cleanup noise; anything else is a real failure.
+    fake_chrome.close_page.side_effect = RuntimeError("bug")
+    with pytest.raises(RuntimeError, match="bug"):
+        webchat.close_tab(2)
 
 
 # --------------------------------------------------------------------------- #

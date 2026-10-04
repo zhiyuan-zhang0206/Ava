@@ -317,7 +317,7 @@ def test_db_size_breakdown_format(monkeypatch: pytest.MonkeyPatch, database: Dat
     assert line == "db=4044MiB checkpoint=1335MiB rest=2708MiB"
 
     def _boom(_self: Database, **_: object) -> object:
-        raise RuntimeError("db down")
+        raise psycopg.OperationalError("db down")
 
     monkeypatch.setattr(Database, "connect", _boom)
     assert backup._db_size_breakdown(database) == "unavailable"

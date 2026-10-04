@@ -163,9 +163,11 @@ async def _maybe_refresh(client: Any, ref: CacheRef, now: datetime, timeout_s: f
             timeout=timeout_s,
         )
         ref.expire_time = updated.expire_time or (now + timedelta(seconds=_CACHE_TTL_SECONDS))
-    except Exception as exc:
-        logger.debug(
-            "[gemini-cache] ttl refresh failed for {name}: {exc!r}", name=ref.name, exc=exc
+    except Exception:
+        logger.opt(exception=True).warning(
+            "[gemini-cache] ttl refresh failed for {name}; the entry stays and a stale cache "
+            "recovers on the next request",
+            name=ref.name,
         )
 
 
@@ -197,8 +199,10 @@ async def _adopt_existing(
 
     try:
         return await asyncio.wait_for(_scan(), timeout=timeout_s)
-    except Exception as exc:
-        logger.debug("[gemini-cache] list failed (will create instead): {exc!r}", exc=exc)
+    except Exception:
+        logger.opt(exception=True).warning(
+            "[gemini-cache] listing existing caches failed; creating a fresh one instead"
+        )
     return None
 
 

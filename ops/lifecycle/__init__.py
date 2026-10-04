@@ -246,8 +246,8 @@ async def _cancel_hosted_turn_best_effort(agent_id: int, command_id: int) -> Non
 
     Dials the local agent-host's loopback health port (`POST /cancel-turn`);
     the host cancels the turn with its bounded unwind and reports a
-    C-call-blocked straggler instead of hanging. Every failure is swallowed at
-    INFO with the exception. The durable force pointer stays unobserved until
+    C-call-blocked straggler instead of hanging. A transport or HTTP-status failure
+    is logged at WARNING with the exception and swallowed. The durable force pointer stays unobserved until
     the original host actually settles; a dead host is not child-exit proof.
     """
     import httpx
@@ -261,8 +261,8 @@ async def _cancel_hosted_turn_best_effort(agent_id: int, command_id: int) -> Non
                 json={"agent_id": agent_id, "command_id": command_id},
             )
             resp.raise_for_status()
-    except Exception:
-        _log.info(
+    except httpx.HTTPError:
+        _log.warning(
             "hosted turn-cancel call for agent %s failed (non-fatal; the durable "
             "force command remains accepted; quiescence is not confirmed)",
             agent_id,
@@ -620,7 +620,7 @@ async def recover_crash_marked_if_stalled(
         )
         return "unreachable", str(exc)
     except Exception:
-        _log.info(
+        _log.warning(
             "recover_crash_marked_if_stalled: harvest request for agent %s (inbound %s) failed",
             agent_id,
             stalled_inbound_id,
