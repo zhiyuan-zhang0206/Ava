@@ -509,7 +509,7 @@ def resurrect(agent_id: int, prompt: str) -> ResurrectResult:
 def commands() -> list[CommandInfo]:
     """List the commands a peer agent accepts; invoke one by sending
     `/name <instruction>` as the message text."""
-    from ava.composer_commands import discover_commands
+    from ava.skills.composer_commands import discover_commands
 
     return [
         CommandInfo(

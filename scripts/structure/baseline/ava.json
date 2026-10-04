@@ -11,10 +11,6 @@
     "ava/agent_identity.py::global-rebind:_agent_id": 2,
     "ava/agent_identity.py::global-rebind:_owns_loop": 2,
     "ava/attachment_transport.py::ambient-container:_ATTACHMENTS": 1,
-    "ava/security.py::ambient-container:_pending_findings": 1,
-    "ava/skills.py::ambient-container:_recorded_skill_invocations": 1
-  },
-  "directories": {
-    "ava": 21
+    "ava/security.py::ambient-container:_pending_findings": 1
   }
 }

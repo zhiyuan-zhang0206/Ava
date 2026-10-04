@@ -78,7 +78,7 @@ auto-injected. An untracked skill — a plugin's runtime provider root — count
 ## The registry is the gate, not a record
 
 `$AVA_HOME/skills/` is the **single skill load dir**, and
-`ava/skills.py:_scan_tree` surfaces a top-level directory only when its name is
+`ava/skills/__init__.py:_scan_tree` surfaces a top-level directory only when its name is
 in `loadable_skill_names()` — tracked **and** `enabled`, and the package's
 manifest host contract passes (`engines.ava` / `requires_commit`; the runtime
 half of the §5.5 gate, reason visible in `ava packages status`). A directory
@@ -107,7 +107,7 @@ The single write path — `mutate()` under `registry_lock`, its wrappers, and th
   `cli/commands/extensions/_claude_code_plugin.py`. It may bundle any of: `skills/`
   (copied verbatim), `agents/` (turned into one orchestrator skill),
   `commands/` (copied verbatim, surfaced as composer `/`-commands by
-  `ava/composer_commands.py:discover_commands`), or a root `.mcp.json` (merged by
+  `ava/skills/composer_commands.py:discover_commands`), or a root `.mcp.json` (merged by
   `ava/mcp_config.py:load_mcp_config`). A hooks-only plugin bundling none of
   these is refused.
 - **MCP package** — a self-contained package (its own `.mcp.json` +

@@ -19,4 +19,4 @@ The credential model is machine-level, not per-cluster: both the password file a
 
 ## Key Dependencies
 - [[ava_builtins/skills/docs/skills.ava.okf.md|Skills index]] — full skills catalog
-- [[ava/docs/skills.ava.okf.md|Skill System]] — indexed in every agent's `# Capabilities` section like every loaded skill (`skills_to_inject_into_system_prompt` defaults to `*`)
+- [[ava/skills/docs/skills.ava.okf.md|Skill System]] — indexed in every agent's `# Capabilities` section like every loaded skill (`skills_to_inject_into_system_prompt` defaults to `*`)

@@ -18,8 +18,8 @@ from langgraph.graph.message import REMOVE_ALL_MESSAGES
 
 from agent import state as _state
 from agent.db import ClaimedInbound
-from agent.graph import context_notes
-from agent.graph._chat_inbound import build_chat_inbound
+from agent.graph.claim._chat_inbound import build_chat_inbound
+from agent.graph.prompt import context_notes
 from agent.hooks import compact
 from agent.hooks.compact import (
     COMPACT_MAX_ATTEMPTS,
@@ -568,7 +568,7 @@ async def _handle_fork(
     # Old fork rows carry no payload: skip.
     tail_skills = (item.payload or {}).get("tail_skills")
     if isinstance(tail_skills, list):
-        from agent.graph.context_notes import fork_tail_skills_note
+        from agent.graph.prompt.context_notes import fork_tail_skills_note
 
         note = fork_tail_skills_note(
             [s for s in tail_skills if isinstance(s, str)], slices.prompt.sdk_disable

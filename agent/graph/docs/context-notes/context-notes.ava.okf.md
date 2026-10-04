@@ -49,6 +49,6 @@ life — first wake, and the turn after any compaction — and by one owner.
 
 ## Entry Points
 - `agent/graph/_init_context.py` — the node that lays down the head
-- `agent/graph/context_notes.py` — `context_notes` / `fork_notes` and the framework's notes
+- `agent/graph/prompt/context_notes.py` — `context_notes` / `fork_notes`, framework notes
 - `ava_builtins/plugins/ava_memory/notes.py` — the two memory index notes; `inherit.py` — the inherited-memory note (ancestor chain, block parsing, guardrails)
-- `agent/graph/memory_recall.py` + `_memory_filter.py` — passive recall and its filter
+- `agent/graph/recall/memory_recall.py` + `_memory_filter.py` — passive recall + filter

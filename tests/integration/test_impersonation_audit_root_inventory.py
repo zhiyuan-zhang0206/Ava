@@ -24,7 +24,7 @@ _INVENTORY: dict[str, str] = {
     "agent/ownership/hosted.py::_record_legacy_adoption": "ineligible",
     "agent/ownership/hosted.py::settle_hosted_runtime": "ineligible",
     "ava/self.py::compact": "local",
-    "ava/skills.py::_insert_skill_events": "local",
+    "ava/skills/__init__.py::_insert_skill_events": "local",
     "ava_builtins/plugins/ava_fleet/_task_update.py::_log_task_update": "local",
     "ava_builtins/plugins/ava_fleet/task_registry.py::_insert_task": "local",
     "gateway/agents/router.py::_patch_label_blocking": "central",

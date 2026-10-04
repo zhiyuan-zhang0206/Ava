@@ -86,6 +86,11 @@ def _is_capability_surface_member(path: str) -> bool:
 _warned_unresolved: set[tuple[str, str]] = set()
 
 
+def forget_unresolved_warnings() -> None:
+    """Reset the once-per-process unresolved-skill warning memory (the test seam)."""
+    _warned_unresolved.clear()
+
+
 def _warn_unresolved_once(config_field: str, name: str) -> None:
     """Warn that a configured skill name matched nothing — at most once per
     (list, name) per process. Naming `config_field` so the operator sees which

@@ -37,7 +37,7 @@ passive_memory_recall_before_llm = _PassiveMemoryRecallHook()
 - Performs semantic search against recent conversation, injects matched note references as system messages (`system_note`), seen by agent in next turn. Each hit presents path + frontmatter description — two of the three fields `ava.memory.search` returns; recall deliberately omits tags (the injected note is a pointer, not a tag list). Description is empty when absent, never synthesized from title/body
 - Uses the built-in `memory` (`MemoryState`) sub-state's `injected_paths` union reducer (`_memory_state_merge`) to accumulate path set, each note appears at most once
 
-The recall engine (search + rendering beyond gating) is in the core `agent/graph/memory_recall.py:passive_memory_recall`;
+The recall engine (search + rendering beyond gating) is in the core `agent/graph/recall/memory_recall.py:passive_memory_recall`;
 this plugin only provides the before_llm wiring + trigger gate. It also bundles memory skills: `ava.skills.ava_memory`
 (Memory Steward maintenance manual — daily merge, health check, note consolidation, query service) +
 `ava.skills.ava_memory.consolidation` sub-skill (`ava memory` CLI daily merge — commit / push / rebuild index).

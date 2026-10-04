@@ -31,4 +31,4 @@ An agent has only one tool—`execute_code(code: str)`—but obtains all capabil
 - [[self.ava.okf.md]] — Agent self (**core** ava.self): AGENT_ID / MACHINE_SPEC / SELF_MACHINE_NAME / attach / pause_heartbeat / compact / restart / terminate; `set_label` is separately injected by ava_fleet plugin
 - [[ui.ava.okf.md]] — User interface: serve / notify / show / close
 - [[ava_builtins/plugins/ava_memory/docs/memory-api.ava.okf.md]] — Long-term memory pool: semantic search
-- [[ava/docs/skills.ava.okf.md]] — Skill registry: ava.help(ava.skills.<name>)
+- [[ava/skills/docs/skills.ava.okf.md]] — Skill registry: ava.help(ava.skills.<name>)

@@ -168,7 +168,7 @@ Python surfaces, so they keep heading form rather than stub form).
      the error is common and actionable. This inverts the pre-2026-06-10 rule
      ("Raises must be written").
 7. **No SDK<->skill coupling** — an SDK docstring never references a skill;
-   skill discovery belongs to the skills index section. `ava/skills.py` is the
+   skill discovery belongs to the skills index section. `ava/skills/__init__.py` is the
    one exempt module (enforced by `agent_docstrings`).
 
 Every other `ava/` module — framework code such as `ava/sdk_surface/wraps.py` or `ava/sdk_surface/plugin_loader.py`, whatever its name — is out of scope (audience is the framework or plugin authors, not the agent) and may keep the dev perspective.

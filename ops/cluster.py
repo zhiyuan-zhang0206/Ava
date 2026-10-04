@@ -130,7 +130,7 @@ def _project_skill_roots(cwd: Path | None) -> list[Path]:
 def _narrow_commands(commands: list[Any], wanted: list[str] | None) -> list[Any]:
     """Keep explicit commands plus skill commands selected as prompt capabilities.
 
-    This intentionally mirrors ``agent.graph.capabilities.resolve_prompt_skills``:
+    This intentionally mirrors ``agent.graph.prompt.capabilities.resolve_prompt_skills``:
     ``*`` selects all loaded skills; otherwise a configured value matches the
     dotted identifier first and then the bare frontmatter name under the common
     dash/underscore fold.  Only skill-as-command entries are narrowed; explicit
@@ -166,9 +166,9 @@ def agent_skill_view_op(agent_id: int, pool: Any) -> AgentSkillViewResult:
     project skills into a later agent's result.  The
     result also carries this runner's enabled MCP names as phase-2 groundwork.
     """
-    from ava.composer_commands import discover_commands
     from ava.mcp_config import load_mcp_config
     from ava.sdk_surface import skill_sources
+    from ava.skills.composer_commands import discover_commands
     from base.packages.plugins.mcp_enabled import read_enabled
 
     cwd, wanted = _agent_skill_view_inputs(pool, agent_id)

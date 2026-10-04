@@ -61,7 +61,7 @@ load at the context tail.
 
 ## Key Dependencies
 - [[agents.ava.okf.md]] — spawn resolves `config_overlay.preset` at the spawn boundary
-- [[ava/docs/skills.ava.okf.md|Skill System]] — name resolution for the two skill combination fields + index-vs-expand mechanism
+- [[ava/skills/docs/skills.ava.okf.md|Skill System]] — name resolution for the two skill combination fields + index-vs-expand mechanism
 
 ## Notes
 When presets ≤ 10, no search/filter is provided—agent code does it itself.

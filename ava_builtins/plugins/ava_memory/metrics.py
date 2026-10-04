@@ -15,9 +15,9 @@ panels use a fixed ``[5m]`` window. Every count wraps in
 ``sum(...)``: the unknown_service family has >500 streams over a day, and an
 unaggregated count_over_time hits Loki's per-query series cap.
 
-Data provenance: ``recall_filter`` (agent/graph/_memory_filter.py) records
+Data provenance: ``recall_filter`` (agent/graph/recall/_memory_filter.py) records
 the passive-recall relevance verdict, while ``passive_recall``
-(agent/graph/memory_recall.py) records its successful search and filter
+(agent/graph/recall/memory_recall.py) records its successful search and filter
 durations. ``recall_filter`` is emitted with an explicit
 ``event="recall_filter"`` and mapped to category='telemetry' (90d retention;
 event_name-category final convention, 2026-08-05, tracker #762 — the metrics

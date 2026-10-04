@@ -30,7 +30,7 @@ This is the agent's "view" at runtime — from the LLM's perspective, what the a
 - [[self.ava.okf.md]] — agent self
 - [[ui.ava.okf.md]] — user interface
 - [[ava_builtins/plugins/ava_memory/docs/memory-api.ava.okf.md]] — long-term memory pool
-- [[ava/docs/skills.ava.okf.md]] — skill registry
+- [[ava/skills/docs/skills.ava.okf.md]] — skill registry
 
 ### System Prompt & Messages
 - [[system-prompt.ava.okf.md]] — how the system prompt is built

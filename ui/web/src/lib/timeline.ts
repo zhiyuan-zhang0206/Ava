@@ -24,7 +24,7 @@ export function isReattachedTimelineContext(item: BackendTimelineItem): boolean 
 /** Item ids of the standing head notes: the contiguous `system_marker` run
  *  right after the current segment's system prompt (`0.0`).
  *
- *  These are the notes `agent/graph/context_notes.py` lays down at window
+ *  These are the notes `agent/graph/prompt/context_notes.py` lays down at window
  *  establishment (exec timeout / timezone / cluster memory / agent id / agent
  *  memory / preloaded skills). The gateway re-attaches them at the head of
  *  every initial window exactly like the prompt itself, so loadOlder cursors

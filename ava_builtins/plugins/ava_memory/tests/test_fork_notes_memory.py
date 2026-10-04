@@ -16,7 +16,7 @@ from langchain_core.messages import (
 from psycopg_pool import AsyncConnectionPool
 
 from agent.graph.claim.node import claim_node
-from agent.graph.context_notes import FRAMEWORK_NOTES
+from agent.graph.prompt.context_notes import FRAMEWORK_NOTES
 from agent.messages import NoteTag
 from agent.state import AgentState
 from agent.tests.claim_support import _config, _insert_inbound_kind, _make_runtime

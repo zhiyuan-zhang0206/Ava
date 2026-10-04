@@ -22,7 +22,7 @@ from langchain_core.messages import AnyMessage, HumanMessage, SystemMessage
 from langgraph.runtime import Runtime
 
 import ava.skills as skills_mod
-from agent.graph.capabilities import (
+from agent.graph.prompt.capabilities import (
     _NEW_SKILLS_MAX_ENTRIES,
     index_drift,
     indexed_skill_identifiers,

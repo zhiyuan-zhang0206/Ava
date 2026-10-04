@@ -1,4 +1,4 @@
-"""Passive memory recall rendering (`agent/graph/memory_recall.py`).
+"""Passive memory recall rendering (`agent/graph/recall/memory_recall.py`).
 
 Recall presents the pool-relative path plus the note's frontmatter `description`
 -- two of the three fields `ava.memory.search` returns. It deliberately omits
@@ -11,7 +11,7 @@ from pathlib import Path
 import httpx
 import pytest
 
-import agent.graph.memory_recall as recall
+import agent.graph.recall.memory_recall as recall
 from agent.messages import inbound_message
 from ava.gateway_client import MemorySearchResult
 from base.agents import IndexerUnavailable

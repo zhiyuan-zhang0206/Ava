@@ -51,4 +51,4 @@ Message formats exchanged between agent, LLM, users, and other agents. `agent/me
 - `agent/messages/__init__.py:security_note_message(...)` — SECURITY note for one injection-scan finding
 - `agent/messages/__init__.py:exec_output_message(...)` — execution output
 - `agent/messages/__init__.py:attach_message(...)` — attached media for the next turn
-- `agent/graph/_chat_inbound.py` — chat inbound → (HumanMessage, scan finding) assembly (multimodal inline)
+- `agent/graph/claim/_chat_inbound.py` — chat inbound → (HumanMessage, scan finding) assembly (multimodal inline)

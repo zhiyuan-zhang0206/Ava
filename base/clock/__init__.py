@@ -101,7 +101,7 @@ class Clock:
         stamps. No zone suffix: the zone is cluster-pinned, so a suffix would be a constant
         repeated on every timestamp (and ambiguous: `%Z` gives PDT/PST across DST, and CST names
         two zones); the agent is told the zone once by the standing context note in
-        `agent/graph/context_notes.py`. This is the single agent-facing timestamp
+        `agent/graph/prompt/context_notes.py`. This is the single agent-facing timestamp
         representation: every producer goes through here.
         """
         local = dt.astimezone(self.explicit_zone())

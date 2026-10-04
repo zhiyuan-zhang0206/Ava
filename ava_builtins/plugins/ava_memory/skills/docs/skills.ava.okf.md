@@ -28,4 +28,4 @@ one-off records; the Arbiter owns their coherence during consolidation.
 ## Notes
 
 - Unlike the two-level pattern of ava_fleet where "plugin name = top-level directory, skills hang under it", the skills root of this plugin **is itself a skill** (with SKILL.md at root): `ava_memory` is directly the root skill name, with sub-skills hanging under it.
-- For the skill mechanism and origin axis (origin=plugin), see [[ava/docs/skills.ava.okf.md|Skill System]]; for a line in the ops skill group overview, see [[ava_builtins/skills/docs/skills.ava.okf.md|skills index]]; for the hook surface of the plugin, see [[ava_builtins/plugins/ava_memory/docs/ava_memory.ava.okf.md|ava_memory plugin]].
+- For the skill mechanism and origin axis (origin=plugin), see [[ava/skills/docs/skills.ava.okf.md|Skill System]]; for a line in the ops skill group overview, see [[ava_builtins/skills/docs/skills.ava.okf.md|skills index]]; for the hook surface of the plugin, see [[ava_builtins/plugins/ava_memory/docs/ava_memory.ava.okf.md|ava_memory plugin]].
