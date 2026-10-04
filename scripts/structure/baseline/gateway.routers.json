@@ -1,8 +1,6 @@
 {
   "ambient_state": {
-    "gateway/routers/fleet_graph.py::ambient-container:_stale_emit_at": 1,
-    "gateway/routers/frontend_telemetry.py::ambient-container:_session_windows": 1,
-    "gateway/routers/pages.py::ambient-container:_page_host_cache": 1
+    "gateway/routers/fleet_graph.py::ambient-container:_stale_emit_at": 1
   },
   "files": {
     "gateway/routers/tests/test_config_api.py": 1004,

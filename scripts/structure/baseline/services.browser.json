@@ -1,18 +1,11 @@
 {
   "ambient_state": {
-    "services/browser/gateway_session.py::ambient-container:_inject_tasks": 1,
-    "services/browser/gateway_session.py::ambient-container:_verify_tasks": 1,
     "services/browser/gateway_session.py::asyncio-task:_spawn_inject": 1,
     "services/browser/gateway_session.py::asyncio-task:_spawn_verify": 1,
     "services/browser/gateway_session.py::asyncio-task:_start_session_maintenance": 1,
     "services/browser/mcp_daemon.py::asyncio-task:_await_death_or_stop": 2,
     "services/browser/mcp_daemon.py::asyncio-task:run": 2,
-    "services/browser/mcp_upstream.py::asyncio-task:_initialize_until_stop_or_timeout": 2,
-    "services/browser/page_lifecycle.py::ambient-container:_AGENT_AFFINITY": 1,
-    "services/browser/page_lifecycle.py::ambient-container:_AGENT_LAST_USE": 1,
-    "services/browser/page_lifecycle.py::ambient-container:_PAGE_TTL_DEADLINES": 1,
-    "services/browser/page_lifecycle.py::ambient-instance:_GENERATIONS": 1,
-    "services/browser/session.py::ambient-container:_last_injected_cookie": 1
+    "services/browser/mcp_upstream.py::asyncio-task:_initialize_until_stop_or_timeout": 2
   },
   "files": {
     "services/browser/tests/test_browser_mcp_daemon.py": 1511

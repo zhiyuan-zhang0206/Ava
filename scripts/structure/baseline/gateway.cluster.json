@@ -1,5 +1,1 @@
-{
-  "ambient_state": {
-    "gateway/cluster/roster_probe.py::ambient-container:_identity_mismatch_active": 1
-  }
-}
+{}

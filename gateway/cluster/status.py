@@ -250,6 +250,7 @@ def _get_services_status() -> ServicesStatus:
 
 
 def _machine_status_from_cluster_status(
+    identity_log: roster_probe.IdentityMismatchLog,
     status: ClusterStatus,
     name: str,
     role: list[str],
@@ -272,7 +273,7 @@ def _machine_status_from_cluster_status(
     URL answering for someone else is that row's expected face — task #4143).
     """
     if status.machine_name != name:
-        roster_probe.log_identity_mismatch(
+        identity_log.log_mismatch(
             name, gateway_url, status.machine_name, stopped=stopped_at is not None
         )
         return _roster_rows.identity_mismatch_status(
@@ -284,7 +285,7 @@ def _machine_status_from_cluster_status(
             stopped_at,
             is_staging=is_staging,
         )
-    roster_probe.note_identity_match(name)
+    identity_log.note_match(name)
     return MachineStatus(
         name=name,
         serve_gateway="gateway" in role,
@@ -313,6 +314,7 @@ def _machine_status_from_cluster_status(
 
 
 def _status_from_snapshot(
+    identity_log: roster_probe.IdentityMismatchLog,
     snapshot: Snapshot,
     name: str,
     role: list[str],
@@ -348,6 +350,7 @@ def _status_from_snapshot(
         )
         return _roster_rows.reachable_unknown_status(*row_args, is_staging=is_staging)
     return _machine_status_from_cluster_status(
+        identity_log,
         status,
         *row_args,
         is_staging=is_staging,
@@ -356,6 +359,7 @@ def _status_from_snapshot(
 
 
 async def _probe_agent_runner(
+    identity_log: roster_probe.IdentityMismatchLog,
     name: str,
     role: list[str],
     gateway_url: str | None,
@@ -410,7 +414,7 @@ async def _probe_agent_runner(
         )
         return _roster_rows.reachable_unknown_status(*row_args, is_staging=is_staging)
     return _machine_status_from_cluster_status(
-        status, *row_args, is_staging=is_staging, observed_at=None
+        identity_log, status, *row_args, is_staging=is_staging, observed_at=None
     )
 
 
@@ -469,6 +473,7 @@ async def gather_cluster_status(
     rows: list[tuple[str, str | None, list[str], datetime, str | None, datetime | None, bool]],
     local_name: str,
     *,
+    identity_log: roster_probe.IdentityMismatchLog,
     snapshots: Mapping[str, Snapshot] | None = None,
 ) -> list[MachineStatus]:
     """The roster of the given machines.
@@ -519,6 +524,7 @@ async def gather_cluster_status(
             if snapshot is not None and snapshot.fresh():
                 machines.append(
                     _status_from_snapshot(
+                        identity_log,
                         snapshot,
                         name,
                         role,
@@ -532,6 +538,7 @@ async def gather_cluster_status(
                 continue
             probe_coros.append(
                 _probe_agent_runner(
+                    identity_log,
                     name,
                     role,
                     url,
@@ -548,7 +555,9 @@ async def gather_cluster_status(
     return sorted(machines, key=lambda m: m.name)
 
 
-def _get_cluster_status(db: Database, cur: Cursor) -> ClusterPanel:
+def _get_cluster_status(
+    db: Database, cur: Cursor, identity_log: roster_probe.IdentityMismatchLog
+) -> ClusterPanel:
     """Assemble the cluster sub-section: SELECT the machines table (paused rows
     excluded — the cluster panel shows only active members; `ava cluster resume`
     brings a row back) and render each machine from the heartbeat liveness
@@ -574,7 +583,11 @@ def _get_cluster_status(db: Database, cur: Cursor) -> ClusterPanel:
     local_name = machine_name()
     snapshots = read_all(cur)
     machines = (
-        asyncio.run(gather_cluster_status(db, rows, local_name, snapshots=snapshots))
+        asyncio.run(
+            gather_cluster_status(
+                db, rows, local_name, identity_log=identity_log, snapshots=snapshots
+            )
+        )
         if rows
         else []
     )
@@ -616,7 +629,9 @@ def _compute_system_status(request: Request) -> SystemStatus:
     # Cluster
     try:
         with request.app.state.db_pool.connection() as conn, conn.cursor() as cur:
-            cluster = _get_cluster_status(request.app.state.db, cur)
+            cluster = _get_cluster_status(
+                request.app.state.db, cur, request.app.state.identity_mismatch_log
+            )
     except Exception:
         _log.exception("GET /api/status: cluster query failed")
         # Fallback: at least surface this host's name/role so the frontend

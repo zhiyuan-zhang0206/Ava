@@ -66,6 +66,7 @@ from base.log import logger
 from base.paths import chrome_mcp_socket
 from services.browser import page_lifecycle
 from services.browser.gateway_session import (
+    GatewaySession,
     _navigates_to_gateway,
     _spawn_inject,
     _spawn_verify,
@@ -80,14 +81,12 @@ from services.browser.mcp_upstream import (
 )
 from services.browser.page_lifecycle import (
     RENEW_PAGE_TOOL,
+    PageRegistry,
     _text_of,
     dead_page_reaper,
-    drop_page_ttl,
     handle_release_agent_page,
-    register_created_page,
     renew_agent_page,
     renew_page_tool_dump,
-    touch_agent_page,
 )
 from services.browser.protocol import Request, Response
 
@@ -208,16 +207,23 @@ class ChromeMcpDaemon:
     Two affinity shapes: requests carrying an `agent_id` resolve their page
     from the per-agent registry (generation-stamped — see page_lifecycle);
     requests without one fall back to the caller-supplied per-connection page.
+
+    ``pages`` and ``gateway`` are built once by ``run()`` and shared by every
+    daemon it creates, so their state survives upstream reconnects.
     """
 
-    def __init__(self, upstream: ClientSession) -> None:
+    def __init__(
+        self, upstream: ClientSession, pages: PageRegistry, gateway: GatewaySession
+    ) -> None:
         self._upstream = upstream
+        self.pages = pages
+        self.gateway = gateway
         self._lock = asyncio.Lock()
         self._tools: list[types.Tool] | None = None
         # Set when an upstream call hits a closed session; run() watches it to
         # trigger a reconnect instead of exiting.
         self.dead = asyncio.Event()
-        self.generation = page_lifecycle.new_generation()  # page ids are per process
+        self.generation = pages.new_generation()  # page ids are per process
 
     async def _call(self, name: str, args: dict[str, Any]) -> types.CallToolResult:
         """Forward to the upstream, turning a dead session into a clean signal:
@@ -290,10 +296,10 @@ class ChromeMcpDaemon:
             # same lock, so a call that lands mid-sweep must serialize with it
             # (either its stamp is visible before the candidate phase, or the
             # page is already closed and the next call cold-starts).
-            touch_agent_page(agent_id)
-            page = page_lifecycle.get_agent_page(agent_id, self.generation)
+            self.pages.touch_agent_page(agent_id)
+            page = self.pages.get_agent_page(agent_id, self.generation)
             result, updated = await self._affinity_call(name, args, page)
-            page_lifecycle.set_agent_page(agent_id, updated, self.generation)
+            self.pages.set_agent_page(agent_id, updated, self.generation)
             return result
 
     async def _repin(self, current_page: int | None) -> int | None:
@@ -324,9 +330,9 @@ class ChromeMcpDaemon:
                 # The auto-created page gets its TTL deadline like an
                 # explicit new_page (the two creation paths are the
                 # whole coverage of the TTL registry).
-                register_created_page(_selected_id(result), self.generation)
+                self.pages.register_created_page(_selected_id(result), self.generation)
                 if verify_after:
-                    _spawn_verify()
+                    _spawn_verify(self.gateway)
             return result, (_selected_id(result) or None)
         return _no_page_result(), None
 
@@ -346,17 +352,17 @@ class ChromeMcpDaemon:
 
         result = await self._call(name, args)
         if verify_after and not result.is_error:
-            _spawn_verify()
+            _spawn_verify(self.gateway)
         if not result.is_error:
             if name == "new_page":
                 # Page created -> TTL slot (see `page_lifecycle`); a listing
                 # that drifted off the parseable shape registers nothing.
-                register_created_page(_selected_id(result), self.generation)
+                self.pages.register_created_page(_selected_id(result), self.generation)
             elif name == "close_page":
                 # A clean close drops the TTL slot with the page; the shared
                 # `_page_id` normalization accepts an integral-float pageId too
                 # (bool is rejected so a JSON `true` can never alias page id 1).
-                drop_page_ttl(_page_id(args.get("pageId")))
+                self.pages.drop_page_ttl(_page_id(args.get("pageId")))
         return result, self._next_page(name, args, result, current_page)
 
     @staticmethod
@@ -575,7 +581,11 @@ async def run() -> None:  # noqa: PLR0915 — upstream watchdog lifecycle keeps 
     )
     logger.info(f"[browser-mcp] listening on {sock} (upstream {browser_url})")
 
-    stop, session_task = await _start_session_maintenance()
+    # Composition root of the shared page/session state: built once, handed to
+    # every ChromeMcpDaemon so it survives upstream reconnects.
+    pages = PageRegistry()
+    gateway = GatewaySession()
+    stop, session_task = await _start_session_maintenance(gateway)
 
     # Tracks the current upstream stack so we can close it before reconnecting.
     current_stack: AsyncExitStack | None = None
@@ -606,7 +616,7 @@ async def run() -> None:  # noqa: PLR0915 — upstream watchdog lifecycle keeps 
             if current_stack is not None:
                 await _bounded_stack_close(current_stack, "previous upstream stack close")
             current_stack = stack
-            daemon_ref[0] = ChromeMcpDaemon(session)
+            daemon_ref[0] = ChromeMcpDaemon(session, pages, gateway)
             watchdog_task = asyncio.create_task(_upstream_watchdog(daemon_ref[0], stop))
             reaper_task = asyncio.create_task(dead_page_reaper(daemon_ref[0], stop))
             reconnect_delay = _RECONNECT_INITIAL_DELAY_S
@@ -616,7 +626,7 @@ async def run() -> None:  # noqa: PLR0915 — upstream watchdog lifecycle keeps 
             # right away (the periodic loop covers expiry; this covers the
             # fresh-profile cold start and the post-restart gap without
             # waiting for the next tick).
-            _spawn_inject()
+            _spawn_inject(gateway)
 
             # Wait for upstream death or stop signal.
             await _await_death_or_stop(daemon_ref[0], stop)

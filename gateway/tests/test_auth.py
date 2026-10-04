@@ -25,7 +25,6 @@ from fastapi import Request
 from fastapi.testclient import TestClient
 from starlette.middleware import Middleware
 
-import gateway.app as gateway_app
 from base import config
 from base.cluster.auth import (
     bearer_header,
@@ -118,7 +117,6 @@ def _patch_secret(monkeypatch: pytest.MonkeyPatch) -> None:
     """
     monkeypatch.setattr(config.settings.gateway, "auth_middleware_enabled", True)
     monkeypatch.setattr(config.settings.data_plane, "cluster_secret", _SECRET)
-    getattr(gateway_app, "_session_last_touch", {}).clear()
 
 
 # ── Gateway security settings ─────────────────────────────────────────

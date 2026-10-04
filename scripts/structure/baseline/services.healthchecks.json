@@ -1,6 +1,5 @@
 {
   "ambient_state": {
-    "services/healthchecks/lgtm.py::ambient-instance:_local_http": 1,
     "services/healthchecks/permissions_helper.py::global-rebind:_reported_unhealthy": 1
   }
 }

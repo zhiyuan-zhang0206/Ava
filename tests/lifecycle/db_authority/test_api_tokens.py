@@ -221,9 +221,12 @@ def test_a_session_records_which_credential_minted_it(gateway: Path) -> None:
         client.cookies.clear()
         machine = client.post("/api/auth/login", json={"password": runner}).cookies[cookie_name()]
         sessions = client.app.state.sessions  # type: ignore[attr-defined]
-        assert request_principal.current_session_fact(sessions, human, _HUMAN) == "user_session"
+        keys: request_principal.SessionKeys = client.app.state.session_keys  # type: ignore[attr-defined]
         assert (
-            request_principal.current_session_fact(sessions, machine, _HUMAN)
+            request_principal.current_session_fact(sessions, keys, human, _HUMAN) == "user_session"
+        )
+        assert (
+            request_principal.current_session_fact(sessions, keys, machine, _HUMAN)
             == "machine_session:runner"
         )
 

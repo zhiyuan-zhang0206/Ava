@@ -1,5 +1,1 @@
-{
-  "ambient_state": {
-    "services/labeler/daemon.py::ambient-container:_BACKOFF": 1
-  }
-}
+{}

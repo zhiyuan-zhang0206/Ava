@@ -36,13 +36,6 @@ from base.cluster.auth import MANAGED_BROWSER_USER_AGENT, cookie_name
 _HTTP_TIMEOUT_S = 5.0
 _WS_TIMEOUT_S = 10.0
 
-# The cookie most recently handed to Chrome, as (name, value). The daemon's
-# early-refresh path checks it against the gateway after a gateway-URL
-# navigation, so a revoked or expired managed session heals immediately instead
-# of waiting out the next scheduled refresh tick. A one-element list keeps the
-# slot mutable without a `global` statement in the injector.
-_last_injected_cookie: list[tuple[str, str] | None] = [None]
-
 
 async def gateway_session_login(gateway_url: str, secret: str) -> tuple[str, str, int]:
     """Log in and return ``(cookie_name, value, expires_unix)``.
@@ -100,11 +93,13 @@ async def _cdp_call(
     return resp.get("result") or {}
 
 
-async def inject_session_cookie(cdp_port: int, gateway_url: str, secret: str) -> None:
+async def inject_session_cookie(cdp_port: int, gateway_url: str, secret: str) -> tuple[str, str]:
     """Log in to the gateway and set its session cookie in managed Chrome.
 
     The cookie is host-only for ``gateway_url`` with the same flags the login
-    flow sets (HttpOnly, SameSite=Lax, Path=/, expiry from Max-Age).
+    flow sets (HttpOnly, SameSite=Lax, Path=/, expiry from Max-Age). Returns the
+    injected ``(name, value)`` so the caller can later check it against the
+    gateway.
 
     Raises RuntimeError when Chrome is unreachable or rejects the cookie.
     """
@@ -141,12 +136,7 @@ async def inject_session_cookie(cdp_port: int, gateway_url: str, secret: str) ->
 
     if not result.get("success"):
         raise RuntimeError(f"Chrome rejected the gateway session cookie: {result}")
-    _last_injected_cookie[0] = (name, value)
-
-
-def last_injected_cookie() -> tuple[str, str] | None:
-    """The ``(name, value)`` of the most recently injected gateway cookie, or None."""
-    return _last_injected_cookie[0]
+    return name, value
 
 
 async def gateway_session_is_valid(gateway_url: str, cookie_value: str) -> bool:

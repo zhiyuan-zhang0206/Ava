@@ -14,8 +14,7 @@
     "ava/files.py::import-time-read:_home_at_load": 1,
     "ava/security.py::ambient-container:_pending_findings": 1,
     "ava/security.py::global-rebind:_pending_findings": 1,
-    "ava/skills.py::ambient-container:_recorded_skill_invocations": 1,
-    "ava/web.py::ambient-container:_GATED_SITE_SKILLS": 1
+    "ava/skills.py::ambient-container:_recorded_skill_invocations": 1
   },
   "directories": {
     "ava": 21

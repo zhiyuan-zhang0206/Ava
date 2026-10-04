@@ -23,7 +23,12 @@ from base.cluster.auth import (
 from base.cluster.rate_limit import login_limiter
 from base.config import settings
 from gateway.auth.cors import session_cookie_secure
-from gateway.auth.request_principal import current_session_fact, login_mint, session_mints
+from gateway.auth.request_principal import (
+    SessionKeys,
+    current_session_fact,
+    login_mint,
+    session_mints,
+)
 from gateway.auth.session_store import (
     list_sessions,
     minted_session_id,
@@ -103,7 +108,7 @@ async def login(body: LoginRequest, request: Request) -> JSONResponse:
             retryable=False,
         )
 
-    mint = await asyncio.to_thread(login_mint, password, secret)
+    mint = await asyncio.to_thread(login_mint, request.app.state.session_keys, password, secret)
     if mint is None:
         login_limiter.record_failure(ip)
         return error_response(
@@ -164,17 +169,18 @@ async def check(request: Request) -> JSONResponse:
     fact = await asyncio.to_thread(
         current_session_fact,
         request.app.state.sessions,
+        request.app.state.session_keys,
         token,
         settings.data_plane.cluster_secret,
     )
     return JSONResponse(content={"authenticated": fact is not None})
 
 
-def _sessions_that_authenticate(pool: Any, secret: str) -> list[dict[str, Any]]:
+def _sessions_that_authenticate(pool: Any, keys: SessionKeys, secret: str) -> list[dict[str, Any]]:
     """Unrevoked, unexpired sessions whose mint is still admitted: the rows
     `current_session_fact` would accept. A rotated secret's sessions and ids without
     a mint are dead and omitted."""
-    admitted = session_mints(secret)
+    admitted = session_mints(keys, secret)
     return [row for row in list_sessions(pool) if session_mint(row["id"]) in admitted]
 
 
@@ -195,6 +201,7 @@ async def sessions(request: Request) -> list[dict[str, Any]]:
     rows = await asyncio.to_thread(
         _sessions_that_authenticate,
         request.app.state.db_pool,
+        request.app.state.session_keys,
         settings.data_plane.cluster_secret,
     )
     result: list[dict[str, Any]] = []

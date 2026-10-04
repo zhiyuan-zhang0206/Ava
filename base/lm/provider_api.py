@@ -189,23 +189,9 @@ class _ProviderRegistry:
     def __init__(self) -> None:
         self.bindings: dict[str, ProviderBinding] = {}
         self._reserved_prefixes: set[str] = set()
-        self._invalidators: list[Callable[[], None]] = []
 
     def reserve_core_prefixes(self, prefixes: set[str]) -> None:
         self._reserved_prefixes = prefixes
-
-    def register_invalidator(self, fn: Callable[[], None]) -> None:
-        """Register a callback run after every successful plugin registration.
-
-        Consumers that cache a view derived from the registration state (e.g.
-        ``base/lm/concurrency.known_provider_keys``) hook their cache clear
-        here so a plugin provider becomes visible without a second mechanism.
-        """
-        self._invalidators.append(fn)
-
-    def _invalidate(self) -> None:
-        for fn in self._invalidators:
-            fn()
 
     def ensure_available(self, binding: ProviderBinding, *, plugin: str) -> None:
         """Reject a binding collision before its companion data mutates."""
@@ -214,7 +200,6 @@ class _ProviderRegistry:
     def add(self, binding: ProviderBinding, *, plugin: str) -> None:
         self.ensure_available(binding, plugin=plugin)
         self.bindings[binding.prefix] = binding
-        self._invalidate()
 
 
 REGISTRY = _ProviderRegistry()

@@ -88,73 +88,74 @@ _BACKOFF_CAP_S = 300.0
 #
 # 12 is ~28 minutes of retrying (2+4+8+...+256, then four waits at the cap), so
 # an ordinary provider outage is still ridden out rather than retired through.
-# Per-process like the rest of _BACKOFF: a daemon restart clears it and every
+# Per-process like the rest of the backoff state: a daemon restart clears it and every
 # retired agent gets one more chance.
 _GIVE_UP_AFTER_FAILURES = 12
-# agent_id -> (consecutive_failures, monotonic deadline before next retry)
-_BACKOFF: dict[int, tuple[int, float]] = {}
 
 
-def _is_retired(tid: int) -> bool:
-    """Whether an agent has failed enough consecutive times to be given up on."""
-    return _BACKOFF.get(tid, (0, 0.0))[0] >= _GIVE_UP_AFTER_FAILURES
+class _Backoff:
+    """The per-agent failure state of one dispatch loop: `agent_id -> (consecutive_failures,
+    monotonic deadline before next retry)`."""
 
+    def __init__(self) -> None:
+        self._entries: dict[int, tuple[int, float]] = {}
 
-def _cooling_ids(now: float) -> list[int]:
-    """agent ids to keep out of the poll SELECT at `now` (a `time.monotonic`
-    reading): those still inside their backoff window, plus those retired
-    outright. Opportunistically drops entries whose retry was due more than one
-    full cap-window ago: an expired entry that is still label-eligible would have
-    been re-selected and cleared/re-failed by now, so a long-stale one means the
-    agent was labeled out of band (or removed) and its backoff state can go.
+    def is_retired(self, tid: int) -> bool:
+        """Whether an agent has failed enough consecutive times to be given up on."""
+        return self._entries.get(tid, (0, 0.0))[0] >= _GIVE_UP_AFTER_FAILURES
 
-    A retired entry is deliberately never pruned — pruning it would readmit the
-    agent to the SELECT and restart the whole attempt cycle, which is the
-    unbounded loop this is here to stop. The retained entries are bounded by the
-    number of permanently-unlabelable agents seen in one process lifetime."""
-    cooling: list[int] = []
-    stale: list[int] = []
-    for tid, (fails, deadline) in _BACKOFF.items():
-        if fails >= _GIVE_UP_AFTER_FAILURES or now < deadline:
-            cooling.append(tid)
-        elif deadline < now - _BACKOFF_CAP_S:
-            stale.append(tid)
-    for tid in stale:
-        del _BACKOFF[tid]
-    return cooling
+    def cooling_ids(self, now: float) -> list[int]:
+        """agent ids to keep out of the poll SELECT at `now` (a `time.monotonic`
+        reading): those still inside their backoff window, plus those retired
+        outright. Opportunistically drops entries whose retry was due more than one
+        full cap-window ago: an expired entry that is still label-eligible would have
+        been re-selected and cleared/re-failed by now, so a long-stale one means the
+        agent was labeled out of band (or removed) and its backoff state can go.
 
+        A retired entry is deliberately never pruned — pruning it would readmit the
+        agent to the SELECT and restart the whole attempt cycle, which is the
+        unbounded loop this is here to stop. The retained entries are bounded by the
+        number of permanently-unlabelable agents seen in one process lifetime."""
+        cooling: list[int] = []
+        stale: list[int] = []
+        for tid, (fails, deadline) in self._entries.items():
+            if fails >= _GIVE_UP_AFTER_FAILURES or now < deadline:
+                cooling.append(tid)
+            elif deadline < now - _BACKOFF_CAP_S:
+                stale.append(tid)
+        for tid in stale:
+            del self._entries[tid]
+        return cooling
 
-def _record_failure(tid: int, now: float) -> float:
-    """Bump an agent's consecutive-failure count and push its next retry out
-    exponentially (2s, 4s, 8s, ... capped at _BACKOFF_CAP_S). Returns the delay
-    applied, for logging — meaningless once the agent is retired, which the
-    caller checks with `_is_retired`."""
-    fails = _BACKOFF.get(tid, (0, 0.0))[0] + 1
-    delay = min(_BACKOFF_BASE_S * 2 ** (fails - 1), _BACKOFF_CAP_S)
-    _BACKOFF[tid] = (fails, now + delay)
-    if fails == _GIVE_UP_AFTER_FAILURES:
-        # Terminal for this process — emitted once, on the crossing, so the
-        # event counts agents given up on rather than retry attempts.
-        logger.error(
-            "label generation retired for agent {agent_id} after {failures} consecutive failures",
-            event="label_generate_retired",
-            agent_id=tid,
-            failures=fails,
-        )
-    return delay
+    def record_failure(self, tid: int, now: float) -> float:
+        """Bump an agent's consecutive-failure count and push its next retry out
+        exponentially (2s, 4s, 8s, ... capped at _BACKOFF_CAP_S). Returns the delay
+        applied, for logging — meaningless once the agent is retired, which the
+        caller checks with `is_retired`."""
+        fails = self._entries.get(tid, (0, 0.0))[0] + 1
+        delay = min(_BACKOFF_BASE_S * 2 ** (fails - 1), _BACKOFF_CAP_S)
+        self._entries[tid] = (fails, now + delay)
+        if fails == _GIVE_UP_AFTER_FAILURES:
+            # Terminal for this process — emitted once, on the crossing, so the
+            # event counts agents given up on rather than retry attempts.
+            logger.error(
+                "label generation retired for agent {agent_id} after {failures} consecutive failures",
+                event="label_generate_retired",
+                agent_id=tid,
+                failures=fails,
+            )
+        return delay
 
+    def retry_note(self, tid: int, delay: float) -> str:
+        """The retry half of a failure log line — the promise must match reality, so
+        a retired agent says so rather than naming a retry that will never come."""
+        if self.is_retired(tid):
+            return f"retired after {_GIVE_UP_AFTER_FAILURES} consecutive failures, label stays NULL"
+        return f"backoff: next retry in >={delay:.0f}s"
 
-def _retry_note(tid: int, delay: float) -> str:
-    """The retry half of a failure log line — the promise must match reality, so
-    a retired agent says so rather than naming a retry that will never come."""
-    if _is_retired(tid):
-        return f"retired after {_GIVE_UP_AFTER_FAILURES} consecutive failures, label stays NULL"
-    return f"backoff: next retry in >={delay:.0f}s"
-
-
-def _clear_backoff(tid: int) -> None:
-    """Drop an agent's backoff state after it labels successfully."""
-    _BACKOFF.pop(tid, None)
+    def clear(self, tid: int) -> None:
+        """Drop an agent's backoff state after it labels successfully."""
+        self._entries.pop(tid, None)
 
 
 # The inbound condition a label prompt may come from: a chat peer message,
@@ -241,6 +242,7 @@ async def _dispatch_loop(
     are auto-skipped.
     """
     _log.info("[labeler] daemon started, pid=%s", os.getpid())
+    backoff = _Backoff()
     while True:
         liveness.beat()
         try:
@@ -248,7 +250,7 @@ async def _dispatch_loop(
             if admission.quiesced():
                 continue
             now = time.monotonic()
-            cooling = _cooling_ids(now)
+            cooling = backoff.cooling_ids(now)
             with pool.connection() as conn, conn.cursor() as cur:
                 rows = _select_unlabeled(cur, cooling)
             for tid, prompt in rows:
@@ -261,12 +263,12 @@ async def _dispatch_loop(
                     # Defensive: generate_label_async returns False on LLM
                     # failures instead of raising; an escaping exception is
                     # the DB CAS / publish path and is also a failure.
-                    delay = _record_failure(tid, now)
+                    delay = backoff.record_failure(tid, now)
                     _log.error(
                         "[labeler] generate label for thread %s failed: %r (%s)",
                         tid,
                         exc,
-                        _retry_note(tid, delay),
+                        backoff.retry_note(tid, delay),
                     )
                 else:
                     if result is False:
@@ -274,14 +276,14 @@ async def _dispatch_loop(
                         # RETURN value, not an exception: generate_label_async
                         # swallows LLM errors, and the old except-keyed
                         # backoff never fired (audit round 2, P1).
-                        delay = _record_failure(tid, now)
+                        delay = backoff.record_failure(tid, now)
                         _log.error(
                             "[labeler] generate label for thread %s failed (%s)",
                             tid,
-                            _retry_note(tid, delay),
+                            backoff.retry_note(tid, delay),
                         )
                     else:
-                        _clear_backoff(tid)
+                        backoff.clear(tid)
         except asyncio.CancelledError:
             raise
         except psycopg.ProgrammingError:
