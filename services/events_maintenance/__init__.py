@@ -8,8 +8,8 @@ checkpoint table sizes. The checkpoint trim opt-in was retired on 2026-09-30
 under the never-delete ruling; the retained reaper implementation is not
 scheduled. A five-minute resolution slice reads the event classes in `telemetry_events`,
 combines them with `event_dismissals`, and publishes unresolved + dismissed
-warning/error gauges (`services.events_maintenance.resolution`); the gateway
-stats dashboard reuses the same class arithmetic for its selected window. The PG `events` archive
+warning/error gauges (`services.events_maintenance.resolution`); the gateway's alert-class
+surface reads the same classes and dismissal match for its selected window. The PG `events` archive
 maintenance slices (partitions / retention / table retention / reindex) were
 removed with the task #1281/#1823 cleanup — the table was dropped.
 See `services.events_maintenance.daemon` for the poll loops.

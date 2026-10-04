@@ -43,7 +43,7 @@ are mounted. `hours` is the aggregation window, whitelisted to
 |---|---|
 | `live_count`, lifetime event estimate | Postgres metadata |
 | windowed tokens, cost, turn duration, warning/error counts | `telemetry_events` (Postgres) |
-| warning/error `*_dismissed` / `*_net` split | active `event_dismissals` rows (Postgres) applied to the same window's class counts |
+| warning/error event totals and `alert_classes_active` / `alert_classes_dismissed` | the window's classes (below) and the active `event_dismissals` rows (Postgres) that cancel them |
 | `plugin_stats` (plugin-declared cards) | `plugin_stats` rows (`base/packages/plugins/stats.py`), joined by the console against the `contributions.ui.stats` declarations; NOT windowed — a plugin value is a point in time |
 
 Every request computes its window in one pooled connection with an 8-second
@@ -51,18 +51,29 @@ statement timeout (a timeout is a retriable 503): one scan of the window's
 `llm_usage` and `turn_end` rows (`gateway/cluster/_stats_events.py`) gives the
 token, cost and turn sums, and one grouped count of the warning, error and
 critical rows (served by the partial index `telemetry_events_anomaly_ts`) gives
-the event classes. The window is the requested one (7 days included), so
-`applied_window_hours` equals `window_hours`. The warning/error section applies the
-events-maintenance daemon's class arithmetic (`resolution.level_splits`) over the
-SELECTED window (task #1935): events
-whose class has an active dismissal in `event_dismissals` — an exact
-`(category, level, event_name, source, process)` match, or a wildcard row
-with an empty `process` (task #4329 B5) — land in `*_dismissed`, the rest in
-`*_net`, and dismissed + net == the raw total —
-the same cancellation the daemon's fixed-six-hour Grafana gauges apply. The
-`llm_usage.cost_usd` sum is the usage-time quote snapshot, not historical tokens
-repriced against today's registry. Every read is scoped to the current
-home-derived cluster label (rows with no label included).
+the alert classes. The window is the requested one (7 days included), so
+`applied_window_hours` equals `window_hours`. The `llm_usage.cost_usd` sum is the
+usage-time quote snapshot, not historical tokens repriced against today's registry.
+Every read is scoped to the current home-derived cluster label (rows with no label
+included).
+
+### Alert classes — `GET /api/stats/alert-classes?hours=` and `.../samples`
+
+The sidebar's Warnings / Errors card counts **classes**, not events (19,629 events can
+be a handful of classes): one class per `(level, event_name, source, process)` of the
+window, with its event count, first and last occurrence and the `dismissal_id` of the
+active `event_dismissals` row that cancels it (None = active). The dismissal match is
+`resolution.matching_dismissal` — the daemon's: the emission category is ignored, an
+exact `process` row or a wildcard row (`process = ''`, task #4329 B5) cancels the class,
+and the exact row wins when both match. A reopened or per-agent row cancels nothing. The
+dashboard's `alert_classes_active` / `alert_classes_dismissed` count the same rows
+(`warnings` / `errors` stay raw event totals, critical folded into errors). The list is
+most-frequent-first, capped at 200 rows (`total_classes` / `total_events` are uncapped).
+`/samples?level&event_name&source&process&hours` returns the newest five events of one
+class (`attributes.msg` as `message`, plus the full attributes); it is read only when a
+row is opened. Dismiss and reopen are the existing `POST /api/event-resolutions[/{id}/reopen]`
+calls, made per class from the card. Both reads run under an 8-second statement timeout
+(a timeout is a retriable 503).
 
 `GET /api/agents/{id}/inspect/statistics` owns window-dependent cost, stats,
 TPS and activity. It reads one repeatable-read Postgres snapshot over persisted

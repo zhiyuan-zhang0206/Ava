@@ -212,10 +212,8 @@ def test_plugin_quota_rows_wrap_inside_statistics_popover(
                 "avg_turn_seconds": None,
                 "warnings": 0,
                 "errors": 0,
-                "warnings_dismissed": 0,
-                "errors_dismissed": 0,
-                "warnings_net": 0,
-                "errors_net": 0,
+                "alert_classes_active": 0,
+                "alert_classes_dismissed": 0,
                 "total_events": 0,
                 "plugin_stats": [
                     {

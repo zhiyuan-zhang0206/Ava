@@ -49,7 +49,7 @@ Every route module is a FastAPI `APIRouter` `include_router`-mounted to `/api/*`
 [[gateway/routers/docs/frontend-ui-data.ava.okf.md]]
 
 ### Ops & system
-- **status** (`/api/health`, `/api/status`, `/api/stats/dashboard`) — liveness + status panel + dashboard; public health exposes process `started_at` and boot-frozen `sha` for rollout observers ([[gateway/cluster/docs/ops-surfaces.ava.okf.md|dashboard contract]])
+- **status** + **alert_classes** (`/api/health`, `/api/status`, `/api/stats/dashboard`, `/api/stats/alert-classes[/samples]`) — liveness + status panel + dashboard + the card's warning/error classes; public health exposes process `started_at` and boot-frozen `sha` for rollout observers ([[gateway/cluster/docs/ops-surfaces.ava.okf.md|dashboard contract]])
 - **metrics** (`/api/metrics`, `/api/metrics/agents`) — aggregated metrics over `telemetry_events`
 - **schedules** (`/api/schedules/*`) — scheduled task CRUD + start/stop/restart
 - **shell** (`/api/agents/{id}/shell/{sid}`) — terminal session monitor (session backend proxy)

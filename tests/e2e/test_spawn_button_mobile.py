@@ -83,6 +83,8 @@ _API_STUBS: dict[str, object] = {
         "avg_turn_seconds": None,
         "warnings": 0,
         "errors": 0,
+        "alert_classes_active": 0,
+        "alert_classes_dismissed": 0,
         "total_events": 0,
     },
     "/api/system": {"cpu_percent": 0, "mem_percent": 0, "disk_percent": 0},
