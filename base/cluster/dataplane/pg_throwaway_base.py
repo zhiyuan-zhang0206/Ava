@@ -10,8 +10,9 @@ keep that module under its line ceiling (the same reason
 - The **disk fallback base**: `/var/tmp` where it exists (on the data volume,
   unlike the RAM-sized tmpfs), else the OS temp dir.
 - The **selection policy** (`select_throwaway_base`): the operator override wins
-  outright; a caller that declares its required capacity gets the disk fallback
-  when the platform default cannot hold it, and a loud refusal when no base can.
+  outright; a caller that declares its required capacity takes the disk fallback
+  itself — never the RAM-sized platform default — and the selection refuses
+  loudly when the disk fallback cannot hold the declared footprint.
 
 Why the capacity step exists (2026-09-14 WSL incident): the throwaway cluster
 defaulted to /dev/shm — 7.8 GiB on that host — while a full-restore drill of a
@@ -19,7 +20,11 @@ defaulted to /dev/shm — 7.8 GiB on that host — while a full-restore drill of
 mid-restore when the cluster outgrew the tmpfs; the drill surfaced only
 `PQputCopyData: server closed the connection` and the host a dmesg signal 6. A
 caller that knows its footprint (the restore drill) now asks for a base with room
-before the cluster is created.
+before the cluster is created. A declared footprint is still a floor to clear,
+not a size guarantee (the restore drill's `_SCRATCH_SPACE_FACTOR`): on
+2026-10-05 a 15.4 GiB estimate cleared /dev/shm's 16 GiB while the actual restore
+did not — the same death mid-restore — so a capacity-declaring caller now takes
+the durable base outright instead of betting the estimate on a RAM-sized one.
 
 The override channel is the host-scoped `AVA_PG_THROWAWAY_BASE` settings field
 (`settings.data_plane.pg_throwaway_base`), imported only when a base is selected:
@@ -108,8 +113,15 @@ def select_throwaway_base(required_bytes: int | None = None) -> Path:
 
     Order: the configured override (`AVA_PG_THROWAWAY_BASE`) when set — used as-is,
     with a warning when `required_bytes` clearly exceeds its free space; otherwise
-    the platform default (`default_base`); otherwise, when `required_bytes` is
-    given and the default cannot hold it, the disk fallback (`disk_fallback_base`).
+    the caller's base:
+
+    - no declared capacity: the platform default, unchanged;
+    - a declared capacity (every caller that passes `required_bytes` — the restore
+      drills): the disk fallback (`disk_fallback_base`), or a loud refusal when it
+      cannot hold the requirement — never the RAM-sized platform default, because
+      a declared footprint is a floor to clear, not a size guarantee: on
+      2026-10-05 a 15.4 GiB estimate cleared /dev/shm's 16 GiB and the restore
+      still died mid-way.
 
     `required_bytes` is the caller's estimate of the cluster's peak footprint on its
     base — the restore drill passes a multiple of the artifact it restores. None
@@ -118,9 +130,10 @@ def select_throwaway_base(required_bytes: int | None = None) -> Path:
 
     Raises:
         RuntimeError: the configured override is not an existing directory.
-        InsufficientThrowawaySpaceError: `required_bytes` is given and no base
-            offers it. Failing here names each base and its free space instead of
-            dying mid-restore when the data outgrows its base (2026-09-14 and 2026-09-19 WSL).
+        InsufficientThrowawaySpaceError: `required_bytes` is given and the base
+            the caller may take cannot hold it. Failing here names each base's
+            free space instead of dying mid-restore when the data outgrows its
+            base (2026-09-14, 2026-09-19, 2026-10-05).
     """
     override = configured_base()
     if override is not None:
@@ -137,24 +150,22 @@ def select_throwaway_base(required_bytes: int | None = None) -> Path:
             )
         return override
 
-    default = default_base()
-    if required_bytes is None or free_bytes(default) >= required_bytes:
-        return default
+    if required_bytes is None:
+        return default_base()
 
+    # A declared footprint is a floor to clear, not a size guarantee, so the
+    # durable base is the only safe pick — never the RAM-sized default.
+    default = default_base()
     fallback = disk_fallback_base()
-    if fallback != default and free_bytes(fallback) >= required_bytes:
-        logger.info(
-            f"throwaway base demoted from {default} to {fallback}: "
-            f"{format_bytes(required_bytes)} requested, "
-            f"{format_bytes(free_bytes(default))} free on {default}"
-        )
-        return fallback
+    durable = fallback if fallback != default else default
+    if free_bytes(durable) >= required_bytes:
+        return durable
 
     offered = ", ".join(
         f"{path} ({format_bytes(free_bytes(path))} free)"
         for path in dict.fromkeys((default, fallback))
     )
     raise InsufficientThrowawaySpaceError(
-        f"throwaway Postgres needs {format_bytes(required_bytes)} free — {offered}. "
-        "Free space, or point AVA_PG_THROWAWAY_BASE at a larger volume."
+        f"throwaway Postgres needs {format_bytes(required_bytes)} free on a durable base — "
+        f"{offered}. Free space, or point AVA_PG_THROWAWAY_BASE at a larger volume."
     )
