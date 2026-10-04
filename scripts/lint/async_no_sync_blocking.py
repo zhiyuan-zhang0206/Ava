@@ -75,6 +75,7 @@ _LIBRARY_BLOCKING_NAMES = {
 _REPO_BLOCKING_HELPERS = {
     # DB helpers (sync psycopg on a fresh connection)
     "insert_inbound_message",
+    "insert_inbound_message_in_transaction",
     "publish_agent_updated_sync",
     "agent_exists",
     "get_agent_status",

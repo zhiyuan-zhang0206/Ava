@@ -49,3 +49,8 @@ it closed and only logged them.
   logs it; the owner finds the session gone without a reason, as before this change.
 - A machine's `.env` must be readable by the child as by any `python -m` process: it needs the
   machine name and the database it is told about in its environment.
+
+Partly superseded by: [A crash-notice batch is staged on disk and re-sent, not lost to the
+child's time limit](2026-10-04-pty-crash-notices-staged-retry.md) — the child's batch is
+staged before it runs and a batch it does not finish is re-sent at the next start, replacing
+the "nothing retries" consequence above.

@@ -210,12 +210,14 @@ def _record_close_notices(
     """Write one closure notice per closed busy session to the database (issue #2044).
 
     Each entry names the session's shell and the processes of it that outlived
-    the SIGKILL. The write is one short connection, made here while the data
-    plane is still up and closed before this returns (`pty_close_notices`). An
-    idle session or one that is not an agent shell yields no notice, and no
-    notice means no connection. A notice that cannot be written is loud on
-    stderr, with the text its owner would have read, but never fails the
-    closure — retrying the whole stop would not restore the resources it closes.
+    the SIGKILL. The write is one short connection and one transaction, made
+    here while the data plane is still up and closed before this returns
+    (`pty_close_notices`): the batch commits or rolls back as one, so a failed
+    write leaves nothing behind to skip a later re-send. An idle session or one
+    that is not an agent shell yields no notice, and no notice means no
+    connection. A batch that cannot be written is loud on stderr, with the text
+    its owner would have read, but never fails the closure — retrying the whole
+    stop would not restore the resources it closes.
     """
     notices = pty_close_notices.notices_for(
         closed, reason=notice.reason, operation=notice.operation, acquired_at=notice.acquired_at
