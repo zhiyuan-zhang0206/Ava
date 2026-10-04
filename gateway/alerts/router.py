@@ -45,8 +45,10 @@ from base.db.transaction import write_transaction
 from base.telemetry.alerts import (
     AlertKey,
     display_language,
+    normalize_status,
+    notify_group_text,
     notify_im,
-    notify_text,
+    parse_alertname,
     stamp_notified,
     upsert_alert,
 )
@@ -114,7 +116,9 @@ def ingest_alerts(body: AlertWebhookPayload, request: Request) -> AlertIngestRes
 
     inserted = updated = notified = 0
     rows: list[dict[str, Any]] = []
-    pending: list[tuple[AlertKey, str]] = []  # (key, text)
+    # One IM per rule and status in this POST (Grafana's notification group): instances still
+    # get their own row, but the user hears one message with a count.
+    pending: dict[tuple[str, str], list[tuple[AlertKey, dict[str, Any]]]] = {}
 
     with write_transaction(request.app.state.db_pool) as conn:
         lang = display_language(conn)
@@ -128,17 +132,22 @@ def ingest_alerts(body: AlertWebhookPayload, request: Request) -> AlertIngestRes
                 updated += 1
             rows.append(row)
             if should_notify:
-                pending.append((key, notify_text(alert, lang)))
+                group = (
+                    normalize_status(str(alert.get("status") or "")),
+                    parse_alertname(alert.get("labels") or {}),
+                )
+                pending.setdefault(group, []).append((key, alert))
         conn.commit()
 
     publish_alert_rows(request.app.state.bus, rows)
 
     if pending:
         with write_transaction(request.app.state.db_pool) as conn:
-            for key, text in pending:
-                if notify_im(text):
-                    notified += 1
-                    stamp_notified(conn, [key])
+            for members in pending.values():
+                keys = [key for key, _ in members]
+                if notify_im(notify_group_text([alert for _, alert in members], lang)):
+                    notified += len(keys)
+                    stamp_notified(conn, keys)
             conn.commit()
 
     return AlertIngestResult(

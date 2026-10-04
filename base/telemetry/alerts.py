@@ -42,6 +42,8 @@ from base.cluster.machine import GatewayApiTokenMissing, gateway_auth_headers
 from base.config import settings
 from base.daemon.endpoints import ServiceEndpoints
 from base.telemetry.alerts_copy import (
+    ALERT_GROUP_COUNT,
+    ALERT_GROUP_MORE,
     ALERT_HEAD,
     ALERT_JUMP_LINK,
     ALERT_LANGUAGE_DEFAULT,
@@ -67,6 +69,9 @@ _SEVERITY_RANK = {"warning": 0, "error": 1, "critical": 2}
 # Alertmanager's status vocabulary maps onto the store's: the store has only
 # unresolved / resolved (no ack, no escalation — user ruling).
 _STATUS_MAP = {"firing": "unresolved", "resolved": "resolved"}
+
+# Instances a grouped message names before it says how many more there are.
+_GROUP_LISTED = 3
 
 _IM_GATE_LABEL = "notify_im"
 _IM_GATE_VALUE = "false"
@@ -459,3 +464,39 @@ def notify_text(alert: dict[str, Any], lang: str | None = None) -> str:
     if base_url:
         lines.append(ALERT_JUMP_LINK.format(url=base_url))
     return "\n".join(lines)
+
+
+def notify_group_text(alerts: list[dict[str, Any]], lang: str | None = None) -> str:
+    """One IM message for the instances of one rule that a single webhook POST carries.
+
+    Grafana groups a rule's instances into one notification (`group_by alertname`), so the
+    user hears one message per group, not one per instance: a lone instance keeps the
+    ``notify_text`` format; several share one head (the highest severity, the alertname and
+    ``xN``), list the first few summaries and count the rest. The store still holds one row
+    per instance. Instances are expected to share their alertname and status."""
+
+    if len(alerts) == 1:
+        return notify_text(alerts[0], lang)
+    lang = lang if lang in ALERT_LANGUAGES else ALERT_LANGUAGE_DEFAULT
+    lines = [_group_head(alerts, lang)]
+    lines += [f"- {s[:200]}" for a in alerts[:_GROUP_LISTED] if (s := _summary(a))]
+    if len(alerts) > _GROUP_LISTED:
+        lines.append(ALERT_GROUP_MORE[lang].format(n=len(alerts) - _GROUP_LISTED))
+    starts = [t for a in alerts if (t := parse_ts(a.get("starts_at") or "")) is not None]
+    if starts:
+        lines.append(ALERT_TRIGGERED_AT[lang].format(time=format_local(min(starts))))
+    if base_url := frontend_base_url():
+        lines.append(ALERT_JUMP_LINK.format(url=base_url))
+    return "\n".join(lines)
+
+
+def _group_head(alerts: list[dict[str, Any]], lang: str) -> str:
+    """The grouped message's head: highest severity, the alertname and the count."""
+
+    labels_of = [cast("dict[str, str]", a.get("labels") or {}) for a in alerts]
+    severity = max((parse_severity(lab) for lab in labels_of), key=_SEVERITY_RANK.__getitem__)
+    resolved = normalize_status(str(alerts[0].get("status") or "")) == "resolved"
+    head = ALERT_HEAD[lang]["resolved" if resolved else "firing"].format(
+        severity=severity.upper(), alertname=parse_alertname(labels_of[0])
+    )
+    return head + ALERT_GROUP_COUNT.format(n=len(alerts))
