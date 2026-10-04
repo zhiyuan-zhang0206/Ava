@@ -278,8 +278,9 @@ the stale window plus one scan interval (≈75 s).
   before its ACK; acknowledge each batch on receipt with
   `impersonate ack 0 ID ... --agent 42`. The envelope's ACK line carries the
   exact command for its batch.
-  An ACK that marks messages done publishes a wake so the relay immediately
-  drops the ids from its outstanding set, even when no new message has arrived.
+  An ACK that marks messages done (the record's delivery status — not task
+  completion) publishes a wake so the relay immediately drops the ids from its
+  outstanding set, even when no new message has arrived.
   Repeating an ACK for already-done messages does not publish another wake.
   Treat `kind="cancel"` as a request to stop current work; acknowledge it on receipt (like every message), then stop.
   Native Ava does not consume cancellation on behalf of the external controller.
