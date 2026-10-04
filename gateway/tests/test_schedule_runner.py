@@ -19,7 +19,6 @@ from unittest.mock import Mock
 import psycopg
 import pytest
 
-from ava import agent_identity
 from base.config import settings
 from base.db import Database
 from gateway.schedule_runner import _script_filename, run
@@ -27,8 +26,8 @@ from gateway.schedule_runner import _script_filename, run
 
 @pytest.fixture(autouse=True)
 def _restore_actor(monkeypatch: pytest.MonkeyPatch) -> None:
-    # run() calls establish_actor + sets AVA_SCHEDULE_ID; keep both out of other tests.
-    monkeypatch.setattr(agent_identity, "_actor", agent_identity._actor)
+    # run() binds a schedule-actor context (restored by the identity fixture) and sets AVA_SCHEDULE_ID;
+    # keep the latter out of other tests.
     monkeypatch.delenv("AVA_SCHEDULE_ID", raising=False)
 
 

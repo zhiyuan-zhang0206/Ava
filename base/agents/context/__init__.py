@@ -11,28 +11,42 @@ dependencies as `runtime.context.X`:
 - **`agent`**: the agent's resolved per-turn configuration (`AgentSlices`, see
   `base.host.env.agent_slices`), built by the host when the turn starts;
 - **`extensions`**: the plugins' contributions, held by the host that loaded them;
+- **`identity`**: who the run acts as (`AgentIdentity`);
 - **host-held state** the graph reads or writes across turns: `turn_progress`, `relays`,
   `recall_log_key`. The host builds each once and hands the same object to every turn it runs;
   a context built without them (the eval driver, a test) carries private ones.
+
+The exec child holds the same type. The host puts `describe()` of the turn's context in the exec
+request envelope and the child builds its instance with `from_description()`, so agent code reads
+the identity the host's turn carries (`ava.context`). Only what is serializable and not secret
+crosses; a handle the child needs it builds itself from its own settings.
 
 `frozen=True`: context is read-only during a run. If you need mutable state, split it into a
 separate dataclass.
 """
 
+from __future__ import annotations
+
 import secrets
 from dataclasses import dataclass, field
+from typing import TYPE_CHECKING, Any, Self
 
-from langchain_core.language_models.chat_models import BaseChatModel
-from langchain_core.runnables import RunnableConfig
-from psycopg_pool import AsyncConnectionPool
-
+from base.agents.context.identity import AgentIdentity
 from base.agents.observation.relay_supervision import RelaySupervision
 from base.agents.observation.turn_progress import TurnProgress
-from base.db import Database
-from base.events.live.bus import EventBus
-from base.events.live.publisher import AgentEventPublisher
-from base.host.env.agent_slices import AgentSlices
-from base.packages.plugins.extensions import EMPTY, ExtensionRegistry
+
+# The handle types are annotations only: the exec child builds this same type from its request
+# envelope, and its start must not import psycopg / redis / langchain for handles it never holds.
+if TYPE_CHECKING:
+    from langchain_core.language_models.chat_models import BaseChatModel
+    from langchain_core.runnables import RunnableConfig
+    from psycopg_pool import AsyncConnectionPool
+
+    from base.db import Database
+    from base.events.live.bus import EventBus
+    from base.events.live.publisher import AgentEventPublisher
+    from base.host.env.agent_slices import AgentSlices
+    from base.packages.plugins.extensions import ExtensionRegistry
 
 
 def agent_id_from_config(
@@ -88,9 +102,34 @@ class AvaContext:
     agent: AgentSlices | None = None
     """This agent's per-turn configuration, resolved by the host when the turn starts."""
 
-    extensions: ExtensionRegistry = EMPTY
+    extensions: ExtensionRegistry | None = None
     """What the enabled plugins contribute (prompt sections, context notes), as the loader built it
-    for this host. Empty for the eval driver and tests that run no plugins."""
+    for this host. None for the eval driver and tests that run no plugins (`plugin_registry`)."""
+
+    identity: AgentIdentity | None = None
+    """Who this run acts as. The host sets it for a turn it serves; the exec child and a launched
+    script get theirs from a description, an external controller's carries its lease."""
+
+    def require_identity(self) -> AgentIdentity:
+        """The identity of this run; a context built without one fails here."""
+        if self.identity is None:
+            raise RuntimeError("this AvaContext carries no AgentIdentity (ctx.identity is None)")
+        return self.identity
+
+    def describe(self) -> dict[str, Any]:
+        """The serializable, non-secret description an exec request envelope carries."""
+        return {"identity": self.require_identity().describe()}
+
+    @classmethod
+    def from_description(cls, description: dict[str, Any]) -> Self:
+        """The context an exec child builds from the envelope's description."""
+        return cls(identity=AgentIdentity.from_description(description["identity"]))
+
+    def plugin_registry(self) -> ExtensionRegistry:
+        """What the plugins contribute; an empty registry when this run loaded none."""
+        from base.packages.plugins.extensions import EMPTY
+
+        return EMPTY if self.extensions is None else self.extensions
 
     turn_progress: TurnProgress = field(default_factory=TurnProgress)
     """The turn-progress clock: graph nodes and the LLM stream mark activity on it, the host's

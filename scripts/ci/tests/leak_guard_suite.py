@@ -22,13 +22,15 @@ import os
 def load_env() -> None:
     os.environ["DEMO_HEALTH_PORT"] = "8123"
 """,
-    # The framework-internal identity slot (the real one is `ava.agent_identity`).
+    # The identity holder (the real one is the bound context of `ava.sdk_surface.process_context`).
     "leakdemo/identity.py": """
-_id: int | None = None
+from contextvars import ContextVar
+
+_id: ContextVar[int | None] = ContextVar("leakdemo_id", default=None)
 
 
 def agent_id() -> int | None:
-    return _id
+    return _id.get()
 """,
     # A plugin namespace module (stand-in for `ava_builtins.plugins.ava_code._code_namespace`).
     "leakdemo/nsmod.py": '"""A namespace module."""\n',
@@ -86,9 +88,8 @@ import pytest
 import leakdemo.identity  # the stand-in slot must be loaded before the first test, whatever file runs
 from tests.fixtures import identity_restore, leak_guard
 
-# The suite's own singleton stands in for the agent identity slots.
-identity_restore.IDENTITY_SLOTS = (("leakdemo.identity", ("_id",)),)
-identity_restore.IDENTITY_CONTEXTVARS = ()
+# The suite's own context variable stands in for the bound context.
+identity_restore.IDENTITY_CONTEXTVARS = (("leakdemo.identity", "_id"),)
 
 
 class _Boom(list):
@@ -148,7 +149,7 @@ def test_leaker_setattr_getattr_served_name(monkeypatch: pytest.MonkeyPatch) -> 
 
 
 def test_victim_identity_read(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(identity, "_id", 99)  # what establish(99) does
+    identity._id.set(99)  # what pin_agent(99) does
     assert selfmod.AGENT_ID == 99  # a stored AGENT_ID=1 would win over __getattr__
 
 
@@ -195,26 +196,21 @@ def test_clean_preregistered_module_attr(monkeypatch: pytest.MonkeyPatch) -> Non
     registry.install_namespace(nsmod, "code")
 
 
-# ---- class 4: the identity slot assigned bare, the pattern 300+ test sites use (undone by identity_restore)
+# ---- class 4: the identity bound bare, the pattern 300+ test sites use (undone by identity_restore)
 def test_leaker_bare_identity_assignment() -> None:
-    identity._id = 7
+    identity._id.set(7)
 
 
 def test_victim_stale_identity() -> None:
-    assert identity._id is None  # the session's identity, not the 7 the test before it left
+    assert identity._id.get() is None  # the session's identity, not the 7 the test before it left
 
 
-def test_clean_identity_via_monkeypatch(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(identity, "_id", 8)
-
-
-def test_clean_identity_try_finally() -> None:
-    original = identity._id
-    identity._id = 9
+def test_clean_identity_token_reset() -> None:
+    token = identity._id.set(9)
     try:
-        assert identity._id == 9
+        assert identity._id.get() == 9
     finally:
-        identity._id = original
+        identity._id.reset(token)
 '''
 
 OTHER_STATE = '''

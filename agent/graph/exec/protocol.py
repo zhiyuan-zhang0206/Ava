@@ -6,8 +6,9 @@ Two envelope files per run, both under `<exec_dir>/<agent_id>/` and chmod 0600 (
 snapshot carries the agent's full message history — same sensitivity as the
 logs it shares the home with):
 
-- request `<uuid>.json`: the code, the agent id, the timeout, and the typed
-  state snapshot.
+- request `<uuid>.json`: the code, the agent id (the attribution key the quarantine tooling in
+  `base/agents/incarnation/exec_request_evidence.py` reads), the description of the run's
+  `AvaContext` (identity; `AvaContext.describe`), the timeout, and the typed state snapshot.
 - result  `<uuid>.json`: the outcome kind, the state-update delta (plugin fields,
   security findings), attachments, the run's SDK-call tally, and — for a crash —
   the child-formatted traceback text.
@@ -109,11 +110,16 @@ class RequestPayload:
     """
 
     code: str
-    agent_id: int | None
+    context: dict[str, Any]  # the host's `AvaContext.describe()`; the child builds its own from it
     timeout_s: float
     state: dict[str, Any] | None  # typed-blob-decoded model dump (see materialize_state)
     incarnation: RuntimeIncarnation | None = None
     state_raw: tuple[str, bytes] | None = None
+
+    @property
+    def agent_id(self) -> int | None:
+        """The agent the run acts as: the identity of the described context."""
+        return cast("int | None", self.context["identity"]["agent_id"])
 
     def materialize_state(self) -> dict[str, Any] | None:
         """Decode the raw state blob once; None for a stateless request."""
@@ -204,15 +210,22 @@ def _prune_stale(agent_dir: Path) -> None:
 
 
 def write_request(
-    path: Path, *, code: str, agent_id: int | None, timeout_s: float, state: dict[str, Any] | None
+    path: Path,
+    *,
+    code: str,
+    context: dict[str, Any],
+    timeout_s: float,
+    state: dict[str, Any] | None,
 ) -> None:
-    """Write the request envelope (0600). `state` is a model dump; it is
-    serialized as a typed blob so langchain messages / plugin models survive."""
+    """Write the request envelope (0600). `context` is the host context's `describe()`; `state`
+    is a model dump, serialized as a typed blob so langchain messages / plugin models survive."""
     started_at = time.perf_counter()
+    agent_id = context["identity"]["agent_id"]
     envelope: dict[str, Any] = {
         "v": REQUEST_VERSION,
         "code": code,
         "agent_id": agent_id,
+        "context": context,
         "timeout_s": timeout_s,
     }
     incarnation = current_incarnation(agent_id) if agent_id is not None else None
@@ -250,6 +263,12 @@ def read_request(path: Path) -> RequestPayload:
         state_raw = (str(envelope["state_tag"]), base64.b64decode(envelope["state_b64"]))
     from uuid import UUID
 
+    acts_as = envelope["context"]["identity"]["agent_id"]
+    if envelope["agent_id"] != acts_as:
+        raise ValueError(
+            f"exec request envelope names agent {envelope['agent_id']!r} but its context acts as "
+            f"{acts_as!r}"
+        )
     identity = envelope.get("incarnation")
     incarnation = None
     if identity is not None:
@@ -260,7 +279,7 @@ def read_request(path: Path) -> RequestPayload:
         )
     payload = RequestPayload(
         code=str(envelope["code"]),
-        agent_id=envelope.get("agent_id"),
+        context=cast("dict[str, Any]", envelope["context"]),
         timeout_s=float(envelope["timeout_s"]),
         state=None,
         incarnation=incarnation,

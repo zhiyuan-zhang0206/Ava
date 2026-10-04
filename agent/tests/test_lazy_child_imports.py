@@ -121,7 +121,16 @@ from agent.graph.exec.protocol import read_request
 
 req = Path(tempfile.mkdtemp(prefix="lazy-child-")) / "req-x.json"
 req.write_text(
-    json.dumps({"v": 1, "code": "pass", "agent_id": None, "timeout_s": 1.0}), encoding="utf-8"
+    json.dumps(
+        {
+            "v": 1,
+            "code": "pass",
+            "agent_id": None,
+            "context": {"identity": {"agent_id": None, "owns_loop": True, "actor": None}},
+            "timeout_s": 1.0,
+        }
+    ),
+    encoding="utf-8",
 )
 payload = read_request(req)
 serde = sorted(
@@ -328,6 +337,9 @@ def test_child_surface_upgrade_loads_faces_without_reexecuting_surfaces() -> Non
 # ── leg-2 (B3): the stateful child's lazy state slot ───────────────────────
 
 
+_NO_AGENT_CONTEXT = {"identity": {"agent_id": None, "owns_loop": True, "actor": None}}
+
+
 def _craft_stateful_envelope(tmp_path: Path) -> Path:
     """A v1 request envelope carrying a typed state snapshot."""
     import base64
@@ -342,6 +354,7 @@ def _craft_stateful_envelope(tmp_path: Path) -> Path:
                 "v": 1,
                 "code": "pass",
                 "agent_id": None,
+                "context": _NO_AGENT_CONTEXT,
                 "timeout_s": 1.0,
                 "state_tag": tag,
                 "state_b64": base64.b64encode(blob).decode("ascii"),

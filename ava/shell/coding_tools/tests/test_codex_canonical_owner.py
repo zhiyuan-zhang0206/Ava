@@ -19,6 +19,7 @@ import pytest
 from ava.shell.coding_tools import _common, codex
 from base.native_process.os_platform import IS_WINDOWS
 from base.sessions import coding_session_owner
+from tests.fixtures.pin_agent import pin_agent
 from tests.path_scoped.pty_service import PtyServiceProcess
 from tests.path_scoped.pty_service import pty_service as pty_service
 
@@ -155,7 +156,7 @@ def test_codex_supervisor_uses_projected_session_environment(
     pty_service.stop()
     service = PtyServiceProcess(unit_home, {"VIRTUAL_ENV": str(unit_home / "foreign" / ".venv")})
     service.start()
-    monkeypatch.setattr(codex.ava.agent_identity, "_agent_id", 41)
+    pin_agent(41)
     monkeypatch.setattr("ava._settings.database", lambda: FakeDatabase(next_index=7))
 
     def workspace_for_owner(_agent_id: int) -> Path:

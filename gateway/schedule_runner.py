@@ -387,6 +387,20 @@ def run(schedule_id: int) -> int:
     return _run(Database.from_settings(), schedule_id)
 
 
+def _bind_schedule_actor(schedule_id: int) -> None:
+    """Bind a context whose actor is this schedule so ava.agents.* attributes its spawns/wakes to
+    `schedule:<id>` (a .py script, run in-process, shares this binding)."""
+    from ava.sdk_surface import process_context
+    from base.agents.context import AvaContext
+    from base.agents.context.identity import AgentIdentity
+
+    process_context.bind_process(
+        AvaContext(
+            identity=AgentIdentity(agent_id=None, owns_loop=True, actor=f"schedule:{schedule_id}")
+        )
+    )
+
+
 def _run(database: Database, schedule_id: int) -> int:
     loaded = _load(database, schedule_id)
     if loaded is None:
@@ -400,11 +414,7 @@ def _run(database: Database, schedule_id: int) -> int:
     script_path = work_dir / script_name
     script_path.write_text(script)
 
-    # Bind the actor so ava.agents.* attributes this schedule's spawns/wakes to
-    # `schedule:<id>` (a .py script, run in-process below, shares this binding).
-    import ava.agent_identity
-
-    ava.agent_identity.establish_actor(f"schedule:{schedule_id}")
+    _bind_schedule_actor(schedule_id)
 
     # Run history: one row per process execution, opened in-progress (ok=NULL)
     # here and closed with the outcome on every exit path below — including the

@@ -41,8 +41,8 @@ def resolve(path: str | Path) -> Path:
     # prepend the per-agent workspace. The workspace is a framework
     # concept, so it lives here in the SDK core — plugins may layer cwd
     # *tracking* on top, but the no-plugin baseline must not silently
-    # fall back to `$HOME` (issue #1008). Before `ava.agent_identity.establish`
-    # binds an identity (test / dev REPL without a bootstrap) there is
+    # fall back to `$HOME` (issue #1008). Before a context
+    # carrying an identity is bound (test / dev REPL without a bootstrap) there is
     # no workspace; `Path.home()` is the documented pre-bootstrap base
     # (per-call live, so test fixture mock env takes effect immediately).
     p = Path(path).expanduser()

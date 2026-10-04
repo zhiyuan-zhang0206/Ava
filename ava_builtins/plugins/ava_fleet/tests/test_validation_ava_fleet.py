@@ -9,6 +9,7 @@ import pytest
 
 import ava
 import ava.agent_identity
+from tests.fixtures.pin_agent import pin_agent
 
 
 class TestTasksEntries:
@@ -27,7 +28,7 @@ class TestTasksEntries:
             assert row is not None
             root_id = row[0]  # pyright: ignore[reportOptionalSubscript]
         db_conn.commit()
-        monkeypatch.setattr(ava.agent_identity, "_agent_id", 900001)
+        pin_agent(900001)
         with db_conn.cursor() as cur:
             cur.execute("INSERT INTO agents (id) VALUES (900001) ON CONFLICT (id) DO NOTHING")
         db_conn.commit()

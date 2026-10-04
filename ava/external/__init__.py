@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 import sys
 from collections.abc import Mapping
 from contextlib import ExitStack
@@ -16,7 +17,10 @@ from uuid import uuid4
 
 from ava import agent_identity
 from ava._settings import database
+from ava.sdk_surface import process_context
 from base.agents import impersonation as control
+from base.agents.context import AvaContext
+from base.agents.context.identity import AgentIdentity, ExternalLease
 from base.cluster.machine import machine_name
 from base.config.agent_pins import resolve_agent_config_pins
 from base.log import logger
@@ -34,14 +38,6 @@ __all_for_ava__ = ["attach", "Attachment"]
 
 _attachment_lock = Lock()
 _close_flush_permission = local()
-
-
-def attached_config() -> tuple[Mapping[str, Any], PluginConfigView] | None:
-    """The pins and plugin-config view of the agent this process is attached to, if any."""
-    # The attachment is the process's external-identity provider: its bound `_validate` is
-    # what `agent_identity` calls to recheck the lease.
-    attachment = getattr(agent_identity._external_identity, "__self__", None)
-    return attachment.config if isinstance(attachment, Attachment) else None
 
 
 def _close_flush_permitted() -> bool:
@@ -75,6 +71,20 @@ def _deliver_telemetry_before_detach() -> None:
         )
 
 
+def _refuse_unless_attachable() -> AvaContext | None:
+    """The process's own context, when nothing forbids attaching to it: no attachment yet, and
+    no native agent runtime."""
+    bound = process_context.peek()
+    identity = None if bound is None else bound.identity
+    if identity is not None and identity.lease is not None:
+        raise RuntimeError("this process already has an external attachment")
+    if agent_identity.current_turn_agent_id() is not None or (
+        identity is not None and identity.agent_id is not None and identity.owns_loop
+    ):
+        raise RuntimeError("a native agent runtime cannot attach an external controller")
+    return bound
+
+
 class Attachment:
     """One local SDK attachment; use a context manager or explicitly close it.
 
@@ -86,19 +96,17 @@ class Attachment:
     def __init__(self, lease_id: str) -> None:
         import ava
 
-        if agent_identity._external_identity is not None:
-            raise RuntimeError("this process already has an external attachment")
-        if agent_identity.current_turn_agent_id() is not None or (
-            agent_identity._agent_id is not None and agent_identity._owns_loop
-        ):
-            raise RuntimeError("a native agent runtime cannot attach an external controller")
+        bound = _refuse_unless_attachable()
         self.lease_id = lease_id
         self._closed = False
         self._closing = False
         self._stack = ExitStack()
-        # The attached agent's pins and plugin-config view (`attached_config`), once loaded.
+        # The attached agent's pins and plugin-config view (`ava._settings._attached` reads it through the lease), once loaded.
         self.config: tuple[Mapping[str, Any], PluginConfigView] | None = None
         self._event_participant: Any = None
+        # The process's own context, put back at detach; `_bound` says this attachment bound one.
+        self._prior_context = bound
+        self._bound = False
         # The agent state class the snapshot loaded into (set before the constructor returns).
         self._state_cls: type[Any]
         if ava.in_exec_turn():
@@ -110,8 +118,7 @@ class Attachment:
             self.agent_id = int(lease["agent_id"])
             self.session_id = int(lease["session_id"])
             self._version = int(lease["delta_version"])
-            agent_identity._external_identity = self._validate
-            agent_identity._external_agent_id = self.agent_id
+            self._bind_borrowed_context()
             # Native load: load_snapshot below rebuilds the checkpoint state
             # (build_agent_state().model_validate), which needs the plugins'
             # state fields registered — the surface-only default would silently
@@ -136,6 +143,23 @@ class Attachment:
         except BaseException:
             self._detach()
             raise
+
+    def _bind_borrowed_context(self) -> None:
+        """Bind the borrowed identity for the attachment's lifetime (`_detach` puts the process's
+        own context back), over whatever identity the process already had."""
+        borrowed = ExternalLease(
+            agent_id=self.agent_id, validate=self._validate, config=lambda: self.config
+        )
+        bound = self._prior_context
+        own = (None if bound is None else bound.identity) or AgentIdentity(
+            agent_id=None, owns_loop=True
+        )
+        process_context.bind_process(
+            dataclasses.replace(
+                bound or AvaContext(), identity=dataclasses.replace(own, lease=borrowed)
+            )
+        )
+        self._bound = True
 
     def _lease(self) -> dict[str, Any]:
         lease = control.require_active(database(), self.lease_id, process_metadata())
@@ -276,8 +300,10 @@ class Attachment:
 
                 unbind_local_participant(self._event_participant)
                 self._event_participant = None
-            agent_identity._external_identity = None
-            agent_identity._external_agent_id = None
+            if self._bound and self._prior_context is not None:
+                process_context.bind_process(self._prior_context)
+            elif self._bound:
+                process_context.unbind_process()
             ava.unbind_exec_turn()
             self._stack.close()
         finally:

@@ -27,6 +27,9 @@ An agent has only one tool—`execute_code(code: str)`—but obtains all capabil
 - [[understand.ava.okf.md]] — Multimodal understanding primitive: understand(targets) → list[str], each target carrying prompt + text|paths
 - [[watcher.ava.okf.md]] — Background listener: at / cron / launch (wake self = `ava.agents.send_message`)
 
+### Context
+- `ava.context` — the `AvaContext` this process runs as, read-only: `ava.context.identity` (`agent_id`, `owns_loop`, `actor`). The exec child rebuilds the host's context from the exec request envelope; a script an agent launched derives it from `AVA_AGENT_ID`. It does not exist (raises `AttributeError`) in the agent host and in a bare script, as `ava.state` does not outside an exec turn. Free functions such as `ava.agents.*` read the identity from it and keep their call shapes.
+
 ### Self & User
 - [[self.ava.okf.md]] — Agent self (**core** ava.self): AGENT_ID / MACHINE_SPEC / SELF_MACHINE_NAME / attach / pause_heartbeat / compact / restart / terminate; `set_label` is separately injected by ava_fleet plugin
 - [[ui.ava.okf.md]] — User interface: serve / notify / show / close

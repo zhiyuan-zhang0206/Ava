@@ -20,6 +20,7 @@ from base.host.memory_pressure import PressureLevel
 from base.host.proc import kill_process_tree
 from base.native_process.exec_kill_notice import notice_path, read_notice
 from services.agent_runner.agent_host.exec_memory_guard import ExecDomain, ExecMemoryGuard
+from tests.fixtures.pin_agent import exec_context
 
 _GIB = 1024**3
 
@@ -189,7 +190,7 @@ async def _run(tmp_path: Path, code: str) -> Any:
     result, _payload = await _run_in_subprocess(
         Database.from_settings(),
         code,
-        424242,
+        exec_context(424242),
         asyncio.Event(),
         60.0,
         None,

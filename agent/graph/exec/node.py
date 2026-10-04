@@ -186,7 +186,7 @@ async def _run_agent_code(
             _run_in_subprocess(
                 ctx.require_db(),
                 code,
-                int(agent_id),
+                ctx,
                 cancel_event,
                 settings.sandbox.exec_timeout_seconds,
                 chunk_publisher,

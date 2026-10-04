@@ -40,6 +40,7 @@ from base.db import Database
 from base.host.proc import kill_process_tree
 from base.paths import logs_dir
 from tests._test_env_file import rewrite_line
+from tests.fixtures.pin_agent import exec_context
 
 _AGENT_ID = 424242
 
@@ -85,7 +86,7 @@ async def _run(
         result, _payload = await _run_in_subprocess(
             Database.from_settings(),
             code,
-            _AGENT_ID,
+            exec_context(_AGENT_ID),
             cancel_event,
             timeout,
             chunk_publisher,
@@ -425,7 +426,7 @@ async def test_outer_task_cancel_reaps_child_and_descendant(
         _run_in_subprocess(
             database,
             code,
-            _AGENT_ID,
+            exec_context(_AGENT_ID),
             asyncio.Event(),
             60.0,
             exec_dir=tmp_path / "exec",

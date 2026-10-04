@@ -24,6 +24,7 @@ import pytest
 from agent.graph.exec._stream import StreamCap, StreamingTextIO
 from agent.graph.exec.output import wrap_code_output
 from base.db import Database
+from tests.fixtures.pin_agent import exec_context, pin_agent
 
 # ---------------------------------------------------------------------------
 # The accumulator: head + rolling tail under a fixed budget
@@ -136,10 +137,9 @@ def test_live_stream_is_bounded_and_says_so_exactly_once() -> None:
 @pytest.fixture
 def _overflow(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     """Redirect the workspace overflow ring into tmp_path."""
-    import ava
     from agent.graph.exec import output
 
-    monkeypatch.setattr(ava.agent_identity, "_agent_id", 7)
+    pin_agent(7)
     monkeypatch.setattr(output, "_overflow_dir", lambda: tmp_path / "overflow")
     return tmp_path / "overflow"
 
@@ -251,7 +251,7 @@ async def test_runaway_print_loop_is_truncated_and_the_run_completes(
     result, _payload = await _run_in_subprocess(
         database,
         code="for i in range(20000): print('spam', i)\nprint('DONE_MARKER')",
-        agent_id=1,
+        context=exec_context(1),
         cancel_event=asyncio.Event(),
         timeout=60.0,
         chunk_publisher=None,

@@ -20,6 +20,7 @@ import pytest
 
 import ava
 from ava import shell
+from tests.fixtures.pin_agent import pin_agent
 
 # One definition shared with the gateway and integration modules; imported here so it
 # registers for this module's paths.
@@ -92,15 +93,11 @@ def _isolated_agent(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
     a clean starting state; `pty_service` must be requested first so it outlives
     the final cleanup.
 
-    The agent-id swap goes through monkeypatch, NOT a manual save/restore:
-    a test in the module may itself monkeypatch `_agent_id` (test_watcher's
-    remind tests), and the per-test monkeypatch instance is shared across all
-    requesters with LIFO undo — a manual restore here can run BEFORE that
-    instance's undo, which would then re-leak _TEST_AGENT_BASE into every
-    later test in the process (resolving workspaces under the wrong id).
-    monkeypatch also restores when teardown kill_all raises.
+    The pin is undone by the `identity_restore` fixture, which also runs when teardown
+    kill_all raises. A test in the module may re-pin the identity, so teardown pins this fake
+    agent again before it kills the fake agent's sessions.
     """
-    monkeypatch.setattr(ava.agent_identity, "_agent_id", _TEST_AGENT_BASE)
+    pin_agent(_TEST_AGENT_BASE)
     shell.sessions.kill_all()  # pure sessions, no DB — session tests that need a meta row ensure it themselves
     # A killed session lingers a beat after kill_all() returns. The fake
     # agent-id is fixed per worker and tests reuse session names (e.g.
@@ -116,6 +113,7 @@ def _isolated_agent(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
     try:
         yield
     finally:
+        pin_agent(_TEST_AGENT_BASE)
         shell.sessions.kill_all()
 
 

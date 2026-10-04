@@ -30,8 +30,9 @@ their processes or shell variables. Data and profile directories remain on disk.
 
 The agent host binds identity through `base/native_process/turn_identity.py` for each turn.
 It does not set process-wide agent identity. Disposable execute children carry
-an explicit per-agent request; watcher/schedule bootstraps establish their own
-identity. A bare persistent shell has no agent identity.
+an explicit per-agent request (its `AvaContext` description); watcher/schedule
+children derive their context from `AVA_AGENT_ID`, and a gateway-hosted schedule
+binds one carrying its actor. A bare persistent shell has no agent identity.
 
 `base/sessions/env_forwarding.py:forward_env_dict()` passes host-scope bootstrap values
 to daemon/session children. Cluster values are loaded from the child's actual

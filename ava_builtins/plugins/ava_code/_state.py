@@ -22,7 +22,7 @@ def default_cwd() -> str:
     """Initial cwd for a fresh agent state: the agent's own workspace.
 
     State is first created inside a bootstrapped agent process, after
-    `ava.agent_identity.establish` has bound the identity — so a real run starts in
+    the process context is bound — so a real run starts in
     `$AVA_HOME/workspaces/<agent_id>/` (created here on first touch). Direct
     state construction without a bootstrap (tests, dev REPL) has no agent and
     therefore no workspace; $HOME is the documented pre-bootstrap placeholder

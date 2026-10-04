@@ -18,6 +18,7 @@ from base.agents.incarnation.resources import (
 from base.agents.incarnation.tests.test_resources import _admitted, _force
 from base.db import Database
 from base.native_process.runtime_incarnation import RuntimeIncarnation
+from tests.fixtures.pin_agent import exec_context
 
 
 async def test_force_at_owner_ready_leaves_no_resurrection_blocker(  # noqa: PLR0915 -- one synchronized race proof.
@@ -78,7 +79,7 @@ async def test_force_at_owner_ready_leaves_no_resurrection_blocker(  # noqa: PLR
     result, _ = await _run_in_subprocess(
         database,
         f"from pathlib import Path; Path({str(marker)!r}).touch()",
-        target.agent_id,
+        exec_context(target.agent_id),
         asyncio.Event(),
         30,
         exec_dir=tmp_path,

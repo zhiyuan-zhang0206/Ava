@@ -10,6 +10,7 @@ import pytest
 
 from ava.tests._understand_helpers import mock_deepseek as mock_deepseek
 from ava.tests._understand_helpers import understand_mod
+from tests.fixtures.pin_agent import pin_agent, pin_no_identity
 
 # ── auto-save output ────────────────────────────────────────────────────────
 
@@ -18,7 +19,6 @@ def test_single_result_saved_to_exec_output(
     mock_deepseek: dict[str, Any], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Single-call understand saves result to .exec_output/ in workspace."""
-    from ava import agent_identity
 
     # Use a temp workspace dir so we can inspect it
     agent_id = 2139
@@ -26,7 +26,7 @@ def test_single_result_saved_to_exec_output(
     ws.mkdir(parents=True)
 
     # Monkeypatch workspace_dir and agent_id
-    monkeypatch.setattr(agent_identity, "_agent_id", agent_id)
+    pin_agent(agent_id)
 
     def _fake_workspace(aid: int) -> Path:
         return ws
@@ -49,12 +49,11 @@ def test_batch_results_saved_to_exec_output(
     mock_deepseek: dict[str, Any], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Batch understand saves each result individually."""
-    from ava import agent_identity
 
     agent_id = 2139
     ws = tmp_path / "batch_ws"
     ws.mkdir(parents=True)
-    monkeypatch.setattr(agent_identity, "_agent_id", agent_id)
+    pin_agent(agent_id)
 
     def _fake_workspace(aid: int) -> Path:
         return ws
@@ -78,12 +77,11 @@ def test_auto_save_prunes_old_files(
     mock_deepseek: dict[str, Any], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Old understand output files are pruned, keeping the _OVERFLOW_KEEP most recent."""
-    from ava import agent_identity
 
     agent_id = 2139
     ws = tmp_path / "prune_ws"
     ws.mkdir(parents=True)
-    monkeypatch.setattr(agent_identity, "_agent_id", agent_id)
+    pin_agent(agent_id)
 
     def _fake_workspace(aid: int) -> Path:
         return ws
@@ -124,10 +122,9 @@ def test_auto_save_noop_without_agent_id(
     mock_deepseek: dict[str, Any], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """When no agent identity is established, auto-save is skipped gracefully."""
-    from ava import agent_identity
 
     # Set agent_id to None — simulate non-agent process
-    monkeypatch.setattr(agent_identity, "_agent_id", None)
+    pin_no_identity()
     # Also ensure env var doesn't re-establish
     monkeypatch.delenv("AVA_AGENT_ID", raising=False)
 

@@ -4,6 +4,8 @@ A hosted turn context stays authoritative over both."""
 
 import pytest
 
+from tests.fixtures.pin_agent import pin_agent
+
 
 def test_sdk_external_profile_overrides_inherited_agent_identity(
     monkeypatch: pytest.MonkeyPatch,
@@ -11,7 +13,7 @@ def test_sdk_external_profile_overrides_inherited_agent_identity(
     from ava import agent_identity
 
     monkeypatch.setattr(agent_identity, "current_turn_agent_id", lambda: None)
-    monkeypatch.setattr(agent_identity, "_agent_id", 405)
+    pin_agent(405)
     monkeypatch.setenv("AVA_CALLER_IDENTITY", '{"kind":"external_agent","subject":"codex"}')
     assert agent_identity.require_actor() == "external_agent:codex"
     assert agent_identity.default_actor() == "external_agent:codex"

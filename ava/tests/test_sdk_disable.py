@@ -293,7 +293,7 @@ def test_env_disable_refuses_a_framework_module() -> None:
 def test_runtime_disable_refuses_a_framework_module_and_its_members() -> None:
     code, out, err = _run("""
         from ava.sdk_surface.sdk_disable import apply_sdk_disable
-        for entry in ("sdk_surface", "agent_identity.establish"):
+        for entry in ("sdk_surface", "agent_identity.agent_id"):
             try:
                 apply_sdk_disable([entry])
             except ValueError as exc:
@@ -302,7 +302,7 @@ def test_runtime_disable_refuses_a_framework_module_and_its_members() -> None:
     assert code == 0, err
     assert out.splitlines()[:2] == [
         "refused sdk_surface True",
-        "refused agent_identity.establish True",
+        "refused agent_identity.agent_id True",
     ], out
 
 

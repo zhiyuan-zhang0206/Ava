@@ -14,7 +14,6 @@ missing, Settings() instantiation throws ValidationError immediately,
 not reaching here.
 """
 
-import sys
 import threading
 from collections.abc import Callable, Mapping
 from typing import Any
@@ -143,8 +142,8 @@ def shell_sessions() -> "ShellSessions":  # noqa: F821  # pyright: ignore[report
         raise RuntimeError(
             "Cannot use shell sessions: this process has no agent identity. "
             "ava.shell.sessions requires an agent process or a background "
-            "script launched by one (which receives the identity via "
-            "ava.agent_identity.establish). Running a standalone script that imports ava "
+            "script launched by one (which derives the identity from "
+            "AVA_AGENT_ID). Running a standalone script that imports ava "
             "does not set an agent identity."
         )
     return ShellSessions(backend=get_shell_backend(), database=database(), agent_id=agent_id)
@@ -162,9 +161,12 @@ def page_host() -> "PageHost":  # noqa: F821  # pyright: ignore[reportUndefinedV
 
 def _attached() -> tuple[Mapping[str, Any], Any] | None:
     """The pins and plugin-config view of the agent this process attached to (`ava.external`:
-    one attachment per process), if any."""
-    external = sys.modules.get("ava.external")
-    return external.attached_config() if external is not None else None
+    one attachment per process), if any: the lease its context carries."""
+    from ava.sdk_surface import process_context
+
+    context = process_context.peek()
+    lease = None if context is None or context.identity is None else context.identity.lease
+    return None if lease is None else lease.config()
 
 
 def agent_setting(name: str) -> Any:

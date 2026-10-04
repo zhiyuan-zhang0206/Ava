@@ -363,7 +363,7 @@ check-typed-exception = true
 # telemetry / retry-policy readers sit outside node signatures, so a blanket
 # ban is not possible. New uses need a written justification in the PR
 # description before joining the per-file-ignores allowlist below.
-"contextvars" = { msg = "contextvars is allowlisted only — owners: base/native_process/turn_identity.py, base/packages/plugins/context.py, base/events/live/redis_client.py, gateway/mcp_server/endpoint.py, ava/sdk_surface/help.py, ava/sdk_surface/discovery.py, services/agent_runner/agent_host/runtime.py (audit 2026-08-27). New use needs a written justification in the PR description." }
+"contextvars" = { msg = "contextvars is allowlisted only — owners: base/native_process/turn_identity.py, base/packages/plugins/context.py, base/events/live/redis_client.py, gateway/mcp_server/endpoint.py, ava/sdk_surface/help.py, ava/sdk_surface/discovery.py, ava/sdk_surface/process_context.py, services/agent_runner/agent_host/runtime.py (audit 2026-08-27). New use needs a written justification in the PR description." }
 
 [tool.ruff.lint.per-file-ignores]
 # `tests/*` is the top-level tests directory; `**/tests/*` every package's own
@@ -449,6 +449,8 @@ check-typed-exception = true
 "ava/sdk_surface/help.py" = ["TID251"]
 "ava/sdk_surface/discovery.py" = ["TID251"]
 "services/agent_runner/agent_host/runtime.py" = ["TID251"]
+# The process's AvaContext: the one in-process entry to the run's context (decisions/2026-10-04-ava-state-and-context.md).
+"ava/sdk_surface/process_context.py" = ["TID251"]
 # An operator CLI: its report on stdout is the contract.
 "services/derived/memory_indexer/memory_search_reconcile.py" = ["T201"]
 # tests may import contextvars to exercise the propagation contracts

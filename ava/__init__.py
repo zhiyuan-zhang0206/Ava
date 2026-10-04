@@ -12,8 +12,11 @@ from typing import Any
 # (defined below) forwards `ava.DB_URL` etc. to _settings, preserving the
 # external API while removing the "must mutate settings before import"
 # invariant.
+from base.agents.context import AvaContext
+
 from ._settings import DB as DB
 from ._settings import REDIS as REDIS
+from .sdk_surface import process_context
 
 # ── SDK entry machinery — implementations in `ava/sdk_surface/` ─────────────
 #
@@ -90,6 +93,17 @@ _UPDATE_KEY = "_exec_state_update"
 state: Any
 state_update: dict[str, Any] | None
 
+context: AvaContext
+"""The context this process runs as, read-only: the same `AvaContext` the agent host builds for a
+turn, rebuilt in the exec child from the description the host put in the request envelope.
+
+`context.identity` says who the code acts as: `agent_id` (the agent whose calls these are, None
+for a process with no agent), `owns_loop` (True in your own turn, False in a script you launched,
+which may not compact or restart you) and `actor` (the provenance principal of a process that acts
+as something other than an agent, e.g. `schedule:7`). Raises `AttributeError` where no context is
+bound: the agent host, a bare script no agent launched.
+"""
+
 
 def _outside_exec_turn(name: str) -> PluginStateOutsideTurnError:
     return PluginStateOutsideTurnError(
@@ -125,8 +139,12 @@ class _SdkModule(_ModuleType):
     def state_update(self, value: Any) -> None:
         self.__dict__[_UPDATE_KEY] = value
 
+    @property
+    def context(self) -> AvaContext:
+        return process_context.current()
+
     def __dir__(self) -> list[str]:
-        return sorted({*super().__dir__(), "state", "state_update"})
+        return sorted({*super().__dir__(), "context", "state", "state_update"})
 
 
 _sys.modules[__name__].__class__ = _SdkModule
@@ -313,6 +331,9 @@ def __getattr__(name: str) -> Any:
     if name in ("state", "state_update"):
         # Reached only when the slot property raised (an AttributeError falls through to here).
         raise _outside_exec_turn(name)
+    if name == "context":
+        # Same fall-through: the property raised because no context is bound.
+        return process_context.current()
     if name == "external":
         import importlib
 
@@ -375,6 +396,7 @@ extend._qualname = "ava.extend"  # type: ignore[attr-defined]  # agent-facing na
 # must be defined before `apply_sdk_disable` runs.
 __all_for_ava__ = [
     "agents",
+    "context",
     "files",
     "help",
     "mcps",

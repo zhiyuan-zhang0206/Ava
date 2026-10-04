@@ -19,6 +19,7 @@ import ava.mcps._remote as remote_mod
 from ava.mcps.tests._mcps_helpers import _content_image, _content_text, _make_tool, _result
 from ava.mcps.tests._mcps_helpers import fake_config as fake_config
 from ava.mcps.tests._mcps_helpers import mock_session as mock_session
+from tests.fixtures.pin_agent import pin_no_identity
 
 # ─── _load_config / servers() ────────────────────────────────────────────
 
@@ -464,7 +465,7 @@ def test_read_cache_fills_defaults_for_missing_fields(fake_config: Path, tmp_pat
 
 
 def test_daemon_socket_path_none_when_identity_unset(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("ava.agent_identity._agent_id", None)
+    pin_no_identity()
     assert mcps_mod._daemon_socket_path() is None
 
 

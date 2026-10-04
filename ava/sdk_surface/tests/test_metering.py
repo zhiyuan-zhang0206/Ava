@@ -21,6 +21,7 @@ import pytest
 
 import ava
 from ava.sdk_surface import install, metering
+from base.agents.context.identity import ExternalLease
 from base.agents.sdk import telemetry as sdk_usage_telemetry
 from base.packages.plugins.extensions import (
     ExtensionRegistry,
@@ -29,6 +30,7 @@ from base.packages.plugins.extensions import (
     SdkNamespace,
     SdkWrap,
 )
+from tests.fixtures.pin_agent import pin_agent
 
 
 def _spy_emit(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, dict[str, object], float | None]]:
@@ -345,7 +347,6 @@ def test_borrowed_identity_is_stamped_on_external_sdk_events(
 ) -> None:
     from typing import Any
 
-    from ava import agent_identity
     from base import telemetry
     from base.agents.sdk import call_policy
 
@@ -357,9 +358,7 @@ def test_borrowed_identity_is_stamped_on_external_sdk_events(
     def validate() -> int:
         pytest.fail("observational telemetry must not validate the lease")
 
-    monkeypatch.setattr(agent_identity, "_external_identity", validate)
-    monkeypatch.setattr(agent_identity, "_external_agent_id", 99)
-    monkeypatch.setattr(agent_identity, "_agent_id", 42)
+    pin_agent(42, lease=ExternalLease(agent_id=99, validate=validate, config=lambda: None))
     monkeypatch.setattr(telemetry, "emit", capture)
     monkeypatch.setattr(call_policy, "policy", call_policy.SamplingPolicy)
     wrapped = metering._make_recorder(lambda: "ok", "files.read")
@@ -446,7 +445,7 @@ def test_a_failing_identity_snapshot_is_reported_and_the_call_goes_on(
         raise RuntimeError("identity unreadable")
 
     monkeypatch.setattr(metering, "report_sink_failure", record)
-    monkeypatch.setattr(metering.agent_identity, "_try_establish_from_env", _boom)
+    monkeypatch.setattr(metering.process_context, "peek", _boom)
     with metering._caller():
         pass
 

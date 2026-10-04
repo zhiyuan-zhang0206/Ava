@@ -23,6 +23,7 @@ import pytest
 import ava
 import ava.agent_identity
 from ava import shell
+from ava.sdk_surface import process_context
 from base.native_process.os_platform import IS_WINDOWS
 
 pytestmark = [
@@ -162,7 +163,7 @@ def test_run_default_cwd_is_workspace(tmp_path: Path, monkeypatch: pytest.Monkey
 
     monkeypatch.setenv("AVA_HOME", str(tmp_path))
     out = ava.shell.run("pwd")
-    expected = tmp_path / "workspaces" / str(ava.agent_identity._agent_id)
+    expected = tmp_path / "workspaces" / str(ava.agent_identity.agent_id())
     assert Path(out.strip()).resolve() == expected.resolve()
     assert expected.is_dir()  # workspace_dir mkdir on demand
 
@@ -171,16 +172,13 @@ def test_run_default_cwd_is_home_before_identity() -> None:
     """Identity not bound (pre-bootstrap) → falls back to $HOME — consistent with ava.files.resolve's
     pre-identity base, both surfaces share the same base in any state.
 
-    Manually save/restore instead of monkeypatch: this module's `_isolated_agent` (usefixtures)
-    already swaps _agent_id to a worker fake id before test body runs; monkeypatch.setattr's snapshot
-    would capture that fake id and restore it last in teardown, leaking the fake id to subsequent tests."""
-    original = ava.agent_identity._agent_id
-    ava.agent_identity._agent_id = None
+    The context is unbound only inside the block, so this module's `_isolated_agent` teardown
+    still finds its fake agent."""
     original_env = os.environ.pop("AVA_AGENT_ID", None)
     try:
-        out = ava.shell.run("pwd")
+        with process_context.scoped(None):
+            out = ava.shell.run("pwd")
     finally:
-        ava.agent_identity._agent_id = original
         if original_env is not None:
             os.environ["AVA_AGENT_ID"] = original_env
     assert Path(out.strip()).resolve() == Path.home().resolve()

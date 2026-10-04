@@ -24,6 +24,7 @@ from ava.tests._understand_helpers import fake_video as fake_video
 from ava.tests._understand_helpers import mock_deepseek as mock_deepseek
 from ava.tests._understand_helpers import mock_gemini as mock_gemini
 from base.config import settings
+from tests.fixtures.pin_agent import pin_agent, pin_no_identity
 
 # ── mode validation (paths= / text= mutually exclusive) ─────────────────────
 
@@ -159,9 +160,7 @@ def test_relative_path_resolves_to_home_before_identity(
     """Identity not bound → relative path falls back to $HOME resolution (same as ava.files pre-identity baseline)."""
     from unittest.mock import patch
 
-    import ava.agent_identity
-
-    monkeypatch.setattr(ava.agent_identity, "_agent_id", None)
+    pin_no_identity()
     (tmp_path / "h.txt").write_text("home material", encoding="utf-8")
     with patch.dict(os.environ, {"HOME": str(tmp_path)}):
         assert Path.home() == tmp_path  # mock lock-in
@@ -455,11 +454,10 @@ def test_paths_auto_save_source_labels_list(
     mock_gemini: dict[str, Any], fake_image: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Auto-saved output carries the paths list as its source label."""
-    from ava import agent_identity
 
     ws = tmp_path / "paths_ws"
     ws.mkdir(parents=True)
-    monkeypatch.setattr(agent_identity, "_agent_id", 2139)
+    pin_agent(2139)
 
     def _fake_workspace(aid: int) -> Path:
         return ws
