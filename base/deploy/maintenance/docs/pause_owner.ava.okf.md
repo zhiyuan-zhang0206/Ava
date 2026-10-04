@@ -17,7 +17,7 @@ Only a maintenance hold (below) writes the journal. A `paused` or `resumed`
 record without a hold is what the retired updater's stop op left: a `paused`
 one keeps business closed, and no command clears it. An unreadable journal
 refuses new work the same way. Both have one exit: after confirming no `ava
-stop` or `ava maintenance` command is in flight for this home, an operator
+stop` is in flight for this home, an operator
 removes the file by hand (`rm $AVA_HOME/run/deploy-pause-owner.json`) and runs
 `ava start`.
 
@@ -25,7 +25,7 @@ An explicit [maintenance hold](maintenance.ava.okf.md) uses the same journal
 with a typed cohort/progress payload and the recorded shepherding process it
 was taken under (`base/deploy/maintenance/hold_driver.py`). It has no expiry timer and no
 automatic release; only its exact
-operation's `ava start` (or `ava maintenance cancel`) ends it. Ordinary
+operation's `ava start` ends it. Ordinary
 compensation and a newer maintenance operation cannot release or overwrite it.
 This is distinct from a retired updater's pause record, which has no exit but
 the manual removal above.

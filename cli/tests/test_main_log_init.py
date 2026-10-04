@@ -104,8 +104,6 @@ def _dispatching(sink: list[str]) -> argparse.ArgumentParser:
         (["lgtm", "on"], "cli-lgtm"),
         (["lgtm", "off"], "cli-lgtm"),
         (["status"], None),
-        (["maintenance", "status"], None),
-        (["maintenance", "repair"], None),
         (["lgtm", "status"], None),
     ],
 )

@@ -129,7 +129,7 @@ def test_resume_agents_releases_undelivered_receipts(
     assert pause_owner.read().status == "resumed"
 
 
-def test_resume_agents_refuses_blocking_failures_with_repair_hint(
+def test_resume_agents_refuses_blocking_failures_with_start_hint(
     monkeypatch: pytest.MonkeyPatch,
     database: Database,
     event_bus: EventBus,
@@ -140,7 +140,7 @@ def test_resume_agents_refuses_blocking_failures_with_repair_hint(
 
     monkeypatch.setattr("ops.agent_pause.publish_inbound_wake", MagicMock())
     _hold_with(failures={7: "RuntimeError"})
-    with pytest.raises(RuntimeError, match="ava maintenance repair --operation"):
+    with pytest.raises(RuntimeError, match="run `ava start`"):
         resume_agents(database, event_bus)
     assert pause_owner.read().status == "paused"
 

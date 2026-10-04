@@ -1,10 +1,12 @@
 # pyright: reportUnknownArgumentType=warning
-"""A recorded failure receipt blocks every maintenance gate.
+"""A recorded failure receipt blocks every maintenance gate except `ava start`.
 
-A member whose continuation failed keeps the hold fail-closed at each exit:
+A member whose continuation failed keeps the hold fail-closed at each gate:
 preparation retry, drain certification, the `drained` phase transition, the
-drain loop, resume and the start path. Each names the sanctioned exit
-(`ava maintenance repair`) or refuses, and none of them releases the hold.
+drain loop and resume. Each names `ava start` or refuses, and none of them
+releases the hold. `ava start` is the one exit: once the unit serves, it
+re-delivers each failed continuation, reports and notifies for any it cannot
+deliver, and releases the hold.
 """
 
 from __future__ import annotations
@@ -12,7 +14,6 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from pathlib import Path
 from unittest.mock import MagicMock
-from urllib.error import URLError
 from uuid import uuid4
 
 import psycopg
@@ -24,7 +25,6 @@ from base.deploy.maintenance import admission, cohort, pause_owner
 from base.deploy.maintenance.state import MaintenanceHold
 from base.events.live.bus import EventBus
 from ops import agent_pause, cluster_pause
-from ops.agent_pause.probe import HostIdentity, host_identity_or_none
 
 WHEN = datetime(2026, 9, 20, 3, 0, tzinfo=UTC)
 HOLDER = "ops:test:4150"
@@ -110,12 +110,12 @@ def test_set_phase_refuses_a_recorded_failure() -> None:
         admission.set_phase(HOLDER, WHEN, "drained")
 
 
-def test_unpause_names_repair_for_a_recorded_failure(
+def test_unpause_names_start_for_a_recorded_failure(
     database: Database, event_bus: EventBus
 ) -> None:
     _publish(MaintenanceHold("draining", {1: 11}, failures={1: "RuntimeError"}))
 
-    with pytest.raises(RuntimeError, match="maintenance repair"):
+    with pytest.raises(RuntimeError, match="run `ava start`"):
         cluster_pause.unpause_local_cluster(database, event_bus)
     assert pause_owner.read().status == "paused"
 
@@ -139,48 +139,164 @@ def test_resume_agents_refuses_a_recorded_failure(
         agent_pause.resume_agents(database, event_bus)
 
 
-def test_start_path_refuses_a_recorded_failure() -> None:
-    from cli.commands.lifecycle._pause_resume import resume_after_start
+def _pending_restart(db_conn: psycopg.Connection, status: str = "idling") -> tuple[int, int]:
+    """A cohort member's durable pointer: an agent row and its pending maintenance restart."""
+    agent = create_agent(db_conn)
+    db_conn.execute(
+        "INSERT INTO agents_meta(id,status,machine) VALUES(%s,%s,%s)",
+        (agent, status, machine_name()),
+    )
+    command = insert_inbound_message(
+        db_conn,
+        agent,
+        "",
+        "system:maintenance",
+        kind="restart",
+        payload=_MAINTENANCE_PAYLOAD,
+        database=Database.from_settings(),
+        bus=EventBus.from_settings(),
+    )
+    db_conn.commit()
+    return agent, command
 
-    _publish(MaintenanceHold("draining", {1: 11}, failures={1: "RuntimeError"}))
 
-    @resume_after_start
-    def start() -> int:
-        raise AssertionError("start must not run")
+class _StartHarness:
+    """`ava start` over a standing hold, with its release collaborators observable."""
 
-    with pytest.raises(RuntimeError, match="start cannot release failed"):
-        start()
+    def __init__(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from base.deploy.lifecycle import start_serving
+
+        self.woken: list[int] = []
+        self.alerts: list[dict[str, object]] = []
+        self.logger = MagicMock()
+        monkeypatch.setattr(start_serving, "is_serving", lambda: True)
+        monkeypatch.setattr("base.deploy.state.host_deploy_state.set_posture", MagicMock())
+        monkeypatch.setattr("ops.agent_pause.publish_inbound_wake", self._record_wake)
+        monkeypatch.setattr("cli.commands.lifecycle._failed_receipts.logger", self.logger)
+        monkeypatch.setattr("cli.commands._probe._alert_db_connect", MagicMock())
+        monkeypatch.setattr("cli.commands._probe._alert_upsert_and_maybe_im", self._record_alert)
+
+    def _record_wake(self, _db: object, _bus: object, agent: int, _payload: str) -> bool:
+        self.woken.append(agent)
+        return True
+
+    def _record_alert(self, _conn: object, alert: dict[str, object], *, im_enabled: bool) -> None:
+        assert im_enabled
+        self.alerts.append(alert)
+
+    def start(self, rc: int = 0) -> int:
+        from cli.commands.lifecycle._pause_resume import resume_after_start
+
+        ran: list[bool] = []
+
+        @resume_after_start
+        def start() -> int:
+            assert admission.start_authorized()
+            ran.append(True)
+            return rc
+
+        result = start()
+        assert ran == [True]
+        return result
 
 
-def test_host_identity_or_none_requires_independent_absence(
-    monkeypatch: pytest.MonkeyPatch,
+def test_start_redelivers_a_failed_continuation_and_releases_the_hold(
+    monkeypatch: pytest.MonkeyPatch, db_conn: psycopg.Connection
 ) -> None:
-    identity = MagicMock(side_effect=URLError(ConnectionRefusedError(111, "Connection refused")))
-    monkeypatch.setattr("ops.agent_pause.probe.host_identity", identity)
-    monkeypatch.setattr("ops.agent_pause.probe.host_running", lambda: False)
-    assert host_identity_or_none() is None
-    identity.assert_not_called()
+    """The failed member's restart pointer is intact: no error, no notice; the release wakes it."""
+    agent, command = _pending_restart(db_conn)
+    _publish(MaintenanceHold("draining", {agent: command}, failures={agent: "RuntimeError"}))
+    harness = _StartHarness(monkeypatch)
 
-    monkeypatch.setattr("ops.agent_pause.probe.host_running", lambda: True)
-    with pytest.raises(URLError):
-        host_identity_or_none()
+    assert harness.start() == 0
 
-    identity.side_effect = ConnectionRefusedError(111, "Connection refused")
-    with pytest.raises(ConnectionRefusedError):
-        host_identity_or_none()
-
-    identity.side_effect = None
-    identity.return_value = HostIdentity(uuid4(), frozenset({7}))
-    assert host_identity_or_none() == identity.return_value
+    assert pause_owner.read().status == "resumed"
+    assert harness.woken == [agent]
+    harness.logger.error.assert_not_called()
+    assert harness.alerts == []
 
 
-def test_unknown_host_process_evidence_still_refuses(monkeypatch: pytest.MonkeyPatch) -> None:
-    def unknown() -> bool:
-        raise RuntimeError("cannot identify an unrecorded agent-host home")
+def test_start_reports_and_notifies_a_continuation_it_cannot_redeliver(
+    monkeypatch: pytest.MonkeyPatch, db_conn: psycopg.Connection
+) -> None:
+    """A restart pointer that is gone is logged at ERROR and told to the owner; start still goes."""
+    lost, lost_command = _pending_restart(db_conn)
+    kept, kept_command = _pending_restart(db_conn)
+    db_conn.execute("UPDATE inbound_messages SET status='done' WHERE id=%s", (lost_command,))
+    db_conn.commit()
+    _publish(
+        MaintenanceHold(
+            "draining",
+            {lost: lost_command, kept: kept_command},
+            failures={lost: "RuntimeError", kept: "ValueError"},
+        )
+    )
+    harness = _StartHarness(monkeypatch)
 
-    identity = MagicMock()
-    monkeypatch.setattr("ops.agent_pause.probe.host_running", unknown)
-    monkeypatch.setattr("ops.agent_pause.probe.host_identity", identity)
-    with pytest.raises(RuntimeError, match="cannot identify"):
-        host_identity_or_none()
-    identity.assert_not_called()
+    assert harness.start() == 0
+
+    assert pause_owner.read().status == "resumed"
+    assert sorted(harness.woken) == sorted([lost, kept])
+    harness.logger.error.assert_called_once()
+    assert harness.logger.error.call_args.kwargs["agent_id"] == lost
+    assert harness.logger.error.call_args.kwargs["category"] == "RuntimeError"
+    assert [alert["labels"]["agent"] for alert in harness.alerts] == [str(lost)]  # type: ignore[index]
+    summary = harness.alerts[0]["annotations"]["summary"]  # type: ignore[index]
+    assert f"agent {lost}" in summary
+    assert f"agent {kept}" not in summary
+
+
+def test_start_does_not_revive_a_terminated_agent_whose_continuation_failed(
+    monkeypatch: pytest.MonkeyPatch, db_conn: psycopg.Connection
+) -> None:
+    agent, command = _pending_restart(db_conn, status="terminated")
+    db_conn.execute("UPDATE inbound_messages SET status='done' WHERE id=%s", (command,))
+    db_conn.commit()
+    _publish(MaintenanceHold("draining", {agent: command}, failures={agent: "RuntimeError"}))
+    harness = _StartHarness(monkeypatch)
+
+    assert harness.start() == 0
+
+    assert pause_owner.read().status == "resumed"
+    harness.logger.error.assert_not_called()
+    assert harness.alerts == []
+
+
+def test_failed_start_keeps_the_hold_and_its_receipts(
+    monkeypatch: pytest.MonkeyPatch, db_conn: psycopg.Connection
+) -> None:
+    """Receipts are settled only once the unit serves: a start that failed leaves them for the retry."""
+    agent, command = _pending_restart(db_conn)
+    _publish(MaintenanceHold("draining", {agent: command}, failures={agent: "RuntimeError"}))
+    harness = _StartHarness(monkeypatch)
+
+    assert harness.start(rc=1) == 1
+
+    current = pause_owner.read()
+    assert current.status == "paused"
+    assert current.maintenance is not None
+    assert current.maintenance.failures == {agent: "RuntimeError"}
+    assert harness.woken == []
+
+
+def test_unreadable_pointer_check_keeps_the_failure_receipts(
+    monkeypatch: pytest.MonkeyPatch, db_conn: psycopg.Connection
+) -> None:
+    agent, command = _pending_restart(db_conn)
+    _publish(MaintenanceHold("draining", {agent: command}, failures={agent: "RuntimeError"}))
+    harness = _StartHarness(monkeypatch)
+
+    def unreachable() -> None:
+        raise ConnectionError("database unreachable")
+
+    monkeypatch.setattr(
+        "cli.commands.lifecycle._failed_receipts.Database.from_settings", unreachable
+    )
+
+    with pytest.raises(ConnectionError):
+        harness.start()
+
+    current = pause_owner.read()
+    assert current.status == "paused"
+    assert current.maintenance is not None
+    assert current.maintenance.failures == {agent: "RuntimeError"}

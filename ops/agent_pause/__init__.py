@@ -180,13 +180,12 @@ def drain(db: Database, holder: str, at: datetime, timeout: float) -> None:
         hold = _hold(holder, at)
         if hold.phase == "preparing":
             raise RuntimeError(
-                "preparation is incomplete; re-run `ava stop`, or abandon it with `ava maintenance cancel`"
+                "preparation is incomplete; re-run `ava stop`, or abandon it with `ava start`"
             )
         if hold.failures:
             raise RuntimeError(
                 f"continuations failed; hold retained: {sorted(hold.failures)} — "
-                "fix the root cause, then ava maintenance repair --operation "
-                f"{holder} --acquired-at {at.isoformat()}"
+                "`ava start` re-delivers them and releases the hold"
             )
         if set(hold.drained) == set(hold.commands):
             with db.connect() as conn:
@@ -296,8 +295,9 @@ def _stall_line(
     if host_owner is not None and row.runtime_owner is not None and row.runtime_owner != host_owner:
         line += (
             f"\n  fence: runtime owned by {row.runtime_owner}, not the live boot {host_owner} — "
-            "a successor host cannot certify its predecessor flushed; resolve explicitly "
-            "(ava maintenance status, then ava maintenance cancel or repair)"
+            "a successor host cannot certify its predecessor flushed, so re-running "
+            "`ava stop` cannot clear it; `ava start` releases the hold and cold "
+            "admission resumes the agent from its checkpoint"
         )
     return line
 
@@ -347,9 +347,8 @@ def resume_agents(db: Database, bus: EventBus) -> None:
     assert current.holder is not None and current.acquired_at is not None  # noqa: S101
     if current.maintenance.failures:
         raise RuntimeError(
-            "cannot resume failed continuation/flush receipts; fix the root cause, "
-            "then ava maintenance repair --operation "
-            f"{current.holder} --acquired-at {current.acquired_at.isoformat()}"
+            "cannot resume failed continuation/flush receipts; run `ava start`, which "
+            "re-delivers them before it releases the hold"
         )
     pause_owner.change_maintenance(
         current.holder, current.acquired_at, current.maintenance, current.maintenance, resumed=True

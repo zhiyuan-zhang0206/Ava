@@ -107,11 +107,8 @@ def test_pty_stays_settings_lite(monkeypatch: pytest.MonkeyPatch) -> None:
     assert _dispatched_fetch_env(monkeypatch, ["pty", "status"]) == "skip"
 
 
-def test_status_stays_settings_lite_and_the_hold_exits_fetch(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """`status` reads only the local journal, so it stays offline-capable; `repair`
-    and `cancel` dial this unit's real database and fetch like any other verb."""
-    assert _dispatched_fetch_env(monkeypatch, ["maintenance", "status"]) == "skip"
-    for verb in ("repair", "cancel"):
-        assert _dispatched_fetch_env(monkeypatch, ["maintenance", verb]) is None
+def test_status_stays_settings_lite(monkeypatch: pytest.MonkeyPatch) -> None:
+    """`status` (and `status --json`, the hold's reader) reads the local journal first,
+    so it stays offline-capable."""
+    assert _dispatched_fetch_env(monkeypatch, ["status"]) == "skip"
+    assert _dispatched_fetch_env(monkeypatch, ["status", "--json"]) == "skip"

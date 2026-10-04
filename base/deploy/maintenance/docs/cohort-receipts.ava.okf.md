@@ -32,10 +32,9 @@ Receipts latched after the stop started had no exit.
 
 Everything else records as before: any failure before the capture (phase
 `preparing`) and a member's failure before the drain is certified (phase
-`draining`, drained and parked members included); `ava maintenance repair`
-covers both.
+`draining`, drained and parked members included); `ava start` settles both.
 
 ## Dependencies
 
 - [[maintenance.ava.okf.md|Native pause and maintenance]] — the hold, its
-  phases, grading of failure receipts and the repair exit.
+  phases, grading of failure receipts and the `ava start` settlement.

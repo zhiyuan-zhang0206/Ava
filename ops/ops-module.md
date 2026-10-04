@@ -74,7 +74,7 @@ these fields do not certify every sibling daemon's running code.
 with the running image's required set. Wheel runtimes use installed SQL metadata without Git.
 The status contract contains the diagnosis kind, machine and detail; it has no
 Git-pin category, watchdog counters, held-service projection, or stranded-hold
-record. Ordinary stop and maintenance status remain independent of this
+record. Ordinary stop and the hold status remain independent of this
 read-only schema diagnosis. Invalid database catalogs or image migration layouts
 report `invalid-migration-layout`; query and connection failures report
 `unavailable`. Only a successful comparison of equal sets returns no diagnosis.

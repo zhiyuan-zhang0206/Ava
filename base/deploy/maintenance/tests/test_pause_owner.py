@@ -104,3 +104,31 @@ def test_a_journal_written_with_the_retired_reaped_map_still_reads() -> None:
     assert snapshot.status == "paused"
     assert snapshot.maintenance == hold
     assert "reaped" not in hold.encode()
+
+
+def test_journal_written_with_the_retired_repair_record_still_decodes() -> None:
+    """`repaired` / `repair_record` left with `ava maintenance repair`; a journal that carries
+    them decodes without them."""
+    import json
+
+    from base.deploy.maintenance.state import MaintenanceHold
+
+    hold = MaintenanceHold("stopped", {7: 100}, drained=(7,))
+    pause_owner.state_path().write_text(
+        json.dumps(
+            {
+                "state": "paused",
+                "holder": "A",
+                "acquired_at": "2026-08-25T01:02:00+00:00",
+                "maintenance": {
+                    **hold.encode(),
+                    "repaired": {"7": "RuntimeError"},
+                    "repair_record": {"at": "2026-08-25T01:03:00+00:00", "by": "Ava #1"},
+                },
+            }
+        )
+    )
+    snapshot = pause_owner.read()
+    assert snapshot.maintenance == hold
+    assert "repaired" not in hold.encode()
+    assert "repair_record" not in hold.encode()
