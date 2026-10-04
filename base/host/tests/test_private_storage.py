@@ -421,7 +421,7 @@ def test_summary_caps_examples_and_counts_every_skip(
     example paths."""
     root = tmp_path / "private"
     root.mkdir()
-    links = []
+    links: list[Path] = []
     for index in range(5):
         link = root / f"link{index}"
         link.symlink_to(tmp_path / "missing-target")

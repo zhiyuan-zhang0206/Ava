@@ -105,7 +105,7 @@ async def test_slow_acquires_coalesce_per_host_within_the_cooldown(
         return object()
 
     pool = _pool()  # construct under the real clock, before we stub it
-    monkeypatch.setattr(AsyncConnectionPool, "getconn", _ok)
+    monkeypatch.setattr(AsyncConnectionPool, "getconn", _ok)  # pyright: ignore[reportUnknownArgumentType]
     clock = [0.0]
 
     def _monotonic() -> float:
@@ -116,7 +116,7 @@ async def test_slow_acquires_coalesce_per_host_within_the_cooldown(
 
     await pool.getconn()
     await pool.getconn()
-    assert [r["level"].name for r in _acquire_records(loguru_records)] == [  # pyright: ignore[reportUnknownMemberType]
+    assert [r["level"].name for r in _acquire_records(loguru_records)] == [  # pyright: ignore[reportUnknownMemberType, reportUnknownArgumentType]
         "WARNING",
         "DEBUG",
     ]
@@ -125,7 +125,7 @@ async def test_slow_acquires_coalesce_per_host_within_the_cooldown(
     os.utime(_isolated_warn_marker, (aged, aged))
     await pool.getconn()
 
-    recs = _acquire_records(loguru_records)  # pyright: ignore[reportUnknownMemberType]
+    recs = _acquire_records(loguru_records)  # pyright: ignore[reportUnknownArgumentType]
     assert [r["level"].name for r in recs] == ["WARNING", "DEBUG", "WARNING"]  # pyright: ignore[reportUnknownMemberType]
     assert [r["extra"]["coalesced"] for r in recs] == [False, True, False]
     assert recs[0]["extra"]["check_ms"] >= 0

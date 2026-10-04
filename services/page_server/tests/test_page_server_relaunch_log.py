@@ -12,9 +12,11 @@ from __future__ import annotations
 import logging
 import secrets
 from pathlib import Path
+from typing import cast
 
 import pytest
 
+from base.sessions.backend import SessionBackend
 from services.page_server import daemon as psd
 from services.page_server.degradation import _PageRow
 
@@ -36,8 +38,15 @@ def test_failed_relaunch_logs_warning_and_tears_the_session_down(
     monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture, tmp_path: Path
 ) -> None:
     caplog.set_level(logging.WARNING, logger="services.page_server.daemon")
-    monkeypatch.setattr(psd, "_server_is_healthy", lambda *_args: False)
-    monkeypatch.setattr(psd, "_probe_port", lambda *_args: None)
+
+    def _unhealthy(*_args: object) -> bool:
+        return False
+
+    def _no_port(*_args: object) -> None:
+        return None
+
+    monkeypatch.setattr(psd, "_server_is_healthy", _unhealthy)
+    monkeypatch.setattr(psd, "_probe_port", _no_port)
     session = "ava-agent-42-shell-3-page-wedged"
     serve_dir = str(tmp_path / "page")
     token = secrets.token_hex(8)
@@ -51,12 +60,14 @@ def test_failed_relaunch_logs_warning_and_tears_the_session_down(
         server_token=token,
         session_name=session,
     )
-    key = (42, "wedged")
+    key: tuple[int, str] = (42, "wedged")
     handle = psd._ServerHandle(42, "wedged", 12016, serve_dir, token, session, 0.0)
-    managed = {key: handle}
+    managed: dict[tuple[int, str], psd._ServerHandle] = {key: handle}
     backend = _Backend()
 
-    tore_down = psd._supervise_handle(backend, row, key, handle, managed, {}, {}, {}, 1e9)
+    tore_down = psd._supervise_handle(
+        cast("SessionBackend", backend), row, key, handle, managed, {}, {}, {}, 1e9
+    )
 
     assert tore_down is True, "the caller recreates the session in this same pass"
     assert backend.killed == [session]
