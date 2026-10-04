@@ -13,6 +13,7 @@ from __future__ import annotations
 import urllib.error
 import urllib.request
 from datetime import UTC, datetime
+from typing import Any
 
 import pytest
 
@@ -155,12 +156,17 @@ def test_station_answers_http_error_is_not_alive(monkeypatch: pytest.MonkeyPatch
     assert hc._station_answers("http://10.0.0.9:4318") is False
 
 
-def test_station_answers_connection_failure_is_not_alive(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_station_answers_connection_failure_is_not_alive(
+    monkeypatch: pytest.MonkeyPatch, loguru_records: list[dict[str, Any]]
+) -> None:
     def _raise(_req: object, **_kw: object) -> None:
         raise OSError("connection refused")
 
     monkeypatch.setattr(urllib.request, "urlopen", _raise)
     assert hc._station_answers("http://10.0.0.9:4318") is False
+    record = next(r for r in loguru_records if "unreachable" in r["message"])
+    assert record["exception"] is not None
+    assert record["exception"].type is OSError
 
 
 def test_station_answers_without_a_published_token_warns_and_fails_open(

@@ -125,12 +125,11 @@ async def sideload_committed_ids(
         for type_tag, blob in rows:
             _collect_inbound_ids(serde.loads_typed((type_tag, blob)), ids)
     except Exception:
-        logger.warning(
+        logger.opt(exception=True).warning(
             "inbound reconcile side-load decode failed; scanning settled history",
             event="inbound_reconcile_sideload_fallback",
             agent_id=agent_id,
             reason="decode_error",
-            exc_info=True,
         )
         return None
     return ids

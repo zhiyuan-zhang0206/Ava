@@ -287,7 +287,7 @@ def _enqueue_failed(agent_id: int, exc: Exception) -> None:
             attributes={"agent_id": agent_id, "error": f"{type(exc).__name__}: {exc}"},
         )
     except Exception:
-        logger.warning("hierarchy enqueue-failure event could not be emitted", exc_info=True)
+        logger.opt(exception=True).warning("hierarchy enqueue-failure event could not be emitted")
 
 
 async def mark_compact_boundary(

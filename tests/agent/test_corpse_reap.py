@@ -28,7 +28,11 @@ from agent.ownership.corpse_reap import (
     reap_crash_corpses,
     reap_recrashed_corpse,
 )
-from agent.ownership.hosted import admit_hosted_runtime, settle_hosted_runtime
+from agent.ownership.hosted import (
+    admit_hosted_runtime,
+    settle_and_stamp_turn,
+    settle_hosted_runtime,
+)
 from base.agents.incarnation.lifecycle_acceptance import HOSTED_TURN_RECOVERY_MARKER
 from base.config import settings
 from base.db import Database, create_agent
@@ -408,3 +412,32 @@ async def test_recovery_wake_switch_off_commits_nothing(
     assert [corpse.agent_id for corpse in reaped] == [agent_id]
     assert reaped[0].recovery_wake_id is None
     assert _recovery_wakes(db_conn, agent_id) == []
+
+
+async def test_corpse_stamp_failure_keeps_its_traceback(
+    db_conn: psycopg.Connection[Any],
+    aops_pool: AsyncConnectionPool[Any],
+    loguru_records: list[dict[str, Any]],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A failed corpse stamp is best-effort — but its log keeps the cause (task #4979)."""
+
+    async def _broken(_pool: object, _incarnation: object) -> None:
+        raise RuntimeError("stamp store down")
+
+    monkeypatch.setattr("agent.ownership.hosted.stamp_turn_fatal", _broken)
+
+    agent_id, owner = _agent(db_conn), uuid4()
+    incarnation = await admit_hosted_runtime(
+        aops_pool, agent_id, "host-test", owner, expected_from="idling", db=Database.from_settings()
+    )
+    assert incarnation is not None
+
+    settlement = await settle_and_stamp_turn(
+        aops_pool, incarnation, bus=EventBus.from_settings(), exited=False, crashed=True
+    )
+
+    assert settlement.stamp is None
+    record = next(r for r in loguru_records if r["extra"].get("event") == "corpse_stamp_failed")
+    assert record["exception"] is not None
+    assert record["exception"].type is RuntimeError
