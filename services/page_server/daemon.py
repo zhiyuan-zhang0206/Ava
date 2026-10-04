@@ -551,7 +551,10 @@ def _supervise_handle(
         try:
             _launch_in_session(backend, handle, row)
         except RuntimeError as exc:
-            _log.error("[page-server] relaunch failed for %s: %s", key, exc)
+            # Self-healing: the wedged session is torn down and a fresh one is
+            # rebuilt in this same pass. Noise, not an incident (2026-10-03
+            # triage, E5).
+            _log.warning("[page-server] relaunch failed for %s: %s", key, exc)
             # The shell cannot run the server command — its host is gone or
             # wedged while the record still reads alive. A bare backoff
             # would retry the dead transport forever; tear the session down
