@@ -478,9 +478,10 @@ async def test_send_to_owner_before_any_inbound_raises_clear_error(
     adapter: FeishuAdapter,
 ) -> None:
     """send_to_owner with no known p2p chat (daemon restart, no inbound yet)
-    raises the documented RuntimeError — not an AttributeError from an
-    uninitialized _last_open_id."""
-    with pytest.raises(RuntimeError, match="no known user chat"):
+    raises the fan-out's skip signal, NotImplementedError — not an
+    AttributeError from an uninitialized _last_open_id, and not a RuntimeError
+    that the notify fan-out would retry forever (task #4964)."""
+    with pytest.raises(NotImplementedError, match="no known user chat"):
         await adapter.send_to_owner("hi")
 
 
