@@ -209,8 +209,8 @@ class ShellSessions:
         full = f"{self._shell_prefix()}{session_id}" + (f"-{name}" if name is not None else "")
         # Pass the session allowlist to the backend. On POSIX the shell's base env is
         # the pty-sessions service's own env, overlaid with this dict;
-        # watcher-only runner credentials arrive through `env_overrides`, while
-        # generic shell sessions keep the ordinary projection.
+        # watcher-only runner credentials arrive through `env_overrides`; every session
+        # also gets the owner's identity (below), the projection's one deliberate addition.
         #
         # The dict rides the request body over the service's 0600 unix socket, not
         # argv (issue #974).
@@ -224,6 +224,13 @@ class ShellSessions:
         session_cwd = Path(cwd)
         activate_venv = cwd_is_inside_checkout(session_cwd, repo_root())
         session_env = forward_env_dict(activate_venv=activate_venv)
+        # The session is the agent's own: the owner's id rides the environment so a script run
+        # in it builds a full AvaContext (`process_context._launched_child_context`,
+        # `owns_loop=False`) and `ava.DB` / `ava.REDIS` / the gateway-backed calls work as in
+        # the exec child (ruling 2026-10-04, decisions/2026-10-04-ava-state-and-context.md,
+        # source 2). Per-creation, from this session's owner — not the creating process's
+        # copied value, which the allowlist drops (a frozen pane's stale id).
+        session_env["AVA_AGENT_ID"] = str(self._agent_id)
         if env_overrides:
             session_env.update(env_overrides)
         ok = backend.new_session(

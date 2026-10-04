@@ -99,7 +99,10 @@ def test_exec_child_closure_stays_lite_with_real_pin_map(tmp_path: Path) -> None
                 "v": 1,
                 "code": code,
                 "agent_id": None,
-                "context": {"identity": {"agent_id": None, "owns_loop": True, "actor": None}},
+                "context": {
+                    "identity": {"agent_id": None, "owns_loop": True, "actor": None},
+                    "gateway_url": "http://gateway.invalid:8000",
+                },
                 "timeout_s": 30.0,
             }
         ),

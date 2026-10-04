@@ -1,22 +1,33 @@
-"""Contract tests for `ava.self.attach`'s child-local registration buffer."""
+"""Contract tests for `ava.self.attach`: a registration goes into the exec turn's state update."""
 
 from __future__ import annotations
 
 from collections.abc import Iterator
 from pathlib import Path
+from typing import cast
 
 import pytest
 
-from ava.attachment_transport import attach, take_attachments
+import ava
+from ava.attachment_transport import attach
 from base.lm.attach_constants import ATTACH_MAX_FILE_BYTES, ATTACH_MAX_LABEL_CHARS
 from tests.fixtures.model_catalog import AddModels
 
 
+def take_attachments() -> list[dict[str, object]]:
+    """The registrations in the bound turn's state update, drained as the exec node drains them."""
+    update = ava.state_update
+    assert isinstance(update, dict)
+    return cast("list[dict[str, object]]", update.pop("attach", []))
+
+
 @pytest.fixture(autouse=True)
-def _clear_attachment_buffer() -> Iterator[None]:
-    take_attachments()
+def _exec_turn() -> Iterator[None]:
+    """Run as an exec turn: the state slot is bound, as the exec child binds it."""
+    ava.state = object()
+    ava.state_update = {}
     yield
-    take_attachments()
+    ava.unbind_exec_turn()
 
 
 @pytest.fixture(autouse=True)
@@ -29,14 +40,9 @@ def _media_capable_model(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(settings.lm, "llm_model", "gpt-5.6-sol")
 
 
-def _exec_child(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    monkeypatch.setenv("AVA_EXEC_REQUEST_FILE", str(tmp_path / "request.json"))
-
-
 def test_registers_resolved_path_and_drains_once(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    _exec_child(monkeypatch, tmp_path)
     image = tmp_path / "result.png"
     image.write_bytes(b"png")
 
@@ -46,8 +52,8 @@ def test_registers_resolved_path_and_drains_once(
     assert take_attachments() == []
 
 
-def test_rejects_calls_outside_exec_child(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    monkeypatch.delenv("AVA_EXEC_REQUEST_FILE", raising=False)
+def test_rejects_calls_outside_exec_child(tmp_path: Path) -> None:
+    ava.unbind_exec_turn()
     image = tmp_path / "result.png"
     image.write_bytes(b"png")
 
@@ -58,7 +64,6 @@ def test_rejects_calls_outside_exec_child(monkeypatch: pytest.MonkeyPatch, tmp_p
 def test_validates_path_suffix_size_and_label(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    _exec_child(monkeypatch, tmp_path)
     directory = tmp_path / "directory"
     directory.mkdir()
     text_file = tmp_path / "notes.txt"
@@ -86,7 +91,6 @@ def test_validates_path_suffix_size_and_label(
 def test_uses_workspace_relative_path_semantics(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    _exec_child(monkeypatch, tmp_path)
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setattr("ava.files.agent_identity.agent_id", lambda: None)
     image = tmp_path / "relative.png"
@@ -97,30 +101,12 @@ def test_uses_workspace_relative_path_semantics(
     assert take_attachments() == [{"path": str(image.resolve()), "label": None}]
 
 
-def test_take_attachments_drops_tampered_entries(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    from ava import attachment_transport
-
-    _exec_child(monkeypatch, tmp_path)
-    image = tmp_path / "result.png"
-    image.write_bytes(b"png")
-    attach(image)
-    attachment_transport._ATTACHMENTS.extend(
-        [{"path": 1, "label": None}, {"path": "x", "label": 1}, object()]  # pyright: ignore[reportArgumentType]  # Deliberately tamper with the private buffer.
-    )
-
-    assert take_attachments() == [{"path": str(image.resolve()), "label": None}]
-    assert take_attachments() == []
-
-
 def test_rejects_text_only_model(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """A text-only model's attach call fails at the model gate with a clear
     error and registers nothing — the member is hidden from its SDK docs, so
     the call is the only path that can reach it (user ruling 2026-08-28)."""
     from base.config import settings
 
-    _exec_child(monkeypatch, tmp_path)
     monkeypatch.setattr(settings.lm, "llm_model", "deepseek-v4-pro")
     image = tmp_path / "result.png"
     image.write_bytes(b"png")
@@ -140,7 +126,6 @@ def test_rejects_model_withdrawn_to_its_text_only_fallback(
     from base.config import settings
     from base.lm.plugin_providers import model_catalog
 
-    _exec_child(monkeypatch, tmp_path)
     model = "deepseek-vision-fixture"
     add_models(
         {
@@ -170,7 +155,6 @@ def test_rejects_modality_not_supported_by_model(
     skip (user ruling 2026-08-28)."""
     from base.config import settings
 
-    _exec_child(monkeypatch, tmp_path)
     # gpt-5.6-sol is image-only.
     monkeypatch.setattr(settings.lm, "llm_model", "gpt-5.6-sol")
     video = tmp_path / "clip.mp4"
@@ -191,7 +175,6 @@ def test_attach_modality_matrix_follows_registry(
     2026-08-28)."""
     from base.config import settings
 
-    _exec_child(monkeypatch, tmp_path)
     video = tmp_path / "clip.mp4"
     video.write_bytes(b"mp4")
     image = tmp_path / "shot.png"

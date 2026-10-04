@@ -1,12 +1,14 @@
 """ava.context cross-process e2e — an exec child holds the host's context.
 
 One turn: the scripted model's execute_code reads `ava.context.identity` in the real exec child,
-then uses that identity for an SQL read over `ava.DB` and a gateway read over `ava.agents`
+then uses that identity for an SQL read over `ava.context.sql` and gateway reads over
+`ava.agents` and `ava.context.gateway`
 (see fakes/scenarios/context_identity). The code_output the turn commits must show
 
 - the agent id the host's context carried (the e2e agent's own id), owning its loop, no actor;
 - the database row of that agent, read through the child's own connection;
-- the agent's status, read through the gateway the child's client dialed.
+- the agent's status and its gateway record (HTTP 200), read through the gateway the child's own
+  client dialed.
 """
 
 from __future__ import annotations
@@ -59,3 +61,4 @@ def test_exec_child_holds_the_hosts_context(e2e_env: E2EEnv) -> None:
     assert (
         f"CTX agent_id={agent_id} owns_loop=True actor=None db_row={agent_id} status=" in output
     ), output
+    assert "gateway=200" in output

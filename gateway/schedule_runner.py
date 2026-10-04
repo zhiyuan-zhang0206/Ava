@@ -396,7 +396,8 @@ def _bind_schedule_actor(schedule_id: int) -> None:
 
     process_context.bind_process(
         AvaContext(
-            identity=AgentIdentity(agent_id=None, owns_loop=True, actor=f"schedule:{schedule_id}")
+            identity=AgentIdentity(agent_id=None, owns_loop=True, actor=f"schedule:{schedule_id}"),
+            clients=process_context.process_clients(),
         )
     )
 

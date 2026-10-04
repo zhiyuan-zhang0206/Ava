@@ -201,7 +201,6 @@ def test_result_envelope_round_trip(tmp_path: Path) -> None:
         exc_msg="boom",
         full_traceback="Traceback...",
         state_update={"messages": [HumanMessage(content="note")]},
-        attachments=[{"path": "/example/result.png", "label": "render"}],
         sdk_calls=[{"method": "files.read", "count": 3}],
     )
     path = make_result_path(tmp_path, agent_id=7)
@@ -212,7 +211,6 @@ def test_result_envelope_round_trip(tmp_path: Path) -> None:
     assert back.exc_msg == "boom"
     assert back.full_traceback == "Traceback..."
     assert back.state_update == payload.state_update  # messages back as instances
-    assert back.attachments == payload.attachments
     assert back.sdk_calls == payload.sdk_calls
 
 
@@ -222,17 +220,6 @@ def test_result_envelope_minimal(tmp_path: Path) -> None:
     back = read_result(path)
     assert back.kind == "done"
     assert back.state_update is None
-    assert back.attachments is None
-
-
-def test_result_envelope_without_attachments_reads_as_old_format(tmp_path: Path) -> None:
-    path = make_result_path(tmp_path, agent_id=7)
-    write_result(path, ResultPayload(kind="done"))
-    raw = json.loads(path.read_text(encoding="utf-8"))
-    del raw["attachments"]
-    path.write_text(json.dumps(raw), encoding="utf-8")
-
-    assert read_result(path).attachments is None
 
 
 def test_result_envelope_without_sdk_calls_reads_as_old_format(tmp_path: Path) -> None:

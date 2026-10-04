@@ -2,8 +2,8 @@
 
 Script:
   turn 1: execute_code reads `ava.context.identity` (the identity the agent host put in the
-          exec request envelope), then uses it for one SQL read over `ava.DB` and one
-          gateway read over `ava.agents.get_status`, and prints what it saw
+          exec request envelope), then uses it for one SQL read over `ava.context.sql` and
+          two gateway reads (`ava.agents.get_status`, `ava.context.gateway`), and prints what it saw
   turn 2: final reply text
 
 The e2e agent runs its real graph and a real exec child, so the printed line proves the child
@@ -25,11 +25,12 @@ CODE = """\
 import ava
 
 who = ava.context.identity
-with ava.DB.cursor() as cur:
+with ava.context.sql.cursor() as cur:
     cur.execute("SELECT id FROM agents_meta WHERE id = %s", (who.agent_id,))
     row = cur.fetchone()
 status = ava.agents.get_status(who.agent_id)
-print(f"CTX agent_id={who.agent_id} owns_loop={who.owns_loop} actor={who.actor} db_row={row[0]} status={status.value}")
+reply = ava.context.gateway.get(f"/api/agents/{who.agent_id}")
+print(f"CTX agent_id={who.agent_id} owns_loop={who.owns_loop} actor={who.actor} db_row={row[0]} status={status.value} gateway={reply.status_code}")
 """
 
 SCRIPT: tuple[AIMessage, ...] = (

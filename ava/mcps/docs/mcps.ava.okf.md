@@ -34,6 +34,8 @@ at all, replacing the ~63MB per-agent wrapper. `"shared": true` (x) keeps one da
 **Remote servers**: a `url` entry (validated by `ava/mcp_config.py:server_url`) is an http(s) Streamable HTTP endpoint — mutually exclusive with `command` — with one auth mode: static `headers` (str → str, API-key style) or `"oauth": true`, a full OAuth 2.1 authorization-code + PKCE browser flow ([[oauth.ava.okf.md]]).
 
 
+**Local fallback and the context**: the SDK side holds its MCP clients on the bound `AvaContext` (`ava/mcps/_clients.py:McpClients`, built on first use through `context.clients.get(McpClients)`): the daemon socket client, and for the fallback a loop on a daemon thread (anyio's blocking portal) with one cached session per server. They end with the context: the exec child releases them as it exits, a launched script at interpreter exit. Cached local sessions are not awaited shut (closing stdio children while the parent dies can deadlock); a server sees EOF and exits.
+
 ## See Also
 - [[ava/skills/docs/skills.ava.okf.md|Skill System]] — skills vs MCP servers
 

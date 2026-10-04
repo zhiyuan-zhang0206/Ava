@@ -34,6 +34,14 @@ IDENTITY_CONTEXTVARS: tuple[tuple[str, str], ...] = (
 def _restore_agent_identity() -> Iterator[None]:
     variables = [getattr(sys.modules[module], name) for module, name in IDENTITY_CONTEXTVARS]
     held_variables = [variable.get() for variable in variables]
+    context_module = sys.modules.get("ava.sdk_surface.process_context")
+    context_var = getattr(context_module, "_CURRENT", None)
+    held = None if context_var is None else context_var.get()
     yield
+    # Clients a test's own context built end with the test; the ones that were bound before it
+    # (the session default's, which `pin_agent` carries over) keep living.
+    current = None if context_var is None else context_var.get()
+    if current is not None and (held is None or current.clients is not held.clients):
+        current.clients.close()
     for variable, value in zip(variables, held_variables, strict=True):
         variable.set(value)

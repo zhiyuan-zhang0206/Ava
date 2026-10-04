@@ -7,16 +7,19 @@ needs is derived from the context it finds; nothing else in `ava/` holds state.
 
 Who binds it:
 
-- the exec child, once, from the description in its request envelope (`bind_process`);
+- the exec child, once, from the description in its request envelope (`bind_process`), releasing
+  its clients when it ends (`close_process`);
 - a script an agent launched, lazily on first read, from `AVA_AGENT_ID` in its environment
   (`owns_loop=False`: it carries the agent's identity but is not the agent's turn path);
 - a gateway-hosted schedule runner, which has an actor and no agent;
 - an external attachment, for the lifetime of the attachment (`bind_process` / `unbind_process`);
 - a test, with `scoped`.
 
-The agent host does not bind it: a host serves many agents' turns, and its identity is the turn
-contextvar (`base.native_process.turn_identity`). Outside a bound process, `ava.context` raises
-`ContextOutsideProcessError`, as `ava.state` raises outside an exec turn.
+The agent host binds each turn's context around that turn's graph run (`scoped`), so an `ava.*`
+call a graph node makes reaches the host's shared clients; the host never binds one for the
+process, since it serves many agents. Where nothing is bound (a bare script, the host between
+turns), `ava.context` raises `ContextOutsideProcessError`, as `ava.state` raises outside an exec
+turn.
 
 A `ContextVar` is per-context: a plain thread starts with an empty one. A process that binds with
 `bind_process` makes the threads it starts afterwards carry the context bound at `start()` (this
@@ -25,14 +28,17 @@ variable only), so agent code that fans work out with a thread pool keeps seeing
 
 from __future__ import annotations
 
+import atexit
 import contextlib
 import contextvars
 import functools
 import os
 import threading
 from collections.abc import Generator
+from typing import Any
 
 from base.agents.context import AvaContext
+from base.agents.context.clients import ClientSet
 from base.agents.context.identity import AgentIdentity
 from base.native_process.turn_identity import current_turn_agent_id
 
@@ -50,6 +56,21 @@ class ContextOutsideProcessError(AttributeError):
     """
 
 
+def process_clients(*, gateway_url: str | None = None) -> ClientSet:
+    """The clients of a process's own context: its database is the cluster's, as its settings
+    name it. The composition root of every context this process builds for itself."""
+    from ava import _settings
+
+    return ClientSet(gateway_url=gateway_url, database=_settings.database)
+
+
+def context_from_description(description: dict[str, Any]) -> AvaContext:
+    """The context an exec child builds from its request envelope's description."""
+    from ava import _settings
+
+    return AvaContext.from_description(description, database=_settings.database)
+
+
 def _launched_child_context() -> AvaContext | None:
     """The context of a script an agent launched: its identity is in the environment.
 
@@ -59,8 +80,12 @@ def _launched_child_context() -> AvaContext | None:
     raw = os.environ.get("AVA_AGENT_ID")  # env-ok: the identity channel of a launched child
     if raw is None:
         return None
-    context = AvaContext(identity=AgentIdentity(agent_id=int(raw), owns_loop=False))
+    context = AvaContext(
+        identity=AgentIdentity(agent_id=int(raw), owns_loop=False), clients=process_clients()
+    )
     bind_process(context)
+    # A script has no end hook of its own: its clients are released when the interpreter exits.
+    atexit.register(context.clients.close)
     return context
 
 
@@ -112,6 +137,13 @@ def bind_process(context: AvaContext) -> None:
     """Bind `context` for the rest of this process: the exec child's boot, a launched script."""
     _CURRENT.set(context)
     _share_context_with_threads()
+
+
+def close_process() -> None:
+    """Release the clients of the context this process bound (the exec child's end)."""
+    context = _CURRENT.get()
+    if context is not None:
+        context.clients.close()
 
 
 def unbind_process() -> None:

@@ -16,7 +16,14 @@ import pytest
 
 import ava.mcps as mcps_mod
 import ava.mcps._remote as remote_mod
-from ava.mcps.tests._mcps_helpers import _content_image, _content_text, _make_tool, _result
+from ava.mcps._clients import McpClients
+from ava.mcps.tests._mcps_helpers import (
+    _content_image,
+    _content_text,
+    _make_tool,
+    _result,
+    local_mcp_clients,
+)
 from ava.mcps.tests._mcps_helpers import fake_config as fake_config
 from ava.mcps.tests._mcps_helpers import mock_session as mock_session
 from tests.fixtures.pin_agent import pin_no_identity
@@ -259,9 +266,7 @@ def test_proxy_other_errors_become_call_error(mock_session: MagicMock) -> None:
 
 def _patch_local_session_state(monkeypatch: pytest.MonkeyPatch) -> None:
     """Isolate the local-path caches for one test (daemon absent → local mode)."""
-    monkeypatch.setattr(mcps_mod, "_sessions", {})
-    monkeypatch.setattr(mcps_mod, "_session_locks", {})
-    monkeypatch.setattr(mcps_mod, "_session_stacks", {})
+    local_mcp_clients(monkeypatch)
     monkeypatch.setattr(mcps_mod, "_read_cache", lambda _server: None)  # pyright: ignore[reportUnknownArgumentType]
     monkeypatch.setattr(mcps_mod, "_write_cache", lambda _server, _tools: None)  # pyright: ignore[reportUnknownArgumentType]
 
@@ -286,14 +291,14 @@ def _dying_then_healthy_connect(
 
     order: list[str] = []
 
-    async def _fake_connect(server: str, **kwargs: object) -> MagicMock:
+    async def _fake_connect(mcp: McpClients, server: str, **kwargs: object) -> MagicMock:
         if not order:
             order.append("dying")
-            mcps_mod._sessions[server] = dying
-            mcps_mod._session_stacks[server] = dying_stack
+            mcp.sessions[server] = dying
+            mcp.session_stacks[server] = dying_stack
             return dying
         order.append("healthy")
-        mcps_mod._sessions[server] = healthy
+        mcp.sessions[server] = healthy
         return healthy
 
     monkeypatch.setattr(mcps_mod, "_connect", _fake_connect)
@@ -490,13 +495,13 @@ def test_daemon_socket_path_returns_path_when_socket_present(
 
 def test_get_remote_client_none_without_daemon(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(remote_mod, "_daemon_socket_path", lambda: None)
-    monkeypatch.setattr(remote_mod, "_remote_client", None)
+    local_mcp_clients(monkeypatch)
     assert mcps_mod._get_remote_client() is None
 
 
 def test_get_remote_client_creates_when_daemon_running(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(remote_mod, "_daemon_socket_path", lambda: "fake-socket-path")
-    monkeypatch.setattr(remote_mod, "_remote_client", None)
+    local_mcp_clients(monkeypatch)
     client = mcps_mod._get_remote_client()
     assert isinstance(client, mcps_mod._RemoteMCPClient)
     assert client._socket_path == "fake-socket-path"
@@ -504,7 +509,7 @@ def test_get_remote_client_creates_when_daemon_running(monkeypatch: pytest.Monke
 
 def test_get_remote_client_caches_instance(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(remote_mod, "_daemon_socket_path", lambda: "fake-socket-path")
-    monkeypatch.setattr(remote_mod, "_remote_client", None)
+    local_mcp_clients(monkeypatch)
     c1 = mcps_mod._get_remote_client()
     c2 = mcps_mod._get_remote_client()
     assert c1 is c2

@@ -156,7 +156,8 @@ class Attachment:
         )
         process_context.bind_process(
             dataclasses.replace(
-                bound or AvaContext(), identity=dataclasses.replace(own, lease=borrowed)
+                bound or AvaContext(clients=process_context.process_clients()),
+                identity=dataclasses.replace(own, lease=borrowed),
             )
         )
         self._bound = True
@@ -303,6 +304,9 @@ class Attachment:
             if self._bound and self._prior_context is not None:
                 process_context.bind_process(self._prior_context)
             elif self._bound:
+                # The process had no context of its own: the one this attachment made, and the
+                # clients it built, end with the attachment.
+                process_context.close_process()
                 process_context.unbind_process()
             ava.unbind_exec_turn()
             self._stack.close()

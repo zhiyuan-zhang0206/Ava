@@ -19,6 +19,13 @@ from base.agents import AgentNotFound, GatewayUnavailable
 from base.agents.messages import delivery_outbox as outbox
 
 
+def _client_mock() -> MagicMock:
+    """A gateway client double: the transport's `_http()` returns it."""
+    client = MagicMock()
+    client.return_value = client
+    return client
+
+
 @pytest.mark.parametrize(
     "error",
     [
@@ -27,7 +34,7 @@ from base.agents.messages import delivery_outbox as outbox
         httpx.RemoteProtocolError("peer closed"),
     ],
 )
-@patch("ava.gateway_client.transport._client")
+@patch("ava.gateway_client.transport._http", new_callable=_client_mock)
 def test_unkeyed_spawn_does_not_retry_uncertain_transport_error(
     mock_client: MagicMock, error: httpx.TransportError
 ) -> None:
@@ -84,7 +91,7 @@ def _records(journal: Path) -> list[outbox.OutboxEntry]:
     ]
 
 
-@patch("ava.gateway_client.transport._client")
+@patch("ava.gateway_client.transport._http", new_callable=_client_mock)
 def test_failed_send_records_with_the_key_it_used(mock_client: MagicMock, journal: Path) -> None:
     from ava.gateway_client import send_message
 
@@ -101,7 +108,7 @@ def test_failed_send_records_with_the_key_it_used(mock_client: MagicMock, journa
     assert entry.state == "pending" and entry.attempts == 1
 
 
-@patch("ava.gateway_client.transport._client")
+@patch("ava.gateway_client.transport._http", new_callable=_client_mock)
 def test_retry_chain_shares_one_key_and_success_retires_the_record(
     mock_client: MagicMock, journal: Path
 ) -> None:
@@ -129,7 +136,7 @@ def test_retry_chain_shares_one_key_and_success_retires_the_record(
     assert _keys(mock_client) != [first_key]
 
 
-@patch("ava.gateway_client.transport._client")
+@patch("ava.gateway_client.transport._http", new_callable=_client_mock)
 def test_permanent_wire_failure_is_not_recorded(mock_client: MagicMock, journal: Path) -> None:
     from ava.gateway_client import send_message
 
@@ -144,7 +151,7 @@ def test_permanent_wire_failure_is_not_recorded(mock_client: MagicMock, journal:
     assert _records(journal) == []
 
 
-@patch("ava.gateway_client.transport._client")
+@patch("ava.gateway_client.transport._http", new_callable=_client_mock)
 def test_broken_outbox_never_changes_the_send_outcome(
     mock_client: MagicMock, journal: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -160,7 +167,7 @@ def test_broken_outbox_never_changes_the_send_outcome(
     assert _records(journal) == []
 
 
-@patch("ava.gateway_client.transport._client")
+@patch("ava.gateway_client.transport._http", new_callable=_client_mock)
 def test_disabled_outbox_records_nothing_and_never_reuses_keys(
     mock_client: MagicMock, journal: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
