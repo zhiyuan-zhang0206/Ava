@@ -3,7 +3,6 @@
     "base/events/live/publisher.py::asyncio-task:AgentEventPublisher.start": 1,
     "base/events/live/redis_client.py::ambient-container:_warn_last": 1,
     "base/events/live/redis_client.py::contextvar:_auth_retry_active": 1,
-    "base/events/live/redis_listener.py::ambient-instance:_KEEPALIVE_OPTIONS": 1,
     "base/events/live/redis_listener.py::asyncio-task:RedisInboundListener._wait_one_impl": 2
   }
 }

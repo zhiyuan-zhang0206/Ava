@@ -180,7 +180,7 @@ def test_ntfs_synthetic_modes_do_not_break_converge(
     client_home = home / ".codex"
     client_home.mkdir()
     filesystem = _filesystem_module()
-    monkeypatch.setattr(filesystem, "_POSIX", False)
+    monkeypatch.setattr(filesystem, "_is_posix", lambda: False)
     monkeypatch.setattr(filesystem, "_lstat", _ntfs_lstat(filesystem._lstat))
     monkeypatch.setattr(filesystem, "_source_lstat", _ntfs_lstat(filesystem._source_lstat))
 
