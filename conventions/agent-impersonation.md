@@ -130,8 +130,8 @@ messages retain their direction and sender. No frontend message table is split.
 
 ## Receive, ACK and renew
 
-The relay pushes full inbound content, IDs and the exact ACK command. Process
-only the work you actually handled, then acknowledge it:
+The relay pushes full inbound content, IDs and the exact ACK command. Acknowledge
+each batch as soon as it arrives — receipt, not completion — then process it:
 
 ```bash
 ava impersonate ack 0 123 124 --agent 405
@@ -143,9 +143,10 @@ Inbox reads do not ACK. Each lease snapshots the configured ACK window and
 maximum total delivery attempts (defaults: 180 seconds, 2 attempts including
 the first). Missing a final ACK window ends the takeover and preserves pending
 input for native handoff. See [delivery configuration](agent-impersonation-hosts.md#delivery-and-recovery).
-ACK changes processing state, never history retention. `cancel` asks the external controller
-to stop; ACK after stopping. `reminder` indicates an approaching TTL deadline:
-decide whether to renew once or release. Renew explicitly, never in an automated
+An ACK records delivery receipt — never completion — and never affects history
+retention. `cancel` asks the external controller
+to stop; acknowledge it on receipt, then stop. `reminder` indicates an approaching TTL deadline:
+acknowledge it on receipt, then decide whether to renew once or release. Renew explicitly, never in an automated
 heartbeat loop. TTL is 1..86400 seconds; relay liveness does not extend it.
 
 Messages are model work — a delivered message wakes a model on its receiving
@@ -172,7 +173,7 @@ and visible again for the native agent.
 
 | kind | native flow | takeover flow |
 | --- | --- | --- |
-| chat | pending -> claimed -> done (a compact batch may fall a claim back to pending) | read -> ACK -> done; unacknowledged, uncaptured rows stay pending for the native claim |
+| chat | pending -> claimed -> done (a compact batch may fall a claim back to pending) | read -> ACK (receipt) -> done; unacknowledged, uncaptured rows stay pending for the native claim |
 | cancel / terminate / restart | claimed -> done (control path; the host fulfils the intent) | delivered + ACK |
 | restart_completed / resurrect / fork | first claim consumes it -> done | delivered + ACK |
 | compact_request / compact_summary | claimed -> done | delivered + ACK |
@@ -180,7 +181,10 @@ and visible again for the native agent.
 | system_note / reminder | claimed -> done | delivered + ACK (a reminder also expires/dismisses) |
 
 An automatic session's handoff receipt consumes its captured backlog to
-`done`; uncaptured unacknowledged rows stay `pending` for the native agent.
+`done`; uncaptured unacknowledged rows stay `pending` for the native agent. ACK
+state is delivery bookkeeping, not completion: the resume note directs the
+native agent to review acknowledged messages for work the summary does not
+show as finished.
 
 ## Return control
 
@@ -191,13 +195,16 @@ ava impersonate release 0 --agent 405 \
   --summary 'Implemented X and verified Y. Z remains open; resume from its failing case.'
 ```
 
-The summary must be written by the impersonator. Ava generates one JSON file at
+The summary must be written by the impersonator — naming any work left
+unfinished, acknowledged or not. Ava generates one JSON file at
 `<agent workspace>/impersonation/0.json`, with session/process metadata, all
 incoming/outgoing messages, inbound ACK state, lifecycle history, original
 consumed SDK/API events and counts (calls, task changes, recipients, duration).
 The file is saved before the native agent resumes. The summary and file path
 arrive as the first new system note, ahead of subsequent normal input. Captured
-unacknowledged input remains in the JSON for the native agent to handle.
+unacknowledged input remains in the JSON for the native agent to handle, as does
+acknowledged input whose work did not finish — an ACK records receipt, never
+completion.
 
 Expiry or failed activation also produces a handoff, explicitly stating the
 reason and absence of an external summary. Session history is permanent,

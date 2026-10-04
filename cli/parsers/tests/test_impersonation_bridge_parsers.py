@@ -285,10 +285,11 @@ def test_codex_relay_caps_content_and_preserves_inbox_on_steer_failure(
         assert 5 in inbox.messages
     push = delivered[-1]
     assert "truncated" in push
+    assert "before acknowledging" in push
     assert relay.ack_command(0, [5], agent_id=42) in push
     body_line = [line for line in push.splitlines() if line.startswith("x" * 10)]
     assert body_line
     assert len(body_line[0]) <= relay._PUSH_MAX_CHARS + len(
-        " (truncated; run the inbox command to read the full message)"
+        " (truncated — run the inbox command to read the full body before acknowledging)"
     )
     assert listener.closed

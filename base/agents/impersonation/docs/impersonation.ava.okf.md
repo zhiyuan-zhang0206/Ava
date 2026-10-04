@@ -66,7 +66,8 @@ refuses to discard recorded history. The export is regenerable from the DB.
 
 Activation captures pending input, and committed inbound inserts capture arrivals
 while active. Idempotent chat retries produce one history entry. Inbox reads leave
-messages pending; explicit ACK records processing without removing their bodies.
+messages pending; an explicit ACK records delivery receipt without removing their
+bodies.
 `ava impersonate say` commits an outbound message with
 a stable retry key, then publishes `impersonation_changed`. Logical identity
 remains the Ava agent; `impersonation` metadata names the session and executor. Process facts
@@ -92,7 +93,9 @@ and the JSON path, before ordinary queued input; it is the resumed input — whi
 it is the newest message, the agent's claim runs its first turn even with an
 otherwise empty queue, and delivery ends by publishing a wake. Captured pending
 inputs become processed only after the note is durable; unacknowledged incoming
-content remains in the file for the resumed agent to handle.
+content remains in the file for the resumed agent to handle, as does
+acknowledged input whose work did not finish — an ACK records receipt, not
+completion, and the note directs that review.
 
 The events the borrowed identity caused (SDK calls and audit facts) are written
 into the same log by their producers and complete in the database; see

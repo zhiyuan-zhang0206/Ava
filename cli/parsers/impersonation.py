@@ -200,7 +200,9 @@ def _add_impersonation_parser(sub: argparse._SubParsersAction[argparse.ArgumentP
         help="new lifetime in seconds, 1..86400; extend deliberately, never on a timer",
     )
     parsers["release"].add_argument(
-        "--summary", required=True, help="handoff summary; '-' reads stdin"
+        "--summary",
+        required=True,
+        help="handoff summary; name unfinished work, acknowledged or not; '-' reads stdin",
     )
     # Same page bounds as the controller read (task #3696 exception inventory).
     # Page-size default: approved display-only exception (task #4102).
@@ -219,7 +221,10 @@ def _add_impersonation_parser(sub: argparse._SubParsersAction[argparse.ArgumentP
         help="finite, nonnegative seconds to wait for new input (0 = return immediately)",
     )
     parsers["ack"].add_argument(
-        "message_ids", nargs="+", type=int, help="inbound IDs already processed"
+        "message_ids",
+        nargs="+",
+        type=int,
+        help="inbound IDs to acknowledge (receipt — they have reached the executor)",
     )
     parsers["exec"].add_argument("--file", help="local Python file; omitted or '-' reads stdin")
     _add_send_parser(commands)

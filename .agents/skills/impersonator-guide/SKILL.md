@@ -1,6 +1,6 @@
 ---
 name: impersonator-guide
-description: 'Operating an Ava impersonation lease as the external agent: Ava CLI and Python SDK use under a borrowed identity, push-based message handling with prompt ACKs, reminder-driven lease renewal, and summary handoff, with a host guide each for Claude Code, Codex and DeepSeek Harness. Use when an "Ava control active" hint names your lease or an impersonation session is active for your agent.'
+description: 'Operating an Ava impersonation lease as the external agent: Ava CLI and Python SDK use under a borrowed identity, push-based message handling with ACK-on-receipt, reminder-driven lease renewal, and summary handoff, with a host guide each for Claude Code, Codex and DeepSeek Harness. Use when an "Ava control active" hint names your lease or an impersonation session is active for your agent.'
 ---
 
 # Acting as an Ava impersonator
@@ -28,9 +28,10 @@ request:
 - **Start.** Your briefing arrived inline in your launch message — read it
   before acting; it names the task and points at any context you need
   (workspace paths, checkouts, people to report to). Nothing about a takeover
-  is file-based: no task file to read, no work file to write. Activation is an
-  interruption, not a hand-merge — the Ava agent pauses at its checkpoint, and
-  you and it never run at the same time.
+  is file-based: no task file to read, no work file to write — but the borrowed
+  agent's standing context is yours to recover: see *Before acting* below.
+  Activation is an interruption, not a hand-merge — the Ava agent pauses at its
+  checkpoint, and you and it never run at the same time.
 - **Relay startup.** Your host's guide and your request output define it. A
   takeover activates only once its relay heartbeats; without one it is
   rejected, and the Ava agent keeps running.
@@ -44,6 +45,29 @@ request:
   is arranged by the Ava side.
 - Everything between those two points happens under the lease. Nothing outside
   it — no acting after expiry, no self-restart, no fighting the lifecycle.
+
+## Before acting: inherit the borrowed context
+
+You are not a new agent picking up a fresh task — you are the continuation of
+the agent whose identity you hold, and the briefing is a quick entry point, not
+the whole context. Before starting the work, recover the standing context it needs:
+
+- **Memory.** The `memory/MEMORY.md` index in its workspace (default
+  `~/.ava/workspaces/<agent_id>/`) and the entries this work touches.
+- **Shared rulings and facts.** The shared memory pool (`ava.memory`) — the
+  standing rules and user rulings other agents already work by.
+- **Work in progress.** Its open tasks (`ava.tasks`) and any handoff or progress
+  notes left in its workspace.
+- **Role and boundaries.** What this identity owns and how it collaborates — its
+  label, the role notes around it, and the conventions others hold it to.
+
+Recover selectively, just in time — what the work in front of you needs, not
+everything at once. Under the SDK attachment, `ava.cwd` and `ava.files` resolve
+against the borrowed agent's workspace; outside it, read the files directly on
+this machine. Never substitute new-agent assumptions for the borrowed context: a
+takeover that invents a process or a gate the agent never had — or ignores one it
+did — fights its own owner; if something you need is not exposed to you, read it
+on this machine instead of guessing.
 
 ## Environment facts
 
@@ -75,12 +99,13 @@ The response shows the lease status and its expiry. Statuses you will see:
 side stopped because a core component died — the session record names the
 cause).
 
-## Messages: receive, process, acknowledge
+## Messages: receive, acknowledge, process
 
 Delivery is **push**, not poll. The bound relay delivers every inbound batch
 to your session as one self-contained envelope: the full message content, the
 message ids, and the exact ACK command to run. There is no inbox code to write
-and nothing to poll — process what arrives, then acknowledge it.
+and nothing to poll — acknowledge a batch as soon as it arrives, then do the
+work it asks for; the ACK confirms receipt, not completion.
 
 Messages carry a `kind` that tells you how to treat them:
 
@@ -90,7 +115,7 @@ Messages carry a `kind` that tells you how to treat them:
 - `cancel` — stop your current work now (see below).
 - `system_note` — platform lifecycle information (rare during a lease).
 
-After processing a batch, acknowledge exactly the ids you handled, within the
+Acknowledge each batch as soon as it arrives — receipt is the ACK — within the
 ACK window stated in the envelope (180 seconds by default):
 
 ```bash
@@ -101,26 +126,30 @@ ava impersonate ack <session_id> 101 102 --agent <agent_id>
 
 Rules that keep delivery honest:
 
-- **Acknowledge only what you actually handled.** A batch that is not
-  acknowledged within its ACK window is retried up to the lease's configured
-  total attempt limit (default: 2 attempts, each with 180 seconds to ACK).
-  Missing the final ACK window ends impersonation and returns unacknowledged
-  input to the native agent. The per-message budget is fixed at request time
-  and survives relay restarts; the ids make re-ACKing a batch you
-  already handled harmless. Never ACK a message to silence delivery;
-  if you cannot handle it, leave it unacknowledged and say so in your release
-  summary.
+- **Acknowledge what you have actually received.** An ACK records receipt;
+  finishing work goes through say and the release summary, never an ACK. A batch
+  not acknowledged within its ACK window is retried up to the lease's configured
+  total attempt limit (default: 2 attempts, each with 180 seconds to ACK);
+  missing the final window ends impersonation and returns unacknowledged input to
+  the native agent. The per-message budget is fixed at request time and survives
+  relay restarts; the ids make re-ACKing a batch you already received harmless.
+  A message you cannot act on is still acknowledged on receipt — say what you
+  could not do in your release summary.
 - **Never poll, never write inbox code.** `ava impersonate inbox <session_id> --agent <agent_id>`
-  remains only as a fallback read — for a missed or truncated push, or for a
-  message's payload. The pushes are the delivery.
+  is a fallback read only — for a missed or truncated push, or for a message's
+  payload; the pushes are the delivery. A truncated push is not received yet: fetch the
+  full body with the inbox command first (the fetch is part of receiving), then
+  ACK — once acknowledged, the inbox no longer returns the row; acknowledged
+  before reading? The body is not lost: read it inside the lease attachment —
+  `ava impersonate exec`, then `ava.context.gateway.get("/api/agents/<agent_id>/timeline")`.
 - **Confirm the start message.** Activation, relay liveness, and transport
   acceptance are not host receipt: confirm the start message actually arrived
   in your conversation before relying on pushes. If it did not, use the
   fallback read and note the miss in your release summary.
-- **`cancel`**: stop the current work and ACK the cancel once stopped. To
-  interrupt an in-flight tool immediately, use your own session's stop control;
-  the ACK comes after the stop, not instead of it. An unacknowledged cancel
-  stays pending for the Ava agent when control returns.
+- **`cancel`**: acknowledge it on receipt like every message — receipt is the
+  ACK — then stop the current work now; for an in-flight tool use your own
+  session's stop control — the ACK never substitutes for stopping. An
+  unacknowledged cancel stays pending for the Ava agent when control returns.
 
 Send user-facing progress, questions and results to the normal Ava UI:
 
@@ -157,8 +186,8 @@ The correct model:
 1. Roughly **five minutes before the lease expires**, the Ava side delivers a
    renewal reminder — a `reminder` message pushed through the same envelope
    path as everything else.
-2. On that reminder, decide: renew once, or start wrapping up. Then ACK the
-   reminder like any other message.
+2. Acknowledge the reminder as soon as it arrives — receipt, like any other
+   message — then decide: renew once, or start wrapping up.
 3. To renew, extend from now for the time you still need:
 
 ```bash
@@ -189,9 +218,9 @@ Hard rules:
   calls fail validation. Control returns to the Ava agent with your
   unacknowledged messages and staged state preserved. Do not keep acting
   under the identity, and do not request a new lease on your own — a fresh
-  takeover, if wanted, is arranged by the Ava side. Hand back honestly
-  instead: release with a summary whenever you still can; if expiry catches
-  you, anything still unacknowledged stays for the agent.
+  takeover, if wanted, is arranged by the Ava side. Hand back honestly instead:
+  release with a summary whenever you still can, naming every unfinished piece,
+  acknowledged or not; if expiry catches you, anything unacknowledged stays for the agent.
 
 ## Using the Python SDK under the lease
 
@@ -250,8 +279,8 @@ leaving lifecycle decisions to the Ava side.
 
 ## Finishing: release with a summary
 
-When the work is done — or when you must stop before it is — close your
-attachments, ACK the messages you handled, and release:
+When the work is done — or when you must stop before it is — close attachments,
+acknowledge any batch you received but have not yet acknowledged, and release:
 
 ```bash
 ava impersonate release <session_id> --agent <agent_id> \
@@ -259,10 +288,12 @@ ava impersonate release <session_id> --agent <agent_id> \
 ```
 
 The summary is required, nonempty, and concrete: state what you did, what you
-verified, what remains open, and where to resume. Ava writes one JSON file at
+verified, what remains open — including work whose input you acknowledged but
+did not finish; an ACK means received, never done — and where to resume. Ava writes one JSON file at
 `<agent workspace>/impersonation/<session_id>.json`, containing every incoming
 and outgoing message, ACK state, lifecycle history, consumed SDK/API events and
 statistics. Your summary plus that file path is the first new system note in
-the resumed agent's input. History is permanent. The resumed agent must read
-unacknowledged incoming messages in the file. Expiry has no invented summary. Release, not silence, is the ending: never leave an active lease
+the resumed agent's input. History is permanent. The resumed agent must review the file's incoming
+messages — including the ones you acknowledged, since an ACK records receipt,
+not completion — and finish what remains. Expiry has no invented summary. Release, not silence, is the ending: never leave an active lease
 behind when you are finished.

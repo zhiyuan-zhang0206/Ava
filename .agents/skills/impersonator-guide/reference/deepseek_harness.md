@@ -2,8 +2,8 @@
 
 Host-specific half of the [impersonator guide](../SKILL.md): how the relay
 reaches a dsh session, where your authority comes from, and the traps seen in
-practice. Everything else — messages, ACK, renewal, SDK, release — is in the
-general guide.
+practice. Everything else — inheriting the borrowed context, messages, ACK,
+renewal, SDK, release — is in the general guide.
 
 ## Relay startup
 

@@ -572,6 +572,8 @@ def _assert_resume_note_delivery_contract(content: str) -> None:
     assert "not that no SDK calls occurred" in content
     assert "record of emitted SDK/API events" in content
     assert "never proves no SDK calls" in content
+    assert "An ACK records receipt, not completion" in content
+    assert "does not show as finished" in content
 
 
 async def test_end_note_resumes_an_empty_queue(
@@ -634,6 +636,56 @@ async def test_end_note_resumes_an_empty_queue(
         await graph.ainvoke(reset, config, context=ctx)
         assert len(model_calls) == 1
         assert resumed["impersonation_handoff_id"] == f"{owner.agent_id}:0"
+
+
+async def test_acknowledged_but_unfinished_input_reaches_the_resumed_native(
+    db_conn: psycopg.Connection[Any],
+    aops_pool: AsyncConnectionPool[Any],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    database: Database,
+    event_bus: EventBus,
+) -> None:
+    """Task #5010: an ACK acknowledges the message, not the work — input the executor
+    received and never finished survives expiry into the record and the resume note."""
+    from base.agents.impersonation import history as history
+
+    graph, saver, ctx, config, reset, owner, requested, model_calls = await _prepare_graph(
+        db_conn, aops_pool, monkeypatch, automatic=True
+    )
+    monkeypatch.setattr(impersonation, "establish_relay", _relay_ready)
+    monkeypatch.setattr(history, "workspace_dir", Mock(return_value=tmp_path))
+    with bind_turn_identity(owner.agent_id, incarnation=owner):
+        await graph.ainvoke(reset, config, context=ctx)
+        await flush_checkpoint(saver, owner.agent_id)
+        assert await settle_checkpoint(graph, database, event_bus, owner.agent_id, ctx.relays)
+        inbound_id = insert_inbound_message(
+            db_conn,
+            owner.agent_id,
+            "Rebuild the report; resume from the failing case",
+            source="user",
+            bus=event_bus,
+            database=database,
+        )
+        db_conn.commit()
+        leases.inbox(database, requested["id"], attested_caller(requested))
+        leases.ack(database, event_bus, requested["id"], attested_caller(requested), [inbound_id])
+        # Receipt is recorded; the executor dies before finishing the work.
+        _end_external_session(db_conn, database, event_bus, requested, "expire")
+        await graph.ainvoke(reset, config, context=ctx)
+        await flush_checkpoint(saver, owner.agent_id)
+        assert not await settle_checkpoint(graph, database, event_bus, owner.agent_id, ctx.relays)
+        await graph.ainvoke(reset, config, context=ctx)
+        await flush_checkpoint(saver, owner.agent_id)
+        assert len(model_calls) == 1
+        note = model_calls[0].messages[-1]
+        assert "An ACK records receipt, not completion" in note.content
+        assert "does not show as finished" in note.content
+        document = json.loads((tmp_path / "impersonation" / "0.json").read_text())
+        message = next(
+            m for m in document["messages"] if m["payload"]["content"].startswith("Rebuild")
+        )
+        assert message["acknowledged"] is True
 
 
 async def _stop_takeover_with_lost_relay(

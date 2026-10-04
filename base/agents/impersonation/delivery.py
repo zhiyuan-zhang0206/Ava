@@ -1,4 +1,4 @@
-"""Durable relay attempt reservations; they never acknowledge processing.
+"""Durable relay attempt reservations; a reservation is not a receipt.
 
 Reserve before calling the host. Submission and SQL cannot commit atomically:
 if the host accepted a push before the relay crashed, recording afterwards

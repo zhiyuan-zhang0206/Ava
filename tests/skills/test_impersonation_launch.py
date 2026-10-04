@@ -47,6 +47,9 @@ def _assert_takeover_protocol_uses_say_and_own_summary_release(message: str) -> 
     assert "ava.impersonation.say" not in message
     assert "release with your own summary" in message
     assert "transport acceptance is not host receipt" in message
+    assert "as soon as you receive it" in message
+    assert "never substitute new-agent assumptions" in message
+    assert "process and ACK inbound messages" not in message
 
 
 def _assert_provider_specific_relay_instructions(message: str, provider: str) -> None:
@@ -86,6 +89,24 @@ def test_bootstrap_names_the_executors_own_host_guide(provider: str, host_guide:
     assert f"host guide at {path}." in message
     others = {"codex.md", "claude_code.md", "deepseek_harness.md"} - {host_guide}
     assert not any(f"reference/{other}" in message for other in others)
+
+
+def test_impersonator_guide_carries_receipt_semantics_and_the_borrowed_context() -> None:
+    """Task #5010: an ACK is receipt and the takeover inherits the borrowed identity's
+    standing context — both must be present in the guide the bootstrap points at."""
+    guide = _SKILL_DIR.parents[3] / ".agents/skills/impersonator-guide/SKILL.md"
+    text = guide.read_text(encoding="utf-8")
+    assert "## Before acting: inherit the borrowed context" in text
+    assert "memory/MEMORY.md" in text
+    assert "ava.tasks" in text
+    assert "substitute new-agent assumptions" in text
+    assert "A truncated push is not received yet" in text
+    assert "ava.context.gateway.get" in text
+    assert "ava agents timeline" not in text
+    assert "receipt, not completion" in text
+    assert "process what arrives, then acknowledge it" not in text
+    assert "Acknowledge only what you actually handled" not in text
+    assert "ACK the cancel once stopped" not in text
 
 
 def test_codex_bootstrap_carries_the_shared_app_server_endpoint() -> None:
