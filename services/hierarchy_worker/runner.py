@@ -341,10 +341,9 @@ def run_tick(config: HierarchyWorkerConfig, db: Database) -> None:
         except psycopg.ProgrammingError:
             # Code<->DB drift: no retry self-heals. Exit so the manager's
             # crash path (backoff + breaker + last_error) exposes it.
-            logger.critical(
+            logger.opt(exception=True).critical(
                 "hierarchy worker: code<->DB drift (ProgrammingError) — exiting; "
                 "the manager restarts after a fix",
-                exc_info=True,
             )
             raise
         except Exception:

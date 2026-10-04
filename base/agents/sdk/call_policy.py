@@ -70,9 +70,8 @@ class _PolicyCache:
             with self.lock:
                 self.value = value
         except Exception:
-            logger.bind(_no_emitter=True).warning(
+            logger.bind(_no_emitter=True).opt(exception=True).warning(
                 "SDK sampling config refresh failed; retaining the last valid policy",
-                exc_info=True,
             )
         finally:
             with self.lock:

@@ -16,6 +16,7 @@ The scan's enqueue decisions and the child-side outcome live in
 from __future__ import annotations
 
 from collections.abc import Callable
+from typing import Any
 
 import psycopg
 import pytest
@@ -174,7 +175,9 @@ def test_run_tick_returns_on_a_transient_failure(monkeypatch: pytest.MonkeyPatch
     )  # returns — no exception escapes the tick
 
 
-def test_run_tick_raises_on_schema_drift(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_run_tick_raises_on_schema_drift(
+    monkeypatch: pytest.MonkeyPatch, loguru_records: list[dict[str, Any]]
+) -> None:
     """Code<->DB drift escapes the tick so the manager's crash path records it."""
 
     def drifted_scan(conn: object, _config: object) -> ScanOutcome:
@@ -185,6 +188,9 @@ def test_run_tick_raises_on_schema_drift(monkeypatch: pytest.MonkeyPatch) -> Non
 
     with pytest.raises(psycopg.ProgrammingError):
         runner.run_tick(hierarchy_config(), fake_database(_fake_connect))
+    record = next(r for r in loguru_records if "code<->DB drift" in r["message"])
+    assert record["exception"] is not None
+    assert record["exception"].type is psycopg.ProgrammingError
 
 
 def test_run_tick_is_silent_while_the_switch_is_off(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -552,6 +558,7 @@ def test_regen_signals_fire_only_past_their_thresholds(
 
 def test_guardrail_emit_failure_never_fails_the_build(
     monkeypatch: pytest.MonkeyPatch,
+    loguru_records: list[dict[str, Any]],
 ) -> None:
     """The guardrail events observe a completed build, so an emission failure
     is swallowed (a warning), never a raise — it must not corrupt the job's
@@ -563,3 +570,6 @@ def test_guardrail_emit_failure_never_fails_the_build(
     monkeypatch.setattr("base.telemetry.emit", broken)
 
     execute_module._try_emit("hierarchy_regen_halt", {"agent_id": 1})  # no raise
+    record = next(r for r in loguru_records if "guardrail event" in r["message"])
+    assert record["exception"] is not None
+    assert record["exception"].type is RuntimeError

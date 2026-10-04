@@ -303,6 +303,6 @@ def _try_emit(kind: str, attributes: dict[str, object]) -> None:
     try:
         telemetry.emit("telemetry", kind, attributes=attributes)
     except Exception:
-        logger.warning(
-            "hierarchy guardrail event {kind} could not be emitted", kind=kind, exc_info=True
+        logger.opt(exception=True).warning(
+            "hierarchy guardrail event {kind} could not be emitted", kind=kind
         )

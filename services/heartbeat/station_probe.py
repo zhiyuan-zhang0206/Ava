@@ -153,8 +153,8 @@ def _station_answers(url: str) -> bool:
         )
         return False
     except Exception:
-        logger.bind(_no_emitter=True, component="station-healthcheck").warning(
-            "station probe: {} unreachable", url, exc_info=True
+        logger.bind(_no_emitter=True, component="station-healthcheck").opt(exception=True).warning(
+            "station probe: {} unreachable", url
         )
         return False
 

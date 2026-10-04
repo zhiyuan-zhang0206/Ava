@@ -184,11 +184,10 @@ def _contain_plugin_load_failure(exc: Exception) -> None:
     """
     from base.log import logger
 
-    logger.error(
+    logger.opt(exception=exc).error(
         "[plugins] plugin load failed in this launched child — continuing "
         "without plugin namespaces (the agent host reports the same "
         "failure at its own boot)",
-        exc_info=exc,
     )
     _sys.stderr.write(
         f"[plugins] plugin load failed in this launched child "

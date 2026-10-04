@@ -15,6 +15,7 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 
@@ -168,7 +169,7 @@ def test_ensure_plugins_loaded_idempotent(monkeypatch: pytest.MonkeyPatch) -> No
 def test_ensure_plugins_loaded_contains_a_failing_load_chain(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
-    loguru_records: list[dict],
+    loguru_records: list[dict[str, Any]],
 ) -> None:
     """A failure escaping the load chain — duplicate plugin name, malformed
     config, schema drift — must not kill an agent-launched child at `import
@@ -187,7 +188,9 @@ def test_ensure_plugins_loaded_contains_a_failing_load_chain(
     ava.ensure_plugins_loaded()  # must not raise
 
     assert ava._plugins_loaded is True
-    assert any("failed in this launched child" in r["message"] for r in loguru_records)
+    report = next(r for r in loguru_records if "failed in this launched child" in r["message"])
+    assert report["exception"] is not None  # the traceback rides the record (#4979)
+    assert report["exception"].type is DuplicatePlugin
     stderr = capsys.readouterr().err
     assert "plugin load failed in this launched child" in stderr
     assert "DuplicatePlugin" in stderr

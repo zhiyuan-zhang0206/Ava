@@ -150,11 +150,10 @@ async def _record_permanent_reject_outcome(
     try:
         streak = await record_permanent_reject_turn(ctx.ops_pool, agent_id, reason)
     except Exception:
-        logger.warning(
+        logger.opt(exception=True).warning(
             "failed to record a permanent-rejection streak for agent {agent_id}; "
             "the recovery circuit breaker is not updated",
             agent_id=agent_id,
-            exc_info=True,
         )
         return
     if streak < HALT_AFTER_CONSECUTIVE_PERMANENT_REJECTS:
@@ -163,10 +162,9 @@ async def _record_permanent_reject_outcome(
         freshly_tripped = await halt_automatic_recovery(ctx.ops_pool, agent_id)
     except Exception:
         freshly_tripped = False
-        logger.warning(
+        logger.opt(exception=True).warning(
             "failed to suppress automatic wakes for halted agent {agent_id}",
             agent_id=agent_id,
-            exc_info=True,
         )
     if freshly_tripped:
         logger.warning(
@@ -211,10 +209,9 @@ async def _record_permanent_reject_outcome(
             occurred_at=occurred_at if occurred_at is not None else datetime.now(UTC),
         )
     except Exception:
-        logger.warning(
+        logger.opt(exception=True).warning(
             "failed to enqueue the recovery-halt report to an ancestor",
             agent_id=agent_id,
-            exc_info=True,
         )
     emit_error_event(
         ctx,
