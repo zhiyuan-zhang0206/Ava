@@ -48,21 +48,22 @@ def reap_impersonations(
     return len(expired_agents)
 
 
-def alert_stuck_event_logs(pool: ConnectionPool) -> int:
-    """Alert on ended leases still waiting for an open event source; resolve cleared ones.
+def signal_incomplete_event_logs(pool: ConnectionPool) -> int:
+    """Emit the incomplete-event-log signal for every lease still holding it.
 
-    A state alert, not a threshold: the lease cannot complete until its source
-    seals, and nothing else will say so.
+    A state signal, not a threshold: a lease cannot complete until its source
+    seals (or ever, after a capture failure), and nothing else will say so.
+    Re-emitted every pass while the fact holds.
     """
-    from base.agents.impersonation_event_alerts import reconcile_seal_stuck_alerts
+    from base.agents.impersonation_event_signals import emit_incomplete_event_logs
     from base.log import logger
 
     try:
-        with write_transaction(pool) as conn:
-            return reconcile_seal_stuck_alerts(conn)
+        with pool.connection() as conn:
+            return emit_incomplete_event_logs(conn)
     except Exception:
-        # A failing alert pass must not stop the reclamation that runs after it.
-        logger.exception("impersonation event-log alert pass failed")
+        # A failing signal pass must not stop the reclamation that runs after it.
+        logger.exception("impersonation event-log signal pass failed")
         return 0
 
 

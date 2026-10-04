@@ -3,7 +3,7 @@
 Grafana's notification policy repeats an unchanged firing only every four
 hours, so webhook silence is not current state. This loop of the
 events-maintenance service reads the embedded Alertmanager's active instances at
-service start and every five minutes, then resolves stored Grafana-owned
+service start and every five minutes, then resolves stored unresolved
 instances absent from that truth set and publishes the resolved rows.
 
 A Grafana that is down, answers with an error or sends a malformed snapshot is an
@@ -89,18 +89,20 @@ def reconcile_open_grafana_alerts(
     snapshot_started_at: datetime,
     resolved_at: datetime,
 ) -> list[dict[str, Any]]:
-    """Resolve stored Grafana instances absent from one complete snapshot.
+    """Resolve stored instances absent from one complete snapshot.
 
-    Only Grafana webhook rows participate: health/machine probes are
-    edge-triggered direct writers and do not appear in Grafana. Rows touched
-    after the snapshot began are excluded, closing the race where a new firing
-    webhook lands after Grafana produced the response but before this UPDATE.
+    Every row belongs to Grafana's evaluator (the webhook is the only writer),
+    so a row Grafana no longer reports firing is closed whatever `source` it
+    carries: that also ends a row a retired in-process writer left open. Rows
+    touched after the snapshot began are excluded, closing the race where a new
+    firing webhook lands after Grafana produced the response but before this
+    UPDATE.
     """
 
     with conn.cursor(row_factory=dict_row) as cur:
         cur.execute(
             "SELECT id, fingerprint, starts_at FROM alerts"
-            " WHERE source = 'grafana' AND status = 'unresolved' AND updated_at <= %s",
+            " WHERE status = 'unresolved' AND updated_at <= %s",
             (snapshot_started_at,),
         )
         stale_ids = [

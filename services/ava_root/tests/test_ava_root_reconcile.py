@@ -25,13 +25,13 @@ import pytest
 
 from base.daemon.health import DaemonProbe
 from base.native_process.ownership import OwnedProcess
-from services.ava_root.alerts import UnitAlertFacts
 from services.ava_root.custody import (
     ReconcileOutcome,
     ServiceCustody,
     reconcile_record,
     require_clear,
 )
+from services.ava_root.failure_state import UnitFailureFacts
 from services.ava_root.health import HealthMonitor
 from services.ava_root.manifest import RestartPolicy, UnitManifest, UnitRegistry
 from services.ava_root.probes import ProbeRegistry
@@ -537,9 +537,9 @@ class _RevivalStub:
         self.asked.append(unit_id)
         return None
 
-    def unit_alert_facts(self, unit_id: str) -> UnitAlertFacts:
+    def unit_failure_facts(self, unit_id: str) -> UnitFailureFacts:
         self.asked.append(unit_id)
-        return UnitAlertFacts(intent_running=True, restart_failed=None, custody_held=False)
+        return UnitFailureFacts(intent_running=True, restart_failed=None, custody_held=False)
 
     async def reconcile_custody(self) -> list[ReconcileOutcome]:
         self.reconcile_calls += 1

@@ -10,10 +10,7 @@ live pg by stubbing the base `getconn` and the clock.
 
 from __future__ import annotations
 
-import os
-import time
 from contextlib import asynccontextmanager
-from pathlib import Path
 from typing import Any, cast
 
 import psycopg
@@ -23,6 +20,7 @@ from psycopg_pool import AsyncConnectionPool, PoolTimeout
 from agent import db
 from agent.db import LoggingConnectionPool, claim_inbound_batch
 from base.config import settings
+from base.events.declarations.agent_runtime import DbPoolAcquireSlow
 
 
 def _pool() -> LoggingConnectionPool[psycopg.AsyncConnection]:
@@ -38,15 +36,6 @@ def _pool() -> LoggingConnectionPool[psycopg.AsyncConnection]:
 
 def _acquire_records(records):
     return [r for r in records if r["extra"].get("event", "").startswith("db_pool_acquire")]  # pyright: ignore[reportUnknownMemberType]
-
-
-@pytest.fixture(autouse=True)
-def _isolated_warn_marker(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    """Keep the host-wide slow-borrow marker out of the real `$AVA_HOME/run`
-    and out of the next test's view; cooldown tests get this path back."""
-    marker = tmp_path / "db-pool-slow-acquire.warn"
-    monkeypatch.setattr(db, "_slow_acquire_warn_marker", lambda: marker)
-    return marker
 
 
 async def test_fast_acquire_is_quiet(loguru_records, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -94,12 +83,9 @@ async def test_slow_acquire_warns(loguru_records, monkeypatch: pytest.MonkeyPatc
     assert recs[0]["level"].name == "WARNING"  # pyright: ignore[reportUnknownMemberType]
 
 
-async def test_slow_acquires_coalesce_per_host_within_the_cooldown(
-    loguru_records, monkeypatch: pytest.MonkeyPatch, _isolated_warn_marker: Path
-) -> None:
-    """One host stall is one WARNING: the first slow borrow stamps the marker,
-    further slow borrows log DEBUG with the same fields, and the next WARNING
-    comes only after the cooldown passes."""
+async def test_every_slow_acquire_warns(loguru_records, monkeypatch: pytest.MonkeyPatch) -> None:
+    """No per-host coalescing: each slow borrow is one WARNING with the event's
+    elapsed and pool-state fields, so a rule can count them per host."""
 
     async def _ok(self, timeout=None):
         return object()
@@ -116,35 +102,28 @@ async def test_slow_acquires_coalesce_per_host_within_the_cooldown(
 
     await pool.getconn()
     await pool.getconn()
-    assert [r["level"].name for r in _acquire_records(loguru_records)] == [  # pyright: ignore[reportUnknownMemberType, reportUnknownArgumentType]
-        "WARNING",
-        "DEBUG",
-    ]
-
-    aged = time.time() - settings.agent.db_pool_slow_acquire_warn_cooldown_seconds - 1.0
-    os.utime(_isolated_warn_marker, (aged, aged))
-    await pool.getconn()
 
     recs = _acquire_records(loguru_records)  # pyright: ignore[reportUnknownArgumentType]
-    assert [r["level"].name for r in recs] == ["WARNING", "DEBUG", "WARNING"]  # pyright: ignore[reportUnknownMemberType]
-    assert [r["extra"]["coalesced"] for r in recs] == [False, True, False]
-    assert recs[0]["extra"]["check_ms"] >= 0
+    assert [r["level"].name for r in recs] == ["WARNING", "WARNING"]  # pyright: ignore[reportUnknownMemberType]
+    assert {r["extra"]["event"] for r in recs} == {"db_pool_acquire_slow"}
+    elapsed = [r["extra"]["elapsed"] for r in recs]
+    assert min(elapsed) >= settings.agent.db_pool_slow_acquire_warn_seconds  # pyright: ignore[reportUnknownArgumentType]
+    assert set(recs[0]["extra"]) >= set(DbPoolAcquireSlow.__annotations__)  # pyright: ignore[reportUnknownArgumentType]
 
 
 async def test_slow_acquire_separates_slot_wait_and_check(
     loguru_records, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     pool = _pool()
-    monkeypatch.setattr(settings.agent, "db_pool_slow_acquire_warn_seconds", 3.0)
     clock = [0.0]
     sentinel = object()
 
     async def slot(_self: Any, _timeout: float) -> object:
-        clock[0] += 2.0
+        clock[0] += 6.0
         return sentinel
 
     async def check(_self: Any, _conn: object) -> None:
-        clock[0] += 2.0
+        clock[0] += 6.0
 
     async def borrow(self: Any, timeout: float | None = None) -> object:
         conn = await self._getconn_unchecked(timeout or 5.0)
@@ -158,8 +137,8 @@ async def test_slow_acquire_separates_slot_wait_and_check(
 
     assert await pool.getconn() is sentinel
     record = _acquire_records(loguru_records)[0]["extra"]  # pyright: ignore[reportUnknownArgumentType]
-    assert record["slot_wait_ms"] == 2000.0
-    assert record["check_ms"] == 2000.0
+    assert record["slot_wait_ms"] == 6000.0
+    assert record["check_ms"] == 6000.0
     assert record["check_attempts"] == 1
 
 

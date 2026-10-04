@@ -16,7 +16,7 @@ from base.agents import impersonation as leases
 from base.agents.impersonation import event_log
 from base.agents.impersonation import history as history
 from base.agents.impersonation.tests import test_history as history_cases
-from base.agents.impersonation_event_alerts import reconcile_seal_stuck_alerts
+from base.agents.impersonation_event_signals import emit_incomplete_event_logs
 from base.agents.impersonation_manifest import (
     LocalParticipant,
     bind_local_participant,
@@ -341,6 +341,7 @@ def test_a_capture_failure_keeps_the_lease_pending_for_good(
     monkeypatch: pytest.MonkeyPatch,
     database: Database,
     event_bus: EventBus,
+    loguru_records: list[dict[str, Any]],
 ) -> None:
     monkeypatch.setattr(event_log, "MAX_LOG_ENTRIES", 1)
     participant = _participant(owner, lease, "capped")
@@ -358,35 +359,39 @@ def test_a_capture_failure_keeps_the_lease_pending_for_good(
     ended = history.resolve(database, owner.agent_id, 0)
     assert ended["events_completed_at"] is None
     assert pending_reason(ended) == "capture_failed"
+    assert emit_incomplete_event_logs(db_conn) == 1
+    failed = _incomplete_events(loguru_records)
+    assert [e["condition"] for e in failed] == ["capture_failed"]
+    assert failed[0]["pending_reason"] == "capture_failed"
 
 
-def test_an_ended_lease_with_an_open_source_alerts_by_state_and_resolves_on_seal(
-    db_conn: psycopg.Connection[Any], owner: RuntimeIncarnation, lease: dict[str, Any]
+def _incomplete_events(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [
+        r["extra"]
+        for r in records
+        if r["extra"].get("event") == "impersonation_event_log_incomplete"
+    ]
+
+
+def test_an_ended_lease_with_an_open_source_signals_by_state_until_it_seals(
+    db_conn: psycopg.Connection[Any],
+    owner: RuntimeIncarnation,
+    lease: dict[str, Any],
+    loguru_records: list[dict[str, Any]],
 ) -> None:
     participant = _participant(owner, lease, "stuck")
-    reconcile_seal_stuck_alerts(db_conn)
-    assert (
-        db_conn.execute(
-            "SELECT 1 FROM alerts WHERE labels->>'lease_id'=%s "
-            "AND alertname='ImpersonationEventSealStuck'",
-            (participant.lease_id,),
-        ).fetchone()
-        is None
-    )
+    assert emit_incomplete_event_logs(db_conn) == 0  # a live lease is not stuck
     _expire(db_conn, lease)
-    reconcile_seal_stuck_alerts(db_conn)
-    assert db_conn.execute(
-        "SELECT status FROM alerts WHERE labels->>'lease_id'=%s "
-        "AND alertname='ImpersonationEventSealStuck'",
-        (participant.lease_id,),
-    ).fetchone() == ("unresolved",)
+    assert emit_incomplete_event_logs(db_conn) == 1
+    assert emit_incomplete_event_logs(db_conn) == 1  # state, not edge: re-emitted while it holds
+    events = _incomplete_events(loguru_records)
+    assert [e["condition"] for e in events] == ["seal_stuck", "seal_stuck"]
+    assert events[0]["lease_id"] == participant.lease_id
+    assert events[0]["agent_id"] == owner.agent_id
+    loguru_records.clear()
     seal_local_participant(participant)
-    reconcile_seal_stuck_alerts(db_conn)
-    assert db_conn.execute(
-        "SELECT status FROM alerts WHERE labels->>'lease_id'=%s "
-        "AND alertname='ImpersonationEventSealStuck'",
-        (participant.lease_id,),
-    ).fetchone() == ("resolved",)
+    assert emit_incomplete_event_logs(db_conn) == 0
+    assert _incomplete_events(loguru_records) == []
 
 
 def test_agent_termination_completes_a_fully_sealed_lease(
@@ -468,8 +473,11 @@ def test_a_late_seal_rewrites_the_already_delivered_handoff_file(
     assert delivery["sdk_calls"]["consumed_event_count"] == 1
 
 
-def test_the_reaper_pass_alerts_on_a_stuck_source_and_resolves_it_when_it_seals(
-    db_conn: psycopg.Connection[Any], owner: RuntimeIncarnation, lease: dict[str, Any]
+def test_the_reaper_pass_signals_a_stuck_source_until_it_seals(
+    db_conn: psycopg.Connection[Any],
+    owner: RuntimeIncarnation,
+    lease: dict[str, Any],
+    loguru_records: list[dict[str, Any]],
 ) -> None:
     from base.agents.impersonation import maintenance
     from base.db import pool
@@ -477,18 +485,12 @@ def test_the_reaper_pass_alerts_on_a_stuck_source_and_resolves_it_when_it_seals(
     participant = _participant(owner, lease, "reaper-stuck")
     _expire(db_conn, lease)
 
-    def alert_status() -> tuple[Any, ...] | None:
-        return db_conn.execute(
-            "SELECT status FROM alerts WHERE labels->>'lease_id'=%s "
-            "AND alertname='ImpersonationEventSealStuck'",
-            (participant.lease_id,),
-        ).fetchone()
-
     with pool(max_size=2) as reaper_pool:
-        assert maintenance.alert_stuck_event_logs(reaper_pool) == 1
-        assert alert_status() == ("unresolved",)
-        assert maintenance.alert_stuck_event_logs(reaper_pool) == 0  # one instance per episode
+        assert maintenance.signal_incomplete_event_logs(reaper_pool) == 1
+        assert maintenance.signal_incomplete_event_logs(reaper_pool) == 1  # state, not edge
         seal_local_participant(participant)
-        assert maintenance.alert_stuck_event_logs(reaper_pool) == 1
-    db_conn.rollback()
-    assert alert_status() == ("resolved",)
+        assert maintenance.signal_incomplete_event_logs(reaper_pool) == 0
+    assert [e["condition"] for e in _incomplete_events(loguru_records)] == [
+        "seal_stuck",
+        "seal_stuck",
+    ]

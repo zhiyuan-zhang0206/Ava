@@ -330,13 +330,12 @@ class WeixinAdapter(IMAdapter):
         self._seen: dict[str, float] = {}  # dedup key -> monotonic timestamp
         self._last_inbound: dict[str, float] = {}  # peer -> epoch of last inbound msg
         # Push-failure watchdog state (Task #829): consecutive sendmessage
-        # failures mean the iLink context_token expired — the core alerts the
-        # user through other channels and hints "recovered" after the first
+        # failures mean the iLink context_token expired — the core emits the
+        # im_push_failed event and hints "recovered" after the first
         # success (a fresh user message brought a new token).
         self.push_failures = 0
         self.push_failed_at: float | None = None
         self.push_recovered_at: float | None = None
-        self._push_alerted_at: float | None = None
         self._chunk_delay_seconds = _SEND_CHUNK_DELAY_SECONDS
         # (chat_id, chunk_idx) -> (client_id, monotonic): the id of the last
         # failed send attempt, reused on the push_watchdog retry so iLink's

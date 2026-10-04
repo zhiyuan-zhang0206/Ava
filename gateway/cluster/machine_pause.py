@@ -1,7 +1,7 @@
 """Machine pause/resume endpoints — `POST /api/cluster/machines/{name}/pause`
 and `.../resume` (Task #1283: temporarily pull a machine out of the cluster,
 e.g. the operator is away for a week and disconnects it; the cluster then
-shows only its active members, no offline alert fires for the expected
+shows only its active members, no offline signal is emitted for the expected
 absence, rollouts and spawns skip it, and `ava cluster resume` brings it
 back).
 
@@ -13,7 +13,7 @@ below, the roster/staging/delete endpoints stay in cluster.py.
 from __future__ import annotations
 
 import asyncio
-from datetime import UTC, datetime
+from datetime import datetime
 
 from fastapi import APIRouter, HTTPException, Request
 from psycopg_pool import ConnectionPool
@@ -119,46 +119,6 @@ def _force_mark_terminated_blocking(
     force_mark_terminated(db, bus, agent_id, pool, source="machine-pause")
 
 
-def _resolve_machine_alerts_blocking(pool: ConnectionPool, name: str) -> None:
-    """Resolve every open "machine offline" alert for `name` — a paused
-    machine's absence is expected, not an incident, so an alert that was
-    already firing when the pause ran must not stay open (and spam IM) for
-    the whole pause window. Mirrors the liveness pass's recovery edge
-    (`services.heartbeat.liveness._machine_alert_edges`) so each persisted
-    instance keeps its original fingerprint convention."""
-    from base.telemetry.alerts import AlertKey, stamp_notified, upsert_alert
-
-    identity_labels = {"alertname": "machine offline", "machine": name}
-    with pool.connection() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                "SELECT starts_at, fingerprint, severity FROM alerts "
-                "WHERE labels->>'alertname' = 'machine offline' "
-                "AND labels->>'machine' = %s AND status = 'unresolved' "
-                "ORDER BY starts_at DESC",
-                (name,),
-            )
-            open_rows = cur.fetchall()
-        keys: list[AlertKey] = []
-        for starts_at, row_fingerprint, severity in open_rows:
-            alert = {
-                "status": "resolved",
-                "labels": {**identity_labels, "severity": severity},
-                "annotations": {"summary": f"machine {name} paused (expected absence)"},
-                "starts_at": starts_at.isoformat(),
-                "ends_at": datetime.now(UTC).isoformat(),
-                "fingerprint": row_fingerprint,
-            }
-            key, _did_insert, should_notify, _row = upsert_alert(
-                conn, alert, source="machine-pause"
-            )
-            if should_notify:
-                keys.append(key)
-        if keys:
-            stamp_notified(conn, keys)
-        conn.commit()
-
-
 @router.post("/api/cluster/machines/{name}/pause", response_model=MachinePauseResponse)
 async def pause_cluster_machine(
     name: str, req: MachinePauseRequest, request: Request
@@ -196,10 +156,10 @@ async def pause_cluster_machine(
     The separate transaction race between the pause latch and creation of a
     brand-new agent row is outside this resurrection boundary.
 
-    Open "machine offline" alerts for the machine are resolved as part of the
-    latch step — an expected absence is not an incident. Idempotent: pausing
-    an already-paused machine re-runs the (now-empty) drain/terminate and
-    returns the existing latch.
+    The expected absence is silent at the source: the latch removes the machine
+    from the liveness pass's targets, so it emits no `machine_probe_failed`
+    signal. Idempotent: pausing an already-paused machine re-runs the
+    (now-empty) drain/terminate and returns the existing latch.
 
     Refuses (400) to pause the gateway's own machine — the gateway host must
     stay a cluster member for the cluster to answer anything.
@@ -248,8 +208,6 @@ async def pause_cluster_machine(
             )
             if was_live:
                 force_marked += 1
-
-    await asyncio.to_thread(_resolve_machine_alerts_blocking, pool, name)
 
     return MachinePauseResponse(
         name=name,

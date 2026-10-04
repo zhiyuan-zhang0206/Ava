@@ -29,12 +29,11 @@ class Diagnostic:
     probe: Callable[[], DaemonProbe]
     interval_s: float = 60.0
     timeout_s: float = 20.0
-    failure_threshold: int = 1
     report: Callable[[DaemonProbe], None] | None = None
 
     def __post_init__(self) -> None:
-        if self.interval_s <= 0 or self.timeout_s <= 0 or self.failure_threshold < 1:
-            raise ValueError("diagnostic timing and failure threshold must be positive")
+        if self.interval_s <= 0 or self.timeout_s <= 0:
+            raise ValueError("diagnostic timing must be positive")
 
 
 @dataclass(slots=True)
@@ -46,7 +45,6 @@ class _State:
     sampled_at: float | None = None
     result: DaemonProbe | None = None
     failures: int = 0
-    reported: str | None = None
 
 
 class DiagnosticMonitor:
@@ -69,8 +67,9 @@ class DiagnosticMonitor:
         result = await state.runner.observe(check.probe, check.timeout_s)
         state.result = result
         state.sampled_at = time.time()
+        recovered = result.alive and state.failures > 0
         state.failures = state.failures + 1 if not result.alive else 0
-        self._report_transition(check, state, result)
+        self._report_sample(check, state, result, recovered=recovered)
         if check.report is not None and result.verdict != ProbeVerdict.UNAVAILABLE:
             # The result is fresh. Reporting is bounded through the SAME runner,
             # so an alert backend that hangs also prevents overlapping samples.
@@ -85,16 +84,18 @@ class DiagnosticMonitor:
                 _log.error("[diagnostic] %s reporting unavailable: %s", check.name, reported.detail)
 
     @staticmethod
-    def _report_transition(check: Diagnostic, state: _State, result: DaemonProbe) -> None:
-        # An unknown round is not damage evidence, but it extends the streak:
-        # the episode log waits for the streak to reach the threshold, so one
-        # deadline miss cannot open it, and only a healthy round re-arms.
-        if not result.alive and state.failures < check.failure_threshold:
+    def _report_sample(
+        check: Diagnostic, state: _State, result: DaemonProbe, *, recovered: bool
+    ) -> None:
+        """One `root_diagnostic` per non-alive sample, plus one on recovery.
+
+        A condition is a state, so every failing sample (an unknown result
+        included) reports at WARNING; the observability rule's pending period
+        carries the debounce, and the first healthy sample after a streak logs
+        the recovery.
+        """
+        if result.alive and not recovered:
             return
-        key = result.verdict.value
-        if key == state.reported:
-            return
-        state.reported = key
         from base.log import logger
 
         logger.log(

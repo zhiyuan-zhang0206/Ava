@@ -78,3 +78,5 @@ normal-recovery window.
   written under the former severity-in-fingerprint convention to resolve.
 - The health marker keeps compatibility with one-line direct-IM state and
   two-line pre-transition alert state during upgrade.
+
+Forward: superseded by [2026-10-04](2026-10-04-alerting-on-grafana-alerting.md): the transition clock, the deploy-window explanation and the health marker are gone; the same grades are Grafana rules with `for: 3m` / `for: 10m` and the window is a silence.

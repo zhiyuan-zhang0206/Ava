@@ -4,9 +4,8 @@ Alert is fully separate from Notice: own table, own UI section, own IM
 channel — nothing here touches agent_notices.
 
 - ``POST /api/alerts`` — the alert webhook. Grafana's embedded Alertmanager
-  contact point delivers the Alertmanager standard webhook payload here; the
-  cluster health probe posts its edge alerts through the same endpoint with
-  ``source="health-probe"``. Each alert instance is stored in ``alerts``
+  contact point delivers the Alertmanager standard webhook payload here — the
+  one way into the store. Each alert instance is stored in ``alerts``
   (deduped by fingerprint x starts_at), published on the ``ava:alerts`` Redis
   channel for the SSE stream, and fanned out to the user's connected IM
   channels via the local im_bridge daemon — every severity pushes

@@ -36,6 +36,7 @@ import yaml
 from base.events.contract import EVENTS, payload_keys, telemetry_events
 from base.telemetry.otlp.telemetry_otlp import _METRIC_DISPOSITION
 from base.telemetry.otlp.telemetry_otlp_metrics import _strip_unit_suffix, _unit_for
+from tests.scripts.test_alert_rules_signals import SIGNALS
 
 _RULES = (
     Path(__file__).resolve().parent.parent.parent
@@ -118,7 +119,7 @@ def _load_groups() -> list[dict[str, Any]]:
     assert [group["name"] for group in groups] == ["ava-ops", "ava-ops-slow"]
     assert [group["folder"] for group in groups] == ["Ava", "Ava"]
     assert [group["interval"] for group in groups] == ["1m", "5m"]
-    assert [len(group["rules"]) for group in groups] == [33, 9]
+    assert [len(group["rules"]) for group in groups] == [55, 12]
     return groups
 
 
@@ -148,7 +149,7 @@ def _threshold_params(rule: dict[str, Any]) -> list[list[Any]]:
 
 def test_rules_have_expected_uids() -> None:
     rules = _load_rules()
-    assert {r["uid"] for r in rules} == _EXPECTED_UIDS
+    assert {r["uid"] for r in rules} == _EXPECTED_UIDS | set(SIGNALS)
 
 
 def test_rule_uids_fit_grafana_40_char_limit() -> None:

@@ -45,7 +45,7 @@ The contact point posts to the gateway's alert ingest endpoint — loopback
 `127.0.0.1:8000` when the observatory is local, the gateway's reachable
 address when `AVA_OBSERVABILITY_URL` points at a remote station.
 
-## Rules (43)
+## Rules (67)
 
 The rules are split between `ava-ops` (33 rules, evaluated every minute:
 R1-R6, the root-health-round and gateway-metrics silence rules, the checkpoint
@@ -89,10 +89,9 @@ For `ava-ops-fleet-graph-stale`, the threshold counts degradation
 **episodes** (two in ten minutes): the gateway emits one `fleet_graph_stale`
 event per degraded episode and rate-caps repeats per reason
 (`AVA_FLEET_GRAPH_STALE_EMIT_INTERVAL_S`, 30s default), so a retry storm
-cannot fabricate a cluster while a single blip stays quiet. Expected windows
-(LGTM maintenance, planned upgrades) are silenced in Grafana — no per-rule
-window is provisioned. TODO: revisit provisioned mute timings once a
-machine-readable expected-window source exists.
+cannot fabricate a cluster while a single blip stays quiet. A planned update
+is silenced by the fleet update's one silence (see Notifications below); no
+per-rule window is provisioned.
 
 The two provider-stall rules (task #3948) surface the stall-wave telemetry:
 `ava-ops-llm-stall-burst` is calibrated on the trailing 7 days (52 stalls
@@ -251,17 +250,66 @@ There is no independent launchd or systemd Grafana restart path.
    watch `GET /api/prometheus/grafana/api/v1/rules` for the state
    transition.
 
-## Notifications — wired through the alerts ingest
+## Signal rules — the alerts that used to be written in code
 
-Rules evaluate in Grafana and POST firing/resolved webhooks to the gateway's
-`POST /api/alerts` (provisioned contact point + policy in `contact.yml`).
-The ingest stores each alert instance in `alerts` (deduped by fingerprint ×
-starts_at, Alertmanager webhook shape) and fans firing notifications out
-through the im_bridge daemon (the only sanctioned IM surface) — one alert
-instance = one row + one IM, every severity (critical/warning/error, no
-gate). The cluster health probe posts through the same endpoint
-(`source=health-probe`); the heartbeat liveness pass writes machine
-offline/online edges straight to the table (`source=machine-probe`).
+Before 2026-10-04 several processes wrote their own alerts (a direct row plus a direct IM)
+and several gates throttled or graded them (consecutive rounds, grace windows, cooldown
+markers, the 180s/600s transition clock, deploy-window holds). All of that is gone
+([decision](../../../../../../decisions/2026-10-04-alerting-on-grafana-alerting.md)): the code
+emits a declared event (`category=telemetry`) while a condition holds, and the rule's `for:`
+and trailing window carry the debounce. A condition that stops resolves itself when its events stop.
+
+| uid | Event | `for` | Severity | Replaces |
+|-----|-------|-------|----------|----------|
+| `ava-ops-health-probe-warning` / `-error` | `health_probe_failing` per `attributes_check` | 3m / 10m | warning / error | the probe's time-graded owner alert |
+| `ava-ops-health-probe-silent` | absent `health_probe_ran` for 15m | 0m | error | nothing: a stopped probe was silent (routes to Telegram too) |
+| `ava-ops-service-start-unready` | `service_start_unready` | 0m | warning | start-readiness alert rows |
+| `ava-ops-schedule-verify-failed` | `schedule_verify_failed` | 0m | error | the verify sweep's direct post |
+| `ava-ops-agent-continuation-lost` | `agent_continuation_lost` per agent | 0m | error | `ava start`'s direct owner alert for a lost restart pointer |
+| `ava-ops-schedule-stalled` | `schedule_stalled` (24h) | 0m | warning | the event had no rule |
+| `ava-ops-machine-offline-warning` / `-error` | `machine_probe_failed` per machine | 3m / 10m | warning / error | the machine-offline rows and their clock |
+| `ava-ops-exec-child-boot-failed` | `exec_child_boot_failed` | 0s | warning | the exec child's direct post and 600s limit |
+| `ava-ops-inspect-metrics-gap` | `inspect_metrics_coverage_gap` | 0s | warning | the inspector's cooldown and direct row |
+| `ava-ops-impersonation-seal-stuck` / `-capture-failed` | `impersonation_event_log_incomplete` | 0s | warning | the impersonation event-log rows |
+| `ava-ops-im-push-failed` | `im_push_failed` (weixin, 2+ failures) | 0s | warning | the push watchdog's cross-channel alert and cooldown |
+| `ava-ops-im-feishu-owner-seed-failed` | `im_feishu_owner_seed_failed` | 0s | warning | a direct owner message |
+| `ava-ops-hosted-boot-recovery-deferred` | `hosted_boot_recovery_deferred` >2 in 24h | 0s | warning | the consecutive-boot streak ledger |
+| `ava-ops-delivery-stalled` | `delivery_stalled` per agent | 1m | warning | the deploy-window hold and settle grace |
+| `ava-ops-db-pool-acquire-slow` | `db_pool_acquire_slow` per machine | 2m | warning | the per-host cooldown marker |
+| `ava-ops-root-unit-restart-failed` / `-breaker-open` / `-custody-held` | `root_unit_failure_state` per `attributes_kind` | 0m | error / critical / warning | the root unit episode store and its posts |
+| `ava-ops-root-unit-not-revivable` | `root_unit_not_revivable` >1 in 2m | 0m | error | `terminal_escalate_rounds` |
+| `ava-ops-root-diagnostic-venv` / `-brew-pin` / `-browser-reach` | `root_diagnostic` non-alive, >1 / >1 / >2 samples | 0m | warning | the per-probe consecutive-failure thresholds |
+
+Unhealthy-for-3-minutes and unhealthy-for-10-minutes are two coexisting rules per condition
+(Grafana's file provisioning has no inhibition rules), so a long outage holds a warning and an
+error instance; the machine-offline pair hands off through the `consecutive_failures` filter instead.
+The observatory station's own reachability has no rule: Loki and Grafana live on the station and
+the events travel the very path it would watch. An ingress that rejects events and a station that is
+down both surface as the health probe's `health_probe_ran` going absent; a whole-machine outage is the
+out-of-band probe's.
+
+## Notifications — the policy, the webhook, the window silence
+
+Rules evaluate in Grafana and POST firing/resolved webhooks to the gateway's `POST /api/alerts`
+(contact point and policy in `contact.yml`). The policy is the one place merging and repetition
+are decided: instances of one rule are one group (`group_by: [alertname]`, 30s wait, 5m
+interval, 4h repeat), critical skips the wait, and every other alert has an explicit route to the
+webhook. `attributes_check="gateway_liveness"` alerts and the probe's dead-man rule also go straight
+to Telegram through Grafana's native notifier (bot token and owner chat id rendered by converge from
+the telegram settings), because the webhook cannot report a down gateway.
+
+The ingest stores each alert instance in `alerts` (deduped by fingerprint x starts_at, Alertmanager
+webhook shape) and fans firing notifications out through the im_bridge daemon (the only sanctioned
+IM surface) — one alert instance = one row + one IM, every severity (critical/warning/error, no
+gate beyond the rule's own `notify_im="false"`). It is the only writer of that table; no process
+writes alert rows, posts to the endpoint or pushes an alert to IM on its own
+(`tests/scripts/test_alert_single_path.py`).
+
+A planned outage is a silence, not a gate in the services: `python -m cli.fleet_update down` creates
+one silence in this Grafana (matcher `alertname=~".+"`, disk alerts excepted: `metric="host_disk"`,
+`attributes_check="disk_usage"`; createdBy `ava-fleet-update`; expiry and a comment naming the
+target) and `up` expires it. Silenced rules keep evaluating, so a condition that outlives the window
+notifies when the silence ends.
 
 ## Events-stream cutover (task #1197, done)
 

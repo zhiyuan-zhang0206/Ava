@@ -18,8 +18,8 @@ adding the same observed day twice. Exact duration observations feed quantiles;
 older ledger-only histograms retain their declared integer-second precision.
 The panel renders the observed metrics only: coverage verdicts (availability,
 duration precision, retained sources, last-observed) go to the background log
-instead, with unexpected gaps raised as alert episodes (task #3869, user ruling
-2026-09-17).
+instead, with unexpected gaps emitted as the `inspect_metrics_coverage_gap` event
+(task #3869, user ruling 2026-09-17).
 Missing evidence is null/partial with window and observation timestamps, not a
 zero or a claim of complete collection. No synchronous log scan or completed
 result TTL is part of the statistics path. The statistics path serves only the

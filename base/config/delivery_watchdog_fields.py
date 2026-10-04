@@ -168,19 +168,6 @@ class DeliveryWatchdogFields:
         },
     )
 
-    delivery_watchdog_alert_grace_seconds: float = Field(
-        default=300.0,
-        ge=0.0,
-        alias="AVA_DELIVERY_WATCHDOG_ALERT_GRACE_SECONDS",
-        description="Settle window (seconds) between a deploy window closing (or a daemon boot / stop-window resume) and stall alerting resuming: the resume's claim tail is still being claimed, so its pending rows are not stalls yet — the 2026-10-03/04 post-ready batches all claimed within +228s of ready. Wake re-dispatch and the dead-letter sweeps keep running throughout; 0 disables the grace.",
-        json_schema_extra={
-            "restart_required": "all",
-            "writable": True,
-            "sensitive": False,
-            "scope": "cluster-pinned",
-        },
-    )
-
     delivery_stalled_recovery_enabled: bool = Field(
         default=True,
         alias="AVA_DELIVERY_STALLED_RECOVERY_ENABLED",

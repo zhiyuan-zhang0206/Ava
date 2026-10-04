@@ -61,38 +61,49 @@ class CustodyReconcile(TypedDict):
     evidence: str
 
 
-class RootUnitAlertFired(TypedDict):
-    """One root unit entered an alertable failure state (task #4872, B route).
+class RootUnitFailureState(TypedDict):
+    """One root unit sits in an explicit failure state (task #4872).
 
-    Emitted once per episode — a unit whose intent is running and which sits
-    in a recorded replacement failure, an open restart breaker, or retained
-    native custody — while later rounds, backoff retries, and kind changes on
-    the same episode stay silent. ``delivery`` records the user-channel post:
-    "posted" when the gateway accepted it, "failed" after the single retry.
+    Emitted on EVERY health round while the condition holds — the unit's intent
+    is running and it has a recorded replacement failure, an open restart
+    breaker, or retained native custody — so a rule's pending period can debounce
+    it and the stream going quiet resolves it. ``kind`` is ``restart_failed``,
+    ``breaker_open`` or ``custody_held`` (the first that applies in that order);
+    ``detail`` is the bounded evidence line, never a grouping key.
     """
 
     unit: str
     kind: str
-    since_timestamp_seconds: float
     detail: str
-    delivery: str
 
 
-class RootUnitAlertResolved(TypedDict):
-    """One root unit's alert episode closed — the derived condition disappeared.
+class RootUnitNotRevivable(TypedDict):
+    """A unit's probe verdict is terminal: this unit cannot revive it.
 
-    Emitted once per episode when the condition clears (including after a root
-    restart), replaying the episode identity. ``delivery`` records the
-    user-channel resolve post: "posted", "failed" after the single retry, or
-    "skipped" when the firing was never delivered — there is no open row to
-    close, and posting one would fabricate it.
+    Emitted on every health round that observes a terminal verdict (unknown
+    identity, inspection error, timeout, foreign listener) outside an operator
+    stop. One round is often an inspection race; a streak is the incident —
+    the rule's pending period tells them apart. ``detail`` is the probe's
+    evidence, never a grouping key.
     """
 
     unit: str
-    kind: str
-    since_timestamp_seconds: float
-    failed_for_s: float
-    delivery: str
+    detail: str
+
+
+class RootDiagnostic(TypedDict):
+    """`root_diagnostic` payload — services/ava_root_glue/diagnostics.py.
+
+    One row per non-alive diagnostic sample (WARNING, every sample while the
+    condition persists) and one on recovery (INFO). ``diagnostic`` names the
+    check, ``verdict`` is its reading, ``consecutive_failures`` the streak the
+    sample extends; ``detail`` is the evidence, never a grouping key.
+    """
+
+    diagnostic: str
+    verdict: str
+    detail: str
+    consecutive_failures: int
 
 
 class ScheduleStalled(TypedDict):
@@ -131,6 +142,57 @@ class RecoveryDrillFailed(TypedDict):
     """
 
     drill: str
+    detail: str
+
+
+class HealthProbeFailing(TypedDict):
+    """`health_probe_failing` payload — cli/commands/cluster/health.py.
+
+    One row per unhealthy probe run, repeated on every run while the condition
+    holds. ``check`` names the failed check (the Grafana grouping key);
+    ``failure_class`` is the probe's reading of the cause (``code`` /
+    ``environment`` / ``maintenance``); ``message`` is the bounded diagnostic
+    and not a grouping key.
+    """
+
+    check: str
+    failure_class: str
+    message: str
+
+
+class HealthProbeRan(TypedDict):
+    """`health_probe_ran` payload — cli/commands/cluster/health.py.
+
+    One row per completed probe run, healthy or not: the probe's own heartbeat,
+    so its absence (not any failure) is the signal that the probe stopped
+    running. ``unhealthy_checks`` is 0 for a healthy run, 1 when the run
+    stopped at its first failing check.
+    """
+
+    unhealthy_checks: int
+
+
+class ServiceStartUnready(TypedDict):
+    """`service_start_unready` payload — cli/commands/lifecycle/start.py.
+
+    One row per non-critical service that missed its readiness window at an
+    `ava start` (the start does not fail on it).
+    """
+
+    service: str
+
+
+class ScheduleVerifyFailed(TypedDict):
+    """`schedule_verify_failed` payload — cli/commands/management/schedules_verify.py.
+
+    One row per non-clean `ava schedules verify` sweep of the live table:
+    ``red`` in-store scripts failed out of ``checked``; ``tool_error`` is set
+    when the sweep itself could not run; ``detail`` lists the failures.
+    """
+
+    checked: int
+    red: int
+    tool_error: str | None
     detail: str
 
 
@@ -202,20 +264,21 @@ EVENTS: dict[str, EventSpec] = {
         payload=CustodyReconcile,
         tier="observation",
     ),
-    "root_unit_alert_fired": telemetry_event(
-        "root_unit_alert_fired",
-        "root unit entered an alertable failure state (intent running, and restart_failed, "
-        "breaker open, or retained custody) — one firing per episode; delivery records the "
-        "user-channel post (task #4872)",
-        payload=RootUnitAlertFired,
+    "root_unit_failure_state": telemetry_event(
+        "root_unit_failure_state",
+        "root unit sits in an explicit failure state (intent running, and restart_failed, "
+        "breaker open, or retained custody) — emitted every health round while it holds "
+        "(task #4872)",
+        payload=RootUnitFailureState,
         tier="anomaly",
     ),
-    "root_unit_alert_resolved": telemetry_event(
-        "root_unit_alert_resolved",
-        "root unit alert episode closed — the failure state cleared and the episode resolved "
-        "(task #4872)",
-        payload=RootUnitAlertResolved,
-        tier="noise",
+    "root_unit_not_revivable": telemetry_event(
+        "root_unit_not_revivable",
+        "root health round observed a terminal probe verdict the unit cannot revive "
+        "(unknown identity, inspection error, foreign listener) — emitted every round "
+        "it is observed, WARNING",
+        payload=RootUnitNotRevivable,
+        tier="anomaly",
     ),
     # Parent-helper diagnosis never grants root authority to replace its ancestor.
     "permissions_helper_unhealthy": telemetry_event(
@@ -238,7 +301,9 @@ EVENTS: dict[str, EventSpec] = {
     ),
     "root_diagnostic": telemetry_event(
         "root_diagnostic",
-        "root diagnostic verdict changed; observation only, no recovery authority",
+        "root diagnostic sampled non-alive (every sample while it persists, WARNING) or "
+        "recovered (once, INFO); observation only, no recovery authority",
+        payload=RootDiagnostic,
         tier="anomaly",
     ),
     "root_health_tick": telemetry_event(
@@ -271,6 +336,34 @@ EVENTS: dict[str, EventSpec] = {
         payload=RecoveryDrillFailed,
         tier="anomaly",
         site=("services/backup_scheduler/daemon.py:_run_due_local_dump_restore (positional emit)"),
+    ),
+    "health_probe_failing": telemetry_event(
+        "health_probe_failing",
+        "the cluster health probe found a failing check; repeated on every unhealthy run",
+        payload=HealthProbeFailing,
+        tier="anomaly",
+        site="cli/commands/cluster/health.py:_report_failing telemetry.emit",
+    ),
+    "health_probe_ran": telemetry_event(
+        "health_probe_ran",
+        "the cluster health probe completed a run, healthy or not (its own heartbeat)",
+        payload=HealthProbeRan,
+        site="cli/commands/cluster/health.py:_report_ran telemetry.emit",
+    ),
+    "service_start_unready": telemetry_event(
+        "service_start_unready",
+        "a non-critical service missed its readiness window at ava start",
+        payload=ServiceStartUnready,
+        tier="anomaly",
+        site="cli/commands/_probe.py:_report_non_critical_unready_services telemetry.emit",
+    ),
+    "schedule_verify_failed": telemetry_event(
+        "schedule_verify_failed",
+        "ava schedules verify found in-store schedule scripts that fail dry-import or "
+        "call-signature binding, or the sweep itself failed",
+        payload=ScheduleVerifyFailed,
+        tier="anomaly",
+        site="cli/commands/management/schedules_verify.py:_report_verify telemetry.emit",
     ),
     "lifecycle_pointer_done_torn": EventSpec(
         name="lifecycle_pointer_done_torn",

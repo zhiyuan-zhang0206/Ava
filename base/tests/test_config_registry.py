@@ -252,9 +252,7 @@ def test_host_fields_declare_remote_writable_bool() -> None:
 
 _REMOTE_WRITABLE_ALLOWLIST = frozenset(
     {
-        "brew_pin_probe_failure_threshold",
         "browser_enabled",
-        "browser_reach_failure_threshold",
         "browser_reach_probe_interval_s",
         "browser_reach_timeout_s",
         "chrome_binary",
@@ -279,7 +277,6 @@ _REMOTE_WRITABLE_ALLOWLIST = frozenset(
         "permissions_helper_spawn",
         "ops_concurrency",
         "task_maintenance_enabled",
-        "venv_probe_failure_threshold",
     }
 )
 

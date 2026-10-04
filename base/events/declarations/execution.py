@@ -37,6 +37,16 @@ class ExecChildBoot(TypedDict):
     duration_ms: float
 
 
+class ExecChildBootFailed(TypedDict):
+    """`exec_child_boot_failed` payload — agent/graph/exec/node.py.
+
+    The exec child crashed before the agent's code ran (typically
+    GET /api/bootstrap unreachable); `exc_msg` is truncated to 200 chars."""
+
+    exc_type: str
+    exc_msg: str
+
+
 class ExecRequestQuarantine(TypedDict):
     """`exec_request_quarantine` payload — stale exec request evidence preserved."""
 
@@ -91,6 +101,12 @@ EVENTS: dict[str, EventSpec] = {
         "exec child bootstrap duration before agent-authored code",
         payload=ExecChildBoot,
         tier="noise",
+    ),
+    "exec_child_boot_failed": telemetry_event(
+        "exec_child_boot_failed",
+        "exec child crashed before running the agent's code (bootstrap-class failure)",
+        payload=ExecChildBootFailed,
+        tier="anomaly",
     ),
     "exec_request_quarantine": telemetry_event(
         "exec_request_quarantine",

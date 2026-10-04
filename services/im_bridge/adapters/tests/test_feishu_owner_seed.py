@@ -5,8 +5,8 @@ messages across a restart, so the outbound leg went blind until the user's next
 message (measured 6h+; only the daily patrol noticed). ``start()`` now seeds the
 owner from the persisted switch state when exactly one feishu chat is recorded.
 These tests pin the seed semantics: first-writer, no guessing on a missing /
-unreadable / ambiguous state, and the telegram alert that keeps the blind
-window observable instead of silent.
+unreadable / ambiguous state, and the ``im_feishu_owner_seed_failed`` event
+that keeps the blind window observable instead of silent.
 
 ``send_to_owner`` plumbing is covered by ``test_feishu_adapter.py``; the send
 seam used here only proves the seed resolves the owner.
@@ -20,7 +20,6 @@ from typing import Any
 
 import pytest
 
-from services.im_bridge import copy
 from services.im_bridge.adapters.feishu import FeishuAdapter
 from services.im_bridge.config import FeishuCredentialsConfig
 from services.im_bridge.tests.slices import feishu_config
@@ -36,19 +35,6 @@ class FakeCore:
 
     async def handle_inbound(self, message: InboundMessage) -> None:
         self.received.append(message)
-
-
-class FakeTelegram:
-    """Telegram stand-in recording ``send_to_owner`` calls."""
-
-    def __init__(self, *, fail: bool = False) -> None:
-        self.sent: list[str] = []
-        self.fail = fail
-
-    async def send_to_owner(self, text: str, **_: Any) -> None:
-        if self.fail:
-            raise RuntimeError("telegram unavailable")
-        self.sent.append(text)
 
 
 class BootAdapter(FeishuAdapter):
@@ -68,11 +54,8 @@ def _write_switch_state(tmp_path: Path, state: dict[str, int]) -> None:
     path.write_text(json.dumps(state), encoding="utf-8")
 
 
-def _core_with_telegram(*, fail: bool = False) -> tuple[FakeCore, FakeTelegram]:
-    core = FakeCore()
-    telegram = FakeTelegram(fail=fail)
-    core.adapters["telegram"] = telegram
-    return core, telegram
+def _seed_events(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [r["extra"] for r in records if r["extra"].get("event") == "im_feishu_owner_seed_failed"]
 
 
 def _boot_adapter(config: FeishuCredentialsConfig, core: FakeCore | None = None) -> BootAdapter:
@@ -89,7 +72,7 @@ async def test_start_seeds_owner_open_id_from_switch_state(
     restores the owner open id before the link goes live."""
     monkeypatch.setenv("AVA_HOME", str(tmp_path))
     _write_switch_state(tmp_path, {"feishu:ou_owner_1": 405, "telegram:12345": 405})
-    core, telegram = _core_with_telegram()
+    core = FakeCore()
     adapter = _boot_adapter(
         feishu_config(feishu_app_id="cli_x", feishu_app_secret="secret_x"),  # noqa: S106
         core,
@@ -98,7 +81,6 @@ async def test_start_seeds_owner_open_id_from_switch_state(
     await adapter.start()
 
     assert adapter._last_open_id == "ou_owner_1"
-    assert telegram.sent == []
 
 
 async def test_start_without_credentials_does_not_seed_or_alert(
@@ -108,13 +90,12 @@ async def test_start_without_credentials_does_not_seed_or_alert(
     no seed, no alert — the alert exists for a live-but-blind leg."""
     monkeypatch.setenv("AVA_HOME", str(tmp_path))
     _write_switch_state(tmp_path, {"feishu:ou_owner_1": 405})
-    core, telegram = _core_with_telegram()
+    core = FakeCore()
     adapter = _boot_adapter(feishu_config(feishu_app_id="", feishu_app_secret=""), core)
 
     await adapter.start()
 
     assert adapter._last_open_id == ""
-    assert telegram.sent == []
 
 
 # -- seed semantics ---------------------------------------------------------
@@ -148,14 +129,12 @@ async def test_seed_never_overwrites_a_known_owner(
     never replaced by the persisted state — the rule _register_sent_chat keeps."""
     monkeypatch.setenv("AVA_HOME", str(tmp_path))
     _write_switch_state(tmp_path, {"feishu:ou_state": 405})
-    core, telegram = _core_with_telegram()
-    adapter = FeishuAdapter(core, feishu_config())
+    adapter = FeishuAdapter(FakeCore(), feishu_config())
     adapter._last_open_id = "ou_known"
 
     await adapter._seed_owner_from_switch_state()
 
     assert adapter._last_open_id == "ou_known"
-    assert telegram.sent == []
 
 
 @pytest.mark.parametrize(
@@ -163,43 +142,46 @@ async def test_seed_never_overwrites_a_known_owner(
     [None, {}, {"telegram:12345": 405}],
     ids=["missing-file", "empty-state", "no-feishu-key"],
 )
-async def test_seed_without_a_source_alerts_and_stays_blind(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, state: dict[str, int] | None
+async def test_seed_without_a_source_emits_the_failure_event_and_stays_blind(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    state: dict[str, int] | None,
+    loguru_records: list[dict[str, Any]],
 ) -> None:
     """No usable source (state missing / empty / no feishu chat) -> stay empty
-    and alert the user through telegram, so the blind leg is observable."""
+    and emit the failure event, so the blind leg is observable."""
     monkeypatch.setenv("AVA_HOME", str(tmp_path))
     if state is not None:
         _write_switch_state(tmp_path, state)
-    core, telegram = _core_with_telegram()
-    adapter = FeishuAdapter(core, feishu_config())
+    adapter = FeishuAdapter(FakeCore(), feishu_config())
 
     await adapter._seed_owner_from_switch_state()
 
     assert adapter._last_open_id == ""
-    assert telegram.sent == [copy.FEISHU_OWNER_SEED_NO_SOURCE]
+    events = _seed_events(loguru_records)
+    assert [(e["reason"], e["chats"]) for e in events] == [("no_source", 0)]
 
 
-async def test_seed_with_multiple_feishu_chats_alerts_ambiguity(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+async def test_seed_with_multiple_feishu_chats_emits_the_ambiguity_event(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, loguru_records: list[dict[str, Any]]
 ) -> None:
-    """Two recorded feishu chats are ambiguous: never guess one — alert instead."""
+    """Two recorded feishu chats are ambiguous: never guess one — emit instead."""
     monkeypatch.setenv("AVA_HOME", str(tmp_path))
     _write_switch_state(tmp_path, {"feishu:ou_a": 405, "feishu:ou_b": 405})
-    core, telegram = _core_with_telegram()
-    adapter = FeishuAdapter(core, feishu_config())
+    adapter = FeishuAdapter(FakeCore(), feishu_config())
 
     await adapter._seed_owner_from_switch_state()
 
     assert adapter._last_open_id == ""
-    assert telegram.sent == [copy.FEISHU_OWNER_SEED_AMBIGUOUS.format(count=2)]
+    events = _seed_events(loguru_records)
+    assert [(e["reason"], e["chats"]) for e in events] == [("ambiguous", 2)]
 
 
-async def test_seed_with_unreadable_state_alerts_and_stays_blind(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+async def test_seed_with_unreadable_state_emits_and_stays_blind(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, loguru_records: list[dict[str, Any]]
 ) -> None:
     """A loader failure degrades to the old behavior (empty owner, no crash)
-    and still alerts — the fallback must not be silent.
+    and still emits — the fallback must not be silent.
 
     The loader swallows OSError/ValueError by design; a valid-JSON non-object
     document is the corruption whose AttributeError escapes it.
@@ -208,25 +190,9 @@ async def test_seed_with_unreadable_state_alerts_and_stays_blind(
     path = tmp_path / "state" / "im_bridge" / "switch_state.json"
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("[1, 2, 3]", encoding="utf-8")
-    core, telegram = _core_with_telegram()
-    adapter = FeishuAdapter(core, feishu_config())
+    adapter = FeishuAdapter(FakeCore(), feishu_config())
 
     await adapter._seed_owner_from_switch_state()
 
     assert adapter._last_open_id == ""
-    assert telegram.sent == [copy.FEISHU_OWNER_SEED_NO_SOURCE]
-
-
-async def test_seed_alert_is_fail_soft(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    """A failing telegram leg, or none loaded at all, must never break boot."""
-    monkeypatch.setenv("AVA_HOME", str(tmp_path))
-    core, telegram = _core_with_telegram(fail=True)
-    adapter = FeishuAdapter(core, feishu_config())
-
-    await adapter._seed_owner_from_switch_state()  # telegram send raises: tolerated
-    assert adapter._last_open_id == ""
-
-    no_telegram = FeishuAdapter(FakeCore(), feishu_config())
-    await no_telegram._seed_owner_from_switch_state()  # no telegram adapter: tolerated
-    assert no_telegram._last_open_id == ""
-    assert telegram.sent == []
+    assert [e["reason"] for e in _seed_events(loguru_records)] == ["no_source"]

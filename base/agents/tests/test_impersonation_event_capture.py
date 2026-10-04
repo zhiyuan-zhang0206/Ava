@@ -18,6 +18,7 @@ from base.agents import impersonation_manifest as capture
 from base.agents.impersonation import history as history
 from base.agents.impersonation.tests import test_history as history_cases
 from base.agents.impersonation_event_grants import grant_event_log_runner_access
+from base.agents.impersonation_event_signals import emit_incomplete_event_logs
 from base.agents.impersonation_manifest import (
     LocalParticipant,
     bind_local_participant,
@@ -279,11 +280,7 @@ def test_a_direct_audit_event_after_close_refuses_and_fails_the_source(
     finally:
         unbind_local_participant(participant)
     assert history.resolve(database, owner.agent_id, 0)["events_completed_at"] is None
-    assert db_conn.execute(
-        "SELECT 1 FROM alerts WHERE labels->>'lease_id'=%s "
-        "AND alertname='ImpersonationEventCaptureFailed'",
-        (participant.lease_id,),
-    ).fetchone() == (1,)
+    assert emit_incomplete_event_logs(db_conn) == 1  # the failed source keeps the signal firing
 
 
 def test_a_transient_failure_stays_sticky_until_the_failed_source_persists(
@@ -293,7 +290,7 @@ def test_a_transient_failure_stays_sticky_until_the_failed_source_persists(
     monkeypatch: pytest.MonkeyPatch,
     database: Database,
 ) -> None:
-    """Neither a failed writer nor a failed alert can turn a lost event into a seal."""
+    """A failed writer cannot turn a lost event into a seal."""
     participant = _open(lease, owner.agent_id, "sticky")
     bind_local_participant(participant)
     original_lock = capture.locked_receipt_state
@@ -310,12 +307,8 @@ def test_a_transient_failure_stays_sticky_until_the_failed_source_persists(
     def failed_write(*_args: Any, **_kwargs: Any) -> None:
         raise OSError("write failed")
 
-    def failed_alert(_conn: psycopg.Connection[Any], _lease: dict[str, Any]) -> None:
-        raise OSError("alert down")
-
     monkeypatch.setattr(capture, "append_source_event", failed_write)
     monkeypatch.setattr(capture, "locked_receipt_state", lock_with_one_outage)
-    monkeypatch.setattr(capture, "alert_capture_failed", failed_alert)
     try:
         capture_local_event(_sdk_event(owner.agent_id, "lost-during-outage"))
         assert _state(db_conn, participant) == ("open",)

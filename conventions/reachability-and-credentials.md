@@ -105,4 +105,5 @@ changes only when the human secret rotates.
   `POST <advertised station url>/v1/traces` with an empty
   `ExportTraceServiceRequest` and the telemetry token; any 2xx = alive. The
   probe dials the **advertised** address (rule 1), never a bare connect.
-  Probe failure is fail-open: it alerts and never blocks local business.
+  Probe failure is fail-open: it logs and never blocks local business (the station hosts the
+  observability backends, so no alert can carry its own failure).

@@ -17,7 +17,6 @@ from psycopg_pool import ConnectionPool, PoolTimeout
 from base.agents import AgentNotFound
 from base.config import settings
 from base.db import Database
-from base.events.live.bus import EventBus
 from gateway.inspect import _metrics, _plugin_metrics, _plugin_widgets, neighbors
 from gateway.inspect._cache import InspectCacheFullError, InspectQueryCache
 from gateway.inspect._live import db_rows_blocking, notice_blocking, project_heartbeat
@@ -142,7 +141,6 @@ def build_query_cache() -> InspectCache:
 async def _inspect_rows_cached_async(
     cache: InspectCache,
     pool: ConnectionPool[Any],
-    bus: EventBus,
     agent_id: int,
     hours: StatsWindowHours | None,
     *,
@@ -152,7 +150,7 @@ async def _inspect_rows_cached_async(
     try:
         return await cache.get_or_load_async(
             key,
-            lambda: _metrics.inspect_snapshot(pool, bus, agent_id, hours, spawned_at=spawned_at),
+            lambda: _metrics.inspect_snapshot(pool, agent_id, hours, spawned_at=spawned_at),
             ttl_s=0,
             now=time_mod.monotonic,
         )
@@ -223,7 +221,6 @@ async def get_agent_inspect_statistics(
             _inspect_rows_cached_async(
                 request.app.state.inspect_query_cache,
                 pool,
-                request.app.state.bus,
                 agent_id,
                 hours,
                 spawned_at=spawned_at,

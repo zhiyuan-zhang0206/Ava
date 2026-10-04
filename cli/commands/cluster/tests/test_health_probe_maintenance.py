@@ -2,7 +2,7 @@
 
 import json
 import subprocess
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from pathlib import Path
 
 import psycopg
@@ -12,13 +12,16 @@ from base.db.tests.fakes import patch_database
 from base.deploy.lifecycle import service_selection
 from base.deploy.maintenance import pause_owner
 from cli.commands.cluster import health as cluster_health
-from cli.commands.cluster import health_alerts as cluster_health_alerts
 
 
 def _select_excluded(names: set[str]) -> None:
     service_selection.resolve_selection(
         {"agent-host", "frontend"}, excluded=tuple(sorted(names)), all_services=not names
     )
+
+
+def _no_init(**_kwargs: object) -> None:
+    return None
 
 
 @pytest.fixture
@@ -30,7 +33,8 @@ def probe_home(
     monkeypatch.setattr("base.paths.ava_home", lambda: tmp_path)
     monkeypatch.setattr(service_selection, "ava_home", lambda: tmp_path)
     monkeypatch.setattr(cluster_health, "_gateway_liveness_with_retry", lambda: True)
-    monkeypatch.setattr(cluster_health, "_deploy_suppression", lambda: None)
+    monkeypatch.setattr(cluster_health, "_disk_usage_failure", lambda: None)
+    monkeypatch.setattr(cluster_health.telemetry, "init_telemetry", _no_init)
     return tmp_path
 
 
@@ -49,12 +53,19 @@ def rollbacks(monkeypatch: pytest.MonkeyPatch) -> list[list[str]]:
 
 @pytest.fixture
 def alerts(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, object]]:
+    """The attributes of every `health_probe_failing` event the probe emits."""
     emitted: list[dict[str, object]] = []
 
-    def ingest(**kwargs: object) -> None:
-        emitted.append(kwargs)
+    def emit(category: str, event_name: str, **kwargs: object) -> None:
+        assert category == "telemetry"
+        if event_name == "health_probe_ran":
+            return
+        assert event_name == "health_probe_failing"
+        attributes = kwargs["attributes"]
+        assert isinstance(attributes, dict)
+        emitted.append(dict(attributes))  # pyright: ignore[reportUnknownArgumentType]
 
-    monkeypatch.setattr(cluster_health_alerts, "_ingest_alert", ingest)
+    monkeypatch.setattr(cluster_health.telemetry, "emit", emit)
     return emitted
 
 
@@ -73,19 +84,15 @@ def test_expected_low_population_does_not_rollback_or_promote(
         pause_owner.begin_maintenance("test-maintenance", datetime.now(UTC))
         marker = pause_owner.state_path()
     intent_before = marker.read_bytes()
-    # An aged incident would normally alert immediately on this probe.
-    started_at = datetime.now(UTC) - timedelta(minutes=20)
-    message = "FAIL: agent population — fewer than 1 agent(s) running/idling"
-    (probe_home / cluster_health.ALERT_STATE_FILE).write_text(
-        f"{message}\n{started_at.isoformat()}\n"
-    )
-
     assert cluster_health._agent_population(1) is False
     assert cluster_health.run_health_probe() == 1
 
     assert rollbacks == []
-    assert len(alerts) == 1  # Local intent cannot hide a real global population outage.
-    assert alerts[0]["status"] == "firing"
+    # Local intent cannot hide a real global population outage: the signal is
+    # still emitted, carrying the maintenance class for the reader.
+    assert len(alerts) == 1
+    assert alerts[0]["check"] == "agent_population"
+    assert alerts[0]["failure_class"] == "maintenance"
     assert marker.read_bytes() == intent_before
     assert "maintenance" in capsys.readouterr().err
 
