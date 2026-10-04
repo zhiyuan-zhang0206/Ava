@@ -168,12 +168,12 @@ def _finalize_turn_observability(
             from ava_builtins.plugins.ava_fleet.task_registry import record_task_usage
 
             record_task_usage(task_id, token_count=usage_tally[0], cost_usd=usage_tally[1])
-        except Exception:
+        except Exception as exc:
             logger.warning(
                 "[{label}] {body}",
                 label="task-usage",
                 event="task_usage_record_failed",
-                body=f"failed to record usage for task {task_id}",
+                body=f"failed to record usage for task {task_id}: {exc!r}",
             )
     usage = final_msg.usage_metadata or {}
     from base.lm.reasoning import extract_reasoning_tokens
