@@ -465,6 +465,11 @@ def helper_spawn_enabled() -> bool:
             and settings.services.permissions_helper_spawn
         )
     except Exception:
+        _log.warning(
+            "reading the permissions-helper settings failed; routing process creation "
+            "through the legacy POSIX supervisor",
+            exc_info=True,
+        )
         return False
 
 

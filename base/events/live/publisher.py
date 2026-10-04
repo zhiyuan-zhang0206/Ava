@@ -146,14 +146,23 @@ class AgentEventPublisher:
                 # next batch reconnects fresh instead of riding a half-dead
                 # socket (keepalive/health-check would take up to ~30s).
                 self._note_drop("publish_error", detail=f"{type(exc).__name__}: {exc}")
-                with suppress(Exception):
-                    # redis-py (8.x) types disconnect() as async and it IS a
-                    # coroutine at runtime — it must be awaited or the
-                    # tear-down never runs (the coroutine object is created and
-                    # discarded, and every failed batch also emits a
-                    # "coroutine ... was never awaited" RuntimeWarning). The
-                    # await is inside suppress(Exception).
-                    await self._redis.connection_pool.disconnect(inuse_connections=True)
+                try:
+                    # Already-dead sockets fail their close (OSError / RedisError); the next
+                    # batch reconnects anyway.
+                    with suppress(OSError, aredis.RedisError):
+                        # redis-py (8.x) types disconnect() as async and it IS a
+                        # coroutine at runtime — it must be awaited or the
+                        # tear-down never runs (the coroutine object is created and
+                        # discarded, and every failed batch also emits a
+                        # "coroutine ... was never awaited" RuntimeWarning).
+                        await self._redis.connection_pool.disconnect(inuse_connections=True)
+                except Exception:
+                    # The worker must keep draining, so this cannot propagate.
+                    logger.opt(exception=True).warning(
+                        "[event-publisher] tearing down the redis pool after a failed batch "
+                        "raised unexpectedly (agent_id={aid}); the next batch may ride a half-dead socket",
+                        aid=self._agent_id,
+                    )
             finally:
                 for _ in batch:
                     self._queue.task_done()

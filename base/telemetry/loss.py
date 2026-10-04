@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import contextlib
 import logging
 import sys
 from dataclasses import replace
@@ -10,6 +9,18 @@ from datetime import UTC, datetime
 
 from base.log import logger
 from base.telemetry import Event
+
+
+def _stderr(message: str) -> None:
+    """Write one diagnostic line to stderr, the channel that needs no configured sink.
+
+    A closed or detached stderr (`OSError` / `ValueError`) is the one expected
+    failure: a daemon whose stderr is gone has no further channel to report on.
+    """
+    try:
+        sys.stderr.write(message + "\n")
+    except (OSError, ValueError):
+        return
 
 
 def loss_event(
@@ -39,15 +50,16 @@ def report_loss(event: Event, count: int, queue_name: str) -> Event:
     report = loss_event(event, count, queue_name)
     # Always available, even before logging/provider initialization in bare scripts.
     # This exceptional data-loss diagnostic must not depend on any configured sink.
-    with contextlib.suppress(Exception):
-        sys.stderr.write(f"ERROR: Telemetry queue {queue_name} full: lost {count} event(s)\n")
-    with contextlib.suppress(Exception):
+    _stderr(f"ERROR: Telemetry queue {queue_name} full: lost {count} event(s)")
+    try:
         logger.bind(_no_emitter=True).error(
             "Telemetry queue {queue} full: lost {n} event(s); event history is incomplete",
             queue=queue_name,
             n=count,
         )
-    with contextlib.suppress(Exception):
+    except Exception as exc:
+        _stderr(f"ERROR: Telemetry loss log for queue {queue_name} failed: {exc!r}")
+    try:
         from base.telemetry.otlp import telemetry_otlp
 
         backend = telemetry_otlp.backend
@@ -58,6 +70,8 @@ def report_loss(event: Event, count: int, queue_name: str) -> Event:
                     report, attributes={k: v for k, v in report.attributes.items() if k != "n"}
                 )
             backend._record_metrics(metric_report)
+    except Exception as exc:
+        _stderr(f"ERROR: Telemetry loss metric for queue {queue_name} failed: {exc!r}")
     return report
 
 
@@ -67,7 +81,7 @@ class _ExporterDropFilter(logging.Filter):
     def filter(self, record: logging.LogRecord) -> bool:
         if record.msg != "Queue full, dropping %s.":
             return True
-        with contextlib.suppress(Exception):
+        try:
             from base import telemetry
 
             now = datetime.now(UTC)
@@ -88,6 +102,8 @@ class _ExporterDropFilter(logging.Filter):
             )
             report = report_loss(event, 1, "otel-sdk")
             telemetry._append_jsonl([report])
+        except Exception as exc:
+            _stderr(f"ERROR: OTel SDK queue-overflow loss could not be recorded: {exc!r}")
         # The replacement error already reached local sinks. Re-exporting the
         # original warning through the log queue would amplify the overflow.
         return False

@@ -76,7 +76,6 @@ mirror records the outage even while OTLP itself cannot carry the event.
 
 from __future__ import annotations
 
-import contextlib
 import queue
 import sys
 import threading
@@ -84,7 +83,7 @@ import time
 from functools import cache
 from typing import Any
 
-from base.telemetry import Event
+from base.telemetry import Event, failure_isolated, report_no_pipeline, report_sink_failure
 from base.telemetry.metrics import ci_runs_metrics
 from base.telemetry.observability import (
     cluster_label,
@@ -304,7 +303,7 @@ def endpoint_reachable(endpoint: str) -> bool:
         # from a collector that rejects the probe's content type is still
         # the collector.
         return True
-    except Exception:
+    except OSError:  # URLError, refused / reset / timed-out connections: nothing answered
         return False
 
 
@@ -314,7 +313,7 @@ def _emit_backend_event(event_name: str, **attributes: Any) -> None:
     When the collector is unavailable, the event reaches the JSONL mirror even
     though its OTLP copy cannot leave the process.
     """
-    with contextlib.suppress(Exception):
+    with failure_isolated("otlp init-status event"):
         from base import telemetry
 
         telemetry.emit("telemetry", event_name, attributes=attributes)
@@ -401,7 +400,7 @@ class _OtlpBackend:
             # while the log lane is full; the local mirror retains the evidence.
             _append_jsonl([report])
         for event in events:
-            with contextlib.suppress(Exception):
+            with failure_isolated("otlp metric mapping"):
                 self._record_metrics(event)
 
     def flush(self, timeout: float = 2.0) -> None:
@@ -422,12 +421,12 @@ class _OtlpBackend:
                 if isinstance(event, WorkerFlushMarker):
                     event.done.set()
                     continue
-                with contextlib.suppress(Exception):
+                with failure_isolated("otlp log emit"):
                     self._emit_log(event)
-        with contextlib.suppress(Exception):
+        with failure_isolated("otlp log flush"):
             if self._logs is not None:
                 self._logs.force_flush(timeout_millis=500)
-        with contextlib.suppress(Exception):
+        with failure_isolated("otlp metric flush"):
             if self._metric_provider is not None:
                 self._metric_provider.force_flush(timeout_millis=500)
 
@@ -436,15 +435,15 @@ class _OtlpBackend:
         # Complete a deferred hold first (task #3816 M4b): the atexit path for
         # abnormal exits reaches here too, and held records must face the same
         # best-effort completion a clean exit gets through finalize().
-        with contextlib.suppress(Exception):
+        with failure_isolated("otlp finalize"):
             self.finalize()
         worker = self._thread
         if worker is not None and worker.is_alive() and threading.current_thread() is not worker:
             stop_worker(self._queue, worker, self._report)
-        with contextlib.suppress(Exception):
+        with failure_isolated("otlp log flush at shutdown"):
             if self._logs is not None:
                 self._logs.force_flush(timeout_millis=2000)
-        with contextlib.suppress(Exception):
+        with failure_isolated("otlp metric flush at shutdown"):
             if self._metric_provider is not None:
                 self._metric_provider.force_flush(timeout_millis=2000)
 
@@ -482,14 +481,16 @@ class _OtlpBackend:
     def _enabled() -> bool:
         """Read the startup-frozen OTLP flag. Any read failure degrades to
         off — the OTLP side must never be the reason an emit path breaks."""
-        with contextlib.suppress(Exception):
+        try:
             from base.config import settings
 
             return (
                 bool(settings.observability.telemetry_otlp_enabled)
                 and observability_export_allowed()
             )
-        return False
+        except Exception as exc:
+            report_sink_failure("otlp enabled-flag read", exc)
+            return False
 
     @staticmethod
     def _endpoint_reachable(endpoint: str) -> bool:
@@ -592,7 +593,7 @@ class _OtlpBackend:
             if isinstance(event, WorkerFlushMarker):
                 event.done.set()
                 continue
-            with contextlib.suppress(Exception):
+            with failure_isolated("otlp log emit"):
                 self._emit_log(event)
 
     # ── signal mapping ───────────────────────────────────────────────────────
@@ -722,11 +723,8 @@ class _OtlpBackend:
     def _report(self, message: str) -> None:
         """Log an OTLP-side diagnostic through loguru, marked `_NO_EMITTER` so
         it reaches stderr/file sinks and never re-enters the event pipeline.
-        Best-effort: never raises."""
-        with contextlib.suppress(Exception):
-            from base.log import logger
-
-            logger.bind(**{_NO_EMITTER: True}).warning(f"[otlp-exporter] {message}")
+        Best-effort: never raises, falls back to stderr."""
+        report_no_pipeline(f"[otlp-exporter] {message}")
 
 
 def _metrics_resource() -> Any:
@@ -759,7 +757,7 @@ def warmup() -> None:
     a failed warmup is reported and retried after five minutes without ever
     raising into the caller.
     """
-    with contextlib.suppress(Exception):
+    with failure_isolated("otlp warmup"):
         if backend._enabled():
             backend._ensure()
 

@@ -62,7 +62,6 @@ diagnosis after port ALLOCATION, which was never the mechanism (issue #977).
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import json
 import logging
 import os
@@ -626,8 +625,8 @@ def _probe_daemon(
 async def stop_health_server(server: asyncio.Server) -> None:
     """Close health server (idempotent + does not raise). Called in daemon finally."""
     server.close()
-    # In cleanup, swallow any cleanup error — close itself is
-    # idempotent; second wait_closed call may raise RuntimeError
-    # (event loop closed) etc.
-    with contextlib.suppress(Exception):
+    # Runs in the daemon's `finally`: a failed wait must not abort the rest of cleanup.
+    try:
         await server.wait_closed()
+    except Exception:
+        _log.warning("[health] health server wait_closed failed; shutdown continues", exc_info=True)

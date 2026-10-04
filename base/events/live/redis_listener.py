@@ -203,15 +203,7 @@ class RedisInboundListener:
             pubsub = redis.pubsub(ignore_subscribe_messages=True)  # pyright: ignore[reportUnknownMemberType]
             await pubsub.subscribe(self._channel)
         except BaseException:
-            try:
-                await redis.aclose()
-            except Exception as exc:
-                logger.debug(
-                    "RedisInboundListener[agent={a}]: ignoring close error "
-                    "during open rollback: {exc!r}",
-                    a=self._agent_id,
-                    exc=exc,
-                )
+            await self._aclose_handle(redis, "redis connection during open rollback")
             raise
         self._redis = redis
         self._pubsub = pubsub
@@ -235,8 +227,16 @@ class RedisInboundListener:
                         timeout=_PROBE_TIMEOUT_S,
                     )
                     return self._pubsub
+                except (TimeoutError, OSError, aredis.RedisError, TypeError):
+                    # Connection dead — close and reopen below. TypeError is redis-py's
+                    # dead-transport health-check quirk (see `_open_and_subscribe`).
+                    await self._close_inner()
                 except Exception:
-                    # Connection dead — close and reopen below.
+                    logger.opt(exception=True).warning(
+                        "RedisInboundListener[agent={a}]: pubsub liveness probe failed "
+                        "unexpectedly; reconnecting",
+                        a=self._agent_id,
+                    )
                     await self._close_inner()
             return await self._open_and_subscribe()
 
@@ -331,13 +331,23 @@ class RedisInboundListener:
                 await self._close_inner()
             return False
         except Exception as exc:
+            # First failure of the degraded episode carries the traceback; repeats stay at
+            # debug so a persistent outage does not warn on every wait.
+            first = not self._wake_degraded
             self._mark_wake_degraded(WakeFailure.GETDEL_ERROR)
-            logger.debug(
-                "RedisInboundListener[agent={a}]: wake-key GETDEL failed; "
-                "falling back to pub/sub/SELECT recheck: {exc!r}",
-                a=self._agent_id,
-                exc=exc,
-            )
+            if first:
+                logger.opt(exception=True).warning(
+                    "RedisInboundListener[agent={a}]: wake-key GETDEL failed; "
+                    "falling back to pub/sub/SELECT recheck",
+                    a=self._agent_id,
+                )
+            else:
+                logger.debug(
+                    "RedisInboundListener[agent={a}]: wake-key GETDEL failed; "
+                    "falling back to pub/sub/SELECT recheck: {exc!r}",
+                    a=self._agent_id,
+                    exc=exc,
+                )
             return False
 
     async def _consume_one(self, pubsub: _RedisPubSub, timeout: float) -> None:
@@ -506,23 +516,32 @@ class RedisInboundListener:
         self._pubsub = None
         self._redis = None
         if pubsub is not None:
-            try:
-                await pubsub.aclose()
-            except Exception as exc:
-                logger.debug(
-                    "RedisInboundListener[agent={a}]: ignoring error closing pubsub: {exc!r}",
-                    a=self._agent_id,
-                    exc=exc,
-                )
+            await self._aclose_handle(pubsub, "pubsub")
         if redis is not None:
-            try:
-                await redis.aclose()
-            except Exception as exc:
-                logger.debug(
-                    "RedisInboundListener[agent={a}]: ignoring error closing redis: {exc!r}",
-                    a=self._agent_id,
-                    exc=exc,
-                )
+            await self._aclose_handle(redis, "redis connection")
+
+    async def _aclose_handle(self, handle: _RedisPubSub | aredis.Redis, what: str) -> None:
+        """Close one redis handle during teardown; a close failure must not abort the rest.
+
+        A transport that is already dead fails its close with an OSError / RedisError —
+        expected, debug only; anything else is a bug and reported at WARNING.
+        """
+        try:
+            await handle.aclose()
+        except (OSError, aredis.RedisError) as exc:
+            logger.debug(
+                "RedisInboundListener[agent={a}]: ignoring error closing {what}: {exc!r}",
+                a=self._agent_id,
+                what=what,
+                exc=exc,
+            )
+        except Exception:
+            logger.opt(exception=True).warning(
+                "RedisInboundListener[agent={a}]: closing {what} failed unexpectedly; "
+                "the handle is dropped without a clean close",
+                a=self._agent_id,
+                what=what,
+            )
 
     async def close(self) -> None:
         """Close the underlying connection for clean shutdown."""

@@ -6,6 +6,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from base.config import settings
+from base.telemetry import report_sink_failure
 
 AVA_BILLING_ATTR_LINE = "ava.billing.line"
 AVA_BILLING_ATTR_VENDOR = "ava.billing.vendor"
@@ -97,8 +98,8 @@ def emit_billing_event(
         if unpriced:
             span.set_attribute(AVA_BILLING_ATTR_UNPRICED, unpriced)
         span.end()
-    except Exception:
-        return
+    except Exception as exc:
+        report_sink_failure("billing span emission (the span is dropped)", exc)
 
 
 def emit_billing_from_message(
@@ -133,5 +134,5 @@ def emit_billing_from_message(
             unpriced=priced is None,
             start_time_ns=start_time_ns,
         )
-    except Exception:
-        return
+    except Exception as exc:
+        report_sink_failure("pricing a provider message for billing (its span is dropped)", exc)

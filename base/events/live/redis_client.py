@@ -310,9 +310,10 @@ def _log_publish_failure(exc: BaseException, *, channel: str, context: str) -> N
     this channel, an ACL / channel-prefix misconfig) would silently disable live
     updates fleet-wide, so it is logged at WARNING (rate-limited per channel, see
     `_warn_last`). A transient failure (redis down, connection dropped) is
-    best-effort and logged at DEBUG — the durable DB write already happened and the
+    best-effort and logged at DEBUG; any other exception is a bug, logged at WARNING with
+    its traceback (same throttle) — the durable DB write already happened and the
     frontend recovers on its next full fetch."""
-    from redis.exceptions import ResponseError
+    from redis.exceptions import RedisError, ResponseError
 
     tag = f" [{context}]" if context else ""
     if isinstance(exc, ResponseError):
@@ -338,7 +339,7 @@ def _log_publish_failure(exc: BaseException, *, channel: str, context: str) -> N
                 tag=tag,
                 w=_WARN_THROTTLE_S,
             )
-    else:
+    elif isinstance(exc, (RedisError, OSError, TimeoutError)):
         logger.debug(
             "publish to {ch!r} skipped ({exc!r}){tag} — best-effort; pub/sub is a "
             "latency optimization and the durable DB write is unaffected.",
@@ -346,6 +347,19 @@ def _log_publish_failure(exc: BaseException, *, channel: str, context: str) -> N
             exc=exc,
             tag=tag,
         )
+    else:
+        # Not a transport failure: a bug in the publish path. Same per-channel throttle.
+        key = (channel, type(exc).__name__)
+        now = time.monotonic()
+        last = _warn_last.get(key)
+        if last is None or now - last >= _WARN_THROTTLE_S:
+            _warn_last[key] = now
+            logger.opt(exception=exc).warning(
+                "publish to {ch!r} failed unexpectedly{tag}; the live event is dropped "
+                "(best-effort)",
+                ch=channel,
+                tag=tag,
+            )
 
 
 async def publish_via(

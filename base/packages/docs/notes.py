@@ -17,6 +17,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, cast
 
+from base.log import logger
 from base.packages.docs.frontmatter import parse_frontmatter_typed
 
 _MD_LINK_RE = re.compile(r"\[([^\]]+)\]\(([^)]+)\)")
@@ -94,9 +95,9 @@ def walk_notes(
 ) -> Iterator[tuple[Path, Note]]:
     """Yield `(path, note)` for every valid note under `root`, in sorted order.
 
-    Files whose name is in `skip_names` are skipped; an unreadable file appends
-    a `cannot read <rel>` warning (when `warnings` is given) and is skipped; a
-    file without valid frontmatter is skipped silently. `note.rel` is the
+    Files whose name is in `skip_names` are skipped; an unreadable file is skipped with a
+    `cannot read <rel>` warning (appended to `warnings` when given, else logged at WARNING);
+    a file without valid frontmatter is skipped silently. `note.rel` is the
     posix path relative to `root` sans `suffix`.
     """
     for md_file in sorted(root.rglob(f"*{suffix}")):
@@ -106,9 +107,11 @@ def walk_notes(
         rel_id = rel[: -len(suffix)] if rel.endswith(suffix) else rel
         try:
             text = md_file.read_text(encoding="utf-8")
-        except Exception:
+        except (OSError, UnicodeDecodeError):
             if warnings is not None:
                 warnings.append(f"cannot read {rel}")
+            else:
+                logger.opt(exception=True).warning("cannot read note {}; skipped", rel)
             continue
         note = parse_note(text, rel_id)
         if note is None:

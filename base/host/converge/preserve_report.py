@@ -15,8 +15,6 @@ base/events/declarations/root.py next to the dashboard render-failure guard.
 
 from __future__ import annotations
 
-import contextlib
-
 
 def report_converge_preserve(*, path: str, key: str, surface: str) -> None:
     """Report one preserved converge destination. Never raises.
@@ -26,13 +24,22 @@ def report_converge_preserve(*, path: str, key: str, surface: str) -> None:
     renderer (``lgtm-provisioning``, ``otel-collector``,
     ``skills``, ``extensions``).
     """
+    from base.log import logger
     from base.telemetry import emit
 
-    with contextlib.suppress(Exception):
+    try:
         emit(
             "telemetry",
             "converge_file_preserved",
             level="warning",
             source="converge",
             attributes={"path": path, "key": key, "surface": surface},
+        )
+    except Exception:
+        # `_no_emitter`: the failure may be the telemetry pipeline itself; its report must not
+        # re-enter it. Converge must continue.
+        logger.bind(_no_emitter=True).opt(exception=True).warning(
+            "converge_file_preserved event for {path} was not emitted; the preserve is "
+            "visible only in converge output",
+            path=path,
         )
