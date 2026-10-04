@@ -1,6 +1,11 @@
-"""Forbid log calls whose message format does not match their logger's formatter.
+"""Forbid log calls whose message format does not match their logger's formatter —
+and the `exc_info` kwarg loguru silently ignores.
 
-Two mirror-image rules, one per formatter. Run:
+Two mirror-image format rules, one per formatter, plus one lost-cause rule:
+loguru has no `exc_info` parameter (stdlib logging does), so
+`logger.warning(..., exc_info=True)` rides the record's `extra` and the
+traceback is never attached; `logger.opt(exception=True)` is the way it goes on
+the call. Run:
 `.venv/bin/python scripts/lint/loguru_format.py [path ...]` (defaults to
 the framework dirs plus `scripts/`; an explicit path that does not exist is an
 error (stderr + exit 1) rather than a silent no-op). Also run automatically via
@@ -31,6 +36,15 @@ the record is formatted. In production the root handler swallows that into a
 summary, a scheduler refusal — never reaches the log file or the event stream;
 under pytest the capture handler re-raises it, which is how it stayed hidden
 until a test happened to run with the root logger at INFO.
+
+A third habit slips through just as silently. loguru has no `exc_info`
+parameter (stdlib `logging` does), so
+
+    logger.warning("gate raised; failing open", exc_info=True)
+
+logs the message, moves `exc_info` into the record's `extra`, and attaches
+nothing to `record["exception"]` — the line reads complete while its traceback
+is gone.
 
 ## Rule 1: loguru loggers
 
@@ -70,6 +84,15 @@ alias, or `.getChild(...)` of a stdlib logger), the call expression itself
 that holds both a loguru `logger` and a stdlib `_log` is checked correctly on
 both; a name the module also binds any other way (a `from base.log import
 logger as _log`, a parameter, a loop target) is ambiguous and is not checked.
+
+## Rule 3: the `exc_info` kwarg on loguru
+
+A loguru log call passing `exc_info` in any form (`exc_info=True`,
+`exc_info=exc`) is flagged: loguru has no such parameter, the kwarg rides the
+record's `extra`, and the traceback is lost — use `logger.opt(exception=True)`
+(or `logger.opt(exception=exc)` when an exception object is in hand; task
+#4979). stdlib loggers keep the kwarg: `exc_info` is the correct parameter
+there.
 
 ## Exemption
 
@@ -318,6 +341,22 @@ def _call_problem(node: ast.Call, bindings: _Bindings) -> str | None:
     return None
 
 
+def _exc_info_problem(node: ast.Call, bindings: _Bindings) -> str | None:
+    """A loguru log call passing `exc_info` — a stdlib-only parameter it ignores."""
+    func = node.func
+    if not isinstance(func, ast.Attribute) or not bindings.is_loguru(func.value):
+        return None
+    if func.attr not in _LEVEL_METHODS and func.attr != "log":
+        return None
+    if not any(keyword.arg == "exc_info" for keyword in node.keywords):
+        return None
+    return (
+        "loguru call passes `exc_info`, which loguru has no parameter for — the kwarg rides "
+        "the record's `extra` and the traceback is never attached; use "
+        "`logger.opt(exception=True)`"
+    )
+
+
 def _stdlib_message_index(node: ast.Call, bindings: _StdlibBindings) -> int | None:
     """Position of the message argument of a stdlib log call, or None. The receiver is a
     stdlib logger or the `logging` module itself (the root-logger shortcuts)."""
@@ -370,7 +409,11 @@ def violations_in_source(src: str, filename: str = "<source>") -> list[tuple[int
     out: list[tuple[int, str]] = []
     for node in ast.walk(tree):
         if isinstance(node, ast.Call):
-            problem = _call_problem(node, loguru) or _stdlib_call_problem(node, stdlib)
+            problem = (
+                _call_problem(node, loguru)
+                or _exc_info_problem(node, loguru)
+                or _stdlib_call_problem(node, stdlib)
+            )
             if problem is not None and not _is_exempt(node, lines):
                 out.append((node.lineno, problem))
     return sorted(out)
@@ -403,9 +446,9 @@ def main(argv: list[str] | None = None) -> int:
 
     if total:
         print(
-            f"\n{total} log call(s) whose message format does not match the logger: loguru takes "
-            "`{}` fields, stdlib logging takes `%s`; see the docstring at the top of "
-            "scripts/lint/loguru_format.py.",
+            f"\n{total} log call(s) that lose their message or traceback: loguru takes "
+            "`{}` fields and `logger.opt(exception=True)` (it has no `exc_info`); stdlib "
+            "logging takes `%s`; see the docstring at the top of scripts/lint/loguru_format.py.",
             file=sys.stderr,
         )
         return 1

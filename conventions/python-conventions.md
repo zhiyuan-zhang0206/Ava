@@ -261,7 +261,9 @@ which loguru leaves in the text while dropping the arguments. A stdlib
 (`_log.warning("gate for %s raised: %s", name, exc)`), and a `{}` field with
 positional arguments raises `TypeError` at emit, losing the line. Both
 directions are enforced by `scripts/lint/loguru_format.py` (hook
-`lint-loguru-format`).
+`lint-loguru-format`), which also flags `exc_info=` on a loguru call — loguru
+has no such parameter (the traceback rides `extra` and is lost), so it is
+`logger.opt(exception=True)`; stdlib loggers keep `exc_info`.
 
 ## No decorative emoji in core Python
 
