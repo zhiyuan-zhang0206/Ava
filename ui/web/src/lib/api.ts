@@ -63,6 +63,10 @@ import type { NoticesFeed,
   SpawnAgentRequest,
   SpawnedAgent,
   StatsDashboard,
+  AlertClassRow,
+  AlertClassesResponse,
+  AlertClassSample,
+  EventResolutionRow,
   SystemStatus,
   TerminateAgentResponse,
   TimelineResponse,
@@ -594,6 +598,46 @@ export const api = {
       "stats dashboard",
     );
   },
+
+  // The same window's warning/error classes, most frequent first — each row says
+  // whether an active dismissal cancels it (`dismissal_id`).
+  getAlertClasses: (hours: number, signal?: AbortSignal): Promise<AlertClassesResponse> => {
+    return jsonWithTimeout<AlertClassesResponse>(
+      `/api/stats/alert-classes?hours=${hours}`,
+      {},
+      40_000,
+      signal,
+      "alert classes",
+    );
+  },
+
+  // The newest events of one class in the window (the row's expanded detail).
+  getAlertClassSamples: (
+    cls: Pick<AlertClassRow, "level" | "event_name" | "source" | "process">,
+    hours: number,
+    signal?: AbortSignal,
+  ): Promise<AlertClassSample[]> => {
+    const q = new URLSearchParams({
+      level: cls.level,
+      event_name: cls.event_name,
+      source: cls.source,
+      process: cls.process,
+      hours: String(hours),
+    });
+    return f(`/api/stats/alert-classes/samples?${q.toString()}`, { signal })
+      .then(ok<{ samples: AlertClassSample[] }>)
+      .then((body) => body.samples);
+  },
+
+  // Dismiss one class (the identity is the row's own, process included), and
+  // reopen it by the dismissal id the row carries.
+  dismissAlertClass: (
+    cls: Pick<AlertClassRow, "category" | "level" | "event_name" | "source" | "process">,
+  ): Promise<EventResolutionRow> =>
+    f("/api/event-resolutions", POST_JSON(cls)).then(ok<EventResolutionRow>),
+
+  reopenAlertClass: (dismissalId: number): Promise<EventResolutionRow> =>
+    f(`/api/event-resolutions/${dismissalId}/reopen`, POST).then(ok<EventResolutionRow>),
 
   // --- ops monitor (Insights Ops tab) ---
   // Time-bucketed ops series from the LGTM stack (Loki + Prometheus) —

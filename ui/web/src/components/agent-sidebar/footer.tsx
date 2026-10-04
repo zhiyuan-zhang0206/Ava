@@ -4,6 +4,8 @@ import {
   Activity,
   AlertTriangle,
   BarChart3,
+  ChevronDown,
+  ChevronRight,
   Loader2,
   NotebookText,
   RotateCw,
@@ -12,6 +14,7 @@ import {
 } from "lucide-react";
 import * as Popover from "@radix-ui/react-popover";
 import { useTranslations } from "next-intl";
+import { useState } from "react";
 import { useRouter } from "next/navigation";
 
 import { PluginNavIcons } from "@/components/plugin-nav";
@@ -34,6 +37,7 @@ import type { StatsDashboard } from "@/lib/types";
 import { FLEX, FLEX_COL, MIN_W_0 } from "@/lib/layout";
 import { cn } from "@/lib/utils";
 
+import { AlertClassList } from "./alert-classes";
 import { fleetHref } from "./links";
 
 /** Shared by the expanded footer and collapsed rail. */
@@ -58,6 +62,7 @@ export function StatsCards({
   onRetry: () => void;
 }) {
   const t = useTranslations("sidebar");
+  const [alertsOpen, setAlertsOpen] = useState(false);
   const pluginCards = usePluginStatCards(stats?.plugin_stats);
   const errMsg = error ? formatErrMsg(error) : null;
   const failedWithoutData = errMsg !== null && stats === undefined;
@@ -202,6 +207,8 @@ export function StatsCards({
               valueClass={valueClass}
               firstLoad={firstLoad}
               title={windowMismatch ? card.title : undefined}
+              expanded={alertsOpen}
+              onToggle={() => setAlertsOpen((open) => !open)}
             />
           ) : (
             <div
@@ -224,6 +231,7 @@ export function StatsCards({
           ),
         )}
       </div>
+      {alertsOpen ? <AlertClassList windowHours={windowHours} /> : null}
       {pluginCards.length > 0 ? (
         // Plugin-declared cards (`contributions.ui.stats` + the values the
         // dashboard carried). Not windowed: a plugin value is a point in
@@ -387,17 +395,13 @@ function SidebarNavButton({
   );
 }
 
-// ── Warning / Error unresolved card (ruling 2026-08-29, original card
-// layout restored per user feedback 2026-08-30) ──
+// ── Warning / Error card ──
 //
-// One unresolved number per level — "N / M" (warnings_net / errors_net) —
-// rendered like the other five cards: a small single-cell card in the 2×3
-// grid (the v0 layout from the initial public release). The full total /
-// resolved / net split lives on the Grafana tiles. Zero levels render as
-// plain 0 (no all-clear badge — user ruling 2026-08-30). `stats` is passed
-// undefined during a window transition so the card shows the same "…"
-// placeholder as the other cards instead of displaying a previous window's
-// numbers.
+// One number: the active warning/error classes of the window (an error-tracker grouping, not a
+// raw event count), with the window's event total as secondary text. The card is the toggle of
+// the class list below the grid (`AlertClassList`): per-class count, first/last occurrence,
+// samples and dismiss / reopen. `stats` is passed undefined during a window transition so the
+// card shows the same "…" placeholder as the other cards instead of a previous window's numbers.
 function WarningErrorCard({
   stats,
   placeholder,
@@ -405,6 +409,8 @@ function WarningErrorCard({
   valueClass,
   firstLoad,
   title,
+  expanded,
+  onToggle,
 }: {
   stats: StatsDashboard | undefined;
   placeholder: string;
@@ -412,29 +418,43 @@ function WarningErrorCard({
   valueClass: string;
   firstLoad: boolean;
   title: string | undefined;
+  expanded: boolean;
+  onToggle: () => void;
 }) {
   const t = useTranslations("sidebar");
-  const value =
-    stats === undefined ? null : `${stats.warnings_net} / ${stats.errors_net}`;
+  const Chevron = expanded ? ChevronDown : ChevronRight;
   return (
-    <div
+    <button
+      type="button"
       title={title}
-      className={cn("gap-0.5 rounded bg-sidebar-accent/40 px-2 py-1.5", FLEX, FLEX_COL)}
+      aria-expanded={expanded}
+      onClick={onToggle}
+      className={cn(
+        "gap-0.5 rounded bg-sidebar-accent/40 px-2 py-1.5 text-left hover:bg-sidebar-accent/60",
+        FLEX,
+        FLEX_COL,
+      )}
     >
-      <span className="text-[10px] tracking-wide text-muted-foreground">
+      <span className={cn("items-center justify-between text-[10px] tracking-wide text-muted-foreground", FLEX)}>
         {t("warningsErrors")}
+        <Chevron className="size-3" aria-hidden />
       </span>
       {firstLoad ? (
         <span
           className="h-4 w-10 animate-pulse rounded bg-muted-foreground/20"
           aria-hidden
         />
-      ) : value === null ? (
+      ) : stats === undefined ? (
         <span className={placeholderClass}>{placeholder}</span>
       ) : (
-        <span className={valueClass}>{value}</span>
+        <span className={cn("items-baseline gap-1.5", FLEX)}>
+          <span className={valueClass}>{stats.alert_classes_active}</span>
+          <span className="truncate text-[10px] text-muted-foreground">
+            {t("alertEventsCount", { count: (stats.warnings + stats.errors).toLocaleString("en-US") })}
+          </span>
+        </span>
       )}
-    </div>
+    </button>
   );
 }
 

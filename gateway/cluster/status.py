@@ -41,6 +41,7 @@ from base.packages.plugins import stats
 from base.telemetry.observability import cluster_label
 from gateway.cluster import _roster_rows, _stats_events, roster_probe
 from gateway.cluster._health import get_health
+from gateway.cluster.alert_classes import read_alert_classes
 from gateway.cluster.schemas import (
     ClusterPanel,
     PluginStat,
@@ -57,7 +58,6 @@ from ops import cluster_rpc as _cluster_rpc
 from ops.cluster_pause import is_paused as cluster_is_paused
 from ops.cluster_status import ClusterStatus, check_pidfile
 from ops.cluster_status.schema_mismatch import status as schema_mismatch_status
-from services.events_maintenance import resolution as _resolution
 
 router = APIRouter()
 ARCHIVE_TOTAL_ROWS = 4_813_148  # frozen archive rows at the #1823 drop (pg_dump-verified)
@@ -112,9 +112,9 @@ def get_stats_dashboard(
     - `live_count`: agents_meta table — all non-terminated agents (running/idling)
     - `tokens` / `cost_usd` / average turn duration: the window's `llm_usage` and
       `turn_end` rows in `telemetry_events` (cost is each row's usage-time snapshot)
-    - warning/error counts: per-class counts of `telemetry_events` rows, split into
-      total / dismissed / net with the resolution daemon's class arithmetic over the
-      SELECTED window (task #1935)
+    - warning/error event totals and class counts: the SELECTED window's warning, error and
+      critical `telemetry_events` rows grouped by class; a class is dismissed when an active
+      `event_dismissals` row cancels it (`gateway.cluster.alert_classes`)
     - `total_events`: archived event row count — frozen historical constant
       (task #1281 parity run; PG events dropped; not a live gauge)
 
@@ -138,9 +138,7 @@ def _compute_stats_dashboard(pool: ConnectionPool[Any], hours: StatsWindowHours)
     with pool.connection() as conn:
         conn.execute("SET LOCAL statement_timeout = '8s'")
         totals = _stats_events.window_totals(conn, cluster=cluster, start=window_start, end=now)
-        class_counts = _stats_events.window_class_counts(
-            conn, cluster=cluster, start=window_start, end=now
-        )
+        alert_classes = read_alert_classes(conn, start=window_start, end=now)
         live_count = int(
             conn.execute(
                 "SELECT COUNT(*) FROM agents_meta WHERE status != 'terminated'"
@@ -153,14 +151,6 @@ def _compute_stats_dashboard(pool: ConnectionPool[Any], hours: StatsWindowHours)
         # events table was dropped with the #1823 cleanup; the dashboard's
         # "total events" card shows the archive's size. See ARCHIVE_TOTAL_ROWS.
         total_events = ARCHIVE_TOTAL_ROWS
-
-        # Active class-wide dismissals, read like the daemon reads them.
-        splits = _resolution.level_splits(
-            class_counts,
-            {dismissal.event_class for dismissal in _resolution.active_dismissals(conn)},
-        )
-    warning = splits.get("warning", _resolution.LevelSplit(0, 0, 0))
-    error = splits.get("error", _resolution.LevelSplit(0, 0, 0))
     cache_hit_pct = round(totals.cache_read / totals.in_total * 100, 2) if totals.in_total else 0.0
     return StatsDashboard(
         live_count=live_count,
@@ -174,12 +164,10 @@ def _compute_stats_dashboard(pool: ConnectionPool[Any], hours: StatsWindowHours)
         ),
         cost_usd=totals.cost_usd,
         avg_turn_seconds=totals.turn_seconds / totals.turn_count if totals.turn_count else None,
-        warnings=warning.total,
-        errors=error.total,
-        warnings_dismissed=warning.dismissed,
-        warnings_net=warning.net,
-        errors_dismissed=error.dismissed,
-        errors_net=error.net,
+        warnings=sum(row.count for row in alert_classes if row.level == "warning"),
+        errors=sum(row.count for row in alert_classes if row.level != "warning"),
+        alert_classes_active=sum(row.dismissal_id is None for row in alert_classes),
+        alert_classes_dismissed=sum(row.dismissal_id is not None for row in alert_classes),
         total_events=total_events,
         plugin_stats=_plugin_stat_rows(pool),
         as_of=datetime.now(UTC),

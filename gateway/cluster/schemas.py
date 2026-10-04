@@ -19,13 +19,14 @@ the wire before.
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import (
     BaseModel,
     ConfigDict,
     Field,
     NonNegativeInt,
+    PositiveInt,
 )
 
 from base.api_contracts.status import MachineStatus
@@ -220,19 +221,16 @@ class StatsDashboard(BaseModel):
       events that pre-date the snapshot field contribute 0
     - `avg_turn_seconds`: windowed avg LLM call wall time
       (event=turn_end + ok=true)
-    - `warnings` / `errors`: raw level totals over the window (critical
+    - `warnings` / `errors`: raw event totals over the window (critical
       folds into error). Agent trial-and-error (exec_failed) logs at INFO
       and is deliberately NOT counted — these numbers are operator-facing
       alerts, not agent activity.
-    - `warnings_dismissed` / `warnings_net` / `errors_dismissed` /
-      `errors_net`: the three-way resolution split (task #1935). The
-      arithmetic is the events-maintenance daemon's class subtraction
-      (`services.events_maintenance.resolution.level_splits`) applied to the
-      SELECTED window instead of the daemon's fixed six hours: events whose
-      (category, level, event_name, source, process) class has an active
-      dismissal in `event_dismissals` — exact, or matching a wildcard row
-      with an empty `process` — count as dismissed, the rest as net, and
-      dismissed + net == the raw total by construction.
+    - `alert_classes_active` / `alert_classes_dismissed`: how many distinct
+      (level, event_name, source, process) warning/error classes the window
+      holds, split by whether an active dismissal in `event_dismissals`
+      cancels the class — exact, or a wildcard row with an empty `process`.
+      The sidebar card shows `alert_classes_active`; the classes themselves
+      are `GET /api/stats/alert-classes`, which reads the same rows.
     - `total_events`: archived event row count (frozen — the PG events copy
       stopped growing at the LGTM cutover; not a live gauge)
 
@@ -255,13 +253,74 @@ class StatsDashboard(BaseModel):
     avg_turn_seconds: float | None
     warnings: NonNegativeInt
     errors: NonNegativeInt
-    warnings_dismissed: NonNegativeInt
-    warnings_net: NonNegativeInt
-    errors_dismissed: NonNegativeInt
-    errors_net: NonNegativeInt
+    alert_classes_active: NonNegativeInt
+    alert_classes_dismissed: NonNegativeInt
     total_events: NonNegativeInt
     plugin_stats: list[PluginStat]
     as_of: datetime | None = None
+
+
+AlertLevel = Literal["warning", "error", "critical"]
+
+
+class AlertClassRow(BaseModel):
+    """One warning/error class over the window, tallied across its events.
+
+    The identity is `(level, event_name, source, process)`, the same one an
+    `event_dismissals` row cancels. `category` is the emission transport to put on a
+    dismissal made from this class (matching ignores it). `dismissal_id` is the active
+    dismissal cancelling the class (reopen it through
+    `POST /api/event-resolutions/{id}/reopen`), None when the class is active.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    level: AlertLevel
+    event_name: str
+    source: str
+    process: str
+    category: Literal["telemetry", "log"]
+    count: PositiveInt
+    first_seen: datetime
+    last_seen: datetime
+    dismissal_id: int | None
+
+
+class AlertClassesResponse(BaseModel):
+    """GET /api/stats/alert-classes — the window's classes, most frequent first.
+
+    `classes` is capped at `ALERT_CLASSES_LIMIT` rows; `total_classes` is the uncapped count
+    and `total_events` the window's whole event count, so a cut list still states its size.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    window_hours: StatsWindowHours
+    classes: list[AlertClassRow]
+    total_classes: NonNegativeInt
+    total_events: NonNegativeInt
+    as_of: datetime
+
+
+class AlertClassSample(BaseModel):
+    """One recorded event of an alert class: the message and the context it carried."""
+
+    model_config = ConfigDict(frozen=True)
+
+    ts: datetime
+    agent_id: int | None
+    machine: str
+    trace_id: str | None
+    message: str | None
+    attributes: dict[str, Any]
+
+
+class AlertClassSamples(BaseModel):
+    """GET /api/stats/alert-classes/samples — the newest events of one class in the window."""
+
+    model_config = ConfigDict(frozen=True)
+
+    samples: list[AlertClassSample]
 
 
 # NonNegativeInt / None-able percentile fields

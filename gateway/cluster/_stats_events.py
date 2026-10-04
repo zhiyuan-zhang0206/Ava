@@ -1,9 +1,8 @@
 """The stats dashboard's window totals, read from `telemetry_events`.
 
 One scan of the window's `llm_usage` and `turn_end` rows gives the token, cost and turn
-sums; one grouped count of the warning, error and critical rows gives the event classes the
-resolution arithmetic splits. The cluster filter accepts the home cluster's label and rows
-with no label, as every dashboard read does.
+sums. The cluster filter accepts the home cluster's label and rows with no label, as every
+dashboard read does. The warning/error classes are `gateway.cluster.alert_classes`.
 """
 
 from __future__ import annotations
@@ -15,7 +14,6 @@ import psycopg
 
 from base.events.contract import LLM_USAGE_KEYS, TURN_END_KEYS
 from base.telemetry.event_sql import numeric
-from services.events_maintenance.resolution import EventClass, class_counts
 
 
 class WindowTotals(NamedTuple):
@@ -63,10 +61,3 @@ def window_totals(
         turn_seconds=float(row[4]),
         turn_count=int(row[5]),
     )
-
-
-def window_class_counts(
-    conn: psycopg.Connection[Any], *, cluster: str, start: datetime, end: datetime
-) -> dict[EventClass, int]:
-    """Per-class warning, error and critical counts over `(start, end]` for the home cluster."""
-    return class_counts(conn, start=start, end=end, cluster=cluster)
