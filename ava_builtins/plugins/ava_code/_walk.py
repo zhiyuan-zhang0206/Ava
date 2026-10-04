@@ -1,70 +1,22 @@
 """Walk up the path collecting context files. See `find_context_files_along_path` docstring."""
 
-import subprocess
 from pathlib import Path
 
-from base.log import logger
-from base.native_process.os_platform import CREATE_NO_WINDOW
 
-# Cache only *successful* git-root resolutions, keyed by resolved dir path. A
-# dir's repo root is stable once the repo exists, so caching it avoids repeated
-# ~10-30ms forks on high-frequency `ava.files.read`. A negative result ("not a
-# repo") is deliberately NOT cached: it can flip during a session (`git init`,
-# or a clone landing in a watched dir), and a stale None would hide that repo's
-# AGENTS.md / project-local skills until restart.
-_GIT_ROOT_CACHE: dict[str, Path] = {}
-
-
-def _resolve_git_root(cwd: Path) -> Path | None:
-    if not cwd.exists():
-        return None
-    try:
-        result = subprocess.run(
-            ["git", "rev-parse", "--show-toplevel"],
-            cwd=cwd,
-            capture_output=True,
-            text=True,
-            check=False,
-            creationflags=CREATE_NO_WINDOW,
-            timeout=2,
-        )
-    except (FileNotFoundError, subprocess.TimeoutExpired) as e:
-        # git not installed / timeout (slow NFS) — not "not a git repo";
-        # log it so ops can spot env issues like a broken $PATH. Plugin
-        # behavior matches no-repo (return None = no walk on this path).
-        logger.warning("[ava_code] git rev-parse failed cwd={cwd}: {e}", cwd=cwd, e=e)
-        return None
-    if result.returncode == 0:
-        return Path(result.stdout.strip()).resolve()
-    if result.returncode == 128:
-        return None  # "not a git repository" — expected path
-    # Other returncode (perm denied, other env issues) — log it
-    logger.warning(
-        "[ava_code] git rev-parse returncode={rc} cwd={cwd} stderr={err!r}",
-        rc=result.returncode,
-        cwd=cwd,
-        err=result.stderr.strip(),
-    )
-    return None
+def _is_git_root(directory: Path) -> bool:
+    """Whether `directory` holds a git repository or worktree: a `.git` file (linked worktree,
+    submodule) or a `.git` directory with a `HEAD`. An empty or foreign `.git` is skipped, as git
+    itself keeps looking upward past it."""
+    dotgit = directory / ".git"
+    return dotgit.is_file() or (dotgit / "HEAD").exists()
 
 
 def _git_root(start: Path) -> Path | None:
-    """`git rev-parse --show-toplevel` to get the git repo root containing `start`.
-
-    Not a git repo → None (expected, not logged; not cached — see _GIT_ROOT_CACHE).
-    git not installed / timeout / other returncode → None + logger.warning
-    (distinguishes env issues from not-a-repo so a user with a broken $PATH
-    can pinpoint the problem).
-    """
-    cwd = start if start.is_dir() else start.parent
-    key = str(cwd.resolve())
-    cached = _GIT_ROOT_CACHE.get(key)
-    if cached is not None:
-        return cached
-    root = _resolve_git_root(cwd)
-    if root is not None:
-        _GIT_ROOT_CACHE[key] = root
-    return root
+    """The nearest ancestor of `start` (itself included, when a directory) that is a git
+    repository root, or None. Resolved by walking up for `.git`, so nothing is cached and a repo
+    created mid-session (`git init`, a clone landing in a watched dir) surfaces immediately."""
+    cwd = (start if start.is_dir() else start.parent).resolve()
+    return next((d for d in (cwd, *cwd.parents) if _is_git_root(d)), None)
 
 
 def project_skill_roots(cwd: Path) -> list[Path]:

@@ -11,7 +11,7 @@ Two pieces, cwd and context-file injection:
   / CLAUDE.md files along the way as a system note (tag=CONTEXT) so the agent
   sees them next turn. Delivery is **in-memory, inside the exec turn** (user
   ruling 2026-08-11 — the old side-channel JSONL file is gone): the wrap
-  appends each note to the base `messages` channel via `state_handle.update`,
+  appends each note to the base `messages` channel via `update_state`,
   and the exec node (agent/graph/exec/node.py) merges the plugin's messages delta
   with its own exec-result ToolMessage, after it (the Anthropic-compat wire
   contract forbids notes between the AIMessage and its ToolMessage). No file
@@ -34,8 +34,8 @@ This module is the plugin's SDK **surface** — the only face an agent-launched
 child loads (task #3633). Its agent-runtime registrations (the `ava_code__cwd`
 state field, the two system-prompt sections, the after_init / after_exec
 hooks) live in `agent_runtime.py`, imported only on the full path (see
-`agent/extensions/__init__.py`); until it loads, `state_handle` below is a stand-in
-that raises the same `PluginStateOutsideTurnError` the real handle raises
+`agent/extensions/__init__.py`); `read_state` / `update_state` below load it on first use
+and raise the same `PluginStateOutsideTurnError` the real handle raises
 outside an exec turn.
 """
 
@@ -63,74 +63,46 @@ from ._walk import find_context_files_along_path, project_skill_roots
 _files_resolve = _ava_files_mod.resolve
 
 # ── ava.cwd SDK namespace — declared in `contribute()` at the bottom of this file.
-# _code_namespace's top level does not depend on state_handle (function
+# _code_namespace's top level does not depend on the state accessors (function
 # bodies lazy-import), so importing here is cycle-free.
 # Promote cwd into the system prompt's expanded SDK reference, ahead of the
 # configured framework list — it is the top coding surface, and a framework
 # default cannot name a plugin namespace (issue #1011).
 
 
-# ── state handle (surface stand-in) ──────────────────────────────────────
-# The real handle — and the state class it belongs to — lives in the
-# agent-runtime face (`agent_runtime.py`), loaded when a state slot first
-# materializes (task #3633 leg-2: a stateful child's slot is lazy). This
-# stand-in exists so the surface's call sites (`ava.cwd.get`/`set`, the read
-# wrap's injection path, the project-skill source below) always hold a handle
-# object. With a live slot (`ava.in_exec_turn()`), the slot exposes
-# `materialize()` — the framework contract on the lazy slot: calling it loads
-# the face (which rebinds `state_handle` on this module) and the call then
-# delegates to the real handle. The rebind replaces the module attribute only,
-# so a holder that bound the stand-in before it (a call-site local, or the name
-# read once and reused across an update pair) must delegate forward: `_forward`
-# re-reads the module first and hands over once the binding has moved on (task
-# #3665). Without a live slot — outside a turn (test / dev REPL) — its methods
-# raise exactly what the real handle raises outside an exec turn.
-class _UnboundStateHandle:
-    """Stand-in for the ava_code `PluginStateHandle` until the slot resolves.
-
-    Once the slot materializes the real handle is rebound onto this module;
-    a holder still pointing here delegates forward on its next call — see
-    `_forward`."""
-
-    def read(self) -> Any:
-        return self._forward(
-            "read",
-            "PluginStateHandle[AvaCodeState].read() called outside exec turn—"
-            "ava.state only valid inside execute_code (the exec turn).",
+# ── plugin state access (surface) ────────────────────────────────────────
+# The state class and the real handle live in the agent-runtime face
+# (`agent_runtime.py`), loaded when a state slot first materializes (task #3633
+# leg-2: a stateful child's slot is lazy). The surface reaches the state only
+# through `read_state` / `update_state`, which resolve the handle at each call:
+# with a live slot (`ava.in_exec_turn()`), the slot exposes `materialize()` —
+# the framework contract on the lazy slot — which loads the face, and the call
+# then runs on the real handle. Without a live slot — outside a turn (test / dev
+# REPL) — they raise exactly what the real handle raises outside an exec turn,
+# without importing the agent runtime.
+def _handle(method: str, slot: str) -> Any:
+    """The face's handle, with a live lazy state slot materialized first."""
+    if not ava.in_exec_turn():
+        raise ava.PluginStateOutsideTurnError(
+            f"PluginStateHandle[AvaCodeState].{method}() called outside exec turn—"
+            f"{slot} only valid inside execute_code (the exec turn)."
         )
+    materialize = getattr(ava.state, "materialize", None)
+    if materialize is not None:
+        materialize()
+    from .agent_runtime import state_handle
 
-    def update(self, delta: dict[str, Any]) -> None:
-        self._forward(
-            "update",
-            "PluginStateHandle[AvaCodeState].update() called outside exec turn—"
-            "ava.state_update only valid inside execute_code (the exec turn).",
-            delta,
-        )
-
-    def _forward(self, method: str, outside_turn_message: str, *args: Any) -> Any:
-        """Delegate to the module's current handle; materialize a live slot first."""
-        # A stale holder (bound before the slot materialized — e.g. the name
-        # read once and reused across `ava.cwd.set`'s cwd + cwd_note pair)
-        # must delegate before reading `ava.state`: once materialized that is
-        # the real state, which has no `materialize()` — the stale path would
-        # otherwise fall through to the outside-turn raise after having
-        # already succeeded once (#3665).
-        from .plugin import state_handle as current
-
-        if current is not self:
-            return getattr(current, method)(*args)
-        if ava.in_exec_turn():
-            materialize = getattr(ava.state, "materialize", None)
-            if materialize is not None:
-                materialize()
-                from .plugin import state_handle as current
-
-                if current is not self:
-                    return getattr(current, method)(*args)
-        raise ava.PluginStateOutsideTurnError(outside_turn_message)
+    return state_handle()
 
 
-state_handle: _UnboundStateHandle = _UnboundStateHandle()
+def read_state() -> Any:
+    """The plugin's current `AvaCodeState` snapshot."""
+    return _handle("read", "ava.state").read()
+
+
+def update_state(delta: dict[str, Any]) -> None:
+    """Apply a field update to the plugin's state."""
+    _handle("update", "ava.state_update").update(delta)
 
 
 # ── project-local skill source ───────────────────────────────────────────
@@ -141,7 +113,7 @@ state_handle: _UnboundStateHandle = _UnboundStateHandle()
 def _project_skill_source() -> list[Path]:
     if not ava.in_exec_turn():
         return []
-    return project_skill_roots(Path(state_handle.read().cwd))
+    return project_skill_roots(Path(read_state().cwd))
 
 
 # ── wrap ava.files.read ───────────────────────────────────────────────────
@@ -221,7 +193,7 @@ def _process_context_file(
     note_body = content
     if len(note_body) > settings.sandbox.exec_output_max_chars:
         note_body = truncate_both_ends(note_body, settings.sandbox.exec_output_max_chars)
-    state_handle.update(
+    update_state(
         {
             "messages": [
                 system_note_message(
@@ -284,7 +256,7 @@ def _wrapped_read(
     # it directly — a missing value is a real bug, not a default-to-0 case.
     from agent.state import compact_version
 
-    current = state_handle.read()
+    current = read_state()
     compact_v = compact_version()
     if compact_v > current.last_seen_compact:
         injected: set[str] = set()
@@ -296,7 +268,7 @@ def _wrapped_read(
         new_bookmark = current.last_seen_compact
 
     # 4. Inject / mark walk results. For multiple reads in the same turn,
-    # state_handle.read() reflects values updated earlier (handle.update
+    # read_state() reflects values updated earlier (update_state
     # synchronously mutates the ava.state working copy); no extra cache needed.
     for ctx_file in candidates:
         _process_context_file(ctx_file, p, injected=injected, hashes=hashes)
@@ -312,7 +284,7 @@ def _wrapped_read(
     if new_bookmark != current.last_seen_compact:
         update_dict["last_seen_compact"] = new_bookmark
     if update_dict:
-        state_handle.update(update_dict)
+        update_state(update_dict)
 
     # 6. Actual read — pass the plugin-cwd-resolved absolute path; do not rely
     # on the system cwd. Line-range params thread straight through.
