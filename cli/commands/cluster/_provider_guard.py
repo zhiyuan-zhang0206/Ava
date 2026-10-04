@@ -19,19 +19,14 @@ the first signal anyone acted on was the owner waking up.
     fleet is still halted and resolves only as agents recover.
 
 Both checks ride the health probe's existing machinery on purpose: the 300s
-OS cron on gateway hosts, the edge-triggered alert ingest (one row plus one IM
-per edge, with the local-ingest fallback when the gateway is unreachable), and
-the WARNING -> ERROR episode grading. No new daemon, no new schedule, and no
-dependency on anything the outage kills — in particular not on the LLM call
-chain, which is dead the moment the account is.
+OS cron on gateway hosts and its `health_probe_failing` event (checks
+`provider_balance` and `provider_blocked_agents`, repeated every run while the
+condition holds). No new daemon, no new schedule, and no dependency on anything
+the outage kills — in particular not on the LLM call chain, which is dead the
+moment the account is.
 
-Alert hygiene: the episode key is the exact failure message
-(`cluster.health_alerts._alert_failure`), so the messages here are deliberately
-*stable* across runs — they name the configured threshold, never a live
-value. A balance ticking down (or a growing halted count) inside the message
-would reset the episode on every probe tick and the alert would crawl back to
-its three-minute WARNING grade forever instead of firing. Live readings ride a
-stderr detail line for the cron log instead.
+Live readings (the balance, the halted count) ride a stderr detail line for the
+cron log; the failure messages name the configured threshold.
 
 Both checks are fail-open on read errors: a provider API blip or an
 unreachable database is not evidence of a drained account, matching
@@ -42,7 +37,6 @@ from __future__ import annotations
 
 import sys
 from collections.abc import Callable
-from pathlib import Path
 from typing import Any, cast
 
 from base.agents.recovery_breaker import HALT_AFTER_CONSECUTIVE_PERMANENT_REJECTS
@@ -53,34 +47,35 @@ class BalanceReadError(RuntimeError):
     """A balance read that could not produce a payload, with a sanitized reason."""
 
 
-def run_provider_guard(home: Path, *, alert_failure: Callable[[Path, str], None]) -> int | None:
+def run_provider_guard(*, report: Callable[[str, str], None]) -> int | None:
     """Run checks 9-10 for the health probe; return 1 on failure, None on pass.
 
-    `alert_failure` is the probe's edge-alert entry point
-    (`cluster.health_alerts._alert_failure`), passed in rather than imported so the
+    `report(check, message)` is the probe's failure signal
+    (`cluster.health._report_failing`), passed in rather than imported so the
     caller's module attribute stays the single test seam.
     """
     failure = provider_guard_failure()
     if failure is not None:
-        print(failure, file=sys.stderr)
-        alert_failure(home, failure)
+        check, message = failure
+        print(message, file=sys.stderr)
+        report(check, message)
         return 1
     print("  ✓ provider account guard")
     return None
 
 
-def provider_guard_failure() -> str | None:
-    """The first failing provider-guard check as a ready-to-alert line, if any.
+def provider_guard_failure() -> tuple[str, str] | None:
+    """The first failing provider-guard check as (check name, failure line), if any.
 
     Balance first (the root cause), blocked agents second; a run reports one
     failure at a time, like the probe's earlier checks.
     """
     balance = _balance_failure()
     if balance is not None:
-        return f"FAIL: provider balance — {balance}"
+        return "provider_balance", f"FAIL: provider balance — {balance}"
     blocked = _blocked_agents_failure()
     if blocked is not None:
-        return f"FAIL: provider blocked agents — {blocked}"
+        return "provider_blocked_agents", f"FAIL: provider blocked agents — {blocked}"
     return None
 
 

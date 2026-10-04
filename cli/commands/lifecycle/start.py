@@ -358,7 +358,7 @@ def _print_gateway_hint() -> None:
         )
 
 
-def _readiness_verdict(launch: Any, wait: Any, started: Any) -> int | None:
+def _readiness_verdict(launch: Any, wait: Any) -> int | None:
     """Print the readiness verdict; the not-ready exit code, or None when everything is up.
 
     Launch failures share the verdict: rollout reads `base.deploy.lifecycle.launch_failures`, while the
@@ -377,15 +377,7 @@ def _readiness_verdict(launch: Any, wait: Any, started: Any) -> int | None:
     # Diagnostic tiers remain visible without weakening the readiness verdict.
     if wait.non_critical_unready:
         _probe_commands._print_non_critical_unready_services(wait.non_critical_unready)
-        _probe_commands._notify_non_critical_unready_services(
-            wait.non_critical_unready, im_enabled=True
-        )
-    # The resolved edge: a non-critical service that is up again closes its open
-    # alert instance, so the Inspector never keeps showing a resolved failure
-    # (QA #1196 P1-1).
-    recovered = _probe_commands._recovered_non_critical_specs(started, wait.non_critical_unready)
-    if recovered:
-        _probe_commands._resolve_recovered_non_critical_alerts(recovered, im_enabled=True)
+        _probe_commands._report_non_critical_unready_services(wait.non_critical_unready)
     if wait.unready or wait.non_critical_unready or launch.failed:
         return SERVICES_NOT_READY_EXIT_CODE
     return None
@@ -473,7 +465,7 @@ def _cmd_start_body(
         _print_gateway_hint()
 
     # 8) Readiness verdict last: its exit code and printed snapshot describe the same run.
-    rc = _readiness_verdict(launch, wait, started)
+    rc = _readiness_verdict(launch, wait)
     if rc is not None:
         return rc
 

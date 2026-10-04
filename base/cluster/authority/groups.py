@@ -85,18 +85,19 @@ _RUNNER_TABLE_GRANTS: tuple[tuple[LiteralString, tuple[str, ...]], ...] = (
             "agent_metric_file_cursors",
         ),
     ),
-    # Start-readiness alert upsert and in-place resolution (task #3747).
-    ("SELECT, INSERT, UPDATE", ("alerts",)),
     # Agent state: the LangGraph checkpoint tables.
     ("ALL", CHECKPOINT_TABLES),
 )
 
-# Tables the runner group must not rewrite. Earlier releases granted it UPDATE
+# Table writes the runner group must not hold. Earlier releases granted them
 # here, and a grant already recorded on a cluster survives its removal from the
-# matrix, so the refresh revokes it explicitly. `agents` is gateway-only
+# matrix, so the refresh revokes them explicitly. `agents` is gateway-only
 # (labels go through the gateway; the impersonation counter is bumped by a
-# SECURITY DEFINER trigger).
-_RUNNER_REVOKED_UPDATE_TABLES = ("agents",)
+# SECURITY DEFINER trigger); `alerts` is written only by the gateway's ingest.
+_RUNNER_REVOKED_WRITES: tuple[tuple[LiteralString, tuple[str, ...]], ...] = (
+    ("UPDATE", ("agents",)),
+    ("INSERT, UPDATE", ("alerts",)),
+)
 
 
 def group_violations(conn: Conn, groups: Groups) -> list[str]:
@@ -165,8 +166,9 @@ def _grant_runner(conn: Conn, owner: str, runner: str) -> None:
     for privileges, tables in _RUNNER_TABLE_GRANTS:
         for table in tables:
             _grant(conn, f"GRANT {privileges} ON {{}} TO {{}}", table, runner)
-    for table in _RUNNER_REVOKED_UPDATE_TABLES:
-        _grant(conn, "REVOKE UPDATE ON {} FROM {}", table, runner)
+    for privileges, tables in _RUNNER_REVOKED_WRITES:
+        for table in tables:
+            _grant(conn, f"REVOKE {privileges} ON {{}} FROM {{}}", table, runner)
     _grant(conn, "GRANT USAGE, SELECT ON SEQUENCE agent_shell_ttl_renewals_id_seq TO {}", runner)
     # The writer creates the next month's partition itself (SECURITY DEFINER).
     _grant(
@@ -180,7 +182,7 @@ def _grant_runner(conn: Conn, owner: str, runner: str) -> None:
 def apply_group_grants(conn: Conn, *, owner: str, database: str, groups: Groups) -> None:
     """Converge both groups' grant surface in the connected cluster database.
 
-    Idempotent; grants are added, except the runner's retired UPDATE grants,
+    Idempotent; grants are added, except the runner's retired write grants,
     which are revoked. The checkpoint tables and every table the runner matrix
     names must exist, so a missing table fails loudly instead of silently
     narrowing the contract.

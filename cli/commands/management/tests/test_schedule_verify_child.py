@@ -127,7 +127,7 @@ def test_the_sweep_checks_agent_written_rows_like_built_in_ones(
         return None
 
     ports = _verify.VerifyPorts(
-        read_rows=lambda: rows, check_script=_verify._check_script, alert=no_alert
+        read_rows=lambda: rows, check_script=_verify._check_script, report=no_alert
     )
     assert _verify.cmd_schedules_verify(notify=False, ports=ports) == 1
     out = capsys.readouterr().out

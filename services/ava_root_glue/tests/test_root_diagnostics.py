@@ -13,8 +13,8 @@ import pytest
 from base.cluster.dataplane import pooler as base_pooler
 from base.daemon.health import DaemonProbe
 from base.native_process.ownership import OwnedProcess
-from services.ava_root.alerts import UnitAlertFacts
 from services.ava_root.custody import ReconcileOutcome
+from services.ava_root.failure_state import UnitFailureFacts
 from services.ava_root.health import HealthMonitor, ProbeRunner
 from services.ava_root.probes import ProbeRegistry
 from services.ava_root_glue import diagnostic_probes as probes
@@ -124,7 +124,7 @@ async def test_slow_diagnostic_cannot_block_peer_or_duplicate_itself(
         release.set()
 
 
-async def test_unknown_never_resolves_station_alert_but_counts_the_streak(
+async def test_unknown_never_resolves_station_alert_but_extends_the_streak(
     events: list[dict[str, object]],
 ) -> None:
     current = DaemonProbe.down("canary failed")
@@ -135,13 +135,12 @@ async def test_unknown_never_resolves_station_alert_but_counts_the_streak(
                 "canary",
                 lambda: current,
                 interval_s=0.001,
-                failure_threshold=2,
                 report=reported.append,
             )
         ]
     )
     await monitor.run_round()
-    assert not events  # the first failing round is below the threshold
+    assert [record["consecutive_failures"] for record in events] == [1]
     current = DaemonProbe.unavailable("no host baseline")
     await asyncio.sleep(0.002)
     await monitor.run_round()
@@ -149,34 +148,31 @@ async def test_unknown_never_resolves_station_alert_but_counts_the_streak(
     state = _entry(monitor.health_snapshot(), "diagnostic:canary")
     assert state["consecutive_failures"] == 2  # the unknown extended the failure streak
     assert state["last_verdict"] == "unavailable"
-    assert [record["consecutive_failures"] for record in events] == [2]
     await asyncio.sleep(0.002)
-    await monitor.run_round()  # a repeated unknown stays in the same episode
-    assert [record["consecutive_failures"] for record in events] == [2]
-    assert _entry(monitor.health_snapshot(), "diagnostic:canary")["consecutive_failures"] == 3
+    await monitor.run_round()  # a repeated unknown reports again: the condition still holds
+    assert [record["consecutive_failures"] for record in events] == [1, 2, 3]
 
 
-async def test_healthy_round_re_arms_the_streak_behind_an_unknown(
+async def test_every_failing_sample_reports_and_recovery_reports_once(
     events: list[dict[str, object]],
 ) -> None:
     current = DaemonProbe.unavailable("host stalled")
-    monitor = DiagnosticMonitor(
-        [Diagnostic("canary", lambda: current, interval_s=0.001, failure_threshold=2)]
-    )
-    await monitor.run_round()
-    assert not events  # one unknown round is below the threshold
-    await asyncio.sleep(0.002)
-    await monitor.run_round()
-    assert [record["consecutive_failures"] for record in events] == [2]
+    monitor = DiagnosticMonitor([Diagnostic("canary", lambda: current, interval_s=0.001)])
+    for _ in range(2):
+        await monitor.run_round()
+        await asyncio.sleep(0.002)
+    assert [record["consecutive_failures"] for record in events] == [1, 2]
+    assert all(record["event"] == "root_diagnostic" for record in events)
     current = DaemonProbe.up("healthy again")
-    await asyncio.sleep(0.002)
     await monitor.run_round()
+    await asyncio.sleep(0.002)
+    await monitor.run_round()  # a healthy sample after a healthy one is silent
+    assert [record["consecutive_failures"] for record in events] == [1, 2, 0]
+    assert events[-1]["verdict"] == "alive"
     current = DaemonProbe.unavailable("host stalled")
     await asyncio.sleep(0.002)
     await monitor.run_round()
-    # the healthy sample reset the streak, so the next single unknown stays silent
-    assert [record["consecutive_failures"] for record in events] == [2, 0]
-    assert _entry(monitor.health_snapshot(), "diagnostic:canary")["consecutive_failures"] == 1
+    assert [record["consecutive_failures"] for record in events] == [1, 2, 0, 1]
 
 
 class _NoRevival:
@@ -191,8 +187,8 @@ class _NoRevival:
     def revival_deferral(self, unit_id: str) -> str | None:
         raise AssertionError(f"unexpected revival check for {unit_id}")
 
-    def unit_alert_facts(self, unit_id: str) -> UnitAlertFacts:
-        raise AssertionError(f"unexpected alert facts lookup for {unit_id}")
+    def unit_failure_facts(self, unit_id: str) -> UnitFailureFacts:
+        raise AssertionError(f"unexpected failure facts lookup for {unit_id}")
 
     async def reconcile_custody(self) -> list[ReconcileOutcome]:
         raise AssertionError("unexpected custody reconcile pass")
@@ -263,50 +259,10 @@ def test_helper_diagnostics_are_macos_only(monkeypatch: pytest.MonkeyPatch) -> N
     monkeypatch.setattr(
         probes,
         "settings",
-        SimpleNamespace(
-            services=SimpleNamespace(
-                brew_pin_probe_failure_threshold=2,
-                permissions_helper_enabled=False,
-                venv_probe_failure_threshold=2,
-            )
-        ),
+        SimpleNamespace(services=SimpleNamespace(permissions_helper_enabled=False)),
     )
     names = {check.name for check in probes.build_diagnostics(set())}
     assert names == {"venv", "brew-pin", "permissions-helper"}
-
-
-def test_venv_diagnostic_uses_the_configured_failure_threshold(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(probes, "IS_MACOS", False)
-    monkeypatch.setattr("base.cluster.machine.is_gateway", lambda: False)
-    monkeypatch.setattr(
-        probes,
-        "settings",
-        SimpleNamespace(services=SimpleNamespace(venv_probe_failure_threshold=5)),
-    )
-    check = next(c for c in probes.build_diagnostics(set()) if c.name == "venv")
-    assert check.failure_threshold == 5
-
-
-def test_brew_pin_diagnostic_uses_the_configured_failure_threshold(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(probes, "IS_MACOS", True)
-    monkeypatch.setattr("base.cluster.machine.is_gateway", lambda: False)
-    monkeypatch.setattr(
-        probes,
-        "settings",
-        SimpleNamespace(
-            services=SimpleNamespace(
-                brew_pin_probe_failure_threshold=3,
-                permissions_helper_enabled=False,
-                venv_probe_failure_threshold=2,
-            )
-        ),
-    )
-    check = next(c for c in probes.build_diagnostics(set()) if c.name == "brew-pin")
-    assert check.failure_threshold == 3
 
 
 def test_station_no_credential_is_unknown_and_does_not_send(

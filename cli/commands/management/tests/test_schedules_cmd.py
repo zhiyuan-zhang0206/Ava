@@ -20,7 +20,6 @@ import pytest
 
 from cli.commands.management import schedules as _sched
 from cli.commands.management import schedules_verify as _verify
-from gateway.alerts.schemas import AlertWebhookPayload
 
 
 class _FakeResp:
@@ -383,27 +382,26 @@ def _verify_ports(
     rows: list[tuple[int, str, str]],
     check: Callable[[str], str | None],
 ) -> tuple[_verify.VerifyPorts, list[dict[str, object]]]:
-    """The sweep's DB-read + child-check ports as stubs; alert calls are recorded."""
+    """The sweep's DB-read + child-check ports as stubs; failure reports are recorded."""
     seen: list[dict[str, object]] = []
 
     def record(**kwargs: object) -> None:
         seen.append(kwargs)
 
-    return _verify.VerifyPorts(read_rows=lambda: rows, check_script=check, alert=record), seen
+    return _verify.VerifyPorts(read_rows=lambda: rows, check_script=check, report=record), seen
 
 
-def test_verify_green_prints_the_result_line_and_reports_clean(
+def test_verify_green_prints_the_result_line_and_reports_nothing(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """All scripts clean -> the RESULT counts, rc 0, and the alert call carries
-    the clean result (which resolves an open episode — see the alert tests)."""
+    """All scripts clean -> the RESULT counts, rc 0, and no failure report (the
+    alert resolves once reds stop recurring)."""
     ports, alerts = _verify_ports([(1, "a", "print(1)\n"), (2, "b", "print(2)\n")], lambda _s: None)
     assert _verify.cmd_schedules_verify(ports=ports) == 0
     out = capsys.readouterr().out
     assert "RESULT ts=" in out
     assert "checked=2 green=2 red=0 rc=0" in out
-    assert len(alerts) == 1
-    assert alerts[0]["reds"] == [] and alerts[0]["tool_error"] is None
+    assert alerts == []
 
 
 def test_verify_red_lines_name_each_failure(
@@ -435,7 +433,9 @@ def test_verify_tool_error_when_the_table_cannot_be_read(
         raise RuntimeError("db down")
 
     ports, alerts = _verify_ports([], lambda _s: None)
-    ports = _verify.VerifyPorts(read_rows=boom, check_script=ports.check_script, alert=ports.alert)
+    ports = _verify.VerifyPorts(
+        read_rows=boom, check_script=ports.check_script, report=ports.report
+    )
     assert _verify.cmd_schedules_verify(ports=ports) == 2
     out = capsys.readouterr().out
     assert "checked=0 green=0 red=0 rc=2" in out
@@ -443,7 +443,7 @@ def test_verify_tool_error_when_the_table_cannot_be_read(
     assert alerts[0]["tool_error"] == "RuntimeError: db down"
 
 
-def test_verify_no_notify_suppresses_the_alert(
+def test_verify_no_notify_suppresses_the_report(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     ports, alerts = _verify_ports([(7, "x", "import os\n")], lambda _s: "boom")
@@ -452,19 +452,19 @@ def test_verify_no_notify_suppresses_the_alert(
     assert alerts == []
 
 
-def test_verify_rows_file_sweeps_the_dump_without_the_db_or_an_alert(
+def test_verify_rows_file_sweeps_the_dump_without_the_db_or_a_report(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """`--rows-file` replaces the table read and never alerts, even with notify on."""
+    """`--rows-file` replaces the table read and never reports, even with notify on."""
 
     def no_table() -> list[tuple[int, str, str]]:
         raise AssertionError("the table must not be read")
 
-    def no_alert(**_kwargs: object) -> None:
-        raise AssertionError("a rows-file sweep must not alert")
+    def no_report(**_kwargs: object) -> None:
+        raise AssertionError("a rows-file sweep must not report")
 
     monkeypatch.setattr(_verify, "_read_schedule_rows", no_table)
-    monkeypatch.setattr(_verify, "_alert_verify", no_alert)
+    monkeypatch.setattr(_verify, "_report_verify", no_report)
     rows = tmp_path / "rows.json"
     rows.write_text(json.dumps([[3, "ok", "import os\n"], [4, "stale", "import zz_ava_gone\n"]]))
     assert _verify.cmd_schedules_verify(rows_file=str(rows)) == 1
@@ -518,102 +518,37 @@ def test_verify_check_file_unreadable_is_a_tool_error(
     assert "cannot read script file" in capsys.readouterr().err
 
 
-def _patch_alert_post(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, object]]:
-    posted: list[dict[str, object]] = []
+def _capture_verify_events(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, object]]:
+    emitted: list[dict[str, object]] = []
 
-    def fake_post(url: str, **kwargs: object) -> _FakeResp:
-        posted.append({"url": url, **kwargs})
-        return _FakeResp({"processed": 1})
+    def emit(category: str, event_name: str, **kwargs: object) -> None:
+        assert (category, event_name) == ("telemetry", "schedule_verify_failed")
+        assert kwargs["level"] == "error"
+        attributes = kwargs["attributes"]
+        assert isinstance(attributes, dict)
+        emitted.append(dict(attributes))  # pyright: ignore[reportUnknownArgumentType]
 
-    monkeypatch.setattr(httpx, "post", fake_post)
-    return posted
-
-
-def test_verify_alert_firing_reuses_the_open_episode(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A red run posts one firing instance through /api/alerts, keyed to the
-    open episode's starts_at (the ingest dedup key — a repeated red run must
-    not become a new instance)."""
-    from base.telemetry.alerts import fingerprint
-
-    posted = _patch_alert_post(monkeypatch)
-    _verify._alert_verify(
-        stamp="2026-09-30T15:00:00+08:00",
-        checked=2,
-        reds=[(7, "drifted", "shared.watcher")],
-        tool_error=None,
-        open_starts_at=lambda: "2026-09-01T00:00:00+08:00",
-    )
-    assert len(posted) == 1
-    assert posted[0]["url"] == "http://gw:8000/api/alerts"
-    payload = posted[0]["json"]
-    assert isinstance(payload, dict)
-    assert payload["source"] == "schedule-verify"
-    # Parsed through the real ingest schema: the wire shape is the Alertmanager
-    # camelCase one, and a snake_case key is silently dropped as an extra
-    # (starts_at -> "" -> the ingest rejects the instance).
-    parsed = AlertWebhookPayload.model_validate(payload)
-    (alert,) = parsed.alerts
-    assert alert.status == "firing"
-    assert alert.starts_at == "2026-09-01T00:00:00+08:00"
-    assert alert.ends_at == ""
-    assert alert.labels == {"alertname": "schedule dry-import", "severity": "error"}
-    assert alert.fingerprint == fingerprint(alert.labels)
-    summary = alert.annotations["summary"]
-    assert "id=7" in summary and "shared.watcher" in summary
+    monkeypatch.setattr(_verify.telemetry, "emit", emit)
+    return emitted
 
 
-def test_verify_alert_clean_run_resolves_the_open_episode(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    posted = _patch_alert_post(monkeypatch)
-    _verify._alert_verify(
-        stamp="2026-09-30T16:00:00+08:00",
-        checked=3,
-        reds=[],
-        tool_error=None,
-        open_starts_at=lambda: "2026-09-01T00:00:00+08:00",
-    )
-    (call,) = posted
-    payload = call["json"]
-    assert isinstance(payload, dict)
-    parsed = AlertWebhookPayload.model_validate(payload)
-    (alert,) = parsed.alerts
-    assert alert.status == "resolved"
-    assert alert.starts_at == "2026-09-01T00:00:00+08:00"
-    assert alert.ends_at == "2026-09-30T16:00:00+08:00"
+def test_report_verify_emits_one_event_naming_the_reds(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A red run emits one `schedule_verify_failed` event; the counts are the
+    event's metric fields and the detail names each failing script."""
+    emitted = _capture_verify_events(monkeypatch)
+    _verify._report_verify(checked=2, reds=[(7, "drifted", "shared.watcher")], tool_error=None)
+    (event,) = emitted
+    assert event["checked"] == 2 and event["red"] == 1 and event["tool_error"] is None
+    detail = str(event["detail"])
+    assert "id=7" in detail and "shared.watcher" in detail
 
 
-def test_verify_alert_clean_run_without_an_episode_is_silent(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    posted = _patch_alert_post(monkeypatch)
-    _verify._alert_verify(
-        stamp="2026-09-30T16:00:00+08:00",
-        checked=3,
-        reds=[],
-        tool_error=None,
-        open_starts_at=lambda: None,
-    )
-    assert posted == []
-
-
-def test_verify_alert_delivery_failure_retries_once_then_drops(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-) -> None:
-    """Two attempts, then a stderr note — never an exception, never a sweep
-    failure; the caller reads the outcome from stdout + rc either way."""
-    attempts: list[str] = []
-
-    def failing_post(url: str, **_kwargs: object) -> _FakeResp:
-        attempts.append(url)
-        raise httpx.ConnectError("refused")
-
-    monkeypatch.setattr(httpx, "post", failing_post)
-    _verify._alert_verify(
-        stamp="2026-09-30T15:00:00+08:00", checked=1, reds=[(1, "x", "m")], tool_error=None
-    )
-    assert len(attempts) == 2
-    assert "verify alert delivery failed: ConnectError" in capsys.readouterr().err
+def test_report_verify_tool_error_names_the_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    emitted = _capture_verify_events(monkeypatch)
+    _verify._report_verify(checked=0, reds=[], tool_error="RuntimeError: db down")
+    (event,) = emitted
+    assert event["red"] == 0 and event["tool_error"] == "RuntimeError: db down"
+    assert "RuntimeError: db down" in str(event["detail"])
 
 
 def test_verify_reads_all_rows_from_the_real_table(capsys: pytest.CaptureFixture[str]) -> None:
@@ -626,26 +561,6 @@ def test_verify_reads_all_rows_from_the_real_table(capsys: pytest.CaptureFixture
     assert "trace-ship-tempo" in names  # operator builtin: present but disabled
     ids = [row[0] for row in rows]
     assert ids == sorted(ids)
-
-
-def test_open_verify_starts_at_reads_the_open_instance(db_conn: psycopg.Connection) -> None:
-    from psycopg.types.json import Jsonb
-
-    labels = Jsonb({"alertname": _verify._VERIFY_ALERTNAME, "severity": "error"})
-    with db_conn.cursor() as cur:
-        cur.execute(
-            "INSERT INTO alerts (status, severity, alertname, labels, starts_at, fingerprint)"
-            " VALUES ('unresolved', 'error', %s, %s, '2026-09-01T00:00:00+00:00', 'test-fp')",
-            (_verify._VERIFY_ALERTNAME, labels),
-        )
-    db_conn.commit()
-    value = _verify._open_verify_starts_at()
-    assert value is not None and value.startswith("2026-09-01T00:00:00")
-
-    with db_conn.cursor() as cur:
-        cur.execute("UPDATE alerts SET status = 'resolved' WHERE fingerprint = 'test-fp'")
-    db_conn.commit()
-    assert _verify._open_verify_starts_at() is None
 
 
 # ── parser wiring ──

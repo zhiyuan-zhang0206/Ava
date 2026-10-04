@@ -78,8 +78,6 @@ PROCESS_PROFILES: dict[ProcessProfile, frozenset[str]] = {
             "gateway",
             "services",
             "daemon",
-            # The ttl reaper raises the impersonation event-log state alerts.
-            "alerts",
             # ava/skills/__init__.py imports base.packages.extensions.install_registry, whose
             # resolved_policy() resolves per-package update defaults from
             # settings.packages (#3267).
@@ -100,8 +98,6 @@ PROCESS_PROFILES: dict[ProcessProfile, frozenset[str]] = {
             "lm",  # ops.lifecycle reads llm_model
             "sandbox",
             "observability",
-            # Runner-owned event capture raises the capture-failure alert.
-            "alerts",
             # base.packages.extensions.install_registry.resolved_policy() is reachable from the
             # runner closure and resolves per-package update defaults from
             # settings.packages (#3267).

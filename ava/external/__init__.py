@@ -239,7 +239,7 @@ class Attachment:
         )
         # A call still running after the wait seals its own source when it drains; the
         # wait never turns a live source into an empty or failed receipt. An ended lease
-        # that keeps an open source is alerted by state (ImpersonationEventSealStuck).
+        # that keeps an open source is signalled by state (impersonation_event_log_incomplete).
         if drained:
             seal_local_participant(self._event_participant)
 

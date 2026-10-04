@@ -102,14 +102,6 @@ REPLY_SENT_OTHER_AGENT = "✅ Sent as a reply to that notice. Your next message 
 
 # -- push watchdog ----------------------------------------------------------
 
-PUSH_FAILURE_ALERT = '\u300c{channel}\u300d push link failed {failures} times consecutively. Send a message to the {channel} bot (e.g. "hi") to restore the push; if messages still do not arrive, the QR login must be redone — contact the administrator.'
 PUSH_RECOVERED_HINT = (
     "(system note: the '{channel}' push link failed earlier and has now recovered)"
 )
-
-# -- feishu owner seed (task #4930) -----------------------------------------
-
-# Boot could not restore the owner chat from the persisted switch state; the
-# outbound leg skips feishu until the user messages the bot once.
-FEISHU_OWNER_SEED_NO_SOURCE = 'Feishu alerts paused after the bridge restart: no feishu chat could be resolved from the bridge state. Send the feishu bot a message (e.g. "hi") to resume them.'
-FEISHU_OWNER_SEED_AMBIGUOUS = 'Feishu alerts paused after the bridge restart: the bridge state lists {count} feishu chats, so no owner could be picked. Send the feishu bot a message (e.g. "hi") to resume them.'

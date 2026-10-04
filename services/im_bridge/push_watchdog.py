@@ -6,8 +6,9 @@ silently with ret=-2 while getUpdates keeps working — the user can still
 message the bot but never receives replies. The only refresh is the user's
 own message, so:
 
-- after enough consecutive failures, alert the user through the OTHER
-  channels (Telegram / Feishu) telling them to message the bot;
+- a failed retry emits the ``im_push_failed`` event carrying the adapter's
+  consecutive-failure count; the alert rule over the event stream tells the
+  user (through the ops fan-out) to message the bot;
 - after a later send succeeds (a fresh user message brought a new token),
   hint "recovered" on the next inbound reply.
 
@@ -23,13 +24,12 @@ import time
 from collections.abc import Awaitable, Callable
 from typing import Any
 
+from base.log import logger
 from services.im_bridge import copy
 from services.im_bridge.config import ImBridgeConfig
 
 _log = logging.getLogger("services.im_bridge.core.push_watchdog")
 
-PUSH_FAILURE_THRESHOLD = 2  # consecutive failures before alerting
-PUSH_ALERT_COOLDOWN_SECONDS = 1800  # seconds between alerts
 PUSH_RECOVERED_HINT_SECONDS = 60  # seconds after first success to hint
 
 _sleep = asyncio.sleep  # module-local seam: tests patch this name, not asyncio.sleep
@@ -64,8 +64,7 @@ async def retry_once_after_backoff(
 
 async def send_with_retry(core: Any, channel: str, chat_id: str, reply: Any, adapter: Any) -> None:
     """Send once, retry once after a bounded jitter backoff; on the retry
-    failure also run the weixin push-failure watchdog (alert the user
-    through other channels)."""
+    failure emit the ``im_push_failed`` event."""
 
     async def attempt() -> None:
         await adapter.send(chat_id, reply.text, buttons=reply.buttons, markdown=reply.markdown)
@@ -82,33 +81,12 @@ async def send_with_retry(core: Any, channel: str, chat_id: str, reply: Any, ada
             await retry_once_after_backoff(attempt, core.config)
         except Exception:
             _log.exception("send retry failed channel=%s chat=%s", channel, chat_id)
-            await alert_push_failure(core, channel, adapter)
-
-
-async def alert_push_failure(core: Any, channel: str, adapter: Any) -> None:
-    """Alert the user through other channels when a channel's outbound
-    pushes keep failing. Inbound always works, so the alert must go out
-    over a different channel than the failing one."""
-
-    failures = getattr(adapter, "push_failures", 0)
-    failed_at = getattr(adapter, "push_failed_at", None)
-    if channel != "weixin" or failures < PUSH_FAILURE_THRESHOLD or failed_at is None:
-        return
-    alerted_at = getattr(adapter, "_push_alerted_at", None)
-    if alerted_at is not None and time.time() - alerted_at < PUSH_ALERT_COOLDOWN_SECONDS:
-        return
-    text = copy.PUSH_FAILURE_ALERT.format(channel=channel, failures=failures)
-    sent_anywhere = False
-    for other, other_adapter in core.adapters.items():
-        if other == channel:
-            continue
-        try:
-            await other_adapter.send_to_owner(text)
-            sent_anywhere = True
-        except Exception as exc:  # one broken channel must not stop the rest
-            _log.warning("push-failure alert via %s failed: %r", other, exc)
-    if sent_anywhere:
-        adapter._push_alerted_at = time.time()  # type: ignore[attr-defined]
+            logger.warning(
+                "push failed after retry: {channel}",
+                event="im_push_failed",
+                channel=channel,
+                failures=getattr(adapter, "push_failures", 0),
+            )
 
 
 async def hint_recovered(core: Any, msg: Any) -> None:

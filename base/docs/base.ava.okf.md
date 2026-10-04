@@ -33,10 +33,6 @@ tags:
 - **Process supervision**: native service/orchestration/agent sessions, agent shells held by the pty-sessions service, start-serving readiness gating, and daemon health/liveness — [[process-supervision.ava.okf.md]].
 - **Health envelope** (`base/daemon/health_schema.py`, `base/daemon/health.py`): daemon `/healthz` and gateway `/api/health` return identity, liveness, readiness, components, and reasons; a degraded component is HTTP 503 for watchdog recovery.
 - **Native process identity** (`base/native_process/`): dependency-free boot scope and birth keys are separate from process observation and signaling. Linux requires exact start ticks; reconstructed wall timestamps are diagnostic. Independent observations use native keys while retained receipt bytes remain exact. Descendant enumeration is a hint: capture validates each current ancestry edge against native generations before accepting a member. Repeated captures preserve the original receipt per birth. Linux signals retain a pidfd through identity verification and delivery; a stdlib-only libc adapter serves it, independent of optional Python build bindings; unknown identity never grants cleanup or recovery authority.
-- **Transition alert policy** (`base/deploy/transition.py`): one dependency-free
-  elapsed-time policy shared by machine liveness and the cluster health probe;
-  a live deploy explains the bounded window, then unexplained episodes grade
-  from silent to WARNING to ERROR using cluster-pinned alert thresholds.
 
 ## Key dependencies
 

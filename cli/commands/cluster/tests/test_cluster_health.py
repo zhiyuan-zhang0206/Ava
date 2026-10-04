@@ -1,14 +1,14 @@
-"""Health observations and graded owner alerts, without release mutations.
+"""Health observations and their failure signal, without release mutations.
 
-Each outage keeps one episode through recovery and deploy suppression. Alert
-transport failures cannot hide health failures or break observation.
+Every unhealthy run emits one `health_probe_failing` event naming the failed
+check; a healthy run emits nothing. Notification grading belongs to the Grafana
+rules that read the event.
 """
 
 from __future__ import annotations
 
 import os
 import subprocess
-from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from uuid import uuid4
 
@@ -17,36 +17,6 @@ import pytest
 
 from base.db.tests.fakes import patch_database
 from cli.commands.cluster import health as cluster_health
-from cli.commands.cluster import health_alerts
-
-# Captured at import, before the autouse `_sent_alerts` fixture stubs the module
-# attributes — the handles the unit tests use to reach the real send/ingest
-# paths.
-_REAL_NOTIFY_OWNER = cluster_health.notify_owner
-_REAL_INGEST_ALERT = cluster_health._ingest_alert
-
-
-def _write_aged_alert_state(
-    home: Path, message: str, *, age: timedelta = timedelta(minutes=4), severity: str = ""
-) -> datetime:
-    started_at = datetime.now(UTC) - age
-    (home / cluster_health.ALERT_STATE_FILE).write_text(
-        f"{message}\n{started_at.isoformat()}\n{severity}"
-    )
-    return started_at
-
-
-def _freeze_alert_clock(monkeypatch: pytest.MonkeyPatch, initial: datetime) -> list[datetime]:
-    clock = [initial]
-
-    class _FixedDatetime(datetime):
-        @classmethod
-        def now(cls, tz: object | None = None) -> datetime:
-            assert tz is UTC
-            return clock[0]
-
-    monkeypatch.setattr(health_alerts, "datetime", _FixedDatetime)
-    return clock
 
 
 def test_schema_health_db_flake_is_healthy(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -128,10 +98,10 @@ def test_liveness_retry_recovers_before_reporting_outage(
     assert cluster_health.run_health_probe() == 0
 
 
-def test_environment_liveness_failure_alerts_without_counting(
+def test_environment_liveness_failure_signals_without_counting(
     _home: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A data-plane failure alerts but cannot launch an unrelated code rollback."""
+    """A data-plane failure signals but cannot launch an unrelated code rollback."""
     rollback_commands: list[list[str]] = []
     monkeypatch.setattr(cluster_health, "_gateway_liveness_with_retry", lambda: False)
     monkeypatch.setattr(cluster_health, "_data_plane_abnormal", lambda: True)
@@ -174,6 +144,10 @@ def test_agent_population_classifies_db_failure_as_environment(
     assert cluster_health.run_health_probe() == 1
 
 
+def _no_init(**_kwargs: object) -> None:
+    return None
+
+
 @pytest.fixture
 def _all_checks_pass(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(cluster_health, "_gateway_liveness_with_retry", lambda: True)
@@ -198,7 +172,7 @@ def _provider_guard_healthy(monkeypatch: pytest.MonkeyPatch) -> None:
     own tests below re-point `run_provider_guard` at the real one to exercise
     the wiring."""
 
-    def _ok(_home: Path, *, alert_failure: object) -> None:
+    def _ok(*, report: object) -> None:
         return None
 
     monkeypatch.setattr(cluster_health, "run_provider_guard", _ok)
@@ -206,10 +180,6 @@ def _provider_guard_healthy(monkeypatch: pytest.MonkeyPatch) -> None:
 
 @pytest.fixture
 def _home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    # run_health_probe resolves the alert state home via base.paths.ava_home.
-    import base.paths
-
-    monkeypatch.setattr(base.paths, "ava_home", lambda: tmp_path)
     # Check 8 (source tree) derives its checkout from ava_home() and, on a
     # runner with no prod tree, resolves it to a non-git path — the guard
     # (correctly) reports that as "guard skipped" and fails the probe. Unit
@@ -222,144 +192,134 @@ def _home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
 
 @pytest.fixture(autouse=True)
-def _sent_alerts(monkeypatch: pytest.MonkeyPatch) -> list[str]:
-    """Capture edge-alert summaries; autouse so no test hits a real gateway.
-
-    The probe's edge alerts now flow through `_ingest_alert` (W16); the
-    captured value is the stamped summary the ingest payload would carry, so
-    assertions on wording keep working. `notify_owner` is NOT stubbed here —
-    its own unit tests below reach the real send path via `_REAL_NOTIFY_OWNER`,
-    and the fallback tests stub it explicitly where they need to."""
-    sent: list[str] = []
-
-    def _capture(*, status: str, message: str, starts_at: object, severity: str = "error") -> None:
-        sent.append(cluster_health._alert_summary(recovered=status == "resolved", message=message))
-
-    monkeypatch.setattr(health_alerts, "_ingest_alert", _capture)
-    return sent
+def _ran() -> list[dict[str, object]]:
+    """The attributes of every `health_probe_ran` heartbeat the probe emits."""
+    return []
 
 
 @pytest.fixture(autouse=True)
-def _no_deploy_in_flight(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Keep alert tests independent of live deploy state."""
-    from ops.deploy_window import DeployWindow
+def _signals(
+    monkeypatch: pytest.MonkeyPatch, _ran: list[dict[str, object]]
+) -> list[dict[str, object]]:
+    """Capture the attributes of every `health_probe_failing` event the probe emits
+    (heartbeats go to `_ran`).
 
-    monkeypatch.setattr(
-        "ops.deploy_window.deploy_in_flight",
-        lambda _db, **_k: DeployWindow(active=False, detail="no deploy in flight"),  # pyright: ignore[reportUnknownArgumentType]
-    )
+    Autouse so no test reaches the real event pipeline."""
+    emitted: list[dict[str, object]] = []
+
+    def _emit(category: str, event_name: str, **kwargs: object) -> None:
+        assert category == "telemetry"
+        attributes = kwargs["attributes"]
+        assert isinstance(attributes, dict)
+        if event_name == "health_probe_ran":
+            assert "level" not in kwargs  # info
+            _ran.append(dict(attributes))  # pyright: ignore[reportUnknownArgumentType]
+            return
+        assert event_name == "health_probe_failing"
+        assert kwargs["level"] == "warning"
+        emitted.append(dict(attributes))  # pyright: ignore[reportUnknownArgumentType]
+
+    monkeypatch.setattr(cluster_health.telemetry, "emit", _emit)
+    monkeypatch.setattr(cluster_health.telemetry, "init_telemetry", _no_init)
+    return emitted
 
 
-# ─── per-service check (5) + owner alerts ────────────────────────────────────
-
-
-def test_service_probe_failure_alerts(
+def test_every_run_emits_the_heartbeat_healthy_or_not(
     _all_checks_pass: None,
     _home: Path,
     monkeypatch: pytest.MonkeyPatch,
-    _sent_alerts: list[str],
+    _signals: list[dict[str, object]],
+    _ran: list[dict[str, object]],
 ) -> None:
-    """A dead selected service fails the probe and reports its outage."""
+    """`health_probe_ran` is the probe's dead-man heartbeat: one per run on every
+    path, carrying the unhealthy-check count; the failing event is separate."""
+    assert cluster_health.run_health_probe() == 0
+    assert _ran == [{"unhealthy_checks": 0}]
+    assert _signals == []
+
     monkeypatch.setattr(cluster_health, "_service_probes", lambda: ["ava-main-frontend"])
-    _write_aged_alert_state(_home, "FAIL: service probe — not healthy: ava-main-frontend")
-
-    rc = cluster_health.run_health_probe()
-
-    assert rc == 1
-    assert len(_sent_alerts) == 1
-    assert "ava-main-frontend" in _sent_alerts[0]
+    assert cluster_health.run_health_probe() == 1  # the alert-only path
+    monkeypatch.setattr(cluster_health, "_gateway_liveness_with_retry", lambda: False)
+    assert cluster_health.run_health_probe() == 1  # the primary-check path
+    assert _ran == [{"unhealthy_checks": 0}, {"unhealthy_checks": 1}, {"unhealthy_checks": 1}]
+    assert len(_signals) == 2
 
 
-def test_service_probe_deploy_window_pauses_alert_grade(
+def test_a_refused_checkout_emits_no_heartbeat(
+    _home: Path, monkeypatch: pytest.MonkeyPatch, _ran: list[dict[str, object]]
+) -> None:
+    """A wrong-checkout refusal (exit 2) never observed the cluster, so it is not a run."""
+    import base.paths
+
+    def _refuse(_root: Path) -> str:
+        return "dev checkout"
+
+    monkeypatch.setattr(base.paths, "prod_service_checkout_error", _refuse)
+
+    assert cluster_health.run_health_probe() == 2
+    assert _ran == []
+
+
+# ─── failing checks emit the signal ──────────────────────────────────────────
+
+
+def test_service_probe_failure_emits_the_alert_only_signal(
     _all_checks_pass: None,
     _home: Path,
     monkeypatch: pytest.MonkeyPatch,
-    _sent_alerts: list[str],
+    _signals: list[dict[str, object]],
 ) -> None:
-    from ops.deploy_window import DeployWindow
-
-    monkeypatch.setattr(
-        "ops.deploy_window.deploy_in_flight",
-        lambda _db, **_kw: DeployWindow(active=True, detail="rollout live"),  # pyright: ignore[reportUnknownArgumentType]
-    )
+    """A dead selected service fails the probe and emits its failing check."""
     monkeypatch.setattr(cluster_health, "_service_probes", lambda: ["ava-main-frontend"])
-    _write_aged_alert_state(
-        _home,
-        "FAIL: service probe — not healthy: ava-main-frontend",
-        age=timedelta(minutes=11),
-    )
 
     assert cluster_health.run_health_probe() == 1
-    assert _sent_alerts == []
+
+    assert _signals == [
+        {
+            "check": "service_probe",
+            "failure_class": "alert-only",
+            "message": "FAIL: service probe — not healthy: ava-main-frontend",
+        }
+    ]
 
 
-def test_disk_over_watermark_fails_and_alerts(
+def test_disk_over_watermark_fails_and_signals(
     _all_checks_pass: None,
     _home: Path,
     monkeypatch: pytest.MonkeyPatch,
-    _sent_alerts: list[str],
+    _signals: list[dict[str, object]],
 ) -> None:
-    """A data volume over the 90% watermark fails the probe (exit 1) and
-    alerts the owner; rolling
-    back code frees no disk space (the 2026-08-08 outage class: checkpoint
-    growth filled the disk and the gateway could not start)."""
+    """A data volume over the 90% watermark fails the probe (exit 1) and emits
+    the `disk_usage` signal; rolling back code frees no disk space (the
+    2026-08-08 outage class: checkpoint growth filled the disk and the gateway
+    could not start)."""
     monkeypatch.setattr(
         cluster_health, "_disk_usage_failure", lambda: "data volume 92.4% used (watermark 90%)"
     )
-    _write_aged_alert_state(
-        _home,
-        "FAIL: disk usage — data volume 92.4% used (watermark 90%)",
-    )
-
-    rc = cluster_health.run_health_probe()
-
-    assert rc == 1
-    assert len(_sent_alerts) == 1
-    assert "disk usage" in _sent_alerts[0]
-    assert "92.4%" in _sent_alerts[0]
-
-
-def test_deploy_never_explains_full_disk(
-    _all_checks_pass: None,
-    _home: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    _sent_alerts: list[str],
-) -> None:
-    from ops.deploy_window import DeployWindow
-
-    monkeypatch.setattr(
-        "ops.deploy_window.deploy_in_flight",
-        lambda _db, **_kw: DeployWindow(active=True, detail="rollout live"),  # pyright: ignore[reportUnknownArgumentType]
-    )
-    message = "FAIL: disk usage — data volume 92.4% used (watermark 90%)"
-    monkeypatch.setattr(
-        cluster_health, "_disk_usage_failure", lambda: "data volume 92.4% used (watermark 90%)"
-    )
-    _write_aged_alert_state(_home, message, age=timedelta(minutes=11))
 
     assert cluster_health.run_health_probe() == 1
-    assert len(_sent_alerts) == 1
-    assert "disk usage" in _sent_alerts[0]
+
+    assert len(_signals) == 1
+    assert _signals[0]["check"] == "disk_usage"
+    assert _signals[0]["failure_class"] == "alert-only"
+    assert "92.4%" in str(_signals[0]["message"])
 
 
-def test_wal_archiving_failure_alerts_with_a_stable_message(
+def test_wal_archiving_failure_signals_with_its_message(
     _all_checks_pass: None,
     _home: Path,
     monkeypatch: pytest.MonkeyPatch,
-    _sent_alerts: list[str],
+    _signals: list[dict[str, object]],
 ) -> None:
-    """A broken archiver fails the probe like the disk check does; the text is the
-    episode's identity, so the state file holds exactly the message."""
+    """A broken archiver fails the probe like the disk check does."""
     failure = "WAL archiving: the archiver is failing"
     monkeypatch.setattr(cluster_health, "_walg_archive_failure", lambda: failure)
-    _write_aged_alert_state(_home, f"FAIL: {failure}")
 
     assert cluster_health.run_health_probe() == 1
 
-    assert len(_sent_alerts) == 1 and failure in _sent_alerts[0]
-    assert (_home / cluster_health.ALERT_STATE_FILE).read_text().splitlines()[0] == (
-        f"FAIL: {failure}"
-    )
+    assert _signals == [
+        {"check": "walg_archive", "failure_class": "alert-only", "message": f"FAIL: {failure}"}
+    ]
 
 
 def test_wal_archiving_is_never_dialed_while_off(
@@ -419,26 +379,24 @@ def test_disk_usage_failure_boundary(monkeypatch: pytest.MonkeyPatch) -> None:
     assert cluster_health._disk_usage_failure() is not None
 
 
-def test_source_tree_failure_alerts(
+def test_source_tree_failure_signals(
     _all_checks_pass: None,
     _home: Path,
     monkeypatch: pytest.MonkeyPatch,
-    _sent_alerts: list[str],
+    _signals: list[dict[str, object]],
 ) -> None:
-    """A tampered prod source tree fails the probe (exit 1) and alerts the
-    owner; rolling back code does
-    not undo an on-disk edit (the 2026-08-28 outage class: edited source broke
-    `import ava` for every agent on the box)."""
+    """A tampered prod source tree fails the probe (exit 1) and emits the
+    `source_tree` signal; rolling back code does not undo an on-disk edit (the
+    2026-08-28 outage class: edited source broke `import ava` for every agent on
+    the box)."""
     message = "prod source tree tampered: untracked outside whitelist: junk.txt"
     monkeypatch.setattr(cluster_health, "_source_tree_failure", lambda: message)  # pyright: ignore[reportUnknownArgumentType]
-    _write_aged_alert_state(_home, f"FAIL: source tree — {message}")
 
-    rc = cluster_health.run_health_probe()
+    assert cluster_health.run_health_probe() == 1
 
-    assert rc == 1
-    assert len(_sent_alerts) == 1
-    assert "source tree" in _sent_alerts[0]
-    assert "junk.txt" in _sent_alerts[0]
+    assert len(_signals) == 1
+    assert _signals[0]["check"] == "source_tree"
+    assert "junk.txt" in str(_signals[0]["message"])
 
 
 def test_source_tree_clean_passes(
@@ -475,54 +433,39 @@ def test_source_tree_guard_skipped_is_a_distinct_alert(
     assert failure == "prod source tree guard skipped: git unavailable"
 
 
-def test_alert_edge_triggered_once_per_outage(
+def test_signal_repeats_every_unhealthy_run_and_stops_when_healthy(
     _all_checks_pass: None,
     _home: Path,
     monkeypatch: pytest.MonkeyPatch,
-    _sent_alerts: list[str],
+    _signals: list[dict[str, object]],
 ) -> None:
-    """The probe fires every few minutes; a persistent outage must alert once on
-    the first graded transition and once on recovery — not once per run."""
+    """The probe fires every few minutes; a persistent outage emits the signal on
+    every run (a Grafana `for:` needs continuous samples), a healthy run emits
+    nothing, and no state file is kept."""
     monkeypatch.setattr(cluster_health, "_gateway_liveness_with_retry", lambda: False)
-    _write_aged_alert_state(
-        _home, "FAIL: gateway liveness — health endpoint unreachable or non-200"
-    )
     assert cluster_health.run_health_probe() == 1
     assert cluster_health.run_health_probe() == 1
-    assert len(_sent_alerts) == 1
-    assert "unhealthy" in _sent_alerts[0]
+    assert [signal["check"] for signal in _signals] == ["gateway_liveness"] * 2
 
     monkeypatch.setattr(cluster_health, "_gateway_liveness_with_retry", lambda: True)
     assert cluster_health.run_health_probe() == 0
-    assert len(_sent_alerts) == 2
-    assert "recovered" in _sent_alerts[1]
-    assert not (_home / cluster_health.ALERT_STATE_FILE).exists()
-    # Healthy again — no further alert.
-    assert cluster_health.run_health_probe() == 0
-    assert len(_sent_alerts) == 2
+    assert len(_signals) == 2
+    assert not list(_home.iterdir())
 
 
-def test_alert_re_fires_when_failure_reason_changes(
+def test_signal_names_the_failed_check(
     _all_checks_pass: None,
     _home: Path,
     monkeypatch: pytest.MonkeyPatch,
-    _sent_alerts: list[str],
+    _signals: list[dict[str, object]],
 ) -> None:
-    """A changed failure reason starts a fresh episode and grades independently."""
+    """A changed failure reason is a different check, grouped separately by Grafana."""
     monkeypatch.setattr(cluster_health, "_service_probes", lambda: ["ava-main-frontend"])
-    service_message = "FAIL: service probe — not healthy: ava-main-frontend"
-    _write_aged_alert_state(_home, service_message)
     assert cluster_health.run_health_probe() == 1
     monkeypatch.setattr(cluster_health, "_gateway_liveness_with_retry", lambda: False)
     assert cluster_health.run_health_probe() == 1
 
-    assert len(_sent_alerts) == 1
-    assert "service probe" in _sent_alerts[0]
-    gateway_message = "FAIL: gateway liveness — health endpoint unreachable or non-200"
-    _write_aged_alert_state(_home, gateway_message)
-    assert cluster_health.run_health_probe() == 1
-    assert len(_sent_alerts) == 2
-    assert "gateway liveness" in _sent_alerts[1]
+    assert [signal["check"] for signal in _signals] == ["service_probe", "gateway_liveness"]
 
 
 def test_service_probes_skips_gated_but_rejects_unknown_specs(
@@ -642,7 +585,7 @@ def test_service_probes_checks_otel_collector_on_lgtm_gateway(
 
 
 def test_service_probes_carry_the_failing_fact(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The owner's alert is the only thing a human sees, so it has to say WHICH
+    """The signal's message is the only diagnostic a human sees, so it has to say WHICH
     fact failed: "answering, but its home is /home/ava/.ava" is another unit on
     this unit's port — a different incident from "nothing is listening", and one
     no amount of waiting fixes."""
@@ -717,208 +660,24 @@ def test_service_probes_unreadable_selection_is_unhealthy(monkeypatch: pytest.Mo
     assert cluster_health._service_probes() == ["service selection unavailable (corrupt selection)"]
 
 
-# ─── cluster-stamped outbound alerts ─────────────────────────────────────────
-
-
-def test_notify_owner_stamps_home_label(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-) -> None:
-    """Every ops alert carries the cluster name so the owner can tell which
-    cluster is talking — a preview cluster's alert must not read like a prod
-    incident. Stamping in the single send point covers every alert uniformly.
-
-    Calls the real `notify_owner` (the autouse `_sent_alerts` fixture stubs the
-    module attribute, so the captured `_REAL_NOTIFY_OWNER` is used to reach the
-    actual send path). It POSTs to the im_bridge daemon's health-port `/send`
-    RPC — stub `httpx.post` to capture the request."""
-
-    import httpx
-
-    import base.cluster
-    from base.config import settings
-    from base.daemon.endpoints import ServiceEndpoints
-
-    monkeypatch.setattr(settings.alerts, "im_notify_enabled", True)
-    monkeypatch.setattr(settings.data_plane, "cluster_secret", "test-secret")
-    monkeypatch.setattr(base.cluster, "home_label", lambda _home: ".ava-preview-42")  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr("base.paths.ava_home", lambda: tmp_path / ".ava-preview-42")
-
-    sent: list[tuple[str, dict[str, str], dict[str, str]]] = []
-
-    class _Resp:
-        def raise_for_status(self) -> None:
-            pass
-
-    def _post(url: str, *, json: dict[str, str], headers: dict[str, str], timeout: float) -> _Resp:
-        sent.append((url, json, headers))
-        return _Resp()
-
-    monkeypatch.setattr(httpx, "post", _post)
-
-    _REAL_NOTIFY_OWNER("[health-probe] cluster unhealthy: FAIL: schema health")
-
-    assert len(sent) == 1
-    url, payload, headers = sent[0]
-    assert (
-        url
-        == f"http://127.0.0.1:{ServiceEndpoints.from_settings().of('im_bridge').health_port}/send"
-    )
-    assert headers["Authorization"] == "Bearer test-secret"
-    assert payload == {
-        "text": "[.ava-preview-42] [health-probe] cluster unhealthy: FAIL: schema health"
-    }
-
-
-def test_notify_owner_failed_send_does_not_leak_secret(
-    monkeypatch: pytest.MonkeyPatch,
-    capsys: pytest.CaptureFixture[str],
-    tmp_path: Path,
-) -> None:
-    """A failed send must not write the cluster secret to the log. The secret
-    rides in the Authorization header; httpx embeds the request (but never its
-    headers) in the exception repr, so `notify_owner` must never format the
-    exception itself."""
-
-    import httpx
-
-    import base.cluster
-    from base.config import settings
-
-    secret = "SUPERSECRET"  # noqa: S105 — test fixture
-    monkeypatch.setattr(settings.alerts, "im_notify_enabled", True)
-    monkeypatch.setattr(settings.data_plane, "cluster_secret", secret)
-    monkeypatch.setattr(base.cluster, "home_label", lambda _home: ".ava-main")  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr("base.paths.ava_home", lambda: tmp_path / ".ava-main")
-
-    # A 401 from the daemon — raise_for_status() raises httpx.HTTPStatusError,
-    # the path most likely to leak.
-    req = httpx.Request("POST", "http://127.0.0.1:8111/send")
-    resp = httpx.Response(401, request=req, json={"error": "unauthorized"})
-    monkeypatch.setattr(httpx, "post", lambda *_a, **_k: resp)  # pyright: ignore[reportUnknownArgumentType]
-
-    _REAL_NOTIFY_OWNER("[health-probe] cluster unhealthy: FAIL")  # never raises
-
-    err = capsys.readouterr().err
-    assert "delivery failed" in err  # it did log the failure
-    assert secret not in err  # but not the cluster secret
-
-
-def test_notify_owner_im_bridge_down_does_not_raise(
-    monkeypatch: pytest.MonkeyPatch,
-    capsys: pytest.CaptureFixture[str],
-    tmp_path: Path,
-) -> None:
-    """The alert is a side channel: when the im_bridge daemon is down the probe
-    must still complete — no raise, just a stderr note naming the failure
-    class. A dead bridge must never break health observation."""
-
-    import httpx
-
-    import base.cluster
-    from base.config import settings
-
-    monkeypatch.setattr(settings.alerts, "im_notify_enabled", True)
-    monkeypatch.setattr(settings.data_plane, "cluster_secret", "test-secret")
-    monkeypatch.setattr(base.cluster, "home_label", lambda _home: ".ava-main")  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr("base.paths.ava_home", lambda: tmp_path / ".ava-main")
-
-    def _post(*_a: object, **_k: object) -> None:
-        raise httpx.ConnectError("connection refused")
-
-    monkeypatch.setattr(httpx, "post", _post)
-
-    _REAL_NOTIFY_OWNER("[health-probe] cluster unhealthy: FAIL")  # never raises
-
-    assert "delivery failed: ConnectError" in capsys.readouterr().err
-
-
-def test_notify_owner_skips_when_im_notify_disabled(
-    monkeypatch: pytest.MonkeyPatch,
-    capsys: pytest.CaptureFixture[str],
-    tmp_path: Path,
-) -> None:
-    """`AVA_ALERTS_IM_NOTIFY_ENABLED=false` silences the probe's owner alerts
-    too — one master switch for every IM notification (the same flag the
-    gateway's ops-alerts ingest honours). No HTTP call is made."""
-
-    import httpx
-
-    import base.cluster
-    from base.config import settings
-
-    monkeypatch.setattr(settings.alerts, "im_notify_enabled", False)
-    monkeypatch.setattr(base.cluster, "home_label", lambda _home: ".ava-main")  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr("base.paths.ava_home", lambda: tmp_path / ".ava-main")
-
-    called = False
-
-    def _post(*_a: object, **_k: object) -> None:
-        nonlocal called
-        called = True
-
-    monkeypatch.setattr(httpx, "post", _post)
-
-    _REAL_NOTIFY_OWNER("[health-probe] cluster unhealthy: FAIL")
-
-    assert not called
-    assert "skipped" in capsys.readouterr().err
-
-
-def test_notify_owner_honours_im_bridge_health_url_override(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-) -> None:
-    """`AVA_IM_BRIDGE_HEALTH_URL` (a remote host's bridge) is honoured when
-    set; the loopback health port is only the fallback."""
-
-    import httpx
-
-    import base.cluster
-    from base.config import settings
-
-    monkeypatch.setattr(settings.alerts, "im_notify_enabled", True)
-    monkeypatch.setattr(settings.data_plane, "cluster_secret", "test-secret")
-    monkeypatch.setattr(settings.services, "im_bridge_health_url", "http://10.0.0.5:9111/")
-    monkeypatch.setattr(base.cluster, "home_label", lambda _home: ".ava-main")  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr("base.paths.ava_home", lambda: tmp_path / ".ava-main")
-
-    sent: list[str] = []
-
-    class _Resp:
-        def raise_for_status(self) -> None:
-            pass
-
-    def _post(url: str, **_: object) -> _Resp:
-        sent.append(url)
-        return _Resp()
-
-    monkeypatch.setattr(httpx, "post", _post)
-
-    _REAL_NOTIFY_OWNER("[health-probe] cluster unhealthy: FAIL")
-
-    assert sent == ["http://10.0.0.5:9111/send"]
-
-
 # ── the gate's entry port rides in check 5 (alert-only) ───────────────────────
 
 
 def test_dark_gate_fails_the_probe_without_arming_rollback(
-    monkeypatch: pytest.MonkeyPatch, _all_checks_pass: None, _home: Path, _sent_alerts: list[str]
+    monkeypatch: pytest.MonkeyPatch,
+    _all_checks_pass: None,
+    _home: Path,
+    _signals: list[dict[str, object]],
 ) -> None:
-    """The boundary this check was placed for: a dark entry port alerts the owner and
-    exits 1. The 2026-08-01 cause was a
-    converge step that failed to reinstall the launchd job — rolling the cluster's
-    code back would re-run that step identically, so rollback is not the remedy."""
+    """The boundary this check was placed for: a dark entry port signals and exits 1.
+    The 2026-08-01 cause was a converge step that failed to reinstall the launchd
+    job — rolling the cluster's code back would re-run that step identically, so
+    rollback is not the remedy."""
     monkeypatch.setattr(
         cluster_health, "_service_probes", lambda: ["gate entry :3000 not answering (dark)"]
     )
-    _write_aged_alert_state(
-        _home,
-        "FAIL: service probe — not healthy: gate entry :3000 not answering (dark)",
-    )
     assert cluster_health.run_health_probe() == 1
-    assert any("not answering" in a for a in _sent_alerts)
+    assert any("not answering" in str(signal["message"]) for signal in _signals)
 
 
 # ── the Redis bridge rides in check 5 (alert-only) ───────────────────────────
@@ -959,18 +718,17 @@ def test_redis_bridge_probe_reports_running_but_dead_listener(
     assert "connection refused" in failure
 
 
-def test_redis_bridge_failure_alerts_without_arming_rollback(
+def test_redis_bridge_failure_signals_without_arming_rollback(
     monkeypatch: pytest.MonkeyPatch,
     _all_checks_pass: None,
     _home: Path,
-    _sent_alerts: list[str],
+    _signals: list[dict[str, object]],
 ) -> None:
     failure = "Redis bridge 10.64.0.7:6380 failed authenticated PING (connection refused)"
     monkeypatch.setattr(cluster_health, "_redis_bridge_probe", lambda: failure)
-    _write_aged_alert_state(_home, f"FAIL: service probe — not healthy: {failure}")
 
     assert cluster_health.run_health_probe() == 1
-    assert any("Redis bridge" in alert for alert in _sent_alerts)
+    assert any("Redis bridge" in str(signal["message"]) for signal in _signals)
 
 
 # ── crash-loop detection: category=audit only (W9 fix) ──────────────────────

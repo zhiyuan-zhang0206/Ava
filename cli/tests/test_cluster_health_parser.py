@@ -9,13 +9,13 @@ from cli.commands.cluster.tests.test_cluster_health import (
     _home as _home,
 )
 from cli.commands.cluster.tests.test_cluster_health import (
-    _no_deploy_in_flight as _no_deploy_in_flight,
-)
-from cli.commands.cluster.tests.test_cluster_health import (
     _provider_guard_healthy as _provider_guard_healthy,
 )
 from cli.commands.cluster.tests.test_cluster_health import (
-    _sent_alerts as _sent_alerts,
+    _ran as _ran,
+)
+from cli.commands.cluster.tests.test_cluster_health import (
+    _signals as _signals,
 )
 
 

@@ -236,7 +236,7 @@ ALLOWED: dict[str, tuple[Category, str]] = {
     ),
     "tests/gateway/test_alerts_api.py": (
         "integration",
-        "/api/alerts through the gateway app with the cli and ops alert writers: spans base, cli, gateway, ops, no one of which may import all the others",
+        "/api/alerts through the gateway app against the base ingest core and the shared session database fixtures",
     ),
     "tests/gateway/test_caller_protocol_path.py": (
         "integration",
@@ -345,6 +345,14 @@ ALLOWED: dict[str, tuple[Category, str]] = {
     "tests/scripts/test_alert_notification_policy.py": (
         "contract",
         "validates the notification policy of deploy/lgtm/config/grafana/provisioning/alerting/contact.yml",
+    ),
+    "tests/scripts/test_alert_rules_signals.py": (
+        "contract",
+        "validates the signal rules of deploy/lgtm/config/grafana/provisioning/alerting/rules.yml against the declared events",
+    ),
+    "tests/scripts/test_alert_single_path.py": (
+        "contract",
+        "scans every production package for alert writers: its subject is the repository, which no package owns",
     ),
     "tests/scripts/test_alert_rules_backup_custody.py": (
         "contract",

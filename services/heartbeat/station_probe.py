@@ -1,10 +1,10 @@
 """Remote observatory-station probe — run every 60s by the GATEWAY watchdog.
 
-Lives in services/heartbeat/ (not services/healthchecks/) on purpose: it consumes the
-`alerts` settings domain, which is gateway-owned — the runner watchdog imports the
-healthcheck roster too, so a module under services/healthchecks/ would drag the alerts
-domain into the runner profile (test_gateway_consumer_guard). The watchdog resolves it
-by dotted string, so the runner closure never contains it.
+Lives in services/heartbeat/ (not services/healthchecks/) on purpose: it is gateway-only —
+the runner watchdog imports the healthcheck roster too, and a module under
+services/healthchecks/ would drag the gateway-side station resolution into the runner
+profile (test_gateway_consumer_guard). The watchdog resolves it by dotted string, so the
+runner closure never contains it.
 
 The GATEWAY's probe of a REMOTE observatory station (WP4, task #1946;
 conventions/reachability-and-credentials.md). When `AVA_OBSERVABILITY_URL`
@@ -23,10 +23,10 @@ means the station's ingress is not serving.
 
 **Fail-open by design**: a failed probe NEVER blocks, restarts, or sheds
 local business — the gateway's collector keeps buffering in its file-backed
-queue and the local stack is untouched. The probe only records an alert
-("observatory station offline", consecutive-failure gated like the machine
-offline probe) and resolves it on recovery. Every failure path is caught and
-logged; main() never raises.
+queue and the local stack is untouched. The probe only logs a
+warning (no alert: the station hosts the observability backends, so a station
+that cannot ingest cannot carry its own failure signal). Every failure path is
+caught and logged; main() never raises.
 """
 
 from __future__ import annotations
@@ -34,36 +34,20 @@ from __future__ import annotations
 import logging
 import urllib.error
 import urllib.request
-from datetime import UTC, datetime
-from typing import Any
 
 from base.config import settings
 from base.db import Database
-from base.deploy.transition import transition_severity
 from base.log import init_gateway_process, logger
 from base.telemetry.station_endpoint import StationTarget as _StationTarget
 from base.telemetry.station_endpoint import resolve_station_target, validated_observability_base
 
 _log = logging.getLogger("services.heartbeat.station_probe")
 
-# Consecutive failed probes before the alert fires. The pass runs once per
-# minute, so this is a ~2-minute anti-jitter window (a single dropped packet
-# or a station mid-restart is not an incident) — the same gate as the
-# machine-offline probe (services/heartbeat/liveness.py).
-_OFFLINE_AFTER_FAILURES = 2
-
 # One OTLP round-trip budget. The station is a private-network peer; 5s
 # covers a slow-but-healthy host while a genuinely offline host still
 # refuses fast (connect refused / blackhole), mirroring the status_probe
 # budget philosophy (AVA_STATUS_PROBE_TIMEOUT_SECONDS).
 _PROBE_TIMEOUT_S = 5.0
-
-_ALERTNAME = "observatory station offline"
-
-# In-process probe state — the watchdog is long-lived, so the consecutive
-# failure count and the transition start survive between rounds (the same
-# in-process pattern as the page-host cache in gateway/routers/pages.py).
-_state: dict[str, Any] = {"failures": 0, "transition_since": None}
 
 
 def _configured_observability_base() -> str:
@@ -159,149 +143,17 @@ def _station_answers(url: str) -> bool:
         return False
 
 
-def _fire_offline(
-    database: Database, target: _StationTarget, state: dict[str, Any], now: datetime
-) -> None:
-    """Fire (or escalate) the 'observatory station offline' alert; fail-open on any write error."""
-    from base.telemetry.alerts import (
-        display_language,
-        fingerprint,
-        notify_im,
-        notify_text,
-        stamp_notified,
-        upsert_alert,
-    )
-
-    identity = {"alertname": _ALERTNAME, "station": target.url}
-    try:
-        with database.connect() as conn:
-            severity = transition_severity(
-                state["transition_since"],
-                now,
-                warning_after_s=settings.alerts.transition_warning_seconds,
-                error_after_s=settings.alerts.transition_error_seconds,
-            )
-            if severity is None:
-                return
-            with conn.cursor() as cur:
-                cur.execute(
-                    "SELECT starts_at, severity, notified_at FROM alerts "
-                    "WHERE labels->>'alertname' = %s AND labels->>'station' = %s "
-                    "AND status = 'unresolved' ORDER BY starts_at DESC LIMIT 1",
-                    (_ALERTNAME, target.url),
-                )
-                open_row = cur.fetchone()
-            if open_row is not None and open_row[1] == severity and open_row[2] is not None:
-                return
-            starts_at = open_row[0] if open_row is not None else state["transition_since"]
-            alert = {
-                "status": "firing",
-                "labels": {**identity, "severity": severity},
-                "annotations": {
-                    "summary": (
-                        f"observatory station {target.name or target.url} unreachable for "
-                        f"{max(0.0, (now - state['transition_since']).total_seconds()) / 60.0:.1f} "
-                        f"minutes ({state['failures']} consecutive failed probes)"
-                    )
-                },
-                "starts_at": starts_at.isoformat(),
-                "fingerprint": fingerprint(identity),
-            }
-            key, _inserted, should_notify, _row = upsert_alert(conn, alert, source="station-probe")
-            if should_notify and notify_im(notify_text(alert, display_language(conn))):
-                stamp_notified(conn, [key])
-    except Exception:
-        logger.bind(_no_emitter=True, component="station-healthcheck").exception(
-            "station probe: alert write failed (fail-open)"
-        )
-
-
-def _resolve_offline(database: Database, now: datetime) -> None:
-    """Resolve every open row for the alertname; fail-open on any write error."""
-    from base.telemetry.alerts import (
-        display_language,
-        notify_im,
-        notify_text,
-        stamp_notified,
-        upsert_alert,
-    )
-
-    try:
-        with database.connect() as conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    "SELECT starts_at, fingerprint, severity FROM alerts "
-                    "WHERE labels->>'alertname' = %s AND status = 'unresolved' "
-                    "ORDER BY starts_at DESC",
-                    (_ALERTNAME,),
-                )
-                open_rows = cur.fetchall()
-            if not open_rows:
-                return
-            lang = display_language(conn)
-            for starts_at, fp, severity in open_rows:
-                alert = {
-                    "status": "resolved",
-                    "labels": {"alertname": _ALERTNAME, "severity": severity},
-                    "annotations": {"summary": "observatory station reachable again"},
-                    "starts_at": starts_at.isoformat(),
-                    "ends_at": now.isoformat(),
-                    "fingerprint": fp,
-                }
-                key, _inserted, should_notify, _row = upsert_alert(
-                    conn, alert, source="station-probe"
-                )
-                if should_notify and notify_im(notify_text(alert, lang)):
-                    stamp_notified(conn, [key])
-    except Exception:
-        logger.bind(_no_emitter=True, component="station-healthcheck").exception(
-            "station probe: alert resolve write failed (fail-open)"
-        )
-
-
-def _alert_edges(database: Database, target: _StationTarget, *, ok: bool, now: datetime) -> None:
-    """Fire/resolve the 'observatory station offline' alert for this target.
-
-    Direct DB write (the gateway watchdog runs with the cluster DB at hand),
-    same shape as the machine-offline probe (services/heartbeat/liveness.py):
-    fire on the consecutive-failure threshold, escalate WARNING -> ERROR via
-    the shared transition clock, resolve on recovery, IM-notify on notify
-    edges. Best-effort: alerting must never break the probe.
-    """
-    state = _state
-    if not ok:
-        state["failures"] += 1
-        if state["transition_since"] is None:
-            state["transition_since"] = now
-        if state["failures"] < _OFFLINE_AFTER_FAILURES:
-            return
-        _fire_offline(database, target, state, now)
-        return
-
-    # Recovered: reset the episode and resolve every open row for the
-    # alertname — the observatory is reachable again regardless of which
-    # target address the episode was about.
-    recovered = state["failures"] > 0 or state["transition_since"] is not None
-    state["failures"] = 0
-    state["transition_since"] = None
-    if not recovered:
-        return
-    _resolve_offline(database, now)
-
-
 def main() -> None:
     init_gateway_process("station")
     target = resolve_target()
     if target is None:
         return  # no remote observatory configured — nothing to probe here
     ok = _station_answers(target.url)
-    _alert_edges(Database.from_settings(), target, ok=ok, now=datetime.now(UTC))
     if not ok:
         logger.bind(_no_emitter=True, component="station-healthcheck").warning(
-            "station probe: {} did not answer a bearer OTLP probe ({} consecutive failures) — "
-            "fail-open: local business is unaffected, alert raised",
+            "station probe: {} did not answer a bearer OTLP probe — "
+            "fail-open: local business is unaffected",
             target.url,
-            _state["failures"],
         )
 
 

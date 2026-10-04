@@ -244,7 +244,6 @@ DEFERRED: dict[str, str] = {
         "gateway/auth/rejection_log.py::global-rebind:_auth401_total",
         "gateway/auth/rejection_log.py::ambient-container:_auth401_last_warn",
         "gateway/auth/rejection_log.py::ambient-container:_auth401_suppressed",
-        "gateway/inspect/_metrics_health.py::ambient-container:_last_logged",
         "gateway/routers/fleet_graph.py::ambient-container:_stale_emit_at",
         "services/healthchecks/permissions_helper.py::global-rebind:_reported_unhealthy",
     )

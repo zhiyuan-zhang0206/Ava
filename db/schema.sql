@@ -778,10 +778,9 @@ CREATE TABLE IF NOT EXISTS agent_model_tokens_total_through (
 -- ─────────────── alerts (system→human alert store, Task #1224) ───────────────
 -- One row = one alert instance, in the Alertmanager standard webhook payload
 -- shape (status + labels + annotations + startsAt/endsAt + fingerprint +
--- generatorURL). Sources: the Grafana embedded-Alertmanager webhook contact
--- point (POST /api/alerts, source='grafana'), the cluster health probe
--- (source='health-probe'), and the heartbeat liveness pass's machine
--- offline/online edges (source='machine-probe'). Alert is fully separate
+-- generatorURL). One writer: the Grafana embedded-Alertmanager webhook contact
+-- point (POST /api/alerts, source='grafana'); rows from before 2026-10-04 also
+-- carry the retired in-process writers' tags. Alert is fully separate
 -- from Notice: own table, own UI section, own IM channel — nothing here
 -- enters the notices queue.
 -- severity: critical / warning / error (all three push to IM).
@@ -815,21 +814,6 @@ COMMENT ON COLUMN alerts.source IS
     'Provenance: ''grafana'' (webhook default), ''health-probe'', ''machine-probe''.';
 
 CREATE INDEX alerts_status_starts_idx ON alerts (status, starts_at DESC);
-
--- ava_runner surface for the start-readiness alerts (task #3747): `ava start`'s
--- non-critical tier upserts its firing instance and resolves it again on
--- recovery from the runner process (cli/commands/_probe.py). The resolve edge
--- is an in-place status UPDATE and no runner path deletes rows, so the write
--- surface is SELECT / INSERT / UPDATE, no DELETE. Gated on the role's
--- existence: fresh bootstrap applies this baseline before install birth
--- creates ava_runner, and base/cluster/authority/groups.py's ensure_groups
--- grants the audited surface at birth.
-DO $$
-BEGIN
-    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'ava_runner') THEN
-        GRANT SELECT, INSERT, UPDATE ON alerts TO ava_runner;
-    END IF;
-END $$;
 
 -- ─────────────── event_dismissals (Loki event-class resolution, task #1468) ───────────────
 -- Loki log lines are immutable, so a resolution is state about an event class,
@@ -1131,8 +1115,7 @@ CREATE TABLE machines (
 -- machine_probe — per-machine status_probe results, written by the gateway
 -- heartbeat daemon's liveness pass (Task #1174). Raw probe outcome plus the
 -- consecutive-failure count (the anti-jitter gate: a machine is judged offline
--- only after 2 consecutive failed probes) and the true start of the current
--- failed-probe transition (NULL while reachable). Deliberately NOT a machines-table
+-- only after 2 consecutive failed probes). Deliberately NOT a machines-table
 -- column: the machines row is a recomputed composition of machine_units
 -- (base/cluster/machines.py _recompute_machine_row) and any column there would be
 -- clobbered by register_self.
@@ -1141,8 +1124,7 @@ CREATE TABLE machine_probe (
     online               BOOLEAN NOT NULL,
     agent_host_online    BOOLEAN, -- status_probe's existing host-alive verdict; NULL if the probe failed or lacked it
     consecutive_failures INTEGER NOT NULL DEFAULT 0,
-    last_probe_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
-    transition_since     TIMESTAMPTZ
+    last_probe_at        TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
 -- machine_status_snapshot — the roster's read model: the last status_probe of every

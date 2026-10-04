@@ -4,9 +4,7 @@ The ingest side models the Alertmanager standard webhook payload (as Grafana's
 embedded Alertmanager delivers it to a webhook contact point): one POST
 carries ``status`` + ``alerts[]``, each alert an instance of a rule
 (labels/annotations/startsAt/endsAt/fingerprint/values/generatorURL). The
-cluster health probe and the heartbeat liveness pass post the same shape
-with ``source="health-probe"`` / ``source="machine-probe"``, so every
-producer rides one ingest pipeline. The query side is the alert section's
+query side is the alert section's
 history list (unresolved-first); the SSE stream publishes the same row shape
 the list returns.
 
@@ -20,8 +18,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-# Label parsing helpers live in base/telemetry/alerts.py — the ingest core shared
-# with the health probe and the machine liveness pass.
+# Label parsing helpers live in base/telemetry/alerts.py — the ingest core.
 from base.telemetry.alerts import parse_alertname, parse_severity
 
 __all__ = [
@@ -71,8 +68,7 @@ class AlertWebhookPayload(BaseModel):
     receiver/commonLabels/… — ignored here) and the slimmer Grafana-managed
     webhook shape; only ``status`` + ``alerts[]`` matter to the store.
     ``source`` tags the row's provenance: the webhook omits it (default
-    ``grafana``), while the health probe posts ``source="health-probe"`` and
-    the liveness pass ``source="machine-probe"``.
+    ``grafana``).
     """
 
     model_config = ConfigDict(extra="ignore")

@@ -117,8 +117,8 @@ CRITICAL_SERVICE_SESSIONS = frozenset({"gate", "gateway", "frontend", "agent-hos
 # that the short window ends long before the critical bound, so a healthy start
 # is never held to the long number by a straggling non-critical daemon. A
 # non-critical service that misses the window does NOT fail the start — it is
-# reported and posted as an alert instead (see
-# `cli.commands._probe._notify_non_critical_unready_services`), so the
+# reported and emitted as a `service_start_unready` event instead (see
+# `cli.commands._probe._report_non_critical_unready_services`), so the
 # downgrade never goes silent.
 NON_CRITICAL_SERVICE_READY_TIMEOUT_S = 45.0
 

@@ -2593,6 +2593,1508 @@ groups:
   # 15m, and the route gateway-latency queries are the most expensive rules
   # (fleet-graph degradation wave, 2026-08-23, #3224). Their `for` windows
   # remain unchanged, so semantics hold at 1/5 the evaluation cost.
+
+      # ── ava-ops-machine-offline-warning: replaces services/heartbeat/liveness.py _fire_machine_offline WARNING grade (transition_severity warning_after_s=180) ──
+      - uid: ava-ops-machine-offline-warning
+        title: "Machine offline (agent-runner unreachable)"
+        condition: D
+        for: 3m
+        noDataState: OK
+        execErrState: OK
+        labels:
+          severity: warning
+          ruleUID: ava-ops-machine-offline-warning
+          metric: machine_offline
+          team: ava-ops
+        annotations:
+          summary: "machine {{ $labels.attributes_machine }} unreachable for 3+ minutes"
+          description: >-
+            The gateway's liveness pass (every ~60s) failed its status_probe of agent-runner {{
+            $labels.attributes_machine }} on every pass for at least 3 minutes (machine_probe_failed events,
+            payload consecutive_failures). Normal recovery (restart, brief network blip) stays under the 3
+            minute grace window. Escalates to the error rule at 10 minutes. A paused machine (`ava cluster
+            pause`) is not probed and cannot fire this.
+        data:
+          - refId: A
+            datasourceUid: loki
+            queryType: ""
+            model:
+              refId: A
+              datasource:
+                type: loki
+                uid: loki
+              editorMode: code
+              expr: >-
+                sum by (attributes_machine) (count_over_time({service_name="unknown_service",
+                event_name="machine_probe_failed"} | json | cluster=".ava" | category="telemetry" |
+                attributes_consecutive_failures < 11 [2m]))
+              instant: true
+              queryType: instant
+            relativeTimeRange:
+              from: 120
+              to: 0
+          - refId: C
+            datasourceUid: __expr__
+            queryType: ""
+            model:
+              refId: C
+              datasource:
+                type: __expr__
+                uid: __expr__
+              type: reduce
+              expression: A
+              reducer: mean
+          - refId: D
+            datasourceUid: __expr__
+            queryType: ""
+            model:
+              refId: D
+              datasource:
+                type: __expr__
+                uid: __expr__
+              type: threshold
+              expression: C
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [0]
+                  operator:
+                    type: and
+                  query:
+                    params: [C]
+
+      # ── ava-ops-machine-offline-error: replaces services/heartbeat/liveness.py _fire_machine_offline ERROR grade (transition_severity error_after_s=600) ──
+      - uid: ava-ops-machine-offline-error
+        title: "Machine offline 10+ minutes (agent-runner unreachable)"
+        condition: D
+        for: 10m
+        noDataState: OK
+        execErrState: OK
+        labels:
+          severity: error
+          ruleUID: ava-ops-machine-offline-error
+          metric: machine_offline
+          team: ava-ops
+        annotations:
+          summary: "machine {{ $labels.attributes_machine }} unreachable for 10+ minutes"
+          description: >-
+            agent-runner {{ $labels.attributes_machine }} has failed every liveness probe for at least 10
+            minutes (machine_probe_failed events). Its agents render offline. Check the host, its network
+            path and its ops server; `ava cluster status` shows the roster.
+        data:
+          - refId: A
+            datasourceUid: loki
+            queryType: ""
+            model:
+              refId: A
+              datasource:
+                type: loki
+                uid: loki
+              editorMode: code
+              expr: >-
+                sum by (attributes_machine) (count_over_time({service_name="unknown_service",
+                event_name="machine_probe_failed"} | json | cluster=".ava" | category="telemetry" [2m]))
+              instant: true
+              queryType: instant
+            relativeTimeRange:
+              from: 120
+              to: 0
+          - refId: C
+            datasourceUid: __expr__
+            queryType: ""
+            model:
+              refId: C
+              datasource:
+                type: __expr__
+                uid: __expr__
+              type: reduce
+              expression: A
+              reducer: mean
+          - refId: D
+            datasourceUid: __expr__
+            queryType: ""
+            model:
+              refId: D
+              datasource:
+                type: __expr__
+                uid: __expr__
+              type: threshold
+              expression: C
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [0]
+                  operator:
+                    type: and
+                  query:
+                    params: [C]
+
+      # ── ava-ops-exec-child-boot-failed: replaces agent/graph/exec/_alerts.py maybe_alert_exec_boot_failure (POST /api/alerts, source agent-exec, per-agent 600s rate limit) ──
+      - uid: ava-ops-exec-child-boot-failed
+        title: "Exec child boot failed"
+        condition: D
+        for: 0s
+        noDataState: OK
+        execErrState: OK
+        labels:
+          severity: warning
+          ruleUID: ava-ops-exec-child-boot-failed
+          metric: exec_child_boot_failed
+          team: ava-ops
+        annotations:
+          summary: "agent {{ $labels.agent_id }} ({{ $labels.machine }}): exec child crashed before running code ({{ $values.C }} in 5m)"
+          description: >-
+            The execute_code child died during bootstrap, before the agent's code ran (typically GET
+            /api/bootstrap unreachable while the gateway was down), so the agent was stranded with the
+            honest "code was NOT executed" envelope. The per-agent 600s rate limit is replaced by Grafana
+            grouping/repeat; the instance resolves 5 minutes after the last boot failure. Event payload
+            carries exc_type and exc_msg (read the Loki line for the cause).
+        data:
+          - refId: A
+            datasourceUid: loki
+            queryType: ""
+            model:
+              refId: A
+              datasource:
+                type: loki
+                uid: loki
+              editorMode: code
+              expr: >-
+                sum by (agent_id, machine) (count_over_time({service_name="unknown_service",
+                event_name="exec_child_boot_failed"} | json | cluster=".ava" | category="telemetry" [5m]))
+              instant: true
+              queryType: instant
+            relativeTimeRange:
+              from: 300
+              to: 0
+          - refId: C
+            datasourceUid: __expr__
+            queryType: ""
+            model:
+              refId: C
+              datasource:
+                type: __expr__
+                uid: __expr__
+              type: reduce
+              expression: A
+              reducer: mean
+          - refId: D
+            datasourceUid: __expr__
+            queryType: ""
+            model:
+              refId: D
+              datasource:
+                type: __expr__
+                uid: __expr__
+              type: threshold
+              expression: C
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [0]
+                  operator:
+                    type: and
+                  query:
+                    params: [C]
+
+      # ── ava-ops-inspect-metrics-gap: replaces gateway/inspect/_metrics_health.py episode alert (upsert_alert source inspect-metrics, per-condition cooldown, store-derived resolve) ──
+      - uid: ava-ops-inspect-metrics-gap
+        title: "Inspector metrics recorder gap"
+        condition: D
+        for: 0s
+        noDataState: OK
+        execErrState: OK
+        labels:
+          severity: warning
+          ruleUID: ava-ops-inspect-metrics-gap
+          metric: inspect_metrics_coverage_gap
+          team: ava-ops
+        annotations:
+          summary: "inspector metrics: agent {{ $labels.agent_id }} {{ $labels.attributes_family }} limited by {{ $labels.attributes_condition }}"
+          description: >-
+            A statistics read on a window inside the observation-collection era shows turns recorded without
+            durations (missing_turn_durations): a live recorder gap, not history. The event is emitted by
+            every statistics read that still shows the gap (reads are user-driven), so the 15-minute
+            trailing window keeps the instance firing while anyone keeps looking and resolves it once reads
+            stop showing the gap. Expected limits (historical coverage, archive precision) are DEBUG log
+            lines only.
+        data:
+          - refId: A
+            datasourceUid: loki
+            queryType: ""
+            model:
+              refId: A
+              datasource:
+                type: loki
+                uid: loki
+              editorMode: code
+              expr: >-
+                sum by (agent_id, attributes_family, attributes_condition)
+                (count_over_time({service_name="unknown_service", event_name="inspect_metrics_coverage_gap"} |
+                json | cluster=".ava" | category="telemetry" [15m]))
+              instant: true
+              queryType: instant
+            relativeTimeRange:
+              from: 900
+              to: 0
+          - refId: C
+            datasourceUid: __expr__
+            queryType: ""
+            model:
+              refId: C
+              datasource:
+                type: __expr__
+                uid: __expr__
+              type: reduce
+              expression: A
+              reducer: mean
+          - refId: D
+            datasourceUid: __expr__
+            queryType: ""
+            model:
+              refId: D
+              datasource:
+                type: __expr__
+                uid: __expr__
+              type: threshold
+              expression: C
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [0]
+                  operator:
+                    type: and
+                  query:
+                    params: [C]
+
+      # ── ava-ops-impersonation-seal-stuck: replaces base/agents/impersonation_event_alerts.py reconcile_seal_stuck_alerts (upsert_alert ImpersonationEventSealStuck, source health-probe) ──
+      - uid: ava-ops-impersonation-seal-stuck
+        title: "Impersonation event log waiting on an open source"
+        condition: D
+        for: 0s
+        noDataState: OK
+        execErrState: OK
+        labels:
+          severity: warning
+          ruleUID: ava-ops-impersonation-seal-stuck
+          metric: impersonation_event_seal_stuck
+          team: ava-ops
+        annotations:
+          summary: "impersonation lease {{ $labels.attributes_lease_id }} (agent {{ $labels.agent_id }}, {{ $labels.attributes_lease_machine }}) ended but its event source is still open ({{ $labels.attributes_pending_reason }})"
+          description: >-
+            An ended automatic impersonation lease cannot complete its event log until the open source
+            seals. The ttl reaper emits one event per lease every pass (about 60s) while the row fact holds;
+            the 3-minute trailing window tolerates missed passes and the instance resolves itself minutes
+            after the source seals.
+        data:
+          - refId: A
+            datasourceUid: loki
+            queryType: ""
+            model:
+              refId: A
+              datasource:
+                type: loki
+                uid: loki
+              editorMode: code
+              expr: >-
+                sum by (agent_id, attributes_lease_id, attributes_lease_machine, attributes_pending_reason)
+                (count_over_time({service_name="unknown_service",
+                event_name="impersonation_event_log_incomplete"} | json | cluster=".ava" | category="telemetry"
+                | attributes_condition="seal_stuck" [3m]))
+              instant: true
+              queryType: instant
+            relativeTimeRange:
+              from: 180
+              to: 0
+          - refId: C
+            datasourceUid: __expr__
+            queryType: ""
+            model:
+              refId: C
+              datasource:
+                type: __expr__
+                uid: __expr__
+              type: reduce
+              expression: A
+              reducer: mean
+          - refId: D
+            datasourceUid: __expr__
+            queryType: ""
+            model:
+              refId: D
+              datasource:
+                type: __expr__
+                uid: __expr__
+              type: threshold
+              expression: C
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [0]
+                  operator:
+                    type: and
+                  query:
+                    params: [C]
+
+      # ── ava-ops-impersonation-capture-failed: replaces base/agents/impersonation_event_alerts.py alert_capture_failed (upsert_alert ImpersonationEventCaptureFailed, source health-probe, never resolved) ──
+      - uid: ava-ops-impersonation-capture-failed
+        title: "Impersonation event capture failed"
+        condition: D
+        for: 0s
+        noDataState: OK
+        execErrState: OK
+        labels:
+          severity: warning
+          ruleUID: ava-ops-impersonation-capture-failed
+          metric: impersonation_event_capture_failed
+          team: ava-ops
+        annotations:
+          summary: "impersonation lease {{ $labels.attributes_lease_id }} (agent {{ $labels.agent_id }}, {{ $labels.attributes_lease_machine }}): event capture failed, the lease can never complete"
+          description: >-
+            A source failed to capture its events, which is permanent: a failed source never completes its
+            lease, so the instance keeps firing for as long as the lease row stays incomplete (the old alert
+            row also stayed unresolved). Notification repeat is the policy's repeat_interval; silence it per
+            lease_id once the lease has been handled by hand.
+        data:
+          - refId: A
+            datasourceUid: loki
+            queryType: ""
+            model:
+              refId: A
+              datasource:
+                type: loki
+                uid: loki
+              editorMode: code
+              expr: >-
+                sum by (agent_id, attributes_lease_id, attributes_lease_machine)
+                (count_over_time({service_name="unknown_service",
+                event_name="impersonation_event_log_incomplete"} | json | cluster=".ava" | category="telemetry"
+                | attributes_condition="capture_failed" [3m]))
+              instant: true
+              queryType: instant
+            relativeTimeRange:
+              from: 180
+              to: 0
+          - refId: C
+            datasourceUid: __expr__
+            queryType: ""
+            model:
+              refId: C
+              datasource:
+                type: __expr__
+                uid: __expr__
+              type: reduce
+              expression: A
+              reducer: mean
+          - refId: D
+            datasourceUid: __expr__
+            queryType: ""
+            model:
+              refId: D
+              datasource:
+                type: __expr__
+                uid: __expr__
+              type: threshold
+              expression: C
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [0]
+                  operator:
+                    type: and
+                  query:
+                    params: [C]
+
+      # ── ava-ops-im-push-failed: replaces services/im_bridge/push_watchdog.py alert_push_failure (cross-channel send_to_owner push, threshold 2, 1800s cooldown, adapter._push_alerted_at) ──
+      - uid: ava-ops-im-push-failed
+        title: "IM push link failing (weixin)"
+        condition: D
+        for: 0s
+        noDataState: OK
+        execErrState: OK
+        labels:
+          severity: warning
+          ruleUID: ava-ops-im-push-failed
+          metric: im_push_failed
+          team: ava-ops
+        annotations:
+          summary: "weixin push link failed {{ $values.C }} sends in 10m (2+ consecutive failures)"
+          description: >-
+            weixin outbound sends keep failing after their retry: the iLink context_token has expired, so
+            the user can still message the bot but never receives replies. Only the user's own message
+            refreshes the token: send any message (e.g. "hi") to the weixin bot. The alert is delivered
+            through the ops fan-out to the other IM channels. The old 30-minute cooldown is the notification
+            policy's repeat interval.
+        data:
+          - refId: A
+            datasourceUid: loki
+            queryType: ""
+            model:
+              refId: A
+              datasource:
+                type: loki
+                uid: loki
+              editorMode: code
+              expr: >-
+                sum by (attributes_channel) (count_over_time({service_name="unknown_service",
+                event_name="im_push_failed"} | json | cluster=".ava" | category="telemetry" |
+                attributes_channel="weixin" | attributes_failures >= 2 [10m]))
+              instant: true
+              queryType: instant
+            relativeTimeRange:
+              from: 600
+              to: 0
+          - refId: C
+            datasourceUid: __expr__
+            queryType: ""
+            model:
+              refId: C
+              datasource:
+                type: __expr__
+                uid: __expr__
+              type: reduce
+              expression: A
+              reducer: mean
+          - refId: D
+            datasourceUid: __expr__
+            queryType: ""
+            model:
+              refId: D
+              datasource:
+                type: __expr__
+                uid: __expr__
+              type: threshold
+              expression: C
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [0]
+                  operator:
+                    type: and
+                  query:
+                    params: [C]
+
+      # ── ava-ops-im-feishu-owner-seed-failed: replaces services/im_bridge/adapters/feishu.py _seed_owner_from_switch_state telegram send_to_owner message (copy.FEISHU_OWNER_SEED_*) ──
+      - uid: ava-ops-im-feishu-owner-seed-failed
+        title: "Feishu owner chat not restored at bridge boot"
+        condition: D
+        for: 0s
+        noDataState: OK
+        execErrState: OK
+        labels:
+          severity: warning
+          ruleUID: ava-ops-im-feishu-owner-seed-failed
+          metric: im_feishu_owner_seed_failed
+          team: ava-ops
+        annotations:
+          summary: "feishu notifications are blind after the bridge restart ({{ $labels.attributes_reason }})"
+          description: >-
+            The im_bridge could not restore the feishu owner chat from its persisted switch state at boot
+            (no_source: no feishu chat recorded; ambiguous: more than one), so the feishu outbound leg is
+            skipped until the user messages the feishu bot once (send e.g. "hi"). Emitted once per bridge
+            boot, hence the 30-minute window.
+        data:
+          - refId: A
+            datasourceUid: loki
+            queryType: ""
+            model:
+              refId: A
+              datasource:
+                type: loki
+                uid: loki
+              editorMode: code
+              expr: >-
+                sum by (attributes_reason) (count_over_time({service_name="unknown_service",
+                event_name="im_feishu_owner_seed_failed"} | json | cluster=".ava" | category="telemetry" [30m]))
+              instant: true
+              queryType: instant
+            relativeTimeRange:
+              from: 1800
+              to: 0
+          - refId: C
+            datasourceUid: __expr__
+            queryType: ""
+            model:
+              refId: C
+              datasource:
+                type: __expr__
+                uid: __expr__
+              type: reduce
+              expression: A
+              reducer: mean
+          - refId: D
+            datasourceUid: __expr__
+            queryType: ""
+            model:
+              refId: D
+              datasource:
+                type: __expr__
+                uid: __expr__
+              type: threshold
+              expression: C
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [0]
+                  operator:
+                    type: and
+                  query:
+                    params: [C]
+
+      # ── ava-ops-delivery-stalled: replaces services/delivery_watchdog/daemon.py _DeployWindowGate (deploy-window hold + settle window, AVA_DELIVERY_WATCHDOG_ALERT_GRACE_SECONDS). The per-row event itself is unchanged; this rule is its Grafana notification path (the event had no per-event rule, only the >50/10m backlog rule). ──
+      - uid: ava-ops-delivery-stalled
+        title: "Chat delivery stalled (delivery_stalled event)"
+        condition: D
+        for: 1m
+        noDataState: OK
+        execErrState: OK
+        labels:
+          severity: warning
+          ruleUID: ava-ops-delivery-stalled
+          metric: delivery_stalled
+          team: ava-ops
+        annotations:
+          summary: "Chat delivery to agent {{ $labels.agent_id }} is stalled ({{ $values.C }} stalled inbound(s) in 3m)"
+          description: >-
+            The delivery watchdog emits one delivery_stalled event per chat inbound that stayed pending past
+            AVA_DELIVERY_WATCHDOG_THRESHOLD_SECONDS (30s) while its owner is idling or terminated (lost
+            pub/sub wake or a claim loop that is not running). Wake re-dispatch and the dead-letter sweeps
+            keep running; this rule is only the notification. Deploy windows are silenced upstream by the
+            fleet-update silence, so a resume's claim tail does not page. The rule is per agent (stream
+            label agent_id); ava-ops-delivery-stalled-backlog stays as the fleet-wide volume rule.
+        data:
+          - refId: A
+            datasourceUid: loki
+            queryType: ""
+            model:
+              refId: A
+              datasource:
+                type: loki
+                uid: loki
+              editorMode: code
+              expr: >-
+                sum by (agent_id) (count_over_time({service_name="unknown_service",
+                event_name="delivery_stalled"} | json | cluster=".ava" | category="telemetry" [3m]))
+              instant: true
+              queryType: instant
+            relativeTimeRange:
+              from: 180
+              to: 0
+          - refId: C
+            datasourceUid: __expr__
+            queryType: ""
+            model:
+              refId: C
+              datasource:
+                type: __expr__
+                uid: __expr__
+              type: reduce
+              expression: A
+              reducer: mean
+          - refId: D
+            datasourceUid: __expr__
+            queryType: ""
+            model:
+              refId: D
+              datasource:
+                type: __expr__
+                uid: __expr__
+              type: threshold
+              expression: C
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [0]
+                  operator:
+                    type: and
+                  query:
+                    params: [C]
+
+      # ── ava-ops-db-pool-acquire-slow: replaces agent/db/__init__.py per-host cooldown marker file (db-pool-slow-acquire.warn) and AVA_DB_POOL_SLOW_ACQUIRE_WARN_COOLDOWN_SECONDS. AVA_DB_POOL_SLOW_ACQUIRE_WARN_SECONDS (the 10s detection threshold) stays. Every slow borrow now WARNs and emits the event; the for: 2m + count window replaces the 300s coalescing. ──
+      - uid: ava-ops-db-pool-acquire-slow
+        title: "DB pool borrows slow (db_pool_acquire_slow)"
+        condition: D
+        for: 2m
+        noDataState: OK
+        execErrState: OK
+        labels:
+          severity: warning
+          ruleUID: ava-ops-db-pool-acquire-slow
+          metric: db_pool_acquire_slow
+          team: ava-ops
+        annotations:
+          summary: "{{ $values.C }} agent DB pool borrows took >=10s on {{ $labels.machine }} in 10m"
+          description: >-
+            Each agent process on {{ $labels.machine }} emits one db_pool_acquire_slow event (WARNING) per
+            successful connection borrow that took at least 10s: a stalled host, Postgres/PgBouncer
+            reconnecting, or a saturated client pool. The event carries elapsed, slot_wait_ms, check_ms and
+            the pool state (pool_size, pool_available, requests_waiting, connections_errors) — check_ms ~=
+            elapsed means a stalled reset check on the host, slot_wait_ms ~= elapsed means pool saturation.
+            One host stall slows every agent's pool at once, so the rule groups by machine and Grafana
+            notification grouping replaces the old per-host cooldown marker.
+        data:
+          - refId: A
+            datasourceUid: loki
+            queryType: ""
+            model:
+              refId: A
+              datasource:
+                type: loki
+                uid: loki
+              editorMode: code
+              expr: >-
+                sum by (machine) (count_over_time({service_name="unknown_service",
+                event_name="db_pool_acquire_slow"} | json | cluster=".ava" | category="telemetry" [10m]))
+              instant: true
+              queryType: instant
+            relativeTimeRange:
+              from: 600
+              to: 0
+          - refId: C
+            datasourceUid: __expr__
+            queryType: ""
+            model:
+              refId: C
+              datasource:
+                type: __expr__
+                uid: __expr__
+              type: reduce
+              expression: A
+              reducer: mean
+          - refId: D
+            datasourceUid: __expr__
+            queryType: ""
+            model:
+              refId: D
+              datasource:
+                type: __expr__
+                uid: __expr__
+              type: threshold
+              expression: C
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [0]
+                  operator:
+                    type: and
+                  query:
+                    params: [C]
+
+      # ── ava-ops-root-unit-restart-failed: replaces services/ava_root/alerts.py AlertRouter/AlertWebhookNotifier: fire once per episode (kind restart_failed, severity error) posted to /api/alerts with source ava-root ──
+      - uid: ava-ops-root-unit-restart-failed
+        title: "Root unit replacement failed"
+        condition: D
+        for: 0m
+        noDataState: OK
+        execErrState: OK
+        labels:
+          severity: error
+          ruleUID: ava-ops-root-unit-restart-failed
+          metric: root_unit_restart_failed
+          team: ava-ops
+        annotations:
+          summary: "Root unit {{ $labels.attributes_unit }}: replacement failed and is being retried"
+          description: >-
+            The unit's intent is running and its last replacement failed at its down or up half; the health
+            monitor retries under its backoff. root_unit_failure_state is emitted on every health round
+            (~60s) while the state holds, so the alert resolves by itself once the unit is replaced or
+            stopped. Check the detail on the matching event and `ava status` on the owning machine.
+        data:
+          - refId: A
+            datasourceUid: loki
+            queryType: ""
+            model:
+              refId: A
+              datasource:
+                type: loki
+                uid: loki
+              editorMode: code
+              expr: >-
+                sum by (attributes_unit) (count_over_time({service_name="unknown_service",
+                event_name="root_unit_failure_state"} | json | cluster=".ava" | category="telemetry" |
+                attributes_kind="restart_failed" [3m]))
+              instant: true
+              queryType: instant
+            relativeTimeRange:
+              from: 180
+              to: 0
+          - refId: C
+            datasourceUid: __expr__
+            queryType: ""
+            model:
+              refId: C
+              datasource:
+                type: __expr__
+                uid: __expr__
+              type: reduce
+              expression: A
+              reducer: mean
+          - refId: D
+            datasourceUid: __expr__
+            queryType: ""
+            model:
+              refId: D
+              datasource:
+                type: __expr__
+                uid: __expr__
+              type: threshold
+              expression: C
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [0]
+                  operator:
+                    type: and
+                  query:
+                    params: [C]
+
+      # ── ava-ops-root-unit-breaker-open: replaces services/ava_root/alerts.py episode kind breaker_open (severity critical) ──
+      - uid: ava-ops-root-unit-breaker-open
+        title: "Root unit restart breaker open"
+        condition: D
+        for: 0m
+        noDataState: OK
+        execErrState: OK
+        labels:
+          severity: critical
+          ruleUID: ava-ops-root-unit-breaker-open
+          metric: root_unit_breaker_open
+          team: ava-ops
+        annotations:
+          summary: "Root unit {{ $labels.attributes_unit }}: restart breaker open, restarts held"
+          description: >-
+            Repeated non-alive health rounds opened the unit's restart breaker; restarts are held until a
+            probe-alive round, so an operator must act. The state is re-emitted every health round while it
+            holds. A unit that also has a recorded replacement failure reports as restart_failed instead
+            (kind priority restart_failed > breaker_open > custody_held), so this rule only sees units whose
+            last replacement did not itself fail.
+        data:
+          - refId: A
+            datasourceUid: loki
+            queryType: ""
+            model:
+              refId: A
+              datasource:
+                type: loki
+                uid: loki
+              editorMode: code
+              expr: >-
+                sum by (attributes_unit) (count_over_time({service_name="unknown_service",
+                event_name="root_unit_failure_state"} | json | cluster=".ava" | category="telemetry" |
+                attributes_kind="breaker_open" [3m]))
+              instant: true
+              queryType: instant
+            relativeTimeRange:
+              from: 180
+              to: 0
+          - refId: C
+            datasourceUid: __expr__
+            queryType: ""
+            model:
+              refId: C
+              datasource:
+                type: __expr__
+                uid: __expr__
+              type: reduce
+              expression: A
+              reducer: mean
+          - refId: D
+            datasourceUid: __expr__
+            queryType: ""
+            model:
+              refId: D
+              datasource:
+                type: __expr__
+                uid: __expr__
+              type: threshold
+              expression: C
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [0]
+                  operator:
+                    type: and
+                  query:
+                    params: [C]
+
+      # ── ava-ops-root-unit-custody-held: replaces services/ava_root/alerts.py episode kind custody_held (severity warning) ──
+      - uid: ava-ops-root-unit-custody-held
+        title: "Root unit native custody held"
+        condition: D
+        for: 0m
+        noDataState: OK
+        execErrState: OK
+        labels:
+          severity: warning
+          ruleUID: ava-ops-root-unit-custody-held
+          metric: root_unit_custody_held
+          team: ava-ops
+        annotations:
+          summary: "Root unit {{ $labels.attributes_unit }}: native custody blocks revival until reconciliation"
+          description: >-
+            The unit's intent is running but retained native custody (a generation that is not active)
+            blocks revival until the custody reconcile pass proves it gone. No operator action is implied
+            unless it persists; the state is re-emitted every health round and resolves on its own.
+        data:
+          - refId: A
+            datasourceUid: loki
+            queryType: ""
+            model:
+              refId: A
+              datasource:
+                type: loki
+                uid: loki
+              editorMode: code
+              expr: >-
+                sum by (attributes_unit) (count_over_time({service_name="unknown_service",
+                event_name="root_unit_failure_state"} | json | cluster=".ava" | category="telemetry" |
+                attributes_kind="custody_held" [3m]))
+              instant: true
+              queryType: instant
+            relativeTimeRange:
+              from: 180
+              to: 0
+          - refId: C
+            datasourceUid: __expr__
+            queryType: ""
+            model:
+              refId: C
+              datasource:
+                type: __expr__
+                uid: __expr__
+              type: reduce
+              expression: A
+              reducer: mean
+          - refId: D
+            datasourceUid: __expr__
+            queryType: ""
+            model:
+              refId: D
+              datasource:
+                type: __expr__
+                uid: __expr__
+              type: threshold
+              expression: C
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [0]
+                  operator:
+                    type: and
+                  query:
+                    params: [C]
+
+      # ── ava-ops-root-unit-not-revivable: replaces services/ava_root/health.py terminal_escalate_rounds=2 (consecutive terminal rounds escalate WARNING -> ERROR) ──
+      - uid: ava-ops-root-unit-not-revivable
+        title: "Root unit not revivable"
+        condition: D
+        for: 0m
+        noDataState: OK
+        execErrState: OK
+        labels:
+          severity: error
+          ruleUID: ava-ops-root-unit-not-revivable
+          metric: root_unit_not_revivable
+          team: ava-ops
+        annotations:
+          summary: "Root unit {{ $labels.attributes_unit }}: terminal probe verdict on consecutive rounds ({{ $values.C }} in 2m)"
+          description: >-
+            Two consecutive health rounds observed a terminal verdict (unknown identity, inspection error,
+            timeout or foreign listener) that this unit cannot revive. A single round is usually an
+            inspection race and stays a WARNING log only; this rule needs at least two reports inside two
+            minutes (rounds run every ~60s). Resolve the reported ownership or inspection failure by hand;
+            the detail is on the matching root_unit_not_revivable event.
+        data:
+          - refId: A
+            datasourceUid: loki
+            queryType: ""
+            model:
+              refId: A
+              datasource:
+                type: loki
+                uid: loki
+              editorMode: code
+              expr: >-
+                sum by (attributes_unit) (count_over_time({service_name="unknown_service",
+                event_name="root_unit_not_revivable"} | json | cluster=".ava" | category="telemetry" [2m]))
+              instant: true
+              queryType: instant
+            relativeTimeRange:
+              from: 120
+              to: 0
+          - refId: C
+            datasourceUid: __expr__
+            queryType: ""
+            model:
+              refId: C
+              datasource:
+                type: __expr__
+                uid: __expr__
+              type: reduce
+              expression: A
+              reducer: mean
+          - refId: D
+            datasourceUid: __expr__
+            queryType: ""
+            model:
+              refId: D
+              datasource:
+                type: __expr__
+                uid: __expr__
+              type: threshold
+              expression: C
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [1]
+                  operator:
+                    type: and
+                  query:
+                    params: [C]
+
+      # ── ava-ops-root-diagnostic-venv: replaces AVA_VENV_PROBE_FAILURE_THRESHOLD (default 2) gating the root_diagnostic episode log ──
+      - uid: ava-ops-root-diagnostic-venv
+        title: "Root venv diagnostic failing"
+        condition: D
+        for: 0m
+        noDataState: OK
+        execErrState: OK
+        labels:
+          severity: warning
+          ruleUID: ava-ops-root-diagnostic-venv
+          metric: root_diagnostic_venv
+          team: ava-ops
+        annotations:
+          summary: "Root venv diagnostic non-alive on consecutive rounds ({{ $values.C }} in 3m)"
+          description: >-
+            The root checkout's dependency/import check returned down or unavailable on at least two samples
+            in three minutes (60s cadence). Two consecutive samples filter single deadline misses under host
+            churn. Inspect the root_diagnostic event detail (venv violations, or uv missing).
+        data:
+          - refId: A
+            datasourceUid: loki
+            queryType: ""
+            model:
+              refId: A
+              datasource:
+                type: loki
+                uid: loki
+              editorMode: code
+              expr: >-
+                sum(count_over_time({service_name="unknown_service", event_name="root_diagnostic"} | json |
+                cluster=".ava" | category="telemetry" | attributes_diagnostic="venv" |
+                attributes_verdict!="alive" [3m]))
+              instant: true
+              queryType: instant
+            relativeTimeRange:
+              from: 180
+              to: 0
+          - refId: C
+            datasourceUid: __expr__
+            queryType: ""
+            model:
+              refId: C
+              datasource:
+                type: __expr__
+                uid: __expr__
+              type: reduce
+              expression: A
+              reducer: mean
+          - refId: D
+            datasourceUid: __expr__
+            queryType: ""
+            model:
+              refId: D
+              datasource:
+                type: __expr__
+                uid: __expr__
+              type: threshold
+              expression: C
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [1]
+                  operator:
+                    type: and
+                  query:
+                    params: [C]
+
+      # ── ava-ops-root-diagnostic-brew-pin: replaces AVA_BREW_PIN_PROBE_FAILURE_THRESHOLD (default 2) gating the root_diagnostic episode log ──
+      - uid: ava-ops-root-diagnostic-brew-pin
+        title: "Root brew-pin diagnostic failing"
+        condition: D
+        for: 0m
+        noDataState: OK
+        execErrState: OK
+        labels:
+          severity: warning
+          ruleUID: ava-ops-root-diagnostic-brew-pin
+          metric: root_diagnostic_brew_pin
+          team: ava-ops
+        annotations:
+          summary: "Root brew-pin diagnostic non-alive on consecutive rounds ({{ $values.C }} in 3m)"
+          description: >-
+            Approved Homebrew formulae are unpinned, or the brew inspection was unavailable, on at least two
+            samples in three minutes (60s cadence). Two samples filter a single host-stall deadline miss.
+            Inspect the root_diagnostic event detail for the unpinned formulae.
+        data:
+          - refId: A
+            datasourceUid: loki
+            queryType: ""
+            model:
+              refId: A
+              datasource:
+                type: loki
+                uid: loki
+              editorMode: code
+              expr: >-
+                sum(count_over_time({service_name="unknown_service", event_name="root_diagnostic"} | json |
+                cluster=".ava" | category="telemetry" | attributes_diagnostic="brew-pin" |
+                attributes_verdict!="alive" [3m]))
+              instant: true
+              queryType: instant
+            relativeTimeRange:
+              from: 180
+              to: 0
+          - refId: C
+            datasourceUid: __expr__
+            queryType: ""
+            model:
+              refId: C
+              datasource:
+                type: __expr__
+                uid: __expr__
+              type: reduce
+              expression: A
+              reducer: mean
+          - refId: D
+            datasourceUid: __expr__
+            queryType: ""
+            model:
+              refId: D
+              datasource:
+                type: __expr__
+                uid: __expr__
+              type: threshold
+              expression: C
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [1]
+                  operator:
+                    type: and
+                  query:
+                    params: [C]
+
+      # ── ava-ops-health-probe-warning: replaces health_alerts._alert_failure WARNING grade at transition_warning_seconds (180s) of an unhealthy episode ──
+      - uid: ava-ops-health-probe-warning
+        title: "Cluster health probe failing (3 min)"
+        condition: D
+        for: 3m
+        noDataState: OK
+        execErrState: OK
+        labels:
+          severity: warning
+          ruleUID: ava-ops-health-probe-warning
+          metric: health_probe_failing
+          team: ava-ops
+        annotations:
+          summary: "Cluster health check {{ $labels.attributes_check }} failing"
+          description: >-
+            The cluster health probe has reported check {{ $labels.attributes_check }} as failing on every
+            run for at least 3 minutes (the normal-recovery budget for a node restart, rollout, watchdog
+            self-heal or network blip). Checks: gateway_liveness, agent_population, crash_loop, schema,
+            service_probe, disk_usage, walg_archive, editable_install, source_tree, provider_balance,
+            provider_blocked_agents. The event carries the failure text (attributes.message) and class
+            (attributes.failure_class = code | environment | maintenance | alert-only) - read the latest
+            health_probe_failing event, or the probe's stderr in the OS cron log.
+        data:
+          - refId: A
+            datasourceUid: loki
+            queryType: ""
+            model:
+              refId: A
+              datasource:
+                type: loki
+                uid: loki
+              editorMode: code
+              expr: >-
+                sum by (attributes_check) (count_over_time({service_name="unknown_service",
+                event_name="health_probe_failing"} | json | cluster=".ava" | category="telemetry" [8m]))
+              instant: true
+              queryType: instant
+            relativeTimeRange:
+              from: 480
+              to: 0
+          - refId: C
+            datasourceUid: __expr__
+            queryType: ""
+            model:
+              refId: C
+              datasource:
+                type: __expr__
+                uid: __expr__
+              type: reduce
+              expression: A
+              reducer: mean
+          - refId: D
+            datasourceUid: __expr__
+            queryType: ""
+            model:
+              refId: D
+              datasource:
+                type: __expr__
+                uid: __expr__
+              type: threshold
+              expression: C
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [0]
+                  operator:
+                    type: and
+                  query:
+                    params: [C]
+
+      # ── ava-ops-health-probe-error: replaces health_alerts._alert_failure ERROR grade at transition_error_seconds (600s) - the in-place WARNING -> ERROR escalation becomes two coexisting rules ──
+      - uid: ava-ops-health-probe-error
+        title: "Cluster health probe failing (10 min)"
+        condition: D
+        for: 10m
+        noDataState: OK
+        execErrState: OK
+        labels:
+          severity: error
+          ruleUID: ava-ops-health-probe-error
+          metric: health_probe_failing
+          team: ava-ops
+        annotations:
+          summary: "Cluster health check {{ $labels.attributes_check }} still failing after 10 minutes"
+          description: >-
+            Check {{ $labels.attributes_check }} has failed on every health-probe run for at least 10
+            minutes - past the normal-recovery window; this is an outage, not a transition. See the warning
+            rule's description for the check list and where to read the failure text. Note: the warning rule
+            keeps firing alongside this one (two alerts per check, same attributes_check label; there is no
+            in-place escalation or inhibition).
+        data:
+          - refId: A
+            datasourceUid: loki
+            queryType: ""
+            model:
+              refId: A
+              datasource:
+                type: loki
+                uid: loki
+              editorMode: code
+              expr: >-
+                sum by (attributes_check) (count_over_time({service_name="unknown_service",
+                event_name="health_probe_failing"} | json | cluster=".ava" | category="telemetry" [8m]))
+              instant: true
+              queryType: instant
+            relativeTimeRange:
+              from: 480
+              to: 0
+          - refId: C
+            datasourceUid: __expr__
+            queryType: ""
+            model:
+              refId: C
+              datasource:
+                type: __expr__
+                uid: __expr__
+              type: reduce
+              expression: A
+              reducer: mean
+          - refId: D
+            datasourceUid: __expr__
+            queryType: ""
+            model:
+              refId: D
+              datasource:
+                type: __expr__
+                uid: __expr__
+              type: threshold
+              expression: C
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [0]
+                  operator:
+                    type: and
+                  query:
+                    params: [C]
+
+      # ── ava-ops-health-probe-silent: replaces no old equivalent: the removed state-file alerting had no dead-man for the probe itself ──
+      - uid: ava-ops-health-probe-silent
+        title: "Cluster health probe silent"
+        condition: D
+        for: 0m
+        noDataState: OK
+        execErrState: OK
+        labels:
+          severity: error
+          ruleUID: ava-ops-health-probe-silent
+          metric: health_probe_silent
+          team: ava-ops
+        annotations:
+          summary: "The cluster health probe has not run in 15 minutes"
+          description: >-
+            No health_probe_ran heartbeat reached Loki in 15 minutes although the probe runs every 5. Either
+            the OS job (`ava cluster health-probe-register`) is gone or failing before the end of its run,
+            or the event path is down (the stream-freshness rule covers the latter). Every
+            health_probe_failing rule is blind while this fires: check the probe's cron log and run `ava
+            cluster health-probe` by hand.
+        data:
+          - refId: A
+            datasourceUid: loki
+            queryType: ""
+            model:
+              refId: A
+              datasource:
+                type: loki
+                uid: loki
+              editorMode: code
+              expr: >-
+                absent_over_time({service_name="unknown_service", event_name="health_probe_ran"} | json |
+                cluster=".ava" | category="telemetry" [15m])
+              instant: true
+              queryType: instant
+            relativeTimeRange:
+              from: 900
+              to: 0
+          - refId: C
+            datasourceUid: __expr__
+            queryType: ""
+            model:
+              refId: C
+              datasource:
+                type: __expr__
+                uid: __expr__
+              type: reduce
+              expression: A
+              reducer: mean
+          - refId: D
+            datasourceUid: __expr__
+            queryType: ""
+            model:
+              refId: D
+              datasource:
+                type: __expr__
+                uid: __expr__
+              type: threshold
+              expression: C
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [0]
+                  operator:
+                    type: and
+                  query:
+                    params: [C]
+
+      # ── ava-ops-service-start-unready: replaces cli/commands/_probe.py start-readiness alerts rows (upsert_alert source=start-readiness, fingerprint reuse, resolved edge) ──
+      - uid: ava-ops-service-start-unready
+        title: "Non-critical service not ready after start"
+        condition: D
+        for: 0m
+        noDataState: OK
+        execErrState: OK
+        labels:
+          severity: warning
+          ruleUID: ava-ops-service-start-unready
+          metric: service_start_unready
+          team: ava-ops
+        annotations:
+          summary: "Non-critical service {{ $labels.attributes_service }} not ready within 45s of ava start"
+          description: >-
+            `ava start` finished without failing, but the non-critical service {{ $labels.attributes_service
+            }} did not become ready within its short window. ava-root keeps trying to revive it; `ava
+            status` re-checks and `ava start` is idempotent to retry. A standing outage of the service is
+            also covered by the health-probe `service_probe` check.
+        data:
+          - refId: A
+            datasourceUid: loki
+            queryType: ""
+            model:
+              refId: A
+              datasource:
+                type: loki
+                uid: loki
+              editorMode: code
+              expr: >-
+                sum by (attributes_service) (count_over_time({service_name="unknown_service",
+                event_name="service_start_unready"} | json | cluster=".ava" | category="telemetry" [30m]))
+              instant: true
+              queryType: instant
+            relativeTimeRange:
+              from: 1800
+              to: 0
+          - refId: C
+            datasourceUid: __expr__
+            queryType: ""
+            model:
+              refId: C
+              datasource:
+                type: __expr__
+                uid: __expr__
+              type: reduce
+              expression: A
+              reducer: mean
+          - refId: D
+            datasourceUid: __expr__
+            queryType: ""
+            model:
+              refId: D
+              datasource:
+                type: __expr__
+                uid: __expr__
+              type: threshold
+              expression: C
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [0]
+                  operator:
+                    type: and
+                  query:
+                    params: [C]
+
+      # ── ava-ops-schedule-verify-failed: replaces cli/commands/management/schedules_verify.py _alert_verify (POST /api/alerts source=schedule-verify with open-instance starts_at reuse) ──
+      - uid: ava-ops-schedule-verify-failed
+        title: "Schedule scripts fail dry-import"
+        condition: D
+        for: 0m
+        noDataState: OK
+        execErrState: OK
+        labels:
+          severity: error
+          ruleUID: ava-ops-schedule-verify-failed
+          metric: schedule_verify_failed
+          team: ava-ops
+        annotations:
+          summary: "In-store schedule scripts fail dry-import or call-signature binding ({{ $values.C }} failed sweep(s) in 1h)"
+          description: >-
+            `ava schedules verify` found DB-embedded schedule scripts that no longer import or bind against
+            the checkout (a module move or signature change), or the sweep itself failed. The event's
+            attributes.detail lists `id=... name=... missing=...` per script. Re-sync the built-in schedules
+            from the repo (`ava schedules provision`) or fix the agent-written script, then re-run `ava
+            schedules verify`.
+        data:
+          - refId: A
+            datasourceUid: loki
+            queryType: ""
+            model:
+              refId: A
+              datasource:
+                type: loki
+                uid: loki
+              editorMode: code
+              expr: >-
+                sum(count_over_time({service_name="unknown_service", event_name="schedule_verify_failed"} | json
+                | cluster=".ava" | category="telemetry" [1h]))
+              instant: true
+              queryType: instant
+            relativeTimeRange:
+              from: 3600
+              to: 0
+          - refId: C
+            datasourceUid: __expr__
+            queryType: ""
+            model:
+              refId: C
+              datasource:
+                type: __expr__
+                uid: __expr__
+              type: reduce
+              expression: A
+              reducer: mean
+          - refId: D
+            datasourceUid: __expr__
+            queryType: ""
+            model:
+              refId: D
+              datasource:
+                type: __expr__
+                uid: __expr__
+              type: threshold
+              expression: C
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [0]
+                  operator:
+                    type: and
+                  query:
+                    params: [C]
+
+      # ── ava-ops-agent-continuation-lost: replaces cli/commands/lifecycle/_failed_receipts.py _notify_owner (a direct alerts row plus IM push through cli/commands/_probe.py) ──
+      - uid: ava-ops-agent-continuation-lost
+        title: "Agent continuation lost at ava start"
+        condition: D
+        for: 0m
+        noDataState: OK
+        execErrState: OK
+        labels:
+          severity: error
+          ruleUID: ava-ops-agent-continuation-lost
+          metric: agent_continuation_lost
+          team: ava-ops
+        annotations:
+          summary: "agent {{ $labels.agent_id }}: its continuation failed ({{ $labels.attributes_failure_category }}) at a maintenance hold and cannot be re-delivered"
+          description: >-
+            An agent's continuation raised during a stop's drain and its durable restart pointer is gone, so
+            `ava start` could not re-deliver it when it released the hold. The agent will not continue its
+            interrupted work by itself: read the agent_continuation_lost event (holder, reason) and re-
+            prompt or resurrect the agent. Emitted once per agent per start, so the instance resolves an
+            hour after.
+        data:
+          - refId: A
+            datasourceUid: loki
+            queryType: ""
+            model:
+              refId: A
+              datasource:
+                type: loki
+                uid: loki
+              editorMode: code
+              expr: >-
+                sum by (agent_id, attributes_failure_category) (count_over_time({service_name="unknown_service",
+                event_name="agent_continuation_lost"} | json | cluster=".ava" | category="telemetry" [1h]))
+              instant: true
+              queryType: instant
+            relativeTimeRange:
+              from: 3600
+              to: 0
+          - refId: C
+            datasourceUid: __expr__
+            queryType: ""
+            model:
+              refId: C
+              datasource:
+                type: __expr__
+                uid: __expr__
+              type: reduce
+              expression: A
+              reducer: mean
+          - refId: D
+            datasourceUid: __expr__
+            queryType: ""
+            model:
+              refId: D
+              datasource:
+                type: __expr__
+                uid: __expr__
+              type: threshold
+              expression: C
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [0]
+                  operator:
+                    type: and
+                  query:
+                    params: [C]
+
   - orgId: 1
     name: ava-ops-slow
     folder: Ava
@@ -3282,6 +4784,210 @@ groups:
                 - evaluator:
                     type: lt
                     params: [1]
+                  operator:
+                    type: and
+                  query:
+                    params: [C]
+
+      # ── ava-ops-hosted-boot-recovery-deferred: replaces services/agent_host/boot_defer.py consecutive-boot streak ledger + ALERT_AFTER_BOOTS=3 escalation to hosted_boot_recovery_stalled (event renamed hosted_boot_recovery_deferred, emitted every deferred boot; consecutive-ness is approximated by a 24h count) ──
+      - uid: ava-ops-hosted-boot-recovery-deferred
+        title: "Hosted boot recovery deferred repeatedly"
+        condition: D
+        for: 0s
+        noDataState: OK
+        execErrState: OK
+        labels:
+          severity: warning
+          ruleUID: ava-ops-hosted-boot-recovery-deferred
+          metric: hosted_boot_recovery_deferred
+          team: ava-ops
+        annotations:
+          summary: "hosted boot recovery deferred for agent {{ $labels.agent_id }} on {{ $values.C }} boots in 24h"
+          description: >-
+            Retained exec request evidence is not clearing on its own: the agent host deferred the agent's
+            hosted-force recovery on three or more boots within 24 hours (one boot can be a race, two an
+            unlucky restart cadence). The event line carries the evidence and the disposition command hint.
+            The instance resolves 24 hours after the last deferral.
+        data:
+          - refId: A
+            datasourceUid: loki
+            queryType: ""
+            model:
+              refId: A
+              datasource:
+                type: loki
+                uid: loki
+              editorMode: code
+              expr: >-
+                sum by (agent_id) (count_over_time({service_name="unknown_service",
+                event_name="hosted_boot_recovery_deferred"} | json | cluster=".ava" | category="telemetry"
+                [24h]))
+              instant: true
+              queryType: instant
+            relativeTimeRange:
+              from: 86400
+              to: 0
+          - refId: C
+            datasourceUid: __expr__
+            queryType: ""
+            model:
+              refId: C
+              datasource:
+                type: __expr__
+                uid: __expr__
+              type: reduce
+              expression: A
+              reducer: mean
+          - refId: D
+            datasourceUid: __expr__
+            queryType: ""
+            model:
+              refId: D
+              datasource:
+                type: __expr__
+                uid: __expr__
+              type: threshold
+              expression: C
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [2]
+                  operator:
+                    type: and
+                  query:
+                    params: [C]
+
+      # ── ava-ops-root-diagnostic-browser-reach: replaces AVA_BROWSER_REACH_FAILURE_THRESHOLD (default 3) gating the root_diagnostic episode log ──
+      - uid: ava-ops-root-diagnostic-browser-reach
+        title: "Root browser-reach diagnostic failing"
+        condition: D
+        for: 0m
+        noDataState: OK
+        execErrState: OK
+        labels:
+          severity: warning
+          ruleUID: ava-ops-root-diagnostic-browser-reach
+          metric: root_diagnostic_browser_reach
+          team: ava-ops
+        annotations:
+          summary: "Root browser-reach diagnostic non-alive on 3+ consecutive probes ({{ $values.C }} in 16m)"
+          description: >-
+            The browser canary (CDP page fetch of the gateway URL) failed while the host baseline succeeded,
+            or its prerequisite was unavailable, on at least three samples in sixteen minutes. The sample
+            cadence is browser_reach_probe_interval_s (default 300s), so three samples ~ 10-15 minutes; the
+            16m window assumes the default, widen it with that setting. Inspect the root_diagnostic event
+            detail (canary vs host-path result).
+        data:
+          - refId: A
+            datasourceUid: loki
+            queryType: ""
+            model:
+              refId: A
+              datasource:
+                type: loki
+                uid: loki
+              editorMode: code
+              expr: >-
+                sum(count_over_time({service_name="unknown_service", event_name="root_diagnostic"} | json |
+                cluster=".ava" | category="telemetry" | attributes_diagnostic="browser-reach" |
+                attributes_verdict!="alive" [16m]))
+              instant: true
+              queryType: instant
+            relativeTimeRange:
+              from: 960
+              to: 0
+          - refId: C
+            datasourceUid: __expr__
+            queryType: ""
+            model:
+              refId: C
+              datasource:
+                type: __expr__
+                uid: __expr__
+              type: reduce
+              expression: A
+              reducer: mean
+          - refId: D
+            datasourceUid: __expr__
+            queryType: ""
+            model:
+              refId: D
+              datasource:
+                type: __expr__
+                uid: __expr__
+              type: threshold
+              expression: C
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [2]
+                  operator:
+                    type: and
+                  query:
+                    params: [C]
+
+      # ── ava-ops-schedule-stalled: replaces the schedule manager's stall detection ending in a log WARNING only (no rule read the event) ──
+      - uid: ava-ops-schedule-stalled
+        title: "Schedule has had no live session for 2h"
+        condition: D
+        for: 0m
+        noDataState: OK
+        execErrState: OK
+        labels:
+          severity: warning
+          ruleUID: ava-ops-schedule-stalled
+          metric: schedule_stalled
+          team: ava-ops
+        annotations:
+          summary: "schedule {{ $labels.attributes_schedule_id }} has had no live session for 2h+"
+          description: >-
+            The schedule manager found an enabled, non-completed schedule with no live session for more than
+            two hours (schedule_stalled, emitted once per outage). Triage with `ava schedules list` and the
+            schedule's session log; a breaker-tripped error schedule is included on purpose, its silence is
+            the failure. Resolves 24 hours after the event.
+        data:
+          - refId: A
+            datasourceUid: loki
+            queryType: ""
+            model:
+              refId: A
+              datasource:
+                type: loki
+                uid: loki
+              editorMode: code
+              expr: >-
+                sum by (attributes_schedule_id) (count_over_time({service_name="unknown_service",
+                event_name="schedule_stalled"} | json | cluster=".ava" | category="telemetry" [24h]))
+              instant: true
+              queryType: instant
+            relativeTimeRange:
+              from: 86400
+              to: 0
+          - refId: C
+            datasourceUid: __expr__
+            queryType: ""
+            model:
+              refId: C
+              datasource:
+                type: __expr__
+                uid: __expr__
+              type: reduce
+              expression: A
+              reducer: mean
+          - refId: D
+            datasourceUid: __expr__
+            queryType: ""
+            model:
+              refId: D
+              datasource:
+                type: __expr__
+                uid: __expr__
+              type: threshold
+              expression: C
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [0]
                   operator:
                     type: and
                   query:

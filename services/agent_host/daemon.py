@@ -82,7 +82,6 @@ from base.events.live.bus import EventBus
 from base.log import init_gateway_process, logger
 from base.packages.plugins.extensions import ExtensionRegistry
 from base.sessions.helper_chain_guard import parent_chain_intact
-from services.agent_host import boot_defer
 from services.agent_host.dispatcher import InboundWakeDispatcher, TurnScheduler
 from services.agent_host.force_termination import kill_terminating_agent_shells
 from services.agent_host.host import AgentHost
@@ -372,30 +371,15 @@ async def _recover_hosted_forces_at_boot(
         control_pool, machine, kill_shell_sessions=kill_terminating_agent_shells
     )
     logger.info("hosted boot recovery: observed {n} orphaned force(s)", n=len(recovered))
-    streaks = boot_defer.record_deferrals(deferred)
     for agent_id, evidence in deferred.items():
-        streak = streaks[agent_id]
-        if streak >= boot_defer.ALERT_AFTER_BOOTS:
-            logger.warning(
-                "hosted boot recovery deferred for agent {agent_id} on {streak} consecutive "
-                "boots: retained exec request evidence [{evidence}] is not clearing on its "
-                "own. {hint}",
-                event="hosted_boot_recovery_stalled",
-                agent_id=agent_id,
-                streak=streak,
-                evidence="; ".join(entry.describe() for entry in evidence),
-                hint=disposition_hint(agent_id),
-            )
-        else:
-            logger.warning(
-                "hosted boot recovery deferred for agent {agent_id} (boot {streak} of "
-                "{limit}): retained exec request evidence [{evidence}]. {hint}",
-                agent_id=agent_id,
-                streak=streak,
-                limit=boot_defer.ALERT_AFTER_BOOTS,
-                evidence="; ".join(entry.describe() for entry in evidence),
-                hint=disposition_hint(agent_id),
-            )
+        logger.warning(
+            "hosted boot recovery deferred for agent {agent_id}: retained exec request "
+            "evidence [{evidence}] is not clearing on its own. {hint}",
+            event="hosted_boot_recovery_deferred",
+            agent_id=agent_id,
+            evidence="; ".join(entry.describe() for entry in evidence),
+            hint=disposition_hint(agent_id),
+        )
 
 
 async def _open_host_pools(

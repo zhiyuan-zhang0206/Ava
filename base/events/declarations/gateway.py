@@ -117,6 +117,19 @@ class MemorySearchStats(TypedDict):
     last_save_seconds: float
 
 
+class InspectMetricsCoverageGap(TypedDict):
+    """`inspect_metrics_coverage_gap` payload — gateway/inspect/_metrics_health.py.
+
+    One event per statistics read that still shows a live recorder gap: turns
+    recorded without durations on a window inside the observation-collection
+    era. Emitted on every such read while the gap holds (state, not edge); the
+    agent is the event's `agent_id`."""
+
+    family: str
+    condition: str
+    availability: str
+
+
 # The closed reason vocabulary of `fleet_graph_stale` (task #3925): every
 # stale-serving fallback on GET /api/fleet/graph names WHY it degraded — a
 # canceled database read or a phase crossing the route budget. Keep the set closed: the alert rule and dashboards rely on
@@ -180,6 +193,13 @@ class GateAuthProbeFailed(TypedDict):
 
 
 EVENTS: dict[str, EventSpec] = {
+    "inspect_metrics_coverage_gap": telemetry_event(
+        "inspect_metrics_coverage_gap",
+        "inspector statistics read shows a live recorder gap (turns without durations "
+        "inside the collection era); re-emitted on every read while it holds",
+        payload=InspectMetricsCoverageGap,
+        tier="anomaly",
+    ),
     # frontend user modeling
     "frontend_interaction": telemetry_event(
         "frontend_interaction",

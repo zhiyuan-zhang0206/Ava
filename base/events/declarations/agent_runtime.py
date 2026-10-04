@@ -53,6 +53,25 @@ class ShellTtlRenewed(TypedDict):
     new_expires_at: str
 
 
+class DbPoolAcquireSlow(TypedDict):
+    """`db_pool_acquire_slow` payload — agent/db/__init__.py `LoggingConnectionPool`.
+
+    One successful connection borrow that took at least the slow threshold:
+    `elapsed` is the whole wait, `slot_wait_ms` / `check_ms` split it into the
+    client-pool slot wait and the connection health checks; the rest is the
+    pool's state at that moment."""
+
+    name: str
+    elapsed: float
+    slot_wait_ms: float
+    check_ms: float
+    check_attempts: int
+    pool_size: int
+    pool_available: int
+    requests_waiting: int
+    connections_errors: int
+
+
 class HeartbeatNudged(TypedDict):
     """`heartbeat_nudged` payload — services/heartbeat/daemon.py."""
 
@@ -68,6 +87,19 @@ class HeartbeatBackoffRaised(TypedDict):
 
     level: int
     interval_seconds: int
+
+
+class MachineProbeFailed(TypedDict):
+    """`machine_probe_failed` payload — services/heartbeat/liveness.py.
+
+    One event per liveness pass (~60s) in which an unpaused agent-runner's
+    status_probe failed; `consecutive_failures` is the persisted run length
+    (it restarts at 1 after a successful probe), so a trailing-window rule
+    reads "still down" and its age from the same stream.
+    """
+
+    machine: str
+    consecutive_failures: int
 
 
 class HeartbeatBackoffReset(TypedDict):
@@ -188,6 +220,13 @@ EVENTS: dict[str, EventSpec] = {
         tier="noise",
         site="services/heartbeat/daemon.py:_sweep_backoff_resets (positional emit)",
     ),
+    "machine_probe_failed": telemetry_event(
+        "machine_probe_failed",
+        "agent-runner machine unreachable — one event per failed liveness probe",
+        payload=MachineProbeFailed,
+        tier="anomaly",
+        site="services/heartbeat/liveness.py:_record_probe (positional emit)",
+    ),
     "dangling_tool_pairing_repaired": telemetry_event(
         "dangling_tool_pairing_repaired", "dangling tool pairing repaired", tier="anomaly"
     ),
@@ -257,7 +296,11 @@ EVENTS: dict[str, EventSpec] = {
         "db_pool_acquire_timeout", "db pool acquire timeout", tier="anomaly"
     ),
     "db_pool_acquire_slow": telemetry_event(
-        "db_pool_acquire_slow", "db pool acquire slow", tier="anomaly"
+        "db_pool_acquire_slow",
+        "db pool acquire slow",
+        payload=DbPoolAcquireSlow,
+        tier="anomaly",
+        site="agent/db/__init__.py:LoggingConnectionPool.getconn",
     ),
     "checkpoint_write_failed": telemetry_event(
         "checkpoint_write_failed", "checkpoint write failed", tier="anomaly"
