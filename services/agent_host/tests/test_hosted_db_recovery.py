@@ -27,7 +27,7 @@ from base.agents.context import AvaContext
 from base.agents.history.delta_read_compat import wrap_saver_reads_with_delta_reconstruction
 from base.agents.incarnation.hosted_force import install_hosted_force
 from base.agents.incarnation.resources import ResourceBirth
-from base.agents.observation.db_wait import database_wait_snapshot
+from base.agents.observation.db_wait import DatabaseWaits
 from base.cluster.machine import machine_name
 from base.config import settings
 from base.db import Database, insert_inbound_message
@@ -194,7 +194,11 @@ async def test_recovery_never_repairs_or_renews_a_lost_or_forced_incarnation(
         pytest.raises(RuntimeOwnershipLostError, match="lost authority"),
     ):
         await db_recovery.recover_database(
-            pool=aops_pool, graph=graph, checkpointer=saver, incarnation=incarnation
+            pool=aops_pool,
+            graph=graph,
+            checkpointer=saver,
+            incarnation=incarnation,
+            database_waits=DatabaseWaits(),
         )
     assert db_conn.execute("SELECT * FROM agents_meta WHERE id=%s", (agent,)).fetchone() == before
     assert await saver.aget_tuple(config) == checkpoint
@@ -229,7 +233,11 @@ async def test_cancelling_database_wait_keeps_checkpoint_and_does_not_ack_pause(
         with bind_turn_identity(agent, incarnation=incarnation):
             task = asyncio.create_task(
                 db_recovery.recover_database(
-                    pool=control, graph=graph, checkpointer=saver, incarnation=incarnation
+                    pool=control,
+                    graph=graph,
+                    checkpointer=saver,
+                    incarnation=incarnation,
+                    database_waits=DatabaseWaits(),
                 )
             )
         await asyncio.sleep(0.06)
@@ -248,7 +256,11 @@ async def test_cancelling_database_wait_keeps_checkpoint_and_does_not_ack_pause(
     # claim boundary. Recovery itself still cannot certify a drained restart.
     with bind_turn_identity(agent, incarnation=incarnation):
         await db_recovery.recover_database(
-            pool=aops_pool, graph=graph, checkpointer=saver, incarnation=incarnation
+            pool=aops_pool,
+            graph=graph,
+            checkpointer=saver,
+            incarnation=incarnation,
+            database_waits=DatabaseWaits(),
         )
     resumed = admission.require_operation("outage", acquired)
     assert resumed.maintenance is not None and not resumed.maintenance.drained
@@ -281,7 +293,11 @@ async def test_decision_committed_during_outage_prevents_old_continuation(
             with bind_turn_identity(agent, incarnation=incarnation):
                 task = asyncio.create_task(
                     db_recovery.recover_database(
-                        pool=control, graph=graph, checkpointer=saver, incarnation=incarnation
+                        pool=control,
+                        graph=graph,
+                        checkpointer=saver,
+                        incarnation=incarnation,
+                        database_waits=DatabaseWaits(),
                     )
                 )
             try:
@@ -343,7 +359,11 @@ async def test_repair_timeout_retries_and_remains_cancellable(
     with bind_turn_identity(incarnation.agent_id, incarnation=incarnation):
         task = asyncio.create_task(
             db_recovery.recover_database(
-                pool=aops_pool, graph=graph, checkpointer=saver, incarnation=incarnation
+                pool=aops_pool,
+                graph=graph,
+                checkpointer=saver,
+                incarnation=incarnation,
+                database_waits=DatabaseWaits(),
             )
         )
     try:
@@ -524,6 +544,7 @@ async def test_healthy_stages_each_get_their_own_deadline(
                     checkpointer=saver,
                     graph=graph,
                     incarnation=incarnation,
+                    database_waits=DatabaseWaits(),
                 ),
                 15,
             )
@@ -587,6 +608,7 @@ async def test_recovery_budget_abandons_at_attempt_boundary(
     incarnation = await _admit(aops_pool)
     graph, saver = await _graph(aops_pool, incarnation.agent_id, AsyncMock())
     attempts = 0
+    waits = DatabaseWaits()
 
     async def failed_repair(_graph: Any, _agent: int) -> None:
         nonlocal attempts
@@ -601,10 +623,14 @@ async def test_recovery_budget_abandons_at_attempt_boundary(
         pytest.raises(db_recovery.DatabaseRecoveryBudgetExceededError, match="after 2 attempts"),
     ):
         await db_recovery.recover_database(
-            pool=aops_pool, graph=graph, checkpointer=saver, incarnation=incarnation
+            pool=aops_pool,
+            graph=graph,
+            checkpointer=saver,
+            incarnation=incarnation,
+            database_waits=waits,
         )
     assert attempts == backoff.await_count == 2
-    assert database_wait_snapshot(incarnation.agent_id) is None
+    assert waits.snapshot(incarnation.agent_id) is None
     log.error.assert_called_once_with(
         "host checkpoint recovery abandoned",
         agent_id=incarnation.agent_id,
@@ -658,7 +684,11 @@ async def test_recovery_prolonged_warns_once_at_first_threshold_crossing(
     monkeypatch.setattr(db_recovery, "flush_checkpoint", flaky_flush)
     with bind_turn_identity(incarnation.agent_id, incarnation=incarnation):
         await db_recovery.recover_database(
-            pool=aops_pool, graph=graph, checkpointer=saver, incarnation=incarnation
+            pool=aops_pool,
+            graph=graph,
+            checkpointer=saver,
+            incarnation=incarnation,
+            database_waits=DatabaseWaits(),
         )
     warnings = [
         c for c in log.warning.call_args_list if c.args[0] == "host checkpoint recovery prolonged"
@@ -690,6 +720,7 @@ async def test_recovery_summary_counts_all_attempts_and_backoff_time(
     graph, saver = await _graph(aops_pool, incarnation.agent_id, AsyncMock())
     refresh = db_recovery._refresh_owner
     failed_probes = 0
+    waits = DatabaseWaits()
 
     async def flaky_probe(pool: AsyncConnectionPool, original: RuntimeIncarnation) -> None:
         nonlocal failed_probes
@@ -702,10 +733,14 @@ async def test_recovery_summary_counts_all_attempts_and_backoff_time(
     monkeypatch.setattr(db_recovery, "_refresh_owner", flaky_probe)
     with bind_turn_identity(incarnation.agent_id, incarnation=incarnation):
         await db_recovery.recover_database(
-            pool=aops_pool, graph=graph, checkpointer=saver, incarnation=incarnation
+            pool=aops_pool,
+            graph=graph,
+            checkpointer=saver,
+            incarnation=incarnation,
+            database_waits=waits,
         )
     assert backoff.await_count == failures
-    assert database_wait_snapshot(incarnation.agent_id) is not None
+    assert waits.snapshot(incarnation.agent_id) is not None
     recovered = [
         c for c in log.info.call_args_list if c.args[0] == "host turn checkpoint recovered"
     ]

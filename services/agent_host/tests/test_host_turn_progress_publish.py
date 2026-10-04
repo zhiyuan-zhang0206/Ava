@@ -10,6 +10,7 @@ from typing import cast
 import pytest
 
 from agent.turn import progress
+from base.agents.observation.db_wait import DatabaseWaits
 from base.deploy.maintenance import admission as maintenance_admission
 from base.events.live.bus import EventBus
 from base.events.live.redis_client import open_async_redis
@@ -77,10 +78,10 @@ async def test_agent_host_publishes_active_snapshots_and_refreshes_empty_heartbe
     patch_async_redis(monkeypatch, FakeRedis)
     try:
         await host_daemon._publish_turn_progress_heartbeat(
-            EventBus.from_settings(), "runner-a", {agent_id}
+            EventBus.from_settings(), "runner-a", {agent_id}, DatabaseWaits()
         )
         await host_daemon._publish_turn_progress_heartbeat(
-            EventBus.from_settings(), "runner-a", set()
+            EventBus.from_settings(), "runner-a", set(), DatabaseWaits()
         )
     finally:
         progress._PROGRESS.pop(agent_id, None)
@@ -105,7 +106,7 @@ async def test_agent_host_progress_publish_failure_is_debug_only(
 
     with caplog.at_level(logging.DEBUG, logger=host_daemon._log.name):
         await host_daemon._publish_turn_progress_heartbeat(
-            EventBus.from_settings(), "runner-a", set()
+            EventBus.from_settings(), "runner-a", set(), DatabaseWaits()
         )
 
     records = [record for record in caplog.records if record.name == host_daemon._log.name]
@@ -133,6 +134,7 @@ async def test_hung_progress_set_does_not_stop_repeated_ownership_renewal(
 
     class FakeHost:
         admission = _FakeAdmission()
+        database_waits = DatabaseWaits()
 
         async def renew_ownership(self) -> None:
             calls.append("renew")
@@ -187,6 +189,7 @@ async def test_beat_skips_ownership_renewal_while_quiesced(
 
     class FakeHost:
         admission = _FakeAdmission()
+        database_waits = DatabaseWaits()
 
         async def renew_ownership(self) -> None:
             calls.append("renew")
@@ -198,7 +201,9 @@ async def test_beat_skips_ownership_renewal_while_quiesced(
     class FakeScheduler:
         active_agents: frozenset[int] = frozenset()
 
-    async def _record_publish(_bus: object, _machine: str, _agents: frozenset[int]) -> None:
+    async def _record_publish(
+        _bus: object, _machine: str, _agents: frozenset[int], _waits: DatabaseWaits
+    ) -> None:
         calls.append("publish")
 
     monkeypatch.setattr(maintenance_admission, "quiesced", lambda: state["quiesced"])
@@ -246,7 +251,7 @@ async def test_progress_publish_propagates_cancellation_without_failure_warning(
     with caplog.at_level(logging.DEBUG, logger=host_daemon._log.name):
         task = asyncio.create_task(
             host_daemon._publish_turn_progress_heartbeat(
-                EventBus.from_settings(), "runner-a", set()
+                EventBus.from_settings(), "runner-a", set(), DatabaseWaits()
             )
         )
         try:
@@ -314,12 +319,12 @@ async def test_timed_out_redis_connection_is_released_before_next_heartbeat(
         with caplog.at_level(logging.DEBUG, logger=host_daemon._log.name):
             async with asyncio.timeout(2.0):
                 await host_daemon._publish_turn_progress_heartbeat(
-                    EventBus.from_settings(), "runner-a", set()
+                    EventBus.from_settings(), "runner-a", set(), DatabaseWaits()
                 )
                 await first_disconnected.wait()
                 assert not client.connection_pool._in_use_connections
                 await host_daemon._publish_turn_progress_heartbeat(
-                    EventBus.from_settings(), "runner-a", set()
+                    EventBus.from_settings(), "runner-a", set(), DatabaseWaits()
                 )
                 assert writes == [[b"SET", b"host_turn_progress:runner-a", b"{}", b"EX", b"60"]] * 2
                 assert not client.connection_pool._in_use_connections
@@ -348,6 +353,7 @@ async def test_ownership_renewal_timeout_logs_warning_without_traceback(
 
     class FakeHost:
         admission = _FakeAdmission()
+        database_waits = DatabaseWaits()
 
         async def renew_ownership(self) -> None:
             await asyncio.Event().wait()
@@ -359,7 +365,9 @@ async def test_ownership_renewal_timeout_logs_warning_without_traceback(
         def beat(self) -> None:
             pass
 
-    async def fake_publish(_bus: object, machine: str, active_agents: object) -> None:
+    async def fake_publish(
+        _bus: object, machine: str, active_agents: object, _waits: object
+    ) -> None:
         pass
 
     async def stop_sleep(delay: float) -> None:
@@ -396,6 +404,7 @@ async def test_agent_host_beats_liveness_before_renewing_ownership(
 
     class FakeHost:
         admission = _FakeAdmission()
+        database_waits = DatabaseWaits()
 
         async def renew_ownership(self) -> None:
             calls.append("renew")
@@ -407,7 +416,9 @@ async def test_agent_host_beats_liveness_before_renewing_ownership(
         def beat(self) -> None:
             calls.append("liveness")
 
-    async def fake_publish(_bus: object, machine: str, active_agents: object) -> None:
+    async def fake_publish(
+        _bus: object, machine: str, active_agents: object, _waits: object
+    ) -> None:
         calls.append(("publish", machine, active_agents))
 
     async def stop_sleep(delay: float) -> None:
@@ -444,6 +455,7 @@ async def test_agent_host_liveness_continues_when_ownership_renewal_hangs(
 
     class FakeHost:
         admission = _FakeAdmission()
+        database_waits = DatabaseWaits()
 
         async def renew_ownership(self) -> None:
             nonlocal renew_calls
@@ -459,7 +471,9 @@ async def test_agent_host_liveness_continues_when_ownership_renewal_hangs(
         def beat(self) -> None:
             beat_counts.append(len(beat_counts) + 1)
 
-    async def fake_publish(_bus: object, machine: str, active_agents: object) -> None:
+    async def fake_publish(
+        _bus: object, machine: str, active_agents: object, _waits: object
+    ) -> None:
         pass
 
     monkeypatch.setattr(host_daemon, "_OWNERSHIP_RENEW_TIMEOUT_S", 0.01)
@@ -498,6 +512,7 @@ async def test_agent_host_liveness_continues_when_ownership_renewal_raises(
 
     class FakeHost:
         admission = _FakeAdmission()
+        database_waits = DatabaseWaits()
 
         async def renew_ownership(self) -> None:
             nonlocal renew_calls
@@ -513,7 +528,9 @@ async def test_agent_host_liveness_continues_when_ownership_renewal_raises(
             if len(beat_counts) == 2:
                 second_beat.set()
 
-    async def fake_publish(_bus: object, machine: str, active_agents: object) -> None:
+    async def fake_publish(
+        _bus: object, machine: str, active_agents: object, _waits: object
+    ) -> None:
         pass
 
     monkeypatch.setattr(host_daemon, "_LIVENESS_BEAT_STEP_S", 0.01)

@@ -129,17 +129,6 @@ class ErrorReason(StrEnum):
     FORK_CONFIG_CHANGE_NOT_ALLOWED = "fork_config_change_not_allowed"
 
 
-# Reverse lookup table from wire reason -> exception class; used by
-# SDK `raise_from_response`. `AvaAgentError.__init_subclass__` writes
-# entries automatically at class-declaration time; do **not** maintain
-# by hand — adding a new error only requires "add enum + add class
-# with reason/http_status", and registration follows on import.
-# gateway/middleware/tests/test_agent_error_wire_equivalence.py parametrizes this dict to
-# lock the end-to-end loop; the assertion at the module end catches
-# "enum added but class missing" in the reverse direction.
-EXCEPTION_BY_REASON: dict[ErrorReason, type[AvaAgentError]] = {}
-
-
 class AvaAgentError(Exception):
     """Root of **wire-encoded** agent gateway errors — the
     gateway uses one `@app.exception_handler(AvaAgentError)` to map to
@@ -152,10 +141,10 @@ class AvaAgentError(Exception):
     catch groups and do not carry wire fields (concrete subclasses use
     multiple inheritance to inherit marker + AvaAgentError together).
 
-    `__init_subclass__` enforces ClassVars at class-declaration time +
-    auto-registers into `EXCEPTION_BY_REASON` — single source of
-    truth; adding a new error has only two steps "add enum + add
-    class with the two ClassVars", and registration follows.
+    `__init_subclass__` enforces ClassVars at class-declaration time; the
+    literal `EXCEPTION_BY_REASON` table at the module end lists every
+    subclass, and the import-time check below fails when a subclass or an
+    `ErrorReason` is missing from it.
     """
 
     reason: ClassVar[ErrorReason]
@@ -177,7 +166,6 @@ class AvaAgentError(Exception):
             raise TypeError(
                 f"{cls.__name__} inheriting AvaAgentError must set `http_status: ClassVar[int]`"
             )
-        EXCEPTION_BY_REASON[cls.reason] = cls
 
 
 # Wire note: AgentNotFound is wire-encoded and re-exported as `ava.agents.AgentNotFound`.
@@ -399,15 +387,50 @@ class InvalidModelConfig(AvaAgentError):  # noqa: N818 — state description, sa
     http_status = 400
 
 
-# Completeness check: every ErrorReason must have a registered class
-# (after all AvaAgentError subclasses have run __init_subclass__ on
-# import, the two sets must be exactly equal). Otherwise "enum added
-# but class missing" — wire protocol has a hole; fail at import time.
-# Use raise (not assert) because ruff S101 + python -O strips asserts;
-# this contract check must run in prod too.
-if set(EXCEPTION_BY_REASON) != set(ErrorReason):
+# Reverse lookup table from wire reason -> exception class; used by
+# SDK `raise_from_response`. A new wire error = add an enum value + an
+# AvaAgentError subclass with the two ClassVars + one row here; the check
+# below fails at import time when a row, a subclass or an enum value is missing.
+# gateway/middleware/tests/test_agent_error_wire_equivalence.py parametrizes this dict to
+# lock the end-to-end loop.
+EXCEPTION_BY_REASON: dict[ErrorReason, type[AvaAgentError]] = {
+    ErrorReason.AGENT_NOT_FOUND: AgentNotFound,
+    ErrorReason.FORK_SOURCE_EMPTY: ForkSourceEmpty,
+    ErrorReason.FORK_CHECKPOINT_NOT_FOUND: ForkCheckpointNotFound,
+    ErrorReason.MACHINE_NOT_REGISTERED: MachineNotRegistered,
+    ErrorReason.SPAWN_TARGET_NOT_AGENT_RUNNER: SpawnTargetNotAgentRunner,
+    ErrorReason.MACHINE_PAUSED: MachinePaused,
+    ErrorReason.CROSS_MACHINE_GATEWAY_UNAVAILABLE: CrossMachineGatewayUnavailable,
+    ErrorReason.AGENT_LAUNCH_FAILED: AgentLaunchFailed,
+    ErrorReason.INDEXER_UNAVAILABLE: IndexerUnavailable,
+    ErrorReason.CHANNEL_NOT_CONFIGURED: ChannelNotConfigured,
+    ErrorReason.INVALID_MODEL_CONFIG: InvalidModelConfig,
+    ErrorReason.FORK_CONFIG_CHANGE_NOT_ALLOWED: ForkConfigChangeNotAllowed,
+}
+
+
+def _wire_subclasses(root: type[AvaAgentError]) -> set[type[AvaAgentError]]:
+    found: set[type[AvaAgentError]] = set()
+    for sub in root.__subclasses__():
+        found.add(sub)
+        found |= _wire_subclasses(sub)
+    return found
+
+
+# Completeness check: the table must cover every ErrorReason and every
+# AvaAgentError subclass, each under its own reason. Otherwise "enum added
+# but class missing" / "class added but row missing" — wire protocol has a
+# hole; fail at import time. Use raise (not assert) because ruff S101 +
+# python -O strips asserts; this contract check must run in prod too.
+if (
+    set(EXCEPTION_BY_REASON) != set(ErrorReason)
+    or any(reason is not cls.reason for reason, cls in EXCEPTION_BY_REASON.items())
+    or set(EXCEPTION_BY_REASON.values()) != _wire_subclasses(AvaAgentError)
+):
     raise RuntimeError(
-        f"ErrorReason and EXCEPTION_BY_REASON are inconsistent — "
-        f"reasons without a class: {set(ErrorReason) - set(EXCEPTION_BY_REASON)};"
-        f"classes without a reason: {set(EXCEPTION_BY_REASON) - set(ErrorReason)}"
+        f"ErrorReason, AvaAgentError subclasses and EXCEPTION_BY_REASON are inconsistent — "
+        f"reasons without a row: {set(ErrorReason) - set(EXCEPTION_BY_REASON)}; "
+        f"rows without a reason: {set(EXCEPTION_BY_REASON) - set(ErrorReason)}; "
+        f"subclasses without a row: "
+        f"{_wire_subclasses(AvaAgentError) - set(EXCEPTION_BY_REASON.values())}"
     )

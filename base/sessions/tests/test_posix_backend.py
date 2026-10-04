@@ -348,13 +348,11 @@ def test_has_session_false_for_unknown(unit_home):
 def test_get_shell_backend_returns_pty_backend():
     """get_shell_backend() is the PTY backend for agent shells/watchers —
     the self-hosted PTY supervisor —
-    a singleton distinct from the get_backend() singleton (service sessions
+    distinct from the get_backend() one (service sessions
     live on the native backend; interactive shells on the PTY one)."""
     from base.sessions.backend import get_backend
 
-    b1 = get_shell_backend()
-    b2 = get_shell_backend()
-    assert b1 is b2  # singleton
-    assert isinstance(b1, PtySessionBackend)
-    assert isinstance(b1, SessionBackend)
-    assert b1 is not get_backend()
+    shell = get_shell_backend()
+    assert isinstance(shell, PtySessionBackend)
+    assert isinstance(shell, SessionBackend)
+    assert not isinstance(get_backend(), PtySessionBackend)

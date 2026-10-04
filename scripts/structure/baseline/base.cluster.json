@@ -2,11 +2,8 @@
   "ambient_state": {
     "base/cluster/authority/api.py::ambient-container:_acceptance_cache": 1,
     "base/cluster/dataplane/pg_foreground.py::global-rebind:_receipts": 1,
-    "base/cluster/dataplane/pg_throwaway_base.py::import-time-read:_tmpfs_base": 1,
-    "base/cluster/dataplane/pg_tools.py::hidden-cache:brew_prefix": 1,
     "base/cluster/machine.py::ambient-instance:_identity": 1,
     "base/cluster/postgres.py::ambient-container:_CHILDREN": 1,
-    "base/cluster/provision.py::ambient-container:CHECKPOINT_SCHEMA_AVA_MIGRATIONS": 1,
     "base/cluster/rate_limit.py::ambient-instance:login_limiter": 1
   },
   "complexity": {},

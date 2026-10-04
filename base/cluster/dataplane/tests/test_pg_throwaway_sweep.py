@@ -85,7 +85,7 @@ def throwaway_root(monkeypatch: pytest.MonkeyPatch) -> Iterator[Path]:
     Teardown force-stops anything still running under the root, so a failing test
     cannot leak the very orphan this module exists to prevent."""
     root = Path(tempfile.mkdtemp(prefix="ava-sweep-", dir="/tmp"))
-    monkeypatch.setattr(pg_throwaway_base, "_tmpfs_base", str(root))
+    monkeypatch.setattr(pg_throwaway_base, "default_base", lambda: root)
     # The sweep covers every throwaway root now (disk fallback and the
     # AVA_PG_THROWAWAY_BASE override included): pin the fallback at the same scratch
     # dir and clear the override, so a host's real /var/tmp orphan or configured
@@ -107,10 +107,11 @@ def throwaway_root(monkeypatch: pytest.MonkeyPatch) -> Iterator[Path]:
 
 _ORPHAN_OWNER = """
 import os, sys, time
+from pathlib import Path
 import base.cluster.dataplane.pg_throwaway_base as pg_base
 import base.cluster.dataplane.pg_tools as pg_tools
 
-pg_base._tmpfs_base = sys.argv[1]
+pg_base.default_base = lambda: Path(sys.argv[1])
 # `cm` must stay referenced: a dropped context manager is finalized, and its
 # GeneratorExit would run the very teardown this test needs never to happen.
 cm = pg_tools.throwaway_postgres()

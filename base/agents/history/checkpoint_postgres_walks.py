@@ -36,7 +36,6 @@ _EXPECTED_PARAMETERS = (
     "walk_cursor_by_ch",
     "seeded",
 )
-_installed_descriptor: list[object] = []
 
 
 def install_checkpoint_postgres_walk_patch() -> None:
@@ -49,11 +48,11 @@ def install_checkpoint_postgres_walk_patch() -> None:
         )
 
     descriptor = vars(BasePostgresSaver)["_try_advance_walks"]
-    if _installed_descriptor and descriptor is _installed_descriptor[0]:
+    if not isinstance(descriptor, staticmethod):
+        raise TypeError("checkpoint-postgres _try_advance_walks was replaced outside Ava")
+    if getattr(descriptor.__func__, "_ava_walk_patch", False):
         _install_message_history_reads()
         return
-    if _installed_descriptor or not isinstance(descriptor, staticmethod):
-        raise RuntimeError("checkpoint-postgres _try_advance_walks was replaced outside Ava")
 
     original = cast(Callable[..., None], descriptor.__func__)
     method_signature = signature(original)
@@ -101,8 +100,8 @@ def install_checkpoint_postgres_walk_patch() -> None:
             seeded,
         )
 
-    _installed_descriptor.append(staticmethod(advance_walks))
-    BasePostgresSaver._try_advance_walks = _installed_descriptor[0]  # type: ignore[assignment]
+    advance_walks._ava_walk_patch = True  # type: ignore[attr-defined]
+    BasePostgresSaver._try_advance_walks = staticmethod(advance_walks)  # type: ignore[assignment]
     _install_message_history_reads()
 
 

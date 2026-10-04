@@ -5,7 +5,7 @@ drill needs disk-sized room: on 2026-09-14 the throwaway postmaster died
 mid-restore when the cluster outgrew WSL's 7.8 GiB /dev/shm (dmesg signal 6; the
 drill surfaced only `PQputCopyData: server closed the connection`). These tests
 exercise selection through its seams — the `AVA_PG_THROWAWAY_BASE` settings field,
-the per-test-pinned `_tmpfs_base`, and a scripted `free_bytes` — so they never
+the per-test-pinned `default_base`, and a scripted `free_bytes` — so they never
 depend on a real tmpfs's size or a host's real configured base.
 """
 

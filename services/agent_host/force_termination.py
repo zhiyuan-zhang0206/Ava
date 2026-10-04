@@ -34,7 +34,11 @@ from base.log import logger
 from base.native_process.runtime_incarnation import RuntimeIncarnation, current_incarnation
 from services.agent_host.runtime import TurnOutcome
 
-__all__ = ["force_termination_outcome", "force_termination_stop"]
+__all__ = [
+    "force_termination_outcome",
+    "force_termination_stop",
+    "kill_terminating_agent_shells",
+]
 
 # The applied-but-unobserved force command bound to this turn's own
 # incarnation, still anchored by the live lifecycle pointer. `status='claimed'`
@@ -108,3 +112,31 @@ async def _owns_force_command(pool: AsyncConnectionPool, incarnation: RuntimeInc
             )
         ).fetchone()
     return row is not None
+
+
+def kill_terminating_agent_shells(agent_id: int) -> None:
+    """Kill every shell session a terminating agent owns on this machine.
+
+    The at-exit half of `kill_all_shell_sessions`, bound into
+    `apply_hosted_lifecycle` (right before a graceful termination commits) and
+    into the force settlements (`base.agents.incarnation.hosted_force`: the sweep once a force
+    is observed quiescent, live or at boot). Never raises: a failed kill must
+    not turn a termination into a crashed turn, so it is logged at ERROR and
+    the termination still applies.
+    """
+    from ops.cluster_status import kill_agent_shells
+
+    try:
+        killed = kill_agent_shells(agent_id)
+    except Exception:  # logged at ERROR; the termination must still apply
+        logger.opt(exception=True).error(
+            "terminate could not kill every shell session of agent {agent_id}",
+            agent_id=agent_id,
+        )
+        return
+    logger.info(
+        "terminate killed {count} shell session(s) of agent {agent_id}: {killed}",
+        agent_id=agent_id,
+        count=len(killed),
+        killed=killed,
+    )

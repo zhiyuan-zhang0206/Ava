@@ -1,7 +1,4 @@
 {
-  "ambient_state": {
-    "base/api_contracts/contracts.py::ambient-container:_INDEX_BUCKETS": 1,
-    "base/api_contracts/contracts.py::ambient-container:_INDEX_BUILT": 1,
-    "base/api_contracts/contracts.py::ambient-container:_INDEX_WILDCARDS": 1
-  }
+  "ambient_state": {},
+  "complexity": {}
 }

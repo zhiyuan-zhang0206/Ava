@@ -12,6 +12,7 @@ from langchain_core.runnables import RunnableConfig
 from psycopg_pool import AsyncConnectionPool, PoolTimeout
 
 from agent import state as states
+from base.agents.observation.db_wait import DatabaseWaits
 from base.cluster.machine import machine_name
 from base.config import settings
 from base.db import Database, insert_inbound_message
@@ -229,7 +230,11 @@ async def test_recovery_retries_promptly_but_does_not_execute_or_ack_control(
     with bind_turn_identity(agent, incarnation=incarnation):
         original = asyncio.create_task(
             db_recovery.recover_database(
-                pool=aops_pool, checkpointer=saver, graph=graph, incarnation=incarnation
+                pool=aops_pool,
+                checkpointer=saver,
+                graph=graph,
+                incarnation=incarnation,
+                database_waits=DatabaseWaits(),
             )
         )
     try:

@@ -1,7 +1,4 @@
 {
-  "ambient_state": {
-    "base/sessions/backend.py::global-rebind:_backend": 1,
-    "base/sessions/backend.py::global-rebind:_shell_backend": 1
-  },
+  "ambient_state": {},
   "complexity": {}
 }

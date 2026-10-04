@@ -25,36 +25,31 @@ from tests.path_scoped.pty_service import pty_service as pty_service
 # ---------------------------------------------------------------------------
 
 
-def test_get_backend_returns_platform_appropriate_singleton():
-    """get_backend() returns a singleton of the correct type for this platform.
+def test_get_backend_returns_platform_appropriate_backend():
+    """get_backend() returns the correct type for this platform.
 
     S6 step 1: on POSIX the service/daemon backend is the native
     supervisor; S7 moved the orchestration sessions onto it too.
     """
-    b1 = get_backend()
-    b2 = get_backend()
-    assert b1 is b2  # singleton
-    assert isinstance(b1, PosixProcSessionBackend)
+    assert isinstance(get_backend(), PosixProcSessionBackend)
 
 
-def test_get_shell_backend_returns_platform_appropriate_singleton():
+def test_get_shell_backend_returns_platform_appropriate_backend():
     """get_shell_backend() names the PTY backend — agent shells / watchers run
     on the self-hosted PTY supervisor (POSIX, S6 step 2) while service sessions
     live on the native supervisor.
 
-    A distinct singleton from ``get_backend()``: the two answer different
+    A distinct backend from ``get_backend()``: the two answer different
     questions (where a service runs vs where an agent's interactive shell runs)
     and must not be collapsed into one.
     """
-    b1 = get_shell_backend()
-    b2 = get_shell_backend()
-    assert b1 is b2  # singleton
-    assert isinstance(b1, PtySessionBackend)
-    assert b1 is not get_backend()
+    shell = get_shell_backend()
+    assert isinstance(shell, PtySessionBackend)
+    assert not isinstance(get_backend(), PtySessionBackend)
 
 
 def test_get_backend_is_a_session_backend():
-    """The singleton implements the SessionBackend interface."""
+    """The backend implements the SessionBackend interface."""
     backend = get_backend()
     assert isinstance(backend, SessionBackend)
 
