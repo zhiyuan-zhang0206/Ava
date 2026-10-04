@@ -1256,7 +1256,9 @@ itself (its own public key in its own `authorized_keys`):
   `--dry-run` — runs NEW's `ava schedules verify` against the running gateway's
   schedule table (every stored script, agent-written ones included) from a
   throwaway worktree of NEW at `$HOME/.ava/pre-update-verify` on the host's current
-  interpreter. A red row (a moved module, a call that no longer binds), or a check that
+  interpreter. The table is read by the home's own (OLD) source checkout — the only code
+  the database authority admits — and handed to the worktree as a rows file
+  (`--rows-file`), so NEW checks it offline and never dials the database. A red row (a moved module, a call that no longer binds), or a check that
   could not run, refuses with exit 2, the rows listed and nothing stopped; fix the
   scripts and rerun, or pass `--allow-red-schedules` to proceed (the rows then
   crash-loop after `up` until fixed). A host that has not fetched NEW (a dry run does
@@ -1283,16 +1285,17 @@ itself (its own public key in its own `authorized_keys`):
   name it reports itself (`machine_name()`), not by its SSH alias; a name with no
   row fails the half. Roster machines that are not listed (a laptop that is off) are
   reported with their online flag and commits and never fail `up` (see the last bullet for their old processes). Then
-  two read-only drift checks run, each to the end before `up` fails with the details in the
+  the gateway smoke-tests each listed agent-runner with a real agent, reading its own
+  address and bearer in place; then each host runs `ava packages refresh`
+  (skills follow their channel; `ava skill update` is retired) and its summary
+  line (`summary: …`) is printed. A differing local copy is replaced and
+  reported — an info line names the differing files. Last, two read-only drift checks
+  run, each to the end before `up` fails with the details in the
   log: `ava schedules verify --no-notify` on the gateway (the stored schedule scripts, as
   above) and `ava plugins verify` on every listed host (each enabled plugin loads as an
   agent boot loads it; the loader skips a broken plugin, so this is what turns that into
-  a failure — 2026-10-03: out-of-repo plugins calling deleted hook APIs). Then
-  the gateway smoke-tests each listed agent-runner with a real agent, reading its own
-  address and bearer in place; last, each host runs `ava packages refresh`
-  (skills follow their channel; `ava skill update` is retired) and its summary
-  line (`summary: …`) is printed. A differing local copy is replaced and
-  reported — an info line names the differing files.
+  a failure — 2026-10-03: out-of-repo plugins calling deleted hook APIs). They come
+  last so a red never skips the smoke or the refresh.
 - The first failure stops a half and nothing rolls back: fix the cause and
   rerun the whole half, which is idempotent. `--dry-run` runs only the
   read-only checks and prints the effects. Output is redacted and tee'd to

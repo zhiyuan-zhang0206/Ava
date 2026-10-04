@@ -4,8 +4,8 @@
 refuses, `--allow-red-schedules` overrides); stop each runner, then the gateway; switch every
 checkout to NEW. `up`: start the gateway, then each runner (macOS as a one-time
 GUI-session LaunchAgent: helper signing needs the login keychain); check holds
-and the listed machines' roster rows; check for drift (the gateway's in-store schedule scripts, every
-host's plugins); smoke-test each listed agent-runner; refresh skills.
+and the listed machines' roster rows; smoke-test each listed agent-runner; refresh skills; then check
+for drift (the gateway's in-store schedule scripts, every host's plugins), which fails `up` last.
 After a failure, fix the cause and rerun the whole half. See conventions/runbook.md#updating-a-networked-cluster-in-source-mode.
 """
 
@@ -95,18 +95,24 @@ sys.exit(0 if out["completed"] and out["terminate"] < 300 else 2)
 """
 
 
-# Before anything stops: NEW's `ava schedules verify` against the running gateway's schedule table
-# (read-only; every stored script, agent-written ones included). NEW's source comes from a throwaway
-# worktree and runs on the host's current interpreter (cwd wins sys.path, so NEW's modules are the
-# ones imported); no service is touched. `VERIFY_RC` is the verdict, so a crashed check (new
-# dependency missing, DB unreachable) is told apart from a red.
+# Before anything stops: NEW's `ava schedules verify` over the running gateway's schedule table
+# (every stored script, agent-written ones included). The table is read by the home's own source
+# checkout (OLD), the only code the database authority admits; NEW's source, from a throwaway
+# worktree, receives the rows as a file and checks them offline on the host's current interpreter
+# (cwd wins sys.path, so NEW's modules are the ones imported). Nothing dials the database from the
+# worktree and no service is touched. `VERIFY_RC` is the verdict, so a crashed check (unreadable
+# table, new dependency missing) is told apart from a red.
 _PRE_VERIFY = """{home}
-W="$H/pre-update-verify"; trap 'git -C "$S" worktree remove --force "$W" >/dev/null 2>&1' EXIT
+W="$H/pre-update-verify"; R="$W.rows"
+trap 'git -C "$S" worktree remove --force "$W" >/dev/null 2>&1; rm -f "$R"' EXIT
 git -C "$S" worktree remove --force "$W" >/dev/null 2>&1; rm -rf "$W"; git -C "$S" worktree prune
 git cat-file -e "{new}^{{commit}}" || {{ echo "SKIPPED: {new} is not fetched on this host (a dry run does not fetch)"; exit 0; }}
+(umask 077; AVA_HOME="$H" AVA_CONFIG_FETCH=skip "$S/.venv/bin/python" -c \\
+  'import json, sys; from cli.commands.management.schedules_verify import _read_schedule_rows as rows; json.dump(rows(), open(sys.argv[1], "w"))' "$R") \\
+  || {{ echo "VERIFY_RC=2"; exit 0; }}
 git -C "$S" worktree add -q "$W" {new} || {{ echo "VERIFY_RC=2"; exit 0; }}
 cd "$W" && AVA_HOME="$H" AVA_CONFIG_FETCH=skip "$S/.venv/bin/python" -c \\
-  'import sys; from cli.commands.management.schedules_verify import cmd_schedules_verify as v; sys.exit(v(notify=False))'
+  'import sys; from cli.commands.management.schedules_verify import cmd_schedules_verify as v; sys.exit(v(notify=False, rows_file=sys.argv[1]))' "$R"
 echo "VERIFY_RC=$?"; exit 0"""
 
 
@@ -365,7 +371,9 @@ def _drift_checks(s: Session, args: argparse.Namespace) -> None:
     `ava schedules verify` on the gateway (the in-store schedule scripts: imports resolve and every
     call into repo code still binds) and `ava plugins verify` on every host (each enabled plugin
     loads; the agent loader contains a broken one, so only this surfaces it). Both read-only.
-    Every check runs; each one's detail is in the log above, and any red fails `up`."""
+    Every check runs; each one's detail is in the log above, and any red fails `up`. They run
+    after the smoke and the refresh: a red names a repair to make, not a reason to leave the
+    cluster half-updated."""
     checks = [(args.gateway, "schedules verify --no-notify")]
     checks += [(alias, "plugins verify") for alias in [args.gateway, *args.runner]]
     failed: list[str] = []
@@ -387,16 +395,16 @@ def up(s: Session, args: argparse.Namespace) -> None:
             raise FailedError(f"{alias}: start left maintenance {hold}")
     program = f"{_PYTHON} -"
     if s.dry_run:
-        _drift_checks(s, args)
         s.run(args.gateway, f"{program} smoke MACHINE {args.smoke_timeout}  # each agent-runner")
         _refresh(s, args)
+        _drift_checks(s, args)
         return
     rows, commit = _roster(s, args, program)
-    _drift_checks(s, args)
     for name in [row["name"] for row in rows if row["serve_agent_runner"]]:
         smoke = f"{program} smoke {shlex.quote(name)} {args.smoke_timeout}"
         s.run(args.gateway, smoke, stdin=_GATEWAY_PROGRAM)
     _refresh(s, args)
+    _drift_checks(s, args)  # last, so a false red never skips the smoke or the refresh
     s.say(f"up complete: every listed machine runs {commit[:12]}")
 
 

@@ -10,6 +10,7 @@ the tri-state enable/disable flag, and the error-detail surfacing.
 
 from __future__ import annotations
 
+import json
 from collections.abc import Callable
 from pathlib import Path
 
@@ -449,6 +450,39 @@ def test_verify_no_notify_suppresses_the_alert(
     assert _verify.cmd_schedules_verify(notify=False, ports=ports) == 1
     assert "RED id=7 name=x missing=boom" in capsys.readouterr().out
     assert alerts == []
+
+
+def test_verify_rows_file_sweeps_the_dump_without_the_db_or_an_alert(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """`--rows-file` replaces the table read and never alerts, even with notify on."""
+
+    def no_table() -> list[tuple[int, str, str]]:
+        raise AssertionError("the table must not be read")
+
+    def no_alert(**_kwargs: object) -> None:
+        raise AssertionError("a rows-file sweep must not alert")
+
+    monkeypatch.setattr(_verify, "_read_schedule_rows", no_table)
+    monkeypatch.setattr(_verify, "_alert_verify", no_alert)
+    rows = tmp_path / "rows.json"
+    rows.write_text(json.dumps([[3, "ok", "import os\n"], [4, "stale", "import zz_ava_gone\n"]]))
+    assert _verify.cmd_schedules_verify(rows_file=str(rows)) == 1
+    out = capsys.readouterr().out
+    assert "checked=2 green=1 red=1 rc=1" in out
+    assert "RED id=4 name=stale missing=zz_ava_gone" in out
+
+
+def test_verify_rows_file_unreadable_is_a_tool_error(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    broken = tmp_path / "rows.json"
+    broken.write_text("not json")
+    assert _verify.cmd_schedules_verify(rows_file=str(broken)) == 2
+    assert _verify.cmd_schedules_verify(rows_file=str(tmp_path / "missing.json")) == 2
+    out = capsys.readouterr().out
+    assert out.count("checked=0 green=0 red=0 rc=2") == 2
+    assert "TOOL-ERROR JSONDecodeError" in out
 
 
 def test_verify_check_file_ok_red_and_syntax_error(

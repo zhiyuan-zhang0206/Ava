@@ -308,6 +308,13 @@ def _add_schedules_parser(sub: argparse._SubParsersAction[argparse.ArgumentParse
         help="check one script file off-DB instead of the table (falsification hook; no alert)",
     )
     schedules_verify_p.add_argument(
+        "--rows-file",
+        default=None,
+        metavar="PATH",
+        help="sweep a JSON dump of the table ([[id, name, script], ...]) instead of reading the "
+        "database (no DB access, no alert)",
+    )
+    schedules_verify_p.add_argument(
         "--no-notify",
         action="store_true",
         help="suppress the red-path alert for this run (self-tests)",
