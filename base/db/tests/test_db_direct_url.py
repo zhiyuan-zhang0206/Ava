@@ -153,14 +153,15 @@ def test_direct_db_url_remote_host_ignores_the_home_record(
     assert not any("direct_db_url" in r["message"] for r in loguru_records)
 
 
-def test_direct_db_url_split_runner_falls_back_loudly(
+def test_direct_db_url_split_runner_falls_back_with_an_info_line(
     monkeypatch: pytest.MonkeyPatch,
     loguru_records,
 ) -> None:
     """The split-runner case: this home's record does not explain the URL's port
     (the gateway's pooler port is a fact of the GATEWAY home's record). The URL is
-    returned as-is — runner boot must not break — but the degraded dial is
-    logged, never silent. The runner's URL names its own gateway
+    returned as-is — runner boot must not break — and the expected degraded dial
+    is logged at INFO, never silent and never a warning (every start logs one;
+    2026-10-03 triage). The runner's URL names its own gateway
     (AVA_GATEWAY_URL), which keeps this distinct from a remote/SaaS plane —
     foreign but pooler-less, dialed silently (Task #1752)."""
     monkeypatch.setattr(config.settings.data_plane, "pgbouncer_enabled", True)
@@ -172,7 +173,8 @@ def test_direct_db_url_split_runner_falls_back_loudly(
     )
     got = db_module.direct_db_url()
     assert got == "postgresql://ava_main:sek@10.0.0.9:6433/ava_main"
-    assert any("this home's record" in r["message"] for r in loguru_records)
+    lines = [r for r in loguru_records if "this home's record" in r["message"]]
+    assert [r["level"].name for r in lines] == ["INFO"]
 
 
 def test_direct_db_url_unknown_port_stays_silent_when_pooling_off(
