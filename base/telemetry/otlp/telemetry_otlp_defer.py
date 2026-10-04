@@ -23,7 +23,7 @@ standard five-minute retry gate) cannot double-count when a later one succeeds.
 Both knobs are read from the environment directly: reading them through the
 settings singleton would import the full config chain this deferral exists to
 keep out of the child's life. They stay registered as Settings fields
-(``base/config/observability.py``) so the .env surface, scope routing, and
+(``base/config/domains/observability/settings.py``) so the .env surface, scope routing, and
 docs have one home.
 """
 

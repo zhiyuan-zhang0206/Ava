@@ -86,5 +86,5 @@ they never call an already incomplete archive the full output.
 ## Dependencies
 
 - [[agent/graph/exec/docs/exec.ava.okf.md]] — native exec lifecycle and result dispatch
-- `base/config/sandbox.py` — validated configuration surface
+- `base/config/domains/sandbox.py` — validated configuration surface
 - `agent/graph/exec/tests/test_exec_output_crop.py` — previews, real file recovery and bounded retention

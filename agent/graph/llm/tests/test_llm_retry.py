@@ -134,7 +134,7 @@ def test_the_model_caps_the_number_of_tries(
 
 
 def test_a_spent_total_budget_ends_the_retries(ledger: LlmLedger) -> None:
-    from base.config.lm import LmSettings
+    from base.config.domains.lm import LmSettings
 
     assert LmSettings().llm_retry_max_total_seconds == 420.0
     exc = ConnectionError("budget exhausted")

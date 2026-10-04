@@ -11,7 +11,11 @@ makes the pool footprint config-driven with explicit caller sizes winning.
 
 from __future__ import annotations
 
-from base.config.data_plane import DataPlaneSettings, resolved_pool_size, sslmode_for_url
+from base.config.domains.storage.data_plane import (
+    DataPlaneSettings,
+    resolved_pool_size,
+    sslmode_for_url,
+)
 from base.host.env.dotenv_boot import PLACEHOLDER_DB_URL
 
 # A foreign host that could never be this machine's own reachable address in

@@ -47,7 +47,7 @@ from agent.messages import NoteTag, system_note_message
 from agent.state import AgentState
 from base.agents.context import AvaContext
 from base.config import settings
-from base.config.agent_compaction import AgentCompactionSettings
+from base.config.domains.agent.compaction import AgentCompactionSettings
 from base.db import Database
 from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices

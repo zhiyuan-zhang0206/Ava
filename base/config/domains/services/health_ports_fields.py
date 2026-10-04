@@ -1,6 +1,6 @@
 """The daemon /healthz port fields of `ServiceSettings`.
 
-Moved out of `base/config/services.py` when the task #3696 field additions
+Moved out of `base/config/domains/services/settings.py` when the task #3696 field additions
 pushed that module past its 800-line hard ceiling (the same split pattern as
 `delivery_watchdog_fields.py`, #2624). Mixed into `ServiceSettings` — NOT a
 config domain: `settings.services.*`, every alias/scope/capability face, and

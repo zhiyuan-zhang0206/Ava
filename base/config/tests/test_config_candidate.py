@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-from base.config.candidate import EnvPatchValidation
+from base.config.admin.candidate import EnvPatchValidation
 from base.host.env import runtime_config
 
 type EnvPatchValidator = Callable[[dict[str, object], set[str]], list[str]]
@@ -28,13 +28,13 @@ def configured_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
 
 def _validate_env_patch() -> EnvPatchValidator:
-    from base.config.candidate import validate_env_patch
+    from base.config.admin.candidate import validate_env_patch
 
     return validate_env_patch
 
 
 def _validate_env_patch_for_write() -> Callable[[dict[str, object], set[str]], EnvPatchValidation]:
-    from base.config.candidate import validate_env_patch_for_write
+    from base.config.admin.candidate import validate_env_patch_for_write
 
     return validate_env_patch_for_write
 
@@ -93,7 +93,7 @@ def test_removing_required_field_is_invalid(configured_home: Path) -> None:
 
 def test_validate_or_raise_joins_candidate_errors(configured_home: Path) -> None:
     """Non-HTTP callers receive the same alias-safe candidate explanation."""
-    from base.config.candidate import validate_env_patch_or_raise
+    from base.config.admin.candidate import validate_env_patch_or_raise
 
     with pytest.raises(ValueError, match="exec_node_timeout_seconds"):
         validate_env_patch_or_raise({"exec_node_timeout_seconds": 200}, set())

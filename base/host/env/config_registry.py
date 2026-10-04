@@ -104,22 +104,22 @@ DOMAIN_ATTRS = frozenset(attr for attr, _label, _model, _cap in DOMAIN_MODELS)
 # this registry is still initializing, breaking the dotenv_boot pre-Settings
 # boot.
 MODEL_CLASSES = {
-    "LmSettings": "base.config.lm",
-    "SandboxSettings": "base.config.sandbox",
-    "AgentSettings": "base.config.agent",
-    "WebSettings": "base.config.web",
-    "GatewaySettings": "base.config.gateway",
-    "DaemonSettings": "base.config.daemon",
-    "AlertsSettings": "base.config.alerts",
-    "DataPlaneSettings": "base.config.data_plane",
-    "ServiceSettings": "base.config.services",
-    "ObservabilitySettings": "base.config.observability",
-    "DisplaySettings": "base.config.display",
-    "PackagesSettings": "base.config.packages",
-    "FeishuSettings": "base.config.feishu",
-    "TelegramSettings": "base.config.telegram",
-    "WalgSettings": "base.config.walg",
-    "GeneralSettings": "base.config.general",
+    "LmSettings": "base.config.domains.lm",
+    "SandboxSettings": "base.config.domains.sandbox",
+    "AgentSettings": "base.config.domains.agent.settings",
+    "WebSettings": "base.config.domains.web",
+    "GatewaySettings": "base.config.domains.gateway",
+    "DaemonSettings": "base.config.domains.daemon.settings",
+    "AlertsSettings": "base.config.domains.observability.alerts",
+    "DataPlaneSettings": "base.config.domains.storage.data_plane",
+    "ServiceSettings": "base.config.domains.services.settings",
+    "ObservabilitySettings": "base.config.domains.observability.settings",
+    "DisplaySettings": "base.config.domains.display",
+    "PackagesSettings": "base.config.domains.packages",
+    "FeishuSettings": "base.config.domains.channels.feishu",
+    "TelegramSettings": "base.config.domains.channels.telegram",
+    "WalgSettings": "base.config.domains.storage.walg",
+    "GeneralSettings": "base.config.domains.general",
 }
 
 

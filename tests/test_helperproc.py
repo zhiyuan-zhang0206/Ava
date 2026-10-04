@@ -276,7 +276,7 @@ def test_backend_route_fails_closed_when_settings_are_unreadable(
 
 def test_permissions_helper_spawn_defaults_off() -> None:
     from base.config import FIELD_INFOS, field_alias
-    from base.config.services import ServiceSettings
+    from base.config.domains.services.settings import ServiceSettings
 
     assert ServiceSettings.model_fields["permissions_helper_spawn"].default is False
     assert field_alias("permissions_helper_spawn") == "AVA_PERMISSIONS_HELPER_SPAWN"

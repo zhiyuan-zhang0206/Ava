@@ -23,7 +23,7 @@ class _CropConfig(Protocol):
     """The crop knobs `crop_output` reads — declared structurally so this module
     never imports the eager config chain.
 
-    Naming `SandboxSettings` here would import `base.config.sandbox` (and
+    Naming `SandboxSettings` here would import `base.config.domains.sandbox` (and
     with it pydantic_settings) into every exec child's lite boot — this module
     sits on the `agent.graph` import path (task #3621). The protocol is also
     the truthful runtime contract: lite mode hands `crop_output` the config

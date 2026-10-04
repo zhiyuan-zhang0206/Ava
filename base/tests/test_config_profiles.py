@@ -290,8 +290,8 @@ def test_memory_backend_switch_fields_require_gateway_restart() -> None:
     panel/CLI "no restart required" and a backend switch silently stayed
     unapplied until a manual kickstart (Task #2224).
     """
+    from base.config.domains.services.settings import ServiceSettings
     from base.config.profiles import PROCESS_PROFILES
-    from base.config.services import ServiceSettings
 
     # The owning domain must be in the gateway profile for "gateway" to be the
     # honest value — the consumption matrix, kept in sync with the profile set.
@@ -322,10 +322,10 @@ def test_gateway_consumed_fields_declare_gateway_restart() -> None:
       memory_search daemons read them at boot — they said "" (no restart hint
       at all), the same class #2224 fixed for memory_search_backend.
     """
-    from base.config.feishu import FeishuSettings
+    from base.config.domains.channels.feishu import FeishuSettings
+    from base.config.domains.channels.telegram import TelegramSettings
+    from base.config.domains.services.settings import ServiceSettings
     from base.config.profiles import PROCESS_PROFILES
-    from base.config.services import ServiceSettings
-    from base.config.telegram import TelegramSettings
 
     # The owning domains must be in the gateway profile for "gateway" to be
     # the honest value — the consumption matrix, kept in sync with the set.

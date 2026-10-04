@@ -132,7 +132,7 @@ def test_collect_sessions_stamps_cluster_zone(monkeypatch: pytest.MonkeyPatch) -
     monkeypatch.setattr("base.sessions.backend.get_backend", lambda: service)
     monkeypatch.setattr("base.sessions.backend.get_shell_backend", lambda: _BatchOnlyBackend("x"))
     from base.config import settings
-    from base.config.general import GeneralSettings
+    from base.config.domains.general import GeneralSettings
 
     monkeypatch.setattr(
         settings, "general", GeneralSettings.model_construct(timezone="Asia/Shanghai")

@@ -14,7 +14,7 @@ import pytest
 from base import cluster, config
 from base import db as db_module
 from base.cluster import ClusterPorts, ClusterRecord
-from base.config.data_plane import DataPlaneSettings
+from base.config.domains.storage.data_plane import DataPlaneSettings
 from base.host.env.dotenv_boot import PLACEHOLDER_DB_URL
 
 _POOLED = "postgresql://ava_main:sek@127.0.0.1:6433/ava_main"

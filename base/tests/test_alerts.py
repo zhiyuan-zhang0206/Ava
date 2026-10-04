@@ -20,7 +20,7 @@ from psycopg.types.json import Jsonb
 
 import base.telemetry.alerts as base_alerts
 from base.config import settings
-from base.config.general import GeneralSettings
+from base.config.domains.general import GeneralSettings
 from base.telemetry import alerts_copy as copy
 from base.telemetry.alerts import display_language, format_local, frontend_base_url, notify_text
 

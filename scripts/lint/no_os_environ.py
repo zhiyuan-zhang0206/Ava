@@ -129,7 +129,7 @@ _ALLOWED_FILES = frozenset(
         "cli/tests/test_start_identity.py",  # Exercises the settings-free birth boundary; environment is the actual input before Settings exists.
         "tests/cli/test_start_repo_guard.py",  # Verifies checkout/home routing before Settings can be constructed.
         "base/config/__init__.py",  # Settings aggregate; role-derives the gateway-config fetch before sub-models construct
-        "base/config/data_plane.py",  # _self_machine_host reads AVA_MACHINE_HOST at sub-model construction time — the settings singleton does not exist yet, sibling sub-models are unreachable, and base.cluster.machine imports settings (circular)
+        "base/config/domains/storage/data_plane.py",  # self_machine_host reads AVA_MACHINE_HOST at sub-model construction time — the settings singleton does not exist yet, sibling sub-models are unreachable, and base.cluster.machine imports settings (circular)
         "base/host/env/dotenv_boot.py",  # load_dotenv ~/.ava/.env, must run before Settings import
         "base/host/env/runtime_config.py",  # path bootstrap; cannot import Settings (circular dep)
         "cli/commands/management/config.py",  # the settings-free repair path (ava config --local) reads AVA_GATEWAY_URL / AVA_CLUSTER_SECRET from the raw env/.env WITHOUT constructing Settings — a broken .env is exactly the scenario it repairs, and constructing Settings would fail first
@@ -173,7 +173,7 @@ _ALLOWED_FILES = frozenset(
         "base/lm/provider_api.py",  # plugin keys are not Settings fields; require_key reads the live process env for the bootstrap plugin-secrets channel on split runners, the same class as child-env handoff entries
         "scripts/host_ops/guard_editable_venv.py",  # dependency-free pre-uv preflight must inspect inherited VIRTUAL_ENV before a project environment can be trusted or Settings can import
         "base/config/_lite.py",  # the boot-lite resolution layer IS the Settings bootstrap: it reads raw env aliases and plants the placeholder data-plane URLs before any sub-model exists — the same "cannot depend on Settings by construction" class as base/config/__init__.py
-        "base/config/_full.py",  # the eager builder reads AVA_PROCESS_PROFILE at construction time, before the singleton exists — the same bootstrap-ordering class as base/config/data_plane.py
+        "base/config/_full.py",  # the eager builder reads AVA_PROCESS_PROFILE at construction time, before the singleton exists — the same bootstrap-ordering class as base/config/domains/storage/data_plane.py
         "scripts/codegen/gen_config_lite_table.py",  # regeneration must run in exactly the states that need it (broken .env, unreachable gateway): it forces AVA_CONFIG_FETCH=skip in the process env BEFORE importing the registry, which Settings cannot mediate by construction
     }
 )

@@ -4,7 +4,7 @@ hostname resolution entirely.
 Background — see `base.host.net.predicates.is_ipv4_literal` for the network failure
 mode this defends against (DNS64/NAT64 synthesis of a v4 literal). This
 module is the httpx-specific fix; Postgres gets the equivalent via libpq's
-own `hostaddr=` (`base/config/data_plane.py`).
+own `hostaddr=` (`base/config/domains/storage/data_plane.py`).
 
 Only the SYNC path needs it. httpx's async transport (httpcore's
 `AnyIOBackend`, backed by `anyio.connect_tcp`) and `redis.asyncio` (via

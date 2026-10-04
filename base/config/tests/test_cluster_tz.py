@@ -20,7 +20,7 @@ from base.config import (
     host_tz_name,
     settings,
 )
-from base.config.general import GeneralSettings
+from base.config.domains.general import GeneralSettings
 
 
 @pytest.fixture(autouse=True)

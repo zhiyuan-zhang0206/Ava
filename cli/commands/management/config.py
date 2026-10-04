@@ -312,7 +312,7 @@ def _resolve_field(key: str, index: dict[str, ConfigFieldView]) -> ConfigFieldVi
 
 
 def _field_editable(field: ConfigFieldView, *, remote: bool) -> bool:
-    # Mirrors base.config.editing.field_editable. The CLI has the wire view,
+    # Mirrors base.config.admin.editing.field_editable. The CLI has the wire view,
     # not ConfigFieldMeta, so these two definitions must stay in lockstep.
     return field.remote_writable if remote and field.scope == "host" else field.writable
 
@@ -511,7 +511,7 @@ def _build_local_patch(
     pairs: dict[str, str] | None, unset_keys: list[str] | None
 ) -> tuple[dict[str, object], set[str], list[_LocalConfigField]]:
     """Resolve, gate, and coerce one direct `.env` patch before validation."""
-    from base.config.editing import coerce_config_scalar
+    from base.config.admin.editing import coerce_config_scalar
 
     index = _index_local_fields(_local_fields())
     writes: dict[str, object] = {}
@@ -537,7 +537,7 @@ def _edit_local_config(
     pairs: dict[str, str] | None, unset_keys: list[str] | None, verb: str
 ) -> int:
     """Validate and persist one local `.env` patch without booting Settings."""
-    from base.config.candidate import validate_env_patch_for_write
+    from base.config.admin.candidate import validate_env_patch_for_write
     from base.host.env import runtime_config
 
     try:

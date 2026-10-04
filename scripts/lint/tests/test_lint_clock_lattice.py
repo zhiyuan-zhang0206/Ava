@@ -107,7 +107,7 @@ def test_independent_clock_without_lattice_vocabulary_is_allowed(scan_tmp) -> No
 def test_settings_field_in_class_body_is_not_scanned(scan_tmp) -> None:
     errs = _errors(
         scan_tmp,
-        "base/config/gateway.py",
+        "base/config/domains/gateway.py",
         """
         class GatewaySettings(EnvSettings):
             launch_confirm_timeout_seconds: float = Field(

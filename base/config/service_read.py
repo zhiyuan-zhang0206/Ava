@@ -236,7 +236,7 @@ def _is_expected_owner_url_refusal(exc: ValidationError) -> bool:
     test — never a message match. EVERY reported error must be the refusal:
     anything else is a genuine decode failure and warns.
     """
-    from base.config.data_plane import AgentProfileOwnerDbUrlRefusedError
+    from base.config.domains.storage.data_plane import AgentProfileOwnerDbUrlRefusedError
 
     errors = exc.errors()
     return bool(errors) and all(

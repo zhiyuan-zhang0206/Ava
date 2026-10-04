@@ -38,7 +38,7 @@ _INDEX = _REPO_ROOT / "base" / "host" / "env" / "config_lite_table.json"
 
 
 def test_stall_exit_record_deadline_contract() -> None:
-    from base.config.gateway import GatewaySettings
+    from base.config.domains.gateway import GatewaySettings
 
     name = "schedule_stall_exit_record_deadline_seconds"
     alias = "AVA_SCHEDULE_STALL_EXIT_RECORD_DEADLINE_SECONDS"

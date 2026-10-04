@@ -41,8 +41,8 @@ from base.api_contracts.config import (
 )
 from base.cluster.machine import MachineRole, machine_name
 from base.config import env_override_values, field_domain, get_config_metadata, settings
-from base.config.candidate import validate_env_patch_for_write
-from base.config.editing import ConfigPatchPlan, split_reducer_patch
+from base.config.admin.candidate import validate_env_patch_for_write
+from base.config.admin.editing import ConfigPatchPlan, split_reducer_patch
 from base.host.env import runtime_config
 from base.host.env.audit import check_env_integrity
 from ops import cluster_rpc as _cluster_rpc

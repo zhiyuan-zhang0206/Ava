@@ -9,7 +9,7 @@ from pydantic import ValidationError
 
 from agent.graph.exec import output
 from base.config import settings
-from base.config.sandbox import SandboxSettings
+from base.config.domains.sandbox import SandboxSettings
 
 
 @pytest.fixture

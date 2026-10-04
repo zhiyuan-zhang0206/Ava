@@ -19,7 +19,7 @@ once, per the registry doctrine in `base/host/env/config_registry.py`), with:
 - consumers that resolve the value **at call time**, and a parity invariant: an
   unconfigured cluster behaves exactly as before the field existed.
 
-The display domain (`base/config/display.py`, task #3696) is the reference
+The display domain (`base/config/domains/display.py`, task #3696) is the reference
 shape: user-facing windows and page defaults, each with its reasoning inline.
 
 ## The exception: a literal that stays

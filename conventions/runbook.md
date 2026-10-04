@@ -377,7 +377,7 @@ refused by `ava start` before any native effect; no conversion exists
 ([details](data-plane-secret-split.md#homes-born-before-this-model)). Settings never
 rewrites a database credential. On the same load, a data-plane URL whose host is this machine's own
 reachable address (`AVA_MACHINE_HOST`) dials `127.0.0.1` instead
-(`base/config/data_plane.py`): self-dial never leaves the box. The `.env` value,
+(`base/config/domains/storage/data_plane.py`): self-dial never leaves the box. The `.env` value,
 bootstrap payload, and registered address stay untouched, so remote runners keep dialing
 the gateway's real address.
 

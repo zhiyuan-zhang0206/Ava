@@ -35,7 +35,7 @@ receivers:
     # no dead gRPC receiver.
     # The receiver endpoint is baked from AVA_TELEMETRY_OTLP_PORT at converge
     # (default 127.0.0.1:4318 — the standard OTLP port; single source in
-    # base/config/observability.py, task #1945).
+    # base/config/domains/observability/settings.py, task #1945).
     protocols:
       http:
         endpoint: $OTLP_RECEIVER_ENDPOINT

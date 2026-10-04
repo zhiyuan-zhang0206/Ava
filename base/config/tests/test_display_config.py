@@ -3,7 +3,7 @@
 import pytest
 from pydantic import ValidationError
 
-from base.config.display import DisplaySettings
+from base.config.domains.display import DisplaySettings
 
 DISPLAY_RANGES = (
     ("messages_default_limit", 1, 10000),

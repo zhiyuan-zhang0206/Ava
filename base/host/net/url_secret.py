@@ -75,7 +75,7 @@ def url_with_host(url: str, host: str) -> str:
     double-encode it and change the credential bytes before the dial). An IPv6
     replacement host is bracketed.
 
-    Used by the self-dial loopback rewrite (base.config.data_plane): when a
+    Used by the self-dial loopback rewrite (base.config.domains.storage.data_plane): when a
     data-plane URL names this machine's own reachable address, the dial host is
     swapped to loopback while identity/port/database stay exactly as derived."""
     parts = urlsplit(url)
@@ -94,7 +94,7 @@ def url_with_query_param(url: str, key: str, value: str) -> str:
     absent, replaced in place if already present); scheme/userinfo/host/
     port/path and every other query param pass through untouched.
 
-    Used to set libpq's `hostaddr` (base.config.data_plane) — a query
+    Used to set libpq's `hostaddr` (base.config.domains.storage.data_plane) — a query
     param, not a netloc part, so `url_with_host`/`url_with_port` don't cover
     it.
     """

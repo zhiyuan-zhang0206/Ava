@@ -7,7 +7,7 @@ import pytest
 
 @pytest.mark.parametrize("raw", ["[1, 2.5]", "1,2.5"])
 def test_delivery_watchdog_backoff_accepts_json_or_comma_list(raw: str) -> None:
-    from base.config.daemon import DaemonSettings
+    from base.config.domains.daemon.settings import DaemonSettings
 
     configured = DaemonSettings.model_validate(
         {"AVA_DELIVERY_WATCHDOG_DISPATCH_BACKOFF_STEPS_S": raw}
@@ -19,14 +19,14 @@ def test_delivery_watchdog_backoff_accepts_json_or_comma_list(raw: str) -> None:
 def test_delivery_watchdog_backoff_rejects_empty_or_nonpositive_steps(raw: str) -> None:
     import pydantic
 
-    from base.config.daemon import DaemonSettings
+    from base.config.domains.daemon.settings import DaemonSettings
 
     with pytest.raises(pydantic.ValidationError):
         DaemonSettings.model_validate({"AVA_DELIVERY_WATCHDOG_DISPATCH_BACKOFF_STEPS_S": raw})
 
 
 def test_delivery_watchdog_wake_suppression_defaults() -> None:
-    from base.config.daemon import DaemonSettings
+    from base.config.domains.daemon.settings import DaemonSettings
 
     configured = DaemonSettings()
     assert configured.delivery_watchdog_resurrect_fail_before_suppress == 5
@@ -37,7 +37,7 @@ def test_delivery_watchdog_wake_suppression_defaults() -> None:
 def test_delivery_outbox_defaults() -> None:
     """Task #3757: on by default; 30s/1m/5m/15m ladder, 12h budget, 15m merge
     window, 30s flush tick, 128-entry cap (each reason lives on the field)."""
-    from base.config.daemon import DaemonSettings
+    from base.config.domains.daemon.settings import DaemonSettings
 
     configured = DaemonSettings()
     assert configured.delivery_outbox_enabled is True
@@ -51,7 +51,7 @@ def test_delivery_outbox_defaults() -> None:
 
 @pytest.mark.parametrize("raw", ["[1, 2.5]", "1,2.5"])
 def test_delivery_outbox_backoff_accepts_json_or_comma_list(raw: str) -> None:
-    from base.config.daemon import DaemonSettings
+    from base.config.domains.daemon.settings import DaemonSettings
 
     configured = DaemonSettings.model_validate({"AVA_DELIVERY_OUTBOX_RETRY_BACKOFF_STEPS_S": raw})
     assert configured.delivery_outbox_retry_backoff_steps_s == [1.0, 2.5]
@@ -61,13 +61,13 @@ def test_reduce_context_switch_defaults_ship_as_current_behavior() -> None:
     """Task #4137: the platform switch and its policy keys land with
     behavior-preserving defaults — the off-fallback, the wiring points, and the
     night-silence window are follow-ups."""
-    from base.config.agent_prompt import AgentPromptSettings
+    from base.config.domains.agent.prompt import AgentPromptSettings
 
     assert AgentPromptSettings().reduce_context_switch is True
 
 
 def test_reduce_context_switch_env_aliases() -> None:
-    from base.config.agent_prompt import AgentPromptSettings
+    from base.config.domains.agent.prompt import AgentPromptSettings
 
     configured = AgentPromptSettings.model_validate({"AVA_REDUCE_CONTEXT_SWITCH": "false"})
     assert configured.reduce_context_switch is False
@@ -77,7 +77,7 @@ def test_reduce_context_switch_env_aliases() -> None:
 def test_delivery_outbox_backoff_rejects_empty_or_nonpositive_steps(raw: str) -> None:
     import pydantic
 
-    from base.config.daemon import DaemonSettings
+    from base.config.domains.daemon.settings import DaemonSettings
 
     with pytest.raises(pydantic.ValidationError):
         DaemonSettings.model_validate({"AVA_DELIVERY_OUTBOX_RETRY_BACKOFF_STEPS_S": raw})
@@ -87,7 +87,7 @@ def test_delivery_outbox_backoff_rejects_empty_or_nonpositive_steps(raw: str) ->
 def test_delivery_outbox_abandoned_retention_rejects_nonpositive(raw: str) -> None:
     import pydantic
 
-    from base.config.daemon import DaemonSettings
+    from base.config.domains.daemon.settings import DaemonSettings
 
     with pytest.raises(pydantic.ValidationError):
         DaemonSettings.model_validate({"AVA_DELIVERY_OUTBOX_ABANDONED_RETENTION_DAYS": raw})
@@ -96,7 +96,7 @@ def test_delivery_outbox_abandoned_retention_rejects_nonpositive(raw: str) -> No
 def test_hierarchy_budget_must_stay_below_deadline() -> None:
     import pydantic
 
-    from base.config.daemon import DaemonSettings
+    from base.config.domains.daemon.settings import DaemonSettings
 
     with pytest.raises(pydantic.ValidationError, match="hierarchy_job_budget_seconds"):
         DaemonSettings.model_validate(
@@ -119,7 +119,7 @@ def test_hierarchy_budget_must_stay_below_deadline() -> None:
 
 def test_hierarchy_tail_defaults_ship_dark() -> None:
     """The C-leg tail knobs' defaults: off, 15min idle, 60min interval, cap 3."""
-    from base.config.daemon import DaemonSettings
+    from base.config.domains.daemon.settings import DaemonSettings
 
     configured = DaemonSettings.model_validate({})
     assert configured.hierarchy_tail_seal_enabled is False
@@ -160,7 +160,7 @@ def test_sdk_nameerror_hint_enabled_config_contract() -> None:
 
 def test_llm_model_code_default_is_deepseek_flash() -> None:
     """An unset AVA_MODEL must fall back to deepseek-flash (user rulings 2026-09-10 / 2026-09-17)."""
-    from base.config.lm import LmSettings
+    from base.config.domains.lm import LmSettings
 
     assert LmSettings.model_fields["llm_model"].default == "deepseek-flash"
 
@@ -169,14 +169,14 @@ def test_llm_model_code_default_is_deepseek_flash() -> None:
 
 
 def test_gateway_session_ttl_defaults_to_one_day() -> None:
-    from base.config.gateway import GatewaySettings
+    from base.config.domains.gateway import GatewaySettings
 
     assert GatewaySettings().session_ttl_seconds == 24 * 3600
 
 
 def test_timeline_compact_history_config_contract() -> None:
     from base.config import field_alias_map
-    from base.config.gateway import GatewaySettings
+    from base.config.domains.gateway import GatewaySettings
 
     field = GatewaySettings.model_fields["timeline_compact_history"]
     extra = field.json_schema_extra

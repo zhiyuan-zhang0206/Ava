@@ -1,6 +1,6 @@
 """The hierarchy-worker field block of `DaemonSettings`.
 
-Split out of `base/config/daemon.py` at birth for the same line-budget
+Split out of `base/config/domains/daemon/settings.py` at birth for the same line-budget
 reason the delivery-watchdog block was split (task #3616 x #3621): the daemon
 module carries an 800-line hard ceiling. Mixed into `DaemonSettings` — NOT a
 config domain: `settings.daemon.hierarchy_*`, every alias/scope/capability
