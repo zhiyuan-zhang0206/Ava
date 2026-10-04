@@ -26,3 +26,5 @@ tiles, Dismissed tiles, Unresolved tiles) sums by construction.
   both read the same active set.
 - Per-agent `agent_id`-scoped dismissal rows remain without arithmetic effect
   everywhere (v1 API rejects them); the split reads class-wide rows only.
+
+<!-- Superseded (dashboard half): decisions/2026-10-04-alert-classes-not-events.md -->

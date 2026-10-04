@@ -4,12 +4,14 @@ liveness + status panel + stats dashboard, and the ops monitor series.
 
 Package door — no imports, no re-exports; callers use the modules below.
 Routers mounted in `gateway/app.py`: `router`, `machine_pause`, `bootstrap`,
-`status`, `ops_monitor`. Modules:
+`status`, `alert_classes`, `ops_monitor`. Modules:
 
   - `router.py`          — `/api/cluster/*` control + admin endpoints
   - `machine_pause.py`   — `POST /api/cluster/machines/{name}/pause|resume`
   - `bootstrap.py`       — `GET /api/bootstrap` runner registration handshake
   - `status.py`          — `/api/health`, `/api/status`, `/api/stats/dashboard`
+  - `alert_classes.py`   — `/api/stats/alert-classes[/samples]`: the sidebar card's warning/error
+                            classes and one class's newest events
   - `ops_monitor.py`     — `GET /api/ops/monitor`
   - `ops_series.py`     — the query core behind the ops monitor (over `telemetry_events`)
   - `roster_probe.py`    — bounded transport policy for runner status probes

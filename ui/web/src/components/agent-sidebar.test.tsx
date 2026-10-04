@@ -107,6 +107,27 @@ vi.mock("@/lib/api", () => ({
   api: {
     patchAgentLabel: vi.fn().mockResolvedValue(undefined),
     listAgents: vi.fn(() => Promise.resolve({ agents: state.agents.filter((a) => a.status === "terminated"), next_cursor: null })),
+    getAlertClasses: vi.fn(() =>
+      Promise.resolve({
+        window_hours: 24,
+        classes: [
+          {
+            level: "warning",
+            event_name: "disk_pressure",
+            source: "svc",
+            process: "gateway",
+            category: "telemetry",
+            count: 10_000,
+            first_seen: "2026-10-04T01:00:00Z",
+            last_seen: "2026-10-04T02:00:00Z",
+            dismissal_id: null,
+          },
+        ],
+        total_classes: 1,
+        total_events: 10_000,
+        as_of: "2026-10-04T02:00:00Z",
+      }),
+    ),
   },
 }));
 
@@ -682,12 +703,10 @@ describe("StatsCards tri-state (loading / data / error)", () => {
       tokens: { input: 12_345, output: 6_789, cache_read: 0, cache_hit_pct: 80 },
       cost_usd: 1.2345,
       avg_turn_seconds: 3.14,
-      warnings: 2,
-      errors: 1,
-      warnings_dismissed: 1,
-      warnings_net: 1,
-      errors_dismissed: 1,
-      errors_net: 0,
+      warnings: 19_588,
+      errors: 41,
+      alert_classes_active: 7,
+      alert_classes_dismissed: 2,
       total_events: 100,
       plugin_stats: [],
     };
@@ -698,18 +717,14 @@ describe("StatsCards tri-state (loading / data / error)", () => {
     expect(screen.getByText("80.00%")).toBeTruthy(); // cache hit, 2 decimals
     expect(screen.getByText("$1.23")).toBeTruthy(); // windowed cost
     expect(screen.getByText("3s")).toBeTruthy(); // avg turn
-    // warnings/errors card: one unresolved number per level rendered as a
-    // single "N / M" value in the original 2x3 card layout (restored per user
-    // feedback 2026-08-30); zero levels render as plain 0, so warnings_net=1
-    // with errors_net=0 shows the bare "1 / 0" value
-    expect(screen.getByText("1 / 0")).toBeTruthy();
-    // no Total / Resolved / Remaining labels anywhere in the card
-    expect(screen.queryByText(/Total/)).toBeNull();
-    expect(screen.queryByText(/Resolved/)).toBeNull();
-    expect(screen.queryByText(/Remaining/)).toBeNull();
+    // warnings/errors card: the active class count is the value; the raw event
+    // total is secondary text, never the headline
+    expect(screen.getByText("7")).toBeTruthy();
+    expect(screen.getByText("19,629 events")).toBeTruthy();
+    expect(screen.queryByText("19,629")).toBeNull();
   });
 
-  it("both levels fully resolved → plain '0 / 0', no all-clear badge", () => {
+  it("every class dismissed → plain 0 active classes, no all-clear badge", () => {
     state.agents = [makeAgent({ agent_id: 1 })];
     state.stats = {
       live_count: 5,
@@ -719,18 +734,46 @@ describe("StatsCards tri-state (loading / data / error)", () => {
       avg_turn_seconds: 3.14,
       warnings: 3,
       errors: 2,
-      warnings_dismissed: 3,
-      warnings_net: 0,
-      errors_dismissed: 2,
-      errors_net: 0,
+      alert_classes_active: 0,
+      alert_classes_dismissed: 5,
       total_events: 100,
       plugin_stats: [],
     };
     wrap(<AgentSidebar {...handlers} />);
     openStats();
-    // user ruling 2026-08-30: zero levels render as plain 0, no all-clear badge
-    expect(screen.getByText("0 / 0")).toBeTruthy();
+    expect(screen.getByText("0")).toBeTruthy();
+    expect(screen.getByText("5 events")).toBeTruthy();
     expect(screen.queryByText("All clear")).toBeNull();
+  });
+
+  it("the warnings card toggles the grouped class list", async () => {
+    state.agents = [makeAgent({ agent_id: 1 })];
+    state.stats = {
+      live_count: 5,
+      window_hours: 24,
+      tokens: { input: 1, output: 1, cache_read: 0, cache_hit_pct: 0 },
+      cost_usd: 0,
+      avg_turn_seconds: null,
+      warnings: 10_000,
+      errors: 0,
+      alert_classes_active: 1,
+      alert_classes_dismissed: 0,
+      total_events: 100,
+      plugin_stats: [],
+    };
+    wrap(<AgentSidebar {...handlers} />);
+    openStats();
+    const card = screen.getByRole("button", { name: /Warnings \/ errors/ });
+    expect(card.getAttribute("aria-expanded")).toBe("false");
+    expect(screen.queryByText("disk_pressure")).toBeNull();
+
+    fireEvent.click(card);
+
+    expect(card.getAttribute("aria-expanded")).toBe("true");
+    expect(await screen.findByText("disk_pressure")).toBeTruthy();
+    expect(screen.getByText("×10000")).toBeTruthy();
+    fireEvent.click(card);
+    expect(screen.queryByText("disk_pressure")).toBeNull();
   });
 
   it("error without data shows retry and clicking it refetches", () => {
@@ -758,10 +801,8 @@ describe("StatsCards tri-state (loading / data / error)", () => {
       avg_turn_seconds: 3,
       warnings: 2,
       errors: 1,
-      warnings_dismissed: 1,
-      warnings_net: 1,
-      errors_dismissed: 1,
-      errors_net: 0,
+      alert_classes_active: 1,
+      alert_classes_dismissed: 2,
       total_events: 100,
       plugin_stats: [],
     };
@@ -784,10 +825,8 @@ describe("StatsCards tri-state (loading / data / error)", () => {
       avg_turn_seconds: null,
       warnings: 0,
       errors: 0,
-      warnings_dismissed: 0,
-      warnings_net: 0,
-      errors_dismissed: 0,
-      errors_net: 0,
+      alert_classes_active: 0,
+      alert_classes_dismissed: 0,
       total_events: 0,
       plugin_stats: [],
     };
@@ -806,10 +845,8 @@ describe("StatsCards tri-state (loading / data / error)", () => {
       avg_turn_seconds: null,
       warnings: 0,
       errors: 0,
-      warnings_dismissed: 0,
-      warnings_net: 0,
-      errors_dismissed: 0,
-      errors_net: 0,
+      alert_classes_active: 0,
+      alert_classes_dismissed: 0,
       total_events: 0,
       plugin_stats: [],
     };
@@ -829,10 +866,8 @@ describe("plugin stat cards", () => {
       avg_turn_seconds: null,
       warnings: 0,
       errors: 0,
-      warnings_dismissed: 0,
-      warnings_net: 0,
-      errors_dismissed: 0,
-      errors_net: 0,
+      alert_classes_active: 0,
+      alert_classes_dismissed: 0,
       total_events: 0,
       plugin_stats: pluginStats,
     };
@@ -971,10 +1006,8 @@ describe("StatsCards window selector", () => {
       avg_turn_seconds: 3.14,
       warnings: 2,
       errors: 1,
-      warnings_dismissed: 1,
-      warnings_net: 1,
-      errors_dismissed: 1,
-      errors_net: 0,
+      alert_classes_active: 1,
+      alert_classes_dismissed: 2,
       total_events: 100,
       plugin_stats: [],
     };
@@ -1016,10 +1049,8 @@ describe("StatsCards window selector", () => {
       avg_turn_seconds: 3,
       warnings: 0,
       errors: 0,
-      warnings_dismissed: 0,
-      warnings_net: 0,
-      errors_dismissed: 0,
-      errors_net: 0,
+      alert_classes_active: 0,
+      alert_classes_dismissed: 0,
       total_events: 100,
       plugin_stats: [],
     };

@@ -5426,7 +5426,7 @@
     "/api/stats/dashboard": {
       "get": {
         "summary": "Get Stats Dashboard",
-        "description": "Pull all data for the sidebar-top stats card in one shot.\n\nData sources:\n- `live_count`: agents_meta table — all non-terminated agents (running/idling)\n- `tokens` / `cost_usd` / average turn duration: the window's `llm_usage` and\n  `turn_end` rows in `telemetry_events` (cost is each row's usage-time snapshot)\n- warning/error counts: per-class counts of `telemetry_events` rows, split into\n  total / dismissed / net with the resolution daemon's class arithmetic over the\n  SELECTED window (task #1935)\n- `total_events`: archived event row count — frozen historical constant\n  (task #1281 parity run; PG events dropped; not a live gauge)\n\n`?hours=` selects the aggregation window (0 = last 5m; 1/6/24/72/168 =\nhours), whitelisted by `StatsWindowHours` (anything else 422s); the served horizon is\n`applied_window_hours`, which is the requested window. Zero-data scenario: tokens all 0,\ncost_usd 0.0, avg_turn_seconds None (frontend shows \"—\"). The window is computed on\nevery request, in one connection, with an 8-second statement timeout.",
+        "description": "Pull all data for the sidebar-top stats card in one shot.\n\nData sources:\n- `live_count`: agents_meta table — all non-terminated agents (running/idling)\n- `tokens` / `cost_usd` / average turn duration: the window's `llm_usage` and\n  `turn_end` rows in `telemetry_events` (cost is each row's usage-time snapshot)\n- warning/error event totals and class counts: the SELECTED window's warning, error and\n  critical `telemetry_events` rows grouped by class; a class is dismissed when an active\n  `event_dismissals` row cancels it (`gateway.cluster.alert_classes`)\n- `total_events`: archived event row count — frozen historical constant\n  (task #1281 parity run; PG events dropped; not a live gauge)\n\n`?hours=` selects the aggregation window (0 = last 5m; 1/6/24/72/168 =\nhours), whitelisted by `StatsWindowHours` (anything else 422s); the served horizon is\n`applied_window_hours`, which is the requested window. Zero-data scenario: tokens all 0,\ncost_usd 0.0, avg_turn_seconds None (frontend shows \"—\"). The window is computed on\nevery request, in one connection, with an 8-second statement timeout.",
         "operationId": "get_stats_dashboard_api_stats_dashboard_get",
         "parameters": [
           {
@@ -5475,6 +5475,133 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/SystemStatus"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/stats/alert-classes": {
+      "get": {
+        "summary": "Get Alert Classes",
+        "description": "The selected window's warning/error classes, most frequent first.\n\nActive and dismissed classes come together (`dismissal_id` tells them apart) so the console\ncan list the dismissed ones apart and reopen them. Capped at `ALERT_CLASSES_LIMIT` rows;\n`total_classes` / `total_events` are uncapped. One connection, an 8-second statement\ntimeout (a timeout is a retriable 503).",
+        "operationId": "get_alert_classes_api_stats_alert_classes_get",
+        "parameters": [
+          {
+            "name": "hours",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/StatsWindowHours",
+              "default": 24
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AlertClassesResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/stats/alert-classes/samples": {
+      "get": {
+        "summary": "Get Alert Class Samples",
+        "description": "The newest `SAMPLES_LIMIT` events of one class in the window, with their message and context.\n\n`process` matches exactly (an empty value is the empty-process class). The literal level\npredicate lets the partial index on warning/error/critical rows serve the newest-first scan.",
+        "operationId": "get_alert_class_samples_api_stats_alert_classes_samples_get",
+        "parameters": [
+          {
+            "name": "level",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "enum": [
+                "warning",
+                "error",
+                "critical"
+              ],
+              "type": "string",
+              "title": "Level"
+            }
+          },
+          {
+            "name": "event_name",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 255,
+              "title": "Event Name"
+            }
+          },
+          {
+            "name": "source",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 255,
+              "title": "Source"
+            }
+          },
+          {
+            "name": "process",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 255,
+              "default": "",
+              "title": "Process"
+            }
+          },
+          {
+            "name": "hours",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/StatsWindowHours",
+              "default": 24
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AlertClassSamples"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
                 }
               }
             }
@@ -7735,6 +7862,197 @@
         ],
         "title": "AgentTps",
         "description": "Token-per-second metrics for one agent — two views of throughput.\n\n`lm_stage_tps` = output tokens / cumulative LLM-call wall-clock,\nisolating just the model's generation speed excluding execute_code and framework\noverhead. Denominator is the sum of all `turn_end.duration_seconds` over the window.\n\n`agent_lifecycle_tps` = output tokens / agent's cumulative alive\nwall-clock, covering the full agent runtime including non-LLM time.\nDenominator is the agent's total time in non-terminated status (sum of each\nspawn/resurrect → terminate interval, excluding gaps spent terminated)."
+      },
+      "AlertClassRow": {
+        "properties": {
+          "level": {
+            "type": "string",
+            "enum": [
+              "warning",
+              "error",
+              "critical"
+            ],
+            "title": "Level"
+          },
+          "event_name": {
+            "type": "string",
+            "title": "Event Name"
+          },
+          "source": {
+            "type": "string",
+            "title": "Source"
+          },
+          "process": {
+            "type": "string",
+            "title": "Process"
+          },
+          "category": {
+            "type": "string",
+            "enum": [
+              "telemetry",
+              "log"
+            ],
+            "title": "Category"
+          },
+          "count": {
+            "type": "integer",
+            "exclusiveMinimum": 0.0,
+            "title": "Count"
+          },
+          "first_seen": {
+            "type": "string",
+            "format": "date-time",
+            "title": "First Seen"
+          },
+          "last_seen": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Last Seen"
+          },
+          "dismissal_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dismissal Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "level",
+          "event_name",
+          "source",
+          "process",
+          "category",
+          "count",
+          "first_seen",
+          "last_seen",
+          "dismissal_id"
+        ],
+        "title": "AlertClassRow",
+        "description": "One warning/error class over the window, tallied across its events.\n\nThe identity is `(level, event_name, source, process)`, the same one an\n`event_dismissals` row cancels. `category` is the emission transport to put on a\ndismissal made from this class (matching ignores it). `dismissal_id` is the active\ndismissal cancelling the class (reopen it through\n`POST /api/event-resolutions/{id}/reopen`), None when the class is active."
+      },
+      "AlertClassSample": {
+        "properties": {
+          "ts": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Ts"
+          },
+          "agent_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Agent Id"
+          },
+          "machine": {
+            "type": "string",
+            "title": "Machine"
+          },
+          "trace_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Trace Id"
+          },
+          "message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Message"
+          },
+          "attributes": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Attributes"
+          }
+        },
+        "type": "object",
+        "required": [
+          "ts",
+          "agent_id",
+          "machine",
+          "trace_id",
+          "message",
+          "attributes"
+        ],
+        "title": "AlertClassSample",
+        "description": "One recorded event of an alert class: the message and the context it carried."
+      },
+      "AlertClassSamples": {
+        "properties": {
+          "samples": {
+            "items": {
+              "$ref": "#/components/schemas/AlertClassSample"
+            },
+            "type": "array",
+            "title": "Samples"
+          }
+        },
+        "type": "object",
+        "required": [
+          "samples"
+        ],
+        "title": "AlertClassSamples",
+        "description": "GET /api/stats/alert-classes/samples — the newest events of one class in the window."
+      },
+      "AlertClassesResponse": {
+        "properties": {
+          "window_hours": {
+            "$ref": "#/components/schemas/StatsWindowHours"
+          },
+          "classes": {
+            "items": {
+              "$ref": "#/components/schemas/AlertClassRow"
+            },
+            "type": "array",
+            "title": "Classes"
+          },
+          "total_classes": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Total Classes"
+          },
+          "total_events": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Total Events"
+          },
+          "as_of": {
+            "type": "string",
+            "format": "date-time",
+            "title": "As Of"
+          }
+        },
+        "type": "object",
+        "required": [
+          "window_hours",
+          "classes",
+          "total_classes",
+          "total_events",
+          "as_of"
+        ],
+        "title": "AlertClassesResponse",
+        "description": "GET /api/stats/alert-classes — the window's classes, most frequent first.\n\n`classes` is capped at `ALERT_CLASSES_LIMIT` rows; `total_classes` is the uncapped count\nand `total_events` the window's whole event count, so a cut list still states its size."
       },
       "AlertIngestResult": {
         "properties": {
@@ -14858,25 +15176,15 @@
             "minimum": 0.0,
             "title": "Errors"
           },
-          "warnings_dismissed": {
+          "alert_classes_active": {
             "type": "integer",
             "minimum": 0.0,
-            "title": "Warnings Dismissed"
+            "title": "Alert Classes Active"
           },
-          "warnings_net": {
+          "alert_classes_dismissed": {
             "type": "integer",
             "minimum": 0.0,
-            "title": "Warnings Net"
-          },
-          "errors_dismissed": {
-            "type": "integer",
-            "minimum": 0.0,
-            "title": "Errors Dismissed"
-          },
-          "errors_net": {
-            "type": "integer",
-            "minimum": 0.0,
-            "title": "Errors Net"
+            "title": "Alert Classes Dismissed"
           },
           "total_events": {
             "type": "integer",
@@ -14912,15 +15220,13 @@
           "avg_turn_seconds",
           "warnings",
           "errors",
-          "warnings_dismissed",
-          "warnings_net",
-          "errors_dismissed",
-          "errors_net",
+          "alert_classes_active",
+          "alert_classes_dismissed",
           "total_events",
           "plugin_stats"
         ],
         "title": "StatsDashboard",
-        "description": "GET /api/stats/dashboard response — sidebar-top stats card data pulled in one shot.\n\nAll windowed fields (`tokens` / `cost_usd` / `avg_turn_seconds` /\n`warnings` / `errors`) aggregate over the `applied_window_hours` horizon.\n`window_hours` echoes the selected value — `0` means five minutes; all\nother values are hours.\n`applied_window_hours` is the served window in hours: the requested one.\n\n- `live_count`: current non-terminated count (from agents_meta, not\n  events; not windowed)\n- `tokens`: windowed telemetry LLM token usage\n- `cost_usd`: windowed LLM spend in USD, summed from the usage-time\n  `cost_usd` snapshots carried by `llm_usage` events in `telemetry_events`;\n  events that pre-date the snapshot field contribute 0\n- `avg_turn_seconds`: windowed avg LLM call wall time\n  (event=turn_end + ok=true)\n- `warnings` / `errors`: raw level totals over the window (critical\n  folds into error). Agent trial-and-error (exec_failed) logs at INFO\n  and is deliberately NOT counted — these numbers are operator-facing\n  alerts, not agent activity.\n- `warnings_dismissed` / `warnings_net` / `errors_dismissed` /\n  `errors_net`: the three-way resolution split (task #1935). The\n  arithmetic is the events-maintenance daemon's class subtraction\n  (`services.events_maintenance.resolution.level_splits`) applied to the\n  SELECTED window instead of the daemon's fixed six hours: events whose\n  (category, level, event_name, source, process) class has an active\n  dismissal in `event_dismissals` — exact, or matching a wildcard row\n  with an empty `process` — count as dismissed, the rest as net, and\n  dismissed + net == the raw total by construction.\n- `total_events`: archived event row count (frozen — the PG events copy\n  stopped growing at the LGTM cutover; not a live gauge)\n\n`avg_turn_seconds` None = zero turns in the window (new DB / no\nactivity); frontend renders \"—\".\n\n`plugin_stats` is not windowed (see `PluginStat`): the runtime values\nbehind cards that plugins declare under `contributions.ui.stats`, joined\nby the console on `(plugin, id)`.\n\n`as_of` is the UTC time the payload's reads were assembled."
+        "description": "GET /api/stats/dashboard response — sidebar-top stats card data pulled in one shot.\n\nAll windowed fields (`tokens` / `cost_usd` / `avg_turn_seconds` /\n`warnings` / `errors`) aggregate over the `applied_window_hours` horizon.\n`window_hours` echoes the selected value — `0` means five minutes; all\nother values are hours.\n`applied_window_hours` is the served window in hours: the requested one.\n\n- `live_count`: current non-terminated count (from agents_meta, not\n  events; not windowed)\n- `tokens`: windowed telemetry LLM token usage\n- `cost_usd`: windowed LLM spend in USD, summed from the usage-time\n  `cost_usd` snapshots carried by `llm_usage` events in `telemetry_events`;\n  events that pre-date the snapshot field contribute 0\n- `avg_turn_seconds`: windowed avg LLM call wall time\n  (event=turn_end + ok=true)\n- `warnings` / `errors`: raw event totals over the window (critical\n  folds into error). Agent trial-and-error (exec_failed) logs at INFO\n  and is deliberately NOT counted — these numbers are operator-facing\n  alerts, not agent activity.\n- `alert_classes_active` / `alert_classes_dismissed`: how many distinct\n  (level, event_name, source, process) warning/error classes the window\n  holds, split by whether an active dismissal in `event_dismissals`\n  cancels the class — exact, or a wildcard row with an empty `process`.\n  The sidebar card shows `alert_classes_active`; the classes themselves\n  are `GET /api/stats/alert-classes`, which reads the same rows.\n- `total_events`: archived event row count (frozen — the PG events copy\n  stopped growing at the LGTM cutover; not a live gauge)\n\n`avg_turn_seconds` None = zero turns in the window (new DB / no\nactivity); frontend renders \"—\".\n\n`plugin_stats` is not windowed (see `PluginStat`): the runtime values\nbehind cards that plugins declare under `contributions.ui.stats`, joined\nby the console on `(plugin, id)`.\n\n`as_of` is the UTC time the payload's reads were assembled."
       },
       "StatsTokens": {
         "properties": {

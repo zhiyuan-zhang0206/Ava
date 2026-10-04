@@ -19,7 +19,7 @@ Three layers: `HomePage` (read-only toast) → `HomeShell` (`useAgents`, activeI
 - **HeaderBar** / **ContentToggle** / **ConnectionNotice** / **PendingStrip** — current-agent title plus the Alerts badge and Inspector toggle in the top bar, a single Details tri-state selector in the composer — All / Last / None (`components/content-toggle.tsx`, DB-backed `display.*`, synced across devices), and the inline SSE connection notice. There is no React updating component/state: update hints reload through the always-up Gate, which solely renders maintenance. **CopyButton** (`copy-button.tsx` + `lib/clipboard.ts`)—corner copy for code blocks / command output; `execCommand` fallback when Clipboard API fails.
 - **SpawnButton** — cross-machine placement and model/preset/effort selection; creation availability and selected-agent reason: [[ui/web/src/docs/frontend-components/creation-availability.ava.okf.md|Creation Availability]].
 
-`PageDock` removed—open pages now carried by InspectorPanel's `useAgentPages`.
+Warnings / Errors stats card: [[ui/web/src/docs/frontend-components/alert-classes.ava.okf.md|Alert Classes]].
 
 Plugin statistics use full-width rows: primary `value`, secondary `detail`,
 both wrap and preserve line breaks. No provider parsing. The sidebar popover

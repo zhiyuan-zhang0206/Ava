@@ -2870,9 +2870,9 @@ export interface paths {
          *     - `live_count`: agents_meta table — all non-terminated agents (running/idling)
          *     - `tokens` / `cost_usd` / average turn duration: the window's `llm_usage` and
          *       `turn_end` rows in `telemetry_events` (cost is each row's usage-time snapshot)
-         *     - warning/error counts: per-class counts of `telemetry_events` rows, split into
-         *       total / dismissed / net with the resolution daemon's class arithmetic over the
-         *       SELECTED window (task #1935)
+         *     - warning/error event totals and class counts: the SELECTED window's warning, error and
+         *       critical `telemetry_events` rows grouped by class; a class is dismissed when an active
+         *       `event_dismissals` row cancels it (`gateway.cluster.alert_classes`)
          *     - `total_events`: archived event row count — frozen historical constant
          *       (task #1281 parity run; PG events dropped; not a live gauge)
          *
@@ -2910,6 +2910,54 @@ export interface paths {
          *     degraded value).
          */
         get: operations["get_system_status_api_status_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/stats/alert-classes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Alert Classes
+         * @description The selected window's warning/error classes, most frequent first.
+         *
+         *     Active and dismissed classes come together (`dismissal_id` tells them apart) so the console
+         *     can list the dismissed ones apart and reopen them. Capped at `ALERT_CLASSES_LIMIT` rows;
+         *     `total_classes` / `total_events` are uncapped. One connection, an 8-second statement
+         *     timeout (a timeout is a retriable 503).
+         */
+        get: operations["get_alert_classes_api_stats_alert_classes_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/stats/alert-classes/samples": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Alert Class Samples
+         * @description The newest `SAMPLES_LIMIT` events of one class in the window, with their message and context.
+         *
+         *     `process` matches exactly (an empty value is the empty-process class). The literal level
+         *     predicate lets the partial index on warning/error/critical rows serve the newest-first scan.
+         */
+        get: operations["get_alert_class_samples_api_stats_alert_classes_samples_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -4030,6 +4078,100 @@ export interface components {
             lm_stage_tps: number | null;
             /** Agent Lifecycle Tps */
             agent_lifecycle_tps: number | null;
+        };
+        /**
+         * AlertClassRow
+         * @description One warning/error class over the window, tallied across its events.
+         *
+         *     The identity is `(level, event_name, source, process)`, the same one an
+         *     `event_dismissals` row cancels. `category` is the emission transport to put on a
+         *     dismissal made from this class (matching ignores it). `dismissal_id` is the active
+         *     dismissal cancelling the class (reopen it through
+         *     `POST /api/event-resolutions/{id}/reopen`), None when the class is active.
+         */
+        AlertClassRow: {
+            /**
+             * Level
+             * @enum {string}
+             */
+            level: "warning" | "error" | "critical";
+            /** Event Name */
+            event_name: string;
+            /** Source */
+            source: string;
+            /** Process */
+            process: string;
+            /**
+             * Category
+             * @enum {string}
+             */
+            category: "telemetry" | "log";
+            /** Count */
+            count: number;
+            /**
+             * First Seen
+             * Format: date-time
+             */
+            first_seen: string;
+            /**
+             * Last Seen
+             * Format: date-time
+             */
+            last_seen: string;
+            /** Dismissal Id */
+            dismissal_id: number | null;
+        };
+        /**
+         * AlertClassSample
+         * @description One recorded event of an alert class: the message and the context it carried.
+         */
+        AlertClassSample: {
+            /**
+             * Ts
+             * Format: date-time
+             */
+            ts: string;
+            /** Agent Id */
+            agent_id: number | null;
+            /** Machine */
+            machine: string;
+            /** Trace Id */
+            trace_id: string | null;
+            /** Message */
+            message: string | null;
+            /** Attributes */
+            attributes: {
+                [key: string]: unknown;
+            };
+        };
+        /**
+         * AlertClassSamples
+         * @description GET /api/stats/alert-classes/samples — the newest events of one class in the window.
+         */
+        AlertClassSamples: {
+            /** Samples */
+            samples: components["schemas"]["AlertClassSample"][];
+        };
+        /**
+         * AlertClassesResponse
+         * @description GET /api/stats/alert-classes — the window's classes, most frequent first.
+         *
+         *     `classes` is capped at `ALERT_CLASSES_LIMIT` rows; `total_classes` is the uncapped count
+         *     and `total_events` the window's whole event count, so a cut list still states its size.
+         */
+        AlertClassesResponse: {
+            window_hours: components["schemas"]["StatsWindowHours"];
+            /** Classes */
+            classes: components["schemas"]["AlertClassRow"][];
+            /** Total Classes */
+            total_classes: number;
+            /** Total Events */
+            total_events: number;
+            /**
+             * As Of
+             * Format: date-time
+             */
+            as_of: string;
         };
         /**
          * AlertIngestResult
@@ -7494,19 +7636,16 @@ export interface components {
          *       events that pre-date the snapshot field contribute 0
          *     - `avg_turn_seconds`: windowed avg LLM call wall time
          *       (event=turn_end + ok=true)
-         *     - `warnings` / `errors`: raw level totals over the window (critical
+         *     - `warnings` / `errors`: raw event totals over the window (critical
          *       folds into error). Agent trial-and-error (exec_failed) logs at INFO
          *       and is deliberately NOT counted — these numbers are operator-facing
          *       alerts, not agent activity.
-         *     - `warnings_dismissed` / `warnings_net` / `errors_dismissed` /
-         *       `errors_net`: the three-way resolution split (task #1935). The
-         *       arithmetic is the events-maintenance daemon's class subtraction
-         *       (`services.events_maintenance.resolution.level_splits`) applied to the
-         *       SELECTED window instead of the daemon's fixed six hours: events whose
-         *       (category, level, event_name, source, process) class has an active
-         *       dismissal in `event_dismissals` — exact, or matching a wildcard row
-         *       with an empty `process` — count as dismissed, the rest as net, and
-         *       dismissed + net == the raw total by construction.
+         *     - `alert_classes_active` / `alert_classes_dismissed`: how many distinct
+         *       (level, event_name, source, process) warning/error classes the window
+         *       holds, split by whether an active dismissal in `event_dismissals`
+         *       cancels the class — exact, or a wildcard row with an empty `process`.
+         *       The sidebar card shows `alert_classes_active`; the classes themselves
+         *       are `GET /api/stats/alert-classes`, which reads the same rows.
          *     - `total_events`: archived event row count (frozen — the PG events copy
          *       stopped growing at the LGTM cutover; not a live gauge)
          *
@@ -7534,14 +7673,10 @@ export interface components {
             warnings: number;
             /** Errors */
             errors: number;
-            /** Warnings Dismissed */
-            warnings_dismissed: number;
-            /** Warnings Net */
-            warnings_net: number;
-            /** Errors Dismissed */
-            errors_dismissed: number;
-            /** Errors Net */
-            errors_net: number;
+            /** Alert Classes Active */
+            alert_classes_active: number;
+            /** Alert Classes Dismissed */
+            alert_classes_dismissed: number;
             /** Total Events */
             total_events: number;
             /** Plugin Stats */
@@ -11674,6 +11809,72 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SystemStatus"];
+                };
+            };
+        };
+    };
+    get_alert_classes_api_stats_alert_classes_get: {
+        parameters: {
+            query?: {
+                hours?: components["schemas"]["StatsWindowHours"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AlertClassesResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_alert_class_samples_api_stats_alert_classes_samples_get: {
+        parameters: {
+            query: {
+                level: "warning" | "error" | "critical";
+                event_name: string;
+                source: string;
+                process?: string;
+                hours?: components["schemas"]["StatsWindowHours"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AlertClassSamples"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
