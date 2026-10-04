@@ -14,27 +14,31 @@ import re
 from cli.commands.data_plane import pgbouncer
 
 
-def test_render_ini_is_transaction_scram_and_socket_server() -> None:
-    ini = pgbouncer._render_ini(
-        pg_port=5433,
-        listen_port=6433,
-        db_name="ava_main",
-        cluster_secret="s3cr3t",  # noqa: S106 — test fixture
-    )
+def _assert_transaction_pooling_with_scram_clients(ini: str) -> None:
     # Transaction pooling is the whole point.
     assert "pool_mode = transaction" in ini
     # Client auth is scram against the userlist of generation verifiers.
     assert "auth_type = scram-sha-256" in ini
     assert f"auth_file = {pgbouncer._userlist_path()}" in ini
     assert "listen_port = 6433" in ini
+
+
+def _assert_database_entry_forwards_over_owner_only_socket(ini: str) -> None:
     # The [databases] entry keys on the cluster db and forwards to the local pg over
     # its owner-only unix socket (host=<socket dir>) with SCRAM pass-through.
     assert "[databases]" in ini
-    assert "ava_main = host=/" in ini and "port=5433 dbname=ava_main" in ini
+    assert "ava_main = host=/" in ini
+    assert "port=5433 dbname=ava_main" in ini
+
+
+def _assert_backends_born_with_statement_ceiling(ini: str) -> None:
     # Every pooled backend is born with the statement ceiling (the pooler drops
     # the client's `options` startup parameter — the connect_query SET is the
     # one pooler-side delivery path; see base.db.PG_STATEMENT_TIMEOUT_SET_SQL).
     assert "connect_query='SET statement_timeout = 60000'" in ini
+
+
+def _assert_release_reset_is_one_unquoted_discard_all(ini: str) -> None:
     # A backend whose client vanished mid-transaction is scrubbed back to its
     # connect_query-fresh state by the release reset: a session-level GUC (e.g.
     # a polluter's SET default_transaction_read_only = on) must never reach the
@@ -59,11 +63,28 @@ def test_render_ini_is_transaction_scram_and_socket_server() -> None:
     # client-side SET on every pooled use.
     reset_line = next(ln for ln in ini.splitlines() if ln.startswith("server_reset_query ="))
     assert reset_line == "server_reset_query = DISCARD ALL"
+
+
+def _assert_quiet_connection_logs_and_userlist_only_console(ini: str) -> None:
     assert "log_connections = 0" in ini.splitlines()
     assert "log_disconnections = 0" in ini.splitlines()
     # admin/stats console is the userlist-only operator entry, never a database role.
     console = {"admin_users = ava_pooler_admin", "stats_users = ava_pooler_admin"}
     assert console <= set(ini.splitlines())
+
+
+def test_render_ini_is_transaction_scram_and_socket_server() -> None:
+    ini = pgbouncer._render_ini(
+        pg_port=5433,
+        listen_port=6433,
+        db_name="ava_main",
+        cluster_secret="s3cr3t",  # noqa: S106 — test fixture
+    )
+    _assert_transaction_pooling_with_scram_clients(ini)
+    _assert_database_entry_forwards_over_owner_only_socket(ini)
+    _assert_backends_born_with_statement_ceiling(ini)
+    _assert_release_reset_is_one_unquoted_discard_all(ini)
+    _assert_quiet_connection_logs_and_userlist_only_console(ini)
 
 
 def test_render_ini_authenticates_without_secret_and_binds_loopback_only() -> None:

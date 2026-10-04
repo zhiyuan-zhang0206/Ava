@@ -1,11 +1,4 @@
 {
-  "complexity": {
-    "tests/e2e/test_compact_flow.py::test_force_compact_renders_envelope_without_unrecognized_marker": 16,
-    "tests/e2e/test_compare_visual.py::test_compare_alignment_and_arrows": 17,
-    "tests/e2e/test_error_recovery.py::test_llm_error_renders_error_marker_and_agent_recovers": 18,
-    "tests/e2e/test_idle_restart_silent.py::test_external_restart_of_idle_agent_is_silent": 19,
-    "tests/e2e/test_message_flow.py::test_message_flow_renders_full_turn_without_unrecognized_marker": 21
-  },
   "directories": {
     "tests/e2e": 31
   }

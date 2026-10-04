@@ -27,6 +27,39 @@ def _owner(state_dir: Path) -> coding_session_owner.CodingSessionOwner:
     )
 
 
+def _assert_takeover_request_inlines_brief_and_guide(message: str, brief: str, guide: Path) -> None:
+    assert "take over Ava agent 42" in message
+    assert "--agent 42" in message
+    assert "--name 'Fix login'" in message
+    # The request command spells out its former defaults (task #4102: the CLI
+    # defaults are gone).
+    assert "--ttl 1800" in message
+    assert "--batch-window 0" in message
+    assert str(guide) in message
+    assert brief in message
+
+
+def _assert_takeover_protocol_uses_say_and_own_summary_release(message: str) -> None:
+    assert "work.md" not in message
+    assert "tasks.md" not in message
+    assert "work file" not in message
+    assert "ava impersonate say" in message
+    assert "ava.impersonation.say" not in message
+    assert "release with your own summary" in message
+    assert "transport acceptance is not host receipt" in message
+
+
+def _assert_provider_specific_relay_instructions(message: str, provider: str) -> None:
+    if provider == "codex":
+        assert "CODEX_THREAD_ID" in message
+        assert "CODEX_HOME" in message
+        assert "--codex-remote" in message
+    else:
+        assert "Monitor relay with --session" in message
+        assert "as the request output instructs" in message
+        assert "--codex-remote" not in message
+
+
 @pytest.mark.parametrize("provider", ["codex", "claude"])
 def test_self_takeover_bootstrap_inlines_brief_and_links_real_guide(
     provider: str, tmp_path: Path
@@ -35,24 +68,9 @@ def test_self_takeover_bootstrap_inlines_brief_and_links_real_guide(
     assert guide.is_file()
     brief = "Goal: fix the login flow.\nDecision: keep the session table as-is."
     message = bootstrap_message(42, "Fix login", provider, brief, guide)
-    assert "take over Ava agent 42" in message
-    assert "--agent 42" in message and "--name 'Fix login'" in message
-    # The request command spells out its former defaults (task #4102: the CLI
-    # defaults are gone).
-    assert "--ttl 1800" in message and "--batch-window 0" in message
-    assert str(guide) in message and brief in message
-    assert "work.md" not in message and "tasks.md" not in message and "work file" not in message
-    assert "ava impersonate say" in message
-    assert "ava.impersonation.say" not in message
-    assert "release with your own summary" in message
-    assert "transport acceptance is not host receipt" in message
-    if provider == "codex":
-        assert "CODEX_THREAD_ID" in message and "CODEX_HOME" in message
-        assert "--codex-remote" in message
-    else:
-        assert "Monitor relay with --session" in message
-        assert "as the request output instructs" in message
-        assert "--codex-remote" not in message
+    _assert_takeover_request_inlines_brief_and_guide(message, brief, guide)
+    _assert_takeover_protocol_uses_say_and_own_summary_release(message)
+    _assert_provider_specific_relay_instructions(message, provider)
 
 
 @pytest.mark.parametrize(

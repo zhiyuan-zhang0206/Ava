@@ -20,7 +20,7 @@ from __future__ import annotations
 import json
 from collections.abc import Callable, Iterator
 from datetime import UTC, datetime, timedelta
-from typing import TypedDict, cast
+from typing import Any, TypedDict, cast
 
 import pytest
 from playwright.sync_api import Browser, BrowserContext, Page, Route
@@ -289,15 +289,7 @@ def _expected_x(*, lane_left: float, lane_width: float, ts: str) -> float:
     return lane_left + 32 + fraction * (lane_width - 64)
 
 
-def test_compare_alignment_and_arrows(compare_page: Page) -> None:
-    """One shared axis: equal canvases, equal ticks, and arrows on the ts x."""
-    _open_compare(compare_page)
-    state = compare_page.evaluate(_ALIGNMENT_SCRIPT)
-
-    assert len(state["laneWidths"]) == len(_AGENT_ORDER)
-    assert len(set(state["laneWidths"])) == 1, state["laneWidths"]
-    assert len({tuple(ticks) for ticks in state["tickLefts"]}) == 1, state["tickLefts"]
-
+def _assert_arrows_sit_on_timestamp_x(state: dict[str, Any]) -> None:
     lane_index = {agent_id: index for index, agent_id in enumerate(_AGENT_ORDER)}
     for arrow in state["arrows"]:
         lane = lane_index[arrow["target"]]
@@ -308,13 +300,11 @@ def test_compare_alignment_and_arrows(compare_page: Page) -> None:
         )
         assert abs(arrow["x"] - expected) <= 1.5, (arrow, expected)
 
-    assert sorted(arrow["count"] for arrow in state["arrows"]) == [1, 3, 3, 3, 5, 8]
-    assert len(state["badges"]) == 5
-    assert state["horizontalOverflow"] <= 1
 
-    # Every lane's edge tick labels sit inside the visible canvas (the canvas
-    # fits its container), so the rightmost timestamp is not clipped.
-    for lane in compare_page.locator('[data-testid="run-timeline-visualization"]').all():
+def _assert_lane_edge_ticks_inside_container(page: Page) -> None:
+    """Every lane's edge tick labels sit inside the visible canvas (the canvas
+    fits its container), so the rightmost timestamp is not clipped."""
+    for lane in page.locator('[data-testid="run-timeline-visualization"]').all():
         container_box = lane.locator("xpath=..").bounding_box()
         lane_box = lane.bounding_box()
         assert container_box is not None and lane_box is not None
@@ -328,6 +318,24 @@ def test_compare_alignment_and_arrows(compare_page: Page) -> None:
                 tick_box["x"] + tick_box["width"]
                 <= container_box["x"] + container_box["width"] + 0.5
             )
+
+
+def test_compare_alignment_and_arrows(compare_page: Page) -> None:
+    """One shared axis: equal canvases, equal ticks, and arrows on the ts x."""
+    _open_compare(compare_page)
+    state = compare_page.evaluate(_ALIGNMENT_SCRIPT)
+
+    assert len(state["laneWidths"]) == len(_AGENT_ORDER)
+    assert len(set(state["laneWidths"])) == 1, state["laneWidths"]
+    assert len({tuple(ticks) for ticks in state["tickLefts"]}) == 1, state["tickLefts"]
+
+    _assert_arrows_sit_on_timestamp_x(state)
+
+    assert sorted(arrow["count"] for arrow in state["arrows"]) == [1, 3, 3, 3, 5, 8]
+    assert len(state["badges"]) == 5
+    assert state["horizontalOverflow"] <= 1
+
+    _assert_lane_edge_ticks_inside_container(compare_page)
 
 
 def test_compare_panel_keeps_shared_canvas_width(compare_page: Page) -> None:

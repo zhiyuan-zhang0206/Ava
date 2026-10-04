@@ -26,6 +26,7 @@ from typing import Any
 import httpx
 import psycopg
 import pytest
+from playwright.sync_api import ConsoleMessage, Page
 
 from base.agents import AgentStatus
 from base.config import settings
@@ -78,19 +79,53 @@ def _wait_kinds(
     return items
 
 
+def _collect_unrecognized_console_warnings(page: Page) -> list[str]:
+    """Return a live list that collects `unrecognized system_marker` console warnings."""
+    warnings: list[str] = []
+
+    def collect_if_unrecognized(message: ConsoleMessage) -> None:
+        if "unrecognized system_marker" in message.text.lower():
+            warnings.append(message.text)
+
+    page.on("console", collect_if_unrecognized)
+    return warnings
+
+
+def _assert_compact_request_finalized(agent_id: int) -> None:
+    """DB: the compact_request inbound was claimed and finalized."""
+    with psycopg.connect(settings.data_plane.db_url) as conn, conn.cursor() as cur:
+        cur.execute(
+            "SELECT kind, status FROM inbound_messages WHERE agent_id = %s ORDER BY id",
+            (agent_id,),
+        )
+        rows = cur.fetchall()
+    assert rows[-1] == ("compact_request", "done"), rows
+
+
+def _assert_no_unrecognized_alarm_after_compact(
+    page: Page, unrecognized_warnings: list[str]
+) -> None:
+    assert page.get_by_test_id("marker-unrecognized").count() == 0, (
+        "marker-unrecognized alarm rendered"
+    )
+    assert page.get_by_text(_UNRECOGNIZED_RE).count() == 0, (
+        f"unrecognized system_marker alarm rendered after compact — {unrecognized_warnings}"
+    )
+    # Pump the playwright loop once before reading the collected list: the
+    # page.on("console") deliveries only run while a call is in flight, so a
+    # warning emitted right before this assert could still be in flight
+    # (task #3927 class).
+    page.evaluate("() => 1")
+    assert unrecognized_warnings == [], (
+        f"[timeline] unrecognized console warnings fired after compact: {unrecognized_warnings}"
+    )
+
+
 @pytest.mark.scenario("tests.e2e.fakes.scenarios.compact_flow:build")
 def test_force_compact_renders_envelope_without_unrecognized_marker(e2e_env: E2EEnv) -> None:
     page = e2e_env.page
     agent_id = e2e_env.agent_id
-    unrecognized_warnings: list[str] = []
-    page.on(
-        "console",
-        lambda m: (
-            unrecognized_warnings.append(m.text)
-            if "unrecognized system_marker" in m.text.lower()
-            else None
-        ),
-    )
+    unrecognized_warnings = _collect_unrecognized_console_warnings(page)
 
     # The compact envelope card is a secondary timeline item; the default
     # details level "none" (user ruling 2026-09-17) folds secondary items out
@@ -118,31 +153,11 @@ def test_force_compact_renders_envelope_without_unrecognized_marker(e2e_env: E2E
     assert SUMMARY_TEXT in envelope["payload"], envelope
     assert "Compact request" in envelope["payload"], envelope
 
-    # DB: the compact_request inbound was claimed and finalized.
-    with psycopg.connect(settings.data_plane.db_url) as conn, conn.cursor() as cur:
-        cur.execute(
-            "SELECT kind, status FROM inbound_messages WHERE agent_id = %s ORDER BY id",
-            (agent_id,),
-        )
-        rows = cur.fetchall()
-    assert rows[-1] == ("compact_request", "done"), rows
+    _assert_compact_request_finalized(agent_id)
 
     # Browser: the envelope card renders, and NO #1017-class alarm.
     page.wait_for_selector("text=Compact request", timeout=15_000)
-    assert page.get_by_test_id("marker-unrecognized").count() == 0, (
-        "marker-unrecognized alarm rendered"
-    )
-    assert page.get_by_text(_UNRECOGNIZED_RE).count() == 0, (
-        f"unrecognized system_marker alarm rendered after compact — {unrecognized_warnings}"
-    )
-    # Pump the playwright loop once before reading the collected list: the
-    # page.on("console") deliveries only run while a call is in flight, so a
-    # warning emitted right before this assert could still be in flight
-    # (task #3927 class).
-    page.evaluate("() => 1")
-    assert unrecognized_warnings == [], (
-        f"[timeline] unrecognized console warnings fired after compact: {unrecognized_warnings}"
-    )
+    _assert_no_unrecognized_alarm_after_compact(page, unrecognized_warnings)
 
     # The post-compact state: the compact transition resumes at LLM, so the
     # model speaks once after the wipe (narration) before the next message.

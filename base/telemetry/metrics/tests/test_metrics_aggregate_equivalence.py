@@ -70,14 +70,7 @@ def test_equivalence_empty(fake: TelemetryStream) -> None:
     _run_aggregate(fake, since_compact=True)
 
 
-def test_equivalence_full_thread(fake: TelemetryStream) -> None:
-    """One agent with every unit-relevant event — the router wiring scenario.
-
-    Golden lock on the aggregate output: the text digest, the
-    machine data fragment, and the per-agent rollup must keep these exact
-    values.
-    """
-    aid = 1
+def _write_full_thread_scenario(fake: TelemetryStream, aid: int) -> None:
     _add(fake, event="code", agent_id=aid, payload={"body": "print(1)"})
     _add(fake, event="syntax_fix", agent_id=aid, payload={"fixes": "ruff,ruff_format"})
     _add(fake, event="exec", agent_id=aid, payload={"body": "1\n", "ok": True})
@@ -91,8 +84,8 @@ def test_equivalence_full_thread(fake: TelemetryStream) -> None:
     _add(fake, event="agent_spawned", agent_id=aid, payload={"spawner": "agent:1"})
     _add(fake, event="halt", agent_id=aid, payload={"body": "no tool_call (idle)"})
 
-    text, data, roll = _run_aggregate(fake)
-    # ── text digest ──
+
+def _assert_full_thread_text_digest(text: str) -> None:
     assert "7 events / 1 agents" in _norm(text)
     assert "syntax_fix trigger counts (per code block):" in text
     assert "ruff                        1  100%" in text
@@ -101,7 +94,9 @@ def test_equivalence_full_thread(fake: TelemetryStream) -> None:
     assert "cache hit overall: 80.0%   cost: $0.0003" in text
     assert "turn duration (s):" in text
     assert "agents: 1 distinct  1 spawns (1 subagents)  1 idle halts" in text
-    # ── data fragment ──
+
+
+def _assert_full_thread_data_fragment(data: dict[str, Any]) -> None:
     sx = data["metrics"]["syntax_fix"]
     assert sx["trigger_counts"] == {"ruff": 1, "ruff_format": 1}
     assert sx["code_blocks"] == 1
@@ -111,11 +106,29 @@ def test_equivalence_full_thread(fake: TelemetryStream) -> None:
     assert llm["llm_calls"] == 1 and llm["tokens_in"] == 1000 and llm["tokens_out"] == 200
     assert llm["cache_hit_pct"] == 80.0
     assert data["metrics"]["agent_activity"]["spawns_total"] == 1
-    # ── per-agent rollups ──
+
+
+def _assert_full_thread_rollup(roll: dict[int, Any], aid: int) -> None:
     assert roll[aid]["events"] == 7
     assert roll[aid]["llm_calls"] == 1
     assert roll[aid]["turn_total"] == 1
     assert roll[aid]["exec_ok"] == 1
+
+
+def test_equivalence_full_thread(fake: TelemetryStream) -> None:
+    """One agent with every unit-relevant event — the router wiring scenario.
+
+    Golden lock on the aggregate output: the text digest, the
+    machine data fragment, and the per-agent rollup must keep these exact
+    values.
+    """
+    aid = 1
+    _write_full_thread_scenario(fake, aid)
+
+    text, data, roll = _run_aggregate(fake)
+    _assert_full_thread_text_digest(text)
+    _assert_full_thread_data_fragment(data)
+    _assert_full_thread_rollup(roll, aid)
 
     # since-compact window (no compact rows here) — identical counts
     text2, _data2, roll2 = _run_aggregate(fake, since_compact=True)

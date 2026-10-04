@@ -33,6 +33,72 @@ def _ai_count(values: dict[str, Any]) -> int:
     return sum(1 for m in values.get("messages", []) if isinstance(m, AIMessage))
 
 
+def _agent_status_row(agent_id: int) -> tuple[Any, ...] | None:
+    with psycopg.connect(settings.data_plane.db_url) as conn, conn.cursor() as cur:
+        cur.execute("SELECT status, pid FROM agents_meta WHERE id = %s", (agent_id,))
+        return cur.fetchone()
+
+
+def _restart_inbound_applied(agent_id: int) -> bool:
+    with psycopg.connect(settings.data_plane.db_url) as conn, conn.cursor() as cur:
+        cur.execute(
+            "SELECT applied_at IS NOT NULL FROM inbound_messages "
+            "WHERE agent_id = %s AND kind = 'restart' LIMIT 1",
+            (agent_id,),
+        )
+        return cur.fetchone() == (True,)
+
+
+def _wait_for_pre_restart_turn(agent_id: int) -> dict[str, Any]:
+    """Turn complete = two AIMessages written to checkpoint and status back to idling."""
+    deadline = time.monotonic() + 90.0
+    while time.monotonic() < deadline:
+        values = _checkpoint_values(agent_id)
+        row = _agent_status_row(agent_id)
+        if row and row[0] == AgentStatus.IDLING.value and _ai_count(values) == 2:
+            return values
+        time.sleep(0.3)
+    raise RuntimeError(f"agent {agent_id} did not complete pre-restart turn within 90s")
+
+
+def _wait_for_silent_restart_cycle(agent_id: int) -> dict[str, Any]:
+    """Restart applied and marker committed: applied row / idling / durable marker."""
+    deadline = time.monotonic() + 90.0
+    last: tuple = ()
+    while time.monotonic() < deadline:
+        completed = _restart_inbound_applied(agent_id)
+        row = _agent_status_row(agent_id)
+        values = _checkpoint_values(agent_id)
+        marker_committed = any(
+            "Restart was accepted from user" in str(m.content) for m in values.get("messages", [])
+        )
+        last = (completed, row, marker_committed)
+        if (
+            completed
+            and row is not None
+            and row[0] == AgentStatus.IDLING.value
+            and marker_committed
+        ):
+            return values
+        time.sleep(0.5)
+    raise RuntimeError(
+        f"agent {agent_id} did not complete silent restart cycle within 90s: "
+        f"(completed, (status, pid), marker_committed)={last!r}"
+    )
+
+
+def _assert_silent_and_alive_after_restart(values: dict[str, Any]) -> None:
+    # Zero LLM call: AIMessages still the pre-restart two (post-restart script is empty,
+    # any model call would exhaust the script — this count is belt-and-suspenders)
+    assert _ai_count(values) == 2, f"extra LLM turn after respawn: {_ai_count(values)} AIMessages"
+    # After marker, agent stopped waiting — halted=True still in checkpoint as is
+    assert values["halted"] is True
+    # plugin state survives respawn (empty state update no longer overwrites with default)
+    assert str(values["ava_code__cwd"]).endswith("e2e-idle-restart-cwd"), (
+        f"plugin state cwd did not survive respawn: {values.get('ava_code__cwd')!r}"
+    )
+
+
 @pytest.mark.scenario("tests.e2e.fakes.scenarios.idle_restart_silent:build")
 def test_external_restart_of_idle_agent_is_silent(spawned_agent: int) -> None:
     agent_id = spawned_agent
@@ -45,18 +111,7 @@ def test_external_restart_of_idle_agent_is_silent(spawned_agent: int) -> None:
     )
     resp.raise_for_status()
 
-    # turn complete = two AIMessages written to checkpoint and status back to idling
-    deadline = time.monotonic() + 90.0
-    while time.monotonic() < deadline:
-        values = _checkpoint_values(agent_id)
-        with psycopg.connect(settings.data_plane.db_url) as conn, conn.cursor() as cur:
-            cur.execute("SELECT status, pid FROM agents_meta WHERE id = %s", (agent_id,))
-            row = cur.fetchone()
-        if row and row[0] == AgentStatus.IDLING.value and _ai_count(values) == 2:
-            break
-        time.sleep(0.3)
-    else:
-        raise RuntimeError(f"agent {agent_id} did not complete pre-restart turn within 90s")
+    values = _wait_for_pre_restart_turn(agent_id)
 
     assert str(values["ava_code__cwd"]).endswith("e2e-idle-restart-cwd"), (
         f"pre-restart cwd not written to plugin state: {values.get('ava_code__cwd')!r}"
@@ -65,54 +120,14 @@ def test_external_restart_of_idle_agent_is_silent(spawned_agent: int) -> None:
     # ── external restart (default source='user') ──
     httpx.post(f"{GATEWAY_URL}/api/agents/{agent_id}/restart", timeout=10.0).raise_for_status()
 
-    # Restart applied and marker committed: applied row / idling / durable marker.
-    deadline = time.monotonic() + 90.0
-    last: tuple = ()
-    while time.monotonic() < deadline:
-        with psycopg.connect(settings.data_plane.db_url) as conn, conn.cursor() as cur:
-            cur.execute(
-                "SELECT applied_at IS NOT NULL FROM inbound_messages "
-                "WHERE agent_id = %s AND kind = 'restart' LIMIT 1",
-                (agent_id,),
-            )
-            completed = cur.fetchone() == (True,)
-            cur.execute("SELECT status, pid FROM agents_meta WHERE id = %s", (agent_id,))
-            row = cur.fetchone()
-        values = _checkpoint_values(agent_id)
-        marker_committed = any(
-            "Restart was accepted from user" in str(m.content) for m in values.get("messages", [])
-        )
-        last = (completed, row, marker_committed)
-        if (
-            completed
-            and row is not None
-            and row[0] == AgentStatus.IDLING.value
-            and marker_committed
-        ):
-            break
-        time.sleep(0.5)
-    else:
-        raise RuntimeError(
-            f"agent {agent_id} did not complete silent restart cycle within 90s: "
-            f"(completed, (status, pid), marker_committed)={last!r}"
-        )
+    values = _wait_for_silent_restart_cycle(agent_id)
 
     # ── Silent + liveness assertions ──
-    # Zero LLM call: AIMessages still the pre-restart two (post-restart script is empty,
-    # any model call would exhaust the script — this count is belt-and-suspenders)
-    assert _ai_count(values) == 2, f"extra LLM turn after respawn: {_ai_count(values)} AIMessages"
-    # After marker, agent stopped waiting — halted=True still in checkpoint as is
-    assert values["halted"] is True
-    # plugin state survives respawn (empty state update no longer overwrites with default)
-    assert str(values["ava_code__cwd"]).endswith("e2e-idle-restart-cwd"), (
-        f"plugin state cwd did not survive respawn: {values.get('ava_code__cwd')!r}"
-    )
+    _assert_silent_and_alive_after_restart(values)
 
     # Short observation window: no delayed wakeup (if any, AIMessage increases / empty script fails the invocation)
     time.sleep(2.0)
     values = _checkpoint_values(agent_id)
-    with psycopg.connect(settings.data_plane.db_url) as conn, conn.cursor() as cur:
-        cur.execute("SELECT status FROM agents_meta WHERE id = %s", (agent_id,))
-        row = cur.fetchone()
+    row = _agent_status_row(agent_id)
     assert row is not None and row[0] == AgentStatus.IDLING.value
     assert _ai_count(values) == 2
