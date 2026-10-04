@@ -137,6 +137,13 @@ export type StatsDashboard = Schemas["StatsDashboard"];
 export type StatsTokens = Schemas["StatsTokens"];
 export type PluginStat = Schemas["PluginStat"];
 
+// The sidebar card's warning/error classes: one row per (level, event_name, source, process),
+// and the persisted dismissal a row's Dismiss action creates.
+export type AlertClassRow = Schemas["AlertClassRow"];
+export type AlertClassesResponse = Schemas["AlertClassesResponse"];
+export type AlertClassSample = Schemas["AlertClassSample"];
+export type EventResolutionRow = Schemas["EventResolutionRow"];
+
 // --- Metrics (settings Metrics tab) ---
 //
 // The envelope (meta + the `metrics` map) comes from the generated schema,

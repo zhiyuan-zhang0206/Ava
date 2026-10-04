@@ -87,6 +87,7 @@ from gateway.auth.cors import cors_allowed_origins
 from gateway.auth.rejection_log import log_auth401_rejection
 from gateway.auth.request_principal import SessionKeys
 from gateway.auth.session_store import SessionStore, SessionTouchThrottle, touch_session
+from gateway.cluster import alert_classes as alert_classes_router
 from gateway.cluster import bootstrap as bootstrap_router
 from gateway.cluster import machine_pause as machine_pause_router
 from gateway.cluster import ops_monitor as ops_monitor_router
@@ -570,6 +571,7 @@ app.include_router(event_resolutions_router.router)
 app.include_router(ops_monitor_router.router)
 app.include_router(alerts_router.router)
 app.include_router(status_router.router)
+app.include_router(alert_classes_router.router)
 app.include_router(memory_router.router)
 app.include_router(mcp_server_router.router)
 app.include_router(fleet_graph_router.router)

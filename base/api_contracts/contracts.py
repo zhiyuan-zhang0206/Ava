@@ -392,6 +392,9 @@ ROUTE_CONTRACTS: dict[tuple[str, str], RouteContract] = {
     ),
     # ── gateway/cluster/status.py ───────────────────────────────────
     ("GET", "/api/stats/dashboard"): RouteContract(),
+    # ── gateway/cluster/alert_classes.py ────────────────────────────
+    ("GET", "/api/stats/alert-classes"): RouteContract(),
+    ("GET", "/api/stats/alert-classes/samples"): RouteContract(),
     ("GET", "/api/status"): RouteContract(),
     ("GET", "/api/system"): RouteContract(),
     ("GET", "/api/system/all"): RouteContract(),

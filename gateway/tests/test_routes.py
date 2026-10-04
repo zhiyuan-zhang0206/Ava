@@ -146,59 +146,47 @@ def _insert_dismissal(
     db.commit()
 
 
-def test_dashboard_three_way_resolution_split(
+def test_dashboard_counts_alert_classes_not_events(
     db_conn: psycopg.Connection, event_rows: _EventRows
 ) -> None:
-    """The dashboard carries total / dismissed / net per level; dismissed
-    classes are cancelled from net exactly like the resolution daemon's
-    gauges (task #1935)."""
+    """The card's number is the active class count: three events of one class are one class,
+    a dismissed class leaves the active count, and critical folds into the error event total."""
     _insert_dismissal(db_conn, level="warning", event_name="dismissed_warning")
     _insert_dismissal(db_conn, level="error", event_name="dismissed_error")
     event_rows.add(event="dismissed_warning", level="warning")
     event_rows.add(event="dismissed_warning", level="warning")
+    event_rows.add(event="remaining_warning", level="warning")
     event_rows.add(event="remaining_warning", level="warning")
     event_rows.add(event="dismissed_error", level="error")
     event_rows.add(event="remaining_critical", level="critical")
     db_conn.commit()
     with TestClient(app) as client:
         body = client.get("/api/stats/dashboard").json()
-    assert body["warnings"] == 3
-    assert body["warnings_dismissed"] == 2
-    assert body["warnings_net"] == 1
-    # critical folds into error for both the total and the split.
+    assert body["warnings"] == 4
     assert body["errors"] == 2
-    assert body["errors_dismissed"] == 1
-    assert body["errors_net"] == 1
-    # The three-way split sums back to the raw totals by construction.
-    assert body["warnings_dismissed"] + body["warnings_net"] == body["warnings"]
-    assert body["errors_dismissed"] + body["errors_net"] == body["errors"]
+    assert body["alert_classes_active"] == 2
+    assert body["alert_classes_dismissed"] == 2
 
 
-def test_dashboard_all_dismissed_level_reports_zero_net(
+def test_dashboard_all_classes_dismissed_reports_zero_active(
     db_conn: psycopg.Connection, event_rows: _EventRows
 ) -> None:
-    """Every in-window warning class dismissed -> warnings_net 0 (the
-    frontend's all-clear state); error side stays untouched."""
     _insert_dismissal(db_conn, level="warning", event_name="only_warning")
     event_rows.add(event="only_warning", level="warning")
     event_rows.add(event="only_warning", level="warning")
-    event_rows.add(event="only_error", level="error")
     db_conn.commit()
     with TestClient(app) as client:
         body = client.get("/api/stats/dashboard").json()
     assert body["warnings"] == 2
-    assert body["warnings_dismissed"] == 2
-    assert body["warnings_net"] == 0
-    assert body["errors"] == 1
-    assert body["errors_dismissed"] == 0
-    assert body["errors_net"] == 1
+    assert body["alert_classes_active"] == 0
+    assert body["alert_classes_dismissed"] == 1
 
 
-def test_dashboard_reopened_dismissal_counts_as_net(
+def test_dashboard_reopened_dismissal_counts_as_active(
     db_conn: psycopg.Connection, event_rows: _EventRows
 ) -> None:
-    """A dismissal flipped to reopened (burst safety valve) no longer
-    cancels its class — same active-set semantics as the daemon."""
+    """A dismissal flipped to reopened (burst safety valve) no longer cancels its class — same
+    active-set semantics as the daemon."""
     _insert_dismissal(db_conn, level="warning", event_name="burst_warning")
     with db_conn.cursor() as cur:
         cur.execute(
@@ -210,17 +198,15 @@ def test_dashboard_reopened_dismissal_counts_as_net(
     db_conn.commit()
     with TestClient(app) as client:
         body = client.get("/api/stats/dashboard").json()
-    assert body["warnings"] == 1
-    assert body["warnings_dismissed"] == 0
-    assert body["warnings_net"] == 1
+    assert body["alert_classes_active"] == 1
+    assert body["alert_classes_dismissed"] == 0
 
 
-def test_dashboard_per_agent_dismissal_has_no_arithmetic_effect(
+def test_dashboard_per_agent_dismissal_has_no_effect_on_the_class(
     db_conn: psycopg.Connection, event_rows: _EventRows
 ) -> None:
-    """v1 rejects per-agent dismissals; a manually inserted agent-scoped row
-    must not subtract from the class-wide aggregate (resolution daemon
-    contract)."""
+    """v1 rejects per-agent dismissals; a manually inserted agent-scoped row must not cancel the
+    class-wide class (resolution daemon contract)."""
     with db_conn.cursor() as cur:
         cur.execute(
             "INSERT INTO event_dismissals "
@@ -232,9 +218,8 @@ def test_dashboard_per_agent_dismissal_has_no_arithmetic_effect(
     db_conn.commit()
     with TestClient(app) as client:
         body = client.get("/api/stats/dashboard").json()
-    assert body["warnings"] == 1
-    assert body["warnings_dismissed"] == 0
-    assert body["warnings_net"] == 1
+    assert body["alert_classes_active"] == 1
+    assert body["alert_classes_dismissed"] == 0
 
 
 def test_dashboard_live_count_excludes_terminated(db_conn: psycopg.Connection) -> None:
