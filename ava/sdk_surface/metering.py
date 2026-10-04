@@ -33,7 +33,6 @@ from __future__ import annotations
 import contextlib
 import functools
 import inspect
-import weakref
 from collections.abc import Callable, Generator
 from types import ModuleType, SimpleNamespace
 from typing import Any
@@ -42,11 +41,22 @@ import ava
 from ava import agent_identity
 from base.telemetry import report_sink_failure
 
-# Identity set of live recorder objects. install() skips a target only when the
-# current top callable *is* one of these — robust to `ava.extend`'s wrap machinery,
-# which copies a wrapped callable's __dict__ (so a plain attribute marker would leak
-# onto a plugin wrapper built over a recorder and make install() wrongly skip it).
-_RECORDERS: weakref.WeakSet[Callable[..., Any]] = weakref.WeakSet()
+# A recorder marks itself with a reference to itself. `is_recorder` tests that identity, so
+# `install()` skips a target only when the current top callable *is* a recorder — robust to
+# `ava.extend`'s wrap machinery, which copies a wrapped callable's __dict__: a plugin wrapper built
+# over a recorder inherits the marker, but it points at the inner recorder, not at the wrapper.
+_RECORDER_MARK = "__ava_recorder__"
+
+
+def _recorder(fn: Callable[..., Any]) -> Callable[..., Any]:
+    setattr(fn, _RECORDER_MARK, fn)
+    return fn
+
+
+def is_recorder(fn: object) -> bool:
+    """Whether `fn` is itself a metering recorder (not a wrapper that merely copied one's attributes)."""
+    return getattr(fn, _RECORDER_MARK, None) is fn
+
 
 # Restore ledger (task #3426): the ``(parent, attr)`` pairs install() actually
 # wrapped, in wrap order. uninstall() restores from this record rather than
@@ -110,11 +120,9 @@ def _make_recorder(original: Callable[..., Any], fq: str) -> Callable[..., Any]:
             with _caller():
                 return await sdk_usage_telemetry.run_metered_async(fq, original, args, kwargs)
 
-        _RECORDERS.add(async_recorder)
-        return async_recorder
+        return _recorder(async_recorder)
 
-    _RECORDERS.add(recorder)
-    return recorder
+    return _recorder(recorder)
 
 
 # ava.mcps exposes tools dynamically (no list `__all_for_ava__`), so the namespace walk cannot
@@ -134,8 +142,7 @@ def _make_mcp_recorder(original: Callable[..., Any]) -> Callable[..., Any]:
         with _caller():
             return run_metered(f"mcps.{server}.{tool}", original, (server, tool, *args), kwargs)
 
-    _RECORDERS.add(recorder)
-    return recorder
+    return _recorder(recorder)
 
 
 def _instrument_targets() -> list[tuple[Any, str, str]]:
@@ -188,7 +195,7 @@ def install() -> None:
     """
     for parent, attr, fq in _instrument_targets():
         current = getattr(parent, attr, None)
-        if current is None or current in _RECORDERS:
+        if current is None or is_recorder(current):
             continue
         setattr(parent, attr, _make_recorder(current, fq))
         _WRAPPED.append((parent, attr))
@@ -196,7 +203,7 @@ def install() -> None:
     mcps_mod = getattr(ava, "mcps", None)
     if mcps_mod is not None:
         funnel = getattr(mcps_mod, _MCP_CALL_FUNNEL, None)
-        if callable(funnel) and funnel not in _RECORDERS:
+        if callable(funnel) and not is_recorder(funnel):
             setattr(mcps_mod, _MCP_CALL_FUNNEL, _make_mcp_recorder(funnel))
             _WRAPPED.append((mcps_mod, _MCP_CALL_FUNNEL))
 
@@ -218,12 +225,9 @@ def uninstall() -> None:
     failure shape of task #3426 (macOS local: 8 teardowns exploded after the test
     bodies had gone green).
     """
-    # O(1) early-out: _RECORDERS is a WeakSet, and an installed recorder is held
-    # strongly by the namespace it sits on, so an empty set proves nothing is
-    # installed. Without it every per-test teardown would pay for a full restore
-    # pass that could only find nothing.
-    if not _RECORDERS:
-        _WRAPPED.clear()
+    # O(1) early-out: the ledger is empty when nothing is installed. Without it every
+    # per-test teardown would pay for a full restore pass that could only find nothing.
+    if not _WRAPPED:
         return
 
     # Restore from the install() ledger, never by walking the namespace (task
@@ -233,6 +237,6 @@ def uninstall() -> None:
     # complete.
     for parent, attr in _WRAPPED:
         current = getattr(parent, attr, None)
-        if current is not None and current in _RECORDERS:
+        if current is not None and is_recorder(current):
             setattr(parent, attr, current.__wrapped__)
     _WRAPPED.clear()

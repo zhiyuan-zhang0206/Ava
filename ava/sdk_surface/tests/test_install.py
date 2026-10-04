@@ -332,9 +332,9 @@ def test_the_recorder_is_outermost_over_plugin_wraps_and_gone_after_uninstall(
     install.install(registry)
 
     ping = ava.install_ns.ping  # type: ignore[attr-defined]
-    assert ping in metering._RECORDERS  # the recorder is the outermost layer
-    assert ping.__wrapped__ not in metering._RECORDERS  # ... with the plugin's layer under it
-    assert ava.files.read in metering._RECORDERS
+    assert metering.is_recorder(ping)  # the recorder is the outermost layer
+    assert not metering.is_recorder(ping.__wrapped__)  # ... with the plugin's layer under it
+    assert metering.is_recorder(ava.files.read)
     assert ping() == "w(pong)"
     assert calls == ["install_ns.ping"]  # one count per agent call, not one per layer
 
@@ -343,7 +343,7 @@ def test_the_recorder_is_outermost_over_plugin_wraps_and_gone_after_uninstall(
     # The recorder came off before the plugin wraps were undone, so the framework callable is
     # restored to the very object it was, not to a recorder proxy or a stale chain.
     assert ava.files.read is original_read
-    assert original_read not in metering._RECORDERS
+    assert not metering.is_recorder(original_read)
     assert wraps.wrappers() == {}
 
 
@@ -415,3 +415,15 @@ def test_expansions_reflect_namespaces_marked_expand_and_declared_paths_in_regis
 
     install.uninstall()
     assert install.expansions() == ()
+
+
+def test_the_turn_state_slot_belongs_to_the_installation() -> None:
+    """The installation owns its turn-state slot: `install()` creates it,
+    `install.turn_state()` reads it back, and `uninstall()` drops it."""
+    assert install.turn_state() is None
+
+    install.install(_registry())
+    assert install.turn_state() is not None
+
+    install.uninstall()
+    assert install.turn_state() is None

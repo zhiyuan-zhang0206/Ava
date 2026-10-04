@@ -1,6 +1,6 @@
 """`ava.const()` — opt-in documented constant values.
 
-The wrapper factory plus its per-type cache, split out of `ava/__init__.py`.
+The wrapper factory, split out of `ava/__init__.py`.
 The package entry imports `const` BEFORE its submodule imports, so top-level
 const assignments (e.g. `ava.self.AGENT_ID = ava.const(...)`) keep working
 during submodule load.
@@ -8,7 +8,13 @@ during submodule load.
 
 from typing import Any
 
-_DOCUMENTED_TYPE_CACHE: dict[type, type] = {}
+_DOCUMENTED_MARKER = "__ava_documented_const__"
+"""Class attribute set on every type `const()` mints; `is_documented_const` reads it."""
+
+
+def is_documented_const(obj: Any) -> bool:
+    """True if `obj`'s type is one minted by `const()`."""
+    return vars(type(obj)).get(_DOCUMENTED_MARKER) is True
 
 
 def const(value: Any, doc: str) -> Any:
@@ -43,14 +49,15 @@ def const(value: Any, doc: str) -> Any:
         TypeError: `type(value)` is not subclassable.
     """
     base = type(value)
-    cls = _DOCUMENTED_TYPE_CACHE.get(base)
-    if cls is None:
-        cls = type(
-            f"Documented{base.__name__}",
-            (base,),
-            {"__module__": __name__, "__qualname__": f"const.Documented{base.__name__}"},
-        )
-        _DOCUMENTED_TYPE_CACHE[base] = cls
+    cls = type(
+        f"Documented{base.__name__}",
+        (base,),
+        {
+            "__module__": __name__,
+            "__qualname__": f"const.Documented{base.__name__}",
+            _DOCUMENTED_MARKER: True,
+        },
+    )
     instance = cls(value)
     instance.__doc__ = doc
     return instance

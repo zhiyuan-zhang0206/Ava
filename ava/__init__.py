@@ -50,7 +50,7 @@ from .sdk_surface.plugins import UnknownNamespaceError as UnknownNamespaceError
 # request envelope before agent code runs.
 #
 # Lifecycle (framework side):
-#   Before agent code runs, the exec child sets
+#   Before agent code runs, the exec child (after loading plugins) sets
 #   `ava.state = <snapshot validated from the request envelope>` +
 #   `ava.state_update = {}` (`agent/exec_child.py:_build_state_slot`).
 #   handle.read reads ava.state; handle.update synchronously mutates the
@@ -388,7 +388,7 @@ __all_for_ava__ = [
 ]
 
 # Apply env-based entries at import time (existing behavior)
-_sdk_disable.apply_sdk_disable(_sdk_disable.sdk_disable_entries)
+_sdk_disable.apply_sdk_disable(_sdk_disable.env_entries())
 
 # The agent-facing FQN a help() heading shows comes from `fn.__module__`
 # (`ava.help` → `# ava.help`). The implementations live in `ava/sdk_surface/`

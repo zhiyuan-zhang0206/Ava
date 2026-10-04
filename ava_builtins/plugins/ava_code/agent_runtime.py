@@ -8,12 +8,10 @@ load on their own (surface-only) boot (task #3633). The state class is in `_stat
 and the prompt sections in `_prompt_sections.py`; this module imports no `ava`, because
 its hooks run in the agent host and operate on the graph state they are handed.
 
-The real `PluginStateHandle` is created here and rebound onto the surface
-module (`plugin.state_handle`). Until then the surface holds a stand-in that
-raises the same `PluginStateOutsideTurnError` the real handle raises outside
-an exec turn; a child upgrades to this face before any state is injected
-(`agent/exec_child.py` — a stateful request never takes the surface-only
-path).
+The surface reaches this plugin's state through `plugin.read_state` /
+`plugin.update_state`, which build the handle here at each call (a child upgrades
+to this face before any state is injected — `agent/exec_child.py`; a stateful
+request never takes the surface-only path).
 """
 
 from __future__ import annotations
@@ -28,18 +26,13 @@ from agent.state import AgentState, PluginStateHandle
 from base.log import logger
 from base.packages.plugins.extensions import PluginContributions
 
-from . import plugin as _surface
 from ._prompt_sections import _coding_tools_section, _engineering_workflow_section
 from ._state import AvaCodeState, default_cwd
 
-state_handle = PluginStateHandle(AvaCodeState, "ava_code")
 
-# The surface module holds a stand-in handle until this face loads — on the agent side the
-# face loads at boot; in a stateful child the lazy state slot materializes on first handle
-# use (task #3633 leg-2). Either way the rebind lets the surface's call sites
-# (`ava.cwd.get`/`set`, the read wrap's injection path, the project-skill source) share
-# the real handle.
-_surface.state_handle = state_handle
+def state_handle() -> PluginStateHandle[AvaCodeState]:
+    """The typed handle over this plugin's state — a view over the turn's state slot, built per use."""
+    return PluginStateHandle(AvaCodeState, "ava_code")
 
 
 # ── after_exec hook: cwd + project-skills notes ──────────────────────────────
@@ -65,7 +58,7 @@ class _InjectCwdNotesAfterExecHook(Hook):
         # The hook runs in the agent host: it reads the graph `state` it was handed through the
         # handle's pure `view`, and returns its writes as an update dict (`delta`) for the
         # LangGraph reducer — never the SDK's exec slot.
-        current = state_handle.view(state)
+        current = state_handle().view(state)
         notes: list = []
         update: dict = {}
 
@@ -107,7 +100,7 @@ class _InjectCwdNotesAfterExecHook(Hook):
         if notes:
             logger.info("[ava_code] injecting {} finding(s) as system notes", len(notes))
             update["messages"] = notes
-            return state_handle.delta(update)
+            return state_handle().delta(update)
         return None
 
 
@@ -159,16 +152,11 @@ class _ValidateCwdAfterInitHook(Hook):
         return None
 
 
-validate_cwd_after_init = _ValidateCwdAfterInitHook()
-
-inject_cwd_notes_after_exec = _InjectCwdNotesAfterExecHook()
-
-
 def contribute() -> PluginContributions:
     """What this plugin declares for the agent runtime."""
     return PluginContributions(
         system_prompt_sections=(_coding_tools_section, _engineering_workflow_section),
-        after_init=(validate_cwd_after_init,),
-        after_exec=(inject_cwd_notes_after_exec,),
+        after_init=(_ValidateCwdAfterInitHook(),),
+        after_exec=(_InjectCwdNotesAfterExecHook(),),
         state=(AvaCodeState,),
     )

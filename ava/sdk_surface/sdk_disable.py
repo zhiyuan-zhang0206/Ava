@@ -2,7 +2,7 @@
 
 The env-var parse, the sentinel module, and the idempotent apply machinery
 (split out of `ava/__init__.py`) live here; the package entry imports
-`apply_sdk_disable` / `sdk_disable_entries` and applies the env entries at
+`apply_sdk_disable` / `env_entries` and applies the env entries at
 its own import-time point (after the submodule imports + `__all_for_ava__`
 exist). The disposable exec child applies its agent overlay before
 importing the SDK; the shared host does not mutate exports per turn.
@@ -16,6 +16,7 @@ import types as _types
 from typing import Any
 
 from . import ava_module
+
 
 # AVA_SDK_DISABLE removes pieces of the agent-facing SDK after the regular
 # imports finish. Each comma-separated entry is either:
@@ -36,11 +37,12 @@ from . import ava_module
 #     AttributeError. Either way help() stops listing it.
 # Used to scope the SDK to a context — e.g. a benchmark runner that owns the
 # agent lifecycle disables watcher / self / agents / shell.sessions.
-_sdk_disable_raw = _os.environ.get("AVA_SDK_DISABLE", "")
-sdk_disable_entries: list[str] = [e.strip() for e in _sdk_disable_raw.split(",") if e.strip()]
+def env_entries() -> list[str]:
+    """The entries `AVA_SDK_DISABLE` names right now, parsed.
 
-# (the package entry applies the parsed entries after its submodule imports
-# and `__all_for_ava__` exist — see `ava/__init__.py`)
+    The package entry applies them after its submodule imports and `__all_for_ava__`
+    exist — see `ava/__init__.py`."""
+    return [e.strip() for e in _os.environ.get("AVA_SDK_DISABLE", "").split(",") if e.strip()]
 
 
 class _DisabledSDKModule(_types.ModuleType):

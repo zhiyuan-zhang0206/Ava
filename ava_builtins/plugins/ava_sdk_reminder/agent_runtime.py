@@ -256,9 +256,6 @@ class _SdkReminderAfterExecHook(Hook):
         return update
 
 
-sdk_reminder_after_exec = _SdkReminderAfterExecHook()
-
-
 def _agent_reply_note() -> HumanMessage:
     """The system-styled note pointing at `ava.agents.send_message`, stamped now."""
     return system_note_message(
@@ -340,6 +337,6 @@ def contribute() -> PluginContributions:
     """What this plugin declares for the agent runtime."""
     return PluginContributions(
         before_llm=(sdk_reminder_agent_reply_before_llm,),
-        after_exec=(sdk_reminder_after_exec,),
+        after_exec=(_SdkReminderAfterExecHook(),),
         state=(AvaSdkReminderState,),
     )

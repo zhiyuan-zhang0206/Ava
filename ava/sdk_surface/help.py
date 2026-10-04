@@ -19,11 +19,11 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
+from .const import is_documented_const
 from .discovery import (
     _children,
     _Constant,
     _is_container,
-    _is_documented_const,
     _is_element,
     _is_namespace,
     _is_skill_object,
@@ -121,7 +121,7 @@ def _target_body(target: Any, fqn: str) -> str:
         # to get `read` always matches the heading.
         terminal = fqn.rsplit(".", 1)[-1] if "." in fqn else fqn
         return _format_function_stub(terminal, target)
-    if _is_documented_const(target):
+    if is_documented_const(target):
         return _format_documented_const_stub(_resolve_const_name(target), target)
     return f"<{type(target).__name__}> {target!r}"
 
@@ -151,7 +151,7 @@ def _resolve_fqn(target: Any) -> str:
         return _container_fqn(target)
     if _is_element(target):
         return _element_fqn(target)
-    if _is_documented_const(target):
+    if is_documented_const(target):
         return _resolve_const_name(target)
     return repr(target)
 
@@ -276,7 +276,7 @@ def _child_formatter(child: Any) -> Callable[[str, Any], str] | None:
         return _format_function_stub
     if _is_namespace(child):
         return _format_submodule_ref
-    if _is_documented_const(child):
+    if is_documented_const(child):
         return _format_documented_const_stub
     if isinstance(child, _Constant):
         return _format_pep224_const

@@ -16,7 +16,7 @@ from functools import cache
 from types import ModuleType, SimpleNamespace
 from typing import Any
 
-from .const import _DOCUMENTED_TYPE_CACHE
+from .const import is_documented_const
 
 # Render-time member hiding for help() — see `_module_children`. A caller that
 # knows a member is unavailable for the current agent (e.g. `ava.self.attach`
@@ -51,11 +51,6 @@ class _Constant:
     doc: str
 
 
-def _is_documented_const(obj: Any) -> bool:
-    """True if `obj`'s type is one minted by `ava.const()`."""
-    return type(obj) in _DOCUMENTED_TYPE_CACHE.values()
-
-
 def _is_skill_object(obj: Any) -> bool:
     """True if `obj` is a skill proxy or namespace (has `_ava_skill_kind`)."""
     return hasattr(obj, "_ava_skill_kind")
@@ -88,7 +83,7 @@ def _child_group_rank(child: Any) -> int:
     (submodules) first, then constants, then classes, then functions."""
     if inspect.ismodule(child) or isinstance(child, SimpleNamespace):
         return 0
-    if isinstance(child, _Constant) or _is_documented_const(child):
+    if isinstance(child, _Constant) or is_documented_const(child):
         return 1
     if inspect.isclass(child):
         return 2
@@ -218,7 +213,7 @@ def _classify_dir_entry(
         return attr if _belongs_to_module(attr, mod, name) else None
     if _is_routine_or_class(attr):
         return attr if _defined_in_package(attr, mod) else None
-    if _is_documented_const(attr):
+    if is_documented_const(attr):
         return attr
     if _has_pep224_doc(name, annotations, docs):
         return _Constant(
@@ -273,7 +268,7 @@ def _resolve_child(
         if name in docs or name in annotations:
             return _Constant(type_str=annotations.get(name, ""), doc=docs.get(name, ""))
         return None
-    if _is_container(attr) or _is_element(attr) or _is_documented_const(attr):
+    if _is_container(attr) or _is_element(attr) or is_documented_const(attr):
         return attr
     return _Constant(
         type_str=annotations.get(name, type(attr).__name__),

@@ -123,33 +123,24 @@ def parse_inheritable_blocks(text: str) -> list[str]:
     return blocks
 
 
-# One gateway read per (process, agent): the born_spawner chain is immutable.
-_CHAIN_CACHE: dict[int, list[dict[str, Any]]] = {}
-
-
 def _ancestor_chain(agent_id: int) -> list[dict[str, Any]] | None:
     """The birth chain above `agent_id` (nearest ancestor first), or None when
     the gateway read failed.
 
-    A failure degrades to "no inherited note" (warning, no cache entry so the
-    next establishment retries) — the caller establishes a context window, and
-    a gateway blip must not wedge an agent's birth (the same posture passive
-    recall takes on the turn path)."""
-    cached = _CHAIN_CACHE.get(agent_id)
-    if cached is not None:
-        return cached
+    A failure degrades to "no inherited note" (warning; the next establishment
+    retries) — the caller establishes a context window, and a gateway blip must
+    not wedge an agent's birth (the same posture passive recall takes on the
+    turn path)."""
     import httpx  # deferred: stays off the boot path
 
     from ava import gateway_client
     from base.agents import GatewayUnavailable
 
     try:
-        chain = gateway_client.get_born_chain(agent_id)
+        return gateway_client.get_born_chain(agent_id)
     except (GatewayUnavailable, httpx.HTTPStatusError) as exc:
         logger.warning("[inherited-memory] born-chain read failed (agent {}): {}", agent_id, exc)
         return None
-    _CHAIN_CACHE[agent_id] = chain
-    return chain
 
 
 def _collect_blocks(

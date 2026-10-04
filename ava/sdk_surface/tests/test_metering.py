@@ -203,10 +203,10 @@ def test_recorder_feeds_the_recording_tally(monkeypatch: pytest.MonkeyPatch) -> 
 def test_recorder_recognized_by_identity_not_copied_dict() -> None:
     """P3: ava.extend._install_metadata copies a wrapped callable's __dict__ onto its
     wrapper, so a plugin wrapper built over a recorder inherits the recorder's dict.
-    install() must key off object identity (the _RECORDERS set), not an attribute, or
+    is_recorder() must key off object identity (the marker points at the recorder itself), not the attribute's presence, or
     it would skip re-wrapping such a wrapper and leave the recorder buried inside."""
     rec = metering._make_recorder(lambda: None, "ns.fn")
-    assert rec in metering._RECORDERS
+    assert metering.is_recorder(rec)
 
     def plugin_wrapper() -> None:
         return rec()
@@ -214,7 +214,7 @@ def test_recorder_recognized_by_identity_not_copied_dict() -> None:
     # replicate _install_metadata's `chained.__dict__.setdefault(k, v)` copy.
     for k, v in rec.__dict__.items():
         plugin_wrapper.__dict__.setdefault(k, v)
-    assert plugin_wrapper not in metering._RECORDERS
+    assert not metering.is_recorder(plugin_wrapper)
 
 
 def test_mcp_recorder_derives_fq_from_runtime_args(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -283,7 +283,7 @@ def test_uninstall_restores_from_the_install_record_without_a_namespace_walk(
     metering.install()
     wrapped = target.demo
     assert wrapped is not demo
-    assert wrapped in metering._RECORDERS
+    assert metering.is_recorder(wrapped)
 
     def _no_walk() -> list[tuple[object, str, str]]:
         pytest.fail("uninstall() must not re-walk the namespace (task #3426)")
@@ -299,9 +299,8 @@ def test_teardown_survives_a_poisoned_dynamic_surface(monkeypatch: pytest.Monkey
     behind); uninstall() must complete without touching the surface and restore
     every recorded pair."""
     metering.uninstall()
-    before = set(metering._RECORDERS)
     metering.install()
-    assert metering._RECORDERS
+    assert metering._WRAPPED
     recorded = list(metering._WRAPPED)
 
     def _poisoned(_self: object) -> list[str]:
@@ -313,13 +312,11 @@ def test_teardown_survives_a_poisoned_dynamic_surface(monkeypatch: pytest.Monkey
 
     metering.uninstall()
     # Completeness on the precise unit of the guarantee: no recorded pair still
-    # holds a recorder. (The set itself may retain recorders captured before this test armed
-    # metering — that retention predates task #3426 and is not this fix's business.)
+    # holds a recorder.
     for parent, attr in recorded:
-        assert getattr(parent, attr, None) not in metering._RECORDERS
-    assert ava.files.read not in metering._RECORDERS
-    assert ava.mcps._call_raw not in metering._RECORDERS
-    assert set(metering._RECORDERS) <= before
+        assert not metering.is_recorder(getattr(parent, attr, None))
+    assert not metering.is_recorder(ava.files.read)
+    assert not metering.is_recorder(ava.mcps._call_raw)
 
 
 @pytest.mark.asyncio

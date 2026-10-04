@@ -1,13 +1,5 @@
 {
   "ambient_state": {
-    "ava_builtins/plugins/ava_code/_walk.py::ambient-container:_GIT_ROOT_CACHE": 1,
-    "ava_builtins/plugins/ava_code/agent_runtime.py::ambient-instance:inject_cwd_notes_after_exec": 1,
-    "ava_builtins/plugins/ava_code/agent_runtime.py::ambient-instance:state_handle": 1,
-    "ava_builtins/plugins/ava_code/agent_runtime.py::foreign-rebind:ava_builtins.plugins.ava_code.plugin.state_handle": 1,
-    "ava_builtins/plugins/ava_fleet/task_maintenance/daemon.py::ambient-container:_pending_counter_writes": 1,
-    "ava_builtins/plugins/ava_memory/inherit.py::ambient-container:_CHAIN_CACHE": 1,
-    "ava_builtins/plugins/ava_sdk_reminder/agent_runtime.py::ambient-instance:sdk_reminder_after_exec": 1,
-    "ava_builtins/plugins/ava_syntax_fix/_imports.py::hidden-singleton:_ruff_executable": 1,
     "ava_builtins/plugins/ava_syntax_fix/_imports.py::hidden-singleton:_warn_ruff_missing_once": 1,
     "ava_builtins/plugins/lm_google/gemini_cache.py::ambient-container:_MEMO": 1,
     "ava_builtins/plugins/lm_google/gemini_cache.py::ambient-container:_NEGATIVE": 1
