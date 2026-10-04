@@ -81,3 +81,35 @@ a future/decisions or backup-recovery role was graded down to a decision, not de
 - `GET /api/agents/{id}/activity` consumers outside the repository would now 404; the recorded
   window showed none.
 - The `agent_activity` table is unreferenced until the separate migration track drops it.
+
+## Addendum (2026-10-04): the work-failed ingest webhook
+
+The user ruled (2026-10-04, through the CC -> #405 -> task #4962 line): `POST /api/work-failed`
+is deleted. The SDK+HTTP inventory (C6) found no producer in the repository, on any machine's
+`~/.ava`, or in the production window, and the ruling chose deletion over keeping a dead
+ingest. One change removes the router and its schemas, the route's tests and doc page, the app
+wiring (import, `include_router`, the pause-exempt set), the contract entry, the package
+docstrings that listed it, and the route reference in the routers doc.
+
+The TTL reaper's remote loop was the one live internal consumer: it retried stale
+`work_failed_events` deliveries through
+`gateway.routers.work_failed.reconcile_stale_work_failures` — the import the
+2026-10-02-ttl-reaper-is-its-own-service note called out. With ingest gone nothing can write a
+row, so the redelivery phase is deleted with the function (no other caller exists), along with
+`work_failed_retry_grace_seconds` (the reconciler was its only reader). The `remote` loop keeps
+only its shell-reclaim phase.
+
+It was also the service's last non-test reference to the gateway, and removing it moved the
+patch-target placement home of `services/ttl_reaper/tests/test_loops.py`: the file's one
+gateway-side assertion (the gateway owns no reaper) moved to its own
+`gateway/tests/test_ttl_reaper_not_in_gateway.py`, mirroring the completion-digest pin.
+
+The `work_failed_events` table is not touched here. It now has no reader or writer; it is
+registered for the DB track (dump, then drop). When dropping it, also drop its entry from
+`tests/fixtures/provisioning.py`'s `_PER_TEST_TRUNCATE_TABLES` — removing the entry earlier
+would leave the still-existing table uncovered by the truncate-isolation lint.
+
+Living docs are corrected in the same change (the runbook's ttl-reaper row, the ttl_reaper
+service doc, the api-tokens surface table); dated records (the 2026-10-02 decision, migration
+history) stay as written. The deleted test file's two `.test_durations` entries are left to
+the nightly refresh.

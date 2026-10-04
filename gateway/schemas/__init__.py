@@ -9,7 +9,7 @@ A feature package owns its own wire models beside its routes
 
   - one family per `gateway/routers/` module (`commands`, `fleet_graph`,
     `frontend_telemetry`, `memory`, `pages`, `shell`, `tasks`, `uploads`,
-    `user_settings`, `work_failed`);
+    `user_settings`);
   - vocabulary several packages share: `errors` (the RFC 9457-style error
     envelope every route answers with), `models` (the model catalog and the
     cluster default model), `stats` (the whitelisted `?hours=` window).

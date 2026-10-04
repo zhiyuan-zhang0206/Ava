@@ -160,9 +160,6 @@ from gateway.routers import (
 from gateway.routers import (
     uploads as uploads_router,
 )
-from gateway.routers import (
-    work_failed as work_failed_router,
-)
 from gateway.run_timeline import router as run_timeline_router
 from gateway.schedules import router as schedules_router
 
@@ -364,7 +361,6 @@ _AUTH_BYPASS_METHOD_PATHS: frozenset[tuple[str, str]] = frozenset(
         # Bearer / loopback trust) inside the router, not by the
         # session/bearer middleware. Alert reads still require cluster auth.
         ("POST", "/api/alerts"),
-        ("POST", "/api/work-failed"),
     }
 )
 _STATE_CHANGING_METHODS: frozenset[str] = frozenset({"POST", "PUT", "PATCH", "DELETE"})
@@ -596,7 +592,6 @@ app.include_router(tasks_router.router)
 app.include_router(plugin_ui_router.router)
 app.include_router(ui_contributions_router.router)
 app.include_router(uploads_router.router)
-app.include_router(work_failed_router.router)
 
 # /mcp — MCP control plane (design task #1212 step 1). Mounted always; the
 # wrapper answers 404 while settings.gateway.mcp_endpoint_enabled is off, so
