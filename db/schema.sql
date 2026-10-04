@@ -480,34 +480,6 @@ CREATE INDEX completion_notice_events_delivered_idx
 COMMENT ON TABLE completion_notice_events IS
     'Restart-safe hourly completion-notice buffer and canary conservation source. One row records each platform completion event admitted under an agent hourly policy; failure events remain individually delivered immediately and also appear in the hour count.';
 
--- Failure producers submit one stable dedup key. The gateway records the event
--- before routing it to the author, the nearest live birth-lineage delegator, or
--- a task-registry alert when the entire chain is dead.
-CREATE TABLE work_failed_events (
-    id                  BIGSERIAL PRIMARY KEY,
-    repo                VARCHAR(200) NOT NULL,
-    ref                 VARCHAR(255) NOT NULL,
-    commit_sha          VARCHAR(64) NOT NULL,
-    stage               TEXT NOT NULL CHECK (stage IN ('ci', 'qa', 'merge')),
-    summary             VARCHAR(2000) NOT NULL,
-    author_agent_id     BIGINT NOT NULL CHECK (author_agent_id > 0),
-    dedup_key           VARCHAR(255) NOT NULL UNIQUE,
-    delivered_to        TEXT,
-    delivery_kind       TEXT CHECK (
-        delivery_kind IN ('author', 'author_resurrected', 'delegator', 'task_alert')
-    ),
-    created_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
-    delivered_at        TIMESTAMPTZ,
-    delivery_attempts   INT NOT NULL DEFAULT 0,
-    CONSTRAINT work_failed_events_delivery_complete CHECK (
-        (delivered_to IS NULL AND delivery_kind IS NULL AND delivered_at IS NULL)
-        OR (delivered_to IS NOT NULL AND delivery_kind IS NOT NULL AND delivered_at IS NOT NULL)
-    )
-);
-
-COMMENT ON TABLE work_failed_events IS
-    'Idempotent CI, QA, and merge failure events routed to the author, nearest live delegator, or task registry.';
-
 COMMENT ON COLUMN inbound_messages.source_verified_by IS
     'Server-owned credential identity that admitted the gateway inbound; NULL is unauthenticated or legacy.';
 
