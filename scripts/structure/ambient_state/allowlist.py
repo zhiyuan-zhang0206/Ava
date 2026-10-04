@@ -169,7 +169,6 @@ ALLOWED: dict[str, str] = {
     "base/api_contracts/contracts.py::hidden-cache:_template_regex": "a regex compiled from a template string",
     "base/config/candidate.py::hidden-cache:_candidate_validation_model": "builds a validation subclass of a given Settings class",
     "base/config/service_read.py::hidden-singleton:domain_model_classes": "the static table of Settings domain classes",
-    "base/host/env/config_lite_table.py::ambient-instance:_RAW": "the parse of the checked-in generated config index JSON: static data, read once, never rebound",
     "base/host/env/audit.py::hidden-singleton:_load_alias_metadata": "static alias metadata of the env registry",
     "base/host/env/config_registry.py::hidden-singleton:_build_registry": "the static config registry derived from the Settings classes",
     "base/host/env/config_registry.py::hidden-singleton:field_infos": "a static view of the config registry",
