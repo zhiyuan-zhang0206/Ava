@@ -231,7 +231,10 @@ async def reconcile_inbounds_after_turn(
         )
         return
     if not hosted_resources_settled():
-        logger.warning(
+        # Expected fail-closed path (the event declares tier="noise"): the
+        # claimed rows wait for the next cold admission, so this is INFO, not
+        # a WARNING-level anomaly (2026-10-03 triage).
+        logger.info(
             "turn inbound reconcile skipped: turn resources unresolved — "
             "the next cold admission disposes the claimed rows",
             event="host_turn_reconcile_skipped",
@@ -244,7 +247,10 @@ async def reconcile_inbounds_after_turn(
             with bind_turn_identity(agent_id, incarnation=incarnation):
                 await reconcile_claimed_inbounds_at_startup(pool, checkpointer, agent_id)
     except RuntimeOwnershipLostError:
-        logger.warning(
+        # Expected fail-closed path (the event declares tier="noise"): the
+        # replacement runtime disposes the rows, so this is INFO, not a
+        # WARNING-level anomaly (2026-10-03 triage).
+        logger.info(
             "turn inbound reconcile skipped: runtime ownership already replaced — "
             "the replacement disposes the claimed rows",
             event="host_turn_reconcile_skipped",
