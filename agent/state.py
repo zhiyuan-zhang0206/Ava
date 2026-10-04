@@ -27,9 +27,15 @@ framework dispatches by field name:
   AgentState; plugin-private channel.
 
 `build_agent_state(extensions)` dynamically creates AgentState (BaseAgentState
-subclass + plugin-declared fields) at graph build time. All plugin
-read/write goes through `PluginStateHandle`, not directly touching
-`ava.state` / `ava.state_update` (framework-internal slots).
+subclass + plugin-declared fields) at graph build time. A plugin reaches its state two
+ways, one per side of the exec process boundary, both through its `PluginStateHandle`:
+
+- host side (graph hooks, in the agent process): `handle.view(state)` builds the typed
+  snapshot from the graph `state` argument, and `handle.delta({...})` turns a plugin-local
+  update into the prefixed update dict the hook returns for LangGraph's reducer. Pure
+  functions of the class and the state — no SDK slot, no `ava`.
+- exec side (SDK functions running in the exec child): `handle.read()` / `handle.update()`
+  work on the exec turn's slot (`ava.state` / `ava.state_update`, framework-internal).
 
 Usage (in a plugin's agent_runtime.py):
 
@@ -46,14 +52,15 @@ Usage (in a plugin's agent_runtime.py):
         seen: Annotated[set[str], _set_union] = Field(default_factory=set)
 
     state_handle = PluginStateHandle(MyPluginState, "my_plugin")
-    # state_handle.read() -> MyPluginState (typed snapshot, reflects same-turn writes)
-    # state_handle.update({"counter": 1, "seen": {"x"}})  (validated, LangGraph-reducer merged)
+    # exec side: state_handle.read() -> MyPluginState; state_handle.update({"counter": 1})
+    # host side, in a hook(state, runtime, config): state_handle.view(state) -> MyPluginState,
+    #   return state_handle.delta({"counter": 1})  # -> {"my_plugin__counter": 1}
 
     def contribute() -> PluginContributions:
         return PluginContributions(state=(MyPluginState,))
 """
 
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
 from types import SimpleNamespace
 from typing import Annotated, Any
@@ -376,9 +383,18 @@ def _accumulate_delta(acc: Any, new: Any, reducer: Callable[[Any, Any], Any]) ->
 class PluginStateHandle[T: BaseModel]:
     """Typed read/write handle for plugin state. Built from a declared state class and its plugin's name.
 
-    All plugin state operations go through the handle; **do not** directly
-    touch `ava.state` / `ava.state_update` (the latter is marked framework-
-    internal). API shape matches LangGraph Command(update=dict):
+    Two sides, because the plugin's state is touched from two processes:
+
+    Host side — a graph hook runs in the agent process and was handed the graph `state`;
+    it never touches the SDK's exec slot (which does not exist there):
+
+        handle.view(state) -> T                     (typed snapshot of the graph state)
+        handle.delta({"field": value}) -> dict      (the update dict the hook returns)
+
+    Both are pure; LangGraph's reducer applies the returned dict.
+
+    Exec side — SDK functions running inside the exec child (`ava.cwd.set`, the read wrap)
+    work on the turn's slot. API shape matches LangGraph Command(update=dict):
 
         handle.read() -> T                          (typed snapshot)
         handle.update({"field": delta_value})       (validated + reducer-merged)
@@ -391,6 +407,7 @@ class PluginStateHandle[T: BaseModel]:
     producing the same result as the working copy — reducers must be
     batching-invariant, i.e. merging deltas then applying once must equal
     applying them in sequence; `_accumulate_delta` implements the merge).
+    Outside an exec turn `read()` / `update()` raise `PluginStateOutsideTurnError`.
 
     Base field reuse: if a plugin BaseModel declares a field with the same
     name as one in BaseAgentState (types matching exactly, validated at
@@ -421,28 +438,54 @@ class PluginStateHandle[T: BaseModel]:
             name: _resolve_reducer(field) for name, field in cls.model_fields.items()
         }
 
-    def read(self) -> T:
-        """Current state snapshot. Reflects all `update()` calls in same turn.
+    def view(self, state: object) -> T:
+        """Typed snapshot of this plugin's fields in a graph `state` — a hook's argument.
+
+        The graph already validated `state`, so the fields are taken as they stand
+        (`model_construct`): no second validation, no copy of the message history a plugin
+        may declare. Pure: reads only `state`.
+        """
+        return self._cls.model_construct(
+            **{f: getattr(state, self._channel_keys[f]) for f in self._cls.model_fields}
+        )
+
+    def delta(self, update: Mapping[str, Any]) -> dict[str, Any]:
+        """The graph-state update dict for plugin-local `update` — what a hook returns.
+
+        Keys are plugin-local field names (no prefix); the result is keyed by the actual
+        channels, ready for LangGraph's reducer. Pure.
 
         Raises:
-            PluginStateOutsideTurnError: `ava.state` slot not injected (called outside exec turn).
+            ValueError: `update` has a key outside the BaseModel schema (plugin author typo).
+        """
+        out: dict[str, Any] = {}
+        for field, value in update.items():
+            if field not in self._cls.model_fields:
+                raise ValueError(
+                    f"PluginStateHandle[{self._cls.__name__}].delta: unknown field "
+                    f"{field!r} (schema declares {sorted(self._cls.model_fields)})"
+                )
+            out[self._channel_keys[field]] = value
+        return out
+
+    def read(self) -> T:
+        """Current exec-turn snapshot. Reflects all `update()` calls in same turn.
+
+        Raises:
+            PluginStateOutsideTurnError: not inside an exec turn (`ava.state` is unbound).
         """
         import ava  # lazy import: avoid circular (ava imports agent.state via plugin loading)
         from ava.agent_identity import validate_external_identity
 
         validate_external_identity()
 
-        if ava.state is None:
-            raise ava.PluginStateOutsideTurnError(
-                f"PluginStateHandle[{self._cls.__name__}].read() called outside exec turn—"
-                f"ava.state only valid inside execute_code (the exec turn)."
-            )
+        slot = ava.state
         return self._cls.model_validate(
-            {f: getattr(ava.state, self._channel_keys[f]) for f in self._cls.model_fields}
+            {f: getattr(slot, self._channel_keys[f]) for f in self._cls.model_fields}
         )
 
     def update(self, delta: dict[str, Any]) -> None:
-        """Apply field updates. Same API shape as LangGraph Command(update=dict).
+        """Apply field updates inside an exec turn. Same API shape as LangGraph Command(update=dict).
 
         Each field's reducer merges `current ⊕ delta`; the result is written
         to the `ava.state` working copy (immediately visible to `read()`
@@ -454,7 +497,8 @@ class PluginStateHandle[T: BaseModel]:
         dispatches base/plugin to the correct channel.
 
         Raises:
-            PluginStateOutsideTurnError: slot not injected (called outside exec turn).
+            PluginStateOutsideTurnError: not inside an exec turn (`ava.state` is unbound).
+            TypeError: the exec code replaced `ava.state_update` with a non-dict.
             ValueError: delta contains a key outside the BaseModel schema (plugin author typo).
         """
         import ava
@@ -462,10 +506,12 @@ class PluginStateHandle[T: BaseModel]:
 
         validate_external_identity()
 
-        if ava.state is None or ava.state_update is None:
-            raise ava.PluginStateOutsideTurnError(
-                f"PluginStateHandle[{self._cls.__name__}].update() called outside exec turn—"
-                f"ava.state_update only valid inside execute_code (the exec turn)."
+        slot = ava.state
+        accumulated = ava.state_update
+        if not isinstance(accumulated, dict):
+            raise TypeError(
+                f"ava.state_update must stay a dict, got {type(accumulated).__name__} "
+                f"(PluginStateHandle[{self._cls.__name__}].update)"
             )
         for field, new in delta.items():
             if field not in self._cls.model_fields:
@@ -474,9 +520,9 @@ class PluginStateHandle[T: BaseModel]:
                     f"{field!r} (schema declares {sorted(self._cls.model_fields)})"
                 )
             channel_key = self._channel_keys[field]
-            current = getattr(ava.state, channel_key)
+            current = getattr(slot, channel_key)
             merged = self._reducers[field](current, new)
-            setattr(ava.state, channel_key, merged)  # working copy synchronously visible
+            setattr(slot, channel_key, merged)  # working copy synchronously visible
             # Accumulate the raw delta into ava.state_update. The previous
             # raw-overwrite dropped every earlier delta to a reducer field in
             # one turn: two `update({"seen": {"a"}})` + `update({"seen":
@@ -485,12 +531,30 @@ class PluginStateHandle[T: BaseModel]:
             # cc-backend-runtime P1). For last-value fields the reducer is
             # overwrite, so the accumulation collapses to the latest delta
             # exactly as before (see `_accumulate_delta` for the merge rule).
-            if channel_key in ava.state_update:
-                ava.state_update[channel_key] = _accumulate_delta(
-                    ava.state_update[channel_key], new, self._reducers[field]
+            if channel_key in accumulated:
+                accumulated[channel_key] = _accumulate_delta(
+                    accumulated[channel_key], new, self._reducers[field]
                 )
             else:
-                ava.state_update[channel_key] = new
+                accumulated[channel_key] = new
+
+
+def compact_version() -> int:
+    """The exec turn snapshot's `compact.version` — the built-in compaction counter.
+
+    A built-in channel no plugin declares, so it is not reachable through a
+    `PluginStateHandle`; exec-side code that resets per-compaction bookkeeping (injection
+    dedup) reads it here instead of reaching into `ava.state`.
+
+    Raises:
+        PluginStateOutsideTurnError: not inside an exec turn (`ava.state` is unbound).
+    """
+    import ava
+    from ava.agent_identity import validate_external_identity
+
+    validate_external_identity()
+
+    return ava.state.compact.version
 
 
 def _annotation_text(annotation: Any) -> str:

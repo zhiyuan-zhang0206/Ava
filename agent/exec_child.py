@@ -310,9 +310,9 @@ class _LazyStateSlot:
 def _build_state_slot(child: _ChildContext, payload: RequestPayload) -> None:
     """Arm the dynamic AgentState slot from the request snapshot.
 
-    A stateless request leaves `ava.state` None. A stateful request binds a
-    lazy slot (task #3633 leg-2): the decode, the plugin faces, and the
-    dynamic-class build/validation happen on first use — a handle call or an
+    A stateless request binds no slot, so `ava.state` does not exist in that child. A
+    stateful request binds a lazy slot (task #3633 leg-2): the decode, the plugin faces,
+    and the dynamic-class build/validation happen on first use — a handle call or an
     `ava.state.<x>` read (`_LazyStateSlot.materialize`).
     """
     if payload.state_raw is None:
@@ -324,19 +324,14 @@ def _build_state_slot(child: _ChildContext, payload: RequestPayload) -> None:
 def _take_result_state_update(child: _ChildContext, payload: Any, *, state_injected: bool) -> None:
     """Serialize this turn's plugin delta into the result envelope.
 
-    A tampered slot (agent set ava.state_update to a non-dict) is reported as
+    A tampered slot (agent replaced ava.state_update with a non-dict) is reported as
     an error string rather than a delta; the parent raises the same TypeError
-    the old in-process path raised. With a snapshot injected, even None is
-    tampering — the slot was initialized to {}; without one (container/eval
-    mode) None is the uninitialized default and carries no delta.
+    the old in-process path raised. A request without a snapshot (container/eval
+    mode) bound no slot, so there is nothing to read and no delta to carry.
     """
-    update = child.ava.state_update
-    if update is None:
-        if state_injected:
-            payload.state_update_error = (
-                "plugin tampered with ava.state_update: expected dict, got NoneType"
-            )
+    if not state_injected:
         return
+    update = child.ava.state_update
     if not isinstance(update, dict):
         payload.state_update_error = (
             f"plugin tampered with ava.state_update: expected dict, got {type(update).__name__}"

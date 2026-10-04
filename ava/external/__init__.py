@@ -95,10 +95,10 @@ class Attachment:
         self._event_participant: Any = None
         # The agent state class the snapshot loaded into (set before the constructor returns).
         self._state_cls: type[Any]
+        if ava.in_exec_turn():
+            raise RuntimeError("an exec turn cannot attach an external controller")
         if not _attachment_lock.acquire(blocking=False):
             raise RuntimeError("this process already has an external attachment")
-        self._prior_state = ava.state
-        self._prior_update = ava.state_update
         try:
             lease = self._lease()
             self.agent_id = int(lease["agent_id"])
@@ -259,7 +259,7 @@ class Attachment:
         )
 
     def _detach(self) -> None:
-        """Restore local bindings without reading or writing the lease."""
+        """Drop local bindings without reading or writing the lease."""
         import ava
 
         if self._closed:
@@ -275,7 +275,7 @@ class Attachment:
                 self._event_participant = None
             agent_identity._external_identity = None
             agent_identity._external_agent_id = None
-            ava.state, ava.state_update = self._prior_state, self._prior_update
+            ava.unbind_exec_turn()
             self._stack.close()
         finally:
             _attachment_lock.release()

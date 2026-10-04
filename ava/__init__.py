@@ -1,4 +1,5 @@
 import sys as _sys
+from types import ModuleType as _ModuleType
 from types import SimpleNamespace
 from typing import Any
 
@@ -41,14 +42,12 @@ from .sdk_surface.plugins import UnknownNamespaceError as UnknownNamespaceError
 # ── Framework-internal state slot ──────────────────────────────────────────
 #
 # **Framework-internal. Plugin authors do not directly touch these two
-# module attributes — all state read/write goes through
-# `agent.state.PluginStateHandle` (the typed handle a plugin builds from its declared
-# state class)**. These two attributes exist because the
-# framework itself (primarily `agent/graph/exec/node.py:_exec_node_impl`) and
-# the handle internals rely on them to pass the working copy + delta dict;
-# a module-level slot is simpler than ContextVar — the slot lives in the
-# exec child, which rebuilds it from the request envelope before agent code
-# runs; the parent process never touches it.
+# attributes — exec-side state read/write goes through `agent.state.PluginStateHandle`
+# (`read` / `update`), and host-side logic (graph hooks) never touches them at all: it reads
+# the graph `state` argument and returns an update dict.** The framework itself (the exec
+# child, an external attachment) and the handle internals use them to pass the exec turn's
+# working copy + delta dict; the slot lives in the exec child, which rebuilds it from the
+# request envelope before agent code runs.
 #
 # Lifecycle (framework side):
 #   Before agent code runs, the exec child sets
@@ -56,29 +55,98 @@ from .sdk_surface.plugins import UnknownNamespaceError as UnknownNamespaceError
 #   `ava.state_update = {}` (`agent/exec_child.py:_build_state_slot`).
 #   handle.read reads ava.state; handle.update synchronously mutates the
 #   ava.state working copy + accumulates raw delta into ava.state_update.
-#   At turn end, exec_node takes state_update, merges into
-#   `Command(update=...)` going through the LangGraph reducer; both slots
-#   reset back to None.
+#   When the child exits it writes state_update into its result envelope; exec_node
+#   reads it from there and merges it into `Command(update=...)`, going through
+#   the LangGraph reducer. Nothing resets the slots in the child: they are discarded
+#   with the process. An external attachment unbinds them at detach. No other process
+#   — the agent host included — ever binds them.
 #
 # Under the LangGraph cycling topology, nodes run sequentially, no
 # cross-turn race; if parallel branch (fan-out) is introduced in the
-# future, this module-level slot model must be re-evaluated.
+# future, this one-slot model must be re-evaluated.
 
 
-class PluginStateOutsideTurnError(Exception):
-    """`PluginStateHandle.read()` / `.update()` called outside an exec turn —
-    framework hasn't injected the state slot.
+class PluginStateOutsideTurnError(AttributeError):
+    """`ava.state` / `ava.state_update` (or a `PluginStateHandle` read / update) touched
+    outside an exec turn — the framework binds the state slot only in the exec child that
+    runs agent code.
 
-    Common misuse: plugin calls handle.read at module load time (during
-    `import`); at that moment exec_node hasn't set the slot. Plugins
-    should only access state inside hook callbacks or wrapped SDK
-    functions (running inside execute_code).
+    An AttributeError, so the attribute simply does not exist elsewhere. Common misuse: a
+    plugin reads state at module load time, or from a graph hook in the agent host — host
+    logic reads the graph `state` argument its hook was handed, never the SDK's slot.
     """
 
 
-# Framework-internal slots. Plugin code does not read/write directly — go through PluginStateHandle.
-state: Any = None
-state_update: dict[str, Any] | None = None
+# ── The exec turn's state slot ───────────────────────────────────────────────
+# `ava.state` / `ava.state_update` exist only while an exec turn is bound: reading either
+# anywhere else raises `PluginStateOutsideTurnError`, never a None. The two values live under
+# private keys of this module's own dict; the properties below are the only readers and
+# writers, and `in_exec_turn()` / `unbind_exec_turn()` are the framework's explicit questions
+# and ends of a turn. A bind is plain assignment — `ava.state = <snapshot>`,
+# `ava.state_update = {}` — and the exec child dies with its slot.
+_STATE_KEY = "_exec_state"
+_UPDATE_KEY = "_exec_state_update"
+
+state: Any
+state_update: dict[str, Any] | None
+
+
+def _outside_exec_turn(name: str) -> PluginStateOutsideTurnError:
+    return PluginStateOutsideTurnError(
+        f"ava.{name} exists only inside execute_code (an exec turn); this process has no bound "
+        "turn state. Host code reads the graph state its hook was handed instead."
+    )
+
+
+class _SdkModule(_ModuleType):
+    """The `ava` module, whose two framework slots are properties over its private keys."""
+
+    @property
+    def state(self) -> Any:
+        value = self.__dict__.get(_STATE_KEY)
+        if value is None:
+            raise _outside_exec_turn("state")
+        return value
+
+    @state.setter
+    def state(self, value: Any) -> None:
+        if value is None:
+            raise TypeError("ava.state cannot be None; end a turn with ava.unbind_exec_turn()")
+        self.__dict__[_STATE_KEY] = value
+
+    @property
+    def state_update(self) -> Any:
+        if self.__dict__.get(_STATE_KEY) is None:
+            raise _outside_exec_turn("state_update")
+        # Whatever the exec code left there: the exec child validates it is a dict at exit.
+        return self.__dict__.get(_UPDATE_KEY)
+
+    @state_update.setter
+    def state_update(self, value: Any) -> None:
+        self.__dict__[_UPDATE_KEY] = value
+
+    def __dir__(self) -> list[str]:
+        return sorted({*super().__dir__(), "state", "state_update"})
+
+
+_sys.modules[__name__].__class__ = _SdkModule
+
+
+def in_exec_turn() -> bool:
+    """Whether this process is running an exec turn — the framework has bound its state slot.
+
+    The one explicit answer for the SDK's own call sites (cwd-aware wraps, the findings
+    buffer): true in an exec child while agent code runs and in an attached external
+    controller, false in the agent host and in bare scripts. Framework-internal — not in the
+    `ava.help()` view.
+    """
+    return globals().get(_STATE_KEY) is not None
+
+
+def unbind_exec_turn() -> None:
+    """End the bound turn: drop both slot values (an external attachment's detach, a test)."""
+    globals().pop(_STATE_KEY, None)
+    globals().pop(_UPDATE_KEY, None)
 
 
 # Per-process latches: set once this process has loaded plugin namespaces via
@@ -242,6 +310,9 @@ def _maybe_load_plugins_for_missing(name: str) -> bool:
 # settings.data_plane.db_url at runtime (test conftest, eval driver) is immediately
 # visible to `ava.DB_URL` readers without import-order gymnastics.
 def __getattr__(name: str) -> Any:
+    if name in ("state", "state_update"):
+        # Reached only when the slot property raised (an AttributeError falls through to here).
+        raise _outside_exec_turn(name)
     if name == "external":
         import importlib
 

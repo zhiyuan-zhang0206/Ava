@@ -488,8 +488,7 @@ def test_personal_write_is_immune_to_ava_cwd_drift(memory_plugin: Any, tmp_path:
         ava.cwd.set(drifted_cwd)
         entry = ava.memory.write("cwd-proof", "memory body")
     finally:
-        ava.state = None
-        ava.state_update = None
+        ava.unbind_exec_turn()
 
     assert entry == (workspace / "memory" / "cwd-proof.md").resolve()
     assert not (drifted_cwd / "memory" / "cwd-proof.md").exists()

@@ -36,7 +36,7 @@ from langchain_core.runnables import RunnableConfig
 from langgraph.runtime import Runtime
 
 from agent import state as _state
-from agent.graph.prompt.capabilities import index_drift, new_skills_note_text
+from agent.graph.prompt.capabilities import index_drift, new_skills_note_text, skill_identifiers
 from agent.hooks._registry import Hook
 from agent.hooks.compact import auto_compact_will_fire
 from agent.messages import NoteTag, system_note_message
@@ -98,9 +98,7 @@ class _NewlyInstalledSkillsHook(Hook):
         if not drift.added:
             return None
 
-        import ava
-
-        added = [ava.skills.identifier(s) for s in drift.added]
+        added = skill_identifiers(drift.added)
         logger.info(
             "[capabilities] {} skill(s) installed since the index was built: {}",
             len(added),

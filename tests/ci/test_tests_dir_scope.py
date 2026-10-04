@@ -94,7 +94,7 @@ def test_async_lint_helper_names_are_not_kept_alive_by_a_test(
 def test_plugin_wrap_lint_exempts_a_plugins_own_tests(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    lint = importlib.import_module("scripts.lint.no_plugin_wrap")
+    lint = importlib.import_module("scripts.lint.plugins.no_plugin_wrap")
     monkeypatch.setattr(lint, "_REPO_ROOT", tmp_path)
     body = "import ava\n\nava.files.read = lambda: None\n"
     stub = _write(tmp_path, "ava_builtins/plugins/p/tests/test_plugin.py", body)
