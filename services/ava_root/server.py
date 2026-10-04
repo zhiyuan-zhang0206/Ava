@@ -4,7 +4,9 @@ The handler passed in owns all business semantics (the supervisor's
 `dispatch`); this class owns the transport — read one line, validate it,
 forward it, write one line back. A malformed message is answered with an error
 response; a message that overruns the line cap breaks the stream boundary and
-the connection is dropped instead.
+the connection is dropped instead. A client that disconnects before its
+response is delivered is routine churn: it is logged at debug level and the
+connection ends without surfacing an unhandled asyncio error.
 
 An optional `after_response` hook starts daemon shutdown after the accepted
 response is delivered. Resource payloads can contain child environments and
@@ -99,18 +101,27 @@ class ControlServer:
                     MAX_MESSAGE_BYTES,
                 )
                 return
+            except ConnectionError as exc:
+                _log.debug(
+                    "control connection lost while reading request (%s)",
+                    type(exc).__name__,
+                )
+                return
             if not raw.strip():
                 return
             try:
                 request = parse_request(raw)
             except UnknownVerbError as exc:
-                await self._write(writer, error_response(ErrorCode.UNKNOWN_VERB, str(exc)))
+                await self._write_or_drop(writer, error_response(ErrorCode.UNKNOWN_VERB, str(exc)))
                 return
             except ProtocolError as exc:
-                await self._write(writer, error_response(ErrorCode.INVALID_REQUEST, str(exc)))
+                await self._write_or_drop(
+                    writer, error_response(ErrorCode.INVALID_REQUEST, str(exc))
+                )
                 return
             response = await self._invoke(request)
-            await self._write(writer, response)
+            if not await self._write_or_drop(writer, response):
+                return
             if self._after_response is not None:
                 self._after_response(request)
         finally:
@@ -123,3 +134,21 @@ class ControlServer:
         """Write one response line and flush it."""
         writer.write(encode(response))
         await writer.drain()
+
+    async def _write_or_drop(self, writer: asyncio.StreamWriter, response: ResponsePayload) -> bool:
+        """Write one response; a client that vanished mid-request is churn, never a raise.
+
+        A peer that disconnects before its response is delivered is routine
+        (CLI timeouts, restarts); letting the reset escape the connection
+        callback only fed asyncio's default handler an ERROR traceback.
+        Returns False when the response was not delivered.
+        """
+        try:
+            await self._write(writer, response)
+        except ConnectionError as exc:
+            _log.debug(
+                "control connection lost before response delivered (%s)",
+                type(exc).__name__,
+            )
+            return False
+        return True
